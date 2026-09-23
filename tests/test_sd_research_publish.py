@@ -17,10 +17,14 @@ twice, which must be two independent requests -- one queue file per destination
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import json
+import os
+import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -866,6 +870,653 @@ class RepoKeyTests(unittest.TestCase):
         for name in ("Traces-Research", "my repo", "a.b_c"):
             key = PUBLISH.repo_key(Path("/tmp") / name)
             self.assertRegex(key, r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z", name)
+
+
+#: The entrypoint the hook tests drive, so `init-hook` runs with the fixture
+#: repository as its working directory the way it does for a user.
+KIT = BIN / "sd-research-kit"
+
+#: A committer for fixture repositories: git refuses a commit without one, and
+#: the machine's own identity must not be what a test depends on.
+GIT_ENV = {
+    "GIT_AUTHOR_NAME": "Fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
+    "GIT_COMMITTER_NAME": "Fixture", "GIT_COMMITTER_EMAIL": "fixture@example.invalid",
+}
+
+
+def git(cwd: Path, *args: str, env: dict[str, str] | None = None) -> str:
+    merged = dict(os.environ, **GIT_ENV)
+    # The machine's hooks path, if it names one, would silence every hook a
+    # test installs; the fixture's repository is the only config that applies.
+    # And the machine's `SD_SKIP_RENDER`, if set, would silence the hook.
+    merged["GIT_CONFIG_GLOBAL"] = os.devnull
+    merged.pop("SD_SKIP_RENDER", None)
+    merged.update(env or {})
+    return subprocess.run(
+        ["git", *args], cwd=cwd, env=merged, capture_output=True, text=True,
+        check=True, timeout=60,
+    ).stdout.strip()
+
+
+def research_repo(root: Path, name: str = "my-research") -> Path:
+    """A committed research repo with one designated document."""
+    repo = root / name
+    (repo / "10-x").mkdir(parents=True)
+    (repo / "research.conf.py").write_text(
+        "PROJECT = 'MINE'\n"
+        "DOCS = [dict(src='10-x/a.md', out='a', title='A', notion=dict())]\n",
+        encoding="utf-8")
+    (repo / "10-x" / "a.md").write_text("# A\n\nfirst\n", encoding="utf-8")
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "add", ".")
+    git(repo, "commit", "-q", "-m", "first")
+    return repo
+
+
+class ReceiptFixture(Fixture):
+    """One designated document, its source on disk, and a drain to call."""
+
+    def doc(self, title: str = "A") -> list[dict]:
+        return [dict(src="10-x/a.md", out="a", title=title, notion=dict())]
+
+    def source(self, text: str) -> None:
+        path = self.repo / "10-x" / "a.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def drain(self, name: str = "my-research.a.notion.json") -> str:
+        """What a drain does at its end: acknowledge the generation it read."""
+        fingerprint = json.loads((PUBLISH.QUEUE / name).read_text())["fingerprint"]
+        return PUBLISH.mirror_delivered(name, fingerprint)
+
+
+class ReceiptTests(ReceiptFixture):
+    """A render that changes nothing queues nothing.
+
+    `enqueue` used to compare nothing, so every render re-queued every
+    designated document: eight requests per commit in one repo, and the drain
+    then re-wrote eight mirrors that had not changed. The receipt beside the
+    queue records what was last queued, and an unchanged document is skipped
+    whether its request is still pending or has already been drained.
+    """
+
+    def test_a_second_run_over_an_unchanged_tree_queues_once(self) -> None:
+        self.source("first\n")
+        first = PUBLISH.enqueue(self.repo, self.doc())
+        path = PUBLISH.QUEUE / "my-research.a.notion.json"
+        before = path.stat().st_mtime_ns
+        second = PUBLISH.enqueue(self.repo, self.doc())
+        self.assertTrue(any("queued a" in line for line in first), first)
+        self.assertFalse(any("queued a" in line for line in second), second)
+        self.assertTrue(any("already queued" in line for line in second), second)
+        self.assertEqual(path.stat().st_mtime_ns, before, "the request was rewritten")
+
+    def test_a_delivered_request_is_not_queued_again_while_the_source_stands(self) -> None:
+        """The drain records what it delivered and removes the request. Without
+        that record the next render cannot tell a delivered mirror from one
+        never queued, and re-queues it."""
+        self.source("first\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        self.assertIn("request removed", self.drain())
+        said = PUBLISH.enqueue(self.repo, self.doc())
+        self.assertEqual(list(PUBLISH.QUEUE.glob("*.json")), [])
+        self.assertTrue(any("unchanged" in line for line in said), said)
+
+    def test_a_changed_source_is_queued_again(self) -> None:
+        self.source("first\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        self.drain()
+        self.source("second\n")
+        said = PUBLISH.enqueue(self.repo, self.doc())
+        self.assertTrue((PUBLISH.QUEUE / "my-research.a.notion.json").is_file())
+        self.assertTrue(any("queued a" in line for line in said), said)
+
+    def test_a_changed_title_is_queued_again(self) -> None:
+        """The title is what the mirror is called, so a rename is a change
+        the destination has to see even when the body did not move."""
+        self.source("first\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        self.drain()
+        PUBLISH.enqueue(self.repo, self.doc(title="A renamed"))
+        self.assertTrue((PUBLISH.QUEUE / "my-research.a.notion.json").is_file())
+
+    def test_a_changed_container_is_queued_again(self) -> None:
+        self.source("first\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        self.drain()
+        PUBLISH.enqueue(self.repo, [dict(
+            src="10-x/a.md", out="a", title="A", notion=dict(team=True))])
+        self.assertTrue((PUBLISH.QUEUE / "my-research.a.notion.json").is_file())
+
+    def test_the_receipt_lives_beside_the_queue_and_not_in_it(self) -> None:
+        """`sd-status` globs `*.json` in the queue, so a receipt inside it
+        would read as one more pending mirror."""
+        self.source("first\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        self.assertEqual(
+            sorted(p.name for p in PUBLISH.QUEUE.iterdir()),
+            ["my-research.a.notion.json"])
+        receipts = PUBLISH.receipts()
+        self.assertNotEqual(receipts, PUBLISH.QUEUE)
+        self.assertTrue(receipts.is_relative_to(self.root), receipts)
+        self.assertTrue(any(receipts.iterdir()), "no receipt written")
+
+    def test_requeue_forces_a_write_of_an_unchanged_document(self) -> None:
+        self.source("first\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        self.drain()
+        PUBLISH.ENVIRON = dict(PUBLISH.ENVIRON, SD_MIRROR_REQUEUE="1")
+        said = PUBLISH.enqueue(self.repo, self.doc())
+        self.assertTrue((PUBLISH.QUEUE / "my-research.a.notion.json").is_file())
+        self.assertTrue(any("queued a" in line for line in said), said)
+
+
+class DrainRaceTests(ReceiptFixture):
+    """A render that queues during a drain is not acknowledged by that drain.
+
+    Vacuity, against 476c85db: the receipt recorded what was *queued*, and
+    read the request's absence as "delivered". A drain that read A, then a
+    render that queued B, then the drain deleting the shared file, left B's
+    receipt standing with no request -- so every later render skipped B
+    while the destination held A (`remote=A, source=B, queue absent`). On
+    that revision `PUBLISH.delivered` does not exist, and the first test
+    below fails at the call; the second fails on its `queued a` assertion,
+    because the old rule made the deleted slot read as delivered.
+    """
+
+    NAME = "my-research.a.notion.json"
+
+    def test_a_request_queued_during_a_drain_survives_the_drains_delete(self) -> None:
+        self.source("A\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        read = json.loads((PUBLISH.QUEUE / self.NAME).read_text())  # drain step 1
+        self.source("B\n")
+        PUBLISH.enqueue(self.repo, self.doc())  # a render during the drain
+        said = PUBLISH.mirror_delivered(self.NAME, read["fingerprint"])  # drain step 6
+        self.assertIn("newer request is pending and stays", said)
+        self.assertTrue((PUBLISH.QUEUE / self.NAME).is_file(), "B's request was deleted")
+        pending = json.loads((PUBLISH.QUEUE / self.NAME).read_text())
+        self.assertNotEqual(pending["fingerprint"], read["fingerprint"])
+        # The next render sees B pending, not delivered, and leaves it for the
+        # next drain; the drain then acknowledges B and only B is gone.
+        again = PUBLISH.enqueue(self.repo, self.doc())
+        self.assertTrue(any("already queued" in line for line in again), again)
+        self.assertIn("request removed", self.drain())
+        after = PUBLISH.enqueue(self.repo, self.doc())
+        self.assertTrue(any("unchanged" in line for line in after), after)
+        self.assertEqual(list(PUBLISH.QUEUE.glob("*.json")), [])
+
+    def test_a_request_removed_without_a_delivery_record_is_queued_again(self) -> None:
+        """Absence says nothing. A file deleted by hand, or by a drain that
+        recorded nothing, is not evidence the destination holds this."""
+        self.source("A\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        (PUBLISH.QUEUE / self.NAME).unlink()
+        said = PUBLISH.enqueue(self.repo, self.doc())
+        self.assertTrue(any("queued a" in line for line in said), said)
+        self.assertTrue((PUBLISH.QUEUE / self.NAME).is_file())
+
+    def test_the_verb_records_and_removes_through_the_kit(self) -> None:
+        """The drain is an agent session; the step it runs is this command."""
+        self.source("A\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        fingerprint = json.loads((PUBLISH.QUEUE / self.NAME).read_text())["fingerprint"]
+        env = dict(os.environ, SD_MIRROR_QUEUE=str(PUBLISH.QUEUE))
+        result = subprocess.run(
+            [sys.executable, str(KIT), "delivered", self.NAME, fingerprint],
+            env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("request removed", result.stdout)
+        self.assertFalse((PUBLISH.QUEUE / self.NAME).exists())
+        self.assertEqual(
+            json.loads((PUBLISH.receipts() / self.NAME).read_text())["delivered"],
+            fingerprint)
+        self.assertIn("delivered", subprocess.run(
+            [sys.executable, str(KIT), "--help"], capture_output=True, text=True).stdout)
+
+    def test_the_verb_refuses_anything_but_a_name_and_a_fingerprint(self) -> None:
+        for argv in ([], ["only-a-name"], ["a", "b", "c"]):
+            result = subprocess.run(
+                [sys.executable, str(KIT), "delivered", *argv],
+                capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 2, argv)
+
+
+class AcknowledgementRaceTests(ReceiptFixture):
+    """A render cannot land between the acknowledgement's read and its unlink.
+
+    The reviewer's reproduction against bdb6774f, `ACK_RACE: remote=A,
+    source=B, queue=False`: `mirror_delivered` read the request, wrote the
+    receipt, compared the record it had read *before* those writes, and
+    unlinked -- and a render that wrote B between the read and the unlink
+    had B removed with A's fingerprint on the receipt. Nothing serialised
+    the two writers. Now both take the queue lock, so the render lands
+    wholly before the read (and the comparison keeps it) or wholly after the
+    unlink (and nothing is left to remove).
+
+    Deterministic, with no sleep and no join timeout. The acknowledgement
+    runs in the main thread with its request read hooked; the hook starts
+    the render in a thread and waits for it to *report progress*: a render
+    that reaches the lock reports before it can hold it, and a render that
+    finds no lock to wait on reports when it has finished. Either way the
+    hook returns with the render's write either impossible until the
+    acknowledgement is done, or already done. Against bdb6774f there is no
+    lock, so the render finishes inside the window and the unlink takes B.
+    """
+
+    NAME = "my-research.a.notion.json"
+
+    def test_a_render_during_the_acknowledgement_keeps_its_request(self) -> None:
+        self.source("A\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        read = json.loads((PUBLISH.QUEUE / self.NAME).read_text())  # drain step 1
+        self.source("B\n")  # what the render during the drain will queue
+
+        progress = threading.Event()
+        failures: list[BaseException] = []
+
+        def render() -> None:
+            try:
+                PUBLISH.enqueue(self.repo, self.doc())
+            except BaseException as problem:  # noqa: BLE001 - re-raised below
+                failures.append(problem)
+            finally:
+                progress.set()
+
+        thread = threading.Thread(target=render, name="render")
+        real_lock = getattr(PUBLISH, "queue_locked", None)
+        if real_lock is not None:
+            @contextlib.contextmanager
+            def announced():
+                if threading.current_thread() is thread:
+                    progress.set()  # at the lock, and so not yet past it
+                with real_lock():
+                    yield
+            PUBLISH.queue_locked = announced
+            self.addCleanup(setattr, PUBLISH, "queue_locked", real_lock)
+
+        real_load = PUBLISH.load_record
+        started = threading.Event()
+
+        def hooked(path: Path) -> dict:
+            record = real_load(path)
+            if (path == PUBLISH.QUEUE / self.NAME
+                    and threading.current_thread() is threading.main_thread()
+                    and not started.is_set()):
+                started.set()
+                thread.start()
+                progress.wait()
+            return record
+
+        PUBLISH.load_record = hooked
+        self.addCleanup(setattr, PUBLISH, "load_record", real_load)
+
+        said = PUBLISH.mirror_delivered(self.NAME, read["fingerprint"])  # drain step 6
+        thread.join()
+        if failures:
+            raise failures[0]
+        self.assertTrue(started.is_set(), "the acknowledgement never read the request")
+        self.assertIn("request removed", said)
+        queued = (PUBLISH.QUEUE / self.NAME).is_file()
+        self.assertTrue(queued, "ACK_RACE: remote=A, source=B, queue=%s" % queued)
+        pending = json.loads((PUBLISH.QUEUE / self.NAME).read_text())
+        self.assertNotEqual(pending["fingerprint"], read["fingerprint"], "B was not queued")
+        receipt = json.loads((PUBLISH.receipts() / self.NAME).read_text())
+        self.assertEqual(receipt["delivered"], read["fingerprint"])
+        self.assertEqual(receipt["queued"], pending["fingerprint"])
+
+    def test_the_lock_sits_beside_the_queue_and_survives_the_drain(self) -> None:
+        """Not in the queue, where `sd-status` would list it; not removed,
+        because a removed lock file is two inodes and two winners."""
+        self.source("A\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        lock = PUBLISH.queue_lock_path()
+        self.assertTrue(lock.is_file(), lock)
+        self.assertNotEqual(lock.parent, PUBLISH.QUEUE)
+        self.assertTrue(lock.is_relative_to(self.root), lock)
+        self.drain()
+        self.assertTrue(lock.is_file(), "the drain removed the lock")
+
+
+class RevertTests(ReceiptFixture):
+    """A pending request is reconciled before a delivered receipt is trusted.
+
+    The reviewer's reproduction against bdb6774f, `REVERT: desired_title=A,
+    pending_title=B`: `already_queued` consulted the receipt first, so a
+    document delivered as A, then queued as B, then reverted to A before any
+    drain, read as delivered -- and B stayed in the queue for the next drain
+    to rename the page with. The queue is now read first: a request asking
+    for a different generation is overwritten whatever the receipt says,
+    carrying the id a drain may have recorded in it.
+    """
+
+    NAME = "my-research.a.notion.json"
+
+    def test_a_reverted_designation_overwrites_the_pending_request(self) -> None:
+        self.source("body\n")
+        PUBLISH.enqueue(self.repo, self.doc(title="A"))
+        self.assertIn("request removed", self.drain())  # A delivered
+        PUBLISH.enqueue(self.repo, self.doc(title="B"))  # the rename, queued
+        path = PUBLISH.QUEUE / self.NAME
+        queued = json.loads(path.read_text())
+        queued["page"] = "page-a-drain-recorded"  # an interrupted drain's step 4
+        path.write_text(json.dumps(queued), encoding="utf-8")
+        said = PUBLISH.enqueue(self.repo, self.doc(title="A"))  # the revert
+        pending = json.loads(path.read_text())
+        self.assertEqual(
+            pending["title"], "A",
+            "REVERT: desired_title=A, pending_title=%s" % pending["title"])
+        self.assertTrue(any("queued a" in line for line in said), said)
+        self.assertEqual(pending["page"], "page-a-drain-recorded", "the recorded id was dropped")
+        # The next drain writes A, and only then is A read as delivered again.
+        self.assertIn("request removed", self.drain())
+        after = PUBLISH.enqueue(self.repo, self.doc(title="A"))
+        self.assertTrue(any("unchanged" in line for line in after), after)
+
+    def test_a_delivered_document_with_nothing_pending_is_still_skipped(self) -> None:
+        self.source("body\n")
+        PUBLISH.enqueue(self.repo, self.doc(title="A"))
+        self.drain()
+        said = PUBLISH.enqueue(self.repo, self.doc(title="A"))
+        self.assertTrue(any("unchanged" in line for line in said), said)
+        self.assertEqual(list(PUBLISH.QUEUE.glob("*.json")), [])
+
+
+class MutableSourceTests(ReceiptFixture):
+    """A request carries the Markdown it was queued with, and the fingerprint
+    describes that text and not the path.
+
+    The reviewer's reproduction against bdb6774f, `MUTABLE_SOURCE: remote=B,
+    source=A, queue=False`: the request named a mutable `source` path and the
+    fingerprint hashed the file's bytes at enqueue. Queue A, edit the file to
+    B without rendering, and the drain read the path, published B and
+    acknowledged A's fingerprint; restoring A then read as delivered, so A
+    was never published again. The request now carries `content`, read once
+    at enqueue, and the drain mirrors that; the fingerprint hashes the stored
+    text, so the two cannot disagree.
+    """
+
+    NAME = "my-research.a.notion.json"
+
+    def published(self, request: dict) -> str:
+        """What a drain mirrors: the request's `content`. A request without
+        one -- every request before this -- sent the drain to the path."""
+        if "content" in request:
+            return request["content"]
+        return Path(request["source"]).read_text(encoding="utf-8")
+
+    def test_the_drain_publishes_the_content_the_request_carries(self) -> None:
+        self.source("A\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        request = json.loads((PUBLISH.QUEUE / self.NAME).read_text())  # drain step 1
+        self.source("B\n")  # edited under the queued request, with no render
+        remote = self.published(request).strip()  # drain step 3
+        PUBLISH.mirror_delivered(self.NAME, request["fingerprint"])  # drain step 6
+        self.source("A\n")  # the edit reverted
+        PUBLISH.enqueue(self.repo, self.doc())
+        queued = (PUBLISH.QUEUE / self.NAME).is_file()
+        self.assertEqual(
+            (remote, queued), ("A", False),
+            "MUTABLE_SOURCE: remote=%s, source=A, queue=%s" % (remote, queued))
+
+    def test_the_fingerprint_hashes_the_stored_text_and_not_the_path(self) -> None:
+        self.source("A\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        request = json.loads((PUBLISH.QUEUE / self.NAME).read_text())
+        self.assertEqual(request["content"], "A\n")
+        targets, problems = PUBLISH.mirror_targets(self.doc()[0], self.repo)
+        self.assertEqual(problems, [])
+        what = PUBLISH.BY_NAME["notion"].what
+        self.source("B\n")
+        self.assertEqual(
+            PUBLISH.mirror_fingerprint(request, targets[0], what), request["fingerprint"],
+            "the fingerprint followed the path")
+        self.assertNotEqual(
+            PUBLISH.mirror_fingerprint(dict(request, content="B\n"), targets[0], what),
+            request["fingerprint"], "the fingerprint ignores the content")
+
+
+class WorktreeIdentityTests(Fixture):
+    """A render from a linked worktree names the repository, not the worktree.
+
+    The key, the vault folder and the default containers were all derived
+    from `Path.cwd().name`, so a render from a worktree called `tc-pins`
+    wrote `label|tc-pins|TRACE-CLASSIFIER` into the dashboard's tracked
+    `documents.conf` and a `Briefs/tc-pins/` folder into the vault.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.repo / "build").rmdir()
+        self.repo.rmdir()
+        self.primary = research_repo(self.root)
+        self.wt = self.root / "wt-x"
+        git(self.primary, "worktree", "add", "-q", str(self.wt), "-b", "x")
+
+    def test_the_dashboard_row_carries_the_primary_checkouts_key(self) -> None:
+        said = PUBLISH.register_root(self.wt, "MINE", self.wt / "docs" / "dashboard")
+        self.assertIn("registered my-research", said)
+        self.assertEqual(self.rows("wt-x"), [])
+        self.assertEqual(self.rows(), ["label|my-research|MINE"])
+
+    def test_a_worktree_and_the_primary_write_the_same_row(self) -> None:
+        PUBLISH.register_root(self.primary, "MINE", self.primary / "docs" / "dashboard")
+        said = PUBLISH.register_root(self.wt, "MINE", self.wt / "docs" / "dashboard")
+        self.assertIn("already registered", said)
+        self.assertEqual(self.rows(), ["label|my-research|MINE"])
+
+    def test_the_vault_folder_is_the_primary_checkouts(self) -> None:
+        self.assertEqual(PUBLISH.vault_folder(self.wt), self.briefs())
+
+    DOC = [dict(src="10-x/a.md", out="a", title="A", notion=dict())]
+
+    def test_a_worktree_render_queues_nothing_and_claims_no_page_id(self) -> None:
+        """Publication is the main checkout's. A worktree render must neither
+        replace its pending request nor inherit the page id a drain recorded
+        for it: that is branch content becoming the canonical mirror.
+
+        Vacuity, against 476c85db: the worktree's enqueue overwrote the
+        request under the repository's name, carried the recorded page id
+        into it, and pointed `source` at the worktree -- the assertion on
+        `source` below is the one that failed there, with the page id
+        adopted.
+        """
+        PUBLISH.enqueue(self.primary, self.DOC)
+        path = PUBLISH.QUEUE / "my-research.a.notion.json"
+        request = json.loads(path.read_text())
+        request["page"] = "canonical-page"  # drain step 4
+        path.write_text(json.dumps(request) + "\n", encoding="utf-8")
+        (self.wt / "10-x" / "a.md").write_text("branch content\n", encoding="utf-8")
+
+        said = PUBLISH.enqueue(self.wt, self.DOC)
+        self.assertEqual(sorted(p.name for p in PUBLISH.QUEUE.iterdir()),
+                         ["my-research.a.notion.json"])
+        after = json.loads(path.read_text())
+        self.assertEqual(Path(after["source"]).resolve(),
+                         (self.primary / "10-x" / "a.md").resolve())
+        self.assertEqual(after["page"], "canonical-page")
+        self.assertEqual(len(said), 1, said)
+        self.assertIn(str(self.primary.resolve()), said[0])
+        self.assertIn("SD_PUBLISH_FROM_WORKTREE", said[0])
+
+    def test_a_worktree_render_writes_no_vault_copy(self) -> None:
+        said = PUBLISH.write_obsidian(self.wt, self.DOC)
+        self.assertFalse(self.briefs().exists())
+        self.assertEqual(len(said), 1, said)
+        self.assertIn("SD_PUBLISH_FROM_WORKTREE", said[0])
+
+    def test_with_the_opt_in_a_worktree_publishes_under_the_repositorys_name(self) -> None:
+        """`SD_PUBLISH_FROM_WORKTREE=1` is the operator saying, on the
+        invocation, that this branch's content is the canonical copy."""
+        PUBLISH.ENVIRON = dict(PUBLISH.ENVIRON, SD_PUBLISH_FROM_WORKTREE="1")
+        PUBLISH.enqueue(self.wt, self.DOC)
+        self.assertEqual(
+            sorted(p.name for p in PUBLISH.QUEUE.iterdir()),
+            ["my-research.a.notion.json"])
+        request = json.loads(
+            (PUBLISH.QUEUE / "my-research.a.notion.json").read_text())
+        self.assertEqual(Path(request["repo"]).resolve(), self.primary.resolve())
+        self.assertEqual(request["subfolder"], "my-research")
+        # The files to read are the worktree's: that is what was rendered.
+        self.assertEqual(Path(request["source"]).resolve(),
+                         (self.wt / "10-x" / "a.md").resolve())
+        PUBLISH.write_obsidian(self.wt, self.DOC)
+        self.assertTrue((self.briefs() / "a.md").is_file())
+
+    def test_a_primary_checkout_is_its_own_home(self) -> None:
+        self.assertEqual(PUBLISH.repo_home(self.primary).resolve(),
+                         self.primary.resolve())
+
+    def test_a_directory_outside_git_is_its_own_home(self) -> None:
+        plain = self.root / "plain"
+        plain.mkdir()
+        self.assertEqual(PUBLISH.repo_home(plain), plain)
+
+
+class HookTests(unittest.TestCase):
+    """`init-hook` installs one script under three names, and git runs it.
+
+    The post-commit hook alone missed every pulled change: a `git pull`
+    fast-forwards without committing, so the page went stale while looking
+    current, and the review then demanded a render nobody was told to run.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.repo = research_repo(self.root)
+        self.hooks = self.repo / ".git" / "hooks"
+        # A stand-in kit on PATH that records where and how it was called.
+        self.log = self.root / "calls.log"
+        bindir = self.root / "bin"
+        bindir.mkdir()
+        fake = bindir / "sd-research-kit"
+        fake.write_text(
+            "#!%s\nimport os, sys\n"
+            "open(%r, 'a').write(os.getcwd() + ' ' + ' '.join(sys.argv[1:]) + '\\n')\n"
+            % (sys.executable, str(self.log)), encoding="utf-8")
+        fake.chmod(0o755)
+        self.env = {"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")}
+
+    def init_hook(self) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(KIT), "init-hook"], cwd=self.repo,
+            capture_output=True, text=True, timeout=60)
+
+    def calls(self) -> list[str]:
+        return self.log.read_text(encoding="utf-8").splitlines() if self.log.is_file() else []
+
+    def git(self, *args: str, env: dict[str, str] | None = None) -> str:
+        merged = dict(self.env)
+        merged.update(env or {})
+        return git(self.repo, *args, env=merged)
+
+    def feature_commit(self, text: str = "second\n") -> None:
+        """A branch `feature`, one commit ahead of `main`, changing the document."""
+        self.git("checkout", "-q", "-b", "feature")
+        (self.repo / "10-x" / "a.md").write_text(text, encoding="utf-8")
+        self.git("commit", "-q", "-am", "edit", env={"SD_SKIP_RENDER": "1"})
+        self.git("checkout", "-q", "main", env={"SD_SKIP_RENDER": "1"})
+
+    def test_three_hooks_are_installed_from_one_text(self) -> None:
+        result = self.init_hook()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for name in ("post-commit", "post-merge", "post-checkout"):
+            path = self.hooks / name
+            self.assertTrue(path.is_file(), name)
+            self.assertTrue(os.access(path, os.X_OK), name)
+            self.assertEqual(path.read_text(encoding="utf-8"), PUBLISH.HOOK, name)
+
+    def test_a_second_install_changes_nothing_and_says_so(self) -> None:
+        self.init_hook()
+        stamps = {n: (self.hooks / n).stat().st_mtime_ns
+                  for n in ("post-commit", "post-merge", "post-checkout")}
+        result = self.init_hook()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # One line naming every target, not one line per target: the merge
+        # took sd:1353's installer, which reports the set it left alone.
+        self.assertIn("already installed", result.stdout)
+        for name in ("post-commit", "post-merge", "post-checkout"):
+            self.assertIn(name, result.stdout)
+        for name, stamp in stamps.items():
+            self.assertEqual((self.hooks / name).stat().st_mtime_ns, stamp, name)
+
+    def test_a_hook_this_kit_wrote_earlier_is_upgraded(self) -> None:
+        """A released body, byte for byte, is what says the file is ours.
+
+        This branch proposed a marker line -- any file carrying
+        `Installed by ...init-hook` is ours to rewrite --
+        and the merge with sd:1353 took that branch's stricter test instead,
+        `SUPERSEDED_HOOKS`, because a marker also claims a copy of our hook
+        that somebody has edited. So the file installed here is a body this
+        pack actually released rather than a hand-written stand-in, which is
+        the case the weaker test could not tell apart from the stronger one.
+        """
+        self.hooks.mkdir(exist_ok=True)
+        old = PUBLISH.SUPERSEDED_HOOKS[0]
+        (self.hooks / "post-commit").write_text(old, encoding="utf-8")
+        result = self.init_hook()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("upgraded", result.stdout)
+        self.assertEqual((self.hooks / "post-commit").read_text(encoding="utf-8"), PUBLISH.HOOK)
+        self.assertTrue((self.hooks / "post-merge").is_file())
+
+    def test_a_hook_somebody_else_wrote_is_refused_and_kept(self) -> None:
+        self.hooks.mkdir(exist_ok=True)
+        theirs = "#!/bin/sh\necho theirs\n"
+        (self.hooks / "post-merge").write_text(theirs, encoding="utf-8")
+        result = self.init_hook()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("post-merge", result.stderr)
+        self.assertEqual((self.hooks / "post-merge").read_text(encoding="utf-8"), theirs)
+
+    def test_a_fast_forward_merge_renders(self) -> None:
+        self.feature_commit()
+        self.assertEqual(self.init_hook().returncode, 0)
+        self.git("merge", "-q", "--ff-only", "feature")
+        self.assertEqual(self.calls(), ["%s render" % self.repo.resolve()])
+
+    def test_a_branch_checkout_that_changes_a_document_renders(self) -> None:
+        self.feature_commit()
+        self.assertEqual(self.init_hook().returncode, 0)
+        self.git("checkout", "-q", "feature")
+        self.assertEqual(self.calls(), ["%s render" % self.repo.resolve()])
+
+    def test_a_checkout_that_moved_no_branch_renders(self) -> None:
+        """Reversed by the merge with sd:1353, deliberately.
+
+        This branch stayed quiet here, on the ground that nothing moved. That
+        reads the tree against `HEAD`, and what a mirror needs to know is
+        whether the tree differs from what was *published*. The two agree only
+        while the published copy tracks `HEAD`, which `git checkout <rev> --
+        doc.md` is exactly what stops: revert a page, publish the older text,
+        restore `HEAD`, and a diff-shaped guard sees a clean tree and freezes
+        the reverted text in the mirror for good. `git checkout -b` falls in
+        the same arm and renders for the same reason -- a branch that did not
+        move is no more a statement about the published copy than a clean tree
+        is. A render that finds nothing changed is cheap; a mirror holding text
+        nobody can see is not.
+        """
+        self.assertEqual(self.init_hook().returncode, 0)
+        self.git("checkout", "-q", "-b", "same-commit")
+        self.assertEqual(self.calls(), ["%s render" % self.repo.resolve()])
+
+    def test_a_commit_renders_and_the_skip_variable_still_skips(self) -> None:
+        self.assertEqual(self.init_hook().returncode, 0)
+        (self.repo / "10-x" / "a.md").write_text("edited\n", encoding="utf-8")
+        self.git("commit", "-q", "-am", "edit", env={"SD_SKIP_RENDER": "1"})
+        self.assertEqual(self.calls(), [])
+        (self.repo / "10-x" / "a.md").write_text("edited again\n", encoding="utf-8")
+        self.git("commit", "-q", "-am", "edit again")
+        self.assertEqual(self.calls(), ["%s render" % self.repo.resolve()])
+
+    def test_a_worktree_add_does_not_render(self) -> None:
+        """`git worktree add` runs post-checkout with no previous HEAD. A
+        render there would publish a checkout nobody has committed to yet."""
+        self.assertEqual(self.init_hook().returncode, 0)
+        self.git("worktree", "add", "-q", str(self.root / "wt-y"), "-b", "y")
+        self.assertEqual(self.calls(), [])
 
 
 if __name__ == "__main__":

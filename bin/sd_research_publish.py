@@ -22,7 +22,9 @@ One queue for every destination rather than one queue each, and one request
 file per document *per destination*: a document designated for two places is
 two independent pieces of outstanding work, and either can drain while the
 other waits. The filename carries the repo, the document and the destination,
-so a re-render overwrites the pending request rather than queueing a second.
+so a re-render overwrites the pending request rather than queueing a second --
+and a re-render of an unchanged document writes nothing at all, pending or
+drained, because a receipt beside the queue remembers what was last queued.
 
 A request that is never drained stays on disk: the queue does not expire,
 because an expiring queue reports a mirror as done that was never written.
@@ -30,15 +32,19 @@ because an expiring queue reports a mirror as done that was never written.
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
+import hashlib
 import json
 import os
 import re
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, NamedTuple
 from urllib.parse import urlsplit
 
-from sd_lib import git_output
+from sd_lib import git_output, main_worktree_root
 
 #: Where the dashboard checkout lives. Overridable because a fleet machine may
 #: hold it elsewhere; not discovered by searching, because a search that found
@@ -169,9 +175,10 @@ NOTION_SCOPES = {
                       "your team Notion briefs folder, under %s"),
 }
 
-#: The environment the folder settings are read out of. A module attribute for
-#: the same reason `QUEUE` and `VAULT` are: a test points it at a fixture
-#: rather than at the machine running the test.
+#: The environment the folder settings, `SD_MIRROR_REQUEUE` and
+#: `SD_PUBLISH_FROM_WORKTREE` are read out of. A module attribute for the same
+#: reason `QUEUE` and `VAULT` are: a test points it at a fixture rather than
+#: at the machine running the test.
 ENVIRON: dict[str, str] = dict(os.environ)
 
 #: A Notion page id: 32 hex digits, dashed or not, alone or ending a page's
@@ -205,14 +212,64 @@ def documents_conf() -> Path:
     return DASHBOARD_HOME / "documents.conf"
 
 
+def repo_home(repo: Path) -> Path:
+    """The checkout that names this repository: `repo`, unless it is a linked
+    worktree, in which case the main checkout it was added from.
+
+    Everything derived from a repository's *name* -- the dashboard key, the
+    vault folder, a default Notion or Drive container, the queue filename --
+    reads it from here and never from the directory the render ran in. A
+    worktree is a scratch checkout with a scratch name, and a render from one
+    called `tc-pins` wrote `label|tc-pins|TRACE-CLASSIFIER` into the
+    dashboard's tracked `documents.conf` and a `Briefs/tc-pins/` folder into
+    the vault, both naming a directory that would be gone within the day.
+
+    The files a render reads and writes stay the worktree's own: what was
+    rendered is that checkout's content, and the request carries its paths.
+    Only the identity comes from the main checkout.
+    """
+    return main_worktree_root(repo)
+
+
+def linked_worktree(repo: Path) -> bool:
+    """Whether `repo` is a linked worktree of some other checkout."""
+    return repo_home(repo).resolve() != Path(repo).resolve()
+
+
+#: The switch that lets a linked worktree publish. On the invocation and
+#: named for what it does, so an operator who sets it is asking, in words,
+#: for branch content to become the canonical copy.
+PUBLISH_FROM_WORKTREE = "SD_PUBLISH_FROM_WORKTREE"
+
+
+def publish_refusal(repo: Path, copy: str) -> str:
+    """Why this checkout may not publish `copy`, or `""` when it may.
+
+    A linked worktree renders locally and publishes nothing by itself. The
+    dashboard key and the vault folder are the *repository's*, which is what
+    stopped a worktree called `tc-pins` registering itself -- but the same
+    identity would let an unmerged branch overwrite the main checkout's
+    pending request, inherit the page id a drain recorded for it, and put
+    branch content into the shared vault folder as the canonical document.
+    Publication is the main checkout's, and a worktree that wants it says so
+    with `SD_PUBLISH_FROM_WORKTREE=1` on the invocation.
+    """
+    if not linked_worktree(repo) or ENVIRON.get(PUBLISH_FROM_WORKTREE):
+        return ""
+    return ("%s: not written from a linked worktree; run `sd-research-kit "
+            "render` in %s, or set %s=1 to publish this branch's content"
+            % (copy, repo_home(repo), PUBLISH_FROM_WORKTREE))
+
+
 def repo_key(repo: Path) -> str:
-    """A short lowercase key from the directory name.
+    """A short lowercase key from the repository's directory name.
 
     Derived and not configured: a key the repo chose for itself could collide
     with another repo's, and the collision would surface as one repo's
-    documents silently replacing the other's in the listing.
+    documents silently replacing the other's in the listing. The name is the
+    main checkout's, whichever worktree is rendering; see `repo_home`.
     """
-    stem = repo.name.lower()
+    stem = repo_home(repo).name.lower()
     stem = re.sub(r"[^a-z0-9._-]+", "-", stem).strip("-.")
     return stem or "docs"
 
@@ -447,7 +504,7 @@ def vault_folder(repo: Path) -> Path | None:
     """
     if not VAULT:
         return None
-    return Path(VAULT).expanduser() / BRIEFS / repo.name
+    return Path(VAULT).expanduser() / BRIEFS / repo_home(repo).name
 
 
 def write_obsidian(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
@@ -463,11 +520,15 @@ def write_obsidian(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
     Nothing here reaches the network and nothing needs a credential, which is
     what lets the primary copy be the one that never waits for a drain.
     """
+    refused = publish_refusal(repo, "obsidian")
+    if refused:
+        return [refused]
     folder = vault_folder(repo)
     if folder is None:
         return ["obsidian: OBSIDIAN_VAULT is not set; no vault copy written"]
 
     rev = revision(repo)
+    home = repo_home(repo)
     reports: list[str] = []
     written = 0
     for cfg in docs:
@@ -488,7 +549,7 @@ def write_obsidian(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
         # which is also why the vault copy is not the place to edit.
         front = "\n".join([
             "---",
-            "source_repo: %s" % repo.name,
+            "source_repo: %s" % home.name,
             "source_path: %s" % src,
             "revision: %s" % rev,
             "rendered_by: sd-research-kit",
@@ -651,12 +712,261 @@ def recorded(path: Path, wanted: dict[str, Any], what: str) -> str:
     return str(pending.get(what, "")).strip()
 
 
+def receipts() -> Path:
+    """Where the last-queued fingerprint of every request is kept.
+
+    Beside the queue and not in it: `bin/sd-status` globs `*.json` in the
+    queue, and a receipt inside it would read as one more pending mirror.
+    Derived from `QUEUE` rather than configured separately, so a test or an
+    operator who moves the queue moves the receipts with it and nothing here
+    can write beside the machine's real queue by mistake. One file per
+    request, under the request's own name, so two repositories rendering at
+    once never contend for one file.
+    """
+    return QUEUE.with_name(QUEUE.name + "-receipts")
+
+
+def queue_lock_path() -> Path:
+    """The sidecar every writer of the queue takes, beside it.
+
+    Beside the queue and not in it, for the reason `receipts()` gives; and
+    created once, never removed, because unlinking it would let a writer
+    that holds the lock be joined by one that creates a fresh inode and
+    locks that instead.
+    """
+    return QUEUE.with_name(QUEUE.name + ".lock")
+
+
+@contextlib.contextmanager
+def queue_locked() -> Iterator[None]:
+    """Hold the queue for one read-compare-write, against writers anywhere.
+
+    A render's enqueue and a drain's acknowledgement are each a read, a
+    comparison and a write of the same request file, and nothing serialised
+    them: an acknowledgement read generation A, a render wrote B, and the
+    acknowledgement's unlink then removed B with A on the receipt -- the
+    request lost until somebody rendered again. Under one lock the render
+    lands wholly before the acknowledgement's read, where the fingerprint
+    comparison keeps it, or wholly after its unlink, where nothing is left to
+    remove.
+
+    Blocking, as `bin/sd-review-ack`'s lock is and for the same reason: the
+    holder is a render or a drain's last step, nothing a session start waits
+    on, and each holds it for one document's worth of work. An `OSError`
+    here is the queue being unwritable, which is the caller's to report.
+    """
+    path = queue_lock_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def mirror_fingerprint(request: dict[str, Any], target: dict[str, str], what: str) -> str:
+    """What a drain would write, as one digest: the same digest means the
+    same mirror.
+
+    The request's `content`, because that is what the drain mirrors -- the
+    Markdown as it stood at enqueue, stored in the request, and not the file
+    at `source`, which may have changed by the time a drain reads it. With
+    the path hashed instead: queued as A, edited to B before any drain, the
+    drain read the path, published B and acknowledged A's fingerprint, and
+    restoring A then read as delivered (`MUTABLE_SOURCE: remote=B, source=A,
+    queue=False`). Hashing what the request stores keeps the fingerprint and
+    the payload from disagreeing. Then the title, because it is what the
+    mirror is called; the identity `mirror_identity` compares, because a
+    document moved to another container is a new mirror; the designation's
+    own page or file id, because a `page=` the user wrote is an instruction
+    the drain has to see; and the source path, because the request carries
+    it and the mirror's pointer line names it.
+
+    Not the revision: a commit that touches nothing the mirror is made of
+    still moves HEAD, and re-queueing on every commit is the defect this
+    exists to close. Not a recorded id either: the drain writes one into the
+    request after the fact, and it must not make the next render see a
+    change.
+    """
+    named = mirror_identity(request, target, what)
+    named.update(title=request.get("title", ""), source=request.get("source", ""),
+                 designated=request.get(what, ""))
+    digest = hashlib.sha256(json.dumps(named, sort_keys=True).encode("utf-8"))
+    digest.update(str(request.get("content", "")).encode("utf-8"))
+    return digest.hexdigest()
+
+
+def source_text(path: Path) -> str:
+    """The Markdown a request carries: the file's text as it stands now.
+
+    Read once, at enqueue, and stored in the request, so the drain mirrors
+    what was queued and not what the path holds when the drain gets to it.
+    Decoded with replacement rather than refused: a stray byte in a brief is
+    a brief with one odd character, not a brief that does not publish.
+    """
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def load_record(path: Path) -> dict[str, Any]:
+    """The object at `path`, or `{}` for anything that is not one.
+
+    A missing file is the ordinary case -- no request queued, no receipt yet
+    -- and is answered without raising; the `try` is for the file that is
+    there and unreadable or not JSON.
+    """
+    if not path.is_file():
+        return {}
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def already_queued(path: Path, receipt: Path, wanted: str,
+                   identity: dict[str, Any]) -> str:
+    """`pending` when the request at `path` already asks for exactly this,
+    `delivered` when nothing is pending and the destination already holds
+    it, or `""` when the request must be written.
+
+    The queue is read before the receipt, and a request that asks for a
+    different generation is overwritten whatever the receipt says. The
+    receipt describes the destination; the queue describes what the next
+    drain will do to it, and a request left asking for something the source
+    no longer says is a drain about to write it: deliver title A, queue the
+    rename to B, revert to A before any drain ran -- with the receipt read
+    first, A read as delivered and B stayed queued, and the next drain
+    renamed the page the source called A. Overwriting costs one rewrite of a
+    mirror that already matches; leaving it costs a wrong one.
+
+    Two records, and neither is inferred from the other. `delivered` is what
+    a drain wrote, recorded by `mirror_delivered()` at the moment it finished; the
+    request's absence is not that record. A drain reads a request, writes
+    the mirror, and deletes the file -- and a render that queued newer content
+    between the read and the delete had its request deleted too, with nothing
+    written for it. Treating the empty slot as "delivered" then suppressed
+    that content for ever: remote A, source B, queue empty. So absence says
+    nothing, and content the receipt does not name as delivered is queued.
+
+    `pending` is read off the request itself, which carries its own
+    fingerprint: a readable file naming the same identity and the same
+    content is already asking for exactly this. A truncated or hand-edited
+    file is not a request anyone will drain, and is rewritten.
+    """
+    if path.exists():
+        pending = load_record(path)
+        if pending.get("fingerprint") != wanted:
+            return ""
+        if any(pending.get(field) != value for field, value in identity.items()):
+            return ""
+        return "pending"
+    if load_record(receipt).get("delivered") == wanted:
+        return "delivered"
+    return ""
+
+
+def mirror_delivered(name: str, fingerprint: str) -> str:
+    """Record that the drain wrote the generation `fingerprint` of request
+    `name`, and remove the request only while it is still that generation.
+
+    The drain's last step, replacing a hand deletion. Deleting the file
+    acknowledged whatever it held at that moment, and after a render that
+    ran during the drain that was content the drain had not written. This
+    acknowledges the generation the drain read -- the `fingerprint` field
+    of the request, as it stood in step 1 -- and leaves a newer request in
+    place for the next drain.
+
+    Returns a one-line report. Recording comes before removing: a receipt
+    that says `delivered` with the request still present costs one skipped
+    re-render at worst, while a removed request with nothing recorded is the
+    defect this exists to close.
+
+    The read, the comparison and the unlink happen under the queue lock. The
+    comparison against a record read before the lock, or before the receipt
+    write, is the window a render fits in: it wrote B after the read, and
+    the unlink took B with A's fingerprint on the receipt.
+    """
+    try:
+        with queue_locked():
+            return acknowledge_request(name, fingerprint)
+    except OSError as problem:
+        return "delivered: cannot lock the queue at %s (%s); request left in place" % (
+            queue_lock_path(), problem)
+
+
+def acknowledge_request(name: str, fingerprint: str) -> str:
+    """The acknowledgement itself, for a caller holding the queue lock.
+
+    Read here, under the lock, and compared here: the record this reads is
+    the one the unlink acts on, because nothing can write the file between
+    the two while the lock is held.
+    """
+    path = QUEUE / name
+    pending = load_record(path)
+    if not pending:
+        return "delivered: no readable request at %s" % path
+    receipt = receipts() / name
+    record = load_record(receipt)
+    record.update(delivered=fingerprint)
+    try:
+        receipts().mkdir(parents=True, exist_ok=True)
+        receipt.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    except OSError as problem:
+        return "delivered: cannot write receipt for %s (%s); request left in place" % (
+            name, problem)
+    if pending.get("fingerprint") != fingerprint:
+        return ("delivered: recorded %s for %s; a newer request is pending and "
+                "stays" % (fingerprint[:12], name))
+    try:
+        path.unlink()
+    except OSError as problem:
+        return "delivered: recorded %s for %s; cannot remove the request (%s)" % (
+            fingerprint[:12], name, problem)
+    return "delivered: recorded %s for %s; request removed" % (fingerprint[:12], name)
+
+
+def delivered_main(argv: list[str]) -> int:
+    """The `delivered` verb: `<request file name> <fingerprint>`.
+
+    The one verb that takes arguments. R10-D6 forbids a *checkout* argument,
+    because a command that can be pointed at a repository can act on one the
+    caller is not standing in; this verb acts on the machine's one queue and
+    names a request in it, which no working directory could resolve.
+    """
+    if len(argv) != 2 or not argv[0] or not argv[1]:
+        print("usage: sd-research-kit delivered <request file name> <fingerprint>",
+              file=sys.stderr)
+        return 2
+    name = Path(argv[0]).name
+    print(mirror_delivered(name, argv[1]))
+    return 0
+
+
 def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
-    """Write one sync request per document per designated destination."""
+    """Write one sync request per document per designated destination, for
+    every document whose mirror would differ from the one last queued.
+
+    Unchanged documents are skipped, and said to be. Every render used to
+    re-queue every designated document -- eight requests per commit in one
+    repository -- and each drain then rewrote eight mirrors nobody had
+    touched. `SD_MIRROR_REQUEUE=1` queues them all regardless, for a mirror
+    that was lost on the far side and has to be written again.
+
+    A linked worktree queues nothing unless `SD_PUBLISH_FROM_WORKTREE=1`
+    says to; see `publish_refusal`.
+    """
     reports: list[str] = []
+    refused = publish_refusal(repo, "mirror")
+    if refused:
+        return [refused]
+    home = repo_home(repo)
     wanted: list[tuple[dict[str, Any], dict[str, str]]] = []
     for cfg in docs:
-        targets, problems = mirror_targets(cfg, repo)
+        targets, problems = mirror_targets(cfg, home)
         reports += ["mirror: %s in %s" % (p, cfg.get("out", "?")) for p in problems]
         wanted += [(cfg, target) for target in targets]
     if not wanted:
@@ -664,32 +974,67 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
 
     QUEUE.mkdir(parents=True, exist_ok=True)
     rev = revision(repo)
-    key = repo_key(repo)
-    vault = vault_folder(repo)
-    for cfg, target in wanted:
-        out = str(cfg.get("out", "")).strip()
-        src = str(cfg.get("src", "")).strip()
-        request = {
-            "repo": str(repo),
-            "revision": rev,
-            "document": out,
-            "title": cfg.get("title", out),
-            "source": str(repo / src) if src else "",
-            "rendered": str(repo / DASHBOARD_DIR / (out + ".html")),
-            "markdown": str(vault / (out + ".md")) if vault else "",
-        }
-        request.update(target)
-        path = QUEUE / ("%s.%s.%s.json" % (key, out or "doc", target["destination"]))
-        # The designation is the answer where it gives one; the queue records
-        # what a drain did, and never overrides what the document says.
-        what = BY_NAME[target["destination"]].what
-        carried = "" if request[what] else recorded(
-            path, mirror_identity(request, target, what), what)
-        request[what] = request[what] or carried
-        path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
-        reports.append("mirror: queued %s -> %s%s" % (
-            out, target["target"],
-            ", updating the %s already recorded" % what if carried else ""))
+    key = repo_key(home)
+    vault = vault_folder(home)
+    force = bool(ENVIRON.get("SD_MIRROR_REQUEUE"))
+    with queue_locked():
+        for cfg, target in wanted:
+            out = str(cfg.get("out", "")).strip()
+            src = str(cfg.get("src", "")).strip()
+            request = {
+                # The repository, not the checkout: this is what `sd-status`
+                # resolves a row against and what a carried id is compared on.
+                # The three paths below are the checkout's, because that is where
+                # the rendered files are.
+                "repo": str(home),
+                "revision": rev,
+                "document": out,
+                "title": cfg.get("title", out),
+                "source": str(repo / src) if src else "",
+                "rendered": str(repo / DASHBOARD_DIR / (out + ".html")),
+                "markdown": str(vault / (out + ".md")) if vault else "",
+                # What the drain mirrors, read once here. The three paths
+                # above say where it came from and where the copies sit;
+                # none of them is what gets published.
+                "content": source_text(repo / src) if src else "",
+            }
+            request.update(target)
+            name = "%s.%s.%s.json" % (key, out or "doc", target["destination"])
+            path = QUEUE / name
+            what = BY_NAME[target["destination"]].what
+            identity = mirror_identity(request, target, what)
+            digest = mirror_fingerprint(request, target, what)
+            state = "" if force else already_queued(path, receipts() / name, digest, identity)
+            if state == "pending":
+                reports.append("mirror: %s: already queued -> %s (unchanged since %s)"
+                               % (out, target["target"], rev[:12]))
+                continue
+            if state == "delivered":
+                reports.append("mirror: %s: unchanged since it was last mirrored; "
+                               "not queued again" % out)
+                continue
+            # The designation is the answer where it gives one; the queue records
+            # what a drain did, and never overrides what the document says.
+            carried = "" if request[what] else recorded(path, identity, what)
+            request[what] = request[what] or carried
+            # The generation this request is: what `mirror_delivered()` acknowledges.
+            request["fingerprint"] = digest
+            path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
+            try:
+                receipts().mkdir(parents=True, exist_ok=True)
+                record = load_record(receipts() / name)
+                record.update(queued=digest, revision=rev, repo=str(home),
+                              document=out, destination=target["destination"])
+                record.pop("fingerprint", None)
+                (receipts() / name).write_text(
+                    json.dumps(record, indent=2) + "\n", encoding="utf-8")
+            except OSError as problem:
+                # The request is written; only the memory of it is not, and the
+                # cost of that is one more queue of this document next time.
+                reports.append("mirror: cannot write receipt for %s (%s)" % (out, problem))
+            reports.append("mirror: queued %s -> %s%s" % (
+                out, target["target"],
+                ", updating the %s already recorded" % what if carried else ""))
     return reports
 
 
@@ -702,7 +1047,8 @@ def publish(repo: Path, project: str, docs: list[dict[str, Any]]) -> list[str]:
     """
     reports = write_obsidian(repo, docs)
     reports.append(ignore_dashboard(repo))
-    reports.append(register_root(repo, project or repo.name, repo / DASHBOARD_DIR))
+    reports.append(register_root(
+        repo, project or repo_home(repo).name, repo / DASHBOARD_DIR))
     # Before enqueueing, and here rather than inside `enqueue`: a repo that
     # designates nothing still runs on the machine holding the stranded queue,
     # and `enqueue` returns before touching the directory when it has no
@@ -879,7 +1225,10 @@ if __name__ == "__main__":
 #: own criterion -- it is the reading that left `4d20574b`'s body off, and the
 #: review that caught it ran the installer against the body of the very
 #: revision it was reviewing. A body from a branch that has not landed belongs
-#: to that branch, which adds it when it does.
+#: to that branch, which adds it when it does -- and the fifth body below is
+#: sd:1352's, added by the merge that brought that branch in. The rule is the
+#: same one read from the other side: a merge inherits the predecessors of
+#: what it merges, because those revisions are checkouts here too.
 #:
 #: Downward only in one direction: a body leaves this tuple when no machine can
 #: still be carrying it, which is not a thing this repository can know. Assume
@@ -1211,6 +1560,109 @@ def main(argv):
         subprocess.run([kit, "render"], cwd=root, timeout=600, check=True)
     except (OSError, subprocess.SubprocessError):
         print("%s: render failed; build/ is now stale" % trigger, file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
+''',
+    # `e65d1ec4`, sd:1352's `rewrite/research-publish-loop`, which this
+    # branch merges: the same three triggers reached independently, with
+    # `HOOK_NAMES` for the tuple and an upgrade keyed on a marker line.
+    # Its resolution of a file checkout -- render nothing -- is the one
+    # this branch replaces, and its shape is gone from the merged tree;
+    # the body stays, because those revisions are now ancestors here and
+    # a checkout of any of them can install it. A branch owns the
+    # predecessors it creates, and a merge inherits the other branch's.
+    '''#!/usr/bin/env python3
+# Re-render this research repo after git changes a document in it.
+#
+# Installed by `sd-research-kit init-hook` as post-commit, post-merge and
+# post-checkout: one file under three names, and the name git called it by
+# says what to compare. A commit is compared with its parent; a merge -- and
+# so a pull, which is a fetch and a merge -- compares ORIG_HEAD with HEAD; a
+# branch checkout compares the two revisions git hands it. Post-commit alone
+# missed every pulled change, and the page then went stale while looking
+# current, until a review demanded a render nobody had been told to run.
+#
+# After the fact and not before: `docs/dashboard/` is generated and not
+# committed, so there is nothing to stage, and the new HEAD is the revision a
+# queued mirror should name.
+#
+# Rendered output goes stale the moment its source changes, and a stale page is
+# worse than a missing one because it looks current. This is what keeps the
+# dashboard's Documents tab a statement about the render rather than about who
+# remembered to run it.
+#
+# Never fails the git command. It is already done when this runs, so exiting
+# non-zero would report a failure for work that succeeded. A render that cannot
+# run says so and leaves the repository alone.
+#
+# `SD_SKIP_RENDER=1 git commit` (or pull, or checkout) skips it.
+
+import os
+import shutil
+import subprocess
+import sys
+
+
+def git(root, *args):
+    return subprocess.run(
+        ["git", *args], cwd=root, capture_output=True, text=True,
+        timeout=30, check=True,
+    ).stdout.split()
+
+
+def changed(root, hook, args):
+    # The paths this git command changed. Every branch here compares two
+    # revisions, so an uncommitted edit is never what triggers a render.
+    if hook == "post-commit":
+        return git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
+    if hook == "post-merge":
+        return git(root, "diff", "--name-only", "ORIG_HEAD", "HEAD")
+    if hook == "post-checkout":
+        # <previous HEAD> <new HEAD> <1 for a branch checkout, 0 for a file>.
+        # A file checkout moves no ref, so there is nothing to compare; and a
+        # previous HEAD of all zeros is a fresh clone or `git worktree add`,
+        # which has nothing rendered yet and nothing committed to it, so a
+        # render there would publish a checkout nobody has worked in.
+        if len(args) < 3 or args[2] != "1" or args[0] == args[1]:
+            return []
+        if set(args[0]) <= {"0"}:
+            return []
+        return git(root, "diff", "--name-only", args[0], args[1])
+    return []
+
+
+def main(argv):
+    if os.environ.get("SD_SKIP_RENDER"):
+        return 0
+    hook = os.path.basename(argv[0]) if argv else "post-commit"
+    try:
+        root = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=30, check=True,
+        ).stdout.strip()
+        if not os.path.isfile(os.path.join(root, "research.conf.py")):
+            return 0
+        # Only when a document moved. A change touching nothing but the
+        # config or a script still renders: both change the output.
+        paths = changed(root, hook, argv[1:])
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    if not any(name.endswith((".md", ".py")) for name in paths):
+        return 0
+
+    kit = shutil.which("sd-research-kit")
+    if kit is None:
+        print("%s: sd-research-kit not on PATH; docs/dashboard/ is now stale"
+              % hook, file=sys.stderr)
+        return 0
+    try:
+        subprocess.run([kit, "render"], cwd=root, timeout=600, check=True)
+    except (OSError, subprocess.SubprocessError):
+        print("%s: render failed; docs/dashboard/ is now stale" % hook,
+              file=sys.stderr)
     return 0
 
 

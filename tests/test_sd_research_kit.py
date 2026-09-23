@@ -1067,7 +1067,8 @@ class InitHookInstallTests(unittest.TestCase):
         """
 
         module = load_publish()
-        nearly = module.SUPERSEDED_HOOKS[-1].replace("build/", "build /", 1)
+        nearly = module.SUPERSEDED_HOOKS[-1].replace(
+            "docs/dashboard/", "docs/ dashboard/", 1)
         self.assertNotEqual(nearly, module.SUPERSEDED_HOOKS[-1])
         with tempfile.TemporaryDirectory() as raw:
             repo = self.make_repo(Path(raw))
@@ -1097,6 +1098,9 @@ class InitHookInstallTests(unittest.TestCase):
         is where it is noticed if it does not. The two from this branch are
         here because a branch owns the predecessors it creates: a review ran
         the installer against the base revision's own hook and it was refused.
+        The fifth is sd:1352's, which this branch merges rather than wrote: a
+        merge inherits the other branch's predecessors, because its revisions
+        become checkouts somebody can run `init-hook` from here.
         """
 
         module = load_publish()
@@ -1112,6 +1116,11 @@ class InitHookInstallTests(unittest.TestCase):
             # `dd14d501`, this branch: a file checkout measured against the
             # working tree, replaced by `8b575695`.
             "aae11a2a3b271585039918aad528278ff5aebf617dd32a1ca52947d5114b7a3e",
+            # `e65d1ec4`, sd:1352's branch, merged into this one: the same
+            # three triggers reached independently. Its shape is gone from the
+            # merged tree and its body is not, because those revisions are
+            # ancestors here and a checkout of one can install it.
+            "aac6c83677dc4cf11b778e012afdec33c126107efd34935ac2c1ca6de6271b0c",
         }
         digests = {hashlib.sha256(body.encode("utf-8")).hexdigest()
                    for body in module.SUPERSEDED_HOOKS}
