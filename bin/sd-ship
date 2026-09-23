@@ -789,9 +789,23 @@ class Ship(SharedReview):
         why, and a second implementation of `docs/spec/**` is the drift this
         pack spends its lint budget on. It is reached through the loaded
         module, so `bin/sd_route.py` keeps its single importer.
+
+        `PolicyError` is not in `main`'s caught tuple, and this is the first
+        caller in `sd-ship` that can raise one, so it is translated here. It
+        refuses rather than falling back to the built-in default: a repository
+        whose policy file will not parse has said nothing this gate may rely
+        on, and taking the default would hand it a deny-list it never wrote.
         """
         review = sd_lib.sibling("sd_review_policy_ship_gate", "sd-review")
-        policy, _source = review.load_policy(self.root)
+        try:
+            policy, _source = review.load_policy(self.root)
+        except review.PolicyError as error:
+            raise Refusal(
+                f"the repository's review policy does not parse, so the never-skip "
+                f"deny-list cannot be applied to the merge gate: {error}",
+                code="review_policy_malformed", boundary="review", state="operator_decision",
+                next_action="Fix .github/sd-review.json, then retry merge.",
+            ) from None
         patterns = policy.get("never_skip") or ()
         return frozenset(path for path in paths
                          if review.sd_route._first_match([path], patterns) is not None)

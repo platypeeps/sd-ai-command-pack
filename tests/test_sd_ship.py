@@ -900,6 +900,27 @@ roles:
         self.assertEqual(operation.unreviewed_shipped_surface(base, head),
                          ["docs/handbook/how.md"])
 
+    def test_a_policy_that_does_not_parse_refuses_the_gate_rather_than_guessing(self):
+        """The deny-list read is the first `load_policy` call in `sd-ship`, and
+        `PolicyError` is not in `main`'s caught tuple, so an unreadable file
+        would have escaped as a traceback. It refuses as a receipt instead --
+        and it refuses rather than falling back to the built-in list, because a
+        repository whose policy will not parse has said nothing this gate may
+        rely on.
+        """
+        self.enable_automatic_copilot()
+        operation = self.operation()
+        base = _git(self.root, "rev-parse", "HEAD")
+        (self.root / "docs").mkdir(exist_ok=True)
+        (self.root / "docs/note.md").write_text("prose\n")
+        _git(self.root, "add", "-A")
+        _git(self.root, "commit", "-m", "prose\n\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        (self.root / ".github/sd-review.json").write_text("{ not json")
+        with self.assertRaisesRegex(ship.Refusal, "review policy does not parse") as raised:
+            operation.unreviewed_shipped_surface(base, head)
+        self.assertEqual(raised.exception.workflow["blocker"]["code"], "review_policy_malformed")
+
     def test_later_push_accepts_the_single_automatic_review_on_the_new_head(self):
         self.enable_automatic_copilot()
         self.prepare()
