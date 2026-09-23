@@ -1314,11 +1314,11 @@ exit 0
         subprocess.run(["git", *args], cwd=cwd, check=True,
                        capture_output=True, text=True)
 
-    def setup(self, **env: str) -> subprocess.CompletedProcess[str]:
+    def setup(self, venv: str = ".venv", **env: str) -> subprocess.CompletedProcess[str]:
         """The command the borrow refusal recommends, verbatim."""
 
         return subprocess.run(
-            ["make", "-s", "setup", f"PYTHON={self.stub}", "VENV=.venv"],
+            ["make", "-s", "setup", f"PYTHON={self.stub}", f"VENV={venv}"],
             cwd=self.linked, capture_output=True, text=True,
             env={**os.environ, **env})
 
@@ -1412,6 +1412,63 @@ exit 0
         self.assertTrue(self.record.is_dir())
         after = self.dry_run("docs-lint")
         self.assertEqual(after.returncode, 0, after.stderr)
+
+    def test_no_mutation_happens_unless_the_marker_exists(self) -> None:
+        """The block's contract, asked at the two commands that can be stepped over.
+
+        A recipe line is one shell with `;` between commands and no `set -e`,
+        so a command that fails is stepped over and the line's status is the
+        last command's. That is not a hypothetical here: both halves below
+        used to pass, quietly, with the mutation already done.
+
+        Asked as the contract rather than as two exit codes, because what
+        matters is not which command reported what -- it is that the record is
+        removed only after a marker exists to say why it is missing. Codex's
+        note on the first pass was that setup and the symlink refusal were
+        each covered and their combination was not; this is the combination.
+        """
+
+        # The marker cannot be written: a directory sits where the file goes,
+        # so the redirection fails. Without `|| exit 1` the `rm -rf` runs
+        # anyway on a line that exits 0, and the record is gone with no marker
+        # to say why -- the absence the borrow paths read as legacy.
+        #
+        # The next step is failed deliberately, and that is what makes this
+        # discriminating rather than merely red. Left to run on, the old
+        # recipe republished the record at the end and failed only on its own
+        # `rm -f` of the directory in the marker's place: a nonzero exit, a
+        # record present, and nothing said about the window in between. What
+        # is under test is the state after the mutation, so the run has to
+        # stop there.
+        self.assertEqual(self.setup().returncode, 0)
+        self.assertTrue(self.record.is_dir())
+        (self.linked / ".venv" / "sd-provisioning").mkdir()
+        blocked = self.setup(STUB_PIP_EXIT="1")
+        self.assertNotEqual(blocked.returncode, 0,
+                            "a failed marker write reported success")
+        self.assertTrue(self.record.is_dir(),
+                        "the record was removed without a marker to explain it")
+
+        # The link cannot be removed: its parent is read-only. `mkdir -p` on a
+        # symlink to an existing directory succeeds, so an unchecked `rm`
+        # leaves the marker written *through* the link and the record removed
+        # from the environment every other worktree borrows from. This half is
+        # about the other checkout, not this one.
+        held = self.linked / "held"
+        held.mkdir()
+        (held / "env").symlink_to(self.main_venv)
+        held.chmod(0o555)
+        self.addCleanup(held.chmod, 0o755)
+        through = self.setup(venv="held/env")
+        self.assertNotEqual(through.returncode, 0,
+                            "a failed detach reported success")
+        self.assertTrue((held / "env").is_symlink(),
+                        "the link is still the thing that could not be removed")
+        self.assertFalse((self.main_venv / "sd-provisioning").exists(),
+                         "the marker was written through the link")
+        for name in self.REQUIREMENTS:
+            self.assertTrue((self.main_venv / "sd-requirements" / name).is_file(),
+                            "the borrowed-from environment lost its record")
 
     def test_the_marker_precedes_the_record_removal(self) -> None:
         """Ordering, read off the state a failure leaves rather than the text.

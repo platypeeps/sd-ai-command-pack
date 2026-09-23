@@ -137,6 +137,21 @@ SETUP_PYTHON = $(SETUP_VENV)/bin/python
 # replacing somebody's deliberate link in silence is worse than the error it
 # repairs. It has to come before the record is removed, too: through a link,
 # `$(SETUP_VENV)/sd-requirements` is the *other* checkout's record.
+# Every command in this block carries `|| exit 1`, and that is not belt and
+# braces. A recipe line is one shell and `;` between commands, with no
+# `set -e`: a command that fails is stepped over, and the line's status is the
+# last command's. Both defects found in review were that. The redirection
+# writing the marker could fail and the `rm -rf` below would run anyway, on a
+# line that then exits 0 -- record gone, no marker, and the borrow paths read
+# the absence as legacy, which is the state the marker exists to end. And `rm`
+# on the link could fail while `mkdir -p` on a symlink to an existing
+# directory succeeds silently, so the marker would be written *through* the
+# surviving link and the `rm -rf` would take the record out of the environment
+# every other worktree borrows from. That one leaves this checkout and is why
+# the detach also asserts its own result rather than trusting an exit code:
+# the invariant is that nothing is provisioned through a link, and a race that
+# recreates one does not announce itself in `rm`'s status.
+#
 # The marker goes in with one write, before anything is touched: `mkdir -p`
 # then the file, and only then the `rm -rf` and the `python -m venv`. That
 # covers both windows at once. On a fresh provision the directory holds no
@@ -150,11 +165,13 @@ setup:
 	@venv="$(SETUP_VENV)"; \
 	  [ -n "$$venv" ] || { printf '%s\n' "error: VENV is empty; there is no path to provision" >&2; exit 1; }; \
 	  if [ -L "$$venv" ]; then \
-	    printf '%s\n' "detaching $$venv, a link to $$(readlink "$$venv"); the environment it points at is left alone" >&2; \
-	    rm "$$venv"; \
+	    target=$$(readlink "$$venv") || exit 1; \
+	    printf '%s\n' "detaching $$venv, a link to $$target; the environment it points at is left alone" >&2 || exit 1; \
+	    rm "$$venv" || exit 1; \
+	    [ ! -L "$$venv" ] || { printf '%s\n' "error: $$venv is still a link; refusing to provision through it" >&2; exit 1; }; \
 	  fi; \
 	  mkdir -p "$$venv" || exit 1; \
-	  printf '%s\n' "make setup is building this environment; nothing may be taken out of it until this file is gone" > "$$venv/sd-provisioning"; \
+	  printf '%s\n' "make setup is building this environment; nothing may be taken out of it until this file is gone" > "$$venv/sd-provisioning" || exit 1; \
 	  rm -rf "$$venv/sd-requirements" "$$venv/.sd-requirements.new"
 	"$(PYTHON)" -m venv "$(SETUP_VENV)"
 	"$(SETUP_PYTHON)" -m pip install --require-hashes -r requirements-dev.txt -r requirements-security.txt
