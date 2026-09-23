@@ -898,6 +898,41 @@ class PipelineTests(ReviewFixture):
         self.assertNotIn("no check ran", stream.getvalue())
         self.assertIn("lint could not start", stream.getvalue())
 
+    def test_a_check_sd_check_killed_at_its_timeout_started_and_the_line_says_so(self) -> None:
+        """The timeout arm of `_started`, exercised with the record sd-check
+        writes rather than one typed here: no aggregate `check`, a `test`
+        sd-check kills at `--timeout 1`, a `lint` it cannot spawn. The test
+        record has no exit code and a `timed out` reason, and it started --
+        the process ran until it was killed. The sentence names lint and may
+        not say no check ran. Against `_started` without the arm, `started`
+        is empty and the line says no check ran, so this fails there."""
+        root = self.make_repo()
+        self.prepare(root)
+        interpreter = root / "no-such-venv" / "bin" / "python"
+        self.local_block(root, "test: sleep 30", f"lint: {interpreter} -m ruff check .")
+        argv = [sys.executable, str(pathlib.Path(sd_review._BIN) / "sd-check"), "--json", "--timeout", "1"]
+        completed = sd_review.subprocess_runner(argv, self.environment(), root, 60)
+        checks = json.loads(completed.stdout)["checks"]
+        by_name = {record["name"]: record for record in checks}
+        self.assertEqual((by_name["test"]["status"], by_name["test"]["exit_code"]), ("fail", None))
+        self.assertEqual(by_name["test"]["reason"], "timed out after 1s")
+        self.assertTrue(sd_review._started(by_name["test"]), "killed at the timeout is not never started")
+        self.assertFalse(sd_review._started(by_name["lint"]), "a spawn failure is")
+        report = sd_review.classify_gate(checks)
+        self.assertEqual((report["reason"], report["entrypoint"], report["started"]),
+                         ("toolchain_missing", "lint", ["test"]))
+        line = sd_review.gate_failed_line(report)
+        self.assertNotIn("no check ran", line)
+        self.assertIn("lint could not start " + str(interpreter), line)
+        self.assertIn("test ran", line)
+        runner = FakeRunner({"sd-check": sd_review.Completed(1, json.dumps({"checks": checks}), "")})
+        result = self.run_review(root, runner)
+        self.assertEqual(result["status"], "gate_failed")
+        stream = io.StringIO()
+        sd_review.render(result, stream)
+        self.assertNotIn("no check ran", stream.getvalue())
+        self.assertIn("test ran", stream.getvalue())
+
     def test_a_blocking_finding_blocks(self) -> None:
         root = self.make_repo()
         self.prepare(root)
