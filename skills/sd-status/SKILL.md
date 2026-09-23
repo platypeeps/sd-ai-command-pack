@@ -300,7 +300,12 @@ authority: it stops collaborators and leaves the one account that does the
 merging entirely ungated. So this section reports enforcement state, and each
 missing leg prints as a named gap:
 
-- `enforce_admins` off — every rule below it stops at the admin who merges
+- `enforce_admins` off — every rule below it stops at the admin who merges;
+  on a ruleset, an `OrganizationAdmin` bypass. The same id says unknown, and
+  never enforced, for a bypass list GitHub withheld and for a repository-role
+  bypass, whose numeric id nothing here resolves to admin or not
+- `bypass` — a ruleset an app, a team, a deploy key or a user can walk past,
+  named; administrators stay subject to its rules, that actor does not
 - no required status checks — a red PR still merges
 - `strict` off — a green check run against a base that moved still merges
 - `required_not_produced` — required contexts no workflow here produces; each

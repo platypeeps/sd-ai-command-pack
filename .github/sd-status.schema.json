@@ -31,7 +31,7 @@
             "properties": {
               "branch_protection": {
                 "type": "boolean",
-                "description": "Whether the default branch has a protection object at all. The `unprotected` gap is emitted only when it does not, and every other fact here reduces that object -- so on that branch the other four are constants and an entry pinning only those would accept the id whatever the branch looked like. This is the fact an `unprotected` acceptance pins, and the one that stops it applying the moment protection is turned on."
+                "description": "Whether the default branch has a protection object at all. The `unprotected` gap is emitted only when it does not, and every other fact here reduces that object -- so on that branch the others are constants and an entry pinning only those would accept the id whatever the branch looked like. This is the fact an `unprotected` acceptance pins, and the one that stops it applying the moment protection is turned on."
               },
               "required_pull_request_reviews": {
                 "type": "boolean",
@@ -49,6 +49,11 @@
               "strict": {
                 "type": "boolean",
                 "description": "Whether required status checks must run against an up-to-date base."
+              },
+              "bypass": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Every bypass of a ruleset that does not reach administrators, as `<ruleset> (#<id>): <actor type> <actor id> (<bypass mode>)`, sorted -- the list the `bypass` gap prints. Empty for classic protection and for a ruleset only administrators can bypass. A list rather than a boolean so that an actor added later un-matches the entry and the gap returns."
               }
             }
           },

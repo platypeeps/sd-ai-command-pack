@@ -488,11 +488,21 @@ class RulesetCase(unittest.TestCase):
         unnamed[2]["parameters"]["required_status_checks"] = []
         self.refused(self.remote(unnamed), r"^ruleset protection requires strict, named CI checks$")
 
-    def test_a_ruleset_with_bypass_actors_is_refused_naming_the_ruleset(self) -> None:
-        bypass = dict(RULESET, name="release", bypass_actors=[
-            {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}])
-        error = self.refused(self.remote(ruleset_rules(), bypass), r"^ruleset release \(#42\) has bypass actors$")
-        self.assertEqual(error.workflow["blocker"]["code"], "protection_required")
+    def test_a_ruleset_with_bypass_actors_is_refused_naming_the_ruleset_and_the_actor(self) -> None:
+        """Any actor: a gate an app can walk past is no more authority than
+        one an admin can. The refusal names who, so the fix is the right
+        ruleset entry and not the admin setting the old words pointed at."""
+        for actors, words in (
+            ([{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}],
+             r"RepositoryRole 5 \(always\)"),
+            ([{"actor_id": 77, "actor_type": "Integration", "bypass_mode": "pull_request"}],
+             r"Integration 77 \(pull_request\)"),
+        ):
+            with self.subTest(actors=actors):
+                bypass = dict(RULESET, name="release", bypass_actors=actors)
+                error = self.refused(self.remote(ruleset_rules(), bypass),
+                                     rf"^ruleset release \(#42\) can be bypassed by {words}$")
+                self.assertEqual(error.workflow["blocker"]["code"], "protection_required")
 
     def test_a_bypass_list_not_shown_is_unknown_and_refuses_while_an_empty_one_validates(self) -> None:
         """GitHub returns `bypass_actors` only to a caller who can edit the

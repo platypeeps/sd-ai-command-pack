@@ -224,14 +224,17 @@ class GitHub:
 
     @staticmethod
     def validate_ruleset_bypass(value: dict) -> None:
-        """A named bypass actor refuses; a bypass list GitHub did not show
-        refuses too, as unknown rather than as none. GitHub returns
+        """A named bypass actor refuses, naming it: an app or a team that can
+        walk past the ruleset is no more authority than an admin who can,
+        and the refusal says which entry to remove. A bypass list GitHub did
+        not show refuses too, as unknown rather than as none. GitHub returns
         `bypass_actors` only to a caller who can edit the ruleset, so its
         absence says what this token may see, not who can bypass, and a gate
         that read absence as nobody would grant on a permission it lacks."""
         for entry in value.get("rulesets") or []:
             if isinstance(entry, dict) and entry.get("bypass_actors"):
-                raise Refusal(f"ruleset {entry.get('name')} (#{entry.get('id')}) has bypass actors",
+                actors = ", ".join(sd_protection.actor_words(actor) for actor in entry["bypass_actors"])
+                raise Refusal(f"ruleset {entry.get('name')} (#{entry.get('id')}) can be bypassed by {actors}",
                               code="protection_required",
                               next_action="Remove the bypass actors from the ruleset; this command cannot bypass it.")
         for entry in sd_protection.hidden_bypass(value):

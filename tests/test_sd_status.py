@@ -357,6 +357,26 @@ class ProtectionGapTests(unittest.TestCase):
         found = self.gaps(self.enforcing(enforce_admins={"enabled": False}), {"lint"})
         self.assertEqual(found, ["enforce_admins"])
 
+    def test_a_bypass_that_does_not_reach_administrators_is_its_own_gap(self) -> None:
+        """Codex on #1140: every bypass actor was folded into `enforce_admins`,
+        so a ruleset one app could walk past printed "exempts the admins who
+        do the merging" on a repository whose administrators are subject to
+        every rule. It is the `bypass` gap, naming the ruleset and the actor,
+        and `enforce_admins` stays what `synthesize` said."""
+        rulesets = [{"id": 42, "name": "release", "enforcement": "active",
+                     "bypass_actors": [{"actor_id": 77, "actor_type": "Integration", "bypass_mode": "pull_request"}, {"actor_id": 9, "actor_type": "Team", "bypass_mode": "always"}]}]
+        found, detail = status._protection_gaps(
+            self.enforcing(source="ruleset", rulesets=rulesets), "main", {"lint"}, [])
+        self.assertEqual([gap["id"] for gap in found], ["bypass"])
+        self.assertIn("release (#42): Integration 77 (pull_request); release (#42): Team 9 (always)", found[0]["gap"])
+        self.assertIn("Administrators stay subject", found[0]["gap"])
+        self.assertNotIn("exempts the admins", found[0]["gap"])
+        self.assertTrue(detail["enforce_admins"])
+        self.assertEqual(detail["bypass"],
+                         ["release (#42): Integration 77 (pull_request)", "release (#42): Team 9 (always)"])
+        # Classic protection has no ruleset to bypass: the fact is empty, not absent.
+        self.assertEqual(status._protection_gaps(self.enforcing(), "main", {"lint"}, [])[1]["bypass"], [])
+
     def test_non_strict_checks_are_a_gap(self) -> None:
         protection = self.enforcing(
             required_status_checks={"strict": False, "contexts": ["lint"]}
@@ -546,6 +566,28 @@ class AcknowledgementTests(unittest.TestCase):
         self.assertIn("no pull-request review is required on main", still_open[0]["gap"])
         self.assertIn("no longer matches", still_open[0]["acknowledgement_stale"])
 
+    def test_a_bypass_acknowledgement_pins_the_actors_and_stops_when_one_is_added(self) -> None:
+        """The `bypass` fact is the list the gap prints, not a boolean: an
+        entry that accepted the release app goes on accepting nothing once a
+        team is added beside it."""
+        app, team = {"actor_id": 77, "actor_type": "Integration", "bypass_mode": "pull_request"}, {"actor_id": 9, "actor_type": "Team", "bypass_mode": "always"}
+        def protection(*actors: dict[str, Any]) -> dict[str, Any]:
+            return self.enforcing(source="ruleset", rulesets=[
+                {"id": 42, "name": "release", "enforcement": "active", "bypass_actors": list(actors)}])
+        entry = {"id": "bypass", "state": {"bypass": ["release (#42): Integration 77 (pull_request)"]},
+                 "because": "the release app opens the version bump", "since": "2026-09-22",
+                 "until": "the release app is retired"}
+        still_open, accepted = self.split(protection(app), [self.ZERO_APPROVALS, entry])
+        self.assertEqual(sorted(gap["id"] for gap in accepted), ["bypass", "reviews"])
+        self.assertEqual(still_open, [])
+        still_open, accepted = self.split(protection(app, team), [self.ZERO_APPROVALS, entry])
+        self.assertEqual([gap["id"] for gap in accepted], ["reviews"])
+        stale = [gap for gap in still_open if gap["id"] == "bypass"][0]
+        self.assertIn("no longer matches", stale["acknowledgement_stale"])
+        self.assertIn("Team 9 (always)", stale["acknowledgement_stale"])
+        _, problems = self.written(json.dumps({"accepted_gaps": [entry]}))
+        self.assertEqual(problems, [])
+
     def test_an_unrelated_gap_is_untouched_by_an_acknowledgement(self) -> None:
         protection = self.enforcing(
             required_status_checks={"strict": False, "contexts": ["lint"]}
@@ -627,6 +669,8 @@ class AcknowledgementTests(unittest.TestCase):
             (self.enforcing(), {"lint", "a-check-nothing-requires"}),
             (self.enforcing(required_status_checks={"contexts": ["nobody-reports-this"]}), set()),
             (self.enforcing(required_pull_request_reviews=None), {"lint"}),
+            (self.enforcing(source="ruleset", rulesets=[{"id": 42, "name": "release", "enforcement": "active",
+                                                          "bypass_actors": [{"actor_id": 77, "actor_type": "Integration", "bypass_mode": "pull_request"}]}]), {"lint"}),
         ):
             gaps, _ = status._protection_gaps(protection, "main", produced, [])
             emitted.update(gap["id"] for gap in gaps)
@@ -5631,7 +5675,8 @@ class RulesetProtectionCase(unittest.TestCase):
                             "required_status_checks": [{"context": "lint", "integration_id": 7}]}},
         ]
 
-    def section(self, rules: Any, ruleset: Any = RULESET, *, repo: dict[str, Any] | None = None) -> dict[str, Any]:
+    def section(self, rules: Any, ruleset: Any = RULESET, *, repo: dict[str, Any] | None = None,
+                extra: dict[int, Any] | None = None) -> dict[str, Any]:
         seen: list[str] = []
 
         def answer(args: list[str], root: pathlib.Path) -> tuple[Any, str]:
@@ -5651,6 +5696,9 @@ class RulesetProtectionCase(unittest.TestCase):
                 return rules[(page - 1) * size:page * size], ""
             if path.endswith("/rulesets/42"):
                 return (ruleset, "") if ruleset is not None else (None, "gh: Not Found (HTTP 404)")
+            for ruleset_id, entry in (extra or {}).items():
+                if path.endswith(f"/rulesets/{ruleset_id}"):
+                    return entry, ""
             raise AssertionError(f"unexpected read {path}")
 
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
@@ -5689,13 +5737,66 @@ class RulesetProtectionCase(unittest.TestCase):
         self.assertEqual(rules_reads, [status.sd_protection.rules_path(f"repos/{self.SLUG}", "main", 1),
                                        status.sd_protection.rules_path(f"repos/{self.SLUG}", "main", 2)])
 
-    def test_a_ruleset_with_bypass_actors_is_protection_that_exempts_someone(self) -> None:
-        bypass = dict(self.RULESET, bypass_actors=[{"actor_id": 5, "actor_type": "RepositoryRole",
+    def test_a_bypass_that_reaches_administrators_is_enforce_admins_off(self) -> None:
+        """`OrganizationAdmin` is the actor an administrator merges as, so its
+        bypass is the classic finding, in the classic words."""
+        bypass = dict(self.RULESET, bypass_actors=[{"actor_id": 1, "actor_type": "OrganizationAdmin",
                                                     "bypass_mode": "always"}])
         result = self.section(self.gating_rules(), bypass)
         self.assertTrue(result["protected"])
-        self.assertIn("enforce_admins", [gap["id"] for gap in result["gaps"]])
+        gaps = {gap["id"]: gap["gap"] for gap in result["gaps"]}
+        self.assertIn("exempts the admins who do the merging", gaps["enforce_admins"])
+        self.assertNotIn("bypass", gaps)
+        self.assertFalse(result["detail"]["enforce_admins"])
+        self.assertEqual(result["detail"]["bypass"], [])
         self.assertEqual(result["detail"]["rulesets"][0]["bypass_actors"], bypass["bypass_actors"])
+
+    def test_a_role_bypass_is_unknown_until_the_role_is_confirmed(self) -> None:
+        """A `RepositoryRole` actor carries a numeric id, and which role it
+        names is confirmed nowhere here -- no ruleset a registered token can
+        read carries one. Guessing the admin id would pick which of two
+        sentences an operator reads, and the wrong guess prints
+        "administrators stay subject" on a branch they can walk past. So it
+        is `enforce_admins` unknown, naming the role, in neither sentence."""
+        for role_id in (5, 4):
+            with self.subTest(role_id=role_id):
+                actor = {"actor_id": role_id, "actor_type": "RepositoryRole", "bypass_mode": "always"}
+                result = self.section(self.gating_rules(), dict(self.RULESET, bypass_actors=[actor]))
+                self.assertTrue(result["protected"])
+                gaps = {gap["id"]: gap["gap"] for gap in result["gaps"]}
+                self.assertNotIn("bypass", gaps)
+                self.assertIn(f"main (#42) lets RepositoryRole {role_id} (always) bypass it", gaps["enforce_admins"])
+                self.assertIn("not confirmed here", gaps["enforce_admins"])
+                self.assertNotIn("exempts the admins", gaps["enforce_admins"])
+                self.assertNotIn("stay subject", gaps["enforce_admins"])
+                self.assertFalse(result["detail"]["enforce_admins"])
+                self.assertEqual(result["detail"]["bypass"], [])
+                self.assertEqual(status.sd_protection.synthesize(self.gating_rules(), {42: dict(
+                    self.RULESET, bypass_actors=[actor])})["enforce_admins"], {"enabled": None})
+
+    def test_a_bypass_for_one_app_is_its_own_gap_and_administrators_stay_subject(self) -> None:
+        """Codex on #1140: an app's bypass printed as `enforce_admins` off,
+        "exempts the admins who do the merging", on a repository whose
+        administrators are subject to every rule. The section reports it as
+        the `bypass` gap naming the actor, with `enforce_admins` on."""
+        bypass = dict(self.RULESET, bypass_actors=[{"actor_id": 77, "actor_type": "Integration", "bypass_mode": "pull_request"}, {"actor_id": 9, "actor_type": "Team", "bypass_mode": "always"}])
+        result = self.section(self.gating_rules(), bypass)
+        self.assertTrue(result["protected"])
+        gaps = {gap["id"]: gap["gap"] for gap in result["gaps"]}
+        self.assertNotIn("enforce_admins", gaps)
+        self.assertIn("main (#42): Integration 77 (pull_request); main (#42): Team 9 (always)", gaps["bypass"])
+        self.assertTrue(result["detail"]["enforce_admins"])
+        self.assertEqual(result["detail"]["bypass"],
+                         ["main (#42): Integration 77 (pull_request)", "main (#42): Team 9 (always)"])
+        # A withheld list beside a shown one stays unknown: the app's bypass
+        # is reported, and so is the list nobody was shown.
+        hidden = {"id": 43, "name": "ops", "enforcement": "active"}
+        rules = self.gating_rules() + [{"type": "pull_request", "ruleset_id": 43,
+                                        "parameters": {"required_approving_review_count": 1}}]
+        result = self.section(rules, bypass, extra={43: hidden})
+        gaps = {gap["id"]: gap["gap"] for gap in result["gaps"]}
+        self.assertIn("did not show bypass_actors for ops (#43)", gaps["enforce_admins"])
+        self.assertIn("Integration 77 (pull_request)", gaps["bypass"])
 
     def test_a_bypass_list_not_shown_is_unknown_not_enforcement(self) -> None:
         """Absent `bypass_actors` is what GitHub answers a caller who cannot

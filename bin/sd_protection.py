@@ -165,13 +165,20 @@ def synthesize(rules: list, rulesets: dict[int, dict]) -> dict[str, Any] | None:
     checks the union.
 
     `enforce_admins` is `bypass_actors` asked the classic way round, in
-    three states rather than two: `True` when every contributing ruleset
-    showed an empty list, `False` when any names someone, and `None` when
-    any did not show its list at all -- GitHub withholds `bypass_actors`
-    from a caller who cannot edit the ruleset, and a list this reader was
-    not shown is not an empty one. The contributing rulesets travel on the
-    object under `rulesets`, each with its `bypass_actors` as read (`None`
-    for withheld), so a refusal can name the one with the bypass or the one
+    three states rather than two: `False` when any contributing ruleset
+    names an actor an administrator merges as (`reaches_admins`); `None`
+    when any did not show its list at all -- GitHub withholds
+    `bypass_actors` from a caller who cannot edit the ruleset, and a list
+    this reader was not shown is not an empty one -- or names a repository
+    role, whose numeric id this reader cannot resolve to admin or not; and
+    `True` otherwise. An actor that does not reach administrators leaves it
+    `True`: an app or a team bypassing the ruleset exempts nobody who
+    merges as admin, and reporting it as `enforce_admins` off was a false
+    security finding on a repository whose administrators are subject to
+    every rule. That bypass is the caller's own finding, read from
+    `bypass_pairs`. The contributing rulesets travel on the object under
+    `rulesets`, each with its `bypass_actors` as read (`None` for
+    withheld), so a refusal can name the one with the bypass or the one
     that hid it.
     """
     gating = [rule for rule in active_rules(rules, rulesets) if rule.get("type") in MERGE_GATING_RULES]
@@ -181,7 +188,7 @@ def synthesize(rules: list, rulesets: dict[int, dict]) -> dict[str, Any] | None:
     value: dict[str, Any] = {
         "source": RULESET_SOURCE,
         "rulesets": contributing,
-        "enforce_admins": {"enabled": _nobody_bypasses([entry["bypass_actors"] for entry in contributing])},
+        "enforce_admins": {"enabled": _admins_subject([entry["bypass_actors"] for entry in contributing])},
     }
     reviews = _reviews([_parameters(rule) for rule in gating if rule.get("type") == "pull_request"])
     if reviews is not None:
@@ -206,12 +213,91 @@ def _bypass_actors(ruleset: dict) -> list | None:
     return list(actors) if isinstance(actors, list) else None
 
 
-def _nobody_bypasses(lists: list[list | None]) -> bool | None:
-    """`True` only when every list was shown and empty; `False` when one
-    names anyone; `None` when one was withheld and none names anyone."""
-    if any(lists):
+def reaches_admins(actor: Any) -> bool | None:
+    """Whether a bypass actor is one an administrator merges as.
+
+    `True` for `OrganizationAdmin`. `None` for a `RepositoryRole`: the
+    actor carries a numeric role id, which role that id names is not
+    confirmed here, and no ruleset a registered token can read carries one
+    to measure against -- so whether it is the admin role, and the
+    administrators' exemption, or a lesser one is unknown, and is reported
+    as unknown rather than as either. A constant guessed here would decide
+    which of two sentences an operator reads, and the wrong guess reads as
+    reassurance. `False` for an app, a team, a deploy key or a user, which
+    bypass the ruleset without reaching the administrators, who stay
+    subject to every rule.
+    """
+    if not isinstance(actor, dict):
         return False
-    return None if any(actors is None for actors in lists) else True
+    kind = actor.get("actor_type")
+    if kind == "OrganizationAdmin":
+        return True
+    return None if kind == "RepositoryRole" else False
+
+
+def actor_words(actor: Any) -> str:
+    """`Integration 77 (pull_request)`: the actor's type, its id when it
+    carries one, and when the bypass applies."""
+    if not isinstance(actor, dict):
+        return str(actor)
+    kind = str(actor.get("actor_type") or "actor")
+    mode = str(actor.get("bypass_mode") or "always")
+    ident = actor.get("actor_id")
+    return f"{kind} {ident} ({mode})" if ident is not None else f"{kind} ({mode})"
+
+
+def bypass_pairs(value: dict[str, Any], reaching: bool | None) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """Every (ruleset, actor) pair whose actor `reaches_admins` answers
+    `reaching`: `False` for the bypasses that do not reach administrators,
+    the `bypass` finding; `None` for the repository roles nothing here
+    resolves, one reason `enforce_admins` reads unknown."""
+    return [(entry, actor)
+            for entry in value.get("rulesets") or [] if isinstance(entry, dict)
+            for actor in entry.get("bypass_actors") or [] if reaches_admins(actor) is reaching]
+
+
+def unknown_admins_words(value: dict[str, Any], default_branch: str) -> str:
+    """Why `enforce_admins` is unknown, each reason named: the rulesets that
+    withheld their bypass list, and the role bypasses nothing here resolves.
+    Unknown is a statement about this reader's knowledge; the alternative
+    sentences are claims about the repository, and neither is made."""
+    reasons: list[str] = []
+    hidden = ", ".join(f"{entry.get('name')} (#{entry.get('id')})" for entry in hidden_bypass(value))
+    if hidden:
+        reasons.append(
+            f"whether anyone can bypass the ruleset protecting {default_branch} is unknown: GitHub "
+            f"did not show bypass_actors for {hidden}, which it withholds from a caller who cannot "
+            "edit the ruleset. A bypass list not shown is not an empty one.")
+    roles = "; ".join(f"{entry.get('name')} (#{entry.get('id')}) lets {actor_words(actor)} bypass it"
+                      for entry, actor in bypass_pairs(value, None))
+    if roles:
+        reasons.append(
+            f"whether administrators can bypass the ruleset protecting {default_branch} is unknown: "
+            f"{roles}, and which role that id names is not confirmed here. The admin role would be "
+            "their exemption; a lesser role would not; neither is claimed.")
+    return " ".join(reasons) or f"whether anyone can bypass the ruleset protecting {default_branch} is unknown."
+
+
+def bypass_words(value: dict[str, Any]) -> list[str]:
+    """`main (#42): Integration 77 (pull_request)`, one a bypass that does
+    not reach administrators, sorted: the words the `bypass` finding prints
+    and the fact an acknowledgement of it pins."""
+    return sorted(f"{entry.get('name')} (#{entry.get('id')}): {actor_words(actor)}"
+                  for entry, actor in bypass_pairs(value, False))
+
+
+def _admins_subject(lists: list[list | None]) -> bool | None:
+    """`False` when a shown actor reaches administrators; `None` when a list
+    was withheld, or a shown actor is a role nothing here resolves, and no
+    shown actor reaches them; `True` when every list was shown and none
+    does either. An actor that does not reach them leaves this alone: that
+    bypass is the caller's finding, not the administrators' exemption."""
+    verdicts = [reaches_admins(actor) for actors in lists if actors for actor in actors]
+    if any(verdict is True for verdict in verdicts):
+        return False
+    if any(actors is None for actors in lists) or any(verdict is None for verdict in verdicts):
+        return None
+    return True
 
 
 def hidden_bypass(value: dict[str, Any]) -> list[dict[str, Any]]:
