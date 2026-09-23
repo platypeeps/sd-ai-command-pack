@@ -306,6 +306,34 @@ jobs:
       - name: Install sd_db from that checkout
         run: python3 -m pip install "$HOME/repos/system/local-sd-db"
 
+      # `tests/test_sd_review_opencode.py::TheEscapeIsClosedLive` is the only
+      # check that the sd:1375 config-merge escape is closed against opencode
+      # itself; without the binary it skips, and the `Fail on skipped tests`
+      # step below turns that skip into a red run. So CI installs opencode. The
+      # config-load half the test measures is offline -- opencode logs its
+      # `loading path=<checkout>/opencode.json` line during config discovery,
+      # before it resolves a provider -- and the run is bounded and killed
+      # after bootstrap, so no model credential is needed on the runner
+      # (measured credential-free: the marker is emitted, then the run ends on
+      # a model-not-found error inside the timeout, and no MCP server starts).
+      - name: Set up Node, for the opencode binary
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+
+      # Pinned to the exact version `bin/sd_opencode.py` and the test docstring
+      # were measured against (1.18.30); `latest` is already past it, so an
+      # unpinned install would run a confinement boundary test against an
+      # unmeasured build. npm refuses to republish a version and checks the
+      # tarball integrity from the packument, so a version pin is immutable and
+      # hash-verified -- the `--require-hashes` equivalent for a global install,
+      # which takes no lockfile. The version assertion fails the step loudly if
+      # the resolved binary is ever not the pinned one.
+      - name: Install opencode (pinned), so the live confinement test runs
+        run: |
+          npm install -g --no-audit --no-fund opencode-ai@1.18.30
+          test "$(opencode --version)" = "1.18.30"
+
       - name: Run tests
         # Shards the suite across workers, one shard per module except the
         # slow modules the script splits by test id (coverage --parallel-mode
