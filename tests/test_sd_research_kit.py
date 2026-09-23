@@ -1243,28 +1243,46 @@ class HookTriggerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.renders(), ["render"])
 
-    def test_post_checkout_does_not_render_a_file_checkout_of_nothing(self) -> None:
-        """Flag 0 with the tree already matching HEAD changed no document."""
+    def test_restoring_head_after_a_revert_renders_again(self) -> None:
+        """The clean tree that used to mean "nothing to do".
+
+        Two file checkouts in a row. The first publishes the older text, so
+        the published copy is now behind HEAD. The second restores HEAD and
+        leaves a tree with no diff against it -- and a guard reading that diff
+        concludes there is nothing to render, which freezes the reverted text
+        in the mirror for good. A clean tree is a statement about HEAD, and
+        the mirror is not a copy of HEAD.
+        """
 
         self.a_second_commit()
         here = self.sha()
+        self.git("checkout", "-q", "HEAD~1", "--", "doc.md")
+        self.assertEqual(self.fire("post-checkout", here, here, "0").returncode, 0)
+        self.git("checkout", "-q", "HEAD", "--", "doc.md")
+        self.assertEqual((self.repo / "doc.md").read_text(), "two\n")
+        self.assertEqual(
+            self.git("diff", "--name-only", "HEAD").stdout.strip(), "",
+            "the restored tree still differs from HEAD; the premise moved")
         result = self.fire("post-checkout", here, here, "0")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.renders(), [])
+        self.assertEqual(self.renders(), ["render", "render"],
+                         "the render that puts HEAD's text back never ran")
 
-    def test_post_checkout_does_not_render_when_nothing_moved(self) -> None:
+    def test_post_checkout_renders_when_no_branch_moved(self) -> None:
         """`git checkout <the branch already checked out>`, or `-b`.
 
-        Equal revisions leave no range, so this falls to the working tree
-        against HEAD -- which names nothing here, because a branch that did
-        not move wrote no file.
+        Equal revisions leave no range, and this falls into the same arm as a
+        file checkout and renders. A branch that did not move is not a
+        statement that the published copy matches it, for the same reason a
+        clean tree is not; keeping a separate answer for it would be the
+        branch-identity special case coming back in a third costume.
         """
 
         self.a_second_commit()
         here = self.sha()
         result = self.fire("post-checkout", here, here, "1")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.renders(), [])
+        self.assertEqual(self.renders(), ["render"])
 
     def test_an_unrecognised_trigger_renders_nothing(self) -> None:
         """A name nobody installed this under is not a guess to make."""

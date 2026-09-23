@@ -234,11 +234,20 @@
   unusable elsewhere: `diff-tree --no-commit-id -r HEAD` prints nothing at all
   for a merge commit, and a checkout's HEAD says nothing about what the
   checkout moved. So a merge is measured against `ORIG_HEAD`, and a branch
-  checkout against the two revisions git passes it. A file checkout --
-  `git checkout <rev> -- doc.md`, how a page is reverted -- moves no branch
-  and so has no range, and is measured against the working tree instead: it
-  changes a document without HEAD moving, which is precisely the render the
-  mirrors exist for.
+  checkout against the two revisions git passes it. A checkout that moved no
+  branch -- `git checkout <rev> -- doc.md`, how a page is reverted -- has no
+  range, and renders without asking anything: it changes a document without
+  HEAD moving, which is precisely the render the mirrors exist for.
+
+  Unconditional and not measured against the working tree, which is the guard
+  that looks right and is not. It asks whether the tree differs from `HEAD`,
+  and a mirror needs to know whether the tree differs from what was
+  published. Those agree only while the published copy tracks `HEAD`, and a
+  file checkout is what breaks that: revert a page and the older text is
+  published, restore `HEAD` and the tree is clean again, so a diff-shaped
+  guard sees nothing to do and the mirror keeps the reverted text for good. A
+  render that finds nothing changed is cheap; a second record of what was
+  published would not be.
 
   The install is all or nothing. Every path is inspected before any is
   written, so a foreign file at one of them refuses by name and leaves the

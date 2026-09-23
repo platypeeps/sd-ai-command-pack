@@ -762,12 +762,18 @@ import shutil
 import subprocess
 import sys
 
+# What `diff_argv` answers for a trigger that renders without asking git
+# anything. Not an empty list: "git named nothing" is a statement about the
+# tree, and this is the refusal to make one.
+ALWAYS = "always"
+
 
 def diff_argv(trigger, argv):
-    # The git command that names what this trigger moved, or None for an
-    # invocation that renders nothing. None rather than an empty list: "ask
-    # git nothing" and "git answered nothing" are different, and only the
-    # second is a statement about the tree.
+    # The git command that names what this trigger moved; ALWAYS to render
+    # without asking; None for an invocation that renders nothing. Three
+    # answers and not two, because "ask git nothing" and "git answered
+    # nothing" are different, and only the second is a statement about the
+    # tree.
     if trigger == "post-commit":
         # Only when the commit carried a document. A commit touching nothing
         # but the config or a script still renders: both change the output.
@@ -784,15 +790,25 @@ def diff_argv(trigger, argv):
         if len(argv) >= 4 and argv[3] == "1" and argv[1] != argv[2]:
             return ["diff", "--name-only", argv[1], argv[2]]
         # Everything else this trigger fires for moved no branch, so its two
-        # revisions are equal and there is no range to ask about --  but
-        # `git checkout <rev> -- doc.md` replaces a document's contents all
-        # the same, which is exactly the render this hook exists for. The
-        # honest question is then the working tree against HEAD, which names
-        # what the checkout just wrote. It also names unrelated uncommitted
-        # edits, so this renders slightly more often than it must; a render
-        # that finds nothing changed is cheap, and a mirror that silently
-        # keeps the superseded text is not.
-        return ["diff", "--name-only", "HEAD"]
+        # revisions are equal and there is no range -- and it renders anyway,
+        # without a question, because there is no question worth asking here.
+        #
+        # Do not reintroduce `diff --name-only HEAD` as an optimisation. It
+        # looks like the right guard and it is the wrong one: it asks whether
+        # the tree differs from HEAD, and what a mirror needs to know is
+        # whether the tree differs from what was published. Those agree only
+        # while the published copy tracks HEAD, and a file checkout is exactly
+        # what breaks that. `git checkout <rev> -- doc.md` publishes the older
+        # text; `git checkout HEAD -- doc.md` then restores a clean tree, the
+        # guard sees no diff, and the published copy keeps the reverted text
+        # for good. Comparing against what was published instead would be a
+        # second record of the same fact, which is the failure this contract
+        # exists to close.
+        #
+        # So it renders on an unchanged tree too. That is the price, and it is
+        # small: a render that finds nothing changed is cheap, and a mirror
+        # holding text nobody can see is not.
+        return ALWAYS
     # An unrecognised name is not this hook's trigger. Guessing would run a
     # render on a git event nobody installed it for.
     return None
@@ -812,13 +828,14 @@ def main(argv):
         ).stdout.strip()
         if not os.path.isfile(os.path.join(root, "research.conf.py")):
             return 0
-        changed = subprocess.run(
-            ["git"] + query,
-            cwd=root, capture_output=True, text=True, timeout=30, check=True,
-        ).stdout.split()
+        if query != ALWAYS:
+            changed = subprocess.run(
+                ["git"] + query,
+                cwd=root, capture_output=True, text=True, timeout=30, check=True,
+            ).stdout.split()
+            if not any(name.endswith((".md", ".py")) for name in changed):
+                return 0
     except (OSError, subprocess.SubprocessError):
-        return 0
-    if not any(name.endswith((".md", ".py")) for name in changed):
         return 0
 
     kit = shutil.which("sd-research-kit")
