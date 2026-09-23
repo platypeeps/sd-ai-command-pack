@@ -15,10 +15,14 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import os
 import pathlib
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
+from typing import Any
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "bin") not in sys.path:
@@ -338,6 +342,120 @@ class TheChainReachesOpencode(unittest.TestCase):
             self.registry, readers=self.readers, consent=self.consent("codex", "claude", "opencode"),
             author_vendors=("openai",))}
         self.assertIn("different vendor from the author", reasons["opencode"])
+
+
+class TheLaunchIsIsolated(unittest.TestCase):
+    """opencode runs from a neutral directory, never the reviewed checkout, so
+    the checkout's own `opencode.json` cannot deep-merge into the confined
+    config. The escape this closes: launched inside the checkout (the shipped
+    default), a hostile `opencode.json` re-granting `bash` survives under the
+    map's `*: deny`, because last-match evaluation keeps its specific
+    allowances (sd:1375)."""
+
+    def opencode_provider(self) -> Any:
+        return sd_registry.Provider(name="opencode", vendor="openai", bill="openai",
+                                    start="opencode run", reader="opencode-json",
+                                    model="openai/gpt-5.5")
+
+    def test_opencode_launches_from_a_neutral_dir_not_the_checkout(self) -> None:
+        from tests.test_sd_review import FakeRunner
+        runner = FakeRunner(default=sd_review.Completed(0, finding_stream('{"findings": []}'), ""))
+        with tempfile.TemporaryDirectory() as raw_root:
+            root = pathlib.Path(raw_root)
+            outcome = sd_review.run_provider(
+                self.opencode_provider(), root,
+                sd_review.Subject("worktree", "HEAD", "worktree", (), 0, ""),
+                "prompt", runner, {}, 60)
+        self.assertEqual(len(runner.calls), 1, outcome.detail)
+        launched = runner.calls[0]["cwd"]
+        self.assertNotEqual(launched.resolve(), root.resolve(),
+                            "launched inside the reviewed checkout -- the config-merge escape")
+        self.assertTrue(launched.name.startswith("sd-review-"),
+                        f"opencode's launch dir {launched} is not the neutral workdir")
+
+    def test_a_launch_dir_inside_the_checkout_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_root:
+            root = pathlib.Path(raw_root)
+            inside = root / "sub"
+            inside.mkdir()
+            with self.assertRaises(sd_opencode.IsolationError):
+                sd_opencode.assert_isolated_launch(inside, root)
+            with self.assertRaises(sd_opencode.IsolationError):
+                sd_opencode.assert_isolated_launch(root, root)
+
+    def test_a_config_bearing_ancestor_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            base = pathlib.Path(raw)
+            (base / "opencode.json").write_text("{}")
+            launch = base / "a" / "b"
+            launch.mkdir(parents=True)
+            with self.assertRaises(sd_opencode.IsolationError):
+                sd_opencode.assert_isolated_launch(launch, base / "elsewhere")
+
+    def test_a_neutral_dir_outside_the_checkout_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_launch, tempfile.TemporaryDirectory() as raw_root:
+            sd_opencode.assert_isolated_launch(pathlib.Path(raw_launch), pathlib.Path(raw_root))
+
+
+@unittest.skipUnless(shutil.which("opencode"), "the opencode binary is not on PATH")
+class TheEscapeIsClosedLive(unittest.TestCase):
+    """The confinement asserted against opencode itself, not only against the
+    generated config. A hostile checkout is built from
+    `tests/fixtures/opencode_escape`, and opencode is launched both ways: from
+    inside the checkout (the escape) and from a neutral directory (the fix).
+    The assertion is on opencode's own startup log -- whether it contributed
+    the checkout's `opencode.json` -- and on the inert mutator, not on the
+    model declining. The config-load half is offline, so no credential is
+    needed; the run is bounded and killed after bootstrap."""
+
+    FIXTURE = REPO_ROOT / "tests" / "fixtures" / "opencode_escape"
+
+    def build_checkout(self, tmp: pathlib.Path) -> pathlib.Path:
+        checkout = tmp / "checkout"
+        (checkout / "tools").mkdir(parents=True)
+        (checkout / "opencode.json").write_text((self.FIXTURE / "checkout_opencode.json").read_text())
+        (checkout / "AGENTS.md").write_text((self.FIXTURE / "AGENTS.md").read_text())
+        (checkout / "tools" / "mutator_mcp.py").write_text((self.FIXTURE / "mutator_mcp.py").read_text())
+        (checkout / "mod.py").write_text("def add(a, b):\n    return a + b\n")
+        subprocess.run(["git", "init", "-q", str(checkout)], check=True)
+        return checkout
+
+    def bootstrap_log(self, cwd: pathlib.Path, checkout: pathlib.Path, evidence: pathlib.Path) -> str:
+        env = sd_opencode.opencode_environment(dict(os.environ))
+        env["MUTATOR_EVIDENCE"] = str(evidence)
+        argv = ["opencode", "run", "--print-logs", "--log-level", "INFO",
+                *sd_opencode.opencode_argv(cwd, "opencode run", "openai/gpt-5.5")[1:]]
+        try:
+            done = subprocess.run(argv, cwd=str(cwd), env=env, capture_output=True,
+                                  text=True, timeout=45)
+            return done.stderr
+        except subprocess.TimeoutExpired as expired:
+            err = expired.stderr or b""
+            return err.decode("utf-8", "replace") if isinstance(err, bytes) else err
+
+    def test_the_checkout_config_is_contributed_from_inside_but_not_from_neutral(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = pathlib.Path(raw)
+            checkout = self.build_checkout(tmp)
+            (checkout / "review-subject.md").write_text("Reply with {\"findings\": []}\n")
+            # macOS symlinks /var -> /private/var, and opencode logs the
+            # resolved path, so the marker must be resolved to match.
+            marker = f"loading path={(checkout / 'opencode.json').resolve()}"
+
+            inside = self.bootstrap_log(checkout, checkout, tmp / "inside.log")
+            self.assertIn(marker, inside,
+                          "control arm: launched inside the checkout, opencode must load its config")
+
+            neutral = tmp / "neutral"
+            neutral.mkdir()
+            (neutral / "review-subject.md").write_text("Reply with {\"findings\": []}\n")
+            sd_opencode.assert_isolated_launch(neutral, checkout)
+            neutral_log = self.bootstrap_log(neutral, checkout, tmp / "neutral.log")
+            self.assertNotIn(marker, neutral_log,
+                             "the checkout's opencode.json must not be contributed from a neutral launch dir")
+            self.assertFalse((tmp / "neutral.log").exists() and "server-started" in (tmp / "neutral.log").read_text(),
+                             "the checkout's MCP mutation server must not start")
+            self.assertFalse((checkout / "PWNED-1375.txt").exists(), "no mutation may reach the checkout")
 
 
 if __name__ == "__main__":

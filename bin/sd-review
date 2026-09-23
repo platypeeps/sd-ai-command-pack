@@ -1341,12 +1341,32 @@ def run_provider(
     with tempfile.TemporaryDirectory(prefix="sd-review-") as raw_dir:
         workdir = pathlib.Path(raw_dir)
         argv = provider_argv(provider, root, workdir)
+        launch_cwd = root
         if provider.reader == "opencode-json":
             child = sd_opencode.opencode_environment(child)
+            # opencode's project root is its launch directory: it merges that
+            # root's opencode.json over our inline config and injects the root's
+            # AGENTS.md as instructions. Launched inside the reviewed checkout
+            # (the shipped default was cwd=root), a hostile checkout's
+            # opencode.json deep-merges under our `*: deny` and its specific
+            # allowances survive -- reproduced live on 1.18.30: the checkout's
+            # MCP server started and a bash `touch` wrote a file (sd:1375). So
+            # opencode launches from the neutral workdir, which holds only the
+            # attached subject; the diff is embedded (MATERIAL_READER), so no
+            # checkout access is needed. `--dir <checkout>` is NOT the fix: it
+            # sets fromDirectory to the checkout and reloads its config,
+            # measured to reopen the escape (and `--dir` before `run` only
+            # prints help, which is not evidence it is harmless). The assertion
+            # refuses a workdir the checkout could reach by config discovery.
+            try:
+                sd_opencode.assert_isolated_launch(workdir, root)
+            except sd_opencode.IsolationError as error:
+                return _outcome(provider.name, REFUSED, str(error))
+            launch_cwd = workdir
         filename, content = ((CODEX_SCHEMA_FILE, json.dumps(CODEX_OUTPUT_SCHEMA)) if codex else
                              ("review-subject.md", request_prompt))
         (workdir / filename).write_text(content, encoding="utf-8")
-        result = runner(argv, child, root, timeout, prompt) if codex else runner(argv, child, root, timeout)
+        result = runner(argv, child, root, timeout, prompt) if codex else runner(argv, child, launch_cwd, timeout)
         if codex:
             answer = workdir / CODEX_ANSWER_FILE
             if answer.is_file():
