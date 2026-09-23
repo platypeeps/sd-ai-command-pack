@@ -13,7 +13,7 @@ Text in, text out. Nothing here opens a file for writing -- the installer is
 the one writer in the lane, and `tests/test_sd_review_boundary.py` counts its
 write sites -- and nothing here parses YAML: a consumer's `dependabot.yml`
 carries comments the pack does not own, and a round-trip through a YAML
-library would drop them. The transform finds the github-actions entry, its
+library would drop them. The transform finds every github-actions entry, its
 `ignore:` list and the one item naming the action by indentation, and touches
 those lines and no others.
 
@@ -227,19 +227,17 @@ def _guarded(line: str, wanted: str | None) -> str | None:
     return action if wanted is None or action == wanted else None
 
 
-def _place(lines: list[str], wanted: str | None = None) -> tuple[str, int, int, int, str | None]:
-    """Where the guard goes: ('replace'|'append'|'ignore', at, until, indent, action).
+def _place(lines: list[str], start: int, wanted: str | None) -> tuple[str, int, int, int, str | None]:
+    """Where the guard goes in the entry at `start`.
 
-    `replace` names the block the existing guard item occupies, and `action`
-    the pack action that item names; `append` the index the guard is inserted
-    at in an existing `ignore:` list; `ignore` the index a new `ignore:` key
-    goes at, with the entry's key indentation. Only `replace` carries an
-    action; the other two have found no guard to read one from.
+    ('replace'|'append'|'ignore', at, until, indent, action). `replace` names
+    the block the existing guard item occupies, and `action` the pack action
+    that item names; `append` the index the guard is inserted at in an
+    existing `ignore:` list; `ignore` the index a new `ignore:` key goes at,
+    with the entry's key indentation. Only `replace` carries an action; the
+    other two have found no guard to read one from.
     """
 
-    start = next((i for i, line in enumerate(lines) if _ENTRY.match(line)), None)
-    if start is None:
-        raise GuardError("no github-actions entry")
     key = _indent(lines[start]) + 2
     stop = _end(lines, start, key)
     ignore = next(
@@ -261,24 +259,70 @@ def _place(lines: list[str], wanted: str | None = None) -> tuple[str, int, int, 
     return "append", _trim(lines, ignore + 1, until), until, indent, None
 
 
+def _places(lines: list[str], wanted: str | None = None) -> list[tuple[str, int, int, int, str | None]]:
+    """One placement per github-actions entry, in file order.
+
+    Dependabot allows a file more than one `github-actions` entry -- separate
+    `directory:` scopes, or one scope listed twice -- and each carries its own
+    `ignore:` list, so each is a place the guard has to be read from and
+    written to. The reader used to take the first match and stop, and reported
+    that one entry's answer as though it covered the file: a consumer whose
+    second entry was unguarded read `same`, and nothing in the output
+    distinguished "one entry, checked" from "three entries, one checked".
+    """
+
+    starts = [i for i, line in enumerate(lines) if _ENTRY.match(line)]
+    if not starts:
+        raise GuardError("no github-actions entry")
+    return [_place(lines, start, wanted) for start in starts]
+
+
+def guard_states(text: str | None, action: str | None = None) -> tuple[str, ...]:
+    """One verdict per github-actions entry, in file order.
+
+    The enumerated form of `guard_state`, for a census that has to say how
+    many entries it read: `('same', 'absent')` is a file with two entries, one
+    of them unguarded, and the single word cannot say that.
+    """
+
+    if text is None:
+        return ("missing",)
+    lines = text.splitlines()
+    try:
+        places = _places(lines, action)
+    except GuardError:
+        return ("absent",)
+    states = []
+    for placement, at, until, indent, guarded in places:
+        if placement != "replace" or guarded is None:
+            states.append("absent")
+            continue
+        wanted = guard_block(" " * indent, guarded).splitlines()
+        states.append("same" if lines[at:until] == wanted else "differs")
+    return tuple(states)
+
+
+#: Worst first: the fold `guard_state` reports, and the order matters because
+#: the installer gates on the word. `differs` outranks `absent` because it is
+#: what `--force` exists for -- a wording this build would overwrite -- and an
+#: entry that merely lacks the guard is added without destroying anything.
+_WORST_FIRST = ("missing", "differs", "absent", "same")
+
+
 def guard_state(text: str | None, action: str | None = None) -> str:
     """'missing' (no file), 'absent' (no guard item), 'same' or 'differs'.
 
     With no `action` the verdict is about whichever of the pack's actions the
     file guards, so a consumer that pins docs-gate and guards docs-gate reads
     `same` rather than `absent`.
+
+    One word about the whole file, folded from every github-actions entry it
+    carries: the worst of them wins, so an unguarded second entry cannot read
+    `same` behind a guarded first one. `guard_states` is the enumerated form.
     """
 
-    if text is None:
-        return "missing"
-    lines = text.splitlines()
-    try:
-        placement, at, until, indent, guarded = _place(lines, action)
-    except GuardError:
-        return "absent"
-    if placement != "replace" or guarded is None:
-        return "absent"
-    return "same" if lines[at:until] == guard_block(" " * indent, guarded).splitlines() else "differs"
+    states = guard_states(text, action)
+    return next(verdict for verdict in _WORST_FIRST if verdict in states)
 
 
 def rendered(text: str | None, action: str = DEFAULT_ACTION) -> str:
@@ -292,13 +336,20 @@ def rendered(text: str | None, action: str = DEFAULT_ACTION) -> str:
     where it stands rather than replaced, because a repository that pins both
     needs both items. Reading is the direction that must not assume one action
     -- see `guard_state`.
+
+    Every github-actions entry in the file gains the guard, not the first one:
+    Dependabot applies an `ignore:` list to its own entry, so a file with two
+    entries and one guard is a file Dependabot still bumps. Guarding all of
+    them is also what makes the transform converge -- a read that folds every
+    entry (see `guard_states`) and a write that touches one have no fixed
+    point, and `--check` compares this output with the tracked bytes.
     """
 
     if text is None:
         return minimal_file(action)
     lines = text.splitlines()
     try:
-        placement, at, until, indent, guarded = _place(lines, action)
+        places = _places(lines, action)
     except GuardError:
         entries = [i for i, line in enumerate(lines) if _ANY_ENTRY.match(line)]
         if not entries:
@@ -310,13 +361,18 @@ def rendered(text: str | None, action: str = DEFAULT_ACTION) -> str:
         at = _trim(lines, entries[-1], _end(lines, entries[-1], key))
         new = _entry(" " * (key - 2), action).splitlines()
         return "\n".join(lines[:at] + new + lines[at:]) + "\n"
-    wanted = guarded or action
-    if placement == "ignore":
-        new = [" " * indent + "ignore:"] + guard_block(" " * (indent + 2), wanted).splitlines()
-        return "\n".join(lines[:at] + new + lines[at:]) + "\n"
-    new = guard_block(" " * indent, wanted).splitlines()
-    stop = until if placement == "replace" else at
-    return "\n".join(lines[:at] + new + lines[stop:]) + "\n"
+    # Last entry first: every placement is an index into `lines`, and editing
+    # an earlier entry would move the later ones out from under theirs.
+    for placement, at, until, indent, guarded in reversed(places):
+        wanted = guarded or action
+        if placement == "ignore":
+            new = [" " * indent + "ignore:"] + guard_block(" " * (indent + 2), wanted).splitlines()
+            stop = at
+        else:
+            new = guard_block(" " * indent, wanted).splitlines()
+            stop = until if placement == "replace" else at
+        lines = lines[:at] + new + lines[stop:]
+    return "\n".join(lines) + "\n"
 
 
 def report_drift(root: pathlib.Path, expected: Mapping[pathlib.Path, str], stream: TextIO) -> int:

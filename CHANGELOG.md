@@ -183,6 +183,19 @@
 
 ### Fixed
 
+- **The Dependabot guard reader inspects every `github-actions` entry, not
+  the first one.** `guard_state()` stopped at the first matching entry and
+  reported that entry's verdict as though it covered the file, so a consumer
+  whose second entry was unguarded or carried a stale wording read `same` --
+  and nothing in the output distinguished "one entry, checked" from "three
+  entries, one checked". The verdict is now folded from every entry, worst
+  first, so `differs` reaches the `--force` gate and `absent` reaches the
+  installer. `rendered()` guards every entry for the same reason, in the
+  same change: a read that folds all of them and a write that touches one
+  have no fixed point, and `--check` compares that render with the tracked
+  bytes. `guard_states()` is the enumerated form, for a census that has to
+  say how many entries it read.
+
 - **sd-review says what a failed gate lacked, and no more.** A linked
   worktree of this pack has no `.venv`, and `make check` is the gate
   sd-review runs, so the pass died on `/bin/sh: .venv/bin/python: No such
