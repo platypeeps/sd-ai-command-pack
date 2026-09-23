@@ -280,6 +280,18 @@ def commit_paths(root: pathlib.Path, args) -> None:
 
 
 class Ship(SharedReview):
+    #: What the last `merge_ownership` read found: the authority record when
+    #: the repository row overrode co-ownership, `None` when ownership alone
+    #: answered. A per-process value on purpose. It reaches the receipt at
+    #: dispatch and nowhere earlier, because an attempt that clears ownership
+    #: is not a merge -- CI, the review gate and the protection re-read can
+    #: all refuse after it -- and a receipt that recorded the attempt would
+    #: keep saying `row_authorized_merge` through a later ownership-only
+    #: merge that the row did not authorize. A class attribute rather than an
+    #: `__init__` line so that the `--no-item` construction, which returns
+    #: early, has it too (sd:1347).
+    row_authority: dict | None = None
+
     def __init__(self, root: pathlib.Path, connection, database: pathlib.Path, args):
         from sd_db import ship
         validate_identity(args)
@@ -889,7 +901,10 @@ class Ship(SharedReview):
         untouched, and it is the same demotion as a refused push: the note is
         written by the same marker, so a remote that lowered the mode at both
         points leaves one. An override is not a demotion -- nothing was
-        lowered -- so it writes no note and records its own authority instead.
+        lowered -- so it writes no note. It records its authority on
+        `row_authority` instead, which `merge` stores at dispatch: this method
+        answers who may merge, and nothing it learns is durable evidence until
+        a merge is actually sent.
 
         A written `guest` or `minimal` was not lowered, and gets no note. The
         answer here comes from `GitHub.owned` rather than from
@@ -899,15 +914,21 @@ class Ship(SharedReview):
         two words here.
         """
         try:
-            return self.api.owned()
+            metadata = self.api.owned()
         except Refusal:
             answer = self.api.answer
             if sd_lib.coownership_only(answer) and self.api.metadata is not None and self.row_merges():
-                self.note_row_authority(answer)
+                self.row_authority = self.row_authority_record(answer)
                 return self.api.metadata
             if answer is not None and not answer.full and sd_lib.remote_can_lower(sd_lib.written_mode(self.root)):
                 self.note_demotion(answer)
             raise
+        # Ownership answered on its own, so this read claims no row authority.
+        # Assigned rather than left alone: `merge` reads ownership more than
+        # once, and a read that no longer needs the row has to retract what an
+        # earlier one recorded, or the dispatch below would carry it.
+        self.row_authority = None
+        return metadata
 
     def note_demotion(self, answer) -> None:
         """One demotion note per item and remote, through `sd_db`'s note API.
@@ -983,26 +1004,30 @@ class Ship(SharedReview):
         except (ImportError, LookupError, OSError, Refusal, sqlite3.Error, ValueError):
             return False
 
-    def note_row_authority(self, answer) -> None:
-        """Record in the durable receipt that the row, not ownership, allowed this merge.
+    def row_authority_record(self, answer) -> dict:
+        """The audit trail for a loosened guard: the row, not ownership, allowed this.
 
-        This is the audit trail for a loosened guard. The three questions said
-        no, the operator's standing row said `auto`, and the merge went ahead
-        anyway: a reader of the receipt has to be able to tell that from a
-        merge this account owned outright, and to see which repository, which
-        row value and which other people may push to it. It goes in the
-        receipt rather than in a log line because `sd-ship reconcile` may run
-        in a later process, and the evidence it emits has to say the same
-        thing then.
+        The three questions said no, the operator's standing row said `auto`,
+        and the merge may go ahead anyway: a reader of the receipt has to be
+        able to tell that from a merge this account owned outright, and to see
+        which repository, which row value and which other people may push to
+        it. It reaches the receipt rather than a log line because `sd-ship
+        reconcile` may run in a later process, and the evidence it emits has
+        to say the same thing then.
 
-        Not a demotion note: nothing was lowered, so `note_demotion`'s marker
-        would be a false sentence on the item. The write is skipped when the
-        receipt already says this, because `merge` reads ownership twice.
+        Built here and stored by the caller at dispatch. Writing it where the
+        answer is read looks equivalent and is not: ownership clearing is not
+        the merge, and the several gates between the two can refuse. The
+        receipt would then describe an attempt, and describe it for good --
+        nothing on the ownership-only path would come back to take it away,
+        so a later merge that the row did not authorize would report that it
+        did. Durable evidence names the merge that was dispatched.
+
+        Not a demotion note either: nothing was lowered, so `note_demotion`'s
+        marker would be a false sentence on the item.
         """
-        authority = {"repository": self.repository, "runner_merge": "auto",
-                     "other_pushers": list(answer.others), "remote_said": answer.reason}
-        if self.state.get("row_authorized_merge") != authority:
-            self.save(row_authorized_merge=authority)
+        return {"repository": self.repository, "runner_merge": "auto",
+                "other_pushers": list(answer.others), "remote_said": answer.reason}
 
     def merge_extras(self) -> dict:
         """The receipt fields a verified merge carries beyond the phase's own.
@@ -1140,7 +1165,14 @@ class Ship(SharedReview):
             raise Refusal("HEAD moved immediately before merge")
         self.merge_authority(head)
         self.still_gated(base, head, protection)
-        self.save(phase="merge_dispatch", merge_message=body)
+        # `row_authorized_merge` is written here, with the phase that says a
+        # merge is going out, and it is written on every dispatch rather than
+        # only when there is something to say: `still_gated` above took the
+        # last ownership read, so `row_authority` is that read's answer, and
+        # passing `None` retracts what an earlier attempt recorded. An
+        # ownership-only merge therefore cannot inherit a claim from a merge
+        # that never happened (sd:1347).
+        self.save(phase="merge_dispatch", merge_message=body, row_authorized_merge=self.row_authority)
         try:
             self.api.api(f"{self.api.prefix}/pulls/{observed['number']}/merge", method="PUT",
                          body={"sha": head, "merge_method": "squash", "commit_title": f"{self.state['title']} (#{observed['number']})",

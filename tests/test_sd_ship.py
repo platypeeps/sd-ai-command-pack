@@ -1264,6 +1264,41 @@ roles:
         self.assertEqual(result["phase"], "merged")
         self.assertNotIn("row_authorized_merge", result)
 
+    def test_an_attempt_that_died_after_ownership_authorizes_no_later_merge(self):
+        """Durable authority describes the merge dispatched, not the attempt allowed.
+
+        Ownership clearing is not merging. CI, the review gate and the
+        protection re-read all run after it and any of them can refuse -- on
+        2026-09-22 both branches in flight came back blocking, so this is the
+        ordinary case and not a corner. Recording the authority where the
+        answer is read leaves it in the receipt of an attempt that never
+        merged, and nothing on the ownership-only path takes it back: the next
+        merge then reports a row authorization the row never gave for it, and
+        `sd-ship reconcile` repeats it in a later process. A false line in an
+        audit trail is worse than an absent one, because an absent one sends
+        the reader to look.
+
+        Here the first attempt clears ownership under the row and dies at the
+        required check. The collaborator then goes, so the retry is owned
+        outright and consults no row at all.
+        """
+
+        self.prepare()
+        self.remote.collaborators = [{"login": "fixture", "permissions": {"push": True}},
+                                     {"login": "someone", "permissions": {"push": True}}]
+        pull = self.remote.pull(1)
+        healthy = [dict(check) for check in pull.checks]
+        pull.checks = [{**healthy[0], "conclusion": "failure"}]
+        with self.assertRaises(ship.Refusal):
+            self.merge()
+        pull.checks = healthy
+        self.remote.collaborators = [{"login": "fixture", "permissions": {"push": True}}]
+        result = self.merge()
+        self.assertEqual(result["phase"], "merged")
+        self.assertNotIn("row_authorized_merge", result,
+                         "an ownership-only merge must not inherit a failed attempt's authority")
+        self.assertNotIn("row_authorized_merge", self.operation("reconcile").reconcile())
+
     def test_required_ci_failure_missing_wrong_head_or_app_cannot_merge(self):
         self.prepare()
         pull = self.remote.pull(1)

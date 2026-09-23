@@ -833,24 +833,53 @@ class TheRowAuthorizedMerge(ShipMergeFixture):
         self.assertEqual(delivery.merge_ownership().get("full_name"), "sven/thing")
         self.assertEqual(self.notes(), [], "nothing was lowered, so nothing was demoted")
 
-    def test_the_receipt_says_the_row_authorized_it_and_names_the_other_pushers(self) -> None:
-        """The audit trail for a loosened guard, in the receipt a later run reads."""
+    def test_the_authority_names_the_other_pushers_and_is_not_durable_yet(self) -> None:
+        """The audit trail for a loosened guard, held until a merge is dispatched.
+
+        The record is complete here -- repository, row value, who else may
+        push, and what the remote said -- because a reader of the receipt must
+        be able to tell this from a merge the account owned outright without
+        going back to the remote. What it is not is written: ownership
+        clearing is not merging, and `merge` runs CI, the review gate and the
+        protection re-read after this point. `merge` stores it with the
+        dispatch phase, and `tests/test_sd_ship.py` takes that end to end.
+        """
 
         self.runner_merge("auto")
         self.remote(WITH_MALLORY)
         delivery = self.operation("merge")
         delivery.merge_ownership()
-        recorded = delivery.state["row_authorized_merge"]
+        recorded = delivery.row_authority
         self.assertEqual(recorded["repository"], "sven/thing")
         self.assertEqual(recorded["runner_merge"], "auto")
         self.assertEqual(recorded["other_pushers"], ["mallory"])
         self.assertIn("mallory", recorded["remote_said"])
-        self.assertEqual(delivery.merge_extras()["row_authorized_merge"], recorded)
-        # Twice, because `merge` reads ownership twice: one record, not two.
+        self.assertNotIn("row_authorized_merge", delivery.state)
+        self.assertNotIn("row_authorized_merge", delivery.merge_extras())
+        # Twice, because `merge` reads ownership twice: still the same answer,
+        # and still nothing durable.
         delivery.merge_ownership()
-        self.assertEqual(delivery.state["row_authorized_merge"], recorded)
-        # And a separate process reconciling later emits the same sentence.
-        self.assertEqual(self.operation("merge").merge_extras()["row_authorized_merge"], recorded)
+        self.assertEqual(delivery.row_authority, recorded)
+        self.assertNotIn("row_authorized_merge", self.operation("merge").state)
+
+    def test_an_ownership_only_read_retracts_an_earlier_read_s_authority(self) -> None:
+        """A second ownership read that needs no row takes the first one's claim back.
+
+        `merge` reads ownership more than once, and the reads can disagree: a
+        collaborator removed between them turns a row-authorized answer into
+        an ownership-only one. The dispatch stores whatever the last read
+        left, so the last read has to say `None` rather than say nothing, or
+        the merge would carry an authority it no longer needs.
+        """
+
+        self.runner_merge("auto")
+        self.remote(WITH_MALLORY)
+        delivery = self.operation("merge")
+        delivery.merge_ownership()
+        self.assertIsNotNone(delivery.row_authority)
+        self.remote(ALONE)
+        delivery.merge_ownership()
+        self.assertIsNone(delivery.row_authority)
 
     def test_a_coowned_repository_the_row_says_manual_for_still_refuses(self) -> None:
         self.runner_merge("manual")
