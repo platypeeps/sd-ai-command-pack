@@ -1753,10 +1753,6 @@ class TwoWritersAtOnce(unittest.TestCase):
         self.assertEqual(elsewhere, [], "another module reaches the store directly")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TheUnlocatedSentinelIsNotALabel(unittest.TestCase):
     """sd:1395: the value that means "no file" may not also be the file shown.
 
@@ -2010,3 +2006,7 @@ class TheVerdictSaysWhatItRead(unittest.TestCase):
         )
         self.assertIn("--limit", stream.getvalue())
         self.assertIn("read stopped at 3", stream.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()
