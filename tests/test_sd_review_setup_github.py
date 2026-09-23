@@ -676,6 +676,93 @@ class BothActionsTests(SetupFixture):
         self.assertIn("no-such-action", str(caught.exception))
 
 
+TWO_ENTRY_CONSUMER = """\
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    ignore:
+{guard}
+  - package-ecosystem: "github-actions"
+    directory: "/.github/actions/inner"
+    schedule:
+      interval: "weekly"
+    ignore:
+{second}
+"""
+
+SECOND_UNGUARDED = """\
+      # The inner action set is bumped by hand too.
+      - dependency-name: "actions/checkout"
+"""
+
+SECOND_STALE = """\
+      # Bump this by hand, in its own commit.
+      - dependency-name: "platypeeps/sd-ai-command-pack/actions/review-route"
+"""
+
+
+class EveryEntryTests(SetupFixture):
+    """A verdict about the file, not about whichever entry comes first.
+
+    Dependabot allows more than one `github-actions` entry -- separate
+    `directory:` scopes, or the same scope twice -- and each carries its own
+    `ignore:` list. The reader stopped at the first match and reported the
+    answer as though it covered the file, so a consumer whose second entry is
+    unguarded or carries a stale wording read `same`. The Copilot round in
+    `tests/fixtures/sd-543-review-round.json` named it: "aggregate verdicts
+    must inspect all matching action blocks."
+    """
+
+    def consumer(self, second: str) -> str:
+        return TWO_ENTRY_CONSUMER.format(
+            guard=guard.guard_block("      ").rstrip("\n"),
+            second=second.rstrip("\n"),
+        )
+
+    def test_a_second_unguarded_entry_is_not_reported_as_same(self) -> None:
+        text = self.consumer(SECOND_UNGUARDED)
+        self.assertEqual(guard.guard_states(text), ("same", "absent"))
+        self.assertEqual(guard.guard_state(text), "absent")
+
+    def test_a_second_entry_with_a_stale_wording_reports_differs(self) -> None:
+        """`differs` outranks `absent`: it is the verdict `--force` gates on."""
+        text = self.consumer(SECOND_STALE)
+        self.assertEqual(guard.guard_states(text), ("same", "differs"))
+        self.assertEqual(guard.guard_state(text), "differs")
+
+    def test_rendering_guards_every_entry_and_stays_idempotent(self) -> None:
+        for name, second in (("unguarded", SECOND_UNGUARDED), ("stale", SECOND_STALE)):
+            with self.subTest(name=name):
+                once = guard.rendered(self.consumer(second))
+                self.assertEqual(once.count(guard.guard_block("      ")), 2)
+                self.assertEqual(guard.guard_states(once), ("same", "same"))
+                self.assertEqual(guard.rendered(once), once)
+
+    def test_the_installer_refuses_a_stale_second_entry_without_force(self) -> None:
+        """The write gate reads the folded verdict, so the refusal reaches the
+        entry it used to walk past."""
+        root = self.make_repo()
+        text = self.consumer(SECOND_STALE)
+        self.seed_dependabot(root, text)
+        with self.assertRaises(setup.Refusal) as caught:
+            install(root)
+        self.assertIn("--force", str(caught.exception))
+        self.assertEqual(self.dependabot(root).read_text(encoding="utf-8"), text)
+
+    def test_force_converges_every_entry_on_the_template(self) -> None:
+        root = self.make_repo()
+        self.seed_dependabot(root, self.consumer(SECOND_STALE))
+        result = install(root, force=True)
+        self.assertEqual(result["guard"], "differs")
+        written = self.dependabot(root).read_text(encoding="utf-8")
+        self.assertEqual(written.count(guard.guard_block("      ")), 2)
+        self.assertEqual(guard.guard_state(written), "same")
+
+
 class CheckTests(SetupFixture):
     """`--check` renders at the repository's own pin and writes nothing."""
 
