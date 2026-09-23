@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import json
 import pathlib
+import re
 import subprocess
 import tempfile
 import unittest
@@ -175,6 +176,28 @@ class PolicyReferenceBinding(unittest.TestCase):
                             bindings.adjudicator_binding(str(library))
                         path.write_text("fixture policy")
                         self.assertEqual(bindings.adjudicator_binding(str(library)), before)
+
+    def test_the_protection_reader_is_in_the_review_manifest(self):
+        """`sd_protection.py` is what the merge gate reads a ruleset through.
+        A change to its bypass or pagination handling must invalidate a
+        clearance the way a change to `sd_ship_remote.py` does."""
+        self.assertIn("sd_protection.py", bindings.REVIEW_TOOL_FILES)
+
+    def test_every_module_sd_ship_imports_is_in_the_review_manifest(self):
+        """The manifest is a hand-maintained tuple, so a module the gate grows
+        a dependency on is a silent gap until somebody adds a line. This walks
+        `sd-ship`'s `sd_*` imports transitively over `bin/` and names any the
+        tuple lacks: the enumeration the tuple itself cannot be."""
+        pattern = re.compile(r"^\s*(?:import|from)\s+(sd_[a-z_]+)", re.MULTILINE)
+        seen, todo = set(), ["sd-ship"]
+        while todo:
+            name = todo.pop()
+            if name in seen or not (bindings.BIN / name).is_file():
+                continue
+            seen.add(name)
+            todo.extend(f"{module}.py" for module in pattern.findall((bindings.BIN / name).read_text()))
+        self.assertEqual(sorted(seen - set(bindings.REVIEW_TOOL_FILES)), [],
+                         "modules sd-ship imports that REVIEW_TOOL_FILES does not bind")
 
     def test_cross_skill_receipt_policy_and_review_helpers_remain_required(self):
         self.assertTrue({"skills/sd-check/SKILL.md", "skills/sd-review/SKILL.md", "skills/sd-ship/SKILL.md",

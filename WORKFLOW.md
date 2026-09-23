@@ -70,6 +70,8 @@ These run without being asked.
 - Expected branch protection requires pull requests, current CI, and up-to-date branches, with no required approvals.
   Configure it deliberately in GitHub; installation does not grant a protection exception.
   `sd-status` reports gaps; executable merge stops when required protection is absent.
+  Protection is read from both of GitHub's mechanisms: the classic object first, and when that is absent, the branch's active rulesets.
+  A ruleset with a `pull_request` or `required_status_checks` rule is the protection, held to the same guards; one that only forbids deletion or force-push is not.
   One accepted gap changes that gate: an `unprotected` entry in `.github/sd-status.json` at the reviewed commit.
   Under it, `sd-ship merge` requires every check run, every status, and a `pull_request` run of every workflow at the head to pass.
   The receipt records `declared_gap: unprotected`. Any other gap, and a declaration only in the working tree, do not change the gate.
@@ -354,6 +356,8 @@ Only submitted, non-pending reviews mark matching request heads complete.
     providers:
       claude:  { start: "claude -p",  vendor: anthropic, bill: anthropic, roles: [author, reviewer], reader: claude-json }
       codex:   { start: "codex exec", vendor: openai,    bill: openai,    roles: [author, reviewer], reader: codex-json }
+      opencode: { start: "opencode run", model: openai/gpt-5.5, vendor: openai, bill: openai,
+                  roles: [reviewer], reader: opencode-json }
       kimi:    { url: "https://api.moonshot.ai/v1", model: kimi-k3, vendor: moonshot, bill: moonshot,
                  roles: [reviewer], max_tokens: 16384, price: { in: 3.00, out: 15.00 } }
       minimax: { url: "https://api.minimax.io/v1", model: MiniMax-M3, vendor: minimax, bill: minimax,
@@ -362,7 +366,7 @@ Only submitted, non-pending reviews mark matching request heads complete.
                  bill: baseten, roles: [reviewer], max_tokens: 16384, price: { in: 1.32, out: 3.96 } }
     roles:
       author:   [claude, codex]
-      reviewer: [codex, claude]
+      reviewer: [codex, claude, opencode]
 
 A capped bill takes `url` entries only, because the library makes those
 calls and can refuse one before it is sent; a `start` entry on a capped
@@ -428,7 +432,7 @@ run says which one reviewed and why the earlier ones did not. With none left,
 the review refuses by name rather than reading its own work.
 Only entries on the reviewer order participate in automatic fallback.
 Enabled reviewer-capable entries outside that order require an explicit `--provider` selection.
-The shipped order contains Codex, then Claude; other providers remain explicit-only.
+The shipped order contains Codex, then Claude, then opencode; other providers remain explicit-only.
 Existing provider files and database orders remain unchanged until the operator migrates them.
 The chain continues until the required count completes or eligible entries run out. A completed
 review with findings counts; it does not trigger a replacement. Consent, author

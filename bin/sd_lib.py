@@ -2640,14 +2640,22 @@ ACKNOWLEDGEMENT_RELATIVE_PATH = pathlib.Path(".github") / "sd-status.json"
 #: the second, which is how a suppression becomes a hole. A key outside this
 #: tuple is rejected at load time rather than quietly matching nothing.
 #:
-#: `branch_protection` is the same move one level up. The other four reduce a
+#: `branch_protection` is the same move one level up. The others reduce a
 #: protection *object*, so on a branch that has none they are all constants --
 #: an `unprotected` entry pinning only those would accept the id whatever the
 #: branch looked like, which is the shape the non-empty `state` rule forbids.
 #: This is the fact that can be wrong there, and therefore the one that can go
 #: stale.
+#:
+#: `bypass` is the list the `bypass` gap prints -- every ruleset bypass that
+#: does not reach administrators, as `<ruleset> (#<id>): <actor> (<mode>)`,
+#: sorted -- rather than a boolean, for the same reason `reviews` pins a
+#: count: an entry that accepted "an app can bypass" as a yes/no would go on
+#: accepting the branch after a team was added beside the app.
 ACKNOWLEDGED_FACTS = (
+    "admin_bypass",
     "branch_protection",
+    "bypass",
     "enforce_admins",
     "required_approving_review_count",
     "required_pull_request_reviews",
@@ -2671,6 +2679,7 @@ ACKNOWLEDGED_FACTS = (
 #: ever match, so admitting them here would re-open the hole under a
 #: better-spelled name.
 ACKNOWLEDGEABLE_GAPS = (
+    "bypass",
     "enforce_admins",
     "produced_not_required",
     "required_checks",

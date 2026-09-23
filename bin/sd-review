@@ -28,6 +28,7 @@ if _BIN not in sys.path:
 import sd_check_receipts  # noqa: E402
 import sd_jev  # noqa: E402
 import sd_lib  # noqa: E402
+import sd_opencode  # noqa: E402
 import sd_registry  # noqa: E402
 import sd_review_material  # noqa: E402
 import sd_review_readiness  # noqa: E402
@@ -172,10 +173,10 @@ POLICY_KEYS = frozenset(DEFAULT_POLICY) | {"$schema"}
 #: The readers this build can run an entry with. The chain marks an entry
 #: whose `reader` is not here ineligible, so a tier's depth counts providers
 #: that can actually answer rather than slots an unrunnable entry occupied.
-READERS = ("codex-json", "claude-json", "agy-json")
+READERS = ("codex-json", "claude-json", "agy-json", "opencode-json")
 #: Readers whose command cannot resolve the subject from the checkout for
 #: itself, so the review material has to travel in the prompt.
-MATERIAL_READERS = ("claude-json", "agy-json")
+MATERIAL_READERS = ("claude-json", "agy-json", "opencode-json")
 
 RETIRED_POLICY_KEYS = {
     "tiers": "a tier now says how many reviewers a change earns, and the registry's "
@@ -859,6 +860,8 @@ def provider_argv(provider: sd_registry.Provider, root: pathlib.Path, workdir: p
     start = provider.start or ""
     if provider.reader == "agy-json":
         return agy_argv(workdir, start, provider.model)
+    if provider.reader == "opencode-json":
+        return sd_opencode.opencode_argv(workdir, start, provider.model)
     return claude_argv(workdir, start) if provider.reader == "claude-json" else codex_argv(root, workdir, start)
 
 
@@ -1320,7 +1323,7 @@ def run_provider(
             "transport" if result.exit_code else "schema" if parsed is None or parsed.error else None)
         return outcome._replace(diagnostic=diagnostic)
 
-    if provider.reader not in ("claude-json", "codex-json", "agy-json"):
+    if provider.reader not in ("claude-json", "codex-json", "agy-json", "opencode-json"):
         # Keep a missing implementation nonpassing if READERS ever gains a name.
         return _outcome(provider.name, NOT_RUN, f"{provider.name} reads back as {provider.reader!r}, "
                         "which this build lists but does not run here.")
@@ -1338,10 +1341,32 @@ def run_provider(
     with tempfile.TemporaryDirectory(prefix="sd-review-") as raw_dir:
         workdir = pathlib.Path(raw_dir)
         argv = provider_argv(provider, root, workdir)
+        launch_cwd = root
+        if provider.reader == "opencode-json":
+            child = sd_opencode.opencode_environment(child)
+            # opencode's project root is its launch directory: it merges that
+            # root's opencode.json over our inline config and injects the root's
+            # AGENTS.md as instructions. Launched inside the reviewed checkout
+            # (the shipped default was cwd=root), a hostile checkout's
+            # opencode.json deep-merges under our `*: deny` and its specific
+            # allowances survive -- reproduced live on 1.18.30: the checkout's
+            # MCP server started and a bash `touch` wrote a file (sd:1375). So
+            # opencode launches from the neutral workdir, which holds only the
+            # attached subject; the diff is embedded (MATERIAL_READER), so no
+            # checkout access is needed. `--dir <checkout>` is NOT the fix: it
+            # sets fromDirectory to the checkout and reloads its config,
+            # measured to reopen the escape (and `--dir` before `run` only
+            # prints help, which is not evidence it is harmless). The assertion
+            # refuses a workdir the checkout could reach by config discovery.
+            try:
+                sd_opencode.assert_isolated_launch(workdir, root)
+            except sd_opencode.IsolationError as error:
+                return _outcome(provider.name, REFUSED, str(error))
+            launch_cwd = workdir
         filename, content = ((CODEX_SCHEMA_FILE, json.dumps(CODEX_OUTPUT_SCHEMA)) if codex else
                              ("review-subject.md", request_prompt))
         (workdir / filename).write_text(content, encoding="utf-8")
-        result = runner(argv, child, root, timeout, prompt) if codex else runner(argv, child, root, timeout)
+        result = runner(argv, child, root, timeout, prompt) if codex else runner(argv, child, launch_cwd, timeout)
         if codex:
             answer = workdir / CODEX_ANSWER_FILE
             if answer.is_file():
@@ -1352,6 +1377,8 @@ def run_provider(
             parsed = parse_findings(text)
         elif provider.reader == "agy-json":
             result, parsed = agy_answer(result, provider.model)
+        elif provider.reader == "opencode-json":
+            result, parsed = sd_opencode.opencode_answer(result, parse=parse_findings, oversized=oversized_findings, limit=MAX_OUTPUT_BYTES)
         else:
             result, parsed = claude_answer(result)
     return _answer(provider.name, result, parsed, argv, removed)._replace(diagnostic=(
@@ -1791,6 +1818,7 @@ def review(
     prompt, prepended, context = ("", False, []) if preflight else prepared_prompt(root, subject, args, previous, env)
     overheads = {"codex-json": None, "claude-json": "\n\nReview input:\n",
                  "agy-json": "\n\nReview input:\n",
+                 "opencode-json": "\n\nReview input:\n",
                  "url": f"\nSchema: {json.dumps(CODEX_OUTPUT_SCHEMA)}\n\nReview input:\n{URL_OUTPUT_CONTRACT}"}
     try:
         _material, inventory = ("", []) if preflight else sd_review_material.collect_review_material(root, subject)

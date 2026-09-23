@@ -423,7 +423,9 @@ class SchemaAcrossTransportsTests(ReviewFixture):
                      "structured_output": payload} if transport == "claude-json" else
                     {"event": "result", "result": {"status": "SUCCESS", "response": "",
                                                    "structured_output": payload}}
-                    if transport == "agy-json" else payload)
+                    if transport == "agy-json" else
+                    {"type": "text", "part": {"type": "text", "text": json.dumps(payload)}}
+                    if transport == "opencode-json" else payload)
         client = FakeClient(default=(0, json.dumps({"choices": [{"message": {"content": json.dumps(payload)}}]}), "", True))
         return sd_review.run_provider(provider, self.tmp,
             sd_review.Subject("worktree", "HEAD", "worktree", (), 0, ""), "review",
