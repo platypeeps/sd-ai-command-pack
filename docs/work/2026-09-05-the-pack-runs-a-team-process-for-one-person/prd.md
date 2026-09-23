@@ -1918,9 +1918,9 @@ from a number the operator types.
   session. Verdicts: neither flow tight; about 1,780 cuttable lines in the
   scripts. Four plausible findings are not recorded as requirements until a
   fixture confirms them: `bin/sd-docs-lint:113,135` bare `read_text`,
-  `bin/sd-docs-lint:47` `\bBLOCKING\b` matching prose, `bin/sd_lib.py:92-99`
-  closing frontmatter on any `---` prefix, `bin/sd-review:341-342`
-  `validate_policy` mutating its argument. The full reports are in the
+  `bin/sd-docs-lint:47` `\bBLOCKING\b` matching prose, the frontmatter
+  reader in `bin/sd_lib.py` closing on any `---` prefix, `validate_policy` in
+  `bin/sd-review` mutating its argument. The full reports are in the
   session's scratchpad, not in the repository. Three open questions
   reopened; see that section. Requirement 13 is unreviewed by the lane
   until the next round runs.
@@ -3270,11 +3270,11 @@ from a number the operator types.
     than failed, which its own docstring calls deliberate. `Ran 4 tests` /
     `OK` with the page deleted. The real gate is the link checker's
     `documentationRoots`. Corrected.
-  - C-157, material: the `authors` policy key sites were cited at
-    `bin/sd-review:287` and `:1092`, which are a `raise PolicyError` and
-    `"scope": args.scope`. The key is at `:276`, `:283` and `:1098`, and
-    `:283` is the shared `_STRING_LIST_KEYS` tuple, so that site is an edit
-    and not a line deletion. Corrected.
+  - C-157, material: the `authors` policy key sites were cited at lines 287
+    and 1092 of `bin/sd-review`, which at the time were a `raise PolicyError`
+    and `"scope": args.scope`. The key sat at lines 276, 283 and 1098, and
+    line 283 was the shared `_STRING_LIST_KEYS` tuple, so that site is an
+    edit and not a line deletion. Corrected.
   - C-158, material: the criteria 30/31/32 transposition note has now cited
     the wrong lines twice. A first draft said 1580 and 1590; its correction
     said 1591, 1592 and 1602, all four low, with two of the three again
@@ -3391,7 +3391,7 @@ from a number the operator types.
     removal list actually lives. The `prd.md` still carried the backwards
     `bin/sd-docs-lint:242` bug (C-154), `bin/sd-docs-lint:87-91` as a reader
     of the `archived` and `parked` fields (C-162), and the `authors` policy
-    key at `bin/sd-review:287`, `:1092` in two places (C-157). A fix applied
+    key at lines 287 and 1092 of `bin/sd-review` in two places (C-157). A fix applied
     to the page that cites a requirement, and not to the requirement, leaves
     the wrong text in the document the implementer is told to enumerate from.
     All three corrected. Checked by grepping both files for each wrong value
