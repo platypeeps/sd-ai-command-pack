@@ -1085,8 +1085,34 @@ def anchored_citations() -> list[tuple[pathlib.Path, str, pathlib.Path, int, int
 #: live-prose gate. A ratchet on violations, never a census: each entry may
 #: fall and may not rise, and an entry that reaches zero is deleted.
 #: Per document, so one page cannot offset a new violation in another.
+#:
+#: The implement.md entry fell from 35 on 2026-09-22. Nothing in that document
+#: changed. Commit 8e3bed07 added `_checkouts_that_may_hold_a_venv` to
+#: `bin/sd_lib.py`, above the lines that page cites, and `bin/sd_lib.py:1334`
+#: -- which the page introduces as `git fetch`, and which had named the date
+#: parser for some time before that -- now lands in a comment block, where
+#: there is no symbol to prefer. That is the ratchet working: a `path:line`
+#: into code is worth less the moment the code moves.
+#:
+#: It stayed at 34 on the same day for the other half of the same lesson. The
+#: change that added `MID_PROVISION` would have pushed that citation back
+#: inside a symbol -- a different one again -- so the citation was repaired
+#: instead of the number: the page now names `delivered`, where the two
+#: `git fetch` calls it was talking about actually are. A count that a
+#: neighbouring edit can move in either direction is measuring the line
+#: numbers and not the claim.
+#:
+#: 35 and 44 are the merge of sd:1303 with `main` at `6ae7e416`, and they are
+#: the measurement rather than either parent's number. The branch recorded
+#: 34/46 and `main` recorded 36/44; the two were measured from bases that do
+#: not contain each other's edits to `bin/sd_lib.py`, so on the merged tree
+#: neither pair is the size. Nothing here raises a violation: the merged
+#: `implement.md` sits below the 36 `main` already records, and `prd.md` is
+#: unchanged from it. This is the same arithmetic the review lane's cap
+#: comment records for a diamond -- re-measure on the tree that exists, do
+#: not pick a side.
 SYMBOL_ANCHORED_CITATIONS = {
-    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 36,
+    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 35,
     "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 44,
 }
 
