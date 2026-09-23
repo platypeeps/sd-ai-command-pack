@@ -161,6 +161,30 @@ LOCK_NAME = STORE_NAME + ".lock"
 
 DEFAULT_LIMIT = 30
 
+#: The `path` of a finding that has no file: one a review heading counted and
+#: the body reader could not recover (`_shortfall`, `_reconciled`).
+#:
+#: It does two jobs and they are separated here on purpose. It is a *control
+#: value*: `answering_commit` refuses to decide that a finding it could not
+#: place has been answered, and reads this to know which findings those are.
+#: It is also *displayed*, because it sits in the `path` of a row that gets
+#: rendered and grouped -- sd:1223 is titled `11 live code-review findings
+#: remain in ?/` because a grouping step took `os.path.dirname` of it.
+#:
+#: Before this constant existed the character was typed at both producers and
+#: at the guard, so improving the display meant editing the producers and
+#: leaving the guard comparing against a character nothing produced any more:
+#: the guard stops recognising its own findings and an unplaced finding starts
+#: reading as answered. Every site now reads the value by name -- producers
+#: from `UNLOCATED`, the guard through `is_unlocated`, readers through
+#: `UNLOCATED_LABEL` -- and `tests/test_sd_review_ack.py` counts the literal in
+#: the parsed source to keep it that way.
+UNLOCATED = "?"
+
+#: What a reader is shown in place of `UNLOCATED`. Changing it is a display
+#: change and cannot reach the guard, which is the whole point of the split.
+UNLOCATED_LABEL = "(unlocated finding)"
+
 #: The heading an automated reviewer writes above findings it chose not to
 #: leave on a line. Its number is the reviewer's own count, and it is read as
 #: an assertion to be checked rather than as a total to be trusted: when fewer
@@ -356,6 +380,30 @@ def _finding(pull: int, source: str, path: str, line: Any, text: str, author: st
     }
 
 
+def is_unlocated(path: Any) -> bool:
+    """True for a finding this reader counted and could not place.
+
+    The question `answering_commit` asks, put in one place so that it is
+    asked by name. An empty path is deliberately *not* unlocated: "no path
+    recorded" and "a finding with no file" are different states, and the
+    caller that cares checks `not path` separately.
+    """
+    return path == UNLOCATED
+
+
+def located_as(row: dict) -> str:
+    """One finding's location, as a reader should read it.
+
+    `UNLOCATED` is a control value that reads as a path only by accident, so
+    nothing renders it: a row with no file says so in words. A row with a path
+    and no line shows the path, which is a real locator and the reviewer's own.
+    """
+    path = str(row.get("path") or "")
+    if is_unlocated(path):
+        return UNLOCATED_LABEL
+    return f"{path}:{row['line']}" if row.get("line") else path
+
+
 # --------------------------------------------------------------------------
 # Finding the findings
 # --------------------------------------------------------------------------
@@ -394,7 +442,7 @@ def _suppressed(pull: int, body: str, author: str) -> list[dict]:
 def _shortfall(pull: int, declared: str, index: int, author: str) -> dict:
     """A finding the heading counted and the body would not give up."""
     return _finding(
-        pull, "body", "?", None,
+        pull, "body", UNLOCATED, None,
         f"a review body declares {declared} suppressed comments and this one, "
         f"number {index + 1}, did not parse; open the review and read it",
         author,
@@ -488,7 +536,7 @@ def _reconciled(pull: int, body: str, author: str, located: list[dict]) -> list[
     stated = len(VOTE_MARKER.findall(body))
     return [
         _finding(
-            pull, "body", "?", None,
+            pull, "body", UNLOCATED, None,
             f"a review body states {stated} voted finding(s) and this one, number "
             f"{index + 1}, is in a shape this reader does not parse; open the review",
             author,
@@ -835,8 +883,8 @@ def answering_commit(root: pathlib.Path, found: dict, head: str) -> str:
     The newest such commit is the one recorded, because a finding reopened and
     re-fixed is answered by the last word on the file, not the first.
 
-    Empty for a finding with no reviewed commit, no path, or the `?` path the
-    shortfall and reconciliation rows carry -- a finding this reader could not
+    Empty for a finding with no reviewed commit, no path, or the `UNLOCATED`
+    path the shortfall and reconciliation rows carry -- a finding this reader could not
     place is a finding it may not decide has been answered. Empty too when
     `git` cannot answer, which is the same direction: `unread` stands.
 
@@ -846,7 +894,7 @@ def answering_commit(root: pathlib.Path, found: dict, head: str) -> str:
     match the wrong file or none; `:(literal)` makes the name mean itself.
     """
     reviewed, path = str(found.get("reviewed") or ""), str(found.get("path") or "")
-    if not reviewed or not path or path == "?":
+    if not reviewed or not path or is_unlocated(path):
         return ""
     found_at = sd_lib.git_output(
         ["rev-list", "--max-count=1", f"{reviewed}..{head}", "--", f":(literal){path}"], root
@@ -1404,7 +1452,7 @@ def render_findings(result: dict, stream: TextIO, indent: str = "  ") -> None:
         write(f"{indent}#{pull}: {at_least(here, len(here))} finding(s), "
               f"{at_least(open_here, len(open_here))} unacknowledged\n")
         for row in here:
-            where = f"{row['path']}:{row['line']}" if row["line"] else row["path"]
+            where = located_as(row)
             answered = f"  (replied {row['replies']}x)" if row.get("replies") else ""
             many = "  (one marker, more than one finding)" if row.get("indeterminate") else ""
             write(f"{indent}  {row['id']}  {row['verdict']:<14} {row['source']:<6} "

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import ast
 import fcntl
+import io
 import json
 import os
 import pathlib
@@ -1754,3 +1755,91 @@ class TwoWritersAtOnce(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheUnlocatedSentinelIsNotALabel(unittest.TestCase):
+    """sd:1395: the value that means "no file" may not also be the file shown.
+
+    `"?"` is the `path` of a finding a review heading counted and the body
+    reader could not recover. It is read as a control value in
+    `answering_commit` -- a finding this reader could not place is one it may
+    not decide has been answered -- and it is printed as though it were a
+    path everywhere a finding is rendered or grouped. sd:1223 is titled
+    `11 live code-review findings remain in ?/` because of the second job.
+
+    The defect is the pairing, not either half: anyone improving the display
+    edits the two producers, leaves the guard comparing against the character,
+    and the guard stops recognising its own findings. So the literal is
+    written once, and every other site reads it by name.
+    """
+
+    SOURCE = (REPO_ROOT / "bin" / "sd-review-ack").read_text(encoding="utf-8")
+
+    def test_the_sentinel_is_spelled_once_in_the_whole_file(self):
+        """One constant, and every producer and guard reads it by name.
+
+        Counted from the parsed source rather than from a list of the sites
+        known today: a fourth producer added next year is inside this check
+        without anybody remembering to add it.
+        """
+        tree = ast.parse(self.SOURCE)
+        literals = [
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and node.value == ack.UNLOCATED
+        ]
+        self.assertEqual(
+            [node.lineno for node in literals], [self._constant_line(tree)],
+            "the unlocated sentinel is written by hand somewhere other than its "
+            "own definition; a display change there cannot reach the guard",
+        )
+
+    def _constant_line(self, tree: ast.Module) -> int:
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id == "UNLOCATED"
+                for target in node.targets
+            ):
+                return node.value.lineno
+        self.fail("bin/sd-review-ack defines no UNLOCATED constant")
+
+    def test_both_producers_make_a_row_the_guard_recognises(self):
+        """The shortfall row and the reconciliation row are the two producers."""
+        shortfall = ack._shortfall(1, "2", 0, "bot")
+        reconciled = ack._reconciled(1, "(moderate, 2 votes) a thing", "bot", [])
+        self.assertTrue(ack.is_unlocated(shortfall["path"]))
+        self.assertEqual(len(reconciled), 1)
+        self.assertTrue(ack.is_unlocated(reconciled[0]["path"]))
+
+    def test_an_empty_path_is_not_an_unlocated_finding(self):
+        """Two states, kept apart: no path recorded, and a finding with no file."""
+        self.assertFalse(ack.is_unlocated(""))
+        self.assertFalse(ack.is_unlocated(None))
+
+    def test_the_guard_refuses_an_unlocated_finding_without_asking_git(self):
+        """`answering_commit` reads the sentinel by name, not by character."""
+        calls: list[list[str]] = []
+
+        def spy(args, root):
+            calls.append(args)
+            return ""
+
+        row = dict(ack._shortfall(1, "2", 0, "bot"), reviewed="c0ffee")
+        with unittest.mock.patch.object(ack.sd_lib, "git_output", spy):
+            self.assertEqual(ack.answering_commit(REPO_ROOT, row, "main"), "")
+            self.assertEqual(calls, [], "an unplaced finding asked git a question")
+            ack.answering_commit(REPO_ROOT, dict(row, path="bin/thing.py"), "main")
+        self.assertEqual(len(calls), 1, "a placed finding must still be asked about")
+
+    def test_a_rendered_unlocated_finding_does_not_read_as_a_file(self):
+        """The display half, which is the half sd:1223's title got wrong."""
+        row = dict(
+            ack._shortfall(1, "2", 0, "bot"), verdict="unread", replies=0, reviewed="",
+        )
+        stream = io.StringIO()
+        ack.render_findings(
+            {"findings": [row], "unsatisfied": [row], "pull_requests": [1],
+             "landing_ref": "origin/main", "store_error": ""},
+            stream,
+        )
+        self.assertIn(ack.UNLOCATED_LABEL, stream.getvalue())
+        self.assertNotIn(f" {ack.UNLOCATED} ", stream.getvalue())
