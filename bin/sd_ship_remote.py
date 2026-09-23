@@ -58,6 +58,13 @@ class GitHub:
         #: What the remote last said to `owned`, so the caller that catches
         #: its refusal can write the demotion note with the same reason.
         self.answer: sd_lib.RemoteAnswer | None = None
+        #: The repository object `owned` last read, kept only while it names
+        #: this repository, is not a fork and grants admin. `None` otherwise,
+        #: including before the first call. `sd-ship`'s merge gate merges
+        #: against it when the repository row overrides the co-ownership
+        #: answer, so it must never stand for a repository those three
+        #: clauses did not clear (sd:1347).
+        self.metadata: dict | None = None
         #: Why the last `declared_gap` read found no declaration, for the refusal.
         self.declaration_faults: list[str] = []
 
@@ -131,8 +138,14 @@ class GitHub:
                 return None, str(error)
 
         answer = self.answer = sd_lib.remote_permits_full(self.root, ask=ask)
-        if (not answer.full or str(metadata.get("full_name", "")).lower() != self.repository
-                or metadata.get("fork") is not False or metadata.get("permissions", {}).get("admin") is not True):
+        # Identity, fork and admin are separated from the answer itself so the
+        # caller that catches this refusal can still see a repository these
+        # three clauses cleared. The disjunction below is unchanged: the same
+        # calls refuse, with the same reason (sd:1347).
+        self.metadata = metadata if (str(metadata.get("full_name", "")).lower() == self.repository
+                                     and metadata.get("fork") is False
+                                     and metadata.get("permissions", {}).get("admin") is True) else None
+        if not answer.full or self.metadata is None:
             raise Refusal(answer.reason or "GitHub ownership did not match origin", code="ownership_refused",
                           next_action="Resolve repository ownership or use the existing authorized manual workflow.")
         return metadata
