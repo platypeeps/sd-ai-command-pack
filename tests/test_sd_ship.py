@@ -122,7 +122,9 @@ class ShipDouble(GitHubDouble):
         if method == "GET" and path.endswith("/protection") and isinstance(self.remote.protection, RemoteRefusal):
             raise self.remote.protection  # a 403 or 5xx, which is not "absent" (sd:1110)
         if method == "GET" and "/rules/branches/" in path:
-            return 200, self.rules
+            # Paged as the endpoint pages: thirty a page unless asked otherwise.
+            size, page = int(query.get("per_page", [30])[0]), int(query.get("page", [1])[0])
+            return 200, self.rules[(page - 1) * size:page * size]
         if method == "GET" and "/rulesets/" in path:
             ruleset_id = int(path.rsplit("/", 1)[1])
             if ruleset_id not in self.rulesets:
@@ -2934,6 +2936,20 @@ class DeclaredGapCase(unittest.TestCase):
             {"type": "required_status_checks", "ruleset_id": 42,
              "parameters": {"strict_required_status_checks_policy": True,
                             "required_status_checks": [{"context": "route", "integration_id": 7}]}}]
+
+    def test_gating_rules_on_the_second_page_of_rules_still_gate(self):
+        """Thirty rules fill the endpoint's first page; the rules that gate
+        the merge sit on the second. A reader that stopped at one page would
+        take Path B and refuse for want of a declaration. The merge lands,
+        and the receipt's object carries the second page's check."""
+        self.commit({".github/workflows/tests.yml": self.TESTS, ".github/workflows/sd-review-route.yml": self.ROUTE})
+        filler = [{"type": "tag_name_pattern", "ruleset_id": 42, "parameters": {"pattern": f"v{n}"}} for n in range(30)]
+        self.double.rules = filler + self.gating_rules()
+        self.double.rulesets = {42: {"id": 42, "name": "main", "enforcement": "active", "bypass_actors": []}}
+        self.green()
+        result = self.merge()
+        self.assertEqual(self.puts(), 1)
+        self.assertEqual(result["protection"]["required_status_checks"]["checks"], [{"context": "route", "app_id": 7}])
 
     def test_a_ruleset_that_does_not_show_its_bypass_actors_refuses_the_merge(self):
         """The same ruleset with `bypass_actors` withheld, which is what GitHub

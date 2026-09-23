@@ -392,10 +392,26 @@ class RulesetCase(unittest.TestCase):
                declaration: dict | None = None) -> PathStubbedGitHub:
         answers = {f"{self.PREFIX}/branches/main/protection": classic}
         if rules is not None:
-            answers[f"{self.PREFIX}/rules/branches/main"] = (200, rules)
+            answers.update(self.paged(rules))
         if ruleset is not None:
             answers[f"{self.PREFIX}/rulesets/42"] = (200, ruleset)
         return PathStubbedGitHub(answers, declaration)
+
+    def paged(self, rules: list) -> dict[str, tuple[int, Any]]:
+        """`rules` as the endpoint pages them, `PAGE_SIZE` a page, with the
+        empty page after a full last one. The bare, pre-pagination path is
+        answered with page one as well: a reader that stops after one
+        request then sees a full page rather than a 404, which is what
+        makes the pagination test fail for the right reason on such a
+        reader instead of on a route it never had."""
+        size = sd_protection.PAGE_SIZE
+        pages = [rules[start:start + size] for start in range(0, len(rules), size)] or [[]]
+        if len(pages[-1]) == size:
+            pages.append([])
+        answers: dict[str, tuple[int, Any]] = {
+            sd_protection.rules_path(self.PREFIX, "main", number): (200, page) for number, page in enumerate(pages, 1)}
+        answers[f"{self.PREFIX}/rules/branches/main"] = (200, pages[0])
+        return answers
 
     def refused(self, remote: PathStubbedGitHub, message: str) -> sd_ship_remote.Refusal:
         with self.assertRaisesRegex(sd_ship_remote.Refusal, message) as caught:
@@ -416,10 +432,49 @@ class RulesetCase(unittest.TestCase):
         self.assertEqual(value["required_status_checks"],
                          {"strict": True, "contexts": ["check"], "checks": [{"context": "check", "app_id": 7}]})
         self.assertEqual(remote.requested, [f"{self.PREFIX}/branches/main/protection",
-                                            f"{self.PREFIX}/rules/branches/main", f"{self.PREFIX}/rulesets/42"])
+                                            sd_protection.rules_path(self.PREFIX, "main", 1),
+                                            f"{self.PREFIX}/rulesets/42"])
         # A second read of the same remote is the same object, which is what
         # `still_gated`'s equality compares.
         self.assertEqual(self.remote(ruleset_rules()).gate("main", HEAD), value)
+
+    def test_every_page_of_rules_is_read_before_they_are_reduced(self) -> None:
+        """The rules endpoint answers `PAGE_SIZE` rules a page. A reader that
+        took the first page for the whole list would miss the gating rules on
+        the second and see a weaker branch than the real one -- Path B and a
+        refusal for want of a declaration, where the truth is Path A. So a
+        full first page costs a second request, and the second page's rules
+        are what the gate validates."""
+        size = sd_protection.PAGE_SIZE
+        filler = [{"type": "tag_name_pattern", "ruleset_id": 42, "parameters": {"pattern": f"v{n}"}}
+                  for n in range(size)]
+        remote = self.remote(filler + ruleset_rules())
+        value = remote.gate("main", HEAD)
+        rules_requests = [path for path in remote.requested if "/rules/branches/" in path]
+        self.assertGreater(len(rules_requests), 1)
+        self.assertEqual(rules_requests, [sd_protection.rules_path(self.PREFIX, "main", 1),
+                                          sd_protection.rules_path(self.PREFIX, "main", 2)])
+        self.assertEqual(value["required_status_checks"]["contexts"], ["check"])
+        self.assertEqual(value["required_pull_request_reviews"]["required_approving_review_count"], 1)
+        # Exactly one full page: the reader asks once more and is told the end.
+        exact = self.remote(filler[3:] + ruleset_rules())
+        self.assertEqual(exact.gate("main", HEAD)["required_status_checks"]["contexts"], ["check"])
+        self.assertEqual(len([path for path in exact.requested if "/rules/branches/" in path]), 2)
+
+    def test_a_rules_list_that_never_comes_back_short_is_a_refusal_not_a_hang(self) -> None:
+        full = [{"type": "deletion", "ruleset_id": 42}] * sd_protection.PAGE_SIZE
+
+        class Endless(PathStubbedGitHub):
+            def api_status(self, path: str) -> tuple[int, Any]:
+                if "/rules/branches/" not in path:
+                    return super().api_status(path)
+                self.requested.append(path)
+                return 200, full
+
+        remote = Endless({f"{self.PREFIX}/branches/main/protection": NOT_PROTECTED}, DECLARATION)
+        error = self.refused(remote, rf"^branch rulesets ran past {sd_protection.MAX_PAGES} pages")
+        self.assertEqual(error.workflow["blocker"]["code"], "prerequisite_failed")
+        self.assertEqual(len(remote.requested), 1 + sd_protection.MAX_PAGES)
 
     def test_a_ruleset_without_a_pull_request_rule_is_refused_by_name(self) -> None:
         self.refused(self.remote(ruleset_rules(pull_request=None)),
@@ -501,7 +556,8 @@ class RulesetCase(unittest.TestCase):
         ruleset not answering, is "could not observe": a refusal, with or
         without a declaration, never Path B."""
         unreadable = self.remote(None, declaration=DECLARATION)
-        error = self.refused(unreadable, r"^no route for repos/fixture/repo/rules/branches/main \(HTTP 404\)$")
+        error = self.refused(unreadable, rf"^no route for {re.escape(sd_protection.rules_path(self.PREFIX, 'main', 1))} "
+                                         r"\(HTTP 404\)$")
         self.assertEqual(error.workflow["blocker"]["code"], "prerequisite_failed")
         gone = self.remote(ruleset_rules(), None, declaration=DECLARATION)
         error = self.refused(gone, r"^ruleset 42: no route for repos/fixture/repo/rulesets/42 \(HTTP 404\)$")

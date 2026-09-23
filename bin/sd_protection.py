@@ -60,6 +60,18 @@ MERGE_GATING_RULES = frozenset({"pull_request", "required_status_checks"})
 #: stays a permission refusal (sd:1327).
 PLAN_LIMIT_MARKER = "upgrade to github"
 
+#: The rules endpoint pages its answer, thirty rules a page by default. The
+#: size is sent explicitly so a full page means the same to the server and to
+#: the loop that reads until a page comes back short. A reader that took the
+#: first page for the whole list would see a *weaker* branch than the real
+#: one -- a `required_status_checks` rule on the second page missing from
+#: the comparison -- which is the direction a gate must not fail in
+#: (sd:1327 review, finding 2).
+PAGE_SIZE = 30
+
+#: Pages read before the reader gives up on a list that never comes back short.
+MAX_PAGES = 100
+
 Fetch = Callable[[str], tuple[int, Any]]
 
 
@@ -68,8 +80,8 @@ def plan_limited(message: object) -> bool:
     return PLAN_LIMIT_MARKER in str(message or "").lower()
 
 
-def rules_path(prefix: str, branch: str) -> str:
-    return f"{prefix}/rules/branches/{quote(branch, safe='')}"
+def rules_path(prefix: str, branch: str, page: int = 1) -> str:
+    return f"{prefix}/rules/branches/{quote(branch, safe='')}?per_page={PAGE_SIZE}&page={page}"
 
 
 def ruleset_path(prefix: str, ruleset_id: int) -> str:
@@ -87,13 +99,25 @@ def read_rulesets(fetch: Fetch, prefix: str, branch: str) -> dict[str, Any]:
     caller that reports names it. Only a 200 is an answer here: the rules
     endpoint answers `[]` for a branch no ruleset touches, so a 404 or 403
     from it is a repository this reader could not see into, never "no rules".
+
+    The rules are read page by page until a page comes back shorter than
+    `PAGE_SIZE`; a page that fails is the same fault as the first one
+    failing, and a list still full at `MAX_PAGES` is a fault too rather
+    than a partial answer.
     """
-    status, body = fetch(rules_path(prefix, branch))
-    if status != 200 or not isinstance(body, list):
-        message = body.get("message") if isinstance(body, dict) else None
-        return {"rules": [], "rulesets": {},
-                "error": f"{message or 'branch rulesets could not be observed'} (HTTP {status})"}
-    rules = [rule for rule in body if isinstance(rule, dict)]
+    rules: list[dict] = []
+    for page in range(1, MAX_PAGES + 1):
+        status, body = fetch(rules_path(prefix, branch, page))
+        if status != 200 or not isinstance(body, list):
+            message = body.get("message") if isinstance(body, dict) else None
+            return {"rules": rules, "rulesets": {},
+                    "error": f"{message or 'branch rulesets could not be observed'} (HTTP {status})"}
+        rules.extend(rule for rule in body if isinstance(rule, dict))
+        if len(body) < PAGE_SIZE:
+            break
+    else:
+        return {"rules": rules, "rulesets": {},
+                "error": f"branch rulesets ran past {MAX_PAGES} pages of {PAGE_SIZE} rules"}
     rulesets: dict[int, dict] = {}
     cited: set[int] = {rule["ruleset_id"] for rule in rules if isinstance(rule.get("ruleset_id"), int)}
     for ruleset_id in sorted(cited):

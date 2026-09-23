@@ -31,6 +31,7 @@ import unittest
 from types import SimpleNamespace
 from typing import Any
 from unittest import mock
+from urllib.parse import parse_qs, urlsplit
 
 from tests.test_sd_pr_state import BIN, SD_STATUS, ToolFixture, tree_digest
 
@@ -5612,14 +5613,20 @@ class RulesetProtectionCase(unittest.TestCase):
         seen: list[str] = []
 
         def answer(args: list[str], root: pathlib.Path) -> tuple[Any, str]:
-            path = args[1]
-            seen.append(path)
+            seen.append(args[1])
+            url = urlsplit(args[1])
+            path, query = url.path, parse_qs(url.query)
             if path == f"repos/{self.SLUG}":
                 return dict(self.REPO), ""
             if path.endswith("/branches/main/protection"):
                 return None, "gh: Branch not protected (HTTP 404)"
             if path.endswith("/rules/branches/main"):
-                return (rules, "") if rules is not None else (None, "gh: Not Found (HTTP 404)")
+                if rules is None:
+                    return None, "gh: Not Found (HTTP 404)"
+                # Paged the way the endpoint pages: `per_page` and `page`,
+                # thirty a page when neither is asked.
+                size, page = int(query.get("per_page", ["30"])[0]), int(query.get("page", ["1"])[0])
+                return rules[(page - 1) * size:page * size], ""
             if path.endswith("/rulesets/42"):
                 return (ruleset, "") if ruleset is not None else (None, "gh: Not Found (HTTP 404)")
             raise AssertionError(f"unexpected read {path}")
@@ -5642,8 +5649,23 @@ class RulesetProtectionCase(unittest.TestCase):
         self.assertEqual(result["detail"]["source"], "ruleset")
         self.assertEqual(result["detail"]["rulesets"],
                          [{"id": 42, "name": "main", "enforcement": "active", "bypass_actors": []}])
-        self.assertEqual(result["_seen"][-2:], [f"repos/{self.SLUG}/rules/branches/main",
+        self.assertEqual(result["_seen"][-2:], [status.sd_protection.rules_path(f"repos/{self.SLUG}", "main", 1),
                                                 f"repos/{self.SLUG}/rulesets/42"])
+
+    def test_every_page_of_rules_reaches_the_gap_analysis(self) -> None:
+        """Thirty rules fill the endpoint's first page. The gating rules on
+        the second must reach the analysis, or the branch reads as
+        `unprotected` -- the weaker picture, the wrong direction."""
+        size = status.sd_protection.PAGE_SIZE
+        filler = [{"type": "tag_name_pattern", "ruleset_id": 42, "parameters": {"pattern": f"v{n}"}}
+                  for n in range(size)]
+        result = self.section(filler + self.gating_rules())
+        self.assertTrue(result["protected"])
+        self.assertNotIn("unprotected", [gap["id"] for gap in result["gaps"]])
+        self.assertEqual(result["detail"]["required_contexts"], ["lint"])
+        rules_reads = [path for path in result["_seen"] if "/rules/branches/" in path]
+        self.assertEqual(rules_reads, [status.sd_protection.rules_path(f"repos/{self.SLUG}", "main", 1),
+                                       status.sd_protection.rules_path(f"repos/{self.SLUG}", "main", 2)])
 
     def test_a_ruleset_with_bypass_actors_is_protection_that_exempts_someone(self) -> None:
         bypass = dict(self.RULESET, bypass_actors=[{"actor_id": 5, "actor_type": "RepositoryRole",
