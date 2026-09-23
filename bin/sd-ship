@@ -676,6 +676,13 @@ class Ship(SharedReview):
         return result
 
     def copilot_reviewed_head(self, reviews: list[dict], merge_head: str) -> str | None:
+        # `stable_copilot_material` calls this once per materialization attempt,
+        # and a review of the exact merge head can land between two of them. The
+        # receipt has to say what the *last* reading found, so the note is
+        # cleared here rather than only written: otherwise an ancestor that
+        # cleared attempt one would still be named in the warning after attempt
+        # two matched exactly.
+        self.copilot_ancestor_review = None
         completed = [review for review in reviews
                      if bool(review.get("submitted_at"))
                      and str(review.get("state") or "").upper() not in ("", "PENDING")]

@@ -739,6 +739,34 @@ roles:
                             for warning in self.operation().state["warnings"]),
                         self.operation().state.get("warnings"))
 
+    def test_an_exact_head_review_landing_mid_wait_drops_the_ancestor_note(self):
+        """`stable_copilot_material` reads the reviews once per attempt, so the
+        exact-head review can land between two of them. The merge receipt has
+        to say what the last reading found: an ancestor that cleared the first
+        attempt must not still be named after the second matched exactly."""
+        self.enable_automatic_copilot()
+        self.prepare()
+        reviewed = _git(self.root, "rev-parse", "HEAD")
+        (self.root / "docs").mkdir(exist_ok=True)
+        (self.root / "docs/note.md").write_text("what the review asked for\n")
+        _git(self.root, "add", "docs/note.md")
+        _git(self.root, "commit", "-m", "answer the review\n\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.prepare()
+        base = {"user": {"login": "copilot-pull-request-reviewer[bot]"},
+                "state": "COMMENTED", "body": ""}
+        exact = {**base, "commit_id": head, "submitted_at": "2026-09-19T20:01:00Z"}
+        self.double.review_sequences["reviews"] = [
+            [{**base, "commit_id": reviewed, "submitted_at": "2026-09-19T20:00:00Z"}],
+            [exact], [exact],
+        ]
+        pull = self.remote.pull(1)
+        pull.checks = [{**row, "head_sha": head} for row in pull.checks]
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+        self.assertEqual([warning for warning in (self.operation().state.get("warnings") or [])
+                          if "ancestor of the merge head" in warning], [])
+
     def test_the_shipped_surface_is_every_path_outside_docs(self):
         """The definition, stated once and checked against the tree rather than
         asserted in prose. `tests/` is deliberately inside the surface: CI
