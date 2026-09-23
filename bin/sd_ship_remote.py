@@ -78,7 +78,10 @@ class GitHub:
         but the protection endpoints: there a 404 means "no classic protection
         object", a fact the ruleset read and then the declared-gap rule act
         on, while a 401, 403 or 5xx means "could not observe", which must
-        stay a refusal. The status comes from
+        stay a refusal. That reading of a 404 holds for the token `owned()`
+        has already shown to administer the repository, and for no other:
+        GitHub answers 404 to a non-admin for protection it may not show,
+        which is why `merge_ownership` runs before `gate`. The status comes from
         the response line `gh api --include` prints, not from the wording of
         gh's stderr, so a reworded message cannot turn a refusal into a fact.
         """
@@ -271,7 +274,10 @@ class GitHub:
     def gate(self, base: str, head: str) -> dict:
         """What stands between this merge and `main`: the object, or the gap.
 
-        Classic protection is read first. A 200 is the object (Path A). A 404
+        Classic protection is read first, by a token `owned()` has shown to
+        administer the repository -- to any other GitHub answers 404 for
+        protection it may not show, so the order is load-bearing. A 200 is
+        the object (Path A). A 404
         is "no classic object", which since sd:1327 is not yet "unprotected":
         the branch's rulesets are read next, and an active ruleset that gates
         the merge -- a `pull_request` or `required_status_checks` rule -- is

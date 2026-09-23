@@ -33,7 +33,13 @@ from typing import Any
 from unittest import mock
 from urllib.parse import parse_qs, urlsplit
 
-from tests.test_sd_pr_state import BIN, SD_STATUS, ToolFixture, tree_digest
+from tests.test_sd_pr_state import (
+    BIN,
+    REPO_SETTINGS,
+    SD_STATUS,
+    ToolFixture,
+    tree_digest,
+)
 
 #: The other half of the pin in `SkillSurfaceTests`. Imported as the function
 #: alone so this module collects its own tests and not that file's.
@@ -844,6 +850,20 @@ class ProtectionSectionTests(StatusFixture):
         self.assertEqual(section["detail"]["required_not_produced"], [])
         self.assertEqual(section["detail"]["produced_not_required"], [])
         self.assertIn("fully enforcing", self.run_tool(SD_STATUS).stdout)
+
+    def test_a_classic_404_to_a_token_without_admin_prints_as_unknown(self) -> None:
+        """The same 404, from a token without `admin` on the repository: the
+        classic side is unseen, so the report says unknown and why, raises no
+        `unprotected` finding, and does not claim the all-clear either."""
+        self.with_github(pulls=[], protection=None, repo=dict(REPO_SETTINGS, permissions={"admin": False}))
+        section = self.report()["protection"]
+        self.assertIsNone(section["protected"])
+        self.assertEqual(section["gaps"], [])
+        self.assertIn("admin", section["reason"])
+        text = self.run_tool(SD_STATUS).stdout
+        self.assertIn("protection unknown -- classic protection on main is not visible to this token", text)
+        self.assertNotIn("fully enforcing", text)
+        self.assertNotIn("no branch protection at all", text)
 
     def test_an_unprotected_default_branch_is_one_named_gap(self) -> None:
         self.with_github(pulls=[], protection=None)
@@ -5595,7 +5615,9 @@ class RulesetProtectionCase(unittest.TestCase):
     SLUG = "acme/widget"
     GH = {"available": True, "slug": SLUG, "reason": ""}
     RULESET = {"id": 42, "name": "main", "enforcement": "active", "bypass_actors": []}
-    REPO = {"default_branch": "main", "allow_rebase_merge": False,
+    #: An operator's own repository: `admin`, so a 404 on classic protection
+    #: is GitHub saying there is none, not that this token may not look.
+    REPO = {"default_branch": "main", "allow_rebase_merge": False, "permissions": {"admin": True},
             "squash_merge_commit_title": "PR_TITLE", "squash_merge_commit_message": "PR_BODY"}
 
     @staticmethod
@@ -5609,7 +5631,7 @@ class RulesetProtectionCase(unittest.TestCase):
                             "required_status_checks": [{"context": "lint", "integration_id": 7}]}},
         ]
 
-    def section(self, rules: Any, ruleset: Any = RULESET) -> dict[str, Any]:
+    def section(self, rules: Any, ruleset: Any = RULESET, *, repo: dict[str, Any] | None = None) -> dict[str, Any]:
         seen: list[str] = []
 
         def answer(args: list[str], root: pathlib.Path) -> tuple[Any, str]:
@@ -5617,7 +5639,7 @@ class RulesetProtectionCase(unittest.TestCase):
             url = urlsplit(args[1])
             path, query = url.path, parse_qs(url.query)
             if path == f"repos/{self.SLUG}":
-                return dict(self.REPO), ""
+                return dict(self.REPO if repo is None else repo), ""
             if path.endswith("/branches/main/protection"):
                 return None, "gh: Branch not protected (HTTP 404)"
             if path.endswith("/rules/branches/main"):
@@ -5705,6 +5727,40 @@ class RulesetProtectionCase(unittest.TestCase):
         self.assertFalse(result["protected"])
         self.assertIn("unprotected", [gap["id"] for gap in result["gaps"]])
         self.assertEqual(result["detail"]["ruleset_rules"], [])
+
+    def test_a_404_from_a_token_without_admin_is_unknown_not_unprotected(self) -> None:
+        """GitHub answers 404 `Not Found` on classic protection to a caller
+        without `admin` on the repository, whether or not the branch is
+        protected -- measured 2026-09-22 on home-assistant/core and
+        gohugoio/hugo, both protected. So a 404 is "no protection" only when
+        the token administers the repository; otherwise the classic side is
+        unknown, the section says why, and no `unprotected` finding is raised
+        on it. `permissions` missing altogether is the same unknown."""
+        for permissions in ({"admin": False}, {"push": True}, None):
+            with self.subTest(permissions=permissions):
+                repo = dict(self.REPO)
+                repo.pop("permissions")
+                if permissions is not None:
+                    repo["permissions"] = permissions
+                result = self.section([], repo=repo)
+                self.assertTrue(result["available"])
+                self.assertIsNone(result["protected"])
+                self.assertNotIn("unprotected", [gap["id"] for gap in result["gaps"]])
+                self.assertIn("admin", result["reason"])
+                self.assertIn(self.SLUG, result["reason"])
+                self.assertEqual(result["detail"]["classic_visibility"], "hidden")
+                self.assertEqual(result["detail"]["ruleset_rules"], [])
+                # The rulesets were still read: they are visible without admin.
+                self.assertTrue(any("/rules/branches/" in path for path in result["_seen"]))
+
+    def test_a_gating_ruleset_is_protection_even_when_classic_is_hidden(self) -> None:
+        """The rules endpoint answers a non-admin (log-distiller, read with
+        `maintain`), so a ruleset that gates the merge is the protection
+        object whatever the classic endpoint would not show."""
+        result = self.section(self.gating_rules(), repo=dict(self.REPO, permissions={"admin": False}))
+        self.assertTrue(result["protected"])
+        self.assertEqual(result["detail"]["source"], "ruleset")
+        self.assertEqual(result["detail"]["classic_visibility"], "hidden")
 
     def test_no_rules_is_unprotected_and_says_the_rules_were_read(self) -> None:
         result = self.section([])

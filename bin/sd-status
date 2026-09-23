@@ -678,6 +678,7 @@ def protection_section(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any]
     default_branch = str(repo.get("default_branch") or "main")
     result.update(available=True, reason="", default_branch=default_branch)
     result["merge_settings"] = _merge_settings(repo)
+    admin = isinstance(repo.get("permissions"), dict) and repo["permissions"].get("admin") is True
 
     protection, error = pr_state.gh_json(
         ["api", f"repos/{slug}/branches/{default_branch}/protection"], root
@@ -703,6 +704,27 @@ def protection_section(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any]
         # what made the omission read as a working feature.
         read = sd_protection.read_rulesets(_gh_fetch(root), f"repos/{slug}", default_branch)
         synthesized = None if read["error"] else sd_protection.synthesize(read["rules"], read["rulesets"])
+        # Whose 404 it is decides what it means. GitHub answers 404 `Not
+        # Found` on classic protection to a caller without `admin` on the
+        # repository whether or not the branch is protected -- measured
+        # 2026-09-22 on home-assistant/core and gohugoio/hugo, both protected
+        # -- and 404 `Branch not protected` to an admin of a bare branch. So
+        # only an admin's 404 is "no protection"; any other is the classic
+        # side unseen, reported as unknown with the reason and never as the
+        # `unprotected` finding, which would be a verdict on no evidence.
+        result["detail"]["classic_visibility"] = "absent" if admin else "hidden"
+        result["detail"]["ruleset_rules"] = sd_protection.rule_types(read["rules"], read["rulesets"])
+        if read["error"]:
+            result["detail"]["rules_read_error"] = read["error"]
+        if synthesized is None and not admin:
+            result["protected"] = None
+            result["reason"] = (
+                f"classic protection on {default_branch} is not visible to this token: GitHub "
+                f"answers 404 to a caller without admin on {slug} whether or not the branch is "
+                "protected, so this 404 is not \"no protection\""
+            )
+            result["detail"]["read_error"] = error
+            return result
         if synthesized is None:
             result["protected"] = False
             still_open, accepted = _apply_acknowledgements(
@@ -720,12 +742,10 @@ def protection_section(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any]
             result["gaps"] = unreadable + still_open
             result["accepted"] = accepted
             result["detail"]["read_error"] = error
-            result["detail"]["ruleset_rules"] = sd_protection.rule_types(read["rules"], read["rulesets"])
-            if read["error"]:
-                result["detail"]["rules_read_error"] = read["error"]
             return result
         protection = synthesized
-        ruleset_detail = {"source": sd_protection.RULESET_SOURCE, "rulesets": synthesized["rulesets"]}
+        ruleset_detail = {"source": sd_protection.RULESET_SOURCE, "rulesets": synthesized["rulesets"],
+                          "classic_visibility": result["detail"]["classic_visibility"]}
     result["protected"] = True
     gaps, detail = _protection_gaps(protection, default_branch, produced, notes)
     still_open, accepted = _apply_acknowledgements(
@@ -3327,7 +3347,11 @@ def _render_protection(section: dict[str, Any], write: Any) -> None:
         # report. An accepted finding is not an absent one, and printing
         # "fully enforcing" over the top of one would be the tool lying about
         # a state the repository deliberately wrote down.
-        if not section["gaps"] and not accepted:
+        if section.get("protected") is None:
+            # The classic endpoint answered a token that may not look. Not
+            # the all-clear and not the `unprotected` finding: unknown, said.
+            write(f"  {branch}: protection unknown -- {section['reason']}\n")
+        elif not section["gaps"] and not accepted:
             write(f"  {branch}: protection is fully enforcing -- admins included, "
                   "checks strict and matched, review required\n")
         for gap in section["gaps"]:

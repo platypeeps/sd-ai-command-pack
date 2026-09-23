@@ -1,7 +1,13 @@
 """What protects a branch, read from both of GitHub's mechanisms.
 
 `repos/{slug}/branches/{b}/protection` is *classic* branch protection. A
-branch a ruleset protects answers 404 there, and
+branch a ruleset protects answers 404 there -- and so does every branch to a
+token without `admin` on the repository: GitHub answers 404 `Not Found`
+rather than 403 (home-assistant/core and gohugoio/hugo, both protected,
+2026-09-22), while an admin of a bare branch gets 404 `Branch not
+protected`. A 404 is "no classic protection" only from an admin. `sd-ship`'s
+gate has that from `owned()` before it reads; `sd-status` asks the repository
+object and reports the classic side unknown otherwise. And
 `repos/{slug}/rules/branches/{b}` lists the rules every *ruleset* evaluates
 for the branch while saying nothing about classic protection: measured
 2026-09-22 on answerbook/mezmo_benchmark, whose classic object requires

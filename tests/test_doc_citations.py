@@ -1086,8 +1086,8 @@ def anchored_citations() -> list[tuple[pathlib.Path, str, pathlib.Path, int, int
 #: fall and may not rise, and an entry that reaches zero is deleted.
 #: Per document, so one page cannot offset a new violation in another.
 SYMBOL_ANCHORED_CITATIONS = {
-    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 36,
-    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 47,
+    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 35,
+    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 48,
 }
 
 
