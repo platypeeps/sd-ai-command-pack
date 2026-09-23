@@ -676,6 +676,99 @@ class BothActionsTests(SetupFixture):
         self.assertIn("no-such-action", str(caught.exception))
 
 
+# A consumer that pins both actions: the docs-gate guard at the template
+# wording, and above -- ahead of it in the `ignore:` list -- nothing; the
+# review-route item comes second, carrying prose its own team wrote.
+HAND_WRITTEN_REVIEW_ROUTE = """\
+      # The sd-ai-command-pack pin is set by hand. Ask #platform before moving
+      # it: the release train pins the same sha in three sibling repositories.
+      - dependency-name: "platypeeps/sd-ai-command-pack/actions/review-route"
+"""
+
+
+def consumer(*blocks: str) -> str:
+    """One github-actions entry whose `ignore:` list holds `blocks`, in order."""
+
+    return (
+        'version: 2\nupdates:\n'
+        '  - package-ecosystem: "github-actions"\n'
+        '    directory: "/"\n'
+        '    schedule:\n'
+        '      interval: "weekly"\n'
+        "    open-pull-requests-limit: 5\n"
+        "    ignore:\n" + "".join(blocks)
+    )
+
+
+class GuardActionTests(SetupFixture):
+    """The write gate reads the guard for the action the installer writes.
+
+    `guard_state()` without an action answers about whichever of the pack's
+    actions the file guards first -- the reading a fleet census wants, and the
+    wrong question for a gate standing in front of a per-action write.
+    `rendered()` replaces the review-route block; the gate has to be asked
+    about the review-route block, or it reports on a different one.
+    """
+
+    def test_a_hand_written_review_route_guard_is_not_silently_replaced(self) -> None:
+        """docs-gate guard first, review-route guard second and hand-written.
+
+        The action-blind read stops at the docs-gate block, says `same`, and
+        lets the write through: the team's prose is replaced by the template
+        and the report calls the run unchanged.
+        """
+        root = self.make_repo()
+        text = consumer(guard.guard_block("      ", "docs-gate"), HAND_WRITTEN_REVIEW_ROUTE)
+        self.seed_dependabot(root, text)
+        with self.assertRaises(setup.Refusal) as caught:
+            install(root)
+        self.assertIn("--force", str(caught.exception))
+        self.assertEqual(self.dependabot(root).read_text(encoding="utf-8"), text)
+
+    def test_the_report_names_the_state_of_the_block_it_writes(self) -> None:
+        root = self.make_repo()
+        self.seed_dependabot(
+            root, consumer(guard.guard_block("      ", "docs-gate"), HAND_WRITTEN_REVIEW_ROUTE)
+        )
+        result = install(root, force=True)
+        self.assertEqual(result["guard"], "differs")
+        text = self.dependabot(root).read_text(encoding="utf-8")
+        self.assertIn(guard.guard_block("      ", "docs-gate"), text)
+        self.assertIn(guard.guard_block("      ", "review-route"), text)
+        self.assertNotIn("#platform", text)
+
+    def test_a_differing_docs_gate_guard_does_not_refuse_this_install(self) -> None:
+        """The other direction: a guard for an action this run does not write.
+
+        The file holds one item, for docs-gate, at a wording that differs from
+        the template. The action-blind read says `differs` and the run refuses
+        by naming a review-route guard the file does not carry.
+        """
+        root = self.make_repo()
+        stale = guard.guard_block("      ", "docs-gate").replace(
+            "actions/docs-gate/README.md", "actions/review-route/README.md"
+        )
+        self.seed_dependabot(root, consumer(stale))
+        result = install(root)
+        self.assertEqual(result["guard"], "absent")
+        text = self.dependabot(root).read_text(encoding="utf-8")
+        self.assertIn(stale, text)
+        self.assertIn(guard.guard_block("      ", "review-route"), text)
+
+    def test_the_gate_is_the_only_action_blind_read_left(self) -> None:
+        """Every `guard_state` call in the installer names its action."""
+
+        source = (REPO_ROOT / "bin" / "sd_setup_github.py").read_text(encoding="utf-8")
+        calls = [
+            line
+            for line in source.splitlines()
+            if "guard_state(" in line and not line.lstrip().startswith("#")
+        ]
+        self.assertTrue(calls)
+        for line in calls:
+            self.assertIn("DEFAULT_ACTION", line, f"action-blind write gate: {line.strip()}")
+
+
 class CheckTests(SetupFixture):
     """`--check` renders at the repository's own pin and writes nothing."""
 
