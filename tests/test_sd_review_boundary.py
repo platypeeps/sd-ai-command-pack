@@ -549,37 +549,36 @@ class LineBudgetTests(unittest.TestCase):
         # reasons. This raise is its own commit, before the one that spends
         # it. Shared-core classification and the complexity ceilings are
         # unchanged.
-        # 3126 -> 3250 admits `opencode-json`, a fourth reader (sd:1329). The
-        # number is the argument once more: the lane measured exactly 3126
-        # before it, on its own floor, so any fourth reader busts the ratchet
-        # whatever it costs. Eight lines land in `bin/sd-review` -- the
-        # import, two tuple entries, and three two-line dispatch branches --
-        # and 116 in `bin/sd_opencode.py`, a new lane file: the argv builder,
-        # the inline agent whose permission map is what refuses a write, the
-        # NDJSON read-back, and the docstring that records what was measured
-        # (a denied write and bash, a denied read outside `--dir`, an attached
-        # subject read verbatim) and what stays open (the operator's global
-        # config still loads, and no event names the model that answered).
-        # The reader lives in its own file rather than beside `agy_answer`
-        # so the entry point gains dispatch and nothing else. This raise
-        # shares a commit with the spend at the integrator's request, and
-        # the exact resulting size keeps this a ratchet. Shared-core
-        # classification and the complexity ceilings are unchanged.
-        # 3250 -> 3271 turns that permission map default-deny (sd:1329,
-        # from review). The by-name denylist left the operator's global MCP
-        # servers' tools reachable under names it never held -- measured, a
-        # `github_get_me` completed -- so the map is now `*: deny` with a
-        # read-only allow-list, and `read` refuses the `mcp:*` patterns the
-        # built-in resource readers ask with. The 21 lines are the
-        # rule's comment and the docstring's record of what was measured
-        # (the escape, its closing, and the two grammar routes that cannot
-        # switch every server off without naming it). Shared-core
-        # classification and the complexity ceilings are unchanged.
+        #
+        # 3126 -> 3176 is sd:1328, which makes Copilot-on-deep-changes the
+        # machine default instead of a per-repository opt-in. Nineteen of the
+        # twenty-one `runner_merge=auto` repositories carry no
+        # `.github/sd-review.json`, so `automatic_deep: false` in the built-in
+        # default meant no Copilot on any of them, and the alternative was
+        # nineteen files saying one thing. The 50 lines are `copilot_policy`
+        # (repository file when it names the key, else `sd.copilot_review`,
+        # else `deep`, with the source named for `--explain`),
+        # `copilot_automatic` (which also keeps `always` off the `skip` tier),
+        # the guard that holds only a file naming `copilot_review` to its
+        # grammar so an absent key inherits, two more report keys, one render
+        # line, and the comments that say why the default carries `None`.
+        # This raise is its own commit, before the one that spends it.
+        # Shared-core classification and the complexity ceilings are
+        # unchanged.
+        #
+        # 3176 -> 3148 is the review of sd:1328 finding that `sd-ship` read
+        # the report's `automatic` verdict back instead of the setting as it
+        # stood at dispatch, so `never` set after a deep review still bought
+        # one. The resolution (`copilot_policy`, `copilot_automatic`) is
+        # policy both lanes need and mechanics of neither, so it moved to
+        # `sd_lib`; the lane keeps the one call and gains the `repository`
+        # report key. Lowered to the measured size in the change that took
+        # the lines out, so the cap does not hide the next spend.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3271,
+            3148,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

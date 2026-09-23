@@ -148,6 +148,13 @@ The installer preserves restrictions and refuses malformed answers. It cannot re
 An explicit instruction to wait overrides it. `ask`, or an absent setting, requires task-specific permission.
 The setting is read by the assistant, not by `sd-ship`: `sd config` validates and stores it, and no tool in `bin/` consults it.
 Ownership, review, CI, protection, and runner gates remain mandatory. This setting starts no background work.
+
+`sd.copilot_review` says when `sd-ship` requests a GitHub Copilot review by itself: `deep` on deep-tier changes only, `always` on every reviewing tier, `never` on none.
+Unset reads `deep`, so every repository gets Copilot on deep changes without a per-repository file.
+A repository's `.github/sd-review.json` `copilot_review.automatic_deep` overrides it when the file names the key; a file that does not name it inherits.
+`sd-review --explain` reports the effective policy and its source (`repository`, `machine config`, `machine default`) under `remote_reviews.copilot`.
+`sd-ship` applies the setting as it stands at dispatch to the tiers the retained passes recorded, so a change takes effect without another review.
+`sd-ship --copilot-review request|skip` still overrides both for one prepare.
 See [the workflow policy](WORKFLOW.md#standing-authorization) for resolution and limits.
 
 ## Daily workflow
@@ -196,6 +203,10 @@ Delivery verifies a full commit and its delivery trailer against the default
 branch before recording completion. Cancelling work requires a reason and
 completes immediately in the database. Neither operation writes a status file
 or creates a bookkeeping pull request.
+
+Parallel sessions and workers follow [Parallel work](WORKFLOW.md#parallel-work):
+one writer per checkout, read-only fan-out, one merge lane, and a budget on
+every worker.
 
 From the writing checkout, `sd writing list`, `sd writing readiness --piece
 YEAR/slug`, and `sd writing stage` share the dashboard's writing controls.

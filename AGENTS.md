@@ -15,6 +15,9 @@ Instructions for AI assistants working in this repository.
   That file is the one statement of the rule and holds the review table every
   review point reads its cap from; this bullet states nothing of its own, so
   there is no second copy to drift.
+- Before dispatching a worker or opening a second checkout, follow
+  [WORKFLOW.md § Parallel work](WORKFLOW.md#parallel-work). That section is
+  the one statement of the rule; this bullet states nothing of its own.
 - `skills/**` holds the one copy of the payload. Nothing renders into this
   repository, so there are no copies to keep synchronized: change the skill and
   you have changed the
@@ -33,6 +36,7 @@ Read each repository's instructions and preserve its existing work before making
 This scope exception does not authorize unrelated work or remove specific approval requirements for destructive actions or upstream Trellis PRs.
 External review uses the operator's standing machine policy, with local restrictions and existing spending limits.
 Read `sd config get sd.external_reviews` and `sd config get sd.assistant_merge`; these settings are never granted by installation.
+`sd.copilot_review` is the one core setting with a default: unset reads `deep`, one Copilot review on deep-tier changes and none otherwise; a repository's `.github/sd-review.json` overrides it.
 `sd.assistant_merge` is read by the assistant, not by `sd-ship`; the tool merges whatever the gates let through, and the setting decides whether to ask it to.
 With `sd.assistant_merge` at `controlled`, finish active in-scope PR work through existing gates unless the user explicitly says wait.
 Shared contributors do not revoke user permission, but existing ownership gates still apply; do not bypass a refusal.
