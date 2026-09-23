@@ -574,11 +574,35 @@ class LineBudgetTests(unittest.TestCase):
         # `sd_lib`; the lane keeps the one call and gains the `repository`
         # report key. Lowered to the measured size in the change that took
         # the lines out, so the cap does not hide the next spend.
+        #
+        # 3148 -> 3293 admits `opencode-json`, a fourth reader (sd:1329), and
+        # with it a seventh lane member: `bin/sd_opencode.py` enters because
+        # `bin/sd-review` imports it, and the lane is that import closure.
+        # It belongs inside the lane rather than beside it because a reader
+        # is review mechanics and nothing else -- the argv that confines the
+        # child, the inline agent whose permission map is what refuses a
+        # write or an inherited MCP tool, and the read-back that turns a
+        # stream into findings. A wrong reader is a wrong verdict or an
+        # unconfined child, which is exactly what this ratchet keeps small
+        # enough to read whole; `sd-ship` never launches a reviewer, so none
+        # of it is shared core. The 145 lines are 8 in `bin/sd-review` --
+        # the import, two tuple entries, three two-line dispatch branches --
+        # and 137 in the module: the builders, the default-deny map
+        # (`*: deny`, a read-only allow-list, `read` refusing `mcp:*`), the
+        # NDJSON read-back, and the docstring that records what was measured
+        # on 1.18.30 (a by-name denylist let `github_get_me` run; under `*`
+        # no server tool is offered; the resource readers fall to `mcp:*`;
+        # a write, a bash command and a read outside the project refused)
+        # and what stays open (the servers still connect, and no event names
+        # the model that answered). Raised to the measured size of the
+        # merged tree, in its own commit after the merge that spent it.
+        # Shared-core classification and the complexity ceilings are
+        # unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3148,
+            3293,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
