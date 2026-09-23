@@ -55,9 +55,10 @@ USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pi
                 mirror, unless SD_PUBLISH_FROM_WORKTREE=1 is set
   publish       the registration and queueing half on its own, without
                 re-rendering
-  init-hook     install the hook that re-renders this repo after a commit, a
-                merge (so a pull) or a branch checkout changes a document;
-                upgrades an earlier install of its own
+  init-hook     install the hook that re-renders this repo, under all three
+                triggers at once -- post-commit, post-merge and post-checkout,
+                so a pull and a branch switch render too; upgrades an earlier
+                install of its own
   delivered <request file name> <fingerprint>
                 the drain's last step: record that generation of the request
                 as delivered and remove the request only while it is still

@@ -1434,16 +1434,27 @@ class HookTests(unittest.TestCase):
                   for n in ("post-commit", "post-merge", "post-checkout")}
         result = self.init_hook()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.count("already installed"), 3, result.stdout)
+        # One line naming every target, not one line per target: the merge
+        # took sd:1353's installer, which reports the set it left alone.
+        self.assertIn("already installed", result.stdout)
+        for name in ("post-commit", "post-merge", "post-checkout"):
+            self.assertIn(name, result.stdout)
         for name, stamp in stamps.items():
             self.assertEqual((self.hooks / name).stat().st_mtime_ns, stamp, name)
 
     def test_a_hook_this_kit_wrote_earlier_is_upgraded(self) -> None:
-        """The marker line is what says the file is ours to replace."""
+        """A released body, byte for byte, is what says the file is ours.
+
+        This branch proposed a marker line -- any file carrying
+        `Installed by ...init-hook` is ours to rewrite --
+        and the merge with sd:1353 took that branch's stricter test instead,
+        `SUPERSEDED_HOOKS`, because a marker also claims a copy of our hook
+        that somebody has edited. So the file installed here is a body this
+        pack actually released rather than a hand-written stand-in, which is
+        the case the weaker test could not tell apart from the stronger one.
+        """
         self.hooks.mkdir(exist_ok=True)
-        old = ("#!/usr/bin/env python3\n"
-               "# Installed by `sd-research-kit init-hook`. Post-commit and not pre-commit.\n"
-               "import sys\nsys.exit(0)\n")
+        old = PUBLISH.SUPERSEDED_HOOKS[0]
         (self.hooks / "post-commit").write_text(old, encoding="utf-8")
         result = self.init_hook()
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -1472,10 +1483,24 @@ class HookTests(unittest.TestCase):
         self.git("checkout", "-q", "feature")
         self.assertEqual(self.calls(), ["%s render" % self.repo.resolve()])
 
-    def test_a_checkout_that_changes_no_document_stays_quiet(self) -> None:
+    def test_a_checkout_that_moved_no_branch_renders(self) -> None:
+        """Reversed by the merge with sd:1353, deliberately.
+
+        This branch stayed quiet here, on the ground that nothing moved. That
+        reads the tree against `HEAD`, and what a mirror needs to know is
+        whether the tree differs from what was *published*. The two agree only
+        while the published copy tracks `HEAD`, which `git checkout <rev> --
+        doc.md` is exactly what stops: revert a page, publish the older text,
+        restore `HEAD`, and a diff-shaped guard sees a clean tree and freezes
+        the reverted text in the mirror for good. `git checkout -b` falls in
+        the same arm and renders for the same reason -- a branch that did not
+        move is no more a statement about the published copy than a clean tree
+        is. A render that finds nothing changed is cheap; a mirror holding text
+        nobody can see is not.
+        """
         self.assertEqual(self.init_hook().returncode, 0)
         self.git("checkout", "-q", "-b", "same-commit")
-        self.assertEqual(self.calls(), [])
+        self.assertEqual(self.calls(), ["%s render" % self.repo.resolve()])
 
     def test_a_commit_renders_and_the_skip_variable_still_skips(self) -> None:
         self.assertEqual(self.init_hook().returncode, 0)
@@ -1488,7 +1513,15 @@ class HookTests(unittest.TestCase):
 
     def test_a_worktree_add_does_not_render(self) -> None:
         """`git worktree add` runs post-checkout with no previous HEAD. A
-        render there would publish a checkout nobody has committed to yet."""
+        render there would publish a checkout nobody has committed to yet.
+
+        This test is older than the guard it now covers. It passed under the
+        merge commit too, by a different route: `git diff 0000000 <new>`
+        failed and the hook's error arm returned 0. Same answer, but that arm
+        returns 0 for any failure of that command, so the day something else
+        throws in it a fresh clone stops rendering and this goes on passing.
+        `diff_argv` says it now.
+        """
         self.assertEqual(self.init_hook().returncode, 0)
         self.git("worktree", "add", "-q", str(self.root / "wt-y"), "-b", "y")
         self.assertEqual(self.calls(), [])

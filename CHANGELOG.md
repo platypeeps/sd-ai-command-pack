@@ -297,6 +297,54 @@
   spent once. Only the point where the automatic allowance runs out moved,
   from the second pass to the fifth.
 
+### Fixed
+
+- **`sd-research-kit init-hook` installs the re-render hook under every
+  trigger.** The publication contract promises a render after a commit, a
+  merge and a checkout; the installer wrote `post-commit` alone, so a pull or
+  a branch switch left `build/` holding the other tree's render -- stale, and
+  looking current. It now writes one source under `post-commit`, `post-merge`
+  and `post-checkout`, and the hook reads its own `argv[0]` to know which one
+  fired. Each asks git a different question, because the post-commit one is
+  unusable elsewhere: `diff-tree --no-commit-id -r HEAD` prints nothing at all
+  for a merge commit, and a checkout's HEAD says nothing about what the
+  checkout moved. So a merge is measured against `ORIG_HEAD`, and a branch
+  checkout against the two revisions git passes it. A checkout that moved no
+  branch -- `git checkout <rev> -- doc.md`, how a page is reverted -- has no
+  range, and renders without asking anything: it changes a document without
+  HEAD moving, which is precisely the render the mirrors exist for.
+
+  Unconditional and not measured against the working tree, which is the guard
+  that looks right and is not. It asks whether the tree differs from `HEAD`,
+  and a mirror needs to know whether the tree differs from what was
+  published. Those agree only while the published copy tracks `HEAD`, and a
+  file checkout is what breaks that: revert a page and the older text is
+  published, restore `HEAD` and the tree is clean again, so a diff-shaped
+  guard sees nothing to do and the mirror keeps the reverted text for good. A
+  render that finds nothing changed is cheap; a second record of what was
+  published would not be.
+
+  The install is all or nothing. Every path is inspected before any is
+  written, so a foreign file at one of them refuses by name and leaves the
+  repository untouched, rather than installing the two triggers it can. A
+  repository rendering on a commit and silently not on a pull is worse than
+  one with no hook: `build/` then looks maintained. A partial install from an
+  earlier run is completed. `SD_SKIP_RENDER=1` still skips, for all three.
+
+  **An existing installation upgrades in place.** Every repository that has
+  this hook has an earlier body on `post-commit` alone, and a refusal to
+  clobber it would have left this fix reaching only installations that do not
+  exist yet. `init-hook` now recognises each body this pack has released,
+  byte for byte, and replaces it. Exact bodies and not a "looks like ours"
+  test: a file one byte off one of them is still somebody else's, and is
+  still refused with nothing written.
+
+  The list carries the bodies this change itself replaced as well as the two
+  released ones, because a branch owns the predecessors it creates: every
+  revision of it is one somebody can check out and install from, and all of
+  them are history once it lands. A body left off is an installation the verb
+  refuses for the rest of its life.
+
 ## 1.0.0 - 2026-09-01
 
 ### Changed

@@ -15,6 +15,7 @@ that would silently regress is the CSS going missing from the rendered page.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.machinery
 import importlib.util
 import io
@@ -56,6 +57,21 @@ def load_kit():
     sys.modules[name] = module
     loader.exec_module(module)
     return module
+
+
+def load_publish():
+    """Load `sd_research_publish` in process, for the two hook constants.
+
+    `bin/` is the script directory when the kit itself runs, which is how that
+    module reaches `sd_lib`; loaded from a test there is no such directory on
+    the path, so it is put there once. `load_kit` on its own is enough for a
+    module with no `bin/` sibling to import.
+    """
+
+    here = str(REPO_ROOT / "bin")
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    return load_kit().load("sd_research_publish")
 
 
 def run(*args, cwd=None):
@@ -928,6 +944,398 @@ class BuildFreshness(unittest.TestCase):
         publish = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(publish)
         self.assertEqual(review.DASHBOARD_DIR, publish.DASHBOARD_DIR)
+
+
+class InitHookInstallTests(unittest.TestCase):
+    """`init-hook` installs one source under every trigger, or none at all.
+
+    The contract promises a render after a commit, a merge and a checkout
+    (`skills/_shared/references/publication-contract.md`), and until sd:1353
+    the installer wrote `post-commit` alone -- so a pull or a branch switch
+    left `build/` holding the other tree's render, looking current.
+
+    All-or-nothing is the other half. A repository installed on one trigger
+    and not the others is worse than one with no hook: it renders often enough
+    that nobody notices the times it does not.
+    """
+
+    TRIGGERS = ("post-commit", "post-merge", "post-checkout")
+
+    def make_repo(self, tmp: Path) -> Path:
+        (tmp / "research.conf.py").write_text('PROJECT = "probe"\nDOCS = []\n')
+        subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+        return tmp
+
+    def hooks(self, repo: Path) -> Path:
+        return repo / ".git" / "hooks"
+
+    def test_every_trigger_is_written_executable_and_identical(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw))
+            result = run("init-hook", cwd=repo)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            written = {}
+            for trigger in self.TRIGGERS:
+                path = self.hooks(repo) / trigger
+                self.assertTrue(path.is_file(), f"{trigger} was not written")
+                self.assertTrue(os.access(path, os.X_OK), f"{trigger} is not executable")
+                written[trigger] = path.read_text(encoding="utf-8")
+            self.assertEqual(len(set(written.values())), 1,
+                             "the three triggers hold different sources")
+
+    def test_a_foreign_file_refuses_and_writes_nothing(self) -> None:
+        """The refusal leaves the repository exactly as it found it."""
+
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw))
+            foreign = self.hooks(repo) / "post-merge"
+            foreign.parent.mkdir(parents=True, exist_ok=True)
+            foreign.write_text("#!/bin/sh\necho somebody else's hook\n")
+            result = run("init-hook", cwd=repo)
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("post-merge", result.stderr)
+            self.assertIn("somebody else", foreign.read_text(encoding="utf-8"))
+            for trigger in ("post-commit", "post-checkout"):
+                self.assertFalse(
+                    (self.hooks(repo) / trigger).exists(),
+                    f"{trigger} was written although the install was refused")
+
+    def test_a_partial_install_is_completed(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw))
+            self.assertEqual(run("init-hook", cwd=repo).returncode, 0)
+            (self.hooks(repo) / "post-checkout").unlink()
+            result = run("init-hook", cwd=repo)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("post-checkout", result.stdout)
+            self.assertTrue((self.hooks(repo) / "post-checkout").is_file())
+
+    def test_a_complete_install_reports_itself_and_writes_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw))
+            self.assertEqual(run("init-hook", cwd=repo).returncode, 0)
+            stamps = {t: (self.hooks(repo) / t).stat().st_mtime_ns
+                      for t in self.TRIGGERS}
+            result = run("init-hook", cwd=repo)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("already installed", result.stdout)
+            for trigger, stamp in stamps.items():
+                self.assertEqual((self.hooks(repo) / trigger).stat().st_mtime_ns,
+                                 stamp, f"{trigger} was rewritten")
+
+    def install(self, repo: Path, trigger: str, body: str) -> Path:
+        path = self.hooks(repo) / trigger
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+        path.chmod(0o755)
+        return path
+
+    def test_an_installation_of_an_earlier_body_is_upgraded(self) -> None:
+        """The population this fix has to reach, and the one it nearly missed.
+
+        Every repository that has this hook today has an earlier body on
+        `post-commit` alone. Read as somebody else's file it is refused, and
+        then `init-hook` upgrades nobody: the only installations that could
+        ever hold three triggers would be the ones that do not exist yet.
+        """
+
+        module = load_publish()
+        for index, earlier in enumerate(module.SUPERSEDED_HOOKS):
+            with self.subTest(body=index):
+                with tempfile.TemporaryDirectory() as raw:
+                    repo = self.make_repo(Path(raw))
+                    self.install(repo, "post-commit", earlier)
+                    result = run("init-hook", cwd=repo)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("upgraded", result.stdout)
+                    for trigger in self.TRIGGERS:
+                        path = self.hooks(repo) / trigger
+                        self.assertTrue(path.is_file(), f"{trigger} was not written")
+                        self.assertTrue(os.access(path, os.X_OK),
+                                        f"{trigger} is not executable")
+                        self.assertEqual(path.read_text(encoding="utf-8"),
+                                         module.HOOK,
+                                         f"{trigger} still holds the earlier body")
+
+    def test_a_body_one_byte_off_ours_is_foreign_and_writes_nothing(self) -> None:
+        """What keeps the migration from becoming a licence to clobber.
+
+        The near miss is the case worth pinning: a file that is an earlier
+        body with one character changed is not a file this pack wrote, and a
+        test that only used an obviously foreign script could not tell a byte
+        comparison from a heuristic.
+        """
+
+        module = load_publish()
+        # Through `init-hook`, which every body carries and every body will:
+        # it is the phrase that names the verb that writes the file. A probe
+        # keyed on a word only some bodies contain -- `build/` was, until
+        # `9ff7c73c` removed the folder -- goes vacuous on the day a new body
+        # arrives without it, and a probe that stops probing while still
+        # passing is worse than no probe.
+        nearly = module.SUPERSEDED_HOOKS[-1].replace("init-hook", "init- hook", 1)
+        self.assertIn("init-hook", module.SUPERSEDED_HOOKS[-1])
+        self.assertNotEqual(nearly, module.SUPERSEDED_HOOKS[-1])
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw))
+            held = self.install(repo, "post-commit", nearly)
+            result = run("init-hook", cwd=repo)
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("post-commit", result.stderr)
+            self.assertEqual(held.read_text(encoding="utf-8"), nearly,
+                             "a foreign post-commit hook was overwritten")
+            for trigger in ("post-merge", "post-checkout"):
+                self.assertFalse(
+                    (self.hooks(repo) / trigger).exists(),
+                    f"{trigger} was written although the install was refused")
+
+    def test_every_superseded_body_is_one_this_pack_released(self) -> None:
+        """The list is a claim about history, so it is checked against history.
+
+        These digests are of the `HOOK` value at every revision that has
+        carried one, read out with
+        `git rev-list --all --full-history -- bin/sd_research_publish.py`.
+        Recorded rather than recomputed from the file: the point is to catch
+        the day a reformat, a stripped trailing space or a tidy-up edits a
+        body here, which would leave the constant self-consistent and stop it
+        matching the bytes on any machine.
+
+        A commit that changes `HOOK` adds the body it replaces, and this set
+        is where it is noticed if it does not. The two from this branch are
+        here because a branch owns the predecessors it creates: a review ran
+        the installer against the base revision's own hook and it was refused.
+        The fifth is sd:1352's, which this branch merges rather than wrote: a
+        merge inherits the other branch's predecessors, because its revisions
+        become checkouts somebody can run `init-hook` from here. The sixth is
+        the merge commit's own body.
+
+        "Released" is the tempting reading of this set and it is the wrong
+        one. Three of these six name commits that never reached `main`. What
+        puts a body on a machine is a checkout, and an ancestor commit is a
+        checkout.
+        """
+
+        module = load_publish()
+        released = {
+            # `05d4b9d3`, "Publish finished documents to the dashboard by
+            # default (#1089)" -- the revision that added the hook.
+            "ba26cc1e36a2b84455a83be8f620118c900af468c02661ad9ff9177fad1bb95c",
+            # `fa5f5576`, "publish: add Google Drive as a destination, on
+            # Notion's terms (#1091)", still the body at `47d4d147`.
+            "01f8e364291b382813e7eee648ca36033880feca5b7f7b9afcb61a0ea1f9223b",
+            # `4d20574b`, this branch: three triggers, one source.
+            "6d81532bca2b30dabfdedee4a5bd022c8eb0f181599d0580753b825d665cfb89",
+            # `dd14d501`, this branch: a file checkout measured against the
+            # working tree, replaced by `8b575695`.
+            "aae11a2a3b271585039918aad528278ff5aebf617dd32a1ca52947d5114b7a3e",
+            # `e65d1ec4`, sd:1352's branch, merged into this one: the same
+            # three triggers reached independently. Its shape is gone from the
+            # merged tree and its body is not, because those revisions are
+            # ancestors here and a checkout of one can install it.
+            "aac6c83677dc4cf11b778e012afdec33c126107efd34935ac2c1ca6de6271b0c",
+            # This branch's merge commit, superseded by the commit that gave
+            # the hook `docs/dashboard/` and an explicit all-zeros guard.
+            "8f3224d961a7d0394c47648684d9e5ad5c6ce85b7f563917e8f9e6b76881afb7",
+        }
+        digests = {hashlib.sha256(body.encode("utf-8")).hexdigest()
+                   for body in module.SUPERSEDED_HOOKS}
+        self.assertEqual(digests, released)
+        self.assertNotIn(hashlib.sha256(module.HOOK.encode("utf-8")).hexdigest(),
+                         released, "the current body is listed as superseded")
+
+
+class HookTriggerTests(unittest.TestCase):
+    """Each trigger asks git its own question about what moved.
+
+    Copying the post-commit body under the other two names would install a
+    hook that never fires: `git diff-tree --no-commit-id -r HEAD` prints
+    nothing at all for a merge commit, and a checkout's HEAD says nothing
+    about what the checkout moved. These run the installed files the way git
+    runs them -- by name, with git's own argv -- rather than reading the
+    source for the strings.
+    """
+
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.repo = self.root / "repo"
+        self.repo.mkdir()
+        (self.repo / "research.conf.py").write_text('PROJECT = "probe"\nDOCS = []\n')
+        self.git("init", "-q")
+        self.git("config", "user.email", "probe@example.invalid")
+        self.git("config", "user.name", "probe")
+        self.git("config", "commit.gpgsign", "false")
+        (self.repo / "doc.md").write_text("one\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "first")
+        installed = run("init-hook", cwd=self.repo)
+        self.assertEqual(installed.returncode, 0, installed.stderr)
+
+        # The render is a stub on PATH that records its argv. The hook finds
+        # the kit with `shutil.which`, so this is the whole seam, and the real
+        # kit is never run against a two-file temporary repository.
+        self.stub = self.root / "stub"
+        self.stub.mkdir()
+        self.marker = self.root / "rendered"
+        kit = self.stub / "sd-research-kit"
+        kit.write_text(
+            "#!/usr/bin/env python3\n"
+            "import pathlib, sys\n"
+            "with pathlib.Path(%r).open('a') as handle:\n"
+            "    handle.write(' '.join(sys.argv[1:]) + chr(10))\n"
+            % str(self.marker))
+        kit.chmod(0o755)
+
+    def git(self, *args: str) -> subprocess.CompletedProcess:
+        # Every git call here runs with the hook switched off: the hooks are
+        # installed in this repository, and a `git merge` that rendered on its
+        # own would make the assertions below about git's run, not the hook's.
+        return subprocess.run(
+            ["git", *args], cwd=self.repo, check=True,
+            capture_output=True, text=True,
+            env=dict(os.environ, SD_SKIP_RENDER="1"),
+        )
+
+    def sha(self, rev: str = "HEAD") -> str:
+        return self.git("rev-parse", rev).stdout.strip()
+
+    def fire(self, trigger: str, *args: str, skip: bool = False):
+        hook = self.repo / ".git" / "hooks" / trigger
+        env = dict(os.environ,
+                   PATH=os.pathsep.join([str(self.stub), os.environ["PATH"]]))
+        env.pop("SD_SKIP_RENDER", None)
+        if skip:
+            env["SD_SKIP_RENDER"] = "1"
+        return subprocess.run([sys.executable, str(hook), *args],
+                              cwd=self.repo, env=env,
+                              capture_output=True, text=True)
+
+    def renders(self) -> list[str]:
+        if not self.marker.exists():
+            return []
+        return self.marker.read_text(encoding="utf-8").split()
+
+    def a_second_commit(self) -> None:
+        (self.repo / "doc.md").write_text("two\n")
+        self.git("commit", "-qam", "second")
+
+    def test_post_commit_renders_the_commit_that_carried_a_document(self) -> None:
+        self.a_second_commit()
+        result = self.fire("post-commit")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.renders(), ["render"])
+
+    def test_post_merge_reads_orig_head_and_not_the_merge_commit(self) -> None:
+        """The defect a copied post-commit body would have.
+
+        A merge commit has two parents, so `diff-tree --no-commit-id -r HEAD`
+        suppresses the combined diff and prints nothing -- asserted here, so
+        that a future edit back to that question fails rather than going
+        quiet. `ORIG_HEAD` is where this branch stood before the merge.
+        """
+
+        base = self.sha()
+        self.git("checkout", "-q", "-b", "side")
+        (self.repo / "other.md").write_text("side\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "on the side")
+        self.git("checkout", "-q", "-")
+        self.a_second_commit()
+        self.git("merge", "-q", "--no-ff", "--no-edit", "side")
+        self.assertNotEqual(self.sha(), base)
+        empty = self.git("diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
+        self.assertEqual(empty.stdout.strip(), "",
+                         "diff-tree named files for a merge commit; the premise moved")
+        result = self.fire("post-merge")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.renders(), ["render"])
+
+    def test_post_checkout_renders_a_branch_switch_that_moved_a_document(self) -> None:
+        before = self.sha()
+        self.a_second_commit()
+        result = self.fire("post-checkout", before, self.sha(), "1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.renders(), ["render"])
+
+    def test_post_checkout_renders_a_file_checkout(self) -> None:
+        """A document can change without HEAD moving, and usually on purpose.
+
+        `git checkout <rev> -- doc.md` is how a page is reverted. git fires
+        post-checkout with flag 0 and the same revision twice, so there is no
+        range to ask about -- and skipping on that ground leaves the mirror
+        holding the text the checkout just took away. The argv here is git's
+        own, read off a real file checkout.
+        """
+
+        self.a_second_commit()
+        here = self.sha()
+        self.git("checkout", "-q", "HEAD~1", "--", "doc.md")
+        self.assertEqual((self.repo / "doc.md").read_text(), "one\n")
+        self.assertEqual(self.sha(), here, "the file checkout moved HEAD")
+        result = self.fire("post-checkout", here, here, "0")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.renders(), ["render"])
+
+    def test_restoring_head_after_a_revert_renders_again(self) -> None:
+        """The clean tree that used to mean "nothing to do".
+
+        Two file checkouts in a row. The first publishes the older text, so
+        the published copy is now behind HEAD. The second restores HEAD and
+        leaves a tree with no diff against it -- and a guard reading that diff
+        concludes there is nothing to render, which freezes the reverted text
+        in the mirror for good. A clean tree is a statement about HEAD, and
+        the mirror is not a copy of HEAD.
+        """
+
+        self.a_second_commit()
+        here = self.sha()
+        self.git("checkout", "-q", "HEAD~1", "--", "doc.md")
+        self.assertEqual(self.fire("post-checkout", here, here, "0").returncode, 0)
+        self.git("checkout", "-q", "HEAD", "--", "doc.md")
+        self.assertEqual((self.repo / "doc.md").read_text(), "two\n")
+        self.assertEqual(
+            self.git("diff", "--name-only", "HEAD").stdout.strip(), "",
+            "the restored tree still differs from HEAD; the premise moved")
+        result = self.fire("post-checkout", here, here, "0")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.renders(), ["render", "render"],
+                         "the render that puts HEAD's text back never ran")
+
+    def test_post_checkout_renders_when_no_branch_moved(self) -> None:
+        """`git checkout <the branch already checked out>`, or `-b`.
+
+        Equal revisions leave no range, and this falls into the same arm as a
+        file checkout and renders. A branch that did not move is not a
+        statement that the published copy matches it, for the same reason a
+        clean tree is not; keeping a separate answer for it would be the
+        branch-identity special case coming back in a third costume.
+        """
+
+        self.a_second_commit()
+        here = self.sha()
+        result = self.fire("post-checkout", here, here, "1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.renders(), ["render"])
+
+    def test_an_unrecognised_trigger_renders_nothing(self) -> None:
+        """A name nobody installed this under is not a guess to make."""
+
+        self.a_second_commit()
+        foreign = self.repo / ".git" / "hooks" / "post-rewrite"
+        foreign.write_bytes((self.repo / ".git" / "hooks" / "post-commit").read_bytes())
+        foreign.chmod(0o755)
+        result = self.fire("post-rewrite")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.renders(), [])
+
+    def test_sd_skip_render_skips_every_trigger(self) -> None:
+        self.a_second_commit()
+        before = self.sha("HEAD~1")
+        self.assertEqual(self.fire("post-commit", skip=True).returncode, 0)
+        self.assertEqual(
+            self.fire("post-checkout", before, self.sha(), "1", skip=True).returncode, 0)
+        self.assertEqual(self.renders(), [])
 
 
 if __name__ == "__main__":
