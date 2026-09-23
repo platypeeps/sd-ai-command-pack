@@ -74,6 +74,7 @@ REACHED_WITH_THE_LIBRARY = {
     "sd-ship::Ship.merge_authority": "a Ship exists only after main() called the helper",
     "sd-ship::Ship.note_demotion": "a Ship exists only after main() called the helper",
     "sd-ship::Ship.reconcile": "a Ship exists only after main() called the helper",
+    "sd-ship::Ship.row_merges": "a Ship exists only after main() called the helper",
     # Handed that same `Ship` by `Ship.adjudicate`.
     "sd_ship_dispositions.py::adjudicate": "called with a Ship, built after the helper",
     # Only called from `_register`, after `_register_library(sd_db)`.

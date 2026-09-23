@@ -399,6 +399,17 @@ def machine_config(path: pathlib.Path | None = None) -> dict[str, object]:
     return loaded
 
 
+#: The three questions `remote_permits_full` puts, named so a reader can tell
+#: *which* one answered no without reading the sentence it wrote. `sd-ship`'s
+#: merge gate is that reader (sd:1347): the repository row is the operator's
+#: standing decision about co-ownership and about nothing else, so `COOWNED`
+#: is the one answer a row may override. A name is not a message: the wording
+#: of `reason` is free to change without moving that gate.
+ADMIN_QUESTION = "admin"
+FORK_QUESTION = "fork"
+COOWNED_QUESTION = "coowned"
+
+
 @dataclass(frozen=True)
 class RemoteAnswer:
     """What the remote said when asked whether this run may be `full`. Not a
@@ -415,6 +426,30 @@ class RemoteAnswer:
     answered: bool
     #: Empty when `full`; otherwise the sentence naming what said no.
     reason: str = ""
+    #: Which of the three questions answered no: one of the `*_QUESTION` words.
+    #: Empty when `full`, and empty when `answered` is false -- a question that
+    #: could not be put did not answer, so it names none. That is what keeps
+    #: `coownership_only` from reading an unanswerable remote as co-ownership.
+    question: str = ""
+    #: The other logins the remote says may push, when co-ownership is what
+    #: said no; empty everywhere else. The names are already in `reason`, but
+    #: a receipt that has to list them should not parse a sentence to do it.
+    others: tuple[str, ...] = ()
+
+
+def coownership_only(answer: "RemoteAnswer | None") -> bool:
+    """Whether co-ownership is the *whole* of what stands between this remote
+    and `full`: the repository is one you administer, it is not a fork, and
+    somebody else may push to it.
+
+    The positive form of the test `sd-ship`'s merge gate needs, written here
+    so no caller matches on the refusal's wording. It is deliberately false
+    for `answered=False`: a question nobody could put is not an answer about
+    co-ownership, and `remote_permits_full`'s rule that an unanswerable query
+    is never a permission has to survive this gate as well.
+    """
+    return (answer is not None and not answer.full and answer.answered
+            and answer.question == COOWNED_QUESTION)
 
 
 def gh_api(endpoint: str, root: pathlib.Path) -> tuple[Any, str]:
@@ -471,11 +506,11 @@ def remote_permits_full(root: pathlib.Path, *, ask: Asker = gh_api) -> RemoteAns
         return RemoteAnswer(False, False, f"the remote did not say what you may do: {error or 'no permissions'}")
     name = str(repo.get("full_name") or "the remote")
     if not rights.get("admin"):
-        return RemoteAnswer(False, True, f"you do not administer {name}")
+        return RemoteAnswer(False, True, f"you do not administer {name}", ADMIN_QUESTION)
     if repo.get("fork"):
         parent = repo.get("parent")
         upstream = parent.get("full_name") if isinstance(parent, dict) else None
-        return RemoteAnswer(False, True, f"{name} is a fork of {upstream or 'another repository'}")
+        return RemoteAnswer(False, True, f"{name} is a fork of {upstream or 'another repository'}", FORK_QUESTION)
 
     people, error = ask(COLLABORATOR_QUERY, root)
     if not isinstance(people, list):
@@ -496,7 +531,8 @@ def remote_permits_full(root: pathlib.Path, *, ask: Asker = gh_api) -> RemoteAns
         if who != login and rights.get("push"):
             others.append(who)
     if others:
-        return RemoteAnswer(False, True, f"{name} lets {', '.join(sorted(others))} push too")
+        return RemoteAnswer(False, True, f"{name} lets {', '.join(sorted(others))} push too",
+                            COOWNED_QUESTION, tuple(sorted(others)))
     return RemoteAnswer(full=True, answered=True)
 
 

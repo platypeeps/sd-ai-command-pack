@@ -24,6 +24,7 @@ from urllib.parse import parse_qs, urlsplit
 import sd_db
 from sd_db import connect, create_assignment, create_item, initialise, upsert_repo
 from sd_db import ship as receipts
+from sd_db.repos import set_runner_merge
 from sd_db.testing.github import GitHubDouble
 from sd_db.testing.remote import FixtureRemote, RemoteRefusal, _git
 
@@ -315,6 +316,22 @@ roles:
         _git(self.root, "add", str(policy.relative_to(self.root)))
         _git(self.root, "commit", "-m", "select deep remote review\n\nAuthored-with: human")
 
+    def disable_automatic_copilot(self):
+        """The same file, opting the repository out of paid Copilot review.
+
+        `sensitive` still escalates `src.py` to the deep tier, so the tier is
+        never what stops the request in the test below -- the repository's own
+        word is.
+        """
+        policy = self.root / ".github/sd-review.json"
+        policy.parent.mkdir(parents=True, exist_ok=True)
+        policy.write_text(json.dumps({
+            "sensitive": ["src.py"],
+            "copilot_review": {"automatic_deep": False},
+        }))
+        _git(self.root, "add", str(policy.relative_to(self.root)))
+        _git(self.root, "commit", "-m", "opt out of paid remote review\n\nAuthored-with: human")
+
     def cli(self, command, *extra):
         return subprocess.run([sys.executable, str(ROOT / "bin/sd-ship"), command, "--item", str(self.item), "--json", *extra],
                               cwd=self.root, env=self.environment, text=True, capture_output=True, timeout=30)
@@ -568,6 +585,50 @@ roles:
         prepared = self.prepare()
         self.assertEqual(prepared["copilot_review"]["selection"], "automatic")
         self.assertEqual(len(self.double.copilot_requests), 1)
+
+    def test_a_silent_pass_cannot_outvote_a_later_repository_opt_out(self):
+        """sd:1369, the reviewer's three-step sequence against committed source.
+
+        Review once while the repository names no Copilot key, commit
+        `automatic_deep: false` and verify, then set the machine to `always`.
+        The first pass recorded `repository: None`, which falls through to the
+        machine setting *as it stands now*; the second recorded the file's
+        explicit `False`. Resolving the policy per pass and taking `any()`
+        let the first outvote the second, and a paid Copilot request fired
+        against a repository that had said no.
+        """
+        self.machine_copilot("never")
+        self.operation().review(_git(self.root, "rev-parse", "HEAD"))
+        silent = self.operation().state["passes"][-1]["report"]["remote_reviews"]["copilot"]
+        self.assertIsNone(silent["repository"])
+        self.disable_automatic_copilot()
+        self.operation().review(_git(self.root, "rev-parse", "HEAD"))
+        state = self.operation().state
+        opted_out = state["passes"][-1]["report"]["remote_reviews"]["copilot"]
+        self.assertIs(opted_out["repository"], False)
+        self.assertEqual(len(state["passes"]), 2, "both passes have to be retained")
+        self.machine_copilot("always")
+        prepared = self.prepare()
+        self.assertEqual(prepared["copilot_review"]["decision"], "not_selected")
+        self.assertEqual(self.double.copilot_requests, [])
+
+    def test_the_repository_word_is_read_from_the_latest_pass_that_carries_it(self):
+        """The converse of the opt-out, and the reason `latest` rather than
+        `any no wins`: a file that dropped `automatic_deep` since an earlier
+        pass hands the question back to the machine setting, and a pass from
+        before the key never speaks for the repository at all."""
+        def recorded(repository):
+            return {"report": {"route": {"tier": "deep", "depth": 1},
+                               "remote_reviews": {"copilot": {"repository": repository}}}}
+        legacy = {"report": {"route": {"tier": "deep", "depth": 1},
+                             "remote_reviews": {"copilot": {"automatic": True}}}}
+        self.assertIs(ship.Ship.copilot_repository_now([recorded(None), recorded(False)]), False)
+        self.assertIsNone(ship.Ship.copilot_repository_now([recorded(False), recorded(None)]))
+        self.assertIs(ship.Ship.copilot_repository_now([recorded(False), legacy]), False)
+        self.assertIsNone(ship.Ship.copilot_repository_now([legacy]))
+        self.machine_copilot("always")
+        self.assertFalse(ship.Ship.copilot_selected([recorded(None), recorded(False)]))
+        self.assertTrue(ship.Ship.copilot_selected([recorded(False), recorded(None)]))
 
     def test_explicit_copilot_review_is_idempotent_while_the_request_is_present(self):
         first = self.prepare("--copilot-review", "request")
@@ -1240,6 +1301,78 @@ roles:
         self.assertEqual(_git(self.root, "branch", "--show-current"), "topic")
         self.assertTrue(self.root.exists())
 
+    def test_a_coowned_remote_merges_when_the_repository_row_says_auto(self):
+        """sd:1347 -- the defect, end to end: a merge that used to be impossible.
+
+        `sd-ship merge` refused sd:1337 in `answerbook/mezmo_benchmark` with
+        "lets adrianfurlong, ... push too" -- repository ownership, asked at
+        merge time, and its third question is false of every co-authored
+        repository. The row said `auto` and nothing read it, so the Mezmo lane
+        ended at `ready_to_send` and a human merged through the API by hand.
+
+        Here the same remote names a second collaborator, the row says `auto`,
+        and the merge lands. The receipt has to say why: a guard was loosened,
+        and a reader must be able to tell this from a merge this account owned
+        outright, without going back to the remote to find out who else may
+        push.
+        """
+
+        self.prepare()
+        self.remote.collaborators = [{"login": "fixture", "permissions": {"push": True}},
+                                     {"login": "someone", "permissions": {"push": True}}]
+        result = self.merge()
+        self.assertEqual(result["phase"], "merged")
+        authority = result["row_authorized_merge"]
+        self.assertEqual(authority["runner_merge"], "auto")
+        self.assertEqual(authority["other_pushers"], ["someone"])
+        self.assertIn("someone", authority["remote_said"])
+        self.assertEqual(authority["repository"], ship.slug(self.remote_url))
+        # And the same sentence when a separate process reconciles the receipt.
+        self.assertEqual(self.operation("reconcile").reconcile()["row_authorized_merge"], authority)
+
+    def test_a_merge_this_account_owns_outright_claims_no_row_authority(self):
+        """The regression guard: three yeses consult no row and claim none."""
+
+        self.prepare()
+        result = self.merge()
+        self.assertEqual(result["phase"], "merged")
+        self.assertNotIn("row_authorized_merge", result)
+
+    def test_an_attempt_that_died_after_ownership_authorizes_no_later_merge(self):
+        """Durable authority describes the merge dispatched, not the attempt allowed.
+
+        Ownership clearing is not merging. CI, the review gate and the
+        protection re-read all run after it and any of them can refuse -- on
+        2026-09-22 both branches in flight came back blocking, so this is the
+        ordinary case and not a corner. Recording the authority where the
+        answer is read leaves it in the receipt of an attempt that never
+        merged, and nothing on the ownership-only path takes it back: the next
+        merge then reports a row authorization the row never gave for it, and
+        `sd-ship reconcile` repeats it in a later process. A false line in an
+        audit trail is worse than an absent one, because an absent one sends
+        the reader to look.
+
+        Here the first attempt clears ownership under the row and dies at the
+        required check. The collaborator then goes, so the retry is owned
+        outright and consults no row at all.
+        """
+
+        self.prepare()
+        self.remote.collaborators = [{"login": "fixture", "permissions": {"push": True}},
+                                     {"login": "someone", "permissions": {"push": True}}]
+        pull = self.remote.pull(1)
+        healthy = [dict(check) for check in pull.checks]
+        pull.checks = [{**healthy[0], "conclusion": "failure"}]
+        with self.assertRaises(ship.Refusal):
+            self.merge()
+        pull.checks = healthy
+        self.remote.collaborators = [{"login": "fixture", "permissions": {"push": True}}]
+        result = self.merge()
+        self.assertEqual(result["phase"], "merged")
+        self.assertNotIn("row_authorized_merge", result,
+                         "an ownership-only merge must not inherit a failed attempt's authority")
+        self.assertNotIn("row_authorized_merge", self.operation("reconcile").reconcile())
+
     def test_required_ci_failure_missing_wrong_head_or_app_cannot_merge(self):
         self.prepare()
         pull = self.remote.pull(1)
@@ -1260,9 +1393,15 @@ roles:
         with self.assertRaisesRegex(ship.Refusal, "administer"):
             self.merge()
         self.double.admin = True
+        # sd:1347 -- co-ownership is the one answer the repository row may
+        # override, and this fixture's row says `auto`. `manual` is what makes
+        # it a refusal again; the override's own case is
+        # `test_a_coowned_remote_merges_when_the_repository_row_says_auto`.
+        set_runner_merge(self.connection, str(self.operator), "manual")
         self.remote.collaborators = [{"login": "fixture", "permissions": {"push": True}}] * 100 + [{"login": "someone", "permissions": {"push": True}}]
         with self.assertRaisesRegex(ship.Refusal, "someone"):
             self.merge()
+        set_runner_merge(self.connection, str(self.operator), "auto")
         self.remote.collaborators = []
         saved = self.remote.protection
         self.remote.protection = None
