@@ -301,6 +301,22 @@ roles:
         _git(self.root, "add", str(policy.relative_to(self.root)))
         _git(self.root, "commit", "-m", "select deep remote review\n\nAuthored-with: human")
 
+    def disable_automatic_copilot(self):
+        """The same file, opting the repository out of paid Copilot review.
+
+        `sensitive` still escalates `src.py` to the deep tier, so the tier is
+        never what stops the request in the test below -- the repository's own
+        word is.
+        """
+        policy = self.root / ".github/sd-review.json"
+        policy.parent.mkdir(parents=True, exist_ok=True)
+        policy.write_text(json.dumps({
+            "sensitive": ["src.py"],
+            "copilot_review": {"automatic_deep": False},
+        }))
+        _git(self.root, "add", str(policy.relative_to(self.root)))
+        _git(self.root, "commit", "-m", "opt out of paid remote review\n\nAuthored-with: human")
+
     def cli(self, command, *extra):
         return subprocess.run([sys.executable, str(ROOT / "bin/sd-ship"), command, "--item", str(self.item), "--json", *extra],
                               cwd=self.root, env=self.environment, text=True, capture_output=True, timeout=30)
@@ -554,6 +570,50 @@ roles:
         prepared = self.prepare()
         self.assertEqual(prepared["copilot_review"]["selection"], "automatic")
         self.assertEqual(len(self.double.copilot_requests), 1)
+
+    def test_a_silent_pass_cannot_outvote_a_later_repository_opt_out(self):
+        """sd:1369, the reviewer's three-step sequence against committed source.
+
+        Review once while the repository names no Copilot key, commit
+        `automatic_deep: false` and verify, then set the machine to `always`.
+        The first pass recorded `repository: None`, which falls through to the
+        machine setting *as it stands now*; the second recorded the file's
+        explicit `False`. Resolving the policy per pass and taking `any()`
+        let the first outvote the second, and a paid Copilot request fired
+        against a repository that had said no.
+        """
+        self.machine_copilot("never")
+        self.operation().review(_git(self.root, "rev-parse", "HEAD"))
+        silent = self.operation().state["passes"][-1]["report"]["remote_reviews"]["copilot"]
+        self.assertIsNone(silent["repository"])
+        self.disable_automatic_copilot()
+        self.operation().review(_git(self.root, "rev-parse", "HEAD"))
+        state = self.operation().state
+        opted_out = state["passes"][-1]["report"]["remote_reviews"]["copilot"]
+        self.assertIs(opted_out["repository"], False)
+        self.assertEqual(len(state["passes"]), 2, "both passes have to be retained")
+        self.machine_copilot("always")
+        prepared = self.prepare()
+        self.assertEqual(prepared["copilot_review"]["decision"], "not_selected")
+        self.assertEqual(self.double.copilot_requests, [])
+
+    def test_the_repository_word_is_read_from_the_latest_pass_that_carries_it(self):
+        """The converse of the opt-out, and the reason `latest` rather than
+        `any no wins`: a file that dropped `automatic_deep` since an earlier
+        pass hands the question back to the machine setting, and a pass from
+        before the key never speaks for the repository at all."""
+        def recorded(repository):
+            return {"report": {"route": {"tier": "deep", "depth": 1},
+                               "remote_reviews": {"copilot": {"repository": repository}}}}
+        legacy = {"report": {"route": {"tier": "deep", "depth": 1},
+                             "remote_reviews": {"copilot": {"automatic": True}}}}
+        self.assertIs(ship.Ship.copilot_repository_now([recorded(None), recorded(False)]), False)
+        self.assertIsNone(ship.Ship.copilot_repository_now([recorded(False), recorded(None)]))
+        self.assertIs(ship.Ship.copilot_repository_now([recorded(False), legacy]), False)
+        self.assertIsNone(ship.Ship.copilot_repository_now([legacy]))
+        self.machine_copilot("always")
+        self.assertFalse(ship.Ship.copilot_selected([recorded(None), recorded(False)]))
+        self.assertTrue(ship.Ship.copilot_selected([recorded(False), recorded(None)]))
 
     def test_explicit_copilot_review_is_idempotent_while_the_request_is_present(self):
         first = self.prepare("--copilot-review", "request")
