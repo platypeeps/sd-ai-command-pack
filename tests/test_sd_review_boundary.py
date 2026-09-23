@@ -608,11 +608,31 @@ class LineBudgetTests(unittest.TestCase):
         # refused the split twice and the second attempt carried the whole
         # index; the number is still the measurement. Shared-core
         # classification and the complexity ceilings are unchanged.
+        #
+        # 3148 -> 3255 is sd:1343 landing after sd:1328. The three raises
+        # above were measured from a base without sd:1328's move of
+        # `copilot_policy` out of the lane, so on the merged tree neither
+        # chain's number is the size; 3255 is what the merged tree measures.
+        # The 107 lines are what lets a receipt say why a gate failed instead
+        # of `gate_failed`: `classify_gate` and `_not_found_report`, which
+        # read sd-check's records for the one proof that a program never
+        # started (`exit_code: None`, `cannot run <program>`) and otherwise
+        # name the command a 127 could not find and its line; `_started` and
+        # `_spawn_failed`, so `entrypoint` and `started` come from every
+        # record; `gate_failed_line`, which says no check ran only when
+        # nothing started and names the entrypoint otherwise; the keys
+        # `run_check` adds; and the comments that say why exit 127 alone is
+        # not evidence. A worktree without .venv is the case that needed it:
+        # `make check` died on the interpreter before any reviewer ran, and
+        # the receipt read as a failed review. This raise is its own commit,
+        # after the merge it measures and before nothing, since the merge
+        # already spends it. Shared-core classification and the complexity
+        # ceilings are unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3148,
+            3255,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
