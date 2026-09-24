@@ -710,11 +710,21 @@ class LineBudgetTests(unittest.TestCase):
         # `sd-review` is 2350 on this tree. This raise is its own commit,
         # before the one that spends it. Shared-core classification and the
         # complexity ceilings are unchanged.
+        #
+        # 3553 -> 3639 is sd:1375. `bin/sd_opencode.py` grows +81: the
+        # docstring paragraph recording why the neutral launch dir is not the
+        # boundary (+17), and `confined_rules`, `probe_argv`, `resolved_rules`
+        # and `confinement_breach` (+64), which ask opencode what it resolved
+        # and refuse any rule after `*: deny` that is not the map.
+        # `bin/sd-review` grows +5 for the one call and its comment. Measured,
+        # not carried: `sd-review` is 2355 and `sd_opencode.py` is 304 on this
+        # tree. Shared-core classification and the complexity ceilings are
+        # unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3553,
+            3639,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
