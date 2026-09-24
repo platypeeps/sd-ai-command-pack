@@ -15,6 +15,7 @@ import tempfile
 from dataclasses import dataclass
 from typing import Any, Callable
 
+import sd_lib
 import sd_ship_dispositions
 from sd_ship_history import AUTOMATIC_CODE_REVIEW_PASSES, completed_depth, digest
 from sd_ship_remote import Refusal, git
@@ -25,6 +26,19 @@ class ReviewTimeout(Exception):
     def __init__(self, diagnostic: dict):
         self.diagnostic = diagnostic
         super().__init__("local review watchdog expired")
+
+
+def empty_branch_base(root: pathlib.Path, head: str) -> str | None:
+    """sd:1405. The merge base when `head` changes no file against it, else None.
+
+    An `sd attribute` repair branch is empty commits only. `sd-review` refuses
+    such a subject as `subject_empty`, so the ship lane waives review for it.
+    """
+    for ref in ("origin/HEAD", "main", "master"):
+        base = sd_lib.git_output(["merge-base", head, ref], root)
+        if base:
+            return base if sd_lib.git_output(["diff", "--name-only", "--no-renames", base, head], root) == "" else None
+    return None
 
 
 @dataclass(frozen=True)
@@ -104,6 +118,9 @@ class SharedReview:
 
     def review_inputs(self, head: str) -> dict:
         passes = self.history.native(self.state)
+        waived = self.state.get("empty_diff") or {}
+        if not passes and waived.get("head") == head and empty_branch_base(self.root, head) == waived.get("base"):
+            return {"status": "clean", "findings": [], "subject": {"base": waived["base"], "head": head, "paths": []}}
         if not passes:
             raise Refusal("no completed local review receipt for this head")
         if self.state.get("binding") != self.runtime.binding(self.root):
@@ -228,8 +245,20 @@ class SharedReview:
         for previous in self.history.ancestry_heads(self.state):
             git(self.root, "merge-base", "--is-ancestor", previous, head)
 
+    def authorship_start(self) -> str:
+        """Where this branch's commits begin, for trailer and vendor reads."""
+        passes = self.state.get("passes") or []
+        if not passes:
+            return self.state["empty_diff"]["base"]
+        return passes[-1]["report"].get("authorship_base") or passes[0]["report"]["subject"]["base"]
+
     def review(self, head: str) -> None:
         passes = self.history.native(self.state)
+        if not passes and (base := empty_branch_base(self.root, head)):
+            print(f"sd-ship: {head[:12]} changes no file against {base[:12]}; local review skipped, no provider called",
+                  file=sys.stderr)
+            self.save(empty_diff={"head": head, "base": base}, reviewed_head=head)
+            return
         prior = self.history.prior(self.state)
         retry = bool(self.args.retry_review)
         request = self.additional_request(head, passes)

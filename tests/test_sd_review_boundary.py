@@ -700,11 +700,21 @@ class LineBudgetTests(unittest.TestCase):
         # the merge, and at this commit the lane is still 3399, under 3506.
         # Shared-core classification and the complexity ceilings are
         # unchanged.
+        #
+        # 3506 -> 3553 is sd:1405 and sd:1406. `bin/sd-review` grows +40
+        # (`reviewed_paths`, `unlocated` and its docstring, and the one call
+        # in the dispatch loop): a completed answer whose findings cite no
+        # reviewed path is voided, and a failed answer's unlocated advice is
+        # dropped. `bin/sd_review_readiness.py` grows +7 for the
+        # `subject_empty` blocker and its comment. Measured, not carried:
+        # `sd-review` is 2350 on this tree. This raise is its own commit,
+        # before the one that spends it. Shared-core classification and the
+        # complexity ceilings are unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3506,
+            3553,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

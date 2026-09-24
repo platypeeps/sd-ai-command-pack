@@ -1152,7 +1152,10 @@ class TheExplainRenderTests(ReviewFixture):
         """The fixture repository consents to both entries and has a registry,
         so there is no refusal to carry the table into view."""
 
-        text = self.explain(self.make_repo())
+        root = self.make_repo()
+        # A changed file: an empty subject is a readiness blocker (sd:1405).
+        (root / "src.py").write_text("x = 1\n", encoding="utf-8")
+        text = self.explain(root)
         self.assertIn("reviewer chain", text)
         self.assertIn("use codex", " ".join(text.split()))
         self.assertIn("second", text)

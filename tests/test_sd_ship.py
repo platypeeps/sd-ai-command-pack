@@ -2118,6 +2118,33 @@ roles:
         with self.assertRaisesRegex(ship.Refusal, "fix verification"):
             self.merge()
 
+    def test_an_empty_diff_branch_ships_without_a_provider_call(self):
+        # sd:1405. `sd attribute` repairs ship as empty commits. `sd-review`
+        # refuses an empty subject, so the ship lane waives review for a
+        # branch that changes no file, and calls no reader for it.
+        calls = self.directory / "provider-calls"
+        (self.programs / "review-fixture").write_text(
+            "#!/usr/bin/env python3\nimport json, pathlib\n"
+            f"pathlib.Path({str(calls)!r}).open('a').write('call\\n')\n"
+            "print(json.dumps({'type':'result','subtype':'success','structured_output':{'findings':[]}}))\n")
+        _git(self.root, "checkout", "-q", "-b", "repair", "origin/main")
+        _git(self.root, "commit", "--allow-empty", "-m", "repair\n\nAuthored-with: human")
+        self.item = create_item(self.connection, kind="work", title="repair", status="in_progress",
+                                repo=str(self.operator), branch="repair")
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        self.assertFalse(calls.exists(), "a reader was called for a branch that changes no file")
+        state = self.operation().state
+        self.assertEqual(state.get("passes") or [], [])
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.assertEqual(state["reviewed_head"], head)
+        # The gate publish and merge read. The fixture remote cannot squash an
+        # empty diff, so the merge itself is not driven here.
+        self.assertIsNone(self.operation().check_review(head))
+        _git(self.root, "commit", "--allow-empty", "-m", "moved\n\nAuthored-with: human")
+        with self.assertRaisesRegex(ship.Refusal, "no completed local review receipt"):
+            self.operation().check_review(_git(self.root, "rev-parse", "HEAD"))
+        self.assertFalse(calls.exists())
+
     def prepare_owned_delivery(self):
         from sd_db import runner
         acceptance = self.directory / "acceptance.json"
