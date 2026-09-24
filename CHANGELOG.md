@@ -4,6 +4,16 @@
 
 ### Changed
 
+- **The Copilot ancestor gate reads `docs_skip` as well as `never_skip`.**
+  A reviewed ancestor clears the merge when the commits since it touch only
+  `docs/`. The gate subtracted the repository's `never_skip` list but ignored
+  its `docs_skip` list, so a repository that narrowed `docs_skip` still had
+  every `docs/` path cleared (sd:1383). A path is exempt now only when it is
+  under `docs/`, in `docs_skip`, and in no `never_skip` pattern -- the same
+  two lists `bin/sd_route.py` reads to plan `skip`. The two paths the row
+  named first, a rename into `docs/` and `docs/spec/**`, were closed in #1146
+  before it merged.
+
 - **`sd-status` and `sd-ship` read classic protection and rulesets together.**
   Rulesets were read only when classic protection answered 404, so a ruleset
   beside a classic object was invisible to both (sd:1419). They are now read

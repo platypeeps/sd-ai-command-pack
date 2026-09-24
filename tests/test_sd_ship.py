@@ -900,6 +900,42 @@ roles:
         self.assertEqual(operation.unreviewed_shipped_surface(base, head),
                          ["docs/handbook/how.md"])
 
+    def test_a_docs_path_the_repository_does_not_skip_stays_in_the_surface(self):
+        """sd:1383. `never_skip` is one half of the router's word; `docs_skip`
+        is the other.
+
+        `bin/sd_route.py` plans `skip` only when every path is in `docs_skip`
+        and none is in `never_skip`. The gate honoured the second list and
+        not the first, so a repository that narrowed `docs_skip` -- saying
+        its `docs/` is reviewed -- still had every `docs/` path cleared on a
+        reviewed ancestor. A path is exempt now only when it is under `docs/`
+        *and* the repository's own policy would let it skip.
+        """
+        self.enable_automatic_copilot()
+        operation = self.operation()
+        base = _git(self.root, "rev-parse", "HEAD")
+        for name in ("docs/note.md", "docs/handbook/how.md"):
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("prose\n")
+        _git(self.root, "add", "-A")
+        _git(self.root, "commit", "-m", "prose\n\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        policy = self.root / ".github/sd-review.json"
+        policy.write_text(json.dumps({
+            "sensitive": ["src.py"],
+            "docs_skip": ["docs/handbook/**"],
+            "copilot_review": {"automatic_deep": True},
+        }))
+        self.assertEqual(operation.unreviewed_shipped_surface(base, head), ["docs/note.md"])
+        policy.write_text(json.dumps({
+            "sensitive": ["src.py"],
+            "docs_skip": [],
+            "copilot_review": {"automatic_deep": True},
+        }))
+        self.assertEqual(operation.unreviewed_shipped_surface(base, head),
+                         ["docs/handbook/how.md", "docs/note.md"])
+
     def test_a_policy_that_does_not_parse_refuses_the_gate_rather_than_guessing(self):
         """The deny-list read is the first `load_policy` call in `sd-ship`, and
         `PolicyError` is not in `main`'s caught tuple, so an unreadable file

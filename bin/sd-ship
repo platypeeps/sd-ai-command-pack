@@ -80,9 +80,10 @@ COPILOT_MATERIALIZATION_INTERVAL_SECONDS = 5
 #: `docs/spec/**` in that deny-list and the built-in default puts it there
 #: too, so a blanket `docs/` exemption here was not "strictly less than the
 #: router already does" -- it skipped the one directory inside `docs/` the
-#: repository had said may never be skipped. `repository_never_skip` reads
-#: that list and subtracts it from this tuple, so the gate is the blanket
-#: *and* the repository's word, never the blanket alone.
+#: repository had said may never be skipped. `repository_skippable` reads
+#: both lists -- a path must be in `docs_skip` and in no `never_skip` pattern
+#: (sd:1383) -- so the gate is the blanket *and* the repository's word, never
+#: the blanket alone.
 #:
 #: **`tests/` is not in here, and the argument for putting it there does not
 #: survive.** It runs: a test is evidence the product works, and CI re-runs it
@@ -749,7 +750,8 @@ class Ship(SharedReview):
         beyond the tree the reviewer saw, not what happened along the way, so
         a later commit that reverts an earlier one leaves nothing here -- and
         an empty commit, or one that only moves `docs/`, leaves nothing
-        either. `UNSHIPPED_PREFIXES` is the whole definition.
+        either. `UNSHIPPED_PREFIXES`, narrowed by `repository_skippable`, is
+        the whole definition.
 
         The caller has already proved `reviewed` is an ancestor of
         `merge_head` in this checkout's own history, so a force-push or a
@@ -766,20 +768,22 @@ class Ship(SharedReview):
         changed = git(self.root, "diff", "--no-renames", "--name-only",
                       reviewed, merge_head).splitlines()
         paths = sorted({path for path in (line.strip() for line in changed) if path})
-        denied = self.repository_never_skip(paths)
+        skippable = self.repository_skippable(paths)
         return [path for path in paths
-                if not path.startswith(UNSHIPPED_PREFIXES) or path in denied]
+                if not path.startswith(UNSHIPPED_PREFIXES) or path not in skippable]
 
-    def repository_never_skip(self, paths: list[str]) -> frozenset[str]:
-        """Which of `paths` the repository says may never be skipped.
+    def repository_skippable(self, paths: list[str]) -> frozenset[str]:
+        """Which of `paths` the repository's own policy would let skip review.
 
         `UNSHIPPED_PREFIXES` is this gate's own blanket and the repository is
-        allowed to be stricter than it. `never_skip` in `.github/sd-review.json`
-        is that deny-list, and `bin/sd_route.py` gives it the last word over
-        `docs_skip`: a change touching one of its paths is never routed to
-        `skip`, which is the whole reason the allow-list is safe to widen.
-        This pack's own file names `docs/spec/**`, and the built-in default
-        names it too, so a repository that says nothing still gets it.
+        allowed to be stricter than it, through both of the lists
+        `bin/sd_route.py` reads to plan `skip`: a path must be in the
+        `docs_skip` allow-list and in no `never_skip` pattern, the deny-list
+        that always wins. This pack's own file names `docs/spec/**` in the
+        deny-list, and the built-in default names it too, so a repository that
+        says nothing still gets it (sd:1366). Reading `never_skip` alone was
+        half the router's word: a repository that narrowed `docs_skip` -- its
+        `docs/` is reviewed -- still had every `docs/` path cleared (sd:1383).
 
         Read through `sd-review`'s validated loader rather than by parsing the
         file here: a malformed policy then refuses the merge instead of
@@ -801,14 +805,15 @@ class Ship(SharedReview):
             policy, _source = review.load_policy(self.root)
         except review.PolicyError as error:
             raise Refusal(
-                f"the repository's review policy does not parse, so the never-skip "
-                f"deny-list cannot be applied to the merge gate: {error}",
+                f"the repository's review policy does not parse, so its skip lists "
+                f"cannot be applied to the merge gate: {error}",
                 code="review_policy_malformed", boundary="review", state="operator_decision",
                 next_action="Fix .github/sd-review.json, then retry merge.",
             ) from None
-        patterns = policy.get("never_skip") or ()
+        route = review.sd_route
+        allowed, denied = policy.get("docs_skip") or (), policy.get("never_skip") or ()
         return frozenset(path for path in paths
-                         if review.sd_route._first_match([path], patterns) is not None)
+                         if route._all_match([path], allowed) and route._first_match([path], denied) is None)
 
     def stable_copilot_material(self, number: int, pull: dict, head: str,
                                 *, required: bool) -> tuple[list, list] | None:
