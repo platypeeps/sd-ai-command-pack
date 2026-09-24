@@ -277,15 +277,28 @@ jobs:
       #
       # Of the other two `sd_db` commits in `55c4d691..341c5f2c`, #471 widens
       # `sd_db.calls` to a loopback entry that declares no key variable and
-      # #453 touches `sd_db.backup`; no pack test constructs either. Nothing
-      # under `local-sd-db` changes between this commit and system `main`, so
-      # this is the newest `sd_db` there is, not a point chosen inside it.
+      # #453 touches `sd_db.backup`; no pack test constructs either.
+      #
+      # `c50e74f6` (sd:1381) takes `SCHEMA_VERSION` 10 -> 13 across three
+      # migrations: `011_judgment.sql`, `012_recurrence.sql` (#542) and
+      # `013_state_by_kind_key.sql` (#549). The old pin sat three schema
+      # versions behind every machine for three days, green, because nothing
+      # compared it with anything. `tests/test_system_pin.py` now does: it
+      # fails when this ref's `SCHEMA_VERSION` differs from the installed
+      # library's. In this job the library comes from this ref, so it holds
+      # here by construction; on a machine whose venv is installed from system
+      # `main`, the next `make check` goes red the day a migration lands there
+      # and not here. The fourteen `sd_db` commits in `341c5f2c..c50e74f6`
+      # are the library each machine already runs: the operator's venv was
+      # byte-identical to `c50e74f6` when this moved, and `make check` passed
+      # against it. `c50e74f6` is the newest system commit that touches
+      # `local-sd-db`.
       - name: Check out the system checkout, for sd_db
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: platypeeps/system
-          # `repo.runner_merge` needs schema 10, from system #458.
-          ref: 341c5f2cf5809236e11cf648ef8bec3c98033164
+          # Schema 13; `tests/test_system_pin.py` holds it to the installed library.
+          ref: c50e74f649d360c5b9555aade430405d4a9a4295
           token: ${{ secrets.SYSTEM_REPO_TOKEN }}
           path: system-checkout
           persist-credentials: false

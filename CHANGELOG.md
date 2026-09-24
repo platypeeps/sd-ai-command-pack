@@ -202,6 +202,15 @@
 
 ### Fixed
 
+- **CI's `sd_db` pin can no longer fall behind the installed library in
+  silence.** `.github/workflows/tests.yml` pinned `platypeeps/system` at
+  schema 10 while every machine ran schema 13, so CI tested a library nobody
+  runs (sd:1381). The pin moves to `c50e74f6`, schema 13.
+  `tests/test_system_pin.py` reads the pin's `SCHEMA_VERSION` through git and
+  fails when it differs from the installed `sd_db`'s. CI installs from the pin,
+  so it stays reproducible; a local `make check` against a venv installed from
+  system `main` goes red the day a migration lands there and not in the pin.
+
 - **`sd-status` resolves a job name that interpolates only the matrix.**
   `name: system-native (${{ matrix.leg }})` over `leg: [shared, dashboard,
   runner, tools]` produces four checks, and GitHub appends no suffix to such
