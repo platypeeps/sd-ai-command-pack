@@ -64,12 +64,12 @@
     "copilot_review": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Remote Copilot review policy. Local independent review always completes first. Omit the key to inherit the machine's `sd.copilot_review` (`deep` when unset); name it to override the machine for this repository.",
+      "description": "Remote Copilot review policy. Local independent review always completes first. Omit the key to inherit the machine's `sd.copilot_review` (`deep` when unset); name it to override the machine's `deep` or `always` for this repository. A machine `never` wins over it.",
       "required": ["automatic_deep"],
       "properties": {
         "automatic_deep": {
           "type": "boolean",
-          "description": "True requests one Copilot review for the `deep` tier during shipping; false keeps remote review explicit-only. Either value overrides the machine's `sd.copilot_review`."
+          "description": "True requests one Copilot review for the `deep` tier during shipping; false keeps remote review explicit-only. Either value overrides a machine `sd.copilot_review` of `deep` or `always`; a machine `never` wins."
         }
       }
     }

@@ -40,7 +40,7 @@ An absent key inherits standing policy; malformed local consent stops execution.
 Without a grant, stop before transmission.
 
 `remote_reviews.copilot` in `--explain --json` names the effective Copilot policy (`deep`, `never`, `always`) and its source.
-The source is `repository` when `.github/sd-review.json` names `copilot_review.automatic_deep`, `machine config` when `sd.copilot_review` is set, else `machine default` (`deep`).
+The source is `machine config` when `sd.copilot_review` opts out (sd:1444), then `repository` when `.github/sd-review.json` names `copilot_review.automatic_deep`, `machine config` when `sd.copilot_review` is set, else `machine default` (`deep`).
 Installation does not grant consent.
 
 ## Scopes
