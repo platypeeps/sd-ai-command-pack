@@ -30,6 +30,7 @@ one `compare` call the method makes before it looks at check runs.
 
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 import sys
@@ -40,7 +41,8 @@ from typing import Any
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bin"))
 
-import sd_protection  # noqa: E402 - after the path insert
+import sd_lib  # noqa: E402 - after the path insert
+import sd_protection  # noqa: E402
 import sd_ship_remote  # noqa: E402
 
 
@@ -349,6 +351,8 @@ def ruleset_rules(**changes: Any) -> list[dict]:
 
 
 DECLARATION = {"declared_gap": "unprotected", "until": "a second account exists"}
+DEPLOY_KEY = {"actor_id": None, "actor_type": "DeployKey", "bypass_mode": "always"}
+DEPLOY_KEY_WORDS = "main (#42) [pull_request, required_status_checks]: DeployKey (always)"
 NOT_PROTECTED = (404, {"message": "Branch not protected"})
 PLAN_LIMITED = (403, {"message": "Upgrade to GitHub Pro or make this repository public to enable this feature."})
 
@@ -357,10 +361,12 @@ class PathStubbedGitHub(sd_ship_remote.GitHub):
     """The adapter with each path answered on its own, so `/protection` can
     be a 404 while `/rules/branches/main` is a 200 with rules."""
 
-    def __init__(self, answers: dict[str, tuple[int, Any]], declaration: dict | None = None):
+    def __init__(self, answers: dict[str, tuple[int, Any]], declaration: dict | None = None,
+                 bypass: frozenset[str] = frozenset()):
         super().__init__(ROOT, "fixture/repo")
         self.answers = answers
         self.declaration = declaration
+        self.bypass = bypass
         self.requested: list[str] = []
 
     def api_status(self, path: str) -> tuple[int, Any]:
@@ -374,6 +380,9 @@ class PathStubbedGitHub(sd_ship_remote.GitHub):
         self.declaration_faults = [] if self.declaration else [
             ".github/sd-status.json at 0123456789ab carries no `unprotected` entry pinning branch_protection: false"]
         return self.declaration
+
+    def declared_bypass(self, head: str) -> frozenset[str]:
+        return self.bypass
 
 
 class RulesetCase(unittest.TestCase):
@@ -389,13 +398,13 @@ class RulesetCase(unittest.TestCase):
     PREFIX = "repos/fixture/repo"
 
     def remote(self, rules: list | None, ruleset: dict | None = RULESET, *, classic=NOT_PROTECTED,
-               declaration: dict | None = None) -> PathStubbedGitHub:
+               declaration: dict | None = None, bypass: frozenset[str] = frozenset()) -> PathStubbedGitHub:
         answers = {f"{self.PREFIX}/branches/main/protection": classic}
         if rules is not None:
             answers.update(self.paged(rules))
         if ruleset is not None:
             answers[f"{self.PREFIX}/rulesets/42"] = (200, ruleset)
-        return PathStubbedGitHub(answers, declaration)
+        return PathStubbedGitHub(answers, declaration, bypass)
 
     def paged(self, rules: list) -> dict[str, tuple[int, Any]]:
         """`rules` as the endpoint pages them, `PAGE_SIZE` a page, with the
@@ -503,6 +512,76 @@ class RulesetCase(unittest.TestCase):
                 error = self.refused(self.remote(ruleset_rules(), bypass),
                                      rf"^ruleset release \(#42\) can be bypassed by {words}$")
                 self.assertEqual(error.workflow["blocker"]["code"], "protection_required")
+
+    def test_an_undeclared_deploy_key_bypass_refuses_as_any_actor_does(self) -> None:
+        """sd:1451's refusal, kept: without a declaration a deploy key that
+        can walk past the ruleset is refused by name like any other actor."""
+        error = self.refused(self.remote(ruleset_rules(), dict(RULESET, bypass_actors=[DEPLOY_KEY])),
+                             r"^ruleset main \(#42\) can be bypassed by DeployKey \(always\)$")
+        self.assertEqual(error.workflow["blocker"]["code"], "protection_required")
+
+    def test_a_declared_deploy_key_bypass_merges_and_travels_on_the_object(self) -> None:
+        """The reviewed commit's `bypass` acceptance names the deploy key in
+        `sd-status`'s words, so the gate grants, and the object the receipt
+        records says which bypass it accepted (sd:1451)."""
+        value = self.remote(ruleset_rules(), dict(RULESET, bypass_actors=[DEPLOY_KEY]),
+                            bypass=frozenset({DEPLOY_KEY_WORDS})).gate("main", HEAD)
+        self.assertEqual(value["declared_bypass"], [DEPLOY_KEY_WORDS])
+        self.assertEqual(value["source"], "ruleset")
+        self.assertEqual(value["enforce_admins"], {"enabled": True})
+        self.assertEqual(sd_protection.bypass_words(value), [DEPLOY_KEY_WORDS])
+        # No bypass, no key: a firm ruleset's object is unchanged.
+        self.assertNotIn("declared_bypass", self.remote(ruleset_rules(), bypass=frozenset({DEPLOY_KEY_WORDS}))
+                         .gate("main", HEAD))
+
+    def test_a_declared_deploy_key_does_not_cover_another_actor_type_or_mode(self) -> None:
+        """The declaration never widens: a role, an app or a team beside the
+        declared key refuses, a role declared in the same words refuses
+        because only a deploy key can be declared, and the key in a mode the
+        declaration does not name refuses."""
+        role = {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}
+        role_words = "main (#42) [pull_request, required_status_checks]: RepositoryRole 5 (always)"
+        for label, actors, accepted, words in (
+            ("role beside the key", [DEPLOY_KEY, role], {DEPLOY_KEY_WORDS},
+             r"DeployKey \(always\), RepositoryRole 5 \(always\)"),
+            ("role declared", [role], {DEPLOY_KEY_WORDS, role_words}, r"RepositoryRole 5 \(always\)"),
+            ("integration beside the key", [DEPLOY_KEY, INTEGRATION], {DEPLOY_KEY_WORDS},
+             r"DeployKey \(always\), Integration 77 \(pull_request\)"),
+            ("key in another mode", [dict(DEPLOY_KEY, bypass_mode="pull_request")], {DEPLOY_KEY_WORDS},
+             r"DeployKey \(pull_request\)"),
+        ):
+            with self.subTest(label):
+                error = self.refused(self.remote(ruleset_rules(), dict(RULESET, bypass_actors=actors),
+                                                 bypass=frozenset(accepted)),
+                                     rf"^ruleset main \(#42\) can be bypassed by {words}$")
+                self.assertEqual(error.workflow["blocker"]["code"], "protection_required")
+
+    def test_the_declared_bypass_is_read_from_bypass_entries_that_pin_only_the_list(self) -> None:
+        """`declared_bypass` reads `sd-status.json` at the head: a `bypass`
+        entry pinning the list alone. The same list inside another entry's
+        state, or a file with a fault anywhere, accepts nothing."""
+        def entry(gap: str, state: dict) -> dict:
+            return {"id": gap, "state": state, "because": "autocommit", "since": "2026-09-23", "until": "later"}
+
+        class Reading(sd_ship_remote.GitHub):
+            def __init__(self, document: Any):
+                super().__init__(ROOT, "fixture/repo")
+                self.text = document if isinstance(document, str) else json.dumps(document)
+
+            def acceptances(self, head: str) -> tuple[list[dict], list[str]]:
+                return sd_lib.parse_acknowledgements(self.text)
+
+        listed = {"bypass": [DEPLOY_KEY_WORDS]}
+        self.assertEqual(Reading({"accepted_gaps": [entry("bypass", listed)]}).declared_bypass(HEAD),
+                         frozenset({DEPLOY_KEY_WORDS}))
+        for label, document in (
+            ("inside strict", {"accepted_gaps": [entry("strict", {"strict": False, **listed})]}),
+            ("beside another fact", {"accepted_gaps": [entry("bypass", {"strict": False, **listed})]}),
+            ("faulty file", {"accepted_gaps": [entry("bypass", listed), entry("bypas", listed)]}),
+            ("not JSON", "{"),
+        ):
+            with self.subTest(label):
+                self.assertEqual(Reading(document).declared_bypass(HEAD), frozenset())
 
     def test_a_bypass_list_not_shown_is_unknown_and_refuses_while_an_empty_one_validates(self) -> None:
         """GitHub returns `bypass_actors` only to a caller who can edit the

@@ -3579,6 +3579,32 @@ class DeclaredGapCase(unittest.TestCase):
         self.assertEqual(self.puts(), 1)
         self.assertEqual(result["protection"]["required_status_checks"]["checks"], [{"context": "route", "app_id": 7}])
 
+    def test_a_deploy_key_bypass_merges_only_when_the_reviewed_head_declares_it(self):
+        """platypeeps/system's shape (sd:1451): the checks ruleset lets a
+        deploy key push past it, for the autocommit jobs. Undeclared, the
+        merge refuses naming the key and pushes nothing. Declared at the
+        reviewed head as a `bypass` acceptance in `sd-status`'s words, the
+        merge lands once and the receipt names the bypass it accepted."""
+        words = "main (#42) [pull_request, required_status_checks]: DeployKey (always)"
+        key_ruleset = {"id": 42, "name": "main", "enforcement": "active",
+                       "bypass_actors": [{"actor_id": None, "actor_type": "DeployKey", "bypass_mode": "always"}]}
+        self.commit({".github/workflows/tests.yml": self.TESTS, ".github/workflows/sd-review-route.yml": self.ROUTE})
+        self.double.rules = self.gating_rules()
+        self.double.rulesets = {42: key_ruleset}
+        self.green()
+        self.refuse(r"can be bypassed by DeployKey \(always\)$", "protection_required")
+        self.restart()
+        self.declare({"accepted_gaps": [{"id": "bypass", "state": {"bypass": [words]}, "because": "autocommit pushes",
+                                         "since": "2026-09-23", "until": "autocommit lands through pull requests"}]})
+        self.double.rules = self.gating_rules()
+        self.double.rulesets = {42: key_ruleset}
+        self.green()
+        result = self.merge()
+        self.assertEqual(self.puts(), 1)
+        self.assertEqual(result["protection"]["declared_bypass"], [words])
+        key = receipts.receipt_key(self.remote.slug, "topic", self.item)
+        self.assertEqual(receipts.read(self.connection, key)[1]["protection"]["declared_bypass"], [words])
+
     def test_a_ruleset_that_does_not_show_its_bypass_actors_refuses_the_merge(self):
         """The same ruleset with `bypass_actors` withheld, which is what GitHub
         answers a token that cannot edit it: unknown, and unknown does not

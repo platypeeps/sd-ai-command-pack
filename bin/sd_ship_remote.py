@@ -212,17 +212,22 @@ class GitHub:
         return self.validate_protection(value)
 
     @staticmethod
-    def validate_protection(value: Any) -> dict:
+    def validate_protection(value: Any, accepted: frozenset[str] = frozenset()) -> dict:
         """The guards, over a classic object or the one `sd_protection.synthesize`
         shapes from a ruleset. The ruleset spelling of the administrator guard
         is `bypass_actors`: a ruleset that names anyone exempts them, and the
-        refusal names the ruleset rather than the derived `enforce_admins`."""
+        refusal names the ruleset rather than the derived `enforce_admins`.
+        `accepted` is the declared deploy-key bypass (`declared_bypass`); the
+        words it let through travel on the object as `declared_bypass`, so the
+        receipt records what the merge accepted (sd:1451)."""
         if not isinstance(value, dict):
             raise Refusal("branch protection could not be observed")
         checks = value.get("required_status_checks") or {}
         noun = "ruleset protection" if value.get("source") == sd_protection.RULESET_SOURCE else "branch protection"
         if value.get("source") in (sd_protection.RULESET_SOURCE, sd_protection.COMBINED_SOURCE):
-            GitHub.validate_ruleset_bypass(value)
+            declared = GitHub.validate_ruleset_bypass(value, accepted)
+            if declared:
+                value = {**value, "declared_bypass": declared}
         if value.get("enforce_admins", {}).get("enabled") is not True:
             raise Refusal("branch protection does not enforce administrators", code="protection_required",
                           next_action="Restore required branch protection; this command cannot bypass it.")
@@ -236,7 +241,7 @@ class GitHub:
         return value
 
     @staticmethod
-    def validate_ruleset_bypass(value: dict) -> None:
+    def validate_ruleset_bypass(value: dict, accepted: frozenset[str] = frozenset()) -> list[str]:
         """A named bypass actor refuses, naming it: an app or a team that can
         walk past the ruleset is no more authority than an admin who can,
         and the refusal says which entry to remove. A bypass list GitHub did
@@ -248,9 +253,24 @@ class GitHub:
         Beside classic protection (`source: combined`) only a decisive bypass
         refuses: one that removes the last firm source of a rule the ruleset
         carries. A ruleset an app can bypass while classic still enforces the
-        same rule on everyone is information, not a refusal (sd:1419, Q2)."""
+        same rule on everyone is information, not a refusal (sd:1419, Q2).
+
+        One bypass may be declared rather than removed: a `DeployKey` actor
+        whose exact words -- ruleset, rules, mode -- the reviewed commit's
+        `bypass` acceptance lists (`declared_bypass`). Only that actor type:
+        a deploy key pushes and cannot merge a pull request, while an app, a
+        team or a role can. A ruleset whose list holds any other actor, or a
+        deploy key in a mode or ruleset the declaration does not name, still
+        refuses naming every actor. Returns the declared words it accepted."""
+        declared: list[str] = []
         for entry in value.get("rulesets") or []:
             if isinstance(entry, dict) and entry.get("bypass_actors") and sd_protection.decisive(value, entry):
+                words = [f"{sd_protection.scope(entry)}: {sd_protection.actor_words(actor)}"
+                         for actor in entry["bypass_actors"]]
+                if all(isinstance(actor, dict) and actor.get("actor_type") == "DeployKey" and said in accepted
+                       for actor, said in zip(entry["bypass_actors"], words, strict=True)):
+                    declared.extend(words)
+                    continue
                 actors = ", ".join(sd_protection.actor_words(actor) for actor in entry["bypass_actors"])
                 raise Refusal(f"ruleset {entry.get('name')} (#{entry.get('id')}) can be bypassed by {actors}",
                               code="protection_required",
@@ -260,6 +280,7 @@ class GitHub:
                           "so whether anyone can bypass it is unknown",
                           next_action="Read the ruleset with a token that can edit it, so GitHub returns "
                                       "bypass_actors; this command cannot treat a bypass list it was not shown as empty.")
+        return sorted(declared)
 
     def declared_gap(self, head: str) -> dict | None:
         """The `unprotected` acceptance at `head`, or `None` with the reasons.
@@ -272,12 +293,7 @@ class GitHub:
         gap that pins the same fact accepts that gap, not this one.
         """
         where = sd_lib.ACKNOWLEDGEMENT_RELATIVE_PATH.as_posix()
-        try:
-            text = git(self.root, "show", f"{head}:{where}")
-        except Refusal:
-            self.declaration_faults = [f"{where} is not in the tree at {head[:12]}"]
-            return None
-        entries, problems = sd_lib.parse_acknowledgements(text)
+        entries, problems = self.acceptances(head)
         if problems:
             self.declaration_faults = problems
             return None
@@ -287,6 +303,30 @@ class GitHub:
                 return {"declared_gap": entry["id"], "until": entry["until"]}
         self.declaration_faults = [f"{where} at {head[:12]} carries no `unprotected` entry pinning branch_protection: false"]
         return None
+
+    def acceptances(self, head: str) -> tuple[list[dict], list[str]]:
+        """`.github/sd-status.json` at `head`, parsed: `(entries, problems)`."""
+        where = sd_lib.ACKNOWLEDGEMENT_RELATIVE_PATH.as_posix()
+        try:
+            text = git(self.root, "show", f"{head}:{where}")
+        except Refusal:
+            return [], [f"{where} is not in the tree at {head[:12]}"]
+        return sd_lib.parse_acknowledgements(text)
+
+    def declared_bypass(self, head: str) -> frozenset[str]:
+        """The ruleset bypasses the reviewed commit accepts, as `sd-status`'s
+        `bypass` gap words them: the `state.bypass` list of each `bypass`
+        entry that pins that list and nothing else. `validate_ruleset_bypass`
+        honours a `DeployKey` among them and no other actor (sd:1451). A file
+        that does not parse accepts nothing, so the bypass refuses as before.
+        """
+        entries, problems = self.acceptances(head)
+        if problems:
+            return frozenset()
+        return frozenset(words for entry in entries
+                         if entry["id"] == "bypass" and set(entry["state"]) == {"bypass"}
+                         and isinstance(entry["state"]["bypass"], list)
+                         for words in entry["state"]["bypass"] if isinstance(words, str))
 
     def rulesets_observed(self, base: str) -> dict:
         """The rules every ruleset evaluates for `base`, through the status-bearing read."""
@@ -332,7 +372,7 @@ class GitHub:
                 read = self.rulesets_observed(base)
                 if not read["error"]:
                     value = sd_protection.combine(value, read["rules"], read["rulesets"])
-            return self.validate_protection(value)
+            return self.validate_protection(value, self.declared_bypass(head))
         if status == 403 and sd_protection.plan_limited(message):
             if declaration is not None:
                 return declaration
@@ -351,7 +391,7 @@ class GitHub:
                     names = ", ".join(f"{entry['name']} (#{entry['id']})" for entry in synthesized["rulesets"])
                     raise Refusal(f"{where} at {head[:12]} declares main unprotected, but a ruleset gates it "
                                   f"({names}); the declaration does not match the observed state")
-                return self.validate_protection(synthesized)
+                return self.validate_protection(synthesized, self.declared_bypass(head))
             if declaration is not None:
                 return declaration
         detail = "; ".join(self.declaration_faults) if status == 404 else ""

@@ -131,6 +131,9 @@ Never allocate another review ID to reset spent passes or discard history.
   `runner_merge: auto` on the repository row answers the sole-operator question, and only that one.
   Admin you do not hold, a fork, and a remote that cannot answer still refuse.
   A merge the row allowed records that on its receipt as `row_authorized_merge`.
+  A ruleset bypass refuses unless every actor is a `DeployKey` that the reviewed head declares.
+  The declaration is a `bypass` entry in `.github/sd-status.json` whose `state` pins only `bypass`, in the words `sd-status` prints.
+  An app, a team, a role, an admin, or another bypass mode still refuses; the receipt's `protection.declared_bypass` names what merged.
   GitHub's merge rules must also pass.
   A refusal returns `manualRequired: true`; it changes no protection and requests no reviewer.
 - `--watch --wait-seconds 900` starts one bounded fail-fast CI watcher.

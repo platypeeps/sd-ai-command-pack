@@ -348,6 +348,10 @@ What makes it an acknowledgement rather than a suppression:
 - **A malformed file accepts nothing and says so** — each fault prints as its
   own gap. It fails closed and loudly, never silently.
 
+`sd-ship merge` reads one kind of acceptance itself, at the reviewed head: a
+`bypass` entry pinning only `bypass` lets a `DeployKey` it lists pass the
+merge gate. No other actor type can be accepted that way.
+
 An acceptance nobody re-reads is itself a row: `accepted-gap-standing` at rank
 45 surfaces a written acceptance whose `until` condition nothing is watching.
 
