@@ -608,14 +608,29 @@ roles:
         self.assertEqual(prepared["copilot_review"]["decision"], "not_selected")
         self.assertEqual(self.double.copilot_requests, [])
 
-    def test_a_repository_that_named_the_key_still_wins_at_dispatch(self):
-        """The repository's say travels in the report; a machine flip does not
-        override a file that named `automatic_deep`."""
+    def test_a_repository_that_named_the_key_still_wins_over_always_at_dispatch(self):
+        """The repository's say travels in the report; a machine `always` does
+        not override a file that named `automatic_deep: false`."""
+        self.machine_copilot("always")
+        self.disable_automatic_copilot()
+        prepared = self.prepare()
+        self.assertEqual(prepared["copilot_review"]["decision"], "not_selected")
+        self.assertEqual(self.double.copilot_requests, [])
+
+    def test_machine_never_beats_a_repository_opt_in_at_dispatch(self):
+        """sd:1444, inverting the sd:1328 precedence for `never` alone: the
+        operator's `never` stops the request even when the file names
+        `automatic_deep: true`, at review time and set after it."""
         self.machine_copilot("never")
         self.enable_automatic_copilot()
         prepared = self.prepare()
-        self.assertEqual(prepared["copilot_review"]["selection"], "automatic")
-        self.assertEqual(len(self.double.copilot_requests), 1)
+        self.assertEqual(prepared["copilot_review"]["decision"], "not_selected")
+        self.assertEqual(self.double.copilot_requests, [])
+        recorded = [{"report": {"route": {"tier": "deep", "depth": 1},
+                                "remote_reviews": {"copilot": {"tier": "deep", "repository": True}}}}]
+        self.assertFalse(ship.Ship.copilot_selected(recorded))
+        self.machine_copilot("deep")
+        self.assertTrue(ship.Ship.copilot_selected(recorded))
 
     def test_a_silent_pass_cannot_outvote_a_later_repository_opt_out(self):
         """sd:1369, the reviewer's three-step sequence against committed source.

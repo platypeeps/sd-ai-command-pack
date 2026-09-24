@@ -149,7 +149,7 @@ class Refusal(Exception):
 #
 # `copilot_review.automatic_deep` is `None` here on purpose: the repository has
 # not said, so the machine's `sd.copilot_review` answers (`deep` when unset).
-# A file that names the key says `true` or `false` and overrides the machine.
+# A file naming the key overrides a machine `deep` or `always`, not `never`.
 DEFAULT_POLICY: dict[str, Any] = {
     "tier_order": ["skip", "cheap", "standard", "deep"],
     "default_tier": "standard",

@@ -4,6 +4,16 @@
 
 ### Changed
 
+- **A machine `sd.copilot_review` of `never` wins over the repository.** The
+  repository's `.github/sd-review.json` `copilot_review.automatic_deep`
+  overrode every machine word, so a repository's `true` bought a paid Copilot
+  review past an operator who had set `never` (sd:1444). `never` is the
+  operator's cost lever, and now `copilot_policy` returns it before it reads
+  the file. `deep` and `always` keep the sd:1328 precedence: a file that names
+  the key still overrides them. `sd-review` reports `never` with source
+  `machine config` and still records the file's word under `repository`;
+  `sd-ship` resolves the same way at dispatch.
+
 - **The research-repo `CLAUDE.md` template shrinks from 193 lines to 102.**
   Five research repos copied about 2.2k tokens of it into every session.
   The adversarial-review section now names `sd-research-kit review`, which
@@ -32,6 +42,19 @@
   the machine's library moves. `tests/test_home_relative.py` writes a store
   under one home and drives the verbs under another, and CI's system pin
   moves to schema 14.
+
+- **Claude Code reads `AGENTS.md` in this repository.** A root `CLAUDE.md`
+  imports it with `@AGENTS.md`. Before, Claude sessions loaded only the two
+  `.claude/rules` files and never saw the repository rules.
+  `sd-operator-defaults.md` no longer restates the STE-Concise and Diagrams
+  rules. Each agent's global instructions carry them. Its report guidance
+  moves to a `Reports` section. `sd-planning-adversarial-review.md` now loads
+  only for `docs/work/**` and `WORKFLOW.md`. Skills and commands still read
+  it by path.
+  `sd-knowledge-capture` writes to Obsidian or Notion, and `sd-research-repo`
+  mirrors to Notion or Drive, only after an explicit request in the same
+  session. They stay skills: the command marker is pinned to the
+  nine commands.
 
 - **The Copilot ancestor gate reads `docs_skip` as well as `never_skip`.**
   A reviewed ancestor clears the merge when the commits since it touch only
@@ -76,7 +99,8 @@
   opt-in.** `sd.copilot_review` is a third core setting: `deep` (what unset
   reads), `always` or `never`. `sd-review` resolves it under the repository's
   `.github/sd-review.json`, which overrides only when it names
-  `copilot_review.automatic_deep`; a file that does not name the key now
+  `copilot_review.automatic_deep` (and, since sd:1444, not over a machine
+  `never`); a file that does not name the key now
   inherits instead of reading `false`. So the nineteen repositories that carry
   no file get one Copilot review on a deep-tier change and none on anything
   else, without anybody writing nineteen files (sd:1328). The report's

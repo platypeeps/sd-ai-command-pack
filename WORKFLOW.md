@@ -5,7 +5,7 @@ people see pull requests and merged commits, and nothing else the pack makes.
 Every default below serves that person. Anything that would show a personal
 process to someone else is off unless this file says otherwise.
 
-For this maintainer's reviewer, writing, and diagram preferences, read the
+For this maintainer's reviewer and report preferences, read the
 sd-ai-command-pack checkout's [.claude/rules/sd-operator-defaults.md](.claude/rules/sd-operator-defaults.md).
 Those instructions do not change executable gates or another operator's permissions.
 
@@ -335,7 +335,8 @@ Skip requires none; planning and challenged reviews retain their minimum of one.
 Tier selection still follows repository policy, without adding automatic local reviewers.
 Complete local review before any Copilot request.
 The machine's `sd.copilot_review` selects remote review during shipping: `deep` (unset reads `deep`), `always` or `never`.
-A repository's `copilot_review.automatic_deep` overrides it when the file names the key; a file that does not name it inherits.
+A repository's `copilot_review.automatic_deep` overrides `deep` and `always` when the file names the key; a file that does not name it inherits.
+A machine `never` wins over the file (sd:1444).
 Shipping reads that override once, from the latest retained review report that names it, and applies it to the tiers every retained pass recorded.
 `sd-review --explain` names the effective policy and whether the repository, the machine config, or the machine default answered.
 Automatic review runs once per pull request after the local review and acknowledgement step.
@@ -501,7 +502,8 @@ The reserved `sd` namespace declares three settings:
 - `sd.copilot_review`: when `sd-ship` requests a Copilot review by itself. `deep` requests one on deep-tier changes only,
   `always` on every reviewing tier, `never` on none. Absence reads `deep`, so a repository with no
   `.github/sd-review.json` gets Copilot on deep changes and on nothing else.
-  A repository file that names `copilot_review.automatic_deep` overrides it; one that does not inherits.
+  A repository file that names `copilot_review.automatic_deep` overrides `deep` and `always`; one that does not inherits.
+  `never` wins over the file.
   `sd-review` reports the effective policy, its source and the repository's say under `remote_reviews.copilot`.
   `sd-ship` resolves the decision again at dispatch, from the setting as it stands then and the tiers the
   retained passes recorded, so a setting changed after the review takes effect without another review.

@@ -155,7 +155,7 @@ Results report `review_selection.requested_provider` and the actual `reviewed_by
 Read the recovery reference before retries, fix verification, or additional reviews with an explicit provider.
 
 `--copilot-review auto` is the prepare default.
-It resolves the decision at dispatch: the machine's `sd.copilot_review` as it stands then (`deep` when unset), overridden by the repository's `copilot_review.automatic_deep` as the latest retained report naming it recorded it, applied to the tiers every retained pass recorded, so a later push's delta pass does not hide the branch's.
+It resolves the decision at dispatch: the machine's `sd.copilot_review` as it stands then (`deep` when unset), which wins when it opts out (sd:1444) and is otherwise overridden by the repository's `copilot_review.automatic_deep` as the latest retained report naming it recorded it, applied to the tiers every retained pass recorded, so a later push's delta pass does not hide the branch's.
 The report's own `automatic` verdict is what the policy said at review time, not the decision.
 A setting changed after the review takes effect on the next prepare without another local review.
 Each request binds one exact head and persists before merge.

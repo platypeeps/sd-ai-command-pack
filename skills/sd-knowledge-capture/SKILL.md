@@ -10,6 +10,10 @@ vault or Notion data source. It is the explicit write-capable bridge after
 `sd-capture`: destination routing, identity matching, preservation, preview,
 approval, write, and verification stay visible.
 
+Write to Obsidian, Notion, or any other external service only after the user
+explicitly asks for that write in this session. A capture, a preview, or a
+configured destination is not that request.
+
 Source quality and dating rules live in `references/source-standards.md`.
 
 ## When to use
