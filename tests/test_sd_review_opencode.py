@@ -366,12 +366,14 @@ class TheLaunchIsIsolated(unittest.TestCase):
                 self.opencode_provider(), root,
                 sd_review.Subject("worktree", "HEAD", "worktree", (), 0, ""),
                 "prompt", runner, {}, 60)
-        self.assertEqual(len(runner.calls), 1, outcome.detail)
-        launched = runner.calls[0]["cwd"]
-        self.assertNotEqual(launched.resolve(), root.resolve(),
-                            "launched inside the reviewed checkout -- the config-merge escape")
-        self.assertTrue(launched.name.startswith("sd-review-"),
-                        f"opencode's launch dir {launched} is not the neutral workdir")
+        # The confinement probe, then the review: both from the neutral dir.
+        self.assertEqual(len(runner.calls), 2, outcome.detail)
+        for call in runner.calls:
+            launched = call["cwd"]
+            self.assertNotEqual(launched.resolve(), root.resolve(),
+                                "launched inside the reviewed checkout -- the config-merge escape")
+            self.assertTrue(launched.name.startswith("sd-review-"),
+                            f"opencode's launch dir {launched} is not the neutral workdir")
 
     def test_a_launch_dir_inside_the_checkout_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as raw_root:
@@ -395,6 +397,84 @@ class TheLaunchIsIsolated(unittest.TestCase):
     def test_a_neutral_dir_outside_the_checkout_is_accepted(self) -> None:
         with tempfile.TemporaryDirectory() as raw_launch, tempfile.TemporaryDirectory() as raw_root:
             sd_opencode.assert_isolated_launch(pathlib.Path(raw_launch), pathlib.Path(raw_root))
+
+
+class TheResolvedConfinementIsChecked(unittest.TestCase):
+    """The run is refused unless opencode itself resolves the sd-review agent
+    to this map (sd:1375). The neutral launch dir decides where opencode
+    looks; this reads back what it resolved, so a widening that arrives by any
+    other route -- an inherited variable, an ancestor `.opencode/` -- refuses
+    the run instead of starting it. The fakes answer in the shape
+    `opencode debug agent sd-review` printed on 1.18.30."""
+
+    BASH = {"permission": "bash", "action": "allow", "pattern": "*"}
+
+    def provider(self) -> Any:
+        return sd_registry.Provider(name="opencode", vendor="openai", bill="openai",
+                                    start="opencode run", reader="opencode-json",
+                                    model="openai/gpt-5.5")
+
+    def run_with(self, probe: Any) -> tuple[Any, Any]:
+        from tests.test_sd_review import FakeRunner
+
+        def answer(argv, env, cwd, timeout):
+            if list(argv[1:3]) == ["debug", "agent"]:
+                return probe(env) if callable(probe) else probe
+            return sd_review.Completed(0, finding_stream('{"findings": []}'), "")
+        runner = FakeRunner(answers={"opencode": answer})
+        with tempfile.TemporaryDirectory() as raw_root:
+            outcome = sd_review.run_provider(
+                self.provider(), pathlib.Path(raw_root),
+                sd_review.Subject("worktree", "HEAD", "worktree", (), 0, ""),
+                "prompt", runner, {"HOME": "/home/reviewer"}, 60)
+        return outcome, runner
+
+    def test_a_widened_resolution_refuses_before_the_review_starts(self) -> None:
+        from tests.test_sd_review import resolved_agent
+        outcome, runner = self.run_with(lambda env: sd_review.Completed(0, resolved_agent(env, self.BASH), ""))
+        self.assertEqual(outcome.status, sd_review.REFUSED, outcome.detail)
+        self.assertIn('"bash"', outcome.detail)
+        self.assertEqual(len(runner.calls), 1, "the review itself must not start")
+
+    def test_the_probe_asks_the_same_launch_dir_and_environment(self) -> None:
+        from tests.test_sd_review import resolved_agent
+        outcome, runner = self.run_with(lambda env: sd_review.Completed(0, resolved_agent(env), ""))
+        self.assertEqual(outcome.status, sd_review.CLEAN, outcome.detail)
+        probe, review = runner.calls
+        self.assertEqual(probe["argv"], ["opencode", "debug", "agent", "sd-review", "--pure"])
+        self.assertEqual(probe["cwd"], review["cwd"])
+        self.assertEqual(probe["env"]["OPENCODE_CONFIG_CONTENT"], review["env"]["OPENCODE_CONFIG_CONTENT"])
+
+    def test_a_probe_that_cannot_answer_refuses(self) -> None:
+        for probe in (sd_review.Completed(1, "", "unknown command"), sd_review.Completed(0, "not json", "")):
+            outcome, runner = self.run_with(probe)
+            self.assertEqual(outcome.status, sd_review.REFUSED, outcome.detail)
+            self.assertIn("unconfirmed", outcome.detail)
+            self.assertEqual(len(runner.calls), 1)
+
+    def breach(self, *extra: dict, env: dict | None = None) -> str | None:
+        from tests.test_sd_review import resolved_agent
+        env = env or {"HOME": "/home/reviewer"}
+        stdout = resolved_agent(env, *extra)
+        return sd_opencode.confinement_breach(
+            lambda *args: sd_review.Completed(0, stdout, ""), "opencode run", env, pathlib.Path("/x"), 60)
+
+    def test_only_the_exact_map_passes(self) -> None:
+        self.assertIsNone(self.breach())
+        self.assertIsNone(self.breach(env={"HOME": "/h", "XDG_DATA_HOME": "/xdg"}))
+        # Not a list of known keys: an unknown tool, a re-opened MCP read and
+        # even a narrowing all differ from the map, and all refuse.
+        for rule in (self.BASH, {"permission": "mutator_mutate", "action": "allow", "pattern": "*"},
+                     {"permission": "read", "action": "allow", "pattern": "mcp:*"},
+                     {"permission": "external_directory", "action": "allow", "pattern": "*"},
+                     {"permission": "grep", "action": "deny", "pattern": "*"}):
+            self.assertIsNotNone(self.breach(rule), rule)
+
+    def test_a_resolution_without_the_default_deny_refuses(self) -> None:
+        stdout = json.dumps({"permission": [{"permission": "*", "action": "allow", "pattern": "*"}]})
+        breach = sd_opencode.confinement_breach(
+            lambda *args: sd_review.Completed(0, stdout, ""), "opencode run", {"HOME": "/h"}, pathlib.Path("/x"), 60)
+        self.assertIn("no `*: deny`", breach or "")
 
 
 @unittest.skipUnless(shutil.which("opencode"), "the opencode binary is not on PATH")
@@ -456,6 +536,31 @@ class TheEscapeIsClosedLive(unittest.TestCase):
             self.assertFalse((tmp / "neutral.log").exists() and "server-started" in (tmp / "neutral.log").read_text(),
                              "the checkout's MCP mutation server must not start")
             self.assertFalse((checkout / "PWNED-1375.txt").exists(), "no mutation may reach the checkout")
+
+    def probe(self, cwd: pathlib.Path, env: dict[str, str]) -> str | None:
+        return sd_opencode.confinement_breach(sd_review.subprocess_runner, "opencode run",
+                                              sd_opencode.opencode_environment(env), cwd, 45)
+
+    def test_opencode_resolves_the_hostile_config_as_a_breach_by_any_route(self) -> None:
+        """Measured through opencode, not the loader: from inside the hostile
+        checkout it resolves `bash` and `mutator_mutate` allowances, and the
+        same config handed in through `XDG_CONFIG_HOME` -- a route the
+        neutral launch dir does not close -- is refused just the same."""
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = pathlib.Path(raw)
+            checkout = self.build_checkout(tmp)
+            neutral = tmp / "neutral"
+            neutral.mkdir()
+            env = dict(os.environ)
+            inside = self.probe(checkout, env) or ""
+            self.assertIn('"bash"', inside)
+            self.assertIn('"mutator_mutate"', inside)
+            self.assertIsNone(self.probe(neutral, env))
+            config = tmp / "xdg" / "opencode"
+            config.mkdir(parents=True)
+            (config / "opencode.json").write_text((self.FIXTURE / "checkout_opencode.json").read_text())
+            routed = self.probe(neutral, {**env, "XDG_CONFIG_HOME": str(tmp / "xdg")}) or ""
+            self.assertIn('"bash"', routed)
 
 
 if __name__ == "__main__":

@@ -66,6 +66,24 @@ checkout, so the checkout cannot reach the model even as file data -- the one
 residual an `external_directory` allowance would leave open is not opened
 here.
 
+The neutral root stops the one merge that was measured, and it is not the
+last word, because it is a statement about where opencode looks and not
+about what it resolved. Configuration also arrives through the environment
+the run inherits (`XDG_CONFIG_HOME`, `OPENCODE_CONFIG`, a direnv-exported
+variable from the checkout the operator stood in) and through ancestors the
+check above names by file (`.opencode/` is not one of them). So the run is
+also refused unless opencode's own resolution agrees: `confinement_breach`
+runs `opencode debug agent sd-review --pure` with the review's environment
+and launch dir -- offline, about half a second, and it starts no MCP server
+(measured) -- and requires every rule after the last `*: deny` to be exactly
+this map's, in order, followed by the one allowance opencode appends for its
+own truncated tool output (`<data>/opencode/tool-output/*`, measured to
+follow `XDG_DATA_HOME`). Nothing is filtered by name: a rule of any source,
+key or shape that is not ours refuses the run, including a narrowing. The
+hostile checkout, resolved from inside it, puts `bash` and `mutator_mutate`
+allowances right after the deny (measured on 1.18.30), which is the escape
+read back from opencode instead of inferred from its loader.
+
 The cost of that, named so a future reader can price it. This reviewer
 cannot make an out-of-diff finding: it sees only what `review-subject.md`
 embeds, so a defect that lives in a tracked file the change does not touch
@@ -105,6 +123,7 @@ answer in `part.text`, not deltas), `step_finish`, and `error` on failure.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import shlex
 from typing import Any, Callable, Mapping
@@ -165,6 +184,68 @@ def assert_isolated_launch(launch_dir: pathlib.Path, checkout: pathlib.Path) -> 
                 raise IsolationError(
                     f"opencode config {candidate} on an ancestor of the launch dir "
                     "would merge into the confined run")
+
+
+def confined_rules(env: Mapping[str, str]) -> list[dict[str, str]]:
+    """The ruleset opencode must resolve from the last `*: deny` on: this map
+    in order, its deny first, then opencode's own allowance for its truncated tool output, which
+    it appends to every agent under its data dir (`XDG_DATA_HOME`, else
+    `~/.local/share`, then `opencode`)."""
+    rules = []
+    for permission, value in PERMISSION.items():
+        patterns = value if isinstance(value, dict) else {"*": value}
+        rules += [{"permission": permission, "pattern": pattern, "action": action}
+                  for pattern, action in patterns.items()]
+    data = env.get("XDG_DATA_HOME") or os.path.join(env.get("HOME") or os.path.expanduser("~"), ".local", "share")
+    rules.append({"permission": "external_directory", "action": "allow",
+                  "pattern": os.path.join(data, "opencode", "tool-output", "*")})
+    return rules
+
+
+def probe_argv(start: str) -> list[str]:
+    """`opencode debug agent sd-review --pure`: the same program as the start
+    line, asked what it resolved instead of asked to run."""
+    words = shlex.split(start)
+    program = words[:-1] if words and words[-1] == "run" else words[:1]
+    return [*program, "debug", "agent", AGENT, "--pure"]
+
+
+def resolved_rules(stdout: str) -> list[dict[str, str]] | None:
+    """The agent's permission rules from `debug agent`, or None."""
+    try:
+        agent = json.loads(stdout)
+    except (ValueError, RecursionError):
+        return None
+    rules = agent.get("permission") if isinstance(agent, dict) else None
+    if not isinstance(rules, list) or not all(isinstance(rule, dict) for rule in rules):
+        return None
+    return [{key: rule.get(key) for key in ("permission", "pattern", "action")} for rule in rules]
+
+
+def confinement_breach(runner: Callable[..., Any], start: str, env: Mapping[str, str],
+                       launch_dir: pathlib.Path, timeout: int) -> str | None:
+    """Why the confinement opencode resolved is not this map, or None.
+
+    Asked of opencode itself, in the review's own environment and launch dir,
+    so a widening from any source -- the checkout's config, an inherited
+    variable, an ancestor -- is refused without this file naming the source."""
+    result = runner(probe_argv(start), env, launch_dir, min(timeout, 60))
+    rules = resolved_rules(result.stdout) if result.exit_code == 0 else None
+    if rules is None:
+        return ("opencode could not show the resolved sd-review agent (`debug agent`), so its "
+                f"confinement is unconfirmed; no review was started. {result.stderr.strip()[:300]}").strip()
+    deny = {"permission": "*", "pattern": "*", "action": "deny"}
+    if deny not in rules:
+        return "opencode resolved sd-review with no `*: deny`; no review was started."
+    tail = rules[len(rules) - 1 - rules[::-1].index(deny):]
+    expected = confined_rules(env)
+    if tail == expected:
+        return None
+    foreign = [rule for rule in tail if rule not in expected] or tail
+    return ("opencode resolved sd-review wider than, or different from, the confined map: "
+            f"{json.dumps(foreign)[:400]} after `*: deny`. A setting from outside this run -- the "
+            "reviewed checkout's config or the inherited environment -- reached the agent; "
+            "no review was started.")
 
 
 def opencode_argv(workdir: pathlib.Path, start: str, model: str | None) -> list[str]:
