@@ -454,11 +454,13 @@ def changed_paths(repo: pathlib.Path) -> tuple[list[str] | None, str]:
         # default, `--name-only` prints a moved file under its new name only.
         # A workflow moved out of `.github/` was then a change to nowhere in
         # any class, and the diff that retired it passed clean (#972 review).
-        # Both paths of a move are what the pull request touches.
-        listed = sd_lib.git_output(["diff", "--name-only", "--no-renames", f"{base}...HEAD"], repo)
+        # Both paths of a move are what the pull request touches. `-z`: a
+        # newline listing quotes a non-ASCII path, which then matched no
+        # scope glob and passed without its line (sd:1440).
+        listed = sd_lib.git_output(["diff", "--name-only", "--no-renames", "-z", f"{base}...HEAD"], repo)
         if listed is None:
-            return None, f"git diff --name-only --no-renames {base}...HEAD failed"
-        return [line for line in listed.splitlines() if line], base
+            return None, f"git diff --name-only --no-renames -z {base}...HEAD failed"
+        return [name for name in listed.split("\0") if name], base
     return None, "neither origin/HEAD nor origin/main resolves"
 
 
