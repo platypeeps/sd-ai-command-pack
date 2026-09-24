@@ -4,6 +4,19 @@
 
 ### Changed
 
+- **The research-repo `CLAUDE.md` template shrinks from 193 lines to 102.**
+  Five research repos copied about 2.2k tokens of it into every session.
+  The adversarial-review section now names `sd-research-kit review`, which
+  prints the checklist and the second-reader command. It no longer says a
+  silent `codex` run is normal: a run with no new rollout file is a hang.
+  Publishing keeps the local-by-default rule and the opt-in mirror keys.
+  The template drops `build/artifact/`, which no longer exists. `## Parallel
+  work` cites `skills/_shared/references/subagent-dispatch.md` and states the
+  subagent `Write` filename rule once. `review` now accepts a repo block that
+  says a template block and more, so repos that keep the longer text pass.
+  `conventions.md` shows the template's real Publishing heading in its
+  override example, and no longer calls a silent `codex` run normal.
+
 - **The Copilot ancestor gate reads `docs_skip` as well as `never_skip`.**
   A reviewed ancestor clears the merge when the commits since it touch only
   `docs/`. The gate subtracted the repository's `never_skip` list but ignored

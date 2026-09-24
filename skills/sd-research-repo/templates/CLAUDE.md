@@ -28,14 +28,7 @@ Use only the directories this repo needs; do not invent new ones.
 Choose exactly one main document titled `START HERE — <descriptive project or decision title>`.
 Apply this during setup and the next update to an existing project.
 Match its Markdown H1 to the `research.conf.py` `title` and `h1`.
-A designated mirror carries the same title, in Notion or in Drive.
-Link that mirror near the README's top; use the source link until a mirror exists.
-Identify the main document in the README table.
-Keep the source filename and any existing mirror page or file identity.
-For multiple tracks, choose an overview that directs readers to each track.
 
-Before publishing, check the configured documents for missing, duplicate, or mismatched main-document titles.
-Read back the mirror title and entry links after each drain.
 Follow the full standard's **Main document — START HERE** section.
 
 ## Documents
@@ -52,9 +45,6 @@ Compiled 2026-08-27 from `owner/repo` @ `abc1234`, plus <other sources>.
 ## 1. First section
 ```
 
-The renderer strips everything above `---` and builds the masthead from
-`research.conf.py`, so that block is for readers of the markdown.
-
 - `##` headings become the rail nav. Number them when order matters.
 - State what is **verified** and what is **not verified** in a closing Status section.
 - Corrections stay visible — say what changed and why, do not silently overwrite.
@@ -65,16 +55,9 @@ The renderer strips everything above `---` and builds the masthead from
 sd-research-kit render
 ```
 
-Writes `docs/dashboard/<name>.html` — standalone, opens with `file://`, and
-served by the dashboard's Documents tab. `render` also writes each document's
-Markdown into `$OBSIDIAN_VAULT/Briefs/<repo>/`, which is where the document
-lives. Add or edit pages in `research.conf.py`, never by editing generated
-files.
+Add or edit pages in `research.conf.py`, never by editing generated files.
 
 ## Adversarial review before publishing
-
-Nothing is published until it has been reviewed against itself — the **information** it
-rests on, and the **product** the reader receives. The mechanical half:
 
 ```bash
 sd-research-kit review
@@ -83,108 +66,34 @@ sd-research-kit review
 It checks provenance blocks, Status sections and build freshness, then prints the checklist
 for the half no script can do. Exit 1 means fix it first.
 
-The information — take it adversarially, the job is to refute:
-
-1. List the load-bearing claims: removing one changes the conclusion.
-2. Open each cited source again and read it. Default to refuted — the source must *say* it,
-   not merely be consistent with it.
-3. Numbers: check the unit, the date and the denominator, not the digits.
-4. An unsupported claim is cut, or moved to Status as explicitly unverified. It never stays
-   in the body, where a reader assumes it was checked.
-5. Say what you could not check and why.
-
-The product — read what the reader gets, not what you meant:
-
-6. Read the rendered page cold. Does the conclusion follow from what is on the page?
-7. Find the load-bearing assumption the document never states.
-8. After a drain, check each mirror against the source, and that handling restrictions
-   survived the mirror.
-
-This pass is the research flow's review point *after the brief and decisions*; the pass over
-the final product before the send box is the second point. Both caps live in the
-sd-ai-command-pack checkout's `.claude/rules/sd-planning-adversarial-review.md` — not in this
-repo, which does not carry that file — and this page states neither.
-
-The second reader is an independent CLI reviewer, **run through its own CLI, not a plugin**.
-The invocation is not retyped here — `sd-research-kit review` prints it under *The second
-reader*, with the exact flags and the availability check that says whether the CLI is
-installed and logged in. Run that and take the command from there. The plugin that supplies
-the `/codex:*` slash commands is not a dependency of this kit and may not be installed, so
-those slash commands must not be reached for.
-
-Use the focus text that `sd-research-kit review` prints.
-`CHECKLIST` in `bin/sd_research_review.py` owns that text.
-Do not copy the prompt into this guide.
-
-`-s read-only` is not optional — it is what keeps an adversarial reader from editing the work
-it is reviewing. Name the documents in the prompt when the diff is large. Run it in the
-background for anything past a page; it buffers stdout and prints nothing until it exits, so
-silence is normal rather than a hang.
-
-The focus text points it at **uncommitted** working-tree changes, so the ordinary case is:
-review before committing. Once the work is committed — on a branch or merged to `main` —
-`git status` and `git diff` show it nothing and the pass reviews an empty diff without saying
-so. For committed work on a branch, name the comparison in the prompt: *"review
-`git diff main...HEAD`"*. Its default framing is a code review, hence the focus text. It sees
-the repo, not the sources, so step 2 — reopening the citation — stays yours.
-
 Record the outcome in the Status section: what was verified and how, what was not, what was
 cut, and the second reader's pass — which reader, date, what it raised, what changed, what
-was rejected and why. A review that found nothing says what it checked. If that CLI is
-missing or not logged in (the availability check in the printed checklist reports it), say
-that in Status: "no independent pass" is a stated gap.
+was rejected and why. A review that found nothing says what it checked.
 
 ## Publishing — local by default, mirrors on request
-
-**Do not publish research as an artifact** — the hosted single-page surface `build/artifact/`
-was written for.
 
 `sd-research-kit render` publishes every overview, map, brief, report, and survey twice.
 Both copies are local: Markdown in the Obsidian vault, HTML on the dashboard's Documents
 tab. That is the whole of publication for most documents. `90-scratch/` is not published.
 
+**Do not publish research as an artifact.**
+
 An outward mirror is opt-in, per document. The user designates a document. Record the
 designation as a `notion=` or `drive=` key in that document's `research.conf.py` entry.
-Nothing infers a target from a title, a folder, or a neighbouring document. The markdown
-file stays the source of truth; a mirror is the readable, shareable copy. By default a
-designated document mirrors into this repo's own page or folder at that destination — put
-its URL here when the repo designates one. Each destination has its own default: the
-configured briefs folder for Notion, `Briefs/<repo>` in My Drive for Drive. A per-document
-`space=` or `folder=` overrides that default. Each mirror stays in sync when the source
-document changes.
 
-`render` queues one sync request per designated document under
-`~/.claude/pending-mirror-syncs/`, and an agent session drains it. A drain that creates a
-page or file writes the new id back into that document's entry. Use `page=` for Notion and
-`file=` for Drive. Without that write-back the next drain creates a second copy. A
-write-back that fails leaves the request in place and is reported, so the queue still says
-the work is owed.
-
-Mirror shape — full content minus the H1, opening with a pointer back to the file:
-
-```markdown
-*Source: **`file:///<absolute path to this document in the checkout>`** — edit there, then update this page.*
-
-<the document's provenance line>
-
----
-
-## 1. First section
-```
-
-Give each Notion page an icon and keep it stable across updates — a changed icon reads as a
-different page. Record every mirror in the README's **Notion pages** table, Drive included:
-document, destination, title, URL.
+By default a designated document mirrors into this repo's own page or folder at that
+destination — put its URL here when the repo designates one.
 
 ## Parallel work
 
-Reading fans out; writing does not. Fan out source extraction, link sweeps and
-citation checks across read-only subagents. Every edit to this repo stays in one
-lane: one checkout, one writer, and a second writer takes its own worktree. Give
-each subagent a budget and a deadline, run it in the background, and treat no
-report by the deadline as a failure. The rules are the pack's `WORKFLOW.md`,
-section **Parallel work**; the filenames a subagent cannot write are in the
-`sd-research-repo` skill's `references/subagent-dispatch.md`.
+Reading fans out to read-only subagents; writing stays in one lane, one writer per
+checkout. Give each subagent a budget and a deadline, and treat no report by the
+deadline as a failure. The rules are the pack's `WORKFLOW.md` section **Parallel work**
+and `skills/_shared/references/subagent-dispatch.md`.
+
+Subagents return findings as text. Inside a subagent, Claude Code's `Write` tool refuses
+a basename matching `/^(REPORT|SUMMARY|FINDINGS|ANALYSIS).*\.md$/i`. Name scratch files
+for their subject, such as `source-notes.md`. The main thread writes `30-brief/SUMMARY-*`.
 
 ## Style
 

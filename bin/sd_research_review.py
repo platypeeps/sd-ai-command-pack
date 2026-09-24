@@ -283,6 +283,46 @@ def only_a_local_value(template_block, repo_block):
     return True
 
 
+def words(text):
+    """The block's words in order, lower-cased, with markup and punctuation gone."""
+    return " " + " ".join(re.findall(r"\w+", text.lower())) + " "
+
+
+def said_within(template_block, repo_block):
+    """True if the repo block says the whole template block, and possibly more.
+
+    The template shrank on 2026-09-24, and several of its blocks became a run of
+    words inside a longer block the research repos already carried. A repo
+    that still says the longer form says everything the template says, so it
+    has not fallen behind: the template is a floor. Markup and punctuation are
+    ignored, because the shorter form may end a sentence where the longer one
+    continued it.
+    """
+    want = words(template_block)
+    return bool(want.strip()) and want in words(repo_block)
+
+
+def carried_by(want, candidates):
+    """The repo block that carries this template block, and the best ratio seen.
+
+    The carrier is None when no block does. The ratio only picks the wording of
+    the finding, `reworded` or `gone`.
+    """
+    best, ratio = "", 0.0
+    for candidate in candidates:
+        score = difflib.SequenceMatcher(None, want, candidate).ratio()
+        if score > ratio:
+            best, ratio = candidate, score
+    if best and (
+        best == want
+        or fills_a_slot(want, best)
+        or only_a_local_value(want, best)
+    ):
+        return best, ratio
+    wider = [c for c in candidates if said_within(want, c)]
+    return (wider[0] if wider else None), ratio
+
+
 # Below this, the nearest repo block is a different block rather than an edited
 # one, so the template block is reported as gone instead of as reworded. It
 # changes the wording of a finding, never whether one is reported.
@@ -321,17 +361,9 @@ def drift(template_text, repo_text):
         matched = set()
         for block in blocks(body):
             want = flat(block)
-            best, ratio = "", 0.0
-            for candidate in candidates:
-                score = difflib.SequenceMatcher(None, want, candidate).ratio()
-                if score > ratio:
-                    best, ratio = candidate, score
-            if best and (
-                best == want
-                or fills_a_slot(want, best)
-                or only_a_local_value(want, best)
-            ):
-                matched.add(best)
+            carrier, ratio = carried_by(want, candidates)
+            if carrier is not None:
+                matched.add(carrier)
                 continue
             how = "reworded" if ratio >= REWORDED_FLOOR else "gone"
             findings.append((name, how, want))

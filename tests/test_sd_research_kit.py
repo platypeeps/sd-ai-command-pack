@@ -40,6 +40,9 @@ VERBS = (
     "init-claude-md",
 )
 TEMPLATE = REPO_ROOT / "skills" / "sd-research-repo" / "templates" / "CLAUDE.md"
+#: The template as the five research repos copied it, before it shrank from
+#: 193 lines on 2026-09-24. Kept as `.txt` so no doc gate reads its retired prose.
+LONG_TEMPLATE = REPO_ROOT / "tests" / "fixtures" / "research-claude-md-before-2026-09-24.txt"
 
 
 def load_kit():
@@ -376,15 +379,15 @@ class TemplateDriftTests(unittest.TestCase):
         self.assertEqual(self.findings(text), [])
 
     def test_a_filled_in_slot_is_not_drift(self) -> None:
-        slot = "<absolute path to this document in the checkout>"
-        self.assertIn(slot, self.template, "the template's path slot moved")
-        text = self.template.replace(slot, "/Users/probe/repos/research/x/00-overview/y.md")
+        slot = "<descriptive project or decision title>"
+        self.assertIn(slot, self.template, "the template's title slot moved")
+        text = self.template.replace(slot, "Probe adoption decision")
         self.assertEqual(self.findings(text), [])
 
     def test_a_reworded_template_paragraph_is_drift(self) -> None:
         """The failure that actually happened: the repo kept the old wording."""
 
-        current = "**Do not publish research as an artifact**"
+        current = "**Do not publish research as an artifact.**"
         self.assertIn(current, self.template)
         text = self.template.replace(current, "**Do not publish research as a Claude artifact.**")
         found = self.findings(text)
@@ -406,6 +409,39 @@ class TemplateDriftTests(unittest.TestCase):
         found = self.findings(self.template.replace(gone, ""))
         self.assertEqual(len(found), 1, found)
         self.assertEqual(found[0][1], "gone")
+
+    def test_a_longer_paragraph_that_says_the_block_is_not_drift(self) -> None:
+        """The template is a floor: saying its block and more is not falling behind."""
+
+        block = "Add or edit pages in `research.conf.py`, never by editing generated files."
+        self.assertIn(block, self.template)
+        text = self.template.replace(
+            block,
+            "Writes `docs/dashboard/<name>.html`. Add or edit pages in\n"
+            "`research.conf.py`, never by editing generated\nfiles. Keep it that way.",
+        )
+        self.assertEqual(self.findings(text), [])
+
+    def test_a_block_cut_short_is_still_drift(self) -> None:
+        """Containment runs one way: the repo must say all of the template block."""
+
+        block = "Add or edit pages in `research.conf.py`, never by editing generated files."
+        text = self.template.replace(block, "Add or edit pages in `research.conf.py`.")
+        found = self.findings(text)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("Rendering", found[0][0])
+
+    def test_a_repo_carrying_the_long_template_drifts_only_in_parallel_work(self) -> None:
+        """The five research repos copied the 193-line template, and still carry it.
+
+        The shrink must not report the text it removed. The one section that
+        does drift is `## Parallel work`, whose wording is new; no research repo
+        carried the old one either.
+        """
+
+        found = self.findings(LONG_TEMPLATE.read_text(encoding="utf-8"))
+        self.assertTrue(found)
+        self.assertEqual({where for where, _, _ in found}, {"`## Parallel work`"}, found)
 
     def test_local_content_is_counted_not_reported(self) -> None:
         text = self.template + "\n## Local\n\nOne local block.\n"
@@ -437,7 +473,7 @@ class TemplateDriftTests(unittest.TestCase):
             (repo / "research.conf.py").write_text('PROJECT = "probe"\nDOCS = []\n')
             (repo / "CLAUDE.md").write_text(
                 self.template.replace(
-                    "**Do not publish research as an artifact**",
+                    "**Do not publish research as an artifact.**",
                     "**Do not publish research as a Claude artifact.**",
                 )
             )
