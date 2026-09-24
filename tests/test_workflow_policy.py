@@ -257,7 +257,7 @@ class ReviewTable(unittest.TestCase):
     def test_the_table_appears_in_exactly_two_files(self):
         """Both copies are in the grep now. `WORKFLOW.md` used to sit outside
         the governed pathspec -- the hand-typed copy named three top-level
-        markdown files and one of them, `CLAUDE.md`, is not even tracked here
+        markdown files and one of them, `CLAUDE.md`, was not tracked here then
         -- so the page was asserted by a direct read beside a grep that could
         not see it. The read stays as the control on the grep."""
         rows = governed_grep(re.escape(TABLE_HEADER))

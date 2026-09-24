@@ -1,3 +1,9 @@
+---
+paths:
+  - "docs/work/**"
+  - "WORKFLOW.md"
+---
+
 # SD planning adversarial review
 
 Adversarial review runs at four points, each with a cap on automatic passes.

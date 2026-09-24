@@ -22,7 +22,7 @@ Complete local review and fix verification before requesting any Copilot review.
 Copilot is an optional second review.
 Repository policy may request it automatically for the configured `deep` tier.
 Otherwise, request it only after explicit task direction.
-Never repeat an automatic request after a later push.
+Do not repeat an automatic request after a later push.
 Honor repository restrictions on remote reviewer requests.
 An unavailable local reviewer needs an operator decision, not an automatic remote escalation.
 
@@ -30,30 +30,17 @@ The pack's consent and the agent runtime's execution approval are separate bound
 Name the rejecting boundary and exact intended recipient when approval is missing.
 Do not request blanket approval for unused fallbacks or weaken the runtime's protections.
 
-## STE-Concise
+## Writing and diagrams
 
-Use STE-Concise for replies, comments, documentation, commit messages, and PR text from either agent.
-Use active voice and simple tenses.
-Limit prose sentences to 20 words, with one idea per sentence.
-Lead with the result, decision, or blocker.
-Remove preambles, repeated progress recaps, filler, and closing offers.
-Preserve exact identifiers, commands, paths, quotations, and necessary technical detail.
-Accuracy and safety take precedence over brevity.
+Writing style and diagram tooling come from each agent's global instructions.
+This file does not restate them.
+
+## Reports
 
 Treat skill report fields as a completeness check, not mandatory headings in every reply.
 Include only applicable results, verification evidence, unresolved limits, and required decisions.
 Link detailed evidence instead of repeating it in chat.
 Do not omit failed checks or incomplete work to shorten a report.
-
-## Diagrams
-
-Prefer Archify for architecture, workflow, sequence, data-flow, and lifecycle diagrams when available and suitable.
-Read the installed Archify skill before using it.
-Use its renderer, validation, and visual-review requirements.
-Honor an explicitly requested format.
-If Archify is unavailable or unsuitable, explain the limitation and use a supported fallback.
-A table or short list is sufficient when a diagram adds no clarity.
-Do not create decorative artifacts merely to satisfy a tool preference.
 
 ## Enforcement boundary
 
