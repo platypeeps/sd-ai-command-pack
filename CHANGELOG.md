@@ -62,6 +62,14 @@
   A report retained from before `sd-review` wrote the repository's say into
   it is capped by the verdict it recorded: the setting may only subtract
   from that, so a `false` of its day never becomes a request.
+  The cap was per pass, so an older pass's `true` still bought a request after
+  a later pass of the same age recorded the repository's opt-out as `false`
+  (sd:1369). `sd-ship` now also reads `.github/sd-review.json` at dispatch,
+  and the repository's word there, resolved under the machine setting as it
+  stands, must select too. That reading only subtracts: a current
+  `automatic_deep: false`, or a machine `never` under a file that does not
+  name the key, stops the automatic request whatever a retained pass
+  recorded. A policy file that does not parse refuses the dispatch.
 
 - **`sd.merge_authorization` is now `sd.assistant_merge`.** The old name said
   what the setting was about, not who reads it, and the one database's
