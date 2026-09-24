@@ -4,8 +4,9 @@ Instructions for AI assistants working in this repository.
 
 ## Maintainer Rules
 
-- Follow [.claude/rules/sd-operator-defaults.md](.claude/rules/sd-operator-defaults.md) for reviewer selection, STE-Concise, and diagram tooling.
+- Follow [.claude/rules/sd-operator-defaults.md](.claude/rules/sd-operator-defaults.md) for reviewer selection and report content.
   These defaults apply to both Claude and Codex.
+  Writing style and diagram tooling come from each agent's global instructions.
 - Do not create pull requests in the upstream `Trellis` repository without
   explicit approval from the user for that specific upstream PR. If
   `sd-ai-command-pack` work uncovers a `Trellis`-owned change, document the

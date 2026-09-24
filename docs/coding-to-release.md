@@ -29,7 +29,7 @@ Reuse the stable review record; do not create another record to escape review hi
 Itemless merge remains manual and retains the same protection, ownership, review, and exact-head gates.
 Do not run every listed check twice: the local review also invokes the repository gate.
 Check reviewer eligibility and approval boundaries before that expensive invocation.
-Read the sd-ai-command-pack checkout's [operator defaults](../.claude/rules/sd-operator-defaults.md) for reviewer, writing, and diagram preferences.
+Read the sd-ai-command-pack checkout's [operator defaults](../.claude/rules/sd-operator-defaults.md) for reviewer and report preferences.
 
 ## Implementation ownership
 
@@ -87,5 +87,5 @@ These are recommendations, not implemented behavior.
 
 Command forms were checked with their local `--help` output on 2026-09-18.
 The settings check found STE-Concise in Claude's configuration and Codex's global instructions.
-The pack's Claude override also selects STE-Concise; the system checkout inherits the global setting.
+The pack and the system checkout inherit the global setting.
 Configured instructions do not prove that every generated sentence follows the style.

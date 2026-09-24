@@ -898,6 +898,28 @@ roles:
         self.assertEqual(
             operation.unreviewed_shipped_surface(head, _git(self.root, "rev-parse", "HEAD")), [])
 
+    def test_a_non_ascii_planning_path_still_reaches_the_guest_refusal(self):
+        """`core.quotePath` is on by default, so `--name-only` prints a
+        non-ASCII path as a C-quoted string: `docs/work/é.md` came out as
+        `"docs/work/\\303\\251.md"`, missed every planning prefix, and a guest
+        destination received the planning file (sd:1440). The first assertion
+        pins the premise, so this test cannot pass because git stopped quoting.
+        """
+        operation = self.operation()
+        base = _git(self.root, "rev-parse", "HEAD")
+        for name in ("docs/work/é.md", "docs/spec/naïve.md", "src/ok.py"):
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("body\n")
+        _git(self.root, "add", "-A")
+        _git(self.root, "commit", "-m", "plan in a non-ASCII name\n\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.assertIn('"docs/work/\\303\\251.md"',
+                      _git(self.root, "diff", "--name-only", base, head).splitlines(),
+                      "the premise: git quotes a non-ASCII path by default")
+        self.assertEqual(operation.planning_artifacts(base, head),
+                         ["docs/spec/naïve.md", "docs/work/é.md"])
+
     def test_a_move_out_of_the_shipped_surface_still_names_its_source(self):
         """A rename reports its destination only, and the source vanished.
 
@@ -3649,6 +3671,16 @@ class DeclaredGapCase(unittest.TestCase):
         head = self.head()
         (self.root / ".github/workflows/tests.yml").write_text(self.TESTS)
         self.assertEqual(self.adapter().expected_workflows(head), expected[:1])
+
+    def test_a_non_ascii_workflow_name_is_still_expected(self):
+        """`ls-tree --name-only` quotes a non-ASCII path by default, so
+        `tëst.yml` came back as `".github/workflows/t\\303\\253st.yml"`, failed
+        the `.yml` suffix test on its closing quote, and the merge stopped
+        waiting for its run (sd:1440)."""
+        head = self.declare(workflows={"tëst.yml": self.TESTS, "sd-review-route.yml": self.ROUTE})
+        self.assertEqual(self.adapter().expected_workflows(head),
+                         [(".github/workflows/sd-review-route.yml", "sd-review route"),
+                          (".github/workflows/tëst.yml", "Tests")])
 
     def test_a_push_run_is_not_evidence_of_the_pull_request_validation(self):
         self.declare()

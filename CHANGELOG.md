@@ -27,6 +27,19 @@
   `conventions.md` shows the template's real Publishing heading in its
   override example, and no longer calls a silent `codex` run normal.
 
+- **Claude Code reads `AGENTS.md` in this repository.** A root `CLAUDE.md`
+  imports it with `@AGENTS.md`. Before, Claude sessions loaded only the two
+  `.claude/rules` files and never saw the repository rules.
+  `sd-operator-defaults.md` no longer restates the STE-Concise and Diagrams
+  rules. Each agent's global instructions carry them. Its report guidance
+  moves to a `Reports` section. `sd-planning-adversarial-review.md` now loads
+  only for `docs/work/**` and `WORKFLOW.md`. Skills and commands still read
+  it by path.
+  `sd-knowledge-capture` writes to Obsidian or Notion, and `sd-research-repo`
+  mirrors to Notion or Drive, only after an explicit request in the same
+  session. They stay skills: the command marker is pinned to the
+  nine commands.
+
 - **The Copilot ancestor gate reads `docs_skip` as well as `never_skip`.**
   A reviewed ancestor clears the merge when the commits since it touch only
   `docs/`. The gate subtracted the repository's `never_skip` list but ignored
@@ -243,6 +256,17 @@
   action this tool is allowed to take.
 
 ### Fixed
+
+- **Non-ASCII paths no longer slip past three path checks (sd:1440).**
+  `core.quotePath` is on by default, so a newline-separated `--name-only`
+  prints `docs/work/é.md` as `"docs/work/\303\251.md"`, and no prefix or
+  glob matched the quoted form. Three checks failed open on it. `sd-ship`'s
+  guest-artifact refusal let a guest destination receive the planning file.
+  `sd-docs-lint` rule 8 let a non-ASCII `.github/workflows/` path pass
+  without its scope line. The declared-gap merge stopped expecting a run from
+  a non-ASCII workflow file. All three read NUL-separated names (`-z`) now.
+  The Copilot ancestor gate was already safe: a quoted `docs/` path stays in
+  the reviewed surface.
 
 - **The opencode reviewer refuses to run unless opencode resolves our
   confinement exactly.** The neutral launch dir stopped the reviewed checkout's

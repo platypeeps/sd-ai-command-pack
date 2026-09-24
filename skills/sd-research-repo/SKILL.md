@@ -23,6 +23,11 @@ vault and the dashboard's Documents tab by default, and reaches an
 outward destination — Notion, Google Drive — only where the user designated that
 document for it.
 
+Mirror to Notion, Google Drive, or any other external service only after the
+user explicitly asks for it in this session. A designated destination or a
+queued mirror sync is not that request. The local render to the vault and the
+dashboard needs no request.
+
 ## When to use
 
 Use when the repo you are standing in is a research repo and the task is to
