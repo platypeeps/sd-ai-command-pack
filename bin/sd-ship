@@ -106,6 +106,8 @@ COPILOT_MATERIALIZATION_INTERVAL_SECONDS = 5
 #: repository root, so a nested `src/docs/` stays inside the surface and a
 #: repository that wants a wider exemption does not get one by accident.
 UNSHIPPED_PREFIXES = ("docs/",)
+#: Where local planning artifacts live; a guest destination receives none of them.
+PLANNING_PREFIXES = ("docs/work/", "docs/spec/", "docs/decisions/")
 #: How many shipped paths a stale-review refusal names before it counts the rest.
 UNSHIPPED_NAMED = 5
 #: What a decoded value is called when the receipt refuses it for not being an
@@ -778,6 +780,18 @@ class Ship(SharedReview):
             self.copilot_ancestor_review = candidate
         return candidate
 
+    def planning_artifacts(self, base: str, head: str) -> list[str]:
+        """The planning paths a push of `head` would hand a guest destination.
+
+        **`-z` is load-bearing.** `core.quotePath` is on by default, so a
+        newline-separated `--name-only` prints `docs/work/é.md` as
+        `"docs/work/\\303\\251.md"`, which no prefix matches: the refusal failed
+        open and a guest received the planning file (sd:1440). NUL-separated
+        output is never quoted, so every path arrives as its own bytes.
+        """
+        changed = git(self.root, "diff", "--name-only", "-z", f"{base}...{head}").split("\0")
+        return sorted(path for path in changed if path.startswith(PLANNING_PREFIXES))
+
     def unreviewed_shipped_surface(self, reviewed: str, merge_head: str) -> list[str]:
         """The shipped paths the Copilot review of `reviewed` did not read.
 
@@ -994,8 +1008,7 @@ class Ship(SharedReview):
             if not self.args.no_item and not local_work:
                 body = body.replace(f"\n\nWork: sd:{self.args.item}\n", "")
                 self.save(body=body)
-            changed = git(self.root, "diff", "--name-only", f"origin/{base}...{head}").splitlines()
-            if any(path.startswith(("docs/work/", "docs/spec/", "docs/decisions/")) for path in changed):
+            if self.planning_artifacts(f"origin/{base}", head):
                 raise Refusal("guest destination cannot receive local planning artifacts")
         self.check_review(head)
         if current_head(self.root) != head:

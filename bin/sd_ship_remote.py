@@ -380,11 +380,14 @@ class GitHub:
         """
         directory = ".github/workflows"
         try:
-            listing = git(self.root, "ls-tree", "--name-only", head, f"{directory}/")
+            # `-z`: a newline listing quotes a non-ASCII name, and the quoted
+            # form fails the suffix test below, so its run was never expected
+            # (sd:1440).
+            listing = git(self.root, "ls-tree", "--name-only", "-z", head, f"{directory}/")
         except Refusal:
             return []
         expected = []
-        for path in sorted(line.strip() for line in listing.splitlines() if line.strip()):
+        for path in sorted(name for name in listing.split("\0") if name):
             if not path.endswith((".yml", ".yaml")):
                 continue
             lines = sd_lib.yaml_lines(git(self.root, "show", f"{head}:{path}"))

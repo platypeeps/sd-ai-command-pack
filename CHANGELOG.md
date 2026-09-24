@@ -246,6 +246,17 @@
 
 ### Fixed
 
+- **Non-ASCII paths no longer slip past three path checks (sd:1440).**
+  `core.quotePath` is on by default, so a newline-separated `--name-only`
+  prints `docs/work/é.md` as `"docs/work/\303\251.md"`, and no prefix or
+  glob matched the quoted form. Three checks failed open on it. `sd-ship`'s
+  guest-artifact refusal let a guest destination receive the planning file.
+  `sd-docs-lint` rule 8 let a non-ASCII `.github/workflows/` path pass
+  without its scope line. The declared-gap merge stopped expecting a run from
+  a non-ASCII workflow file. All three read NUL-separated names (`-z`) now.
+  The Copilot ancestor gate was already safe: a quoted `docs/` path stays in
+  the reviewed surface.
+
 - **The opencode reviewer refuses to run unless opencode resolves our
   confinement exactly.** The neutral launch dir stopped the reviewed checkout's
   `opencode.json` from deep-merging over the read-only map, but it only decides
