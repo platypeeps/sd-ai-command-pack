@@ -544,9 +544,12 @@ class CopilotPolicyResolution(unittest.TestCase):
     """The two pure halves both lanes share (sd:1328): who decides, and
     whether the decided word selects a review of this tier."""
 
-    def test_repository_then_machine_then_default(self):
-        self.assertEqual(sd_lib.copilot_policy(True, "never"), ("deep", "repository"))
+    def test_machine_never_then_repository_then_machine_then_default(self):
+        self.assertEqual(sd_lib.copilot_policy(True, "never"), ("never", "machine config"))
+        self.assertEqual(sd_lib.copilot_policy(False, "never"), ("never", "machine config"))
+        self.assertEqual(sd_lib.copilot_policy(True, "always"), ("deep", "repository"))
         self.assertEqual(sd_lib.copilot_policy(False, "always"), ("never", "repository"))
+        self.assertEqual(sd_lib.copilot_policy(False, "deep"), ("never", "repository"))
         self.assertEqual(sd_lib.copilot_policy(None, "always"), ("always", "machine config"))
         self.assertEqual(sd_lib.copilot_policy(None, "never"), ("never", "machine config"))
         self.assertEqual(sd_lib.copilot_policy(None, None), (sd_lib.COPILOT_REVIEW_DEFAULT, "machine default"))

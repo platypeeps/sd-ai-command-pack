@@ -4,6 +4,16 @@
 
 ### Changed
 
+- **A machine `sd.copilot_review` of `never` wins over the repository.** The
+  repository's `.github/sd-review.json` `copilot_review.automatic_deep`
+  overrode every machine word, so a repository's `true` bought a paid Copilot
+  review past an operator who had set `never` (sd:1444). `never` is the
+  operator's cost lever, and now `copilot_policy` returns it before it reads
+  the file. `deep` and `always` keep the sd:1328 precedence: a file that names
+  the key still overrides them. `sd-review` reports `never` with source
+  `machine config` and still records the file's word under `repository`;
+  `sd-ship` resolves the same way at dispatch.
+
 - **The research-repo `CLAUDE.md` template shrinks from 193 lines to 102.**
   Five research repos copied about 2.2k tokens of it into every session.
   The adversarial-review section now names `sd-research-kit review`, which
@@ -73,7 +83,8 @@
   opt-in.** `sd.copilot_review` is a third core setting: `deep` (what unset
   reads), `always` or `never`. `sd-review` resolves it under the repository's
   `.github/sd-review.json`, which overrides only when it names
-  `copilot_review.automatic_deep`; a file that does not name the key now
+  `copilot_review.automatic_deep` (and, since sd:1444, not over a machine
+  `never`); a file that does not name the key now
   inherits instead of reading `false`. So the nineteen repositories that carry
   no file get one Copilot review on a deep-tier change and none on anything
   else, without anybody writing nineteen files (sd:1328). The report's

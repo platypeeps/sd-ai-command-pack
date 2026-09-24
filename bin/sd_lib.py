@@ -36,15 +36,15 @@ COPILOT_REVIEW_DEFAULT = "deep"
 def copilot_policy(repository: bool | None, machine: str | None) -> tuple[str, str]:
     """The effective Copilot policy word and who said it.
 
-    The repository's `.github/sd-review.json` wins when it named
-    `copilot_review.automatic_deep` (`True` is `deep`, `False` is `never`);
-    otherwise the machine's `sd.copilot_review`; otherwise the default, so a
-    repository with no file gets one Copilot review on a deep-tier change and
-    none on anything else (sd:1328). Pure on purpose: `sd-review` resolves it
-    when it reports, and `sd-ship` resolves it again when it dispatches,
-    against the setting as it stands then.
+    A machine `sd.copilot_review` of `never` wins first, as the operator's
+    cost lever (sd:1444); then the repository's `.github/sd-review.json` when
+    it named `copilot_review.automatic_deep` (`True` is `deep`, `False` is
+    `never`); then the machine's word; then the default, so a repository with
+    no file gets one Copilot review on a deep-tier change only (sd:1328).
+    Pure on purpose: `sd-review` resolves it when it reports, and `sd-ship`
+    resolves it again when it dispatches, against the setting as it stands.
     """
-    if repository is not None:
+    if repository is not None and machine != "never":
         return ("deep" if repository else "never"), "repository"
     if machine is not None:
         return machine, "machine config"
@@ -71,7 +71,7 @@ CORE_CONFIG = {
     "copilot_review": {"pattern": "|".join(COPILOT_REVIEW_POLICIES),
                        "description": "When sd-ship requests a Copilot review by itself: deep (unset reads deep) on deep-tier "
                                       "changes only, always on every reviewing tier, never on none; a repository's "
-                                      ".github/sd-review.json copilot_review overrides it."},
+                                      ".github/sd-review.json copilot_review overrides deep and always, and never wins over it."},
 }
 
 #: `{current name: the name it was stored under before 1.1.0}`. A rename must

@@ -2132,8 +2132,9 @@ class CopilotPolicyTests(ReviewFixture):
     The machine's `sd.copilot_review` is the default for every repository;
     unset it reads `deep`, so a repository with no `.github/sd-review.json`
     gets Copilot on deep-tier changes and on nothing else. The repository's
-    own `copilot_review.automatic_deep` wins when the file names it, and a
-    file that does not name it inherits. `--explain` says which one answered.
+    own `copilot_review.automatic_deep` wins over `deep` and `always` when the
+    file names it, and a file that does not name it inherits. A machine
+    `never` wins over the file (sd:1444). `--explain` says which one answered.
     """
 
     def machine(self, value: str | None) -> None:
@@ -2194,15 +2195,34 @@ class CopilotPolicyTests(ReviewFixture):
         self.assertEqual(skipped["policy"], "always")
         self.assertFalse(skipped["automatic"])
 
-    def test_a_repository_file_that_names_the_key_overrides_the_machine(self) -> None:
+    def test_a_repository_file_that_names_the_key_overrides_deep_and_always(self) -> None:
         self.machine("always")
         off = self.copilot(self.repo("off", deep=True, policy={"copilot_review": {"automatic_deep": False}}))
         self.assertEqual(off, {"automatic": False, "tier": "deep",
                                "policy": "never", "source": "repository", "repository": False})
-        self.machine("never")
+        self.machine("deep")
+        off = self.copilot(self.repo("off-deep", deep=True, policy={"copilot_review": {"automatic_deep": False}}))
+        self.assertEqual(off, {"automatic": False, "tier": "deep",
+                               "policy": "never", "source": "repository", "repository": False})
+        self.machine("always")
         on = self.copilot(self.repo("on", deep=True, policy={"copilot_review": {"automatic_deep": True}}))
         self.assertEqual(on, {"automatic": True, "tier": "deep",
                               "policy": "deep", "source": "repository", "repository": True})
+
+    def test_machine_never_beats_a_repository_opt_in(self) -> None:
+        """sd:1444: the operator's `never` is the cost lever, and a repository's
+        `automatic_deep: true` does not buy a paid review past it. The report
+        still records what the file said."""
+        self.machine("never")
+        on = self.copilot(self.repo("on", deep=True, policy={"copilot_review": {"automatic_deep": True}}))
+        self.assertEqual(on, {"automatic": False, "tier": "deep",
+                              "policy": "never", "source": "machine config", "repository": True})
+        root = self.repo("on-explained", deep=True, policy={"copilot_review": {"automatic_deep": True}})
+        runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", "")})
+        explained = sd_review.review(root, namespace(explain=True), runner, self.environment(), self.chatgpt_home())
+        out = io.StringIO()
+        sd_review.render(explained, out)
+        self.assertIn("copilot     never (machine config); tier deep, not requested", out.getvalue())
 
     def test_a_repository_file_without_the_key_inherits_the_machine(self) -> None:
         self.machine("never")

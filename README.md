@@ -151,7 +151,8 @@ Ownership, review, CI, protection, and runner gates remain mandatory. This setti
 
 `sd.copilot_review` says when `sd-ship` requests a GitHub Copilot review by itself: `deep` on deep-tier changes only, `always` on every reviewing tier, `never` on none.
 Unset reads `deep`, so every repository gets Copilot on deep changes without a per-repository file.
-A repository's `.github/sd-review.json` `copilot_review.automatic_deep` overrides it when the file names the key; a file that does not name it inherits.
+A repository's `.github/sd-review.json` `copilot_review.automatic_deep` overrides `deep` and `always` when the file names the key; a file that does not name it inherits.
+A machine `never` wins over the file.
 `sd-review --explain` reports the effective policy and its source (`repository`, `machine config`, `machine default`) under `remote_reviews.copilot`.
 `sd-ship` applies the setting as it stands at dispatch to the tiers the retained passes recorded, so a change takes effect without another review.
 `sd-ship --copilot-review request|skip` still overrides both for one prepare.
