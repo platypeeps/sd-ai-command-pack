@@ -342,6 +342,7 @@ Automatic review runs once per pull request after the local review and acknowled
 Later pushes still require exact-head local review and CI.
 A completed Copilot review must cover the merge head, or an ancestor of it.
 An ancestor clears only when the diff from it to the merge head touches nothing outside `docs/`.
+Each such path must also be one the repository's policy lets skip: in `docs_skip` and not in `never_skip`.
 `tests/` is inside that surface: a green suite does not say a test still asserts what the reviewer approved.
 The merge receipt carries a warning naming the ancestor whenever one clears the gate.
 Request an explicit later-head review only when the automatic review is stale.
