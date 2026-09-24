@@ -484,8 +484,38 @@ class Ship(SharedReview):
 
     def automatic_copilot_review(self) -> bool:
         """Whether the policy as it stands now selects a Copilot review of a
-        tier some retained pass recorded (sd:1328)."""
-        return self.copilot_selected(self.history.native(self.state))
+        tier some retained pass recorded (sd:1328).
+
+        The retained passes answer first, and the repository's file as it
+        stands at dispatch answers second, and both must select (sd:1369).
+        The second reading only subtracts. A pass records what the file said
+        at its own head, and a pass from before the `repository` key records
+        nothing the dispatch can read, so no pass is the repository's
+        current word. The checkout is the reviewed head here: `prepare`
+        reviews it and refuses a moved HEAD before it pushes.
+        """
+        passes = self.history.native(self.state)
+        return (self.copilot_selected(passes)
+                and self.copilot_tiers_selected(passes, self.copilot_repository_at_dispatch()))
+
+    def copilot_repository_at_dispatch(self) -> bool | None:
+        """What `.github/sd-review.json` says of Copilot now, or `None`.
+
+        Read through `sd-review`'s validated loader, as `repository_skippable`
+        reads it. A file that will not parse refuses: it has said nothing a
+        paid request may rely on.
+        """
+        review = sd_lib.sibling("sd_review_policy_ship_copilot", "sd-review")
+        try:
+            policy, _source = review.load_policy(self.root)
+        except review.PolicyError as error:
+            raise Refusal(
+                f"the repository's review policy does not parse, so its Copilot word "
+                f"cannot be read at dispatch: {error}",
+                code="review_policy_malformed", boundary="review", state="operator_decision",
+                next_action="Fix .github/sd-review.json, then retry.",
+            ) from None
+        return policy["copilot_review"]["automatic_deep"]
 
     @staticmethod
     def copilot_selected(passes: list[dict]) -> bool:
@@ -518,8 +548,13 @@ class Ship(SharedReview):
         only when that verdict was `True`, and it never speaks for the
         repository, because it cannot.
         """
+        return Ship.copilot_tiers_selected(passes, Ship.copilot_repository_now(passes))
+
+    @staticmethod
+    def copilot_tiers_selected(passes: list[dict], repository: bool | None) -> bool:
+        """Whether `repository`'s word, under the machine setting as it stands
+        now, selects a tier some retained pass is evidence of."""
         tiers = [route for route in map(Ship.copilot_pass_tier, passes) if route is not None]
-        repository = Ship.copilot_repository_now(passes)
         if not tiers:
             return False
         word, _source = sd_lib.copilot_policy(repository, sd_lib.core_setting("copilot_review"))

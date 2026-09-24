@@ -661,6 +661,50 @@ roles:
         self.assertFalse(ship.Ship.copilot_selected([recorded(None), recorded(False)]))
         self.assertTrue(ship.Ship.copilot_selected([recorded(False), recorded(None)]))
 
+    def test_a_legacy_grant_cannot_outvote_the_repository_opt_out_at_dispatch(self):
+        """sd:1369, the legacy half. Two passes written before `repository`
+        travelled in the report: the first granted a deep change under the
+        default, and the second, after the repository committed
+        `automatic_deep: false`, recorded `automatic: false`. The ceiling drops
+        the second pass's tier and keeps the first, no pass speaks for the
+        repository, and the machine setting of the day bought a paid review of
+        a repository that had said no. The file as it stands at dispatch is the
+        repository's current word, and a current opt-out stops the request
+        whatever an older pass recorded."""
+        self.route_deep_saying_nothing_about_copilot()
+        self.machine_copilot(None)
+        self.operation().review(_git(self.root, "rev-parse", "HEAD"))
+        self.disable_automatic_copilot()
+        self.operation().review(_git(self.root, "rev-parse", "HEAD"))
+        operation = self.operation()
+        passes = operation.state["passes"]
+        self.assertEqual(len(passes), 2, "both passes have to be retained")
+        for review_pass in passes:
+            review_pass["report"]["remote_reviews"]["copilot"].pop("repository", None)
+        verdicts = [(p["report"]["route"]["tier"], p["report"]["remote_reviews"]["copilot"]["automatic"])
+                    for p in passes]
+        self.assertEqual(verdicts, [("deep", True), ("deep", False)])
+        # `prepare` would re-validate the first pass's digest, which the
+        # simulated upgrade just changed; the dispatch decision itself is
+        # `automatic_copilot_review`, and `copilot_selection` reads only it.
+        for machine in (None, "deep", "always"):
+            with self.subTest(machine=machine):
+                self.machine_copilot(machine)
+                self.assertFalse(operation.automatic_copilot_review())
+
+    def test_a_current_machine_never_stops_a_request_a_retained_opt_in_recorded(self):
+        """The machine half: a pass recorded the repository's opt-in, the file
+        has since stopped naming the key, and the machine now says `never`.
+        The recorded `true` is history; the current word is the machine's."""
+        self.enable_automatic_copilot()
+        self.operation().review(_git(self.root, "rev-parse", "HEAD"))
+        operation = self.operation()
+        recorded = operation.state["passes"][-1]["report"]["remote_reviews"]["copilot"]
+        self.assertIs(recorded["repository"], True)
+        (self.root / ".github/sd-review.json").write_text(json.dumps({"sensitive": ["src.py"]}))
+        self.machine_copilot("never")
+        self.assertFalse(operation.automatic_copilot_review())
+
     def test_explicit_copilot_review_is_idempotent_while_the_request_is_present(self):
         first = self.prepare("--copilot-review", "request")
         second = self.prepare("--copilot-review", "request")
