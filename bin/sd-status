@@ -273,6 +273,152 @@ def _matrix_names(matrix: list[str]) -> tuple[list[str], bool]:
     return [", ".join(combo) for combo in combos if combo], approximate
 
 
+#: A name expression this reader resolves: `${{ matrix.<key> }}` and nothing
+#: else. Any other context -- `github`, `inputs`, a function call -- is the
+#: runner's, and a name carrying one stays the note it always was.
+_MATRIX_REF_RE = re.compile(r"\$\{\{\s*matrix\.([A-Za-z_][A-Za-z0-9_\-]*)\s*\}\}")
+
+#: An unquoted scalar GitHub renders as written: a plain word, an integer
+#: without a leading zero, or a decimal already in its shortest spelling.
+#: `3.10` renders `3.1`, `True` renders `true`, `~` renders empty -- each is
+#: YAML typing a value, and a name built from the text would be a check
+#: nobody reports, so those are left unresolved.
+_LITERAL_WORD_RE = re.compile(r"^(?:[A-Za-z][A-Za-z0-9_.\-]*|0|[1-9][0-9]*)$")
+_FLOAT_RE = re.compile(r"^[0-9]+\.[0-9]+$")
+_TYPED_WORDS = frozenset({"true", "false", "null", "yes", "no", "on", "off", "inf", "nan"})
+
+
+def _literal(text: str) -> str | None:
+    """A matrix value exactly as GitHub renders it, or `None` when unsure."""
+    text = text.strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
+        inner = text[1:-1]
+        return None if "\\" in inner or "${{" in inner or text[0] in inner else inner
+    if _FLOAT_RE.match(text):
+        return text if repr(float(text)) == text else None
+    if not _LITERAL_WORD_RE.match(text) or text.lower() in _TYPED_WORDS:
+        return None
+    return text
+
+
+def _literal_axis(lines: list[str], inline: str) -> list[str] | None:
+    """One axis as a list of literal scalars, or `None` for anything else."""
+    text = inline.strip()
+    if text:
+        if not (text.startswith("[") and text.endswith("]")) or lines:
+            return None
+        raw = [part for part in text[1:-1].split(",") if part.strip()]
+    else:
+        base = _indent(lines[0]) if lines else 0
+        items = [_ITEM_RE.match(line) for line in lines]
+        if any(item is None or _indent(line) != base for item, line in zip(items, lines, strict=True)):
+            return None
+        raw = [item.group("rest") for item in items if item]
+    values = [_literal(part) for part in raw]
+    return None if not values or None in values else [str(value) for value in values]
+
+
+def _literal_mappings(lines: list[str], inline: str) -> list[dict[str, str]] | None:
+    """An `include:`/`exclude:` list of flat `key: literal` entries, or `None`."""
+    if inline.strip() or not lines:
+        return None
+    base = _indent(lines[0])
+    found: list[dict[str, str]] = []
+    column = 0
+    for line in lines:
+        item = _ITEM_RE.match(line)
+        if item and _indent(line) == base:
+            found.append({})
+            column = item.start("rest")
+            rest = item.group("rest")
+        elif found and _indent(line) == column:
+            rest = line.strip()
+        else:
+            return None
+        match = _KEY_RE.match(rest)
+        value = _literal(match.group("value")) if match else None
+        if match is None or value is None:
+            return None
+        found[-1][sd_lib.yaml_key(match)] = value
+    return found
+
+
+def _matrix_combinations(matrix: list[str]) -> list[dict[str, str]] | None:
+    """Every combination a static matrix runs, or `None` if it is not static.
+
+    Axes cross-multiply, `exclude:` removes each combination that matches all
+    of an entry's pairs, and `include:` then runs GitHub's documented merge
+    (`_merge_includes`). A matrix built from an expression, an axis of mappings, or a value YAML
+    would retype answers `None`, and the caller keeps its note.
+    """
+    axes: dict[str, list[str]] = {}
+    includes: list[dict[str, str]] = []
+    excludes: list[dict[str, str]] = []
+    entries = _entries(matrix)
+    if len(entries) != sum(1 for line in matrix if _indent(line) == _indent(matrix[0])):
+        return None
+    for offset, key, inline in entries:
+        children = _children(matrix, offset)
+        if key in ("include", "exclude"):
+            listed = _literal_mappings(children, inline)
+            if listed is None:
+                return None
+            (includes if key == "include" else excludes).extend(listed)
+            continue
+        values = _literal_axis(children, inline)
+        if values is None:
+            return None
+        axes[key] = values
+    originals = [dict(zip(axes, combo, strict=True)) for combo in itertools.product(*axes.values())] if axes else []
+    originals = [
+        combo for combo in originals
+        if not any(all(combo.get(k) == v for k, v in entry.items()) for entry in excludes)
+    ]
+    return _merge_includes(originals, includes)
+
+
+def _merge_includes(originals: list[dict[str, str]], includes: list[dict[str, str]]) -> list[dict[str, str]]:
+    """GitHub's `include:` merge over the combinations `exclude:` left.
+
+    Only an original combination can take an entry, and only when none of
+    its axis values would change; a value an earlier entry added may be
+    overwritten. An entry no original takes is a combination of its own.
+    """
+    combos = [dict(combo) for combo in originals]
+    for entry in includes:
+        joined = False
+        for index, original in enumerate(originals):
+            if all(original[k] == v for k, v in entry.items() if k in original):
+                combos[index].update(entry)
+                joined = True
+        if not joined:
+            combos.append(dict(entry))
+    return combos
+
+
+def _interpolated_names(display: str, matrix: list[str]) -> list[str] | None:
+    """`display` resolved once per combination when it reads only `matrix.*`.
+
+    GitHub appends no `(values)` suffix to a name that interpolates the
+    matrix, so each combination names exactly one check: platypeeps/system's
+    `system-native (${{ matrix.leg }})` reports `system-native (shared)` and
+    three more, and nothing else (sd:1420). `None` when any expression is not
+    a matrix reference, the matrix is not static, or a combination lacks a
+    key the name reads -- GitHub renders that empty, and guessing it is the
+    wrong answer this reader refuses to print.
+    """
+    if not matrix or "${{" in _MATRIX_REF_RE.sub("", display):
+        return None
+    combos = _matrix_combinations(matrix)
+    keys = set(_MATRIX_REF_RE.findall(display))
+    if not combos or any(not keys <= combo.keys() for combo in combos):
+        return None
+    # `split` on the one capture group alternates text and key: odd parts are keys.
+    parts = _MATRIX_REF_RE.split(display)
+    names = ["".join(combo[part] if index % 2 else part for index, part in enumerate(parts)) for combo in combos]
+    return list(dict.fromkeys(names))
+
+
 def workflow_checks(root: pathlib.Path) -> tuple[set[str], list[str]]:
     """The check names `.github/workflows/**` produces on a pull request."""
     directory = root / ".github" / "workflows"
@@ -365,13 +511,14 @@ def _job_names(
         return
     display = _scalar(_field(body, "name") or "") or job_id
     matrix = _sub(_sub(body, "strategy"), "matrix")
-    suffixes, approximate = _matrix_names(matrix) if matrix else ([], False)
+    interpolated = _interpolated_names(display, matrix) if "${{" in display else None
+    suffixes, approximate = _matrix_names(matrix) if matrix and interpolated is None else ([], False)
     if approximate:
         notes.append(
             f"{filename}: job {job_id} mixes matrix axes with include:, "
             "so its derived names are approximate"
         )
-    names = [f"{display} ({suffix})" for suffix in suffixes] or [display]
+    names = interpolated or [f"{display} ({suffix})" for suffix in suffixes] or [display]
     if any("${{" in name for name in names):
         notes.append(
             f"{filename}: job {job_id} names contain a ${{{{ }}}} expression "

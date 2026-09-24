@@ -183,6 +183,18 @@
 
 ### Fixed
 
+- **`sd-status` resolves a job name that interpolates only the matrix.**
+  `name: system-native (${{ matrix.leg }})` over `leg: [shared, dashboard,
+  runner, tools]` produces four checks, and GitHub appends no suffix to such
+  a name. `workflow_checks` treated every `${{ }}` as the runner's, so
+  platypeeps/system read all four required contexts as
+  `required_not_produced` beside an expression note (sd:1420). A name whose
+  only expressions are `matrix.<key>` now expands once per combination of a
+  static matrix: axes cross-multiply, `exclude:` removes matches, and
+  `include:` follows GitHub's documented merge. Any other expression, a
+  computed matrix, an axis of mappings, a value YAML would retype (`3.10`,
+  `true`), or a combination missing a referenced key keeps the note.
+
 - **The Dependabot guard reader inspects every `github-actions` entry, not
   the first one.** `guard_state()` stopped at the first matching entry and
   reported that entry's verdict as though it covered the file, so a consumer
