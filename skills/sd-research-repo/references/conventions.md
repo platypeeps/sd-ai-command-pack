@@ -46,6 +46,17 @@ one-directional: the template is a floor, not a ceiling. Anything the repo adds
 — a whole local section, an extra paragraph inside a shared one — is the repo
 doing its job and is counted, never reported.
 
+The template is short on purpose. It keeps what an agent in the repo needs
+every session: the layout, the main-document name, the provenance block, the
+`render` and `review` commands, the local-by-default rule, the fan-out limits,
+and the style bullets. The rest lives here, and the template points here.
+The checklist and the second-reader command live in `sd-research-kit review`.
+
+A repo block that says a template block and more is not drift. `review` ignores
+case, markup and punctuation for that match. So a repo that still carries the
+longer template text of 2026-09-23 passes, except `## Parallel work`, which no
+repo carried. A repo can shorten its copy to the current template at any time.
+
 ### Declare intentional differences
 
 Declare each intentional replacement under this heading:
@@ -54,7 +65,7 @@ Declare each intentional replacement under this heading:
 ## Local overrides of the shared template
 
 - `the opening`: use STE-Concise sentences without changing the template instructions.
-- `## Publishing — the dashboard by default, outward mirrors on designation`: omit
+- `## Publishing — local by default, mirrors on request`: omit
   personal checkout paths from shared pages.
 ```
 
@@ -310,10 +321,11 @@ Three things to get right:
   `CHECKLIST` in `bin/sd_research_review.py` owns that text.
   Do not copy the prompt into a repository guide.
 
-  Run it in the background for anything past a page. It buffers stdout, so it
-  prints nothing at all until it exits — silence is normal, not a hang. If you
-  background it by appending `> pass.txt 2>&1 &` to the invocation, the same
-  applies to the file: empty means still running.
+  Run it in the background for anything past a page, with stdin closed
+  (`< /dev/null`). An open stdin makes the CLI wait forever.
+  Silence does not prove a slow run. A live run writes a new
+  `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` within a minute. No new
+  rollout file means a hang: stop it and fix stdin.
 
 **What it cannot do.** The second reader sees the repository, not the sources.
 It cannot discharge step 2 — opening the citation and reading it is yours, and
