@@ -797,6 +797,19 @@ class Rule8PullRequestScopeTests(LintFixture):
         self.assertIn("touches .github/workflows/tests.yml", report.failures[0])
         self.assertIn("1 changed path(s) from origin/HEAD", self.rule_8(report))
 
+    def test_a_non_ascii_path_still_reaches_its_scope_class(self) -> None:
+        # `core.quotePath` is on by default, so a newline `--name-only`
+        # printed `.github/workflows/tëst.yml` quoted, no scope glob matched
+        # it, and the diff passed without its scope line (sd:1440).
+        self.policy()
+        self.commit_all("base")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        (self.repo / ".github" / "workflows").mkdir(parents=True)
+        (self.repo / ".github" / "workflows" / "tëst.yml").write_text("on: push\n", encoding="utf-8")
+        self.commit_all("touch a workflow with a non-ASCII name")
+        report = self.run_lint("Work: sd:1\n")
+        self.assertIn("touches .github/workflows/tëst.yml", "\n".join(report.failures))
+
     def test_origin_main_is_read_when_origin_head_is_not_set(self) -> None:
         self.policy()
         self.commit_all("base")
