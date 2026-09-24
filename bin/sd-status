@@ -746,6 +746,10 @@ def _admin_gaps(protection: dict[str, Any], default_branch: str) -> tuple[list[d
         # here resolves to admin or not -- so neither "exempts the admins"
         # nor "administrators stay subject" is said of it (sd:1327 review).
         gaps.append(_gap("enforce_admins", sd_protection.unknown_admins_words(protection, default_branch)))
+    elif not enabled and protection.get("source") == sd_protection.COMBINED_SOURCE:
+        # Per rule: which rules no source binds the administrators on, and
+        # which ones a source still does (sd:1419, Q1).
+        gaps.append(_gap("enforce_admins", sd_protection.combined_admins_words(protection, default_branch)))
     elif not enabled and protection.get("source") == sd_protection.RULESET_SOURCE:
         # Per ruleset, with the rules each bypass reaches, and which
         # rulesets still bind the administrators: GitHub layers rulesets,
@@ -866,7 +870,9 @@ def protection_section(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any]
         ["api", f"repos/{slug}/branches/{default_branch}/protection"], root
     )
     ruleset_detail: dict[str, Any] = {}
-    if not isinstance(protection, dict):
+    if isinstance(protection, dict):
+        protection, ruleset_detail = _layered(root, slug, default_branch, protection)
+    else:
         # 404 is the answer, not an outage: this branch has no *classic*
         # protection. That used to be the whole answer, and on 2026-09-22 it
         # reported rwbp-website's main as unprotected while a ruleset was
@@ -939,6 +945,32 @@ def protection_section(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any]
     detail.update(ruleset_detail)
     result["detail"] = detail
     return result
+
+
+def _layered(
+    root: pathlib.Path, slug: str, default_branch: str, classic: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Classic protection with the branch's rulesets layered onto it.
+
+    Before sd:1419 a classic object was the whole answer and the rulesets
+    were read only after a 404, so a ruleset beside classic protection was
+    invisible here. They are read beside it now and combined the way GitHub
+    layers them, strictest per rule (`sd_protection.combine`). A classic-only
+    branch comes back unchanged with no detail added; a rules read that fails
+    keeps the classic object and names the fault in `rules_read_error`.
+    """
+    read = sd_protection.read_rulesets(_gh_fetch(root), f"repos/{slug}", default_branch)
+    if read["error"]:
+        return classic, {"rules_read_error": read["error"]}
+    value = sd_protection.combine(classic, read["rules"], read["rulesets"])
+    if value is classic:
+        return classic, {}
+    detail: dict[str, Any] = {"source": value["source"], "rulesets": value["rulesets"],
+                              "classic_visibility": "present"}
+    if value["source"] == sd_protection.COMBINED_SOURCE:
+        detail.update(sources=value["sources"], bypass_info=value["bypass_info"],
+                      advisory=value["advisory"])
+    return value, detail
 
 
 def _gh_fetch(root: pathlib.Path) -> sd_protection.Fetch:

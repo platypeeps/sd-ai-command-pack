@@ -598,5 +598,129 @@ class RulesetCase(unittest.TestCase):
                 self.assertEqual(error.workflow["blocker"]["code"], "prerequisite_failed")
 
 
+
+# --------------------------------------------------------------------------
+# Classic protection and rulesets together (sd:1419)
+# --------------------------------------------------------------------------
+
+INTEGRATION = {"actor_id": 77, "actor_type": "Integration", "bypass_mode": "pull_request"}
+ORG_ADMIN = {"actor_id": 1, "actor_type": "OrganizationAdmin", "bypass_mode": "always"}
+
+
+class ClassicAndRulesetCase(unittest.TestCase):
+    """`GitHub.gate` when classic answers 200 *and* a ruleset applies.
+
+    Before sd:1419 a 200 was the whole answer and the rulesets were never
+    read. GitHub layers the two, strictest per rule, and the operator's
+    decisions of 2026-09-24 settle the rest: a bypass refuses only when it
+    removes the last firm source of a rule (Q2), a stricter rule a bypass
+    can skip is advisory and never grants (Q3), and administrators are
+    enforced on a rule when any source imposing it binds them (Q1).
+    """
+
+    PREFIX = RulesetCase.PREFIX
+    remote = RulesetCase.remote
+    paged = RulesetCase.paged
+    refused = RulesetCase.refused
+
+    def both(self, classic: dict | None = None, rules: list | None = None, ruleset: dict | None = RULESET,
+             **kwargs: Any) -> PathStubbedGitHub:
+        return self.remote(ruleset_rules() if rules is None else rules, ruleset,
+                           classic=(200, protection_document() if classic is None else classic), **kwargs)
+
+    def test_classic_with_no_ruleset_is_the_classic_object_unchanged(self) -> None:
+        for rules in ([], [{"type": "deletion", "ruleset_id": 42}]):
+            with self.subTest(rules=rules):
+                self.assertEqual(self.both(rules=rules).gate("main", HEAD), protection_document())
+
+    def test_the_same_rules_in_both_are_one_combined_requirement(self) -> None:
+        value = self.both().gate("main", HEAD)
+        self.assertEqual(value["source"], "combined")
+        self.assertEqual(value["sources"], {"pull_request": ["classic", "ruleset:42"],
+                                            "required_status_checks": ["classic", "ruleset:42"]})
+        self.assertEqual(value["enforce_admins"], {"enabled": True})
+        self.assertEqual(value["required_pull_request_reviews"]["required_approving_review_count"], 1)
+        self.assertEqual(value["required_status_checks"],
+                         {"strict": True, "contexts": ["check"], "checks": [{"context": "check", "app_id": 7}]})
+        self.assertEqual((value["advisory"], value["bypass_info"]), ([], []))
+        self.assertEqual(self.both().gate("main", HEAD), value)
+
+    def test_a_ruleset_bypass_beside_firm_classic_is_information_not_a_refusal(self) -> None:
+        """Classic still enforces both rules on everyone, so the app that can
+        walk past the ruleset walks into classic: nothing it removes is the
+        last enforcement. The same holds for a list GitHub did not show."""
+        for ruleset, words in ((dict(RULESET, bypass_actors=[INTEGRATION]),
+                                "main (#42) [pull_request, required_status_checks]: Integration 77 (pull_request)"),
+                               ({"id": 42, "name": "main", "enforcement": "active"},
+                                "main (#42) [pull_request, required_status_checks]: bypass_actors not shown")):
+            with self.subTest(ruleset=ruleset):
+                value = self.both(ruleset=ruleset).gate("main", HEAD)
+                self.assertEqual(value["bypass_info"], [words])
+                self.assertEqual(value["enforce_admins"], {"enabled": True})
+
+    def test_a_ruleset_bypass_that_removes_the_last_enforcement_refuses(self) -> None:
+        """Classic requires reviews only; the checks come from the ruleset
+        alone, and the app can bypass it: the checks rule has no firm
+        source, so the bypass is decisive and the refusal names it."""
+        classic = protection_document()
+        del classic["required_status_checks"]
+        self.refused(self.both(classic, ruleset=dict(RULESET, bypass_actors=[INTEGRATION])),
+                     r"^ruleset main \(#42\) can be bypassed by Integration 77 \(pull_request\)$")
+        self.refused(self.both(classic, ruleset={"id": 42, "name": "main", "enforcement": "active"}),
+                     r"^ruleset main \(#42\) did not show its bypass actors")
+        # The same ruleset without the bypass is firm, and the gate grants.
+        self.assertEqual(self.both(classic).gate("main", HEAD)["firm"]["required_status_checks"], ["ruleset:42"])
+
+    def test_a_stricter_bypassable_ruleset_is_advisory_and_never_grants(self) -> None:
+        """The ruleset asks for strict checks and two approvals, and an app
+        can bypass it. Classic asks for one approval and lax checks. The
+        effective requirement is classic's, so the lax checks still refuse,
+        and the stricter asks are named as advisory."""
+        rules = ruleset_rules()
+        rules[1]["parameters"]["required_approving_review_count"] = 2
+        lax = protection_document(required_status_checks={"strict": False, "contexts": ["check"]})
+        remote = self.both(lax, rules, dict(RULESET, bypass_actors=[INTEGRATION]))
+        self.refused(remote, r"^branch protection requires strict, named CI checks$")
+        value = sd_protection.combine(lax, rules, {42: dict(RULESET, bypass_actors=[INTEGRATION])})
+        self.assertEqual(value["required_pull_request_reviews"]["required_approving_review_count"], 1)
+        self.assertFalse(value["required_status_checks"]["strict"])
+        self.assertEqual(len(value["advisory"]), 2)
+        self.assertIn("main (#42) [pull_request] asks for more than the firm sources", value["advisory"][0])
+        # Firm, the same ruleset is the requirement: two approvals, strict.
+        firm = self.both(lax, rules).gate("main", HEAD)
+        self.assertEqual(firm["required_pull_request_reviews"]["required_approving_review_count"], 2)
+        self.assertTrue(firm["required_status_checks"]["strict"])
+        self.assertEqual(firm["advisory"], [])
+
+    def test_admins_are_enforced_per_rule_by_any_source_that_binds_them(self) -> None:
+        """Q1. Classic exempts admins; a firm ruleset carrying both rules
+        binds them on both, so they are enforced. Carrying only the review
+        rule, it leaves the checks rule to classic alone, which exempts them,
+        and the gate refuses as it does today."""
+        exempt = protection_document(enforce_admins={"enabled": False})
+        value = self.both(exempt).gate("main", HEAD)
+        self.assertEqual(value["enforce_admins"], {"enabled": True})
+        self.assertEqual(value["admins"], {"pull_request": True, "required_status_checks": True})
+        partial = self.both(exempt, ruleset_rules(required_status_checks=None))
+        self.refused(partial, r"^branch protection does not enforce administrators$")
+        self.assertEqual(sd_protection.combine(exempt, ruleset_rules(required_status_checks=None), {42: RULESET})
+                         ["admins"], {"pull_request": True, "required_status_checks": False})
+
+    def test_an_admin_bypass_on_the_ruleset_beside_classic_enforcing_admins_is_information(self) -> None:
+        value = self.both(ruleset=dict(RULESET, bypass_actors=[ORG_ADMIN])).gate("main", HEAD)
+        self.assertEqual(value["enforce_admins"], {"enabled": True})
+        self.assertEqual(sd_protection.bypass_words(value, True), [])
+        self.assertEqual(value["bypass_info"],
+                         ["main (#42) [pull_request, required_status_checks]: OrganizationAdmin 1 (always)"])
+        # Both sources exempting admins is enforce_admins off.
+        both_off = self.both(protection_document(enforce_admins={"enabled": False}),
+                             ruleset=dict(RULESET, bypass_actors=[ORG_ADMIN]))
+        self.refused(both_off, r"can be bypassed by OrganizationAdmin 1 \(always\)$")
+
+    def test_a_rules_read_that_fails_keeps_the_classic_gate(self) -> None:
+        remote = self.remote(None, None, classic=(200, protection_document()))
+        self.assertEqual(remote.gate("main", HEAD), protection_document())
+
+
 if __name__ == "__main__":
     unittest.main()

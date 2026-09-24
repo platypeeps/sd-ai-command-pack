@@ -14,7 +14,22 @@ for the branch while saying nothing about classic protection: measured
 reviews and the `CI Result` check, the rules endpoint listed only its
 ruleset's `deletion` and `non_fast_forward`. A reader of either endpoint
 alone is blind to the other (sd:1323, sd:1327), so the callers read classic
-first and this module reads the rulesets when classic answers 404.
+first and this module reads the rulesets whatever classic answered: after a
+404 the rulesets are the whole answer (`synthesize`), and beside a classic
+object they are layered onto it (`combine`, sd:1419).
+
+GitHub layers the two mechanisms: for each rule, the strictest source wins.
+`combine` applies that per merge-gating rule, with three refinements the
+operator decided on 2026-09-24. A source is *firm* for a rule when nobody can
+bypass it: classic with `enforce_admins` on (and, for the review rule, no
+bypass allowances), a ruleset whose `bypass_actors` was shown and is empty.
+The effective requirement is the strictest among the firm sources; a stricter
+source that is not firm is reported as `advisory` and never tightens it, so
+it cannot turn a refusal into a grant. A bypass is *decisive* only when it
+removes the last firm source of a rule; one beside a firm source is reported
+as information (`bypass_info`) and refuses nothing. And administrators are
+enforced on a rule when any source imposing it binds them; `enforce_admins`
+is `True` only when that holds for every rule the branch requires.
 
 The rules come back one per applied rule, each with `type`, `ruleset_id`
 and, for the rule types that carry any, `parameters`; sampled on
@@ -50,6 +65,14 @@ from urllib.parse import quote
 
 #: The `source` marker on a synthesized object. A classic object has none.
 RULESET_SOURCE = "ruleset"
+
+#: The `source` marker on an object layered from classic protection and at
+#: least one ruleset, each contributing a merge-gating rule (sd:1419).
+COMBINED_SOURCE = "combined"
+
+#: How `combine` names classic protection in `sources`; a ruleset is
+#: `ruleset:<id>`.
+CLASSIC_SOURCE = "classic"
 
 #: Rule types that gate what a merge lands. `deletion`, `non_fast_forward`,
 #: `required_linear_history`, `required_signatures` and the rest constrain
@@ -257,7 +280,24 @@ def bypass_pairs(value: dict[str, Any], reaching: bool | None) -> list[tuple[dic
     resolves, one reason `enforce_admins` reads unknown."""
     return [(entry, actor)
             for entry in value.get("rulesets") or [] if isinstance(entry, dict)
-            for actor in entry.get("bypass_actors") or [] if reaches_admins(actor) is reaching]
+            for actor in entry.get("bypass_actors") or []
+            if reaches_admins(actor) is reaching and decisive(value, entry, reaching)]
+
+
+def decisive(value: dict[str, Any], entry: dict[str, Any], reaching: bool | None = False) -> bool:
+    """Whether a bypass of ruleset `entry` removes the last enforcement of a
+    rule it carries. Always, outside a combined object. Inside one, a bypass
+    by an actor that does not reach administrators (`reaching` `False`) is
+    decisive when a rule of `entry` has no firm source; an administrators'
+    exemption, or a role nothing resolves, when a rule of `entry` has no
+    source binding them. A bypass beside a firm source is information
+    (`bypass_info`), not a finding and not a refusal (sd:1419, Q2)."""
+    if value.get("source") != COMBINED_SOURCE:
+        return True
+    rules = entry.get("rules") or []
+    if reaching is False:
+        return any(not (value.get("firm") or {}).get(rule) for rule in rules)
+    return any((value.get("admins") or {}).get(rule) is not True for rule in rules)
 
 
 def unknown_admins_words(value: dict[str, Any], default_branch: str) -> str:
@@ -266,7 +306,7 @@ def unknown_admins_words(value: dict[str, Any], default_branch: str) -> str:
     Unknown is a statement about this reader's knowledge; the alternative
     sentences are claims about the repository, and neither is made."""
     reasons: list[str] = []
-    hidden = ", ".join(scope(entry) for entry in hidden_bypass(value))
+    hidden = ", ".join(scope(entry) for entry in hidden_bypass(value, admins=True))
     if hidden:
         reasons.append(
             f"whether anyone can bypass the ruleset protecting {default_branch} is unknown: GitHub "
@@ -362,10 +402,13 @@ def _admins_subject(lists: list[list | None]) -> bool | None:
     return True
 
 
-def hidden_bypass(value: dict[str, Any]) -> list[dict[str, Any]]:
-    """The contributing rulesets whose `bypass_actors` GitHub did not show."""
+def hidden_bypass(value: dict[str, Any], admins: bool = False) -> list[dict[str, Any]]:
+    """The contributing rulesets whose `bypass_actors` GitHub did not show.
+    In a combined object only the decisive ones: those whose rules have no
+    firm source, or with `admins` no source binding administrators."""
     return [entry for entry in value.get("rulesets") or []
-            if isinstance(entry, dict) and entry.get("bypass_actors") is None]
+            if isinstance(entry, dict) and entry.get("bypass_actors") is None
+            and decisive(value, entry, None if admins else False)]
 
 
 def _reviews(parameter_sets: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -401,3 +444,191 @@ def _checks(parameter_sets: list[dict[str, Any]]) -> dict[str, Any] | None:
 def rule_types(rules: list, rulesets: dict[int, dict]) -> list[str]:
     """The distinct active rule types on the branch, sorted, for a report."""
     return sorted({str(rule.get("type")) for rule in active_rules(rules, rulesets)})
+
+
+# --------------------------------------------------------------------------
+# Classic protection and rulesets together (sd:1419)
+# --------------------------------------------------------------------------
+
+
+def combine(classic: dict[str, Any], rules: list, rulesets: dict[int, dict]) -> dict[str, Any]:
+    """Classic protection and the branch's rulesets, layered the way GitHub
+    layers them: for each merge-gating rule, the strictest source wins.
+
+    A single contributing source keeps today's object: `classic` itself when
+    no active ruleset gates the merge, and `synthesize`'s object when classic
+    carries neither a review nor a checks requirement. Otherwise the object
+    is classic-shaped, marked `source: "combined"`, and carries per rule:
+    `sources` (every source imposing it, `classic` or `ruleset:<id>`),
+    `firm` (the ones nobody can bypass) and `admins` (whether a source
+    binds administrators: `True`, `False` or `None` for unknown). The
+    requirement itself is the strictest among the firm sources, or among
+    all of them when none is firm -- a rule whose every source can be
+    bypassed, which the gate refuses and `sd-status` reports as `bypass`.
+    `advisory` names a stricter source that is not firm; `bypass_info` names
+    a bypass that is not decisive. `enforce_admins` is `True` only when
+    every rule has a source binding administrators, `False` when one has
+    none that could, and `None` otherwise.
+    """
+    synthesized = synthesize(rules, rulesets)
+    if synthesized is None:
+        return classic
+    classic_source = _classic_source(classic)
+    if not classic_source["rules"]:
+        return synthesized
+    gating = [rule for rule in active_rules(rules, rulesets) if rule.get("type") in MERGE_GATING_RULES]
+    sources = [classic_source] + [_ruleset_source(entry, gating) for entry in synthesized["rulesets"]]
+    value: dict[str, Any] = {"source": COMBINED_SOURCE, "rulesets": synthesized["rulesets"],
+                             "sources": {}, "firm": {}, "admins": {}, "advisory": []}
+    for rule in sorted(MERGE_GATING_RULES):
+        _layer_rule(value, rule, [source for source in sources if rule in source["rules"]], classic_source)
+    verdicts = list(value["admins"].values())
+    value["enforce_admins"] = {"enabled": False if False in verdicts else (None if None in verdicts else True)}
+    value["bypass_info"] = _bypass_info(value)
+    return value
+
+
+def _layer_rule(value: dict[str, Any], rule: str, imposing: list[dict[str, Any]],
+                classic_source: dict[str, Any]) -> None:
+    """One rule of `combine`: its sources, its firm ones, its administrators,
+    the requirement the firm sources set, and the stricter asks they do not."""
+    if not imposing:
+        return
+    firm = [source for source in imposing if _firm(source, rule)]
+    effective = _strictest(rule, [source["rules"][rule] for source in firm or imposing])
+    value["sources"][rule] = [source["name"] for source in imposing]
+    value["firm"][rule] = [source["name"] for source in firm]
+    value["admins"][rule] = _rule_admins([source["admins"] for source in imposing])
+    if firm:
+        value["advisory"].extend(
+            f"{source['label']} [{rule}] asks for more than the firm sources, but {source['why']}, "
+            "so it is advisory and the requirement is theirs"
+            for source in imposing
+            if source not in firm and _strictest(rule, [effective, source["rules"][rule]]) != effective)
+    if rule != "pull_request":
+        value["required_status_checks"] = effective
+        return
+    allowances = classic_source["allowances"]
+    if not firm and classic_source in imposing and allowances:
+        effective = dict(effective, bypass_pull_request_allowances=allowances)
+    value["required_pull_request_reviews"] = effective
+
+
+def _classic_source(classic: dict[str, Any]) -> dict[str, Any]:
+    """Classic protection as one source: its two merge-gating rules in the
+    normalized shape `_reviews` and `_checks` give a ruleset's."""
+    admins = classic.get("enforce_admins")
+    enforced = (admins.get("enabled") if isinstance(admins, dict) else admins) is True
+    found: dict[str, Any] = {}
+    reviews = classic.get("required_pull_request_reviews")
+    allowances: dict[str, Any] = {}
+    if isinstance(reviews, dict):
+        count = reviews.get("required_approving_review_count")
+        found["pull_request"] = {
+            "required_approving_review_count": count if isinstance(count, int) else 0,
+            "dismiss_stale_reviews": reviews.get("dismiss_stale_reviews") is True,
+            "require_code_owner_reviews": reviews.get("require_code_owner_reviews") is True,
+            "require_last_push_approval": reviews.get("require_last_push_approval") is True,
+        }
+        raw = reviews.get("bypass_pull_request_allowances")
+        if isinstance(raw, dict) and any(raw.get(name) for name in ("users", "teams", "apps")):
+            allowances = raw
+    checks = classic.get("required_status_checks")
+    if isinstance(checks, dict) and checks:
+        contexts = [str(name) for name in checks.get("contexts") or []]
+        bound = [{"context": str(entry["context"]), "app_id": entry.get("app_id")}
+                 for entry in checks.get("checks") or [] if isinstance(entry, dict) and entry.get("context")]
+        found["required_status_checks"] = {"strict": checks.get("strict") is True,
+                                           "contexts": contexts, "checks": bound}
+    why = "enforce_admins is off" if not enforced else "it has pull-request bypass allowances"
+    return {"name": CLASSIC_SOURCE, "label": "classic protection", "rules": found, "admins": enforced,
+            "allowances": allowances, "why": why}
+
+
+def _ruleset_source(entry: dict[str, Any], gating: list[dict]) -> dict[str, Any]:
+    """One contributing ruleset as a source, its rules reduced on their own."""
+    mine = [rule for rule in gating if rule.get("ruleset_id") == entry["id"]]
+    found: dict[str, Any] = {}
+    reviews = _reviews([_parameters(rule) for rule in mine if rule.get("type") == "pull_request"])
+    if reviews is not None:
+        found["pull_request"] = reviews
+    checks = _checks([_parameters(rule) for rule in mine if rule.get("type") == "required_status_checks"])
+    if checks is not None:
+        found["required_status_checks"] = checks
+    actors = entry.get("bypass_actors")
+    why = ("its bypass list was not shown" if actors is None
+           else "it can be bypassed by " + ", ".join(actor_words(actor) for actor in actors))
+    return {"name": f"ruleset:{entry['id']}", "label": f"{entry.get('name')} (#{entry.get('id')})",
+            "rules": found, "admins": _admins_subject([actors]), "actors": actors, "why": why}
+
+
+def _firm(source: dict[str, Any], rule: str) -> bool:
+    """Whether nobody can bypass `source` for `rule`."""
+    if source["name"] == CLASSIC_SOURCE:
+        return source["admins"] is True and (rule != "pull_request" or not source["allowances"])
+    return source.get("actors") == []
+
+
+def _rule_admins(verdicts: list[bool | None]) -> bool | None:
+    """Administrators on one rule: bound when any source imposing it binds
+    them, exempt when every source lets them past, else unknown (Q1)."""
+    if True in verdicts:
+        return True
+    return None if None in verdicts else False
+
+
+def _strictest(rule: str, parameter_sets: list[dict[str, Any]]) -> dict[str, Any]:
+    """The normalized requirement for `rule` that satisfies every set given."""
+    if rule == "pull_request":
+        return {
+            "required_approving_review_count": max(p["required_approving_review_count"] for p in parameter_sets),
+            "dismiss_stale_reviews": any(p["dismiss_stale_reviews"] for p in parameter_sets),
+            "require_code_owner_reviews": any(p["require_code_owner_reviews"] for p in parameter_sets),
+            "require_last_push_approval": any(p["require_last_push_approval"] for p in parameter_sets),
+        }
+    contexts: list[str] = []
+    checks: list[dict[str, Any]] = []
+    for parameters in parameter_sets:
+        for context in parameters["contexts"]:
+            if context not in contexts:
+                contexts.append(context)
+        for entry in parameters["checks"]:
+            if entry["context"] not in [known["context"] for known in checks]:
+                checks.append(dict(entry))
+    return {"strict": any(p["strict"] for p in parameter_sets), "contexts": contexts, "checks": checks}
+
+
+def _bypass_info(value: dict[str, Any]) -> list[str]:
+    """The bypasses of a combined object that remove no last enforcement:
+    `main (#42) [pull_request]: Integration 77 (pull_request)`, and a
+    withheld list as `... : bypass_actors not shown`. Information, sorted."""
+    words = []
+    for entry in value.get("rulesets") or []:
+        actors = entry.get("bypass_actors")
+        if actors is None:
+            if not decisive(value, entry, False):
+                words.append(f"{scope(entry)}: bypass_actors not shown")
+            continue
+        words.extend(f"{scope(entry)}: {actor_words(actor)}" for actor in actors
+                     if not decisive(value, entry, reaches_admins(actor)))
+    return sorted(words)
+
+
+def combined_admins_words(value: dict[str, Any], default_branch: str) -> str:
+    """`enforce_admins` off on a combined object: the rules no source binds
+    administrators on, each with why every source lets them past, then the
+    rules a source still binds them on."""
+    names = {"classic": "classic protection (enforce_admins off)"}
+    for entry in value.get("rulesets") or []:
+        actors = [actor_words(actor) for actor in entry.get("bypass_actors") or [] if reaches_admins(actor)]
+        names[f"ruleset:{entry.get('id')}"] = f"{scope(entry)} by {', '.join(actors) or 'an actor'}"
+    exempt = [rule for rule, verdict in sorted((value.get("admins") or {}).items()) if verdict is False]
+    binding = [rule for rule, verdict in sorted((value.get("admins") or {}).items()) if verdict is True]
+    detail = "; ".join(f"{rule}: " + ", ".join(names.get(name, name) for name in value["sources"][rule])
+                       for rule in exempt)
+    words = (f"enforce_admins is off on {default_branch} for {', '.join(exempt)}: every source of "
+             f"{'that rule' if len(exempt) == 1 else 'those rules'} exempts the admins who do the merging "
+             f"({detail}). Protection that exempts admins is prose, not authority.")
+    if binding:
+        words += f" Still binding them: {', '.join(binding)}."
+    return words
