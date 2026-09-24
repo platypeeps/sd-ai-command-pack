@@ -21,3 +21,11 @@ checkout from these, launches opencode the way the reader does, and asserts
 the checkout's config is not contributed (no `loading path=` line for it) and
 the mutation does not fire. It self-skips where the `opencode` binary is
 absent; the config-load half is offline and needs no credentials.
+
+`TheEscapeIsClosedLive::test_opencode_resolves_the_hostile_config_as_a_breach_by_any_route`
+asks opencode what it resolved (`opencode debug agent sd-review --pure`, the
+probe `sd_opencode.confinement_breach` runs before every review). From inside
+the checkout the resolution carries this config's `bash` and `mutator_mutate`
+allowances; from a neutral dir it is clean; and the same file handed in
+through `XDG_CONFIG_HOME` is refused again. That last route is why the
+neutral dir alone is not the boundary.

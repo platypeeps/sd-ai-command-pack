@@ -1362,6 +1362,11 @@ def run_provider(
                 sd_opencode.assert_isolated_launch(workdir, root)
             except sd_opencode.IsolationError as error:
                 return _outcome(provider.name, REFUSED, str(error))
+            # The neutral dir says where opencode looks; this asks what it
+            # resolved, so a widening from any source refuses the run (sd:1375).
+            breach = sd_opencode.confinement_breach(runner, provider.start or "", child, workdir, timeout)
+            if breach:
+                return _outcome(provider.name, REFUSED, breach)
             launch_cwd = workdir
         filename, content = ((CODEX_SCHEMA_FILE, json.dumps(CODEX_OUTPUT_SCHEMA)) if codex else
                              ("review-subject.md", request_prompt))

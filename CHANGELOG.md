@@ -212,6 +212,21 @@
 
 ### Fixed
 
+- **The opencode reviewer refuses to run unless opencode resolves our
+  confinement exactly.** The neutral launch dir stopped the reviewed checkout's
+  `opencode.json` from deep-merging over the read-only map, but it only decides
+  where opencode looks (sd:1375). The same hostile config handed in through
+  `XDG_CONFIG_HOME` still resolved `bash` and `mutator_mutate` allowances after
+  our `*: deny` (measured on opencode 1.18.30). Before each review, `sd-review`
+  now runs `opencode debug agent sd-review --pure` in the review's own launch
+  dir and environment. It refuses the run unless every rule from the last
+  `*: deny` on is exactly the map, followed by opencode's own tool-output
+  allowance. Nothing is filtered by key: any foreign rule, a narrowing
+  included, refuses. An opencode without `debug agent`, or one whose answer
+  does not parse, is refused as unconfirmed and the chain moves on.
+  `tests/test_sd_review_opencode.py` keeps the hostile fixture as a live
+  regression test for both routes.
+
 - **CI's `sd_db` pin can no longer fall behind the installed library in
   silence.** `.github/workflows/tests.yml` pinned `platypeeps/system` at
   schema 10 while every machine ran schema 13, so CI tested a library nobody

@@ -81,11 +81,28 @@ class FakeRunner:
         # or not, keeps control of what the probe sees.
         if program not in self.answers and list(argv[1:3]) == SKILL_PROBE_WORDS:
             return sd_review.Completed(0, PROMPT_INPUT_SUPPRESSED, "")
+        # The opencode confinement probe (sd:1375) reads a resolved agent, so
+        # an unscripted one gets the agent a clean launch resolves.
+        if program not in self.answers and list(argv[1:3]) == OPENCODE_PROBE_WORDS:
+            return sd_review.Completed(0, resolved_agent(env), "")
         return answer
 
 
 #: The skill-suppression probe's argv, by the two words that identify it.
 SKILL_PROBE_WORDS = ["debug", "prompt-input"]
+
+#: The opencode confinement probe's argv, by the two words that identify it.
+OPENCODE_PROBE_WORDS = ["debug", "agent"]
+
+
+def resolved_agent(env: Mapping[str, str], *extra: dict[str, str]) -> str:
+    """`opencode debug agent sd-review` in the measured 1.18.30 shape: the
+    defaults, then the map's `*: deny` and its rules; `extra` lands right after
+    the deny, where a merged checkout config put its allowances."""
+
+    deny, *confined = sd_review.sd_opencode.confined_rules(env)
+    rules = [{"permission": "*", "action": "allow", "pattern": "*"}, deny, *extra, *confined]
+    return json.dumps({"name": "sd-review", "mode": "primary", "permission": rules})
 
 
 def prompt_input(*texts: str) -> str:
