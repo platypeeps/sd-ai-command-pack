@@ -349,7 +349,7 @@ class TaskDeliveryCLITests(unittest.TestCase):
                         ("config", "user.email", "fixture@example.invalid")):
             subprocess.run(["git", "-C", str(root), *command], check=True, timeout=30)
         with sd_db.connect(sd_db.default_path(case.home), write=True) as connection:
-            sd_db.repos.upsert_repo(connection, str(root), status_source="row")
+            sd_db.repos.upsert_repo(connection, sd_lib.stored_repo(root), status_source="row")
         return root
 
     def commit(self, root: pathlib.Path, message: str, content: str) -> str:
@@ -512,7 +512,7 @@ class TaskDeliveryCLITests(unittest.TestCase):
         state = json.loads(case.call("task", "add", "A review finding", "--kind", "followup",
                                      "--json", cwd=root).stdout)
         item = state["item"]["id"]
-        self.assertEqual(state["item"]["repo"], str(root))
+        self.assertEqual(state["item"]["repo"], sd_lib.stored_repo(root))
 
         refused = case.call("task", "status", item, "done", "--delivered-by", "0" * 40,
                             code=1, cwd=root)

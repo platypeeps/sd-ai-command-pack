@@ -58,7 +58,9 @@ create a PRD just to record routine progress or work already merged.
    `.status-source` says `row`. Run `sd work register docs/work/<item>/prd.md`
    as soon as the file exists. Under a `--work-dir` root the step does not
    apply and the command will refuse: a row's identity is
-   `<checkout>::docs/work/<item>/prd.md`, and every reader keys on it, so
+   `<checkout>::docs/work/<item>/prd.md`, where `<checkout>` is the
+   registered key -- `~/repos/<name>` for a checkout under `$HOME` -- and
+   every reader keys on it, so
    there is no row shape for an item that lives somewhere else. Say the item
    is unregistered rather than inventing one. The
    retirement handed status to the database and took the importer away with

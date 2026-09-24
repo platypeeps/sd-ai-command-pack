@@ -1289,7 +1289,7 @@ def contributions_section(root: pathlib.Path) -> dict[str, Any]:
         return {"available": False, "reason": imported.problem if imported.provisioned else "shared contribution library is not installed", "rows": []}
     if not sd_db.default_path().exists():
         return {"available": False, "reason": "no shared database yet", "rows": []}
-    identities = [str(root)]
+    identities = [sd_lib.stored_repo(root)]
     slug = pr_state.remote_slug(root)
     if slug:
         identities.append(slug)

@@ -75,7 +75,7 @@ def run(args: argparse.Namespace) -> int:
             if root is None:
                 raise WorkRefusal("runner prepare requires a Git checkout")
             current = item_state(connection, args.item)
-            result = configure_item(connection, args.item, repo=str(root), branch=args.branch,
+            result = configure_item(connection, args.item, repo=sd_lib.stored_repo(root), branch=args.branch,
                                     expected_revision=args.if_revision or current["revision"], who=getpass.getuser())
         else:
             state = runner.queue_state(connection, args.assignment)

@@ -17,6 +17,22 @@
   `conventions.md` shows the template's real Publishing heading in its
   override example, and no longer calls a silent `codex` run normal.
 
+- **The pack keys a repository the way the library stores it: `~/...`
+  under `$HOME`.** `sd_db` at schema 14 (sd:1439) stores a checkout under
+  the home as `~/<relative>`, so a machine with another login reads the same
+  rows. Every place the pack turns its working directory into a lookup, a
+  key or a comparison now goes through `sd_db.paths`, by way of four helpers
+  in `bin/sd_lib.py`: `stored_repo` (`sd task add --here`, `--belongs-to`,
+  `sd work register`, `sd runner prepare`, `sd writing`, `sd-status`'s
+  contributions, `sd-review`'s cost row), `repo_row` (the `repo` lookups in
+  `sd task add --here` and `sd-ship`'s standing merge grant), `same_repo`
+  (whether a task row is in this checkout) and `repo_disk` (the checkout a
+  `--delivered-by` commit is verified in). Against a library without
+  `paths` each helper is the identity, so the pack behaves as before until
+  the machine's library moves. `tests/test_home_relative.py` writes a store
+  under one home and drives the verbs under another, and CI's system pin
+  moves to schema 14.
+
 - **The Copilot ancestor gate reads `docs_skip` as well as `never_skip`.**
   A reviewed ancestor clears the merge when the commits since it touch only
   `docs/`. The gate subtracted the repository's `never_skip` list but ignored

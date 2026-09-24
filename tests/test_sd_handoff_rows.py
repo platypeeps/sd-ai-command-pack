@@ -87,14 +87,15 @@ class RowCase(unittest.TestCase):
             subprocess.run(["git", "-C", str(self.root), *args], check=True,
                            capture_output=True)
         self.root = self.root.resolve()
-        sd_db.writes.upsert_repo(self.connection, str(self.root))
         # `sd_db.default_path` reads `$HOME` from the process at call time, and
         # the reader opens its own connection rather than taking this one.
         # Both have to point at the scratch home or the read opens the
-        # operator's real database.
+        # operator's real database. Set before the row is written, because
+        # the row's key is `~/...` under that home (sd:1439).
         was = os.environ.get("HOME")
         os.environ["HOME"] = str(self.home)
         self.addCleanup(os.environ.__setitem__, "HOME", was or "")
+        sd_db.writes.upsert_repo(self.connection, sd_lib.stored_repo(self.root))
 
     def item(self, name: str = "an-item", status: str = "in_progress") -> int:
         """One work item, keyed the way `sd_lib` keys it."""
@@ -186,7 +187,7 @@ class WhatIsNotHandedOver(RowCase):
         self.followup(item, "mine")
         other = self.home / "elsewhere"
         other.mkdir()
-        sd_db.writes.upsert_repo(self.connection, str(other))
+        sd_db.writes.upsert_repo(self.connection, sd_lib.stored_repo(other))
         theirs = sd_db.writes.create_item(
             self.connection, kind="work", title="theirs", status="in_progress",
             repo=str(other), source=sd_lib.ITEM_ROW_SOURCE,
@@ -569,7 +570,7 @@ class TheRowIsFoundFromAClone(RowCase):
                        check=True, capture_output=True)
         self.git(self.root, "remote", "add", "origin", str(bare))
         self.git(self.root, "push", "-q", "origin", "HEAD:main")
-        sd_db.writes.upsert_repo(self.connection, str(self.root), remote=str(bare))
+        sd_db.writes.upsert_repo(self.connection, sd_lib.stored_repo(self.root), remote=str(bare))
         row = self.item()
         clone = self.home / "clone"
         subprocess.run(["git", "clone", "-q", str(bare), str(clone)],

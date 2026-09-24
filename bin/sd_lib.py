@@ -739,7 +739,7 @@ def status_marker(root: pathlib.Path, work_dir: str = WORK_DIR) -> tuple[str, st
 
 def external_id(root: pathlib.Path | str, item_dir: pathlib.Path) -> str:
     """One item's row key. A writer needs it and no read connection to get it."""
-    return (f"{main_worktree_root(pathlib.Path(root).resolve())}::"
+    return (f"{stored_repo(main_worktree_root(pathlib.Path(root).resolve()))}::"
             f"{WORK_DIR}/{item_dir.name}/prd.md")
 
 
@@ -767,7 +767,62 @@ def registered_base(root: pathlib.Path | str, sd_db: Any, connection: Any) -> st
     if registered_for is None:
         return base
     origin = git_output(["remote", "get-url", "origin"], here)
-    return str(registered_for(connection, base, origin or None))
+    return stored_repo(registered_for(connection, base, origin or None))
+
+
+# Repository paths, stored and compared (sd:1439). The database keys a
+# repository under `$HOME` as `~/<relative>`, so a second machine with another
+# login reads the same rows; `sd_db.paths` owns that rule and these helpers only
+# reach it. A library without `paths` stores absolute paths and compares them
+# as strings, so against one each of these is the identity: the pack keeps
+# working on a machine whose library has not moved yet.
+
+
+def _library_paths() -> Any:
+    """`sd_db.paths` when the installed library carries it, else None."""
+    if import_sd_db().module is None:
+        return None
+    try:
+        from sd_db import paths  # noqa: PLC0415
+    except ImportError:
+        return None
+    return paths
+
+
+def stored_repo(path: pathlib.Path | str) -> str:
+    """The form a row stores for this repository path: `~/...` under `$HOME`."""
+    paths = _library_paths()
+    return str(path) if paths is None else str(paths.key(str(path)))
+
+
+def same_repo(left: pathlib.Path | str | None, right: pathlib.Path | str | None) -> bool:
+    """Whether two paths name one repository, whichever form each is in."""
+    paths = _library_paths()
+    if paths is None:
+        return left is not None and right is not None and str(left) == str(right)
+    return bool(paths.same(left, right))
+
+
+def repo_row(connection: Any, path: pathlib.Path | str) -> Any:
+    """The `repo` row for a path in whichever form the row holds, or None.
+
+    The library's `repos.row_for` probes every form; a library without it
+    stores one form, which the exact match below finds. The one raw
+    `repo WHERE path` probe under `bin/` is that fallback, and
+    `tests/test_home_relative.py` holds it to that.
+    """
+    import_sd_db()  # the caller holds a connection, so this is the one it has
+    try:
+        from sd_db.repos import row_for  # noqa: PLC0415
+    except ImportError:
+        return connection.execute("SELECT * FROM repo WHERE path = ?", (str(path),)).fetchone()
+    return row_for(connection, str(path))
+
+
+def repo_disk(value: pathlib.Path | str) -> pathlib.Path:
+    """The path on this disk for a stored repository value, for git and `is_dir`."""
+    paths = _library_paths()
+    return pathlib.Path(value) if paths is None else pathlib.Path(paths.disk(str(value)))
 
 
 # The file `make setup` leaves inside a `.venv` while it is building it. The

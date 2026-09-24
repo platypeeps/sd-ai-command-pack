@@ -27,6 +27,8 @@ class ContributionStatusTests(unittest.TestCase):
         environment = patch.dict(os.environ, {"HOME": str(self.root)})
         environment.start()
         self.addCleanup(environment.stop)
+        # The checkout is the home itself here, so its repository key is `~`
+        # (sd:1439): that is the identity the projection is asked for.
 
     def test_exact_local_and_remote_identities_use_one_ordered_projection(self) -> None:
         rows = [{"key": "item:14", "lane": "newly_unblocked"},
@@ -39,7 +41,7 @@ class ContributionStatusTests(unittest.TestCase):
         self.assertEqual(result["rows"], rows)
         self.assertEqual(result["source"], "database")
         self.assertEqual(projection.call_count, 1)
-        self.assertEqual(projection.call_args.kwargs, {"repo": [str(self.root), "example/project"]})
+        self.assertEqual(projection.call_args.kwargs, {"repo": ["~", "example/project"]})
         connect.assert_called_once_with(write=False)
         self.assertEqual(self.database.read_bytes(), before)
 
@@ -48,7 +50,7 @@ class ContributionStatusTests(unittest.TestCase):
                 patch.object(contributions, "projection", return_value=[]) as projection:
             result = status.contributions_section(self.root)
         self.assertTrue(result["available"])
-        self.assertEqual(projection.call_args.kwargs, {"repo": [str(self.root)]})
+        self.assertEqual(projection.call_args.kwargs, {"repo": ["~"]})
 
     def test_missing_database_is_not_created_and_unreadable_data_is_not_empty_success(self) -> None:
         absent = self.root / "absent.db"

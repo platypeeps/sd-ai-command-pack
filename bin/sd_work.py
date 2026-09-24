@@ -152,8 +152,11 @@ def _task_repo(args: argparse.Namespace, connection: Any, workflow: Any) -> str 
             raise WorkRefusal("--here requires a Git checkout")
         return None
     repo = str(sd_lib.main_worktree_root(root))
-    if connection.execute("SELECT 1 FROM repo WHERE path = ?", (repo,)).fetchone():
-        return repo
+    # Whichever form the row holds (sd:1439): `~/...` on a migrated store, the
+    # absolute path on an older one. The row's own spelling is what goes back.
+    found = sd_lib.repo_row(connection, repo)
+    if found:
+        return str(found["path"])
     if args.here:
         raise WorkRefusal(f"--here: {repo} is not a registered repository")
     return None
@@ -171,8 +174,9 @@ def _belongs_to(value: str) -> str:
     `--here` / `--no-repo` pair. One family, one spelling; a second answer
     here would make the rule read as negotiable.
 
-    A row's `repo` is an absolute path and a foreign key into the `repo`
-    table, so the argument has to become one before the library sees it.
+    A row's `repo` is a repository key -- `~/...` under `$HOME` (sd:1439) --
+    and a foreign key into the `repo` table, so the argument has to become one
+    before the library sees it.
     `--belongs-to .` from inside a checkout is the spelling a caller standing
     in the misfiled row's real repository will reach for, and a relative path
     is what a shell hands over; both resolve here rather than arriving as a
@@ -188,8 +192,8 @@ def _belongs_to(value: str) -> str:
     path = pathlib.Path(value).expanduser()
     root = sd_lib.repo_root(path)
     if root is None:
-        return str(path.resolve())
-    return str(sd_lib.main_worktree_root(root))
+        return sd_lib.stored_repo(path.resolve())
+    return sd_lib.stored_repo(sd_lib.main_worktree_root(root))
 
 
 def _edit_changes(args: argparse.Namespace) -> dict[str, Any]:
@@ -397,7 +401,7 @@ def _register(sd_db, connection, args, who: str) -> Any:
     # runner clone carries the same files at another path, and resolving by
     # path alone refuses every run made from one.
     origin = sd_lib.git_output(["remote", "get-url", "origin"], root)
-    repo = repos.registered_for(connection, str(root), origin or None)
+    repo = sd_lib.stored_repo(repos.registered_for(connection, str(root), origin or None))
     commit = sd_lib.git_output(
         ["log", "-1", "--format=%H", "--", relative], root)
     return workflow.register_work_item(
@@ -427,7 +431,7 @@ def _standing_in(rows: list[Any]) -> str | None:
     if not any(row.get("repo") for row in rows):
         return None
     root = sd_lib.repo_root()
-    return None if root is None else str(sd_lib.main_worktree_root(root))
+    return None if root is None else sd_lib.stored_repo(sd_lib.main_worktree_root(root))
 
 
 def _repo_line(row: Any, *, here: str | None, moved: bool) -> str | None:
@@ -460,7 +464,7 @@ def _repo_line(row: Any, *, here: str | None, moved: bool) -> str | None:
     repo = row.get("repo")
     if moved:
         return f"  repo: {repo}" if repo else f"  repo: {NO_CHECKOUT}"
-    return f"  repo: {repo}" if repo and repo != here else None
+    return f"  repo: {repo}" if repo and not sd_lib.same_repo(repo, here) else None
 
 
 def _emit(value: Any, *, machine: bool, moved: bool = False) -> None:
@@ -556,7 +560,7 @@ def _delivery_reason(row: Any, commit: str) -> str:
         raise WorkRefusal(
             f"item {row['id']} belongs to no checkout, so no commit can be verified "
             "for it; `sd task edit` with `--belongs-to` names one")
-    root = pathlib.Path(row["repo"])
+    root = sd_lib.repo_disk(row["repo"])
     if not root.is_dir():
         raise WorkRefusal(f"{root} is unavailable; delivery cannot be verified")
     if sd_lib.git_output(["rev-parse", "--verify", f"{commit}^{{commit}}"], root) != commit:
