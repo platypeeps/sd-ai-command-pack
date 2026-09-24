@@ -1234,8 +1234,7 @@ class Ship(SharedReview):
 
             origin = git(self.root, "config", "--get", "remote.origin.url")
             path = registered_for(self.connection, str(self.root.resolve()), origin)
-            row = self.connection.execute(
-                "SELECT remote, runner_merge FROM repo WHERE path = ?", (path,)).fetchone()
+            row = sd_lib.repo_row(self.connection, path)  # `~/...` or legacy (sd:1439)
             if row is None or row["runner_merge"] != "auto":
                 return False
             return slug(row["remote"] or "") == self.repository

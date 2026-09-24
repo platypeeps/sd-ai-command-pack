@@ -1219,7 +1219,7 @@ def charged_call(
         try:
             result = calls.call(
                 connection, entry=ledger.library.Provider(**vars(provider)), prompt=prompt, environ=environ,
-                timeout=timeout, role="reviewer", repo=str(root),
+                timeout=timeout, role="reviewer", repo=sd_lib.stored_repo(root),
                 transport=None if client is None else _wire(client, provider, prompt, environ),
             )
         except (calls.CallRefused, ledger.library.LedgerRefused) as error:

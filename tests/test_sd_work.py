@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
 import sd_db  # noqa: E402
 import sd_db.repos  # noqa: E402
 import sd_db.workflow as workflow  # noqa: E402
+import sd_lib  # noqa: E402
 import sd_work  # noqa: E402
 from sd_db.workflow import NOTE_KINDS  # noqa: E402
 
@@ -29,6 +30,12 @@ class TaskCLI(unittest.TestCase):
         self.home = Path(scratch.name)
         sd_db.initialise(home=self.home)
         self.environment = {**os.environ, "HOME": str(self.home)}
+        # The library keys a checkout under `$HOME` as `~/...` (sd:1439), so the
+        # rows this process writes and the ones the CLI writes agree only when
+        # both read the scratch home.
+        home = unittest.mock.patch.dict(os.environ, {"HOME": str(self.home)})
+        home.start()
+        self.addCleanup(home.stop)
 
     def call(self, *arguments, code=0, cwd=None):
         result = subprocess.run(
@@ -151,7 +158,7 @@ class TaskCLI(unittest.TestCase):
             sd_db.repos.add(connection, root, home=self.home)
 
         ordinary = json.loads(self.call("task", "add", "Ordinary", "--json", cwd=root).stdout)
-        self.assertEqual(ordinary["item"]["repo"], str(root.resolve()))
+        self.assertEqual(ordinary["item"]["repo"], sd_lib.stored_repo(root))
 
         for kind in sorted(workflow.REPO_LESS_KINDS):
             with self.subTest(kind=kind):
@@ -205,11 +212,11 @@ class TaskCLI(unittest.TestCase):
         filed = json.loads(self.call(
             "task", "add", "Review finding", "--kind", "followup", "--json", cwd=root).stdout)
         self.assertEqual((filed["item"]["kind"], filed["item"]["repo"]),
-                         ("followup", str(root.resolve())))
+                         ("followup", sd_lib.stored_repo(root)))
         here = json.loads(self.call(
             "task", "add", "Said here", "--kind", "followup", "--here", "--json",
             cwd=root).stdout)
-        self.assertEqual(here["item"]["repo"], str(root.resolve()))
+        self.assertEqual(here["item"]["repo"], sd_lib.stored_repo(root))
 
         linked = self.home / "reviewed-linked"
         subprocess.run(["git", "worktree", "add", "-q", "-b", "side", str(linked)],
@@ -217,7 +224,7 @@ class TaskCLI(unittest.TestCase):
         from_worktree = json.loads(self.call(
             "task", "add", "From a worktree", "--kind", "followup", "--json",
             cwd=linked).stdout)
-        self.assertEqual(from_worktree["item"]["repo"], str(root.resolve()))
+        self.assertEqual(from_worktree["item"]["repo"], sd_lib.stored_repo(root))
 
         opted_out = json.loads(self.call(
             "task", "add", "Nowhere", "--kind", "followup", "--no-repo", "--json",
@@ -256,13 +263,13 @@ class TaskCLI(unittest.TestCase):
             "--json").stdout)
         row = moved["item"]
         self.assertEqual((row["kind"], row["repo"], row["title"], row["priority"], row["due"]),
-                         ("followup", str(first.resolve()), "Fix the finding", 2, "2026-09-20"))
+                         ("followup", sd_lib.stored_repo(first), "Fix the finding", 2, "2026-09-20"))
         self.assertEqual(moved["notes"][-1]["body"],
                          f"Updated due, priority, repo, title by {getpass.getuser()}")
 
         again = json.loads(self.call(
             "task", "edit", item, "--belongs-to", ".", "--json", cwd=second).stdout)
-        self.assertEqual(again["item"]["repo"], str(second.resolve()))
+        self.assertEqual(again["item"]["repo"], sd_lib.stored_repo(second))
 
         bodied = json.loads(self.call(
             "task", "edit", item, "--body", "The finding is at line 12", "--json").stdout)
@@ -334,14 +341,14 @@ class TaskCLI(unittest.TestCase):
             sd_db.repos.add(connection, root, home=self.home)
 
         filed = json.loads(self.call("task", "add", "Inside", "--json", cwd=root).stdout)
-        self.assertEqual(filed["item"]["repo"], str(root.resolve()))
+        self.assertEqual(filed["item"]["repo"], sd_lib.stored_repo(root))
 
         linked = self.home / "linked"
         subprocess.run(["git", "worktree", "add", "-q", "-b", "side", str(linked)],
                        cwd=str(root), check=True, capture_output=True, text=True)
         from_worktree = json.loads(
             self.call("task", "add", "From a worktree", "--json", cwd=linked).stdout)
-        self.assertEqual(from_worktree["item"]["repo"], str(root.resolve()))
+        self.assertEqual(from_worktree["item"]["repo"], sd_lib.stored_repo(root))
 
         opted_out = json.loads(
             self.call("task", "add", "Neither", "--no-repo", "--json", cwd=root).stdout)
@@ -372,7 +379,7 @@ class TaskCLI(unittest.TestCase):
         self.assertIsNone(state["item"]["repo"])
 
         moved = json.loads(self.call("task", "edit", item, "--belongs-to", first, "--json").stdout)
-        self.assertEqual(moved["item"]["repo"], str(first.resolve()))
+        self.assertEqual(moved["item"]["repo"], sd_lib.stored_repo(first))
 
         # The path is read the way `add` reads cwd, so `.` inside a checkout
         # names that checkout rather than a directory the `repo` table has
@@ -381,7 +388,7 @@ class TaskCLI(unittest.TestCase):
         # answered the same question without it one verb earlier.
         again = json.loads(
             self.call("task", "edit", item, "--belongs-to", ".", "--json", cwd=second).stdout)
-        self.assertEqual(again["item"]["repo"], str(second.resolve()))
+        self.assertEqual(again["item"]["repo"], sd_lib.stored_repo(second))
 
         cleared = json.loads(self.call("task", "edit", item, "--no-repo", "--json").stdout)
         self.assertIsNone(cleared["item"]["repo"])
@@ -414,10 +421,10 @@ class TaskCLI(unittest.TestCase):
         # The move, made from inside the destination, where "which repository"
         # is otherwise answered by where the caller is standing.
         moved = self.call("task", "edit", item, "--belongs-to", ".", cwd=root)
-        self.assertIn(f"repo: {root.resolve()}", moved.stdout)
+        self.assertIn(f"repo: {sd_lib.stored_repo(root)}", moved.stdout)
 
         # Read back from outside every checkout: nothing else answers it.
-        self.assertIn(f"repo: {root.resolve()}",
+        self.assertIn(f"repo: {sd_lib.stored_repo(root)}",
                       self.call("store", "item", item).stdout)
 
         # The control. Standing in the row's own checkout, an ordinary listing
@@ -502,7 +509,7 @@ class TaskCLI(unittest.TestCase):
         state = json.loads(self.call("task", "add", "Not work at all", "--json", cwd=root).stdout)
         item = state["item"]["id"]
         self.assertEqual((state["item"]["kind"], state["item"]["repo"]),
-                         ("task", str(root.resolve())))
+                         ("task", sd_lib.stored_repo(root)))
         before = {note["id"] for note in state["notes"]}
 
         moved = json.loads(self.call(
@@ -567,6 +574,12 @@ class WorkRegister(unittest.TestCase):
         self.home = Path(scratch.name)
         sd_db.initialise(home=self.home)
         self.environment = {**os.environ, "HOME": str(self.home)}
+        # The library keys a checkout under `$HOME` as `~/...` (sd:1439), so the
+        # rows this process writes and the ones the CLI writes agree only when
+        # both read the scratch home.
+        home = unittest.mock.patch.dict(os.environ, {"HOME": str(self.home)})
+        home.start()
+        self.addCleanup(home.stop)
         # Resolved, because that is the spelling the repo row carries: `add`
         # resolves what it is given, and on macOS the scratch directory is a
         # symlink, so the unresolved path matches no row at all.
@@ -613,7 +626,7 @@ class WorkRegister(unittest.TestCase):
         self.assertTrue(state["created"])
         self.assertEqual(row["title"], "A thing to do")
         self.assertEqual(row["status"], "planning")
-        self.assertEqual(row["repo"], str(self.root))
+        self.assertEqual(row["repo"], sd_lib.stored_repo(self.root))
         self.assertEqual(row["path"], path)
         # On the default branch there is no working branch to name yet.
         self.assertIsNone(row["branch"])
@@ -775,7 +788,7 @@ class WorkRegister(unittest.TestCase):
         with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
             connection.execute(
                 "UPDATE repo SET status_source = 'file' WHERE path = ?",
-                (str(self.root),))
+                (sd_lib.stored_repo(self.root),))
             connection.commit()
         path = self.item()
         refused = self.call("work", "register", path, code=1)

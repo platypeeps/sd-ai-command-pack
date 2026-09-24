@@ -22,7 +22,7 @@ def run(args: argparse.Namespace) -> int:
     root = sd_lib.repo_root()
     if root is None:
         raise WorkRefusal("writing controls require the writing Git checkout as the current directory")
-    repo = str(root.resolve())
+    repo = sd_lib.stored_repo(root.resolve())
     action = args.writing_action
     write = action in {"cutover", "recover", "register", "stage", "metadata", "gate", "park",
                        "publication-claim", "publication-dispatch", "publication-receipt", "publication-reconcile", "publication-abandon", "publication-recover"} or (
