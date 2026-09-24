@@ -17,6 +17,19 @@
   `conventions.md` shows the template's real Publishing heading in its
   override example, and no longer calls a silent `codex` run normal.
 
+- **Claude Code reads `AGENTS.md` in this repository.** A root `CLAUDE.md`
+  imports it with `@AGENTS.md`. Before, Claude sessions loaded only the two
+  `.claude/rules` files and never saw the repository rules.
+  `sd-operator-defaults.md` no longer restates the STE-Concise and Diagrams
+  rules. Each agent's global instructions carry them. Its report guidance
+  moves to a `Reports` section. `sd-planning-adversarial-review.md` now loads
+  only for `docs/work/**` and `WORKFLOW.md`. Skills and commands still read
+  it by path.
+  `sd-knowledge-capture` writes to Obsidian or Notion, and `sd-research-repo`
+  mirrors to Notion or Drive, only after an explicit request in the same
+  session. They stay skills: the command marker is pinned to the
+  nine commands.
+
 - **The Copilot ancestor gate reads `docs_skip` as well as `never_skip`.**
   A reviewed ancestor clears the merge when the commits since it touch only
   `docs/`. The gate subtracted the repository's `never_skip` list but ignored

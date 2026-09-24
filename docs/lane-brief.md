@@ -181,8 +181,8 @@ for the controls a run passes through.
 >    **NOT VERIFIED** what you asked for, what came back, and which head it
 >    named, then report and stop. I decide from there.
 >    Quote every finding verbatim and address or rebut each with evidence.
->    <system only: do NOT request a Copilot review; that repository's CLAUDE.md
->    forbids it, because its CI runs the reviewer itself.>
+>    <system only: request a Copilot review only when that repository's
+>    route-tier policy selects it.>
 >
 > ### Rules
 >
