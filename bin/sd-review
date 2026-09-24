@@ -1988,6 +1988,7 @@ def review(
 
     outcomes: list[Outcome] = []
     reviewed: list[str] = []
+    cited = reviewed_paths(root, subject, previous)
     for provider in chosen:
         if len(reviewed) >= depth:
             break
@@ -1995,8 +1996,8 @@ def review(
         # itself. The result key carries the last; each outcome carries its own.
         if provider.reader == "codex-json" and auth["ok"]:
             skills = result["codex_skill_suppression"] = codex_skill_state(provider, root, runner, env, auth_home)
-        outcome = run_provider(provider, root, subject, prompt, runner, env, args.timeout,
-                               codex_auth_home, client, ledger, skills)
+        outcome = unlocated(run_provider(provider, root, subject, prompt, runner, env, args.timeout,
+                                         codex_auth_home, client, ledger, skills), cited, result["severity_floor"])
         outcomes.append(outcome)
         if outcome.status in (CLEAN, FINDINGS):
             reviewed.append(outcome.backend)
@@ -2049,6 +2050,45 @@ def _planned(
         planned.append({"backend": provider.name, "argv": argv, "endpoint": target, "would_run": not reason, "reason": reason or "",
                         "stdin": prompt if argv and provider.reader == "codex-json" else None})
     return planned
+
+
+#: Paths the lane writes itself (`evidence_limit`), never a reader's claim.
+LANE_PATHS = frozenset({"<review-response>"})
+
+
+def reviewed_paths(root: pathlib.Path, subject: Subject, previous: Mapping[str, Any] | None) -> frozenset[str]:
+    """What a finding may cite: the subject's paths, a verified report's own
+    finding paths, and the lane's markers. Absolute spellings under `root`
+    count too, so a reader that prints full paths is not mistaken for blind."""
+    names = set(subject.paths) | ({row["path"] for row in previous["findings"]} if previous else set())
+    prefixes = {f"{pathlib.Path(root).as_posix()}/", f"{pathlib.Path(root).resolve().as_posix()}/"}
+    return frozenset(names | {prefix + name for prefix in prefixes for name in names}
+                     | {f"./{name}" for name in names} | LANE_PATHS)
+
+
+def unlocated(outcome: Outcome, cited: frozenset[str], floor: str) -> Outcome:
+    """sd:1406. A finding that cites no path this run reviewed is not advice.
+
+    Measured blind answers put nothing, `/`, or prose where a path belongs; a
+    sighted one cites a subject path. The check reads structure, not prose.
+    A completed answer with no located finding is voided: `unavailable`, not
+    counted toward depth, its findings dropped. A completed answer with one
+    located finding is kept whole. A failed answer keeps its located findings
+    and every blocker, located or not; its unlocated advice is dropped.
+    """
+    completed = outcome.status in (CLEAN, FINDINGS)
+    located = [row["path"].strip() in cited for row in outcome.findings]
+    if completed and any(located) or all(located):
+        return outcome
+    kept = () if completed else tuple(row for row, here in zip(outcome.findings, located, strict=True)
+                                      if here or dispose([row], floor)[0]["disposition"] == "blocking")
+    count = len(outcome.findings) - len(kept)
+    if not count:
+        return outcome
+    note = f"{outcome.backend} cited no reviewed path in {count} finding(s); they are not a review of this subject"
+    return outcome._replace(status=UNAVAILABLE if completed else outcome.status, findings=kept,
+                            detail=note if completed else f"{outcome.detail}; {note}",
+                            diagnostic=dict(outcome.diagnostic or {}, unlocated_findings=count))
 
 
 def finish_review(result: dict[str, Any], outcomes: Sequence[Outcome], reviewed: list[str]) -> dict[str, Any]:

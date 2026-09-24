@@ -412,7 +412,7 @@ class Ship(SharedReview):
     def commit_warnings(self, head: str) -> list[str]:
         warnings = []
         if not self.args.no_item and pathlib.Path(self.repo["path"]).name in {"sd-ai-command-pack", "system", "sd-writing-pack"}:
-            start = self.state["passes"][-1]["report"].get("authorship_base") or self.state["passes"][0]["report"]["subject"]["base"]
+            start = self.authorship_start()
             for commit, message in sd_lib.commit_messages(self.root, start, head):
                 if not any(line.startswith("Needed-by:") for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines()):
                     warnings.append(f"commit {commit} has no Needed-by trailer; delivery continues")
@@ -1317,7 +1317,7 @@ class Ship(SharedReview):
         body = self.squash_body()
         # Preserve actual authorship through the squash, including its vendor
         # at authoring time. No declaration supplied to merge can rewrite it.
-        start = self.state["passes"][-1]["report"].get("authorship_base") or self.state["passes"][0]["report"]["subject"]["base"]
+        start = self.authorship_start()
         sd_lib.author_vendors(self.root, start, head)
         authors = set(sd_lib.attribution(self.root, start, head).values())
         for _, message in sd_lib.commit_messages(self.root, start, head):

@@ -235,10 +235,16 @@ class ReceiptTests(ReviewFixture):
             self.assertIsNone(receipts.reuse_checked_result(self.root, self.env, self.database))
 
     def test_review_requires_per_run_opt_in(self):
+        # A committed change on a branch: reuse needs a clean checkout, and an
+        # empty subject is a readiness blocker (sd:1405).
+        self.git("checkout", "--quiet", "-b", "topic")
+        (self.root / "reviewed.py").write_text("x = 1\n")
+        self.git("add", "reviewed.py")
+        self.git("commit", "--quiet", "-m", "change\n\nAuthored-with: human")
         self.record()
         for opt_in, expected_calls in ((False, 1), (True, 0)):
             runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", "")})
-            result = sd_review.review(self.root, namespace(reuse_check=opt_in, database=self.database),
+            result = sd_review.review(self.root, namespace(scope="branch", reuse_check=opt_in, database=self.database),
                                       runner, self.env, self.chatgpt_home())
             self.assertEqual(sum("sd-check" in " ".join(call["argv"]) for call in runner.calls), expected_calls)
             self.assertEqual(result["check"].get("source"), "receipt" if opt_in else None)

@@ -47,6 +47,13 @@ def review_readiness(result: Mapping[str, Any], chosen: Sequence[sd_registry.Pro
         blockers.append(blocker("input_oversized", "input", "Split the branch using input_manifest; no review partition was executed."))
     if material.get("error"):
         blockers.append(blocker("input_unreadable", "input", str(material["error"])))
+    # sd:1405. A subject with no paths gives a reader nothing to read, so an
+    # answer about it is not a review: refuse before a check or call is spent.
+    # A fix verification is exempt; it reads the report it verifies, and
+    # `sd-ship` spends a capped pass on each one, empty fix diff or not.
+    if ("subject" in result and not result["subject"].get("paths") and not material.get("paths")
+            and not result.get("verification_report_digest")):
+        blockers.append(blocker("subject_empty", "input", "The subject has no changed paths; nothing to review. Commit or stage the change, or pick another scope."))
     return {"status": "blocked" if blockers else "ready", "blockers": blockers, "warnings": warnings,
             "runtime_approval": "not_observable"}
 

@@ -211,6 +211,23 @@
   so it stays reproducible; a local `make check` against a venv installed from
   system `main` goes red the day a migration lands there and not in the pin.
 
+- **`sd-review` no longer reports a review it did not do.** A subject with no
+  changed paths dispatched a real provider call and reported `clean` or
+  `advisory` at exit 0 (sd:1405). It is now a readiness blocker,
+  `subject_empty`, so the run ends `refused` (exit 3), or `unavailable` (exit
+  5) with no eligible reader, before any check or call. A fix verification
+  is exempt: it reads the report it verifies. `sd-ship` waives review for a
+  branch that changes no file against its merge base, such as an
+  `sd attribute` repair: it prints one line, calls no reader, and gates
+  publish and merge on the diff still being empty at that head.
+  A completed provider answer whose findings cite no reviewed path (none, `/`,
+  or a path outside the subject) counted as a review, and its findings were
+  dispositioned as advice (sd:1406). That answer is now voided: `unavailable`,
+  not counted toward depth, so the chain falls through to the next reader.
+  Its findings are dropped, with their count in the outcome's
+  `unlocated_findings`. A failed answer keeps its located findings and every
+  blocker; only its unlocated advice is dropped. The check reads no prose.
+
 - **`sd-status` resolves a job name that interpolates only the matrix.**
   `name: system-native (${{ matrix.leg }})` over `leg: [shared, dashboard,
   runner, tools]` produces four checks, and GitHub appends no suffix to such
