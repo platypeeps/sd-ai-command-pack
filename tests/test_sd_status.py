@@ -6033,5 +6033,114 @@ class RulesetProtectionCase(unittest.TestCase):
         self.assertEqual(result["detail"]["rules_read_error"], "gh: Not Found (HTTP 404)")
 
 
+
+class ClassicAndRulesetProtectionCase(unittest.TestCase):
+    """`protection_section` when classic answers 200 *and* a ruleset applies.
+
+    Before sd:1419 the rulesets were read only after a classic 404, so a
+    ruleset beside classic protection was invisible. They are read beside it
+    now and layered, strictest per rule. One source keeps today's output;
+    more than one reports `source: combined` and a `sources` map (Q4).
+    """
+
+    SLUG = RulesetProtectionCase.SLUG
+    GH = RulesetProtectionCase.GH
+    RULESET = RulesetProtectionCase.RULESET
+    REPO = RulesetProtectionCase.REPO
+    INTEGRATION = {"actor_id": 77, "actor_type": "Integration", "bypass_mode": "pull_request"}
+
+    @staticmethod
+    def classic(**overrides: Any) -> dict[str, Any]:
+        record: dict[str, Any] = {
+            "enforce_admins": {"enabled": True},
+            "required_status_checks": {"strict": True, "contexts": ["lint"]},
+            "required_pull_request_reviews": {"required_approving_review_count": 1},
+        }
+        record.update(overrides)
+        return record
+
+    def section(self, classic: dict[str, Any], rules: list[dict[str, Any]],
+                ruleset: dict[str, Any] = RULESET) -> dict[str, Any]:
+        def answer(args: list[str], root: pathlib.Path) -> tuple[Any, str]:
+            path = urlsplit(args[1]).path
+            if path == f"repos/{self.SLUG}":
+                return dict(self.REPO), ""
+            if path.endswith("/branches/main/protection"):
+                return classic, ""
+            if path.endswith("/rules/branches/main"):
+                return rules, ""
+            if path.endswith("/rulesets/42"):
+                return ruleset, ""
+            raise AssertionError(f"unexpected read {path}")
+
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+                status.pr_state, "gh_json", answer):
+            return status.protection_section(pathlib.Path(directory), self.GH)
+
+    @staticmethod
+    def ids(result: dict[str, Any]) -> list[str]:
+        """The gap ids, less the one every fixture carries: the temporary
+        root has no workflows, so `lint` is required and never produced."""
+        return [gap["id"] for gap in result["gaps"] if gap["id"] != "required_not_produced"]
+
+    def test_classic_alone_reports_exactly_what_it_did(self) -> None:
+        result = self.section(self.classic(), [])
+        self.assertTrue(result["protected"])
+        self.assertEqual(self.ids(result), [])
+        for key in ("source", "sources", "rulesets", "bypass_info", "advisory", "classic_visibility"):
+            self.assertNotIn(key, result["detail"])
+
+    def test_both_with_the_same_rules_is_combined_and_names_each_rules_sources(self) -> None:
+        result = self.section(self.classic(), RulesetProtectionCase.gating_rules())
+        self.assertTrue(result["protected"])
+        self.assertEqual(self.ids(result), [])
+        self.assertEqual(result["detail"]["source"], "combined")
+        self.assertEqual(result["detail"]["sources"], {"pull_request": ["classic", "ruleset:42"],
+                                                       "required_status_checks": ["classic", "ruleset:42"]})
+        self.assertTrue(result["detail"]["enforce_admins"])
+
+    def test_a_bypass_beside_firm_classic_is_information_not_the_bypass_gap(self) -> None:
+        """The acknowledgement fact `bypass` stays `[]`: an entry pinning it
+        keeps matching, because nothing that fact names has changed."""
+        result = self.section(self.classic(), RulesetProtectionCase.gating_rules(),
+                              dict(self.RULESET, bypass_actors=[self.INTEGRATION]))
+        self.assertNotIn("bypass", [gap["id"] for gap in result["gaps"]])
+        self.assertEqual(result["detail"]["bypass"], [])
+        self.assertEqual(result["detail"]["bypass_info"],
+                         ["main (#42) [pull_request, required_status_checks]: Integration 77 (pull_request)"])
+
+    def test_a_decisive_bypass_is_the_bypass_gap(self) -> None:
+        classic = self.classic()
+        del classic["required_status_checks"]
+        result = self.section(classic, RulesetProtectionCase.gating_rules(),
+                              dict(self.RULESET, bypass_actors=[self.INTEGRATION]))
+        self.assertEqual(result["detail"]["bypass"],
+                         ["main (#42) [pull_request, required_status_checks]: Integration 77 (pull_request)"])
+        self.assertIn("bypass", [gap["id"] for gap in result["gaps"]])
+
+    def test_a_stricter_bypassable_ruleset_is_advisory_and_leaves_the_gap_open(self) -> None:
+        rules = RulesetProtectionCase.gating_rules()
+        result = self.section(self.classic(required_status_checks={"strict": False, "contexts": ["lint"]}),
+                              rules, dict(self.RULESET, bypass_actors=[self.INTEGRATION]))
+        self.assertIn("strict", [gap["id"] for gap in result["gaps"]])
+        self.assertFalse(result["detail"]["strict"])
+        self.assertEqual(len(result["detail"]["advisory"]), 1)
+        self.assertIn("[required_status_checks] asks for more than the firm sources",
+                      result["detail"]["advisory"][0])
+
+    def test_admins_exempt_on_classic_are_enforced_when_a_firm_ruleset_carries_every_rule(self) -> None:
+        exempt = self.classic(enforce_admins={"enabled": False})
+        result = self.section(exempt, RulesetProtectionCase.gating_rules())
+        self.assertTrue(result["detail"]["enforce_admins"])
+        self.assertNotIn("enforce_admins", [gap["id"] for gap in result["gaps"]])
+        partial = [rule for rule in RulesetProtectionCase.gating_rules() if rule["type"] != "required_status_checks"]
+        result = self.section(exempt, partial)
+        self.assertFalse(result["detail"]["enforce_admins"])
+        gaps = {gap["id"]: gap["gap"] for gap in result["gaps"]}
+        self.assertIn("enforce_admins is off on main for required_status_checks", gaps["enforce_admins"])
+        self.assertIn("classic protection (enforce_admins off)", gaps["enforce_admins"])
+        self.assertIn("Still binding them: pull_request.", gaps["enforce_admins"])
+
+
 if __name__ == "__main__":
     unittest.main()

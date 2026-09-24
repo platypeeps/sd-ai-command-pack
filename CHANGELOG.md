@@ -4,6 +4,25 @@
 
 ### Changed
 
+- **`sd-status` and `sd-ship` read classic protection and rulesets together.**
+  Rulesets were read only when classic protection answered 404, so a ruleset
+  beside a classic object was invisible to both (sd:1419). They are now read
+  beside it and layered the way GitHub layers them: per merge-gating rule, the
+  strictest source wins. A source is *firm* for a rule when nobody can bypass
+  it. The effective requirement is the strictest among the firm sources; a
+  stricter source a bypass can skip is listed in `advisory` and never turns a
+  refusal into a grant. A bypass refuses the merge, and raises the `bypass`
+  finding, only when it removes a rule's last firm source; one beside firm
+  classic protection is listed in `bypass_info`. Administrators count as
+  enforced on a rule when any source imposing it binds them, and
+  `enforce_admins` is `true` only when that holds for every required rule. The
+  object and `sd-status`'s `detail` say `source: combined` and carry a
+  `sources` map naming each rule's sources (`classic`, `ruleset:<id>`). A
+  classic-only or ruleset-only branch reports exactly what it did. A rules read
+  that fails beside a classic object keeps the classic gate, and `sd-status`
+  names the fault in `detail.rules_read_error`. Acknowledgement facts keep
+  their spelling; on a combined branch their values follow the layered object.
+
 - **`sd-ship merge` reads the repository row, not repository ownership alone.**
   Merge authority asked three questions of the remote, and the third -- "nobody
   else may push" -- is false of every co-authored repository, so every such

@@ -221,7 +221,7 @@ class GitHub:
             raise Refusal("branch protection could not be observed")
         checks = value.get("required_status_checks") or {}
         noun = "ruleset protection" if value.get("source") == sd_protection.RULESET_SOURCE else "branch protection"
-        if noun == "ruleset protection":
+        if value.get("source") in (sd_protection.RULESET_SOURCE, sd_protection.COMBINED_SOURCE):
             GitHub.validate_ruleset_bypass(value)
         if value.get("enforce_admins", {}).get("enabled") is not True:
             raise Refusal("branch protection does not enforce administrators", code="protection_required",
@@ -243,9 +243,14 @@ class GitHub:
         not show refuses too, as unknown rather than as none. GitHub returns
         `bypass_actors` only to a caller who can edit the ruleset, so its
         absence says what this token may see, not who can bypass, and a gate
-        that read absence as nobody would grant on a permission it lacks."""
+        that read absence as nobody would grant on a permission it lacks.
+
+        Beside classic protection (`source: combined`) only a decisive bypass
+        refuses: one that removes the last firm source of a rule the ruleset
+        carries. A ruleset an app can bypass while classic still enforces the
+        same rule on everyone is information, not a refusal (sd:1419, Q2)."""
         for entry in value.get("rulesets") or []:
-            if isinstance(entry, dict) and entry.get("bypass_actors"):
+            if isinstance(entry, dict) and entry.get("bypass_actors") and sd_protection.decisive(value, entry):
                 actors = ", ".join(sd_protection.actor_words(actor) for actor in entry["bypass_actors"])
                 raise Refusal(f"ruleset {entry.get('name')} (#{entry.get('id')}) can be bypassed by {actors}",
                               code="protection_required",
@@ -293,7 +298,8 @@ class GitHub:
         Classic protection is read first, by a token `owned()` has shown to
         administer the repository -- to any other GitHub answers 404 for
         protection it may not show, so the order is load-bearing. A 200 is
-        the object (Path A). A 404
+        the object (Path A), layered with the branch's rulesets by
+        `sd_protection.combine` (sd:1419). A 404
         is "no classic object", which since sd:1327 is not yet "unprotected":
         the branch's rulesets are read next, and an active ruleset that gates
         the merge -- a `pull_request` or `required_status_checks` rule -- is
@@ -316,6 +322,16 @@ class GitHub:
             if declaration is not None:
                 raise Refusal(f"{where} at {head[:12]} declares main unprotected, "
                               "but GitHub returns a protection object; the declaration does not match the observed state")
+            # Rulesets layer onto classic protection, strictest per rule
+            # (sd:1419). A rules read that fails leaves the classic object as
+            # it was: combining can only tighten what classic requires, or
+            # bind administrators classic exempts, so classic alone is never
+            # a weaker gate than the combined one and a transient fault here
+            # does not refuse a merge that passed before rulesets were read.
+            if isinstance(value, dict):
+                read = self.rulesets_observed(base)
+                if not read["error"]:
+                    value = sd_protection.combine(value, read["rules"], read["rulesets"])
             return self.validate_protection(value)
         if status == 403 and sd_protection.plan_limited(message):
             if declaration is not None:

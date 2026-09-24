@@ -2131,8 +2131,8 @@ A third set, `ALLOWED_IF_PRESENT`, carries the two lines #995 adds to
 quotes `sd-status`'s `.trellis` removal command and the comment above it
 that names the framework. Team-lead's ruling: a test that names the residue
 commands must name them, so both are permanent exemptions of the same kind as
-`bin/sd-status:1117-1119`. They are matched by file and content, not by line
-number, and may match zero lines, so the test is green whether #995 merges
+the `.trellis` row of `RESIDUE` (`source:bin/sd-status::RESIDUE`). They
+are matched by file and content, not by line number, and may match zero lines, so the test is green whether #995 merges
 before this branch or after it; a fourth test fails a row that matches two
 lines. Proof, 2026-09-16, on a scratch worktree at this branch with
 `git merge --no-commit --no-ff origin/feat/sd-10-sweep-cut` (`5691b193`)
