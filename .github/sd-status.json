@@ -7,7 +7,7 @@
         "required_pull_request_reviews": true,
         "required_approving_review_count": 0
       },
-      "because": "Sole operator on this repository: the one account that merges cannot approve its own pull request, so a required approval count of 1 would block every merge. Protection (restored 2026-09-24 and confirmed intended by the operator) requires a pull request, strict `lint` and `unittest`, and enforce_admins; the approval count stays 0. What stands in for a human approval is the review lane: `sd-ship prepare` requires an independent local review from a different vendor than the author, and `sd-ship merge` refuses unacknowledged pull-request review findings.",
+      "because": "Sole operator on this repository: the one account that merges cannot approve its own pull request, so a required approval count of 1 would block every merge. Protection (restored 2026-09-24 and confirmed intended by the operator) requires a pull request, strict `lint`, `unittest` and `body-lint`, and enforce_admins; the approval count stays 0. What stands in for a human approval is the review lane: `sd-ship prepare` requires an independent local review from a different vendor than the author, and `sd-ship merge` refuses unacknowledged pull-request review findings.",
       "since": "2026-09-24",
       "until": "a second account with push or merge rights on this repository exists"
     }
