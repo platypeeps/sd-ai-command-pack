@@ -116,6 +116,18 @@ def load_tests(loader, standard_tests, pattern):
     return loader.loadTestsFromTestCase(Plain)
 """
 
+#: The header and footer `run-tests.sh` writes around a run (sd:1407).
+TREE_LINE = r"test runner: (finished )?tree=(\S+) content=(\S+) pid=(\d+) (started|ended)=\S+"
+
+#: A shard that edits the fixture's tracked file while the run is under way.
+EDITS_MID_RUN = PLAIN + """
+    def test_three(self):
+        import os
+        import pathlib
+        notes = pathlib.Path(os.environ["FIXTURE_COUNTER"]).parent / "notes.txt"
+        notes.write_text("edited mid-run\\n")
+"""
+
 SPLIT_NAMES =("test_sd_ship", "test_sd_ship_dispositions", "test_sd_ship_disposition_guards")
 
 
@@ -195,21 +207,25 @@ class SplitModuleFixtures(unittest.TestCase):
                          {f"tests.{name}.part{part}of2" for name in SPLIT_NAMES for part in (1, 2)})
         self.assertEqual([status for _, _, status in summaries], ["0"] * 6)
 
-    def test_the_log_names_its_tree_and_each_result_its_shard(self) -> None:
-        """sd:1407. A log that does not say which tree it ran against reads
-        the same stale as current, and a `Ran` line printed before its shard's
-        only label is attributed to the shard above it by any positional
-        parse. The header names the tree, the footer closes the same run, and
-        every `Ran` line sits inside its own shard's start and end lines."""
+    def commit_fixture(self) -> str:
+        """Make the fixture root a repository with one tracked `notes.txt`."""
         git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
         (self.root / ".gitignore").write_text("unittest-output.log\n.coverage\n.coverage.*\n__pycache__/\n")
         (self.root / "notes.txt").write_text("zero\n")
         subprocess.run(git + ["init", "-q"], cwd=self.root, check=True)
         subprocess.run(git + ["add", "-A"], cwd=self.root, check=True)
         subprocess.run(git + ["commit", "-qm", "fixture"], cwd=self.root, check=True)
-        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.root, check=True,
+        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.root, check=True,
                               capture_output=True, text=True).stdout.strip()
-        pattern = r"test runner: (finished )?tree=(\S+) content=(\S+) pid=(\d+) (started|ended)=\S+"
+
+    def test_the_log_names_its_tree_and_each_result_its_shard(self) -> None:
+        """sd:1407. A log that does not say which tree it ran against reads
+        the same stale as current, and a `Ran` line printed before its shard's
+        only label is attributed to the shard above it by any positional
+        parse. The header names the tree, the footer closes the same run, and
+        every `Ran` line sits inside its own shard's start and end lines."""
+        head = self.commit_fixture()
+        pattern = TREE_LINE
         contents = []
         # Two edits of one already-dirty file: the dirty-path count is the same
         # for both, so only a content fingerprint tells the runs apart.
@@ -238,6 +254,26 @@ class SplitModuleFixtures(unittest.TestCase):
                 current = None
             elif line.startswith("Ran "):
                 self.assertIsNotNone(current, f"{line!r} sits outside any shard")
+
+    def test_the_footer_reads_the_tree_after_the_run(self) -> None:
+        """sd:1407, Copilot on #1178. Equal fingerprints on an unchanged tree
+        cannot tell a footer sampled after the shards from one sampled with
+        the header. Here a shard edits a tracked file, so the footer must name
+        a different tree from the header -- and the same one the next run
+        opens on, which proves it read the tree the shards left behind."""
+        self.commit_fixture()
+        result = self.run_harness(test_sd_ship=EDITS_MID_RUN)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.root / "notes.txt").read_text(), "edited mid-run\n")
+        lines = result.stdout.splitlines()
+        header, footer = re.fullmatch(TREE_LINE, lines[0]), re.fullmatch(TREE_LINE, lines[-1])
+        self.assertIsNotNone(header, lines[:2])
+        self.assertIsNotNone(footer, lines[-2:])
+        self.assertNotEqual(footer.group(3), header.group(3), "the footer read the tree the run started on")
+        # The same modules again, so the only difference is what the shards did.
+        after = self.run_harness(test_sd_ship=EDITS_MID_RUN)
+        self.assertEqual(after.returncode, 0, after.stdout + after.stderr)
+        self.assertEqual(re.fullmatch(TREE_LINE, after.stdout.splitlines()[0]).group(3), footer.group(3))
 
     def test_shard_timing_does_not_hide_a_failed_test(self) -> None:
         failing = PLAIN.replace("self.assertTrue(self.ready)", "self.assertFalse(self.ready)")
