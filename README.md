@@ -198,6 +198,17 @@ registered checkout carries that checkout since sd:809, but only a task's
 move to done records a delivering commit, so the flag is refused there too,
 on that second reason, and the item closes without it just the same.
 
+A task that repeats carries a rule:
+`sd task add "File the weekly report" --due 2026-01-01 --recur FREQ=WEEKLY`.
+The rule is an RRULE subset (`FREQ`, `INTERVAL`, `BYMONTH`, `BYMONTHDAY`) and
+needs a due date. `--recur-anchor schedule`, the default, dates the next
+occurrence from the last due date; `completion` dates it from the day the task
+was done. Completing the task creates the next row and moves the rule to it,
+and `sd task status` prints `next occurrence: #N · due D`, or `recurrence
+ended:` with the reason when no next occurrence exists. `sd task edit` takes
+the same two flags, and `--clear-recur` stops the series. `sd_db` owns every
+refusal: the grammar, the anchor, the due date and the kinds that may recur.
+
 `sd store items --open` lists the backlog; `sd store item 42 --json` includes
 history and a revision that edits can require with `--if-revision`. Notes,
 priorities, due dates and task status save directly to the database. GitHub
@@ -395,19 +406,16 @@ advisory `route` job in `sd-review-route.yml`:
 workflow files produce, not with this table, so a row here can go stale
 without anything saying so; the workflow files are the inventory.
 
-`main` is currently unprotected, and that is an accepted gap rather than an
-open one, recorded in tracked `.github/sd-status.json` under the id
-`unprotected` with the reason and the condition that ends it (a second
-account with push or merge rights). `sd-status` reports it every run as
-accepted and stops accepting it the moment the live state stops matching what
-the file pins. While protection is gone there are no required contexts, and
-`sd-ship merge` refuses to run: it reads the protection object before it
-reads the pull request's checks and refuses a missing one
-(`bin/sd_ship_remote.py`, `gate()`). The object is the classic one or, when
-classic answers 404, the branch's active rulesets reduced to the same shape
-(`bin/sd_protection.py`); this repository's own ruleset forbids only
-deletion and force-push, which gates no merge, so it stays unprotected here. Merges land by hand with
-`gh pr merge` after the maintainer reads the checks.
+`main` carries classic branch protection: pull requests with no required
+approvals, the strict `lint` and `unittest` checks above, and enforce_admins.
+`.github/sd-status.json` accepts one gap, `reviews`: the approval count is 0
+because the sole maintainer cannot approve their own pull request. `sd-ship merge`
+reads the protection object before it reads the pull request's checks and
+refuses a missing or weaker one (`bin/sd_ship_remote.py`, `gate()`). The
+object is the classic one or, when classic answers 404, the branch's active
+rulesets reduced to the same shape (`bin/sd_protection.py`). An `unprotected`
+entry in that file is the documented way to accept a branch without
+protection; `WORKFLOW.md` describes how the merge gate honours it.
 
 **Installer coverage is gated at 100% line and branch.** The gate enumerates its
 subject from git rather than matching a glob, and declares a statement floor, so

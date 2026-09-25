@@ -693,6 +693,10 @@ class StatusReport:
     #: there is no database, no row for it, or no readable stamp. Attached by
     #: `_reported`, which is the one place holding an open `Statuses`.
     activity: str = ""
+    #: The row's `branch` column, `""` when the row names none, and `None`
+    #: when no row answered -- a `file` checkout, no database, no row. `None`
+    #: leaves the frontmatter `branch:` line to decide, as it did before rows.
+    branch: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1157,6 +1161,24 @@ class Rows:
                 pass
         return max((stamp for stamp in stamps if stamp), default="")
 
+    def branch(self, item_dir: pathlib.Path) -> str | None:
+        """The row's `branch` column, `""` for none, `None` when no row answers.
+
+        The column is what `sd runner prepare --branch` writes and what
+        `sd-status` and the dashboard print. The frontmatter `branch:` line is
+        a second copy nothing reconciles (sd:1382), so a checkout whose marker
+        names the row reads the branch from the row as it reads the status.
+        """
+        if not self.opened:
+            return None
+        try:
+            row = self.item(item_dir)
+        except Exception:  # noqa: BLE001 - a read that failed said nothing
+            return None
+        if row is None:
+            return None
+        return str(row["branch"] or "").strip()
+
     def completed(self, item_dir: pathlib.Path) -> bool:
         if self._completion_read is None:
             return False
@@ -1380,6 +1402,13 @@ def _recorded(statuses: "Statuses", item_dir: pathlib.Path) -> str:
     return statuses.rows.activity(item_dir) if statuses.rows is not None else ""
 
 
+def _row_branch(statuses: "Statuses", item_dir: pathlib.Path) -> str | None:
+    """The row's branch when the row is this checkout's authority, else `None`."""
+    if statuses.source != FROM_ROW or statuses.rows is None:
+        return None
+    return statuses.rows.branch(item_dir)
+
+
 def _reported(
     item_dir: pathlib.Path,
     fields: dict[str, str],
@@ -1397,12 +1426,14 @@ def _reported(
         return replace(
             _status_report(item_dir, fields, problems, statuses),
             activity=_recorded(statuses, item_dir),
+            branch=_row_branch(statuses, item_dir),
         )
     own = Statuses.of(_root_of(item_dir))
     try:
         return replace(
             _status_report(item_dir, fields, problems, own),
             activity=_recorded(own, item_dir),
+            branch=_row_branch(own, item_dir),
         )
     finally:
         own.close()
@@ -1444,7 +1475,7 @@ def work_item(item_dir: pathlib.Path, *, statuses: "Statuses | None" = None) -> 
         title=fields.get("title", ""),
         status=report.status,
         created=fields.get("created", ""),
-        branch=fields.get("branch", ""),
+        branch=fields.get("branch", "") if report.branch is None else report.branch,
         archived=report.archived,
         inconsistencies=report.inconsistencies,
         activity=report.activity,
@@ -2960,3 +2991,85 @@ def jev_stage_off(value: str | None) -> bool:
     """
 
     return value is not None and value.strip().lower() in JEV_FLAG_OFF
+
+
+#: How long `run_group` waits for a killed group's leader to be reaped.
+GROUP_CLEANUP_SECONDS = 5
+
+
+class GroupTimeout(Exception):
+    """`run_group` reached its deadline. The group is already gone."""
+
+
+class _Terminated(BaseException):
+    """SIGTERM, raised while `run_group` owns a group that must end first."""
+
+
+def _raise_terminated(number: int, frame: object) -> None:
+    raise _Terminated
+
+
+def _end_group(process: subprocess.Popen) -> None:
+    """Kill whatever is left of the group `process` leads, and reap it."""
+    import signal  # noqa: PLC0415 - only the group helpers need it
+
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+    try:
+        process.wait(timeout=GROUP_CLEANUP_SECONDS)
+    except subprocess.TimeoutExpired:
+        pass
+    for stream in (process.stdin, process.stdout, process.stderr):
+        if stream is not None:
+            try:
+                stream.close()
+            except OSError:
+                pass
+
+
+def run_group(argv: list[str], *, cwd: pathlib.Path, env: dict[str, str], timeout: float,
+              input_text: str | None = None) -> subprocess.CompletedProcess:
+    """Run `argv` as the leader of a process group, and end the whole group.
+
+    sd:1482. `subprocess.run(timeout=)` kills the one process it started. A
+    child with children of its own -- `sd-check` running `make check` -- left
+    them running with nothing to time them out. Here the group is killed when
+    the call ends: at the deadline, on an interruption, and after a normal exit.
+
+    A group of its own no longer receives what is sent to the caller's group,
+    which is how `sd-ship` ends a review. So for the length of the call SIGTERM
+    ends the group first and then the caller, as it would have without one.
+    Only the default disposition is replaced: a caller that handles or ignores
+    SIGTERM keeps that, and a thread cannot install a handler.
+
+    Raises `GroupTimeout` at the deadline, and what `Popen` raises when
+    `argv[0]` cannot start.
+    """
+    import signal  # noqa: PLC0415 - only the group helpers need it
+    import threading  # noqa: PLC0415
+
+    owns_term = (threading.current_thread() is threading.main_thread()
+                 and signal.getsignal(signal.SIGTERM) is signal.SIG_DFL)
+    if owns_term:
+        signal.signal(signal.SIGTERM, _raise_terminated)
+    try:
+        process = subprocess.Popen(
+            list(argv), cwd=str(cwd), env=dict(env), text=True, start_new_session=True,
+            stdin=subprocess.DEVNULL if input_text is None else subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            output, errors = process.communicate(input_text, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            raise GroupTimeout(f"{argv[0]}: timed out after {timeout}s") from None
+        finally:
+            _end_group(process)
+    except _Terminated:
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        os.kill(os.getpid(), signal.SIGTERM)
+        raise
+    finally:
+        if owns_term:
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    return subprocess.CompletedProcess(list(argv), process.returncode, output or "", errors or "")
