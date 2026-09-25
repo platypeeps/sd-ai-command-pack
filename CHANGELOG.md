@@ -141,6 +141,18 @@
 
 ### Added
 
+- **`sd-ship prepare` names a squashed head the branch carries, and which
+  paths `--ours` may take (sd:1409).** A squash merge leaves the merged head
+  off the default branch's history. A second branch that merged that head
+  then conflicts on ancestry, not content, when it merges the default branch.
+  The operator chose the remedy: resolve with `git checkout --ours`, gated by
+  blob identity. `prepare` reads this machine's merged ship receipts in
+  `bin/sd_ship_squash.py`. For each receipt whose head the branch carries and
+  the base does not, a receipt warning lists the squash's paths in two groups.
+  Paths whose base blob equals the carried head's are safe for `--ours`.
+  Paths the base changed after the squash must be read by hand. The ship
+  skill's recovery reference documents the procedure.
+
 - **`opencode` reviews, through a new `opencode-json` reader (sd:1329).**
   The shipped registry gains an `opencode` entry third on the reviewer
   order, after `codex` and `claude`. `opencode run -m provider/model`

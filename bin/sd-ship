@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 
 import sd_lib
 import sd_ship_dispositions as sd_ship_dispositions
+import sd_ship_squash
 from sd_ship_bindings import review_binding
 from sd_ship_history import ItemHistory, digest
 from sd_ship_history import completed_depth as completed_depth
@@ -419,6 +420,11 @@ class Ship(SharedReview):
             for commit, message in sd_lib.commit_messages(self.root, start, head):
                 if not any(line.startswith("Needed-by:") for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines()):
                     warnings.append(f"commit {commit} has no Needed-by trailer; delivery continues")
+        base = self.state.get("base")
+        if base and not self.args.no_item:
+            receipts = sd_ship_squash.merged_receipts(self.connection, self.repository)
+            for entry in sd_ship_squash.squashed_heads(self.root, f"refs/remotes/origin/{base}", head, receipts):
+                warnings.append(sd_ship_squash.warning(entry, base))
         return warnings
 
     def copilot_entries(self) -> list[dict]:
