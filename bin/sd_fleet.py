@@ -375,9 +375,14 @@ def workflow_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None]
             except sd_setup_guard.GuardError as error:
                 plan.refused.append(f"{DEPENDABOT_PATH}: {error}")
 
-    # Check workflow, only where nothing else validates a pull request.
+    # Check workflow, only where nothing else validates a pull request, and
+    # create-only: a file already at the path is the repository's, whatever
+    # it holds, so an operator's own jobs there are never replaced.
     others = pull_request_workflows(tree, besides=(ROUTE_PATH, CHECK_PATH))
-    if others and tree.text_at(CHECK_PATH) is None:
+    if tree.text_at(CHECK_PATH) is not None:
+        if tree.text_at(CHECK_PATH) != check_workflow_text():
+            plan.adapted.append(f"{CHECK_PATH}: kept as written; the stamp only creates it")
+    elif others:
         plan.adapted.append(f"{CHECK_PATH}: not laid; {', '.join(others)} already run on pull_request")
     else:
         propose(CHECK_PATH, check_workflow_text())

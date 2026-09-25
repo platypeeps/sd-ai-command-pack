@@ -72,7 +72,7 @@ else is. Its executables write these paths, and no others:
   must be a checkout of a `runner_merge=auto` repository: the routing lane and
   its Dependabot guard as `setup-github` writes them,
   `.github/workflows/sd-check.yml` where no other workflow runs on
-  `pull_request`, the `unprotected` entry in `.github/sd-status.json`
+  `pull_request` (created only: an existing one is kept as written), the `unprotected` entry in `.github/sd-status.json`
   (only where the remote says nobody else may push, and only where the file
   declares no gap yet), and a `docs/dashboard/` line in
   `.gitignore`. **Tracked**, and written only on a feature branch. A repository

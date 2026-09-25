@@ -125,6 +125,13 @@ class DryRun(Fleet):
         self.assertNotIn(sd_fleet.CHECK_PATH, [change["path"] for change in plan["changes"]])
         self.assertTrue(any(line.startswith(sd_fleet.CHECK_PATH) for line in plan["adapted"]))
 
+    def test_an_existing_check_workflow_is_never_replaced(self) -> None:
+        own = CI.replace("name: ci", "name: sd-check").replace("- run: true", "- run: npm test")
+        root, remote = self.repo("owned-check", {sd_fleet.CHECK_PATH: own})
+        [plan] = self.plan([(root, remote)])
+        self.assertNotIn(sd_fleet.CHECK_PATH, [change["path"] for change in plan["changes"]])
+        self.assertTrue(any(line.startswith(f"{sd_fleet.CHECK_PATH}: kept as written") for line in plan["adapted"]))
+
     def test_employer_repository_gets_no_unprotected_declaration(self) -> None:
         root, remote = self.repo("work", owner="answerbook")
         [plan] = self.plan([(root, remote)])
