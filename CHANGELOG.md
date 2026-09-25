@@ -283,6 +283,24 @@
 
 ### Fixed
 
+- **A gate that fails before any reviewer is asked no longer spends a review
+  pass (sd:1475).** Under parallel load `make check` outran sd-check's fixed
+  900-second limit. sd-review then reported `gate_failed` without asking a
+  provider, and `sd-ship prepare` kept the reserved pass anyway: sd:1309 lost
+  two of its five automatic passes that way, and each loss demanded
+  `--retry-review` for a review that never started. `sd-ship` now removes that
+  reservation, records the gate output under `review_preflight_error`, and
+  refuses with code `gate_failed`; the next prepare reviews normally. A run
+  whose report names any outcome, reviewer or finding keeps its pass.
+  sd-review now hands sd-check the phase budget its timing plan already
+  reserves for the gate (`--timeout`, default 1800 seconds) instead of
+  leaving sd-check at 900. `sd-ship prepare` and `sd-ship review` take
+  `--review-timeout SECONDS`, forwarded to `sd-review --timeout`, which also
+  sizes the watchdog. The pack still declares no `.github/sd-check-reuse.json`:
+  its `make check` reads the borrowed `.venv`, the installed `sd_db` and
+  `~/repos/system`, none of which a declaration can bind, so `complete: true`
+  would be false.
+
 - **Non-ASCII paths no longer slip past three path checks (sd:1440).**
   `core.quotePath` is on by default, so a newline-separated `--name-only`
   prints `docs/work/é.md` as `"docs/work/\303\251.md"`, and no prefix or

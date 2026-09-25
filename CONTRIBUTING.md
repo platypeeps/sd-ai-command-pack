@@ -86,15 +86,14 @@ Lower a floor only in the pull request that reduces the measured implementation.
 ## Main Branch Policy
 
 Every change to `main` requires a pull request.
-The repository has an accepted branch-protection exception in [.github/sd-status.json](.github/sd-status.json).
-That file owns the reason and the condition that ends the exception.
+Branch protection on `main` requires a pull request, the strict `lint` and `unittest` checks, and enforce_admins.
+It requires no approving review, because the sole maintainer cannot approve their own pull request.
+[.github/sd-status.json](.github/sd-status.json) records that accepted `reviews` gap, its reason, and the condition that ends it.
 Run `bin/sd-status` to inspect live protection.
 
-Use the pack's ship workflow for publication and review.
-While protection is absent, `sd-ship merge` refuses the missing protection object.
-Under the recorded exception, the maintainer reads every check before using `gh pr merge`.
-No server rule or local pre-push hook enforces this check.
-When protection returns, require the contexts that the current workflows produce.
+Use the pack's ship workflow for publication, review and merge.
+`sd-ship merge` checks the protection object, the exact-head checks and the review findings before it merges.
+Keep the required contexts equal to the contexts that the current workflows produce.
 
 The matrix in `.github/workflows/tests.yml` currently runs Ubuntu with Python 3.13 only.
 CI does not verify other Python versions or macOS behaviour.

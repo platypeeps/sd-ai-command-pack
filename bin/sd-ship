@@ -1485,9 +1485,28 @@ def quote_branch(repository, branch):
     return quote(f"{repository.split('/')[0]}:{branch}", safe="")
 
 
+def review_seconds(value: str) -> int:
+    seconds = int(value)
+    if seconds <= 0:
+        raise argparse.ArgumentTypeError("takes a positive number of seconds")
+    return seconds
+
+
+def review_timeout_flag(action) -> None:
+    """sd:1475. The one limit sd-review plans every phase with, forwarded when given.
+
+    It reaches sd-review's `--timeout`, which bounds the repository gate and
+    each reviewer, and sd-review's timing plan sizes the watchdog from it.
+    """
+    action.add_argument("--review-timeout", type=review_seconds, metavar="SECONDS",
+                        help="per-phase limit for sd-review: the repository gate, then each reviewer "
+                             "(default: sd-review's own)")
+
+
 def no_item_record_flags(action) -> None:
     action.add_argument("--provider", metavar="NAME", help="select one guarded reviewer for this invocation; never changes automatic order")
     action.add_argument("--reuse-check", action="store_true", help="opt into exact-input successful check-receipt reuse")
+    review_timeout_flag(action)
     action.add_argument("--create-record", action="store_true", help="allocate a record without provider dispatch or a spent pass")
     action.add_argument("--assert-new-work", action="store_true", help="explicit assertion of new work, not a renamed or rewritten continuation")
     action.add_argument("--import-history", type=pathlib.Path, metavar="FILE", help="import an ordered manifest of historical reports as untrusted evidence")
@@ -1548,6 +1567,7 @@ def parser():
         if name == "prepare":
             action.add_argument("--provider", metavar="NAME", help="select one guarded reviewer for this invocation; never changes automatic order")
             action.add_argument("--reuse-check", action="store_true", help="opt into exact-input successful check-receipt reuse")
+            review_timeout_flag(action)
             action.add_argument("--retry-review", action="store_true", help="spend one automatic pass on a full-branch retry of an incomplete review")
             action.add_argument("--additional-review-for", metavar="SHA", help="record one explicit post-cap operator request for this exact committed head")
             action.add_argument("--review-history-digest", metavar="SHA256", help="one-use digest of every existing pass; required to renew after three reservations")
