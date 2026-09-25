@@ -273,6 +273,15 @@
 
 ### Fixed
 
+- **The Copilot ancestor-clearance warning reaches the receipt only with a
+  merge dispatch (sd:1373).** `require_copilot_clearance` saved "Copilot
+  reviewed <sha>, an ancestor of the merge head ..." as soon as the gate
+  cleared. The findings check, CI, the authorship checks and the protection
+  re-read could all refuse afterwards, and the receipt still described a
+  clearance for a merge that never landed. Each retry appended another copy.
+  The note is now held per attempt and written with `phase="merge_dispatch"`,
+  replacing any earlier copy, as `row_authorized_merge` already is (sd:1347).
+
 - **A gate that fails before any reviewer is asked no longer spends a review
   pass (sd:1475).** Under parallel load `make check` outran sd-check's fixed
   900-second limit. sd-review then reported `gate_failed` without asking a
