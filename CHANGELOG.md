@@ -273,6 +273,13 @@
 
 ### Fixed
 
+- **`sd-ship prepare` re-reads a pull object that lags the push (sd:1394).**
+  It read the pull object once after pushing and refused when the head
+  differed, but GitHub updates it a second or so after the ref. A push that
+  landed was refused as a permanent policy block. It now reads up to five
+  times with growing waits; a head that never arrives is a retryable
+  `pull_head_mismatch` naming both heads, and a rerun adopts the PR.
+
 - **Non-ASCII paths no longer slip past three path checks (sd:1440).**
   `core.quotePath` is on by default, so a newline-separated `--name-only`
   prints `docs/work/é.md` as `"docs/work/\303\251.md"`, and no prefix or
