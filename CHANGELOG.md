@@ -273,6 +273,16 @@
 
 ### Fixed
 
+- **The research re-render hook no longer executes a `research.conf.py` that a
+  pull or checkout just brought in (sd:1376).** A render executes the config.
+  After sd:1353 the post-merge and post-checkout arms rendered on every pull
+  and branch switch, so a config from a tree the operator had not read ran
+  without any command of theirs. Those arms now ask git whether the operation
+  changed `research.conf.py` (for a file checkout: whether the tree's copy
+  still matches HEAD) and, when it did, decline to render and name
+  `sd-research-kit render`. Post-commit renders as before. `init-hook`
+  upgrades the previous body, which joins `SUPERSEDED_HOOKS`.
+
 - **A gate that fails before any reviewer is asked no longer spends a review
   pass (sd:1475).** Under parallel load `make check` outran sd-check's fixed
   900-second limit. sd-review then reported `gate_failed` without asking a

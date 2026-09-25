@@ -1172,6 +1172,9 @@ class InitHookInstallTests(unittest.TestCase):
             # This branch's merge commit, superseded by the commit that gave
             # the hook `docs/dashboard/` and an explicit all-zeros guard.
             "8f3224d961a7d0394c47648684d9e5ad5c6ce85b7f563917e8f9e6b76881afb7",
+            # `91d26285`, the body on main before sd:1376 declined to render
+            # a research.conf.py the pull or checkout had just brought in.
+            "26e6f156735dd19389a05eca4b13ac844cd540d121f1b0a2a2d45142a3ef1acb",
         }
         digests = {hashlib.sha256(body.encode("utf-8")).hexdigest()
                    for body in module.SUPERSEDED_HOOKS}
@@ -1337,6 +1340,47 @@ class HookTriggerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.renders(), ["render", "render"],
                          "the render that puts HEAD's text back never ran")
+
+    def a_config_change(self) -> None:
+        (self.repo / "research.conf.py").write_text('PROJECT = "incoming"\nDOCS = []\n')
+        self.git("commit", "-qam", "config from elsewhere")
+
+    def assert_declined(self, result: subprocess.CompletedProcess) -> None:
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.renders(), [])
+        self.assertIn("research.conf.py", result.stderr)
+        self.assertIn("sd-research-kit render", result.stderr)
+
+    def test_a_pull_that_brings_in_a_config_does_not_execute_it(self) -> None:
+        """sd:1376. `render` executes research.conf.py. A post-merge arm that
+        rendered on every pull ran a config the operator never read, from a
+        tree they did not write, with no command of theirs in between."""
+
+        self.git("checkout", "-q", "-b", "side")
+        self.a_config_change()
+        self.git("checkout", "-q", "-")
+        self.a_second_commit()
+        self.git("merge", "-q", "--no-ff", "--no-edit", "side")
+        self.assert_declined(self.fire("post-merge"))
+
+    def test_a_branch_switch_that_changes_the_config_does_not_execute_it(self) -> None:
+        before = self.sha()
+        self.a_config_change()
+        self.assert_declined(self.fire("post-checkout", before, self.sha(), "1"))
+
+    def test_a_file_checkout_of_the_config_does_not_execute_it(self) -> None:
+        self.a_config_change()
+        here = self.sha()
+        self.git("checkout", "-q", "HEAD~1", "--", "research.conf.py")
+        self.assert_declined(self.fire("post-checkout", here, here, "0"))
+
+    def test_the_operators_own_config_commit_still_renders(self) -> None:
+        """Post-commit is the original design: the operator wrote the commit."""
+
+        self.a_config_change()
+        result = self.fire("post-commit")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.renders(), ["render"])
 
     def test_post_checkout_renders_when_no_branch_moved(self) -> None:
         """`git checkout <the branch already checked out>`, or `-b`.
