@@ -17,7 +17,7 @@ from typing import Any, Callable
 
 import sd_lib
 import sd_ship_dispositions
-from sd_ship_history import AUTOMATIC_CODE_REVIEW_PASSES, completed_depth, digest
+from sd_ship_history import AUTOMATIC_CODE_REVIEW_PASSES, carried_report, completed_depth, digest
 from sd_ship_remote import Refusal, git
 from sd_ship_workflow import success
 
@@ -126,6 +126,7 @@ class SharedReview:
         if self.state.get("binding") != self.runtime.binding(self.root):
             raise Refusal("review tools or repository policy changed after review")
         report = complete_report(passes[-1], head, self.state.get("reviewed_head"))
+        self.verify_carried(passes)
         validate_provider_selection(report, passes[-1].get("requested_provider"), completed=True)
         self.history.validate_coverage(self.state, report)
         validate_findings(report)
@@ -208,6 +209,46 @@ class SharedReview:
         if not merge_base or sd_lib.git_output(["merge-base", "--is-ancestor", merge_base, previous], self.root) is not None:
             return None
         return merge_base
+
+    def patch_id(self, base: str, head: str) -> str | None:
+        """`git patch-id --stable` of `base..head`, or None for an empty or unreadable diff."""
+        diff = subprocess.run(["git", "diff", "--binary", "--no-renames", base, head], cwd=self.root,
+                              capture_output=True, check=False, timeout=120)
+        if diff.returncode or not diff.stdout:
+            return None
+        answer = subprocess.run(["git", "patch-id", "--stable"], cwd=self.root, input=diff.stdout,
+                                capture_output=True, check=False, timeout=120)
+        return answer.stdout.split()[0].decode() if answer.returncode == 0 and answer.stdout.strip() else None
+
+    def carried_review(self, last: dict, merge_base: str, head: str) -> dict | None:
+        """The last review carried to `head`, when a merge-in left the branch's own patch unchanged (sd:1485).
+
+        Only a completed, passing, non-blocking review at the last reviewed
+        head is carried; a blocking one needs its dispositions at the new head.
+        The caller has already excluded a moved binding, a retry and an
+        explicit request. The pass is recorded but spends nothing.
+        """
+        report = last.get("report") or {}
+        if (self.state.get("reviewed_head") != last.get("head") or last.get("exit_code") != 0
+                or report.get("status") not in ("clean", "advisory") or not completed_depth(report)
+                or (report.get("check") or {}).get("status") != "pass"):
+            return None
+        previous_base = sd_lib.git_output(["merge-base", last["head"], "refs/remotes/origin/HEAD"], self.root)
+        before = self.patch_id(previous_base, last["head"]) if previous_base else None
+        if before is None or before != self.patch_id(merge_base, head):
+            return None
+        return {"head": head, "base": None, "retry": False, "requested_provider": last.get("requested_provider"),
+                "started_at": self.runtime.clock(), "exit_code": 0, "report": carried_report(report, merge_base, head),
+                "carried_forward": {"from": last["head"], "previous_merge_base": previous_base,
+                                    "merge_base": merge_base, "patch_id": before, "recorded_at": self.runtime.clock()}}
+
+    def verify_carried(self, passes: list[dict]) -> None:
+        """Recompute every carried pass's patch identity; the receipt's word is not enough."""
+        for entry in passes:
+            carried = entry.get("carried_forward")
+            if carried and (self.patch_id(carried.get("previous_merge_base", ""), carried.get("from", "")) != carried.get("patch_id")
+                            or self.patch_id(carried.get("merge_base", ""), entry.get("head", "")) != carried.get("patch_id")):
+                raise Refusal("a carried-forward review no longer matches the branch's own patch")
 
     def reusable_review(self, head: str, prior: dict, retry: bool, additional: bool) -> bool:
         if additional:
@@ -305,6 +346,11 @@ class SharedReview:
         # blocker is dropped, exactly as a post-cap request does.
         moved = not additional and self.binding_moved()
         merged = None if (not passes or retry or additional or moved) else self.base_merged_in(passes[-1]["head"], head)
+        if merged and (carried := self.carried_review(passes[-1], merged, head)):
+            passes.append(carried)
+            self.save(passes=passes, head=head, reviewed_head=head, phase="reviewed")
+            self.check_review(head)
+            return
         if moved or merged:
             prior = self.history.aggregate(self.state)
         base = passes[-1]["head"] if passes and not (retry or additional or moved or merged) else None

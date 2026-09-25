@@ -2240,6 +2240,10 @@ roles:
         tip = self.remote.commit_on("main", "land elsewhere\n\nAuthored-with: human", files={"other.txt": "x\n"})
         _git(self.root, "fetch", "-q", "origin", "main:refs/remotes/origin/main")
         _git(self.root, "merge", "-q", "--no-edit", "-m", "merge main\n\nAuthored-with: human", "origin/main")
+        # A change of the branch's own after the merge-in, so the review is not
+        # carried forward unchanged (sd:1485).
+        (self.root / "src.py").write_text("value = 2\n")
+        _git(self.root, "commit", "-q", "-am", "change after the merge\n\nAuthored-with: human")
         head = _git(self.root, "rev-parse", "HEAD")
         self.prepare()
         state = self.operation().state
@@ -2256,6 +2260,66 @@ roles:
         self.assertEqual(latest["report"]["resume_report_digest"],
                          ship.digest(ship.review_history(state["passes"][:1])))
         self.assertEqual(state["reviewed_head"], head)
+
+    def merge_main_in(self, files: dict[str, str] | None = None) -> tuple[str, str]:
+        """Land a commit on the fixture's main and merge it in; return (tip, head)."""
+        tip = self.remote.commit_on("main", "land elsewhere\n\nAuthored-with: human", files=files or {"other.txt": "x\n"})
+        _git(self.root, "fetch", "-q", "origin", "main:refs/remotes/origin/main")
+        _git(self.root, "merge", "-q", "--no-edit", "-m", "merge main\n\nAuthored-with: human", "origin/main")
+        return tip, _git(self.root, "rev-parse", "HEAD")
+
+    def refuse_any_review(self) -> None:
+        (self.programs / "review-fixture").write_text(
+            "#!/usr/bin/env python3\nraise SystemExit('a reviewer was asked for a carried-forward head')\n")
+
+    def test_a_clean_merge_in_carries_the_review_forward_without_a_pass(self):
+        """sd:1485: the branch's own patch did not change, so its review still holds.
+
+        Each landing on main put every queued branch behind. Merging main in
+        and preparing again spent a full review of a diff nobody changed.
+        """
+        self.prepare()
+        first = self.operation().state["passes"][0]
+        tip, head = self.merge_main_in()
+        self.refuse_any_review()
+        prepared = self.prepare()
+        self.assertEqual(prepared["phase"], "ready_to_send")
+        state = self.operation().state
+        self.assertEqual(state["reviewed_head"], head)
+        carried = state["passes"][-1]
+        self.assertEqual(carried["head"], head)
+        self.assertEqual(carried["carried_forward"]["from"], first["head"])
+        self.assertEqual(carried["carried_forward"]["merge_base"], tip)
+        # Carrying spends nothing: the cap still counts one reviewed pass.
+        self.assertEqual(ship.ItemHistory().spent(state), 1)
+        self.assertEqual(self.remote.rev_parse("topic"), head)
+
+    def test_a_merge_in_that_changes_the_branch_patch_is_reviewed(self):
+        """A conflict resolution or any edit in the merge is new content: review it."""
+        self.prepare()
+        # main touches the branch's own file, so the merge result differs
+        # from both sides and the branch's patch against main changes.
+        self.remote.commit_on("main", "land elsewhere\n\nAuthored-with: human", files={"src.py": "value = 0\n"})
+        _git(self.root, "fetch", "-q", "origin", "main:refs/remotes/origin/main")
+        _git(self.root, "merge", "-q", "--no-edit", "-X", "ours", "-m", "merge main\n\nAuthored-with: human", "origin/main")
+        (self.root / "src.py").write_text("value = 3\n")
+        _git(self.root, "commit", "-q", "-a", "--amend", "--no-edit")
+        self.prepare()
+        latest = self.operation().state["passes"][-1]
+        self.assertNotIn("carried_forward", latest)
+        self.assertIn("base_merge", latest)
+
+    def test_a_moved_binding_is_never_carried_forward(self):
+        self.prepare()
+        self.merge_main_in()
+        # The tools that wrote the receipt are gone, so a carried review would
+        # vouch for evidence the current tools never produced.
+        original = ship.binding
+        with patch.object(ship, "binding", side_effect=lambda root: original(root) + "-moved"):
+            self.prepare()
+        latest = self.operation().state["passes"][-1]
+        self.assertNotIn("carried_forward", latest)
+        self.assertIn("review_binding_change", latest)
 
     def test_fix_verifications_keep_prior_findings_and_refuse_a_pass_past_the_cap(self):
         program = self.programs / "review-fixture"

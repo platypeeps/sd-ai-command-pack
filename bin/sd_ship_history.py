@@ -93,9 +93,11 @@ def validate_additional_requests(passes: list[dict]) -> None:
     entry would let that request go unchecked. The entry states it, so the
     entry is what is read.
     """
+    reviewed = 0
     for index, entry in enumerate(passes):
         request = entry.get("additional_review_request")
-        if request is None and index < AUTOMATIC_CODE_REVIEW_PASSES:
+        position, reviewed = reviewed, reviewed + (not entry.get("carried_forward"))
+        if request is None and (position < AUTOMATIC_CODE_REVIEW_PASSES or entry.get("carried_forward")):
             continue
         if (not isinstance(request, dict) or request.get("head") != entry.get("head")
                 or not isinstance(request.get("reason"), str) or not request["reason"].strip()
@@ -126,6 +128,11 @@ def verification_link(previous: dict, report: dict) -> bool:
     """`report` verifies `previous`: same head reviewed, same evidence carried."""
     return (report.get("subject", {}).get("base") == previous.get("head")
             and report.get("verification_report_digest") == digest(previous.get("report") or {}))
+
+
+def carried_report(report: dict, merge_base: str, head) -> dict:
+    """The reviewed report, restated for the head it is carried to; nothing else changes."""
+    return dict(report, subject=dict(report.get("subject") or {}, base=merge_base, head=head))
 
 
 def full_branch_coverage(report: dict, prior: dict) -> None:
@@ -172,7 +179,8 @@ class ReviewHistory:
         return list(state.get("passes") or [])
 
     def spent(self, state: dict) -> int:
-        return len(self._records(state))
+        # A carried-forward pass reviewed nothing new and spends nothing (sd:1485).
+        return len([entry for entry in self._records(state) if not entry.get("carried_forward")])
 
     def history_digest(self, state: dict) -> str:
         return self._digest(state)
@@ -307,6 +315,16 @@ class ItemHistory(ReviewHistory):
                 raise Refusal("the original branch never completed the requested local review depth")
             return
         previous = passes[index - 1]
+        carried = entry.get("carried_forward")
+        if carried is not None:
+            # Carried, not reviewed: it must restate its predecessor exactly.
+            # The patch identity it rests on is recomputed from git by the
+            # caller, which can read the repository; this walk cannot.
+            base = carried.get("merge_base") if isinstance(carried, dict) else None
+            if (carried.get("from") != previous.get("head") or not isinstance(base, str)
+                    or current != carried_report(previous.get("report") or {}, base, entry.get("head"))):
+                raise Refusal("a carried-forward review does not restate the review it carries")
+            return
         if index - 1 > checkpoint and not completed_depth(previous.get("report") or {}):
             raise Refusal("the original branch never completed the requested local review depth")
         if not verification_link(previous, current):
