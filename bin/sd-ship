@@ -1462,6 +1462,20 @@ class Ship(SharedReview):
         self.save(phase="merged", merge_commit=commit, evidence=evidence)
         if not self.args.no_item:
             self.store.note_merge(self.connection, self.args.item, evidence)
+        # GitHub squashes onto the base it holds at the `PUT`, and no request
+        # field pins that base. `ready` and `still_gated` saw the reviewed head
+        # contain the base; a squash parent outside it means the base advanced
+        # in between, and the landed tree is a combination nobody reviewed or
+        # checked. The merge is a fact to record; delivery is not (sd:1089).
+        parent = git(self.root, "rev-parse", f"{commit}^1")
+        contained = subprocess.run(["git", "merge-base", "--is-ancestor", parent, self.state["reviewed_head"]],
+                                   cwd=self.root, capture_output=True).returncode
+        if contained != 0 and not self.args.no_item and self.state.get("deliver"):
+            pending = blocked("base_advanced_at_merge", "ci",
+                              f"Verify the combined tree at {commit} (default-branch CI), then deliver the item by hand.",
+                              state="operator_decision")
+            return {**evidence, "delivery_pending": True, "merged_parent": parent,
+                    "workflow": {**evidence["workflow"], **pending}}
         if not self.args.no_item and self.state.get("deliver"):
             from sd_db.errors import SdDbError
             from sd_db.progress import deliver_work

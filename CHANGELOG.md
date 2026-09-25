@@ -4,6 +4,13 @@
 
 ### Changed
 
+- **`sd-ship` holds delivery when the base advanced under the merge.** GitHub
+  squashes onto the base it holds at the `PUT`, and no request field pins that
+  base, so a base advance after the last freshness read landed a combined tree
+  nobody reviewed (sd:1089, seen on #1075). `reconcile` now reads the squash
+  parent. When the reviewed head does not contain it, the merge is recorded and
+  delivery stops at `base_advanced_at_merge`, naming the commit to verify.
+
 - **A machine `sd.copilot_review` of `never` wins over the repository.** The
   repository's `.github/sd-review.json` `copilot_review.automatic_deep`
   overrode every machine word, so a repository's `true` bought a paid Copilot

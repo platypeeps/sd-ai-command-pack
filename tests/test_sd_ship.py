@@ -1802,6 +1802,31 @@ roles:
         self.assertEqual(self.merge()["phase"], "merged")
         self.assertEqual(len([call for call in self.remote.calls if call.method == "PUT"]), 1)
 
+    def test_a_base_that_advanced_under_the_put_holds_delivery(self):
+        """GitHub squashes onto the base it holds at the `PUT`, not the one the
+        freshness reads saw. A same-file advance between them lands a combined
+        tree nobody reviewed, so the merge is recorded and delivery waits (sd:1089)."""
+        self.remote.commit_on("main", "shared\n\nAuthored-with: human", files={"shared.py": "a = 1\nb = 2\nc = 3\nd = 4\n"})
+        _git(self.root, "pull", "-q", "--no-rebase", "--no-edit", str(self.remote.path), "main")
+        (self.root / "shared.py").write_text("a = 10\nb = 2\nc = 3\nd = 4\n")
+        _git(self.root, "commit", "-qam", "topic edits shared\n\nAuthored-with: human")
+        acceptance = self.directory / "acceptance.json"
+        acceptance.write_text(json.dumps({"item": self.item, "complete": True, "criteria": [{"criterion": "actual scope", "passed": True, "evidence": "fixture-check-pass"}]}))
+        self.prepare("--deliver", "--acceptance-file", str(acceptance))
+        saved = self.double._route
+
+        def route(method, path, body):
+            if method == "PUT" and path.endswith("/merge"):
+                self.remote.commit_on("main", "raced\n\nAuthored-with: human", files={"shared.py": "a = 1\nb = 2\nc = 3\nd = 40\n"})
+            return saved(method, path, body)
+        self.double._route = route
+        result = self.merge()
+        self.assertEqual(result["phase"], "merged")
+        self.assertTrue(result["delivery_pending"])
+        self.assertEqual(result["workflow"]["blocker"]["code"], "base_advanced_at_merge")
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "in_progress")
+        self.assertEqual(len([call for call in self.remote.calls if call.method == "PUT"]), 1)
+
     def test_empty_search_after_uncertain_create_cannot_duplicate_pr(self):
         self.double.no_create_result = True
         with self.assertRaises(ship.Refusal):
