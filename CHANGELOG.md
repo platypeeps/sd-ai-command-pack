@@ -4,6 +4,13 @@
 
 ### Changed
 
+- **`sd-review`'s Jev tier reading is metered.** Both `jev` calls now name
+  the caller `sd-review` and the stage `JEV_SD_REVIEW`, and the `enabled` gate
+  passes `--record`. Before this, a judgment landed in the judgment ledger under
+  `unknown` and a declining gate left no row, so the lane that asks Jev on every
+  review was the one caller the ledger missed (sd:1253). What leaves the machine
+  is unchanged: the three flags are ledger fields.
+
 - **A machine `sd.copilot_review` of `never` wins over the repository.** The
   repository's `.github/sd-review.json` `copilot_review.automatic_deep`
   overrode every machine word, so a repository's `true` bought a paid Copilot
@@ -140,6 +147,16 @@
   names it as no longer declared. 1.2.0 removes the alias.
 
 ### Added
+
+- **`sd task add` and `sd task edit` take `--recur` and `--recur-anchor`.**
+  The recurrence columns and the completion logic landed in `sd_db` with
+  sd:1099, but no CLI flag reached them (sd:1428). The flags pass the rule and
+  its anchor through unchecked, and `sd_db` refuses a bad rule, a bad anchor,
+  a missing due date or a kind that cannot recur by name. `sd task edit
+  --clear-recur` stops a series. `sd task status ... done` on a recurring task
+  prints the next occurrence and its due date, or says the recurrence ended
+  and why; `--json` already carried `next_occurrence` and
+  `next_occurrence_reason`. A row that recurs prints its rule under its line.
 
 - **`opencode` reviews, through a new `opencode-json` reader (sd:1329).**
   The shipped registry gains an `opencode` entry third on the reviewer
@@ -280,6 +297,33 @@
   "does not bind the current review, history, tools and head". The two
   in-process no-item suites now bind a copy taken per test. The subprocess
   disposition suites keep the exposure; sd:1479 tracks them.
+
+- **The Copilot ancestor-clearance warning reaches the receipt only with a
+  merge dispatch (sd:1373).** `require_copilot_clearance` saved "Copilot
+  reviewed <sha>, an ancestor of the merge head ..." as soon as the gate
+  cleared. The findings check, CI, the authorship checks and the protection
+  re-read could all refuse afterwards, and the receipt still described a
+  clearance for a merge that never landed. Each retry appended another copy.
+  The note is now held per attempt and written with `phase="merge_dispatch"`,
+  replacing any earlier copy, as `row_authorized_merge` already is (sd:1347).
+
+- **A gate that fails before any reviewer is asked no longer spends a review
+  pass (sd:1475).** Under parallel load `make check` outran sd-check's fixed
+  900-second limit. sd-review then reported `gate_failed` without asking a
+  provider, and `sd-ship prepare` kept the reserved pass anyway: sd:1309 lost
+  two of its five automatic passes that way, and each loss demanded
+  `--retry-review` for a review that never started. `sd-ship` now removes that
+  reservation, records the gate output under `review_preflight_error`, and
+  refuses with code `gate_failed`; the next prepare reviews normally. A run
+  whose report names any outcome, reviewer or finding keeps its pass.
+  sd-review now hands sd-check the phase budget its timing plan already
+  reserves for the gate (`--timeout`, default 1800 seconds) instead of
+  leaving sd-check at 900. `sd-ship prepare` and `sd-ship review` take
+  `--review-timeout SECONDS`, forwarded to `sd-review --timeout`, which also
+  sizes the watchdog. The pack still declares no `.github/sd-check-reuse.json`:
+  its `make check` reads the borrowed `.venv`, the installed `sd_db` and
+  `~/repos/system`, none of which a declaration can bind, so `complete: true`
+  would be false.
 
 - **Non-ASCII paths no longer slip past three path checks (sd:1440).**
   `core.quotePath` is on by default, so a newline-separated `--name-only`
