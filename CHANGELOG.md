@@ -273,6 +273,14 @@
 
 ### Fixed
 
+- **The disposition suites bind a library copy they own (sd:1479).**
+  `adjudicator_binding` hashes `sd_db/ship.py` on every command, and the
+  installed file belongs to the `.venv` every worktree borrows. An install
+  into it between two of a test's commands refused the accept.
+  `test_sd_ship_dispositions` and `test_sd_ship_disposition_guards` now copy
+  `sd_db` per test. The `sd-ship` children import the copy through
+  `PYTHONPATH`, and the test process points `sd_db.ship.__file__` at it.
+
 - **Non-ASCII paths no longer slip past three path checks (sd:1440).**
   `core.quotePath` is on by default, so a newline-separated `--name-only`
   prints `docs/work/é.md` as `"docs/work/\303\251.md"`, and no prefix or

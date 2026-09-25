@@ -8,16 +8,39 @@ import io
 import json
 import os
 import pathlib
+import shutil
 import unittest
 from unittest.mock import patch
+
+from sd_db import ship as ship_store
 
 from tests import test_sd_ship as fixture
 
 ship = fixture.ship
 
 
+def freeze_library(case):
+    """Give this process and every `sd-ship` child one library copy the test owns (sd:1479).
+
+    `adjudicator_binding` hashes `sd_db/ship.py` on every command, and the
+    installed file belongs to the `.venv` every worktree borrows. An install
+    into it between two commands moved the binding and refused an accept.
+    The children import the copy through `PYTHONPATH`; this process, which
+    already imported the installed package, has `__file__` pointed at it.
+    """
+    root = case.directory / "library"
+    shutil.copytree(fixture.SITE_PACKAGES / "sd_db", root / "sd_db", ignore=shutil.ignore_patterns("__pycache__"))
+    case.environment["PYTHONPATH"] = os.pathsep.join(filter(None, (str(root), case.environment.get("PYTHONPATH"))))
+    frozen = patch.object(ship_store, "__file__", str(root / "sd_db" / "ship.py"))
+    frozen.start()
+    case.addCleanup(frozen.stop)
+
+
 class DispositionTests(unittest.TestCase):
-    setUp = fixture.ShipCase.setUp
+    def setUp(self):
+        fixture.ShipCase.setUp(self)
+        freeze_library(self)
+
     args = fixture.ShipCase.args
     operation = fixture.ShipCase.operation
     prepare = fixture.ShipCase.prepare
@@ -100,6 +123,29 @@ class DispositionTests(unittest.TestCase):
         result = self.command("--dispositions-file", str(self.proposal_file))
         self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
         self.assertEqual(list(self.connection.execute("SELECT * FROM state")), before)
+
+    def test_every_command_binds_the_library_this_test_owns(self):
+        """sd:1479. The children and this process hash one copy, not the shared install.
+
+        `adjudicator_binding` hashes `sd_db/ship.py` on every command. The
+        installed file belongs to the `.venv` every worktree borrows, and an
+        install into it between two of this fixture's commands refused the
+        accept. So the fixture's copy is the file that has to move the binding:
+        changing it refuses, in the child and in this process alike, and
+        restoring it accepts again.
+        """
+        self.blocked()
+        self.filled()
+        library = self.directory / "library" / "sd_db" / "ship.py"
+        original = library.read_bytes()
+        library.write_bytes(original + b"# changed\n")
+        refused = self.command("--dispositions-file", str(self.proposal_file))
+        self.assertEqual(refused.returncode, 3, refused.stdout + refused.stderr)
+        self.assertIn("does not bind the current review", refused.stdout)
+        self.assertEqual(pathlib.Path(ship_store.__file__), library)
+        library.write_bytes(original)
+        self.accepted(json.loads(self.proposal_file.read_text()))
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
 
     def test_blank_template_missing_explicit_acceptance_and_wrong_digest_refuse(self):
         self.blocked()
