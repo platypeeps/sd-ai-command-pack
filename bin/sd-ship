@@ -1468,9 +1468,9 @@ class Ship(SharedReview):
         # in between, and the landed tree is a combination nobody reviewed or
         # checked. The merge is a fact to record; delivery is not (sd:1089).
         parent = git(self.root, "rev-parse", f"{commit}^1")
-        contained = subprocess.run(["git", "merge-base", "--is-ancestor", parent, self.state["reviewed_head"]],
-                                   cwd=self.root, capture_output=True).returncode
-        if contained != 0 and not self.args.no_item and self.state.get("deliver"):
+        # None is "no" and "cannot tell" alike, and both hold delivery.
+        contained = sd_lib.git_output(["merge-base", "--is-ancestor", parent, self.state["reviewed_head"]], self.root)
+        if contained is None and not self.args.no_item and self.state.get("deliver"):
             pending = blocked("base_advanced_at_merge", "ci",
                               f"Verify the combined tree at {commit} (default-branch CI), then deliver the item by hand.",
                               state="operator_decision")
