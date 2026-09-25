@@ -457,17 +457,12 @@ class EntrypointTests(Fixture):
         activations = {
             "virtualenv": {"VIRTUAL_ENV": str(root / ".tox" / "py312")},
             "conda": {"CONDA_PREFIX": "/opt/conda/envs/py312", "CONDA_DEFAULT_ENV": "py312"},
+            "conda base": {"CONDA_PREFIX": "/opt/conda", "CONDA_DEFAULT_ENV": "base"},
         }
         for label, activated in activations.items():
             with self.subTest(label), unittest.mock.patch.dict(os.environ, activated):
                 detection = sd_lib.detect_entrypoints(root)
                 self.assertEqual(detection.commands, {"test": ["python3", "-m", "pytest"]})
-        # Conda's auto-activated base is ambient, not a choice for this repo.
-        ambient = {"CONDA_PREFIX": "/opt/conda", "CONDA_DEFAULT_ENV": "base"}
-        with unittest.mock.patch.dict(os.environ, ambient):
-            os.environ.pop("VIRTUAL_ENV", None)
-            detection = sd_lib.detect_entrypoints(root)
-        self.assertEqual(detection.commands, {"test": [".venv/bin/python", "-m", "pytest"]})
 
     def test_pyproject_ignores_a_venv_without_a_runnable_interpreter(self) -> None:
         root = self.repo_with({"pyproject.toml": "[project]\nname = 'x'\n", ".venv/pyvenv.cfg": ""})

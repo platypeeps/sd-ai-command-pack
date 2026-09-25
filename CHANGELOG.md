@@ -9,8 +9,7 @@
   test dependencies live in `.venv` failed before any test ran (sd:1309). It
   now names `.venv/bin/python` (or `.venv/Scripts/python.exe`) when that file
   is an executable, and keeps `python3` when neither is or when the caller
-  has activated an environment (`VIRTUAL_ENV`, or a conda env other than
-  the default `base`).
+  has activated an environment (`VIRTUAL_ENV` or `CONDA_PREFIX` is set).
 
 - **A machine `sd.copilot_review` of `never` wins over the repository.** The
   repository's `.github/sd-review.json` `copilot_review.automatic_deep`
