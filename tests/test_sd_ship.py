@@ -18,6 +18,7 @@ import tempfile
 import time
 import unittest
 from http.server import BaseHTTPRequestHandler
+from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
@@ -843,6 +844,43 @@ roles:
         self.assertTrue(any(reviewed in warning and "ancestor of the merge head" in warning
                             for warning in self.operation().state["warnings"]),
                         self.operation().state.get("warnings"))
+
+    def test_a_merge_refused_after_the_copilot_gate_records_no_ancestor_clearance(self):
+        """sd:1373. The ancestor note says the gate cleared a merge, so the step
+        that dispatches the merge writes it. Written when the gate cleared, it
+        survived every later refusal -- the findings check a dozen lines below
+        it first -- and each retry appended another copy."""
+        self.enable_automatic_copilot()
+        self.prepare()
+        reviewed = _git(self.root, "rev-parse", "HEAD")
+        self.reviewed_at(reviewed)
+        (self.root / "docs").mkdir(exist_ok=True)
+        (self.root / "docs/note.md").write_text("what the review asked for\n")
+        _git(self.root, "add", "docs/note.md")
+        _git(self.root, "commit", "-m", "answer the review\n\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.prepare()
+        pull = self.remote.pull(1)
+        pull.checks = [{**row, "head_sha": head} for row in pull.checks]
+        real_sibling = ship.sd_lib.sibling
+        open_finding = SimpleNamespace(review_state=lambda *_: {"unsatisfied": [{"id": "finding-1"}]})
+
+        def sibling(name, *rest):
+            return open_finding if name == "sd_review_ack_ship_gate" else real_sibling(name, *rest)
+
+        def ancestor_notes():
+            return [warning for warning in (self.operation().state.get("warnings") or [])
+                    if "ancestor of the merge head" in warning]
+
+        with patch.object(ship.sd_lib, "sibling", sibling), patch.object(ship.time, "sleep"):
+            for _ in range(2):
+                with self.assertRaisesRegex(ship.Refusal, "remain unacknowledged"):
+                    self.merge()
+        self.assertEqual(ancestor_notes(), [])
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+        self.assertEqual(len(ancestor_notes()), 1, ancestor_notes())
+        self.assertIn(reviewed, ancestor_notes()[0])
 
     def test_an_exact_head_review_landing_mid_wait_drops_the_ancestor_note(self):
         """`stable_copilot_material` reads the reviews once per attempt, so the
@@ -3555,6 +3593,26 @@ class DeclaredGapCase(unittest.TestCase):
         self.assertEqual(result["protection"]["source"], "ruleset")
         self.assertEqual([entry["id"] for entry in result["protection"]["rulesets"]], [42])
         self.assertEqual(result["protection"]["required_status_checks"]["checks"], [{"context": "route", "app_id": 7}])
+
+    def test_a_ruleset_that_forbids_squash_refuses_before_any_merge_is_dispatched(self):
+        """sd:1379. A ruleset's `pull_request` rule names the merge methods the
+        branch accepts, and `synthesize` dropped them, so the gate passed and
+        `sd-ship` sent a squash the branch forbids. The refusal names the
+        methods allowed and dispatches nothing; a list that includes squash
+        still merges once."""
+        self.commit({".github/workflows/tests.yml": self.TESTS, ".github/workflows/sd-review-route.yml": self.ROUTE})
+        rules = self.gating_rules()
+        rules[1]["parameters"]["allowed_merge_methods"] = ["merge", "rebase"]
+        self.double.rules = rules
+        self.double.rulesets = {42: {"id": 42, "name": "main", "enforcement": "active", "bypass_actors": []}}
+        self.green()
+        with self.assertRaisesRegex(ship.Refusal, r"allows only merge, rebase .*squash"):
+            self.merge()
+        self.assertEqual(self.puts(), 0)
+        rules[1]["parameters"]["allowed_merge_methods"] = ["squash", "rebase"]
+        result = self.merge()
+        self.assertEqual(self.puts(), 1)
+        self.assertEqual(result["protection"]["allowed_merge_methods"], ["rebase", "squash"])
 
     @staticmethod
     def gating_rules() -> list:
