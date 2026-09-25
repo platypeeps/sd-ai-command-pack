@@ -623,5 +623,117 @@ class PublishSignalTests(unittest.TestCase):
             self.assertEqual(len(_shards(root)), 2, _shards(root))
 
 
+
+class GateSlotTests(unittest.TestCase):
+    """sd:1541. At most `SD_GATE_SLOTS` local runs at once on one machine.
+
+    On 2026-09-25 the load average reached 157 while several gates ran
+    together, and a 30 s test bound failed three of them. `make test` sets
+    the cap; a direct run, CI and every nested run have none.
+    """
+
+    def slot_env(self, root, **overrides):
+        return _fixture_env(SD_GATE_SLOTS="1", SD_GATE_SLOTS_DIR=str(root / "slots"),
+                            SD_GATE_SLOT_POLL="0.2", CI="", GITHUB_ACTIONS="", **overrides)
+
+    def test_a_second_run_waits_for_the_one_slot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+            slow = subprocess.Popen(["bash", str(script)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                    env=self.slot_env(root, HARNESS_FIXTURE_SLEEP="4"))
+            try:
+                self.assertTrue(_wait_for(lambda: (root / "slots" / "slot.1").is_dir(), timeout=60))
+                fast = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False,
+                                      env=self.slot_env(root, HARNESS_FIXTURE_SLEEP="0"), timeout=300)
+                self.assertEqual(fast.returncode, 0, fast.stdout + fast.stderr)
+                self.assertIn("waiting for a gate slot", fast.stderr)
+                self.assertIsNotNone(slow.poll(), "the second run finished while the first held the slot")
+            finally:
+                if slow.poll() is None:
+                    slow.kill()
+                slow.wait()
+            self.assertEqual(sorted((root / "slots").iterdir()), [])
+
+    def test_a_dead_holders_slot_is_taken(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+            gone = subprocess.Popen(["true"])
+            gone.wait()
+            (root / "slots" / "slot.1").mkdir(parents=True)
+            (root / "slots" / "slot.1" / "pid").write_text(f"{gone.pid}\n")
+            fast = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False,
+                                  env=self.slot_env(root, HARNESS_FIXTURE_SLEEP="0"), timeout=300)
+            self.assertEqual(fast.returncode, 0, fast.stdout + fast.stderr)
+            self.assertNotIn("waiting for a gate slot", fast.stderr)
+            self.assertEqual(sorted((root / "slots").iterdir()), [])
+
+    def test_without_a_cap_no_slot_is_taken(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+            env = self.slot_env(root, HARNESS_FIXTURE_SLEEP="0")
+            del env["SD_GATE_SLOTS"]
+            fast = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False,
+                                  env=env, timeout=300)
+            self.assertEqual(fast.returncode, 0, fast.stdout + fast.stderr)
+            self.assertFalse((root / "slots").exists())
+
+    def test_make_test_sets_the_cap_and_a_holder_lifts_it_for_its_children(self):
+        makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+        self.assertIn("SD_GATE_SLOTS ?= 2", makefile)
+        self.assertIn('SD_GATE_SLOTS="$(SD_GATE_SLOTS)"', makefile)
+        self.assertIn("export SD_GATE_SLOTS=0", HARNESS.read_text(encoding="utf-8"))
+
+
+class RunHeaderTests(unittest.TestCase):
+    """sd:1407. A run names the tree it ran against, at its start and its end.
+
+    On 2026-09-23 a run reported failures against edits made after it had
+    imported the old modules, and a second run wrote into the same log with
+    nothing marking either. The header and the footer carry one pid.
+    """
+
+    def test_a_run_prints_its_head_dirty_count_and_pid_at_both_ends(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+            for args in (["init", "-q"], ["add", "-A"],
+                         ["-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "fixture"]):
+                subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+            head = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], check=True,
+                                  capture_output=True, text=True).stdout.strip()
+            (root / "untracked.txt").write_text("x\n")
+            run = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False,
+                                 env=_fixture_env(HARNESS_FIXTURE_SLEEP="0"), timeout=300)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            # stderr, because stdout is the run log and must equal unittest-output.log.
+            self.assertNotIn("run-tests: start ", run.stdout)
+            self.assertNotIn("run-tests: end ", run.stdout)
+            lines = run.stderr.splitlines()
+            start = [line for line in lines if line.startswith("run-tests: start ")]
+            end = [line for line in lines if line.startswith("run-tests: end ")]
+            self.assertEqual(len(start), 1, run.stderr)
+            self.assertEqual(len(end), 1, run.stderr)
+            self.assertLess(lines.index(start[0]), lines.index(end[0]))
+            self.assertIn(f"head={head}", start[0])
+            self.assertIn("dirty=1", start[0])
+            pid = start[0].split("pid=")[1].split()[0]
+            self.assertIn(f"pid={pid}", end[0])
+            self.assertIn(f"head={head}", end[0])
+            self.assertIn("exit=0", end[0])
+
+    def test_outside_a_repository_the_head_is_named_as_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+            run = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False,
+                                 env=_fixture_env(HARNESS_FIXTURE_SLEEP="0", GIT_CEILING_DIRECTORIES=str(root.parent)),
+                                 timeout=300)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            self.assertIn("head=unknown dirty=unknown", run.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

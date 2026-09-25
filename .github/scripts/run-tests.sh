@@ -326,25 +326,116 @@ reap_shards() {
   fi
 }
 
+# sd:1407. The footer that matches the header below: the same pid and head,
+# with the exit, so a reader can tell which run a log line belongs to and
+# whether it saw their edit. `cleanup` runs on every exit and once more after a
+# signal, and the footer is printed once.
+run_head=""
+footer_printed=""
+run_footer() {
+  if [ -n "$run_head" ] && [ -z "$footer_printed" ]; then
+    footer_printed=1
+    printf 'run-tests: end head=%s pid=%s exit=%s at=%s\n' \
+      "$run_head" "$$" "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
+  fi
+}
+
 cleanup() {
+  local status=$?
+  [ -z "${1:-}" ] || status=$1
   if [ -n "$watchdog_pid" ]; then
     kill -TERM "$watchdog_pid" 2>/dev/null
     watchdog_pid=""
   fi
   reap_shards
   rm -rf "$work_dir"
+  release_gate_slot
+  run_footer "$status"
 }
 
 on_signal() {
   # Nothing is published from here: a run that was interrupted has no complete
   # data, and the repo root still holds whatever the last finished run left.
   printf '%s\n' "error: test run interrupted; shard processes terminated." >&2
-  cleanup
+  cleanup 143
   exit 143
 }
 
 trap 'cleanup' EXIT
 trap 'on_signal' INT TERM HUP
+
+# sd:1541. At most SD_GATE_SLOTS local runs at once on this machine. On
+# 2026-09-25 several gates started together, the load average reached 157, and
+# tests with a fixed bound failed three of them. `make test` sets the cap; unset
+# or 0 means none, and CI never waits. A slot is a directory, taken with an
+# atomic `mkdir` and holding the runner's pid, so a slot whose holder is gone
+# is taken over. A holder exports SD_GATE_SLOTS=0: the runs its tests start
+# inside it must not wait on the slot their own parent holds.
+gate_slot=""
+release_gate_slot() {
+  if [ -n "$gate_slot" ]; then
+    rm -rf -- "$gate_slot"
+    gate_slot=""
+  fi
+}
+acquire_gate_slot() {
+  local slots="${SD_GATE_SLOTS:-0}" dir i slot holder announced=""
+  case "$slots" in
+    '' | *[!0-9]*)
+      printf '%s\n' "error: SD_GATE_SLOTS must be a non-negative integer (got '$slots')" >&2
+      exit 1
+      ;;
+  esac
+  if [ "$slots" -eq 0 ] || [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
+    return 0
+  fi
+  dir="${SD_GATE_SLOTS_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/sd/gate-slots}"
+  if ! mkdir -p -- "$dir" 2>/dev/null; then
+    printf '%s\n' "warning: cannot create $dir; running without the gate cap" >&2
+    return 0
+  fi
+  while :; do
+    for ((i = 1; i <= slots; i++)); do
+      slot="$dir/slot.$i"
+      if ! mkdir -- "$slot" 2>/dev/null; then
+        holder="$(cat -- "$slot/pid" 2>/dev/null)"
+        # A holder that died before writing its pid leaves an empty slot; a
+        # minute is far longer than the write takes.
+        if { [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; } ||
+          { [ -z "$holder" ] && [ -n "$(find "$slot" -maxdepth 0 -mmin +1 2>/dev/null)" ]; }; then
+          rm -rf -- "$slot"
+          mkdir -- "$slot" 2>/dev/null || continue
+        else
+          continue
+        fi
+      fi
+      printf '%s\n' "$$" >"$slot/pid"
+      gate_slot="$slot"
+      export SD_GATE_SLOTS=0
+      return 0
+    done
+    if [ -z "$announced" ]; then
+      printf '%s\n' "waiting for a gate slot: $slots of $slots in use under $dir" >&2
+      announced=1
+    fi
+    sleep "${SD_GATE_SLOT_POLL:-5}"
+  done
+}
+acquire_gate_slot
+
+# sd:1407. The tree this run imports from, named before the first test: a log
+# from a run that started before an edit reads as current otherwise, since a
+# traceback quotes the file as it is now, not as the run loaded it.
+run_head="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null)" || run_head=""
+if [ -n "$run_head" ]; then
+  run_dirty="$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null | wc -l | tr -d '[:space:]')"
+else
+  run_head="unknown"
+  run_dirty="unknown"
+fi
+# On stderr: stdout is the run log, byte for byte (unittest-output.log).
+printf 'run-tests: start head=%s dirty=%s pid=%s at=%s\n' \
+  "$run_head" "$run_dirty" "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
 
 watchdog() {
   # Stated rather than relied on: bash resets trapped signals in the subshell a

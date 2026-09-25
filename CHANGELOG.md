@@ -4,6 +4,33 @@
 
 ### Changed
 
+- **The local gate caps concurrent runs on one machine.** `make test` now
+  takes one of `SD_GATE_SLOTS` slots (default 2) before it starts, and waits
+  with one `waiting for a gate slot` line while all are held (sd:1541). Ten
+  worktrees checking at once had driven the load average to 157. A dead
+  holder's slot is reclaimed, CI takes no slot, and `SD_GATE_SLOTS=0` turns
+  the cap off.
+
+- **`run-tests.sh` names the tree it tested.** It prints a `run-tests: start
+  head=... dirty=...` line before the suite and a `run-tests: end head=...
+  exit=...` line after it, so a stale run no longer reads as a current one
+  (sd:1407).
+
+- **The real-CLI shipping test bounds each command at 300 s, not 30 s.** The
+  bound is a hang guard; at 30 s it failed gates under load on runs that take
+  about 7 s alone (sd:1539).
+
+- **`sd-docs-lint` reads `archive` only below the work root.** Rule 1, rule
+  6, the claim collector and `--update-citations` treated any `archive`
+  component in a path as the archive, so a checkout under a directory of
+  that name skipped them (sd:1540). One helper, `is_archived`, now decides
+  for all five sites.
+
+- **CI runs the suite against system `main` as a non-blocking canary.** The
+  new `sd-db-main-canary` job installs `sd_db` from system `main` with
+  `continue-on-error`, so a removed library name shows before the pin moves
+  (sd:1542). The `MONEY_NOISE` removal broke every local gate with no CI signal.
+
 - **`sd-check` runs a Python repo's tests with its `.venv` interpreter.** The
   `pyproject.toml` fallback always named `python3 -m pytest`, so a repo whose
   test dependencies live in `.venv` failed before any test ran (sd:1309). It

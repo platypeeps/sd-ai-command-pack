@@ -30,6 +30,10 @@ from sd_db.testing.github import GitHubDouble
 from sd_db.testing.remote import FixtureRemote, RemoteRefusal, _git
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+#: The bound on one real `sd-ship` command (sd:1539): a hang guard, not a
+#: speed claim. At 30 s it failed gates at load average 157 on runs that take
+#: about 7 s alone.
+CLI_TIMEOUT = 300
 #: The directory `make setup` provisioned the library into, read off the copy
 #: this run imported rather than off `ROOT / ".venv"`. A test that asks the
 #: checkout for a virtualenv has to skip where there is none, and a skipped
@@ -335,7 +339,7 @@ roles:
 
     def cli(self, command, *extra):
         return subprocess.run([sys.executable, str(ROOT / "bin/sd-ship"), command, "--item", str(self.item), "--json", *extra],
-                              cwd=self.root, env=self.environment, text=True, capture_output=True, timeout=30)
+                              cwd=self.root, env=self.environment, text=True, capture_output=True, timeout=CLI_TIMEOUT)
 
 
     # -- criterion 21: a ship leaves `docs/work/archive/` untouched ---------
@@ -1658,6 +1662,13 @@ roles:
         self.assertIn("is not valid JSON", warned)
         self.assertEqual(acknowledgements.store_path(self.root).read_text(), "{not json")
 
+    def test_the_real_cli_bound_guards_a_hang_not_a_load_average(self):
+        """sd:1539. A 30 s bound failed three gates on one loaded afternoon; alone the run takes about 7 s."""
+        self.assertGreaterEqual(CLI_TIMEOUT, 300)
+        with patch.object(subprocess, "run") as run:
+            self.cli("prepare")
+        self.assertEqual(run.call_args.kwargs["timeout"], CLI_TIMEOUT)
+
     def test_real_cli_review_prepare_slice_merge_and_repeat_reconcile(self):
         prepared = self.cli("prepare")
         self.assertEqual(prepared.returncode, 0, prepared.stdout + prepared.stderr)
@@ -1666,7 +1677,7 @@ roles:
         body.write_text(self.remote.pull(1).body)
         (self.root / "docs/work").mkdir(parents=True)
         linted = subprocess.run([sys.executable, str(ROOT / "bin/sd-docs-lint"), "--pr-body", str(body)],
-                                cwd=self.root, env=self.environment, text=True, capture_output=True, timeout=30)
+                                cwd=self.root, env=self.environment, text=True, capture_output=True, timeout=CLI_TIMEOUT)
         self.assertEqual(linted.returncode, 0, linted.stdout + linted.stderr)
         self.assertIn(f"database association sd:{self.item}", linted.stdout)
         result = self.merge()

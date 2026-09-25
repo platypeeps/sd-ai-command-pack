@@ -38,8 +38,20 @@ WORKFLOW = ROOT / ".github" / "workflows" / "tests.yml"
 PIN = re.compile(r"repository: platypeeps/system\n(?:[ \t]+(?:#.*|\w+: .*)\n)*?[ \t]+ref: (\S+)")
 
 
+#: The one other system ref (sd:1542): the `sd-db-main-canary` job runs the
+#: suite against system `main`, never as a gate, so a removed `sd_db` name
+#: shows before the pin moves.
+CANARY_REF = "main"
+
+
 def pins(text: str) -> list[str]:
-    return PIN.findall(text)
+    """The pinned system refs: every checkout of it except the canary's."""
+    return [ref for ref in PIN.findall(text) if ref != CANARY_REF]
+
+
+def job_block(text: str, name: str) -> str:
+    match = re.search(rf"^  {re.escape(name)}:\n((?:(?:    .*|[ \t]*)\n)*)", text, re.MULTILINE)
+    return match.group(1) if match else ""
 
 
 def pinned_schema(checkout: Path, ref: str) -> int | None:
@@ -62,6 +74,15 @@ class ThePinIsReadable(unittest.TestCase):
         found = pins(WORKFLOW.read_text(encoding="utf-8"))
         self.assertEqual(len(found), 1, f"expected one platypeeps/system ref in {WORKFLOW}: {found}")
         self.assertRegex(found[0], r"^[0-9a-f]{40}$", "the pin is a full commit, not a branch or tag")
+
+    def test_the_only_unpinned_system_ref_is_the_non_blocking_canary(self):
+        text = WORKFLOW.read_text(encoding="utf-8")
+        self.assertEqual(PIN.findall(text).count(CANARY_REF), 1)
+        canary = job_block(text, "sd-db-main-canary")
+        self.assertIn(f"ref: {CANARY_REF}\n", canary)
+        self.assertRegex(canary, r"(?m)^    continue-on-error: true$",
+                         "a red canary must not block a merge")
+        self.assertIn("bash .github/scripts/run-tests.sh", canary)
 
     def test_comments_between_repository_and_ref_are_skipped(self):
         text = ("          repository: platypeeps/system\n"

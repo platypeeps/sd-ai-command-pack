@@ -410,6 +410,62 @@ jobs:
       - name: Report installer coverage (gate 100%)
         run: bash .github/scripts/check-installer-coverage.sh
 
+  # sd:1542: the unittest job installs `sd_db` at a pinned system commit, so
+  # a system change that removes a name the pack imports reaches no pack CI
+  # run until someone moves the pin. #579 did that with `MONEY_NOISE`, and
+  # the first signal was every local gate failing. This job runs the same
+  # suite against system `main`. It is an early warning, never a gate:
+  # `continue-on-error` keeps it off the merge path, and a red run here
+  # names the system commit to adapt to before the pin moves.
+  # `tests/test_system_pin.py` goes red here by design whenever `main`
+  # carries a newer `SCHEMA_VERSION` than the pin.
+  sd-db-main-canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The whole history, as in the unittest job: the archive test
+          # resolves a commit a shallow clone cannot reach.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Check out system main, for sd_db
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: platypeeps/system
+          ref: main
+          token: ${{ secrets.SYSTEM_REPO_TOKEN }}
+          path: system-checkout
+          persist-credentials: false
+
+      - name: Put it where the installer looks
+        shell: bash
+        run: |
+          mkdir -p "$HOME/repos"
+          mv system-checkout "$HOME/repos/system"
+          git -C "$HOME/repos/system" log -1 --format='sd_db from system main at %H' | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Install test dependencies
+        run: python3 -m pip install --require-hashes -r requirements-dev.txt
+
+      - name: Install sd_db from system main
+        run: python3 -m pip install "$HOME/repos/system/local-sd-db"
+
+      - name: Run tests against system main
+        shell: bash
+        run: bash .github/scripts/run-tests.sh
+
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
