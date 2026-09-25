@@ -120,6 +120,12 @@ It supplies prior evidence through `--resume-report` and verifies every previous
 Failed attempts, findings, and the initial receipt remain unchanged.
 Repeated incomplete runs exhaust the automatic allowance and grant no publication clearance.
 
+A repository gate that fails before any reviewer is asked spends no pass.
+`sd-ship` removes that reservation and keeps the gate output under `review_preflight_error`.
+The next prepare reviews normally, without `--retry-review`.
+A slow gate under load can take a longer limit: `sd-ship prepare --review-timeout SECONDS`.
+It reaches `sd-review --timeout`, which bounds the gate and each reviewer.
+
 ## Additional review
 
 After the automatic cap, obtain a new direct user request before another paid review.
