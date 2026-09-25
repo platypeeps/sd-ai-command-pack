@@ -9,11 +9,10 @@ import io
 import json
 import os
 import pathlib
-import re
 import shutil
-import sys
+import subprocess
 import tempfile
-import types
+import time
 import unittest
 from unittest.mock import patch
 
@@ -24,46 +23,37 @@ from tests import test_sd_ship as fixture
 ship = fixture.ship
 
 
-def drifted(snapshot: pathlib.Path) -> list[str]:
-    """The loaded `sd_db` functions whose code the snapshot's source does not compile to.
+def process_started() -> float:
+    """When this process started, to the second, as `ps` reports it."""
+    stamp = subprocess.run(["ps", "-o", "lstart=", "-p", str(os.getpid())], capture_output=True, text=True,
+                           check=True, env={**os.environ, "LC_ALL": "C"}).stdout.strip()
+    return time.mktime(time.strptime(stamp, "%a %b %d %H:%M:%S %Y"))
+
+
+def installed_since(package: pathlib.Path, started: float) -> list[str]:
+    """The package's files written at or after `started`, a second's grace included.
 
     This process imported the installed package before any snapshot could
-    exist, so an install in between would leave it running one build while
-    the children import another, both hashing the same copy (sd:1479 review).
-    Code objects compare by bytecode, constants, names and line table, not by
-    file name, so identical source compares equal and any edit does not.
+    exist (sd:1479 review). An install in between would leave it running one
+    build while its children import another, both hashing the same copy, and
+    no comparison of loaded objects covers constants, defaults and class
+    state alike. `pip` writes each file at install time, so a file younger
+    than the process is the install, whatever it changed.
     """
-    drift = []
-    for name, module in sorted(sys.modules.items()):
-        # The loader's origin: `freeze_library` repoints `__file__`, not this.
-        path = getattr(getattr(module, "__spec__", None), "origin", None)
-        if not (name == "sd_db" or name.startswith("sd_db.")) or not path or not path.endswith(".py"):
-            continue
-        source = snapshot / pathlib.Path(path).resolve().relative_to(fixture.SITE_PACKAGES.resolve())
-        # `dont_inherit`: this file's own `__future__` import would otherwise
-        # compile the library under flags it was not loaded with.
-        compiled, table = [compile(source.read_bytes(), path, "exec", dont_inherit=True)], {}
-        while compiled:
-            code = compiled.pop()
-            table[code.co_qualname] = code
-            compiled += [const for const in code.co_consts if isinstance(const, types.CodeType)]
-        members = [value for value in vars(module).values() if getattr(value, "__module__", None) == name]
-        members += [inner for value in members if isinstance(value, type) for inner in vars(value).values()]
-        for value in members:
-            code = getattr(getattr(value, "__func__", value), "__code__", None)
-            if code is not None and code.co_filename == path and table.get(code.co_qualname) != code:
-                drift.append(f"{name}.{code.co_qualname}")
-    return drift
+    return sorted(str(path.relative_to(package)) for path in package.rglob("*")
+                  if path.is_file() and "__pycache__" not in path.parts and path.stat().st_mtime >= started - 1)
 
 
 #: One snapshot of the installed `sd_db` per test process, taken as this module
-#: loads rather than per test (sd:1479 review), and refused when the code this
-#: process already imported is not the code in it.
+#: loads rather than per test (sd:1479 review), and refused when the package
+#: was written after this process started, which the parent may not have loaded.
 LIBRARY = pathlib.Path(tempfile.mkdtemp(prefix="sd-ship-library-"))
 atexit.register(shutil.rmtree, LIBRARY, True)
 shutil.copytree(fixture.SITE_PACKAGES / "sd_db", LIBRARY / "sd_db", ignore=shutil.ignore_patterns("__pycache__"))
-if drifted(LIBRARY):
-    raise RuntimeError(f"sd_db was installed while this test process started; rerun it: {drifted(LIBRARY)[:5]}")
+# After the copy, so an install racing it is seen too.
+if installed_since(fixture.SITE_PACKAGES / "sd_db", process_started()):
+    raise RuntimeError("sd_db was installed after this test process started; rerun it: "
+                       f"{installed_since(fixture.SITE_PACKAGES / 'sd_db', process_started())[:5]}")
 
 
 def freeze_library(case):
@@ -193,20 +183,18 @@ class DispositionTests(unittest.TestCase):
         self.accepted(json.loads(self.proposal_file.read_text()))
         self.assertEqual(self.prepare()["phase"], "ready_to_send")
 
-    def test_a_snapshot_the_loaded_library_did_not_come_from_is_named(self):
-        """The check the module load runs: clean on its own snapshot, loud on any edit.
-
-        One blank line before a function moves its first line, which is the
-        smallest install that changes what a function compiles to.
-        """
-        self.assertEqual(drifted(LIBRARY), [])
-        edited = self.directory / "edited"
-        shutil.copytree(LIBRARY, edited)
-        library = edited / "sd_db" / "ship.py"
-        source = library.read_text()
-        name = re.search(r"^def (\w+)\(", source, re.MULTILINE).group(1)
-        library.write_text(source.replace(f"\ndef {name}(", f"\n\ndef {name}(", 1))
-        self.assertIn(f"sd_db.ship.{name}", drifted(edited))
+    def test_a_package_written_after_the_process_started_is_named(self):
+        """The check the module load runs: silent on the installed package, loud on a newer file."""
+        started = process_started()
+        self.assertLessEqual(started, time.time())
+        self.assertEqual(installed_since(fixture.SITE_PACKAGES / "sd_db", started), [])
+        package = self.directory / "installed" / "sd_db"
+        shutil.copytree(LIBRARY / "sd_db", package)
+        for path in package.rglob("*.py"):
+            os.utime(path, (started - 60, started - 60))
+        self.assertEqual(installed_since(package, started), [])
+        (package / "ship.py").write_text("CONSTANT = 2\n")
+        self.assertEqual(installed_since(package, started), ["ship.py"])
 
     def test_blank_template_missing_explicit_acceptance_and_wrong_digest_refuse(self):
         self.blocked()

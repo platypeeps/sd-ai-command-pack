@@ -280,7 +280,9 @@
   `test_sd_ship_dispositions` and `test_sd_ship_disposition_guards` now copy
   `sd_db` once per test process, as the module loads. The `sd-ship` children
   import the copy through `PYTHONPATH`, and the test process points
-  `sd_db.ship.__file__` at it.
+  `sd_db.ship.__file__` at it. The module refuses to load when any installed
+  `sd_db` file is younger than the process: the parent may then run a build
+  the copy does not hold.
 
 - **Non-ASCII paths no longer slip past three path checks (sd:1440).**
   `core.quotePath` is on by default, so a newline-separated `--name-only`
