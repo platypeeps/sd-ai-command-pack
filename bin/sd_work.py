@@ -229,6 +229,15 @@ def _edit_changes(args: argparse.Namespace) -> dict[str, Any]:
     # dropping it silently. None of those rules is repeated here.
     if args.kind is not None:
         changes["kind"] = args.kind
+    # The rule and its anchor go through as typed. The grammar, the default
+    # anchor, the kinds that may recur and the due date a rule needs are all
+    # `edit_item`'s to refuse; a cleared rule clears its anchor there too.
+    if args.recur is not None:
+        changes["recurrence"] = args.recur
+    if args.clear_recur:
+        changes["recurrence"] = None
+    if args.recur_anchor is not None:
+        changes["recurrence_anchor"] = args.recur_anchor
     if not changes:
         raise WorkRefusal("edit requires a field to change")
     return changes
@@ -467,7 +476,7 @@ def _repo_line(row: Any, *, here: str | None, moved: bool) -> str | None:
     return f"  repo: {repo}" if repo and not sd_lib.same_repo(repo, here) else None
 
 
-def _emit(value: Any, *, machine: bool, moved: bool = False) -> None:
+def _emit(value: Any, *, machine: bool, moved: bool = False, following: Any = None) -> None:
     if machine:
         print(json.dumps(value, ensure_ascii=False))
         return
@@ -482,6 +491,10 @@ def _emit(value: Any, *, machine: bool, moved: bool = False) -> None:
         line = _repo_line(row, here=here, moved=moved)
         if line:
             print(line)
+        if row.get("recurrence"):
+            print(f"  recurs {row['recurrence']} ({row.get('recurrence_anchor')})")
+    if isinstance(value, dict) and "next_occurrence" in value:
+        _occurrence_line(value, following)
     if isinstance(value, dict):
         # `register` is the one verb that can do nothing and still succeed.
         # Registering twice is deliberately not an error -- the unique index
@@ -493,6 +506,25 @@ def _emit(value: Any, *, machine: bool, moved: bool = False) -> None:
             resolved = " · resolved" if note.get("resolved_at") else ""
             print(f"  note #{note['id']} · {note['kind']}{resolved}: {note['body']}")
         print(f"revision: {value['revision']}")
+
+
+def _occurrence_line(value: dict[str, Any], following: Any) -> None:
+    """What completing a recurring row did to its series (sd:1428).
+
+    `change_status` adds `next_occurrence` and `next_occurrence_reason` only
+    when the completed row recurred, so a caller that finished an ordinary
+    task sees nothing new. A completion that ended the series says so with
+    the library's reason: the obligation stops here, and a caller who reads
+    only the status line would otherwise assume the next one exists.
+
+    `following` is the new row, read by `run` from the store rather than
+    parsed out of the note that names it, so the due date printed is the
+    one the row carries.
+    """
+    if following is None:
+        print(f"  recurrence ended: {value.get('next_occurrence_reason')}")
+        return
+    print(f"  next occurrence: #{following['id']} · due {following['due']}")
 
 
 #: A delivery commit as `sd_db.progress` requires it to be spelled: the full
@@ -617,6 +649,22 @@ def _status_reason(workflow: Any, connection: Any, args: argparse.Namespace) -> 
     return _delivery_reason(row, args.delivered_by)
 
 
+def _change_status(workflow: Any, connection: Any, args: argparse.Namespace,
+                   who: str) -> tuple[dict[str, Any], Any]:
+    """The transition, and the row a recurring completion created (sd:1428).
+
+    The second value is for the human line only; `--json` already carries
+    its id as `next_occurrence`. None when nothing was created.
+    """
+    result = workflow.change_status(
+        connection, args.item, args.status, who=who,
+        expected_revision=getattr(args, "if_revision", None),
+        reason=_status_reason(workflow, connection, args))
+    spawned = result.get("next_occurrence")
+    following = None if spawned is None else workflow.item_state(connection, spawned)["item"]
+    return result, following
+
+
 def _refuse_task_delivery(workflow: Any, connection: Any, args: argparse.Namespace) -> None:
     """Refuse `deliver` on an ordinary task, saying where the evidence goes.
 
@@ -651,15 +699,26 @@ def _capture(sd_db: Any, workflow: Any, args: argparse.Namespace,
     re-read after the update rather than patched -- `revision` is computed
     from the row, and handing back the pre-update one would arm every
     `--if-revision` caller with a checkpoint that was already stale.
+
+    A recurrence rule (sd:1428) is where that shortcut stops being enough.
+    `capture_task` checks the rule against `task`, and only some kinds recur,
+    so `set_item_fields` would leave a `work-idea` carrying a rule nothing
+    could ever fire. With a rule and another kind, the kind goes through
+    `edit_item` instead, which checks the rule against the kind the row ends
+    up with and refuses by name. The row then carries the note that edit
+    writes, which says what happened: captured as a task, then reclassified.
     """
     with workflow.transaction(connection):
         state = workflow.capture_task(
             connection, title=args.title, body=args.body, priority=args.priority,
-            due=args.due, repo=_task_repo(args, connection, workflow), who=who,
+            due=args.due, repo=_task_repo(args, connection, workflow),
+            recurrence=args.recur, recurrence_anchor=args.recur_anchor, who=who,
         )
         if args.kind == "task":
             return state
         item = state["item"]["id"]
+        if args.recur is not None:
+            return workflow.edit_item(connection, item, {"kind": args.kind}, who=who)
         sd_db.writes.set_item_fields(connection, item, kind=args.kind)
         return workflow.item_state(connection, item)
 
@@ -675,7 +734,8 @@ def run(args: argparse.Namespace) -> int:
         # Whether this command changed the row's checkout, which is the one
         # thing `_emit` cannot read off the result: a row that already sat in
         # the destination looks the same afterwards as one that just moved.
-        moved = False
+        # `following` is the row a recurring completion created, if any.
+        moved, following = False, None
         result: Any
         if action == "today":
             result = [dict(row) for row in sd_db.reads.today_items(connection)]
@@ -698,10 +758,7 @@ def run(args: argparse.Namespace) -> int:
             result = workflow.edit_item(
                 connection, args.item, changes, who=who, expected_revision=revision)
         elif action == "status":
-            result = workflow.change_status(
-                connection, args.item, args.status, who=who,
-                expected_revision=revision,
-                reason=_status_reason(workflow, connection, args))
+            result, following = _change_status(workflow, connection, args, who)
         elif action == "note":
             result = workflow.add_item_note(
                 connection, args.item, body=args.body, kind=args.kind, who=who,
@@ -728,12 +785,33 @@ def run(args: argparse.Namespace) -> int:
                     expected_revision=revision)
         else:
             raise WorkRefusal(f"unknown workflow operation: {action}")
-        _emit(result, machine=args.json, moved=moved)
+        _emit(result, machine=args.json, moved=moved, following=following)
         return 0
     except sd_db.SdDbError as error:
         raise WorkRefusal(str(error)) from error
     finally:
         connection.close()
+
+
+def _recurrence_flags(parser: argparse.ArgumentParser, *, clear: bool = False) -> None:
+    """`--recur` and `--recur-anchor`, the same on `add` and `edit` (sd:1428).
+
+    No `choices` and no grammar check: `sd_db.workflow` refuses a bad rule, a
+    bad anchor, a rule with no due date and a kind that cannot recur, each by
+    name, and a second copy here would be the one that drifts. The two anchor
+    words are recited in the help because the parser may not import the
+    library (`test_building_the_parser_imports_no_sd_db`).
+    """
+    rule = parser.add_mutually_exclusive_group() if clear else parser
+    rule.add_argument("--recur", metavar="RRULE",
+                      help="repeat on completion, e.g. FREQ=WEEKLY or FREQ=MONTHLY;INTERVAL=3 "
+                           "(FREQ, INTERVAL, BYMONTH, BYMONTHDAY); needs a due date")
+    if clear:
+        rule.add_argument("--clear-recur", action="store_true",
+                          help="stop the series; clears the anchor too")
+    parser.add_argument("--recur-anchor", metavar="ANCHOR",
+                        help="schedule (default: the next due date follows the last one) or "
+                             "completion (it follows the day the task was done)")
 
 
 def _output(parser: argparse.ArgumentParser, action: str, *, revision: bool = False) -> None:
@@ -934,6 +1012,7 @@ def register(groups: Any, store: Any) -> None:
         help="what the item is (default: task); a followup takes a checkout as a task "
              "does, and personal, work-idea and personal-idea carry no repository")
     kind.choices = LibraryKinds()  # after add_argument: see `LibraryKinds`
+    _recurrence_flags(add)
     where = add.add_mutually_exclusive_group()
     where.add_argument("--here", action="store_true",
                        help="refuse unless this is a checkout (one is used by default)")
@@ -964,6 +1043,7 @@ def register(groups: Any, store: Any) -> None:
                        "personal-idea carries no repository and needs --no-repo in "
                        "the same command")
     kind.choices = LibraryKinds()  # after add_argument: see `LibraryKinds`
+    _recurrence_flags(edit, clear=True)
     _output(edit, "edit", revision=True)
 
     status = verbs.add_parser("status", help="change status with an atomic history entry")

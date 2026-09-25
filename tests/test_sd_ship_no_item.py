@@ -10,6 +10,7 @@ import io
 import json
 import os
 import pathlib
+import shutil
 import sqlite3
 import subprocess
 import tempfile
@@ -26,6 +27,23 @@ ship = fixture.ship
 no_item = importlib.import_module("sd_ship_no_item")
 CAP = fixture.CAP
 bindings = importlib.import_module("sd_ship_bindings")
+#: The library file every worktree's borrowed `.venv` shares.
+INSTALLED_LIBRARY = pathlib.Path(receipts.__file__)
+
+
+def freeze_library(case, directory):
+    """Point the adjudicator's library binding at this test's own copy (sd:1459).
+
+    The binding reads the file named by `sd_db.ship.__file__` on every command,
+    and the installed one is shared by every worktree that borrows the pack's
+    `.venv`, so an install by another session mid-test moved it. The copy is
+    taken once per test and nothing else writes it.
+    """
+    library = directory / "sd_db-ship.py"
+    shutil.copyfile(INSTALLED_LIBRARY, library)
+    frozen = patch.object(receipts, "__file__", str(library))
+    frozen.start()
+    case.addCleanup(frozen.stop)
 
 
 class NoItemContracts(unittest.TestCase):
@@ -52,6 +70,7 @@ class NoItemContracts(unittest.TestCase):
         initialise(self.database)
         self.connection = connect(self.database)
         self.addCleanup(self.connection.close)
+        freeze_library(self, self.directory)
         self.environment = {
             "HOME": str(self.directory / "home"),
             "GIT_CONFIG_COUNT": "1",
@@ -655,6 +674,26 @@ class NoItemContracts(unittest.TestCase):
         self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
         self.assertEqual(self.snapshot(), before)
         self.assertEqual(self.evidence_snapshot(), evidence_before)
+
+    def test_a_library_reinstalled_mid_test_does_not_move_the_adjudicator_binding(self):
+        """sd:1459. The shared environment is not this test's to hold still.
+
+        `adjudicator_binding` hashes the installed `sd_db/ship.py` again on
+        every command. Worktrees borrow one `.venv`, and a session installing
+        `sd_db` into it between two of this fixture's commands made the accept
+        refuse with "does not bind the current review, history, tools and
+        head": the flake the row names. The reinstall is simulated as the
+        installed file reading different bytes after the proposal is written.
+        """
+        review_id, _proposal, proposal_path, _durable = self.blocking_proposal()
+        original = pathlib.Path.read_bytes
+
+        def reinstalled(path):
+            return original(path) + (b"# reinstalled\n" if path == INSTALLED_LIBRARY else b"")
+
+        with patch.object(pathlib.Path, "read_bytes", reinstalled):
+            self.accept(review_id, proposal_path)
+            self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
 
     def test_prepare_evidence_cannot_accept_dispositions_in_the_same_command(self):
         review_id, _proposal, proposal_path, _source = self.blocking_proposal(prepare=False)
