@@ -184,10 +184,9 @@ class DispositionTests(unittest.TestCase):
         self.assertEqual(self.prepare()["phase"], "ready_to_send")
 
     def test_a_package_written_after_the_process_started_is_named(self):
-        """The check the module load runs: silent on the installed package, loud on a newer file."""
+        """The check the module load runs, against a package this test owns: silent when old, loud on a newer file."""
         started = process_started()
         self.assertLessEqual(started, time.time())
-        self.assertEqual(installed_since(fixture.SITE_PACKAGES / "sd_db", started), [])
         package = self.directory / "installed" / "sd_db"
         shutil.copytree(LIBRARY / "sd_db", package)
         for path in package.rglob("*.py"):
