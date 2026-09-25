@@ -297,6 +297,15 @@
 
 ### Fixed
 
+- **A merge-forward before the first `sd-ship prepare` no longer becomes the
+  pull request title (sd:1377).** With no `--title` and no stored title,
+  prepare took HEAD's subject. After the merge-forward sd-ship demands, that
+  was "Merge origin/main into <branch>". It was stored, preferred on every
+  later run, and landed on main as `18d42c56` for sd:1347. The fallback now
+  takes the newest commit the branch adds over the base that is not a merge.
+  A branch that adds only merges gets the existing "provide a final --title"
+  refusal.
+
 - **`sd-review`'s capped-exposure report works with the exact-money ledger.**
   System #579 (sd:1176) removed `sd_db.ledger.MONEY_NOISE`, and the report
   still added it to the month's spend, so every capped check raised
