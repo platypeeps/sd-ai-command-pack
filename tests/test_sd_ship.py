@@ -441,6 +441,16 @@ roles:
         self.assertEqual(after["body"], before["body"])
         self.assertEqual(len(after["passes"]), 2)
 
+    def test_a_merge_forward_before_the_first_prepare_does_not_become_the_title(self):
+        # sd:1377: the merge-forward sd-ship demands left HEAD's subject naming
+        # a branch operation, and it was stored as the title and landed on main.
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        _git(self.root, "fetch", "-q", "origin", "main")
+        _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge origin/main into topic\n\nAuthored-with: human", "FETCH_HEAD")
+        result = self.prepare()
+        self.assertEqual(self.operation().state["title"], "change")
+        self.assertEqual(self.remote.pull(result["pull_request"]["number"]).title, "change")
+
     def test_a_moved_binding_re_reviews_the_same_head_instead_of_bricking_it(self):
         # sd:1390, live on #1140. Reuse was decided on head equality and the
         # receipt then rejected on the binding, with nothing between them, so

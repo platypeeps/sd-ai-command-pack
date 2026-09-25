@@ -273,6 +273,15 @@
 
 ### Fixed
 
+- **A merge-forward before the first `sd-ship prepare` no longer becomes the
+  pull request title (sd:1377).** With no `--title` and no stored title,
+  prepare took HEAD's subject. After the merge-forward sd-ship demands, that
+  was "Merge origin/main into <branch>". It was stored, preferred on every
+  later run, and landed on main as `18d42c56` for sd:1347. The fallback now
+  takes the newest commit the branch adds over the base that is not a merge.
+  A branch that adds only merges gets the existing "provide a final --title"
+  refusal.
+
 - **A gate that fails before any reviewer is asked no longer spends a review
   pass (sd:1475).** Under parallel load `make check` outran sd-check's fixed
   900-second limit. sd-review then reported `gate_failed` without asking a

@@ -965,7 +965,10 @@ class Ship(SharedReview):
         # an operator's checkout implicitly to make a check pass.
         git(self.root, "fetch", "--no-tags", "origin", f"refs/heads/{base}:refs/remotes/origin/{base}")
         git(self.root, "symbolic-ref", "refs/remotes/origin/HEAD", f"refs/remotes/origin/{base}")
-        title = self.args.title or self.state.get("title") or git(self.root, "show", "-s", "--format=%s", head)
+        # A merge-forward's subject names a branch operation, not the change;
+        # the newest commit the branch adds that is not a merge does (sd:1377).
+        title = (self.args.title or self.state.get("title")
+                 or git(self.root, "log", "-1", "--no-merges", "--format=%s", f"refs/remotes/origin/{base}..{head}"))
         if not title or re.match(r"(?i)wip\b", title):
             raise Refusal("provide a final --title; wip titles never reach the default branch")
         body, deliver, claim, local_work = self.publication_claim()
