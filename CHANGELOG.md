@@ -13,8 +13,10 @@
   `origin/HEAD`. `--dry-run` prints the diffs and writes nothing. A write
   stamps only the checkout it runs in (R10-D6), puts tracked files only on a
   feature branch, and a second run changes nothing. The check workflow runs `git diff --check` and
-  is laid only where no other workflow runs on `pull_request`. Employer
-  repositories keep their protection and get no `unprotected` entry. The
+  is laid only where no other workflow runs on `pull_request`. The remote is
+  asked the three ownership questions first: a fork or an unadministered
+  repository gets no tracked file, and only a repository nobody else may push
+  to gets the `unprotected` entry, so employer repositories keep theirs. The
   `CLAUDE.local.md` template gains the parallel-work line (sd:1342) and the
   `docs/dashboard/` rule.
 

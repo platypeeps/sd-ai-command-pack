@@ -23,6 +23,7 @@ if str(REPO_ROOT / "bin") not in sys.path:
 
 import sd_fleet  # noqa: E402
 import sd_install  # noqa: E402
+import sd_lib  # noqa: E402
 import sd_setup_github  # noqa: E402
 
 PIN = "1" * 40
@@ -37,6 +38,16 @@ def args(**overrides) -> argparse.Namespace:
     values = {"dry_run": True, "only": [], "pin": PIN, "json": False}
     values.update(overrides)
     return argparse.Namespace(**values)
+
+
+def remote(*, admin: bool = True, fork: bool = False, others: tuple[str, ...] = ()):
+    """An `ask` seam answering the three ownership questions; nothing reaches the network."""
+    people = [{"login": "me", "permissions": {"push": True}}]
+    people += [{"login": who, "permissions": {"push": True}} for who in others]
+    answers = {sd_lib.VIEWER_QUERY: {"login": "me"},
+               sd_lib.REPOSITORY_QUERY: {"full_name": "o/r", "fork": fork, "permissions": {"admin": admin}},
+               sd_lib.COLLABORATOR_QUERY: people}
+    return lambda endpoint, root: (answers[endpoint], "")
 
 
 def snapshot(root: pathlib.Path) -> dict[str, bytes]:
@@ -71,13 +82,14 @@ class Fleet(unittest.TestCase):
             (root / "CLAUDE.local.md").write_text(local, encoding="utf-8")
         return root, remote
 
-    def run_stamp(self, rows, cwd=None, **overrides) -> tuple[int, str]:
+    def run_stamp(self, rows, cwd=None, ask=None, **overrides) -> tuple[int, str]:
         out = io.StringIO()
-        code = sd_fleet.fleet_stamp(args(**overrides), rows=lambda: rows, stream=out, cwd=cwd)
+        code = sd_fleet.fleet_stamp(args(**overrides), rows=lambda: rows, stream=out, cwd=cwd,
+                                    ask=ask or remote())
         return code, out.getvalue()
 
-    def plan(self, rows, cwd=None, **overrides) -> list[dict]:
-        code, text = self.run_stamp(rows, cwd, json=True, **overrides)
+    def plan(self, rows, cwd=None, ask=None, **overrides) -> list[dict]:
+        code, text = self.run_stamp(rows, cwd, ask, json=True, **overrides)
         return json.loads(text)["repos"]
 
 
@@ -118,6 +130,20 @@ class DryRun(Fleet):
         [plan] = self.plan([(root, remote)])
         self.assertNotIn(sd_fleet.STATUS_PATH, [change["path"] for change in plan["changes"]])
         self.assertTrue(any("protection stands" in line for line in plan["adapted"]))
+
+    def test_co_owned_repository_gets_files_but_no_declaration(self) -> None:
+        root, remote_url = self.repo("shared")
+        [plan] = self.plan([(root, remote_url)], ask=remote(others=("colleague",)))
+        paths = [change["path"] for change in plan["changes"]]
+        self.assertIn(sd_fleet.ROUTE_PATH, paths)
+        self.assertNotIn(sd_fleet.STATUS_PATH, paths)
+
+    def test_fork_or_unadministered_remote_gets_no_tracked_file(self) -> None:
+        for name, ask in (("fork", remote(fork=True)), ("visitor", remote(admin=False))):
+            root, remote_url = self.repo(name)
+            [plan] = self.plan([(root, remote_url)], ask=ask)
+            self.assertEqual({change["where"] for change in plan["changes"]}, {"local"}, name)
+            self.assertTrue(plan["refused"][0].startswith("tracked files:"), name)
 
     def test_status_keeps_other_entries_and_rewrites_unprotected(self) -> None:
         other = {"id": "reviews", "state": {"required_pull_request_reviews": False},
@@ -201,6 +227,13 @@ class Write(Fleet):
         self.assertFalse((root / sd_fleet.CHECK_PATH).exists())
         self.assertTrue((root / "CLAUDE.local.md").is_file())
         self.assertEqual(git(root, "status", "--porcelain", "--untracked-files=no"), before)
+
+    def test_master_without_origin_head_is_a_default_branch(self) -> None:
+        root, remote_url = self.repo("old")
+        git(root, "branch", "-m", "main", "master")
+        git(root, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
+        [plan] = self.plan([(root, remote_url)], cwd=root, dry_run=False)
+        self.assertEqual({change["where"] for change in plan["changes"]}, {"local"})
 
     def test_write_refuses_a_checkout_outside_the_auto_rows(self) -> None:
         root, remote = self.repo("one")

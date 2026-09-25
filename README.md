@@ -73,7 +73,7 @@ else is. Its executables write these paths, and no others:
   its Dependabot guard as `setup-github` writes them,
   `.github/workflows/sd-check.yml` where no other workflow runs on
   `pull_request`, the `unprotected` entry in `.github/sd-status.json`
-  (operator-owned repositories only), and a `docs/dashboard/` line in
+  (only where the remote says nobody else may push), and a `docs/dashboard/` line in
   `.gitignore`. **Tracked**, and written only on a feature branch. It also
   refreshes that checkout's `CLAUDE.local.md` block and creates its untracked
   `docs/dashboard/`. `--dry-run` prints every auto repository's diff against

@@ -308,8 +308,8 @@ def tracked_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None],
 
     # The declared gap, on owned repositories only.
     if not owned:
-        plan.adapted.append(f"{STATUS_PATH}: not declared; {plan.slug or 'this remote'} is not an operator-owned "
-                            "repository, so its protection stands")
+        plan.adapted.append(f"{STATUS_PATH}: not declared; {plan.slug or 'this remote'} is an employer's repository "
+                            "or others may push to it, so its protection stands")
     else:
         try:
             propose(STATUS_PATH, status_text(tree.text_at(STATUS_PATH)))
@@ -320,7 +320,8 @@ def tracked_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None],
 
 
 def plan_repo(root: pathlib.Path, remote: str | None, *, pin: str, tree: Tree,
-              local_block: Callable[[str], str], tracked: Callable[[pathlib.Path, str], bool]) -> Plan:
+              local_block: Callable[[str], str], tracked: Callable[[pathlib.Path, str], bool],
+              ask: sd_lib.Asker = sd_lib.gh_api) -> Plan:
     """What stamping `root` would change, rendered and diffed; writes nothing.
 
     `local_block` renders the `CLAUDE.local.md` text from the current text,
@@ -339,7 +340,11 @@ def plan_repo(root: pathlib.Path, remote: str | None, *, pin: str, tree: Tree,
 
     # A guest or minimal repository carries none of the framework's tracked
     # files (R10-D5), so nothing tracked is proposed there at all; its
-    # untracked block is still the operator's to keep current.
+    # untracked block is still the operator's to keep current. Otherwise the
+    # remote is asked the three questions, as `setup-github` asks them, and
+    # the one no a row can override is sd-ship's: co-ownership (sd:1347).
+    # Only a remote that answers `full` -- nobody else may push -- gets the
+    # `unprotected` declaration.
     try:
         mode = sd_lib.written_mode(root)
     except sd_lib.ConfigError as error:
@@ -349,7 +354,13 @@ def plan_repo(root: pathlib.Path, remote: str | None, *, pin: str, tree: Tree,
             plan.refused.append(f"tracked files: the local block says mode {mode}; a {mode} repository "
                                 "carries none of the framework's files")
         else:
-            tracked_changes(plan, tree, propose, pin=pin, owned=owned, self_install=self_install)
+            answer = sd_lib.remote_permits_full(root, ask=ask)
+            if answer.full or sd_lib.coownership_only(answer):
+                tracked_changes(plan, tree, propose, pin=pin, owned=owned and answer.full,
+                                self_install=self_install)
+            else:
+                plan.refused.append(f"tracked files: {answer.reason}; the stamp writes only where the "
+                                    "remote permits full mode, or where co-ownership alone says no")
 
     # The checkout's own, untracked files.
     if tracked(root, LOCAL_BLOCK_PATH):
@@ -416,9 +427,11 @@ def here(rows: list[tuple[pathlib.Path, str | None]], cwd: pathlib.Path) -> tupl
     if not match:
         raise FleetRefusal(f"{top} is not a checkout of a runner_merge=auto repository; the stamp covers only those")
     branch = sd_lib.git_output(["symbolic-ref", "--quiet", "--short", "HEAD"], top)
-    default = (sd_lib.git_output(["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], top)
-               or "origin/main").removeprefix("origin/")
-    return top, match[0][1], bool(branch) and branch != default
+    # An unknown default is treated as both names `default_ref` falls back to,
+    # so a `master` repository without `origin/HEAD` is not a feature branch.
+    named = sd_lib.git_output(["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], top)
+    defaults = {named.removeprefix("origin/")} if named else {"main", "master"}
+    return top, match[0][1], bool(branch) and branch not in defaults
 
 
 def render_plans(plans: list[Plan], stream: Any, *, dry_run: bool) -> None:
@@ -491,7 +504,7 @@ def write_here(rows: list[tuple[pathlib.Path, str | None]], cwd: pathlib.Path, p
 
 
 def fleet_stamp(args: argparse.Namespace, *, rows: Rows = auto_rows, stream: Any = None,
-                cwd: pathlib.Path | None = None) -> int:
+                cwd: pathlib.Path | None = None, ask: sd_lib.Asker = sd_lib.gh_api) -> int:
     """Plan every selected repository, print the plans, and write only on a write run.
 
     A dry run walks the auto rows and reads each at its `origin/HEAD`. A
@@ -508,7 +521,7 @@ def fleet_stamp(args: argparse.Namespace, *, rows: Rows = auto_rows, stream: Any
     def planned(root: pathlib.Path, remote: str | None, tree: Tree) -> Plan:
         return plan_repo(root, remote, pin=pin, tree=tree,
                          local_block=lambda text: installer.local_block_text(text)[0],
-                         tracked=installer.path_is_tracked)
+                         tracked=installer.path_is_tracked, ask=ask)
 
     if args.dry_run:
         plans = dry_run_plans(selected(rows(), args.only), planned)
