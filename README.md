@@ -383,19 +383,15 @@ advisory `route` job in `sd-review-route.yml`:
 workflow files produce, not with this table, so a row here can go stale
 without anything saying so; the workflow files are the inventory.
 
-`main` is currently unprotected, and that is an accepted gap rather than an
-open one, recorded in tracked `.github/sd-status.json` under the id
-`unprotected` with the reason and the condition that ends it (a second
-account with push or merge rights). `sd-status` reports it every run as
-accepted and stops accepting it the moment the live state stops matching what
-the file pins. While protection is gone there are no required contexts, and
-`sd-ship merge` refuses to run: it reads the protection object before it
-reads the pull request's checks and refuses a missing one
-(`bin/sd_ship_remote.py`, `gate()`). The object is the classic one or, when
-classic answers 404, the branch's active rulesets reduced to the same shape
-(`bin/sd_protection.py`); this repository's own ruleset forbids only
-deletion and force-push, which gates no merge, so it stays unprotected here. Merges land by hand with
-`gh pr merge` after the maintainer reads the checks.
+`main` carries classic branch protection: pull requests with no required
+approvals, the strict `lint` and `unittest` checks above, and enforce_admins.
+`.github/sd-status.json` therefore declares no accepted gap. `sd-ship merge`
+reads the protection object before it reads the pull request's checks and
+refuses a missing or weaker one (`bin/sd_ship_remote.py`, `gate()`). The
+object is the classic one or, when classic answers 404, the branch's active
+rulesets reduced to the same shape (`bin/sd_protection.py`). An `unprotected`
+entry in that file is the documented way to accept a branch without
+protection; `WORKFLOW.md` describes how the merge gate honours it.
 
 **Installer coverage is gated at 100% line and branch.** The gate enumerates its
 subject from git rather than matching a glob, and declares a statement floor, so
