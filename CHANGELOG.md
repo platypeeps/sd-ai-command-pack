@@ -4,6 +4,20 @@
 
 ### Changed
 
+- **`sd fleet stamp` lays the auto-merge fleet's shared files (sd:1326).**
+  Each `runner_merge=auto` repository needs the same four things before the
+  runner can merge it: the route workflow at the current pin, a check workflow,
+  the `unprotected` declaration and the `CLAUDE.local.md` block. The verb
+  renders them from the existing writers (`sd_setup_github`, `sd_setup_guard`,
+  `sd_install.local_block_text`) and diffs them against each repository's
+  `origin/HEAD`. `--dry-run` prints the diffs and writes nothing. A write
+  stamps only the checkout it runs in (R10-D6), puts tracked files only on a
+  feature branch, and a second run changes nothing. The check workflow runs `git diff --check` and
+  is laid only where no other workflow runs on `pull_request`. Employer
+  repositories keep their protection and get no `unprotected` entry. The
+  `CLAUDE.local.md` template gains the parallel-work line (sd:1342) and the
+  `docs/dashboard/` rule.
+
 - **A machine `sd.copilot_review` of `never` wins over the repository.** The
   repository's `.github/sd-review.json` `copilot_review.automatic_deep`
   overrode every machine word, so a repository's `true` bought a paid Copilot

@@ -68,6 +68,16 @@ else is. Its executables write these paths, and no others:
   setup-github`, which runs only in a `full`-mode repository. **Tracked.** With
   `--remove-legacy` it also deletes the three files the old `sd-github-review`
   installer left.
+- The fleet stamp, from `sd fleet stamp`, into the checkout you stand in, which
+  must be a checkout of a `runner_merge=auto` repository: the routing lane and
+  its Dependabot guard as `setup-github` writes them,
+  `.github/workflows/sd-check.yml` where no other workflow runs on
+  `pull_request`, the `unprotected` entry in `.github/sd-status.json`
+  (operator-owned repositories only), and a `docs/dashboard/` line in
+  `.gitignore`. **Tracked**, and written only on a feature branch. It also
+  refreshes that checkout's `CLAUDE.local.md` block and creates its untracked
+  `docs/dashboard/`. `--dry-run` prints every auto repository's diff against
+  its `origin/HEAD` and writes nothing.
 - `docs/work/<item>/.citations.tsv` — the citation baseline, one per active work
   item, from `sd-docs-lint --update-citations`. **Tracked.**
 - `build/` — HTML from `sd-research-kit render`, into the research repository you
