@@ -211,8 +211,13 @@ class SharedReview:
         return merge_base
 
     def patch_id(self, base: str, head: str) -> str | None:
-        """`git patch-id --stable` of `base..head`, or None for an empty or unreadable diff."""
-        diff = subprocess.run(["git", "diff", "--binary", "--no-renames", base, head], cwd=self.root,
+        """`git patch-id --stable` of `base..head`, or None for an empty or unreadable diff.
+
+        Zero context lines: patch-id hashes context too, so a merge-in that
+        only puts new lines next to the branch's own -- a CHANGELOG union, the
+        lane's commonest resolution -- would read as a changed patch.
+        """
+        diff = subprocess.run(["git", "diff", "-U0", "--binary", "--no-renames", base, head], cwd=self.root,
                               capture_output=True, check=False, timeout=120)
         if diff.returncode or not diff.stdout:
             return None

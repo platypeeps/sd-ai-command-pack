@@ -2309,6 +2309,54 @@ roles:
         self.assertNotIn("carried_forward", latest)
         self.assertIn("base_merge", latest)
 
+    def changelog_union(self, branch_entry: str) -> tuple[str, str]:
+        """The lane's commonest merge-in: both sides add an entry at the same place.
+
+        The branch's entry is committed and reviewed first; main then lands
+        its own entry next to it, and the conflict is resolved by keeping
+        both, with `branch_entry` as the branch's side of the resolution.
+        """
+        (self.root / "README.md").write_text("fixture\n- branch entry\n")
+        _git(self.root, "commit", "-q", "-am", "branch entry\n\nAuthored-with: human")
+        self.prepare()
+        self.remote.commit_on("main", "main entry\n\nAuthored-with: human", files={"README.md": "fixture\n- main entry\n"})
+        _git(self.root, "fetch", "-q", "origin", "main:refs/remotes/origin/main")
+        subprocess.run(["git", "merge", "-q", "--no-edit", "origin/main"], cwd=self.root, capture_output=True, check=False)
+        (self.root / "README.md").write_text(f"fixture\n{branch_entry}\n- main entry\n")
+        _git(self.root, "add", "README.md")
+        _git(self.root, "commit", "-q", "--no-edit", "-m", "merge main\n\nAuthored-with: human")
+        return self.operation().state["passes"][-1]["head"], _git(self.root, "rev-parse", "HEAD")
+
+    def test_a_changelog_union_merge_in_carries_the_review_forward(self):
+        """Context lines moved; the branch's own changed lines did not."""
+        reviewed, head = self.changelog_union("- branch entry")
+        self.refuse_any_review()
+        self.prepare()
+        state = self.operation().state
+        self.assertEqual(state["passes"][-1]["carried_forward"]["from"], reviewed)
+        self.assertEqual(state["reviewed_head"], head)
+
+    def test_an_edit_to_the_branch_entry_in_a_changelog_union_is_reviewed(self):
+        reviewed, head = self.changelog_union("- branch entry, reworded in the merge")
+        self.prepare()
+        latest = self.operation().state["passes"][-1]
+        self.assertNotIn("carried_forward", latest)
+        self.assertEqual(latest["base_merge"]["previous"], reviewed)
+
+    def test_a_blocking_review_is_never_carried_forward(self):
+        """Its dispositions are bound to the head they were accepted at."""
+        program = self.programs / "review-fixture"
+        payload = {"type": "result", "subtype": "success", "structured_output": {"findings": [
+            {"path": "src.py", "line": 1, "severity": "high", "family": "correctness", "summary": "value is wrong"}]}}
+        program.write_text("#!/usr/bin/env python3\nimport json\nprint(" + repr(json.dumps(payload)) + ")\n")
+        with self.assertRaisesRegex(ship.Refusal, "local review blocking"):
+            self.prepare()
+        self.merge_main_in()
+        self.refuse_any_review()
+        with self.assertRaisesRegex(ship.Refusal, "local review unavailable"):
+            self.prepare()
+        self.assertFalse(any(entry.get("carried_forward") for entry in self.operation().state["passes"]))
+
     def test_a_moved_binding_is_never_carried_forward(self):
         self.prepare()
         self.merge_main_in()
