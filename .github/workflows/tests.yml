@@ -460,60 +460,23 @@ jobs:
       # which happened. Installing sd_db would not change that: a library
       # with no database file to open answers the same way.
       #
-      # On a pull request the linter also reads the body: rule 5 (exactly one
-      # `Work:` line) and rule 8 (the scope line a changed path demands, read
-      # from the table in .github/copilot-instructions.md) run only under
-      # --pr-body, and until sd:992 nothing here passed it. #1024 and #1027
-      # both changed this file and merged without a `CI/review scope:` line;
-      # the reviewer asked for it on each and a request is not a gate. The
-      # body reaches the script through the environment, never through
-      # `${{ }}` inside it: it is attacker-controlled text.
+      # The body rules -- rule 5 (exactly one `Work:` line) and rule 8 (the
+      # scope line a changed path demands) -- run in pr-body-lint.yml, the
+      # `body-lint` check, not here (sd:1408). They ran here under --pr-body
+      # from sd:992 on, and #1024 and #1027, which merged without a
+      # `CI/review scope:` line, are why they exist at all.
       #
-      # The changed paths come from the merge ref this job checks out. Its
-      # first parent is the base branch and its second is the pull request's
-      # head, so `HEAD^1 HEAD` is what this pull request adds and nothing the
-      # base has gained since. The two other spellings are wrong in opposite
-      # directions. `origin/HEAD` reads nothing: a checkout on main diffs to
-      # itself and passes, which is how the #1024 request was misread as a
-      # false positive. `github.event.pull_request.base.sha` reads too much:
-      # the payload freezes it at the base tip the pull request was opened
-      # against, so every later merge into the base widens this pull request's
-      # apparent scope, and rule 8 then demands a scope class for a file
-      # somebody else changed. That is sd:1401, and it bricked #1151 -- a body
-      # that could not be made to pass without claiming scope it did not have,
-      # on a branch whose own diff was two files. The merge ref carries no
-      # such drift, because GitHub recomputes it against the current base. A
-      # `HEAD^2` that does not resolve means this is not the merge ref, and
-      # the step fails there rather than diffing against something else.
-      # A push to main has no body and runs the tree rules alone, as before.
-      #
-      # `PR_BODY` comes from the stored event payload, and `on: pull_request`
-      # with no `types:` fires on `opened`, `synchronize` and `reopened` --
-      # not on `edited`. So a body that fails rule 5 or rule 8 cannot be
-      # cleared by editing it: the edit fires no event, and a re-run replays
-      # the payload the first run saw, body and all. Push a commit or reopen
-      # the pull request. Adding `edited` to the trigger would re-run this
-      # whole workflow on every body tweak, which is why it is not here.
+      # They moved because of where the body comes from: the stored event
+      # payload. `on: pull_request` with no `types:` fires on `opened`,
+      # `synchronize` and `reopened` -- not on `edited` -- so a body edited
+      # after the last push was graded by nothing, and a body that failed
+      # could not be cleared by fixing it. Adding `edited` to this trigger
+      # would re-run this whole workflow on every body tweak, which is why it
+      # is not here. `body-lint` runs on edits as well, and nothing here grades
+      # the body, so a failure an old body left red here cannot outlive the fix.
+      # This step runs the tree rules alone, on a pull request and on main.
       - name: Docs lint (docs/work, docs/spec, docs/decisions)
-        env:
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: |
-          set -euo pipefail
-          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
-            python3 bin/sd-docs-lint
-            exit 0
-          fi
-          body="$RUNNER_TEMP/pr-body.md"
-          printf '%s' "${PR_BODY:-}" > "$body"
-          if ! git rev-parse --verify --quiet HEAD^2 >/dev/null; then
-            echo "docs lint: HEAD has no second parent, so this checkout is" \
-                 "not the pull request merge ref and the changed paths" \
-                 "cannot be read from it" >&2
-            exit 1
-          fi
-          changed="$RUNNER_TEMP/pr-changed.txt"
-          git diff --name-only --no-renames HEAD^1 HEAD > "$changed"
-          python3 bin/sd-docs-lint --pr-body "$body" --changed "$changed"
+        run: python3 bin/sd-docs-lint
 
       # The three steps below were the `security` job until sd:10 criterion 17
       # folded them in here. Same commands, same pins, same scanner set; what
