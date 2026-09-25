@@ -56,7 +56,7 @@ def mismatches(floor: str, files: dict[str, str]) -> list[str]:
 
 def tracked_requirements() -> dict[str, str]:
     names = subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "ls-files", "--", "requirements-*.txt"],
+        ["git", "-C", str(REPO_ROOT), "ls-files", "--deduplicate", "--", "requirements-*.txt"],
         check=True, capture_output=True, text=True).stdout.split()
     return {name: (REPO_ROOT / name).read_text(encoding="utf-8") for name in names}
 
