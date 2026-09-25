@@ -1514,9 +1514,8 @@ def gate_failed_line(check: Mapping[str, Any] | None) -> str:
 
 
 def run_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeout: int) -> dict[str, Any]:
-    """Step 1: the repository's own deterministic gate, through sd-check."""
-
-    argv = [sys.executable, str(pathlib.Path(_BIN) / "sd-check"), "--json"]
+    """Step 1: the repository's own gate, through sd-check, held to the planned phase budget (sd:1475)."""
+    argv = [sys.executable, str(pathlib.Path(_BIN) / "sd-check"), "--timeout", str(timeout), "--json"]
     result = runner(argv, env, root, timeout)
     try:
         payload = json.loads(result.stdout)
@@ -2299,7 +2298,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_TIMEOUT_SECONDS,
         metavar="SECONDS",
-        help=f"per-provider timeout (default: {DEFAULT_TIMEOUT_SECONDS})",
+        help=f"per-phase timeout: the repository gate, then each provider (default: {DEFAULT_TIMEOUT_SECONDS})",
     )
     return parser
 
