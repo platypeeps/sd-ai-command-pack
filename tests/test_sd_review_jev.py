@@ -42,6 +42,7 @@ import json, pathlib, sys
 
 argv = sys.argv[1:]
 if argv[:1] == ["enabled"]:
+    pathlib.Path({record!r} + ".gate").write_text(json.dumps(argv))
     raise SystemExit({gate})
 pathlib.Path({record!r}).write_text(json.dumps({{"argv": argv, "state": sys.stdin.read()}}))
 sys.stderr.write("stub: no key on this machine\\n")
@@ -245,7 +246,8 @@ class JevTierTests(ReviewFixture):
         self.assertEqual(argv[2:4], ["--criteria", sd_jev._jev_criteria(
             ["skip", "cheap", "standard", "deep"])])
         self.assertEqual(argv[4:], ["--unsure-below", sd_jev.UNSURE_BELOW, "--state", "-",
-                                    "--state-format", "json", "--id", "sd-review-tier",
+                                    "--state-format", "json", "--caller", "sd-review",
+                                    "--id", "sd-review-tier", "--stage", sd_jev.STAGE,
                                     "--fallback", sd_jev.FALLBACK])
         self.assertEqual(json.loads(state), {
             "changed_paths": ["src.py"], "changed_paths_omitted": 0, "path_count": 1,
@@ -254,6 +256,20 @@ class JevTierTests(ReviewFixture):
         for private in (str(root), str(self.tmp), "privatename", "work", "Fixture",
                         "fixture@example.invalid", "value = 1"):
             self.assertNotIn(private, state + " ".join(argv), f"{private!r} left the machine")
+
+    def test_both_calls_name_themselves_for_the_judgment_ledger(self):
+        """sd:1253. Without `--caller` and `--stage` the judgment lands under
+        `unknown`, and without `--record` a declining gate leaves no row, so
+        the busiest Jev caller on the machine was the one the ledger missed."""
+
+        root = self.prepare()
+        for gate in (0, 3):
+            with self.subTest(gate=gate):
+                record = self.install_stub(gate=gate)
+                self.run_review(root)
+                sent = json.loads(pathlib.Path(str(record) + ".gate").read_text())
+                self.assertEqual(sent, ["enabled", sd_jev.STAGE, "--record",
+                                        "--caller", "sd-review"])
 
     def test_no_criterion_carries_a_separator_that_would_split_it(self):
         criteria = sd_jev._jev_criteria(sorted(sd_jev.TIER_CRITERIA))

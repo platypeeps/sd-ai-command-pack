@@ -252,6 +252,21 @@ class SharedReview:
             return self.state["empty_diff"]["base"]
         return passes[-1]["report"].get("authorship_base") or passes[0]["report"]["subject"]["base"]
 
+    def review_argv(self, base: str | None) -> list[str]:
+        """The sd-review command both stages run: `--explain` first, then the pass."""
+        argv = [sys.executable, str(self.runtime.bin_dir / "sd-review"), "--scope", "branch", "--challenge", "--json", "--database", str(self.database)]
+        requested = getattr(self.args, "provider", None)
+        if requested is not None:
+            argv += ["--provider", requested]
+        if getattr(self.args, "reuse_check", False):
+            argv.append("--reuse-check")
+        if getattr(self.args, "review_timeout", None):
+            # sd:1475. sd-review sizes its timing plan, and so this watchdog, from it.
+            argv += ["--timeout", str(self.args.review_timeout)]
+        if base:
+            argv += ["--base", base]
+        return argv
+
     def review(self, head: str) -> None:
         passes = self.history.native(self.state)
         if not passes and (base := empty_branch_base(self.root, head)):
@@ -278,14 +293,8 @@ class SharedReview:
         if moved:
             prior = self.history.aggregate(self.state)
         base = passes[-1]["head"] if passes and not (retry or additional or moved) else None
-        argv = [sys.executable, str(self.runtime.bin_dir / "sd-review"), "--scope", "branch", "--challenge", "--json", "--database", str(self.database)]
+        argv = self.review_argv(base)
         requested = getattr(self.args, "provider", None)
-        if requested is not None:
-            argv += ["--provider", requested]
-        if getattr(self.args, "reuse_check", False):
-            argv.append("--reuse-check")
-        if base:
-            argv += ["--base", base]
         passes.append({"head": head, "started_at": self.runtime.clock(), "base": base, "retry": retry,
                        "requested_provider": requested})
         if request:
@@ -321,6 +330,8 @@ class SharedReview:
             except Refusal:
                 self.save(review_preflight_error=self.preflight_diagnostic(planned))
                 raise
+            # What dispatch overwrites, so a released gate failure can put it back.
+            self.superseded = {key: self.state.get(key, ABSENT) for key in DISPATCH_FIELDS}
             self.save(passes=passes, phase="reviewing", head=head, binding=self.runtime.binding(self.root), review_preflight_error=None, review_clearance=None)
             stage = "execution"
             return self.runtime.process(self.root, argv + ["--expected-timing", digest(plan)], timeout=plan["execution_seconds"])
@@ -334,6 +345,41 @@ class SharedReview:
                           + ("no provider pass reserved; " if stage == "planning" else "reserved pass retained; ")
                           + "bounded diagnostics remain in the item ship receipt") from None
 
+    def release_gate_failure(self, report: dict, head: str, passes: list[dict]) -> None:
+        """Drop the pass a gate failure reserved, and refuse with the gate's words.
+
+        The reservation is removed rather than kept as an incomplete pass: it
+        reviewed nothing, so it has no findings to carry forward, and keeping
+        it charged the cap and made the next prepare demand `--retry-review`
+        for a review that never started. The gate's output stays in the
+        receipt under `review_preflight_error`, the field a failure before
+        dispatch already uses.
+
+        Removing the pass is not enough to undo the dispatch: `execute_review`
+        stored the current tool and policy binding before the gate ran. Left
+        in place, a re-review forced by a moved binding would, after its gate
+        failed, read as bound to the new policy, and the next prepare would
+        stop re-reviewing (found by the local review of sd:1475). Every field dispatch overwrote
+        goes back to what it was.
+        """
+        passes.pop()
+        check = report.get("check") or {}
+        detail = str(check.get("detail") or "")[-self.runtime.diagnostic_bytes:]
+        checks = gate_diagnostics(check, self.runtime.diagnostic_bytes)
+        for key, value in self.superseded.items():
+            if value is ABSENT:
+                self.state.pop(key, None)
+        self.save(passes=passes, **{key: value for key, value in self.superseded.items() if value is not ABSENT},
+                  review_preflight_error={"kind": "gate_failed", "stage": "check", "head": head,
+                                          "exit_code": check.get("exit_code"), "detail": detail, "checks": checks})
+        failed = next((c for c in checks if c["status"] == "fail"), {})
+        evidence = detail.strip() or (failed.get("stderr") or failed.get("stdout") or failed.get("reason") or "").strip()
+        raise Refusal(f"the repository gate failed before any reviewer was asked; no review pass was spent: "
+                      f"{evidence[-500:] or 'see the item ship receipt'}",
+                      code="gate_failed", boundary="runtime", state="retryable_failure",
+                      next_action="Fix the gate, or rerun prepare when the machine is less loaded "
+                                  "(--review-timeout raises the limit); the next prepare reviews normally.")
+
     def record_review(self, result: subprocess.CompletedProcess, head: str, passes: list[dict]) -> None:
         try:
             report = json.loads(result.stdout)
@@ -341,6 +387,8 @@ class SharedReview:
             raise Refusal("local review emitted no valid receipt; its reserved pass remains recorded") from None
         if not isinstance(report, dict):
             raise Refusal("local review emitted no valid receipt; its reserved pass remains recorded")
+        if unreviewed_gate_failure(report, result.returncode):
+            self.release_gate_failure(report, head, passes)
         passes[-1]["report"] = report
         passes[-1]["exit_code"] = result.returncode
         self.save(passes=passes, reviewed_head=head if result.returncode == 0 else None, phase="reviewed")
@@ -354,6 +402,43 @@ class SharedReview:
         self.check_review(head)
         if self.runtime.current_head(self.root) != head:
             raise Refusal("HEAD or checkout changed during local checks and review")
+
+
+#: The receipt fields `execute_review` overwrites when it dispatches a pass.
+DISPATCH_FIELDS = ("phase", "head", "binding", "review_clearance")
+ABSENT = object()
+
+
+def gate_diagnostics(check: dict, limit: int) -> list[dict]:
+    """sd:1484. What each gate check said, bounded, for a receipt that outlives the pass.
+
+    `check.detail` is sd-check's own stderr, which is empty when a test or a
+    lint fails: that output is in each check's `stdout` and `stderr`. Keeping
+    only `detail` left a receipt that said the gate failed and not why. At
+    most one record per name sd-check runs, each stream cut to its last
+    `limit` characters, where a failure summary ends.
+    """
+    records = check.get("checks")
+    if not isinstance(records, list):
+        return []
+    return [{"name": record.get("name"), "status": record.get("status"), "exit_code": record.get("exit_code"),
+             "reason": str(record.get("reason") or "")[-limit:],
+             "stdout": str(record.get("stdout") or "")[-limit:], "stderr": str(record.get("stderr") or "")[-limit:]}
+            for record in records[:len(sd_lib.CHECK_NAMES)] if isinstance(record, dict)]
+
+
+def unreviewed_gate_failure(report: dict, exit_code: int) -> bool:
+    """sd:1475. The repository gate failed and no reviewer was asked.
+
+    sd-review stops at the gate and returns before any provider dispatch, so
+    such a run verified nothing and cost nothing. Every clause has to hold: a
+    report that names an outcome, a reviewer or a completed review asked
+    someone, and that run keeps its pass as it always has.
+    """
+    return (exit_code != 0 and report.get("status") == "gate_failed"
+            and (report.get("check") or {}).get("status") == "fail"
+            and not report.get("outcomes") and not report.get("reviewed_by")
+            and not report.get("completed_reviews") and not report.get("findings"))
 
 
 def validate_review_readiness(planned: subprocess.CompletedProcess) -> None:

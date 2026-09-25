@@ -625,23 +625,15 @@ def subprocess_runner(
     timeout: int,
     input_text: str | None = None,
 ) -> Completed:
-    """The only place this file starts a process. Tests inject their own."""
+    """The only place this file starts a process. Tests inject their own.
 
+    It ends the process's whole group, so a check's own children go with it (sd:1482).
+    """
     try:
-        finished = subprocess.run(
-            list(argv),
-            cwd=str(cwd),
-            env=dict(env),
-            capture_output=True,
-            input=input_text,
-            stdin=subprocess.DEVNULL if input_text is None else None,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
+        finished = sd_lib.run_group(list(argv), cwd=cwd, env=dict(env), timeout=timeout, input_text=input_text)
     except FileNotFoundError:
         return Completed(127, "", f"{argv[0]}: not found on PATH", launched=False)
-    except subprocess.TimeoutExpired:
+    except sd_lib.GroupTimeout:
         return Completed(124, "", f"{argv[0]}: timed out after {timeout}s", launched=False)
     except OSError:
         return Completed(126, "", f"{argv[0]}: could not start", launched=False)
@@ -1514,9 +1506,8 @@ def gate_failed_line(check: Mapping[str, Any] | None) -> str:
 
 
 def run_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeout: int) -> dict[str, Any]:
-    """Step 1: the repository's own deterministic gate, through sd-check."""
-
-    argv = [sys.executable, str(pathlib.Path(_BIN) / "sd-check"), "--json"]
+    """Step 1: the repository's own gate, through sd-check, held to the planned phase budget (sd:1475)."""
+    argv = [sys.executable, str(pathlib.Path(_BIN) / "sd-check"), "--timeout", str(timeout), "--json"]
     result = runner(argv, env, root, timeout)
     try:
         payload = json.loads(result.stdout)
@@ -2299,7 +2290,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_TIMEOUT_SECONDS,
         metavar="SECONDS",
-        help=f"per-provider timeout (default: {DEFAULT_TIMEOUT_SECONDS})",
+        help=f"per-phase timeout: the repository gate, then each provider (default: {DEFAULT_TIMEOUT_SECONDS})",
     )
     return parser
 
