@@ -3712,6 +3712,34 @@ class DeclaredGapCase(unittest.TestCase):
         self.double.workflow_runs = []
         self.refuse("nothing validated", "ci_missing")
 
+    def test_a_dirty_head_with_no_checks_names_the_conflict_not_the_checks(self):
+        # sd:1403: an empty rollup on a DIRTY head is no slow queue; GitHub
+        # builds no merge ref and never dispatches the run the advice asks for.
+        self.declare()
+        self.green()
+        pull = next(iter(self.remote.pull_requests.values()))
+        pull.checks = []
+        self.double.workflow_runs = []
+        pull.mergeable, pull.merge_state_status = "CONFLICTING", "DIRTY"
+        with self.assertRaisesRegex(ship.Refusal, "conflicts with its base") as caught:
+            self.merge()
+        workflow = caught.exception.workflow
+        self.assertEqual(workflow["blocker"]["code"], "merge_conflict")
+        self.assertNotIn("Run the repository's checks", workflow["next_action"])
+        self.assertIn("resolve the conflict", workflow["next_action"])
+        self.assertEqual(self.puts(), 0)
+
+    def test_an_unknown_mergeability_is_one_retry(self):
+        self.declare()
+        self.green()
+        pull = next(iter(self.remote.pull_requests.values()))
+        pull.checks = []
+        pull.mergeable, pull.merge_state_status = "UNKNOWN", "UNKNOWN"
+        with self.assertRaisesRegex(ship.Refusal, "not finished computing mergeability") as caught:
+            self.merge()
+        self.assertEqual(caught.exception.workflow["state"], "retryable_failure")
+        self.assertEqual(self.puts(), 0)
+
     def test_only_the_advisory_workflow_ran_refuses_naming_tests(self):
         for spelling in ("tests.yml", "tests.yaml"):
             with self.subTest(spelling=spelling):

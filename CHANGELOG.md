@@ -273,6 +273,15 @@
 
 ### Fixed
 
+- **An empty check rollup on a conflicting head names the conflict (sd:1403).**
+  GitHub builds no merge ref for a DIRTY head and dispatches no
+  `pull_request` run, so zero checks there is not a slow queue. `sd-pr-state`
+  and `sd-status` now say the head conflicts and none will run, and say
+  "read again once" on UNKNOWN. `sd-ship merge` refuses a dirty pull request
+  as `merge_conflict` with a resolve-the-conflict next action, and an unknown
+  mergeability as a retryable `mergeability_pending`, instead of one generic
+  merge-rules sentence.
+
 - **Non-ASCII paths no longer slip past three path checks (sd:1440).**
   `core.quotePath` is on by default, so a newline-separated `--name-only`
   prints `docs/work/é.md` as `"docs/work/\303\251.md"`, and no prefix or

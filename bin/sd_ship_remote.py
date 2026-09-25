@@ -487,6 +487,14 @@ class GitHub:
             raise Refusal("pull-request head or default base moved after local review")
         if str(pull.get("head", {}).get("repo", {}).get("full_name", "")).lower() != self.repository:
             raise Refusal("pull request comes from a different repository")
+        if pull.get("mergeable_state") == "dirty":
+            # No merge ref, so no pull_request check will ever run (sd:1403).
+            raise Refusal("the pull request conflicts with its base, so GitHub builds no merge ref and runs no check",
+                          code="merge_conflict", boundary="ci",
+                          next_action="Merge the default branch into this branch, resolve the conflict, push, then retry.")
+        if pull.get("mergeable_state") == "unknown":
+            raise Refusal("GitHub has not finished computing mergeability", code="mergeability_pending",
+                          boundary="ci", state="retryable_failure", next_action="Wait a minute, then retry merge once.")
         if pull.get("mergeable") is not True or pull.get("mergeable_state") != "clean":
             raise Refusal("GitHub has not confirmed all required merge rules are satisfied")
         if self.commits_behind(base, head) != 0:
