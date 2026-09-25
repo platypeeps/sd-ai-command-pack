@@ -158,7 +158,7 @@ class ProviderSelection(unittest.TestCase):
         original = copy.deepcopy(reviewed.state["passes"])
         fixed_head = "c" * 40
         for choice in ("minimax", "baseten", None):
-            with self.subTest(choice=choice), patch("sd_ship_review.git", return_value=""):
+            with self.subTest(choice=choice), patch("sd_ship_review.is_ancestor", return_value=True):
                 review, process = self.context(choice, state=reviewed.state, head=fixed_head)
                 review.review(fixed_head)
                 self.assertEqual(review.state["passes"][:-1], original)
@@ -181,7 +181,7 @@ class ProviderSelection(unittest.TestCase):
             choice = "baseten" if index % 2 == 0 else "minimax"
             spent, _process = self.context(choice, state=spent.state, report_changes=incomplete)
             spent.args.retry_review = True
-            with patch("sd_ship_review.git", return_value=""), self.assertRaises(ship.Refusal):
+            with patch("sd_ship_review.is_ancestor", return_value=True), self.assertRaises(ship.Refusal):
                 spent.review(HEAD)
             selectors.append(choice)
         prefix = copy.deepcopy(spent.state["passes"])
@@ -196,7 +196,7 @@ class ProviderSelection(unittest.TestCase):
         self.assertEqual(refused.state["passes"], prefix)
         allowed, process = self.context("minimax", state=spent.state)
         allowed.args.additional_review_for, allowed.args.request_reason = HEAD, "Synthetic explicit additional request"
-        with patch("sd_ship_review.git", return_value=""):
+        with patch("sd_ship_review.is_ancestor", return_value=True):
             allowed.review(HEAD)
         self.assertEqual(allowed.state["passes"][:-1], prefix)
         self.assertEqual(allowed.state["passes"][-1]["additional_review_request"]["prior_history_digest"], ship.digest(prefix))
@@ -229,7 +229,7 @@ class ProviderSelection(unittest.TestCase):
         self.assertEqual(original[0]["execution_error"]["stage"], "execution")
         retry, _process = self.context("baseten", state=review.state)
         retry.args.retry_review = True
-        with patch("sd_ship_review.git", return_value=""):
+        with patch("sd_ship_review.is_ancestor", return_value=True):
             retry.review(HEAD)
         self.assertEqual(retry.state["passes"][:-1], original)
         self.assertEqual(retry.state["passes"][-1]["requested_provider"], "baseten")

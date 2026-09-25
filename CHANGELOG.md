@@ -273,6 +273,16 @@
 
 ### Fixed
 
+- **An orphaned reviewed head now refuses by name, not as `git failed` (sd:1348).**
+  `sd-ship prepare` requires every earlier reviewed head to stay an ancestor of
+  the offered head. `git merge-base --is-ancestor` answers by exit status and
+  prints nothing, so an amend or a rebase after a review surfaced as the bare
+  message `git failed`, code `command_failed`, marked retryable. The refusal now
+  names the reviewed head, the offered head and the branch. Its code is
+  `reviewed_head_orphaned`, state `operator_decision`, not retryable. Its next
+  action names the `git reset --soft <reviewed head>` remedy. The ancestry rule
+  itself is unchanged.
+
 - **Non-ASCII paths no longer slip past three path checks (sd:1440).**
   `core.quotePath` is on by default, so a newline-separated `--name-only`
   prints `docs/work/é.md` as `"docs/work/\303\251.md"`, and no prefix or
