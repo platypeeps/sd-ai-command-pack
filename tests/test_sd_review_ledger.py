@@ -161,6 +161,20 @@ class TheCostRows(LedgerFixture):
             sd_review.sd_registry.pick(registry, "paid", consent=consent, capped_bills=capped)
         self.assertEqual(str(caught.exception), f"paid is billed to paid: {capped['paid']}")
 
+    def test_at_the_cap_is_an_exact_compare_like_the_ledgers(self) -> None:
+        """sd:1492: `capped_bills` read `spent + MONEY_NOISE >= cap`, so a
+        bill 5e-10 under its cap read as at it while the ledger, which
+        compares exact decimals since system sd:1176, still had room. An
+        exact fill is at the cap; anything under it is not."""
+        self.seed()
+        registry = sd_review.sd_registry.read_file(self.registry_path)
+        self.spend(0.9999999995)
+        self.assertEqual(sd_review.capped_bills(registry, self.ledger()), {})
+        self.spend(0.00000000025)
+        self.assertEqual(sd_review.capped_bills(registry, self.ledger()), {})
+        self.spend(0.00000000025)  # the last of the room: 1.0 exactly, as a float sum too
+        self.assertEqual(list(sd_review.capped_bills(registry, self.ledger())), ["paid"])
+
     def test_a_bound_that_would_pass_the_cap_is_refused_at_reserve_and_falls_through(self) -> None:
         """Exposure under the cap, room below one bound: not in
         `capped_bills`, refused by the ledger inside `run_provider`, passed

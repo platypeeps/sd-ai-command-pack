@@ -4,6 +4,13 @@
 
 ### Changed
 
+- **`sd-review` says a bill is at its cap by an exact compare (sd:1492).**
+  `capped_bills` read `spent + sd_db.ledger.MONEY_NOISE >= cap`, so a bill a
+  fraction of a cent under its cap read as full while the ledger, exact since
+  system sd:1176, still had room; and a library without the name failed every
+  review. Both sides are now compared as the decimals their `repr` spells, and
+  the pack reads no ledger constant.
+
 - **A machine `sd.copilot_review` of `never` wins over the repository.** The
   repository's `.github/sd-review.json` `copilot_review.automatic_deep`
   overrode every machine word, so a repository's `true` bought a paid Copilot

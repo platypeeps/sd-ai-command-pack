@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import decimal
 import hashlib
 import json
 import os
@@ -1177,7 +1178,10 @@ def capped_bills(registry: sd_registry.Registry, ledger: Ledger, *, read_only: b
             if bill.cap_usd_month is None:
                 continue
             spent = rows.exposure(connection, bill=name, month=month)
-            if spent + rows.MONEY_NOISE >= bill.cap_usd_month:
+            # Exact, as the ledger compares since system sd:1176: each side
+            # is the decimal its repr spells, so a bill a fraction of a cent
+            # under its cap still has room, and no library constant is read.
+            if decimal.Decimal(repr(spent)) >= decimal.Decimal(repr(float(bill.cap_usd_month))):
                 lines[name] = f"${spent:.2f} of its ${bill.cap_usd_month:.2f} cap for {month} is spent or held"
     return lines
 
