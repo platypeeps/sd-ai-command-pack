@@ -133,6 +133,7 @@ class NeverPostsTests(unittest.TestCase):
             "__future__",
             "argparse",
             "contextlib",  # `closing` around the read-only receipt connection.
+            "decimal",  # The at-cap notice compares money exactly, as the ledger does.
             "hashlib",  # Binds fix verification to the exact preceding report.
             "json",
             "os",
