@@ -326,6 +326,22 @@ def commit_paths(root: pathlib.Path, args) -> None:
     run(root, ["git", "--literal-pathspecs", "commit", "--only", "--file=-", "--", *paths], input=message)
 
 
+def squash_allowed(base: str, protection: dict) -> None:
+    """Refuse when the base ruleset forbids the one method `merge` uses.
+
+    GitHub would refuse the PUT, or a bypass would land what the branch
+    forbids (sd:1379).
+    """
+    methods = protection.get("allowed_merge_methods")
+    if methods is not None and "squash" not in methods:
+        raise Refusal(f"the {base} ruleset allows only {', '.join(methods) or 'no'} merge methods and sd-ship "
+                      f"merges by squash; allow squash in the ruleset or merge this pull request by hand")
+
+
+#: The words that mark a merge warning as the Copilot ancestor clearance.
+ANCESTOR_CLEARANCE = "an ancestor of the merge head"
+
+
 class Ship(SharedReview):
     #: What the last `merge_ownership` read found: the authority record when
     #: the repository row overrode co-ownership, `None` when ownership alone
@@ -344,6 +360,11 @@ class Ship(SharedReview):
     #: `require_copilot_clearance` so the relaxation reaches the merge receipt
     #: as a warning rather than passing in silence.
     copilot_ancestor_review: str | None = None
+    #: The warning that ancestor clearance earns, held until dispatch. It says
+    #: the gate cleared a merge, so the step that sends the merge writes it;
+    #: written when the gate cleared, it outlived every later refusal and each
+    #: retry appended another copy (sd:1373).
+    copilot_clearance_note: str | None = None
 
     def __init__(self, root: pathlib.Path, connection, database: pathlib.Path, args):
         from sd_db import ship
@@ -905,10 +926,11 @@ class Ship(SharedReview):
         if material is None:
             return
         reviews, comments = material
+        self.copilot_clearance_note = None
         if self.copilot_ancestor_review:
-            self.save(warnings=list(self.state.get("warnings") or []) + [
-                f"Copilot reviewed {self.copilot_ancestor_review}, an ancestor of the merge head "
-                f"{head}; the commits since it touch no shipped surface, so the gate cleared"])
+            self.copilot_clearance_note = (
+                f"Copilot reviewed {self.copilot_ancestor_review}, {ANCESTOR_CLEARANCE} "
+                f"{head}; the commits since it touch no shipped surface, so the gate cleared")
         self.record_copilot_completion(entries, reviews)
         try:
             ack = sd_lib.sibling("sd_review_ack_ship_gate", "sd-review-ack")
@@ -930,6 +952,17 @@ class Ship(SharedReview):
                 code="review_findings_open", boundary="review", state="operator_decision",
                 next_action=f"Run sd-review-ack --pr {number}, disposition each finding, then retry merge.",
             )
+
+    def dispatch_warnings(self) -> list[str]:
+        """The receipt's warnings with this attempt's ancestor note, if any.
+
+        Replaced, never appended: this attempt's reading is the only one a
+        merge going out can claim (sd:1373).
+        """
+        warnings = [warning for warning in self.state.get("warnings") or [] if ANCESTOR_CLEARANCE not in warning]
+        if self.copilot_clearance_note:
+            warnings.append(self.copilot_clearance_note)
+        return warnings
 
     def record_copilot_completion(self, entries: list[dict], reviews: list[dict]) -> None:
         completed_heads = {
@@ -1363,6 +1396,7 @@ class Ship(SharedReview):
         if base != self.state["base"] or metadata.get("allow_squash_merge") is not True:
             raise Refusal("default branch changed or squash merging is disabled")
         protection = self.api.gate(base, head)  # the object, or the declared gap at this head (sd:1110)
+        squash_allowed(base, protection)
         observed = self.api.pull(observed["number"])
         self.api.ready(observed, head, base, protection)
         self.abandon_copilot_review(observed["number"], head)
@@ -1411,7 +1445,8 @@ class Ship(SharedReview):
         # passing `None` retracts what an earlier attempt recorded. An
         # ownership-only merge therefore cannot inherit a claim from a merge
         # that never happened (sd:1347).
-        self.save(phase="merge_dispatch", merge_message=body, row_authorized_merge=self.row_authority)
+        self.save(phase="merge_dispatch", merge_message=body, row_authorized_merge=self.row_authority,
+                  warnings=self.dispatch_warnings())
         try:
             self.api.api(f"{self.api.prefix}/pulls/{observed['number']}/merge", method="PUT",
                          body={"sha": head, "merge_method": "squash", "commit_title": f"{self.state['title']} (#{observed['number']})",

@@ -625,23 +625,15 @@ def subprocess_runner(
     timeout: int,
     input_text: str | None = None,
 ) -> Completed:
-    """The only place this file starts a process. Tests inject their own."""
+    """The only place this file starts a process. Tests inject their own.
 
+    It ends the process's whole group, so a check's own children go with it (sd:1482).
+    """
     try:
-        finished = subprocess.run(
-            list(argv),
-            cwd=str(cwd),
-            env=dict(env),
-            capture_output=True,
-            input=input_text,
-            stdin=subprocess.DEVNULL if input_text is None else None,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
+        finished = sd_lib.run_group(list(argv), cwd=cwd, env=dict(env), timeout=timeout, input_text=input_text)
     except FileNotFoundError:
         return Completed(127, "", f"{argv[0]}: not found on PATH", launched=False)
-    except subprocess.TimeoutExpired:
+    except sd_lib.GroupTimeout:
         return Completed(124, "", f"{argv[0]}: timed out after {timeout}s", launched=False)
     except OSError:
         return Completed(126, "", f"{argv[0]}: could not start", launched=False)
