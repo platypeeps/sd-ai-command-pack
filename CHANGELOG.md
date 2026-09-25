@@ -31,6 +31,26 @@
   `continue-on-error`, so a removed library name shows before the pin moves
   (sd:1542). The `MONEY_NOISE` removal broke every local gate with no CI signal.
 
+- **`sd fleet stamp` lays the auto-merge fleet's shared files (sd:1326).**
+  Each `runner_merge=auto` repository needs the same four things before the
+  runner can merge it: the route workflow at the current pin, a check workflow,
+  the `unprotected` declaration and the `CLAUDE.local.md` block. The verb
+  renders them from the existing writers (`sd_setup_github`, `sd_setup_guard`,
+  `sd_install.local_block_text`) and diffs them against each repository's
+  `origin/HEAD`. `--dry-run` prints the diffs and writes nothing. A write
+  stamps only the checkout it runs in (R10-D6), puts tracked files only on a
+  feature branch, and a second run changes nothing. The check workflow runs `git diff --check` and
+  is laid only where no other workflow runs on `pull_request`. The remote is
+  asked the three ownership questions first: a fork or an unadministered
+  repository gets no tracked file, and only a repository nobody else may push
+  to gets the `unprotected` entry, so employer repositories keep theirs.
+  The stamp is additive: an `sd-status.json` that declares any gap is left as
+  written, the block refresh only adds template lines inside the markers, and a
+  repository that forbids CI (an `sd-status.json` reason saying "forbids CI",
+  or a `No CI` / `Do not add CI` rule in `CLAUDE.md`) gets no workflow. The
+  `CLAUDE.local.md` template gains the parallel-work line (sd:1342) and the
+  `docs/dashboard/` rule.
+
 - **`sd-check` runs a Python repo's tests with its `.venv` interpreter.** The
   `pyproject.toml` fallback always named `python3 -m pytest`, so a repo whose
   test dependencies live in `.venv` failed before any test ran (sd:1309). It
