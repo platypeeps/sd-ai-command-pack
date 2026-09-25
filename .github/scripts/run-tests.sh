@@ -374,6 +374,20 @@ watchdog() {
 # passed through xargs, because BSD xargs caps a `-I` replacement at 255 bytes.
 # An empty ids file is refused: `python -m unittest` with no names discovers and
 # runs the whole tree.
+# Which tree this run tested, and which run this is (sd:1407). Without it a
+# stale run's log reads exactly like a current one -- Python re-reads a source
+# file to format a traceback, so the quoted lines are the edited ones even when
+# the loaded module was not -- and two runs redirected into one file read as
+# one. The footer after the shard logs names the same pid and the tree as it
+# stood at the end, so an edit made mid-run shows as two different lines.
+tree_state() {
+  local sha dirty
+  sha="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null)" || sha="unknown"
+  dirty="$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
+  printf 'tree=%s dirty=%s' "$sha" "${dirty:-unknown}"
+}
+printf 'test runner: %s pid=%s started=%s\n' "$(tree_state)" "$$" \
+  "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$run_log" || exit 1
 printf 'test runner: workers=%s shards=%s\n' "$TEST_WORKERS" "${#shards[@]}" >> "$run_log" || exit 1
 run_status=0
 set -m
@@ -384,8 +398,12 @@ xargs -P "$TEST_WORKERS" -I {} bash -c '
     exit 1
   }
   # Unquoted on purpose: one name per line, and a unittest name has no blanks.
+  # The start line labels the output below it: unittest prints its `Ran` line
+  # last, so with only the end line a `Ran` sat above its own label and read
+  # as the shard before it (sd:1407).
   started=$SECONDS
-  "$1" -m coverage run --parallel-mode -m unittest $ids > "$2/$3.log" 2>&1
+  printf "shard %s: start\n" "$3" > "$2/$3.log" || exit 1
+  "$1" -m coverage run --parallel-mode -m unittest $ids >> "$2/$3.log" 2>&1
   status=$?
   printf "\nshard %s: %ss exit=%s\n" "$3" "$((SECONDS - started))" "$status" >> "$2/$3.log" || exit 1
   exit "$status"
@@ -417,6 +435,9 @@ for shard in "${shards[@]}"; do
     cat "$work_dir/$shard.log" >> "$run_log" || assembly_status=1
   fi
 done
+
+printf 'test runner: finished %s pid=%s ended=%s\n' "$(tree_state)" "$$" \
+  "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$run_log" || assembly_status=1
 
 if [ "$assembly_status" -ne 0 ]; then
   printf '%s\n' \

@@ -4,6 +4,14 @@
 
 ### Changed
 
+- **The test log says which tree and which run it reports on.**
+  `run-tests.sh` writes `test runner: tree=<sha> dirty=<n> pid=<pid>
+  started=<time>` before the shard output and a matching `finished` line after
+  it. Each shard log now opens with `shard <name>: start`, so a `Ran` line sits
+  inside its own shard's labels instead of above them. Before this, a stale run
+  read exactly like a current one, and a positional parse credited each `Ran`
+  line to the shard before it (sd:1407).
+
 - **A machine `sd.copilot_review` of `never` wins over the repository.** The
   repository's `.github/sd-review.json` `copilot_review.automatic_deep`
   overrode every machine word, so a repository's `true` bought a paid Copilot

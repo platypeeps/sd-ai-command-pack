@@ -195,6 +195,41 @@ class SplitModuleFixtures(unittest.TestCase):
                          {f"tests.{name}.part{part}of2" for name in SPLIT_NAMES for part in (1, 2)})
         self.assertEqual([status for _, _, status in summaries], ["0"] * 6)
 
+    def test_the_log_names_its_tree_and_each_result_its_shard(self) -> None:
+        """sd:1407. A log that does not say which tree it ran against reads
+        the same stale as current, and a `Ran` line printed before its shard's
+        only label is attributed to the shard above it by any positional
+        parse. The header names the tree, the footer closes the same run, and
+        every `Ran` line sits inside its own shard's start and end lines."""
+        git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+        subprocess.run(git + ["init", "-q"], cwd=self.root, check=True)
+        subprocess.run(git + ["add", "-A"], cwd=self.root, check=True)
+        subprocess.run(git + ["commit", "-qm", "fixture"], cwd=self.root, check=True)
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.root, check=True,
+                              capture_output=True, text=True).stdout.strip()
+        result = self.run_harness()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        lines = result.stdout.splitlines()
+        header = re.fullmatch(r"test runner: tree=(\S+) dirty=(\d+) pid=(\d+) started=\S+",
+                              lines[0])
+        self.assertIsNotNone(header, lines[:2])
+        self.assertEqual(header.group(1), head)
+        # The run wrote the three test modules after the commit, so it saw them dirty.
+        self.assertNotEqual(header.group(2), "0")
+        footer = re.fullmatch(r"test runner: finished tree=(\S+) dirty=\d+ pid=(\d+) ended=\S+",
+                              lines[-1])
+        self.assertIsNotNone(footer, lines[-2:])
+        self.assertEqual((footer.group(1), footer.group(2)), (head, header.group(3)))
+        current = None
+        for line in lines:
+            if match := re.fullmatch(r"shard (\S+): start", line):
+                current = match.group(1)
+            elif match := re.fullmatch(r"shard (\S+): \d+s exit=\d+", line):
+                self.assertEqual(match.group(1), current, line)
+                current = None
+            elif line.startswith("Ran "):
+                self.assertIsNotNone(current, f"{line!r} sits outside any shard")
+
     def test_shard_timing_does_not_hide_a_failed_test(self) -> None:
         failing = PLAIN.replace("self.assertTrue(self.ready)", "self.assertFalse(self.ready)")
         result = self.run_harness(test_sd_ship=failing)
