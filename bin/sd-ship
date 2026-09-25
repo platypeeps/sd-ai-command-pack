@@ -1325,10 +1325,12 @@ class Ship(SharedReview):
             raise Refusal("ownership or branch protection changed before merge")
         # Under a protection object, `strict` kept the branch up to date and
         # GitHub refused a stale merge server-side. The declared gap has no
-        # such backstop, so the freshness `ready` read is read again here:
+        # such backstop, and neither has an accepted `strict` gap (sd:1451),
+        # so the freshness `ready` read is read again here:
         # another lane on this account can advance the base between the two,
         # and the merge would land against a base nobody validated (sd:1110).
-        if "declared_gap" in protection and self.api.commits_behind(base, head) != 0:
+        unstrict = any(gap.get("id") == "strict" for gap in protection.get("accepted_gaps") or [])
+        if ("declared_gap" in protection or unstrict) and self.api.commits_behind(base, head) != 0:
             raise Refusal("the default branch advanced after the readiness check; rebase and re-review",
                           code="base_moved", boundary="ci", state="retryable_failure",
                           next_action="Update the branch onto the current default branch, then retry.")
