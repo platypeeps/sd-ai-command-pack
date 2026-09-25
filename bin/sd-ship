@@ -326,6 +326,18 @@ def commit_paths(root: pathlib.Path, args) -> None:
     run(root, ["git", "--literal-pathspecs", "commit", "--only", "--file=-", "--", *paths], input=message)
 
 
+def squash_allowed(base: str, protection: dict) -> None:
+    """Refuse when the base ruleset forbids the one method `merge` uses.
+
+    GitHub would refuse the PUT, or a bypass would land what the branch
+    forbids (sd:1379).
+    """
+    methods = protection.get("allowed_merge_methods")
+    if methods is not None and "squash" not in methods:
+        raise Refusal(f"the {base} ruleset allows only {', '.join(methods) or 'no'} merge methods and sd-ship "
+                      f"merges by squash; allow squash in the ruleset or merge this pull request by hand")
+
+
 #: The words that mark a merge warning as the Copilot ancestor clearance.
 ANCESTOR_CLEARANCE = "an ancestor of the merge head"
 
@@ -986,7 +998,10 @@ class Ship(SharedReview):
         # an operator's checkout implicitly to make a check pass.
         git(self.root, "fetch", "--no-tags", "origin", f"refs/heads/{base}:refs/remotes/origin/{base}")
         git(self.root, "symbolic-ref", "refs/remotes/origin/HEAD", f"refs/remotes/origin/{base}")
-        title = self.args.title or self.state.get("title") or git(self.root, "show", "-s", "--format=%s", head)
+        # A merge-forward's subject names a branch operation, not the change;
+        # the newest commit the branch adds that is not a merge does (sd:1377).
+        title = (self.args.title or self.state.get("title")
+                 or git(self.root, "log", "-1", "--no-merges", "--format=%s", f"refs/remotes/origin/{base}..{head}"))
         if not title or re.match(r"(?i)wip\b", title):
             raise Refusal("provide a final --title; wip titles never reach the default branch")
         body, deliver, claim, local_work = self.publication_claim()
@@ -1384,6 +1399,7 @@ class Ship(SharedReview):
         if base != self.state["base"] or metadata.get("allow_squash_merge") is not True:
             raise Refusal("default branch changed or squash merging is disabled")
         protection = self.api.gate(base, head)  # the object, or the declared gap at this head (sd:1110)
+        squash_allowed(base, protection)
         observed = self.api.pull(observed["number"])
         self.api.ready(observed, head, base, protection)
         self.abandon_copilot_review(observed["number"], head)

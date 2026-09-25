@@ -24,6 +24,13 @@
   `CLAUDE.local.md` template gains the parallel-work line (sd:1342) and the
   `docs/dashboard/` rule.
 
+- **`sd-check` runs a Python repo's tests with its `.venv` interpreter.** The
+  `pyproject.toml` fallback always named `python3 -m pytest`, so a repo whose
+  test dependencies live in `.venv` failed before any test ran (sd:1309). It
+  now names `.venv/bin/python` (or `.venv/Scripts/python.exe`) when that file
+  is an executable, and keeps `python3` when neither is or when the caller
+  has activated an environment (`VIRTUAL_ENV` or `CONDA_PREFIX` is set).
+
 - **`sd-review`'s Jev tier reading is metered.** Both `jev` calls now name
   the caller `sd-review` and the stage `JEV_SD_REVIEW`, and the `enabled` gate
   passes `--record`. Before this, a judgment landed in the judgment ledger under
@@ -309,6 +316,39 @@
   action this tool is allowed to take.
 
 ### Fixed
+
+- **A merge-forward before the first `sd-ship prepare` no longer becomes the
+  pull request title (sd:1377).** With no `--title` and no stored title,
+  prepare took HEAD's subject. After the merge-forward sd-ship demands, that
+  was "Merge origin/main into <branch>". It was stored, preferred on every
+  later run, and landed on main as `18d42c56` for sd:1347. The fallback now
+  takes the newest commit the branch adds over the base that is not a merge.
+  A branch that adds only merges gets the existing "provide a final --title"
+  refusal.
+
+- **`sd-review`'s capped-exposure report works with the exact-money ledger.**
+  System #579 (sd:1176) removed `sd_db.ledger.MONEY_NOISE`, and the report
+  still added it to the month's spend, so every capped check raised
+  `AttributeError` against a library installed from system `main`. The
+  report now compares the spend with the cap directly, which reads the same
+  under the old and the new library.
+
+- **The hash-pinned requirements resolve for Python 3.13, the project floor
+  (sd:1391).** `requirements-dev.txt` and `requirements-security.txt` were
+  still compiled with `--python-version 3.10` after `requires-python` rose to
+  3.13. A lint or audit release that needs 3.11 or later could never be
+  pinned, and the gates would stay green on an older analyzer. Both files are
+  recompiled at 3.13; no pinned version moved, and only the 3.10-only `tomli`
+  and `stevedore` entries dropped out. `tests/test_requirements_target.py`
+  fails when a file's compile header names another version than the floor.
+
+- **A ruleset that forbids squash stops `sd-ship merge` before the dispatch
+  (sd:1379).** `synthesize` dropped the `pull_request` rule's
+  `allowed_merge_methods`, so sd-ship squash-merged into a ruleset that
+  allowed only merge or rebase and learned of the refusal from GitHub. The
+  synthesized protection now carries the intersection of the methods every
+  gating rule allows, and `combine` keeps it. `merge` refuses with the allowed
+  methods named when squash is not among them.
 
 - **The no-item adjudication tests no longer read the shared library
   (sd:1459).** `adjudicator_binding` hashes the installed `sd_db/ship.py` on

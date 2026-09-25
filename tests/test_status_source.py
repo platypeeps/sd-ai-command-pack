@@ -955,6 +955,93 @@ class RuleTwoReadsTheRow(Fixture):
         )
 
 
+class RuleTwoComparesTheBranchLine(Fixture):
+    """sd:1476. A `branch:` line that disagrees with the row is named.
+
+    The row's `branch` column is what `sd runner prepare --branch` maintains,
+    and the frontmatter line is a second copy nothing reconciled. Many items
+    still carry `branch: main`, so this is a note and never a failure: a lint
+    that turned every such item red would be switched off, not read.
+    """
+
+    def notes(self) -> tuple[list[str], list[str]]:
+        report = lint.run(self.root, "docs/work", "docs/spec", "docs/decisions", None)
+        found = [n for n in report.notes if n.startswith("rule 2 branch line")]
+        return found, report.failures
+
+    def test_a_line_naming_another_branch_is_named(self) -> None:
+        self.marker("row")
+        self.write(prd(None, branch="main"))
+        self.seed("in_progress", branch="feat/the-thing")
+        found, failures = self.notes()
+        named = [n for n in found if ITEM in n]
+        self.assertEqual(len(named), 1, found)
+        self.assertIn("'main'", named[0])
+        self.assertIn("'feat/the-thing'", named[0])
+        self.assertIn("rule 2 branch line: 1 of 1 active item(s) with a branch: line "
+                      "disagree with the row; advisory, no failure", found)
+        self.assertEqual([f for f in failures if "branch" in f], [])
+
+    def test_a_line_where_the_row_names_no_branch_is_named(self) -> None:
+        self.marker("row")
+        self.write(prd(None, branch="main"))
+        self.seed("planning", branch=None)
+        found, _ = self.notes()
+        named = [n for n in found if ITEM in n]
+        self.assertEqual(len(named), 1, found)
+        self.assertIn("the row names no branch", named[0])
+
+    def test_a_line_that_agrees_is_not_named(self) -> None:
+        self.marker("row")
+        self.write(prd(None, branch="feat/the-thing"))
+        self.seed("in_progress", branch="feat/the-thing")
+        found, _ = self.notes()
+        self.assertEqual([n for n in found if ITEM in n], [])
+        self.assertIn("rule 2 branch line: 0 of 1 active item(s) with a branch: line "
+                      "disagree with the row; advisory, no failure", found)
+
+    def test_an_item_with_no_line_is_not_compared(self) -> None:
+        self.marker("row")
+        self.write(prd(None))
+        self.seed("in_progress", branch="feat/the-thing")
+        found, _ = self.notes()
+        self.assertIn("rule 2 branch line: 0 of 0 active item(s) with a branch: line "
+                      "disagree with the row; advisory, no failure", found)
+
+    def test_an_archived_line_is_history_and_not_compared(self) -> None:
+        self.marker("row")
+        self.write(prd(None))
+        self.seed("in_progress", branch="feat/the-thing")
+        archived = self.work / "archive" / "2026-08" / OTHER
+        archived.mkdir(parents=True)
+        (archived / "prd.md").write_text(prd("done", branch="main"), encoding="utf-8")
+        self.seed("done", name=OTHER, branch="feat/other")
+        found, _ = self.notes()
+        self.assertEqual([n for n in found if OTHER in n], [])
+
+    def test_a_checkout_under_a_directory_named_archive_is_still_compared(self) -> None:
+        # Review of #1177: only `archive/` below the work root is history. A
+        # checkout at `/archive/repo` skipped every item, `0 of 0`, silently.
+        moved = self.tmp / "archive" / "repo"
+        moved.parent.mkdir()
+        self.root.rename(moved)
+        self.root, self.work = moved, moved / "docs" / "work"
+        self.item = self.work / ITEM
+        self.marker("row")
+        self.write(prd(None, branch="main"))
+        self.seed("in_progress", branch="feat/the-thing")
+        found, _ = self.notes()
+        self.assertEqual(len([n for n in found if ITEM in n]), 1, found)
+        self.assertIn("rule 2 branch line: 1 of 1 active item(s) with a branch: line "
+                      "disagree with the row; advisory, no failure", found)
+
+    def test_without_the_row_nothing_is_compared_and_it_says_so(self) -> None:
+        self.write(prd("in_progress", branch="main"))
+        found, _ = self.notes()
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("not compared", found[0])
+
+
 class ATaskKeyedFolder(Fixture):
     """sd:994. A folder written for a task or followup row names it.
 
