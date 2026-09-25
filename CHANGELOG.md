@@ -141,6 +141,16 @@
 
 ### Added
 
+- **`sd task add` and `sd task edit` take `--recur` and `--recur-anchor`.**
+  The recurrence columns and the completion logic landed in `sd_db` with
+  sd:1099, but no CLI flag reached them (sd:1428). The flags pass the rule and
+  its anchor through unchecked, and `sd_db` refuses a bad rule, a bad anchor,
+  a missing due date or a kind that cannot recur by name. `sd task edit
+  --clear-recur` stops a series. `sd task status ... done` on a recurring task
+  prints the next occurrence and its due date, or says the recurrence ended
+  and why; `--json` already carried `next_occurrence` and
+  `next_occurrence_reason`. A row that recurs prints its rule under its line.
+
 - **`opencode` reviews, through a new `opencode-json` reader (sd:1329).**
   The shipped registry gains an `opencode` entry third on the reviewer
   order, after `codex` and `claude`. `opencode run -m provider/model`
