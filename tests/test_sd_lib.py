@@ -428,6 +428,28 @@ class EntrypointTests(Fixture):
                 self.assertEqual(sd_lib.entrypoints(root), commands)
                 self.assertTrue(detection.reason)
 
+    def test_pyproject_prefers_the_repo_venv_interpreter(self) -> None:
+        # sd:1309: python3 on PATH is the one interpreter guaranteed not to
+        # hold the repo's dependencies when they live in .venv.
+        for layout in (("bin", "python"), ("Scripts", "python.exe")):
+            with self.subTest(layout[0]):
+                root = self.repo_with({"pyproject.toml": "[project]\nname = 'x'\n"})
+                interpreter = root / ".venv" / layout[0] / layout[1]
+                interpreter.parent.mkdir(parents=True)
+                interpreter.write_text("", encoding="utf-8")
+                interpreter.chmod(0o755)
+                detection = sd_lib.detect_entrypoints(root)
+                expected = str(pathlib.PurePosixPath(".venv", *layout))
+                self.assertEqual(detection.commands, {"test": [expected, "-m", "pytest"]})
+                self.assertIn(expected, detection.reason)
+
+    def test_pyproject_ignores_a_venv_without_a_runnable_interpreter(self) -> None:
+        root = self.repo_with({"pyproject.toml": "[project]\nname = 'x'\n", ".venv/pyvenv.cfg": ""})
+        (root / ".venv" / "bin").mkdir()
+        (root / ".venv" / "bin" / "python").symlink_to(root / "missing")
+        detection = sd_lib.detect_entrypoints(root)
+        self.assertEqual(detection.commands, {"test": ["python3", "-m", "pytest"]})
+
     def test_probe_order_stops_at_the_first_hit(self) -> None:
         root = self.repo_with(
             {

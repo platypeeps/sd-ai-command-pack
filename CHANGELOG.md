@@ -4,6 +4,12 @@
 
 ### Changed
 
+- **`sd-check` runs a Python repo's tests with its `.venv` interpreter.** The
+  `pyproject.toml` fallback always named `python3 -m pytest`, so a repo whose
+  test dependencies live in `.venv` failed before any test ran (sd:1309). It
+  now names `.venv/bin/python` (or `.venv/Scripts/python.exe`) when that file
+  is an executable, and keeps `python3` only when neither is.
+
 - **A machine `sd.copilot_review` of `never` wins over the repository.** The
   repository's `.github/sd-review.json` `copilot_review.automatic_deep`
   overrode every machine word, so a repository's `true` bought a paid Copilot
