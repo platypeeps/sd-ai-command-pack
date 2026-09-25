@@ -620,19 +620,28 @@ class RowActivity(unittest.TestCase):
         self.assertEqual(self.read(), stamp)
 
     def test_a_note_is_newer_than_the_row_it_was_written_against(self) -> None:
-        """The whole point: the note moves the answer and `updated_at` does not."""
-        before = self.connection.execute(
-            "SELECT updated_at FROM item WHERE id = ?", (self.item,)
-        ).fetchone()["updated_at"]
+        """The whole point: the note moves the answer and `updated_at` does not.
+
+        The row and its `opened as` note are backdated first, so the decision
+        note is strictly newer on every run. Read in the same second, all three
+        stamps were equal and the test proved nothing; read across a second
+        boundary, `fetchone()` returned the `opened as` note and the test
+        failed on a correct answer (sd:1402).
+        """
+        before = "2026-01-01T00:00:00+00:00"
+        with self.connection:
+            self.connection.execute("UPDATE item SET updated_at = ? WHERE id = ?", (before, self.item))
+            self.connection.execute("UPDATE note SET timestamp = ? WHERE item = ?", (before, self.item))
         sd_db.add_note(self.connection, self.item, "decision", "triaged live")
         note = self.connection.execute(
-            "SELECT timestamp FROM note WHERE item = ?", (self.item,)
+            "SELECT timestamp FROM note WHERE item = ? AND kind = 'decision'", (self.item,)
         ).fetchone()["timestamp"]
         after = self.connection.execute(
             "SELECT updated_at FROM item WHERE id = ?", (self.item,)
         ).fetchone()["updated_at"]
 
         self.assertEqual(after, before, "add_note is not supposed to move the row")
+        self.assertGreater(note, before)
         self.assertEqual(self.read(), note)
 
     def test_an_item_the_database_does_not_hold_answers_empty(self) -> None:
