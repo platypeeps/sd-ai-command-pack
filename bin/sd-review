@@ -1177,7 +1177,7 @@ def capped_bills(registry: sd_registry.Registry, ledger: Ledger, *, read_only: b
             if bill.cap_usd_month is None:
                 continue
             spent = rows.exposure(connection, bill=name, month=month)
-            if spent + rows.MONEY_NOISE >= bill.cap_usd_month:
+            if spent >= bill.cap_usd_month:
                 lines[name] = f"${spent:.2f} of its ${bill.cap_usd_month:.2f} cap for {month} is spent or held"
     return lines
 

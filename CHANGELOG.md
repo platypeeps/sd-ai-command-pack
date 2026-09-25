@@ -297,6 +297,13 @@
 
 ### Fixed
 
+- **`sd-review`'s capped-exposure report works with the exact-money ledger.**
+  System #579 (sd:1176) removed `sd_db.ledger.MONEY_NOISE`, and the report
+  still added it to the month's spend, so every capped check raised
+  `AttributeError` against a library installed from system `main`. The
+  report now compares the spend with the cap directly, which reads the same
+  under the old and the new library.
+
 - **The hash-pinned requirements resolve for Python 3.13, the project floor
   (sd:1391).** `requirements-dev.txt` and `requirements-security.txt` were
   still compiled with `--python-version 3.10` after `requires-python` rose to
