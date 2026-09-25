@@ -51,7 +51,7 @@ somebody deliberately wrote under `docs/work/`.
 | Scope line | Paths that demand it | Why |
 |---|---|---|
 | `CI/review scope:` | `.github/**`, `actions/**`, `Makefile` | What CI runs and what a reviewer reads: the workflows, the scripts they call, the review routing policy, this file and the template, the composite actions a consumer's workflow runs, and the local gate CI mirrors. |
-| `Automation scope:` | `bin/sd_setup_github.py`, `bin/sd_setup_guard.py` | What writes the framework's own automation into another repository: the routing workflow and the Dependabot guard `sd-review setup-github` installs. |
+| `Automation scope:` | `bin/sd_setup_github.py`, `bin/sd_setup_guard.py`, `bin/sd_fleet.py` | What writes the framework's own automation into another repository: the routing workflow and the Dependabot guard `sd-review setup-github` installs, and the check workflow and declaration `sd fleet stamp` adds. |
 
 `Tooling/generated scope:` was the third heading, for copied payload. Nothing
 here is a copy of anything, so no path demands it and the heading is retired.
