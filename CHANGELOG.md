@@ -8,7 +8,8 @@
   `pyproject.toml` fallback always named `python3 -m pytest`, so a repo whose
   test dependencies live in `.venv` failed before any test ran (sd:1309). It
   now names `.venv/bin/python` (or `.venv/Scripts/python.exe`) when that file
-  is an executable, and keeps `python3` only when neither is.
+  is an executable, and keeps `python3` when neither is or when the caller
+  has activated an environment (`VIRTUAL_ENV` is set).
 
 - **A machine `sd.copilot_review` of `never` wins over the repository.** The
   repository's `.github/sd-review.json` `copilot_review.automatic_deep`

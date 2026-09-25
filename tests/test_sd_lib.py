@@ -438,16 +438,32 @@ class EntrypointTests(Fixture):
                 interpreter.parent.mkdir(parents=True)
                 interpreter.write_text("", encoding="utf-8")
                 interpreter.chmod(0o755)
-                detection = sd_lib.detect_entrypoints(root)
+                with unittest.mock.patch.dict(os.environ):
+                    os.environ.pop("VIRTUAL_ENV", None)
+                    detection = sd_lib.detect_entrypoints(root)
                 expected = str(pathlib.PurePosixPath(".venv", *layout))
                 self.assertEqual(detection.commands, {"test": [expected, "-m", "pytest"]})
                 self.assertIn(expected, detection.reason)
+
+    def test_pyproject_keeps_an_activated_environment(self) -> None:
+        # An activated environment (tox, another venv) is the caller's choice;
+        # PATH resolves python3 to it, and the repo's .venv must not override.
+        root = self.repo_with({"pyproject.toml": "[project]\nname = 'x'\n"})
+        interpreter = root / ".venv" / "bin" / "python"
+        interpreter.parent.mkdir(parents=True)
+        interpreter.write_text("", encoding="utf-8")
+        interpreter.chmod(0o755)
+        with unittest.mock.patch.dict(os.environ, {"VIRTUAL_ENV": str(root / ".tox" / "py312")}):
+            detection = sd_lib.detect_entrypoints(root)
+        self.assertEqual(detection.commands, {"test": ["python3", "-m", "pytest"]})
 
     def test_pyproject_ignores_a_venv_without_a_runnable_interpreter(self) -> None:
         root = self.repo_with({"pyproject.toml": "[project]\nname = 'x'\n", ".venv/pyvenv.cfg": ""})
         (root / ".venv" / "bin").mkdir()
         (root / ".venv" / "bin" / "python").symlink_to(root / "missing")
-        detection = sd_lib.detect_entrypoints(root)
+        with unittest.mock.patch.dict(os.environ):
+            os.environ.pop("VIRTUAL_ENV", None)
+            detection = sd_lib.detect_entrypoints(root)
         self.assertEqual(detection.commands, {"test": ["python3", "-m", "pytest"]})
 
     def test_probe_order_stops_at_the_first_hit(self) -> None:

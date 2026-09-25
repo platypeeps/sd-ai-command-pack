@@ -1901,7 +1901,11 @@ def _pyproject_interpreter(root: pathlib.Path) -> str:
 
     A `.venv` beside `pyproject.toml` is where such a repo keeps its test
     dependencies; the PATH interpreter is the one least likely to have them.
+    An activated environment is the caller's explicit choice, and PATH already
+    resolves `python3` to it, so it wins over the repo's `.venv`.
     """
+    if os.environ.get("VIRTUAL_ENV"):
+        return "python3"
     for candidate in _VENV_INTERPRETERS:
         path = root / candidate
         if path.is_file() and os.access(path, os.X_OK):
