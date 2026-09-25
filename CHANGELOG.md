@@ -4,6 +4,13 @@
 
 ### Changed
 
+- **`sd-review`'s Jev tier reading is metered.** Both `jev` calls now name
+  the caller `sd-review` and the stage `JEV_SD_REVIEW`, and the `enabled` gate
+  passes `--record`. Before this, a judgment landed in the judgment ledger under
+  `unknown` and a declining gate left no row, so the lane that asks Jev on every
+  review was the one caller the ledger missed (sd:1253). What leaves the machine
+  is unchanged: the three flags are ledger fields.
+
 - **A machine `sd.copilot_review` of `never` wins over the repository.** The
   repository's `.github/sd-review.json` `copilot_review.automatic_deep`
   overrode every machine word, so a repository's `true` bought a paid Copilot
