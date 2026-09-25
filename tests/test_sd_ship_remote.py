@@ -597,6 +597,7 @@ class RulesetCase(unittest.TestCase):
             ("strict not accepted", lax, [BYPASS_ACCEPTED]),
             ("another bypass list", lax, [BYPASS_ACCEPTED, acceptance("strict", strict=False, bypass=[])]),
             ("strict not pinned", lax, [BYPASS_ACCEPTED, acceptance("strict", bypass=[DEPLOY_KEY_WORDS])]),
+            ("bypass not pinned", lax, [BYPASS_ACCEPTED, acceptance("strict", strict=False)]),
             ("strict pinned true", lax, [BYPASS_ACCEPTED, acceptance("strict", strict=True, bypass=[DEPLOY_KEY_WORDS])]),
             ("no named checks", unnamed, [BYPASS_ACCEPTED, STRICT_ACCEPTED]),
         ):

@@ -218,13 +218,22 @@ def observed_state(protection: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+#: The facts a merge requires an acceptance of each gap to pin (sd:1451). A
+#: `strict` entry pins the bypass list too: checks that are not strict are
+#: accepted beside the bypass that keeps moving the base, and a bypass added
+#: or removed later un-matches the entry.
+MERGE_PINS = {"bypass": ("bypass",), "strict": ("strict", "bypass")}
+
+
 def matching_acceptance(entries: list[dict[str, Any]], gap: str, observed: dict[str, Any]) -> dict[str, Any] | None:
-    """The first `accepted_gaps` entry for `gap` that pins `gap`'s own fact and
-    whose every pinned fact equals the live one, or `None`. `sd-status`'s
-    matcher without the fact requirement: a merge honours an acceptance only
-    of the state it names, never one that pins some other fact (sd:1451)."""
+    """The first `accepted_gaps` entry for `gap` that pins the facts
+    `MERGE_PINS` names for it and whose every pinned fact equals the live
+    one, or `None`. `sd-status`'s matcher plus the pin requirement: a merge
+    honours an acceptance only of the state it names, never one that pins
+    some other fact (sd:1451)."""
     return next((entry for entry in entries
-                 if entry.get("id") == gap and gap in (entry.get("state") or {})
+                 if entry.get("id") == gap
+                 and all(fact in (entry.get("state") or {}) for fact in MERGE_PINS.get(gap, (gap,)))
                  and all(observed.get(fact) == value for fact, value in entry["state"].items())), None)
 
 

@@ -133,7 +133,7 @@ Never allocate another review ID to reset spent passes or discard history.
   A merge the row allowed records that on its receipt as `row_authorized_merge`.
   A ruleset bypass refuses unless every actor is a `DeployKey` and the reviewed head declares that exact bypass list.
   Checks that are not strict refuse unless the reviewed head declares that exact state.
-  Each declaration is an `accepted_gaps` entry in `.github/sd-status.json`, id `bypass` or `strict`, pinning its own fact.
+  Each declaration is an `accepted_gaps` entry in `.github/sd-status.json`, id `bypass` or `strict`, pinning its own fact; a `strict` entry also pins `bypass`.
   Every fact it pins must equal the live state, read as the status report reads it.
   An app, a team, a role or an admin bypass still refuses.
   The receipt's `protection.accepted_gaps` names the entries a merge honoured.
