@@ -24,8 +24,11 @@ The requirements files use `--require-hashes` locally and in CI.
 To update a dependency, change its pin and run the compile command from that file's header:
 
 ```bash
-uv pip compile --universal --generate-hashes --python-version 3.10 <file> -o <file>
+uv pip compile --universal --generate-hashes --python-version <floor> <file> -o <file>
 ```
+
+`<floor>` is the `requires-python` lower bound in `pyproject.toml`; the resolver pins only releases that support it.
+`tests/test_requirements_target.py` fails when a file's header names another version (sd:1391).
 
 Remove a conflicting transitive pin before recompiling. Do not edit hashes by hand.
 

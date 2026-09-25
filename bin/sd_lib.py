@@ -693,6 +693,10 @@ class StatusReport:
     #: there is no database, no row for it, or no readable stamp. Attached by
     #: `_reported`, which is the one place holding an open `Statuses`.
     activity: str = ""
+    #: The row's `branch` column, `""` when the row names none, and `None`
+    #: when no row answered -- a `file` checkout, no database, no row. `None`
+    #: leaves the frontmatter `branch:` line to decide, as it did before rows.
+    branch: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1157,6 +1161,24 @@ class Rows:
                 pass
         return max((stamp for stamp in stamps if stamp), default="")
 
+    def branch(self, item_dir: pathlib.Path) -> str | None:
+        """The row's `branch` column, `""` for none, `None` when no row answers.
+
+        The column is what `sd runner prepare --branch` writes and what
+        `sd-status` and the dashboard print. The frontmatter `branch:` line is
+        a second copy nothing reconciles (sd:1382), so a checkout whose marker
+        names the row reads the branch from the row as it reads the status.
+        """
+        if not self.opened:
+            return None
+        try:
+            row = self.item(item_dir)
+        except Exception:  # noqa: BLE001 - a read that failed said nothing
+            return None
+        if row is None:
+            return None
+        return str(row["branch"] or "").strip()
+
     def completed(self, item_dir: pathlib.Path) -> bool:
         if self._completion_read is None:
             return False
@@ -1380,6 +1402,13 @@ def _recorded(statuses: "Statuses", item_dir: pathlib.Path) -> str:
     return statuses.rows.activity(item_dir) if statuses.rows is not None else ""
 
 
+def _row_branch(statuses: "Statuses", item_dir: pathlib.Path) -> str | None:
+    """The row's branch when the row is this checkout's authority, else `None`."""
+    if statuses.source != FROM_ROW or statuses.rows is None:
+        return None
+    return statuses.rows.branch(item_dir)
+
+
 def _reported(
     item_dir: pathlib.Path,
     fields: dict[str, str],
@@ -1397,12 +1426,14 @@ def _reported(
         return replace(
             _status_report(item_dir, fields, problems, statuses),
             activity=_recorded(statuses, item_dir),
+            branch=_row_branch(statuses, item_dir),
         )
     own = Statuses.of(_root_of(item_dir))
     try:
         return replace(
             _status_report(item_dir, fields, problems, own),
             activity=_recorded(own, item_dir),
+            branch=_row_branch(own, item_dir),
         )
     finally:
         own.close()
@@ -1444,7 +1475,7 @@ def work_item(item_dir: pathlib.Path, *, statuses: "Statuses | None" = None) -> 
         title=fields.get("title", ""),
         status=report.status,
         created=fields.get("created", ""),
-        branch=fields.get("branch", ""),
+        branch=fields.get("branch", "") if report.branch is None else report.branch,
         archived=report.archived,
         inconsistencies=report.inconsistencies,
         activity=report.activity,
@@ -1888,15 +1919,43 @@ def _cargo_entrypoints(root: pathlib.Path) -> Detection | None:
     )
 
 
+#: Where a repo-local virtualenv keeps its interpreter, POSIX first. Relative
+#: to the repo root, which is the cwd sd-check runs a detected command in.
+_VENV_INTERPRETERS = (
+    pathlib.PurePosixPath(".venv/bin/python"),
+    pathlib.PurePosixPath(".venv/Scripts/python.exe"),
+)
+
+
+def _pyproject_interpreter(root: pathlib.Path) -> str:
+    """The repo's `.venv` interpreter when one runs, else `python3` from PATH.
+
+    A `.venv` beside `pyproject.toml` is where such a repo keeps its test
+    dependencies; the PATH interpreter is the one least likely to have them.
+    An activated environment is the caller's explicit choice, and PATH already
+    resolves `python3` to it, so it wins over the repo's `.venv`. Conda's
+    `base` counts too: nothing in the environment tells an automatic
+    activation from `conda activate base`.
+    """
+    if os.environ.get("VIRTUAL_ENV") or os.environ.get("CONDA_PREFIX"):
+        return "python3"
+    for candidate in _VENV_INTERPRETERS:
+        path = root / candidate
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(candidate)
+    return "python3"
+
+
 def _pyproject_entrypoints(root: pathlib.Path) -> Detection | None:
     path = root / "pyproject.toml"
     if not path.is_file():
         return None
+    python = _pyproject_interpreter(root)
     return Detection(
         source="pyproject",
         origin=path,
-        commands={"test": ["python3", "-m", "pytest"]},
-        reason="pyproject.toml: python3 -m pytest",
+        commands={"test": [python, "-m", "pytest"]},
+        reason=f"pyproject.toml: {python} -m pytest",
     )
 
 
