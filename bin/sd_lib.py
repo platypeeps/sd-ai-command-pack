@@ -1902,9 +1902,12 @@ def _pyproject_interpreter(root: pathlib.Path) -> str:
     A `.venv` beside `pyproject.toml` is where such a repo keeps its test
     dependencies; the PATH interpreter is the one least likely to have them.
     An activated environment is the caller's explicit choice, and PATH already
-    resolves `python3` to it, so it wins over the repo's `.venv`.
+    resolves `python3` to it, so it wins over the repo's `.venv`. Conda's
+    `base` is left out: conda activates it in every shell by default, so it
+    says nothing about this repo.
     """
-    if os.environ.get("VIRTUAL_ENV"):
+    conda = os.environ.get("CONDA_PREFIX") and os.environ.get("CONDA_DEFAULT_ENV") != "base"
+    if os.environ.get("VIRTUAL_ENV") or conda:
         return "python3"
     for candidate in _VENV_INTERPRETERS:
         path = root / candidate
