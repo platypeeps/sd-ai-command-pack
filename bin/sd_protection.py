@@ -275,6 +275,9 @@ def synthesize(rules: list, rulesets: dict[int, dict]) -> dict[str, Any] | None:
     reviews = _reviews([_parameters(rule) for rule in gating if rule.get("type") == "pull_request"])
     if reviews is not None:
         value["required_pull_request_reviews"] = reviews
+    methods = _merge_methods([_parameters(rule) for rule in gating if rule.get("type") == "pull_request"])
+    if methods is not None:
+        value["allowed_merge_methods"] = methods
     checks = _checks([_parameters(rule) for rule in gating if rule.get("type") == "required_status_checks"])
     if checks is not None:
         value["required_status_checks"] = checks
@@ -483,6 +486,19 @@ def _reviews(parameter_sets: list[dict[str, Any]]) -> dict[str, Any] | None:
     }
 
 
+def _merge_methods(parameter_sets: list[dict[str, Any]]) -> list[str] | None:
+    """The merge methods every `pull_request` rule that names any allows (sd:1379).
+
+    A rule without the key allows every method, so it narrows nothing; each
+    rule that names a list must be satisfied, so the lists intersect. `None`
+    when no rule names one, which keeps the object of a ruleset without the
+    key exactly as it was.
+    """
+    stated = [set(map(str, p["allowed_merge_methods"])) for p in parameter_sets
+              if isinstance(p.get("allowed_merge_methods"), list)]
+    return sorted(set.intersection(*stated)) if stated else None
+
+
 def _checks(parameter_sets: list[dict[str, Any]]) -> dict[str, Any] | None:
     """The `required_status_checks` object of those rules: the union of the
     named checks, `integration_id` carried as `app_id`, strict if any is."""
@@ -544,6 +560,8 @@ def combine(classic: dict[str, Any], rules: list, rulesets: dict[int, dict]) -> 
     verdicts = list(value["admins"].values())
     value["enforce_admins"] = {"enabled": False if False in verdicts else (None if None in verdicts else True)}
     value["bypass_info"] = _bypass_info(value)
+    if "allowed_merge_methods" in synthesized:
+        value["allowed_merge_methods"] = synthesized["allowed_merge_methods"]
     return value
 
 
