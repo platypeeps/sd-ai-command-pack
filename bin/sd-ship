@@ -326,6 +326,18 @@ def commit_paths(root: pathlib.Path, args) -> None:
     run(root, ["git", "--literal-pathspecs", "commit", "--only", "--file=-", "--", *paths], input=message)
 
 
+def squash_allowed(base: str, protection: dict) -> None:
+    """Refuse when the base ruleset forbids the one method `merge` uses.
+
+    GitHub would refuse the PUT, or a bypass would land what the branch
+    forbids (sd:1379).
+    """
+    methods = protection.get("allowed_merge_methods")
+    if methods is not None and "squash" not in methods:
+        raise Refusal(f"the {base} ruleset allows only {', '.join(methods) or 'no'} merge methods and sd-ship "
+                      f"merges by squash; allow squash in the ruleset or merge this pull request by hand")
+
+
 #: The words that mark a merge warning as the Copilot ancestor clearance.
 ANCESTOR_CLEARANCE = "an ancestor of the merge head"
 
@@ -1384,6 +1396,7 @@ class Ship(SharedReview):
         if base != self.state["base"] or metadata.get("allow_squash_merge") is not True:
             raise Refusal("default branch changed or squash merging is disabled")
         protection = self.api.gate(base, head)  # the object, or the declared gap at this head (sd:1110)
+        squash_allowed(base, protection)
         observed = self.api.pull(observed["number"])
         self.api.ready(observed, head, base, protection)
         self.abandon_copilot_review(observed["number"], head)

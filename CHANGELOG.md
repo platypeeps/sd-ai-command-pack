@@ -297,6 +297,14 @@
 
 ### Fixed
 
+- **A ruleset that forbids squash stops `sd-ship merge` before the dispatch
+  (sd:1379).** `synthesize` dropped the `pull_request` rule's
+  `allowed_merge_methods`, so sd-ship squash-merged into a ruleset that
+  allowed only merge or rebase and learned of the refusal from GitHub. The
+  synthesized protection now carries the intersection of the methods every
+  gating rule allows, and `combine` keeps it. `merge` refuses with the allowed
+  methods named when squash is not among them.
+
 - **The no-item adjudication tests no longer read the shared library
   (sd:1459).** `adjudicator_binding` hashes the installed `sd_db/ship.py` on
   every command, and every worktree borrows one `.venv`. A session that

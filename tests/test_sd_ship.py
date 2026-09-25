@@ -3594,6 +3594,26 @@ class DeclaredGapCase(unittest.TestCase):
         self.assertEqual([entry["id"] for entry in result["protection"]["rulesets"]], [42])
         self.assertEqual(result["protection"]["required_status_checks"]["checks"], [{"context": "route", "app_id": 7}])
 
+    def test_a_ruleset_that_forbids_squash_refuses_before_any_merge_is_dispatched(self):
+        """sd:1379. A ruleset's `pull_request` rule names the merge methods the
+        branch accepts, and `synthesize` dropped them, so the gate passed and
+        `sd-ship` sent a squash the branch forbids. The refusal names the
+        methods allowed and dispatches nothing; a list that includes squash
+        still merges once."""
+        self.commit({".github/workflows/tests.yml": self.TESTS, ".github/workflows/sd-review-route.yml": self.ROUTE})
+        rules = self.gating_rules()
+        rules[1]["parameters"]["allowed_merge_methods"] = ["merge", "rebase"]
+        self.double.rules = rules
+        self.double.rulesets = {42: {"id": 42, "name": "main", "enforcement": "active", "bypass_actors": []}}
+        self.green()
+        with self.assertRaisesRegex(ship.Refusal, r"allows only merge, rebase .*squash"):
+            self.merge()
+        self.assertEqual(self.puts(), 0)
+        rules[1]["parameters"]["allowed_merge_methods"] = ["squash", "rebase"]
+        result = self.merge()
+        self.assertEqual(self.puts(), 1)
+        self.assertEqual(result["protection"]["allowed_merge_methods"], ["rebase", "squash"])
+
     @staticmethod
     def gating_rules() -> list:
         return [
