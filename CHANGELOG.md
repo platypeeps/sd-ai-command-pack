@@ -297,6 +297,15 @@
 
 ### Fixed
 
+- **The hash-pinned requirements resolve for Python 3.13, the project floor
+  (sd:1391).** `requirements-dev.txt` and `requirements-security.txt` were
+  still compiled with `--python-version 3.10` after `requires-python` rose to
+  3.13. A lint or audit release that needs 3.11 or later could never be
+  pinned, and the gates would stay green on an older analyzer. Both files are
+  recompiled at 3.13; no pinned version moved, and only the 3.10-only `tomli`
+  and `stevedore` entries dropped out. `tests/test_requirements_target.py`
+  fails when a file's compile header names another version than the floor.
+
 - **A ruleset that forbids squash stops `sd-ship merge` before the dispatch
   (sd:1379).** `synthesize` dropped the `pull_request` rule's
   `allowed_merge_methods`, so sd-ship squash-merged into a ruleset that
