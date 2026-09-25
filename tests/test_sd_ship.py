@@ -18,6 +18,7 @@ import tempfile
 import time
 import unittest
 from http.server import BaseHTTPRequestHandler
+from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
@@ -843,6 +844,43 @@ roles:
         self.assertTrue(any(reviewed in warning and "ancestor of the merge head" in warning
                             for warning in self.operation().state["warnings"]),
                         self.operation().state.get("warnings"))
+
+    def test_a_merge_refused_after_the_copilot_gate_records_no_ancestor_clearance(self):
+        """sd:1373. The ancestor note says the gate cleared a merge, so the step
+        that dispatches the merge writes it. Written when the gate cleared, it
+        survived every later refusal -- the findings check a dozen lines below
+        it first -- and each retry appended another copy."""
+        self.enable_automatic_copilot()
+        self.prepare()
+        reviewed = _git(self.root, "rev-parse", "HEAD")
+        self.reviewed_at(reviewed)
+        (self.root / "docs").mkdir(exist_ok=True)
+        (self.root / "docs/note.md").write_text("what the review asked for\n")
+        _git(self.root, "add", "docs/note.md")
+        _git(self.root, "commit", "-m", "answer the review\n\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.prepare()
+        pull = self.remote.pull(1)
+        pull.checks = [{**row, "head_sha": head} for row in pull.checks]
+        real_sibling = ship.sd_lib.sibling
+        open_finding = SimpleNamespace(review_state=lambda *_: {"unsatisfied": [{"id": "finding-1"}]})
+
+        def sibling(name, *rest):
+            return open_finding if name == "sd_review_ack_ship_gate" else real_sibling(name, *rest)
+
+        def ancestor_notes():
+            return [warning for warning in (self.operation().state.get("warnings") or [])
+                    if "ancestor of the merge head" in warning]
+
+        with patch.object(ship.sd_lib, "sibling", sibling), patch.object(ship.time, "sleep"):
+            for _ in range(2):
+                with self.assertRaisesRegex(ship.Refusal, "remain unacknowledged"):
+                    self.merge()
+        self.assertEqual(ancestor_notes(), [])
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+        self.assertEqual(len(ancestor_notes()), 1, ancestor_notes())
+        self.assertIn(reviewed, ancestor_notes()[0])
 
     def test_an_exact_head_review_landing_mid_wait_drops_the_ancestor_note(self):
         """`stable_copilot_material` reads the reviews once per attempt, so the
