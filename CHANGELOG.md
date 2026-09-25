@@ -4,6 +4,20 @@
 
 ### Changed
 
+- **`sd-check` runs a Python repo's tests with its `.venv` interpreter.** The
+  `pyproject.toml` fallback always named `python3 -m pytest`, so a repo whose
+  test dependencies live in `.venv` failed before any test ran (sd:1309). It
+  now names `.venv/bin/python` (or `.venv/Scripts/python.exe`) when that file
+  is an executable, and keeps `python3` when neither is or when the caller
+  has activated an environment (`VIRTUAL_ENV` or `CONDA_PREFIX` is set).
+
+- **`sd-review`'s Jev tier reading is metered.** Both `jev` calls now name
+  the caller `sd-review` and the stage `JEV_SD_REVIEW`, and the `enabled` gate
+  passes `--record`. Before this, a judgment landed in the judgment ledger under
+  `unknown` and a declining gate left no row, so the lane that asks Jev on every
+  review was the one caller the ledger missed (sd:1253). What leaves the machine
+  is unchanged: the three flags are ledger fields.
+
 - **A machine `sd.copilot_review` of `never` wins over the repository.** The
   repository's `.github/sd-review.json` `copilot_review.automatic_deep`
   overrode every machine word, so a repository's `true` bought a paid Copilot
@@ -140,6 +154,16 @@
   names it as no longer declared. 1.2.0 removes the alias.
 
 ### Added
+
+- **`sd task add` and `sd task edit` take `--recur` and `--recur-anchor`.**
+  The recurrence columns and the completion logic landed in `sd_db` with
+  sd:1099, but no CLI flag reached them (sd:1428). The flags pass the rule and
+  its anchor through unchecked, and `sd_db` refuses a bad rule, a bad anchor,
+  a missing due date or a kind that cannot recur by name. `sd task edit
+  --clear-recur` stops a series. `sd task status ... done` on a recurring task
+  prints the next occurrence and its due date, or says the recurrence ended
+  and why; `--json` already carried `next_occurrence` and
+  `next_occurrence_reason`. A row that recurs prints its rule under its line.
 
 - **`opencode` reviews, through a new `opencode-json` reader (sd:1329).**
   The shipped registry gains an `opencode` entry third on the reviewer
@@ -282,6 +306,47 @@
   still matches HEAD) and, when it did, decline to render and name
   `sd-research-kit render`. Post-commit renders as before. `init-hook`
   upgrades the previous body, which joins `SUPERSEDED_HOOKS`.
+
+- **`sd-review`'s capped-exposure report works with the exact-money ledger.**
+  System #579 (sd:1176) removed `sd_db.ledger.MONEY_NOISE`, and the report
+  still added it to the month's spend, so every capped check raised
+  `AttributeError` against a library installed from system `main`. The
+  report now compares the spend with the cap directly, which reads the same
+  under the old and the new library.
+
+- **The hash-pinned requirements resolve for Python 3.13, the project floor
+  (sd:1391).** `requirements-dev.txt` and `requirements-security.txt` were
+  still compiled with `--python-version 3.10` after `requires-python` rose to
+  3.13. A lint or audit release that needs 3.11 or later could never be
+  pinned, and the gates would stay green on an older analyzer. Both files are
+  recompiled at 3.13; no pinned version moved, and only the 3.10-only `tomli`
+  and `stevedore` entries dropped out. `tests/test_requirements_target.py`
+  fails when a file's compile header names another version than the floor.
+
+- **A ruleset that forbids squash stops `sd-ship merge` before the dispatch
+  (sd:1379).** `synthesize` dropped the `pull_request` rule's
+  `allowed_merge_methods`, so sd-ship squash-merged into a ruleset that
+  allowed only merge or rebase and learned of the refusal from GitHub. The
+  synthesized protection now carries the intersection of the methods every
+  gating rule allows, and `combine` keeps it. `merge` refuses with the allowed
+  methods named when squash is not among them.
+
+- **The no-item adjudication tests no longer read the shared library
+  (sd:1459).** `adjudicator_binding` hashes the installed `sd_db/ship.py` on
+  every command, and every worktree borrows one `.venv`. A session that
+  installed `sd_db` there between two commands made an accept refuse with
+  "does not bind the current review, history, tools and head". The two
+  in-process no-item suites now bind a copy taken per test. The subprocess
+  disposition suites keep the exposure; sd:1479 tracks them.
+
+- **The Copilot ancestor-clearance warning reaches the receipt only with a
+  merge dispatch (sd:1373).** `require_copilot_clearance` saved "Copilot
+  reviewed <sha>, an ancestor of the merge head ..." as soon as the gate
+  cleared. The findings check, CI, the authorship checks and the protection
+  re-read could all refuse afterwards, and the receipt still described a
+  clearance for a merge that never landed. Each retry appended another copy.
+  The note is now held per attempt and written with `phase="merge_dispatch"`,
+  replacing any earlier copy, as `row_authorized_merge` already is (sd:1347).
 
 - **A gate that fails before any reviewer is asked no longer spends a review
   pass (sd:1475).** Under parallel load `make check` outran sd-check's fixed

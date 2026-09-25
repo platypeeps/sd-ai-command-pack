@@ -365,14 +365,17 @@ class SharedReview:
         passes.pop()
         check = report.get("check") or {}
         detail = str(check.get("detail") or "")[-self.runtime.diagnostic_bytes:]
+        checks = gate_diagnostics(check, self.runtime.diagnostic_bytes)
         for key, value in self.superseded.items():
             if value is ABSENT:
                 self.state.pop(key, None)
         self.save(passes=passes, **{key: value for key, value in self.superseded.items() if value is not ABSENT},
                   review_preflight_error={"kind": "gate_failed", "stage": "check", "head": head,
-                                          "exit_code": check.get("exit_code"), "detail": detail})
+                                          "exit_code": check.get("exit_code"), "detail": detail, "checks": checks})
+        failed = next((c for c in checks if c["status"] == "fail"), {})
+        evidence = detail.strip() or (failed.get("stderr") or failed.get("stdout") or failed.get("reason") or "").strip()
         raise Refusal(f"the repository gate failed before any reviewer was asked; no review pass was spent: "
-                      f"{detail.strip()[-500:] or 'see the item ship receipt'}",
+                      f"{evidence[-500:] or 'see the item ship receipt'}",
                       code="gate_failed", boundary="runtime", state="retryable_failure",
                       next_action="Fix the gate, or rerun prepare when the machine is less loaded "
                                   "(--review-timeout raises the limit); the next prepare reviews normally.")
@@ -404,6 +407,24 @@ class SharedReview:
 #: The receipt fields `execute_review` overwrites when it dispatches a pass.
 DISPATCH_FIELDS = ("phase", "head", "binding", "review_clearance")
 ABSENT = object()
+
+
+def gate_diagnostics(check: dict, limit: int) -> list[dict]:
+    """sd:1484. What each gate check said, bounded, for a receipt that outlives the pass.
+
+    `check.detail` is sd-check's own stderr, which is empty when a test or a
+    lint fails: that output is in each check's `stdout` and `stderr`. Keeping
+    only `detail` left a receipt that said the gate failed and not why. At
+    most one record per name sd-check runs, each stream cut to its last
+    `limit` characters, where a failure summary ends.
+    """
+    records = check.get("checks")
+    if not isinstance(records, list):
+        return []
+    return [{"name": record.get("name"), "status": record.get("status"), "exit_code": record.get("exit_code"),
+             "reason": str(record.get("reason") or "")[-limit:],
+             "stdout": str(record.get("stdout") or "")[-limit:], "stderr": str(record.get("stderr") or "")[-limit:]}
+            for record in records[:len(sd_lib.CHECK_NAMES)] if isinstance(record, dict)]
 
 
 def unreviewed_gate_failure(report: dict, exit_code: int) -> bool:
