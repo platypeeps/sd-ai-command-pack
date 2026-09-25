@@ -178,6 +178,65 @@ def _parameters(rule: dict) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
+def observed_state(protection: dict[str, Any] | None) -> dict[str, Any]:
+    """The live protection object reduced to the facts an acknowledgement pins.
+
+    `required_pull_request_reviews` is a boolean here on purpose: what the
+    acknowledgement has to be able to say is *whether the object exists*, which
+    is the difference between "a pull request is required and asks for no
+    approvals" and "nothing requires a pull request".
+
+    `protection` is `None` when the branch has no protection at all, and
+    `branch_protection` is that same existence question asked of the object as
+    a whole. Taking `None` rather than `{}` is deliberate: an empty dict is a
+    protection object that enforces nothing, which is a different branch state
+    from having no object, and the two must not reduce to the same facts.
+    """
+    protection = protection if isinstance(protection, dict) else None
+    reviews = (protection or {}).get("required_pull_request_reviews")
+    admins = (protection or {}).get("enforce_admins") or {}
+    checks = (protection or {}).get("required_status_checks") or {}
+    return {
+        "branch_protection": protection is not None,
+        # The actors an acknowledgement of the `bypass` gap accepted, by
+        # name: one added later un-matches the entry and the gap returns.
+        "bypass": bypass_words(protection or {}),
+        # The administrators' own exemptions, per ruleset with the rules each
+        # reaches: an acknowledgement of `enforce_admins` off that pins them
+        # stops applying when a second ruleset grows one.
+        "admin_bypass": bypass_words(protection or {}, True),
+        "enforce_admins": (
+            bool(admins.get("enabled")) if isinstance(admins, dict) else bool(admins)
+        ),
+        "required_approving_review_count": (
+            int(reviews.get("required_approving_review_count") or 0)
+            if isinstance(reviews, dict)
+            else 0
+        ),
+        "required_pull_request_reviews": isinstance(reviews, dict),
+        "strict": bool(checks.get("strict")) if isinstance(checks, dict) else False,
+    }
+
+
+#: The facts a merge requires an acceptance of each gap to pin (sd:1451). A
+#: `strict` entry pins the bypass list too: checks that are not strict are
+#: accepted beside the bypass that keeps moving the base, and a bypass added
+#: or removed later un-matches the entry.
+MERGE_PINS = {"bypass": ("bypass",), "strict": ("strict", "bypass")}
+
+
+def matching_acceptance(entries: list[dict[str, Any]], gap: str, observed: dict[str, Any]) -> dict[str, Any] | None:
+    """The first `accepted_gaps` entry for `gap` that pins the facts
+    `MERGE_PINS` names for it and whose every pinned fact equals the live
+    one, or `None`. `sd-status`'s matcher plus the pin requirement: a merge
+    honours an acceptance only of the state it names, never one that pins
+    some other fact (sd:1451)."""
+    return next((entry for entry in entries
+                 if entry.get("id") == gap
+                 and all(fact in (entry.get("state") or {}) for fact in MERGE_PINS.get(gap, (gap,)))
+                 and all(observed.get(fact) == value for fact, value in entry["state"].items())), None)
+
+
 def synthesize(rules: list, rulesets: dict[int, dict]) -> dict[str, Any] | None:
     """The classic-shaped object the active, merge-gating rules amount to.
 

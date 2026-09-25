@@ -141,6 +141,16 @@
 
 ### Added
 
+- **`sd task add` and `sd task edit` take `--recur` and `--recur-anchor`.**
+  The recurrence columns and the completion logic landed in `sd_db` with
+  sd:1099, but no CLI flag reached them (sd:1428). The flags pass the rule and
+  its anchor through unchecked, and `sd_db` refuses a bad rule, a bad anchor,
+  a missing due date or a kind that cannot recur by name. `sd task edit
+  --clear-recur` stops a series. `sd task status ... done` on a recurring task
+  prints the next occurrence and its due date, or says the recurrence ended
+  and why; `--json` already carried `next_occurrence` and
+  `next_occurrence_reason`. A row that recurs prints its rule under its line.
+
 - **`opencode` reviews, through a new `opencode-json` reader (sd:1329).**
   The shipped registry gains an `opencode` entry third on the reviewer
   order, after `codex` and `claude`. `opencode run -m provider/model`
@@ -282,6 +292,24 @@
   `reviewed_head_orphaned`, state `operator_decision`, not retryable. Its next
   action names the `git reset --soft <reviewed head>` remedy. The ancestry rule
   itself is unchanged.
+
+- **A gate that fails before any reviewer is asked no longer spends a review
+  pass (sd:1475).** Under parallel load `make check` outran sd-check's fixed
+  900-second limit. sd-review then reported `gate_failed` without asking a
+  provider, and `sd-ship prepare` kept the reserved pass anyway: sd:1309 lost
+  two of its five automatic passes that way, and each loss demanded
+  `--retry-review` for a review that never started. `sd-ship` now removes that
+  reservation, records the gate output under `review_preflight_error`, and
+  refuses with code `gate_failed`; the next prepare reviews normally. A run
+  whose report names any outcome, reviewer or finding keeps its pass.
+  sd-review now hands sd-check the phase budget its timing plan already
+  reserves for the gate (`--timeout`, default 1800 seconds) instead of
+  leaving sd-check at 900. `sd-ship prepare` and `sd-ship review` take
+  `--review-timeout SECONDS`, forwarded to `sd-review --timeout`, which also
+  sizes the watchdog. The pack still declares no `.github/sd-check-reuse.json`:
+  its `make check` reads the borrowed `.venv`, the installed `sd_db` and
+  `~/repos/system`, none of which a declaration can bind, so `complete: true`
+  would be false.
 
 - **Non-ASCII paths no longer slip past three path checks (sd:1440).**
   `core.quotePath` is on by default, so a newline-separated `--name-only`

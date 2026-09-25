@@ -3616,6 +3616,71 @@ class DeclaredGapCase(unittest.TestCase):
         self.assertEqual(self.puts(), 1)
         self.assertEqual(result["protection"]["required_status_checks"]["checks"], [{"context": "route", "app_id": 7}])
 
+    KEY_WORDS = "main (#42) [pull_request, required_status_checks]: DeployKey (always)"
+
+    @staticmethod
+    def accepted(gap: str, state: dict) -> dict:
+        return {"id": gap, "state": state, "because": "autocommit pushes", "since": "2026-09-23",
+                "until": "autocommit lands through pull requests"}
+
+    def keyed_lax(self, declared: list | None) -> None:
+        """platypeeps/system's shape (sd:1451): a ruleset whose named checks
+        are not strict and which a deploy key can push past, with `declared`
+        committed as the reviewed head's `accepted_gaps`, every check green."""
+        rules = self.gating_rules()
+        rules[2]["parameters"]["strict_required_status_checks_policy"] = False
+        if declared is None:
+            self.commit({".github/workflows/tests.yml": self.TESTS, ".github/workflows/sd-review-route.yml": self.ROUTE})
+        else:
+            self.declare({"accepted_gaps": declared})
+        self.double.rules = rules
+        self.double.rulesets = {42: {"id": 42, "name": "main", "enforcement": "active", "bypass_actors": [
+            {"actor_id": None, "actor_type": "DeployKey", "bypass_mode": "always"}]}}
+        self.green()
+
+    def test_a_deploy_key_bypass_and_lax_checks_merge_only_when_the_reviewed_head_declares_both(self):
+        """Undeclared, the merge refuses naming the key and pushes nothing.
+        With only the bypass declared, it refuses on the lax checks. With
+        both declared at the reviewed head in `sd-status`'s words, it lands
+        once and the receipt names the two entries it honoured."""
+        bypass = self.accepted("bypass", {"bypass": [self.KEY_WORDS]})
+        strict = self.accepted("strict", {"strict": False, "bypass": [self.KEY_WORDS]})
+        for declared, refusal in (
+            (None, r"can be bypassed by DeployKey \(always\)$"),
+            ([bypass], r"^ruleset protection requires strict, named CI checks$"),
+            ([bypass, strict], None),
+        ):
+            with self.subTest(declared=declared):
+                self.restart()
+                self.keyed_lax(declared)
+                if refusal is not None:
+                    self.refuse(refusal, "protection_required" if declared is None else None)
+                    continue
+                result = self.merge()
+                self.assertEqual(self.puts(), 1)
+                self.assertEqual([gap["id"] for gap in result["protection"]["accepted_gaps"]], ["bypass", "strict"])
+                key = receipts.receipt_key(self.remote.slug, "topic", self.item)
+                self.assertEqual([gap["id"] for gap in receipts.read(self.connection, key)[1]["protection"]["accepted_gaps"]],
+                                 ["bypass", "strict"])
+
+    def test_the_base_advancing_before_the_put_refuses_under_an_accepted_strict_gap(self):
+        """With `strict` off nothing server-side keeps the branch fresh, as
+        under the declared gap, so the freshness read is read again."""
+        self.keyed_lax([self.accepted("bypass", {"bypass": [self.KEY_WORDS]}),
+                        self.accepted("strict", {"strict": False, "bypass": [self.KEY_WORDS]})])
+        seen = {"count": 0}
+        double = self.double
+        saved = double._route
+
+        def route(method, path, body):
+            if method == "GET" and "/compare/" in path:
+                seen["count"] += 1
+                if seen["count"] >= 2:
+                    return 200, {"behind_by": 3, "ahead_by": 1, "status": "diverged"}
+            return saved(method, path, body)
+        double._route = route
+        self.refuse("default branch advanced after the readiness check", "base_moved")
+
     def test_a_ruleset_that_does_not_show_its_bypass_actors_refuses_the_merge(self):
         """The same ruleset with `bypass_actors` withheld, which is what GitHub
         answers a token that cannot edit it: unknown, and unknown does not
