@@ -202,24 +202,33 @@ class SplitModuleFixtures(unittest.TestCase):
         parse. The header names the tree, the footer closes the same run, and
         every `Ran` line sits inside its own shard's start and end lines."""
         git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+        (self.root / ".gitignore").write_text("unittest-output.log\n.coverage\n.coverage.*\n__pycache__/\n")
+        (self.root / "notes.txt").write_text("zero\n")
         subprocess.run(git + ["init", "-q"], cwd=self.root, check=True)
         subprocess.run(git + ["add", "-A"], cwd=self.root, check=True)
         subprocess.run(git + ["commit", "-qm", "fixture"], cwd=self.root, check=True)
         head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.root, check=True,
                               capture_output=True, text=True).stdout.strip()
-        result = self.run_harness()
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        lines = result.stdout.splitlines()
-        header = re.fullmatch(r"test runner: tree=(\S+) dirty=(\d+) pid=(\d+) started=\S+",
-                              lines[0])
-        self.assertIsNotNone(header, lines[:2])
-        self.assertEqual(header.group(1), head)
-        # The run wrote the three test modules after the commit, so it saw them dirty.
-        self.assertNotEqual(header.group(2), "0")
-        footer = re.fullmatch(r"test runner: finished tree=(\S+) dirty=\d+ pid=(\d+) ended=\S+",
-                              lines[-1])
-        self.assertIsNotNone(footer, lines[-2:])
-        self.assertEqual((footer.group(1), footer.group(2)), (head, header.group(3)))
+        pattern = r"test runner: (finished )?tree=(\S+) content=(\S+) pid=(\d+) (started|ended)=\S+"
+        contents = []
+        # Two edits of one already-dirty file: the dirty-path count is the same
+        # for both, so only a content fingerprint tells the runs apart.
+        for text in ("one\n", "two\n"):
+            (self.root / "notes.txt").write_text(text)
+            result = self.run_harness()
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            lines = result.stdout.splitlines()
+            header, footer = re.fullmatch(pattern, lines[0]), re.fullmatch(pattern, lines[-1])
+            self.assertIsNotNone(header, lines[:2])
+            self.assertIsNotNone(footer, lines[-2:])
+            self.assertEqual((header.group(1), footer.group(1)), (None, "finished "))
+            self.assertEqual((header.group(2), footer.group(2)), (head, head))
+            # Nothing changed during the run, so it opens and closes on one tree.
+            self.assertEqual(footer.group(3), header.group(3))
+            self.assertEqual(footer.group(4), header.group(4))
+            contents.append(header.group(3))
+        self.assertNotIn("unknown", contents)
+        self.assertNotEqual(contents[0], contents[1])
         current = None
         for line in lines:
             if match := re.fullmatch(r"shard (\S+): start", line):

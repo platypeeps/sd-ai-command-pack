@@ -380,11 +380,18 @@ watchdog() {
 # the loaded module was not -- and two runs redirected into one file read as
 # one. The footer after the shard logs names the same pid and the tree as it
 # stood at the end, so an edit made mid-run shows as two different lines.
+# `content` is the tree id of the working tree, untracked files included and
+# ignored ones not, written through a scratch copy of the index so the real one
+# is untouched. A count of dirty paths could not tell two edits of one dirty
+# file apart; a content id can.
 tree_state() {
-  local sha dirty
+  local sha content index="$work_dir/tree-index"
   sha="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null)" || sha="unknown"
-  dirty="$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
-  printf 'tree=%s dirty=%s' "$sha" "${dirty:-unknown}"
+  content="$(cp "$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-path index 2>/dev/null)" "$index" 2>/dev/null
+    GIT_INDEX_FILE="$index" git -C "$REPO_ROOT" add -A 2>/dev/null &&
+      GIT_INDEX_FILE="$index" git -C "$REPO_ROOT" write-tree 2>/dev/null)" || content="unknown"
+  rm -f "$index"
+  printf 'tree=%s content=%s' "$sha" "${content:-unknown}"
 }
 printf 'test runner: %s pid=%s started=%s\n' "$(tree_state)" "$$" \
   "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$run_log" || exit 1

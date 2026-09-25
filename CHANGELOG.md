@@ -5,9 +5,10 @@
 ### Changed
 
 - **The test log says which tree and which run it reports on.**
-  `run-tests.sh` writes `test runner: tree=<sha> dirty=<n> pid=<pid>
+  `run-tests.sh` writes `test runner: tree=<sha> content=<tree-id> pid=<pid>
   started=<time>` before the shard output and a matching `finished` line after
-  it. Each shard log now opens with `shard <name>: start`, so a `Ran` line sits
+  it. `content` is the tree id of the working tree, untracked files included,
+  so two edits of one dirty file read as two trees. Each shard log now opens with `shard <name>: start`, so a `Ran` line sits
   inside its own shard's labels instead of above them. Before this, a stale run
   read exactly like a current one, and a positional parse credited each `Ran`
   line to the shard before it (sd:1407).
