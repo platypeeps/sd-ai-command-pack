@@ -4,6 +4,13 @@
 
 ### Changed
 
+- **`sd-check` runs a Python repo's tests with its `.venv` interpreter.** The
+  `pyproject.toml` fallback always named `python3 -m pytest`, so a repo whose
+  test dependencies live in `.venv` failed before any test ran (sd:1309). It
+  now names `.venv/bin/python` (or `.venv/Scripts/python.exe`) when that file
+  is an executable, and keeps `python3` when neither is or when the caller
+  has activated an environment (`VIRTUAL_ENV` or `CONDA_PREFIX` is set).
+
 - **`sd-review`'s Jev tier reading is metered.** Both `jev` calls now name
   the caller `sd-review` and the stage `JEV_SD_REVIEW`, and the `enabled` gate
   passes `--record`. Before this, a judgment landed in the judgment ledger under

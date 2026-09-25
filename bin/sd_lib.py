@@ -1919,15 +1919,43 @@ def _cargo_entrypoints(root: pathlib.Path) -> Detection | None:
     )
 
 
+#: Where a repo-local virtualenv keeps its interpreter, POSIX first. Relative
+#: to the repo root, which is the cwd sd-check runs a detected command in.
+_VENV_INTERPRETERS = (
+    pathlib.PurePosixPath(".venv/bin/python"),
+    pathlib.PurePosixPath(".venv/Scripts/python.exe"),
+)
+
+
+def _pyproject_interpreter(root: pathlib.Path) -> str:
+    """The repo's `.venv` interpreter when one runs, else `python3` from PATH.
+
+    A `.venv` beside `pyproject.toml` is where such a repo keeps its test
+    dependencies; the PATH interpreter is the one least likely to have them.
+    An activated environment is the caller's explicit choice, and PATH already
+    resolves `python3` to it, so it wins over the repo's `.venv`. Conda's
+    `base` counts too: nothing in the environment tells an automatic
+    activation from `conda activate base`.
+    """
+    if os.environ.get("VIRTUAL_ENV") or os.environ.get("CONDA_PREFIX"):
+        return "python3"
+    for candidate in _VENV_INTERPRETERS:
+        path = root / candidate
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(candidate)
+    return "python3"
+
+
 def _pyproject_entrypoints(root: pathlib.Path) -> Detection | None:
     path = root / "pyproject.toml"
     if not path.is_file():
         return None
+    python = _pyproject_interpreter(root)
     return Detection(
         source="pyproject",
         origin=path,
-        commands={"test": ["python3", "-m", "pytest"]},
-        reason="pyproject.toml: python3 -m pytest",
+        commands={"test": [python, "-m", "pytest"]},
+        reason=f"pyproject.toml: {python} -m pytest",
     )
 
 
