@@ -64,7 +64,7 @@ class GateFailureSpendsNoPass(unittest.TestCase):
         self.assertEqual(failed.state["passes"], original)
 
     def test_a_released_re_review_restores_the_binding_it_superseded(self):
-        """Review finding on #1172: dispatch saves the new binding before the gate runs.
+        """Local review finding on sd:1475: dispatch saves the new binding before the gate runs.
 
         Popping the pass alone left the new binding stored, so the next prepare
         no longer saw the policy change and refused with "this head was already

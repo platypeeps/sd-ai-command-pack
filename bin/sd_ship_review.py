@@ -359,7 +359,7 @@ class SharedReview:
         stored the current tool and policy binding before the gate ran. Left
         in place, a re-review forced by a moved binding would, after its gate
         failed, read as bound to the new policy, and the next prepare would
-        stop re-reviewing (review of #1172). Every field dispatch overwrote
+        stop re-reviewing (found by the local review of sd:1475). Every field dispatch overwrote
         goes back to what it was.
         """
         passes.pop()
