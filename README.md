@@ -385,7 +385,8 @@ without anything saying so; the workflow files are the inventory.
 
 `main` carries classic branch protection: pull requests with no required
 approvals, the strict `lint` and `unittest` checks above, and enforce_admins.
-`.github/sd-status.json` therefore declares no accepted gap. `sd-ship merge`
+`.github/sd-status.json` accepts one gap, `reviews`: the approval count is 0
+because the sole maintainer cannot approve their own pull request. `sd-ship merge`
 reads the protection object before it reads the pull request's checks and
 refuses a missing or weaker one (`bin/sd_ship_remote.py`, `gate()`). The
 object is the classic one or, when classic answers 404, the branch's active
