@@ -205,13 +205,16 @@ class NeverPostsTests(unittest.TestCase):
                 self.fail("sd-review names the gh client; this lane never posts")
 
     def test_the_only_subprocess_call_is_the_injectable_runner(self) -> None:
+        # `sd_lib.run_group` is a process start too: it is how the runner
+        # starts one since sd:1482, so it counts against the same one.
         calls = [
             node
             for node in ast.walk(TREE)
             if isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "subprocess"
+            and (node.func.value.id == "subprocess"
+                 or (node.func.value.id == "sd_lib" and node.func.attr == "run_group"))
         ]
         self.assertEqual(len(calls), 1, "subprocess is started in more than one place")
         enclosing = [
