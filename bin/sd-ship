@@ -1317,7 +1317,7 @@ class Ship(SharedReview):
         from sd_db.progress import completion_record
         row = self.connection.execute("SELECT * FROM item WHERE id = ?", (self.args.item,)).fetchone()
         record = completion_record(row) if row is not None else None
-        return bool(record) and record.get("outcome") == "delivered" and record.get("commit") == commit
+        return record is not None and record.get("outcome") == "delivered" and record.get("commit") == commit
 
     def require_copilot_abandonment_authority(self) -> None:
         if self.args.abandon_copilot_review is not None and not self.args.manual:
