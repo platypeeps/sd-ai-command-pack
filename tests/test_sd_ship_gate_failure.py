@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import dataclasses
 import importlib
 import io
 import unittest
@@ -61,6 +62,31 @@ class GateFailureSpendsNoPass(unittest.TestCase):
         with unittest.mock.patch("sd_ship_review.git", return_value=""), self.assertRaises(ship.Refusal):
             failed.review(fixed)
         self.assertEqual(failed.state["passes"], original)
+
+    def test_a_released_re_review_restores_the_binding_it_superseded(self):
+        """Review finding on #1172: dispatch saves the new binding before the gate runs.
+
+        Popping the pass alone left the new binding stored, so the next prepare
+        no longer saw the policy change and refused with "this head was already
+        reviewed" instead of re-reviewing under the new policy.
+        """
+        reviewed, _process = self.context()
+        reviewed.review(HEAD)
+        original = copy.deepcopy(reviewed.state)
+        failed, _process = self.context(state=reviewed.state, report_changes=GATE_FAILED)
+        failed.runtime = dataclasses.replace(failed.runtime, binding=lambda _root: "moved")
+        with unittest.mock.patch("sd_ship_review.git", return_value=""), \
+                self.assertRaisesRegex(ship.Refusal, "no review pass was spent"):
+            failed.review(HEAD)
+        for key in ("passes", "binding", "head", "reviewed_head", "review_clearance"):
+            self.assertEqual(failed.state.get(key), original.get(key), key)
+        again, process = self.context(state=failed.state)
+        again.runtime = dataclasses.replace(again.runtime, binding=lambda _root: "moved")
+        with unittest.mock.patch("sd_ship_review.git", return_value=""):
+            again.review(HEAD)
+        self.assertEqual(process.call_count, 2)
+        self.assertEqual(len(again.state["passes"]), 2)
+        self.assertIn("review_binding_change", again.state["passes"][1])
 
     def test_a_run_that_asked_a_reviewer_still_spends_its_pass(self):
         asked = {**GATE_FAILED, "outcomes": [{"backend": "automatic", "status": "failed"}]}

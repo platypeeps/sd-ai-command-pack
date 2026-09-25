@@ -330,6 +330,8 @@ class SharedReview:
             except Refusal:
                 self.save(review_preflight_error=self.preflight_diagnostic(planned))
                 raise
+            # What dispatch overwrites, so a released gate failure can put it back.
+            self.superseded = {key: self.state.get(key, ABSENT) for key in DISPATCH_FIELDS}
             self.save(passes=passes, phase="reviewing", head=head, binding=self.runtime.binding(self.root), review_preflight_error=None, review_clearance=None)
             stage = "execution"
             return self.runtime.process(self.root, argv + ["--expected-timing", digest(plan)], timeout=plan["execution_seconds"])
@@ -352,11 +354,21 @@ class SharedReview:
         for a review that never started. The gate's output stays in the
         receipt under `review_preflight_error`, the field a failure before
         dispatch already uses.
+
+        Removing the pass is not enough to undo the dispatch: `execute_review`
+        stored the current tool and policy binding before the gate ran. Left
+        in place, a re-review forced by a moved binding would, after its gate
+        failed, read as bound to the new policy, and the next prepare would
+        stop re-reviewing (review of #1172). Every field dispatch overwrote
+        goes back to what it was.
         """
         passes.pop()
         check = report.get("check") or {}
         detail = str(check.get("detail") or "")[-self.runtime.diagnostic_bytes:]
-        self.save(passes=passes, reviewed_head=None, phase="reviewed",
+        for key, value in self.superseded.items():
+            if value is ABSENT:
+                self.state.pop(key, None)
+        self.save(passes=passes, **{key: value for key, value in self.superseded.items() if value is not ABSENT},
                   review_preflight_error={"kind": "gate_failed", "stage": "check", "head": head,
                                           "exit_code": check.get("exit_code"), "detail": detail})
         raise Refusal(f"the repository gate failed before any reviewer was asked; no review pass was spent: "
@@ -387,6 +399,11 @@ class SharedReview:
         self.check_review(head)
         if self.runtime.current_head(self.root) != head:
             raise Refusal("HEAD or checkout changed during local checks and review")
+
+
+#: The receipt fields `execute_review` overwrites when it dispatches a pass.
+DISPATCH_FIELDS = ("phase", "head", "binding", "review_clearance")
+ABSENT = object()
 
 
 def unreviewed_gate_failure(report: dict, exit_code: int) -> bool:
