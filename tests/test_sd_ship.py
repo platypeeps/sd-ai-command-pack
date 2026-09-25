@@ -2229,6 +2229,34 @@ roles:
             self.prepare("--body-file", str(body))
         self.assertFalse(any(call.method == "POST" for call in self.remote.calls))
 
+    def test_a_pass_after_merging_the_default_branch_in_reviews_the_branch_not_main(self):
+        """sd:1346: the pass after a merge-in diffed against the last reviewed head.
+
+        That range holds the default branch's own, already-merged commits, so
+        the reviewer read main's content and blocked on it.
+        """
+        self.prepare()
+        reviewed = self.operation().state["passes"][0]["head"]
+        tip = self.remote.commit_on("main", "land elsewhere\n\nAuthored-with: human", files={"other.txt": "x\n"})
+        _git(self.root, "fetch", "-q", "origin", "main:refs/remotes/origin/main")
+        _git(self.root, "merge", "-q", "--no-edit", "-m", "merge main\n\nAuthored-with: human", "origin/main")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.prepare()
+        state = self.operation().state
+        self.assertEqual(len(state["passes"]), 2)
+        latest = state["passes"][-1]
+        # The branch's own change against the default branch it now contains,
+        # not reviewed..head, which is exactly main's landing.
+        self.assertEqual(latest["report"]["subject"]["base"], tip)
+        self.assertIsNone(latest["base"])
+        self.assertEqual(latest["base_merge"]["previous"], reviewed)
+        self.assertEqual(latest["base_merge"]["merge_base"], tip)
+        self.assertEqual(latest["base_merge"]["head"], head)
+        # The pass resumes every earlier finding, and the receipt still validates.
+        self.assertEqual(latest["report"]["resume_report_digest"],
+                         ship.digest(ship.review_history(state["passes"][:1])))
+        self.assertEqual(state["reviewed_head"], head)
+
     def test_fix_verifications_keep_prior_findings_and_refuse_a_pass_past_the_cap(self):
         program = self.programs / "review-fixture"
         payload = {"type": "result", "subtype": "success", "structured_output": {"findings": [

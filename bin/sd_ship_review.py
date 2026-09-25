@@ -195,6 +195,20 @@ class SharedReview:
             self._binding_moved = bool(self.history.native(self.state)) and self.state.get("binding") != self.runtime.binding(self.root)
         return self._binding_moved
 
+    def base_merged_in(self, previous: str, head: str) -> str | None:
+        """The default branch's merge base with `head`, when it moved since `previous`.
+
+        A merge of the default branch into a reviewed branch puts main's own,
+        already-merged commits into `previous..head`, so a fix verification
+        based on `previous` reviews main's content (sd:1346). When the merge
+        base is not already in `previous`, the pass reviews the whole branch
+        against the base it now contains instead.
+        """
+        merge_base = sd_lib.git_output(["merge-base", head, "refs/remotes/origin/HEAD"], self.root)
+        if not merge_base or sd_lib.git_output(["merge-base", "--is-ancestor", merge_base, previous], self.root) is not None:
+            return None
+        return merge_base
+
     def reusable_review(self, head: str, prior: dict, retry: bool, additional: bool) -> bool:
         if additional:
             return False
@@ -290,15 +304,19 @@ class SharedReview:
         # than a review. It resumes the complete prior history so no earlier
         # blocker is dropped, exactly as a post-cap request does.
         moved = not additional and self.binding_moved()
-        if moved:
+        merged = None if (not passes or retry or additional or moved) else self.base_merged_in(passes[-1]["head"], head)
+        if moved or merged:
             prior = self.history.aggregate(self.state)
-        base = passes[-1]["head"] if passes and not (retry or additional or moved) else None
+        base = passes[-1]["head"] if passes and not (retry or additional or moved or merged) else None
         argv = self.review_argv(base)
         requested = getattr(self.args, "provider", None)
         passes.append({"head": head, "started_at": self.runtime.clock(), "base": base, "retry": retry,
                        "requested_provider": requested})
         if request:
             passes[-1]["additional_review_request"] = request
+        if merged:
+            passes[-1]["base_merge"] = {"head": head, "previous": passes[-2]["head"], "merge_base": merged,
+                                        "recorded_at": self.runtime.clock()}
         if moved:
             passes[-1]["review_binding_change"] = {"head": head, "recorded_at": self.runtime.clock(),
                                                    "superseded_binding": self.state.get("binding")}
@@ -306,7 +324,7 @@ class SharedReview:
             if prior:
                 prior_path = pathlib.Path(directory) / "prior-review.json"
                 prior_path.write_text(json.dumps(prior, sort_keys=True))
-                argv += ["--resume-report" if retry or additional or moved else "--verify-report", str(prior_path)]
+                argv += ["--resume-report" if retry or additional or moved or merged else "--verify-report", str(prior_path)]
             result = self.execute_review(argv, head, passes)
         self.record_review(result, head, passes)
 

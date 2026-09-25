@@ -297,6 +297,16 @@
 
 ### Fixed
 
+- **A pass after merging the default branch in reviews the branch, not main (sd:1346).**
+  A fix verification diffs from the last reviewed head. After a merge of
+  `origin/<base>` into the branch, that range holds the default branch's own,
+  already-merged commits, so the reviewer read main's content and blocked on
+  it. When the branch's merge base with `origin/HEAD` is no longer contained in
+  the last reviewed head, `sd-ship` now runs a full-branch pass instead. That
+  pass takes no `--base`, resumes every earlier finding, and records
+  `base_merge` with the previous head and the new merge base. It costs one
+  pass, like any other.
+
 - **A ruleset that forbids squash stops `sd-ship merge` before the dispatch
   (sd:1379).** `synthesize` dropped the `pull_request` rule's
   `allowed_merge_methods`, so sd-ship squash-merged into a ruleset that
