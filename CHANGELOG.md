@@ -290,6 +290,14 @@
 
 ### Fixed
 
+- **The no-item adjudication tests no longer read the shared library
+  (sd:1459).** `adjudicator_binding` hashes the installed `sd_db/ship.py` on
+  every command, and every worktree borrows one `.venv`. A session that
+  installed `sd_db` there between two commands made an accept refuse with
+  "does not bind the current review, history, tools and head". The two
+  in-process no-item suites now bind a copy taken per test. The subprocess
+  disposition suites keep the exposure; sd:1479 tracks them.
+
 - **The Copilot ancestor-clearance warning reaches the receipt only with a
   merge dispatch (sd:1373).** `require_copilot_clearance` saved "Copilot
   reviewed <sha>, an ancestor of the merge head ..." as soon as the gate
