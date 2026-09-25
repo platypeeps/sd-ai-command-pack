@@ -13,6 +13,7 @@ import copy
 import dataclasses
 import importlib
 import io
+import sys
 import unittest
 import unittest.mock
 
@@ -103,6 +104,41 @@ class TheRealGateFailureIsRecognised(review_tests.ReviewFixture):
     # Imported as a module, so the loader does not collect its classes here.
     prepare = review_tests.PipelineTests.prepare
     run_review = review_tests.PipelineTests.run_review
+
+    def test_a_failing_unittest_gate_keeps_its_output_in_the_receipt(self):
+        """sd:1484. `check.detail` is sd-check's own stderr, empty when a test
+        fails; the failure is in `checks[].stdout/stderr`. The release kept
+        only `detail`, so the receipt said the gate failed and not why, and
+        learning why meant running the gate again."""
+        root = self.make_repo()
+        (root / "test_gate.py").write_text(
+            "import unittest\n\n\nclass Gate(unittest.TestCase):\n"
+            "    def test_sd1484_marker(self):\n        self.assertEqual(1, 2)\n", encoding="utf-8")
+        self.local_block(root, f"check: {sys.executable} -m unittest test_gate")
+        check = sd_review.run_check(root, sd_review.subprocess_runner, self.environment(), 60)
+        self.assertEqual(check["status"], "fail")
+        review, _process = GateFailureSpendsNoPass.context(self, report_changes={**GATE_FAILED, "check": check})
+        with self.assertRaisesRegex(ship.Refusal, "no review pass was spent") as caught:
+            review.review(HEAD)
+        receipt = review.state["review_preflight_error"]
+        kept = receipt["checks"]
+        self.assertEqual([(c["name"], c["status"], c["exit_code"]) for c in kept], [("check", "fail", 1), ("test", "absent", None), ("lint", "absent", None)])
+        self.assertIn("FAIL: test_sd1484_marker", kept[0]["stderr"])
+        self.assertIn("AssertionError: 1 != 2", str(caught.exception))
+
+    def test_the_kept_output_is_bounded(self):
+        noisy = {"name": "test", "status": "fail", "exit_code": 1, "reason": "",
+                 "stdout": "o" * 10000 + "END-OUT", "stderr": "e" * 10000 + "END-ERR", "command": ["make", "test"]}
+        report = {**GATE_FAILED, "check": {**GATE_FAILED["check"], "checks": [noisy] * 5}}
+        review, _process = GateFailureSpendsNoPass.context(self, report_changes=report)
+        with self.assertRaises(ship.Refusal):
+            review.review(HEAD)
+        kept = review.state["review_preflight_error"]["checks"]
+        self.assertEqual(len(kept), len(sd_ship_review.sd_lib.CHECK_NAMES))
+        for record in kept:
+            self.assertEqual(len(record["stdout"]), 4096)
+            self.assertTrue(record["stdout"].endswith("END-OUT"))
+            self.assertTrue(record["stderr"].endswith("END-ERR"))
 
     def test_sd_review_s_gate_failure_is_the_shape_sd_ship_releases(self):
         root = self.make_repo()
