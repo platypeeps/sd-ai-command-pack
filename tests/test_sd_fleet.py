@@ -132,6 +132,25 @@ class DryRun(Fleet):
         self.assertNotIn(sd_fleet.CHECK_PATH, [change["path"] for change in plan["changes"]])
         self.assertTrue(any(line.startswith(f"{sd_fleet.CHECK_PATH}: kept as written") for line in plan["adapted"]))
 
+    def test_a_route_workflow_at_an_older_pin_gets_the_new_pin(self) -> None:
+        old = sd_setup_github.workflow_text(sd_setup_github.action_reference("a" * 40))
+        root, remote = self.repo("old-pin", {sd_fleet.ROUTE_PATH: old})
+        [plan] = self.plan([(root, remote)])
+        [route] = [change for change in plan["changes"] if change["path"] == sd_fleet.ROUTE_PATH]
+        self.assertIn(f"review-route@{PIN}", route["diff"])
+        self.assertFalse(any(line.startswith(sd_fleet.ROUTE_PATH) for line in plan["refused"]))
+
+    def test_a_customised_route_workflow_is_refused_not_replaced(self) -> None:
+        # #1169 review: a job the repository added to the route workflow was
+        # dropped by a routine stamp, where setup-github refuses without --force.
+        own = sd_setup_github.workflow_text(sd_setup_github.action_reference(PIN)) + (
+            "  security-check:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n")
+        root, remote = self.repo("own-route", {sd_fleet.ROUTE_PATH: own})
+        [plan] = self.plan([(root, remote)])
+        self.assertNotIn(sd_fleet.ROUTE_PATH, [change["path"] for change in plan["changes"]])
+        [refused] = [line for line in plan["refused"] if line.startswith(sd_fleet.ROUTE_PATH)]
+        self.assertIn("--force", refused)
+
     def test_employer_repository_gets_no_unprotected_declaration(self) -> None:
         root, remote = self.repo("work", owner="answerbook")
         [plan] = self.plan([(root, remote)])

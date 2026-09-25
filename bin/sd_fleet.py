@@ -359,6 +359,14 @@ def tracked_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None],
     propose(GITIGNORE_PATH, gitignore_text(tree.text_at(GITIGNORE_PATH)))
 
 
+def is_route_template(text: str, *, self_install: bool) -> bool:
+    """Whether `text` is the route template at some pin, differing at most in the pin."""
+    pin = None if self_install else sd_setup_guard.read_pin(text)
+    if pin is None and not self_install:
+        return False
+    return text == sd_setup_github.workflow_text(sd_setup_github.action_reference(pin))
+
+
 def workflow_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None], *, pin: str,
                      self_install: bool) -> None:
     """Route workflow, its Dependabot guard, and the check workflow where none validates."""
@@ -367,8 +375,17 @@ def workflow_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None]
         plan.refused.append(f"{ROUTE_PATH}: the sd-github-review footprint is still here ({', '.join(legacy)}); "
                             "run `sd-review setup-github --remove-legacy` in this repository first")
     else:
-        propose(ROUTE_PATH, sd_setup_github.workflow_text(
-            sd_setup_github.action_reference(None if self_install else pin)))
+        current = tree.text_at(ROUTE_PATH)
+        if current is None or is_route_template(current, self_install=self_install):
+            propose(ROUTE_PATH, sd_setup_github.workflow_text(
+                sd_setup_github.action_reference(None if self_install else pin)))
+        else:
+            # The stamp moves a pin; it does not take over a file the
+            # repository changed. setup-github refuses the same without
+            # --force, and a routine stamp must not be the way around that
+            # (#1169 review: an added security job was dropped).
+            plan.refused.append(f"{ROUTE_PATH}: differs from the template beyond its pin, so the stamp keeps it; "
+                                "run `sd-review setup-github --force` there to replace it")
         if not self_install:
             try:
                 propose(DEPENDABOT_PATH, sd_setup_guard.rendered(tree.text_at(DEPENDABOT_PATH)))
