@@ -560,43 +560,9 @@ def _gap(gap_id: str, text: str) -> dict[str, str]:
 
 
 def _observed_state(protection: dict[str, Any] | None) -> dict[str, Any]:
-    """The live protection object reduced to the facts an acknowledgement pins.
-
-    `required_pull_request_reviews` is a boolean here on purpose: what the
-    acknowledgement has to be able to say is *whether the object exists*, which
-    is the difference between "a pull request is required and asks for no
-    approvals" and "nothing requires a pull request".
-
-    `protection` is `None` when the branch has no protection at all, and
-    `branch_protection` is that same existence question asked of the object as
-    a whole. Taking `None` rather than `{}` is deliberate: an empty dict is a
-    protection object that enforces nothing, which is a different branch state
-    from having no object, and the two must not reduce to the same facts.
-    """
-    protection = protection if isinstance(protection, dict) else None
-    reviews = (protection or {}).get("required_pull_request_reviews")
-    admins = (protection or {}).get("enforce_admins") or {}
-    checks = (protection or {}).get("required_status_checks") or {}
-    return {
-        "branch_protection": protection is not None,
-        # The actors an acknowledgement of the `bypass` gap accepted, by
-        # name: one added later un-matches the entry and the gap returns.
-        "bypass": sd_protection.bypass_words(protection or {}),
-        # The administrators' own exemptions, per ruleset with the rules each
-        # reaches: an acknowledgement of `enforce_admins` off that pins them
-        # stops applying when a second ruleset grows one.
-        "admin_bypass": sd_protection.bypass_words(protection or {}, True),
-        "enforce_admins": (
-            bool(admins.get("enabled")) if isinstance(admins, dict) else bool(admins)
-        ),
-        "required_approving_review_count": (
-            int(reviews.get("required_approving_review_count") or 0)
-            if isinstance(reviews, dict)
-            else 0
-        ),
-        "required_pull_request_reviews": isinstance(reviews, dict),
-        "strict": bool(checks.get("strict")) if isinstance(checks, dict) else False,
-    }
+    """The facts an acknowledgement pins: `sd_protection.observed_state`,
+    which `sd-ship merge` reads too, so both match an entry the same way."""
+    return sd_protection.observed_state(protection)
 
 
 def _apply_acknowledgements(
