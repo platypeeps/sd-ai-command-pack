@@ -73,10 +73,12 @@ else is. Its executables write these paths, and no others:
   its Dependabot guard as `setup-github` writes them,
   `.github/workflows/sd-check.yml` where no other workflow runs on
   `pull_request`, the `unprotected` entry in `.github/sd-status.json`
-  (only where the remote says nobody else may push), and a `docs/dashboard/` line in
-  `.gitignore`. **Tracked**, and written only on a feature branch. It also
-  refreshes that checkout's `CLAUDE.local.md` block and creates its untracked
-  `docs/dashboard/`. `--dry-run` prints every auto repository's diff against
+  (only where the remote says nobody else may push, and only where the file
+  declares no gap yet), and a `docs/dashboard/` line in
+  `.gitignore`. **Tracked**, and written only on a feature branch. A repository
+  whose `sd-status.json` entry or `CLAUDE.md` rule forbids CI gets no workflow.
+  It also adds the template's new lines to that checkout's `CLAUDE.local.md`
+  block, removing none, and creates its untracked `docs/dashboard/`. `--dry-run` prints every auto repository's diff against
   its `origin/HEAD` and writes nothing.
 - `docs/work/<item>/.citations.tsv` — the citation baseline, one per active work
   item, from `sd-docs-lint --update-citations`. **Tracked.**

@@ -43,6 +43,7 @@ import dataclasses
 import difflib
 import json
 import pathlib
+import re
 import sys
 from typing import Any, Callable, Iterable
 
@@ -248,17 +249,66 @@ def pack_pin(given: str | None) -> str:
 
 
 def status_text(current: str | None) -> str:
-    """`.github/sd-status.json` with the one `unprotected` entry in the plain form.
+    """`.github/sd-status.json` with the plain `unprotected` entry added.
 
-    Every other entry, and every other key, stays as written. Raises
-    ValueError on a file that is not the object the schema describes.
+    Additive only: a file that already declares any accepted gap comes back
+    byte for byte, because its entries are the operator's reasons and a
+    rewrite would lose them. Raises ValueError on a file that is not the
+    object the schema describes.
     """
     data: dict[str, Any] = {} if current is None else json.loads(current)
     if not isinstance(data, dict) or not isinstance(data.get("accepted_gaps", []), list):
         raise ValueError("not an object with an accepted_gaps list")
-    gaps = [gap for gap in data.get("accepted_gaps", []) if not (isinstance(gap, dict) and gap.get("id") == "unprotected")]
-    data["accepted_gaps"] = [*gaps, dict(UNPROTECTED_ENTRY)]
+    if current is not None and data.get("accepted_gaps"):
+        return current
+    data["accepted_gaps"] = [dict(UNPROTECTED_ENTRY)]
     return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+
+
+#: How a repository says it runs no CI. The declaration is structured and
+#: sd-ship reads it, so it is the signal; CLAUDE.md's rule line is the
+#: second, for a repository that says so there and nowhere else.
+NO_CI_DECLARED = re.compile(r"\bforbids (?:adding )?CI\b", re.IGNORECASE)
+NO_CI_RULE = re.compile(r"^\s*(?:-\s*)?(?:No CI\b|(?:Do not|Don't) add (?:CI|workflows)\b)", re.IGNORECASE | re.MULTILINE)
+
+
+def forbids_ci(tree: Tree) -> str | None:
+    """Where `tree` says it takes no CI, or None."""
+    try:
+        gaps = json.loads(tree.text_at(STATUS_PATH) or "{}").get("accepted_gaps", [])
+    except (ValueError, AttributeError):
+        gaps = []
+    for gap in gaps if isinstance(gaps, list) else []:
+        if isinstance(gap, dict) and NO_CI_DECLARED.search(str(gap.get("because", ""))):
+            return f"{STATUS_PATH} entry {gap.get('id')!r} says CI is forbidden"
+    if NO_CI_RULE.search(tree.text_at("CLAUDE.md") or ""):
+        return "CLAUDE.md forbids adding CI"
+    return None
+
+
+def additive_block(current: str | None, rendered: str) -> tuple[str, int]:
+    """`rendered`'s new block lines added to `current`, with nothing removed.
+
+    Only lines the template inserts inside the pack's markers are taken; a
+    line the refresh would change or drop stays as written, and text outside
+    the markers is never touched. Returns the text and how many current
+    lines the full refresh would have dropped.
+    """
+    if not current or sd_lib.LOCAL_BLOCK_START not in current:
+        return rendered, 0
+    old = current.splitlines(keepends=True)
+    new = rendered.splitlines(keepends=True)
+    begin = next(i for i, line in enumerate(old) if sd_lib.LOCAL_BLOCK_START in line)
+    end = next((i for i, line in enumerate(old) if sd_lib.LOCAL_BLOCK_END in line and i > begin), len(old))
+    merged: list[str] = []
+    kept = 0
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes():
+        merged.extend(old[i1:i2])
+        if tag == "insert" and begin < i1 <= end:
+            merged.extend(new[j1:j2])
+        elif tag in ("delete", "replace"):
+            kept += i2 - i1
+    return "".join(merged), kept
 
 
 def gitignore_text(current: str | None) -> str:
@@ -286,6 +336,32 @@ def pull_request_workflows(tree: Tree, *, besides: Iterable[str]) -> list[str]:
 def tracked_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None], *, pin: str,
                     owned: bool, self_install: bool) -> None:
     """The tracked half of a plan: route, guard, check, declaration, ignore line."""
+    no_ci = forbids_ci(tree)
+    if no_ci:
+        plan.adapted.append(f"workflows: none laid ({ROUTE_PATH}, {DEPENDABOT_PATH}, {CHECK_PATH}); {no_ci}")
+    else:
+        workflow_changes(plan, tree, propose, pin=pin, self_install=self_install)
+
+    # The declared gap, on owned repositories only, and only where none is declared.
+    if not owned:
+        plan.adapted.append(f"{STATUS_PATH}: not declared; {plan.slug or 'this remote'} is an employer's repository "
+                            "or others may push to it, so its protection stands")
+    else:
+        try:
+            after = status_text(tree.text_at(STATUS_PATH))
+        except ValueError as error:
+            plan.refused.append(f"{STATUS_PATH}: unreadable ({error}); fix it by hand, then re-run")
+        else:
+            if after == tree.text_at(STATUS_PATH):
+                plan.adapted.append(f"{STATUS_PATH}: kept as written; it already declares its gaps")
+            propose(STATUS_PATH, after)
+
+    propose(GITIGNORE_PATH, gitignore_text(tree.text_at(GITIGNORE_PATH)))
+
+
+def workflow_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None], *, pin: str,
+                     self_install: bool) -> None:
+    """Route workflow, its Dependabot guard, and the check workflow where none validates."""
     legacy = [rel for rel in sd_setup_github.LEGACY_ROUTER_PATHS if tree.text_at(rel) is not None]
     if legacy:
         plan.refused.append(f"{ROUTE_PATH}: the sd-github-review footprint is still here ({', '.join(legacy)}); "
@@ -305,18 +381,6 @@ def tracked_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None],
         plan.adapted.append(f"{CHECK_PATH}: not laid; {', '.join(others)} already run on pull_request")
     else:
         propose(CHECK_PATH, check_workflow_text())
-
-    # The declared gap, on owned repositories only.
-    if not owned:
-        plan.adapted.append(f"{STATUS_PATH}: not declared; {plan.slug or 'this remote'} is an employer's repository "
-                            "or others may push to it, so its protection stands")
-    else:
-        try:
-            propose(STATUS_PATH, status_text(tree.text_at(STATUS_PATH)))
-        except ValueError as error:
-            plan.refused.append(f"{STATUS_PATH}: unreadable ({error}); fix it by hand, then re-run")
-
-    propose(GITIGNORE_PATH, gitignore_text(tree.text_at(GITIGNORE_PATH)))
 
 
 def plan_repo(root: pathlib.Path, remote: str | None, *, pin: str, tree: Tree,
@@ -370,7 +434,10 @@ def plan_repo(root: pathlib.Path, remote: str | None, *, pin: str, tree: Tree,
         target = root / LOCAL_BLOCK_PATH
         current = target.read_text(encoding="utf-8") if target.is_file() else None
         try:
-            propose(LOCAL_BLOCK_PATH, local_block(current or ""), where="local", before=current)
+            after, kept = additive_block(current, local_block(current or ""))
+            if kept:
+                plan.adapted.append(f"{LOCAL_BLOCK_PATH}: kept {kept} line(s) the template would change or drop")
+            propose(LOCAL_BLOCK_PATH, after, where="local", before=current)
         except SystemExit as error:  # the installer's refusal for a half-open block
             plan.refused.append(f"{LOCAL_BLOCK_PATH}: {str(error.code).removeprefix('error: ')}")
     if not (root / DASHBOARD_DIR).is_dir():

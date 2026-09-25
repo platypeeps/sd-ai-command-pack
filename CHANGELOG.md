@@ -16,7 +16,11 @@
   is laid only where no other workflow runs on `pull_request`. The remote is
   asked the three ownership questions first: a fork or an unadministered
   repository gets no tracked file, and only a repository nobody else may push
-  to gets the `unprotected` entry, so employer repositories keep theirs. The
+  to gets the `unprotected` entry, so employer repositories keep theirs.
+  The stamp is additive: an `sd-status.json` that declares any gap is left as
+  written, the block refresh only adds template lines inside the markers, and a
+  repository that forbids CI (an `sd-status.json` reason saying "forbids CI",
+  or a `No CI` / `Do not add CI` rule in `CLAUDE.md`) gets no workflow. The
   `CLAUDE.local.md` template gains the parallel-work line (sd:1342) and the
   `docs/dashboard/` rule.
 

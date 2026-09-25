@@ -145,16 +145,36 @@ class DryRun(Fleet):
             self.assertEqual({change["where"] for change in plan["changes"]}, {"local"}, name)
             self.assertTrue(plan["refused"][0].startswith("tracked files:"), name)
 
-    def test_status_keeps_other_entries_and_rewrites_unprotected(self) -> None:
-        other = {"id": "reviews", "state": {"required_pull_request_reviews": False},
-                 "because": "b", "since": "2026-01-01", "until": "u"}
-        old = {"id": "unprotected", "state": {"branch_protection": False},
-               "because": "cites ruleset 17617253", "since": "2026-09-12", "until": "u"}
-        current = json.dumps({"$schema": "./s.json", "accepted_gaps": [other, old]}, indent=2) + "\n"
+    def test_status_with_any_declared_gap_is_left_as_written(self) -> None:
+        gaps = [{"id": gap, "state": {}, "because": f"ruleset gap {gap} (#566)", "since": "2026-09-24", "until": "u"}
+                for gap in ("reviews", "bypass", "strict")]
+        current = json.dumps({"$schema": "./s.json", "accepted_gaps": gaps}, indent=4) + "\n"
+        root, remote = self.repo("system", {".github/sd-status.json": current})
+        [plan] = self.plan([(root, remote)])
+        self.assertNotIn(sd_fleet.STATUS_PATH, [change["path"] for change in plan["changes"]])
+        self.assertTrue(any("kept as written" in line for line in plan["adapted"]))
+        self.assertEqual(sd_fleet.status_text(current), current)
+
+    def test_status_without_gaps_gets_the_plain_entry_added(self) -> None:
+        current = json.dumps({"$schema": "./s.json"}) + "\n"
         written = json.loads(sd_fleet.status_text(current))
-        self.assertEqual(written["$schema"], "./s.json")
-        self.assertEqual(written["accepted_gaps"], [other, sd_fleet.UNPROTECTED_ENTRY])
+        self.assertEqual(written, {"$schema": "./s.json", "accepted_gaps": [sd_fleet.UNPROTECTED_ENTRY]})
         self.assertEqual(sd_fleet.status_text(sd_fleet.status_text(current)), sd_fleet.status_text(current))
+
+    def test_repository_that_forbids_ci_gets_no_workflow(self) -> None:
+        declared = json.dumps({"accepted_gaps": [{
+            "id": "unprotected", "state": {"branch_protection": False},
+            "because": "One account pushes, and CLAUDE.md forbids adding CI to it.",
+            "since": "2026-09-21", "until": "u"}]}, indent=2) + "\n"
+        shapes = {"hoa": {".github/sd-status.json": declared},
+                  "rule-only": {"CLAUDE.md": "# rules\n\n- No CI, no Copilot on this repo. Don't add workflows.\n"}}
+        for name, files in shapes.items():
+            root, remote = self.repo(name, files)
+            [plan] = self.plan([(root, remote)])
+            paths = [change["path"] for change in plan["changes"]]
+            for workflow in (sd_fleet.ROUTE_PATH, sd_fleet.DEPENDABOT_PATH, sd_fleet.CHECK_PATH):
+                self.assertNotIn(workflow, paths, name)
+            self.assertTrue(any(line.startswith("workflows: none laid") for line in plan["adapted"]), name)
 
     def test_malformed_status_is_refused(self) -> None:
         root, remote = self.repo("broken", {".github/sd-status.json": "{nope"})
@@ -186,6 +206,35 @@ class DryRun(Fleet):
         self.assertIn(" mine\n", change["diff"])
         self.assertIn(" " * 5 + "test: make unit", change["diff"])
         self.assertIn("+# Parallel work follows", change["diff"])
+
+    def test_local_block_refresh_drops_no_operator_line(self) -> None:
+        # The rwbp-website shape: an older template block, the operator's
+        # comment lines inside it, and notes outside it.
+        block = "".join(line for line in sd_install.local_block_text("")[0].splitlines(keepends=True)
+                        if "Parallel work" not in line)
+        block = block.replace("    # test:", "    # `test` is declared because `npm run test` is the e2e suite.\n"
+                                            "    # `npm run test:unit` is the local gate.\n"
+                                            "    test: npm run test:unit\n    # test:", 1)
+        local = f"# operator note above\n\n{block}\n# operator note below\n"
+        root, remote = self.repo("rwbp-website", local=local)
+        [plan] = self.plan([(root, remote)])
+        [change] = [c for c in plan["changes"] if c["path"] == "CLAUDE.local.md"]
+        removed = [line for line in change["diff"].splitlines() if line.startswith("-") and not line.startswith("---")]
+        self.assertEqual(removed, [])
+        after, _ = sd_fleet.additive_block(local, sd_install.local_block_text(local)[0])
+        self.assertIn("+# Parallel work follows", change["diff"])
+        self.assertTrue(after.startswith("# operator note above\n\n" + sd_install.BLOCK_BEGIN))
+        self.assertTrue(after.endswith(sd_install.BLOCK_END + "\n\n# operator note below\n"))
+        rendered = sd_install.local_block_text(after)[0]
+        self.assertEqual(sd_fleet.additive_block(after, rendered)[0], after)
+
+    def test_block_merge_takes_nothing_outside_the_markers(self) -> None:
+        begin, end = sd_install.BLOCK_BEGIN, sd_install.BLOCK_END
+        current = f"outside\n{begin}\n    mine: 1\n{end}\n"
+        rendered = f"new outside\noutside\n{begin}\n    template: 2\n    mine: 1\n{end}\ntrailer\n"
+        merged, kept = sd_fleet.additive_block(current, rendered)
+        self.assertEqual(merged, f"outside\n{begin}\n    template: 2\n    mine: 1\n{end}\n")
+        self.assertEqual(kept, 0)
 
     def test_only_selects_by_name_and_refuses_a_repository_outside_the_rows(self) -> None:
         one, remote_one = self.repo("one")
