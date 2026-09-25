@@ -18,7 +18,7 @@ from typing import Any, Callable
 import sd_lib
 import sd_ship_dispositions
 from sd_ship_history import AUTOMATIC_CODE_REVIEW_PASSES, completed_depth, digest
-from sd_ship_remote import Refusal
+from sd_ship_remote import Refusal, completed_process
 from sd_ship_workflow import success
 
 
@@ -33,9 +33,13 @@ def is_ancestor(root: pathlib.Path, previous: str, head: str) -> bool:
 
     `--is-ancestor` answers by exit status and prints nothing, so the raising
     `git` helper rendered "not an ancestor" as a bare, retryable "git failed"
-    (sd:1348). The caller owns the refusal that names the heads.
+    (sd:1348). Only exit 1 means "no"; any other failure, a timeout or a
+    missing git still raises that retryable runtime refusal, because a git
+    that cannot answer is not evidence of a rewritten history. The caller
+    owns the refusal that names the heads.
     """
-    return sd_lib.git_output(["merge-base", "--is-ancestor", previous, head], root) is not None
+    argv = ["git", "merge-base", "--is-ancestor", previous, head]
+    return completed_process(root, argv, answers=frozenset({0, 1})).returncode == 0
 
 
 def empty_branch_base(root: pathlib.Path, head: str) -> str | None:

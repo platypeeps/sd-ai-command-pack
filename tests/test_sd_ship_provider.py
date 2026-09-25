@@ -152,6 +152,42 @@ class ProviderSelection(unittest.TestCase):
             with self.subTest(flags=flags), self.assertRaisesRegex(ship.Refusal, "provider.*record"):
                 ship.validate_identity(args)
 
+    def test_ancestry_check_reads_only_exit_one_as_an_orphaned_head(self):
+        """sd:1348 review: exit 1 is the only "not an ancestor" answer.
+
+        A git that cannot answer -- a bad object (128), a timeout, no binary --
+        stays the retryable runtime refusal, never an orphaned-head verdict
+        that recommends rewriting history.
+        """
+        reviewed, _process = self.context("minimax")
+        reviewed.review(HEAD)
+        fixed_head = "c" * 40
+        review, _process = self.context("minimax", state=reviewed.state, head=fixed_head)
+        prior = review.history.prior(review.state)
+
+        def answer(outcome):
+            def run(argv, **_kwargs):
+                self.assertEqual(argv, ["git", "merge-base", "--is-ancestor", HEAD, fixed_head])
+                if isinstance(outcome, BaseException):
+                    raise outcome
+                return subprocess.CompletedProcess(argv, outcome, "", "fatal: Not a valid commit name" if outcome > 1 else "")
+            return run
+
+        with patch("sd_ship_remote.subprocess.run", side_effect=answer(0)):
+            review.validate_dispatch(fixed_head, prior, False, False)
+        with patch("sd_ship_remote.subprocess.run", side_effect=answer(1)), self.assertRaises(ship.Refusal) as caught:
+            review.validate_dispatch(fixed_head, prior, False, False)
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "reviewed_head_orphaned")
+        for outcome, code in ((128, "command_failed"),
+                              (subprocess.TimeoutExpired(["git"], 60), "command_unavailable"),
+                              (FileNotFoundError("git"), "command_unavailable")):
+            with self.subTest(outcome=outcome), patch("sd_ship_remote.subprocess.run", side_effect=answer(outcome)), \
+                    self.assertRaises(ship.Refusal) as caught:
+                review.validate_dispatch(fixed_head, prior, False, False)
+            self.assertEqual(caught.exception.workflow["blocker"]["code"], code)
+            self.assertTrue(caught.exception.workflow["blocker"]["retryable"])
+            self.assertNotIn("reviewed head", str(caught.exception))
+
     def test_fix_verification_retains_history_and_uses_only_the_current_selector(self):
         reviewed, _process = self.context("minimax")
         reviewed.review(HEAD)
