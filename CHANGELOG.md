@@ -11,6 +11,13 @@
   is an executable, and keeps `python3` when neither is or when the caller
   has activated an environment (`VIRTUAL_ENV` or `CONDA_PREFIX` is set).
 
+- **`sd-review`'s Jev tier reading is metered.** Both `jev` calls now name
+  the caller `sd-review` and the stage `JEV_SD_REVIEW`, and the `enabled` gate
+  passes `--record`. Before this, a judgment landed in the judgment ledger under
+  `unknown` and a declining gate left no row, so the lane that asks Jev on every
+  review was the one caller the ledger missed (sd:1253). What leaves the machine
+  is unchanged: the three flags are ledger fields.
+
 - **A machine `sd.copilot_review` of `never` wins over the repository.** The
   repository's `.github/sd-review.json` `copilot_review.automatic_deep`
   overrode every machine word, so a repository's `true` bought a paid Copilot
@@ -289,6 +296,14 @@
   action this tool is allowed to take.
 
 ### Fixed
+
+- **The no-item adjudication tests no longer read the shared library
+  (sd:1459).** `adjudicator_binding` hashes the installed `sd_db/ship.py` on
+  every command, and every worktree borrows one `.venv`. A session that
+  installed `sd_db` there between two commands made an accept refuse with
+  "does not bind the current review, history, tools and head". The two
+  in-process no-item suites now bind a copy taken per test. The subprocess
+  disposition suites keep the exposure; sd:1479 tracks them.
 
 - **The Copilot ancestor-clearance warning reaches the receipt only with a
   merge dispatch (sd:1373).** `require_copilot_clearance` saved "Copilot
