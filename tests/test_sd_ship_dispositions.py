@@ -9,8 +9,11 @@ import io
 import json
 import os
 import pathlib
+import re
 import shutil
+import sys
 import tempfile
+import types
 import unittest
 from unittest.mock import patch
 
@@ -21,13 +24,46 @@ from tests import test_sd_ship as fixture
 ship = fixture.ship
 
 
+def drifted(snapshot: pathlib.Path) -> list[str]:
+    """The loaded `sd_db` functions whose code the snapshot's source does not compile to.
+
+    This process imported the installed package before any snapshot could
+    exist, so an install in between would leave it running one build while
+    the children import another, both hashing the same copy (sd:1479 review).
+    Code objects compare by bytecode, constants, names and line table, not by
+    file name, so identical source compares equal and any edit does not.
+    """
+    drift = []
+    for name, module in sorted(sys.modules.items()):
+        # The loader's origin: `freeze_library` repoints `__file__`, not this.
+        path = getattr(getattr(module, "__spec__", None), "origin", None)
+        if not (name == "sd_db" or name.startswith("sd_db.")) or not path or not path.endswith(".py"):
+            continue
+        source = snapshot / pathlib.Path(path).resolve().relative_to(fixture.SITE_PACKAGES.resolve())
+        # `dont_inherit`: this file's own `__future__` import would otherwise
+        # compile the library under flags it was not loaded with.
+        compiled, table = [compile(source.read_bytes(), path, "exec", dont_inherit=True)], {}
+        while compiled:
+            code = compiled.pop()
+            table[code.co_qualname] = code
+            compiled += [const for const in code.co_consts if isinstance(const, types.CodeType)]
+        members = [value for value in vars(module).values() if getattr(value, "__module__", None) == name]
+        members += [inner for value in members if isinstance(value, type) for inner in vars(value).values()]
+        for value in members:
+            code = getattr(getattr(value, "__func__", value), "__code__", None)
+            if code is not None and code.co_filename == path and table.get(code.co_qualname) != code:
+                drift.append(f"{name}.{code.co_qualname}")
+    return drift
+
+
 #: One snapshot of the installed `sd_db` per test process, taken as this module
-#: loads rather than per test (sd:1479 review): this process imported the
-#: installed package moments earlier, and a snapshot taken minutes later, after
-#: an install, would bind children to code the parent is not running.
+#: loads rather than per test (sd:1479 review), and refused when the code this
+#: process already imported is not the code in it.
 LIBRARY = pathlib.Path(tempfile.mkdtemp(prefix="sd-ship-library-"))
 atexit.register(shutil.rmtree, LIBRARY, True)
 shutil.copytree(fixture.SITE_PACKAGES / "sd_db", LIBRARY / "sd_db", ignore=shutil.ignore_patterns("__pycache__"))
+if drifted(LIBRARY):
+    raise RuntimeError(f"sd_db was installed while this test process started; rerun it: {drifted(LIBRARY)[:5]}")
 
 
 def freeze_library(case):
@@ -156,6 +192,21 @@ class DispositionTests(unittest.TestCase):
         library.write_bytes(original)
         self.accepted(json.loads(self.proposal_file.read_text()))
         self.assertEqual(self.prepare()["phase"], "ready_to_send")
+
+    def test_a_snapshot_the_loaded_library_did_not_come_from_is_named(self):
+        """The check the module load runs: clean on its own snapshot, loud on any edit.
+
+        One blank line before a function moves its first line, which is the
+        smallest install that changes what a function compiles to.
+        """
+        self.assertEqual(drifted(LIBRARY), [])
+        edited = self.directory / "edited"
+        shutil.copytree(LIBRARY, edited)
+        library = edited / "sd_db" / "ship.py"
+        source = library.read_text()
+        name = re.search(r"^def (\w+)\(", source, re.MULTILINE).group(1)
+        library.write_text(source.replace(f"\ndef {name}(", f"\n\ndef {name}(", 1))
+        self.assertIn(f"sd_db.ship.{name}", drifted(edited))
 
     def test_blank_template_missing_explicit_acceptance_and_wrong_digest_refuse(self):
         self.blocked()
