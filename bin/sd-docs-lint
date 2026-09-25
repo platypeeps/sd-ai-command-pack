@@ -1478,7 +1478,9 @@ def check_branch_lines(
         return
     compared = disagreeing = 0
     for item in item_directories(work_root):
-        if sd_lib.ARCHIVE_DIR in item.parts:
+        # Only `archive/` below the work root is history: a checkout under a
+        # directory of that name is still active (#1177 review).
+        if sd_lib.ARCHIVE_DIR in item.relative_to(work_root).parts:
             continue
         prd = item / "prd.md"
         if not prd.is_file():

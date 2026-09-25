@@ -1019,6 +1019,22 @@ class RuleTwoComparesTheBranchLine(Fixture):
         found, _ = self.notes()
         self.assertEqual([n for n in found if OTHER in n], [])
 
+    def test_a_checkout_under_a_directory_named_archive_is_still_compared(self) -> None:
+        # Review of #1177: only `archive/` below the work root is history. A
+        # checkout at `/archive/repo` skipped every item, `0 of 0`, silently.
+        moved = self.tmp / "archive" / "repo"
+        moved.parent.mkdir()
+        self.root.rename(moved)
+        self.root, self.work = moved, moved / "docs" / "work"
+        self.item = self.work / ITEM
+        self.marker("row")
+        self.write(prd(None, branch="main"))
+        self.seed("in_progress", branch="feat/the-thing")
+        found, _ = self.notes()
+        self.assertEqual(len([n for n in found if ITEM in n]), 1, found)
+        self.assertIn("rule 2 branch line: 1 of 1 active item(s) with a branch: line "
+                      "disagree with the row; advisory, no failure", found)
+
     def test_without_the_row_nothing_is_compared_and_it_says_so(self) -> None:
         self.write(prd("in_progress", branch="main"))
         found, _ = self.notes()
