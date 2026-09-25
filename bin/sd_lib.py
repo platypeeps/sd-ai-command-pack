@@ -2960,3 +2960,85 @@ def jev_stage_off(value: str | None) -> bool:
     """
 
     return value is not None and value.strip().lower() in JEV_FLAG_OFF
+
+
+#: How long `run_group` waits for a killed group's leader to be reaped.
+GROUP_CLEANUP_SECONDS = 5
+
+
+class GroupTimeout(Exception):
+    """`run_group` reached its deadline. The group is already gone."""
+
+
+class _Terminated(BaseException):
+    """SIGTERM, raised while `run_group` owns a group that must end first."""
+
+
+def _raise_terminated(number: int, frame: object) -> None:
+    raise _Terminated
+
+
+def _end_group(process: subprocess.Popen) -> None:
+    """Kill whatever is left of the group `process` leads, and reap it."""
+    import signal  # noqa: PLC0415 - only the group helpers need it
+
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+    try:
+        process.wait(timeout=GROUP_CLEANUP_SECONDS)
+    except subprocess.TimeoutExpired:
+        pass
+    for stream in (process.stdin, process.stdout, process.stderr):
+        if stream is not None:
+            try:
+                stream.close()
+            except OSError:
+                pass
+
+
+def run_group(argv: list[str], *, cwd: pathlib.Path, env: dict[str, str], timeout: float,
+              input_text: str | None = None) -> subprocess.CompletedProcess:
+    """Run `argv` as the leader of a process group, and end the whole group.
+
+    sd:1482. `subprocess.run(timeout=)` kills the one process it started. A
+    child with children of its own -- `sd-check` running `make check` -- left
+    them running with nothing to time them out. Here the group is killed when
+    the call ends: at the deadline, on an interruption, and after a normal exit.
+
+    A group of its own no longer receives what is sent to the caller's group,
+    which is how `sd-ship` ends a review. So for the length of the call SIGTERM
+    ends the group first and then the caller, as it would have without one.
+    Only the default disposition is replaced: a caller that handles or ignores
+    SIGTERM keeps that, and a thread cannot install a handler.
+
+    Raises `GroupTimeout` at the deadline, and what `Popen` raises when
+    `argv[0]` cannot start.
+    """
+    import signal  # noqa: PLC0415 - only the group helpers need it
+    import threading  # noqa: PLC0415
+
+    owns_term = (threading.current_thread() is threading.main_thread()
+                 and signal.getsignal(signal.SIGTERM) is signal.SIG_DFL)
+    if owns_term:
+        signal.signal(signal.SIGTERM, _raise_terminated)
+    try:
+        process = subprocess.Popen(
+            list(argv), cwd=str(cwd), env=dict(env), text=True, start_new_session=True,
+            stdin=subprocess.DEVNULL if input_text is None else subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            output, errors = process.communicate(input_text, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            raise GroupTimeout(f"{argv[0]}: timed out after {timeout}s") from None
+        finally:
+            _end_group(process)
+    except _Terminated:
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        os.kill(os.getpid(), signal.SIGTERM)
+        raise
+    finally:
+        if owns_term:
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    return subprocess.CompletedProcess(list(argv), process.returncode, output or "", errors or "")
