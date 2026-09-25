@@ -1898,14 +1898,17 @@ def _closing_items(root: pathlib.Path, refs: tuple[str, ...]) -> set[str]:
     grep = f"{sd_lib.DELIVERS_TRAILER}|{sd_lib.CLOSES_TRAILER}"
     for ref in dict.fromkeys(refs):
         raw = sd_lib.git_output(
-            ["log", "--format=%H%x1f%B%x1e", "-E", "--grep", grep, ref], root
+            ["log", "--format=%H%x1f%P%x1f%B%x1e", "-E", "--grep", grep, ref], root
         ) or ""
         for commit in raw.split("\x1e"):
-            message = commit.partition("\x1f")[2]
+            if commit.count("\x1f") < 2:
+                continue
+            _, parents, message = commit.split("\x1f", 2)
             for line in message.splitlines():
                 name, _, value = line.rstrip().partition(" ")
                 item = value.strip()
-                if name in (sd_lib.DELIVERS_TRAILER, sd_lib.CLOSES_TRAILER) and item and sd_lib._closes(message, item):
+                if (name in (sd_lib.DELIVERS_TRAILER, sd_lib.CLOSES_TRAILER) and item
+                        and sd_lib._closes(message, item, parents)):
                     closed.add(item)
     return closed
 
