@@ -273,6 +273,15 @@
 
 ### Fixed
 
+- **The hash-pinned requirements resolve for Python 3.13, the project floor
+  (sd:1391).** `requirements-dev.txt` and `requirements-security.txt` were
+  still compiled with `--python-version 3.10` after `requires-python` rose to
+  3.13. A lint or audit release that needs 3.11 or later could never be
+  pinned, and the gates would stay green on an older analyzer. Both files are
+  recompiled at 3.13; no pinned version moved, and only the 3.10-only `tomli`
+  and `stevedore` entries dropped out. `tests/test_requirements_target.py`
+  fails when a file's compile header names another version than the floor.
+
 - **A gate that fails before any reviewer is asked no longer spends a review
   pass (sd:1475).** Under parallel load `make check` outran sd-check's fixed
   900-second limit. sd-review then reported `gate_failed` without asking a
