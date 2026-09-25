@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import contextlib
 import hashlib
 import io
@@ -9,6 +10,7 @@ import json
 import os
 import pathlib
 import shutil
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -19,19 +21,26 @@ from tests import test_sd_ship as fixture
 ship = fixture.ship
 
 
+#: One snapshot of the installed `sd_db` per test process, taken as this module
+#: loads rather than per test (sd:1479 review): this process imported the
+#: installed package moments earlier, and a snapshot taken minutes later, after
+#: an install, would bind children to code the parent is not running.
+LIBRARY = pathlib.Path(tempfile.mkdtemp(prefix="sd-ship-library-"))
+atexit.register(shutil.rmtree, LIBRARY, True)
+shutil.copytree(fixture.SITE_PACKAGES / "sd_db", LIBRARY / "sd_db", ignore=shutil.ignore_patterns("__pycache__"))
+
+
 def freeze_library(case):
-    """Give this process and every `sd-ship` child one library copy the test owns (sd:1479).
+    """Give this process and every `sd-ship` child the one snapshot (sd:1479).
 
     `adjudicator_binding` hashes `sd_db/ship.py` on every command, and the
     installed file belongs to the `.venv` every worktree borrows. An install
     into it between two commands moved the binding and refused an accept.
-    The children import the copy through `PYTHONPATH`; this process, which
-    already imported the installed package, has `__file__` pointed at it.
+    The children import the snapshot through `PYTHONPATH`; this process,
+    which imported the installed package, has `__file__` pointed at it.
     """
-    root = case.directory / "library"
-    shutil.copytree(fixture.SITE_PACKAGES / "sd_db", root / "sd_db", ignore=shutil.ignore_patterns("__pycache__"))
-    case.environment["PYTHONPATH"] = os.pathsep.join(filter(None, (str(root), case.environment.get("PYTHONPATH"))))
-    frozen = patch.object(ship_store, "__file__", str(root / "sd_db" / "ship.py"))
+    case.environment["PYTHONPATH"] = os.pathsep.join(filter(None, (str(LIBRARY), case.environment.get("PYTHONPATH"))))
+    frozen = patch.object(ship_store, "__file__", str(LIBRARY / "sd_db" / "ship.py"))
     frozen.start()
     case.addCleanup(frozen.stop)
 
@@ -136,8 +145,9 @@ class DispositionTests(unittest.TestCase):
         """
         self.blocked()
         self.filled()
-        library = self.directory / "library" / "sd_db" / "ship.py"
+        library = LIBRARY / "sd_db" / "ship.py"
         original = library.read_bytes()
+        self.addCleanup(library.write_bytes, original)
         library.write_bytes(original + b"# changed\n")
         refused = self.command("--dispositions-file", str(self.proposal_file))
         self.assertEqual(refused.returncode, 3, refused.stdout + refused.stderr)
