@@ -781,6 +781,23 @@ class ClassicAndRulesetCase(unittest.TestCase):
         # The same ruleset without the bypass is firm, and the gate grants.
         self.assertEqual(self.both(classic).gate("main", HEAD)["firm"]["required_status_checks"], ["ruleset:42"])
 
+    def test_allowed_merge_methods_intersect_and_survive_the_combination(self) -> None:
+        """sd:1379. Every `pull_request` rule that names methods must be
+        satisfied, so two rulesets' lists intersect; a rule without the key
+        narrows nothing and adds no key. The combined object carries the
+        list too, since it is the one a branch with classic protection gets."""
+        rules = ruleset_rules() + [{"type": "pull_request", "ruleset_id": 43,
+                                    "parameters": {"allowed_merge_methods": ["rebase", "squash"]}}]
+        rules[1]["parameters"]["allowed_merge_methods"] = ["merge", "squash"]
+        rulesets = {42: RULESET, 43: dict(RULESET, id=43, name="other")}
+        self.assertEqual(sd_protection.synthesize(rules, rulesets)["allowed_merge_methods"], ["squash"])
+        rules[1]["parameters"].pop("allowed_merge_methods")
+        self.assertEqual(sd_protection.synthesize(rules, rulesets)["allowed_merge_methods"], ["rebase", "squash"])
+        self.assertNotIn("allowed_merge_methods", sd_protection.synthesize(rules[:3], {42: RULESET}))
+        combined = sd_protection.combine(protection_document(), rules, rulesets)
+        self.assertEqual(combined["source"], "combined")
+        self.assertEqual(combined["allowed_merge_methods"], ["rebase", "squash"])
+
     def test_a_stricter_bypassable_ruleset_is_advisory_and_never_grants(self) -> None:
         """The ruleset asks for strict checks and two approvals, and an app
         can bypass it. Classic asks for one approval and lax checks. The
