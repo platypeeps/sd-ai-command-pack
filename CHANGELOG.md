@@ -391,6 +391,14 @@
 
 ### Fixed
 
+- **Code motion no longer lowers the R13-D1 citation count (sd:1374).** The
+  ratchet counted a `path:line` into code only when the line sat inside a
+  `def` or a `class`. An insertion above a cited line could carry it out of
+  every symbol, and the count fell with no document changed. The stale
+  `bin/sd-status:877` citation in the one-person PRD read as a cleanup that
+  way. Every live `path:line` into code now counts, so the baselines rose to
+  52 and 80, and that citation now names `handoff_section`.
+
 - **A merge-forward before the first `sd-ship prepare` no longer becomes the
   pull request title (sd:1377).** With no `--title` and no stored title,
   prepare took HEAD's subject. After the merge-forward sd-ship demands, that

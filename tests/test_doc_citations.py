@@ -1065,106 +1065,59 @@ def anchored_citations() -> list[tuple[pathlib.Path, str, pathlib.Path, int, int
 
 # ------------------------------------------------ the symbol preference (R13-D1)
 #
-# sd:431, prose rule 1 in the form its design narrowed it to: a `path:line`
-# into code whose line sits inside a function or a class should name the
-# symbol, `source:<path>::<symbol>`, because the number goes stale at the next
-# insertion above it and the name does not. Not a prohibition on line anchors:
-# a line outside every declaration -- a module-level constant, a comment above
-# an import -- has no symbol to name, a `[quoted: ...]` reason needs its line
-# by construction (sd:568), and a page cited by line is `bin/sd-docs-lint`'s
-# subject and the repointer's.
+# sd:431, prose rule 1: a `path:line` into code should name the symbol,
+# `source:<path>::<symbol>`, because the number goes stale at the next
+# insertion above it and the name does not. A `[quoted: ...]` reason needs its
+# line by construction (sd:568), and a page cited by line is
+# `bin/sd-docs-lint`'s subject and the repointer's; neither is counted.
 #
 # The population is the *unanchored* citations. Since sd:525 a live anchored
-# `path:line` into code is `anchored-line-into-code`, which is red, so the
-# `compared` bucket this was first planned over holds no live row into code
-# at all: measured on `ef7c0c7b`, `compared` was one archived row. What is
+# `path:line` into code is `anchored-line-into-code`, which is red, so what is
 # left is the token nobody anchored -- `no-adjacent-anchor`,
 # `separator-not-adjacent`, `anchor-not-a-symbol` -- which the gate opens only
-# to check the line is in range. This reads the same rows and asks one more
-# question of the file: is that line inside something the `source:` form
-# could name?
+# to check the line is in range.
+#
+# Until sd:1374 this counted only a line inside a `def` or a `class` of a
+# Python file. That made the count depend on the code, not on the prose: an
+# insertion above a cited line could carry it out of every symbol, and the
+# count fell with no document changed. Every such citation now counts,
+# wherever its line sits, so only an edit to the prose moves the count.
 
-#: Live citations whose line sits inside a `def` or a `class`, per document.
-#: Measured after the 2026-09 archive move. Archived records are outside this
-#: live-prose gate. A ratchet on violations, never a census: each entry may
-#: fall and may not rise, and an entry that reaches zero is deleted.
-#: Per document, so one page cannot offset a new violation in another.
+#: Live `path:line` citations into code, per document. A ratchet on
+#: violations, never a census: each entry may fall and may not rise, and an
+#: entry that reaches zero is deleted. Per document, so one page cannot offset
+#: a new violation in another. Archived records are outside this live-prose gate.
 #:
-#: The implement.md entry fell from 35 on 2026-09-22. Nothing in that document
-#: changed. Commit 8e3bed07 added `_checkouts_that_may_hold_a_venv` to
-#: `bin/sd_lib.py`, above the lines that page cites, and `bin/sd_lib.py:1334`
-#: -- which the page introduces as `git fetch`, and which had named the date
-#: parser for some time before that -- now lands in a comment block, where
-#: there is no symbol to prefer. That is the ratchet working: a `path:line`
-#: into code is worth less the moment the code moves.
-#:
-#: It stayed at 34 on the same day for the other half of the same lesson. The
-#: change that added `MID_PROVISION` would have pushed that citation back
-#: inside a symbol -- a different one again -- so the citation was repaired
-#: instead of the number: the page now names `delivered`, where the two
-#: `git fetch` calls it was talking about actually are. A count that a
-#: neighbouring edit can move in either direction is measuring the line
-#: numbers and not the claim.
-#:
-#: 35 and 44 are the merge of sd:1303 with `main` at `6ae7e416`, and they are
-#: the measurement rather than either parent's number. The branch recorded
-#: 34/46 and `main` recorded 36/44; the two were measured from bases that do
-#: not contain each other's edits to `bin/sd_lib.py`, so on the merged tree
-#: neither pair is the size. Nothing here raises a violation: the merged
-#: `implement.md` sits below the 36 `main` already records, and `prd.md` is
-#: unchanged from it. This is the same arithmetic the review lane's cap
-#: comment records for a diamond -- re-measure on the tree that exists, do
-#: not pick a side.
+#: Re-measured for sd:1374 on `4ce3abc9`, when the population stopped being
+#: "inside a `def` or a `class`": 34 and 45 then became 52 and 81. The rise is
+#: the citations the old population could not see, and not new ones. One of
+#: them is the case the row measured: prd.md cited `bin/sd-status:877` for the
+#: `handoff.resolve_root` call, and code motion had carried that line into a
+#: module comment, where the count stopped counting it. The count fell by one
+#: and read as a cleanup, but the citation was as stale as before. That
+#: citation now names `handoff_section`, which is why prd.md stands at 80.
 SYMBOL_ANCHORED_CITATIONS = {
-    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 34,
-    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 45,
+    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 52,
+    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 80,
 }
-
-
-def enclosing_declaration(tree, line: int) -> str | None:
-    """The `def` or `class` whose span holds `line`, or `None` outside every one.
-
-    The two levels `declared_spans` reads and no deeper, because those are the
-    declarations `source:<path>::<symbol>` can name: a nested function is a
-    local, and the citation the rule prefers would name the function it sits
-    in. Inside a class, the method is the answer where a method holds the line
-    and the class where none does.
-    """
-    import ast
-
-    kinds = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-    for node in tree.body:
-        if not isinstance(node, kinds):
-            continue
-        if not node.lineno <= line <= (node.end_lineno or node.lineno):
-            continue
-        for inner in node.body if isinstance(node, ast.ClassDef) else ():
-            if (isinstance(inner, kinds)
-                    and inner.lineno <= line <= (inner.end_lineno or inner.lineno)):
-                return inner.name
-        return node.name
-    return None
 
 
 def symbol_anchored_citations(
         docs: list[pathlib.Path] | None = None) -> dict[str, int]:
-    """Live `path:line` citations whose line sits inside a symbol, per document.
+    """Live `path:line` citations into code, per document.
 
     Over `classify`'s rows, so the population is the one the gate already
     reads and no second tokeniser exists. A row is counted when its document
-    is live, its target is a Python file inside the checkout, and
-    `enclosing_declaration` names something at its line that `declared_at`
-    finds exactly once, because that is the test `source_declaration_error`
-    applies and a name declared twice has no symbolic form to prefer; a
-    `quoted` row is exempt by the design, and a markdown target or an
-    unparseable file has no symbol to prefer. The file is read through
-    `file_lines`, so `ast`'s numbering and this module's agree on which line
-    the citation names.
+    is live, it is not `quoted`, and its target is a code file inside the
+    checkout. Where the line sits does not matter (sd:1374): the count used to
+    ask whether a `def` or a `class` held it, and unrelated code motion that
+    carried a stale citation into a module comment took it out of the count,
+    which the ratchet then read as a cleanup. A line number into code goes
+    stale at the next insertion above it wherever it lands, so every one is
+    counted, and a count falls only when a citation is rewritten or removed.
     """
-    import ast
 
     counts: collections.Counter = collections.Counter()
-    trees: dict[str, object] = {}
     for row in classify(docs):
         if "archive" in row.doc.parts or row.reason == "quoted" or not row.path:
             continue
@@ -1172,15 +1125,6 @@ def symbol_anchored_citations(
             continue
         target = REPO_ROOT / row.path
         if not (is_under_repo(target) and target.is_file()):
-            continue
-        if row.path not in trees:
-            try:
-                trees[row.path] = ast.parse("\n".join(file_lines(target)))
-            except (SyntaxError, ValueError):
-                trees[row.path] = None
-        tree = trees[row.path]
-        symbol = None if tree is None else enclosing_declaration(tree, row.start)
-        if symbol is None or len(declared_at(tree, symbol)) != 1:
             continue
         counts[row.doc.relative_to(REPO_ROOT).as_posix()] += 1
     return dict(counts)
@@ -1356,18 +1300,19 @@ class TheSymbolPreference(unittest.TestCase):
     def test_line_citations_into_a_symbol_match_their_baseline(self) -> None:
         """The ratchet. Equality, for the reason leg b's baseline is one.
 
-        A count that rose is a new `path:line` into a function or a class
-        that `source:<path>::<symbol>` could have named; a count that fell is
+        A count that rose is a new `path:line` into code that
+        `source:<path>::<symbol>` or the file alone could have said; a count that fell is
         the ordinary good case, and the entry moves with it in the same
         change. `assertLessEqual` would let the record go stale.
         """
         self.assertEqual(symbol_anchored_citations(), SYMBOL_ANCHORED_CITATIONS, """
-The live `path:line` citations into a symbol no longer match their baseline.
+The live `path:line` citations into code no longer match their baseline.
 
-Above: measured first, baseline second. A count that rose is a new citation
-naming a line inside a function or a class: cite `source:<path>::<symbol>`
-instead, or the file alone in prose. A count that fell is a cleanup: lower the
-entry in `SYMBOL_ANCHORED_CITATIONS` in the same change, and delete it at zero.""")
+Above: measured first, baseline second. A count that rose is a new `path:line`
+into code: cite `source:<path>::<symbol>` instead, or the file alone in prose.
+A count that fell is a citation rewritten or removed, since code motion cannot
+move one out of the count (sd:1374): lower the entry in
+`SYMBOL_ANCHORED_CITATIONS` in the same change, and delete it at zero.""")
 
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()
@@ -1415,9 +1360,15 @@ entry in `SYMBOL_ANCHORED_CITATIONS` in the same change, and delete it at zero."
                                        " and `bin/tool.py:10`\n"),
                          {"docs/page.md": 3})
 
-    def test_a_line_outside_every_symbol_keeps_its_anchor(self) -> None:
-        """CONTROL: the rule prefers a symbol only where one exists."""
-        self.assertEqual(self.measured("see `bin/tool.py:1`\n"), {})
+    def test_a_line_outside_every_symbol_is_counted_too(self) -> None:
+        """sd:1374. Code motion used to carry a stale citation out of every
+        declaration and out of the count with it, and the fall read as a
+        cleanup. A module-level line moves under an insertion like any other."""
+        self.assertEqual(self.measured("see `bin/tool.py:1`\n"), {"docs/page.md": 1})
+
+    def test_a_line_into_code_that_is_not_python_is_counted(self) -> None:
+        (self.root / "bin" / "tool.sh").write_text("#!/bin/sh\necho one\n", encoding="utf-8")
+        self.assertEqual(self.measured("see `bin/tool.sh:2`\n"), {"docs/page.md": 1})
 
     def test_a_quoted_reason_and_a_markdown_target_are_exempt(self) -> None:
         """CONTROLS: sd:568's marker needs its line; a page is not code."""
@@ -1427,30 +1378,12 @@ entry in `SYMBOL_ANCHORED_CITATIONS` in the same change, and delete it at zero."
         self.assertEqual(self.measured(
             "`bin/tool.py:4` [quoted: docs/notes.md:2]\nand `docs/notes.md:1`\n"), {})
 
-    def test_a_name_declared_twice_is_not_one_the_form_can_name(self) -> None:
-        """CONTROL: the rule asks for a citation the resolver accepts (#1015 review).
-
-        `source:bin/twins.py::open` is refused by `source_declaration_error`
-        as two declarations, so a line inside either `open` has no symbolic
-        form to prefer and is not counted; the line inside `solo` is.
-        """
-        self.assertEqual(self.measured("see `bin/twins.py:3` and `bin/twins.py:7`\n"), {})
-        self.assertEqual(self.measured("see `bin/twins.py:10`\n"), {"docs/page.md": 1})
+    def test_a_line_inside_a_name_declared_twice_is_counted_too(self) -> None:
+        """sd:1374. `source:bin/twins.py::open` names two declarations, so the
+        remedy there is the file alone in prose; the line still moves."""
         self.assertIsNotNone(source_declaration_error(self.root, "bin/twins.py", "open"))
-        self.assertIsNone(source_declaration_error(self.root, "bin/twins.py", "solo"))
-
-    def test_the_enclosing_declaration_is_the_one_the_locator_can_name(self) -> None:
-        import ast
-
-        tree = ast.parse((self.root / "bin" / "tool.py").read_text(encoding="utf-8"))
-        self.assertEqual([enclosing_declaration(tree, line) for line in (1, 4, 7, 10)],
-                         [None, "render", "Store", "open"])
-        for line in (4, 10):
-            with self.subTest(line=line):
-                self.assertEqual(declaration_lines(
-                    self.root, "bin/tool.py", enclosing_declaration(tree, line)),
-                    [3 if line == 4 else 9],
-                    "the name it prefers must be one the `source:` form resolves")
+        self.assertEqual(self.measured("see `bin/twins.py:3` and `bin/twins.py:7`\n"),
+                         {"docs/page.md": 2})
 
 
 class TheMarkerGrammar(unittest.TestCase):
