@@ -354,6 +354,23 @@
 
 ### Added
 
+- **The `sd-slice-builder` agent ships with the pack.** It is the
+  implementation worker for a planned multi-file slice. It existed only as a
+  hand-placed `~/.claude/agents/slice-builder.md`, so no other machine had it.
+  The pack copy keeps `effort: high` and declares `tools:` as the agent tests
+  require: the file tools, Bash, `ToolSearch`, and the two GitHub MCP tools
+  that open and read a pull request. It no longer inherits every tool, so it
+  cannot spawn agents; `gh` through Bash is its fallback for a PR.
+  It reviews through `sd-review --scope branch`, not `codex exec` (sd:1601).
+  `--user` retires the hand-placed predecessor once the successor is on disk.
+  `AGENT_PREDECESSORS` in `bin/sd_install.py` lists each predecessor with the
+  sha256 of every known copy. A copy with a known digest is removed; any other
+  copy stays and is reported as `left in place (modified; superseded by
+  sd-slice-builder)`. `--dry-run` removes nothing, and `--status` names a
+  predecessor that remains. A removal also needs `sd-slice-builder.md` on disk
+  with the shipped bytes, and a predecessor that is not a regular file, such
+  as a FIFO, stays unread instead of blocking the install.
+
 - **`sd task add` and `sd task edit` take `--recur` and `--recur-anchor`.**
   The recurrence columns and the completion logic landed in `sd_db` with
   sd:1099, but no CLI flag reached them (sd:1428). The flags pass the rule and
@@ -495,6 +512,13 @@
   action this tool is allowed to take.
 
 ### Fixed
+
+- **`sd-ship prepare` re-reads a pull object that lags the push (sd:1394).**
+  It read the pull object once after pushing and refused when the head
+  differed, but GitHub updates it a second or so after the ref. A push that
+  landed was refused as a permanent policy block. It now reads up to five
+  times with growing waits; a head that never arrives is a retryable
+  `pull_head_mismatch` naming both heads, and a rerun adopts the PR.
 
 - **An orphaned reviewed head now refuses by name, not as `git failed` (sd:1348).**
   `sd-ship prepare` requires every earlier reviewed head to stay an ancestor of
