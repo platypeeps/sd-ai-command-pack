@@ -445,11 +445,17 @@ class Ship(SharedReview):
                 if not any(line.startswith("Needed-by:") for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines()):
                     warnings.append(f"commit {commit} has no Needed-by trailer; delivery continues")
         base = self.state.get("base")
-        if base and not self.args.no_item:
-            receipts = sd_ship_squash.merged_receipts(self.connection, self.repository)
-            for entry in sd_ship_squash.squashed_heads(self.root, f"refs/remotes/origin/{base}", head, receipts):
-                warnings.append(sd_ship_squash.warning(entry, base))
+        if base:
+            warnings.extend(self.squash_notes(base, head))
         return warnings
+
+    def squash_notes(self, base: str, head: str) -> list[str]:
+        """One note per pre-squash head this branch carries (sd:1409)."""
+        if self.args.no_item:
+            return []
+        receipts = sd_ship_squash.merged_receipts(self.connection, self.repository)
+        return [sd_ship_squash.warning(entry, base)
+                for entry in sd_ship_squash.squashed_heads(self.root, f"refs/remotes/origin/{base}", head, receipts)]
 
     def copilot_entries(self) -> list[dict]:
         entries = self.state.get("copilot_reviews") or []
@@ -1100,12 +1106,14 @@ class Ship(SharedReview):
         Merge refuses the same branch as behind the default branch, so a
         prepare that reviewed it spent the gate on an answer merge rejects
         (sd:1346, sd:1367). A merge, not a rebase, keeps the next push a
-        fast-forward of the branch sd-ship already pushed.
+        fast-forward of the branch sd-ship already pushed. That merge is where
+        a carried pre-squash head conflicts, so the refusal names it (sd:1409).
         """
         try:
             git(self.root, "merge-base", "--is-ancestor", f"refs/remotes/origin/{base}", head)
         except Refusal:
-            raise Refusal(f"the branch is behind the current default branch origin/{base}; nothing was reviewed",
+            notes = "".join(f"; {note}" for note in self.squash_notes(base, head))
+            raise Refusal(f"the branch is behind the current default branch origin/{base}; nothing was reviewed{notes}",
                           code="base_moved", boundary="ci", state="retryable_failure",
                           next_action=f"Run git merge origin/{base} on the branch, then run prepare again.") from None
 

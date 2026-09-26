@@ -538,6 +538,15 @@ roles:
             args = ship.parser().parse_args(["prepare", "--item", str(second), "--json"])
             return ship.Ship(self.root, self.connection, self.database, args)
 
+        # sd:1346 refuses the branch until it merges main, and that merge is
+        # where the ancestry conflict lands, so the refusal names the remedy.
+        with self.assertRaisesRegex(ship.Refusal, "behind the current default branch") as caught:
+            operation().prepare()
+        self.assertIn(tip, str(caught.exception))
+        self.assertIn("safe for: Makefile (", str(caught.exception))
+        self.assertIn("read by hand: src.py (", str(caught.exception))
+        _git(self.root, "merge", "-q", "--no-ff", "-X", "ours", "-m",
+             "Merge origin/main into second\n\nAuthored-with: human", "origin/main")
         operation().prepare()
         warnings = operation().state.get("warnings") or []
         notes = [warning for warning in warnings if tip in warning]

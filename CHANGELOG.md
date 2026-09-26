@@ -334,7 +334,9 @@
   `bin/sd_ship_squash.py`. For each receipt whose head the branch carries and
   the base does not, a receipt warning lists the squash's paths in two groups.
   Paths whose base blob equals the carried head's are safe for `--ours`.
-  Paths the base changed after the squash must be read by hand. The ship
+  Paths the base changed after the squash must be read by hand. A branch
+  still behind the base gets the same split in its `base_moved` refusal,
+  since the merge that refusal asks for is where the conflict lands. The ship
   skill's recovery reference documents the procedure.
 
 - **`sd task add` and `sd task edit` take `--recur` and `--recur-anchor`.**
