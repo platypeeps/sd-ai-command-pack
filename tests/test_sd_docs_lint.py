@@ -1479,7 +1479,7 @@ class CitationRecorderIdempotenceTests(LintFixture):
         work = REPO_ROOT / "docs" / "work"
         compared = 0
         for item in lint.item_directories(work):
-            if "archive" in item.parts:
+            if lint.is_archived(item, work):
                 continue
             manifest = item / lint.CITATION_MANIFEST
             if not manifest.is_file():
@@ -2433,6 +2433,37 @@ class ChangedPathsComeFromTheMergeRefTests(unittest.TestCase):
         self.assertIn("git diff --name-only --no-renames HEAD^1 HEAD", code)
         self.assertIn("HEAD^2", code)
         self.assertNotIn("pull_request.base.sha", code)
+
+
+
+class ArchiveIsBelowTheWorkRootTests(unittest.TestCase):
+    """sd:1540. Only `archive/` below the work root is history.
+
+    The #1177 review found a checkout under a directory named `archive`
+    compared `0 of 0` items; the other checks read the same absolute path.
+    """
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.work_root = pathlib.Path(tmp.name).resolve() / "archive" / "repo" / "docs" / "work"
+        self.item = self.work_root / "2026-09-01-thing"
+        self.item.mkdir(parents=True)
+        (self.item / "prd.md").write_text(GOOD_PRD, encoding="utf-8")
+
+    def test_an_item_is_archived_only_below_the_work_root(self) -> None:
+        self.assertFalse(lint.is_archived(self.item, self.work_root))
+        self.assertTrue(lint.is_archived(self.work_root / "archive" / "2026-08" / "old", self.work_root))
+
+    def test_recording_reads_an_item_in_a_checkout_under_archive(self) -> None:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(lint.record_citations(self.work_root), 0)
+        self.assertIn("2026-09-01-thing: recorded", out.getvalue())
+
+    def test_no_check_reads_archive_from_the_absolute_path(self) -> None:
+        source = LINT_PATH.read_text(encoding="utf-8")
+        self.assertEqual(re.findall(r".*in item\.parts.*", source), [])
 
 
 if __name__ == "__main__":

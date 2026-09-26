@@ -319,6 +319,13 @@ shard_pgid=""
 watchdog_pid=""
 gate_pid=$$
 gate_ppid="$PPID"
+# True only on a reparent `ps` can read: an unreadable `ps` is not an exit.
+launcher_exited() {
+  local current_ppid
+  current_ppid="$(ps -o ppid= -p "$gate_pid" 2>/dev/null | tr -d '[:space:]')"
+  [ -n "$current_ppid" ] && [ "$current_ppid" != "$gate_ppid" ]
+}
+launcher_exited_message="error: the process that started this test run exited; terminating the run and its shards."
 
 reap_shards() {
   if [ -n "$shard_pgid" ]; then
@@ -326,25 +333,135 @@ reap_shards() {
   fi
 }
 
+# sd:1407. The footer that matches the header below: the same pid and head,
+# with the exit, so a reader can tell which run a log line belongs to and
+# whether it saw their edit. `cleanup` runs on every exit and once more after a
+# signal, and the footer is printed once.
+run_head=""
+footer_printed=""
+run_footer() {
+  if [ -n "$run_head" ] && [ -z "$footer_printed" ]; then
+    footer_printed=1
+    printf 'run-tests: end head=%s pid=%s exit=%s at=%s\n' \
+      "$run_head" "$$" "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
+  fi
+}
+
 cleanup() {
+  local status=$?
+  [ -z "${1:-}" ] || status=$1
   if [ -n "$watchdog_pid" ]; then
     kill -TERM "$watchdog_pid" 2>/dev/null
     watchdog_pid=""
   fi
   reap_shards
   rm -rf "$work_dir"
+  release_gate_slot
+  run_footer "$status"
 }
 
 on_signal() {
   # Nothing is published from here: a run that was interrupted has no complete
   # data, and the repo root still holds whatever the last finished run left.
   printf '%s\n' "error: test run interrupted; shard processes terminated." >&2
-  cleanup
+  cleanup 143
   exit 143
 }
 
 trap 'cleanup' EXIT
 trap 'on_signal' INT TERM HUP
+
+# sd:1541. At most SD_GATE_SLOTS local runs at once on this machine. On
+# 2026-09-25 several gates started together, the load average reached 157, and
+# tests with a fixed bound failed three of them. `make test` sets the cap; unset
+# or 0 means none, and CI never waits. A holder exports SD_GATE_SLOTS=0: the
+# runs its tests start inside it must not wait on the slot their own parent
+# holds.
+#
+# #1195 review. A slot is a kernel `flock` on `slot.N.lock`, held through fd 9
+# of this shell. The kernel drops it when the last copy of that fd closes, so a
+# holder that dies frees its slot, and no waiter ever judges a holder dead or
+# deletes anything. Two earlier designs did: a slot directory holding a pid, and
+# then a reclaim lock around it. Each check-then-delete let two waiters remove
+# each other's new slots. The lock files stay; the pid in one is only a hint.
+# Children that outlive this shell must not inherit fd 9, so the shard and
+# watchdog launches close it.
+gate_slot=""
+release_gate_slot() {
+  if [ -n "$gate_slot" ]; then
+    exec 9>&-
+    gate_slot=""
+  fi
+}
+# True when this shell took the slot's lock on fd 9. Bash has no flock, and
+# macOS ships no flock(1); the interpreter locks the open file it inherits.
+take_gate_slot() {
+  exec 9>>"$1" || return 1
+  if "$toolchain_python" -c 'import fcntl; fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)' 2>/dev/null; then
+    # Named before the pid is written: a signal in between releases the slot.
+    gate_slot="$1"
+    return 0
+  fi
+  exec 9>&-
+  return 1
+}
+# An orphaned waiter must not take a slot: the watchdog starts only with the
+# shards. So the launcher is checked before every attempt, and once more with
+# the slot held, since it can exit while a freed slot is taken.
+stop_if_launcher_exited() {
+  if [ "$gate_ppid" != "1" ] && launcher_exited; then
+    release_gate_slot
+    printf '%s\n' "$launcher_exited_message" >&2
+    exit 1
+  fi
+}
+acquire_gate_slot() {
+  local slots="${SD_GATE_SLOTS:-0}" dir i announced=""
+  case "$slots" in
+    '' | *[!0-9]*)
+      printf '%s\n' "error: SD_GATE_SLOTS must be a non-negative integer (got '$slots')" >&2
+      exit 1
+      ;;
+  esac
+  if [ "$slots" -eq 0 ] || [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
+    return 0
+  fi
+  dir="${SD_GATE_SLOTS_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/sd/gate-slots}"
+  if ! mkdir -p -- "$dir" 2>/dev/null; then
+    printf '%s\n' "warning: cannot create $dir; running without the gate cap" >&2
+    return 0
+  fi
+  while :; do
+    for ((i = 1; i <= slots; i++)); do
+      stop_if_launcher_exited
+      take_gate_slot "$dir/slot.$i.lock" || continue
+      stop_if_launcher_exited
+      printf '%s\n' "$$" >"$gate_slot" 2>/dev/null || :
+      export SD_GATE_SLOTS=0
+      return 0
+    done
+    if [ -z "$announced" ]; then
+      printf '%s\n' "waiting for a gate slot: $slots of $slots in use under $dir" >&2
+      announced=1
+    fi
+    sleep "${SD_GATE_SLOT_POLL:-5}"
+  done
+}
+acquire_gate_slot
+
+# sd:1407. The tree this run imports from, named before the first test: a log
+# from a run that started before an edit reads as current otherwise, since a
+# traceback quotes the file as it is now, not as the run loaded it.
+run_head="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null)" || run_head=""
+if [ -n "$run_head" ]; then
+  run_dirty="$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null | wc -l | tr -d '[:space:]')"
+else
+  run_head="unknown"
+  run_dirty="unknown"
+fi
+# On stderr: stdout is the run log, byte for byte (unittest-output.log).
+printf 'run-tests: start head=%s dirty=%s pid=%s at=%s\n' \
+  "$run_head" "$run_dirty" "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
 
 watchdog() {
   # Stated rather than relied on: bash resets trapped signals in the subshell a
@@ -357,11 +474,8 @@ watchdog() {
       reap_shards
       return 0
     fi
-    current_ppid="$(ps -o ppid= -p "$gate_pid" 2>/dev/null | tr -d '[:space:]')"
-    [ -n "$current_ppid" ] || continue
-    [ "$current_ppid" = "$gate_ppid" ] && continue
-    printf '%s\n' \
-      "error: the process that started this test run exited; terminating the run and its shards." >&2
+    launcher_exited || continue
+    printf '%s\n' "$launcher_exited_message" >&2
     reap_shards
     kill -TERM "$gate_pid" 2>/dev/null
     return 0
@@ -389,10 +503,10 @@ xargs -P "$TEST_WORKERS" -I {} bash -c '
   status=$?
   printf "\nshard %s: %ss exit=%s\n" "$3" "$((SECONDS - started))" "$status" >> "$2/$3.log" || exit 1
   exit "$status"
-' _ "$PYTHON_BIN" "$work_dir" {} < "$shard_file" &
+' _ "$PYTHON_BIN" "$work_dir" {} < "$shard_file" 9>&- &
 shard_pgid=$!
 if [ "$gate_ppid" != "1" ]; then
-  watchdog &
+  watchdog 9>&- &
   watchdog_pid=$!
 fi
 wait "$shard_pgid" || run_status=$?
