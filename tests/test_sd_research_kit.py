@@ -23,6 +23,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -1172,6 +1173,15 @@ class InitHookInstallTests(unittest.TestCase):
             # This branch's merge commit, superseded by the commit that gave
             # the hook `docs/dashboard/` and an explicit all-zeros guard.
             "8f3224d961a7d0394c47648684d9e5ad5c6ce85b7f563917e8f9e6b76881afb7",
+            # `91d26285`, the body on main before sd:1376 declined to render
+            # a research.conf.py the pull or checkout had just brought in.
+            "26e6f156735dd19389a05eca4b13ac844cd540d121f1b0a2a2d45142a3ef1acb",
+            # `fbd69cd5`, sd:1376's first body, which asked git only whether
+            # the operation itself changed research.conf.py.
+            "d4a5e7a9fb5df3aca9b3288c1e6acbc2c4da5e1bbbc4dc60d7e503c01758ee21",
+            # `c2b10b20`, sd:1376's second body, which read the render record
+            # after a pull or a checkout and exempted post-commit.
+            "4470626f28b31de26aa04dae1e88b02b780e3ba75f30197ecaaac8a741a93336",
         }
         digests = {hashlib.sha256(body.encode("utf-8")).hexdigest()
                    for body in module.SUPERSEDED_HOOKS}
@@ -1217,11 +1227,24 @@ class HookTriggerTests(unittest.TestCase):
         kit = self.stub / "sd-research-kit"
         kit.write_text(
             "#!/usr/bin/env python3\n"
-            "import pathlib, sys\n"
+            "import os, pathlib, sys\n"
             "with pathlib.Path(%r).open('a') as handle:\n"
             "    handle.write(' '.join(sys.argv[1:]) + chr(10))\n"
-            % str(self.marker))
+            "with pathlib.Path(%r).open('a') as handle:\n"
+            "    handle.write(os.environ.get('SD_RESEARCH_TRIGGER', '-') + chr(10))\n"
+            % (str(self.marker), str(self.root / "triggers")))
         kit.chmod(0o755)
+        # The stub records nothing, so the record a real render leaves is
+        # written here: the config this repository started with has been
+        # rendered once, by hand, which is what `init-hook` asks for.
+        self.trust()
+
+    def trust(self) -> None:
+        """Record the tree's config as rendered, as `sd-research-kit render` does."""
+
+        source = (self.repo / "research.conf.py").read_bytes()
+        record = self.git("rev-parse", "--git-path", "sd-research-conf.sha256").stdout.strip()
+        (self.repo / record).write_text(hashlib.sha256(source).hexdigest() + "\n")
 
     def git(self, *args: str) -> subprocess.CompletedProcess:
         # Every git call here runs with the hook switched off: the hooks are
@@ -1251,6 +1274,14 @@ class HookTriggerTests(unittest.TestCase):
         if not self.marker.exists():
             return []
         return self.marker.read_text(encoding="utf-8").split()
+
+    def triggers(self) -> list[str]:
+        path = self.root / "triggers"
+        return path.read_text(encoding="utf-8").split() if path.exists() else []
+
+    def executions(self) -> int:
+        path = self.root / "executed"
+        return len(path.read_text(encoding="utf-8").split()) if path.exists() else 0
 
     def a_second_commit(self) -> None:
         (self.repo / "doc.md").write_text("two\n")
@@ -1337,6 +1368,219 @@ class HookTriggerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.renders(), ["render", "render"],
                          "the render that puts HEAD's text back never ran")
+
+    def a_config_change(self) -> None:
+        # A config that leaves a mark when it runs, so a test can tell
+        # whether anything executed it.
+        (self.repo / "research.conf.py").write_text(
+            "import pathlib\n"
+            "with pathlib.Path(%r).open('a') as handle:\n"
+            "    handle.write('ran' + chr(10))\n"
+            'PROJECT = "incoming"\nDOCS = []\n' % str(self.root / "executed"))
+        self.git("commit", "-qam", "config from elsewhere")
+
+    def assert_declined(self, result: subprocess.CompletedProcess) -> None:
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.renders(), [])
+        self.assertIn("research.conf.py", result.stderr)
+        self.assertIn("sd-research-kit render", result.stderr)
+
+    def test_a_pull_that_brings_in_a_config_does_not_execute_it(self) -> None:
+        """sd:1376. `render` executes research.conf.py. A post-merge arm that
+        rendered on every pull ran a config the operator never read, from a
+        tree they did not write, with no command of theirs in between."""
+
+        self.git("checkout", "-q", "-b", "side")
+        self.a_config_change()
+        self.git("checkout", "-q", "-")
+        self.a_second_commit()
+        self.git("merge", "-q", "--no-ff", "--no-edit", "side")
+        self.assert_declined(self.fire("post-merge"))
+
+    def test_a_branch_switch_that_changes_the_config_does_not_execute_it(self) -> None:
+        before = self.sha()
+        self.a_config_change()
+        self.assert_declined(self.fire("post-checkout", before, self.sha(), "1"))
+
+    def test_a_file_checkout_of_the_config_does_not_execute_it(self) -> None:
+        self.git("checkout", "-q", "-b", "side")
+        self.a_config_change()
+        self.git("checkout", "-q", "-")
+        here = self.sha()
+        self.git("checkout", "-q", "side", "--", "research.conf.py")
+        self.assert_declined(self.fire("post-checkout", here, here, "0"))
+
+    def a_declined_pull_of_a_config(self) -> None:
+        self.git("checkout", "-q", "-b", "side")
+        self.a_config_change()
+        self.git("checkout", "-q", "-")
+        self.a_second_commit()
+        self.git("merge", "-q", "--no-ff", "--no-edit", "side")
+        self.assert_declined(self.fire("post-merge"))
+
+    def test_a_file_checkout_after_a_declined_pull_does_not_execute_the_config(self) -> None:
+        """The #1376 review. The pull is declined; `git checkout HEAD -- doc.md`
+        then finds the tree's config equal to HEAD's. An arm that asked git
+        only about its own operation read that as nothing to decline, and
+        executed the config the pull had brought in."""
+
+        self.a_declined_pull_of_a_config()
+        here = self.sha()
+        (self.repo / "doc.md").write_text("scratch\n")
+        self.git("checkout", "-q", "HEAD", "--", "doc.md")
+        self.assert_declined(self.fire("post-checkout", here, here, "0"))
+
+    def test_a_later_pull_that_leaves_the_config_alone_does_not_execute_it(self) -> None:
+        self.a_declined_pull_of_a_config()
+        self.git("checkout", "-q", "-b", "later")
+        (self.repo / "doc.md").write_text("later\n")
+        self.git("commit", "-qam", "later")
+        self.git("checkout", "-q", "-")
+        self.git("merge", "-q", "--no-ff", "--no-edit", "later")
+        self.assert_declined(self.fire("post-merge"))
+
+    def record(self) -> Path:
+        return self.repo / self.git(
+            "rev-parse", "--git-path", "sd-research-conf.sha256").stdout.strip()
+
+    def digest(self) -> str:
+        return hashlib.sha256((self.repo / "research.conf.py").read_bytes()).hexdigest()
+
+    def real_render(self, **env: str):
+        """Run the real `render` in-process, as the kit's `render` verb does.
+
+        `env` is added to an environment that carries neither marker of an
+        automatic render, so a run with no `env` is a render by hand even
+        when this suite itself runs under a git hook. Returns the render
+        module's `trust_conf` as a spy, and the exit it raised or None.
+        """
+
+        load_publish()
+        with unittest.mock.patch.dict(sys.modules, {"markdown": types.ModuleType("markdown")}):
+            render = load_kit().load("sd_research_render")
+        here = os.getcwd()
+        os.chdir(self.repo)
+        self.addCleanup(os.chdir, here)
+        clean = {k: v for k, v in os.environ.items()
+                 if k not in ("SD_RESEARCH_TRIGGER", "GIT_EXEC_PATH")}
+        spy = unittest.mock.Mock(wraps=render.trust_conf)
+        # DOCS is empty, so nothing is converted: an empty module stands in
+        # for python-markdown, which the kit re-executes to find.
+        with unittest.mock.patch.dict(os.environ, dict(clean, **env), clear=True), \
+                unittest.mock.patch.object(render, "publish", return_value=[]), \
+                unittest.mock.patch.object(render, "trust_conf", spy), \
+                unittest.mock.patch("sys.stdout", io.StringIO()):
+            try:
+                render.main()
+            except SystemExit as stop:
+                return spy, stop
+        return spy, None
+
+    def test_an_unrelated_commit_after_a_declined_pull_does_not_execute_the_config(self) -> None:
+        """The second #1376 review. The pull is declined; the operator then
+        commits nothing but doc.md. A post-commit arm exempt from the record
+        read that commit as approval of the whole tree, executed the config
+        the pull had brought in, and the render recorded it as read."""
+
+        trusted = self.record().read_text(encoding="utf-8")
+        self.a_declined_pull_of_a_config()
+        (self.repo / "doc.md").write_text("mine\n")
+        self.git("commit", "-qam", "unrelated")
+        self.assert_declined(self.fire("post-commit"))
+        self.assertEqual(self.record().read_text(encoding="utf-8"), trusted)
+
+    def test_a_config_commit_renders_only_after_a_render_by_hand(self) -> None:
+        """A commit is not a render: the committed config is executed by the
+        hook only once a render by hand has executed it."""
+
+        self.a_config_change()
+        self.assert_declined(self.fire("post-commit"))
+
+    def test_a_config_rendered_by_hand_renders_from_then_on(self) -> None:
+        """Only a render by hand records a config as read, and from then on
+        every automatic trigger renders it."""
+
+        self.a_declined_pull_of_a_config()
+        spy, stop = self.real_render()
+        self.assertIsNone(stop)
+        self.assertEqual(self.executions(), 1)
+        spy.assert_called_once()
+        self.assertEqual(self.record().read_text(encoding="utf-8").strip(), self.digest())
+        here = self.sha()
+        result = self.fire("post-checkout", here, here, "0")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.renders(), ["render"])
+        (self.repo / "doc.md").write_text("mine\n")
+        self.git("commit", "-qam", "after the render")
+        result = self.fire("post-commit")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.renders(), ["render", "render"])
+
+    def test_the_hook_tells_the_render_it_is_automatic(self) -> None:
+        """The render checks the bytes it executes, which the hook cannot:
+        the config can change between the hook's read and the render's."""
+
+        self.a_second_commit()
+        result = self.fire("post-commit")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.triggers(), ["post-commit"])
+
+    def test_an_automatic_render_does_not_execute_an_unread_config(self) -> None:
+        trusted = self.record().read_text(encoding="utf-8")
+        self.a_config_change()
+        spy, stop = self.real_render(SD_RESEARCH_TRIGGER="post-merge")
+        self.assertIsNotNone(stop)
+        self.assertNotIn(stop.code, (0, None))
+        self.assertEqual(self.executions(), 0)
+        spy.assert_not_called()
+        self.assertEqual(self.record().read_text(encoding="utf-8"), trusted)
+        # `sys.exit` with a message: python prints it on the way out.
+        self.assertIn("sd-research-kit render", str(stop.code))
+
+    def test_a_render_git_runs_does_not_execute_an_unread_config(self) -> None:
+        """An earlier hook body, still installed, runs the render with no
+        marker of its own. Git sets GIT_EXEC_PATH for every hook it runs."""
+
+        trusted = self.record().read_text(encoding="utf-8")
+        self.a_config_change()
+        spy, stop = self.real_render(GIT_EXEC_PATH="/usr/libexec/git-core")
+        self.assertIsNotNone(stop)
+        self.assertEqual(self.executions(), 0)
+        spy.assert_not_called()
+        self.assertEqual(self.record().read_text(encoding="utf-8"), trusted)
+
+    def test_an_automatic_render_of_a_read_config_records_nothing(self) -> None:
+        self.a_config_change()
+        self.real_render()
+        for marker in ({"SD_RESEARCH_TRIGGER": "post-commit"},
+                       {"GIT_EXEC_PATH": "/usr/libexec/git-core"}):
+            spy, stop = self.real_render(**marker)
+            self.assertIsNone(stop)
+            spy.assert_not_called()
+        self.assertEqual(self.executions(), 3)
+
+    def test_a_checkout_with_no_record_does_not_execute_the_config(self) -> None:
+        """A repository whose config no render has recorded, such as one the
+        previous hook body rendered: its config was never shown to be read."""
+
+        self.record().unlink()
+        here = self.sha()
+        self.assert_declined(self.fire("post-checkout", here, here, "0"))
+
+    def test_a_render_records_the_config_it_executed(self) -> None:
+        """The record the arms above read is written by the render itself, so
+        a render by hand is what lets a pulled config render again."""
+
+        self.record().unlink()
+        self.a_config_change()
+        _, stop = self.real_render()
+        self.assertIsNone(stop)
+        self.assertEqual(self.record().read_text(encoding="utf-8").strip(), self.digest())
+
+    def test_the_hook_reads_the_record_render_writes(self) -> None:
+        module = load_publish()
+        self.assertIn('TRUSTED = "%s"' % module.TRUSTED_CONF, module.HOOK)
+        self.assertIn('TRIGGER_ENV = "%s"' % module.TRIGGER_ENV, module.HOOK)
 
     def test_post_checkout_renders_when_no_branch_moved(self) -> None:
         """`git checkout <the branch already checked out>`, or `-b`.
