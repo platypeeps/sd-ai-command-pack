@@ -1479,7 +1479,7 @@ class CitationRecorderIdempotenceTests(LintFixture):
         work = REPO_ROOT / "docs" / "work"
         compared = 0
         for item in lint.item_directories(work):
-            if "archive" in item.parts:
+            if lint.is_archived(item, work):
                 continue
             manifest = item / lint.CITATION_MANIFEST
             if not manifest.is_file():
