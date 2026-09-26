@@ -623,5 +623,299 @@ class PublishSignalTests(unittest.TestCase):
             self.assertEqual(len(_shards(root)), 2, _shards(root))
 
 
+
+HOLD_SLOT = """
+import fcntl, sys, time
+handle = open(sys.argv[1], "a")
+fcntl.flock(handle, fcntl.LOCK_EX)
+print("held", flush=True)
+time.sleep(600)
+"""
+
+
+def _hold_slot(lock):
+    """A process that holds `lock` the way a run does, until it is killed."""
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    holder = subprocess.Popen([sys.executable, "-c", HOLD_SLOT, str(lock)], stdout=subprocess.PIPE, text=True)
+    assert holder.stdout.readline() == "held\n"
+    holder.stdout.close()
+    return holder
+
+
+def _slot_free(lock):
+    """True when nothing holds `lock`: this process can take it and let it go."""
+    import fcntl
+
+    with open(lock, "a") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        fcntl.flock(handle, fcntl.LOCK_UN)
+    return True
+
+
+class GateSlotTests(unittest.TestCase):
+    """sd:1541. At most `SD_GATE_SLOTS` local runs at once on one machine.
+
+    On 2026-09-25 the load average reached 157 while several gates ran
+    together, and a 30 s test bound failed three of them. `make test` sets
+    the cap; a direct run, CI and every nested run have none. A slot is a
+    kernel lock, so a slot is free exactly when no live process holds it.
+    """
+
+    def slot_env(self, root, **overrides):
+        settings = dict(SD_GATE_SLOTS="1", SD_GATE_SLOTS_DIR=str(root / "slots"),
+                        SD_GATE_SLOT_POLL="0.2", CI="", GITHUB_ACTIONS="")
+        return _fixture_env(**dict(settings, **overrides))
+
+    def test_a_second_run_waits_for_the_one_slot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+            lock = root / "slots" / "slot.1.lock"
+            slow = subprocess.Popen(["bash", str(script)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                    env=self.slot_env(root, HARNESS_FIXTURE_SLEEP="4"))
+            try:
+                self.assertTrue(_wait_for(lambda: lock.exists() and not _slot_free(lock), timeout=60))
+                fast = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False,
+                                      env=self.slot_env(root, HARNESS_FIXTURE_SLEEP="0"), timeout=300)
+                self.assertEqual(fast.returncode, 0, fast.stdout + fast.stderr)
+                self.assertIn("waiting for a gate slot", fast.stderr)
+                self.assertIsNotNone(slow.poll(), "the second run finished while the first held the slot")
+            finally:
+                if slow.poll() is None:
+                    slow.kill()
+                slow.wait()
+            self.assertTrue(_slot_free(lock))
+
+    def test_a_killed_holders_slot_is_taken_without_a_wait(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+            lock = root / "slots" / "slot.1.lock"
+            holder = _hold_slot(lock)
+            holder.kill()
+            holder.wait()
+            fast = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False,
+                                  env=self.slot_env(root, HARNESS_FIXTURE_SLEEP="0"), timeout=300)
+            self.assertEqual(fast.returncode, 0, fast.stdout + fast.stderr)
+            self.assertNotIn("waiting for a gate slot", fast.stderr)
+            self.assertTrue(_slot_free(lock))
+
+    def test_a_waiter_removes_nothing_from_the_slot_directory(self):
+        """#1195 review. No waiter judges a holder dead, so none deletes a slot.
+
+        Both earlier designs removed a slot they judged stale, and two waiters
+        could remove each other's new slots that way. The holder here has an
+        old lock file with a dead pid in it; only the lock counts.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+            lock = root / "slots" / "slot.1.lock"
+            holder = _hold_slot(lock)
+            gone = subprocess.Popen(["true"])
+            gone.wait()
+            lock.write_text(f"{gone.pid}\n")
+            old = time.time() - 3600
+            os.utime(lock, (old, old))
+            try:
+                err = root / "stderr.log"
+                with err.open("w") as err_file:
+                    waiter = subprocess.Popen(["bash", str(script)], stdout=subprocess.DEVNULL, stderr=err_file,
+                                              env=self.slot_env(root, HARNESS_FIXTURE_SLEEP="0"))
+                try:
+                    self.assertTrue(_wait_for(lambda: "waiting for a gate slot" in err.read_text(), timeout=60),
+                                    err.read_text())
+                    time.sleep(1)
+                    self.assertIsNone(waiter.poll(), "the waiter ran while a live process held the slot")
+                    self.assertEqual(sorted((root / "slots").iterdir()), [lock])
+                    self.assertEqual(lock.read_text(), f"{gone.pid}\n")
+                    holder.kill()
+                    holder.wait()
+                    waiter.wait(timeout=300)
+                finally:
+                    if waiter.poll() is None:
+                        waiter.kill()
+                    waiter.wait()
+                self.assertEqual(waiter.returncode, 0, err.read_text())
+            finally:
+                if holder.poll() is None:
+                    holder.kill()
+                holder.wait()
+            self.assertTrue(_slot_free(lock))
+
+    def debug_hook(self, root, pattern, action):
+        """A `BASH_ENV` file that runs `action` once, before the first command matching `pattern`.
+
+        It drives the real script to one instant, deterministically, and
+        leaves a flag behind so a test can tell the hook fired.
+        """
+        fired = root / "hook-fired"
+        hook = root / "hook.env"
+        hook.write_text(
+            "set -o functrace\n"
+            f"trap 'case \"$BASH_COMMAND\" in {pattern}) "
+            f"if mkdir -- \"{fired}\" 2>/dev/null; then {action}; fi;; esac' DEBUG\n"
+        )
+        return hook, fired
+
+    def test_a_signal_before_the_pid_is_written_releases_the_slot(self):
+        """sd:1558. The slot is the run's from the lock on, so its exit frees it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+            hook, fired = self.debug_hook(root, 'printf*gate_slot*', "kill -TERM $$")
+            run = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False,
+                                 env=self.slot_env(root, HARNESS_FIXTURE_SLEEP="0", BASH_ENV=str(hook)),
+                                 timeout=300)
+            self.assertTrue(fired.is_dir(), "the hook never fired; this test asserted nothing")
+            self.assertEqual(run.returncode, 143, run.stdout + run.stderr)
+            self.assertTrue(_slot_free(root / "slots" / "slot.1.lock"))
+
+    def orphan_waiter(self, root, script, **env):
+        """A run started in the background by a launcher shell: (launcher, log, child-pid file)."""
+        log = root / "run.log"
+        child = root / "child.pid"
+        launcher = subprocess.Popen(
+            ["bash", "-c", 'bash "$0" > "$1" 2>&1 & printf "%s\\n" "$!" > "$2"; wait "$!"',
+             str(script), str(log), str(child)],
+            env=self.slot_env(root, HARNESS_FIXTURE_SLEEP="0", **env))
+        self.assertTrue(_wait_for(lambda: log.exists() and "waiting for a gate slot" in log.read_text(),
+                                  timeout=60), log.read_text() if log.exists() else "no log")
+        return launcher, log, int(child.read_text())
+
+    def assert_orphan_stops_unstarted(self, log, waiter):
+        stopped = _wait_for(lambda: not _alive(waiter), timeout=30)
+        self.assertTrue(stopped, f"the orphaned waiter {waiter} still polls: {log.read_text()}")
+        self.assertIn("the process that started this test run exited", log.read_text())
+        self.assertNotIn("run-tests: start ", log.read_text(), "the orphan went on to start the run")
+
+    def test_a_waiter_whose_launcher_exits_stops_without_a_slot(self):
+        """#1195 review. The watchdog starts with the shards, after the wait.
+
+        A waiter whose launcher died would otherwise poll on as an orphan,
+        take the slot when it came free, and start shards unwatched.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+            lock = root / "slots" / "slot.1.lock"
+            holder = _hold_slot(lock)
+            waiter = None
+            launcher = None
+            try:
+                launcher, log, waiter = self.orphan_waiter(root, script)
+                launcher.kill()
+                launcher.wait(timeout=30)
+                self.assert_orphan_stops_unstarted(log, waiter)
+                self.assertFalse(_slot_free(lock), "the holder lost its slot")
+            finally:
+                if launcher is not None and launcher.poll() is None:
+                    launcher.kill()
+                    launcher.wait()
+                if waiter is not None and _alive(waiter):
+                    os.kill(waiter, signal.SIGKILL)
+                holder.kill()
+                holder.wait()
+
+    def test_a_slot_freed_while_the_orphan_sleeps_is_not_used(self):
+        """#1195 review. The launcher exits and the slot frees in one poll sleep.
+
+        The waiter wakes to a free slot. It must check the launcher before it
+        takes one, and stop, not start the run.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+            lock = root / "slots" / "slot.1.lock"
+            holder = _hold_slot(lock)
+            waiter = None
+            launcher = None
+            try:
+                launcher, log, waiter = self.orphan_waiter(root, script, SD_GATE_SLOT_POLL="3")
+                launcher.kill()
+                launcher.wait(timeout=30)
+                holder.kill()
+                holder.wait()
+                self.assert_orphan_stops_unstarted(log, waiter)
+                self.assertTrue(_slot_free(lock))
+            finally:
+                if launcher is not None and launcher.poll() is None:
+                    launcher.kill()
+                    launcher.wait()
+                if waiter is not None and _alive(waiter):
+                    os.kill(waiter, signal.SIGKILL)
+                if holder.poll() is None:
+                    holder.kill()
+                holder.wait()
+
+    def test_without_a_cap_no_slot_is_taken(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+            env = self.slot_env(root, HARNESS_FIXTURE_SLEEP="0")
+            del env["SD_GATE_SLOTS"]
+            fast = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False,
+                                  env=env, timeout=300)
+            self.assertEqual(fast.returncode, 0, fast.stdout + fast.stderr)
+            self.assertFalse((root / "slots").exists())
+
+    def test_make_test_sets_the_cap_and_a_holder_lifts_it_for_its_children(self):
+        makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+        self.assertIn("SD_GATE_SLOTS ?= 2", makefile)
+        self.assertIn('SD_GATE_SLOTS="$(SD_GATE_SLOTS)"', makefile)
+        self.assertIn("export SD_GATE_SLOTS=0", HARNESS.read_text(encoding="utf-8"))
+
+
+class RunHeaderTests(unittest.TestCase):
+    """sd:1407. A run names the tree it ran against, at its start and its end.
+
+    On 2026-09-23 a run reported failures against edits made after it had
+    imported the old modules, and a second run wrote into the same log with
+    nothing marking either. The header and the footer carry one pid.
+    """
+
+    def test_a_run_prints_its_head_dirty_count_and_pid_at_both_ends(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+            for args in (["init", "-q"], ["add", "-A"],
+                         ["-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "fixture"]):
+                subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+            head = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], check=True,
+                                  capture_output=True, text=True).stdout.strip()
+            (root / "untracked.txt").write_text("x\n")
+            run = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False,
+                                 env=_fixture_env(HARNESS_FIXTURE_SLEEP="0"), timeout=300)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            # stderr, because stdout is the run log and must equal unittest-output.log.
+            self.assertNotIn("run-tests: start ", run.stdout)
+            self.assertNotIn("run-tests: end ", run.stdout)
+            lines = run.stderr.splitlines()
+            start = [line for line in lines if line.startswith("run-tests: start ")]
+            end = [line for line in lines if line.startswith("run-tests: end ")]
+            self.assertEqual(len(start), 1, run.stderr)
+            self.assertEqual(len(end), 1, run.stderr)
+            self.assertLess(lines.index(start[0]), lines.index(end[0]))
+            self.assertIn(f"head={head}", start[0])
+            self.assertIn("dirty=1", start[0])
+            pid = start[0].split("pid=")[1].split()[0]
+            self.assertIn(f"pid={pid}", end[0])
+            self.assertIn(f"head={head}", end[0])
+            self.assertIn("exit=0", end[0])
+
+    def test_outside_a_repository_the_head_is_named_as_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+            run = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False,
+                                 env=_fixture_env(HARNESS_FIXTURE_SLEEP="0", GIT_CEILING_DIRECTORIES=str(root.parent)),
+                                 timeout=300)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            self.assertIn("head=unknown dirty=unknown", run.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

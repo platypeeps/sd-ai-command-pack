@@ -3147,3 +3147,14 @@ REVIEW_LENSES: dict[str, str] = {
 def review_lens(name: str | None) -> str:
     """The text a named lens appends to a review prompt; empty without one."""
     return f"\n\n{REVIEW_LENSES[name]}" if name else ""
+
+
+def raw_response(result: Any) -> dict:
+    """A url reviewer's raw output for its diagnostic, only under `SD_REVIEW_RAW_DIR`.
+
+    Opt-in debugging (system #590): sd-ship moves it to an owner-only file and
+    keeps only the path, so model output never reaches the ship state.
+    """
+    if not os.environ.get("SD_REVIEW_RAW_DIR"):
+        return {}
+    return {"raw_response": {"body": result.stdout, "stderr": result.stderr}}
