@@ -483,6 +483,25 @@ class PredecessorTests(unittest.TestCase):
                     "successor not installed; superseded by sd-slice-builder")])
                 self.assertTrue(self.old.is_file())
 
+    def test_an_unreadable_successor_counts_as_not_installed(self) -> None:
+        self.old.write_bytes(self.SEEDED)
+        self.place_successor()
+        render = self.old.parent / "sd-slice-builder.md"
+        original = Path.read_bytes
+
+        def read_bytes(path: Path) -> bytes:
+            if path == render:
+                raise PermissionError(13, "Permission denied")
+            return original(path)
+
+        with mock.patch.object(sd_install.Path, "read_bytes", autospec=True,
+                               side_effect=read_bytes):
+            retired, skipped = self.retire()
+        self.assertEqual(retired, [])
+        self.assertEqual(skipped, [(
+            str(self.old), "successor not installed; superseded by sd-slice-builder")])
+        self.assertTrue(self.old.is_file())
+
     def test_a_non_regular_predecessor_is_kept_unread(self) -> None:
         """A FIFO blocks `read_bytes` until a writer opens it, which would hang `--user`."""
         self.place_successor()

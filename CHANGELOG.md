@@ -322,6 +322,7 @@
   require: the file tools, Bash, `ToolSearch`, and the two GitHub MCP tools
   that open and read a pull request. It no longer inherits every tool, so it
   cannot spawn agents; `gh` through Bash is its fallback for a PR.
+  It reviews through `sd-review --scope branch`, not `codex exec` (sd:1601).
   `--user` retires the hand-placed predecessor once the successor is on disk.
   `AGENT_PREDECESSORS` in `bin/sd_install.py` lists each predecessor with the
   sha256 of every known copy. A copy with a known digest is removed; any other
