@@ -2591,6 +2591,58 @@ roles:
         path = pathlib.Path(error["captured_report"]["outcomes"][0]["diagnostic"]["raw_capture"])
         self.assertEqual(json.loads(path.read_text())["body"], "model text")
 
+    def test_a_watchdog_kill_writes_its_whole_output_when_capture_is_on(self):
+        """sd:1588. A truncated or oversized output leaves no captured report,
+        so the killed process's own bytes are the only evidence left."""
+        operation = self.operation()
+        head = _git(self.root, "rev-parse", "HEAD")
+        original = ship.review_process
+        def killed(root, argv, **kwargs):
+            if "--explain" in argv:
+                return original(root, argv, **kwargs)
+            raise ship.ReviewTimeout({"kind": "watchdog_expired", "allowed_seconds": kwargs["timeout"],
+                                      "stdout": {"bytes": 13, "tail": "partial model", "truncated": False},
+                                      "raw_output": {"stdout": "partial model", "stderr": "warn"}})
+        capture = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory())) / "raw"
+        with patch.dict(os.environ, {"SD_REVIEW_RAW_DIR": str(capture)}), \
+                patch.object(ship, "review_process", side_effect=killed):
+            with self.assertRaisesRegex(ship.Refusal, "execution watchdog expired"):
+                operation.review(head)
+        error = self.operation().state["passes"][0]["execution_error"]
+        self.assertNotIn("partial model", json.dumps(error))
+        self.assertNotIn("raw_output", error)
+        written = json.loads(pathlib.Path(error["raw_capture"]).read_text())
+        self.assertEqual((written["stdout"], written["stderr"], written["head"]), ("partial model", "warn", head))
+
+    def test_a_planning_watchdog_kill_writes_its_output_to_the_file_not_the_receipt(self):
+        """#1201 review. The `--explain` stage times out before execution; its
+        diagnostic is saved as `review_preflight_error` and must be withheld too."""
+        operation = self.operation()
+        head = _git(self.root, "rev-parse", "HEAD")
+        def killed(root, argv, **kwargs):
+            raise ship.ReviewTimeout({"kind": "watchdog_expired", "allowed_seconds": kwargs["timeout"],
+                                      "stdout": {"bytes": 12, "tail": "planning out", "truncated": False},
+                                      "raw_output": {"stdout": "planning out", "stderr": ""}})
+        capture = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory())) / "raw"
+        with patch.dict(os.environ, {"SD_REVIEW_RAW_DIR": str(capture)}), \
+                patch.object(ship, "review_process", side_effect=killed):
+            with self.assertRaisesRegex(ship.Refusal, "planning watchdog expired"):
+                operation.review(head)
+        error = self.operation().state["review_preflight_error"]
+        self.assertNotIn("planning out", json.dumps(error))
+        self.assertNotIn("raw_output", error)
+        self.assertEqual(json.loads(pathlib.Path(error["raw_capture"]).read_text())["stdout"], "planning out")
+
+    def test_review_process_hands_over_its_whole_output_only_under_capture(self):
+        script = "import sys, time\nprint('x' * 10000, flush=True)\nprint('e', file=sys.stderr, flush=True)\ntime.sleep(30)\n"
+        for capture, expected in (("", None), ("/nonexistent-raw-dir", "x" * 10000 + "\n")):
+            with self.subTest(capture=bool(capture)), patch.dict(os.environ, {"SD_REVIEW_RAW_DIR": capture}), \
+                    patch.object(ship, "REVIEW_CLEANUP_SECONDS", .5):
+                with self.assertRaises(ship.ReviewTimeout) as raised:
+                    ship.review_process(self.root, [sys.executable, "-c", script], timeout=5)
+                raw = raised.exception.diagnostic.get("raw_output")
+                self.assertEqual(raw and raw["stdout"], expected)
+
     def test_missing_receipt_retry_is_explicit_and_never_rolls_back_spent_pass(self):
         operation = self.operation()
         head = _git(self.root, "rev-parse", "HEAD")

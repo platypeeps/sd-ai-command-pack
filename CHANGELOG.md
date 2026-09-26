@@ -16,6 +16,21 @@
   no longer reads as done in git (#1179). A hand delivery recorded on the row
   clears the hold on the next reconcile.
 
+- **`sd-review` reads authorship from the reviewed commits on the default branch (sd:1547).**
+  With `--base` on the default branch, the refreshed target boundary is HEAD
+  itself, so the authored range was empty. That empty read printed
+  `human (every commit says so)` and excluded no vendor, so a
+  `claude/anthropic` commit could reach an anthropic reviewer. The authored
+  range now falls back to the review subject when the boundary is HEAD. A
+  range with no commits reports `not read: no commits in <base>..<head>`
+  under `--explain` and refuses otherwise.
+
+- **A watchdog-killed review keeps its output under `SD_REVIEW_RAW_DIR`.**
+  With capture on, sd-ship withheld the stdout tail of a timed-out review but
+  wrote no file, so a truncated or oversized output left no evidence
+  (sd:1588). The killed process's whole stdout and stderr now go to an
+  owner-only `<head>-watchdog-*.json` file, and the diagnostic keeps its path.
+
 - **The local gate caps concurrent runs on one machine.** `make test` now
   takes one of `SD_GATE_SLOTS` slots (default 2) before it starts, and waits
   with one `waiting for a gate slot` line while all are held (sd:1541). Ten
@@ -387,6 +402,14 @@
   action this tool is allowed to take.
 
 ### Fixed
+
+- **Code motion no longer lowers the R13-D1 citation count (sd:1374).** The
+  ratchet counted a `path:line` into code only when the line sat inside a
+  `def` or a `class`. An insertion above a cited line could carry it out of
+  every symbol, and the count fell with no document changed. The stale
+  `bin/sd-status:877` citation in the one-person PRD read as a cleanup that
+  way. Every live `path:line` into code now counts, so the baselines rose to
+  52 and 80, and that citation now names `handoff_section`.
 
 - **A merge-forward before the first `sd-ship prepare` no longer becomes the
   pull request title (sd:1377).** With no `--title` and no stored title,

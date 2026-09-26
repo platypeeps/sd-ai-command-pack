@@ -472,14 +472,14 @@ RULES: tuple[Rule, ...] = (
     #: enforced.
     Rule(
         id="R13-D1",
-        subject="a `path:line` citation in a live document whose line sits "
-                "inside a `def` or a `class` of a Python file names the "
-                "symbol instead, as `source:<path>::<symbol>`, beyond the "
-                "entries `SYMBOL_ANCHORED_CITATIONS` carries per document, "
-                "and that baseline only shrinks; a line outside every "
-                "symbol, a line inside a name the file declares more than "
-                "once, a `[quoted: ...]` reason and a markdown target keep "
-                "their line anchor, because the symbolic form cannot say them",
+        subject="a `path:line` citation into code in a live document "
+                "names the symbol instead, as `source:<path>::<symbol>`, or "
+                "the file alone, beyond the entries "
+                "`SYMBOL_ANCHORED_CITATIONS` carries per document, and that "
+                "baseline only shrinks; every such citation counts wherever "
+                "its line sits, so code motion cannot lower the count "
+                "(sd:1374); a `[quoted: ...]` reason and a markdown target "
+                "keep their line anchor",
         checker="tests/test_doc_citations.py::"
                 "test_line_citations_into_a_symbol_match_their_baseline",
         proof="append a `path:line` citation into the body of "

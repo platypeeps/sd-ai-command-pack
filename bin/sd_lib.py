@@ -3130,6 +3130,22 @@ def run_group(argv: list[str], *, cwd: pathlib.Path, env: dict[str, str], timeou
     return subprocess.CompletedProcess(list(argv), process.returncode, output or "", errors or "")
 
 
+def reviewed_author_vendors(root: pathlib.Path, base: str, head: str) -> tuple[str, ...]:
+    """`author_vendors` for a review, where an empty range is not an answer (sd:1547).
+
+    An empty range reads no commit and returns `()`, which the review lane
+    reported as "human (every commit says so)" and routed as human-authored,
+    so no vendor was excluded. On the default branch `--base` measured
+    authorship from merge-base(HEAD, default) -- HEAD itself -- and a
+    `claude/anthropic` commit under review could reach an anthropic reviewer.
+    `sd-review` now keeps the reviewed range there; this refuses what is left.
+    `sd-ship` keeps calling `author_vendors` directly.
+    """
+    if not git_output(["rev-list", "-n", "1", f"{base}..{head}"], root):
+        raise TrailerError(f"not read: no commits in {base}..{head}")
+    return author_vendors(root, base, head)
+
+
 def raw_response(result: Any) -> dict:
     """A url reviewer's raw output for its diagnostic, only under `SD_REVIEW_RAW_DIR`.
 
