@@ -219,6 +219,27 @@ class RefusalReachesTheRunTests(ReviewFixture):
         self.assertIn("auth_mode", result["codex_preflight"]["reason"])
         self.assertEqual(runner.calls, [])
 
+    def test_explain_does_not_call_an_accepted_auth_file_ok(self) -> None:
+        """The preflight reads `auth.json`; it makes no call (sd:1556).
+
+        `codex auth ok (ChatGPT subscription)` printed beside a `codex exec`
+        that answered 401, because the mode was right and the key was not.
+        The line says what was read, and the JSON says no call was made.
+        """
+
+        root = self.make_repo()
+        home = write_auth(self.tmp / "accepted-home", {"auth_mode": "chatgpt"})
+        runner = FakeRunner()
+        result = sd_review.review(root, namespace(explain=True), runner, self.environment(), home)
+        self.assertTrue(result["codex_preflight"]["ok"])
+        self.assertIs(result["codex_preflight"]["live_call"], False)
+        stream = io.StringIO()
+        sd_review.render(result, stream)
+        line = next(row for row in stream.getvalue().splitlines() if row.lstrip().startswith("codex auth"))
+        self.assertNotIn(" ok", line)
+        self.assertIn("not a live call", line)
+        self.assertNotIn("exec", [call["argv"][1] for call in runner.calls if call["argv"][0] == "codex"])
+
 
 class NoCredentialReachesOutputTests(ReviewFixture):
     """Grep the tool's own output paths for anything a credential could ride on."""

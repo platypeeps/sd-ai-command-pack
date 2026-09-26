@@ -1736,5 +1736,50 @@ class LoopbackNeedsNoCredentialTests(unittest.TestCase):
                 self.assertTrue(sd_registry.loopback(self.entry(f"http://{host}/v1")))
 
 
+class TheGuidanceDefersToTheOrder(unittest.TestCase):
+    """Pack-owned reviewer guidance names no provider preference (sd:1556).
+
+    "Prefer Codex" and "MiniMax and Baseten require explicit selection" sent a
+    session around the chain the operator had configured, which ranked
+    minimax second: it called `codex exec` by hand and fell back to
+    same-vendor reviews. The order has one home, the registry, so the prose
+    that tells an agent how to pick a reviewer points there and ranks nobody.
+    """
+
+    PREFERENCE = r"\b(prefer|preferred|as backup|requires? explicit selection|only after an explicit)\b"
+    GUIDANCE = (".claude/rules", "skills", "hooks", "agents", "AGENTS.md", "WORKFLOW.md")
+
+    def names(self) -> list[str]:
+        """Enumerated from the shipped registry, not remembered here."""
+        return sorted(sd_registry.read_file(SHIPPED).providers)
+
+    def guidance(self) -> list[pathlib.Path]:
+        found = []
+        for entry in self.GUIDANCE:
+            path = REPO_ROOT / entry
+            found.extend([path] if path.is_file() else
+                         sorted(p for p in path.rglob("*") if p.is_file() and p.suffix in ("", ".md", ".sh")))
+        return found
+
+    def test_no_guidance_line_ranks_a_registry_provider(self) -> None:
+        import re  # noqa: PLC0415 - local, so the lines docs cite above stay put
+
+        named = re.compile(r"\b(" + "|".join(map(re.escape, self.names())) + r")\b", re.IGNORECASE)
+        hits = [f"{path.relative_to(REPO_ROOT)}: {line.strip()}"
+                for path in self.guidance()
+                for line in path.read_text(encoding="utf-8", errors="replace").splitlines()
+                if re.search(self.PREFERENCE, line, re.IGNORECASE) and named.search(line)]
+        self.assertEqual(hits, [])
+
+    def test_the_operator_defaults_point_at_the_resolved_order(self) -> None:
+        text = (REPO_ROOT / ".claude/rules/sd-operator-defaults.md").read_text(encoding="utf-8")
+        section = text.split("## Reviewers", 1)[1].split("\n## ", 1)[0]
+        self.assertIn("sd providers list", section)
+        import re  # noqa: PLC0415
+
+        named = [name for name in self.names() if re.search(rf"\b{re.escape(name)}\b", section, re.IGNORECASE)]
+        self.assertEqual(named, [])
+
+
 if __name__ == "__main__":
     unittest.main()

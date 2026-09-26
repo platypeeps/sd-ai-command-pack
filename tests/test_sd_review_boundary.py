@@ -736,11 +736,23 @@ class LineBudgetTests(unittest.TestCase):
         # the contract text that is never cosmetic. Measured, not carried:
         # `sd-review` is 2351 on this tree. Shared-core classification and
         # the complexity ceilings are unchanged.
+        #
+        # 3645 -> 3649 is sd:1556 (PR #1200), one named source for the
+        # reviewer order. `bin/sd-review` grows +4: the `order_source` report
+        # key, the two-line `order from` render, and a second line for the
+        # `codex auth` text, which no longer says `ok` for an auth mode read
+        # from a file with no call made. Both are what the lane reports about
+        # its own chain, so they belong in it. Which store the order came from
+        # is `sd_registry.order_source`, shared core, so the resolution is not
+        # spent here. The branch raised 3641 -> 3645 alongside sd:1602 on main,
+        # so the merge of main stacks it on top. Measured, not carried:
+        # `sd-review` is 2355 on the merged tree. Shared-core classification
+        # and the complexity ceilings are unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3645,
+            3649,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
