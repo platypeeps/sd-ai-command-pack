@@ -76,6 +76,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import sd_codex  # noqa: E402
 import sd_controls  # noqa: E402
+import sd_fleet  # noqa: E402
 import sd_handoff_rows  # noqa: E402
 import sd_lib  # noqa: E402
 import sd_notes  # noqa: E402
@@ -3078,6 +3079,7 @@ def build_parser() -> argparse.ArgumentParser:
     sd_operations.register(groups)
     sd_controls.register(groups)
     sd_runner.register(groups)
+    sd_fleet.register_fleet(groups)
     sd_notes.register_note_group(groups)
     return parser
 

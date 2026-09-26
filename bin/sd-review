@@ -703,8 +703,12 @@ def build_prompt(subject: Subject, challenge: bool, conventions: str) -> str:
         "introduces: correctness bugs, security issues, data-integrity risks, and "
         "maintainability problems that would cost real time later. Judge severity "
         "per finding; high means it should block a merge. Do not report style, "
-        "wording, or observations that are not defects, and prefer few precise "
-        "findings over many speculative ones. path is the repository-relative file, "
+        "wording, or observations that are not defects. Do not report cosmetic "
+        "findings, whose fix changes no behaviour or reader action (wording, "
+        "comments, naming, formatting, drifted counts in prose); contract text, "
+        "such as a command, flag, parsed string, config value, or agent "
+        "instruction, is not cosmetic. Prefer few precise findings over many "
+        "speculative ones. path is the repository-relative file, "
         "line is the line in the new version or null, family is one short category "
         "word such as security, correctness, testing, or maintainability. Respond "
         "only with JSON matching the output schema; an empty findings array means clean."
@@ -1114,7 +1118,7 @@ def author_vendors(root: pathlib.Path, subject: Subject) -> tuple[str, ...]:
     if subject.scope not in TRAILER_SCOPES:
         return ()
     try:
-        return sd_lib.author_vendors(root, subject.base, subject.head)
+        return sd_lib.reviewed_author_vendors(root, subject.base, subject.head)
     except sd_lib.TrailerError as error:
         raise Refusal(str(error)) from None
 
@@ -1298,6 +1302,7 @@ def run_provider(
         diagnostic["model_matches_requested"] = (model.get("sha256") == hashlib.sha256((provider.model or "").encode()).hexdigest()
                                                   if model.get("type") == "string" else None)
         diagnostic["response_received"] = result.launched
+        diagnostic.update(sd_lib.raw_response(result))  # opt-in (SD_REVIEW_RAW_DIR); sd-ship moves it to a file
         diagnostic["ledger"] = receipt
         parsed = oversized_findings() if diagnostic["category"] == "response_limit" else parse_findings(text, diagnostic, allow_json_fence=True)
         if parsed is not None and diagnostic["category"] in ("truncated", "incomplete_finish"):
@@ -1800,10 +1805,10 @@ def review(
         target_base = sd_lib.git_output(["merge-base", subject.head, _default_base(root)], root)
         if not target_base:
             raise UsageError("cannot establish the refreshed target boundary for item authorship")
-        authored_subject = subject._replace(base=target_base)
+        authored_subject = subject if target_base == subject.head else subject._replace(base=target_base)
     authorship_refusal = ""
     try:
-        vendors = author_vendors(root, authored_subject)
+        vendors = () if preflight and not sd_lib.git_output(["rev-list", "-n", "1", f"{authored_subject.base}..{authored_subject.head}"], root) else author_vendors(root, authored_subject)  # sd:1547: an empty-range probe has no author
     except Refusal as error:
         if not args.explain:
             raise
