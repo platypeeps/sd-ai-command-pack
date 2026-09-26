@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -310,8 +311,9 @@ class SharedReview:
             result = self.execute_review(argv, head, passes)
         self.record_review(result, head, passes)
 
-    def preflight_diagnostic(self, planned: subprocess.CompletedProcess) -> dict:
-        diagnostic: dict = {"kind": "invalid_timing_plan", "stage": "planning", "exit_code": planned.returncode}
+    def preflight_diagnostic(self, planned: subprocess.CompletedProcess,
+                             kind: str = "invalid_timing_plan", stage: str = "planning") -> dict:
+        diagnostic: dict = {"kind": kind, "stage": stage, "exit_code": planned.returncode}
         limit = self.runtime.diagnostic_bytes
         for name in ("stdout", "stderr"):
             data = getattr(planned, name).encode("utf-8", "replace")
@@ -384,9 +386,21 @@ class SharedReview:
         try:
             report = json.loads(result.stdout)
         except ValueError:
-            raise Refusal("local review emitted no valid receipt; its reserved pass remains recorded") from None
+            report = None
         if not isinstance(report, dict):
-            raise Refusal("local review emitted no valid receipt; its reserved pass remains recorded")
+            # Keep what the reviewer process said: without its exit code and
+            # output tails, a crash in sd-review and a provider failure read
+            # the same (#590's first MiniMax pass).
+            error = self.preflight_diagnostic(result, "invalid_receipt", "execution")
+            written = write_raw(f"{head[:12]}-invalid-receipt", {"head": head, "exit_code": result.returncode,
+                                                                 "stdout": result.stdout, "stderr": result.stderr})
+            if written:
+                error["raw_capture"] = written
+            passes[-1].update(execution_error=error, exit_code=result.returncode)
+            self.save(passes=passes, reviewed_head=None, phase="reviewed")
+            raise Refusal(f"local review emitted no valid receipt (sd-review exit {result.returncode}); "
+                          "its reserved pass remains recorded; bounded diagnostics remain in the item ship receipt")
+        stash_raw_responses(report, head)
         if unreviewed_gate_failure(report, result.returncode):
             self.release_gate_failure(report, head, passes)
         passes[-1]["report"] = report
@@ -439,6 +453,44 @@ def unreviewed_gate_failure(report: dict, exit_code: int) -> bool:
             and (report.get("check") or {}).get("status") == "fail"
             and not report.get("outcomes") and not report.get("reviewed_by")
             and not report.get("completed_reviews") and not report.get("findings"))
+
+
+#: Opt-in debugging (system #590): the directory that receives raw reviewer
+#: output. sd-review puts a url reviewer's raw response in its diagnostic
+#: only when this is set; sd-ship moves it here so the receipt keeps a path.
+RAW_CAPTURE_ENV = "SD_REVIEW_RAW_DIR"
+
+
+def write_raw(name: str, record: dict) -> str:
+    """Write one owner-only JSON record under `SD_REVIEW_RAW_DIR`; return its path or the error."""
+    directory = os.environ.get(RAW_CAPTURE_ENV, "")
+    if not directory:
+        return ""
+    text = json.dumps(record, indent=1)
+    path = pathlib.Path(directory).expanduser() / f"{name}-{hashlib.sha256(text.encode()).hexdigest()[:12]}.json"
+    try:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as handle:
+            handle.write(text)
+    except FileExistsError:
+        pass
+    except OSError as error:
+        return f"not written: {error}"
+    return str(path)
+
+
+def stash_raw_responses(report: dict, head: str) -> None:
+    """Replace each outcome's `raw_response` with the file that now holds it.
+
+    Without the directory the field is dropped: model output never reaches
+    the item's ship state."""
+    for outcome in report.get("outcomes") or []:
+        diagnostic = outcome.get("diagnostic") if isinstance(outcome, dict) else None
+        if isinstance(diagnostic, dict) and "raw_response" in diagnostic:
+            raw = diagnostic.pop("raw_response")
+            written = write_raw(f"{head[:12]}-{outcome.get('backend', 'provider')}", {"head": head, **raw})
+            if written:
+                diagnostic["raw_capture"] = written
 
 
 def validate_review_readiness(planned: subprocess.CompletedProcess) -> None:

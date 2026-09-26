@@ -2443,6 +2443,50 @@ roles:
                          ship.digest(ship.review_history([first])))
         self.assertEqual(self.merge()["phase"], "merged")
 
+    def test_a_missing_receipt_keeps_the_reviewer_process_output(self):
+        """A review that prints no receipt leaves its exit code and output tails.
+
+        #590's MiniMax pass failed with only "no valid receipt": sd-review's
+        stderr and exit status were dropped, so nothing said whether the
+        provider or sd-review itself failed.
+        """
+        operation = self.operation()
+        head = _git(self.root, "rev-parse", "HEAD")
+        original = ship.review_process
+        def crashed(root, argv, **kwargs):
+            if "--explain" in argv:
+                return original(root, argv, **kwargs)
+            return subprocess.CompletedProcess([], 1, "partial", "Traceback: boom\n")
+        with patch.object(ship, "review_process", side_effect=crashed):
+            with self.assertRaisesRegex(ship.Refusal, "no valid receipt.*exit 1"):
+                operation.review(head)
+        error = self.operation().state["passes"][0]["execution_error"]
+        self.assertEqual(error["kind"], "invalid_receipt")
+        self.assertEqual(error["stage"], "execution")
+        self.assertEqual(error["exit_code"], 1)
+        self.assertIn("Traceback: boom", error["stderr"]["tail"])
+        self.assertEqual(error["stdout"]["tail"], "partial")
+
+    def test_a_missing_receipt_writes_the_whole_output_when_capture_is_on(self):
+        operation = self.operation()
+        head = _git(self.root, "rev-parse", "HEAD")
+        original = ship.review_process
+        def crashed(root, argv, **kwargs):
+            if "--explain" in argv:
+                return original(root, argv, **kwargs)
+            return subprocess.CompletedProcess([], 1, "partial", "Traceback: boom\n")
+        capture = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory())) / "raw"
+        with patch.dict(os.environ, {"SD_REVIEW_RAW_DIR": str(capture)}), \
+                patch.object(ship, "review_process", side_effect=crashed):
+            with self.assertRaisesRegex(ship.Refusal, "no valid receipt"):
+                operation.review(head)
+        path = pathlib.Path(self.operation().state["passes"][0]["execution_error"]["raw_capture"])
+        self.assertEqual(path.parent, capture)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        record = json.loads(path.read_text())
+        self.assertEqual((record["head"], record["exit_code"], record["stdout"], record["stderr"]),
+                         (head, 1, "partial", "Traceback: boom\n"))
+
     def test_missing_receipt_retry_is_explicit_and_never_rolls_back_spent_pass(self):
         operation = self.operation()
         head = _git(self.root, "rev-parse", "HEAD")
@@ -4006,6 +4050,47 @@ class DeclaredGapCase(unittest.TestCase):
         double._route = route
         self.refuse("ownership or branch protection changed before merge")
 
+
+
+class RawCaptureTests(unittest.TestCase):
+    """A provider's raw response reaches a private file, never the ship state."""
+
+    review = importlib.import_module("sd_ship_review")
+
+    def report(self):
+        return {"outcomes": [{"backend": "minimax", "diagnostic": {
+            "kind": "invalid_response", "raw_response": {"body": "not json", "stderr": "warn"}}}]}
+
+    def test_the_raw_response_moves_to_an_owner_only_file(self):
+        capture = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory())) / "raw"
+        report = self.report()
+        with patch.dict(os.environ, {"SD_REVIEW_RAW_DIR": str(capture)}):
+            self.review.stash_raw_responses(report, "a" * 40)
+        diagnostic = report["outcomes"][0]["diagnostic"]
+        self.assertNotIn("raw_response", diagnostic)
+        path = pathlib.Path(diagnostic["raw_capture"])
+        self.assertTrue(path.name.startswith("aaaaaaaaaaaa-minimax-"))
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(capture.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(json.loads(path.read_text()), {"head": "a" * 40, "body": "not json", "stderr": "warn"})
+
+    def test_without_the_directory_the_raw_response_is_dropped(self):
+        report = self.report()
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SD_REVIEW_RAW_DIR", None)
+            self.review.stash_raw_responses(report, "a" * 40)
+        self.assertEqual(report["outcomes"][0]["diagnostic"], {"kind": "invalid_response"})
+
+    def test_an_unwritable_directory_is_named_not_raised(self):
+        locked = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
+        locked.chmod(0o500)
+        self.addCleanup(locked.chmod, 0o700)
+        report = self.report()
+        with patch.dict(os.environ, {"SD_REVIEW_RAW_DIR": str(locked / "raw")}):
+            self.review.stash_raw_responses(report, "a" * 40)
+        diagnostic = report["outcomes"][0]["diagnostic"]
+        self.assertNotIn("raw_response", diagnostic)
+        self.assertTrue(diagnostic["raw_capture"].startswith("not written: "))
 
 
 if __name__ == "__main__":
