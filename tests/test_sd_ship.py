@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 import importlib.machinery
 import importlib.util
@@ -15,6 +16,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from http.server import BaseHTTPRequestHandler
@@ -55,6 +57,10 @@ class ShipDouble(GitHubDouble):
     """Adds precisely the write/read surfaces this adapter calls to the shared double."""
     def __init__(self, remote):
         super().__init__(remote)
+        # `serve_forever` polls for shutdown every 0.5 s by default, so every
+        # `close` in cleanup waited up to half a second: about a quarter of
+        # this module's wall clock (sd:1605). Same server, shorter poll.
+        self._thread = threading.Thread(target=self._server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         self.admin = True
         self.moved = False
         self.lose_merge = False
@@ -192,27 +198,87 @@ class ShipDouble(GitHubDouble):
 #: and with `--include` the response line and headers ahead of it, on a
 #: refusal too (`HTTP/2.0 404 Not Found` then the JSON), which is what
 #: `GitHub.api_status` reads the status from. Exit 1 on a non-2xx, as gh.
+#:
+#: It speaks HTTP/1.0 over a bare socket rather than through urllib: every
+#: `gh` call starts this interpreter, and importing urllib.request cost about
+#: twenty of the fifty milliseconds a call took (sd:1605). The double's
+#: handler is HTTP/1.0 too, so the answer ends when the server closes.
 SHIM = '''#!/usr/bin/env python3
-import json,os,sys,urllib.request,urllib.error
+import json,os,socket,sys
 args=sys.argv[1:]
 assert args[0]=='api',args
 include='--include' in args
 args=[a for a in args if a!='--include']
 path=args[1]
 method=args[args.index('--method')+1]
-data=sys.stdin.read().encode() if '--input' in args else None
-req=urllib.request.Request(os.environ['SHIP_DOUBLE']+'/'+path,data=data,method=method,headers={'Content-Type':'application/json'})
+data=sys.stdin.read().encode() if '--input' in args else b''
+host,port=os.environ['SHIP_DOUBLE'].split('//',1)[1].rsplit(':',1)
+head='%s /%s HTTP/1.0\\r\\nHost: %s:%s\\r\\nContent-Type: application/json\\r\\nContent-Length: %d\\r\\n\\r\\n' % (method,path,host,port,len(data))
+chunks=[]
+with socket.create_connection((host,int(port))) as connection:
+ connection.sendall(head.encode()+data)
+ while True:
+  chunk=connection.recv(65536)
+  if not chunk: break
+  chunks.append(chunk)
+response,_,body=b''.join(chunks).partition(b'\\r\\n\\r\\n')
+_,status,reason=(response.split(b'\\r\\n',1)[0].decode()+'  ').split(' ',2)
+status,reason,body=int(status),reason.strip(),body.decode()
 def emit(status,reason,body):
  if include: print('HTTP/2.0 %d %s\\nContent-Type: application/json\\n' % (status,reason))
  print(body)
-try:
- with urllib.request.urlopen(req) as response: emit(response.status,response.reason,response.read().decode())
-except urllib.error.HTTPError as error:
- body=error.read().decode()
- emit(error.code,error.reason,body)
+emit(status,reason,body)
+if not 200<=status<300:
  message=json.loads(body).get('message','') if body.startswith('{') else ''
- print('gh: %s (HTTP %d)' % (message,error.code),file=sys.stderr);sys.exit(1)
+ print('gh: %s (HTTP %d)' % (message,status),file=sys.stderr);sys.exit(1)
 '''
+
+
+REMOTE_URL = "https://github.com/fixture/repo.git"
+_TEMPLATE: pathlib.Path | None = None
+
+
+def fixture_template() -> pathlib.Path:
+    """The bare remote, its seed, the clone and the operator clone, built once.
+
+    `ShipCase.setUp` built these with about twenty git children a test, which
+    at 227 tests was minutes of the gate (sd:1605). Built lazily on the first
+    setUp rather than in setUpModule or setUpClass, which run-tests.sh refuses
+    in a module it splits by test id; each shard process builds its own.
+    Every test gets a copy, so nothing one test does reaches another.
+    """
+    global _TEMPLATE
+    if _TEMPLATE is None:
+        directory = pathlib.Path(tempfile.mkdtemp(prefix="sd-ship-template-")).resolve()
+        atexit.register(shutil.rmtree, directory, True)
+        remote = FixtureRemote(directory / "fixture")
+        remote.commit_on("topic", "change\n\nAuthored-with: human", files={"src.py": "value = 1\n", "Makefile": "check:\n\t@echo fixture-check-pass\n"})
+        root = directory / "clone"
+        subprocess.run(["git", "clone", "-q", str(remote.path), str(root)], check=True)
+        _git(root, "checkout", "topic")
+        _git(root, "config", "user.name", "Fixture")
+        _git(root, "config", "user.email", "fixture@example.invalid")
+        _git(root, "remote", "set-url", "origin", REMOTE_URL)
+        operator = directory / "operator"
+        subprocess.run(["git", "clone", "-q", str(remote.path), str(operator)], check=True)
+        _git(operator, "remote", "set-url", "origin", REMOTE_URL)
+        _TEMPLATE = directory
+    return _TEMPLATE
+
+
+class CopiedRemote(FixtureRemote):
+    """A `FixtureRemote` whose bare repository and seed are a template's copy."""
+
+    def __init__(self, root: pathlib.Path, template: pathlib.Path) -> None:
+        self._template = template
+        super().__init__(root)
+
+    def _make_bare(self) -> None:
+        shutil.copytree(self._template, self.root, symlinks=True)
+        self.seed = self.root / "seed"
+        # The seed pushes to its own bare copy, never to the template's.
+        _git(self.seed, "remote", "set-url", "origin", str(self.path))
+        _git(self.seed, "update-index", "-q", "--refresh")
 
 
 def git_transport(binary: str, remote: pathlib.Path, url: str) -> str:
@@ -232,22 +298,22 @@ class ShipCase(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.directory = pathlib.Path(self.temp.name).resolve()
-        self.remote = FixtureRemote(self.directory / "fixture")
+        # The three repositories come from one template per process, copied;
+        # `fixture_template` below builds it the way this setUp used to.
+        template = fixture_template()
+        self.remote = CopiedRemote(self.directory / "fixture", template / "fixture")
         self.remote.protection = {"enforce_admins": {"enabled": True}, "required_pull_request_reviews": {"required_approving_review_count": 0},
                                   "required_status_checks": {"strict": True, "contexts": ["check"], "checks": [{"context": "check", "app_id": 7}]}}
-        self.remote.commit_on("topic", "change\n\nAuthored-with: human", files={"src.py": "value = 1\n", "Makefile": "check:\n\t@echo fixture-check-pass\n"})
+        self.remote_url = REMOTE_URL
         self.root = self.directory / "clone"
-        subprocess.run(["git", "clone", "-q", str(self.remote.path), str(self.root)], check=True)
-        _git(self.root, "checkout", "topic")
-        _git(self.root, "config", "user.name", "Fixture")
-        _git(self.root, "config", "user.email", "fixture@example.invalid")
-        self.remote_url = "https://github.com/fixture/repo.git"
-        _git(self.root, "remote", "set-url", "origin", self.remote_url)
         # Real Git resolves the GitHub-looking identity to this fixture's bare
         # remote. The adapter cannot read or mutate an operator repository.
         self.operator = self.directory / "operator"
-        subprocess.run(["git", "clone", "-q", str(self.remote.path), str(self.operator)], check=True)
-        _git(self.operator, "remote", "set-url", "origin", self.remote_url)
+        for clone in (self.root, self.operator):
+            shutil.copytree(template / clone.name, clone, symlinks=True)
+            # A copy has new inodes and ctimes; refresh the index so plumbing
+            # that skips the refresh sees the clean tree the clone left.
+            _git(clone, "update-index", "-q", "--refresh")
         (self.operator / "operator.txt").write_text("uncommitted operator work")
         self.home = self.directory / "home"
         self.database = self.home / ".local/share/sd/sd.db"
@@ -292,7 +358,12 @@ roles:
         # `XDG_CONFIG_HOME` wins over `HOME` in `sd_lib.machine_config_path`, and
         # a GitHub runner sets it: pointed at the fixture here, or a machine
         # config written under `self.home` is never read (sd:1328).
+        # Both Jev stages off: with a keyed `jev` on PATH every `sd-review`
+        # child asked the live endpoint, about 0.85 s a prepare, and a CI
+        # runner has no `jev`, so the fixture now answers the same everywhere
+        # (sd:1605).
         self.environment = {**os.environ, "HOME": str(self.home), "XDG_CONFIG_HOME": str(self.home / ".config"),
+                            "JEV_SD_REVIEW": "0", "JEV_SD_DOCS_LINT": "0",
                             "SHIP_DOUBLE": self.double.base_url,
                             "PATH": str(self.programs) + os.pathsep + os.environ["PATH"]}
         self.patch = patch.dict(os.environ, self.environment, clear=True)
@@ -2687,12 +2758,26 @@ roles:
         self.assertEqual(json.loads(pathlib.Path(error["raw_capture"]).read_text())["stdout"], "planning out")
 
     def test_review_process_hands_over_its_whole_output_only_under_capture(self):
-        script = "import sys, time\nprint('x' * 10000, flush=True)\nprint('e', file=sys.stderr, flush=True)\ntime.sleep(30)\n"
+        # The child says when its output is written, and the watchdog starts
+        # counting only then: a short timeout that cannot expire before the
+        # output exists, rather than five seconds of waiting per case (sd:1605).
+        ready = self.directory / "written"
+        script = ("import pathlib, sys, time\nprint('x' * 10000, flush=True)\nprint('e', file=sys.stderr, flush=True)\n"
+                  f"pathlib.Path({str(ready)!r}).touch()\ntime.sleep(30)\n")
+        original_communicate = subprocess.Popen.communicate
+        def after_written(process, *args, **kwargs):
+            deadline = time.monotonic() + CLI_TIMEOUT
+            while not ready.exists() and time.monotonic() < deadline:
+                time.sleep(.005)
+            self.assertTrue(ready.exists(), "the child never wrote its output")
+            return original_communicate(process, *args, **kwargs)
         for capture, expected in (("", None), ("/nonexistent-raw-dir", "x" * 10000 + "\n")):
+            ready.unlink(missing_ok=True)
             with self.subTest(capture=bool(capture)), patch.dict(os.environ, {"SD_REVIEW_RAW_DIR": capture}), \
-                    patch.object(ship, "REVIEW_CLEANUP_SECONDS", .5):
+                    patch.object(ship, "REVIEW_CLEANUP_SECONDS", .5), \
+                    patch.object(subprocess.Popen, "communicate", after_written):
                 with self.assertRaises(ship.ReviewTimeout) as raised:
-                    ship.review_process(self.root, [sys.executable, "-c", script], timeout=5)
+                    ship.review_process(self.root, [sys.executable, "-c", script], timeout=.2)
                 raw = raised.exception.diagnostic.get("raw_output")
                 self.assertEqual(raw and raw["stdout"], expected)
 
