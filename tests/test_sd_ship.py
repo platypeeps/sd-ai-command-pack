@@ -30,6 +30,10 @@ from sd_db.testing.github import GitHubDouble
 from sd_db.testing.remote import FixtureRemote, RemoteRefusal, _git
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+#: The bound on one real `sd-ship` command (sd:1539): a hang guard, not a
+#: speed claim. At 30 s it failed gates at load average 157 on runs that take
+#: about 7 s alone.
+CLI_TIMEOUT = 300
 #: The directory `make setup` provisioned the library into, read off the copy
 #: this run imported rather than off `ROOT / ".venv"`. A test that asks the
 #: checkout for a virtualenv has to skip where there is none, and a skipped
@@ -335,7 +339,7 @@ roles:
 
     def cli(self, command, *extra):
         return subprocess.run([sys.executable, str(ROOT / "bin/sd-ship"), command, "--item", str(self.item), "--json", *extra],
-                              cwd=self.root, env=self.environment, text=True, capture_output=True, timeout=30)
+                              cwd=self.root, env=self.environment, text=True, capture_output=True, timeout=CLI_TIMEOUT)
 
 
     # -- criterion 21: a ship leaves `docs/work/archive/` untouched ---------
@@ -441,6 +445,16 @@ roles:
         self.assertEqual(after["acceptance"], before["acceptance"])
         self.assertEqual(after["body"], before["body"])
         self.assertEqual(len(after["passes"]), 2)
+
+    def test_a_merge_forward_before_the_first_prepare_does_not_become_the_title(self):
+        # sd:1377: the merge-forward sd-ship demands left HEAD's subject naming
+        # a branch operation, and it was stored as the title and landed on main.
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        _git(self.root, "fetch", "-q", "origin", "main")
+        _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge origin/main into topic\n\nAuthored-with: human", "FETCH_HEAD")
+        result = self.prepare()
+        self.assertEqual(self.operation().state["title"], "change")
+        self.assertEqual(self.remote.pull(result["pull_request"]["number"]).title, "change")
 
     def test_a_moved_binding_re_reviews_the_same_head_instead_of_bricking_it(self):
         # sd:1390, live on #1140. Reuse was decided on head equality and the
@@ -1648,6 +1662,13 @@ roles:
         self.assertIn("is not valid JSON", warned)
         self.assertEqual(acknowledgements.store_path(self.root).read_text(), "{not json")
 
+    def test_the_real_cli_bound_guards_a_hang_not_a_load_average(self):
+        """sd:1539. A 30 s bound failed three gates on one loaded afternoon; alone the run takes about 7 s."""
+        self.assertGreaterEqual(CLI_TIMEOUT, 300)
+        with patch.object(subprocess, "run") as run:
+            self.cli("prepare")
+        self.assertEqual(run.call_args.kwargs["timeout"], CLI_TIMEOUT)
+
     def test_real_cli_review_prepare_slice_merge_and_repeat_reconcile(self):
         prepared = self.cli("prepare")
         self.assertEqual(prepared.returncode, 0, prepared.stdout + prepared.stderr)
@@ -1656,7 +1677,7 @@ roles:
         body.write_text(self.remote.pull(1).body)
         (self.root / "docs/work").mkdir(parents=True)
         linted = subprocess.run([sys.executable, str(ROOT / "bin/sd-docs-lint"), "--pr-body", str(body)],
-                                cwd=self.root, env=self.environment, text=True, capture_output=True, timeout=30)
+                                cwd=self.root, env=self.environment, text=True, capture_output=True, timeout=CLI_TIMEOUT)
         self.assertEqual(linted.returncode, 0, linted.stdout + linted.stderr)
         self.assertIn(f"database association sd:{self.item}", linted.stdout)
         result = self.merge()
@@ -2469,6 +2490,78 @@ roles:
         self.assertEqual(report["resume_report_digest"],
                          ship.digest(ship.review_history([first])))
         self.assertEqual(self.merge()["phase"], "merged")
+
+    def test_a_missing_receipt_keeps_the_reviewer_process_output(self):
+        """A review that prints no receipt leaves its exit code and output tails.
+
+        #590's MiniMax pass failed with only "no valid receipt": sd-review's
+        stderr and exit status were dropped, so nothing said whether the
+        provider or sd-review itself failed.
+        """
+        operation = self.operation()
+        head = _git(self.root, "rev-parse", "HEAD")
+        original = ship.review_process
+        def crashed(root, argv, **kwargs):
+            if "--explain" in argv:
+                return original(root, argv, **kwargs)
+            return subprocess.CompletedProcess([], 1, "partial", "Traceback: boom\n")
+        with patch.object(ship, "review_process", side_effect=crashed):
+            with self.assertRaisesRegex(ship.Refusal, "no valid receipt.*exit 1"):
+                operation.review(head)
+        error = self.operation().state["passes"][0]["execution_error"]
+        self.assertEqual(error["kind"], "invalid_receipt")
+        self.assertEqual(error["stage"], "execution")
+        self.assertEqual(error["exit_code"], 1)
+        self.assertIn("Traceback: boom", error["stderr"]["tail"])
+        self.assertEqual(error["stdout"]["tail"], "partial")
+
+    def test_a_missing_receipt_writes_the_whole_output_when_capture_is_on(self):
+        operation = self.operation()
+        head = _git(self.root, "rev-parse", "HEAD")
+        original = ship.review_process
+        def crashed(root, argv, **kwargs):
+            if "--explain" in argv:
+                return original(root, argv, **kwargs)
+            return subprocess.CompletedProcess([], 1, "partial", "Traceback: boom\n")
+        capture = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory())) / "raw"
+        with patch.dict(os.environ, {"SD_REVIEW_RAW_DIR": str(capture)}), \
+                patch.object(ship, "review_process", side_effect=crashed):
+            with self.assertRaisesRegex(ship.Refusal, "no valid receipt"):
+                operation.review(head)
+        error = self.operation().state["passes"][0]["execution_error"]
+        # A truncated receipt may carry raw model text: only the private file keeps it.
+        self.assertEqual(error["stdout"], {"withheld": "raw capture is on; stdout may carry model output",
+                                           "bytes": len("partial")})
+        path = pathlib.Path(error["raw_capture"])
+        self.assertEqual(path.parent, capture)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        record = json.loads(path.read_text())
+        self.assertEqual((record["head"], record["exit_code"], record["stdout"], record["stderr"]),
+                         (head, 1, "partial", "Traceback: boom\n"))
+
+    def test_a_watchdog_kill_keeps_raw_model_text_out_of_the_ship_state(self):
+        """The timeout path bypasses the receipt check; it must withhold raw text too."""
+        operation = self.operation()
+        head = _git(self.root, "rev-parse", "HEAD")
+        original = ship.review_process
+        report = {"status": "clean", "outcomes": [{"backend": "minimax", "diagnostic": {
+            "kind": "invalid_response", "raw_response": {"body": "model text", "stderr": ""}}}]}
+        def killed(root, argv, **kwargs):
+            if "--explain" in argv:
+                return original(root, argv, **kwargs)
+            raise ship.ReviewTimeout({"kind": "watchdog_expired", "allowed_seconds": kwargs["timeout"],
+                                      "stdout": {"bytes": 10, "tail": "model text", "truncated": False},
+                                      "captured_report": report})
+        capture = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory())) / "raw"
+        with patch.dict(os.environ, {"SD_REVIEW_RAW_DIR": str(capture)}), \
+                patch.object(ship, "review_process", side_effect=killed):
+            with self.assertRaisesRegex(ship.Refusal, "execution watchdog expired"):
+                operation.review(head)
+        error = self.operation().state["passes"][0]["execution_error"]
+        self.assertNotIn("model text", json.dumps(error))
+        self.assertEqual(error["stdout"]["bytes"], 10)
+        path = pathlib.Path(error["captured_report"]["outcomes"][0]["diagnostic"]["raw_capture"])
+        self.assertEqual(json.loads(path.read_text())["body"], "model text")
 
     def test_missing_receipt_retry_is_explicit_and_never_rolls_back_spent_pass(self):
         operation = self.operation()
@@ -3631,6 +3724,26 @@ class DeclaredGapCase(unittest.TestCase):
         self.assertEqual([entry["id"] for entry in result["protection"]["rulesets"]], [42])
         self.assertEqual(result["protection"]["required_status_checks"]["checks"], [{"context": "route", "app_id": 7}])
 
+    def test_a_ruleset_that_forbids_squash_refuses_before_any_merge_is_dispatched(self):
+        """sd:1379. A ruleset's `pull_request` rule names the merge methods the
+        branch accepts, and `synthesize` dropped them, so the gate passed and
+        `sd-ship` sent a squash the branch forbids. The refusal names the
+        methods allowed and dispatches nothing; a list that includes squash
+        still merges once."""
+        self.commit({".github/workflows/tests.yml": self.TESTS, ".github/workflows/sd-review-route.yml": self.ROUTE})
+        rules = self.gating_rules()
+        rules[1]["parameters"]["allowed_merge_methods"] = ["merge", "rebase"]
+        self.double.rules = rules
+        self.double.rulesets = {42: {"id": 42, "name": "main", "enforcement": "active", "bypass_actors": []}}
+        self.green()
+        with self.assertRaisesRegex(ship.Refusal, r"allows only merge, rebase .*squash"):
+            self.merge()
+        self.assertEqual(self.puts(), 0)
+        rules[1]["parameters"]["allowed_merge_methods"] = ["squash", "rebase"]
+        result = self.merge()
+        self.assertEqual(self.puts(), 1)
+        self.assertEqual(result["protection"]["allowed_merge_methods"], ["rebase", "squash"])
+
     @staticmethod
     def gating_rules() -> list:
         return [
@@ -4013,6 +4126,47 @@ class DeclaredGapCase(unittest.TestCase):
         double._route = route
         self.refuse("ownership or branch protection changed before merge")
 
+
+
+class RawCaptureTests(unittest.TestCase):
+    """A provider's raw response reaches a private file, never the ship state."""
+
+    review = importlib.import_module("sd_ship_review")
+
+    def report(self):
+        return {"outcomes": [{"backend": "minimax", "diagnostic": {
+            "kind": "invalid_response", "raw_response": {"body": "not json", "stderr": "warn"}}}]}
+
+    def test_the_raw_response_moves_to_an_owner_only_file(self):
+        capture = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory())) / "raw"
+        report = self.report()
+        with patch.dict(os.environ, {"SD_REVIEW_RAW_DIR": str(capture)}):
+            self.review.stash_raw_responses(report, "a" * 40)
+        diagnostic = report["outcomes"][0]["diagnostic"]
+        self.assertNotIn("raw_response", diagnostic)
+        path = pathlib.Path(diagnostic["raw_capture"])
+        self.assertTrue(path.name.startswith("aaaaaaaaaaaa-minimax-"))
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(capture.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(json.loads(path.read_text()), {"head": "a" * 40, "body": "not json", "stderr": "warn"})
+
+    def test_without_the_directory_the_raw_response_is_dropped(self):
+        report = self.report()
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SD_REVIEW_RAW_DIR", None)
+            self.review.stash_raw_responses(report, "a" * 40)
+        self.assertEqual(report["outcomes"][0]["diagnostic"], {"kind": "invalid_response"})
+
+    def test_an_unwritable_directory_is_named_not_raised(self):
+        locked = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
+        locked.chmod(0o500)
+        self.addCleanup(locked.chmod, 0o700)
+        report = self.report()
+        with patch.dict(os.environ, {"SD_REVIEW_RAW_DIR": str(locked / "raw")}):
+            self.review.stash_raw_responses(report, "a" * 40)
+        diagnostic = report["outcomes"][0]["diagnostic"]
+        self.assertNotIn("raw_response", diagnostic)
+        self.assertTrue(diagnostic["raw_capture"].startswith("not written: "))
 
 
 if __name__ == "__main__":

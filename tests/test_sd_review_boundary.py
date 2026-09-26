@@ -723,11 +723,18 @@ class LineBudgetTests(unittest.TestCase):
         # not carried: `sd-review` is 2355 and `sd_opencode.py` is 304 on this
         # tree. Shared-core classification and the complexity ceilings are
         # unchanged.
+        #
+        # 3639 -> 3641 is sd:1253. `bin/sd_jev.py` grows +2 for `CALLER` and
+        # its one-line comment; the two `jev` calls gain their ledger flags
+        # on existing lines. Measured, not carried: `sd_jev.py` is 205 on this
+        # tree. This raise is its own commit, before the one that spends it.
+        # Shared-core classification and the complexity ceilings are
+        # unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3639,
+            3641,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
