@@ -18,6 +18,17 @@
   research-repo `CLAUDE.md` template, `conventions.md` and the skill say the
   same.
 
+- **`sd-docs-lint`'s Jev claim-support reading is opt-in per repository.**
+  The reading sends `docs/work` prose to a third-party model, and it ran in
+  every checkout where `jev` could answer. A checkout whose prose must not
+  leave the machine had to export `JEV_SD_DOCS_LINT=0`, which a plain shell
+  or a second agent does not do (sd:1304). The reading now runs only where
+  the repository's tracked `.github/sd-docs-lint.json` sets
+  `"jev_claim_support": true`. `JEV_SD_DOCS_LINT=0` still switches it off
+  everywhere, and no value of the variable switches it on without the file.
+  A malformed file takes no reading and prints a note. This repository opts
+  itself in. `sd-review`'s tier reading sends no prose and keeps its default.
+
 - **`sd fleet stamp` lays the auto-merge fleet's shared files (sd:1326).**
   Each `runner_merge=auto` repository needs the same four things before the
   runner can merge it: the route workflow at the current pin, a check workflow,
