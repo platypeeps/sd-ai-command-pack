@@ -4,6 +4,16 @@
 
 ### Changed
 
+- **`sd.assistant_merge` now has one reading (sd:1633).** A session read
+  `controlled` and could not tell whether it might merge, or merge without the
+  review lane, so it stopped and asked. `WORKFLOW.md`, `AGENTS.md`,
+  `README.md`, the `sd-ship` skill and the `sd config` description now say the
+  same thing. `controlled` means merge without asking, only through
+  `sd-ship prepare` then `sd-ship merge`, whose gates include the review lane
+  and required CI. It never permits a raw `gh pr merge` or a web squash. A
+  refusal from `sd-ship` is a stop. `ask`, or no value, means ask first. The
+  values and `sd-ship` behavior do not change.
+
 - **`tests.test_sd_ship` runs about 40% faster (sd:1605).** The module
   sets the `make check` critical path. Its fixture now builds the bare remote,
   seed and both clones once per process and copies them per test. It switches
