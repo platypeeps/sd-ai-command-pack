@@ -624,26 +624,60 @@ class PublishSignalTests(unittest.TestCase):
 
 
 
+HOLD_SLOT = """
+import fcntl, sys, time
+handle = open(sys.argv[1], "a")
+fcntl.flock(handle, fcntl.LOCK_EX)
+print("held", flush=True)
+time.sleep(600)
+"""
+
+
+def _hold_slot(lock):
+    """A process that holds `lock` the way a run does, until it is killed."""
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    holder = subprocess.Popen([sys.executable, "-c", HOLD_SLOT, str(lock)], stdout=subprocess.PIPE, text=True)
+    assert holder.stdout.readline() == "held\n"
+    holder.stdout.close()
+    return holder
+
+
+def _slot_free(lock):
+    """True when nothing holds `lock`: this process can take it and let it go."""
+    import fcntl
+
+    with open(lock, "a") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        fcntl.flock(handle, fcntl.LOCK_UN)
+    return True
+
+
 class GateSlotTests(unittest.TestCase):
     """sd:1541. At most `SD_GATE_SLOTS` local runs at once on one machine.
 
     On 2026-09-25 the load average reached 157 while several gates ran
     together, and a 30 s test bound failed three of them. `make test` sets
-    the cap; a direct run, CI and every nested run have none.
+    the cap; a direct run, CI and every nested run have none. A slot is a
+    kernel lock, so a slot is free exactly when no live process holds it.
     """
 
     def slot_env(self, root, **overrides):
-        return _fixture_env(SD_GATE_SLOTS="1", SD_GATE_SLOTS_DIR=str(root / "slots"),
-                            SD_GATE_SLOT_POLL="0.2", CI="", GITHUB_ACTIONS="", **overrides)
+        settings = dict(SD_GATE_SLOTS="1", SD_GATE_SLOTS_DIR=str(root / "slots"),
+                        SD_GATE_SLOT_POLL="0.2", CI="", GITHUB_ACTIONS="")
+        return _fixture_env(**dict(settings, **overrides))
 
     def test_a_second_run_waits_for_the_one_slot(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             script = _build_fixture(root)
+            lock = root / "slots" / "slot.1.lock"
             slow = subprocess.Popen(["bash", str(script)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                     env=self.slot_env(root, HARNESS_FIXTURE_SLEEP="4"))
             try:
-                self.assertTrue(_wait_for(lambda: (root / "slots" / "slot.1").is_dir(), timeout=60))
+                self.assertTrue(_wait_for(lambda: lock.exists() and not _slot_free(lock), timeout=60))
                 fast = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False,
                                       env=self.slot_env(root, HARNESS_FIXTURE_SLEEP="0"), timeout=300)
                 self.assertEqual(fast.returncode, 0, fast.stdout + fast.stderr)
@@ -653,21 +687,64 @@ class GateSlotTests(unittest.TestCase):
                 if slow.poll() is None:
                     slow.kill()
                 slow.wait()
-            self.assertEqual(sorted((root / "slots").iterdir()), [])
+            self.assertTrue(_slot_free(lock))
 
-    def test_a_dead_holders_slot_is_taken(self):
+    def test_a_killed_holders_slot_is_taken_without_a_wait(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             script = _build_fixture(root)
-            gone = subprocess.Popen(["true"])
-            gone.wait()
-            (root / "slots" / "slot.1").mkdir(parents=True)
-            (root / "slots" / "slot.1" / "pid").write_text(f"{gone.pid}\n")
+            lock = root / "slots" / "slot.1.lock"
+            holder = _hold_slot(lock)
+            holder.kill()
+            holder.wait()
             fast = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False,
                                   env=self.slot_env(root, HARNESS_FIXTURE_SLEEP="0"), timeout=300)
             self.assertEqual(fast.returncode, 0, fast.stdout + fast.stderr)
             self.assertNotIn("waiting for a gate slot", fast.stderr)
-            self.assertEqual(sorted((root / "slots").iterdir()), [])
+            self.assertTrue(_slot_free(lock))
+
+    def test_a_waiter_removes_nothing_from_the_slot_directory(self):
+        """#1195 review. No waiter judges a holder dead, so none deletes a slot.
+
+        Both earlier designs removed a slot they judged stale, and two waiters
+        could remove each other's new slots that way. The holder here has an
+        old lock file with a dead pid in it; only the lock counts.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+            lock = root / "slots" / "slot.1.lock"
+            holder = _hold_slot(lock)
+            gone = subprocess.Popen(["true"])
+            gone.wait()
+            lock.write_text(f"{gone.pid}\n")
+            old = time.time() - 3600
+            os.utime(lock, (old, old))
+            try:
+                err = root / "stderr.log"
+                with err.open("w") as err_file:
+                    waiter = subprocess.Popen(["bash", str(script)], stdout=subprocess.DEVNULL, stderr=err_file,
+                                              env=self.slot_env(root, HARNESS_FIXTURE_SLEEP="0"))
+                try:
+                    self.assertTrue(_wait_for(lambda: "waiting for a gate slot" in err.read_text(), timeout=60),
+                                    err.read_text())
+                    time.sleep(1)
+                    self.assertIsNone(waiter.poll(), "the waiter ran while a live process held the slot")
+                    self.assertEqual(sorted((root / "slots").iterdir()), [lock])
+                    self.assertEqual(lock.read_text(), f"{gone.pid}\n")
+                    holder.kill()
+                    holder.wait()
+                    waiter.wait(timeout=300)
+                finally:
+                    if waiter.poll() is None:
+                        waiter.kill()
+                    waiter.wait()
+                self.assertEqual(waiter.returncode, 0, err.read_text())
+            finally:
+                if holder.poll() is None:
+                    holder.kill()
+                holder.wait()
+            self.assertTrue(_slot_free(lock))
 
     def debug_hook(self, root, pattern, action):
         """A `BASH_ENV` file that runs `action` once, before the first command matching `pattern`.
@@ -684,62 +761,36 @@ class GateSlotTests(unittest.TestCase):
         )
         return hook, fired
 
-    def test_a_slot_re_made_after_its_dead_holder_was_read_is_kept(self):
-        """sd:1558. A reclaims a dead holder's slot after B read the same holder.
-
-        The hook re-makes the slot with a live pid at the instant B checks the
-        holder it has just read, as a reclaimer that won the race would. B
-        must leave that slot alone and wait for it.
-        """
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            script = _build_fixture(root)
-            gone = subprocess.Popen(["true"])
-            gone.wait()
-            slot = root / "slots" / "slot.1"
-            slot.mkdir(parents=True)
-            (slot / "pid").write_text(f"{gone.pid}\n")
-            live = subprocess.Popen(["sleep", "600"])
-            hook, fired = self.debug_hook(
-                root, '"kill -0 "*',
-                f'rm -rf -- \"{slot}\"; mkdir -- \"{slot}\"; printf \"%s\\n\" {live.pid} >\"{slot}/pid\"')
-            err = root / "stderr.log"
-            try:
-                with err.open("w") as err_file:
-                    waiter = subprocess.Popen(["bash", str(script)], stdout=subprocess.DEVNULL, stderr=err_file,
-                                              env=self.slot_env(root, HARNESS_FIXTURE_SLEEP="0", BASH_ENV=str(hook)))
-                try:
-                    _wait_for(lambda: waiter.poll() is not None
-                              or "waiting for a gate slot" in err.read_text(), timeout=60)
-                    self.assertTrue(fired.is_dir(), "the hook never fired; this test asserted nothing")
-                    self.assertIn("waiting for a gate slot", err.read_text())
-                    self.assertEqual((slot / "pid").read_text(), f"{live.pid}\n")
-                    live.kill()
-                    live.wait()
-                    waiter.wait(timeout=300)
-                finally:
-                    if waiter.poll() is None:
-                        waiter.kill()
-                    waiter.wait()
-            finally:
-                if live.poll() is None:
-                    live.kill()
-                live.wait()
-            self.assertEqual(waiter.returncode, 0, err.read_text())
-            self.assertEqual(sorted((root / "slots").iterdir()), [])
-
     def test_a_signal_before_the_pid_is_written_releases_the_slot(self):
-        """sd:1558. The slot is the run's from `mkdir` on, so its exit removes it."""
+        """sd:1558. The slot is the run's from the lock on, so its exit frees it."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             script = _build_fixture(root)
-            hook, fired = self.debug_hook(root, "printf*/pid?", "kill -TERM $$")
+            hook, fired = self.debug_hook(root, 'printf*gate_slot*', "kill -TERM $$")
             run = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False,
                                  env=self.slot_env(root, HARNESS_FIXTURE_SLEEP="0", BASH_ENV=str(hook)),
                                  timeout=300)
             self.assertTrue(fired.is_dir(), "the hook never fired; this test asserted nothing")
             self.assertEqual(run.returncode, 143, run.stdout + run.stderr)
-            self.assertEqual(sorted((root / "slots").iterdir()), [])
+            self.assertTrue(_slot_free(root / "slots" / "slot.1.lock"))
+
+    def orphan_waiter(self, root, script, **env):
+        """A run started in the background by a launcher shell: (launcher, log, child-pid file)."""
+        log = root / "run.log"
+        child = root / "child.pid"
+        launcher = subprocess.Popen(
+            ["bash", "-c", 'bash "$0" > "$1" 2>&1 & printf "%s\\n" "$!" > "$2"; wait "$!"',
+             str(script), str(log), str(child)],
+            env=self.slot_env(root, HARNESS_FIXTURE_SLEEP="0", **env))
+        self.assertTrue(_wait_for(lambda: log.exists() and "waiting for a gate slot" in log.read_text(),
+                                  timeout=60), log.read_text() if log.exists() else "no log")
+        return launcher, log, int(child.read_text())
+
+    def assert_orphan_stops_unstarted(self, log, waiter):
+        stopped = _wait_for(lambda: not _alive(waiter), timeout=30)
+        self.assertTrue(stopped, f"the orphaned waiter {waiter} still polls: {log.read_text()}")
+        self.assertIn("the process that started this test run exited", log.read_text())
+        self.assertNotIn("run-tests: start ", log.read_text(), "the orphan went on to start the run")
 
     def test_a_waiter_whose_launcher_exits_stops_without_a_slot(self):
         """#1195 review. The watchdog starts with the shards, after the wait.
@@ -750,36 +801,54 @@ class GateSlotTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             script = _build_fixture(root)
-            slot = root / "slots" / "slot.1"
-            slot.mkdir(parents=True)
-            holder = subprocess.Popen(["sleep", "600"])
-            (slot / "pid").write_text(f"{holder.pid}\n")
-            log = root / "run.log"
-            child = root / "child.pid"
-            launcher = subprocess.Popen(
-                ["bash", "-c", 'bash "$0" > "$1" 2>&1 & printf "%s\\n" "$!" > "$2"; wait "$!"',
-                 str(script), str(log), str(child)],
-                env=self.slot_env(root, HARNESS_FIXTURE_SLEEP="0"))
+            lock = root / "slots" / "slot.1.lock"
+            holder = _hold_slot(lock)
             waiter = None
+            launcher = None
             try:
-                self.assertTrue(_wait_for(lambda: log.exists() and "waiting for a gate slot" in log.read_text(),
-                                          timeout=60), log.read_text() if log.exists() else "no log")
-                waiter = int(child.read_text())
+                launcher, log, waiter = self.orphan_waiter(root, script)
                 launcher.kill()
                 launcher.wait(timeout=30)
-                stopped = _wait_for(lambda: not _alive(waiter), timeout=30)
-                self.assertTrue(stopped, f"the orphaned waiter {waiter} still polls: {log.read_text()}")
-                self.assertIn("the process that started this test run exited", log.read_text())
-                self.assertNotIn("run-tests: start ", log.read_text(), "the orphan went on to start the run")
-                self.assertEqual(sorted((root / "slots").iterdir()), [slot])
-                self.assertEqual((slot / "pid").read_text(), f"{holder.pid}\n")
+                self.assert_orphan_stops_unstarted(log, waiter)
+                self.assertFalse(_slot_free(lock), "the holder lost its slot")
             finally:
-                if launcher.poll() is None:
+                if launcher is not None and launcher.poll() is None:
                     launcher.kill()
-                launcher.wait()
+                    launcher.wait()
                 if waiter is not None and _alive(waiter):
                     os.kill(waiter, signal.SIGKILL)
                 holder.kill()
+                holder.wait()
+
+    def test_a_slot_freed_while_the_orphan_sleeps_is_not_used(self):
+        """#1195 review. The launcher exits and the slot frees in one poll sleep.
+
+        The waiter wakes to a free slot. It must check the launcher before it
+        takes one, and stop, not start the run.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+            lock = root / "slots" / "slot.1.lock"
+            holder = _hold_slot(lock)
+            waiter = None
+            launcher = None
+            try:
+                launcher, log, waiter = self.orphan_waiter(root, script, SD_GATE_SLOT_POLL="3")
+                launcher.kill()
+                launcher.wait(timeout=30)
+                holder.kill()
+                holder.wait()
+                self.assert_orphan_stops_unstarted(log, waiter)
+                self.assertTrue(_slot_free(lock))
+            finally:
+                if launcher is not None and launcher.poll() is None:
+                    launcher.kill()
+                    launcher.wait()
+                if waiter is not None and _alive(waiter):
+                    os.kill(waiter, signal.SIGKILL)
+                if holder.poll() is None:
+                    holder.kill()
                 holder.wait()
 
     def test_without_a_cap_no_slot_is_taken(self):

@@ -8,15 +8,15 @@
   takes one of `SD_GATE_SLOTS` slots (default 2) before it starts, and waits
   with one `waiting for a gate slot` line while all are held (sd:1541). Ten
   worktrees checking at once had driven the load average to 157. A dead
-  holder's slot is reclaimed, CI takes no slot, and `SD_GATE_SLOTS=0` turns
+  holder's slot frees itself, CI takes no slot, and `SD_GATE_SLOTS=0` turns
   the cap off.
 
-- **Two waiters can no longer both reclaim one dead gate slot.** A waiter now
-  reclaims under a per-slot lock and reads the holder again there, so it keeps
-  a slot another waiter has just re-made (sd:1558). A run also owns its slot
-  from `mkdir` on, so a signal before the pid write releases it. A waiter
-  whose launcher exits now stops without taking a slot, since the watchdog
-  starts only with the shards.
+- **A gate slot is a kernel lock, so no waiter deletes one.** A run holds
+  `slot.N.lock` with `flock` on an open fd, and the kernel frees it when the
+  holder dies (sd:1558). The earlier pid directories let two waiters remove
+  each other's new slots. A waiter whose launcher exits now stops, checked
+  before each attempt and again with a slot held, since the watchdog starts
+  only with the shards.
 
 - **The system-main canary fails on skipped tests.** `sd-db-main-canary` now
   carries the unittest job's skip gate and installs the same pinned opencode

@@ -374,54 +374,49 @@ trap 'on_signal' INT TERM HUP
 # sd:1541. At most SD_GATE_SLOTS local runs at once on this machine. On
 # 2026-09-25 several gates started together, the load average reached 157, and
 # tests with a fixed bound failed three of them. `make test` sets the cap; unset
-# or 0 means none, and CI never waits. A slot is a directory, taken with an
-# atomic `mkdir` and holding the runner's pid, so a slot whose holder is gone
-# is taken over. A holder exports SD_GATE_SLOTS=0: the runs its tests start
-# inside it must not wait on the slot their own parent holds.
+# or 0 means none, and CI never waits. A holder exports SD_GATE_SLOTS=0: the
+# runs its tests start inside it must not wait on the slot their own parent
+# holds.
+#
+# #1195 review. A slot is a kernel `flock` on `slot.N.lock`, held through fd 9
+# of this shell. The kernel drops it when the last copy of that fd closes, so a
+# holder that dies frees its slot, and no waiter ever judges a holder dead or
+# deletes anything. Two earlier designs did: a slot directory holding a pid, and
+# then a reclaim lock around it. Each check-then-delete let two waiters remove
+# each other's new slots. The lock files stay; the pid in one is only a hint.
+# Children that outlive this shell must not inherit fd 9, so the shard and
+# watchdog launches close it.
 gate_slot=""
-gate_reclaim=""
 release_gate_slot() {
-  if [ -n "$gate_reclaim" ]; then
-    rmdir -- "$gate_reclaim" 2>/dev/null
-    gate_reclaim=""
-  fi
   if [ -n "$gate_slot" ]; then
-    rm -rf -- "$gate_slot"
+    exec 9>&-
     gate_slot=""
   fi
 }
-# A slot whose holder is gone. A holder that died before writing its pid leaves
-# an empty slot; a minute is far longer than the write takes.
-gate_slot_is_stale() {
-  local holder
-  holder="$(cat -- "$1/pid" 2>/dev/null)"
-  { [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; } ||
-    { [ -z "$holder" ] && [ -n "$(find "$1" -maxdepth 0 -mmin +1 2>/dev/null)" ]; }
-}
-# sd:1558. Two waiters can read the same dead holder. Without the lock, the
-# second one's `rm` removes the slot the first has just re-made, and both run
-# in it. Under the lock the holder is read again, so a re-made slot is kept.
-# A reclaimer killed outright leaves its lock; a minute is far longer than a
-# reclaim takes, so an older lock is removed.
-reclaim_gate_slot() {
-  local slot="$1" taken=""
-  if ! mkdir -- "$slot.reclaim" 2>/dev/null; then
-    [ -z "$(find "$slot.reclaim" -maxdepth 0 -mmin +1 2>/dev/null)" ] ||
-      rmdir -- "$slot.reclaim" 2>/dev/null
-    return 1
-  fi
-  gate_reclaim="$slot.reclaim"
-  if gate_slot_is_stale "$slot"; then
-    rm -rf -- "$slot"
+# True when this shell took the slot's lock on fd 9. Bash has no flock, and
+# macOS ships no flock(1); the interpreter locks the open file it inherits.
+take_gate_slot() {
+  exec 9>>"$1" || return 1
+  if "$toolchain_python" -c 'import fcntl; fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)' 2>/dev/null; then
     # Named before the pid is written: a signal in between releases the slot.
-    mkdir -- "$slot" 2>/dev/null && taken=1 && gate_slot="$slot"
+    gate_slot="$1"
+    return 0
   fi
-  rmdir -- "$slot.reclaim" 2>/dev/null
-  gate_reclaim=""
-  [ -n "$taken" ]
+  exec 9>&-
+  return 1
+}
+# An orphaned waiter must not take a slot: the watchdog starts only with the
+# shards. So the launcher is checked before every attempt, and once more with
+# the slot held, since it can exit while a freed slot is taken.
+stop_if_launcher_exited() {
+  if [ "$gate_ppid" != "1" ] && launcher_exited; then
+    release_gate_slot
+    printf '%s\n' "$launcher_exited_message" >&2
+    exit 1
+  fi
 }
 acquire_gate_slot() {
-  local slots="${SD_GATE_SLOTS:-0}" dir i slot announced=""
+  local slots="${SD_GATE_SLOTS:-0}" dir i announced=""
   case "$slots" in
     '' | *[!0-9]*)
       printf '%s\n' "error: SD_GATE_SLOTS must be a non-negative integer (got '$slots')" >&2
@@ -438,26 +433,16 @@ acquire_gate_slot() {
   fi
   while :; do
     for ((i = 1; i <= slots; i++)); do
-      slot="$dir/slot.$i"
-      if mkdir -- "$slot" 2>/dev/null; then
-        # Named before the pid is written: a signal in between releases the slot.
-        gate_slot="$slot"
-      elif ! gate_slot_is_stale "$slot" || ! reclaim_gate_slot "$slot"; then
-        continue
-      fi
-      printf '%s\n' "$$" >"$slot/pid"
+      stop_if_launcher_exited
+      take_gate_slot "$dir/slot.$i.lock" || continue
+      stop_if_launcher_exited
+      printf '%s\n' "$$" >"$gate_slot" 2>/dev/null || :
       export SD_GATE_SLOTS=0
       return 0
     done
     if [ -z "$announced" ]; then
       printf '%s\n' "waiting for a gate slot: $slots of $slots in use under $dir" >&2
       announced=1
-    fi
-    # The watchdog starts only with the shards, so a wait has to watch the
-    # launcher itself: an orphaned waiter would otherwise take a slot and run.
-    if [ "$gate_ppid" != "1" ] && launcher_exited; then
-      printf '%s\n' "$launcher_exited_message" >&2
-      exit 1
     fi
     sleep "${SD_GATE_SLOT_POLL:-5}"
   done
@@ -518,10 +503,10 @@ xargs -P "$TEST_WORKERS" -I {} bash -c '
   status=$?
   printf "\nshard %s: %ss exit=%s\n" "$3" "$((SECONDS - started))" "$status" >> "$2/$3.log" || exit 1
   exit "$status"
-' _ "$PYTHON_BIN" "$work_dir" {} < "$shard_file" &
+' _ "$PYTHON_BIN" "$work_dir" {} < "$shard_file" 9>&- &
 shard_pgid=$!
 if [ "$gate_ppid" != "1" ]; then
-  watchdog &
+  watchdog 9>&- &
   watchdog_pid=$!
 fi
 wait "$shard_pgid" || run_status=$?
