@@ -40,6 +40,12 @@ somebody deliberately wrote under `docs/work/`.
   focused fixture in the local guard suite.
 - Separate current, non-outdated unresolved findings from stale or outdated
   review threads.
+- Do not comment on cosmetic issues. A finding is cosmetic when fixing it
+  changes no behaviour and no action a reader takes: wording, comments,
+  docstrings, naming, formatting, or a drifted count or list in prose. Text
+  that is a contract is not cosmetic: a doc or help text that gives a wrong
+  command or flag, a string a test or tool parses, a config value, or an
+  instruction an agent executes.
 - A diff that touches a path in the table below carries the matching scope
   line in the PR body, on its own line, per `.github/PULL_REQUEST_TEMPLATE.md`.
   `bin/sd-docs-lint --pr-body` rule 8 reads this table and fails a body that
@@ -51,7 +57,7 @@ somebody deliberately wrote under `docs/work/`.
 | Scope line | Paths that demand it | Why |
 |---|---|---|
 | `CI/review scope:` | `.github/**`, `actions/**`, `Makefile` | What CI runs and what a reviewer reads: the workflows, the scripts they call, the review routing policy, this file and the template, the composite actions a consumer's workflow runs, and the local gate CI mirrors. |
-| `Automation scope:` | `bin/sd_setup_github.py`, `bin/sd_setup_guard.py` | What writes the framework's own automation into another repository: the routing workflow and the Dependabot guard `sd-review setup-github` installs. |
+| `Automation scope:` | `bin/sd_setup_github.py`, `bin/sd_setup_guard.py`, `bin/sd_fleet.py` | What writes the framework's own automation into another repository: the routing workflow and the Dependabot guard `sd-review setup-github` installs, and the check workflow and declaration `sd fleet stamp` adds. |
 
 `Tooling/generated scope:` was the third heading, for copied payload. Nothing
 here is a copy of anything, so no path demands it and the heading is retired.

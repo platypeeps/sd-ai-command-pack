@@ -25,6 +25,7 @@ no_item = review_fixture.no_item
 class NoItemPublication(unittest.TestCase):
     def setUp(self):
         fixture.ShipCase.setUp(self)
+        review_fixture.freeze_library(self, self.directory)
         self.database = self.database.with_name("no-items.db")
         initialise(self.database)
         self.connection = connect(self.database)

@@ -14,11 +14,12 @@
   "sensitive": [
     ".github/workflows/**",
     ".github/sd-review.json",
+    ".github/sd-docs-lint.json",
     ".github/sd-status.json",
     "bin/sd_install.py",
     "bin/sd-review"
   ],
   "large_change_lines": 800,
-  "severity_floor": "medium",
+  "severity_floor": "high",
   "copilot_review": {"automatic_deep": true}
 }

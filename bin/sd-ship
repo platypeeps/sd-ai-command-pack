@@ -32,7 +32,7 @@ from sd_ship_history import timeout_evidence as timeout_evidence
 from sd_ship_history import validate_additional_requests as validate_additional_requests
 from sd_ship_item import ItemIdentity
 from sd_ship_remote import GitHub, Refusal, git, run, slug
-from sd_ship_review import ReviewRuntime, ReviewTimeout, SharedReview
+from sd_ship_review import RAW_CAPTURE_ENV, ReviewRuntime, ReviewTimeout, SharedReview
 from sd_ship_workflow import blocked, failure
 
 BIN = pathlib.Path(__file__).resolve().parent
@@ -236,6 +236,9 @@ def review_process(root: pathlib.Path, argv: list[str], *, timeout: float) -> su
                 diagnostic[name] = {"bytes": len(data), "truncated": len(data) > REVIEW_DIAGNOSTIC_BYTES,
                                     "tail": data[-REVIEW_DIAGNOSTIC_BYTES:].decode("utf-8", "replace")}
             diagnostic.update(captured_evidence(output))
+            if os.environ.get(RAW_CAPTURE_ENV):  # sd:1588: only this frame holds the whole output
+                diagnostic["raw_output"] = {"stdout": output.decode("utf-8", "replace"),
+                                            "stderr": errors.decode("utf-8", "replace")}
             raise ReviewTimeout(diagnostic) from None
         return subprocess.CompletedProcess(argv, process.returncode, output.decode("utf-8", "replace"),
                                            errors.decode("utf-8", "replace"))
@@ -326,6 +329,22 @@ def commit_paths(root: pathlib.Path, args) -> None:
     run(root, ["git", "--literal-pathspecs", "commit", "--only", "--file=-", "--", *paths], input=message)
 
 
+def squash_allowed(base: str, protection: dict) -> None:
+    """Refuse when the base ruleset forbids the one method `merge` uses.
+
+    GitHub would refuse the PUT, or a bypass would land what the branch
+    forbids (sd:1379).
+    """
+    methods = protection.get("allowed_merge_methods")
+    if methods is not None and "squash" not in methods:
+        raise Refusal(f"the {base} ruleset allows only {', '.join(methods) or 'no'} merge methods and sd-ship "
+                      f"merges by squash; allow squash in the ruleset or merge this pull request by hand")
+
+
+#: The words that mark a merge warning as the Copilot ancestor clearance.
+ANCESTOR_CLEARANCE = "an ancestor of the merge head"
+
+
 class Ship(SharedReview):
     #: What the last `merge_ownership` read found: the authority record when
     #: the repository row overrode co-ownership, `None` when ownership alone
@@ -344,6 +363,11 @@ class Ship(SharedReview):
     #: `require_copilot_clearance` so the relaxation reaches the merge receipt
     #: as a warning rather than passing in silence.
     copilot_ancestor_review: str | None = None
+    #: The warning that ancestor clearance earns, held until dispatch. It says
+    #: the gate cleared a merge, so the step that sends the merge writes it;
+    #: written when the gate cleared, it outlived every later refusal and each
+    #: retry appended another copy (sd:1373).
+    copilot_clearance_note: str | None = None
 
     def __init__(self, root: pathlib.Path, connection, database: pathlib.Path, args):
         from sd_db import ship
@@ -382,7 +406,7 @@ class Ship(SharedReview):
             raise Refusal("--deliver closes work items; ordinary tasks can ship associated slices")
         if self.args.acceptance_file is None:
             raise Refusal("--deliver requires --acceptance-file with evidence for every criterion")
-        value = json.loads(self.args.acceptance_file.read_text())
+        value = json.loads(self.args.acceptance_file.read_text(encoding="utf-8"))
         rows = value.get("criteria") if isinstance(value, dict) else None
         if (not isinstance(value, dict) or value.get("item") != self.args.item or value.get("complete") is not True or not isinstance(rows, list)
                 or not rows or any(not isinstance(row, dict) or not row.get("criterion") or not row.get("evidence")
@@ -399,13 +423,13 @@ class Ship(SharedReview):
 
     def publication_claim(self) -> tuple[str, bool, dict | None, bool]:
         if self.args.no_item:
-            body = self.args.body_file.read_text() if self.args.body_file else self.state.get("body") or "Code changes reviewed locally."
+            body = self.args.body_file.read_text(encoding="utf-8") if self.args.body_file else self.state.get("body") or "Code changes reviewed locally."
             if re.search(r"(?im)^[ \t]*(?:Item|Delivers|Closes|Authored-with|Attributes|Work)[ \t]*:", body):
                 raise Refusal("no-item publication cannot carry item or caller-supplied authorship trailers")
             return body, False, None, False
         deliver = bool(self.args.deliver) if self.args.deliver is not None else bool(self.state.get("deliver"))
         claim = self.acceptance() if self.args.deliver is not None or not self.state else self.state.get("acceptance")
-        body = self.args.body_file.read_text() if self.args.body_file else self.state.get("body") or f"Code changes associated with sd:{self.args.item}."
+        body = self.args.body_file.read_text(encoding="utf-8") if self.args.body_file else self.state.get("body") or f"Code changes associated with sd:{self.args.item}."
         if self.args.body_file and re.search(r"(?im)^(?:Item|Delivers|Closes|Authored-with|Attributes|Work):", body):
             raise Refusal("the ship adapter owns association and delivery trailers")
         local_work = bool(self.item["kind"] == "work" and self.item.get("path")
@@ -905,10 +929,11 @@ class Ship(SharedReview):
         if material is None:
             return
         reviews, comments = material
+        self.copilot_clearance_note = None
         if self.copilot_ancestor_review:
-            self.save(warnings=list(self.state.get("warnings") or []) + [
-                f"Copilot reviewed {self.copilot_ancestor_review}, an ancestor of the merge head "
-                f"{head}; the commits since it touch no shipped surface, so the gate cleared"])
+            self.copilot_clearance_note = (
+                f"Copilot reviewed {self.copilot_ancestor_review}, {ANCESTOR_CLEARANCE} "
+                f"{head}; the commits since it touch no shipped surface, so the gate cleared")
         self.record_copilot_completion(entries, reviews)
         try:
             ack = sd_lib.sibling("sd_review_ack_ship_gate", "sd-review-ack")
@@ -930,6 +955,17 @@ class Ship(SharedReview):
                 code="review_findings_open", boundary="review", state="operator_decision",
                 next_action=f"Run sd-review-ack --pr {number}, disposition each finding, then retry merge.",
             )
+
+    def dispatch_warnings(self) -> list[str]:
+        """The receipt's warnings with this attempt's ancestor note, if any.
+
+        Replaced, never appended: this attempt's reading is the only one a
+        merge going out can claim (sd:1373).
+        """
+        warnings = [warning for warning in self.state.get("warnings") or [] if ANCESTOR_CLEARANCE not in warning]
+        if self.copilot_clearance_note:
+            warnings.append(self.copilot_clearance_note)
+        return warnings
 
     def record_copilot_completion(self, entries: list[dict], reviews: list[dict]) -> None:
         completed_heads = {
@@ -965,7 +1001,11 @@ class Ship(SharedReview):
         # an operator's checkout implicitly to make a check pass.
         git(self.root, "fetch", "--no-tags", "origin", f"refs/heads/{base}:refs/remotes/origin/{base}")
         git(self.root, "symbolic-ref", "refs/remotes/origin/HEAD", f"refs/remotes/origin/{base}")
-        title = self.args.title or self.state.get("title") or git(self.root, "show", "-s", "--format=%s", head)
+        self.assert_current_base(base, head)
+        # A merge-forward's subject names a branch operation, not the change;
+        # the newest commit the branch adds that is not a merge does (sd:1377).
+        title = (self.args.title or self.state.get("title")
+                 or git(self.root, "log", "-1", "--no-merges", "--format=%s", f"refs/remotes/origin/{base}..{head}"))
         if not title or re.match(r"(?i)wip\b", title):
             raise Refusal("provide a final --title; wip titles never reach the default branch")
         body, deliver, claim, local_work = self.publication_claim()
@@ -997,7 +1037,7 @@ class Ship(SharedReview):
             lint.append("--body-only")
         with tempfile.TemporaryDirectory(prefix="sd-ship-lint-") as directory:
             body_path = pathlib.Path(directory) / "pr-body.md"
-            body_path.write_text(body)
+            body_path.write_text(body, encoding="utf-8")
             run(self.root, [*lint, "--pr-body", str(body_path)], timeout=300)
         self.review(head)
         self.save(warnings=self.commit_warnings(head))
@@ -1047,6 +1087,21 @@ class Ship(SharedReview):
         if copilot.get("warning"):
             self.save(warnings=list(self.state.get("warnings") or []) + [copilot["warning"]])
         return self.result("ready_to_send", copilot_review=copilot)
+
+    def assert_current_base(self, base: str, head: str) -> None:
+        """Refuse a head that lacks the fetched default branch, before any review.
+
+        Merge refuses the same branch as behind the default branch, so a
+        prepare that reviewed it spent the gate on an answer merge rejects
+        (sd:1346, sd:1367). A merge, not a rebase, keeps the next push a
+        fast-forward of the branch sd-ship already pushed.
+        """
+        try:
+            git(self.root, "merge-base", "--is-ancestor", f"refs/remotes/origin/{base}", head)
+        except Refusal:
+            raise Refusal(f"the branch is behind the current default branch origin/{base}; nothing was reviewed",
+                          code="base_moved", boundary="ci", state="retryable_failure",
+                          next_action=f"Run git merge origin/{base} on the branch, then run prepare again.") from None
 
     def answer_review(self, number: int, head: str) -> list[str]:
         """Record the review findings this push answers, and never block on it.
@@ -1299,13 +1354,30 @@ class Ship(SharedReview):
         else:
             self.store.manual_merge_guard(self.connection, self.repo["path"])
 
-    def squash_body(self) -> str:
+    def squash_body(self, reviewed_base: str = "") -> str:
         body = self.state["body"].rstrip() + "\n\n"
         if not self.args.no_item:
             body += f"Item: sd:{self.args.item}\n"
             if self.state.get("deliver"):
                 body += f"Delivers: sd:{self.args.item}\n"
+                # The message is fixed before GitHub picks the squash parent,
+                # so it names the parent the review covered; a git reader
+                # holds `Delivers:` when the landed parent differs (#1179).
+                if reviewed_base:
+                    body += f"{sd_lib.REVIEWED_BASE_TRAILER} {reviewed_base}\n"
         return body
+
+    def reviewed_base(self, head: str, base: str) -> str:
+        """The newest `base` commit `head` contains, read after a fresh fetch."""
+        git(self.root, "fetch", "--no-tags", "origin", f"refs/heads/{base}")
+        return git(self.root, "merge-base", head, "FETCH_HEAD")
+
+    def delivered_at(self, commit: str) -> bool:
+        """Whether the row already records delivery at `commit`, by hand or earlier."""
+        from sd_db.progress import completion_record
+        row = self.connection.execute("SELECT * FROM item WHERE id = ?", (self.args.item,)).fetchone()
+        record = completion_record(row) if row is not None else None
+        return record is not None and record.get("outcome") == "delivered" and record.get("commit") == commit
 
     def require_copilot_abandonment_authority(self) -> None:
         if self.args.abandon_copilot_review is not None and not self.args.manual:
@@ -1363,12 +1435,13 @@ class Ship(SharedReview):
         if base != self.state["base"] or metadata.get("allow_squash_merge") is not True:
             raise Refusal("default branch changed or squash merging is disabled")
         protection = self.api.gate(base, head)  # the object, or the declared gap at this head (sd:1110)
+        squash_allowed(base, protection)
         observed = self.api.pull(observed["number"])
         self.api.ready(observed, head, base, protection)
         self.abandon_copilot_review(observed["number"], head)
         self.require_copilot_clearance(observed["number"], observed, head)
         self.save(phase="ci_passed", protection=protection)
-        body = self.squash_body()
+        body = self.squash_body(self.reviewed_base(head, base))
         # Preserve actual authorship through the squash, including its vendor
         # at authoring time. No declaration supplied to merge can rewrite it.
         start = self.authorship_start()
@@ -1411,7 +1484,8 @@ class Ship(SharedReview):
         # passing `None` retracts what an earlier attempt recorded. An
         # ownership-only merge therefore cannot inherit a claim from a merge
         # that never happened (sd:1347).
-        self.save(phase="merge_dispatch", merge_message=body, row_authorized_merge=self.row_authority)
+        self.save(phase="merge_dispatch", merge_message=body, row_authorized_merge=self.row_authority,
+                  warnings=self.dispatch_warnings())
         try:
             self.api.api(f"{self.api.prefix}/pulls/{observed['number']}/merge", method="PUT",
                          body={"sha": head, "merge_method": "squash", "commit_title": f"{self.state['title']} (#{observed['number']})",
@@ -1462,6 +1536,26 @@ class Ship(SharedReview):
         self.save(phase="merged", merge_commit=commit, evidence=evidence)
         if not self.args.no_item:
             self.store.note_merge(self.connection, self.args.item, evidence)
+        # GitHub squashes onto the base it holds at the `PUT`, and no request
+        # field pins that base. `ready` and `still_gated` saw the reviewed head
+        # contain the base; a squash parent outside it means the base advanced
+        # in between, and the landed tree is a combination nobody reviewed or
+        # checked. The merge is a fact to record; delivery is not (sd:1089).
+        parent = git(self.root, "rev-parse", f"{commit}^1")
+        # The squash's own `Reviewed-base:` decides, as it does for every git
+        # reader of `Delivers:`. A message composed before that trailer falls
+        # back to ancestry, where None is "no" and "cannot tell" alike.
+        held = sd_lib.held_at_merge(git(self.root, "show", "-s", "--format=%B", commit), parent)
+        if held is None:
+            held = sd_lib.git_output(["merge-base", "--is-ancestor", parent, self.state["reviewed_head"]], self.root) is None
+        # A hand delivery after the combined tree passed is the resolution;
+        # reissuing the hold over it would never clear (#1179).
+        if held and not self.args.no_item and self.state.get("deliver") and not self.delivered_at(commit):
+            pending = blocked("base_advanced_at_merge", "ci",
+                              f"Verify the combined tree at {commit} (default-branch CI), then deliver the item by hand.",
+                              state="operator_decision")
+            return {**evidence, "delivery_pending": True, "merged_parent": parent,
+                    "workflow": {**evidence["workflow"], **pending}}
         if not self.args.no_item and self.state.get("deliver"):
             from sd_db.errors import SdDbError
             from sd_db.progress import deliver_work
@@ -1485,9 +1579,28 @@ def quote_branch(repository, branch):
     return quote(f"{repository.split('/')[0]}:{branch}", safe="")
 
 
+def review_seconds(value: str) -> int:
+    seconds = int(value)
+    if seconds <= 0:
+        raise argparse.ArgumentTypeError("takes a positive number of seconds")
+    return seconds
+
+
+def review_timeout_flag(action) -> None:
+    """sd:1475. The one limit sd-review plans every phase with, forwarded when given.
+
+    It reaches sd-review's `--timeout`, which bounds the repository gate and
+    each reviewer, and sd-review's timing plan sizes the watchdog from it.
+    """
+    action.add_argument("--review-timeout", type=review_seconds, metavar="SECONDS",
+                        help="per-phase limit for sd-review: the repository gate, then each reviewer "
+                             "(default: sd-review's own)")
+
+
 def no_item_record_flags(action) -> None:
     action.add_argument("--provider", metavar="NAME", help="select one guarded reviewer for this invocation; never changes automatic order")
     action.add_argument("--reuse-check", action="store_true", help="opt into exact-input successful check-receipt reuse")
+    review_timeout_flag(action)
     action.add_argument("--create-record", action="store_true", help="allocate a record without provider dispatch or a spent pass")
     action.add_argument("--assert-new-work", action="store_true", help="explicit assertion of new work, not a renamed or rewritten continuation")
     action.add_argument("--import-history", type=pathlib.Path, metavar="FILE", help="import an ordered manifest of historical reports as untrusted evidence")
@@ -1548,6 +1661,7 @@ def parser():
         if name == "prepare":
             action.add_argument("--provider", metavar="NAME", help="select one guarded reviewer for this invocation; never changes automatic order")
             action.add_argument("--reuse-check", action="store_true", help="opt into exact-input successful check-receipt reuse")
+            review_timeout_flag(action)
             action.add_argument("--retry-review", action="store_true", help="spend one automatic pass on a full-branch retry of an incomplete review")
             action.add_argument("--additional-review-for", metavar="SHA", help="record one explicit post-cap operator request for this exact committed head")
             action.add_argument("--review-history-digest", metavar="SHA256", help="one-use digest of every existing pass; required to renew after three reservations")

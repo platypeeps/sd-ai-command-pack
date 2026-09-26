@@ -252,8 +252,11 @@ else
 TEST_RUNNER_ENV = env -u TEST_CHANGED_FILES
 endif
 
+# sd:1541. Local test runs at once on this machine; `SD_GATE_SLOTS=0 make test` lifts it.
+SD_GATE_SLOTS ?= 2
+
 test:
-	PYTHON_BIN="$(VENV_PYTHON)" $(TEST_RUNNER_ENV) bash .github/scripts/run-tests.sh
+	PYTHON_BIN="$(VENV_PYTHON)" SD_GATE_SLOTS="$(SD_GATE_SLOTS)" $(TEST_RUNNER_ENV) bash .github/scripts/run-tests.sh
 	@if grep -Eq 'skipped=[1-9][0-9]*' unittest-output.log; then printf '%s\n' "Tests skipped locally; install required tools or make the skip explicit."; exit 1; fi
 	@if head -n 1 unittest-output.log | grep -q '^test selection: changed files'; then \
 		printf '%s\n' "Changed-files fast path: coverage combine and the installer gate were not run. Run make check without CHANGED before a push."; \

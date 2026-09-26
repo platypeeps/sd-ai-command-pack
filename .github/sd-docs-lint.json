@@ -1,0 +1,4 @@
+{
+  "$schema": "./sd-docs-lint.schema.json",
+  "jev_claim_support": true
+}

@@ -232,6 +232,11 @@ class TheSelection(TreeCase):
             with self.subTest(path=path):
                 self.assertIsNone(self.select(path))
                 self.assertIsNone(self.select("bin/sd-alpha", path))
+        # By reason, not only outcome: a dependency file no test module names
+        # would fall back to the full run even if it left FULL_RUN_NAMES (sd:999).
+        for path in ("pyproject.toml", "requirements-dev.txt", "requirements-security.txt"):
+            with self.subTest(path=path):
+                self.assertIn("the full suite answers for", self.selector.select(self.root, [path])[1])
 
     def test_an_empty_change_selects_the_full_run(self) -> None:
         """No path is what a failed or empty `git diff` produces; it must not narrow."""
