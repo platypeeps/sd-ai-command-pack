@@ -10,6 +10,45 @@
   (sd:1588). The killed process's whole stdout and stderr now go to an
   owner-only `<head>-watchdog-*.json` file, and the diagnostic keeps its path.
 
+- **The local gate caps concurrent runs on one machine.** `make test` now
+  takes one of `SD_GATE_SLOTS` slots (default 2) before it starts, and waits
+  with one `waiting for a gate slot` line while all are held (sd:1541). Ten
+  worktrees checking at once had driven the load average to 157. A dead
+  holder's slot frees itself, CI takes no slot, and `SD_GATE_SLOTS=0` turns
+  the cap off.
+
+- **A gate slot is a kernel lock, so no waiter deletes one.** A run holds
+  `slot.N.lock` with `flock` on an open fd, and the kernel frees it when the
+  holder dies (sd:1558). The earlier pid directories let two waiters remove
+  each other's new slots. A waiter whose launcher exits now stops, checked
+  before each attempt and again with a slot held, since the watchdog starts
+  only with the shards.
+
+- **The system-main canary fails on skipped tests.** `sd-db-main-canary` now
+  carries the unittest job's skip gate and installs the same pinned opencode
+  (sd:1557). Both jobs call `.github/scripts/install-opencode.sh`, which holds
+  the version and checksum once.
+
+- **`run-tests.sh` names the tree it tested.** It prints a `run-tests: start
+  head=... dirty=...` line before the suite and a `run-tests: end head=...
+  exit=...` line after it, so a stale run no longer reads as a current one
+  (sd:1407).
+
+- **The real-CLI shipping test bounds each command at 300 s, not 30 s.** The
+  bound is a hang guard; at 30 s it failed gates under load on runs that take
+  about 7 s alone (sd:1539).
+
+- **`sd-docs-lint` reads `archive` only below the work root.** Rule 1, rule
+  6, the claim collector and `--update-citations` treated any `archive`
+  component in a path as the archive, so a checkout under a directory of
+  that name skipped them (sd:1540). One helper, `is_archived`, now decides
+  for all five sites.
+
+- **CI runs the suite against system `main` as a non-blocking canary.** The
+  new `sd-db-main-canary` job installs `sd_db` from system `main` with
+  `continue-on-error`, so a removed library name shows before the pin moves
+  (sd:1542). The `MONEY_NOISE` removal broke every local gate with no CI signal.
+
 - **`SD_REVIEW_RAW_DIR` keeps a failed review's raw output for debugging.**
   A MiniMax pass on system #590 failed with only "local review emitted no
   valid receipt"; sd-ship had dropped sd-review's exit code and stderr. Now

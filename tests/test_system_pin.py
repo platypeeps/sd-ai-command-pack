@@ -38,8 +38,20 @@ WORKFLOW = ROOT / ".github" / "workflows" / "tests.yml"
 PIN = re.compile(r"repository: platypeeps/system\n(?:[ \t]+(?:#.*|\w+: .*)\n)*?[ \t]+ref: (\S+)")
 
 
+#: The one other system ref (sd:1542): the `sd-db-main-canary` job runs the
+#: suite against system `main`, never as a gate, so a removed `sd_db` name
+#: shows before the pin moves.
+CANARY_REF = "main"
+
+
 def pins(text: str) -> list[str]:
-    return PIN.findall(text)
+    """The pinned system refs: every checkout of it except the canary's."""
+    return [ref for ref in PIN.findall(text) if ref != CANARY_REF]
+
+
+def job_block(text: str, name: str) -> str:
+    match = re.search(rf"^  {re.escape(name)}:\n((?:(?:    .*|[ \t]*)\n)*)", text, re.MULTILINE)
+    return match.group(1) if match else ""
 
 
 def pinned_schema(checkout: Path, ref: str) -> int | None:
@@ -63,11 +75,56 @@ class ThePinIsReadable(unittest.TestCase):
         self.assertEqual(len(found), 1, f"expected one platypeeps/system ref in {WORKFLOW}: {found}")
         self.assertRegex(found[0], r"^[0-9a-f]{40}$", "the pin is a full commit, not a branch or tag")
 
+    def test_the_only_unpinned_system_ref_is_the_non_blocking_canary(self):
+        text = WORKFLOW.read_text(encoding="utf-8")
+        self.assertEqual(PIN.findall(text).count(CANARY_REF), 1)
+        canary = job_block(text, "sd-db-main-canary")
+        self.assertIn(f"ref: {CANARY_REF}\n", canary)
+        self.assertRegex(canary, r"(?m)^    continue-on-error: true$",
+                         "a red canary must not block a merge")
+        self.assertIn("bash .github/scripts/run-tests.sh", canary)
+
     def test_comments_between_repository_and_ref_are_skipped(self):
         text = ("          repository: platypeeps/system\n"
                 "          # why\n"
                 "          ref: " + "a" * 40 + "\n")
         self.assertEqual(pins(text), ["a" * 40])
+
+
+class TheCanarySkipsNothing(unittest.TestCase):
+    """sd:1557. The canary fails on a skipped test, as the unittest job does.
+
+    Without the gate, a system `main` that loses a capability a test skips on
+    leaves the canary green. Both jobs install opencode from one script, so its
+    live test runs in each, and its version and checksum are written once.
+    """
+
+    INSTALL = "run: bash .github/scripts/install-opencode.sh\n"
+    RUN = "run: bash .github/scripts/run-tests.sh\n"
+    GATE = "- name: Fail on skipped tests\n"
+    SKIPS = "grep -Eq 'skipped=[1-9][0-9]*' unittest-output.log"
+
+    def test_each_suite_job_installs_opencode_runs_then_fails_on_skips(self):
+        text = WORKFLOW.read_text(encoding="utf-8")
+        for name in ("unittest", "sd-db-main-canary"):
+            with self.subTest(job=name):
+                job = job_block(text, name)
+                self.assertEqual(job.count(self.INSTALL), 1, job)
+                self.assertEqual(job.count(self.RUN), 1, job)
+                self.assertEqual(job.count(self.GATE), 1, job)
+                self.assertIn(self.SKIPS, job[job.index(self.GATE):])
+                self.assertLess(job.index(self.INSTALL), job.index(self.RUN))
+                self.assertLess(job.index(self.RUN), job.index(self.GATE))
+
+    def test_the_opencode_version_and_checksum_are_written_once(self):
+        definitions = re.compile(r"(?m)^\s*(OPENCODE_VERSION|OPENCODE_SHA256)\s*[:=]")
+        found = sorted(
+            (str(path.relative_to(ROOT)), name)
+            for path in (ROOT / ".github").rglob("*")
+            if path.is_file()
+            for name in definitions.findall(path.read_text(encoding="utf-8", errors="replace")))
+        self.assertEqual(found, [(".github/scripts/install-opencode.sh", "OPENCODE_SHA256"),
+                                 (".github/scripts/install-opencode.sh", "OPENCODE_VERSION")])
 
 
 class ThePinCarriesTheInstalledSchema(unittest.TestCase):

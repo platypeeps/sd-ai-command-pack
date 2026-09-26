@@ -156,7 +156,7 @@ def check_shape(
         # drift. The archive is the opposite: its files are historical records.
         # They keep their lines, and a naive inversion fails on all of them.
         status = fields.get("status", "")
-        if archived_status_is_authoritative or sd_lib.ARCHIVE_DIR in item.parts:
+        if archived_status_is_authoritative or is_archived(item, work_root):
             if status not in ITEM_STATUSES:
                 report.fail(
                     str(prd), f"status {status!r} is not one of {', '.join(ITEM_STATUSES)}"
@@ -879,7 +879,7 @@ def check_citations(work_root: pathlib.Path, report: Report) -> None:
     declined: list[Skip] = []
     unrecordable: list[str] = []
     for item in item_directories(work_root):
-        if "archive" in item.parts:
+        if is_archived(item, work_root):
             continue
         active += 1
         recordable, skipped = citation_survey(item, work_root)
@@ -1159,7 +1159,7 @@ def collect_claims(work_root: pathlib.Path) -> tuple[dict[str, dict[str, str]], 
     cases: dict[str, dict[str, str]] = {}
     origins: dict[str, str] = {}
     for item in item_directories(work_root):
-        if "archive" in item.parts or not (item / CITATION_MANIFEST).is_file():
+        if is_archived(item, work_root) or not (item / CITATION_MANIFEST).is_file():
             continue
         rows, _ = citation_survey(item, work_root)
         for row in rows:
@@ -1554,7 +1554,7 @@ def check_branch_lines(
     for item in item_directories(work_root):
         # Only `archive/` below the work root is history: a checkout under a
         # directory of that name is still active (#1177 review).
-        if sd_lib.ARCHIVE_DIR in item.relative_to(work_root).parts:
+        if is_archived(item, work_root):
             continue
         prd = item / "prd.md"
         if not prd.is_file():
@@ -1588,7 +1588,7 @@ def record_citations(work_root: pathlib.Path) -> int:
         print(f"error: {work_root} does not exist", file=sys.stderr)
         return 2
     for item in item_directories(work_root):
-        if "archive" in item.parts:
+        if is_archived(item, work_root):
             continue
         count, skipped, dropped = write_citation_manifest(item, work_root)
         # The recorder's own count was a count of what it wrote, so a citation
@@ -1628,6 +1628,16 @@ def body_arguments(args: argparse.Namespace) -> tuple[str | None, list[str] | No
     except (OSError, UnicodeDecodeError) as error:
         return None, None, f"cannot read --changed: {error}"
     return body, [line.strip() for line in listed.splitlines() if line.strip()], ""
+
+
+def is_archived(item: pathlib.Path, work_root: pathlib.Path) -> bool:
+    """Whether `item` lives under `archive/` below the work root (sd:1540).
+
+    Only that directory is history. A checkout that sits under a directory
+    named `archive` is still active, and reading the absolute path skipped
+    every item there (#1177 review).
+    """
+    return sd_lib.ARCHIVE_DIR in item.relative_to(work_root).parts
 
 
 def main(argv: list[str] | None = None) -> int:
