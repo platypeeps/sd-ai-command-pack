@@ -4,6 +4,190 @@
 
 ### Changed
 
+- **`sd.assistant_merge` now has one reading (sd:1633).** A session read
+  `controlled` and could not tell whether it might merge, or merge without the
+  review lane, so it stopped and asked. `WORKFLOW.md`, `AGENTS.md`,
+  `README.md`, the `sd-ship` skill and the `sd config` description now say the
+  same thing. `controlled` means merge without asking, only through
+  `sd-ship prepare` then `sd-ship merge`, whose gates include the review lane
+  and required CI. It never permits a raw `gh pr merge` or a web squash. A
+  refusal from `sd-ship` is a stop. `ask`, or no value, means ask first. The
+  values and `sd-ship` behavior do not change.
+
+- **`tests.test_sd_ship` runs about 40% faster (sd:1605).** The module
+  sets the `make check` critical path. Its fixture now builds the bare remote,
+  seed and both clones once per process and copies them per test. It switches
+  both Jev stages off, so no `sd-review` child asks the live endpoint; a CI
+  runner has no `jev` anyway. The GitHub double polls for shutdown every 10 ms
+  instead of 500 ms. The fixture `gh` speaks HTTP over a socket instead of
+  importing urllib. One watchdog test waits on a ready file instead of a 5 s
+  timeout. Every test still runs and asserts what it did; `sd-ship` is
+  unchanged.
+
+- **`sd-docs-lint` sends the citing sentence, not the citing line, as the claim (sd:1186).**
+  The claim-support reading sent the one physical line a citation marker sat
+  on. Prose here is hard-wrapped and a marker trails its sentence, so the claim
+  was the sentence's tail plus the next sentence's opening. In the system
+  repository 64 of 197 readings scored under 0.5 for that reason. The claim is
+  now the sentence that ends after the marker, joined across the wrapped lines
+  of its paragraph or list item. The 400-character cap is unchanged, so the
+  worst case sent is unchanged; a longer sentence keeps the words that lead up
+  to the marker. A marker placed after its sentence's stop cites the sentence
+  before it. `e.g.` before a lower-case word does not end a sentence, and a
+  fragment under three words falls back to the block up to the marker. The
+  same citation twice on one line gives each row its own sentence.
+  `.citations.tsv` is unchanged: it records the cited line, not the claim, so
+  no recording needs rewriting.
+
+- **`sd-ship prepare` refuses a branch behind the default branch before the
+  review.** Merge refused such a branch, but prepare spent the full review and
+  answered `ready_to_send` first (sd:1346, sd:1367). After its fetch, prepare
+  now checks that `origin/<default>` is an ancestor of the head. It refuses
+  with `base_moved` and names `git merge origin/<default>`; a merge keeps the
+  next push a fast-forward, which a rebase does not.
+
+- **Reviews ignore cosmetic findings (sd:1602).** A finding is cosmetic when
+  fixing it changes no behaviour and no action a reader takes. Text that is a
+  contract is not cosmetic: a wrong command or flag, a parsed string, a config
+  value, or an agent instruction. The `sd-review` prompt and
+  `.github/copilot-instructions.md` tell reviewers not to report them. One that
+  still arrives is `rebutted` with a `cosmetic:` reason in adjudication, or
+  answered with `sd-review-ack --dismiss`, never `--carried`, and gets no
+  follow-up row.
+  `WORKFLOW.md` "Parallel work" also groups rows that change the same files
+  into one pull request (sd:1603), and gates once, in full, before a push
+  after iterating on `make check CHANGED=...` (sd:1606).
+
+- **`sd-ship` holds delivery when the base advanced under the merge.** GitHub
+  squashes onto the base it holds at the `PUT`, and no request field pins that
+  base, so a base advance after the last freshness read landed a combined tree
+  nobody reviewed (sd:1089, seen on #1075). `reconcile` now reads the squash
+  parent. When the reviewed head does not contain it, the merge is recorded and
+  delivery stops at `base_advanced_at_merge`, naming the commit to verify.
+  The squash also carries `Reviewed-base: <sha>`, the parent the review
+  covered. `sd_lib.held_at_merge` compares it with the landed parent, and
+  reconcile, `delivered()` and `sd-status` all ask it, so a held `Delivers:`
+  no longer reads as done in git (#1179). A hand delivery recorded on the row
+  clears the hold on the next reconcile.
+
+- **`sd work register` works from a linked worktree.** It refused with
+  `repository '<worktree>' is not registered` whenever the worktree had no
+  origin to match (sd:1293). The lookup now resolves the worktree to its main
+  checkout, as `sd task add` does; the folder and commit still come from the
+  worktree.
+
+- **`sd task show N` reads one item.** It is an alias for `sd store item N`,
+  which stays the canonical read for every kind (sd:1112). Both print the same
+  item, notes and revision, as text or with `--json`, and neither writes.
+
+- **`sd-review` reads authorship from the reviewed commits on the default branch (sd:1547).**
+  With `--base` on the default branch, the refreshed target boundary is HEAD
+  itself, so the authored range was empty. That empty read printed
+  `human (every commit says so)` and excluded no vendor, so a
+  `claude/anthropic` commit could reach an anthropic reviewer. The authored
+  range now falls back to the review subject when the boundary is HEAD. A
+  range with no commits reports `not read: no commits in <base>..<head>`
+  under `--explain` and refuses otherwise.
+
+- **A watchdog-killed review keeps its output under `SD_REVIEW_RAW_DIR`.**
+  With capture on, sd-ship withheld the stdout tail of a timed-out review but
+  wrote no file, so a truncated or oversized output left no evidence
+  (sd:1588). The killed process's whole stdout and stderr now go to an
+  owner-only `<head>-watchdog-*.json` file, and the diagnostic keeps its path.
+
+- **The local gate caps concurrent runs on one machine.** `make test` now
+  takes one of `SD_GATE_SLOTS` slots (default 2) before it starts, and waits
+  with one `waiting for a gate slot` line while all are held (sd:1541). Ten
+  worktrees checking at once had driven the load average to 157. A dead
+  holder's slot frees itself, CI takes no slot, and `SD_GATE_SLOTS=0` turns
+  the cap off.
+
+- **A gate slot is a kernel lock, so no waiter deletes one.** A run holds
+  `slot.N.lock` with `flock` on an open fd, and the kernel frees it when the
+  holder dies (sd:1558). The earlier pid directories let two waiters remove
+  each other's new slots. A waiter whose launcher exits now stops, checked
+  before each attempt and again with a slot held, since the watchdog starts
+  only with the shards.
+
+- **The system-main canary fails on skipped tests.** `sd-db-main-canary` now
+  carries the unittest job's skip gate and installs the same pinned opencode
+  (sd:1557). Both jobs call `.github/scripts/install-opencode.sh`, which holds
+  the version and checksum once.
+
+- **`run-tests.sh` names the tree it tested.** It prints a `run-tests: start
+  head=... dirty=...` line before the suite and a `run-tests: end head=...
+  exit=...` line after it, so a stale run no longer reads as a current one
+  (sd:1407).
+
+- **The real-CLI shipping test bounds each command at 300 s, not 30 s.** The
+  bound is a hang guard; at 30 s it failed gates under load on runs that take
+  about 7 s alone (sd:1539).
+
+- **`sd-docs-lint` reads `archive` only below the work root.** Rule 1, rule
+  6, the claim collector and `--update-citations` treated any `archive`
+  component in a path as the archive, so a checkout under a directory of
+  that name skipped them (sd:1540). One helper, `is_archived`, now decides
+  for all five sites.
+
+- **CI runs the suite against system `main` as a non-blocking canary.** The
+  new `sd-db-main-canary` job installs `sd_db` from system `main` with
+  `continue-on-error`, so a removed library name shows before the pin moves
+  (sd:1542). The `MONEY_NOISE` removal broke every local gate with no CI signal.
+
+- **`SD_REVIEW_RAW_DIR` keeps a failed review's raw output for debugging.**
+  A MiniMax pass on system #590 failed with only "local review emitted no
+  valid receipt"; sd-ship had dropped sd-review's exit code and stderr. Now
+  the pass's `execution_error` records the exit code and bounded stdout and
+  stderr tails. With `SD_REVIEW_RAW_DIR` set, sd-review also carries each
+  URL provider's raw response body, and sd-ship moves it and any unparsable
+  receipt into an owner-only (0600) JSON file there, recording only the
+  path in the ship state. Unset, no model output is kept.
+
+- **`sd-docs-lint`'s Jev claim-support reading is opt-in per repository.**
+  The reading sends `docs/work` prose to a third-party model, and it ran in
+  every checkout where `jev` could answer. A checkout whose prose must not
+  leave the machine had to export `JEV_SD_DOCS_LINT=0`, which a plain shell
+  or a second agent does not do (sd:1304). The reading now runs only where
+  the repository's tracked `.github/sd-docs-lint.json` sets
+  `"jev_claim_support": true`. `JEV_SD_DOCS_LINT=0` still switches it off
+  everywhere, and no value of the variable switches it on without the file.
+  A malformed file takes no reading and prints a note. This repository opts
+  itself in. `sd-review`'s tier reading sends no prose and keeps its default.
+
+- **`sd fleet stamp` lays the auto-merge fleet's shared files (sd:1326).**
+  Each `runner_merge=auto` repository needs the same four things before the
+  runner can merge it: the route workflow at the current pin, a check workflow,
+  the `unprotected` declaration and the `CLAUDE.local.md` block. The verb
+  renders them from the existing writers (`sd_setup_github`, `sd_setup_guard`,
+  `sd_install.local_block_text`) and diffs them against each repository's
+  `origin/HEAD`. `--dry-run` prints the diffs and writes nothing. A write
+  stamps only the checkout it runs in (R10-D6), puts tracked files only on a
+  feature branch, and a second run changes nothing. The check workflow runs `git diff --check` and
+  is laid only where no other workflow runs on `pull_request`. The remote is
+  asked the three ownership questions first: a fork or an unadministered
+  repository gets no tracked file, and only a repository nobody else may push
+  to gets the `unprotected` entry, so employer repositories keep theirs.
+  The stamp is additive: an `sd-status.json` that declares any gap is left as
+  written, the block refresh only adds template lines inside the markers, and a
+  repository that forbids CI (an `sd-status.json` reason saying "forbids CI",
+  or a `No CI` / `Do not add CI` rule in `CLAUDE.md`) gets no workflow. The
+  `CLAUDE.local.md` template gains the parallel-work line (sd:1342) and the
+  `docs/dashboard/` rule.
+
+- **`sd-check` runs a Python repo's tests with its `.venv` interpreter.** The
+  `pyproject.toml` fallback always named `python3 -m pytest`, so a repo whose
+  test dependencies live in `.venv` failed before any test ran (sd:1309). It
+  now names `.venv/bin/python` (or `.venv/Scripts/python.exe`) when that file
+  is an executable, and keeps `python3` when neither is or when the caller
+  has activated an environment (`VIRTUAL_ENV` or `CONDA_PREFIX` is set).
+
+- **`sd-review`'s Jev tier reading is metered.** Both `jev` calls now name
+  the caller `sd-review` and the stage `JEV_SD_REVIEW`, and the `enabled` gate
+  passes `--record`. Before this, a judgment landed in the judgment ledger under
+  `unknown` and a declining gate left no row, so the lane that asks Jev on every
+  review was the one caller the ledger missed (sd:1253). What leaves the machine
+  is unchanged: the three flags are ledger fields.
+
 - **A machine `sd.copilot_review` of `never` wins over the repository.** The
   repository's `.github/sd-review.json` `copilot_review.automatic_deep`
   overrode every machine word, so a repository's `true` bought a paid Copilot
@@ -141,6 +325,16 @@
 
 ### Added
 
+- **`sd task add` and `sd task edit` take `--recur` and `--recur-anchor`.**
+  The recurrence columns and the completion logic landed in `sd_db` with
+  sd:1099, but no CLI flag reached them (sd:1428). The flags pass the rule and
+  its anchor through unchecked, and `sd_db` refuses a bad rule, a bad anchor,
+  a missing due date or a kind that cannot recur by name. `sd task edit
+  --clear-recur` stops a series. `sd task status ... done` on a recurring task
+  prints the next occurrence and its due date, or says the recurrence ended
+  and why; `--json` already carried `next_occurrence` and
+  `next_occurrence_reason`. A row that recurs prints its rule under its line.
+
 - **`opencode` reviews, through a new `opencode-json` reader (sd:1329).**
   The shipped registry gains an `opencode` entry third on the reviewer
   order, after `codex` and `claude`. `opencode run -m provider/model`
@@ -272,6 +466,74 @@
   action this tool is allowed to take.
 
 ### Fixed
+
+- **An orphaned reviewed head now refuses by name, not as `git failed` (sd:1348).**
+  `sd-ship prepare` requires every earlier reviewed head to stay an ancestor of
+  the offered head. `git merge-base --is-ancestor` answers by exit status and
+  prints nothing, so an amend or a rebase after a review surfaced as the bare
+  message `git failed`, code `command_failed`, marked retryable. The refusal now
+  names the reviewed head, the offered head and the branch. Its code is
+  `reviewed_head_orphaned`, state `operator_decision`, not retryable. Its next
+  action names the `git reset --soft <reviewed head>` remedy. The ancestry rule
+  itself is unchanged.
+
+- **Code motion no longer lowers the R13-D1 citation count (sd:1374).** The
+  ratchet counted a `path:line` into code only when the line sat inside a
+  `def` or a `class`. An insertion above a cited line could carry it out of
+  every symbol, and the count fell with no document changed. The stale
+  `bin/sd-status:877` citation in the one-person PRD read as a cleanup that
+  way. Every live `path:line` into code now counts, so the baselines rose to
+  52 and 80, and that citation now names `handoff_section`.
+
+- **A merge-forward before the first `sd-ship prepare` no longer becomes the
+  pull request title (sd:1377).** With no `--title` and no stored title,
+  prepare took HEAD's subject. After the merge-forward sd-ship demands, that
+  was "Merge origin/main into <branch>". It was stored, preferred on every
+  later run, and landed on main as `18d42c56` for sd:1347. The fallback now
+  takes the newest commit the branch adds over the base that is not a merge.
+  A branch that adds only merges gets the existing "provide a final --title"
+  refusal.
+
+- **`sd-review`'s capped-exposure report works with the exact-money ledger.**
+  System #579 (sd:1176) removed `sd_db.ledger.MONEY_NOISE`, and the report
+  still added it to the month's spend, so every capped check raised
+  `AttributeError` against a library installed from system `main`. The
+  report now compares the spend with the cap directly, which reads the same
+  under the old and the new library.
+
+- **The hash-pinned requirements resolve for Python 3.13, the project floor
+  (sd:1391).** `requirements-dev.txt` and `requirements-security.txt` were
+  still compiled with `--python-version 3.10` after `requires-python` rose to
+  3.13. A lint or audit release that needs 3.11 or later could never be
+  pinned, and the gates would stay green on an older analyzer. Both files are
+  recompiled at 3.13; no pinned version moved, and only the 3.10-only `tomli`
+  and `stevedore` entries dropped out. `tests/test_requirements_target.py`
+  fails when a file's compile header names another version than the floor.
+
+- **A ruleset that forbids squash stops `sd-ship merge` before the dispatch
+  (sd:1379).** `synthesize` dropped the `pull_request` rule's
+  `allowed_merge_methods`, so sd-ship squash-merged into a ruleset that
+  allowed only merge or rebase and learned of the refusal from GitHub. The
+  synthesized protection now carries the intersection of the methods every
+  gating rule allows, and `combine` keeps it. `merge` refuses with the allowed
+  methods named when squash is not among them.
+
+- **The no-item adjudication tests no longer read the shared library
+  (sd:1459).** `adjudicator_binding` hashes the installed `sd_db/ship.py` on
+  every command, and every worktree borrows one `.venv`. A session that
+  installed `sd_db` there between two commands made an accept refuse with
+  "does not bind the current review, history, tools and head". The two
+  in-process no-item suites now bind a copy taken per test. The subprocess
+  disposition suites keep the exposure; sd:1479 tracks them.
+
+- **The Copilot ancestor-clearance warning reaches the receipt only with a
+  merge dispatch (sd:1373).** `require_copilot_clearance` saved "Copilot
+  reviewed <sha>, an ancestor of the merge head ..." as soon as the gate
+  cleared. The findings check, CI, the authorship checks and the protection
+  re-read could all refuse afterwards, and the receipt still described a
+  clearance for a merge that never landed. Each retry appended another copy.
+  The note is now held per attempt and written with `phase="merge_dispatch"`,
+  replacing any earlier copy, as `row_authorized_merge` already is (sd:1347).
 
 - **A gate that fails before any reviewer is asked no longer spends a review
   pass (sd:1475).** Under parallel load `make check` outran sd-check's fixed

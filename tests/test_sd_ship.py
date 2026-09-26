@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 import importlib.machinery
 import importlib.util
@@ -15,9 +16,11 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from http.server import BaseHTTPRequestHandler
+from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
@@ -29,6 +32,10 @@ from sd_db.testing.github import GitHubDouble
 from sd_db.testing.remote import FixtureRemote, RemoteRefusal, _git
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+#: The bound on one real `sd-ship` command (sd:1539): a hang guard, not a
+#: speed claim. At 30 s it failed gates at load average 157 on runs that take
+#: about 7 s alone.
+CLI_TIMEOUT = 300
 #: The directory `make setup` provisioned the library into, read off the copy
 #: this run imported rather than off `ROOT / ".venv"`. A test that asks the
 #: checkout for a virtualenv has to skip where there is none, and a skipped
@@ -50,6 +57,10 @@ class ShipDouble(GitHubDouble):
     """Adds precisely the write/read surfaces this adapter calls to the shared double."""
     def __init__(self, remote):
         super().__init__(remote)
+        # `serve_forever` polls for shutdown every 0.5 s by default, so every
+        # `close` in cleanup waited up to half a second: about a quarter of
+        # this module's wall clock (sd:1605). Same server, shorter poll.
+        self._thread = threading.Thread(target=self._server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         self.admin = True
         self.moved = False
         self.lose_merge = False
@@ -187,27 +198,87 @@ class ShipDouble(GitHubDouble):
 #: and with `--include` the response line and headers ahead of it, on a
 #: refusal too (`HTTP/2.0 404 Not Found` then the JSON), which is what
 #: `GitHub.api_status` reads the status from. Exit 1 on a non-2xx, as gh.
+#:
+#: It speaks HTTP/1.0 over a bare socket rather than through urllib: every
+#: `gh` call starts this interpreter, and importing urllib.request cost about
+#: twenty of the fifty milliseconds a call took (sd:1605). The double's
+#: handler is HTTP/1.0 too, so the answer ends when the server closes.
 SHIM = '''#!/usr/bin/env python3
-import json,os,sys,urllib.request,urllib.error
+import json,os,socket,sys
 args=sys.argv[1:]
 assert args[0]=='api',args
 include='--include' in args
 args=[a for a in args if a!='--include']
 path=args[1]
 method=args[args.index('--method')+1]
-data=sys.stdin.read().encode() if '--input' in args else None
-req=urllib.request.Request(os.environ['SHIP_DOUBLE']+'/'+path,data=data,method=method,headers={'Content-Type':'application/json'})
+data=sys.stdin.read().encode() if '--input' in args else b''
+host,port=os.environ['SHIP_DOUBLE'].split('//',1)[1].rsplit(':',1)
+head='%s /%s HTTP/1.0\\r\\nHost: %s:%s\\r\\nContent-Type: application/json\\r\\nContent-Length: %d\\r\\n\\r\\n' % (method,path,host,port,len(data))
+chunks=[]
+with socket.create_connection((host,int(port))) as connection:
+ connection.sendall(head.encode()+data)
+ while True:
+  chunk=connection.recv(65536)
+  if not chunk: break
+  chunks.append(chunk)
+response,_,body=b''.join(chunks).partition(b'\\r\\n\\r\\n')
+_,status,reason=(response.split(b'\\r\\n',1)[0].decode()+'  ').split(' ',2)
+status,reason,body=int(status),reason.strip(),body.decode()
 def emit(status,reason,body):
  if include: print('HTTP/2.0 %d %s\\nContent-Type: application/json\\n' % (status,reason))
  print(body)
-try:
- with urllib.request.urlopen(req) as response: emit(response.status,response.reason,response.read().decode())
-except urllib.error.HTTPError as error:
- body=error.read().decode()
- emit(error.code,error.reason,body)
+emit(status,reason,body)
+if not 200<=status<300:
  message=json.loads(body).get('message','') if body.startswith('{') else ''
- print('gh: %s (HTTP %d)' % (message,error.code),file=sys.stderr);sys.exit(1)
+ print('gh: %s (HTTP %d)' % (message,status),file=sys.stderr);sys.exit(1)
 '''
+
+
+REMOTE_URL = "https://github.com/fixture/repo.git"
+_TEMPLATE: pathlib.Path | None = None
+
+
+def fixture_template() -> pathlib.Path:
+    """The bare remote, its seed, the clone and the operator clone, built once.
+
+    `ShipCase.setUp` built these with about twenty git children a test, which
+    at 227 tests was minutes of the gate (sd:1605). Built lazily on the first
+    setUp rather than in setUpModule or setUpClass, which run-tests.sh refuses
+    in a module it splits by test id; each shard process builds its own.
+    Every test gets a copy, so nothing one test does reaches another.
+    """
+    global _TEMPLATE
+    if _TEMPLATE is None:
+        directory = pathlib.Path(tempfile.mkdtemp(prefix="sd-ship-template-")).resolve()
+        atexit.register(shutil.rmtree, directory, True)
+        remote = FixtureRemote(directory / "fixture")
+        remote.commit_on("topic", "change\n\nAuthored-with: human", files={"src.py": "value = 1\n", "Makefile": "check:\n\t@echo fixture-check-pass\n"})
+        root = directory / "clone"
+        subprocess.run(["git", "clone", "-q", str(remote.path), str(root)], check=True)
+        _git(root, "checkout", "topic")
+        _git(root, "config", "user.name", "Fixture")
+        _git(root, "config", "user.email", "fixture@example.invalid")
+        _git(root, "remote", "set-url", "origin", REMOTE_URL)
+        operator = directory / "operator"
+        subprocess.run(["git", "clone", "-q", str(remote.path), str(operator)], check=True)
+        _git(operator, "remote", "set-url", "origin", REMOTE_URL)
+        _TEMPLATE = directory
+    return _TEMPLATE
+
+
+class CopiedRemote(FixtureRemote):
+    """A `FixtureRemote` whose bare repository and seed are a template's copy."""
+
+    def __init__(self, root: pathlib.Path, template: pathlib.Path) -> None:
+        self._template = template
+        super().__init__(root)
+
+    def _make_bare(self) -> None:
+        shutil.copytree(self._template, self.root, symlinks=True)
+        self.seed = self.root / "seed"
+        # The seed pushes to its own bare copy, never to the template's.
+        _git(self.seed, "remote", "set-url", "origin", str(self.path))
+        _git(self.seed, "update-index", "-q", "--refresh")
 
 
 def git_transport(binary: str, remote: pathlib.Path, url: str) -> str:
@@ -227,22 +298,22 @@ class ShipCase(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.directory = pathlib.Path(self.temp.name).resolve()
-        self.remote = FixtureRemote(self.directory / "fixture")
+        # The three repositories come from one template per process, copied;
+        # `fixture_template` below builds it the way this setUp used to.
+        template = fixture_template()
+        self.remote = CopiedRemote(self.directory / "fixture", template / "fixture")
         self.remote.protection = {"enforce_admins": {"enabled": True}, "required_pull_request_reviews": {"required_approving_review_count": 0},
                                   "required_status_checks": {"strict": True, "contexts": ["check"], "checks": [{"context": "check", "app_id": 7}]}}
-        self.remote.commit_on("topic", "change\n\nAuthored-with: human", files={"src.py": "value = 1\n", "Makefile": "check:\n\t@echo fixture-check-pass\n"})
+        self.remote_url = REMOTE_URL
         self.root = self.directory / "clone"
-        subprocess.run(["git", "clone", "-q", str(self.remote.path), str(self.root)], check=True)
-        _git(self.root, "checkout", "topic")
-        _git(self.root, "config", "user.name", "Fixture")
-        _git(self.root, "config", "user.email", "fixture@example.invalid")
-        self.remote_url = "https://github.com/fixture/repo.git"
-        _git(self.root, "remote", "set-url", "origin", self.remote_url)
         # Real Git resolves the GitHub-looking identity to this fixture's bare
         # remote. The adapter cannot read or mutate an operator repository.
         self.operator = self.directory / "operator"
-        subprocess.run(["git", "clone", "-q", str(self.remote.path), str(self.operator)], check=True)
-        _git(self.operator, "remote", "set-url", "origin", self.remote_url)
+        for clone in (self.root, self.operator):
+            shutil.copytree(template / clone.name, clone, symlinks=True)
+            # A copy has new inodes and ctimes; refresh the index so plumbing
+            # that skips the refresh sees the clean tree the clone left.
+            _git(clone, "update-index", "-q", "--refresh")
         (self.operator / "operator.txt").write_text("uncommitted operator work")
         self.home = self.directory / "home"
         self.database = self.home / ".local/share/sd/sd.db"
@@ -287,7 +358,12 @@ roles:
         # `XDG_CONFIG_HOME` wins over `HOME` in `sd_lib.machine_config_path`, and
         # a GitHub runner sets it: pointed at the fixture here, or a machine
         # config written under `self.home` is never read (sd:1328).
+        # Both Jev stages off: with a keyed `jev` on PATH every `sd-review`
+        # child asked the live endpoint, about 0.85 s a prepare, and a CI
+        # runner has no `jev`, so the fixture now answers the same everywhere
+        # (sd:1605).
         self.environment = {**os.environ, "HOME": str(self.home), "XDG_CONFIG_HOME": str(self.home / ".config"),
+                            "JEV_SD_REVIEW": "0", "JEV_SD_DOCS_LINT": "0",
                             "SHIP_DOUBLE": self.double.base_url,
                             "PATH": str(self.programs) + os.pathsep + os.environ["PATH"]}
         self.patch = patch.dict(os.environ, self.environment, clear=True)
@@ -334,7 +410,7 @@ roles:
 
     def cli(self, command, *extra):
         return subprocess.run([sys.executable, str(ROOT / "bin/sd-ship"), command, "--item", str(self.item), "--json", *extra],
-                              cwd=self.root, env=self.environment, text=True, capture_output=True, timeout=30)
+                              cwd=self.root, env=self.environment, text=True, capture_output=True, timeout=CLI_TIMEOUT)
 
 
     # -- criterion 21: a ship leaves `docs/work/archive/` untouched ---------
@@ -440,6 +516,32 @@ roles:
         self.assertEqual(after["acceptance"], before["acceptance"])
         self.assertEqual(after["body"], before["body"])
         self.assertEqual(len(after["passes"]), 2)
+
+    def test_a_merge_forward_before_the_first_prepare_does_not_become_the_title(self):
+        # sd:1377: the merge-forward sd-ship demands left HEAD's subject naming
+        # a branch operation, and it was stored as the title and landed on main.
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        _git(self.root, "fetch", "-q", "origin", "main")
+        _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge origin/main into topic\n\nAuthored-with: human", "FETCH_HEAD")
+        result = self.prepare()
+        self.assertEqual(self.operation().state["title"], "change")
+        self.assertEqual(self.remote.pull(result["pull_request"]["number"]).title, "change")
+
+    def test_a_branch_behind_the_default_branch_is_refused_before_the_review(self):
+        # sd:1346, sd:1367: merge refuses a branch behind the default branch,
+        # so prepare refused nothing, spent the review and answered
+        # ready_to_send. It now refuses first and spends nothing.
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        with patch.object(ship.Ship, "review") as review:
+            with self.assertRaisesRegex(ship.Refusal, "behind the current default branch") as caught:
+                self.prepare()
+        review.assert_not_called()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "base_moved")
+        self.assertIn("git merge origin/main", caught.exception.workflow["next_action"])
+        self.assertIsNone(self.operation().state.get("pull_request"))
+        _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge origin/main into topic\n\nAuthored-with: human", "origin/main")
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        self.assertEqual(self.merge()["phase"], "merged")
 
     def test_a_moved_binding_re_reviews_the_same_head_instead_of_bricking_it(self):
         # sd:1390, live on #1140. Reuse was decided on head equality and the
@@ -843,6 +945,43 @@ roles:
         self.assertTrue(any(reviewed in warning and "ancestor of the merge head" in warning
                             for warning in self.operation().state["warnings"]),
                         self.operation().state.get("warnings"))
+
+    def test_a_merge_refused_after_the_copilot_gate_records_no_ancestor_clearance(self):
+        """sd:1373. The ancestor note says the gate cleared a merge, so the step
+        that dispatches the merge writes it. Written when the gate cleared, it
+        survived every later refusal -- the findings check a dozen lines below
+        it first -- and each retry appended another copy."""
+        self.enable_automatic_copilot()
+        self.prepare()
+        reviewed = _git(self.root, "rev-parse", "HEAD")
+        self.reviewed_at(reviewed)
+        (self.root / "docs").mkdir(exist_ok=True)
+        (self.root / "docs/note.md").write_text("what the review asked for\n")
+        _git(self.root, "add", "docs/note.md")
+        _git(self.root, "commit", "-m", "answer the review\n\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.prepare()
+        pull = self.remote.pull(1)
+        pull.checks = [{**row, "head_sha": head} for row in pull.checks]
+        real_sibling = ship.sd_lib.sibling
+        open_finding = SimpleNamespace(review_state=lambda *_: {"unsatisfied": [{"id": "finding-1"}]})
+
+        def sibling(name, *rest):
+            return open_finding if name == "sd_review_ack_ship_gate" else real_sibling(name, *rest)
+
+        def ancestor_notes():
+            return [warning for warning in (self.operation().state.get("warnings") or [])
+                    if "ancestor of the merge head" in warning]
+
+        with patch.object(ship.sd_lib, "sibling", sibling), patch.object(ship.time, "sleep"):
+            for _ in range(2):
+                with self.assertRaisesRegex(ship.Refusal, "remain unacknowledged"):
+                    self.merge()
+        self.assertEqual(ancestor_notes(), [])
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+        self.assertEqual(len(ancestor_notes()), 1, ancestor_notes())
+        self.assertIn(reviewed, ancestor_notes()[0])
 
     def test_an_exact_head_review_landing_mid_wait_drops_the_ancestor_note(self):
         """`stable_copilot_material` reads the reviews once per attempt, so the
@@ -1610,6 +1749,13 @@ roles:
         self.assertIn("is not valid JSON", warned)
         self.assertEqual(acknowledgements.store_path(self.root).read_text(), "{not json")
 
+    def test_the_real_cli_bound_guards_a_hang_not_a_load_average(self):
+        """sd:1539. A 30 s bound failed three gates on one loaded afternoon; alone the run takes about 7 s."""
+        self.assertGreaterEqual(CLI_TIMEOUT, 300)
+        with patch.object(subprocess, "run") as run:
+            self.cli("prepare")
+        self.assertEqual(run.call_args.kwargs["timeout"], CLI_TIMEOUT)
+
     def test_real_cli_review_prepare_slice_merge_and_repeat_reconcile(self):
         prepared = self.cli("prepare")
         self.assertEqual(prepared.returncode, 0, prepared.stdout + prepared.stderr)
@@ -1618,7 +1764,7 @@ roles:
         body.write_text(self.remote.pull(1).body)
         (self.root / "docs/work").mkdir(parents=True)
         linted = subprocess.run([sys.executable, str(ROOT / "bin/sd-docs-lint"), "--pr-body", str(body)],
-                                cwd=self.root, env=self.environment, text=True, capture_output=True, timeout=30)
+                                cwd=self.root, env=self.environment, text=True, capture_output=True, timeout=CLI_TIMEOUT)
         self.assertEqual(linted.returncode, 0, linted.stdout + linted.stderr)
         self.assertIn(f"database association sd:{self.item}", linted.stdout)
         result = self.merge()
@@ -1801,6 +1947,71 @@ roles:
         self.assertEqual(self.merge()["phase"], "merged")
         self.assertEqual(self.merge()["phase"], "merged")
         self.assertEqual(len([call for call in self.remote.calls if call.method == "PUT"]), 1)
+
+    def test_a_base_that_advanced_under_the_put_holds_delivery(self):
+        """GitHub squashes onto the base it holds at the `PUT`, not the one the
+        freshness reads saw. A same-file advance between them lands a combined
+        tree nobody reviewed, so the merge is recorded and delivery waits (sd:1089)."""
+        self.remote.commit_on("main", "shared\n\nAuthored-with: human", files={"shared.py": "a = 1\nb = 2\nc = 3\nd = 4\n"})
+        _git(self.root, "pull", "-q", "--no-rebase", "--no-edit", str(self.remote.path), "main")
+        (self.root / "shared.py").write_text("a = 10\nb = 2\nc = 3\nd = 4\n")
+        _git(self.root, "commit", "-qam", "topic edits shared\n\nAuthored-with: human")
+        acceptance = self.directory / "acceptance.json"
+        acceptance.write_text(json.dumps({"item": self.item, "complete": True, "criteria": [{"criterion": "actual scope", "passed": True, "evidence": "fixture-check-pass"}]}))
+        self.prepare("--deliver", "--acceptance-file", str(acceptance))
+        saved = self.double._route
+
+        def route(method, path, body):
+            if method == "PUT" and path.endswith("/merge"):
+                self.remote.commit_on("main", "raced\n\nAuthored-with: human", files={"shared.py": "a = 1\nb = 2\nc = 3\nd = 40\n"})
+            return saved(method, path, body)
+        self.double._route = route
+        result = self.merge()
+        self.assertEqual(result["phase"], "merged")
+        self.assertTrue(result["delivery_pending"])
+        self.assertEqual(result["workflow"]["blocker"]["code"], "base_advanced_at_merge")
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "in_progress")
+        self.assertEqual(len([call for call in self.remote.calls if call.method == "PUT"]), 1)
+
+    def held_merge(self) -> dict:
+        """A `--deliver` merge whose base advances under the `PUT` (sd:1089)."""
+        acceptance = self.directory / "acceptance.json"
+        acceptance.write_text(json.dumps({"item": self.item, "complete": True, "criteria": [{"criterion": "actual scope", "passed": True, "evidence": "fixture-check-pass"}]}))
+        self.prepare("--deliver", "--acceptance-file", str(acceptance))
+        saved = self.double._route
+
+        def route(method, path, body):
+            if method == "PUT" and path.endswith("/merge"):
+                self.remote.commit_on("main", "raced\n\nAuthored-with: human", files={"raced.py": "x = 1\n"})
+            return saved(method, path, body)
+        self.double._route = route
+        result = self.merge()
+        self.assertEqual(result["workflow"]["blocker"]["code"], "base_advanced_at_merge")
+        return result
+
+    def test_a_held_squash_does_not_read_as_delivered_in_git(self):
+        """The squash carries `Delivers:` because its message is fixed before the
+        `PUT`. Git readers must see the same hold the row does, or a checkout
+        with no database reads the held item as done (#1179)."""
+        self.held_merge()
+        self.assertNotEqual(ship.sd_lib.delivered(self.root, f"sd:{self.item}"), ship.sd_lib.YES)
+
+    def test_an_unheld_squash_still_reads_as_delivered_in_git(self):
+        acceptance = self.directory / "acceptance.json"
+        acceptance.write_text(json.dumps({"item": self.item, "complete": True, "criteria": [{"criterion": "actual scope", "passed": True, "evidence": "fixture-check-pass"}]}))
+        self.prepare("--deliver", "--acceptance-file", str(acceptance))
+        self.assertFalse(self.merge()["delivery_pending"])
+        self.assertEqual(ship.sd_lib.delivered(self.root, f"sd:{self.item}"), ship.sd_lib.YES)
+
+    def test_a_hand_delivery_clears_the_hold(self):
+        """The operator verifies the combined tree and delivers by hand; a later
+        reconcile reads that completion instead of reissuing the hold (#1179)."""
+        from sd_db.progress import deliver_work
+        commit = self.held_merge()["merge_commit"]
+        deliver_work(self.connection, self.item, commit, who="operator", verification_root=self.root)
+        again = self.merge()
+        self.assertFalse(again["delivery_pending"])
+        self.assertIsNone(again["workflow"]["blocker"])
 
     def test_empty_search_after_uncertain_create_cannot_duplicate_pr(self):
         self.double.no_create_result = True
@@ -2225,6 +2436,43 @@ roles:
             self.prepare()
         self.assertEqual(self.remote.rev_parse("topic"), prepared["reviewed_head"])
 
+    def test_an_amended_reviewed_head_refuses_by_name_and_not_as_retryable(self):
+        """sd:1348: `--is-ancestor` answers by exit status and prints nothing.
+
+        The refusal arrived as the bare runtime string 'git failed', marked
+        retryable, although no retry of the same command can pass.
+        """
+        program = self.programs / "review-fixture"
+        payload = {"type": "result", "subtype": "success", "structured_output": {"findings": [
+            {"path": "src.py", "line": 1, "severity": "high", "family": "correctness", "summary": "value is wrong"}]}}
+        program.write_text("#!/usr/bin/env python3\nimport json\nprint(" + repr(json.dumps(payload)) + ")\n")
+        with self.assertRaisesRegex(ship.Refusal, "local review blocking"):
+            self.prepare()
+        reviewed = self.operation().state["passes"][0]["head"]
+        (self.root / "src.py").write_text("value = 2\n")
+        _git(self.root, "add", "src.py")
+        _git(self.root, "commit", "--amend", "--no-edit")
+        amended = _git(self.root, "rev-parse", "HEAD")
+        with self.assertRaises(ship.Refusal) as caught:
+            self.prepare()
+        message = str(caught.exception)
+        self.assertIn(reviewed, message)
+        self.assertIn(amended, message)
+        self.assertIn("amend or a rebase", message)
+        workflow = caught.exception.workflow
+        self.assertEqual(workflow["blocker"]["code"], "reviewed_head_orphaned")
+        self.assertFalse(workflow["blocker"]["retryable"])
+        self.assertIn(f"git reset --soft {reviewed}", workflow["next_action"])
+        # The refusal spends nothing: the receipt still holds the one pass.
+        self.assertEqual(len(self.operation().state["passes"]), 1)
+        # The remedy it names restores the ancestry and the fix verification runs.
+        _git(self.root, "reset", "--soft", reviewed)
+        _git(self.root, "commit", "-m", "correct value\n\nAuthored-with: human")
+        payload["structured_output"]["findings"] = []
+        program.write_text("#!/usr/bin/env python3\nimport json\nprint(" + repr(json.dumps(payload)) + ")\n")
+        self.prepare()
+        self.assertEqual(self.operation().state["passes"][1]["report"]["subject"]["base"], reviewed)
+
     def test_tampered_fix_receipt_cannot_claim_original_blockers_were_verified(self):
         self.prepare()
         _git(self.root, "commit", "--allow-empty", "-m", "fix\n\nAuthored-with: human")
@@ -2394,6 +2642,144 @@ roles:
         self.assertEqual(report["resume_report_digest"],
                          ship.digest(ship.review_history([first])))
         self.assertEqual(self.merge()["phase"], "merged")
+
+    def test_a_missing_receipt_keeps_the_reviewer_process_output(self):
+        """A review that prints no receipt leaves its exit code and output tails.
+
+        #590's MiniMax pass failed with only "no valid receipt": sd-review's
+        stderr and exit status were dropped, so nothing said whether the
+        provider or sd-review itself failed.
+        """
+        operation = self.operation()
+        head = _git(self.root, "rev-parse", "HEAD")
+        original = ship.review_process
+        def crashed(root, argv, **kwargs):
+            if "--explain" in argv:
+                return original(root, argv, **kwargs)
+            return subprocess.CompletedProcess([], 1, "partial", "Traceback: boom\n")
+        with patch.object(ship, "review_process", side_effect=crashed):
+            with self.assertRaisesRegex(ship.Refusal, "no valid receipt.*exit 1"):
+                operation.review(head)
+        error = self.operation().state["passes"][0]["execution_error"]
+        self.assertEqual(error["kind"], "invalid_receipt")
+        self.assertEqual(error["stage"], "execution")
+        self.assertEqual(error["exit_code"], 1)
+        self.assertIn("Traceback: boom", error["stderr"]["tail"])
+        self.assertEqual(error["stdout"]["tail"], "partial")
+
+    def test_a_missing_receipt_writes_the_whole_output_when_capture_is_on(self):
+        operation = self.operation()
+        head = _git(self.root, "rev-parse", "HEAD")
+        original = ship.review_process
+        def crashed(root, argv, **kwargs):
+            if "--explain" in argv:
+                return original(root, argv, **kwargs)
+            return subprocess.CompletedProcess([], 1, "partial", "Traceback: boom\n")
+        capture = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory())) / "raw"
+        with patch.dict(os.environ, {"SD_REVIEW_RAW_DIR": str(capture)}), \
+                patch.object(ship, "review_process", side_effect=crashed):
+            with self.assertRaisesRegex(ship.Refusal, "no valid receipt"):
+                operation.review(head)
+        error = self.operation().state["passes"][0]["execution_error"]
+        # A truncated receipt may carry raw model text: only the private file keeps it.
+        self.assertEqual(error["stdout"], {"withheld": "raw capture is on; stdout may carry model output",
+                                           "bytes": len("partial")})
+        path = pathlib.Path(error["raw_capture"])
+        self.assertEqual(path.parent, capture)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        record = json.loads(path.read_text())
+        self.assertEqual((record["head"], record["exit_code"], record["stdout"], record["stderr"]),
+                         (head, 1, "partial", "Traceback: boom\n"))
+
+    def test_a_watchdog_kill_keeps_raw_model_text_out_of_the_ship_state(self):
+        """The timeout path bypasses the receipt check; it must withhold raw text too."""
+        operation = self.operation()
+        head = _git(self.root, "rev-parse", "HEAD")
+        original = ship.review_process
+        report = {"status": "clean", "outcomes": [{"backend": "minimax", "diagnostic": {
+            "kind": "invalid_response", "raw_response": {"body": "model text", "stderr": ""}}}]}
+        def killed(root, argv, **kwargs):
+            if "--explain" in argv:
+                return original(root, argv, **kwargs)
+            raise ship.ReviewTimeout({"kind": "watchdog_expired", "allowed_seconds": kwargs["timeout"],
+                                      "stdout": {"bytes": 10, "tail": "model text", "truncated": False},
+                                      "captured_report": report})
+        capture = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory())) / "raw"
+        with patch.dict(os.environ, {"SD_REVIEW_RAW_DIR": str(capture)}), \
+                patch.object(ship, "review_process", side_effect=killed):
+            with self.assertRaisesRegex(ship.Refusal, "execution watchdog expired"):
+                operation.review(head)
+        error = self.operation().state["passes"][0]["execution_error"]
+        self.assertNotIn("model text", json.dumps(error))
+        self.assertEqual(error["stdout"]["bytes"], 10)
+        path = pathlib.Path(error["captured_report"]["outcomes"][0]["diagnostic"]["raw_capture"])
+        self.assertEqual(json.loads(path.read_text())["body"], "model text")
+
+    def test_a_watchdog_kill_writes_its_whole_output_when_capture_is_on(self):
+        """sd:1588. A truncated or oversized output leaves no captured report,
+        so the killed process's own bytes are the only evidence left."""
+        operation = self.operation()
+        head = _git(self.root, "rev-parse", "HEAD")
+        original = ship.review_process
+        def killed(root, argv, **kwargs):
+            if "--explain" in argv:
+                return original(root, argv, **kwargs)
+            raise ship.ReviewTimeout({"kind": "watchdog_expired", "allowed_seconds": kwargs["timeout"],
+                                      "stdout": {"bytes": 13, "tail": "partial model", "truncated": False},
+                                      "raw_output": {"stdout": "partial model", "stderr": "warn"}})
+        capture = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory())) / "raw"
+        with patch.dict(os.environ, {"SD_REVIEW_RAW_DIR": str(capture)}), \
+                patch.object(ship, "review_process", side_effect=killed):
+            with self.assertRaisesRegex(ship.Refusal, "execution watchdog expired"):
+                operation.review(head)
+        error = self.operation().state["passes"][0]["execution_error"]
+        self.assertNotIn("partial model", json.dumps(error))
+        self.assertNotIn("raw_output", error)
+        written = json.loads(pathlib.Path(error["raw_capture"]).read_text())
+        self.assertEqual((written["stdout"], written["stderr"], written["head"]), ("partial model", "warn", head))
+
+    def test_a_planning_watchdog_kill_writes_its_output_to_the_file_not_the_receipt(self):
+        """#1201 review. The `--explain` stage times out before execution; its
+        diagnostic is saved as `review_preflight_error` and must be withheld too."""
+        operation = self.operation()
+        head = _git(self.root, "rev-parse", "HEAD")
+        def killed(root, argv, **kwargs):
+            raise ship.ReviewTimeout({"kind": "watchdog_expired", "allowed_seconds": kwargs["timeout"],
+                                      "stdout": {"bytes": 12, "tail": "planning out", "truncated": False},
+                                      "raw_output": {"stdout": "planning out", "stderr": ""}})
+        capture = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory())) / "raw"
+        with patch.dict(os.environ, {"SD_REVIEW_RAW_DIR": str(capture)}), \
+                patch.object(ship, "review_process", side_effect=killed):
+            with self.assertRaisesRegex(ship.Refusal, "planning watchdog expired"):
+                operation.review(head)
+        error = self.operation().state["review_preflight_error"]
+        self.assertNotIn("planning out", json.dumps(error))
+        self.assertNotIn("raw_output", error)
+        self.assertEqual(json.loads(pathlib.Path(error["raw_capture"]).read_text())["stdout"], "planning out")
+
+    def test_review_process_hands_over_its_whole_output_only_under_capture(self):
+        # The child says when its output is written, and the watchdog starts
+        # counting only then: a short timeout that cannot expire before the
+        # output exists, rather than five seconds of waiting per case (sd:1605).
+        ready = self.directory / "written"
+        script = ("import pathlib, sys, time\nprint('x' * 10000, flush=True)\nprint('e', file=sys.stderr, flush=True)\n"
+                  f"pathlib.Path({str(ready)!r}).touch()\ntime.sleep(30)\n")
+        original_communicate = subprocess.Popen.communicate
+        def after_written(process, *args, **kwargs):
+            deadline = time.monotonic() + CLI_TIMEOUT
+            while not ready.exists() and time.monotonic() < deadline:
+                time.sleep(.005)
+            self.assertTrue(ready.exists(), "the child never wrote its output")
+            return original_communicate(process, *args, **kwargs)
+        for capture, expected in (("", None), ("/nonexistent-raw-dir", "x" * 10000 + "\n")):
+            ready.unlink(missing_ok=True)
+            with self.subTest(capture=bool(capture)), patch.dict(os.environ, {"SD_REVIEW_RAW_DIR": capture}), \
+                    patch.object(ship, "REVIEW_CLEANUP_SECONDS", .5), \
+                    patch.object(subprocess.Popen, "communicate", after_written):
+                with self.assertRaises(ship.ReviewTimeout) as raised:
+                    ship.review_process(self.root, [sys.executable, "-c", script], timeout=.2)
+                raw = raised.exception.diagnostic.get("raw_output")
+                self.assertEqual(raw and raw["stdout"], expected)
 
     def test_missing_receipt_retry_is_explicit_and_never_rolls_back_spent_pass(self):
         operation = self.operation()
@@ -3556,6 +3942,26 @@ class DeclaredGapCase(unittest.TestCase):
         self.assertEqual([entry["id"] for entry in result["protection"]["rulesets"]], [42])
         self.assertEqual(result["protection"]["required_status_checks"]["checks"], [{"context": "route", "app_id": 7}])
 
+    def test_a_ruleset_that_forbids_squash_refuses_before_any_merge_is_dispatched(self):
+        """sd:1379. A ruleset's `pull_request` rule names the merge methods the
+        branch accepts, and `synthesize` dropped them, so the gate passed and
+        `sd-ship` sent a squash the branch forbids. The refusal names the
+        methods allowed and dispatches nothing; a list that includes squash
+        still merges once."""
+        self.commit({".github/workflows/tests.yml": self.TESTS, ".github/workflows/sd-review-route.yml": self.ROUTE})
+        rules = self.gating_rules()
+        rules[1]["parameters"]["allowed_merge_methods"] = ["merge", "rebase"]
+        self.double.rules = rules
+        self.double.rulesets = {42: {"id": 42, "name": "main", "enforcement": "active", "bypass_actors": []}}
+        self.green()
+        with self.assertRaisesRegex(ship.Refusal, r"allows only merge, rebase .*squash"):
+            self.merge()
+        self.assertEqual(self.puts(), 0)
+        rules[1]["parameters"]["allowed_merge_methods"] = ["squash", "rebase"]
+        result = self.merge()
+        self.assertEqual(self.puts(), 1)
+        self.assertEqual(result["protection"]["allowed_merge_methods"], ["rebase", "squash"])
+
     @staticmethod
     def gating_rules() -> list:
         return [
@@ -3938,6 +4344,47 @@ class DeclaredGapCase(unittest.TestCase):
         double._route = route
         self.refuse("ownership or branch protection changed before merge")
 
+
+
+class RawCaptureTests(unittest.TestCase):
+    """A provider's raw response reaches a private file, never the ship state."""
+
+    review = importlib.import_module("sd_ship_review")
+
+    def report(self):
+        return {"outcomes": [{"backend": "minimax", "diagnostic": {
+            "kind": "invalid_response", "raw_response": {"body": "not json", "stderr": "warn"}}}]}
+
+    def test_the_raw_response_moves_to_an_owner_only_file(self):
+        capture = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory())) / "raw"
+        report = self.report()
+        with patch.dict(os.environ, {"SD_REVIEW_RAW_DIR": str(capture)}):
+            self.review.stash_raw_responses(report, "a" * 40)
+        diagnostic = report["outcomes"][0]["diagnostic"]
+        self.assertNotIn("raw_response", diagnostic)
+        path = pathlib.Path(diagnostic["raw_capture"])
+        self.assertTrue(path.name.startswith("aaaaaaaaaaaa-minimax-"))
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(capture.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(json.loads(path.read_text()), {"head": "a" * 40, "body": "not json", "stderr": "warn"})
+
+    def test_without_the_directory_the_raw_response_is_dropped(self):
+        report = self.report()
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SD_REVIEW_RAW_DIR", None)
+            self.review.stash_raw_responses(report, "a" * 40)
+        self.assertEqual(report["outcomes"][0]["diagnostic"], {"kind": "invalid_response"})
+
+    def test_an_unwritable_directory_is_named_not_raised(self):
+        locked = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
+        locked.chmod(0o500)
+        self.addCleanup(locked.chmod, 0o700)
+        report = self.report()
+        with patch.dict(os.environ, {"SD_REVIEW_RAW_DIR": str(locked / "raw")}):
+            self.review.stash_raw_responses(report, "a" * 40)
+        diagnostic = report["outcomes"][0]["diagnostic"]
+        self.assertNotIn("raw_response", diagnostic)
+        self.assertTrue(diagnostic["raw_capture"].startswith("not written: "))
 
 
 if __name__ == "__main__":

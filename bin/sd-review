@@ -625,23 +625,15 @@ def subprocess_runner(
     timeout: int,
     input_text: str | None = None,
 ) -> Completed:
-    """The only place this file starts a process. Tests inject their own."""
+    """The only place this file starts a process. Tests inject their own.
 
+    It ends the process's whole group, so a check's own children go with it (sd:1482).
+    """
     try:
-        finished = subprocess.run(
-            list(argv),
-            cwd=str(cwd),
-            env=dict(env),
-            capture_output=True,
-            input=input_text,
-            stdin=subprocess.DEVNULL if input_text is None else None,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
+        finished = sd_lib.run_group(list(argv), cwd=cwd, env=dict(env), timeout=timeout, input_text=input_text)
     except FileNotFoundError:
         return Completed(127, "", f"{argv[0]}: not found on PATH", launched=False)
-    except subprocess.TimeoutExpired:
+    except sd_lib.GroupTimeout:
         return Completed(124, "", f"{argv[0]}: timed out after {timeout}s", launched=False)
     except OSError:
         return Completed(126, "", f"{argv[0]}: could not start", launched=False)
@@ -711,8 +703,12 @@ def build_prompt(subject: Subject, challenge: bool, conventions: str) -> str:
         "introduces: correctness bugs, security issues, data-integrity risks, and "
         "maintainability problems that would cost real time later. Judge severity "
         "per finding; high means it should block a merge. Do not report style, "
-        "wording, or observations that are not defects, and prefer few precise "
-        "findings over many speculative ones. path is the repository-relative file, "
+        "wording, or observations that are not defects. Do not report cosmetic "
+        "findings, whose fix changes no behaviour or reader action (wording, "
+        "comments, naming, formatting, drifted counts in prose); contract text, "
+        "such as a command, flag, parsed string, config value, or agent "
+        "instruction, is not cosmetic. Prefer few precise findings over many "
+        "speculative ones. path is the repository-relative file, "
         "line is the line in the new version or null, family is one short category "
         "word such as security, correctness, testing, or maintainability. Respond "
         "only with JSON matching the output schema; an empty findings array means clean."
@@ -1122,7 +1118,7 @@ def author_vendors(root: pathlib.Path, subject: Subject) -> tuple[str, ...]:
     if subject.scope not in TRAILER_SCOPES:
         return ()
     try:
-        return sd_lib.author_vendors(root, subject.base, subject.head)
+        return sd_lib.reviewed_author_vendors(root, subject.base, subject.head)
     except sd_lib.TrailerError as error:
         raise Refusal(str(error)) from None
 
@@ -1185,7 +1181,7 @@ def capped_bills(registry: sd_registry.Registry, ledger: Ledger, *, read_only: b
             if bill.cap_usd_month is None:
                 continue
             spent = rows.exposure(connection, bill=name, month=month)
-            if spent + rows.MONEY_NOISE >= bill.cap_usd_month:
+            if spent >= bill.cap_usd_month:
                 lines[name] = f"${spent:.2f} of its ${bill.cap_usd_month:.2f} cap for {month} is spent or held"
     return lines
 
@@ -1306,6 +1302,7 @@ def run_provider(
         diagnostic["model_matches_requested"] = (model.get("sha256") == hashlib.sha256((provider.model or "").encode()).hexdigest()
                                                   if model.get("type") == "string" else None)
         diagnostic["response_received"] = result.launched
+        diagnostic.update(sd_lib.raw_response(result))  # opt-in (SD_REVIEW_RAW_DIR); sd-ship moves it to a file
         diagnostic["ledger"] = receipt
         parsed = oversized_findings() if diagnostic["category"] == "response_limit" else parse_findings(text, diagnostic, allow_json_fence=True)
         if parsed is not None and diagnostic["category"] in ("truncated", "incomplete_finish"):
@@ -1808,10 +1805,10 @@ def review(
         target_base = sd_lib.git_output(["merge-base", subject.head, _default_base(root)], root)
         if not target_base:
             raise UsageError("cannot establish the refreshed target boundary for item authorship")
-        authored_subject = subject._replace(base=target_base)
+        authored_subject = subject if target_base == subject.head else subject._replace(base=target_base)
     authorship_refusal = ""
     try:
-        vendors = author_vendors(root, authored_subject)
+        vendors = () if preflight and not sd_lib.git_output(["rev-list", "-n", "1", f"{authored_subject.base}..{authored_subject.head}"], root) else author_vendors(root, authored_subject)  # sd:1547: an empty-range probe has no author
     except Refusal as error:
         if not args.explain:
             raise

@@ -72,6 +72,27 @@ class URLDiagnostics(ReviewFixture):
     def envelope(self, content: object, reason: str = "stop", **extra: object) -> dict:
         return {"choices": [{"finish_reason": reason, "message": {"content": content, **extra}}]}
 
+    def test_the_raw_response_rides_the_diagnostic_only_when_asked(self) -> None:
+        """`SD_REVIEW_RAW_DIR` puts a url reviewer's raw response in its diagnostic.
+
+        The first MiniMax pass on system #590 failed and left only hashes.
+        sd-review writes no file; sd-ship moves the field to one, so the
+        database never holds it. The prompt and credential never ride along.
+        """
+        body = self.envelope("not the findings JSON")
+        with mock.patch.dict(sd_review.os.environ, {}, clear=False):
+            sd_review.os.environ.pop("SD_REVIEW_RAW_DIR", None)
+            outcome = self.run_response(body)
+        self.assertNotIn("raw_response", outcome.diagnostic)
+        with mock.patch.dict(sd_review.os.environ, {"SD_REVIEW_RAW_DIR": str(self.tmp / "raw")}):
+            outcome = self.run_response(body, stderr="transport note")
+        raw = outcome.diagnostic["raw_response"]
+        self.assertEqual(json.loads(raw["body"]), body)
+        self.assertEqual(raw["stderr"], "transport note")
+        self.assertNotIn("private-prompt-marker", json.dumps(raw))
+        self.assertNotIn("credential-marker", json.dumps(raw))
+        self.assertFalse((self.tmp / "raw").exists(), "sd-review itself writes no file")
+
     def test_reasoning_only_does_not_borrow_model_quota_words(self) -> None:
         outcome = self.run_response(self.envelope(None, reasoning_content="rate_limit credential-marker private-prompt-marker"))
         self.assertEqual(outcome.status, sd_review.UNAVAILABLE)

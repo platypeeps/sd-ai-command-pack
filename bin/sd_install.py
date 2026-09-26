@@ -1242,6 +1242,9 @@ DEFAULT_BLOCK_BODY = """\
 # sd-ai-command-pack, machine-scope. Work items live under `docs/work/`; nothing
 # else in this repo belongs to the framework. The workflow these keys override
 # is `WORKFLOW.md` in the pack checkout; the one page that states the policy.
+# Parallel work follows its "Parallel work" section: one writer per checkout, read-only fan-out, one merge lane, a budget on every worker.
+# Generated HTML goes to `docs/dashboard/`, which is gitignored and which the
+# local dashboard discovers; a Claude artifact is published only when asked.
 #
 # Every key below is written commented out, and a commented key is unset.
 # Uncomment one to override this repository, and only then: `mode` resolves
@@ -1297,29 +1300,38 @@ def write_local_block(
         original = target.read_text(encoding="utf-8")
     except OSError:
         original = ""
-    existing = migrated(original)
-    start = existing.find(BLOCK_BEGIN)
-    end = existing.find(BLOCK_END)
-    carried = carried_lines(existing[start + len(BLOCK_BEGIN) : end]) if start != -1 and end > start else {}
-    block = f"{BLOCK_BEGIN}\n{consent_body(consent, carried)}{BLOCK_END}\n"
-    if start != -1 and end > start:
-        updated = existing[:start] + block + existing[end + len(BLOCK_END) + 1 :]
-        action = "refreshed"
-    elif start != -1 or end != -1:
-        raise SystemExit(
-            f"error: {target} has a half-open sd-ai-command-pack block; "
-            "fix the markers by hand, then re-run."
-        )
-    else:
-        separator = "" if not existing or existing.endswith("\n\n") else "\n"
-        updated = f"{existing}{separator}{block}"
-        action = "added"
+    updated, action = local_block_text(original, consent=consent, where=target)
     # Against `original`, not against the migrated copy: a file whose only
     # change is the marker pair is byte-identical to `existing` and would not
     # be written, leaving the repository on the markers nothing reads.
     if not dry_run and updated != original:
         target.write_text(updated, encoding="utf-8")
     return action
+
+
+def local_block_text(
+    original: str, *, consent: str | None = None, where: Path | str = LOCAL_BLOCK_FILE
+) -> tuple[str, str]:
+    """`original` with the block created or refreshed, and which of the two it was.
+
+    Text in, text out, so a reader that must not write -- `sd fleet stamp
+    --dry-run` diffs this against the file on disk -- renders the same block
+    `write_local_block` writes, from the one template.
+    """
+    existing = migrated(original)
+    start = existing.find(BLOCK_BEGIN)
+    end = existing.find(BLOCK_END)
+    carried = carried_lines(existing[start + len(BLOCK_BEGIN) : end]) if start != -1 and end > start else {}
+    block = f"{BLOCK_BEGIN}\n{consent_body(consent, carried)}{BLOCK_END}\n"
+    if start != -1 and end > start:
+        return existing[:start] + block + existing[end + len(BLOCK_END) + 1 :], "refreshed"
+    if start != -1 or end != -1:
+        raise SystemExit(
+            f"error: {where} has a half-open sd-ai-command-pack block; "
+            "fix the markers by hand, then re-run."
+        )
+    separator = "" if not existing or existing.endswith("\n\n") else "\n"
+    return f"{existing}{separator}{block}", "added"
 
 
 def path_is_tracked(repo: Path, relative: str) -> bool:

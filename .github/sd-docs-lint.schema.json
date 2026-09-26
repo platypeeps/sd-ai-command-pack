@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/platypeeps/sd-ai-command-pack/.github/sd-docs-lint.schema.json",
+  "title": "sd-docs-lint repository settings",
+  "description": "Read by `bin/sd-docs-lint` from `.github/sd-docs-lint.json` in the repository it lints. A sibling of `.github/sd-review.json` and `.github/sd-status.json`: it is in git, so a collaborator sees the decision in a diff, and a fresh clone carries it. An absent file means every default. A file that exists and is malformed takes no Jev reading and says why in a note; it never fails the run, because the reading is advisory.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Path or URL to this schema. Ignored by the reader."
+    },
+    "jev_claim_support": {
+      "type": "boolean",
+      "description": "Opt this repository in to rule 6's second reading, in which a model is asked whether each recorded citation's passage still supports the sentence citing it. Taking it sends the citing sentence and the cited passage, both capped, to a third-party model. Unset or false takes no reading (sd:1304). Only a JSON true opts in. `JEV_SD_DOCS_LINT=0` in the environment still switches the reading off, and no environment variable can switch it on without this key."
+    }
+  }
+}
