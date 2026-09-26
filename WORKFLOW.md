@@ -268,6 +268,12 @@ that dispatches workers cites this section and restates nothing.
   by file. Do not group rows across unrelated folders: a wider diff draws more
   review rounds, not fewer. Name every grouped row in the pull request, and
   close each one when it merges.
+- **Iterate on the fast path; gate once before the push.** While fixing, run
+  `make check CHANGED="<paths>"`, which runs only the tests those paths need
+  plus an always-run set. Before the push, run the full `make check` once. On
+  a shared machine set `SD_GATE_SLOTS=1`: each gate already runs a test worker
+  on nearly every core, and overlapping gates slow all of them. Only the full
+  gate counts as evidence; a narrowed run exits 2 to say so.
 
 The pack has two write lanes, and each holds one writer. A session writes on
 its own branch in its own worktree: `sd runner prepare <item> --branch <name>`

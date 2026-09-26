@@ -12,6 +12,9 @@
   still arrives is `rebutted` with a `cosmetic:` reason in adjudication, or
   answered with `sd-review-ack --dismiss`, never `--carried`, and gets no
   follow-up row.
+  `WORKFLOW.md` "Parallel work" also groups rows that change the same files
+  into one pull request (sd:1603), and gates once, in full, before a push
+  after iterating on `make check CHANGED=...` (sd:1606).
 
 - **`sd-ship` holds delivery when the base advanced under the merge.** GitHub
   squashes onto the base it holds at the `PUT`, and no request field pins that
