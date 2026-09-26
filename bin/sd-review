@@ -1804,7 +1804,7 @@ def review(
         authored_subject = subject if target_base == subject.head else subject._replace(base=target_base)
     authorship_refusal = ""
     try:
-        vendors = () if preflight else author_vendors(root, authored_subject)
+        vendors = () if preflight and not sd_lib.git_output(["rev-list", "-n", "1", f"{authored_subject.base}..{authored_subject.head}"], root) else author_vendors(root, authored_subject)  # sd:1547: an empty-range probe has no author
     except Refusal as error:
         if not args.explain:
             raise
