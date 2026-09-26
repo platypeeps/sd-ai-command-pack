@@ -3117,3 +3117,14 @@ def reviewed_author_vendors(root: pathlib.Path, base: str, head: str) -> tuple[s
     if not git_output(["rev-list", "-n", "1", f"{base}..{head}"], root):
         raise TrailerError(f"not read: no commits in {base}..{head}")
     return author_vendors(root, base, head)
+
+
+def raw_response(result: Any) -> dict:
+    """A url reviewer's raw output for its diagnostic, only under `SD_REVIEW_RAW_DIR`.
+
+    Opt-in debugging (system #590): sd-ship moves it to an owner-only file and
+    keeps only the path, so model output never reaches the ship state.
+    """
+    if not os.environ.get("SD_REVIEW_RAW_DIR"):
+        return {}
+    return {"raw_response": {"body": result.stdout, "stderr": result.stderr}}

@@ -1298,6 +1298,7 @@ def run_provider(
         diagnostic["model_matches_requested"] = (model.get("sha256") == hashlib.sha256((provider.model or "").encode()).hexdigest()
                                                   if model.get("type") == "string" else None)
         diagnostic["response_received"] = result.launched
+        diagnostic.update(sd_lib.raw_response(result))  # opt-in (SD_REVIEW_RAW_DIR); sd-ship moves it to a file
         diagnostic["ledger"] = receipt
         parsed = oversized_findings() if diagnostic["category"] == "response_limit" else parse_findings(text, diagnostic, allow_json_fence=True)
         if parsed is not None and diagnostic["category"] in ("truncated", "incomplete_finish"):
