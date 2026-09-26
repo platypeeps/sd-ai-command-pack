@@ -11,6 +11,49 @@
   with `base_moved` and names `git merge origin/<default>`; a merge keeps the
   next push a fast-forward, which a rebase does not.
 
+- **Reviews ignore cosmetic findings (sd:1602).** A finding is cosmetic when
+  fixing it changes no behaviour and no action a reader takes. Text that is a
+  contract is not cosmetic: a wrong command or flag, a parsed string, a config
+  value, or an agent instruction. The `sd-review` prompt and
+  `.github/copilot-instructions.md` tell reviewers not to report them. One that
+  still arrives is `rebutted` with a `cosmetic:` reason in adjudication, or
+  answered with `sd-review-ack --dismiss`, never `--carried`, and gets no
+  follow-up row.
+  `WORKFLOW.md` "Parallel work" also groups rows that change the same files
+  into one pull request (sd:1603), and gates once, in full, before a push
+  after iterating on `make check CHANGED=...` (sd:1606).
+
+- **`sd-ship` holds delivery when the base advanced under the merge.** GitHub
+  squashes onto the base it holds at the `PUT`, and no request field pins that
+  base, so a base advance after the last freshness read landed a combined tree
+  nobody reviewed (sd:1089, seen on #1075). `reconcile` now reads the squash
+  parent. When the reviewed head does not contain it, the merge is recorded and
+  delivery stops at `base_advanced_at_merge`, naming the commit to verify.
+  The squash also carries `Reviewed-base: <sha>`, the parent the review
+  covered. `sd_lib.held_at_merge` compares it with the landed parent, and
+  reconcile, `delivered()` and `sd-status` all ask it, so a held `Delivers:`
+  no longer reads as done in git (#1179). A hand delivery recorded on the row
+  clears the hold on the next reconcile.
+
+- **`sd work register` works from a linked worktree.** It refused with
+  `repository '<worktree>' is not registered` whenever the worktree had no
+  origin to match (sd:1293). The lookup now resolves the worktree to its main
+  checkout, as `sd task add` does; the folder and commit still come from the
+  worktree.
+
+- **`sd task show N` reads one item.** It is an alias for `sd store item N`,
+  which stays the canonical read for every kind (sd:1112). Both print the same
+  item, notes and revision, as text or with `--json`, and neither writes.
+
+- **`sd-review` reads authorship from the reviewed commits on the default branch (sd:1547).**
+  With `--base` on the default branch, the refreshed target boundary is HEAD
+  itself, so the authored range was empty. That empty read printed
+  `human (every commit says so)` and excluded no vendor, so a
+  `claude/anthropic` commit could reach an anthropic reviewer. The authored
+  range now falls back to the review subject when the boundary is HEAD. A
+  range with no commits reports `not read: no commits in <base>..<head>`
+  under `--explain` and refuses otherwise.
+
 - **A watchdog-killed review keeps its output under `SD_REVIEW_RAW_DIR`.**
   With capture on, sd-ship withheld the stdout tail of a timed-out review but
   wrote no file, so a truncated or oversized output left no evidence
@@ -388,6 +431,24 @@
   action this tool is allowed to take.
 
 ### Fixed
+
+- **An orphaned reviewed head now refuses by name, not as `git failed` (sd:1348).**
+  `sd-ship prepare` requires every earlier reviewed head to stay an ancestor of
+  the offered head. `git merge-base --is-ancestor` answers by exit status and
+  prints nothing, so an amend or a rebase after a review surfaced as the bare
+  message `git failed`, code `command_failed`, marked retryable. The refusal now
+  names the reviewed head, the offered head and the branch. Its code is
+  `reviewed_head_orphaned`, state `operator_decision`, not retryable. Its next
+  action names the `git reset --soft <reviewed head>` remedy. The ancestry rule
+  itself is unchanged.
+
+- **Code motion no longer lowers the R13-D1 citation count (sd:1374).** The
+  ratchet counted a `path:line` into code only when the line sat inside a
+  `def` or a `class`. An insertion above a cited line could carry it out of
+  every symbol, and the count fell with no document changed. The stale
+  `bin/sd-status:877` citation in the one-person PRD read as a cleanup that
+  way. Every live `path:line` into code now counts, so the baselines rose to
+  52 and 80, and that citation now names `handoff_section`.
 
 - **A merge-forward before the first `sd-ship prepare` no longer becomes the
   pull request title (sd:1377).** With no `--title` and no stored title,

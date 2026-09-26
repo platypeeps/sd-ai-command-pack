@@ -730,11 +730,17 @@ class LineBudgetTests(unittest.TestCase):
         # tree. This raise is its own commit, before the one that spends it.
         # Shared-core classification and the complexity ceilings are
         # unchanged.
+        #
+        # 3641 -> 3645 is sd:1602. `bin/sd-review` grows +4: the review
+        # prompt tells each lane not to report cosmetic findings and names
+        # the contract text that is never cosmetic. Measured, not carried:
+        # `sd-review` is 2351 on this tree. Shared-core classification and
+        # the complexity ceilings are unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3641,
+            3645,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
