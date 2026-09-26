@@ -25,11 +25,11 @@ Eight rules (each past the fifth arrived with a decision record, not a patch):
                     `.github/copilot-instructions.md` tabulates carries that
                     class's scope line in the pull request body. The classes
                     are read from that file, never restated here.
-Rule 6 carries an optional second reading, taken wherever a `jev` on PATH
-answers that it can: a model is asked whether each cited passage still
-supports the sentence citing it, which a comparison of bytes cannot ask. It
-prints notes and never fails. `JEV_SD_DOCS_LINT=0` switches it off, for a
-checkout whose `docs/work` must not leave the machine.
+Rule 6 carries an optional second reading, taken only in a repository whose
+`.github/sd-docs-lint.json` opts in and where a `jev` on PATH can answer: a
+model is asked whether each cited passage still supports the sentence citing
+it. It prints notes and never fails. `JEV_SD_DOCS_LINT=0` switches it off
+everywhere; no environment variable can switch it on without the opt-in.
 
 Rules 1 to 4, 6 and 7 read the tree. Rules 5 and 8 need the pull request body,
 so they run only when `--pr-body` supplies one and report themselves as not run
@@ -940,23 +940,46 @@ def check_citations(work_root: pathlib.Path, report: Report) -> None:
 # closing -- a check that runs, prints a number, and was never able to see the
 # thing it is trusted for.
 #
-# So a second reading, by a model, wherever a `jev` on PATH can answer. It is
-# advisory and it is advisory deliberately: Jev is experimental, nothing here
+# So a second reading, by a model, in a repository that asked for one and where
+# a `jev` on PATH can answer. It is advisory and it is advisory deliberately: Jev is experimental, nothing here
 # may depend on it, and a gate that turns red on a model's opinion is a gate
 # people learn to re-run until it passes. This prints notes. It never fails,
 # never changes an exit code, and a run that takes no reading is byte-for-byte
 # the run there was before it existed.
 #
-# Taking the reading sends prose off this machine, to a third-party model. The
-# operator this was written for allows that, and it is bounded: the citing
-# sentence and the cited passage, both capped, with no path, no item name and
-# no citation marker. `JEV_SD_DOCS_LINT=0` is how a checkout whose `docs/work`
-# must not leave the machine switches it off, per run or exported once.
+# Taking the reading sends prose off this machine, to a third-party model. It
+# is bounded -- the citing sentence and the cited passage, both capped, with no
+# path, no item name and no citation marker -- but it is still the repository's
+# own prose, so whether it may leave is the repository's decision (sd:1304).
+# The opt-in is `.github/sd-docs-lint.json`, below. `JEV_SD_DOCS_LINT=0` still
+# switches the reading off everywhere, per run or exported once.
 #
-# It used to require `JEV_SD_DOCS_LINT=1`, which is the opposite failure and
-# the more expensive one: a machine with `jev` installed and keyed took no
-# reading at all, because it also needed an export nobody had written.
+# The history, because each step answered the one before. The reading first
+# needed `JEV_SD_DOCS_LINT=1`, and a keyed machine took none for want of an
+# export nobody wrote. Then unset meant on, and every checkout whose `docs/work`
+# must not leave the machine had to export `0` to protect itself -- which a
+# plain shell, a second agent or a CI job does not do, and an operator whose
+# shell exports `1` for other reasons undoes. The variable therefore only ever
+# subtracts. Nothing in the environment can take a reading the repository did
+# not ask for, because the environment belongs to the machine and the prose
+# belongs to the repository.
 JEV_STAGE = "JEV_SD_DOCS_LINT"
+
+# Where a repository opts in. A sibling of `.github/sd-review.json` and
+# `.github/sd-status.json`, and for the reason `sd_lib` gives for the second:
+# it is in git, so a collaborator sees the decision in a diff instead of
+# finding it in somebody's machine config, and a fresh clone carries it. Not a
+# machine config key: that answers for every repository at once, which is the
+# failure this replaces. Not the `repo` table: CI and a machine without the
+# workflow database would read no answer, and a store the checkout does not
+# carry cannot be reviewed with the change that relies on it.
+#
+# Only a JSON `true` opts in. A file that exists and is wrong takes no reading
+# and says why in a note, never a failure -- the pass is advisory -- but never
+# silently either: a repository that wrote the file meant something by it.
+JEV_OPT_IN_RELATIVE_PATH = pathlib.Path(".github") / "sd-docs-lint.json"
+JEV_OPT_IN_KEY = "jev_claim_support"
+JEV_OPT_IN_KNOWN_KEYS = ("$schema", JEV_OPT_IN_KEY)
 
 # The reasons that print nothing. Every other way this pass declines is a
 # run that could have had a reading and did not, and saying so is the whole of
@@ -974,6 +997,12 @@ JEV_STAGE = "JEV_SD_DOCS_LINT"
 # `bin/sd_jev.py` reaches the same three, and the two gates have to agree --
 # a flip that made the kill switch noisy here and silent there would be a
 # policy nobody could state.
+#
+# The fourth is this gate's alone: a repository that has not opted in, or wrote
+# `false`. That is nearly every repository, so it is silent for the reason a
+# missing `jev` is. `bin/sd_jev.py` has no opt-in to agree with, because the
+# review-tier reading sends paths and tier names, never prose; its docstring
+# says so, and the kill switch the two share is unchanged.
 NOT_ASKED = "not asked"
 CLAIM_CHARS = 400
 EVIDENCE_CHARS = 700
@@ -988,7 +1017,42 @@ CLAIM_INSTRUCTIONS = (
 )
 
 
-def jev_command() -> tuple[str, str]:
+def jev_opt_in(repo: pathlib.Path) -> tuple[bool, str]:
+    """Whether `repo` opted in to the reading, and what is wrong with its file.
+
+    `(False, "")` for no file and for a file that says `false`: the ordinary
+    case, and silent. `(False, problem)` for a file that exists and cannot
+    mean anything, so the caller can say so. `(True, "")` only for a JSON
+    `true` -- not `"true"`, not `1`: a value that opens an egress path is
+    spelled one way.
+
+    The problem names the file and the fault and never the file's content,
+    because a note is printed into pull request logs.
+    """
+    where = JEV_OPT_IN_RELATIVE_PATH.as_posix()
+    try:
+        text = (repo / JEV_OPT_IN_RELATIVE_PATH).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return False, ""
+    except (OSError, UnicodeDecodeError) as error:
+        return False, f"{where}: cannot be read ({type(error).__name__})"
+    try:
+        loaded = json.loads(text)
+    except ValueError:
+        return False, f"{where}: not valid JSON"
+    if not isinstance(loaded, dict):
+        return False, f"{where}: the top level must be a JSON object"
+    unknown = sorted(set(loaded) - set(JEV_OPT_IN_KNOWN_KEYS))
+    if unknown:
+        return False, (f"{where}: {len(unknown)} unknown key(s); "
+                       f"known keys are {', '.join(JEV_OPT_IN_KNOWN_KEYS)}")
+    value = loaded.get(JEV_OPT_IN_KEY, False)
+    if not isinstance(value, bool):
+        return False, f"{where}: {JEV_OPT_IN_KEY} must be true or false"
+    return value, ""
+
+
+def jev_command(repo: pathlib.Path) -> tuple[str, str]:
     """The `jev` to call and an empty reason, or an empty pair and why not.
 
     The resolved path travels rather than the name, and the two callers share
@@ -997,15 +1061,23 @@ def jev_command() -> tuple[str, str]:
     unlikely and the failure it makes is unreadable, which is the combination
     worth spending a return value on.
 
-    Three gates in the order that costs least. The switch is a string
-    comparison, `which` is a path walk, and `jev enabled` reads a file and
-    exits 3 rather than calling anything. None of them reaches the network, so
-    a run that takes no reading pays nothing for this being here. A missing
-    `jev` is the ordinary case and not an error: it lives in a private
-    repository and most checkouts of this one will never have it, which is why
-    it returns the silent sentinel rather than a reason.
+    Four gates in the order that costs least. The switch is a string
+    comparison, the opt-in is one small file read, `which` is a path walk, and
+    `jev enabled` reads a file and exits 3 rather than calling anything. None
+    of them reaches the network, so a run that takes no reading pays nothing
+    for this being here. The switch comes first so that `0` wins over
+    everything, the opt-in included; the opt-in comes before `which` so that
+    a repository that never asked is never probed. A missing `jev` is the
+    ordinary case and not an error: it lives in a private repository and most
+    checkouts of this one will never have it, which is why it returns the
+    silent sentinel rather than a reason.
     """
     if sd_lib.jev_stage_off(os.environ.get(JEV_STAGE)):
+        return "", NOT_ASKED
+    opted_in, problem = jev_opt_in(repo)
+    if problem:
+        return "", problem
+    if not opted_in:
         return "", NOT_ASKED
     found = shutil.which("jev")
     if found is None:
@@ -1057,8 +1129,9 @@ def claim_case(item: pathlib.Path, work_root: pathlib.Path, row: str) -> dict[st
     `claim` and `evidence`, and nothing else: no path, no item name, no
     repository name, and not the citation marker either. The passages are
     prose and a sentence may name a file of its own accord; that is the limit
-    of the promise, and it is the reason there is no default that turns this
-    pass on in a private checkout.
+    of the promise, and it is the reason no default turns this pass on in any
+    checkout: a repository opts in through `JEV_OPT_IN_RELATIVE_PATH` or it
+    takes no reading.
     """
     source, _, relative, start, _ = row.split("\t")
     page, _, number = source.rpartition(":")
@@ -1133,15 +1206,16 @@ def ask_claims(command: str, cases: dict[str, dict[str, str]]) -> dict[str, dict
     return answers if isinstance(answers, dict) else {}
 
 
-def check_claim_support(work_root: pathlib.Path, report: Report) -> None:
+def check_claim_support(repo: pathlib.Path, work_root: pathlib.Path, report: Report) -> None:
     """Rule 6's optional second reading: does the evidence still say it?
 
     Notes only, and a note in every outcome a run asked for -- including the
     ones where nothing ran. A pass that can be silently absent is a pass
     nobody can tell apart from a pass that found nothing, and this file has
     already paid for that mistake twice: rule 6 over an unrecorded item, rule
-    7 over no references at all. So a run that set the opt-in is told why it
-    got no answers as plainly as it would be told the answers. A run that set
+    7 over no references at all. So a repository that opted in is told why
+    it got no answers as plainly as it would be told the answers, and one
+    whose opt-in file cannot be read is told that. A repository that asked for
     nothing is told nothing, which is `NOT_ASKED` above.
 
     A citation Jev did not answer for is passed over rather than reported: the
@@ -1155,7 +1229,7 @@ def check_claim_support(work_root: pathlib.Path, report: Report) -> None:
     failing on its arguments. Two bugs, and the one that mattered was this
     line, because it is the one that would have hidden the next.
     """
-    command, reason = jev_command()
+    command, reason = jev_command(repo)
     if reason == NOT_ASKED:
         return
     if reason:
@@ -1455,7 +1529,7 @@ def run(
     check_pr_link(repo, work_root, pr_body, report)
     check_pr_scope(repo, pr_body, changed, report)
     check_citations(work_root, report)
-    check_claim_support(work_root, report)
+    check_claim_support(repo, work_root, report)
     check_work_references(repo, work_dir, report)
     return report
 

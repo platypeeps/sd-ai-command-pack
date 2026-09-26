@@ -2040,6 +2040,9 @@ import sys
 
 verb = sys.argv[1] if len(sys.argv) > 1 else ""
 if verb == "enabled":
+    probed = os.environ.get("JEV_STUB_PROBED")
+    if probed:
+        open(probed, "w").close()
     raise SystemExit(int(os.environ.get("JEV_STUB_ENABLED", "0")))
 state = sys.argv[sys.argv.index("--state") + 1]
 capture = os.environ.get("JEV_STUB_CAPTURE")
@@ -2073,14 +2076,29 @@ class Rule6ClaimSupportTests(LintFixture):
         stub.write_text(JEV_STUB, encoding="utf-8")
         stub.chmod(0o755)
         self.capture = self.repo / "sent.json"
+        self.probed = self.repo / "probed"
+        # Opted in by default, so every case below that is not about the
+        # opt-in exercises the path a reading takes. The cases about the
+        # opt-in remove or rewrite the file themselves.
+        self.opt_in(True)
+
+    def opt_in(self, value: object) -> None:
+        """Write the repository's opt-in file; a `str` is written verbatim."""
+        path = self.repo / lint.JEV_OPT_IN_RELATIVE_PATH
+        path.parent.mkdir(parents=True, exist_ok=True)
+        text = value if isinstance(value, str) else json.dumps({lint.JEV_OPT_IN_KEY: value})
+        path.write_text(text, encoding="utf-8")
+
+    def opt_out(self) -> None:
+        (self.repo / lint.JEV_OPT_IN_RELATIVE_PATH).unlink()
 
     @contextlib.contextmanager
     def jev(self, **extra: str):
         """The stub on PATH and nothing left behind.
 
-        The switch is unset unless a case sets it: unset means on, so a
-        fixture that set it would no longer be testing the path every run
-        takes. It is *removed* rather than merely not added, because
+        The switch is unset unless a case sets it: unset leaves the
+        repository's opt-in to decide, so a fixture that set it would no
+        longer be testing the path every run takes. It is *removed* rather than merely not added, because
         `patch.dict` layers over the real environment and `CONTRIBUTING.md`
         now tells operators to export `JEV_SD_DOCS_LINT=0` -- a reader who
         follows that advice would otherwise watch seven of these fail, and
@@ -2091,6 +2109,7 @@ class Rule6ClaimSupportTests(LintFixture):
         environment = {
             "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
             "JEV_STUB_CAPTURE": str(self.capture),
+            "JEV_STUB_PROBED": str(self.probed),
             **extra,
         }
         with mock.patch.dict(os.environ, environment):
@@ -2103,26 +2122,94 @@ class Rule6ClaimSupportTests(LintFixture):
         lint.write_citation_manifest(item, self.work)
         return item
 
-    def test_an_unset_switch_takes_the_reading(self) -> None:
-        """The flip. This case used to assert the opposite -- that a run with
-        nothing set said nothing at all -- and it is the one whose inversion
-        is the change."""
+    def test_an_opted_in_repository_with_the_switch_unset_takes_the_reading(self) -> None:
+        """The opt-in on, the switch unset: the one way a reading is taken."""
 
         self.recorded_item()
         with self.jev():
             self.assertIn("claim support", self.notes())
-        self.assertTrue(self.capture.exists(), "an unset switch took no reading")
+        self.assertTrue(self.capture.exists(), "an opted-in repository took no reading")
 
-    def test_the_switch_off_says_nothing_and_sends_nothing(self) -> None:
-        """Silence, not a note: the operator asked for silence.
+    def test_a_repository_that_has_not_opted_in_sends_nothing(self) -> None:
+        """The default (sd:1304). No file, the switch unset, `jev` on PATH and
+        keyed: no request, no note, and `jev` is not even asked whether it can
+        answer. Before sd:1304 this run took the reading, and every checkout
+        whose `docs/work` must not leave the machine had to export `0`."""
+
+        self.opt_out()
+        self.recorded_item()
+        with self.jev():
+            self.assertNotIn("claim support", self.notes())
+        self.assertFalse(self.capture.exists(), "a repository that never opted in sent a request")
+        self.assertFalse(self.probed.exists(), "a repository that never opted in probed jev")
+
+    def test_no_environment_variable_can_opt_a_repository_in(self) -> None:
+        """The variable only ever subtracts. The operator's shell exports
+        `JEV_SD_DOCS_LINT=1` for other reasons; that must not turn the
+        reading on in a repository that did not ask for it."""
+
+        self.opt_out()
+        self.recorded_item()
+        for value in ("1", "on", "true", "True", "TRUE", "yes", "enabled", ""):
+            with self.subTest(value=value), self.jev(JEV_SD_DOCS_LINT=value):
+                self.assertNotIn("claim support", self.notes())
+            self.assertFalse(self.capture.exists(), f"{value!r} opted a repository in")
+            self.assertFalse(self.probed.exists(), f"{value!r} made a repository probe jev")
+
+    def test_a_file_that_says_false_is_the_default(self) -> None:
+        self.opt_in(False)
+        self.recorded_item()
+        with self.jev():
+            self.assertNotIn("claim support", self.notes())
+        self.assertFalse(self.capture.exists(), "an opt-in of false sent a request")
+
+    def test_the_switch_off_wins_over_the_opt_in(self) -> None:
+        """Silence, not a note: the operator asked for silence, and the
+        repository's `true` does not overrule them.
 
         `patch.dict` adds to the environment it patches and removes nothing,
         so the switch is stated by the fixture rather than inherited.
         """
         self.recorded_item()
+        self.assertEqual(lint.jev_opt_in(self.repo), (True, ""))
         with self.jev(JEV_SD_DOCS_LINT="0"):
             self.assertNotIn("claim support", self.notes())
         self.assertFalse(self.capture.exists(), "a switched-off run sent a request")
+
+    def test_an_opt_in_that_cannot_mean_anything_is_a_note_and_sends_nothing(self) -> None:
+        """Fails closed, and says so. Only a JSON `true` opts in: a value that
+        opens an egress path is spelled one way. The note names the file and
+        the fault and never what the file held."""
+
+        self.recorded_item()
+        cases = {
+            "{not json": "not valid JSON",
+            "[true]": "the top level must be a JSON object",
+            json.dumps({lint.JEV_OPT_IN_KEY: True, "secret_tenant": True}): "1 unknown key(s)",
+            json.dumps({lint.JEV_OPT_IN_KEY: "true"}): f"{lint.JEV_OPT_IN_KEY} must be true or false",
+            json.dumps({lint.JEV_OPT_IN_KEY: 1}): f"{lint.JEV_OPT_IN_KEY} must be true or false",
+        }
+        for text, fault in cases.items():
+            with self.subTest(text=text):
+                self.opt_in(text)
+                with self.jev():
+                    report = self.run_lint()
+                joined = "\n".join(report.notes)
+                self.assertIn(
+                    f"rule 6 claim support: not run (.github/sd-docs-lint.json: {fault}", joined)
+                self.assertNotIn("secret_tenant", joined)
+                self.assertEqual(report.failures, [])
+                self.assertFalse(self.capture.exists(), f"{text!r} sent a request")
+                self.assertFalse(self.probed.exists(), f"{text!r} made the run probe jev")
+
+    def test_the_schema_names_the_keys_the_reader_accepts(self) -> None:
+        """Two statements of one vocabulary, pinned so they cannot drift."""
+
+        schema = json.loads(
+            (REPO_ROOT / ".github" / "sd-docs-lint.schema.json").read_text(encoding="utf-8"))
+        self.assertFalse(schema["additionalProperties"])
+        self.assertEqual(sorted(schema["properties"]), sorted(lint.JEV_OPT_IN_KNOWN_KEYS))
+        self.assertEqual(schema["properties"][lint.JEV_OPT_IN_KEY]["type"], "boolean")
 
     def test_every_off_word_switches_it_off(self) -> None:
         self.recorded_item()
