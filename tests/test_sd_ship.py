@@ -2491,6 +2491,30 @@ roles:
         self.assertEqual((record["head"], record["exit_code"], record["stdout"], record["stderr"]),
                          (head, 1, "partial", "Traceback: boom\n"))
 
+    def test_a_watchdog_kill_keeps_raw_model_text_out_of_the_ship_state(self):
+        """The timeout path bypasses the receipt check; it must withhold raw text too."""
+        operation = self.operation()
+        head = _git(self.root, "rev-parse", "HEAD")
+        original = ship.review_process
+        report = {"status": "clean", "outcomes": [{"backend": "minimax", "diagnostic": {
+            "kind": "invalid_response", "raw_response": {"body": "model text", "stderr": ""}}}]}
+        def killed(root, argv, **kwargs):
+            if "--explain" in argv:
+                return original(root, argv, **kwargs)
+            raise ship.ReviewTimeout({"kind": "watchdog_expired", "allowed_seconds": kwargs["timeout"],
+                                      "stdout": {"bytes": 10, "tail": "model text", "truncated": False},
+                                      "captured_report": report})
+        capture = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory())) / "raw"
+        with patch.dict(os.environ, {"SD_REVIEW_RAW_DIR": str(capture)}), \
+                patch.object(ship, "review_process", side_effect=killed):
+            with self.assertRaisesRegex(ship.Refusal, "execution watchdog expired"):
+                operation.review(head)
+        error = self.operation().state["passes"][0]["execution_error"]
+        self.assertNotIn("model text", json.dumps(error))
+        self.assertEqual(error["stdout"]["bytes"], 10)
+        path = pathlib.Path(error["captured_report"]["outcomes"][0]["diagnostic"]["raw_capture"])
+        self.assertEqual(json.loads(path.read_text())["body"], "model text")
+
     def test_missing_receipt_retry_is_explicit_and_never_rolls_back_spent_pass(self):
         operation = self.operation()
         head = _git(self.root, "rev-parse", "HEAD")

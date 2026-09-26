@@ -341,7 +341,7 @@ class SharedReview:
             if stage == "planning":
                 self.save(review_preflight_error=dict(error.diagnostic, stage=stage))
             else:
-                passes[-1].update(execution_error=dict(error.diagnostic, stage=stage), exit_code=124)
+                passes[-1].update(execution_error=withhold_raw(dict(error.diagnostic, stage=stage), head), exit_code=124)
                 self.save(passes=passes, reviewed_head=None, phase="reviewed")
             raise Refusal(f"local review {stage} watchdog expired after {error.diagnostic['allowed_seconds']}s; "
                           + ("no provider pass reserved; " if stage == "planning" else "reserved pass retained; ")
@@ -396,11 +396,7 @@ class SharedReview:
                                                                  "stdout": result.stdout, "stderr": result.stderr})
             if written:
                 error["raw_capture"] = written
-            if os.environ.get(RAW_CAPTURE_ENV):
-                # A truncated receipt can carry `raw_response`: its model text
-                # goes to the private file only, never into the ship state.
-                error["stdout"] = {"withheld": "raw capture is on; stdout may carry model output",
-                                   "bytes": len(result.stdout.encode())}
+            withhold_raw(error, head)
             passes[-1].update(execution_error=error, exit_code=result.returncode)
             self.save(passes=passes, reviewed_head=None, phase="reviewed")
             raise Refusal(f"local review emitted no valid receipt (sd-review exit {result.returncode}); "
@@ -496,6 +492,24 @@ def stash_raw_responses(report: dict, head: str) -> None:
             written = write_raw(f"{head[:12]}-{outcome.get('backend', 'provider')}", {"head": head, **raw})
             if written:
                 diagnostic["raw_capture"] = written
+
+
+def withhold_raw(diagnostic: dict, head: str) -> dict:
+    """Keep a reviewer's raw model text out of a diagnostic the ship state stores.
+
+    Only with `SD_REVIEW_RAW_DIR` set does sd-review put `raw_response` in its
+    output, and a truncated receipt or a watchdog kill can leave it in the
+    stdout tail or the captured report. The tail is withheld (the private file
+    holds the whole output) and a captured report's responses move to files.
+    """
+    if os.environ.get(RAW_CAPTURE_ENV):
+        stdout = diagnostic.get("stdout")
+        if isinstance(stdout, dict):
+            diagnostic["stdout"] = {"withheld": "raw capture is on; stdout may carry model output",
+                                    "bytes": stdout.get("bytes")}
+        if isinstance(diagnostic.get("captured_report"), dict):
+            stash_raw_responses(diagnostic["captured_report"], head)
+    return diagnostic
 
 
 def validate_review_readiness(planned: subprocess.CompletedProcess) -> None:
