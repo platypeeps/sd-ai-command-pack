@@ -513,6 +513,14 @@
 
 ### Fixed
 
+- **An empty check rollup on a conflicting head names the conflict (sd:1403).**
+  GitHub builds no merge ref for a DIRTY head and dispatches no
+  `pull_request` run, so zero checks there is not a slow queue. `sd-pr-state`
+  and `sd-status` now say the head conflicts and none will run, and say
+  "read again once" on UNKNOWN. `sd-ship merge` refuses a dirty pull request
+  as `merge_conflict` with a resolve-the-conflict next action, and an unknown
+  mergeability as a retryable `mergeability_pending`, instead of one generic
+  merge-rules sentence.
 - **`sd-ship prepare` re-reads a pull object that lags the push (sd:1394).**
   It read the pull object once after pushing and refused when the head
   differed, but GitHub updates it a second or so after the ref. A push that
