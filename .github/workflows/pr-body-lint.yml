@@ -55,6 +55,9 @@ jobs:
       # request adds and nothing the base has gained since. The payload's
       # `pull_request.base.sha` is frozen at the base the pull request was
       # opened against and widens the set with other people's merges (sd:1401).
+      # `-z` writes the paths NUL-terminated and unquoted: a newline listing
+      # quotes a non-ASCII path, which then matched no scope glob and passed
+      # without its line (sd:1440). sd-docs-lint reads the NUL form.
       # A `HEAD^2` that does not resolve means this is not the merge ref, and
       # the step fails rather than diffing against something else. The body
       # reaches the script through the environment, never through `${{ }}`
@@ -73,5 +76,5 @@ jobs:
             exit 1
           fi
           changed="$RUNNER_TEMP/pr-changed.txt"
-          git diff --name-only --no-renames HEAD^1 HEAD > "$changed"
+          git diff --name-only --no-renames -z HEAD^1 HEAD > "$changed"
           python3 bin/sd-docs-lint --body-only --pr-body "$body" --changed "$changed"
