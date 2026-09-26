@@ -354,23 +354,21 @@
 
 ### Added
 
-- **`sd-ship prepare` names a squashed head the branch carries, and which
-  paths `--ours` may take (sd:1409).** A squash merge leaves the merged head
-  off the default branch's history. A second branch that merged that head
-  then conflicts on ancestry, not content, when it merges the default branch.
-  The operator chose the remedy: resolve with `git checkout --ours`, gated by
-  tree-entry identity against the actual merge base. `prepare` reads this machine's merged ship receipts in
-  `bin/sd_ship_squash.py`. For each receipt whose head the branch carries and
-  the base does not, a receipt warning lists the squash's paths in two groups.
-  A path is safe for `--ours` only when the entries prove the base side has
-  nothing the branch lacks: the squash is the base's only change to it since
-  the merge base. Equality with the carried head alone is not proof, because
-  the base can return to that entry after both sides moved on. Every other
-  path, and any path git cannot read, must be read by hand. Names are read
-  NUL-delimited, so a path with a space stays one path. A branch
-  still behind the base gets the same split in its `base_moved` refusal,
-  since the merge that refusal asks for is where the conflict lands. The ship
-  skill's recovery reference documents the procedure.
+- **`sd-ship prepare` names a squashed head the branch carries (sd:1409).**
+  A squash merge leaves the merged head off the default branch's history. A
+  second branch that merged that head then conflicts on ancestry, not
+  content, when it merges the default branch. `prepare` reads this machine's
+  merged ship receipts in `bin/sd_ship_squash.py`. For each receipt whose
+  head the branch carries and the base does not, a receipt warning names the
+  carried head and the squash, and lists every path the squash changed for
+  resolution by hand. It calls no path safe for `git checkout --ours`.
+  Tree-entry equality cannot prove that: a base that leaves a path and
+  returns to it defeats each rule tried, and `--ours` would discard its
+  change. Names are read NUL-delimited and unstripped, so a leading or inner
+  space survives. A branch still behind the base gets the same warning in its
+  `base_moved` refusal, since the merge that refusal asks for is where the
+  conflict lands. The ship skill's recovery reference documents the
+  procedure.
 - **The `sd-slice-builder` agent ships with the pack.** It is the
   implementation worker for a planned multi-file slice. It existed only as a
   hand-placed `~/.claude/agents/slice-builder.md`, so no other machine had it.

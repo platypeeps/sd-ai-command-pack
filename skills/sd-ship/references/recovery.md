@@ -77,10 +77,10 @@ its output, the trailer did not land.
 A squash merge leaves the merged head off the default branch's history.
 A branch that merged that head conflicts on ancestry when it merges the default branch.
 The conflicts are about history, not content.
-`sd-ship prepare` names the carried head in a receipt warning and splits the squash's paths in two.
-While the branch is still behind the base, the `base_moved` refusal carries the same split.
-Resolve the first list with `git checkout --ours -- <path>`: against the merge base, the squash is the default branch's only change to those paths.
-Read the second list by hand: the default branch changed those paths in some other way, or git could not read them.
+`sd-ship prepare` names the carried head in a receipt warning and lists the paths the squash changed.
+While the branch is still behind the base, the `base_moved` refusal carries the same warning.
+Resolve every conflicted path by hand, against the merge base, not with `git checkout --ours`.
+No path is proven safe for `--ours`: the default branch can leave a path and return to it, and `--ours` would discard that change.
 Do not rebase onto the squash; that needs a force-push.
 
 ## Copilot request recovery
