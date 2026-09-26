@@ -24,8 +24,11 @@ The requirements files use `--require-hashes` locally and in CI.
 To update a dependency, change its pin and run the compile command from that file's header:
 
 ```bash
-uv pip compile --universal --generate-hashes --python-version 3.10 <file> -o <file>
+uv pip compile --universal --generate-hashes --python-version <floor> <file> -o <file>
 ```
+
+`<floor>` is the `requires-python` lower bound in `pyproject.toml`; the resolver pins only releases that support it.
+`tests/test_requirements_target.py` fails when a file's header names another version (sd:1391).
 
 Remove a conflicting transitive pin before recompiling. Do not edit hashes by hand.
 
@@ -148,45 +151,61 @@ Do not replace line numbers without checking their targets.
 Rule 6 compares recorded text against the cited line.
 It cannot tell whether that passage still supports the sentence citing it.
 
-A second reading asks a model that question, and it is taken wherever it can
-be:
+A second reading asks a model that question. It is off unless the repository
+opts in (sd:1304). Opt in with a tracked `.github/sd-docs-lint.json`:
+
+```json
+{
+  "$schema": "./sd-docs-lint.schema.json",
+  "jev_claim_support": true
+}
+```
+
+Only a JSON `true` opts in. No file, or `false`, takes no reading and prints
+nothing. A file that exists and cannot be read as that shape takes no reading
+and prints a note naming the fault; it never fails the run.
+`.github/sd-docs-lint.schema.json` in this repository describes the file.
+This repository opts itself in: its `docs/work` is public already.
+
+The opt-in lives in the repository, not on the machine, because the prose
+belongs to the repository. A tracked file shows the decision in a diff, and a
+fresh clone carries it. A machine setting would answer for every checkout at
+once, which is the failure this replaced.
+
+The reading also needs `jev` on `PATH`. `jev` ships in a private companion
+repository, so most checkouts do not have it, and a run without it is a run
+without this pass — silently, because announcing a missing optional companion
+would put a line in every pull request here forever. The pass prints notes
+only. It never fails a run and never changes an exit code.
 
 ```bash
 make docs-lint
 ```
-
-It needs `jev` on `PATH`. `jev` ships in a private companion repository, so
-most checkouts do not have it, and a run without it is a run without this
-pass — silently, because announcing a missing optional companion would put a
-line in every pull request here forever. The pass prints notes only. It never
-fails a run and never changes an exit code.
 
 Taking the reading sends the citing sentence and the cited passage to a
 third-party model. Both are capped, and neither carries a path, an item name,
 or the citation marker.
 
 **Read `docs/work` there as "the checkout you are standing in", not "this
-one".** `sd-docs-lint` picks its repository from the working directory, and
-the pass walks every recorded citation under that repository's `docs/work` —
-not only the ones a change touched. So a private consumer repo that runs this
-binary from its own root takes the reading over its own prose. `make
-docs-lint` above is the command that names the pass; the ones that will
-actually surprise you are **`make check`**, which wires it into the pre-merge
-gate, and **`sd-ship`**, which lints at delivery. The payload is the same
-either way; what the flip changed is which repositories take the reading and
-how often.
+one".** `sd-docs-lint` picks its repository from the working directory, reads
+that repository's opt-in, and walks every recorded citation under its
+`docs/work` — not only the ones a change touched. `make docs-lint` names the
+pass; **`make check`** wires it into the pre-merge gate, and **`sd-ship`**
+lints at delivery. The payload is the same either way.
 
-Switch it off for a checkout whose `docs/work` must not leave the machine:
+Switch it off for one run or one shell, in any repository:
 
 ```bash
 JEV_SD_DOCS_LINT=0 make check    # or export it once, for every invocation
 ```
 
-`0`, `off`, `false`, `no` and `disabled` all switch it off, in any case.
-Anything else leaves it on, including the `1` this used to require: a typo is
-not an outage. The switch only ever subtracts — it cannot make a reading
-happen that `jev` itself declines, so a machine with no key behaves exactly
-like one with the switch off.
+`0`, `off`, `false`, `no` and `disabled` all switch it off, in any case, and
+the switch wins over the opt-in. The switch only ever subtracts. No value of
+it, `1` included, takes a reading in a repository that has not opted in, and
+it cannot make a reading happen that `jev` itself declines. Before sd:1304
+unset meant on everywhere, so a checkout whose `docs/work` must not leave the
+machine had to export `0` itself. That export still works; it is no longer
+the only protection.
 
 #### The optional review-tier reading
 
@@ -194,6 +213,8 @@ like one with the switch off.
 undocumented here until review said so. `sd_route.route` decides the tier and
 keeps the decision; the reading is a second opinion over a diff shape the
 policy's globs cannot see, and it is taken wherever `jev` says it can answer.
+Unlike the claim-support reading it needs no per-repository opt-in, because
+it sends no prose; the kill switch and the silent cases are the same.
 
 What leaves the machine: the tier names, the repository-relative paths the
 change touches (capped, then a count), the number of lines it moves, and the

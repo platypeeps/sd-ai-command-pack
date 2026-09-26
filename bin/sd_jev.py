@@ -22,6 +22,14 @@ and the routing reason `sd_route` composed from those same inputs. No absolute
 path, no repository or branch name, no author, no commit message, no file
 contents and no diff text.
 
+**No per-repository opt-in, unlike `bin/sd-docs-lint`.** That gate's reading
+sends a repository's own prose, so since sd:1304 it runs only where the
+repository's `.github/sd-docs-lint.json` asks for it. This one sends the
+metadata above and no prose, so it keeps its default. What the two gates share
+is unchanged and must stay so: `sd_lib.jev_stage_off` is the one kill switch,
+which only ever subtracts, and an absent `jev` or `jev enabled` exiting 3 is
+silent in both.
+
 **Exit 0 is not an answer.** `--fallback` prints what it was given and exits 0
 whenever Jev is switched off, unkeyed or failing, so the exit code alone cannot
 tell a judgment from a shrug. The fallback here is `FALLBACK`, a token no tier
@@ -56,6 +64,8 @@ STAGE = "JEV_SD_REVIEW"
 #: path written down here: this repository is public and has no fixed relative
 #: path to a private companion.
 COMMAND = "jev"
+#: This lane's name in the judgment ledger, beside `STAGE` (sd:1253).
+CALLER = "sd-review"
 
 #: Both calls are bounded. The gate answers locally and the judgment is a
 #: single request, so a run that hangs is a fault and not slow progress.
@@ -112,7 +122,7 @@ def jev_tier(
     binary = shutil.which(COMMAND, path=env.get("PATH"))
     if binary is None:
         return tier, None
-    gate = _jev_run([binary, "enabled"], env)
+    gate = _jev_run([binary, "enabled", STAGE, "--record", "--caller", CALLER], env)
     # 3 is "cannot answer here" and nothing narrower: `jev` collapses switched
     # off, no key, a placeholder key and a malformed timeout into this one code
     # on purpose. The same not-configured case as an absent binary, and silent
@@ -167,8 +177,8 @@ def _jev_argv(binary: str, fallback: str, options: Sequence[str]) -> list[str]:
     return [binary, "choice", "How deeply should this code change be reviewed?",
             "--criteria", _jev_criteria(options),
             "--unsure-below", UNSURE_BELOW,
-            "--state", "-", "--state-format", "json",
-            "--id", "sd-review-tier", "--fallback", fallback]
+            "--state", "-", "--state-format", "json", "--caller", CALLER,
+            "--id", "sd-review-tier", "--stage", STAGE, "--fallback", fallback]
 
 
 def _jev_criteria(options: Sequence[str]) -> str:
