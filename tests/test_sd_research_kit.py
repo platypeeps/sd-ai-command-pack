@@ -23,6 +23,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -1172,6 +1173,12 @@ class InitHookInstallTests(unittest.TestCase):
             # This branch's merge commit, superseded by the commit that gave
             # the hook `docs/dashboard/` and an explicit all-zeros guard.
             "8f3224d961a7d0394c47648684d9e5ad5c6ce85b7f563917e8f9e6b76881afb7",
+            # `91d26285`, the body on main before sd:1376 declined to render
+            # a research.conf.py the pull or checkout had just brought in.
+            "26e6f156735dd19389a05eca4b13ac844cd540d121f1b0a2a2d45142a3ef1acb",
+            # `fbd69cd5`, sd:1376's first body, which asked git only whether
+            # the operation itself changed research.conf.py.
+            "d4a5e7a9fb5df3aca9b3288c1e6acbc2c4da5e1bbbc4dc60d7e503c01758ee21",
         }
         digests = {hashlib.sha256(body.encode("utf-8")).hexdigest()
                    for body in module.SUPERSEDED_HOOKS}
@@ -1222,6 +1229,17 @@ class HookTriggerTests(unittest.TestCase):
             "    handle.write(' '.join(sys.argv[1:]) + chr(10))\n"
             % str(self.marker))
         kit.chmod(0o755)
+        # The stub records nothing, so the record a real render leaves is
+        # written here: the config this repository started with has been
+        # rendered once, by hand, which is what `init-hook` asks for.
+        self.trust()
+
+    def trust(self) -> None:
+        """Record the tree's config as rendered, as `sd-research-kit render` does."""
+
+        source = (self.repo / "research.conf.py").read_bytes()
+        record = self.git("rev-parse", "--git-path", "sd-research-conf.sha256").stdout.strip()
+        (self.repo / record).write_text(hashlib.sha256(source).hexdigest() + "\n")
 
     def git(self, *args: str) -> subprocess.CompletedProcess:
         # Every git call here runs with the hook switched off: the hooks are
@@ -1337,6 +1355,122 @@ class HookTriggerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.renders(), ["render", "render"],
                          "the render that puts HEAD's text back never ran")
+
+    def a_config_change(self) -> None:
+        (self.repo / "research.conf.py").write_text('PROJECT = "incoming"\nDOCS = []\n')
+        self.git("commit", "-qam", "config from elsewhere")
+
+    def assert_declined(self, result: subprocess.CompletedProcess) -> None:
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.renders(), [])
+        self.assertIn("research.conf.py", result.stderr)
+        self.assertIn("sd-research-kit render", result.stderr)
+
+    def test_a_pull_that_brings_in_a_config_does_not_execute_it(self) -> None:
+        """sd:1376. `render` executes research.conf.py. A post-merge arm that
+        rendered on every pull ran a config the operator never read, from a
+        tree they did not write, with no command of theirs in between."""
+
+        self.git("checkout", "-q", "-b", "side")
+        self.a_config_change()
+        self.git("checkout", "-q", "-")
+        self.a_second_commit()
+        self.git("merge", "-q", "--no-ff", "--no-edit", "side")
+        self.assert_declined(self.fire("post-merge"))
+
+    def test_a_branch_switch_that_changes_the_config_does_not_execute_it(self) -> None:
+        before = self.sha()
+        self.a_config_change()
+        self.assert_declined(self.fire("post-checkout", before, self.sha(), "1"))
+
+    def test_a_file_checkout_of_the_config_does_not_execute_it(self) -> None:
+        self.git("checkout", "-q", "-b", "side")
+        self.a_config_change()
+        self.git("checkout", "-q", "-")
+        here = self.sha()
+        self.git("checkout", "-q", "side", "--", "research.conf.py")
+        self.assert_declined(self.fire("post-checkout", here, here, "0"))
+
+    def a_declined_pull_of_a_config(self) -> None:
+        self.git("checkout", "-q", "-b", "side")
+        self.a_config_change()
+        self.git("checkout", "-q", "-")
+        self.a_second_commit()
+        self.git("merge", "-q", "--no-ff", "--no-edit", "side")
+        self.assert_declined(self.fire("post-merge"))
+
+    def test_a_file_checkout_after_a_declined_pull_does_not_execute_the_config(self) -> None:
+        """The #1376 review. The pull is declined; `git checkout HEAD -- doc.md`
+        then finds the tree's config equal to HEAD's. An arm that asked git
+        only about its own operation read that as nothing to decline, and
+        executed the config the pull had brought in."""
+
+        self.a_declined_pull_of_a_config()
+        here = self.sha()
+        (self.repo / "doc.md").write_text("scratch\n")
+        self.git("checkout", "-q", "HEAD", "--", "doc.md")
+        self.assert_declined(self.fire("post-checkout", here, here, "0"))
+
+    def test_a_later_pull_that_leaves_the_config_alone_does_not_execute_it(self) -> None:
+        self.a_declined_pull_of_a_config()
+        self.git("checkout", "-q", "-b", "later")
+        (self.repo / "doc.md").write_text("later\n")
+        self.git("commit", "-qam", "later")
+        self.git("checkout", "-q", "-")
+        self.git("merge", "-q", "--no-ff", "--no-edit", "later")
+        self.assert_declined(self.fire("post-merge"))
+
+    def test_a_config_rendered_by_hand_renders_from_then_on(self) -> None:
+        self.a_declined_pull_of_a_config()
+        self.trust()
+        here = self.sha()
+        result = self.fire("post-checkout", here, here, "0")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.renders(), ["render"])
+
+    def test_a_checkout_with_no_record_does_not_execute_the_config(self) -> None:
+        """A repository whose config no render has recorded, such as one the
+        previous hook body rendered: its config was never shown to be read."""
+
+        record = self.git("rev-parse", "--git-path", "sd-research-conf.sha256").stdout.strip()
+        (self.repo / record).unlink()
+        here = self.sha()
+        self.assert_declined(self.fire("post-checkout", here, here, "0"))
+
+    def test_a_render_records_the_config_it_executed(self) -> None:
+        """The record the arms above read is written by the render itself, so
+        a render by hand is what lets a pulled config render again."""
+
+        load_publish()
+        with unittest.mock.patch.dict(sys.modules, {"markdown": types.ModuleType("markdown")}):
+            render = load_kit().load("sd_research_render")
+        record = self.repo / self.git(
+            "rev-parse", "--git-path", "sd-research-conf.sha256").stdout.strip()
+        record.unlink()
+        self.a_config_change()
+        here = os.getcwd()
+        os.chdir(self.repo)
+        self.addCleanup(os.chdir, here)
+        # DOCS is empty, so nothing is converted: an empty module stands in
+        # for python-markdown, which the kit re-executes to find.
+        with unittest.mock.patch.object(render, "publish", return_value=[]), \
+                unittest.mock.patch("sys.stdout", io.StringIO()):
+            render.main()
+        source = (self.repo / "research.conf.py").read_bytes()
+        self.assertEqual(record.read_text(encoding="utf-8").strip(),
+                         hashlib.sha256(source).hexdigest())
+
+    def test_the_hook_reads_the_record_render_writes(self) -> None:
+        module = load_publish()
+        self.assertIn('TRUSTED = "%s"' % module.TRUSTED_CONF, module.HOOK)
+
+    def test_the_operators_own_config_commit_still_renders(self) -> None:
+        """Post-commit is the original design: the operator wrote the commit."""
+
+        self.a_config_change()
+        result = self.fire("post-commit")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.renders(), ["render"])
 
     def test_post_checkout_renders_when_no_branch_moved(self) -> None:
         """`git checkout <the branch already checked out>`, or `-b`.
