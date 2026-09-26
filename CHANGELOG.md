@@ -4,6 +4,12 @@
 
 ### Changed
 
+- **A watchdog-killed review keeps its output under `SD_REVIEW_RAW_DIR`.**
+  With capture on, sd-ship withheld the stdout tail of a timed-out review but
+  wrote no file, so a truncated or oversized output left no evidence
+  (sd:1588). The killed process's whole stdout and stderr now go to an
+  owner-only `<head>-watchdog-*.json` file, and the diagnostic keeps its path.
+
 - **`SD_REVIEW_RAW_DIR` keeps a failed review's raw output for debugging.**
   A MiniMax pass on system #590 failed with only "local review emitted no
   valid receipt"; sd-ship had dropped sd-review's exit code and stderr. Now

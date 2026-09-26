@@ -501,8 +501,15 @@ def withhold_raw(diagnostic: dict, head: str) -> dict:
     output, and a truncated receipt or a watchdog kill can leave it in the
     stdout tail or the captured report. The tail is withheld (the private file
     holds the whole output) and a captured report's responses move to files.
+    A watchdog kill hands over its whole output as `raw_output`, which is always
+    removed here and written to its own file (sd:1588).
     """
+    raw = diagnostic.pop("raw_output", None)
     if os.environ.get(RAW_CAPTURE_ENV):
+        if isinstance(raw, dict):
+            written = write_raw(f"{head[:12]}-watchdog", {"head": head, **raw})
+            if written:
+                diagnostic["raw_capture"] = written
         stdout = diagnostic.get("stdout")
         if isinstance(stdout, dict):
             diagnostic["stdout"] = {"withheld": "raw capture is on; stdout may carry model output",
