@@ -1118,6 +1118,67 @@ def read_span(path: pathlib.Path, start: int, window: int, cap: int) -> str:
     return " ".join(" ".join(span).split())[:cap]
 
 
+# A line that opens a markdown block of its own: a list item, a heading, a
+# quotation, a table row or a fence. A soft-wrapped continuation line opens
+# nothing, which is what lets `read_claim` walk back through one.
+BLOCK_START_RE = re.compile(r"\s*(?:[-*+]\s|\d+[.)]\s|#|>|\||```|~~~)")
+# A line that is a block by itself and never wraps: a heading, a table row, a
+# fence. A citation on one of these claims that line and nothing around it.
+SINGLE_LINE_RE = re.compile(r"\s*(?:#|\||```|~~~)")
+LIST_MARKER_RE = re.compile(r"\s*(?:[-*+]|\d+[.)]|>)\s+")
+# The end of a sentence: a stop, any closing marks after it, then space or the
+# end of the text. `prd.md` does not match, because a space has to follow.
+SENTENCE_END_RE = re.compile(r"[.!?][)\]*_`'\"]*(?=\s|$)")
+
+
+def read_claim(path: pathlib.Path, number: int, citation: str, cap: int) -> str:
+    """The sentence a citation marker sits in, capped at `cap` characters.
+
+    Not the marker's line (sd:1186). Prose here is hard-wrapped, and a marker
+    trails its sentence, so the line it sits on is the sentence's tail plus
+    the opening of the next one. Sent as the claim, that fragment was judged
+    correctly and scored low, and a third of the readings in one repository
+    were that answer to the wrong question.
+
+    So the soft-wrapped lines of the marker's paragraph or list item are
+    joined, and the sentence that ends after the marker is cut out of them.
+    The cap is `read_span`'s and for the same reason: this is what leaves the
+    machine. It is not raised, so the worst case sent is unchanged at `cap`
+    characters; only which characters those are has changed. A sentence
+    longer than the cap keeps the words that lead up to the marker, because
+    those are the assertion the citation supports.
+    """
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ""
+    index = number - 1
+    if not 0 <= index < len(lines) or not lines[index].strip():
+        return ""
+    first = last = index
+    if not SINGLE_LINE_RE.match(lines[index]):
+        while (first > 0 and not BLOCK_START_RE.match(lines[first])
+               and lines[first - 1].strip() and not SINGLE_LINE_RE.match(lines[first - 1])):
+            first -= 1
+        while (last + 1 < len(lines) and lines[last + 1].strip()
+               and not BLOCK_START_RE.match(lines[last + 1])):
+            last += 1
+    parts = [" ".join(line.split()) for line in lines[first:last + 1]]
+    parts[0] = LIST_MARKER_RE.sub("", parts[0], count=1)
+    text = " ".join(parts)
+    offset = len(" ".join(parts[:index - first])) + (1 if index > first else 0)
+    found = parts[index - first].find(f"`{citation}`")
+    marker = offset + max(found, 0)
+    marker_end = marker + (len(citation) + 2 if found >= 0 else 0)
+    start = max((m.end() for m in SENTENCE_END_RE.finditer(text, 0, marker)), default=0)
+    after = SENTENCE_END_RE.search(text, marker_end)
+    end = after.end() if after else len(text)
+    # Past the cap, the window ends at the sentence's end when little follows
+    # the marker, and at the marker otherwise; it starts `cap` before that.
+    high = end if end - marker_end <= cap // 4 else max(marker_end, min(end, start + cap))
+    return text[max(start, high - cap):high].strip()
+
+
 def claim_case(item: pathlib.Path, work_root: pathlib.Path, row: str) -> dict[str, str] | None:
     """One manifest row as the claim it makes and the evidence it points at.
 
@@ -1133,7 +1194,7 @@ def claim_case(item: pathlib.Path, work_root: pathlib.Path, row: str) -> dict[st
     checkout: a repository opts in through `JEV_OPT_IN_RELATIVE_PATH` or it
     takes no reading.
     """
-    source, _, relative, start, _ = row.split("\t")
+    source, citation, relative, start, _ = row.split("\t")
     page, _, number = source.rpartition(":")
     # The citation marker itself comes out of the claim. It names a file and a
     # line, which is the one thing this pass has no reason to send, and the
@@ -1141,7 +1202,7 @@ def claim_case(item: pathlib.Path, work_root: pathlib.Path, row: str) -> dict[st
     # sentence says to look. It is prose, so no promise can be made that a
     # file name never appears inside it -- a sentence is free to name one --
     # but the marker is put there by the citation and is taken back out.
-    claim = CITATION_RE.sub("[cited]", read_span(item / page, int(number), 1, CLAIM_CHARS))
+    claim = CITATION_RE.sub("[cited]", read_claim(item / page, int(number), citation, CLAIM_CHARS))
     evidence = read_span(work_root.resolve() / relative, int(start), EVIDENCE_WINDOW, EVIDENCE_CHARS)
     if not claim or not evidence:
         return None

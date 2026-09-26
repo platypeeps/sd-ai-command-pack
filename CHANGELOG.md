@@ -4,6 +4,17 @@
 
 ### Changed
 
+- **`sd-docs-lint` sends the citing sentence, not the citing line, as the claim (sd:1186).**
+  The claim-support reading sent the one physical line a citation marker sat
+  on. Prose here is hard-wrapped and a marker trails its sentence, so the claim
+  was the sentence's tail plus the next sentence's opening. In the system
+  repository 64 of 197 readings scored under 0.5 for that reason. The claim is
+  now the sentence that ends after the marker, joined across the wrapped lines
+  of its paragraph or list item. The 400-character cap is unchanged, so the
+  worst case sent is unchanged; a longer sentence keeps the words that lead up
+  to the marker. `.citations.tsv` is unchanged: it records the cited line, not
+  the claim, so no recording needs rewriting.
+
 - **`sd-review` reads authorship from the reviewed commits on the default branch (sd:1547).**
   With `--base` on the default branch, the refreshed target boundary is HEAD
   itself, so the authored range was empty. That empty read printed
