@@ -6,17 +6,18 @@ Explicit task instructions and stricter execution permissions take precedence.
 
 ## Reviewers
 
-- Prefer Codex when no reviewed commit carries OpenAI authorship.
-- Use Claude as backup, including for Codex-authored changes, when Anthropic did not author the reviewed change.
-- Do not let a provider review its own vendor's work.
-- Use MiniMax or Baseten only after an explicit user request naming that provider for the task.
-- Do not select either provider automatically for fallback, retries, or an additional review slot.
+- Run `sd-review` and let it pick; do not pick a reviewer by hand or call a provider CLI directly.
+- `sd-review` follows the reviewer order `sd providers list` shows; `sd providers configure` sets it.
+- This file names no provider preference: the registry order is the only one, and `--explain` names its source.
+- `sd-review` passes over any provider whose vendor authored the reviewed change.
+- Use a provider outside that order only after an explicit user request naming it for the task (`--provider NAME`).
+- Do not select such a provider for fallback, retries, or an additional review slot.
 - Availability, configured credentials, and standing transmission consent do not constitute that explicit request.
 - If no permitted independent reviewer remains, report that condition once and stop the review.
 
 Before expensive checks or external transmission, inspect `sd-review --explain --json` for the intended scope.
 Check the complete fallback chain, required review count, authorship exclusions, and effective authorization.
-Stop if the plan includes an unrequested explicit-only provider.
+Stop if the plan includes an unrequested provider from outside the order.
 One completed independent local review satisfies each reviewing tier; risk classification does not add reviewers.
 Complete local review and fix verification before requesting any Copilot review.
 Copilot is an optional second review.

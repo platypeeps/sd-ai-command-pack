@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import pathlib
@@ -315,6 +316,49 @@ class DatabaseProviderStateTests(ReviewRunFixture):
         self.assertEqual(result["status"], "unavailable")
         self.assertIn("cannot read provider state", result["registry_refusal"])
         self.assertEqual(result["outcomes"], [])
+
+
+class OrderSourceTests(ReviewRunFixture):
+    """`--explain` names where the reviewer order came from (sd:1556).
+
+    A session read `roles.reviewer` in providers.yaml, saw no minimax, and
+    watched `sd-review` resolve minimax first: the rows `sd providers
+    configure` writes had overridden the file's seed, and nothing said so.
+    """
+
+    prepare_state = DatabaseProviderStateTests.prepare_state
+
+    def explained(self, root: pathlib.Path) -> tuple[dict[str, Any], str]:
+        result = self.run_review(root, FakeRunner(), explain=True)
+        stream = io.StringIO()
+        sd_review.render(result, stream)
+        return result, stream.getvalue()
+
+    def test_a_database_order_names_the_database_and_the_overridden_seed(self) -> None:
+        root, database = self.prepare_state()
+        connection = connect(database)
+        try:
+            connection.execute("UPDATE provider SET reviewer_rank=0 WHERE name='third'")
+            connection.execute("UPDATE provider SET reviewer_rank=5 WHERE name='codex'")
+        finally:
+            connection.close()
+        result, text = self.explained(root)
+        self.assertTrue(result["order_source"].startswith(f"database {database}"), result["order_source"])
+        self.assertIn("sd providers list", result["order_source"])
+        self.assertIn("roles.reviewer [codex, second, third] is only the seed", result["order_source"])
+        self.assertIn(f"  order from  database {database}", text)
+
+    def test_a_database_that_agrees_with_the_seed_names_no_disagreement(self) -> None:
+        root, database = self.prepare_state()
+        result, _ = self.explained(root)
+        self.assertTrue(result["order_source"].startswith(f"database {database}"), result["order_source"])
+        self.assertNotIn("only the seed", result["order_source"])
+
+    def test_no_database_names_the_file(self) -> None:
+        result, text = self.explained(self.prepare())
+        registry = self.registry_home / ".local/share/sd/providers.yaml"
+        self.assertEqual(result["order_source"], f"file {registry} (roles:); no provider database")
+        self.assertIn(f"  order from  file {registry}", text)
 
 
 class ClaudeReaderTests(ReviewFixture):
