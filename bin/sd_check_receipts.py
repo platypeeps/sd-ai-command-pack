@@ -39,7 +39,7 @@ def file_digest(path: pathlib.Path) -> str:
 
 
 def reuse_contract(root: pathlib.Path) -> dict[str, Any]:
-    value = json.loads((root / CONTRACT).read_text())
+    value = json.loads((root / CONTRACT).read_text(encoding="utf-8"))
     if (not isinstance(value, dict) or set(value) != FIELDS or type(value["schema_version"]) is not int
             or value["schema_version"] != 1 or value["complete"] is not True or value["network"] != "none"):
         raise Unavailable("reuse requires a complete local-only dependency declaration")

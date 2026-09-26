@@ -840,6 +840,10 @@ def quotes(reason: str, token: str, doc: pathlib.Path,
     if symbol:
         import ast
 
+        # A page declares no symbol, however it parses: the same refusal
+        # `source_declaration_error` makes before it parses (sd:999).
+        if not points_into_code(path):
+            return False
         try:
             text = source.read_text(encoding="utf-8")
             spans = declared_spans(ast.parse(text, filename=path), symbol)
@@ -1651,6 +1655,15 @@ class TheMarkerGrammar(unittest.TestCase):
                         sources,
                         f"`f` ({self.QUOTABLE}) [quoted: source:bin/tool.py::{symbol}]"),
                     "quoted-not-there")
+
+    def test_a_source_locator_reason_into_a_page_is_not_a_declaration(self) -> None:
+        """A page that happens to parse as Python declares nothing: the symbol
+        branch refuses markdown the way `source_declaration_error` does."""
+        self.assertEqual(
+            self.reason_in_checkout(
+                {"notes.md": self.CODE["bin/tool.py"]},
+                f"`f` ({self.QUOTABLE}) [quoted: source:notes.md::marker_after]"),
+            "quoted-not-there")
 
     def test_a_malformed_source_locator_is_not_a_marker(self) -> None:
         """No `::symbol`, so no reason, so the citation is checked as a claim."""
@@ -2928,6 +2941,8 @@ class StableSourceCitationTests(unittest.TestCase):
 
     def test_every_explicit_source_locator_resolves_in_the_live_corpus(self) -> None:
         citations = stable_source_citations(REPO_ROOT)
+        # Empty would pass the loop below on no evidence (sd:999).
+        self.assertTrue(citations, "no source:<path>::<symbol> locator was found")
         failures = []
         for doc, path, symbol in citations:
             problem = source_declaration_error(REPO_ROOT, path, symbol)
