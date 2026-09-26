@@ -91,6 +91,42 @@ class ThePinIsReadable(unittest.TestCase):
         self.assertEqual(pins(text), ["a" * 40])
 
 
+class TheCanarySkipsNothing(unittest.TestCase):
+    """sd:1557. The canary fails on a skipped test, as the unittest job does.
+
+    Without the gate, a system `main` that loses a capability a test skips on
+    leaves the canary green. Both jobs install opencode from one script, so its
+    live test runs in each, and its version and checksum are written once.
+    """
+
+    INSTALL = "run: bash .github/scripts/install-opencode.sh\n"
+    RUN = "run: bash .github/scripts/run-tests.sh\n"
+    GATE = "- name: Fail on skipped tests\n"
+    SKIPS = "grep -Eq 'skipped=[1-9][0-9]*' unittest-output.log"
+
+    def test_each_suite_job_installs_opencode_runs_then_fails_on_skips(self):
+        text = WORKFLOW.read_text(encoding="utf-8")
+        for name in ("unittest", "sd-db-main-canary"):
+            with self.subTest(job=name):
+                job = job_block(text, name)
+                self.assertEqual(job.count(self.INSTALL), 1, job)
+                self.assertEqual(job.count(self.RUN), 1, job)
+                self.assertEqual(job.count(self.GATE), 1, job)
+                self.assertIn(self.SKIPS, job[job.index(self.GATE):])
+                self.assertLess(job.index(self.INSTALL), job.index(self.RUN))
+                self.assertLess(job.index(self.RUN), job.index(self.GATE))
+
+    def test_the_opencode_version_and_checksum_are_written_once(self):
+        definitions = re.compile(r"(?m)^\s*(OPENCODE_VERSION|OPENCODE_SHA256)\s*[:=]")
+        found = sorted(
+            (str(path.relative_to(ROOT)), name)
+            for path in (ROOT / ".github").rglob("*")
+            if path.is_file()
+            for name in definitions.findall(path.read_text(encoding="utf-8", errors="replace")))
+        self.assertEqual(found, [(".github/scripts/install-opencode.sh", "OPENCODE_SHA256"),
+                                 (".github/scripts/install-opencode.sh", "OPENCODE_VERSION")])
+
+
 class ThePinCarriesTheInstalledSchema(unittest.TestCase):
     def test_pin_schema_equals_installed_schema(self):
         ref = pins(WORKFLOW.read_text(encoding="utf-8"))[0]
