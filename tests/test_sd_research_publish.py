@@ -1387,6 +1387,10 @@ class HookTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.repo = research_repo(self.root)
         self.hooks = self.repo / ".git" / "hooks"
+        # The merge and checkout arms render only a config a render recorded
+        # (sd:1376), and the stand-in below records nothing. The config this
+        # repository started with has been rendered once, by hand.
+        PUBLISH.trust_conf(self.repo, (self.repo / "research.conf.py").read_bytes())
         # A stand-in kit on PATH that records where and how it was called.
         self.log = self.root / "calls.log"
         bindir = self.root / "bin"
