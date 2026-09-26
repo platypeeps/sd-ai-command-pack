@@ -2431,6 +2431,8 @@ class Rule6ClaimSupportTests(LintFixture):
 
 
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "tests.yml"
+#: The workflow that grades the pull request body (sd:1408).
+BODY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "pr-body-lint.yml"
 
 
 def docs_lint_step_code(text: str) -> str:
@@ -2518,11 +2520,52 @@ class ChangedPathsComeFromTheMergeRefTests(unittest.TestCase):
         self.assertEqual(self.changed("HEAD^1", "HEAD"), ["bin/mine.py"])
 
     def test_the_workflow_diffs_the_first_parent_and_refuses_a_plain_checkout(self) -> None:
-        code = docs_lint_step_code(WORKFLOW.read_text(encoding="utf-8"))
+        code = docs_lint_step_code(BODY_WORKFLOW.read_text(encoding="utf-8"))
         self.assertIn("git diff --name-only --no-renames HEAD^1 HEAD", code)
         self.assertIn("HEAD^2", code)
         self.assertNotIn("pull_request.base.sha", code)
 
+
+class AnEditedBodyIsGradedTests(unittest.TestCase):
+    """sd:1408. The body a check grades is the one in its event's payload.
+
+    `tests.yml` fires on `opened`, `synchronize` and `reopened`, so a body
+    edited after the last push was graded by nothing, and a failing body could
+    not be cleared by fixing it. The body rules now run in a workflow of their
+    own that also fires on `edited`, and `tests.yml` no longer grades the body:
+    a red `lint` left by an old body would outlive the fix, and `lint` is a
+    required check.
+    """
+
+    @staticmethod
+    def header(path: pathlib.Path) -> str:
+        """The workflow above `jobs:`, comments dropped: where its trigger is."""
+        text = path.read_text(encoding="utf-8").split("\njobs:\n", 1)[0]
+        return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+
+    def test_the_body_workflow_runs_on_an_edit_and_on_every_push_event(self) -> None:
+        match = re.search(r"^on:\n  pull_request:\n    types: \[([^\]]*)\]$", self.header(BODY_WORKFLOW), re.MULTILINE)
+        self.assertIsNotNone(match, "pr-body-lint.yml has no `pull_request: types:` trigger")
+        types = {word.strip() for word in match.group(1).split(",")}
+        self.assertIn("edited", types)
+        # A required check has to report on a pull request nobody edits.
+        self.assertTrue({"opened", "synchronize", "reopened"} <= types, types)
+
+    def test_the_body_check_has_the_stable_name_the_ruleset_requires(self) -> None:
+        jobs = BODY_WORKFLOW.read_text(encoding="utf-8").split("\njobs:\n", 1)[1]
+        self.assertEqual(re.findall(r"^  (\S+):$", jobs, re.MULTILINE), ["body-lint"])
+        self.assertRegex(jobs, r"(?m)^    name: body-lint$")
+
+    def test_the_body_check_runs_the_body_rules_alone(self) -> None:
+        code = docs_lint_step_code(BODY_WORKFLOW.read_text(encoding="utf-8"))
+        self.assertIn("bin/sd-docs-lint --body-only --pr-body", code)
+        self.assertIn("PR_BODY: ${{ github.event.pull_request.body }}", code)
+
+    def test_the_test_workflow_neither_grades_the_body_nor_reruns_on_an_edit(self) -> None:
+        code = docs_lint_step_code(WORKFLOW.read_text(encoding="utf-8"))
+        self.assertNotIn("--pr-body", code)
+        self.assertNotIn("PR_BODY", code)
+        self.assertNotIn("edited", self.header(WORKFLOW))
 
 
 class ArchiveIsBelowTheWorkRootTests(unittest.TestCase):

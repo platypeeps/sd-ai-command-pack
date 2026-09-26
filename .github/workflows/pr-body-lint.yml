@@ -1,0 +1,77 @@
+# Grades the pull request body: sd-docs-lint rules 5 (exactly one `Work:`
+# line) and 8 (the scope line a changed path demands), and nothing else.
+#
+# Why a workflow of its own (sd:1408). The body arrives in the stored event
+# payload, so a check grades the body that was live when its event fired. The
+# `lint` job in tests.yml fires on `opened`, `synchronize` and `reopened` only,
+# so a body edited after the last push was graded by nothing, and a failing
+# body could not be cleared by fixing it. Adding `edited` there would re-run the
+# whole test matrix on every body tweak. This workflow is small enough to run on
+# every edit, and it owns the body rules outright: `lint` no longer grades the
+# body, because a failure left red there by an old body would outlive the fix.
+#
+# It runs on the three push events as well as `edited`. It is a required check,
+# and a required check that ran only on edits would never report on a pull
+# request whose body was right the first time.
+#
+# The job name `body-lint` is the required check's name. Renaming it drops the
+# requirement silently: change the ruleset in the same change.
+name: PR body lint
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+# An edit supersedes the body the older run is grading.
+concurrency:
+  group: pr-body-lint-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  body-lint:
+    name: body-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # The default ref, `refs/pull/N/merge`: its first parent is the base as it
+      # stands now and its second the pull request's head. Depth 2 holds both.
+      - name: Check out the merge ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      # The body rules read sd_lib and .github/copilot-instructions.md and need
+      # nothing installed.
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      # The changed paths come from the merge ref, `HEAD^1 HEAD`: what this pull
+      # request adds and nothing the base has gained since. The payload's
+      # `pull_request.base.sha` is frozen at the base the pull request was
+      # opened against and widens the set with other people's merges (sd:1401).
+      # A `HEAD^2` that does not resolve means this is not the merge ref, and
+      # the step fails rather than diffing against something else. The body
+      # reaches the script through the environment, never through `${{ }}`
+      # inside it: it is attacker-controlled text.
+      - name: Docs lint (pull request body)
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          body="$RUNNER_TEMP/pr-body.md"
+          printf '%s' "${PR_BODY:-}" > "$body"
+          if ! git rev-parse --verify --quiet HEAD^2 >/dev/null; then
+            echo "body lint: HEAD has no second parent, so this checkout is" \
+                 "not the pull request merge ref and the changed paths" \
+                 "cannot be read from it" >&2
+            exit 1
+          fi
+          changed="$RUNNER_TEMP/pr-changed.txt"
+          git diff --name-only --no-renames HEAD^1 HEAD > "$changed"
+          python3 bin/sd-docs-lint --body-only --pr-body "$body" --changed "$changed"
