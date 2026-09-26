@@ -23,8 +23,9 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-import subprocess
 from pathlib import Path
+
+import sd_lib
 
 SHA = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
@@ -48,10 +49,6 @@ def merged_receipts(connection: sqlite3.Connection, repository: str) -> list[dic
     return found
 
 
-def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, timeout=60)
-
-
 def reaches(root: Path, ancestor: str, descendant: str) -> bool:
     """Whether `ancestor` is reachable from `descendant`.
 
@@ -59,14 +56,13 @@ def reaches(root: Path, ancestor: str, descendant: str) -> bool:
     so git's "unknown object" answer reads as no.
     """
 
-    return _git(root, "merge-base", "--is-ancestor", ancestor, descendant).returncode == 0
+    return sd_lib.git_output(["merge-base", "--is-ancestor", ancestor, descendant], root) is not None
 
 
 def blob(root: Path, rev: str, path: str) -> str | None:
     """The blob id of `path` at `rev`, or None where the path is absent."""
 
-    done = _git(root, "rev-parse", "--verify", "--quiet", f"{rev}:{path}")
-    return done.stdout.strip() if done.returncode == 0 else None
+    return sd_lib.git_output(["rev-parse", "--verify", "--quiet", f"{rev}:{path}"], root) or None
 
 
 def squashed_heads(root: Path, base_ref: str, head: str, receipts: list[dict]) -> list[dict]:
@@ -82,7 +78,8 @@ def squashed_heads(root: Path, base_ref: str, head: str, receipts: list[dict]) -
         if (not reaches(root, tip, head) or reaches(root, tip, base_ref)
                 or not reaches(root, squash, base_ref)):
             continue
-        paths = _git(root, "diff", "--name-only", "--no-renames", f"{squash}^", squash).stdout.split()
+        paths = (sd_lib.git_output(["diff", "--name-only", "--no-renames", f"{squash}^", squash], root)
+                 or "").split()
         ours = [path for path in paths if blob(root, base_ref, path) == blob(root, tip, path)]
         found.append({"item": receipt.get("item"), "head": tip, "merge_commit": squash, "ours": ours,
                       "by_hand": [path for path in paths if path not in ours]})
