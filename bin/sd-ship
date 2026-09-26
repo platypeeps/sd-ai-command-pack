@@ -63,6 +63,12 @@ REVIEW_CAPTURE_BYTES = 2_000_000
 COPILOT_REVIEW_LIMIT = 3
 COPILOT_MATERIALIZATION_ATTEMPTS = 3
 COPILOT_MATERIALIZATION_INTERVAL_SECONDS = 5
+#: How often `prepare` reads the pull object after a push before it believes a
+#: head that differs from the pushed one (sd:1394). GitHub updates the pull
+#: object a second or so after the ref, so one read refused a push that landed.
+#: The waits grow by the interval each time: 2, 4, 6 and 8 seconds, 20 in all.
+PULL_HEAD_ATTEMPTS = 5
+PULL_HEAD_INTERVAL_SECONDS = 2
 #: **The shipped surface, by exclusion** (sd:1366). A Copilot review of an
 #: ancestor of the merge head may stand when the diff from that ancestor to the
 #: merge head touches nothing outside this tuple. Everything else -- `bin/`,
@@ -1074,9 +1080,7 @@ class Ship(SharedReview):
         number = pull.get("number")
         if type(number) is not int or number <= 0:
             raise Refusal("GitHub did not return a pull-request number")
-        pull = self.api.pull(number)
-        if pull.get("head", {}).get("sha") != head:
-            raise Refusal("PR head changed after push")
+        pull = self.pushed_pull(number, head)
         reference = {"number": number, "repository": self.repository, "base": base,
                      "url": f"https://github.com/{self.repository}/pull/{number}"}
         if str(pull.get("html_url", "")).lower() != reference["url"]:
@@ -1087,6 +1091,26 @@ class Ship(SharedReview):
         if copilot.get("warning"):
             self.save(warnings=list(self.state.get("warnings") or []) + [copilot["warning"]])
         return self.result("ready_to_send", copilot_review=copilot)
+
+    def pushed_pull(self, number: int, head: str) -> dict:
+        """Read the pull object until it shows the head just pushed (sd:1394).
+
+        The push has landed when this runs, and GitHub reflects it in the pull
+        object a moment later. A head that still differs after the last read is
+        refused, as before, but as a retryable failure: a rerun adopts the PR.
+        """
+        for attempt in range(PULL_HEAD_ATTEMPTS):
+            pull = self.api.pull(number)
+            seen = pull.get("head", {}).get("sha")
+            if seen == head:
+                return pull
+            if attempt + 1 < PULL_HEAD_ATTEMPTS:
+                time.sleep(PULL_HEAD_INTERVAL_SECONDS * (attempt + 1))
+        raise Refusal(
+            f"PR head changed after push: #{number} reads {seen} where {head} was pushed",
+            code="pull_head_mismatch", boundary="runtime", state="retryable_failure",
+            next_action="Compare the branch on origin with the pull request's head, then retry prepare.",
+        )
 
     def assert_current_base(self, base: str, head: str) -> None:
         """Refuse a head that lacks the fetched default branch, before any review.

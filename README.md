@@ -403,7 +403,7 @@ its matrix values), plus the advisory `route` job in `sd-review-route.yml`:
 
 | Context | What it runs |
 |---|---|
-| `unittest (ubuntu-latest, 3.13)` | The suite on Ubuntu, Python 3.13, plus the installer coverage gate |
+| `unittest (ubuntu-latest, 3.14)` | The suite on Ubuntu, Python 3.14, plus the installer coverage gate |
 | `body-lint` | `sd-docs-lint --body-only` over the pull request's body and changed paths; it also runs when the body is edited, so a body fixed after a red run is graded again |
 | `lint` | Ruff over `bin/` and `tests/` and mypy over `bin/` (the path lists are `LINT_RUFF_PATHS` and `LINT_MYPY_PATHS` in the `Makefile`, read rather than restated), `sd-docs-lint` over this checkout's `docs/`, then Bandit over `bin/`, zizmor over the workflows, and ShellCheck over the tracked shell |
 

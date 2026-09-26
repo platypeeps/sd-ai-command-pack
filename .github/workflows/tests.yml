@@ -22,14 +22,18 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            python-version: "3.13"
+            python-version: "3.14"
           # 3.10 is gone. `sd_db` declares `requires-python = ">=3.13"`, and
           # two of this pack's verbs -- `sd restore` and `sd skill` -- read
           # the database through it, so a 3.10 leg could not install the
           # library and could not run their tests. Keeping the leg would have
           # meant a matrix row that tests less than the other one and a skip
           # gate with a hole in it, to advertise a floor the pack no longer
-          # has. `pyproject.toml` and the README badge say 3.13 too.
+          # has. `pyproject.toml` and the README badge keep 3.13 as the floor;
+          # the one leg runs 3.14, the latest stable, because the pack tests
+          # one version per language (operator decision 2026-09-26). Moving
+          # the leg renames this job's status context, so branch protection
+          # must require the new name before a pull request can merge.
           #
           # macOS is dropped for the duration of the artifacts-as-product
           # rollout (R11-D4). Restored at step 7, where "verify protection"
@@ -301,12 +305,29 @@ jobs:
       # (`sd_lib.stored_repo`, `repo_row`, `same_repo`, `repo_disk`), and
       # `tests/test_home_relative.py` drives them under a second home, which
       # needs the library to carry the conversion.
+      #
+      # `5fb29ef2` (system #619, sd:1619) takes `SCHEMA_VERSION` 14 -> 15 with
+      # `015_repo_managed.sql`: `repo.managed`, a 0/1 flag set only by
+      # `sd-db.sh repo managed PATH yes|no`, and `repo list --managed`.
+      # `repo list` rows now read `path remote status_source managed
+      # runner_merge`; `runner_merge` stays last. No pack surface parses that
+      # output: `bin/sd_fleet.py`, `bin/sd-ship` and `sd_lib.repo_row` read
+      # the `repo` table by column name, so the new column changes nothing
+      # they see. Of the other `sd_db` commits in `78e43d8b..5fb29ef2`, the
+      # ones a pack surface calls into: `sd_db.ledger` keeps `MONEY_NOISE` for
+      # `bin/sd-review` (#583) while the ledger compares money as exact
+      # decimals and `sd_db.calls` prices in `Decimal` (#579); `sd_db.progress`
+      # compares remotes as host/owner/name (#565), matches pre-014 keys
+      # (#561) and reads issue keys (#595); `repos.checkouts` seeds from the
+      # common conf as well. The rest (`remote`, `serve`, `hub`,
+      # `protection`, `shadow_jira`, backup) is new or system-only code that
+      # no pack test constructs.
       - name: Check out the system checkout, for sd_db
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: platypeeps/system
-          # Schema 14; `tests/test_system_pin.py` holds it to the installed library.
-          ref: 78e43d8b2116d8b43b9277e73a63b474af0524bd
+          # Schema 15; `tests/test_system_pin.py` holds it to the installed library.
+          ref: 5fb29ef2c3cc26b845296d946b8128912da003d0
           token: ${{ secrets.SYSTEM_REPO_TOKEN }}
           path: system-checkout
           persist-credentials: false
@@ -385,7 +406,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.13"
+          python-version: "3.14"
           cache: pip
           cache-dependency-path: requirements-dev.txt
 
@@ -452,7 +473,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.13"
+          python-version: "3.14"
           cache: pip
           cache-dependency-path: |
             requirements-dev.txt
