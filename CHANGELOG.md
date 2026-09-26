@@ -347,11 +347,15 @@
   off the default branch's history. A second branch that merged that head
   then conflicts on ancestry, not content, when it merges the default branch.
   The operator chose the remedy: resolve with `git checkout --ours`, gated by
-  blob identity. `prepare` reads this machine's merged ship receipts in
+  tree-entry identity against the actual merge base. `prepare` reads this machine's merged ship receipts in
   `bin/sd_ship_squash.py`. For each receipt whose head the branch carries and
   the base does not, a receipt warning lists the squash's paths in two groups.
-  Paths whose base blob equals the carried head's are safe for `--ours`.
-  Paths the base changed after the squash must be read by hand. A branch
+  A path is safe for `--ours` only when the entries prove the base side has
+  nothing the branch lacks: the squash is the base's only change to it since
+  the merge base. Equality with the carried head alone is not proof, because
+  the base can return to that entry after both sides moved on. Every other
+  path, and any path git cannot read, must be read by hand. Names are read
+  NUL-delimited, so a path with a space stays one path. A branch
   still behind the base gets the same split in its `base_moved` refusal,
   since the merge that refusal asks for is where the conflict lands. The ship
   skill's recovery reference documents the procedure.
