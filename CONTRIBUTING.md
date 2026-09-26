@@ -1,6 +1,7 @@
 # Contributing
 
-Use Homebrew Python 3.13 for the local virtual environment on macOS.
+Use Homebrew Python 3.14 for the local virtual environment on macOS.
+The `requires-python` floor stays 3.13; tests run on 3.14 only.
 
 ## Setup
 
@@ -98,7 +99,7 @@ Use the pack's ship workflow for publication, review and merge.
 `sd-ship merge` checks the protection object, the exact-head checks and the review findings before it merges.
 Keep the required contexts equal to the contexts that the current workflows produce.
 
-The matrix in `.github/workflows/tests.yml` currently runs Ubuntu with Python 3.13 only.
+The matrix in `.github/workflows/tests.yml` currently runs Ubuntu with Python 3.14 only.
 CI does not verify other Python versions or macOS behaviour.
 **The macOS CI leg remains disabled** (R11-D4).
 The maintainer restores it manually at the rollout's end. The restoration has no scheduled date.
