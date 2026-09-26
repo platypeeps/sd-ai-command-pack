@@ -406,7 +406,7 @@ class Ship(SharedReview):
             raise Refusal("--deliver closes work items; ordinary tasks can ship associated slices")
         if self.args.acceptance_file is None:
             raise Refusal("--deliver requires --acceptance-file with evidence for every criterion")
-        value = json.loads(self.args.acceptance_file.read_text())
+        value = json.loads(self.args.acceptance_file.read_text(encoding="utf-8"))
         rows = value.get("criteria") if isinstance(value, dict) else None
         if (not isinstance(value, dict) or value.get("item") != self.args.item or value.get("complete") is not True or not isinstance(rows, list)
                 or not rows or any(not isinstance(row, dict) or not row.get("criterion") or not row.get("evidence")
@@ -423,13 +423,13 @@ class Ship(SharedReview):
 
     def publication_claim(self) -> tuple[str, bool, dict | None, bool]:
         if self.args.no_item:
-            body = self.args.body_file.read_text() if self.args.body_file else self.state.get("body") or "Code changes reviewed locally."
+            body = self.args.body_file.read_text(encoding="utf-8") if self.args.body_file else self.state.get("body") or "Code changes reviewed locally."
             if re.search(r"(?im)^[ \t]*(?:Item|Delivers|Closes|Authored-with|Attributes|Work)[ \t]*:", body):
                 raise Refusal("no-item publication cannot carry item or caller-supplied authorship trailers")
             return body, False, None, False
         deliver = bool(self.args.deliver) if self.args.deliver is not None else bool(self.state.get("deliver"))
         claim = self.acceptance() if self.args.deliver is not None or not self.state else self.state.get("acceptance")
-        body = self.args.body_file.read_text() if self.args.body_file else self.state.get("body") or f"Code changes associated with sd:{self.args.item}."
+        body = self.args.body_file.read_text(encoding="utf-8") if self.args.body_file else self.state.get("body") or f"Code changes associated with sd:{self.args.item}."
         if self.args.body_file and re.search(r"(?im)^(?:Item|Delivers|Closes|Authored-with|Attributes|Work):", body):
             raise Refusal("the ship adapter owns association and delivery trailers")
         local_work = bool(self.item["kind"] == "work" and self.item.get("path")
@@ -1036,7 +1036,7 @@ class Ship(SharedReview):
             lint.append("--body-only")
         with tempfile.TemporaryDirectory(prefix="sd-ship-lint-") as directory:
             body_path = pathlib.Path(directory) / "pr-body.md"
-            body_path.write_text(body)
+            body_path.write_text(body, encoding="utf-8")
             run(self.root, [*lint, "--pr-body", str(body_path)], timeout=300)
         self.review(head)
         self.save(warnings=self.commit_warnings(head))

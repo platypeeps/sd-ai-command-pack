@@ -328,7 +328,7 @@ class SharedReview:
         with tempfile.TemporaryDirectory(prefix="sd-ship-verify-") as directory:
             if prior:
                 prior_path = pathlib.Path(directory) / "prior-review.json"
-                prior_path.write_text(json.dumps(prior, sort_keys=True))
+                prior_path.write_text(json.dumps(prior, sort_keys=True), encoding="utf-8")
                 argv += ["--resume-report" if retry or additional or moved else "--verify-report", str(prior_path)]
             result = self.execute_review(argv, head, passes)
         self.record_review(result, head, passes)
