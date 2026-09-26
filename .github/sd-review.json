@@ -20,6 +20,6 @@
     "bin/sd-review"
   ],
   "large_change_lines": 800,
-  "severity_floor": "medium",
+  "severity_floor": "high",
   "copilot_review": {"automatic_deep": true}
 }

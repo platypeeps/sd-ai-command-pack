@@ -1338,13 +1338,30 @@ class Ship(SharedReview):
         else:
             self.store.manual_merge_guard(self.connection, self.repo["path"])
 
-    def squash_body(self) -> str:
+    def squash_body(self, reviewed_base: str = "") -> str:
         body = self.state["body"].rstrip() + "\n\n"
         if not self.args.no_item:
             body += f"Item: sd:{self.args.item}\n"
             if self.state.get("deliver"):
                 body += f"Delivers: sd:{self.args.item}\n"
+                # The message is fixed before GitHub picks the squash parent,
+                # so it names the parent the review covered; a git reader
+                # holds `Delivers:` when the landed parent differs (#1179).
+                if reviewed_base:
+                    body += f"{sd_lib.REVIEWED_BASE_TRAILER} {reviewed_base}\n"
         return body
+
+    def reviewed_base(self, head: str, base: str) -> str:
+        """The newest `base` commit `head` contains, read after a fresh fetch."""
+        git(self.root, "fetch", "--no-tags", "origin", f"refs/heads/{base}")
+        return git(self.root, "merge-base", head, "FETCH_HEAD")
+
+    def delivered_at(self, commit: str) -> bool:
+        """Whether the row already records delivery at `commit`, by hand or earlier."""
+        from sd_db.progress import completion_record
+        row = self.connection.execute("SELECT * FROM item WHERE id = ?", (self.args.item,)).fetchone()
+        record = completion_record(row) if row is not None else None
+        return record is not None and record.get("outcome") == "delivered" and record.get("commit") == commit
 
     def require_copilot_abandonment_authority(self) -> None:
         if self.args.abandon_copilot_review is not None and not self.args.manual:
@@ -1408,7 +1425,7 @@ class Ship(SharedReview):
         self.abandon_copilot_review(observed["number"], head)
         self.require_copilot_clearance(observed["number"], observed, head)
         self.save(phase="ci_passed", protection=protection)
-        body = self.squash_body()
+        body = self.squash_body(self.reviewed_base(head, base))
         # Preserve actual authorship through the squash, including its vendor
         # at authoring time. No declaration supplied to merge can rewrite it.
         start = self.authorship_start()
@@ -1503,6 +1520,26 @@ class Ship(SharedReview):
         self.save(phase="merged", merge_commit=commit, evidence=evidence)
         if not self.args.no_item:
             self.store.note_merge(self.connection, self.args.item, evidence)
+        # GitHub squashes onto the base it holds at the `PUT`, and no request
+        # field pins that base. `ready` and `still_gated` saw the reviewed head
+        # contain the base; a squash parent outside it means the base advanced
+        # in between, and the landed tree is a combination nobody reviewed or
+        # checked. The merge is a fact to record; delivery is not (sd:1089).
+        parent = git(self.root, "rev-parse", f"{commit}^1")
+        # The squash's own `Reviewed-base:` decides, as it does for every git
+        # reader of `Delivers:`. A message composed before that trailer falls
+        # back to ancestry, where None is "no" and "cannot tell" alike.
+        held = sd_lib.held_at_merge(git(self.root, "show", "-s", "--format=%B", commit), parent)
+        if held is None:
+            held = sd_lib.git_output(["merge-base", "--is-ancestor", parent, self.state["reviewed_head"]], self.root) is None
+        # A hand delivery after the combined tree passed is the resolution;
+        # reissuing the hold over it would never clear (#1179).
+        if held and not self.args.no_item and self.state.get("deliver") and not self.delivered_at(commit):
+            pending = blocked("base_advanced_at_merge", "ci",
+                              f"Verify the combined tree at {commit} (default-branch CI), then deliver the item by hand.",
+                              state="operator_decision")
+            return {**evidence, "delivery_pending": True, "merged_parent": parent,
+                    "workflow": {**evidence["workflow"], **pending}}
         if not self.args.no_item and self.state.get("deliver"):
             from sd_db.errors import SdDbError
             from sd_db.progress import deliver_work
