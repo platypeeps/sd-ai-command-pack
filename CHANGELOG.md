@@ -496,6 +496,12 @@
   `git checkout HEAD -- doc.md` would have executed it. Post-commit renders as
   before. A repository with no record declines until one render by hand.
   `init-hook` upgrades the previous bodies, which join `SUPERSEDED_HOOKS`.
+- **`sd-ship prepare` re-reads a pull object that lags the push (sd:1394).**
+  It read the pull object once after pushing and refused when the head
+  differed, but GitHub updates it a second or so after the ref. A push that
+  landed was refused as a permanent policy block. It now reads up to five
+  times with growing waits; a head that never arrives is a retryable
+  `pull_head_mismatch` naming both heads, and a rerun adopts the PR.
 
 - **An orphaned reviewed head now refuses by name, not as `git failed` (sd:1348).**
   `sd-ship prepare` requires every earlier reviewed head to stay an ancestor of
