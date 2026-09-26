@@ -391,6 +391,16 @@
 
 ### Fixed
 
+- **An orphaned reviewed head now refuses by name, not as `git failed` (sd:1348).**
+  `sd-ship prepare` requires every earlier reviewed head to stay an ancestor of
+  the offered head. `git merge-base --is-ancestor` answers by exit status and
+  prints nothing, so an amend or a rebase after a review surfaced as the bare
+  message `git failed`, code `command_failed`, marked retryable. The refusal now
+  names the reviewed head, the offered head and the branch. Its code is
+  `reviewed_head_orphaned`, state `operator_decision`, not retryable. Its next
+  action names the `git reset --soft <reviewed head>` remedy. The ancestry rule
+  itself is unchanged.
+
 - **Code motion no longer lowers the R13-D1 citation count (sd:1374).** The
   ratchet counted a `path:line` into code only when the line sat inside a
   `def` or a `class`. An insertion above a cited line could carry it out of
