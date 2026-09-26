@@ -1348,6 +1348,11 @@ class Ship(SharedReview):
                     body += f"{sd_lib.REVIEWED_BASE_TRAILER} {reviewed_base}\n"
         return body
 
+    def reviewed_base(self, head: str, base: str) -> str:
+        """The newest `base` commit `head` contains, read after a fresh fetch."""
+        git(self.root, "fetch", "--no-tags", "origin", f"refs/heads/{base}")
+        return git(self.root, "merge-base", head, "FETCH_HEAD")
+
     def delivered_at(self, commit: str) -> bool:
         """Whether the row already records delivery at `commit`, by hand or earlier."""
         from sd_db.progress import completion_record
@@ -1417,8 +1422,7 @@ class Ship(SharedReview):
         self.abandon_copilot_review(observed["number"], head)
         self.require_copilot_clearance(observed["number"], observed, head)
         self.save(phase="ci_passed", protection=protection)
-        git(self.root, "fetch", "--no-tags", "origin", f"refs/heads/{base}")
-        body = self.squash_body(git(self.root, "merge-base", head, "FETCH_HEAD"))
+        body = self.squash_body(self.reviewed_base(head, base))
         # Preserve actual authorship through the squash, including its vendor
         # at authoring time. No declaration supplied to merge can rewrite it.
         start = self.authorship_start()
