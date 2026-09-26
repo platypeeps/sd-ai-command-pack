@@ -1001,6 +1001,7 @@ class Ship(SharedReview):
         # an operator's checkout implicitly to make a check pass.
         git(self.root, "fetch", "--no-tags", "origin", f"refs/heads/{base}:refs/remotes/origin/{base}")
         git(self.root, "symbolic-ref", "refs/remotes/origin/HEAD", f"refs/remotes/origin/{base}")
+        self.assert_current_base(base, head)
         # A merge-forward's subject names a branch operation, not the change;
         # the newest commit the branch adds that is not a merge does (sd:1377).
         title = (self.args.title or self.state.get("title")
@@ -1086,6 +1087,21 @@ class Ship(SharedReview):
         if copilot.get("warning"):
             self.save(warnings=list(self.state.get("warnings") or []) + [copilot["warning"]])
         return self.result("ready_to_send", copilot_review=copilot)
+
+    def assert_current_base(self, base: str, head: str) -> None:
+        """Refuse a head that lacks the fetched default branch, before any review.
+
+        Merge refuses the same branch as behind the default branch, so a
+        prepare that reviewed it spent the gate on an answer merge rejects
+        (sd:1346, sd:1367). A merge, not a rebase, keeps the next push a
+        fast-forward of the branch sd-ship already pushed.
+        """
+        try:
+            git(self.root, "merge-base", "--is-ancestor", f"refs/remotes/origin/{base}", head)
+        except Refusal:
+            raise Refusal(f"the branch is behind the current default branch origin/{base}; nothing was reviewed",
+                          code="base_moved", boundary="ci", state="retryable_failure",
+                          next_action=f"Run git merge origin/{base} on the branch, then run prepare again.") from None
 
     def answer_review(self, number: int, head: str) -> list[str]:
         """Record the review findings this push answers, and never block on it.
