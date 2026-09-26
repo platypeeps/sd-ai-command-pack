@@ -14,7 +14,9 @@
 - **Two waiters can no longer both reclaim one dead gate slot.** A waiter now
   reclaims under a per-slot lock and reads the holder again there, so it keeps
   a slot another waiter has just re-made (sd:1558). A run also owns its slot
-  from `mkdir` on, so a signal before the pid write releases it.
+  from `mkdir` on, so a signal before the pid write releases it. A waiter
+  whose launcher exits now stops without taking a slot, since the watchdog
+  starts only with the shards.
 
 - **The system-main canary fails on skipped tests.** `sd-db-main-canary` now
   carries the unittest job's skip gate and installs the same pinned opencode

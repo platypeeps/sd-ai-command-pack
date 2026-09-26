@@ -741,6 +741,47 @@ class GateSlotTests(unittest.TestCase):
             self.assertEqual(run.returncode, 143, run.stdout + run.stderr)
             self.assertEqual(sorted((root / "slots").iterdir()), [])
 
+    def test_a_waiter_whose_launcher_exits_stops_without_a_slot(self):
+        """#1195 review. The watchdog starts with the shards, after the wait.
+
+        A waiter whose launcher died would otherwise poll on as an orphan,
+        take the slot when it came free, and start shards unwatched.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+            slot = root / "slots" / "slot.1"
+            slot.mkdir(parents=True)
+            holder = subprocess.Popen(["sleep", "600"])
+            (slot / "pid").write_text(f"{holder.pid}\n")
+            log = root / "run.log"
+            child = root / "child.pid"
+            launcher = subprocess.Popen(
+                ["bash", "-c", 'bash "$0" > "$1" 2>&1 & printf "%s\\n" "$!" > "$2"; wait "$!"',
+                 str(script), str(log), str(child)],
+                env=self.slot_env(root, HARNESS_FIXTURE_SLEEP="0"))
+            waiter = None
+            try:
+                self.assertTrue(_wait_for(lambda: log.exists() and "waiting for a gate slot" in log.read_text(),
+                                          timeout=60), log.read_text() if log.exists() else "no log")
+                waiter = int(child.read_text())
+                launcher.kill()
+                launcher.wait(timeout=30)
+                stopped = _wait_for(lambda: not _alive(waiter), timeout=30)
+                self.assertTrue(stopped, f"the orphaned waiter {waiter} still polls: {log.read_text()}")
+                self.assertIn("the process that started this test run exited", log.read_text())
+                self.assertNotIn("run-tests: start ", log.read_text(), "the orphan went on to start the run")
+                self.assertEqual(sorted((root / "slots").iterdir()), [slot])
+                self.assertEqual((slot / "pid").read_text(), f"{holder.pid}\n")
+            finally:
+                if launcher.poll() is None:
+                    launcher.kill()
+                launcher.wait()
+                if waiter is not None and _alive(waiter):
+                    os.kill(waiter, signal.SIGKILL)
+                holder.kill()
+                holder.wait()
+
     def test_without_a_cap_no_slot_is_taken(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

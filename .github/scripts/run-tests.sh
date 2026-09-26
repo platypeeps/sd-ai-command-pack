@@ -319,6 +319,13 @@ shard_pgid=""
 watchdog_pid=""
 gate_pid=$$
 gate_ppid="$PPID"
+# True only on a reparent `ps` can read: an unreadable `ps` is not an exit.
+launcher_exited() {
+  local current_ppid
+  current_ppid="$(ps -o ppid= -p "$gate_pid" 2>/dev/null | tr -d '[:space:]')"
+  [ -n "$current_ppid" ] && [ "$current_ppid" != "$gate_ppid" ]
+}
+launcher_exited_message="error: the process that started this test run exited; terminating the run and its shards."
 
 reap_shards() {
   if [ -n "$shard_pgid" ]; then
@@ -446,6 +453,12 @@ acquire_gate_slot() {
       printf '%s\n' "waiting for a gate slot: $slots of $slots in use under $dir" >&2
       announced=1
     fi
+    # The watchdog starts only with the shards, so a wait has to watch the
+    # launcher itself: an orphaned waiter would otherwise take a slot and run.
+    if [ "$gate_ppid" != "1" ] && launcher_exited; then
+      printf '%s\n' "$launcher_exited_message" >&2
+      exit 1
+    fi
     sleep "${SD_GATE_SLOT_POLL:-5}"
   done
 }
@@ -476,11 +489,8 @@ watchdog() {
       reap_shards
       return 0
     fi
-    current_ppid="$(ps -o ppid= -p "$gate_pid" 2>/dev/null | tr -d '[:space:]')"
-    [ -n "$current_ppid" ] || continue
-    [ "$current_ppid" = "$gate_ppid" ] && continue
-    printf '%s\n' \
-      "error: the process that started this test run exited; terminating the run and its shards." >&2
+    launcher_exited || continue
+    printf '%s\n' "$launcher_exited_message" >&2
     reap_shards
     kill -TERM "$gate_pid" 2>/dev/null
     return 0
