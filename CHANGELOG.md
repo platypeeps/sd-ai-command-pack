@@ -19,6 +19,25 @@
   `.citations.tsv` is unchanged: it records the cited line, not the claim, so
   no recording needs rewriting.
 
+- **`sd-ship prepare` refuses a branch behind the default branch before the
+  review.** Merge refused such a branch, but prepare spent the full review and
+  answered `ready_to_send` first (sd:1346, sd:1367). After its fetch, prepare
+  now checks that `origin/<default>` is an ancestor of the head. It refuses
+  with `base_moved` and names `git merge origin/<default>`; a merge keeps the
+  next push a fast-forward, which a rebase does not.
+
+- **Reviews ignore cosmetic findings (sd:1602).** A finding is cosmetic when
+  fixing it changes no behaviour and no action a reader takes. Text that is a
+  contract is not cosmetic: a wrong command or flag, a parsed string, a config
+  value, or an agent instruction. The `sd-review` prompt and
+  `.github/copilot-instructions.md` tell reviewers not to report them. One that
+  still arrives is `rebutted` with a `cosmetic:` reason in adjudication, or
+  answered with `sd-review-ack --dismiss`, never `--carried`, and gets no
+  follow-up row.
+  `WORKFLOW.md` "Parallel work" also groups rows that change the same files
+  into one pull request (sd:1603), and gates once, in full, before a push
+  after iterating on `make check CHANGED=...` (sd:1606).
+
 - **`sd-ship` holds delivery when the base advanced under the merge.** GitHub
   squashes onto the base it holds at the `PUT`, and no request field pins that
   base, so a base advance after the last freshness read landed a combined tree
