@@ -532,8 +532,18 @@ def _merged(pull: dict[str, Any], comments: dict[int, list[Any]], error: str) ->
 
 
 def check_summary(record: dict[str, Any]) -> str:
+    """The checks line. An empty rollup reads the merge state first (sd:1403).
+
+    GitHub dispatches no `pull_request` workflow for a head it cannot build a
+    merge ref for, so on DIRTY no check will ever arrive; waiting is wrong.
+    """
     counts = record["checks"]
     if not counts:
+        if record.get("merge_state") == "DIRTY":
+            return ("none, and none will run: the head conflicts with the base, "
+                    "so GitHub builds no merge ref; resolve the conflict")
+        if record.get("merge_state") == "UNKNOWN":
+            return "none yet: GitHub has not finished computing mergeability; read again once"
         return "no checks"
     return " ".join(f"{name}:{counts[name]}" for name in BUCKET_ORDER if counts.get(name))
 
