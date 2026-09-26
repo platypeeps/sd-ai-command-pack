@@ -262,6 +262,12 @@ that dispatches workers cites this section and restates nothing.
 - **Fan out only when three things hold.** The targets are independent, no
   mutable state is shared, and the results are cheap to verify. Work on the
   same files or the same metadata store stays in one lane, in sequence.
+- **Group rows that change the same files.** Every open row on one file or
+  folder goes to one worker, one branch and one pull request, so one review
+  covers them all. Keep a group near 300 changed lines, and split a larger one
+  by file. Do not group rows across unrelated folders: a wider diff draws more
+  review rounds, not fewer. Name every grouped row in the pull request, and
+  close each one when it merges.
 
 The pack has two write lanes, and each holds one writer. A session writes on
 its own branch in its own worktree: `sd runner prepare <item> --branch <name>`
