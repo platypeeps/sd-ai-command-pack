@@ -14,8 +14,11 @@ Use STE-Concise; report delivery state, decisive checks, blockers, and retained 
 ## Standing permission
 
 Read `sd config get sd.assistant_merge` before relying on standing permission.
-`controlled` permits active, in-scope PR delivery in user-controlled repositories, unless they explicitly say wait.
-`ask`, or no setting, requires task-specific permission.
+`controlled` means merge active, in-scope PR work in user-controlled repositories without asking, unless they explicitly say wait.
+Merge only through `sd-ship prepare` then `sd-ship merge`; the review lane and required CI are part of those gates.
+`controlled` never permits a merge that skips the review lane, such as a raw `gh pr merge` or a web squash.
+When the value is `controlled` and the gates pass, merge; do not ask the operator first.
+`ask`, or no setting, means ask the operator first.
 Installation grants no permission.
 Shared contributors do not revoke permission; existing ownership, protection, review, and CI gates still apply.
 A refusal stops execution.
