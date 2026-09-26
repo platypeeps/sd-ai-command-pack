@@ -2150,10 +2150,11 @@ class Rule6ClaimSupportTests(LintFixture):
 
         self.opt_out()
         self.recorded_item()
-        for value in ("1", "on", "true", "yes", "enabled"):
+        for value in ("1", "on", "true", "True", "TRUE", "yes", "enabled", ""):
             with self.subTest(value=value), self.jev(JEV_SD_DOCS_LINT=value):
                 self.assertNotIn("claim support", self.notes())
             self.assertFalse(self.capture.exists(), f"{value!r} opted a repository in")
+            self.assertFalse(self.probed.exists(), f"{value!r} made a repository probe jev")
 
     def test_a_file_that_says_false_is_the_default(self) -> None:
         self.opt_in(False)
