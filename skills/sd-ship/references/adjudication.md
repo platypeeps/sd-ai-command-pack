@@ -13,6 +13,9 @@ For itemless records, replace `--item ID` below with `--no-item --review-id ID`.
 2. Fill each blocking finding's `response_disposition`, `reason`, and `evidence`.
    Use `rebutted` for a supported rejection.
    Use `parked` for accepted risk, with an `owner` and `trigger`.
+   A cosmetic finding is `rebutted` with a reason that starts `cosmetic:` and says why no behaviour changes.
+   Cosmetic means the fix changes no behaviour and no action a reader takes; contract text is never cosmetic.
+   Nobody fixes a cosmetic finding, and it gets no follow-up row.
    Every evidence entry needs a canonical absolute regular-file `path` and exact `sha256`.
    Identical findings keep separate indices and decisions.
    Supply `operator` and `authority_context` describing actual authorization.

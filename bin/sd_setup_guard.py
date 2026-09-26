@@ -111,7 +111,9 @@ def guard_lines(action: str = DEFAULT_ACTION) -> tuple[str, ...]:
 #: SKILL.md cites it by name as the one template.
 GUARD_LINES = guard_lines(DEFAULT_ACTION)
 
-_ENTRY = re.compile(r"""^\s*- package-ecosystem:\s*["']?github-actions["']?\s*$""")
+# A trailing YAML comment is still the entry; missing it read the guard as
+# absent and `rendered()` appended a second github-actions entry (sd:1000).
+_ENTRY = re.compile(r"""^\s*- package-ecosystem:\s*["']?github-actions["']?(?:\s+#.*)?\s*$""")
 _ANY_ENTRY = re.compile(r"^\s*- package-ecosystem:")
 _GUARD_ITEM = re.compile(
     rf"""dependency-name:\s*["']?{re.escape(ACTIONS_PREFIX)}/"""
@@ -392,12 +394,13 @@ def report_drift(root: pathlib.Path, expected: Mapping[pathlib.Path, str], strea
             continue
         differs += 1
         stream.write(f"DIFFERS {relative}\n")
-        stream.writelines(
-            difflib.unified_diff(
-                tracked.splitlines(keepends=True),
-                text.splitlines(keepends=True),
-                fromfile=f"{relative} (tracked)",
-                tofile=f"{relative} (this build)",
-            )
-        )
+        for line in difflib.unified_diff(
+            tracked.splitlines(keepends=True),
+            text.splitlines(keepends=True),
+            fromfile=f"{relative} (tracked)",
+            tofile=f"{relative} (this build)",
+        ):
+            # A last line with no newline gets the marker `diff` writes, or
+            # the next diff line -- or the next file's verdict -- joins it.
+            stream.write(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n")
     return 1 if differs else 0

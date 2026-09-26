@@ -866,17 +866,15 @@ def protection_section(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any]
         # only an admin's 404 is "no protection"; any other is the classic
         # side unseen, reported as unknown with the reason and never as the
         # `unprotected` finding, which would be a verdict on no evidence.
-        result["detail"]["classic_visibility"] = "absent" if admin else "hidden"
+        # And only a 404 is an answer at all: see `_classic_unknown`.
+        result["detail"]["classic_visibility"] = (
+            "unread" if "(HTTP 404)" not in error else "absent" if admin else "hidden")
         result["detail"]["ruleset_rules"] = sd_protection.rule_types(read["rules"], read["rulesets"])
         if read["error"]:
             result["detail"]["rules_read_error"] = read["error"]
-        if synthesized is None and not admin:
-            result["protected"] = None
-            result["reason"] = (
-                f"classic protection on {default_branch} is not visible to this token: GitHub "
-                f"answers 404 to a caller without admin on {slug} whether or not the branch is "
-                "protected, so this 404 is not \"no protection\""
-            )
+        unknown = "" if synthesized else _classic_unknown(error, admin, default_branch, slug)
+        if unknown:
+            result.update(protected=None, reason=unknown)
             result["detail"]["read_error"] = error
             return result
         if synthesized is None:
@@ -911,6 +909,25 @@ def protection_section(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any]
     detail.update(ruleset_detail)
     result["detail"] = detail
     return result
+
+
+def _classic_unknown(error: str, admin: bool, branch: str, slug: str) -> str:
+    """Why a classic read that found nothing is not "no protection", or "".
+
+    Only a 404 is an answer. A 403, a 5xx or a transport fault is a read that
+    failed; `gh_json` returns all of them the same way, so the status code in
+    the sentence is what tells them apart. Before sd:1000 they all took the
+    404's branch, and an admin token got `unprotected` on no evidence.
+    """
+    if "(HTTP 404)" not in error:
+        return f"classic protection on {branch} could not be read ({error}), so it is unknown, not absent"
+    if not admin:
+        return (
+            f"classic protection on {branch} is not visible to this token: GitHub "
+            f"answers 404 to a caller without admin on {slug} whether or not the branch is "
+            "protected, so this 404 is not \"no protection\""
+        )
+    return ""
 
 
 def _layered(
@@ -1898,14 +1915,17 @@ def _closing_items(root: pathlib.Path, refs: tuple[str, ...]) -> set[str]:
     grep = f"{sd_lib.DELIVERS_TRAILER}|{sd_lib.CLOSES_TRAILER}"
     for ref in dict.fromkeys(refs):
         raw = sd_lib.git_output(
-            ["log", "--format=%H%x1f%B%x1e", "-E", "--grep", grep, ref], root
+            ["log", "--format=%H%x1f%P%x1f%B%x1e", "-E", "--grep", grep, ref], root
         ) or ""
         for commit in raw.split("\x1e"):
-            message = commit.partition("\x1f")[2]
+            if commit.count("\x1f") < 2:
+                continue
+            _, parents, message = commit.split("\x1f", 2)
             for line in message.splitlines():
                 name, _, value = line.rstrip().partition(" ")
                 item = value.strip()
-                if name in (sd_lib.DELIVERS_TRAILER, sd_lib.CLOSES_TRAILER) and item and sd_lib._closes(message, item):
+                if (name in (sd_lib.DELIVERS_TRAILER, sd_lib.CLOSES_TRAILER) and item
+                        and sd_lib._closes(message, item, parents)):
                     closed.add(item)
     return closed
 
@@ -2048,7 +2068,7 @@ def _age_rows(
         return [_row(
             "undated-planning", item, slug,
             f"{where} is planning with no created: date and no dated directory",
-            f"add a created: date to {where}/prd.md so the sweep can age it",
+            f"add a created: date to {where}/prd.md so idle-planning can age it",
         )]
     age = _idle_days(entry, when, today, marks)
     if age <= IDLE_DAYS:
