@@ -39,8 +39,12 @@ External review uses the operator's standing machine policy, with local restrict
 Read `sd config get sd.external_reviews` and `sd config get sd.assistant_merge`; these settings are never granted by installation.
 `sd.copilot_review` is the one core setting with a default: unset reads `deep`, one Copilot review on deep-tier changes and none otherwise; a repository's `.github/sd-review.json` overrides `deep` and `always`, and `never` wins over the file.
 `sd.assistant_merge` is read by the assistant, not by `sd-ship`; the tool merges whatever the gates let through, and the setting decides whether to ask it to.
-With `sd.assistant_merge` at `controlled`, finish active in-scope PR work through existing gates unless the user explicitly says wait.
-Shared contributors do not revoke user permission, but existing ownership gates still apply; do not bypass a refusal.
+With `sd.assistant_merge` at `controlled`, merge active in-scope PR work without asking, unless the user explicitly says wait.
+Merge only through `sd-ship prepare` then `sd-ship merge`; the review lane and required CI are part of those gates.
+`controlled` never permits a merge that skips the review lane, such as a raw `gh pr merge` or a web squash.
+When the value is `controlled` and the gates pass, merge; do not ask the operator "may I merge?".
+With `ask`, or no setting, ask the operator first.
+Shared contributors do not revoke user permission, but existing ownership gates still apply; a refusal from `sd-ship` is a stop, not a reason to merge another way.
 
 ## Contributor Entry Points
 

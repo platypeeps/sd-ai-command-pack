@@ -64,6 +64,7 @@ def _load(name: str, module_name: str) -> Any:
 
 
 status_tool = _load("sd-status", "sd_status_for_status_source")
+review_tool = _load("sd-review", "sd_review_for_status_source")
 lint = _load("sd-docs-lint", "sd_docs_lint_for_status_source")
 
 ITEM = "2026-09-05-a-thing"
@@ -145,7 +146,7 @@ class Fixture(unittest.TestCase):
         sd_db.upsert_repo(connection, str(self.root))
         return connection
 
-    def seed(self, status: str, name: str = ITEM) -> Any:
+    def seed(self, status: str, name: str = ITEM, *, branch: str | None = "main") -> Any:
         connection = getattr(self, "_connection", None) or self.database()
         self._connection = connection
         sd_db.upsert_item(
@@ -159,7 +160,7 @@ class Fixture(unittest.TestCase):
             created_at="2026-09-05T00:00:00+00:00",
             repo=str(self.root),
             path=f"docs/work/{name}/prd.md",
-            branch="main",
+            branch=branch,
         )
         return connection
 
@@ -954,6 +955,93 @@ class RuleTwoReadsTheRow(Fixture):
         )
 
 
+class RuleTwoComparesTheBranchLine(Fixture):
+    """sd:1476. A `branch:` line that disagrees with the row is named.
+
+    The row's `branch` column is what `sd runner prepare --branch` maintains,
+    and the frontmatter line is a second copy nothing reconciled. Many items
+    still carry `branch: main`, so this is a note and never a failure: a lint
+    that turned every such item red would be switched off, not read.
+    """
+
+    def notes(self) -> tuple[list[str], list[str]]:
+        report = lint.run(self.root, "docs/work", "docs/spec", "docs/decisions", None)
+        found = [n for n in report.notes if n.startswith("rule 2 branch line")]
+        return found, report.failures
+
+    def test_a_line_naming_another_branch_is_named(self) -> None:
+        self.marker("row")
+        self.write(prd(None, branch="main"))
+        self.seed("in_progress", branch="feat/the-thing")
+        found, failures = self.notes()
+        named = [n for n in found if ITEM in n]
+        self.assertEqual(len(named), 1, found)
+        self.assertIn("'main'", named[0])
+        self.assertIn("'feat/the-thing'", named[0])
+        self.assertIn("rule 2 branch line: 1 of 1 active item(s) with a branch: line "
+                      "disagree with the row; advisory, no failure", found)
+        self.assertEqual([f for f in failures if "branch" in f], [])
+
+    def test_a_line_where_the_row_names_no_branch_is_named(self) -> None:
+        self.marker("row")
+        self.write(prd(None, branch="main"))
+        self.seed("planning", branch=None)
+        found, _ = self.notes()
+        named = [n for n in found if ITEM in n]
+        self.assertEqual(len(named), 1, found)
+        self.assertIn("the row names no branch", named[0])
+
+    def test_a_line_that_agrees_is_not_named(self) -> None:
+        self.marker("row")
+        self.write(prd(None, branch="feat/the-thing"))
+        self.seed("in_progress", branch="feat/the-thing")
+        found, _ = self.notes()
+        self.assertEqual([n for n in found if ITEM in n], [])
+        self.assertIn("rule 2 branch line: 0 of 1 active item(s) with a branch: line "
+                      "disagree with the row; advisory, no failure", found)
+
+    def test_an_item_with_no_line_is_not_compared(self) -> None:
+        self.marker("row")
+        self.write(prd(None))
+        self.seed("in_progress", branch="feat/the-thing")
+        found, _ = self.notes()
+        self.assertIn("rule 2 branch line: 0 of 0 active item(s) with a branch: line "
+                      "disagree with the row; advisory, no failure", found)
+
+    def test_an_archived_line_is_history_and_not_compared(self) -> None:
+        self.marker("row")
+        self.write(prd(None))
+        self.seed("in_progress", branch="feat/the-thing")
+        archived = self.work / "archive" / "2026-08" / OTHER
+        archived.mkdir(parents=True)
+        (archived / "prd.md").write_text(prd("done", branch="main"), encoding="utf-8")
+        self.seed("done", name=OTHER, branch="feat/other")
+        found, _ = self.notes()
+        self.assertEqual([n for n in found if OTHER in n], [])
+
+    def test_a_checkout_under_a_directory_named_archive_is_still_compared(self) -> None:
+        # Review of #1177: only `archive/` below the work root is history. A
+        # checkout at `/archive/repo` skipped every item, `0 of 0`, silently.
+        moved = self.tmp / "archive" / "repo"
+        moved.parent.mkdir()
+        self.root.rename(moved)
+        self.root, self.work = moved, moved / "docs" / "work"
+        self.item = self.work / ITEM
+        self.marker("row")
+        self.write(prd(None, branch="main"))
+        self.seed("in_progress", branch="feat/the-thing")
+        found, _ = self.notes()
+        self.assertEqual(len([n for n in found if ITEM in n]), 1, found)
+        self.assertIn("rule 2 branch line: 1 of 1 active item(s) with a branch: line "
+                      "disagree with the row; advisory, no failure", found)
+
+    def test_without_the_row_nothing_is_compared_and_it_says_so(self) -> None:
+        self.write(prd("in_progress", branch="main"))
+        found, _ = self.notes()
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("not compared", found[0])
+
+
 class ATaskKeyedFolder(Fixture):
     """sd:994. A folder written for a task or followup row names it.
 
@@ -1222,3 +1310,62 @@ class AFollowupRowIsClearedByItsTrailerAlone(Fixture):
         found = self.unmarked()
         self.assertEqual(len(found), 1, self.only().inconsistencies)
         self.assertIn(f"Delivers: sd:{number}", found[0])
+
+
+class TheRowNamesTheBranch(Fixture):
+    """sd:1382. The row's `branch` column is the maintained copy.
+
+    `sd runner prepare --branch` writes the column and `sd-status` prints it;
+    the frontmatter `branch:` line is written once and never reconciled. On a
+    checkout whose marker names the row, `sd-review --scope planning` picked
+    its item by the line, so a stale line both refused a branch the row names
+    and picked a different item whose line named the branch.
+    """
+
+    def other(self, *, branch: str) -> None:
+        (self.work / OTHER).mkdir()
+        (self.work / OTHER / "prd.md").write_text(prd(None, branch=branch), encoding="utf-8")
+
+    def picked_on(self, branch: str) -> list[str]:
+        self.git("checkout", "-q", "-b", branch)
+        subject = review_tool.resolve_subject(self.root, "planning")
+        return sorted({pathlib.Path(path).parts[2] for path in subject.paths})
+
+    def test_the_row_branch_replaces_a_stale_line(self) -> None:
+        self.marker("row")
+        self.write(prd(None, branch="main"))
+        self.seed("in_progress", branch="feat/the-thing")
+        self.assertEqual(self.only().branch, "feat/the-thing")
+
+    def test_a_row_with_no_branch_is_no_branch_whatever_the_line_says(self) -> None:
+        self.marker("row")
+        self.write(prd(None, branch="main"))
+        self.seed("planning", branch=None)
+        self.assertEqual(self.only().branch, "")
+
+    def test_without_the_marker_the_line_still_decides(self) -> None:
+        self.write(prd("in_progress", branch="feat/from-the-line"))
+        self.seed("in_progress", branch="feat/the-thing")
+        self.assertEqual(self.only().branch, "feat/from-the-line")
+
+    def test_planning_review_picks_the_item_the_row_puts_on_this_branch(self) -> None:
+        """Wrongly-pass: the other item's line still names a branch its row
+        no longer carries, and a new item is started on that branch name."""
+        self.marker("row")
+        self.write(prd(None, branch="main"))
+        self.other(branch="feat/the-thing")
+        self.seed("in_progress", branch="feat/the-thing")
+        self.seed("planning", name=OTHER, branch=None)
+        self.commit("chore: two items")
+        self.assertEqual(self.picked_on("feat/the-thing"), [ITEM])
+
+    def test_planning_review_is_not_refused_on_the_branch_the_row_names(self) -> None:
+        """Wrongly-fail: both lines say `branch: main`, and the row puts one
+        of the items on the branch this checkout is on."""
+        self.marker("row")
+        self.write(prd(None, branch="main"))
+        self.other(branch="main")
+        self.seed("in_progress", branch="feat/the-thing")
+        self.seed("planning", name=OTHER, branch=None)
+        self.commit("chore: two items")
+        self.assertEqual(self.picked_on("feat/the-thing"), [ITEM])

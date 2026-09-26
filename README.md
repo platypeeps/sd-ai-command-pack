@@ -68,6 +68,18 @@ else is. Its executables write these paths, and no others:
   setup-github`, which runs only in a `full`-mode repository. **Tracked.** With
   `--remove-legacy` it also deletes the three files the old `sd-github-review`
   installer left.
+- The fleet stamp, from `sd fleet stamp`, into the checkout you stand in, which
+  must be a checkout of a `runner_merge=auto` repository: the routing lane and
+  its Dependabot guard as `setup-github` writes them,
+  `.github/workflows/sd-check.yml` where no other workflow runs on
+  `pull_request` (created only: an existing one is kept as written), the `unprotected` entry in `.github/sd-status.json`
+  (only where the remote says nobody else may push, and only where the file
+  declares no gap yet), and a `docs/dashboard/` line in
+  `.gitignore`. **Tracked**, and written only on a feature branch. A repository
+  whose `sd-status.json` entry or `CLAUDE.md` rule forbids CI gets no workflow.
+  It also adds the template's new lines to that checkout's `CLAUDE.local.md`
+  block, removing none, and creates its untracked `docs/dashboard/`. `--dry-run` prints every auto repository's diff against
+  its `origin/HEAD` and writes nothing.
 - `docs/work/<item>/.citations.tsv` — the citation baseline, one per active work
   item, from `sd-docs-lint --update-citations`. **Tracked.**
 - `build/` — HTML from `sd-research-kit render`, into the research repository you
@@ -144,8 +156,10 @@ A local `reviewers` list restricts recipients; an explicit empty value denies re
 Machine `sd.external_reviews deny` vetoes local consent. Missing machine policy requires explicit local consent.
 The installer preserves restrictions and refuses malformed answers. It cannot recover historical empty answers whose keys were erased.
 
-`controlled` permits the assistant to merge active, in-scope PR work in repositories the user controls.
-An explicit instruction to wait overrides it. `ask`, or an absent setting, requires task-specific permission.
+`controlled` lets the assistant merge active, in-scope PR work in repositories the user controls without asking.
+It merges only through `sd-ship prepare` then `sd-ship merge`, so the review lane and required CI still gate it.
+It never permits a merge that skips the review lane, such as a raw `gh pr merge`; an `sd-ship` refusal is a stop.
+An explicit instruction to wait overrides it. `ask`, or an absent setting, means ask the operator first.
 The setting is read by the assistant, not by `sd-ship`: `sd config` validates and stores it, and no tool in `bin/` consults it.
 Ownership, review, CI, protection, and runner gates remain mandatory. This setting starts no background work.
 
@@ -186,8 +200,20 @@ registered checkout carries that checkout since sd:809, but only a task's
 move to done records a delivering commit, so the flag is refused there too,
 on that second reason, and the item closes without it just the same.
 
+A task that repeats carries a rule:
+`sd task add "File the weekly report" --due 2026-01-01 --recur FREQ=WEEKLY`.
+The rule is an RRULE subset (`FREQ`, `INTERVAL`, `BYMONTH`, `BYMONTHDAY`) and
+needs a due date. `--recur-anchor schedule`, the default, dates the next
+occurrence from the last due date; `completion` dates it from the day the task
+was done. Completing the task creates the next row and moves the rule to it,
+and `sd task status` prints `next occurrence: #N · due D`, or `recurrence
+ended:` with the reason when no next occurrence exists. `sd task edit` takes
+the same two flags, and `--clear-recur` stops the series. `sd_db` owns every
+refusal: the grammar, the anchor, the due date and the kinds that may recur.
+
 `sd store items --open` lists the backlog; `sd store item 42 --json` includes
-history and a revision that edits can require with `--if-revision`. Notes,
+history and a revision that edits can require with `--if-revision`.
+`sd task show 42` is an alias that prints the same thing. Notes,
 priorities, due dates and task status save directly to the database. GitHub
 issues are optional external references, with their last successful sync shown
 separately from local progress.
@@ -197,6 +223,7 @@ and `sd work deliver`. `sd work register docs/work/<item>/prd.md` makes the row
 that owns a planning folder already on disk, reading its title and date from
 the file's own frontmatter; it applies only where the repository's status
 source is the database, and refuses a repository whose files still own status.
+Run from a linked worktree, it files the row under the worktree's main checkout.
 The row's branch is the branch the work happens on — the checkout's own local
 branch when that is not the default, and otherwise nothing at all, never a
 remote-tracking name.
@@ -383,19 +410,16 @@ advisory `route` job in `sd-review-route.yml`:
 workflow files produce, not with this table, so a row here can go stale
 without anything saying so; the workflow files are the inventory.
 
-`main` is currently unprotected, and that is an accepted gap rather than an
-open one, recorded in tracked `.github/sd-status.json` under the id
-`unprotected` with the reason and the condition that ends it (a second
-account with push or merge rights). `sd-status` reports it every run as
-accepted and stops accepting it the moment the live state stops matching what
-the file pins. While protection is gone there are no required contexts, and
-`sd-ship merge` refuses to run: it reads the protection object before it
-reads the pull request's checks and refuses a missing one
-(`bin/sd_ship_remote.py`, `gate()`). The object is the classic one or, when
-classic answers 404, the branch's active rulesets reduced to the same shape
-(`bin/sd_protection.py`); this repository's own ruleset forbids only
-deletion and force-push, which gates no merge, so it stays unprotected here. Merges land by hand with
-`gh pr merge` after the maintainer reads the checks.
+`main` carries classic branch protection: pull requests with no required
+approvals, the strict `lint` and `unittest` checks above, and enforce_admins.
+`.github/sd-status.json` accepts one gap, `reviews`: the approval count is 0
+because the sole maintainer cannot approve their own pull request. `sd-ship merge`
+reads the protection object before it reads the pull request's checks and
+refuses a missing or weaker one (`bin/sd_ship_remote.py`, `gate()`). The
+object is the classic one or, when classic answers 404, the branch's active
+rulesets reduced to the same shape (`bin/sd_protection.py`). An `unprotected`
+entry in that file is the documented way to accept a branch without
+protection; `WORKFLOW.md` describes how the merge gate honours it.
 
 **Installer coverage is gated at 100% line and branch.** The gate enumerates its
 subject from git rather than matching a glob, and declares a statement floor, so
