@@ -68,6 +68,27 @@ class TaskCLI(unittest.TestCase):
         self.assertFalse((self.home / "docs").exists())
         self.assertFalse((self.home / ".git").exists())
 
+    def test_task_show_reads_what_store_item_reads(self):
+        """sd:1112. `sd task show` is a read alias; `sd store item` stays canonical.
+
+        Same row, same notes, same revision, in both output forms, and
+        reading it changes nothing: the revision after is the one before.
+        """
+
+        state = json.loads(self.call("task", "add", "Read me", "--json").stdout)
+        item = state["item"]["id"]
+        self.call("task", "note", item, "--body", "A note")
+        canonical = json.loads(self.call("store", "item", item, "--json").stdout)
+        alias = json.loads(self.call("task", "show", item, "--json").stdout)
+        self.assertEqual(alias, canonical)
+        self.assertIn("A note", [note["body"] for note in alias["notes"]])
+        self.assertEqual(self.call("task", "show", item).stdout,
+                         self.call("store", "item", item).stdout)
+        after = json.loads(self.call("store", "item", item, "--json").stdout)
+        self.assertEqual(after["revision"], canonical["revision"])
+        missing = self.call("task", "show", 999999, code=1)
+        self.assertNotIn("Traceback", missing.stderr)
+
     def test_cli_and_today_query_agree(self):
         for title in ("One", "Two"):
             state = json.loads(self.call("task", "add", title, "--json").stdout)
@@ -559,6 +580,120 @@ class TaskCLI(unittest.TestCase):
         self.call("task", "add", "Task", "--due", "tomorrow", code=1)
 
 
+class Recurrence(unittest.TestCase):
+    """sd:1428. `--recur` and `--recur-anchor` reach the rule sd:1099 stores.
+
+    The library owns every rule about a rule: its grammar, the default
+    anchor, the kinds that may recur and the due date a series needs. These
+    tests read its refusals back through the CLI, so the day the pack starts
+    deciding one of them itself, the message stops being the library's.
+    """
+
+    # Borrowed, not inherited: a subclass would run every `TaskCLI` test twice.
+    setUp = TaskCLI.setUp
+    call = TaskCLI.call
+
+    def add(self, *arguments):
+        return json.loads(self.call("task", "add", *arguments, "--json").stdout)
+
+    def test_add_stores_the_rule_with_the_library_s_default_anchor(self):
+        state = self.add("File the weekly report", "--due", "2026-01-01", "--recur", "freq=weekly")
+        self.assertEqual(state["item"]["recurrence"], "FREQ=WEEKLY")
+        self.assertEqual(state["item"]["recurrence_anchor"], "schedule")
+        anchored = self.add("Service the boiler", "--due", "2026-01-01",
+                            "--recur", "FREQ=YEARLY", "--recur-anchor", "completion")
+        self.assertEqual(anchored["item"]["recurrence_anchor"], "completion")
+
+    def test_add_prints_the_rule_without_json(self):
+        shown = self.call("task", "add", "Weekly", "--due", "2026-01-01", "--recur", "FREQ=WEEKLY").stdout
+        self.assertIn("recurs FREQ=WEEKLY (schedule)", shown)
+
+    def test_a_recurring_followup_takes_its_rule(self):
+        state = self.add("Chase the vendor", "--kind", "followup", "--due", "2026-01-01",
+                         "--recur", "FREQ=MONTHLY")
+        self.assertEqual((state["item"]["kind"], state["item"]["recurrence"]),
+                         ("followup", "FREQ=MONTHLY"))
+
+    def test_add_refusals_are_the_library_s(self):
+        before = json.loads(self.call("store", "items", "--json").stdout)
+        cases = (
+            (("--recur", "FREQ=WEEKLY"), "a recurring item needs a due date"),
+            (("--due", "2026-01-01", "--recur-anchor", "completion"),
+             "recurrence_anchor needs a recurrence rule"),
+            (("--due", "2026-01-01", "--recur", "FREQ=WEEKLY", "--recur-anchor", "sometimes"),
+             "recurrence_anchor must be schedule or completion"),
+            (("--due", "2026-01-01", "--recur", "FREQ=HOURLY"), "FREQ"),
+            (("--kind", "work-idea", "--due", "2026-01-01", "--recur", "FREQ=WEEKLY"),
+             "work-idea items cannot recur"),
+        )
+        for arguments, message in cases:
+            with self.subTest(arguments=arguments):
+                refused = self.call("task", "add", "Refused", *arguments, code=1)
+                self.assertIn(message, refused.stderr)
+                self.assertNotIn("Traceback", refused.stderr)
+        self.assertEqual(json.loads(self.call("store", "items", "--json").stdout), before)
+
+    def test_edit_sets_changes_and_clears_the_rule(self):
+        item = self.add("Water the plants", "--due", "2026-01-01")["item"]["id"]
+        edited = json.loads(self.call("task", "edit", item, "--recur", "FREQ=WEEKLY", "--json").stdout)
+        self.assertEqual((edited["item"]["recurrence"], edited["item"]["recurrence_anchor"]),
+                         ("FREQ=WEEKLY", "schedule"))
+        anchored = json.loads(self.call("task", "edit", item, "--recur-anchor", "completion",
+                                        "--json").stdout)
+        self.assertEqual(anchored["item"]["recurrence_anchor"], "completion")
+        cleared = json.loads(self.call("task", "edit", item, "--clear-recur", "--json").stdout)
+        self.assertEqual((cleared["item"]["recurrence"], cleared["item"]["recurrence_anchor"]),
+                         (None, None))
+        self.call("task", "edit", item, "--recur", "FREQ=WEEKLY", "--clear-recur", code=2)
+        refused = self.call("task", "edit", item, "--recur-anchor", "completion", code=1)
+        self.assertIn("recurrence_anchor needs a recurrence rule", refused.stderr)
+
+    def test_completion_names_the_next_occurrence(self):
+        item = self.add("Weekly filing", "--due", "2026-01-01", "--recur", "FREQ=WEEKLY")["item"]["id"]
+        completed = json.loads(self.call("task", "status", item, "done", "--json").stdout)
+        spawned = completed["next_occurrence"]
+        self.assertIsInstance(spawned, int)
+        self.assertIsNone(completed["next_occurrence_reason"])
+        following = json.loads(self.call("store", "item", spawned, "--json").stdout)["item"]
+        self.assertEqual((following["due"], following["recurrence"]), ("2026-01-08", "FREQ=WEEKLY"))
+        shown = self.call("task", "status", spawned, "done").stdout
+        self.assertIn(f"next occurrence: #{spawned + 1} · due 2026-01-15", shown)
+
+    def test_a_completion_that_ends_the_series_says_so(self):
+        """The runtime case the write-time checks cannot see: no `due` left."""
+        item = self.add("Ends", "--due", "2026-01-01", "--recur", "FREQ=WEEKLY")["item"]["id"]
+        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+            sd_db.writes.set_item_fields(connection, item, due=None)
+            connection.commit()
+        shown = self.call("task", "status", item, "done").stdout
+        self.assertIn("recurrence ended: ", shown)
+        self.assertIn("no due date", shown)
+        self.assertNotIn("next occurrence: #", shown)
+
+    def test_a_completion_that_ends_the_series_carries_its_reason_in_json(self):
+        item = self.add("Ends", "--due", "2026-01-01", "--recur", "FREQ=WEEKLY")["item"]["id"]
+        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+            sd_db.writes.set_item_fields(connection, item, due=None)
+            connection.commit()
+        completed = json.loads(self.call("task", "status", item, "done", "--json").stdout)
+        self.assertIsNone(completed["next_occurrence"])
+        self.assertIn("no due date", completed["next_occurrence_reason"])
+
+    def test_a_task_that_does_not_recur_prints_no_occurrence_line(self):
+        item = self.add("Once")["item"]["id"]
+        shown = self.call("task", "status", item, "done").stdout
+        self.assertNotIn("occurrence", shown)
+        self.assertNotIn("recur", shown)
+
+    def test_help_names_both_flags_and_both_anchors(self):
+        for verb in ("add", "edit"):
+            with self.subTest(verb=verb):
+                text = self.call("task", verb, "--help").stdout
+                for word in ("--recur", "--recur-anchor", "schedule", "completion"):
+                    self.assertIn(word, text)
+        self.assertIn("--clear-recur", self.call("task", "edit", "--help").stdout)
+
+
 class WorkRegister(unittest.TestCase):
     """`sd work register` makes the row that owns a folder already on disk.
 
@@ -599,10 +734,10 @@ class WorkRegister(unittest.TestCase):
         subprocess.run(["git", *args], cwd=str(self.root), check=True,
                        capture_output=True, text=True)
 
-    def call(self, *arguments, code=0):
+    def call(self, *arguments, code=0, cwd=None):
         result = subprocess.run(
             [sys.executable, str(ROOT / "bin" / "sd"), *map(str, arguments)],
-            cwd=str(self.root), env=self.environment,
+            cwd=str(cwd or self.root), env=self.environment,
             capture_output=True, text=True,
         )
         self.assertEqual(result.returncode, code, result.stdout + result.stderr)
@@ -634,6 +769,31 @@ class WorkRegister(unittest.TestCase):
         head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(self.root),
                               capture_output=True, text=True, check=True).stdout.strip()
         self.assertEqual(row["source_commit"], head)
+
+    def test_a_linked_worktree_registers_against_its_main_checkout(self):
+        """sd:1293. The doctrine puts every writer in a worktree.
+
+        The registry holds the main checkout's path, and a worktree with no
+        origin to match by is a path nobody registered. The folder is read
+        from the worktree, where it was written; the row names the checkout
+        the worktree belongs to, because the worktree is gone long before
+        anyone reads the row.
+        """
+
+        self.git("commit", "-q", "--allow-empty", "-m", "root")
+        linked = (self.home / "linked").resolve()
+        self.git("worktree", "add", "-q", "-b", "plan/a-thing", str(linked))
+        folder = linked / "docs" / "work" / "2026-09-11-a-thing"
+        folder.mkdir(parents=True)
+        (folder / "prd.md").write_text(
+            "---\ntitle: A thing to do\ncreated: 2026-09-11\n---\n\nBody.\n")
+        path = "docs/work/2026-09-11-a-thing/prd.md"
+        state = json.loads(
+            self.call("work", "register", path, "--json", cwd=linked).stdout)
+        self.assertTrue(state["created"])
+        self.assertEqual(state["item"]["repo"], sd_lib.stored_repo(self.root))
+        self.assertEqual(state["item"]["path"], path)
+        self.assertEqual(state["item"]["branch"], "plan/a-thing")
 
     def test_registering_twice_is_safe_and_says_so(self):
         """Not an error: the unique index makes the second call a no-op.

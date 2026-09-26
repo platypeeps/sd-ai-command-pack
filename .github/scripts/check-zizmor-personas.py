@@ -123,6 +123,25 @@ DECIDED: tuple[Decision, ...] = (
                 feature="lint"),
         reason=JOB_NAME_REASON),
     Decision(
+        key=Key(ident="anonymous-definition",
+                path=f"{WORKFLOWS}/tests.yml",
+                route="/jobs/sd-db-main-canary",
+                feature="sd-db-main-canary"),
+        reason=JOB_NAME_REASON),
+    Decision(
+        key=Key(ident="secrets-outside-env",
+                path=f"{WORKFLOWS}/tests.yml",
+                route="/jobs/sd-db-main-canary",
+                feature="secrets.SYSTEM_REPO_TOKEN"),
+        reason=(
+            "The same acceptance as the unittest job's use of this token, on "
+            "the same trusted-writer threat model: the canary (sd:1542) runs "
+            "on the same triggers, reads the same private repository with "
+            "the same token and `persist-credentials: false`, and differs "
+            "only in checking out system `main` instead of the pin. A fork's "
+            "pull request receives no secret, so every run that reads it "
+            "starts from a head a writer here pushed.")),
+    Decision(
         key=Key(ident="secrets-outside-env",
                 path=f"{WORKFLOWS}/tests.yml",
                 route="/jobs/unittest",

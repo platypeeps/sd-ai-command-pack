@@ -152,13 +152,49 @@ class ProviderSelection(unittest.TestCase):
             with self.subTest(flags=flags), self.assertRaisesRegex(ship.Refusal, "provider.*record"):
                 ship.validate_identity(args)
 
+    def test_ancestry_check_reads_only_exit_one_as_an_orphaned_head(self):
+        """sd:1348 review: exit 1 is the only "not an ancestor" answer.
+
+        A git that cannot answer -- a bad object (128), a timeout, no binary --
+        stays the retryable runtime refusal, never an orphaned-head verdict
+        that recommends rewriting history.
+        """
+        reviewed, _process = self.context("minimax")
+        reviewed.review(HEAD)
+        fixed_head = "c" * 40
+        review, _process = self.context("minimax", state=reviewed.state, head=fixed_head)
+        prior = review.history.prior(review.state)
+
+        def answer(outcome):
+            def run(argv, **_kwargs):
+                self.assertEqual(argv, ["git", "merge-base", "--is-ancestor", HEAD, fixed_head])
+                if isinstance(outcome, BaseException):
+                    raise outcome
+                return subprocess.CompletedProcess(argv, outcome, "", "fatal: Not a valid commit name" if outcome > 1 else "")
+            return run
+
+        with patch("sd_ship_remote.subprocess.run", side_effect=answer(0)):
+            review.validate_dispatch(fixed_head, prior, False, False)
+        with patch("sd_ship_remote.subprocess.run", side_effect=answer(1)), self.assertRaises(ship.Refusal) as caught:
+            review.validate_dispatch(fixed_head, prior, False, False)
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "reviewed_head_orphaned")
+        for outcome, code in ((128, "command_failed"),
+                              (subprocess.TimeoutExpired(["git"], 60), "command_unavailable"),
+                              (FileNotFoundError("git"), "command_unavailable")):
+            with self.subTest(outcome=outcome), patch("sd_ship_remote.subprocess.run", side_effect=answer(outcome)), \
+                    self.assertRaises(ship.Refusal) as caught:
+                review.validate_dispatch(fixed_head, prior, False, False)
+            self.assertEqual(caught.exception.workflow["blocker"]["code"], code)
+            self.assertTrue(caught.exception.workflow["blocker"]["retryable"])
+            self.assertNotIn("reviewed head", str(caught.exception))
+
     def test_fix_verification_retains_history_and_uses_only_the_current_selector(self):
         reviewed, _process = self.context("minimax")
         reviewed.review(HEAD)
         original = copy.deepcopy(reviewed.state["passes"])
         fixed_head = "c" * 40
         for choice in ("minimax", "baseten", None):
-            with self.subTest(choice=choice), patch("sd_ship_review.git", return_value=""):
+            with self.subTest(choice=choice), patch("sd_ship_review.is_ancestor", return_value=True):
                 review, process = self.context(choice, state=reviewed.state, head=fixed_head)
                 review.review(fixed_head)
                 self.assertEqual(review.state["passes"][:-1], original)
@@ -181,7 +217,7 @@ class ProviderSelection(unittest.TestCase):
             choice = "baseten" if index % 2 == 0 else "minimax"
             spent, _process = self.context(choice, state=spent.state, report_changes=incomplete)
             spent.args.retry_review = True
-            with patch("sd_ship_review.git", return_value=""), self.assertRaises(ship.Refusal):
+            with patch("sd_ship_review.is_ancestor", return_value=True), self.assertRaises(ship.Refusal):
                 spent.review(HEAD)
             selectors.append(choice)
         prefix = copy.deepcopy(spent.state["passes"])
@@ -196,7 +232,7 @@ class ProviderSelection(unittest.TestCase):
         self.assertEqual(refused.state["passes"], prefix)
         allowed, process = self.context("minimax", state=spent.state)
         allowed.args.additional_review_for, allowed.args.request_reason = HEAD, "Synthetic explicit additional request"
-        with patch("sd_ship_review.git", return_value=""):
+        with patch("sd_ship_review.is_ancestor", return_value=True):
             allowed.review(HEAD)
         self.assertEqual(allowed.state["passes"][:-1], prefix)
         self.assertEqual(allowed.state["passes"][-1]["additional_review_request"]["prior_history_digest"], ship.digest(prefix))
@@ -229,7 +265,7 @@ class ProviderSelection(unittest.TestCase):
         self.assertEqual(original[0]["execution_error"]["stage"], "execution")
         retry, _process = self.context("baseten", state=review.state)
         retry.args.retry_review = True
-        with patch("sd_ship_review.git", return_value=""):
+        with patch("sd_ship_review.is_ancestor", return_value=True):
             retry.review(HEAD)
         self.assertEqual(retry.state["passes"][:-1], original)
         self.assertEqual(retry.state["passes"][-1]["requested_provider"], "baseten")

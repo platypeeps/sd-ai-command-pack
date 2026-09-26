@@ -67,7 +67,9 @@ CORE_CONFIG = {
     "external_reviews": {"pattern": "configured|deny",
                          "description": "Standing private-code/context review authorization; unset uses local consent."},
     "assistant_merge": {"pattern": "controlled|ask",
-                        "description": "Assistant merge permission for active controlled-repo work; unset asks, explicit wait wins."},
+                        "description": "controlled: merge active in-scope PR work without asking, only via sd-ship "
+                                       "prepare then merge (never skipping the review lane); ask or unset: ask first; "
+                                       "explicit wait wins."},
     "copilot_review": {"pattern": "|".join(COPILOT_REVIEW_POLICIES),
                        "description": "When sd-ship requests a Copilot review by itself: deep (unset reads deep) on deep-tier "
                                       "changes only, always on every reviewing tier, never on none; a repository's "
@@ -693,6 +695,10 @@ class StatusReport:
     #: there is no database, no row for it, or no readable stamp. Attached by
     #: `_reported`, which is the one place holding an open `Statuses`.
     activity: str = ""
+    #: The row's `branch` column, `""` when the row names none, and `None`
+    #: when no row answered -- a `file` checkout, no database, no row. `None`
+    #: leaves the frontmatter `branch:` line to decide, as it did before rows.
+    branch: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1157,6 +1163,24 @@ class Rows:
                 pass
         return max((stamp for stamp in stamps if stamp), default="")
 
+    def branch(self, item_dir: pathlib.Path) -> str | None:
+        """The row's `branch` column, `""` for none, `None` when no row answers.
+
+        The column is what `sd runner prepare --branch` writes and what
+        `sd-status` and the dashboard print. The frontmatter `branch:` line is
+        a second copy nothing reconciles (sd:1382), so a checkout whose marker
+        names the row reads the branch from the row as it reads the status.
+        """
+        if not self.opened:
+            return None
+        try:
+            row = self.item(item_dir)
+        except Exception:  # noqa: BLE001 - a read that failed said nothing
+            return None
+        if row is None:
+            return None
+        return str(row["branch"] or "").strip()
+
     def completed(self, item_dir: pathlib.Path) -> bool:
         if self._completion_read is None:
             return False
@@ -1380,6 +1404,13 @@ def _recorded(statuses: "Statuses", item_dir: pathlib.Path) -> str:
     return statuses.rows.activity(item_dir) if statuses.rows is not None else ""
 
 
+def _row_branch(statuses: "Statuses", item_dir: pathlib.Path) -> str | None:
+    """The row's branch when the row is this checkout's authority, else `None`."""
+    if statuses.source != FROM_ROW or statuses.rows is None:
+        return None
+    return statuses.rows.branch(item_dir)
+
+
 def _reported(
     item_dir: pathlib.Path,
     fields: dict[str, str],
@@ -1397,12 +1428,14 @@ def _reported(
         return replace(
             _status_report(item_dir, fields, problems, statuses),
             activity=_recorded(statuses, item_dir),
+            branch=_row_branch(statuses, item_dir),
         )
     own = Statuses.of(_root_of(item_dir))
     try:
         return replace(
             _status_report(item_dir, fields, problems, own),
             activity=_recorded(own, item_dir),
+            branch=_row_branch(own, item_dir),
         )
     finally:
         own.close()
@@ -1444,7 +1477,7 @@ def work_item(item_dir: pathlib.Path, *, statuses: "Statuses | None" = None) -> 
         title=fields.get("title", ""),
         status=report.status,
         created=fields.get("created", ""),
-        branch=fields.get("branch", ""),
+        branch=fields.get("branch", "") if report.branch is None else report.branch,
         archived=report.archived,
         inconsistencies=report.inconsistencies,
         activity=report.activity,
@@ -1888,15 +1921,43 @@ def _cargo_entrypoints(root: pathlib.Path) -> Detection | None:
     )
 
 
+#: Where a repo-local virtualenv keeps its interpreter, POSIX first. Relative
+#: to the repo root, which is the cwd sd-check runs a detected command in.
+_VENV_INTERPRETERS = (
+    pathlib.PurePosixPath(".venv/bin/python"),
+    pathlib.PurePosixPath(".venv/Scripts/python.exe"),
+)
+
+
+def _pyproject_interpreter(root: pathlib.Path) -> str:
+    """The repo's `.venv` interpreter when one runs, else `python3` from PATH.
+
+    A `.venv` beside `pyproject.toml` is where such a repo keeps its test
+    dependencies; the PATH interpreter is the one least likely to have them.
+    An activated environment is the caller's explicit choice, and PATH already
+    resolves `python3` to it, so it wins over the repo's `.venv`. Conda's
+    `base` counts too: nothing in the environment tells an automatic
+    activation from `conda activate base`.
+    """
+    if os.environ.get("VIRTUAL_ENV") or os.environ.get("CONDA_PREFIX"):
+        return "python3"
+    for candidate in _VENV_INTERPRETERS:
+        path = root / candidate
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(candidate)
+    return "python3"
+
+
 def _pyproject_entrypoints(root: pathlib.Path) -> Detection | None:
     path = root / "pyproject.toml"
     if not path.is_file():
         return None
+    python = _pyproject_interpreter(root)
     return Detection(
         source="pyproject",
         origin=path,
-        commands={"test": ["python3", "-m", "pytest"]},
-        reason="pyproject.toml: python3 -m pytest",
+        commands={"test": [python, "-m", "pytest"]},
+        reason=f"pyproject.toml: {python} -m pytest",
     )
 
 
@@ -2260,6 +2321,11 @@ def attribute(
 #: alone, and the item stays open.
 DELIVERS_TRAILER = "Delivers:"
 CLOSES_TRAILER = "Closes:"
+#: The squash parent a `--deliver` merge's review covered. GitHub squashes
+#: onto the base it holds at the `PUT`, so the message is fixed before the
+#: parent is known; this trailer lets every git reader hold what reconcile
+#: holds (sd:1089).
+REVIEWED_BASE_TRAILER = "Reviewed-base:"
 
 #: `no` is a positive finding from history the checkout actually has;
 #: `unknown` is what a checkout that cannot see far enough says instead.
@@ -2294,7 +2360,22 @@ def _spellings(item: "str | tuple[str, ...]") -> tuple[str, ...]:
     return (item,) if isinstance(item, str) else tuple(item)
 
 
-def _closes(message: str, item: "str | tuple[str, ...]") -> bool:
+def held_at_merge(message: str, parents: str) -> bool | None:
+    """Whether this squash landed on a parent other than the one its review
+    covered; `None` when its trailer block names no reviewed base.
+
+    `parents` is git's `%P` for the commit, first parent first. Reconcile and
+    every trailer reader ask this one question, so the row's hold and git's
+    answer cannot disagree about the same commit (#1179).
+    """
+    for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines():
+        name, _, value = line.rstrip().partition(" ")
+        if name == REVIEWED_BASE_TRAILER:
+            return value.strip() != (parents.split() or [""])[0]
+    return None
+
+
+def _closes(message: str, item: "str | tuple[str, ...]", parents: str | None = None) -> bool:
     """True when this message's trailer block -- its last paragraph, which is
     what makes a trailer a trailer -- closes `item`. Reading the whole message
     would let a commit that quoted a trailer close the item it named.
@@ -2303,7 +2384,13 @@ def _closes(message: str, item: "str | tuple[str, ...]") -> bool:
     it. The id `sd-ship` writes, `Delivers: sd:<id>`, and the folder name a
     database-free checkout has to ask by are the same item said two ways, and
     `main` carries both forms.
+
+    With `parents`, a squash held at merge closes nothing: its `Delivers:` was
+    written before the base advanced under it. A later closing commit, written
+    once the combined tree is verified, closes the item as usual.
     """
+    if parents is not None and held_at_merge(message, parents):
+        return False
     wanted = _spellings(item)
     for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines():
         name, _, value = line.rstrip().partition(" ")
@@ -2316,8 +2403,9 @@ def _closed_by(root: pathlib.Path, ref: str, item: "str | tuple[str, ...]") -> b
     """Whether a commit reachable from `ref` closes `item`; a ref git cannot
     resolve closes nothing. `--grep` only narrows the walk; `_closes` decides."""
     grep = f"{DELIVERS_TRAILER}|{CLOSES_TRAILER}"
-    raw = git_output(["log", "--format=%H%x1f%B%x1e", "-E", "--grep", grep, ref], root) or ""
-    return any(_closes(c.partition("\x1f")[2], item) for c in raw.split("\x1e"))
+    raw = git_output(["log", "--format=%H%x1f%P%x1f%B%x1e", "-E", "--grep", grep, ref], root) or ""
+    return any(_closes(message, item, parents)
+               for _, parents, message in (c.split("\x1f", 2) for c in raw.split("\x1e") if c.count("\x1f") >= 2))
 
 
 def upstream(root: pathlib.Path) -> tuple[str, str]:
@@ -2960,3 +3048,112 @@ def jev_stage_off(value: str | None) -> bool:
     """
 
     return value is not None and value.strip().lower() in JEV_FLAG_OFF
+
+
+#: How long `run_group` waits for a killed group's leader to be reaped.
+GROUP_CLEANUP_SECONDS = 5
+
+
+class GroupTimeout(Exception):
+    """`run_group` reached its deadline. The group is already gone."""
+
+
+class _Terminated(BaseException):
+    """SIGTERM, raised while `run_group` owns a group that must end first."""
+
+
+def _raise_terminated(number: int, frame: object) -> None:
+    raise _Terminated
+
+
+def _end_group(process: subprocess.Popen) -> None:
+    """Kill whatever is left of the group `process` leads, and reap it."""
+    import signal  # noqa: PLC0415 - only the group helpers need it
+
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+    try:
+        process.wait(timeout=GROUP_CLEANUP_SECONDS)
+    except subprocess.TimeoutExpired:
+        pass
+    for stream in (process.stdin, process.stdout, process.stderr):
+        if stream is not None:
+            try:
+                stream.close()
+            except OSError:
+                pass
+
+
+def run_group(argv: list[str], *, cwd: pathlib.Path, env: dict[str, str], timeout: float,
+              input_text: str | None = None) -> subprocess.CompletedProcess:
+    """Run `argv` as the leader of a process group, and end the whole group.
+
+    sd:1482. `subprocess.run(timeout=)` kills the one process it started. A
+    child with children of its own -- `sd-check` running `make check` -- left
+    them running with nothing to time them out. Here the group is killed when
+    the call ends: at the deadline, on an interruption, and after a normal exit.
+
+    A group of its own no longer receives what is sent to the caller's group,
+    which is how `sd-ship` ends a review. So for the length of the call SIGTERM
+    ends the group first and then the caller, as it would have without one.
+    Only the default disposition is replaced: a caller that handles or ignores
+    SIGTERM keeps that, and a thread cannot install a handler.
+
+    Raises `GroupTimeout` at the deadline, and what `Popen` raises when
+    `argv[0]` cannot start.
+    """
+    import signal  # noqa: PLC0415 - only the group helpers need it
+    import threading  # noqa: PLC0415
+
+    owns_term = (threading.current_thread() is threading.main_thread()
+                 and signal.getsignal(signal.SIGTERM) is signal.SIG_DFL)
+    if owns_term:
+        signal.signal(signal.SIGTERM, _raise_terminated)
+    try:
+        process = subprocess.Popen(
+            list(argv), cwd=str(cwd), env=dict(env), text=True, start_new_session=True,
+            stdin=subprocess.DEVNULL if input_text is None else subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            output, errors = process.communicate(input_text, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            raise GroupTimeout(f"{argv[0]}: timed out after {timeout}s") from None
+        finally:
+            _end_group(process)
+    except _Terminated:
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        os.kill(os.getpid(), signal.SIGTERM)
+        raise
+    finally:
+        if owns_term:
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    return subprocess.CompletedProcess(list(argv), process.returncode, output or "", errors or "")
+
+
+def reviewed_author_vendors(root: pathlib.Path, base: str, head: str) -> tuple[str, ...]:
+    """`author_vendors` for a review, where an empty range is not an answer (sd:1547).
+
+    An empty range reads no commit and returns `()`, which the review lane
+    reported as "human (every commit says so)" and routed as human-authored,
+    so no vendor was excluded. On the default branch `--base` measured
+    authorship from merge-base(HEAD, default) -- HEAD itself -- and a
+    `claude/anthropic` commit under review could reach an anthropic reviewer.
+    `sd-review` now keeps the reviewed range there; this refuses what is left.
+    `sd-ship` keeps calling `author_vendors` directly.
+    """
+    if not git_output(["rev-list", "-n", "1", f"{base}..{head}"], root):
+        raise TrailerError(f"not read: no commits in {base}..{head}")
+    return author_vendors(root, base, head)
+
+
+def raw_response(result: Any) -> dict:
+    """A url reviewer's raw output for its diagnostic, only under `SD_REVIEW_RAW_DIR`.
+
+    Opt-in debugging (system #590): sd-ship moves it to an owner-only file and
+    keeps only the path, so model output never reaches the ship state.
+    """
+    if not os.environ.get("SD_REVIEW_RAW_DIR"):
+        return {}
+    return {"raw_response": {"body": result.stdout, "stderr": result.stderr}}

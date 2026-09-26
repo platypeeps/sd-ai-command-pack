@@ -27,18 +27,28 @@ class Refusal(Exception):
         super().__init__(message)
 
 
-def run(root: Path, argv: list[str], *, input: str | None = None, timeout: int = 60) -> str:
+def completed_process(root: Path, argv: list[str], *, input: str | None = None, timeout: int = 60,
+                      answers: frozenset[int] = frozenset({0})) -> subprocess.CompletedProcess:
+    """`argv` in `root`; a retryable runtime refusal for any exit outside `answers`.
+
+    `answers` lets a command that replies by exit status (`--is-ancestor`)
+    keep its "no" apart from a failure, under the same refusals `run` raises.
+    """
     try:
         result = subprocess.run(argv, cwd=root, input=input, text=True,
                                 capture_output=True, timeout=timeout, check=False)
     except (OSError, subprocess.SubprocessError) as error:
         raise Refusal(f"{argv[0]} could not finish: {error}", code="command_unavailable", boundary="runtime",
                       state="retryable_failure", next_action="Restore command access, then retry this command.") from None
-    if result.returncode:
+    if result.returncode not in answers:
         raise Refusal((result.stderr or result.stdout or f"{argv[0]} failed").strip()[:2000],
                       code="command_failed", boundary="runtime", state="retryable_failure",
                       next_action="Inspect the command error, resolve its cause, then retry.")
-    return result.stdout.strip()
+    return result
+
+
+def run(root: Path, argv: list[str], *, input: str | None = None, timeout: int = 60) -> str:
+    return completed_process(root, argv, input=input, timeout=timeout).stdout.strip()
 
 
 def git(root: Path, *args: str) -> str:

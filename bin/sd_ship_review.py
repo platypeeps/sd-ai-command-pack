@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -18,7 +19,7 @@ from typing import Any, Callable
 import sd_lib
 import sd_ship_dispositions
 from sd_ship_history import AUTOMATIC_CODE_REVIEW_PASSES, completed_depth, digest
-from sd_ship_remote import Refusal, git
+from sd_ship_remote import Refusal, completed_process
 from sd_ship_workflow import success
 
 
@@ -26,6 +27,20 @@ class ReviewTimeout(Exception):
     def __init__(self, diagnostic: dict):
         self.diagnostic = diagnostic
         super().__init__("local review watchdog expired")
+
+
+def is_ancestor(root: pathlib.Path, previous: str, head: str) -> bool:
+    """Whether `previous` is reachable from `head`.
+
+    `--is-ancestor` answers by exit status and prints nothing, so the raising
+    `git` helper rendered "not an ancestor" as a bare, retryable "git failed"
+    (sd:1348). Only exit 1 means "no"; any other failure, a timeout or a
+    missing git still raises that retryable runtime refusal, because a git
+    that cannot answer is not evidence of a rewritten history. The caller
+    owns the refusal that names the heads.
+    """
+    argv = ["git", "merge-base", "--is-ancestor", previous, head]
+    return completed_process(root, argv, answers=frozenset({0, 1})).returncode == 0
 
 
 def empty_branch_base(root: pathlib.Path, head: str) -> str | None:
@@ -243,7 +258,15 @@ class SharedReview:
             if passes[-1].get("head") == head:
                 raise Refusal("this head was already reviewed; address its findings before the fix verification")
         for previous in self.history.ancestry_heads(self.state):
-            git(self.root, "merge-base", "--is-ancestor", previous, head)
+            if not is_ancestor(self.root, previous, head):
+                raise Refusal(
+                    f"reviewed head {previous} is not an ancestor of the offered head {head} on {self.branch}; "
+                    "an amend or a rebase after a review orphans the reviewed head, and a review of a "
+                    "commit the branch cannot reach is not evidence about the branch",
+                    code="reviewed_head_orphaned", boundary="review", state="operator_decision",
+                    next_action=f"Restore a history that contains {previous}: after an amend, run "
+                                f"`git reset --soft {previous}`, commit the change on top, then prepare again. "
+                                "An unchanged retry refuses the same way.")
 
     def authorship_start(self) -> str:
         """Where this branch's commits begin, for trailer and vendor reads."""
@@ -251,6 +274,21 @@ class SharedReview:
         if not passes:
             return self.state["empty_diff"]["base"]
         return passes[-1]["report"].get("authorship_base") or passes[0]["report"]["subject"]["base"]
+
+    def review_argv(self, base: str | None) -> list[str]:
+        """The sd-review command both stages run: `--explain` first, then the pass."""
+        argv = [sys.executable, str(self.runtime.bin_dir / "sd-review"), "--scope", "branch", "--challenge", "--json", "--database", str(self.database)]
+        requested = getattr(self.args, "provider", None)
+        if requested is not None:
+            argv += ["--provider", requested]
+        if getattr(self.args, "reuse_check", False):
+            argv.append("--reuse-check")
+        if getattr(self.args, "review_timeout", None):
+            # sd:1475. sd-review sizes its timing plan, and so this watchdog, from it.
+            argv += ["--timeout", str(self.args.review_timeout)]
+        if base:
+            argv += ["--base", base]
+        return argv
 
     def review(self, head: str) -> None:
         passes = self.history.native(self.state)
@@ -278,14 +316,8 @@ class SharedReview:
         if moved:
             prior = self.history.aggregate(self.state)
         base = passes[-1]["head"] if passes and not (retry or additional or moved) else None
-        argv = [sys.executable, str(self.runtime.bin_dir / "sd-review"), "--scope", "branch", "--challenge", "--json", "--database", str(self.database)]
+        argv = self.review_argv(base)
         requested = getattr(self.args, "provider", None)
-        if requested is not None:
-            argv += ["--provider", requested]
-        if getattr(self.args, "reuse_check", False):
-            argv.append("--reuse-check")
-        if base:
-            argv += ["--base", base]
         passes.append({"head": head, "started_at": self.runtime.clock(), "base": base, "retry": retry,
                        "requested_provider": requested})
         if request:
@@ -296,13 +328,14 @@ class SharedReview:
         with tempfile.TemporaryDirectory(prefix="sd-ship-verify-") as directory:
             if prior:
                 prior_path = pathlib.Path(directory) / "prior-review.json"
-                prior_path.write_text(json.dumps(prior, sort_keys=True))
+                prior_path.write_text(json.dumps(prior, sort_keys=True), encoding="utf-8")
                 argv += ["--resume-report" if retry or additional or moved else "--verify-report", str(prior_path)]
             result = self.execute_review(argv, head, passes)
         self.record_review(result, head, passes)
 
-    def preflight_diagnostic(self, planned: subprocess.CompletedProcess) -> dict:
-        diagnostic: dict = {"kind": "invalid_timing_plan", "stage": "planning", "exit_code": planned.returncode}
+    def preflight_diagnostic(self, planned: subprocess.CompletedProcess,
+                             kind: str = "invalid_timing_plan", stage: str = "planning") -> dict:
+        diagnostic: dict = {"kind": kind, "stage": stage, "exit_code": planned.returncode}
         limit = self.runtime.diagnostic_bytes
         for name in ("stdout", "stderr"):
             data = getattr(planned, name).encode("utf-8", "replace")
@@ -321,26 +354,79 @@ class SharedReview:
             except Refusal:
                 self.save(review_preflight_error=self.preflight_diagnostic(planned))
                 raise
+            # What dispatch overwrites, so a released gate failure can put it back.
+            self.superseded = {key: self.state.get(key, ABSENT) for key in DISPATCH_FIELDS}
             self.save(passes=passes, phase="reviewing", head=head, binding=self.runtime.binding(self.root), review_preflight_error=None, review_clearance=None)
             stage = "execution"
             return self.runtime.process(self.root, argv + ["--expected-timing", digest(plan)], timeout=plan["execution_seconds"])
         except ReviewTimeout as error:
+            diagnostic = withhold_raw(dict(error.diagnostic, stage=stage), head)
             if stage == "planning":
-                self.save(review_preflight_error=dict(error.diagnostic, stage=stage))
+                self.save(review_preflight_error=diagnostic)
             else:
-                passes[-1].update(execution_error=dict(error.diagnostic, stage=stage), exit_code=124)
+                passes[-1].update(execution_error=diagnostic, exit_code=124)
                 self.save(passes=passes, reviewed_head=None, phase="reviewed")
             raise Refusal(f"local review {stage} watchdog expired after {error.diagnostic['allowed_seconds']}s; "
                           + ("no provider pass reserved; " if stage == "planning" else "reserved pass retained; ")
                           + "bounded diagnostics remain in the item ship receipt") from None
 
+    def release_gate_failure(self, report: dict, head: str, passes: list[dict]) -> None:
+        """Drop the pass a gate failure reserved, and refuse with the gate's words.
+
+        The reservation is removed rather than kept as an incomplete pass: it
+        reviewed nothing, so it has no findings to carry forward, and keeping
+        it charged the cap and made the next prepare demand `--retry-review`
+        for a review that never started. The gate's output stays in the
+        receipt under `review_preflight_error`, the field a failure before
+        dispatch already uses.
+
+        Removing the pass is not enough to undo the dispatch: `execute_review`
+        stored the current tool and policy binding before the gate ran. Left
+        in place, a re-review forced by a moved binding would, after its gate
+        failed, read as bound to the new policy, and the next prepare would
+        stop re-reviewing (found by the local review of sd:1475). Every field dispatch overwrote
+        goes back to what it was.
+        """
+        passes.pop()
+        check = report.get("check") or {}
+        detail = str(check.get("detail") or "")[-self.runtime.diagnostic_bytes:]
+        checks = gate_diagnostics(check, self.runtime.diagnostic_bytes)
+        for key, value in self.superseded.items():
+            if value is ABSENT:
+                self.state.pop(key, None)
+        self.save(passes=passes, **{key: value for key, value in self.superseded.items() if value is not ABSENT},
+                  review_preflight_error={"kind": "gate_failed", "stage": "check", "head": head,
+                                          "exit_code": check.get("exit_code"), "detail": detail, "checks": checks})
+        failed = next((c for c in checks if c["status"] == "fail"), {})
+        evidence = detail.strip() or (failed.get("stderr") or failed.get("stdout") or failed.get("reason") or "").strip()
+        raise Refusal(f"the repository gate failed before any reviewer was asked; no review pass was spent: "
+                      f"{evidence[-500:] or 'see the item ship receipt'}",
+                      code="gate_failed", boundary="runtime", state="retryable_failure",
+                      next_action="Fix the gate, or rerun prepare when the machine is less loaded "
+                                  "(--review-timeout raises the limit); the next prepare reviews normally.")
+
     def record_review(self, result: subprocess.CompletedProcess, head: str, passes: list[dict]) -> None:
         try:
             report = json.loads(result.stdout)
         except ValueError:
-            raise Refusal("local review emitted no valid receipt; its reserved pass remains recorded") from None
+            report = None
         if not isinstance(report, dict):
-            raise Refusal("local review emitted no valid receipt; its reserved pass remains recorded")
+            # Keep what the reviewer process said: without its exit code and
+            # output tails, a crash in sd-review and a provider failure read
+            # the same (#590's first MiniMax pass).
+            error = self.preflight_diagnostic(result, "invalid_receipt", "execution")
+            written = write_raw(f"{head[:12]}-invalid-receipt", {"head": head, "exit_code": result.returncode,
+                                                                 "stdout": result.stdout, "stderr": result.stderr})
+            if written:
+                error["raw_capture"] = written
+            withhold_raw(error, head)
+            passes[-1].update(execution_error=error, exit_code=result.returncode)
+            self.save(passes=passes, reviewed_head=None, phase="reviewed")
+            raise Refusal(f"local review emitted no valid receipt (sd-review exit {result.returncode}); "
+                          "its reserved pass remains recorded; bounded diagnostics remain in the item ship receipt")
+        stash_raw_responses(report, head)
+        if unreviewed_gate_failure(report, result.returncode):
+            self.release_gate_failure(report, head, passes)
         passes[-1]["report"] = report
         passes[-1]["exit_code"] = result.returncode
         self.save(passes=passes, reviewed_head=head if result.returncode == 0 else None, phase="reviewed")
@@ -354,6 +440,106 @@ class SharedReview:
         self.check_review(head)
         if self.runtime.current_head(self.root) != head:
             raise Refusal("HEAD or checkout changed during local checks and review")
+
+
+#: The receipt fields `execute_review` overwrites when it dispatches a pass.
+DISPATCH_FIELDS = ("phase", "head", "binding", "review_clearance")
+ABSENT = object()
+
+
+def gate_diagnostics(check: dict, limit: int) -> list[dict]:
+    """sd:1484. What each gate check said, bounded, for a receipt that outlives the pass.
+
+    `check.detail` is sd-check's own stderr, which is empty when a test or a
+    lint fails: that output is in each check's `stdout` and `stderr`. Keeping
+    only `detail` left a receipt that said the gate failed and not why. At
+    most one record per name sd-check runs, each stream cut to its last
+    `limit` characters, where a failure summary ends.
+    """
+    records = check.get("checks")
+    if not isinstance(records, list):
+        return []
+    return [{"name": record.get("name"), "status": record.get("status"), "exit_code": record.get("exit_code"),
+             "reason": str(record.get("reason") or "")[-limit:],
+             "stdout": str(record.get("stdout") or "")[-limit:], "stderr": str(record.get("stderr") or "")[-limit:]}
+            for record in records[:len(sd_lib.CHECK_NAMES)] if isinstance(record, dict)]
+
+
+def unreviewed_gate_failure(report: dict, exit_code: int) -> bool:
+    """sd:1475. The repository gate failed and no reviewer was asked.
+
+    sd-review stops at the gate and returns before any provider dispatch, so
+    such a run verified nothing and cost nothing. Every clause has to hold: a
+    report that names an outcome, a reviewer or a completed review asked
+    someone, and that run keeps its pass as it always has.
+    """
+    return (exit_code != 0 and report.get("status") == "gate_failed"
+            and (report.get("check") or {}).get("status") == "fail"
+            and not report.get("outcomes") and not report.get("reviewed_by")
+            and not report.get("completed_reviews") and not report.get("findings"))
+
+
+#: Opt-in debugging (system #590): the directory that receives raw reviewer
+#: output. sd-review puts a url reviewer's raw response in its diagnostic
+#: only when this is set; sd-ship moves it here so the receipt keeps a path.
+RAW_CAPTURE_ENV = "SD_REVIEW_RAW_DIR"
+
+
+def write_raw(name: str, record: dict) -> str:
+    """Write one owner-only JSON record under `SD_REVIEW_RAW_DIR`; return its path or the error."""
+    directory = os.environ.get(RAW_CAPTURE_ENV, "")
+    if not directory:
+        return ""
+    text = json.dumps(record, indent=1)
+    path = pathlib.Path(directory).expanduser() / f"{name}-{hashlib.sha256(text.encode()).hexdigest()[:12]}.json"
+    try:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as handle:
+            handle.write(text)
+    except FileExistsError:
+        pass
+    except OSError as error:
+        return f"not written: {error}"
+    return str(path)
+
+
+def stash_raw_responses(report: dict, head: str) -> None:
+    """Replace each outcome's `raw_response` with the file that now holds it.
+
+    Without the directory the field is dropped: model output never reaches
+    the item's ship state."""
+    for outcome in report.get("outcomes") or []:
+        diagnostic = outcome.get("diagnostic") if isinstance(outcome, dict) else None
+        if isinstance(diagnostic, dict) and "raw_response" in diagnostic:
+            raw = diagnostic.pop("raw_response")
+            written = write_raw(f"{head[:12]}-{outcome.get('backend', 'provider')}", {"head": head, **raw})
+            if written:
+                diagnostic["raw_capture"] = written
+
+
+def withhold_raw(diagnostic: dict, head: str) -> dict:
+    """Keep a reviewer's raw model text out of a diagnostic the ship state stores.
+
+    Only with `SD_REVIEW_RAW_DIR` set does sd-review put `raw_response` in its
+    output, and a truncated receipt or a watchdog kill can leave it in the
+    stdout tail or the captured report. The tail is withheld (the private file
+    holds the whole output) and a captured report's responses move to files.
+    A watchdog kill hands over its whole output as `raw_output`, which is always
+    removed here and written to its own file (sd:1588).
+    """
+    raw = diagnostic.pop("raw_output", None)
+    if os.environ.get(RAW_CAPTURE_ENV):
+        if isinstance(raw, dict):
+            written = write_raw(f"{head[:12]}-watchdog", {"head": head, **raw})
+            if written:
+                diagnostic["raw_capture"] = written
+        stdout = diagnostic.get("stdout")
+        if isinstance(stdout, dict):
+            diagnostic["stdout"] = {"withheld": "raw capture is on; stdout may carry model output",
+                                    "bytes": stdout.get("bytes")}
+        if isinstance(diagnostic.get("captured_report"), dict):
+            stash_raw_responses(diagnostic["captured_report"], head)
+    return diagnostic
 
 
 def validate_review_readiness(planned: subprocess.CompletedProcess) -> None:
