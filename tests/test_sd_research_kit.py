@@ -426,17 +426,24 @@ class TemplateDriftTests(unittest.TestCase):
         self.assertEqual(len(found), 1, found)
         self.assertIn("Rendering", found[0][0])
 
-    def test_a_repo_carrying_the_long_template_drifts_only_in_parallel_work(self) -> None:
+    def test_a_repo_carrying_the_long_template_drifts_only_where_the_template_changed(self) -> None:
         """The five research repos copied the 193-line template, and still carry it.
 
-        The shrink must not report the text it removed. The one section that
-        does drift is `## Parallel work`, whose wording is new; no research repo
-        carried the old one either.
+        The shrink must not report the text it removed. Two sections do drift.
+        `## Parallel work` has new wording; no research repo carried the old
+        one either. `## Adversarial review before publishing` names the second
+        reader as `sd-review --lens research-brief` since #1194, and the long
+        copy still describes a named CLI with `-s read-only`, so that drift is
+        the signal the repos need.
         """
 
         found = self.findings(LONG_TEMPLATE.read_text(encoding="utf-8"))
         self.assertTrue(found)
-        self.assertEqual({where for where, _, _ in found}, {"`## Parallel work`"}, found)
+        self.assertEqual({where for where, _, _ in found},
+                         {"`## Parallel work`", "`## Adversarial review before publishing`"}, found)
+        review = [text for where, kind, text in found if "Adversarial" in where]
+        self.assertEqual(len(review), 1, review)
+        self.assertIn("sd-review --lens research-brief", review[0])
 
     def test_local_content_is_counted_not_reported(self) -> None:
         text = self.template + "\n## Local\n\nOne local block.\n"
