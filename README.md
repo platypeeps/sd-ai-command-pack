@@ -159,8 +159,10 @@ A local `reviewers` list restricts recipients; an explicit empty value denies re
 Machine `sd.external_reviews deny` vetoes local consent. Missing machine policy requires explicit local consent.
 The installer preserves restrictions and refuses malformed answers. It cannot recover historical empty answers whose keys were erased.
 
-`controlled` permits the assistant to merge active, in-scope PR work in repositories the user controls.
-An explicit instruction to wait overrides it. `ask`, or an absent setting, requires task-specific permission.
+`controlled` lets the assistant merge active, in-scope PR work in repositories the user controls without asking.
+It merges only through `sd-ship prepare` then `sd-ship merge`, so the review lane and required CI still gate it.
+It never permits a merge that skips the review lane, such as a raw `gh pr merge`; an `sd-ship` refusal is a stop.
+An explicit instruction to wait overrides it. `ask`, or an absent setting, means ask the operator first.
 The setting is read by the assistant, not by `sd-ship`: `sd config` validates and stores it, and no tool in `bin/` consults it.
 Ownership, review, CI, protection, and runner gates remain mandatory. This setting starts no background work.
 
@@ -404,7 +406,7 @@ advisory `route` job in `sd-review-route.yml`:
 
 | Context | What it runs |
 |---|---|
-| `unittest (ubuntu-latest, 3.13)` | The suite on Ubuntu, Python 3.13, plus the installer coverage gate |
+| `unittest (ubuntu-latest, 3.14)` | The suite on Ubuntu, Python 3.14, plus the installer coverage gate |
 | `lint` | Ruff over `bin/` and `tests/` and mypy over `bin/` (the path lists are `LINT_RUFF_PATHS` and `LINT_MYPY_PATHS` in the `Makefile`, read rather than restated), `sd-docs-lint` over this checkout's `docs/`, then Bandit over `bin/`, zizmor over the workflows, and ShellCheck over the tracked shell |
 
 `sd-status` compares the live protection object with the contexts the

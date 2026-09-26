@@ -4,6 +4,33 @@
 
 ### Changed
 
+- **CI and local testing run Python 3.14 only.** The operator decided on
+  2026-09-26 to test one version per language, the latest stable. The
+  `unittest` leg, the other two jobs in `tests.yml` and the Makefile's
+  `BREW_PYTHON` move from 3.13 to 3.14. `requires-python` stays `>=3.13`, and
+  the hash-pinned requirements stay compiled for that floor. The required
+  status context becomes `unittest (ubuntu-latest, 3.14)`, so branch
+  protection must name it before a pull request can merge. A `.venv` built on
+  3.13 keeps working until `make setup` rebuilds it. `WORKFLOW.md` states the
+  rule under **Parallel work**.
+
+- **CI's system pin moves to schema 15 (sd:1619).** `platypeeps/system`
+  `5fb29ef2` adds `repo.managed` and `sd-db.sh repo managed PATH yes|no`.
+  `repo list` rows now read `path remote status_source managed runner_merge`.
+  No pack surface parses that output; the pack reads the `repo` table by
+  column name. `tests/test_system_pin.py` holds the pin to the installed
+  library, so it was red on any machine already at schema 15.
+
+- **`sd.assistant_merge` now has one reading (sd:1633).** A session read
+  `controlled` and could not tell whether it might merge, or merge without the
+  review lane, so it stopped and asked. `WORKFLOW.md`, `AGENTS.md`,
+  `README.md`, the `sd-ship` skill and the `sd config` description now say the
+  same thing. `controlled` means merge without asking, only through
+  `sd-ship prepare` then `sd-ship merge`, whose gates include the review lane
+  and required CI. It never permits a raw `gh pr merge` or a web squash. A
+  refusal from `sd-ship` is a stop. `ask`, or no value, means ask first. The
+  values and `sd-ship` behavior do not change.
+
 - **`tests.test_sd_ship` runs about 40% faster (sd:1605).** The module
   sets the `make check` critical path. Its fixture now builds the bare remote,
   seed and both clones once per process and copies them per test. It switches

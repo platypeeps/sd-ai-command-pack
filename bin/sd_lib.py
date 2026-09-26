@@ -67,7 +67,9 @@ CORE_CONFIG = {
     "external_reviews": {"pattern": "configured|deny",
                          "description": "Standing private-code/context review authorization; unset uses local consent."},
     "assistant_merge": {"pattern": "controlled|ask",
-                        "description": "Assistant merge permission for active controlled-repo work; unset asks, explicit wait wins."},
+                        "description": "controlled: merge active in-scope PR work without asking, only via sd-ship "
+                                       "prepare then merge (never skipping the review lane); ask or unset: ask first; "
+                                       "explicit wait wins."},
     "copilot_review": {"pattern": "|".join(COPILOT_REVIEW_POLICIES),
                        "description": "When sd-ship requests a Copilot review by itself: deep (unset reads deep) on deep-tier "
                                       "changes only, always on every reviewing tier, never on none; a repository's "
