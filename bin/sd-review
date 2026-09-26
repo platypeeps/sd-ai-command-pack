@@ -1646,8 +1646,8 @@ def metered_bills(
 def prepared_prompt(root: pathlib.Path, subject: Subject, args: argparse.Namespace,
                     previous: dict[str, Any] | None, env: Mapping[str, str]) -> tuple[str, bool, list[dict[str, Any]]]:
     conventions = local_conventions(root)
-    prompt = build_prompt(subject, args.challenge, conventions) + sd_lib.review_lens(getattr(args, "lens", None))
-    context = []
+    documents, context = sd_lib.lens_documents(root, subject, getattr(args, "lens", None))  # #1199: whole, for every reader
+    prompt = build_prompt(subject, args.challenge, conventions) + sd_lib.review_lens(getattr(args, "lens", None)) + documents
     if previous:
         evidence = json.dumps(previous["findings"], sort_keys=True)
         prompt += ("\nComplete the full branch review after an incomplete attempt. " if getattr(args, "resume_report", None) else "\nThis is the single verification of the preceding review. ")

@@ -20,7 +20,7 @@ import subprocess
 import unittest
 from typing import Any
 
-from tests.test_sd_review import FakeRunner, sd_review
+from tests.test_sd_review import FakeClient, FakeRunner, namespace, sd_review
 from tests.test_sd_review_fallbacks import ReviewRunFixture
 
 LENS = "research-brief"
@@ -120,6 +120,63 @@ class ALensedMarkdownChangeIsReadTests(ReviewRunFixture):
         result = self.run_review(root, runner, scope="branch", lens=LENS)
         self.assertEqual(result["requested_reviews"], 1)
         self.assertEqual(result["reviewed_by"], ["codex"])
+
+
+#: An existing brief whose Status and conclusion sit far outside a one-line patch.
+LONG_BRIEF = ("# A brief\n\nThe rate doubled.\n\n" + "".join(f"Background line {n}.\n" for n in range(12))
+              + "\n## Conclusion\n\nSo the policy failed.\n\n## Status\n\nUnchecked: the 2024 denominator.\n")
+FAR = "Unchecked: the 2024 denominator."
+
+
+class ALensedReviewSeesTheWholeDocumentTests(ReviewRunFixture):
+    """PR #1199 finding: a patch-only reader cannot check an argument.
+
+    Changing one claim of an existing brief leaves its conclusion and Status
+    outside the patch, and a `url` reviewer has no checkout to read them from,
+    so its empty findings would count as clean. With a lens every provider is
+    handed the complete document at the reviewed revision instead.
+    """
+
+    def committed_brief(self) -> pathlib.Path:
+        root = self.make_repo()
+        (root / "brief.md").write_text(LONG_BRIEF)
+        self.git(root, ["add", "."], ["commit", "-m", "brief\n\nAuthored-with: human"])
+        (root / "brief.md").write_text(LONG_BRIEF.replace("The rate doubled.", "The rate tripled."))
+        return root
+
+    def git(self, root: pathlib.Path, *commands: list[str]) -> None:
+        for argv in commands:
+            subprocess.run(["git", *argv], cwd=root, check=True, capture_output=True)
+
+    def test_a_url_reviewer_is_handed_the_unchanged_status(self) -> None:
+        root = self.committed_brief()
+        registry = self.registry_home / ".local/share/sd/providers.yaml"
+        registry.write_text("bills:\n  fixture: {cost: subscription}\nproviders:\n"
+            "  remote: {url: 'https://remote.example.test/v1', model: fixture, vendor: remote, "
+            "bill: fixture, roles: [reviewer], env: [REMOTE_KEY]}\nroles:\n  author: []\n  reviewer: [remote]\n")
+        (root / "CLAUDE.local.md").write_text("<!-- SD-AI-COMMAND-PACK:LOCAL:START -->\n"
+            "reviewers: remote@remote.example.test\n<!-- SD-AI-COMMAND-PACK:LOCAL:END -->\n")
+        runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", "")})
+        for lens, expected in ((None, False), (LENS, True)):
+            with self.subTest(lens=lens):
+                client = FakeClient()
+                result = sd_review.review(root, namespace(lens=lens, challenge=lens is None), runner,
+                                          self.environment(REMOTE_KEY="fixture"), client=client)
+                self.assertEqual(result["reviewed_by"], ["remote"], result["outcomes"])
+                self.assertEqual(FAR in client.sent[0]["prompt"], expected)
+
+    def test_every_planned_prompt_carries_the_document_at_the_reviewed_commit(self) -> None:
+        root = self.committed_brief()
+        self.git(root, ["checkout", "-b", "brief"], ["commit", "-am", "tripled\n\nAuthored-with: human"])
+        # The branch copy is what is reviewed, so the worktree must not answer.
+        (root / "brief.md").write_text("# Uncommitted\n")
+        result = self.run_review(root, FakeRunner(), scope="branch", dry_run=True, lens=LENS)
+        prompts = planned_prompts(result)
+        self.assertTrue(prompts, result["planned_invocations"])
+        for prompt in prompts:
+            self.assertIn(FAR, prompt)
+            self.assertIn("The rate tripled.", prompt)
+            self.assertNotIn("# Uncommitted", prompt)
 
 
 if __name__ == "__main__":

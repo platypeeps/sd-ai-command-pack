@@ -16,7 +16,9 @@
   (`adversarial-gate render --lens research-brief` handed to a reviewer of
   another vendor) is printed only for when `sd-review` cannot run. The
   research-repo `CLAUDE.md` template, `conventions.md` and the skill say the
-  same.
+  same. A lensed review also hands every reviewer each changed document whole,
+  at the reviewed revision, so a `url` reviewer with only the patch still sees
+  the conclusion, citations and Status an edit leaves outside it.
 
 - **`sd work register` works from a linked worktree.** It refused with
   `repository '<worktree>' is not registered` whenever the worktree had no
