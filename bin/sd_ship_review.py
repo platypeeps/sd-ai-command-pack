@@ -19,7 +19,7 @@ from typing import Any, Callable
 import sd_lib
 import sd_ship_dispositions
 from sd_ship_history import AUTOMATIC_CODE_REVIEW_PASSES, completed_depth, digest
-from sd_ship_remote import Refusal, git
+from sd_ship_remote import Refusal, completed_process
 from sd_ship_workflow import success
 
 
@@ -27,6 +27,20 @@ class ReviewTimeout(Exception):
     def __init__(self, diagnostic: dict):
         self.diagnostic = diagnostic
         super().__init__("local review watchdog expired")
+
+
+def is_ancestor(root: pathlib.Path, previous: str, head: str) -> bool:
+    """Whether `previous` is reachable from `head`.
+
+    `--is-ancestor` answers by exit status and prints nothing, so the raising
+    `git` helper rendered "not an ancestor" as a bare, retryable "git failed"
+    (sd:1348). Only exit 1 means "no"; any other failure, a timeout or a
+    missing git still raises that retryable runtime refusal, because a git
+    that cannot answer is not evidence of a rewritten history. The caller
+    owns the refusal that names the heads.
+    """
+    argv = ["git", "merge-base", "--is-ancestor", previous, head]
+    return completed_process(root, argv, answers=frozenset({0, 1})).returncode == 0
 
 
 def empty_branch_base(root: pathlib.Path, head: str) -> str | None:
@@ -244,7 +258,15 @@ class SharedReview:
             if passes[-1].get("head") == head:
                 raise Refusal("this head was already reviewed; address its findings before the fix verification")
         for previous in self.history.ancestry_heads(self.state):
-            git(self.root, "merge-base", "--is-ancestor", previous, head)
+            if not is_ancestor(self.root, previous, head):
+                raise Refusal(
+                    f"reviewed head {previous} is not an ancestor of the offered head {head} on {self.branch}; "
+                    "an amend or a rebase after a review orphans the reviewed head, and a review of a "
+                    "commit the branch cannot reach is not evidence about the branch",
+                    code="reviewed_head_orphaned", boundary="review", state="operator_decision",
+                    next_action=f"Restore a history that contains {previous}: after an amend, run "
+                                f"`git reset --soft {previous}`, commit the change on top, then prepare again. "
+                                "An unchanged retry refuses the same way.")
 
     def authorship_start(self) -> str:
         """Where this branch's commits begin, for trailer and vendor reads."""
