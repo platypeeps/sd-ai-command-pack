@@ -396,6 +396,11 @@ class SharedReview:
                                                                  "stdout": result.stdout, "stderr": result.stderr})
             if written:
                 error["raw_capture"] = written
+            if os.environ.get(RAW_CAPTURE_ENV):
+                # A truncated receipt can carry `raw_response`: its model text
+                # goes to the private file only, never into the ship state.
+                error["stdout"] = {"withheld": "raw capture is on; stdout may carry model output",
+                                   "bytes": len(result.stdout.encode())}
             passes[-1].update(execution_error=error, exit_code=result.returncode)
             self.save(passes=passes, reviewed_head=None, phase="reviewed")
             raise Refusal(f"local review emitted no valid receipt (sd-review exit {result.returncode}); "

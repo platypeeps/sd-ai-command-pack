@@ -2480,7 +2480,11 @@ roles:
                 patch.object(ship, "review_process", side_effect=crashed):
             with self.assertRaisesRegex(ship.Refusal, "no valid receipt"):
                 operation.review(head)
-        path = pathlib.Path(self.operation().state["passes"][0]["execution_error"]["raw_capture"])
+        error = self.operation().state["passes"][0]["execution_error"]
+        # A truncated receipt may carry raw model text: only the private file keeps it.
+        self.assertEqual(error["stdout"], {"withheld": "raw capture is on; stdout may carry model output",
+                                           "bytes": len("partial")})
+        path = pathlib.Path(error["raw_capture"])
         self.assertEqual(path.parent, capture)
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         record = json.loads(path.read_text())
