@@ -4,6 +4,15 @@
 
 ### Changed
 
+- **`sd-review` reads authorship from the reviewed commits on the default branch (sd:1547).**
+  With `--base` on the default branch, the refreshed target boundary is HEAD
+  itself, so the authored range was empty. That empty read printed
+  `human (every commit says so)` and excluded no vendor, so a
+  `claude/anthropic` commit could reach an anthropic reviewer. The authored
+  range now falls back to the review subject when the boundary is HEAD. A
+  range with no commits reports `not read: no commits in <base>..<head>`
+  under `--explain` and refuses otherwise.
+
 - **`sd fleet stamp` lays the auto-merge fleet's shared files (sd:1326).**
   Each `runner_merge=auto` repository needs the same four things before the
   runner can merge it: the route workflow at the current pin, a check workflow,

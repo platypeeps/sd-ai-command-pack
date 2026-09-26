@@ -1114,7 +1114,7 @@ def author_vendors(root: pathlib.Path, subject: Subject) -> tuple[str, ...]:
     if subject.scope not in TRAILER_SCOPES:
         return ()
     try:
-        return sd_lib.author_vendors(root, subject.base, subject.head)
+        return sd_lib.reviewed_author_vendors(root, subject.base, subject.head)
     except sd_lib.TrailerError as error:
         raise Refusal(str(error)) from None
 
@@ -1800,7 +1800,7 @@ def review(
         target_base = sd_lib.git_output(["merge-base", subject.head, _default_base(root)], root)
         if not target_base:
             raise UsageError("cannot establish the refreshed target boundary for item authorship")
-        authored_subject = subject._replace(base=target_base)
+        authored_subject = subject if target_base == subject.head else subject._replace(base=target_base)
     authorship_refusal = ""
     try:
         vendors = author_vendors(root, authored_subject)
