@@ -14,6 +14,13 @@
   3.13 keeps working until `make setup` rebuilds it. `WORKFLOW.md` states the
   rule under **Parallel work**.
 
+- **CI's system pin moves to schema 15 (sd:1619).** `platypeeps/system`
+  `5fb29ef2` adds `repo.managed` and `sd-db.sh repo managed PATH yes|no`.
+  `repo list` rows now read `path remote status_source managed runner_merge`.
+  No pack surface parses that output; the pack reads the `repo` table by
+  column name. `tests/test_system_pin.py` holds the pin to the installed
+  library, so it was red on any machine already at schema 15.
+
 - **`sd.assistant_merge` now has one reading (sd:1633).** A session read
   `controlled` and could not tell whether it might merge, or merge without the
   review lane, so it stopped and asked. `WORKFLOW.md`, `AGENTS.md`,
