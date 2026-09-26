@@ -4,6 +4,16 @@
 
 ### Changed
 
+- **`tests.test_sd_ship` runs about 40% faster (sd:1605).** The module
+  sets the `make check` critical path. Its fixture now builds the bare remote,
+  seed and both clones once per process and copies them per test. It switches
+  both Jev stages off, so no `sd-review` child asks the live endpoint; a CI
+  runner has no `jev` anyway. The GitHub double polls for shutdown every 10 ms
+  instead of 500 ms. The fixture `gh` speaks HTTP over a socket instead of
+  importing urllib. One watchdog test waits on a ready file instead of a 5 s
+  timeout. Every test still runs and asserts what it did; `sd-ship` is
+  unchanged.
+
 - **`sd-docs-lint` sends the citing sentence, not the citing line, as the claim (sd:1186).**
   The claim-support reading sent the one physical line a citation marker sat
   on. Prose here is hard-wrapped and a marker trails its sentence, so the claim
