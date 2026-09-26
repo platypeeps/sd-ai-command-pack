@@ -238,6 +238,8 @@ command automatically deletes or archives a completed item directory.
 The harness fans work out only when a `CLAUDE.md` or a skill asks for it.
 These rules say when to ask. They hold wherever a pack skill runs. A skill
 that dispatches workers cites this section and restates nothing.
+The pack ships a writer for multi-file code: the `sd-slice-builder` agent,
+which the installer places in `~/.claude/agents`.
 
 - **A writer runs alone in its checkout.** One checkout holds one writer. An
   agent or session that changes files works in its own git worktree or clone.
@@ -454,7 +456,7 @@ run says which one reviewed and why the earlier ones did not. With none left,
 the review refuses by name rather than reading its own work.
 Only entries on the reviewer order participate in automatic fallback.
 Enabled reviewer-capable entries outside that order require an explicit `--provider` selection.
-The shipped order contains Codex, then Claude, then opencode; other providers remain explicit-only.
+With a database, the order in force is its rows: `sd providers configure` sets it, `sd providers list` shows it, and `sd-review --explain` names it on its `order from` line; the file's `roles:` lists only seed those rows. The shipped seed contains Codex, then Claude, then opencode; other providers remain explicit-only until an order names them.
 Existing provider files and database orders remain unchanged until the operator migrates them.
 The chain continues until the required count completes or eligible entries run out. A completed
 review with findings counts; it does not trigger a replacement. Consent, author

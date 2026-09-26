@@ -20,6 +20,18 @@
   at the reviewed revision, so a `url` reviewer with only the patch still sees
   the conclusion, citations and Status an edit leaves outside it.
 
+- **Reviewer order has one named source, and nothing else ranks providers
+  (sd:1556).** `sd-review --explain` prints an `order from` line and
+  `--json` an `order_source` key: the database that `sd providers configure`
+  writes and `sd providers list` shows, or the file when there is no database.
+  When the file's `roles.reviewer` seed disagrees with the rows, the line says
+  the seed is overridden. The shipped `providers.yaml` comment says the same.
+  `sd-operator-defaults.md` no longer prefers Codex or holds MiniMax and
+  Baseten back by name; it sends agents to `sd-review` and its resolved order.
+  The `codex auth` line no longer says `ok`: it says the auth mode was read and
+  no call was made, and `codex_preflight.live_call` is `false`. A codex 401
+  still shows only at dispatch; `--preflight` covers URL providers only.
+
 - **CI and local testing run Python 3.14 only.** The operator decided on
   2026-09-26 to test one version per language, the latest stable. The
   `unittest` leg, the other two jobs in `tests.yml` and the Makefile's
@@ -358,6 +370,23 @@
 
 ### Added
 
+- **The `sd-slice-builder` agent ships with the pack.** It is the
+  implementation worker for a planned multi-file slice. It existed only as a
+  hand-placed `~/.claude/agents/slice-builder.md`, so no other machine had it.
+  The pack copy keeps `effort: high` and declares `tools:` as the agent tests
+  require: the file tools, Bash, `ToolSearch`, and the two GitHub MCP tools
+  that open and read a pull request. It no longer inherits every tool, so it
+  cannot spawn agents; `gh` through Bash is its fallback for a PR.
+  It reviews through `sd-review --scope branch`, not `codex exec` (sd:1601).
+  `--user` retires the hand-placed predecessor once the successor is on disk.
+  `AGENT_PREDECESSORS` in `bin/sd_install.py` lists each predecessor with the
+  sha256 of every known copy. A copy with a known digest is removed; any other
+  copy stays and is reported as `left in place (modified; superseded by
+  sd-slice-builder)`. `--dry-run` removes nothing, and `--status` names a
+  predecessor that remains. A removal also needs `sd-slice-builder.md` on disk
+  with the shipped bytes, and a predecessor that is not a regular file, such
+  as a FIFO, stays unread instead of blocking the install.
+
 - **`sd task add` and `sd task edit` take `--recur` and `--recur-anchor`.**
   The recurrence columns and the completion logic landed in `sd_db` with
   sd:1099, but no CLI flag reached them (sd:1428). The flags pass the rule and
@@ -499,6 +528,21 @@
   action this tool is allowed to take.
 
 ### Fixed
+
+- **An empty check rollup on a conflicting head names the conflict (sd:1403).**
+  GitHub builds no merge ref for a DIRTY head and dispatches no
+  `pull_request` run, so zero checks there is not a slow queue. `sd-pr-state`
+  and `sd-status` now say the head conflicts and none will run, and say
+  "read again once" on UNKNOWN. `sd-ship merge` refuses a dirty pull request
+  as `merge_conflict` with a resolve-the-conflict next action, and an unknown
+  mergeability as a retryable `mergeability_pending`, instead of one generic
+  merge-rules sentence.
+- **`sd-ship prepare` re-reads a pull object that lags the push (sd:1394).**
+  It read the pull object once after pushing and refused when the head
+  differed, but GitHub updates it a second or so after the ref. A push that
+  landed was refused as a permanent policy block. It now reads up to five
+  times with growing waits; a head that never arrives is a retryable
+  `pull_head_mismatch` naming both heads, and a rerun adopts the PR.
 
 - **An orphaned reviewed head now refuses by name, not as `git failed` (sd:1348).**
   `sd-ship prepare` requires every earlier reviewed head to stay an ancestor of

@@ -369,6 +369,27 @@ class PullRequestTests(ToolFixture):
         )
         self.assertIn("main...contributor:task/fold", log.read_text(encoding="utf-8"))
 
+    def test_an_empty_rollup_on_a_dirty_head_names_the_conflict(self) -> None:
+        # sd:1403, #1143 and #1152: zero checks read as a slow queue while
+        # GitHub, with no merge ref, would never dispatch a run.
+        self.with_github(pulls=[self.pull(mergeStateStatus="DIRTY", statusCheckRollup=[])])
+        completed = self.run_tool(SD_PR_STATE)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        line = next(text for text in completed.stdout.splitlines() if "checks:" in text)
+        self.assertNotEqual(line.split("checks:", 1)[1].strip(), "no checks")
+        self.assertIn("conflict", line)
+        self.assertIn("none will run", line)
+
+    def test_an_empty_rollup_on_an_unknown_state_says_read_again(self) -> None:
+        self.with_github(pulls=[self.pull(mergeStateStatus="UNKNOWN", statusCheckRollup=[])])
+        line = next(text for text in self.run_tool(SD_PR_STATE).stdout.splitlines() if "checks:" in text)
+        self.assertIn("not finished computing mergeability", line)
+
+    def test_an_empty_rollup_on_a_clean_head_keeps_its_wording(self) -> None:
+        self.with_github(pulls=[self.pull(statusCheckRollup=[])])
+        line = next(text for text in self.run_tool(SD_PR_STATE).stdout.splitlines() if "checks:" in text)
+        self.assertEqual(line.split("checks:", 1)[1].strip(), "no checks")
+
     def test_no_open_pull_requests(self) -> None:
         self.with_github(pulls=[])
         completed = self.run_tool(SD_PR_STATE)
