@@ -24,6 +24,11 @@ module passes the root to, and a name imported from a sibling module in
 `tests/`. A path built from the root (`REPO_ROOT / "skills"`) is a different
 tree and is not a walk of the root.
 
+**Which modules.** The `.py` files the index holds directly under `tests/`,
+from `git ls-files`, for the same reason: an untracked scratch module is not
+the suite. Depths above the checkout collapse to one value, so a loop that
+climbs by rebinding a name settles.
+
 **What this does not do**, stated rather than left to be discovered. Bindings
 are read without flow: a name bound to the root anywhere in its scope is the
 root everywhere in it, which over-reports and never under-reports. It does not
@@ -45,6 +50,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import subprocess
 import tempfile
 import textwrap
 import unittest
@@ -55,6 +61,10 @@ REPO_ROOT = TESTS.parent
 #: How many directory levels a module in `tests/` sits below the checkout.
 #: `Path(__file__)` is the file; its first parent is `tests/`, its second the root.
 ROOT_DEPTH = 2
+#: Every depth above the checkout. A climb never descends, so no depth past
+#: `ROOT_DEPTH` can come back to it; collapsing them keeps the domain finite,
+#: and a loop that rebinds `root = root.parent` settles instead of growing.
+ABOVE = ROOT_DEPTH + 1
 
 #: Methods that list a directory when called on a path.
 WALK_METHODS = frozenset({"rglob", "glob", "iterdir", "walk"})
@@ -208,7 +218,9 @@ class Module:
     # -- evaluation -----------------------------------------------------
 
     def _settle(self) -> None:
-        """Evaluate every binding until no value grows: aliases chain."""
+        """Evaluate every binding until no value grows: aliases chain.
+
+        Values only grow, and each is a subset of `0..ABOVE`, so this ends."""
         while True:
             before = dict(self.values)
             for scope, names in self.bindings.items():
@@ -259,7 +271,7 @@ class Module:
         if isinstance(node, ast.Attribute):
             base = node.value
             if node.attr == "parent":
-                return frozenset(d + 1 for d in self.value(base))
+                return _climb(self.value(base), 1)
             if isinstance(base, ast.Name) and base.id in ("self", "cls"):
                 owner = self._enclosing_class(node)
                 return self._attribute(owner, node.attr) if owner else frozenset()
@@ -271,7 +283,7 @@ class Module:
         if isinstance(node, ast.Subscript):
             if (isinstance(node.value, ast.Attribute) and node.value.attr == "parents"
                     and isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, int)):
-                return frozenset(d + node.slice.value + 1 for d in self.value(node.value.value))
+                return _climb(self.value(node.value.value), node.slice.value + 1)
             return frozenset()
         if isinstance(node, ast.Call):
             func = node.func
@@ -279,7 +291,7 @@ class Module:
             if isinstance(func, ast.Attribute) and name in SAME_PLACE_METHODS and not node.args:
                 return self.value(func.value)
             if name == "dirname" and len(node.args) == 1:
-                return frozenset(d + 1 for d in self.value(node.args[0]))
+                return _climb(self.value(node.args[0]), 1)
             if name in SAME_PLACE and len(node.args) == 1:
                 return self.value(node.args[0])
             if name == "join" and len(node.args) == 1:
@@ -349,6 +361,10 @@ class Module:
                 for call in sorted(self.walks(), key=lambda c: (c.lineno, c.col_offset))]
 
 
+def _climb(depths: frozenset[int], levels: int) -> frozenset[int]:
+    return frozenset(min(d + levels, ABOVE) for d in depths)
+
+
 def _wild_first(node: ast.AST) -> bool:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         first = node.value.split("/", 1)[0]
@@ -363,10 +379,16 @@ def _names_path_class(node: ast.AST) -> bool:
 
 
 class Loader:
-    """Parses the modules of one `tests/` directory once each, on demand."""
+    """Parses the modules of one `tests/` directory once each, on demand.
 
-    def __init__(self, tests: pathlib.Path) -> None:
+    The corpus is `paths` when given, which is how a fixture directory outside
+    any checkout is read; otherwise it is what the index holds directly under
+    `tests/`, so an untracked scratch module never enters it.
+    """
+
+    def __init__(self, tests: pathlib.Path, paths: list[pathlib.Path] | None = None) -> None:
         self.tests = tests
+        self.paths = paths
         self.modules: dict[str, Module | None] = {}
 
     def module(self, stem: str) -> Module | None:
@@ -384,12 +406,21 @@ class Loader:
 
     def root_walks(self) -> list[str]:
         found = []
-        # `tests/` is a derived path, not the root: listing it is the point.
-        for path in sorted(self.tests.glob("*.py")):
+        paths = self.paths if self.paths is not None else tracked_modules(self.tests)
+        for path in sorted(paths):
             module = self.module(path.stem)
             if module is not None:
                 found.extend(module.report())
         return found
+
+
+def tracked_modules(tests: pathlib.Path) -> list[pathlib.Path]:
+    """The `.py` files the index holds directly under `tests/`."""
+    listed = subprocess.run(
+        ["git", "-C", str(tests.parent), "ls-files", "-z", "--deduplicate", "--",
+         f":(glob){tests.name}/*.py"],
+        check=True, capture_output=True, text=True).stdout
+    return [tests.parent / rel for rel in listed.split("\0") if rel]
 
 
 def site_key(line: str) -> str:
@@ -425,7 +456,8 @@ class DetectorTests(unittest.TestCase):
             (tests / "test_fixture.py").write_text(text)
             for stem, text in siblings.items():
                 (tests / f"{stem}.py").write_text(textwrap.dedent(text))
-            return [line for line in Loader(tests).root_walks()
+            # `tests/` is a derived path, not the root: listing it is the point.
+            return [line for line in Loader(tests, sorted(tests.glob("*.py"))).root_walks()
                     if line.startswith("test_fixture.py:")]
 
     HEADER = """\
@@ -521,9 +553,40 @@ class DetectorTests(unittest.TestCase):
         """)
         self.assertEqual(found, [])
 
+    def test_a_loop_that_climbs_settles(self) -> None:
+        """A rebinding loop adds a level on every pass of the evaluator. Depths
+        above the checkout collapse to one value, so the passes end; without
+        flow the name can be the root, so its walk is reported."""
+        found = self.walks("""\
+        root = Path(__file__).resolve()
+        while not (root / ".git").exists():
+            root = root.parent
+        root.rglob("*")
+        """)
+        self.assertEqual(found, ['test_fixture.py:7: root.rglob("*")'])
+
     def test_a_known_site_is_keyed_without_its_line_number(self) -> None:
         self.assertEqual(site_key('test_x.py:12: root.rglob("*: x")'),
                          'test_x.py: root.rglob("*: x")')
+
+
+class CorpusTests(unittest.TestCase):
+    """The modules read are the ones the index holds under `tests/`."""
+
+    WALKER = "import pathlib\nROOT = pathlib.Path(__file__).resolve().parents[1]\nROOT.rglob('*')\n"
+
+    def test_an_untracked_or_nested_module_is_not_in_the_corpus(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = pathlib.Path(tmp)
+            tests = repo / "tests"
+            (tests / "fixtures").mkdir(parents=True)
+            for name in ("test_tracked.py", "test_scratch.py", "fixtures/test_deep.py"):
+                (tests / name).write_text(self.WALKER)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(["git", "-C", str(repo), "add", "tests/test_tracked.py",
+                            "tests/fixtures/test_deep.py"], check=True)
+            found = [site_key(line) for line in Loader(tests).root_walks()]
+        self.assertEqual(found, ["test_tracked.py: ROOT.rglob('*')"])
 
 
 if __name__ == "__main__":
