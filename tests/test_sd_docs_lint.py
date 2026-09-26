@@ -2200,6 +2200,7 @@ class Rule6ClaimSupportTests(LintFixture):
                 self.assertNotIn("secret_tenant", joined)
                 self.assertEqual(report.failures, [])
                 self.assertFalse(self.capture.exists(), f"{text!r} sent a request")
+                self.assertFalse(self.probed.exists(), f"{text!r} made the run probe jev")
 
     def test_the_schema_names_the_keys_the_reader_accepts(self) -> None:
         """Two statements of one vocabulary, pinned so they cannot drift."""
