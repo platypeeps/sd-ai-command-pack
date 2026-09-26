@@ -1804,7 +1804,7 @@ def review(
         authored_subject = subject if target_base == subject.head else subject._replace(base=target_base)
     authorship_refusal = ""
     try:
-        vendors = author_vendors(root, authored_subject)
+        vendors = () if preflight else author_vendors(root, authored_subject)
     except Refusal as error:
         if not args.explain:
             raise
