@@ -189,8 +189,10 @@ In a shared repository:
   repository asked for them.
 - No merge without task-specific or standing operator permission. Shared contributors
   do not revoke that permission. The assistant reads the permission, not
-  `sd-ship`, which never consults `sd.assistant_merge`. Existing ownership and protection gates still
-  decide whether the pack can execute it; a refusal remains a stop.
+  `sd-ship`, which never consults `sd.assistant_merge`. `controlled` is standing
+  permission to merge through `sd-ship prepare` then `sd-ship merge` without asking.
+  No permission covers a merge that skips the review lane. Existing ownership and
+  protection gates still decide whether the pack can execute it; a refusal remains a stop.
 - No issue filed. `sd-suggest` writes a row everywhere; `sd suggest publish`
   files one when you run it, to the destination you name with `--to`.
 
@@ -507,8 +509,12 @@ The reserved `sd` namespace declares three settings:
 - `sd.external_reviews`: `configured` permits private code and scoped review context to eligible configured providers.
   It includes future registry entries; registry configuration chooses capability, while this explicit operator grant authorizes transmission.
   `deny` vetoes all local allowances. Absence supplies no standing grant.
-- `sd.assistant_merge`: `controlled` permits assistant merges for active, in-scope PR work in repositories the user controls.
-  An explicit instruction to wait wins. `ask`, or absence, requires task-specific permission.
+- `sd.assistant_merge`: `controlled` means merge without asking the operator, for active, in-scope PR work in repositories the user controls.
+  The merge goes only through `sd-ship prepare` then `sd-ship merge`; the review lane and required CI are part of those gates.
+  `controlled` never permits a merge that skips the review lane, such as a raw `gh pr merge` or a web squash.
+  A refusal from `sd-ship` is a stop, not a reason to merge another way.
+  When the value is `controlled` and the gates pass, merge; asking the operator "may I merge?" is wrong.
+  An explicit instruction to wait wins. `ask`, or absence, means ask the operator first.
   `sd config` validates and stores the value; the assistant reads it, and `sd-ship` does not.
   It was `sd.merge_authorization` until 1.1.0, which still reads that name; 1.2.0 stops.
   It is the assistant's grant, where `repo.runner_merge` in the one database is the runner's.
