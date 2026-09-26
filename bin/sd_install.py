@@ -435,6 +435,98 @@ def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+#: Hand-placed agents a shipped `sd-*` agent replaces, with the sha256 of every
+#: copy known to have been placed. No receipt ever recorded a predecessor, so
+#: `prune_stale` cannot see one; this table is the only authority for removing
+#: it, and a digest outside the set marks a copy somebody edited.
+AGENT_PREDECESSORS: dict[str, tuple[tuple[str, frozenset[str]], ...]] = {
+    "sd-slice-builder": (
+        ("slice-builder", frozenset({
+            "4a2788273d7ce268e6693f70bfe4883b91e6060013a6a6f185a680d5ea475799",
+        })),
+    ),
+}
+
+
+def predecessor_targets(
+    agents: list[Surface], homes: list[PlatformHome]
+) -> list[tuple[Path, str, frozenset[str], Surface, Path]]:
+    """`(path, successor, known digests, source, render)` per predecessor on disk.
+
+    Only a successor this checkout renders retires anything: a predecessor
+    whose replacement is not shipped is still the only copy of that agent.
+    `source` is the shipped successor and `render` is where it lands in the
+    predecessor's home, so the caller can check it arrived.
+    """
+    shipped = {agent.name: agent for agent in agents}
+    found = []
+    for home in homes:
+        for successor, predecessors in AGENT_PREDECESSORS.items():
+            if successor not in shipped:
+                continue
+            for name, known in predecessors:
+                path = home.root / f"{name}.md"
+                if path.exists() or path.is_symlink():
+                    found.append((path, successor, known, shipped[successor],
+                                  home.target_for(successor)))
+    return found
+
+
+def successor_installed(source: Surface, render: Path) -> bool:
+    """True when `render` is a regular file holding the shipped bytes."""
+    if render.is_symlink() or not render.is_file():
+        return False
+    try:
+        return digest(render.read_bytes()) == digest(source.skill.read_bytes())
+    except OSError:
+        return False
+
+
+def retire_predecessors(
+    agents: list[Surface], homes: list[PlatformHome], *, dry_run: bool = False
+) -> tuple[list[str], list[tuple[str, str]]]:
+    """Remove unmodified predecessors of shipped agents; report the rest.
+
+    Digest-gated like `prune_stale`: a copy whose sha256 is not a known one is
+    somebody's edit and stays, and so does a symlink, which points at a file
+    this installer never placed. Anything else that is not a regular file
+    stays unread: a FIFO would block `read_bytes` until a writer opened it.
+    A removal also needs the successor on disk with the shipped bytes, so the
+    gate holds whatever order a caller runs it in; a dry run skips that check,
+    because it writes no successor either. Returns `(retired, skipped)` so the
+    caller says what it removed and what it left behind.
+    """
+    retired: list[str] = []
+    skipped: list[tuple[str, str]] = []
+    for path, successor, known, source, render in predecessor_targets(agents, homes):
+        why = f"superseded by {successor}"
+        if path.is_symlink():
+            skipped.append((str(path), f"a symlink; {why}"))
+            continue
+        if not path.is_file():
+            skipped.append((str(path), f"not a regular file; {why}"))
+            continue
+        try:
+            actual = digest(path.read_bytes())
+        except OSError as exc:
+            skipped.append((str(path), f"unreadable ({exc.strerror or exc}); {why}"))
+            continue
+        if actual not in known:
+            skipped.append((str(path), f"modified; {why}"))
+            continue
+        if not dry_run:
+            if not successor_installed(source, render):
+                skipped.append((str(path), f"successor not installed; {why}"))
+                continue
+            try:
+                path.unlink()
+            except OSError as exc:
+                skipped.append((str(path), f"could not remove ({exc.strerror or exc}); {why}"))
+                continue
+        retired.append(f"{path} ({why})")
+    return retired, skipped
+
+
 # -------------------------------------------------------------------- receipt
 
 
@@ -1987,6 +2079,10 @@ def cmd_user(ctx: Context, out) -> int:
         previous = owned_entries(recorded)
         skipped = prune_stale(previous, current, dry_run=ctx.dry_run)
         skipped += prune_links(previous, {row["path"] for row in links}, dry_run=ctx.dry_run)
+        # After the renders, so a predecessor goes only once its successor is
+        # on disk; no receipt names it, so `prune_stale` above never sees it.
+        retired, left = retire_predecessors(agents, ctx.agents, dry_run=ctx.dry_run)
+        skipped += left
 
         specs = hook_specs(ctx.checkout)
         hook_changed = install_hook(ctx.settings, specs, dry_run=ctx.dry_run)
@@ -2043,6 +2139,8 @@ def cmd_user(ctx: Context, out) -> int:
         print(f"{prefix} {len(agents)} agents", file=out)
         for home in ctx.agents:
             print(f"  {home.key}: {home.root}", file=out)
+    for path in retired:
+        print(f"  {'would retire' if ctx.dry_run else 'retired'} predecessor: {path}", file=out)
     if links:
         kept = sum(1 for plan in plans if plan.state == "ours")
         print(
@@ -2394,6 +2492,15 @@ def cmd_status(ctx: Context, out) -> int:
         file=out,
     )
     print(command_report(ctx.checkout, ctx.environ), file=out)
+
+    # A dry run of the retirement `--user` performs, so the two cannot disagree
+    # about which copies count as unmodified.
+    retirable, kept = retire_predecessors(
+        discover_agents(ctx.checkout), ctx.agents, dry_run=True)
+    for path in retirable:
+        print(f"predecessor: {path} remains -- run --user to retire it", file=out)
+    for path, reason in kept:
+        print(f"predecessor: {path} remains ({reason}) -- remove it by hand", file=out)
 
     legacy = [
         path
