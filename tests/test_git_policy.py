@@ -63,6 +63,7 @@ VARIANTS = {
     "bin/sd_review_material.py": "needs NUL-delimited unstripped stdout; git_output strips",
     "bin/sd_install.py": "runs before any sibling is borrowed, and one call fetches",
     "bin/sd_research_render.py": "reads a --follow log for dates; wants the lines, not the strip",
+    "bin/sd_fleet.py": "reads file blobs for a byte-exact diff; git_output strips the last newline",
 }
 
 

@@ -4,6 +4,85 @@
 
 ### Changed
 
+- **The local gate caps concurrent runs on one machine.** `make test` now
+  takes one of `SD_GATE_SLOTS` slots (default 2) before it starts, and waits
+  with one `waiting for a gate slot` line while all are held (sd:1541). Ten
+  worktrees checking at once had driven the load average to 157. A dead
+  holder's slot frees itself, CI takes no slot, and `SD_GATE_SLOTS=0` turns
+  the cap off.
+
+- **A gate slot is a kernel lock, so no waiter deletes one.** A run holds
+  `slot.N.lock` with `flock` on an open fd, and the kernel frees it when the
+  holder dies (sd:1558). The earlier pid directories let two waiters remove
+  each other's new slots. A waiter whose launcher exits now stops, checked
+  before each attempt and again with a slot held, since the watchdog starts
+  only with the shards.
+
+- **The system-main canary fails on skipped tests.** `sd-db-main-canary` now
+  carries the unittest job's skip gate and installs the same pinned opencode
+  (sd:1557). Both jobs call `.github/scripts/install-opencode.sh`, which holds
+  the version and checksum once.
+
+- **`run-tests.sh` names the tree it tested.** It prints a `run-tests: start
+  head=... dirty=...` line before the suite and a `run-tests: end head=...
+  exit=...` line after it, so a stale run no longer reads as a current one
+  (sd:1407).
+
+- **The real-CLI shipping test bounds each command at 300 s, not 30 s.** The
+  bound is a hang guard; at 30 s it failed gates under load on runs that take
+  about 7 s alone (sd:1539).
+
+- **`sd-docs-lint` reads `archive` only below the work root.** Rule 1, rule
+  6, the claim collector and `--update-citations` treated any `archive`
+  component in a path as the archive, so a checkout under a directory of
+  that name skipped them (sd:1540). One helper, `is_archived`, now decides
+  for all five sites.
+
+- **CI runs the suite against system `main` as a non-blocking canary.** The
+  new `sd-db-main-canary` job installs `sd_db` from system `main` with
+  `continue-on-error`, so a removed library name shows before the pin moves
+  (sd:1542). The `MONEY_NOISE` removal broke every local gate with no CI signal.
+
+- **`SD_REVIEW_RAW_DIR` keeps a failed review's raw output for debugging.**
+  A MiniMax pass on system #590 failed with only "local review emitted no
+  valid receipt"; sd-ship had dropped sd-review's exit code and stderr. Now
+  the pass's `execution_error` records the exit code and bounded stdout and
+  stderr tails. With `SD_REVIEW_RAW_DIR` set, sd-review also carries each
+  URL provider's raw response body, and sd-ship moves it and any unparsable
+  receipt into an owner-only (0600) JSON file there, recording only the
+  path in the ship state. Unset, no model output is kept.
+
+- **`sd-docs-lint`'s Jev claim-support reading is opt-in per repository.**
+  The reading sends `docs/work` prose to a third-party model, and it ran in
+  every checkout where `jev` could answer. A checkout whose prose must not
+  leave the machine had to export `JEV_SD_DOCS_LINT=0`, which a plain shell
+  or a second agent does not do (sd:1304). The reading now runs only where
+  the repository's tracked `.github/sd-docs-lint.json` sets
+  `"jev_claim_support": true`. `JEV_SD_DOCS_LINT=0` still switches it off
+  everywhere, and no value of the variable switches it on without the file.
+  A malformed file takes no reading and prints a note. This repository opts
+  itself in. `sd-review`'s tier reading sends no prose and keeps its default.
+
+- **`sd fleet stamp` lays the auto-merge fleet's shared files (sd:1326).**
+  Each `runner_merge=auto` repository needs the same four things before the
+  runner can merge it: the route workflow at the current pin, a check workflow,
+  the `unprotected` declaration and the `CLAUDE.local.md` block. The verb
+  renders them from the existing writers (`sd_setup_github`, `sd_setup_guard`,
+  `sd_install.local_block_text`) and diffs them against each repository's
+  `origin/HEAD`. `--dry-run` prints the diffs and writes nothing. A write
+  stamps only the checkout it runs in (R10-D6), puts tracked files only on a
+  feature branch, and a second run changes nothing. The check workflow runs `git diff --check` and
+  is laid only where no other workflow runs on `pull_request`. The remote is
+  asked the three ownership questions first: a fork or an unadministered
+  repository gets no tracked file, and only a repository nobody else may push
+  to gets the `unprotected` entry, so employer repositories keep theirs.
+  The stamp is additive: an `sd-status.json` that declares any gap is left as
+  written, the block refresh only adds template lines inside the markers, and a
+  repository that forbids CI (an `sd-status.json` reason saying "forbids CI",
+  or a `No CI` / `Do not add CI` rule in `CLAUDE.md`) gets no workflow. The
+  `CLAUDE.local.md` template gains the parallel-work line (sd:1342) and the
+  `docs/dashboard/` rule.
+
 - **`sd-check` runs a Python repo's tests with its `.venv` interpreter.** The
   `pyproject.toml` fallback always named `python3 -m pytest`, so a repo whose
   test dependencies live in `.venv` failed before any test ran (sd:1309). It
@@ -304,6 +383,15 @@
   `bin/sd-status:877` citation in the one-person PRD read as a cleanup that
   way. Every live `path:line` into code now counts, so the baselines rose to
   52 and 80, and that citation now names `handoff_section`.
+
+- **A merge-forward before the first `sd-ship prepare` no longer becomes the
+  pull request title (sd:1377).** With no `--title` and no stored title,
+  prepare took HEAD's subject. After the merge-forward sd-ship demands, that
+  was "Merge origin/main into <branch>". It was stored, preferred on every
+  later run, and landed on main as `18d42c56` for sd:1347. The fallback now
+  takes the newest commit the branch adds over the base that is not a merge.
+  A branch that adds only merges gets the existing "provide a final --title"
+  refusal.
 
 - **`sd-review`'s capped-exposure report works with the exact-money ledger.**
   System #579 (sd:1176) removed `sd_db.ledger.MONEY_NOISE`, and the report

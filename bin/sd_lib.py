@@ -3101,3 +3101,14 @@ def run_group(argv: list[str], *, cwd: pathlib.Path, env: dict[str, str], timeou
         if owns_term:
             signal.signal(signal.SIGTERM, signal.SIG_DFL)
     return subprocess.CompletedProcess(list(argv), process.returncode, output or "", errors or "")
+
+
+def raw_response(result: Any) -> dict:
+    """A url reviewer's raw output for its diagnostic, only under `SD_REVIEW_RAW_DIR`.
+
+    Opt-in debugging (system #590): sd-ship moves it to an owner-only file and
+    keeps only the path, so model output never reaches the ship state.
+    """
+    if not os.environ.get("SD_REVIEW_RAW_DIR"):
+        return {}
+    return {"raw_response": {"body": result.stdout, "stderr": result.stderr}}
