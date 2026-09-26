@@ -185,6 +185,9 @@ make docs-lint
 Taking the reading sends the citing sentence and the cited passage to a
 third-party model. Both are capped, and neither carries a path, an item name,
 or the citation marker.
+The citing sentence is the whole sentence that ends at the marker, joined
+across the wrapped lines of its paragraph or list item; it is capped at 400
+characters and the passage at 700.
 
 **Read `docs/work` there as "the checkout you are standing in", not "this
 one".** `sd-docs-lint` picks its repository from the working directory, reads

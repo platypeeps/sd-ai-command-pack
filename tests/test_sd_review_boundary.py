@@ -731,22 +731,28 @@ class LineBudgetTests(unittest.TestCase):
         # Shared-core classification and the complexity ceilings are
         # unchanged.
         #
-        # 3641 -> 3644 is #1194 (PR #1199), `sd-review --lens research-brief`.
+        # 3641 -> 3645 is sd:1602. `bin/sd-review` grows +4: the review
+        # prompt tells each lane not to report cosmetic findings and names
+        # the contract text that is never cosmetic. Measured, not carried:
+        # `sd-review` is 2351 on this tree. Shared-core classification and
+        # the complexity ceilings are unchanged.
+        #
+        # 3645 -> 3648 is #1194 (PR #1199), `sd-review --lens research-brief`.
         # `bin/sd-review` grows +3: the `--lens` argument, the `lens` report
         # key, and the one-line comment saying a lens, like `--challenge`, is
         # a request to be read that `docs_skip` does not answer. The lens is
         # part of the prompt and of the tier decision, which is review
         # mechanics, so its switch belongs in the lane. The lens text itself
         # is `sd_lib.REVIEW_LENSES`, shared core, so none of it is spent here.
-        # Measured, not carried: `sd-review` is 2350 on this tree. This raise
-        # is its own commit, but after the pushed commit that spends it, not
-        # before. Shared-core classification and the complexity ceilings are
-        # unchanged.
+        # The branch raised 3641 -> 3644 alongside sd:1602 on main, so the
+        # merge of main stacks it on top. Measured, not carried: `sd-review`
+        # is 2354 on the merged tree. Shared-core classification and the
+        # complexity ceilings are unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3644,
+            3648,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

@@ -156,6 +156,15 @@ class TrailerBlockTests(GitFixture):
         self.assertFalse(sd_lib._closes(message, ITEM))
         self.assertTrue(sd_lib._closes(message, OTHER))
 
+    def test_a_squash_held_at_merge_closes_nothing(self) -> None:
+        """A `Reviewed-base:` the landed parent differs from is the hold reconcile
+        records; git readers keep the item open with it (#1179)."""
+        message = merge_message("feat: a slice", f"Item: {ITEM}", f"Delivers: {ITEM}", "Reviewed-base: aaa")
+        self.assertFalse(sd_lib._closes(message, ITEM, "bbb"))
+        self.assertTrue(sd_lib._closes(message, ITEM, "aaa ccc"))
+        self.assertTrue(sd_lib.held_at_merge(message, "bbb"))
+        self.assertIsNone(sd_lib.held_at_merge(merge_message("feat: a slice", f"Delivers: {ITEM}"), "bbb"))
+
     def test_both_closing_trailers_close(self) -> None:
         for trailer in (sd_lib.DELIVERS_TRAILER, sd_lib.CLOSES_TRAILER):
             with self.subTest(trailer=trailer):

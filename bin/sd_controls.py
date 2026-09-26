@@ -128,7 +128,7 @@ def run(args: argparse.Namespace) -> int:
                 source = Path(args.file)
                 if source.stat().st_size > 65536:
                     raise ValueError("provider proposal exceeds 64 KiB")
-                proposal = json.loads(source.read_text())
+                proposal = json.loads(source.read_text(encoding="utf-8"))
                 if not isinstance(proposal, dict) or set(proposal) != {"revision", "enabled", "orders"}:
                     raise ValueError("provider proposal needs revision, enabled flags and both role orders")
                 result = provider_controls.configure(connection, enabled=proposal["enabled"], orders=proposal["orders"],

@@ -221,14 +221,15 @@ def remedy_checkout(python: str, root: pathlib.Path) -> str:
     return str(pathlib.Path(python).parent.parent.parent)
 
 
-def staged_paths() -> list[str]:
+def staged_paths(diff_filter: str = "ACMRT") -> list[str]:
     """Added, copied, modified, renamed and type-changed paths in the index.
 
     Deletions have no file to check. `T` is a symlink or submodule replaced by
-    a file, which is a staged file like any other.
+    a file, which is a staged file like any other. With `"D"`, the deletions;
+    `--no-renames` keeps a rename's old path among them.
     """
     result = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMRT", "-z"],
+        ["git", "diff", "--cached", "--name-only", "--no-renames", f"--diff-filter={diff_filter}", "-z"],
         capture_output=True,
         text=True,
         check=True,
@@ -264,7 +265,9 @@ def is_python(path: pathlib.Path) -> bool:
         with path.open("rb") as handle:
             head = handle.readline(SHEBANG_LIMIT)
     except OSError:
-        return False
+        # Fail closed, as `_is_python_script` does: "not Python" for a file
+        # nobody could open would skip Ruff on it silently (sd:1000).
+        return True
     if not head.startswith(b"#!"):
         return False
     if b"python" in head:
@@ -344,8 +347,11 @@ def main() -> int:
         # A deletion is not a staged path, so a commit that removes or renames
         # a pass reaches here with the module gone; that is a failure, not a
         # notice, or the gate could be removed by the commit it should gate.
+        # The index as well as the disk: `git rm --cached` leaves the file.
+        deleted = set(staged_paths("D"))
         absent = [name for name in WHOLE_TREE_PASSES
-                  if not (root / (name.replace(".", "/") + ".py")).is_file()]
+                  if (module := name.replace(".", "/") + ".py") in deleted
+                  or not (root / module).is_file()]
         if absent:
             status = 1
             print(f"pre-commit: {', '.join(absent)} missing from this checkout; "

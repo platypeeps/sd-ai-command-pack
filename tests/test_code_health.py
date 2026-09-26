@@ -900,6 +900,24 @@ class CodeHealth(unittest.TestCase):
             [(key, "shares its name", key.split("::")[0]) for key in blind],
             "Lower AMBIGUOUS_CEILING to the new count in the same change."))
 
+    def test_every_path_text_read_and_write_names_its_encoding(self):
+        """`read_text()` and `write_text()` with no `encoding=` use the locale's.
+
+        A pull request body carries em dashes, and `sd-ship` wrote it that way:
+        under a non-UTF-8 locale `prepare` raised `UnicodeEncodeError` (sd:1000).
+        `open()` is not read here; this covers the two `Path` shorthands only.
+        """
+
+        unnamed = [
+            f"{path.relative_to(REPO_ROOT).as_posix()} line {node.lineno}"
+            for path in sources()
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr in ("read_text", "write_text")
+            and not any(keyword.arg == "encoding" for keyword in node.keywords)
+        ]
+        self.assertEqual(unnamed, [], "name encoding=\"utf-8\" at each of these")
+
     def test_every_baseline_entry_still_earns_its_place(self):
         """The baselines may only shrink.
 

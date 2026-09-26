@@ -20,6 +20,72 @@
   at the reviewed revision, so a `url` reviewer with only the patch still sees
   the conclusion, citations and Status an edit leaves outside it.
 
+- **`sd.assistant_merge` now has one reading (sd:1633).** A session read
+  `controlled` and could not tell whether it might merge, or merge without the
+  review lane, so it stopped and asked. `WORKFLOW.md`, `AGENTS.md`,
+  `README.md`, the `sd-ship` skill and the `sd config` description now say the
+  same thing. `controlled` means merge without asking, only through
+  `sd-ship prepare` then `sd-ship merge`, whose gates include the review lane
+  and required CI. It never permits a raw `gh pr merge` or a web squash. A
+  refusal from `sd-ship` is a stop. `ask`, or no value, means ask first. The
+  values and `sd-ship` behavior do not change.
+
+- **`tests.test_sd_ship` runs about 40% faster (sd:1605).** The module
+  sets the `make check` critical path. Its fixture now builds the bare remote,
+  seed and both clones once per process and copies them per test. It switches
+  both Jev stages off, so no `sd-review` child asks the live endpoint; a CI
+  runner has no `jev` anyway. The GitHub double polls for shutdown every 10 ms
+  instead of 500 ms. The fixture `gh` speaks HTTP over a socket instead of
+  importing urllib. One watchdog test waits on a ready file instead of a 5 s
+  timeout. Every test still runs and asserts what it did; `sd-ship` is
+  unchanged.
+
+- **`sd-docs-lint` sends the citing sentence, not the citing line, as the claim (sd:1186).**
+  The claim-support reading sent the one physical line a citation marker sat
+  on. Prose here is hard-wrapped and a marker trails its sentence, so the claim
+  was the sentence's tail plus the next sentence's opening. In the system
+  repository 64 of 197 readings scored under 0.5 for that reason. The claim is
+  now the sentence that ends after the marker, joined across the wrapped lines
+  of its paragraph or list item. The 400-character cap is unchanged, so the
+  worst case sent is unchanged; a longer sentence keeps the words that lead up
+  to the marker. A marker placed after its sentence's stop cites the sentence
+  before it. `e.g.` before a lower-case word does not end a sentence, and a
+  fragment under three words falls back to the block up to the marker. The
+  same citation twice on one line gives each row its own sentence.
+  `.citations.tsv` is unchanged: it records the cited line, not the claim, so
+  no recording needs rewriting.
+
+- **`sd-ship prepare` refuses a branch behind the default branch before the
+  review.** Merge refused such a branch, but prepare spent the full review and
+  answered `ready_to_send` first (sd:1346, sd:1367). After its fetch, prepare
+  now checks that `origin/<default>` is an ancestor of the head. It refuses
+  with `base_moved` and names `git merge origin/<default>`; a merge keeps the
+  next push a fast-forward, which a rebase does not.
+
+- **Reviews ignore cosmetic findings (sd:1602).** A finding is cosmetic when
+  fixing it changes no behaviour and no action a reader takes. Text that is a
+  contract is not cosmetic: a wrong command or flag, a parsed string, a config
+  value, or an agent instruction. The `sd-review` prompt and
+  `.github/copilot-instructions.md` tell reviewers not to report them. One that
+  still arrives is `rebutted` with a `cosmetic:` reason in adjudication, or
+  answered with `sd-review-ack --dismiss`, never `--carried`, and gets no
+  follow-up row.
+  `WORKFLOW.md` "Parallel work" also groups rows that change the same files
+  into one pull request (sd:1603), and gates once, in full, before a push
+  after iterating on `make check CHANGED=...` (sd:1606).
+
+- **`sd-ship` holds delivery when the base advanced under the merge.** GitHub
+  squashes onto the base it holds at the `PUT`, and no request field pins that
+  base, so a base advance after the last freshness read landed a combined tree
+  nobody reviewed (sd:1089, seen on #1075). `reconcile` now reads the squash
+  parent. When the reviewed head does not contain it, the merge is recorded and
+  delivery stops at `base_advanced_at_merge`, naming the commit to verify.
+  The squash also carries `Reviewed-base: <sha>`, the parent the review
+  covered. `sd_lib.held_at_merge` compares it with the landed parent, and
+  reconcile, `delivered()` and `sd-status` all ask it, so a held `Delivers:`
+  no longer reads as done in git (#1179). A hand delivery recorded on the row
+  clears the hold on the next reconcile.
+
 - **`sd work register` works from a linked worktree.** It refused with
   `repository '<worktree>' is not registered` whenever the worktree had no
   origin to match (sd:1293). The lookup now resolves the worktree to its main

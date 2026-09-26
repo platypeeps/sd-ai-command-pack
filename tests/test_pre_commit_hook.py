@@ -203,6 +203,24 @@ class TheHookRun(unittest.TestCase):
         self.assertNotIn("Ran ", output, "a pass ran with one of the two missing")
         self.assertIn("pre-commit: failed, status 1", output)
 
+    def test_an_index_only_deletion_of_a_whole_tree_pass_is_refused(self):
+        """`git rm --cached` keeps the file on disk, so a disk check passed
+        while the commit removed the gate (sd:1000)."""
+        git("add", "--", "tests", cwd=self.root)
+        git("commit", "-q", "-m", "stubs", cwd=self.root)
+        git("rm", "-q", "--cached", "--", "tests/test_doc_citations.py", cwd=self.root)
+        self.assertTrue((self.root / "tests/test_doc_citations.py").is_file())
+        result = self.run_hook()
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("tests.test_doc_citations", output)
+        self.assertNotIn("Ran ", output, "a pass ran with one of the two deleted")
+
+    def test_a_suffixless_path_that_cannot_be_opened_counts_as_python(self):
+        """Fail closed, as `_is_python_script` does: "not Python" for a file
+        nobody could open would skip Ruff on it silently (sd:1000)."""
+        self.assertTrue(load_hook().is_python(self.root / "tests"))
+
     def test_a_python_shebang_past_128_bytes_still_names_python(self):
         """The same bound as `tests/test_code_health.py`: the whole first line, up to 4096."""
         shebang = "#!/usr/bin/env -S " + " " * 200 + "python3\n"

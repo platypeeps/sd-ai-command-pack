@@ -1564,7 +1564,9 @@ def ack_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", help="emit one machine-readable object")
     parser.add_argument("--ack", metavar="ID", help="acknowledge one finding by its id")
     parser.add_argument("--fixed", metavar="COMMIT", help="with --ack: the commit that answers it")
-    parser.add_argument("--dismiss", metavar="REASON", help="with --ack: why it needs no change")
+    parser.add_argument("--dismiss", metavar="REASON",
+                        help="with --ack: why it needs no change; answer a cosmetic finding "
+                             "here, never with --carried")
     parser.add_argument("--carried", metavar="ITEM",
                         help="with --ack: the item that holds it, whose status decides the verdict")
     parser.add_argument("--landed-in", metavar="REF", dest="landed_in",

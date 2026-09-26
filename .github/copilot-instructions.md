@@ -40,6 +40,12 @@ somebody deliberately wrote under `docs/work/`.
   focused fixture in the local guard suite.
 - Separate current, non-outdated unresolved findings from stale or outdated
   review threads.
+- Do not comment on cosmetic issues. A finding is cosmetic when fixing it
+  changes no behaviour and no action a reader takes: wording, comments,
+  docstrings, naming, formatting, or a drifted count or list in prose. Text
+  that is a contract is not cosmetic: a doc or help text that gives a wrong
+  command or flag, a string a test or tool parses, a config value, or an
+  instruction an agent executes.
 - A diff that touches a path in the table below carries the matching scope
   line in the PR body, on its own line, per `.github/PULL_REQUEST_TEMPLATE.md`.
   `bin/sd-docs-lint --pr-body` rule 8 reads this table and fails a body that

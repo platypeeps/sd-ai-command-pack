@@ -503,6 +503,31 @@ class GuardTests(SetupFixture):
                 self.assertEqual(guard.rendered(once), once)
                 self.assertEqual(guard.guard_state(once), "same")
 
+    def test_a_trailing_comment_on_the_entry_line_is_still_that_entry(self) -> None:
+        """A YAML comment after `github-actions` made the entry invisible, so
+        the guard read `absent` and `rendered()` appended a second entry."""
+        text = guard.minimal_file().replace(
+            '"github-actions"', '"github-actions"   # pinned by the pack', 1)
+        self.assertIn("# pinned by the pack", text)
+        self.assertEqual(guard.guard_state(text), "same")
+        self.assertEqual(guard.rendered(text).count("- package-ecosystem:"), 1)
+
+    def test_drift_on_a_file_with_no_final_newline_keeps_the_diff_lines_apart(self) -> None:
+        """`difflib` writes a last line without its newline, so the next line
+        of the report was glued to it; `diff` marks it instead."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "a").write_text("one\ntwo", encoding="utf-8")
+            (root / "b").write_text("x\n", encoding="utf-8")
+            stream = io.StringIO()
+            code = guard.report_drift(
+                root, {pathlib.Path("a"): "one\ntwo\nthree\n", pathlib.Path("b"): "x\n"}, stream)
+        lines = stream.getvalue().splitlines()
+        self.assertEqual(code, 1)
+        self.assertIn("-two", lines)
+        self.assertIn("\\ No newline at end of file", lines)
+        self.assertEqual(lines[-1], "same b")
+
     def test_a_file_with_no_entry_at_all_refuses_by_name(self) -> None:
         with self.assertRaises(guard.GuardError) as caught:
             guard.rendered("version: 2\nupdates: []\n")
