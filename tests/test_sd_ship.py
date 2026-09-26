@@ -53,6 +53,20 @@ loader.exec_module(ship)
 CAP = importlib.import_module("sd_ship_history").AUTOMATIC_CODE_REVIEW_PASSES
 
 
+#: The head a lagging pull object still reports: the pre-push one on #1145.
+LAGGING_HEAD = "a3b265f4" * 5
+
+
+def pull_head_waits(sleep):
+    """The waits a patched `time.sleep` saw from the post-push re-read.
+
+    The patch is process-wide, so it also sees the sub-second lock backoffs of
+    other threads and the Copilot materialization wait; neither is this one.
+    """
+    return [call.args[0] for call in sleep.call_args_list
+            if call.args[0] >= 1 and call.args[0] != ship.COPILOT_MATERIALIZATION_INTERVAL_SECONDS]
+
+
 class ShipDouble(GitHubDouble):
     """Adds precisely the write/read surfaces this adapter calls to the shared double."""
     def __init__(self, remote):
@@ -82,6 +96,9 @@ class ShipDouble(GitHubDouble):
         #: classic protection before sd:1110 said so (sd:1327).
         self.rules = []
         self.rulesets = {}
+        #: How many `GET /pulls/{n}` reads still answer the pre-push head, the
+        #: way GitHub does for a second or so after a push lands (sd:1394).
+        self.lagging_pull_reads = 0
 
     def _pull(self, pull):
         head = getattr(pull, "merged_head", None) or pull.head_sha(self.remote)
@@ -159,7 +176,11 @@ class ShipDouble(GitHubDouble):
                 return 200, sequence.pop(0) if len(sequence) > 1 else sequence[0]
             return 200, self.review_payload[kind]
         if method == "GET" and path.startswith(f"{prefix}/pulls/"):
-            return 200, self._pull(self.remote.pull(int(path.rsplit("/", 1)[1])))
+            value = self._pull(self.remote.pull(int(path.rsplit("/", 1)[1])))
+            if self.lagging_pull_reads:
+                self.lagging_pull_reads -= 1
+                value["head"]["sha"] = LAGGING_HEAD
+            return 200, value
         if method == "PUT" and path.endswith("/merge"):
             number = int(path.split("/")[-2])
             pull = self.remote.pull(number)
@@ -573,6 +594,35 @@ roles:
                          ship.digest(ship.review_history(before)))
         # The receipt reads back through the same coverage walk that merge uses.
         self.assertEqual(self.merge()["phase"], "merged")
+
+    def test_prepare_rereads_a_pull_object_that_lags_the_push(self):
+        # sd:1394, live on #1145 and system #572: the pull object still named
+        # the pre-push head one second after the push, and one read refused.
+        self.double.lagging_pull_reads = 2
+        with patch.object(ship.time, "sleep") as sleep:
+            result = self.prepare()
+        self.assertEqual(result["phase"], "ready_to_send")
+        self.assertEqual(self.operation().state["pull_request"]["number"], 1)
+        self.assertEqual(self.double.lagging_pull_reads, 0)
+        waits = pull_head_waits(sleep)
+        self.assertEqual(waits, [ship.PULL_HEAD_INTERVAL_SECONDS, 2 * ship.PULL_HEAD_INTERVAL_SECONDS])
+
+    def test_a_head_that_never_arrives_is_a_retryable_refusal(self):
+        self.double.lagging_pull_reads = ship.PULL_HEAD_ATTEMPTS
+        with patch.object(ship.time, "sleep") as sleep:
+            with self.assertRaisesRegex(ship.Refusal, "PR head changed after push") as caught:
+                self.prepare()
+        self.assertIn(LAGGING_HEAD, str(caught.exception))
+        waits = pull_head_waits(sleep)
+        self.assertEqual(waits, [ship.PULL_HEAD_INTERVAL_SECONDS * n for n in range(1, ship.PULL_HEAD_ATTEMPTS)])
+        workflow = caught.exception.workflow
+        self.assertEqual(workflow["state"], "retryable_failure")
+        self.assertTrue(workflow["blocker"]["retryable"])
+        self.assertEqual(workflow["blocker"]["code"], "pull_head_mismatch")
+        self.assertIsNone(self.operation().state.get("pull_request"))
+        # The rerun adopts the PR the push already updated.
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.prepare()["phase"], "ready_to_send")
 
     def test_prepare_hands_the_pull_request_body_to_the_docs_lint(self):
         # Rule 5 only runs with a body. The skill says the PR link is checked
