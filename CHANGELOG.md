@@ -4,6 +4,13 @@
 
 ### Changed
 
+- **CI's system pin moves to schema 15 (sd:1619).** `platypeeps/system`
+  `5fb29ef2` adds `repo.managed` and `sd-db.sh repo managed PATH yes|no`.
+  `repo list` rows now read `path remote status_source managed runner_merge`.
+  No pack surface parses that output; the pack reads the `repo` table by
+  column name. `tests/test_system_pin.py` holds the pin to the installed
+  library, so it was red on any machine already at schema 15.
+
 - **`tests.test_sd_ship` runs about 40% faster (sd:1605).** The module
   sets the `make check` critical path. Its fixture now builds the bare remote,
   seed and both clones once per process and copies them per test. It switches

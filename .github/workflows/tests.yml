@@ -301,12 +301,29 @@ jobs:
       # (`sd_lib.stored_repo`, `repo_row`, `same_repo`, `repo_disk`), and
       # `tests/test_home_relative.py` drives them under a second home, which
       # needs the library to carry the conversion.
+      #
+      # `5fb29ef2` (system #619, sd:1619) takes `SCHEMA_VERSION` 14 -> 15 with
+      # `015_repo_managed.sql`: `repo.managed`, a 0/1 flag set only by
+      # `sd-db.sh repo managed PATH yes|no`, and `repo list --managed`.
+      # `repo list` rows now read `path remote status_source managed
+      # runner_merge`; `runner_merge` stays last. No pack surface parses that
+      # output: `bin/sd_fleet.py`, `bin/sd-ship` and `sd_lib.repo_row` read
+      # the `repo` table by column name, so the new column changes nothing
+      # they see. Of the other `sd_db` commits in `78e43d8b..5fb29ef2`, the
+      # ones a pack surface calls into: `sd_db.ledger` keeps `MONEY_NOISE` for
+      # `bin/sd-review` (#583) while the ledger compares money as exact
+      # decimals and `sd_db.calls` prices in `Decimal` (#579); `sd_db.progress`
+      # compares remotes as host/owner/name (#565), matches pre-014 keys
+      # (#561) and reads issue keys (#595); `repos.checkouts` seeds from the
+      # common conf as well. The rest (`remote`, `serve`, `hub`,
+      # `protection`, `shadow_jira`, backup) is new or system-only code that
+      # no pack test constructs.
       - name: Check out the system checkout, for sd_db
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: platypeeps/system
-          # Schema 14; `tests/test_system_pin.py` holds it to the installed library.
-          ref: 78e43d8b2116d8b43b9277e73a63b474af0524bd
+          # Schema 15; `tests/test_system_pin.py` holds it to the installed library.
+          ref: 5fb29ef2c3cc26b845296d946b8128912da003d0
           token: ${{ secrets.SYSTEM_REPO_TOKEN }}
           path: system-checkout
           persist-credentials: false
