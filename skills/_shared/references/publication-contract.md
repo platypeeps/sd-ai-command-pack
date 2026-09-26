@@ -131,9 +131,9 @@ research repo, `sd-research-kit init-hook` installs the hook that does it, as
 post-commit, post-merge and post-checkout, so a pull or a branch switch renders
 too; the hook never fails the git command, because the change has already been
 made when it runs.
-A render executes `research.conf.py`, so a pull or a checkout that changed that
-file does not render: the hook names the file and asks for
-`sd-research-kit render` once it has been read.
+A render executes `research.conf.py`, so after a pull or a checkout the hook
+renders only a config a render has executed there before. Otherwise it names
+the file and asks for `sd-research-kit render` once it has been read.
 The dashboard's freshness indicator is then a statement about the render, not
 about whether anyone remembered. A verification-only mode that fails on stale
 output is acceptable where a write hook is not wanted; silence is not.

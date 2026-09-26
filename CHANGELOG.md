@@ -471,11 +471,14 @@
   pull or checkout just brought in (sd:1376).** A render executes the config.
   After sd:1353 the post-merge and post-checkout arms rendered on every pull
   and branch switch, so a config from a tree the operator had not read ran
-  without any command of theirs. Those arms now ask git whether the operation
-  changed `research.conf.py` (for a file checkout: whether the tree's copy
-  still matches HEAD) and, when it did, decline to render and name
-  `sd-research-kit render`. Post-commit renders as before. `init-hook`
-  upgrades the previous body, which joins `SUPERSEDED_HOOKS`.
+  without any command of theirs. `sd-research-kit render` now records the
+  sha256 of the config it executed under the git directory, and those arms
+  render only a config whose digest matches. Otherwise they decline and name
+  `sd-research-kit render`. A record, not a question about the one operation:
+  a declined pull leaves the incoming config in the tree, and the next
+  `git checkout HEAD -- doc.md` would have executed it. Post-commit renders as
+  before. A repository with no record declines until one render by hand.
+  `init-hook` upgrades the previous bodies, which join `SUPERSEDED_HOOKS`.
 
 - **An orphaned reviewed head now refuses by name, not as `git failed` (sd:1348).**
   `sd-ship prepare` requires every earlier reviewed head to stay an ancestor of
