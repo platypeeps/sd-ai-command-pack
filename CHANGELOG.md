@@ -14,6 +14,15 @@
   which stays the canonical read for every kind (sd:1112). Both print the same
   item, notes and revision, as text or with `--json`, and neither writes.
 
+- **`sd-review` reads authorship from the reviewed commits on the default branch (sd:1547).**
+  With `--base` on the default branch, the refreshed target boundary is HEAD
+  itself, so the authored range was empty. That empty read printed
+  `human (every commit says so)` and excluded no vendor, so a
+  `claude/anthropic` commit could reach an anthropic reviewer. The authored
+  range now falls back to the review subject when the boundary is HEAD. A
+  range with no commits reports `not read: no commits in <base>..<head>`
+  under `--explain` and refuses otherwise.
+
 - **A watchdog-killed review keeps its output under `SD_REVIEW_RAW_DIR`.**
   With capture on, sd-ship withheld the stdout tail of a timed-out review but
   wrote no file, so a truncated or oversized output left no evidence
@@ -391,6 +400,24 @@
   action this tool is allowed to take.
 
 ### Fixed
+
+- **An orphaned reviewed head now refuses by name, not as `git failed` (sd:1348).**
+  `sd-ship prepare` requires every earlier reviewed head to stay an ancestor of
+  the offered head. `git merge-base --is-ancestor` answers by exit status and
+  prints nothing, so an amend or a rebase after a review surfaced as the bare
+  message `git failed`, code `command_failed`, marked retryable. The refusal now
+  names the reviewed head, the offered head and the branch. Its code is
+  `reviewed_head_orphaned`, state `operator_decision`, not retryable. Its next
+  action names the `git reset --soft <reviewed head>` remedy. The ancestry rule
+  itself is unchanged.
+
+- **Code motion no longer lowers the R13-D1 citation count (sd:1374).** The
+  ratchet counted a `path:line` into code only when the line sat inside a
+  `def` or a `class`. An insertion above a cited line could carry it out of
+  every symbol, and the count fell with no document changed. The stale
+  `bin/sd-status:877` citation in the one-person PRD read as a cleanup that
+  way. Every live `path:line` into code now counts, so the baselines rose to
+  52 and 80, and that citation now names `handoff_section`.
 
 - **A merge-forward before the first `sd-ship prepare` no longer becomes the
   pull request title (sd:1377).** With no `--title` and no stored title,
