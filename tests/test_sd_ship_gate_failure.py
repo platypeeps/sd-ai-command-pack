@@ -60,7 +60,7 @@ class GateFailureSpendsNoPass(unittest.TestCase):
         original = copy.deepcopy(reviewed.state["passes"])
         fixed = "c" * 40
         failed, _process = self.context(state=reviewed.state, head=fixed, report_changes=GATE_FAILED)
-        with unittest.mock.patch("sd_ship_review.git", return_value=""), self.assertRaises(ship.Refusal):
+        with unittest.mock.patch("sd_ship_review.is_ancestor", return_value=True), self.assertRaises(ship.Refusal):
             failed.review(fixed)
         self.assertEqual(failed.state["passes"], original)
 
@@ -76,14 +76,14 @@ class GateFailureSpendsNoPass(unittest.TestCase):
         original = copy.deepcopy(reviewed.state)
         failed, _process = self.context(state=reviewed.state, report_changes=GATE_FAILED)
         failed.runtime = dataclasses.replace(failed.runtime, binding=lambda _root: "moved")
-        with unittest.mock.patch("sd_ship_review.git", return_value=""), \
+        with unittest.mock.patch("sd_ship_review.is_ancestor", return_value=True), \
                 self.assertRaisesRegex(ship.Refusal, "no review pass was spent"):
             failed.review(HEAD)
         for key in ("passes", "binding", "head", "reviewed_head", "review_clearance"):
             self.assertEqual(failed.state.get(key), original.get(key), key)
         again, process = self.context(state=failed.state)
         again.runtime = dataclasses.replace(again.runtime, binding=lambda _root: "moved")
-        with unittest.mock.patch("sd_ship_review.git", return_value=""):
+        with unittest.mock.patch("sd_ship_review.is_ancestor", return_value=True):
             again.review(HEAD)
         self.assertEqual(process.call_count, 2)
         self.assertEqual(len(again.state["passes"]), 2)

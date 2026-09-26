@@ -68,6 +68,27 @@ class TaskCLI(unittest.TestCase):
         self.assertFalse((self.home / "docs").exists())
         self.assertFalse((self.home / ".git").exists())
 
+    def test_task_show_reads_what_store_item_reads(self):
+        """sd:1112. `sd task show` is a read alias; `sd store item` stays canonical.
+
+        Same row, same notes, same revision, in both output forms, and
+        reading it changes nothing: the revision after is the one before.
+        """
+
+        state = json.loads(self.call("task", "add", "Read me", "--json").stdout)
+        item = state["item"]["id"]
+        self.call("task", "note", item, "--body", "A note")
+        canonical = json.loads(self.call("store", "item", item, "--json").stdout)
+        alias = json.loads(self.call("task", "show", item, "--json").stdout)
+        self.assertEqual(alias, canonical)
+        self.assertIn("A note", [note["body"] for note in alias["notes"]])
+        self.assertEqual(self.call("task", "show", item).stdout,
+                         self.call("store", "item", item).stdout)
+        after = json.loads(self.call("store", "item", item, "--json").stdout)
+        self.assertEqual(after["revision"], canonical["revision"])
+        missing = self.call("task", "show", 999999, code=1)
+        self.assertNotIn("Traceback", missing.stderr)
+
     def test_cli_and_today_query_agree(self):
         for title in ("One", "Two"):
             state = json.loads(self.call("task", "add", title, "--json").stdout)
@@ -713,10 +734,10 @@ class WorkRegister(unittest.TestCase):
         subprocess.run(["git", *args], cwd=str(self.root), check=True,
                        capture_output=True, text=True)
 
-    def call(self, *arguments, code=0):
+    def call(self, *arguments, code=0, cwd=None):
         result = subprocess.run(
             [sys.executable, str(ROOT / "bin" / "sd"), *map(str, arguments)],
-            cwd=str(self.root), env=self.environment,
+            cwd=str(cwd or self.root), env=self.environment,
             capture_output=True, text=True,
         )
         self.assertEqual(result.returncode, code, result.stdout + result.stderr)
@@ -748,6 +769,31 @@ class WorkRegister(unittest.TestCase):
         head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(self.root),
                               capture_output=True, text=True, check=True).stdout.strip()
         self.assertEqual(row["source_commit"], head)
+
+    def test_a_linked_worktree_registers_against_its_main_checkout(self):
+        """sd:1293. The doctrine puts every writer in a worktree.
+
+        The registry holds the main checkout's path, and a worktree with no
+        origin to match by is a path nobody registered. The folder is read
+        from the worktree, where it was written; the row names the checkout
+        the worktree belongs to, because the worktree is gone long before
+        anyone reads the row.
+        """
+
+        self.git("commit", "-q", "--allow-empty", "-m", "root")
+        linked = (self.home / "linked").resolve()
+        self.git("worktree", "add", "-q", "-b", "plan/a-thing", str(linked))
+        folder = linked / "docs" / "work" / "2026-09-11-a-thing"
+        folder.mkdir(parents=True)
+        (folder / "prd.md").write_text(
+            "---\ntitle: A thing to do\ncreated: 2026-09-11\n---\n\nBody.\n")
+        path = "docs/work/2026-09-11-a-thing/prd.md"
+        state = json.loads(
+            self.call("work", "register", path, "--json", cwd=linked).stdout)
+        self.assertTrue(state["created"])
+        self.assertEqual(state["item"]["repo"], sd_lib.stored_repo(self.root))
+        self.assertEqual(state["item"]["path"], path)
+        self.assertEqual(state["item"]["branch"], "plan/a-thing")
 
     def test_registering_twice_is_safe_and_says_so(self):
         """Not an error: the unique index makes the second call a no-op.

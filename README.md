@@ -210,7 +210,8 @@ the same two flags, and `--clear-recur` stops the series. `sd_db` owns every
 refusal: the grammar, the anchor, the due date and the kinds that may recur.
 
 `sd store items --open` lists the backlog; `sd store item 42 --json` includes
-history and a revision that edits can require with `--if-revision`. Notes,
+history and a revision that edits can require with `--if-revision`.
+`sd task show 42` is an alias that prints the same thing. Notes,
 priorities, due dates and task status save directly to the database. GitHub
 issues are optional external references, with their last successful sync shown
 separately from local progress.
@@ -220,6 +221,7 @@ and `sd work deliver`. `sd work register docs/work/<item>/prd.md` makes the row
 that owns a planning folder already on disk, reading its title and date from
 the file's own frontmatter; it applies only where the repository's status
 source is the database, and refuses a repository whose files still own status.
+Run from a linked worktree, it files the row under the worktree's main checkout.
 The row's branch is the branch the work happens on — the checkout's own local
 branch when that is not the default, and otherwise nothing at all, never a
 remote-tracking name.

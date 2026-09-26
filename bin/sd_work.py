@@ -408,9 +408,12 @@ def _register(sd_db, connection, args, who: str) -> Any:
     title, created = _frontmatter(prd)
     # The repository this checkout *is*, not the directory it sits in. A
     # runner clone carries the same files at another path, and resolving by
-    # path alone refuses every run made from one.
+    # path alone refuses every run made from one. A linked worktree is looked
+    # up as its main checkout (sd:1293), the way `add` files a task; the
+    # folder and the commit are still read from the worktree, where they are.
     origin = sd_lib.git_output(["remote", "get-url", "origin"], root)
-    repo = sd_lib.stored_repo(repos.registered_for(connection, str(root), origin or None))
+    checkout = sd_lib.main_worktree_root(root)
+    repo = sd_lib.stored_repo(repos.registered_for(connection, str(checkout), origin or None))
     commit = sd_lib.git_output(
         ["log", "-1", "--format=%H", "--", relative], root)
     return workflow.register_work_item(
@@ -1070,6 +1073,11 @@ def register(groups: Any, store: Any) -> None:
     resolve = verbs.add_parser("resolve", help="resolve an item note")
     resolve.add_argument("note", type=int)
     _output(resolve, "resolve", revision=True)
+    # A read alias (sd:1112): the same operation as `sd store item`, which
+    # stays the canonical read for every kind, so both print the same thing.
+    show = verbs.add_parser("show", help="one item, notes, and revision (as `sd store item`)")
+    show.add_argument("item", type=int)
+    _output(show, "item")
 
     work = groups.add_parser("work", help="maintain artifact links and verified completion")
     working = work.add_subparsers(dest="verb", required=True)
