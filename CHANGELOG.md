@@ -4,6 +4,21 @@
 
 ### Changed
 
+- **`sd-docs-lint` sends the citing sentence, not the citing line, as the claim (sd:1186).**
+  The claim-support reading sent the one physical line a citation marker sat
+  on. Prose here is hard-wrapped and a marker trails its sentence, so the claim
+  was the sentence's tail plus the next sentence's opening. In the system
+  repository 64 of 197 readings scored under 0.5 for that reason. The claim is
+  now the sentence that ends after the marker, joined across the wrapped lines
+  of its paragraph or list item. The 400-character cap is unchanged, so the
+  worst case sent is unchanged; a longer sentence keeps the words that lead up
+  to the marker. A marker placed after its sentence's stop cites the sentence
+  before it. `e.g.` before a lower-case word does not end a sentence, and a
+  fragment under three words falls back to the block up to the marker. The
+  same citation twice on one line gives each row its own sentence.
+  `.citations.tsv` is unchanged: it records the cited line, not the claim, so
+  no recording needs rewriting.
+
 - **`sd-ship prepare` refuses a branch behind the default branch before the
   review.** Merge refused such a branch, but prepare spent the full review and
   answered `ready_to_send` first (sd:1346, sd:1367). After its fetch, prepare
