@@ -4,6 +4,13 @@
 
 ### Changed
 
+- **`sd-ship prepare` refuses a branch behind the default branch before the
+  review.** Merge refused such a branch, but prepare spent the full review and
+  answered `ready_to_send` first (sd:1346, sd:1367). After its fetch, prepare
+  now checks that `origin/<default>` is an ancestor of the head. It refuses
+  with `base_moved` and names `git merge origin/<default>`; a merge keeps the
+  next push a fast-forward, which a rebase does not.
+
 - **A watchdog-killed review keeps its output under `SD_REVIEW_RAW_DIR`.**
   With capture on, sd-ship withheld the stdout tail of a timed-out review but
   wrote no file, so a truncated or oversized output left no evidence

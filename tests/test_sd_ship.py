@@ -456,6 +456,22 @@ roles:
         self.assertEqual(self.operation().state["title"], "change")
         self.assertEqual(self.remote.pull(result["pull_request"]["number"]).title, "change")
 
+    def test_a_branch_behind_the_default_branch_is_refused_before_the_review(self):
+        # sd:1346, sd:1367: merge refuses a branch behind the default branch,
+        # so prepare refused nothing, spent the review and answered
+        # ready_to_send. It now refuses first and spends nothing.
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        with patch.object(ship.Ship, "review") as review:
+            with self.assertRaisesRegex(ship.Refusal, "behind the current default branch") as caught:
+                self.prepare()
+        review.assert_not_called()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "base_moved")
+        self.assertIn("git merge origin/main", caught.exception.workflow["next_action"])
+        self.assertIsNone(self.operation().state.get("pull_request"))
+        _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge origin/main into topic\n\nAuthored-with: human", "origin/main")
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        self.assertEqual(self.merge()["phase"], "merged")
+
     def test_a_moved_binding_re_reviews_the_same_head_instead_of_bricking_it(self):
         # sd:1390, live on #1140. Reuse was decided on head equality and the
         # receipt then rejected on the binding, with nothing between them, so
