@@ -4,6 +4,18 @@
 
 ### Changed
 
+- **Reviewer order has one named source, and nothing else ranks providers
+  (sd:1556).** `sd-review --explain` prints an `order from` line and
+  `--json` an `order_source` key: the database that `sd providers configure`
+  writes and `sd providers list` shows, or the file when there is no database.
+  When the file's `roles.reviewer` seed disagrees with the rows, the line says
+  the seed is overridden. The shipped `providers.yaml` comment says the same.
+  `sd-operator-defaults.md` no longer prefers Codex or holds MiniMax and
+  Baseten back by name; it sends agents to `sd-review` and its resolved order.
+  The `codex auth` line no longer says `ok`: it says the auth mode was read and
+  no call was made, and `codex_preflight.live_call` is `false`. A codex 401
+  still shows only at dispatch; `--preflight` covers URL providers only.
+
 - **`sd fleet stamp` lays the auto-merge fleet's shared files (sd:1326).**
   Each `runner_merge=auto` repository needs the same four things before the
   runner can merge it: the route workflow at the current pin, a check workflow,

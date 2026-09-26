@@ -47,5 +47,7 @@ providers:
 
 roles:
   author:   [claude, codex]
-  # Unranked reviewer-capable entries require an explicit --provider request.
+  # A seed, not the order in force once a database exists: the rows
+  # `sd providers configure` writes win, and `sd providers list` shows them.
+  # Entries outside the order in force need an explicit --provider request.
   reviewer: [codex, claude, opencode]

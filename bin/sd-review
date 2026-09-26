@@ -1835,7 +1835,7 @@ def review(
         input_manifest = sd_review_material.input_manifest(inventory, prompt, transport_overheads, MAX_OUTPUT_BYTES, context)
     codex_entry = next((provider for provider in meter_candidates if provider.reader == "codex-json"), None)
     auth_home = codex_auth_home or codex_home(env)
-    auth = (codex_preflight_state(auth_home) if codex_entry is not None
+    auth = ({**codex_preflight_state(auth_home), "live_call": False} if codex_entry is not None
             else {"ok": None, "auth_file": "", "reason": "not selected"})
     # The probe starts a local process, so it runs at two points: under
     # `--explain` on a ready lane, the surface `sd-operator-defaults.md` sends
@@ -1908,6 +1908,7 @@ def review(
         "completed_reviews": 0,
         "reviewed_by": [],
         "registry": str(registry.path),
+        "order_source": sd_registry.order_source(registry, home=env.get("HOME"), database_path=getattr(args, "database", None)),
         "registry_refusal": registry_refusal,
         "selection_refusal": selection_refusal,
         "consent_refusal": consent_refusal,
@@ -2146,6 +2147,8 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
     reachable = workstation_lane_is_reachable(result)
     if reachable:
         write(f"  providers   {', '.join(result['providers']) or '(none)'}\n")
+        if result.get("order_source"):
+            write(f"  order from  {result['order_source']}\n")
         if result.get("authorization"):
             write(f"  consent     {result['authorization']['source']} ({result['authorization']['path']})\n")
     copilot = (result.get("remote_reviews") or {}).get("copilot")
@@ -2158,7 +2161,8 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
     skills = result.get("codex_skill_suppression") or skills_report(SKILLS_NOT_PROBED, "", "not reported")
     if reachable and result["codex_preflight"]["ok"] is not None:
         preflight = result["codex_preflight"]
-        state = "ok (ChatGPT subscription)" if preflight["ok"] else f"would refuse: {preflight['reason']}"
+        state = ("auth_mode chatgpt read from auth.json; not a live call, so a rejected key shows only at dispatch"
+                 if preflight["ok"] else f"would refuse: {preflight['reason']}")
         write(f"  codex auth  {state}\n")
         scrubbed = result["scrubbed_env_names"]
         present = ", ".join(scrubbed) if scrubbed else "no metered codex variables present"

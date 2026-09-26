@@ -76,7 +76,7 @@ Do not substitute another diff or copy a cap into this procedure.
 
 Reviewing tiers require one completed independent local review.
 Skip requires none, subject to planning and challenge minimums.
-Unranked, enabled reviewers require explicit `--provider NAME` selection and the same eligibility checks.
+Enabled reviewers outside the order `sd providers list` shows require explicit `--provider NAME` selection and the same eligibility checks.
 Copilot never fills the local slot.
 Shipping may request it afterward through the configured `deep` tier or explicit task direction.
 
