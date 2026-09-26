@@ -19,7 +19,7 @@ from typing import Any, Callable
 import sd_lib
 import sd_ship_dispositions
 from sd_ship_history import AUTOMATIC_CODE_REVIEW_PASSES, completed_depth, digest
-from sd_ship_remote import Refusal, git
+from sd_ship_remote import Refusal, completed_process
 from sd_ship_workflow import success
 
 
@@ -27,6 +27,20 @@ class ReviewTimeout(Exception):
     def __init__(self, diagnostic: dict):
         self.diagnostic = diagnostic
         super().__init__("local review watchdog expired")
+
+
+def is_ancestor(root: pathlib.Path, previous: str, head: str) -> bool:
+    """Whether `previous` is reachable from `head`.
+
+    `--is-ancestor` answers by exit status and prints nothing, so the raising
+    `git` helper rendered "not an ancestor" as a bare, retryable "git failed"
+    (sd:1348). Only exit 1 means "no"; any other failure, a timeout or a
+    missing git still raises that retryable runtime refusal, because a git
+    that cannot answer is not evidence of a rewritten history. The caller
+    owns the refusal that names the heads.
+    """
+    argv = ["git", "merge-base", "--is-ancestor", previous, head]
+    return completed_process(root, argv, answers=frozenset({0, 1})).returncode == 0
 
 
 def empty_branch_base(root: pathlib.Path, head: str) -> str | None:
@@ -244,7 +258,15 @@ class SharedReview:
             if passes[-1].get("head") == head:
                 raise Refusal("this head was already reviewed; address its findings before the fix verification")
         for previous in self.history.ancestry_heads(self.state):
-            git(self.root, "merge-base", "--is-ancestor", previous, head)
+            if not is_ancestor(self.root, previous, head):
+                raise Refusal(
+                    f"reviewed head {previous} is not an ancestor of the offered head {head} on {self.branch}; "
+                    "an amend or a rebase after a review orphans the reviewed head, and a review of a "
+                    "commit the branch cannot reach is not evidence about the branch",
+                    code="reviewed_head_orphaned", boundary="review", state="operator_decision",
+                    next_action=f"Restore a history that contains {previous}: after an amend, run "
+                                f"`git reset --soft {previous}`, commit the change on top, then prepare again. "
+                                "An unchanged retry refuses the same way.")
 
     def authorship_start(self) -> str:
         """Where this branch's commits begin, for trailer and vendor reads."""
@@ -306,7 +328,7 @@ class SharedReview:
         with tempfile.TemporaryDirectory(prefix="sd-ship-verify-") as directory:
             if prior:
                 prior_path = pathlib.Path(directory) / "prior-review.json"
-                prior_path.write_text(json.dumps(prior, sort_keys=True))
+                prior_path.write_text(json.dumps(prior, sort_keys=True), encoding="utf-8")
                 argv += ["--resume-report" if retry or additional or moved else "--verify-report", str(prior_path)]
             result = self.execute_review(argv, head, passes)
         self.record_review(result, head, passes)
@@ -338,10 +360,11 @@ class SharedReview:
             stage = "execution"
             return self.runtime.process(self.root, argv + ["--expected-timing", digest(plan)], timeout=plan["execution_seconds"])
         except ReviewTimeout as error:
+            diagnostic = withhold_raw(dict(error.diagnostic, stage=stage), head)
             if stage == "planning":
-                self.save(review_preflight_error=dict(error.diagnostic, stage=stage))
+                self.save(review_preflight_error=diagnostic)
             else:
-                passes[-1].update(execution_error=withhold_raw(dict(error.diagnostic, stage=stage), head), exit_code=124)
+                passes[-1].update(execution_error=diagnostic, exit_code=124)
                 self.save(passes=passes, reviewed_head=None, phase="reviewed")
             raise Refusal(f"local review {stage} watchdog expired after {error.diagnostic['allowed_seconds']}s; "
                           + ("no provider pass reserved; " if stage == "planning" else "reserved pass retained; ")
@@ -501,8 +524,15 @@ def withhold_raw(diagnostic: dict, head: str) -> dict:
     output, and a truncated receipt or a watchdog kill can leave it in the
     stdout tail or the captured report. The tail is withheld (the private file
     holds the whole output) and a captured report's responses move to files.
+    A watchdog kill hands over its whole output as `raw_output`, which is always
+    removed here and written to its own file (sd:1588).
     """
+    raw = diagnostic.pop("raw_output", None)
     if os.environ.get(RAW_CAPTURE_ENV):
+        if isinstance(raw, dict):
+            written = write_raw(f"{head[:12]}-watchdog", {"head": head, **raw})
+            if written:
+                diagnostic["raw_capture"] = written
         stdout = diagnostic.get("stdout")
         if isinstance(stdout, dict):
             diagnostic["stdout"] = {"withheld": "raw capture is on; stdout may carry model output",

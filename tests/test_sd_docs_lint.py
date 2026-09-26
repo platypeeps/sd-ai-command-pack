@@ -2340,6 +2340,95 @@ class Rule6ClaimSupportTests(LintFixture):
         self.assertLessEqual(len(payload["citations"]["c1"]["evidence"]), lint.EVIDENCE_CHARS)
         self.assertLessEqual(len(payload["citations"]["c1"]["claim"]), lint.CLAIM_CHARS)
 
+    def wrapped_claims(self, design: str) -> list[str]:
+        """The claims sent for the citations in a `design.md` of `design`, in order."""
+        item = self.cited_item()
+        (item / "design.md").write_text(design, encoding="utf-8")
+        lint.write_citation_manifest(item, self.work)
+        with self.jev():
+            self.run_lint()
+        sent = json.loads(self.capture.read_text(encoding="utf-8"))["citations"]
+        return [sent[f"c{number}"]["claim"] for number in range(1, len(sent) + 1)]
+
+    def wrapped_claim(self, design: str) -> str:
+        """The claim sent for the one citation in a `design.md` of `design`."""
+        return self.wrapped_claims(design)[0]
+
+    def test_a_marker_after_the_stop_claims_the_sentence_before_it(self) -> None:
+        """A marker placed after its sentence's full stop opens nothing: it
+        cites what came before it, not the sentence that follows."""
+        claim = self.wrapped_claim(
+            "# design\n\nRequests require authentication. (`prd.md:3`) Logging is optional.\n"
+        )
+        self.assertIn("Requests require authentication.", claim)
+        self.assertNotIn("Logging is optional", claim)
+
+    def test_an_abbreviation_does_not_end_the_sentence(self) -> None:
+        """`e.g.` followed by a lower-case word is not a sentence boundary."""
+        claim = self.wrapped_claim(
+            "# design\n\nRetries are forbidden for non-idempotent operations, "
+            "e.g. payments (`prd.md:3`).\n"
+        )
+        self.assertIn("Retries are forbidden for non-idempotent operations", claim)
+        # Enough words after the abbreviation that the short-sentence fallback
+        # does not rescue it: only the boundary rule keeps the assertion.
+        claim = self.wrapped_claim(
+            "# design\n\nRetries are forbidden for writes, "
+            "e.g. card payments and bank transfers (`prd.md:3`).\n"
+        )
+        self.assertIn("Retries are forbidden for writes", claim)
+
+    def test_a_fragment_too_short_to_assert_falls_back_to_the_block(self) -> None:
+        """`Fig. 3` reads as a boundary; a two-word sentence is no claim, so the
+        block up to the marker is sent instead."""
+        claim = self.wrapped_claim(
+            "# design\n\nThe cache holds for an hour, see Fig. 3 (`prd.md:3`).\n"
+        )
+        self.assertIn("The cache holds for an hour", claim)
+
+    def test_two_markers_on_one_line_each_claim_their_own_sentence(self) -> None:
+        """The same citation twice on one line is two rows, and each row's
+        claim is the sentence its own marker ends."""
+        claims = self.wrapped_claims(
+            "# design\n\nRetries are allowed (`prd.md:3`). Retries are forbidden (`prd.md:3`).\n"
+        )
+        self.assertEqual(len(claims), 2)
+        self.assertIn("Retries are allowed", claims[0])
+        self.assertNotIn("forbidden", claims[0])
+        self.assertIn("Retries are forbidden", claims[1])
+        self.assertNotIn("allowed", claims[1])
+
+    def test_a_marker_that_trails_its_sentence_sends_the_sentence(self) -> None:
+        """sd:1186. Prose is hard-wrapped, and the marker sits at the end of
+        its sentence, lines below the assertion. One physical line as the
+        claim sent the tail fragment and the next sentence's opening, so the
+        reading judged a question nobody asked. The claim is the sentence."""
+        claim = self.wrapped_claim(
+            "# design\n\n"
+            "- **the adoption gate**: the operator uses it for a week and the request log\n"
+            "  shows GET requests on five of seven days, recorded with the count\n"
+            "  (`prd.md:3`). Criterion 14's email-retirement ask cannot be made\n"
+            "  before that.\n"
+            "- the next item, which is not the claim.\n"
+        )
+        self.assertIn("the operator uses it for a week", claim)
+        self.assertIn("five of seven days", claim)
+        self.assertNotIn("Criterion 14", claim)
+        self.assertNotIn("next item", claim)
+        self.assertNotIn("prd.md", claim)
+
+    def test_a_long_sentence_keeps_the_text_before_its_marker(self) -> None:
+        """The cap still holds, and it cuts from the far end of the assertion,
+        not from the words beside the marker."""
+        claim = self.wrapped_claim(
+            "# design\n\n"
+            + "padding words " * 40 + "\n"
+            + "and the last words of it (`prd.md:3`). Then another sentence.\n"
+        )
+        self.assertLessEqual(len(claim), lint.CLAIM_CHARS)
+        self.assertIn("the last words of it ([cited]).", claim)
+        self.assertNotIn("another sentence", claim)
+
 
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "tests.yml"
 

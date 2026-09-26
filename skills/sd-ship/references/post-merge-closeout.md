@@ -22,6 +22,7 @@ Choose one supported result:
   Link it where the reviewer can access it.
 
 Record local acknowledgements through `--ack ID` with `--fixed COMMIT`, `--dismiss REASON`, or `--carried ITEM`.
+Answer a cosmetic finding with `--dismiss 'cosmetic: ...'`; never `--carried`.
 Confirm that the chosen evidence and destination satisfy the command's checks.
 A reason string alone does not establish a valid disposition.
 

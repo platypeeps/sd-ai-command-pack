@@ -2507,10 +2507,10 @@ class WorkItemInventoryTests(InventoryFixture):
             encoding="utf-8",
         )
         rows = status.actionable_inventory(self.repo, self.sections(), self.TODAY).rows
-        self.assertEqual(
-            [row["title"] for row in self.by_check(rows, "undated-planning")],
-            ["undated-thing"],
-        )
+        (row,) = self.by_check(rows, "undated-planning")
+        self.assertEqual(row["title"], "undated-thing")
+        # The age sweep was cut; the repair names the reader that ages it.
+        self.assertIn("so idle-planning can age it", row["suggest"])
 
     def test_archived_items_contribute_no_rows(self) -> None:
         archived = self.repo / "docs" / "work" / "archive" / "2026-08"
@@ -5782,7 +5782,8 @@ class RulesetProtectionCase(unittest.TestCase):
         ]
 
     def section(self, rules: Any, ruleset: Any = RULESET, *, repo: dict[str, Any] | None = None,
-                extra: dict[int, Any] | None = None) -> dict[str, Any]:
+                extra: dict[int, Any] | None = None,
+                classic: str = "gh: Branch not protected (HTTP 404)") -> dict[str, Any]:
         seen: list[str] = []
 
         def answer(args: list[str], root: pathlib.Path) -> tuple[Any, str]:
@@ -5792,7 +5793,7 @@ class RulesetProtectionCase(unittest.TestCase):
             if path == f"repos/{self.SLUG}":
                 return dict(self.REPO if repo is None else repo), ""
             if path.endswith("/branches/main/protection"):
-                return None, "gh: Branch not protected (HTTP 404)"
+                return None, classic
             if path.endswith("/rules/branches/main"):
                 if rules is None:
                     return None, "gh: Not Found (HTTP 404)"
@@ -6009,6 +6010,21 @@ class RulesetProtectionCase(unittest.TestCase):
                 self.assertEqual(result["detail"]["ruleset_rules"], [])
                 # The rulesets were still read: they are visible without admin.
                 self.assertTrue(any("/rules/branches/" in path for path in result["_seen"]))
+
+    def test_a_classic_read_that_failed_is_unknown_not_unprotected(self) -> None:
+        """Only a 404 says "no protection". A 403, a 5xx or a transport fault
+        is a read that failed, and before sd:1000 it took the same branch as
+        the 404: `unprotected` raised on no evidence, then moved to
+        `accepted` by the repository's standing acknowledgement."""
+        for error in ("gh: Resource not accessible by integration (HTTP 403)",
+                      "gh: Server Error (HTTP 502)", "error connecting to api.github.com"):
+            with self.subTest(error=error):
+                result = self.section([], classic=error)
+                self.assertIsNone(result["protected"])
+                self.assertNotIn("unprotected", [gap["id"] for gap in result["gaps"]])
+                self.assertEqual(result["accepted"], [])
+                self.assertIn(error, result["reason"])
+                self.assertEqual(result["detail"]["classic_visibility"], "unread")
 
     def test_a_gating_ruleset_is_protection_even_when_classic_is_hidden(self) -> None:
         """The rules endpoint answers a non-admin (log-distiller, read with

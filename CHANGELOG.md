@@ -16,6 +16,97 @@
   no call was made, and `codex_preflight.live_call` is `false`. A codex 401
   still shows only at dispatch; `--preflight` covers URL providers only.
 
+- **`sd.assistant_merge` now has one reading (sd:1633).** A session read
+  `controlled` and could not tell whether it might merge, or merge without the
+  review lane, so it stopped and asked. `WORKFLOW.md`, `AGENTS.md`,
+  `README.md`, the `sd-ship` skill and the `sd config` description now say the
+  same thing. `controlled` means merge without asking, only through
+  `sd-ship prepare` then `sd-ship merge`, whose gates include the review lane
+  and required CI. It never permits a raw `gh pr merge` or a web squash. A
+  refusal from `sd-ship` is a stop. `ask`, or no value, means ask first. The
+  values and `sd-ship` behavior do not change.
+
+- **`tests.test_sd_ship` runs about 40% faster (sd:1605).** The module
+  sets the `make check` critical path. Its fixture now builds the bare remote,
+  seed and both clones once per process and copies them per test. It switches
+  both Jev stages off, so no `sd-review` child asks the live endpoint; a CI
+  runner has no `jev` anyway. The GitHub double polls for shutdown every 10 ms
+  instead of 500 ms. The fixture `gh` speaks HTTP over a socket instead of
+  importing urllib. One watchdog test waits on a ready file instead of a 5 s
+  timeout. Every test still runs and asserts what it did; `sd-ship` is
+  unchanged.
+
+- **`sd-docs-lint` sends the citing sentence, not the citing line, as the claim (sd:1186).**
+  The claim-support reading sent the one physical line a citation marker sat
+  on. Prose here is hard-wrapped and a marker trails its sentence, so the claim
+  was the sentence's tail plus the next sentence's opening. In the system
+  repository 64 of 197 readings scored under 0.5 for that reason. The claim is
+  now the sentence that ends after the marker, joined across the wrapped lines
+  of its paragraph or list item. The 400-character cap is unchanged, so the
+  worst case sent is unchanged; a longer sentence keeps the words that lead up
+  to the marker. A marker placed after its sentence's stop cites the sentence
+  before it. `e.g.` before a lower-case word does not end a sentence, and a
+  fragment under three words falls back to the block up to the marker. The
+  same citation twice on one line gives each row its own sentence.
+  `.citations.tsv` is unchanged: it records the cited line, not the claim, so
+  no recording needs rewriting.
+
+- **`sd-ship prepare` refuses a branch behind the default branch before the
+  review.** Merge refused such a branch, but prepare spent the full review and
+  answered `ready_to_send` first (sd:1346, sd:1367). After its fetch, prepare
+  now checks that `origin/<default>` is an ancestor of the head. It refuses
+  with `base_moved` and names `git merge origin/<default>`; a merge keeps the
+  next push a fast-forward, which a rebase does not.
+
+- **Reviews ignore cosmetic findings (sd:1602).** A finding is cosmetic when
+  fixing it changes no behaviour and no action a reader takes. Text that is a
+  contract is not cosmetic: a wrong command or flag, a parsed string, a config
+  value, or an agent instruction. The `sd-review` prompt and
+  `.github/copilot-instructions.md` tell reviewers not to report them. One that
+  still arrives is `rebutted` with a `cosmetic:` reason in adjudication, or
+  answered with `sd-review-ack --dismiss`, never `--carried`, and gets no
+  follow-up row.
+  `WORKFLOW.md` "Parallel work" also groups rows that change the same files
+  into one pull request (sd:1603), and gates once, in full, before a push
+  after iterating on `make check CHANGED=...` (sd:1606).
+
+- **`sd-ship` holds delivery when the base advanced under the merge.** GitHub
+  squashes onto the base it holds at the `PUT`, and no request field pins that
+  base, so a base advance after the last freshness read landed a combined tree
+  nobody reviewed (sd:1089, seen on #1075). `reconcile` now reads the squash
+  parent. When the reviewed head does not contain it, the merge is recorded and
+  delivery stops at `base_advanced_at_merge`, naming the commit to verify.
+  The squash also carries `Reviewed-base: <sha>`, the parent the review
+  covered. `sd_lib.held_at_merge` compares it with the landed parent, and
+  reconcile, `delivered()` and `sd-status` all ask it, so a held `Delivers:`
+  no longer reads as done in git (#1179). A hand delivery recorded on the row
+  clears the hold on the next reconcile.
+
+- **`sd work register` works from a linked worktree.** It refused with
+  `repository '<worktree>' is not registered` whenever the worktree had no
+  origin to match (sd:1293). The lookup now resolves the worktree to its main
+  checkout, as `sd task add` does; the folder and commit still come from the
+  worktree.
+
+- **`sd task show N` reads one item.** It is an alias for `sd store item N`,
+  which stays the canonical read for every kind (sd:1112). Both print the same
+  item, notes and revision, as text or with `--json`, and neither writes.
+
+- **`sd-review` reads authorship from the reviewed commits on the default branch (sd:1547).**
+  With `--base` on the default branch, the refreshed target boundary is HEAD
+  itself, so the authored range was empty. That empty read printed
+  `human (every commit says so)` and excluded no vendor, so a
+  `claude/anthropic` commit could reach an anthropic reviewer. The authored
+  range now falls back to the review subject when the boundary is HEAD. A
+  range with no commits reports `not read: no commits in <base>..<head>`
+  under `--explain` and refuses otherwise.
+
+- **A watchdog-killed review keeps its output under `SD_REVIEW_RAW_DIR`.**
+  With capture on, sd-ship withheld the stdout tail of a timed-out review but
+  wrote no file, so a truncated or oversized output left no evidence
+  (sd:1588). The killed process's whole stdout and stderr now go to an
+  owner-only `<head>-watchdog-*.json` file, and the diagnostic keeps its path.
+
 - **The local gate caps concurrent runs on one machine.** `make test` now
   takes one of `SD_GATE_SLOTS` slots (default 2) before it starts, and waits
   with one `waiting for a gate slot` line while all are held (sd:1541). Ten
@@ -387,6 +478,24 @@
   action this tool is allowed to take.
 
 ### Fixed
+
+- **An orphaned reviewed head now refuses by name, not as `git failed` (sd:1348).**
+  `sd-ship prepare` requires every earlier reviewed head to stay an ancestor of
+  the offered head. `git merge-base --is-ancestor` answers by exit status and
+  prints nothing, so an amend or a rebase after a review surfaced as the bare
+  message `git failed`, code `command_failed`, marked retryable. The refusal now
+  names the reviewed head, the offered head and the branch. Its code is
+  `reviewed_head_orphaned`, state `operator_decision`, not retryable. Its next
+  action names the `git reset --soft <reviewed head>` remedy. The ancestry rule
+  itself is unchanged.
+
+- **Code motion no longer lowers the R13-D1 citation count (sd:1374).** The
+  ratchet counted a `path:line` into code only when the line sat inside a
+  `def` or a `class`. An insertion above a cited line could carry it out of
+  every symbol, and the count fell with no document changed. The stale
+  `bin/sd-status:877` citation in the one-person PRD read as a cleanup that
+  way. Every live `path:line` into code now counts, so the baselines rose to
+  52 and 80, and that citation now names `handoff_section`.
 
 - **A merge-forward before the first `sd-ship prepare` no longer becomes the
   pull request title (sd:1377).** With no `--title` and no stored title,
