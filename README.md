@@ -403,7 +403,7 @@ advisory `route` job in `sd-review-route.yml`:
 
 | Context | What it runs |
 |---|---|
-| `unittest (ubuntu-latest, 3.13)` | The suite on Ubuntu, Python 3.13, plus the installer coverage gate |
+| `unittest (ubuntu-latest, 3.14)` | The suite on Ubuntu, Python 3.14, plus the installer coverage gate |
 | `lint` | Ruff over `bin/` and `tests/` and mypy over `bin/` (the path lists are `LINT_RUFF_PATHS` and `LINT_MYPY_PATHS` in the `Makefile`, read rather than restated), `sd-docs-lint` over this checkout's `docs/`, then Bandit over `bin/`, zizmor over the workflows, and ShellCheck over the tracked shell |
 
 `sd-status` compares the live protection object with the contexts the

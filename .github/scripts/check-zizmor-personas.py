@@ -82,7 +82,7 @@ class Decision:
 JOB_NAME_REASON = (
     "Kept. A job with no `name:` is reported under its YAML key, which is what "
     "both of this repository's gating status contexts are -- `unittest "
-    "(ubuntu-latest, 3.13)` and `lint`. `bin/sd_ship_remote.py` reads those "
+    "(ubuntu-latest, 3.14)` and `lint`. `bin/sd_ship_remote.py` reads those "
     "contexts off the branch protection object before it reads a pull "
     "request's checks, and `CONTRIBUTING.md` says the consequence in as many "
     "words: \"requiring a name no job produces would pin a context that never "
