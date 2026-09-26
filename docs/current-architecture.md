@@ -29,6 +29,7 @@ This narrow exception does not adapt Claude agents or OpenCode commands.
 Agents render from `agents/sd-*.md` to `~/.claude/agents` only.
 `AGENT_PREDECESSORS` in `bin/sd_install.py` lists hand-placed agents that a shipped agent replaces.
 `--user` removes such a predecessor only when its sha256 is a known copy, and reports any other copy.
+It removes one only once the successor is on disk with the shipped bytes, and never reads a non-regular file.
 `--status` names a predecessor that remains.
 
 The installer does not edit shell configuration.

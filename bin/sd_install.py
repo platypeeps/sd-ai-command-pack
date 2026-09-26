@@ -450,13 +450,15 @@ AGENT_PREDECESSORS: dict[str, tuple[tuple[str, frozenset[str]], ...]] = {
 
 def predecessor_targets(
     agents: list[Surface], homes: list[PlatformHome]
-) -> list[tuple[Path, str, frozenset[str]]]:
-    """`(path, successor, known digests)` for each predecessor present on disk.
+) -> list[tuple[Path, str, frozenset[str], Surface, Path]]:
+    """`(path, successor, known digests, source, render)` per predecessor on disk.
 
     Only a successor this checkout renders retires anything: a predecessor
     whose replacement is not shipped is still the only copy of that agent.
+    `source` is the shipped successor and `render` is where it lands in the
+    predecessor's home, so the caller can check it arrived.
     """
-    shipped = {agent.name for agent in agents}
+    shipped = {agent.name: agent for agent in agents}
     found = []
     for home in homes:
         for successor, predecessors in AGENT_PREDECESSORS.items():
@@ -465,8 +467,19 @@ def predecessor_targets(
             for name, known in predecessors:
                 path = home.root / f"{name}.md"
                 if path.exists() or path.is_symlink():
-                    found.append((path, successor, known))
+                    found.append((path, successor, known, shipped[successor],
+                                  home.target_for(successor)))
     return found
+
+
+def successor_installed(source: Surface, render: Path) -> bool:
+    """True when `render` is a regular file holding the shipped bytes."""
+    if render.is_symlink() or not render.is_file():
+        return False
+    try:
+        return digest(render.read_bytes()) == digest(source.skill.read_bytes())
+    except OSError:
+        return False
 
 
 def retire_predecessors(
@@ -476,15 +489,22 @@ def retire_predecessors(
 
     Digest-gated like `prune_stale`: a copy whose sha256 is not a known one is
     somebody's edit and stays, and so does a symlink, which points at a file
-    this installer never placed. Returns `(retired, skipped)` so the caller
-    says what it removed and what it left behind.
+    this installer never placed. Anything else that is not a regular file
+    stays unread: a FIFO would block `read_bytes` until a writer opened it.
+    A removal also needs the successor on disk with the shipped bytes, so the
+    gate holds whatever order a caller runs it in; a dry run skips that check,
+    because it writes no successor either. Returns `(retired, skipped)` so the
+    caller says what it removed and what it left behind.
     """
     retired: list[str] = []
     skipped: list[tuple[str, str]] = []
-    for path, successor, known in predecessor_targets(agents, homes):
+    for path, successor, known, source, render in predecessor_targets(agents, homes):
         why = f"superseded by {successor}"
         if path.is_symlink():
             skipped.append((str(path), f"a symlink; {why}"))
+            continue
+        if not path.is_file():
+            skipped.append((str(path), f"not a regular file; {why}"))
             continue
         try:
             actual = digest(path.read_bytes())
@@ -495,6 +515,9 @@ def retire_predecessors(
             skipped.append((str(path), f"modified; {why}"))
             continue
         if not dry_run:
+            if not successor_installed(source, render):
+                skipped.append((str(path), f"successor not installed; {why}"))
+                continue
             try:
                 path.unlink()
             except OSError as exc:

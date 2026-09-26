@@ -327,7 +327,9 @@
   sha256 of every known copy. A copy with a known digest is removed; any other
   copy stays and is reported as `left in place (modified; superseded by
   sd-slice-builder)`. `--dry-run` removes nothing, and `--status` names a
-  predecessor that remains.
+  predecessor that remains. A removal also needs `sd-slice-builder.md` on disk
+  with the shipped bytes, and a predecessor that is not a regular file, such
+  as a FIFO, stays unread instead of blocking the install.
 
 - **`sd task add` and `sd task edit` take `--recur` and `--recur-anchor`.**
   The recurrence columns and the completion logic landed in `sd_db` with

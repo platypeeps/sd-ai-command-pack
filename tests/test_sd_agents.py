@@ -18,9 +18,11 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
 import re
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -447,6 +449,7 @@ class PredecessorTests(unittest.TestCase):
 
     def test_a_predecessor_that_will_not_unlink_is_reported(self) -> None:
         self.old.write_bytes(self.SEEDED)
+        self.place_successor()
         with mock.patch.object(sd_install.Path, "unlink", autospec=True,
                                side_effect=PermissionError(13, "Permission denied")):
             retired, skipped = sd_install.retire_predecessors(
@@ -456,6 +459,46 @@ class PredecessorTests(unittest.TestCase):
             str(self.old),
             "could not remove (Permission denied); superseded by sd-slice-builder")])
         self.assertTrue(self.old.is_file())
+
+    def retire(self) -> tuple[list[str], list[tuple[str, str]]]:
+        return sd_install.retire_predecessors(
+            sd_install.discover_agents(REPO_ROOT), sd_install.agent_homes(self.home))
+
+    def place_successor(self, data: bytes | None = None) -> None:
+        shipped = (AGENTS / "sd-slice-builder.md").read_bytes()
+        (self.old.parent / "sd-slice-builder.md").write_bytes(
+            shipped if data is None else data)
+
+    def test_a_predecessor_stays_until_its_successor_is_installed(self) -> None:
+        """The gate is the successor's bytes on disk, not the caller's ordering."""
+        for label, data in (("absent", None), ("stale", b"an older render\n")):
+            with self.subTest(successor=label):
+                self.old.write_bytes(self.SEEDED)
+                if data is not None:
+                    self.place_successor(data)
+                retired, skipped = self.retire()
+                self.assertEqual(retired, [])
+                self.assertEqual(skipped, [(
+                    str(self.old),
+                    "successor not installed; superseded by sd-slice-builder")])
+                self.assertTrue(self.old.is_file())
+
+    def test_a_non_regular_predecessor_is_kept_unread(self) -> None:
+        """A FIFO blocks `read_bytes` until a writer opens it, which would hang `--user`."""
+        self.place_successor()
+        os.mkfifo(self.old)
+        result: list = []
+        worker = threading.Thread(target=lambda: result.append(self.retire()), daemon=True)
+        worker.start()
+        worker.join(5)
+        if worker.is_alive():
+            # Unblock the reader so the thread ends, then fail on the hang.
+            os.close(os.open(self.old, os.O_WRONLY | os.O_NONBLOCK))
+            worker.join(5)
+            self.fail("retire_predecessors blocked reading a FIFO")
+        self.assertEqual(result, [([], [(
+            str(self.old), "not a regular file; superseded by sd-slice-builder")])])
+        self.assertTrue(self.old.is_fifo())
 
     def test_no_predecessor_is_silent(self) -> None:
         rc, out = self.install("--user")
