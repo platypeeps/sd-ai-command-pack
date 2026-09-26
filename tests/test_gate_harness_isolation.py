@@ -669,6 +669,78 @@ class GateSlotTests(unittest.TestCase):
             self.assertNotIn("waiting for a gate slot", fast.stderr)
             self.assertEqual(sorted((root / "slots").iterdir()), [])
 
+    def debug_hook(self, root, pattern, action):
+        """A `BASH_ENV` file that runs `action` once, before the first command matching `pattern`.
+
+        It drives the real script to one instant, deterministically, and
+        leaves a flag behind so a test can tell the hook fired.
+        """
+        fired = root / "hook-fired"
+        hook = root / "hook.env"
+        hook.write_text(
+            "set -o functrace\n"
+            f"trap 'case \"$BASH_COMMAND\" in {pattern}) "
+            f"if mkdir -- \"{fired}\" 2>/dev/null; then {action}; fi;; esac' DEBUG\n"
+        )
+        return hook, fired
+
+    def test_a_slot_re_made_after_its_dead_holder_was_read_is_kept(self):
+        """sd:1558. A reclaims a dead holder's slot after B read the same holder.
+
+        The hook re-makes the slot with a live pid at the instant B checks the
+        holder it has just read, as a reclaimer that won the race would. B
+        must leave that slot alone and wait for it.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+            gone = subprocess.Popen(["true"])
+            gone.wait()
+            slot = root / "slots" / "slot.1"
+            slot.mkdir(parents=True)
+            (slot / "pid").write_text(f"{gone.pid}\n")
+            live = subprocess.Popen(["sleep", "600"])
+            hook, fired = self.debug_hook(
+                root, '"kill -0 "*',
+                f'rm -rf -- \"{slot}\"; mkdir -- \"{slot}\"; printf \"%s\\n\" {live.pid} >\"{slot}/pid\"')
+            err = root / "stderr.log"
+            try:
+                with err.open("w") as err_file:
+                    waiter = subprocess.Popen(["bash", str(script)], stdout=subprocess.DEVNULL, stderr=err_file,
+                                              env=self.slot_env(root, HARNESS_FIXTURE_SLEEP="0", BASH_ENV=str(hook)))
+                try:
+                    _wait_for(lambda: waiter.poll() is not None
+                              or "waiting for a gate slot" in err.read_text(), timeout=60)
+                    self.assertTrue(fired.is_dir(), "the hook never fired; this test asserted nothing")
+                    self.assertIn("waiting for a gate slot", err.read_text())
+                    self.assertEqual((slot / "pid").read_text(), f"{live.pid}\n")
+                    live.kill()
+                    live.wait()
+                    waiter.wait(timeout=300)
+                finally:
+                    if waiter.poll() is None:
+                        waiter.kill()
+                    waiter.wait()
+            finally:
+                if live.poll() is None:
+                    live.kill()
+                live.wait()
+            self.assertEqual(waiter.returncode, 0, err.read_text())
+            self.assertEqual(sorted((root / "slots").iterdir()), [])
+
+    def test_a_signal_before_the_pid_is_written_releases_the_slot(self):
+        """sd:1558. The slot is the run's from `mkdir` on, so its exit removes it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+            hook, fired = self.debug_hook(root, "printf*/pid?", "kill -TERM $$")
+            run = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=False,
+                                 env=self.slot_env(root, HARNESS_FIXTURE_SLEEP="0", BASH_ENV=str(hook)),
+                                 timeout=300)
+            self.assertTrue(fired.is_dir(), "the hook never fired; this test asserted nothing")
+            self.assertEqual(run.returncode, 143, run.stdout + run.stderr)
+            self.assertEqual(sorted((root / "slots").iterdir()), [])
+
     def test_without_a_cap_no_slot_is_taken(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

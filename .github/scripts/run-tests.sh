@@ -372,14 +372,49 @@ trap 'on_signal' INT TERM HUP
 # is taken over. A holder exports SD_GATE_SLOTS=0: the runs its tests start
 # inside it must not wait on the slot their own parent holds.
 gate_slot=""
+gate_reclaim=""
 release_gate_slot() {
+  if [ -n "$gate_reclaim" ]; then
+    rmdir -- "$gate_reclaim" 2>/dev/null
+    gate_reclaim=""
+  fi
   if [ -n "$gate_slot" ]; then
     rm -rf -- "$gate_slot"
     gate_slot=""
   fi
 }
+# A slot whose holder is gone. A holder that died before writing its pid leaves
+# an empty slot; a minute is far longer than the write takes.
+gate_slot_is_stale() {
+  local holder
+  holder="$(cat -- "$1/pid" 2>/dev/null)"
+  { [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; } ||
+    { [ -z "$holder" ] && [ -n "$(find "$1" -maxdepth 0 -mmin +1 2>/dev/null)" ]; }
+}
+# sd:1558. Two waiters can read the same dead holder. Without the lock, the
+# second one's `rm` removes the slot the first has just re-made, and both run
+# in it. Under the lock the holder is read again, so a re-made slot is kept.
+# A reclaimer killed outright leaves its lock; a minute is far longer than a
+# reclaim takes, so an older lock is removed.
+reclaim_gate_slot() {
+  local slot="$1" taken=""
+  if ! mkdir -- "$slot.reclaim" 2>/dev/null; then
+    [ -z "$(find "$slot.reclaim" -maxdepth 0 -mmin +1 2>/dev/null)" ] ||
+      rmdir -- "$slot.reclaim" 2>/dev/null
+    return 1
+  fi
+  gate_reclaim="$slot.reclaim"
+  if gate_slot_is_stale "$slot"; then
+    rm -rf -- "$slot"
+    # Named before the pid is written: a signal in between releases the slot.
+    mkdir -- "$slot" 2>/dev/null && taken=1 && gate_slot="$slot"
+  fi
+  rmdir -- "$slot.reclaim" 2>/dev/null
+  gate_reclaim=""
+  [ -n "$taken" ]
+}
 acquire_gate_slot() {
-  local slots="${SD_GATE_SLOTS:-0}" dir i slot holder announced=""
+  local slots="${SD_GATE_SLOTS:-0}" dir i slot announced=""
   case "$slots" in
     '' | *[!0-9]*)
       printf '%s\n' "error: SD_GATE_SLOTS must be a non-negative integer (got '$slots')" >&2
@@ -397,20 +432,13 @@ acquire_gate_slot() {
   while :; do
     for ((i = 1; i <= slots; i++)); do
       slot="$dir/slot.$i"
-      if ! mkdir -- "$slot" 2>/dev/null; then
-        holder="$(cat -- "$slot/pid" 2>/dev/null)"
-        # A holder that died before writing its pid leaves an empty slot; a
-        # minute is far longer than the write takes.
-        if { [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; } ||
-          { [ -z "$holder" ] && [ -n "$(find "$slot" -maxdepth 0 -mmin +1 2>/dev/null)" ]; }; then
-          rm -rf -- "$slot"
-          mkdir -- "$slot" 2>/dev/null || continue
-        else
-          continue
-        fi
+      if mkdir -- "$slot" 2>/dev/null; then
+        # Named before the pid is written: a signal in between releases the slot.
+        gate_slot="$slot"
+      elif ! gate_slot_is_stale "$slot" || ! reclaim_gate_slot "$slot"; then
+        continue
       fi
       printf '%s\n' "$$" >"$slot/pid"
-      gate_slot="$slot"
       export SD_GATE_SLOTS=0
       return 0
     done

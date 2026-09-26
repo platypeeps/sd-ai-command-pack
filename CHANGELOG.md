@@ -11,6 +11,16 @@
   holder's slot is reclaimed, CI takes no slot, and `SD_GATE_SLOTS=0` turns
   the cap off.
 
+- **Two waiters can no longer both reclaim one dead gate slot.** A waiter now
+  reclaims under a per-slot lock and reads the holder again there, so it keeps
+  a slot another waiter has just re-made (sd:1558). A run also owns its slot
+  from `mkdir` on, so a signal before the pid write releases it.
+
+- **The system-main canary fails on skipped tests.** `sd-db-main-canary` now
+  carries the unittest job's skip gate and installs the same pinned opencode
+  (sd:1557). Both jobs call `.github/scripts/install-opencode.sh`, which holds
+  the version and checksum once.
+
 - **`run-tests.sh` names the tree it tested.** It prints a `run-tests: start
   head=... dirty=...` line before the suite and a `run-tests: end head=...
   exit=...` line after it, so a stale run no longer reads as a current one
