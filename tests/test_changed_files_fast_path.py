@@ -54,7 +54,7 @@ def load_selector() -> types.ModuleType:
 # the hand-typed tuple and so narrowed away by every fast path.
 ALWAYS_RUN_NAMES = (
     "test_code_health", "test_cut_symbols", "test_doc_citations",
-    "test_governed_pathspec", "test_loc_caps", "test_ls_files_form",
+    "test_governed_pathspec", "test_loc_caps", "test_ls_files_form", "test_no_root_walk",
     "test_no_shipped_shell", "test_no_trellis_residue", "test_suite_shape",
     "test_verb_inventory", "test_workflow_policy",
 )
