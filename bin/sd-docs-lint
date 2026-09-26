@@ -1126,12 +1126,52 @@ BLOCK_START_RE = re.compile(r"\s*(?:[-*+]\s|\d+[.)]\s|#|>|\||```|~~~)")
 # fence. A citation on one of these claims that line and nothing around it.
 SINGLE_LINE_RE = re.compile(r"\s*(?:#|\||```|~~~)")
 LIST_MARKER_RE = re.compile(r"\s*(?:[-*+]|\d+[.)]|>)\s+")
-# The end of a sentence: a stop, any closing marks after it, then space or the
-# end of the text. `prd.md` does not match, because a space has to follow.
-SENTENCE_END_RE = re.compile(r"[.!?][)\]*_`'\"]*(?=\s|$)")
+# The end of a sentence: a stop, any closing marks after it, then the end of
+# the text or a space before a word that does not start in lower case.
+# `prd.md` does not match, because a space has to follow; `e.g. payments` does
+# not, because an abbreviation is followed by the rest of its own sentence.
+SENTENCE_END_RE = re.compile(r"[.!?][)\]*_`'\"]*(?=\s(?!\s*[a-z])|\s*$)")
+CLOSING_RE = re.compile(r"[)\]]*")
+# Fewer words than this ahead of the marker is not an assertion: it is a
+# boundary the pattern mistook, and the block up to the marker is sent instead.
+CLAIM_MIN_WORDS = 3
 
 
-def read_claim(path: pathlib.Path, number: int, citation: str, cap: int) -> str:
+def claim_block(lines: list[str], index: int) -> tuple[int, int]:
+    """The first and last line of the markdown block that line `index` is in."""
+    first = last = index
+    if SINGLE_LINE_RE.match(lines[index]):
+        return first, last
+    while (first > 0 and not BLOCK_START_RE.match(lines[first])
+           and lines[first - 1].strip() and not SINGLE_LINE_RE.match(lines[first - 1])):
+        first -= 1
+    while (last + 1 < len(lines) and lines[last + 1].strip()
+           and not BLOCK_START_RE.match(lines[last + 1])):
+        last += 1
+    return first, last
+
+
+def claim_sentence(text: str, marker: int, marker_end: int) -> tuple[int, int]:
+    """Where the sentence a marker cites starts and ends in `text`."""
+    boundaries = [m.end() for m in SENTENCE_END_RE.finditer(text, 0, marker)]
+    start = boundaries[-1] if boundaries else 0
+    if not CITATION_RE.sub("", text[start:marker]).strip(" ([`"):
+        # Nothing but other markers between the last stop and this one: the
+        # marker follows its sentence and cites it, not the one after it.
+        start = boundaries[-2] if len(boundaries) > 1 else 0
+        closing = CLOSING_RE.match(text, marker_end)
+        end = closing.end() if closing else marker_end
+    else:
+        after = SENTENCE_END_RE.search(text, marker_end)
+        end = after.end() if after else len(text)
+    if len(CITATION_RE.sub("", text[start:marker]).split()) < CLAIM_MIN_WORDS:
+        start = 0
+    return start, end
+
+
+def read_claim(
+    path: pathlib.Path, number: int, citation: str, cap: int, occurrence: int = 0
+) -> str:
     """The sentence a citation marker sits in, capped at `cap` characters.
 
     Not the marker's line (sd:1186). Prose here is hard-wrapped, and a marker
@@ -1147,6 +1187,12 @@ def read_claim(path: pathlib.Path, number: int, citation: str, cap: int) -> str:
     characters; only which characters those are has changed. A sentence
     longer than the cap keeps the words that lead up to the marker, because
     those are the assertion the citation supports.
+
+    `occurrence` says which marker it is when the same citation appears more
+    than once on its line, counted from 0, so each row claims its own sentence.
+    A marker placed after its sentence's stop cites the sentence before it.
+    When the sentence found is too short to assert anything, the claim falls
+    back to the block up to the marker, still capped.
     """
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -1155,31 +1201,28 @@ def read_claim(path: pathlib.Path, number: int, citation: str, cap: int) -> str:
     index = number - 1
     if not 0 <= index < len(lines) or not lines[index].strip():
         return ""
-    first = last = index
-    if not SINGLE_LINE_RE.match(lines[index]):
-        while (first > 0 and not BLOCK_START_RE.match(lines[first])
-               and lines[first - 1].strip() and not SINGLE_LINE_RE.match(lines[first - 1])):
-            first -= 1
-        while (last + 1 < len(lines) and lines[last + 1].strip()
-               and not BLOCK_START_RE.match(lines[last + 1])):
-            last += 1
+    first, last = claim_block(lines, index)
     parts = [" ".join(line.split()) for line in lines[first:last + 1]]
     parts[0] = LIST_MARKER_RE.sub("", parts[0], count=1)
     text = " ".join(parts)
     offset = len(" ".join(parts[:index - first])) + (1 if index > first else 0)
-    found = parts[index - first].find(f"`{citation}`")
+    found = -1
+    for _ in range(occurrence + 1):
+        found = parts[index - first].find(f"`{citation}`", found + 1)
+        if found < 0:
+            break
     marker = offset + max(found, 0)
     marker_end = marker + (len(citation) + 2 if found >= 0 else 0)
-    start = max((m.end() for m in SENTENCE_END_RE.finditer(text, 0, marker)), default=0)
-    after = SENTENCE_END_RE.search(text, marker_end)
-    end = after.end() if after else len(text)
+    start, end = claim_sentence(text, marker, marker_end)
     # Past the cap, the window ends at the sentence's end when little follows
     # the marker, and at the marker otherwise; it starts `cap` before that.
     high = end if end - marker_end <= cap // 4 else max(marker_end, min(end, start + cap))
     return text[max(start, high - cap):high].strip()
 
 
-def claim_case(item: pathlib.Path, work_root: pathlib.Path, row: str) -> dict[str, str] | None:
+def claim_case(
+    item: pathlib.Path, work_root: pathlib.Path, row: str, occurrence: int = 0
+) -> dict[str, str] | None:
     """One manifest row as the claim it makes and the evidence it points at.
 
     Built from the recording rather than from a second walk of the pages, so
@@ -1193,6 +1236,9 @@ def claim_case(item: pathlib.Path, work_root: pathlib.Path, row: str) -> dict[st
     of the promise, and it is the reason no default turns this pass on in any
     checkout: a repository opts in through `JEV_OPT_IN_RELATIVE_PATH` or it
     takes no reading.
+
+    `occurrence` is which of the row's identical markers on its line this is;
+    the recording has no column for it, so `collect_claims` counts.
     """
     source, citation, relative, start, _ = row.split("\t")
     page, _, number = source.rpartition(":")
@@ -1202,7 +1248,7 @@ def claim_case(item: pathlib.Path, work_root: pathlib.Path, row: str) -> dict[st
     # sentence says to look. It is prose, so no promise can be made that a
     # file name never appears inside it -- a sentence is free to name one --
     # but the marker is put there by the citation and is taken back out.
-    claim = CITATION_RE.sub("[cited]", read_claim(item / page, int(number), citation, CLAIM_CHARS))
+    claim = CITATION_RE.sub("[cited]", read_claim(item / page, int(number), citation, CLAIM_CHARS, occurrence))
     evidence = read_span(work_root.resolve() / relative, int(start), EVIDENCE_WINDOW, EVIDENCE_CHARS)
     if not claim or not evidence:
         return None
@@ -1223,13 +1269,18 @@ def collect_claims(work_root: pathlib.Path) -> tuple[dict[str, dict[str, str]], 
         if is_archived(item, work_root) or not (item / CITATION_MANIFEST).is_file():
             continue
         rows, _ = citation_survey(item, work_root)
+        # Rows come in line order, one per marker, so the same citation twice
+        # on one line is two rows, told apart by how many came before it.
+        seen: dict[tuple[str, str], int] = {}
         for row in rows:
-            case = claim_case(item, work_root, row)
+            source, citation = row.split("\t")[:2]
+            occurrence = seen.get((source, citation), 0)
+            seen[(source, citation)] = occurrence + 1
+            case = claim_case(item, work_root, row, occurrence)
             if case is None:
                 continue
             key = f"c{len(cases) + 1}"
             cases[key] = case
-            source, citation = row.split("\t")[:2]
             origins[key] = f"{item.name}/{source} `{citation}`"
     return cases, origins
 

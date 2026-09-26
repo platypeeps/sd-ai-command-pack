@@ -12,8 +12,12 @@
   now the sentence that ends after the marker, joined across the wrapped lines
   of its paragraph or list item. The 400-character cap is unchanged, so the
   worst case sent is unchanged; a longer sentence keeps the words that lead up
-  to the marker. `.citations.tsv` is unchanged: it records the cited line, not
-  the claim, so no recording needs rewriting.
+  to the marker. A marker placed after its sentence's stop cites the sentence
+  before it. `e.g.` before a lower-case word does not end a sentence, and a
+  fragment under three words falls back to the block up to the marker. The
+  same citation twice on one line gives each row its own sentence.
+  `.citations.tsv` is unchanged: it records the cited line, not the claim, so
+  no recording needs rewriting.
 
 - **`sd work register` works from a linked worktree.** It refused with
   `repository '<worktree>' is not registered` whenever the worktree had no
