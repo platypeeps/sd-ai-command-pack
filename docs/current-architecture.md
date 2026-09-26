@@ -26,6 +26,11 @@ The adapter accepts plain block-mapping keys and lowercase invocation booleans.
 It refuses quoted keys, aliases, flow policy mappings, duplicates, and conflicting invocation controls before rendering.
 This narrow exception does not adapt Claude agents or OpenCode commands.
 
+Agents render from `agents/sd-*.md` to `~/.claude/agents` only.
+`AGENT_PREDECESSORS` in `bin/sd_install.py` lists hand-placed agents that a shipped agent replaces.
+`--user` removes such a predecessor only when its sha256 is a known copy, and reports any other copy.
+`--status` names a predecessor that remains.
+
 The installer does not edit shell configuration.
 Bare command names resolve only when the selected installation directory is on `PATH`.
 

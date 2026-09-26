@@ -23,6 +23,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 AGENTS = REPO_ROOT / "agents"
@@ -39,6 +40,8 @@ def load_module():
 
 
 sd_install = load_module()
+#: The shipped table, captured before any test patches it.
+PREDECESSORS = dict(sd_install.AGENT_PREDECESSORS)
 
 # Tools that can change the working tree. An agent describing itself as
 # read-only must not hold one; `Bash` is deliberately not in this set, because
@@ -332,6 +335,135 @@ class RenderTests(unittest.TestCase):
         out = io.StringIO()
         self.assertEqual(sd_install.cmd_user(context, out), 0)
         self.assertNotIn("agents", out.getvalue())
+
+
+class PredecessorTests(unittest.TestCase):
+    """`--user` retires a hand-placed agent a shipped one replaces.
+
+    `slice-builder.md` lived only in `~/.claude/agents`, placed by hand; the
+    pack now ships it as `sd-slice-builder.md`. No receipt ever recorded the
+    old file, so `prune_stale` cannot touch it, and without this the machine
+    would hold two agents with one job. The table's digest set is the gate: a
+    copy nobody edited goes, anything else stays and is named.
+
+    The seeded bytes are the test's own, with the table patched to vouch for
+    them, so the test does not carry a copy of the hand-placed file.
+    """
+
+    SEEDED = b"---\nname: slice-builder\n---\n\nhand-placed\n"
+
+    def setUp(self) -> None:
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        self.home = Path(scratch.name).resolve()
+        self.old = self.home / ".claude" / "agents" / "slice-builder.md"
+        self.old.parent.mkdir(parents=True)
+        patcher = mock.patch.dict(sd_install.AGENT_PREDECESSORS, {
+            "sd-slice-builder": (
+                ("slice-builder", frozenset({sd_install.digest(self.SEEDED)})),
+            ),
+        })
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def install(self, *args: str) -> tuple[int, str]:
+        out = io.StringIO()
+        rc = sd_install.main([*args, "--home", str(self.home)], out=out)
+        return rc, out.getvalue()
+
+    def test_the_table_names_shipped_successors_and_sha256_digests(self) -> None:
+        """Read unpatched: a successor nobody ships would retire nothing, silently."""
+        shipped = {path.stem for path in agent_files()}
+        for successor, predecessors in PREDECESSORS.items():
+            with self.subTest(successor=successor):
+                self.assertIn(successor, shipped)
+                for name, known in predecessors:
+                    self.assertNotIn(f"{name}.md", {p.name for p in agent_files()})
+                    self.assertTrue(known)
+                    for value in known:
+                        self.assertRegex(value, r"^[0-9a-f]{64}$")
+
+    def test_an_unmodified_predecessor_is_retired(self) -> None:
+        self.old.write_bytes(self.SEEDED)
+        rc, out = self.install("--user")
+        self.assertEqual(rc, 0)
+        self.assertFalse(self.old.exists(), out)
+        self.assertTrue((self.old.parent / "sd-slice-builder.md").is_file())
+        self.assertIn(f"retired predecessor: {self.old}", out)
+
+    def test_a_modified_predecessor_is_kept_and_reported(self) -> None:
+        self.old.write_bytes(self.SEEDED + b"an edit\n")
+        rc, out = self.install("--user")
+        self.assertEqual(rc, 0)
+        self.assertTrue(self.old.is_file())
+        self.assertIn(
+            f"left in place (modified; superseded by sd-slice-builder): {self.old}", out)
+        _, status = self.install("--status")
+        self.assertIn(f"predecessor: {self.old} remains (modified;", status)
+
+    def test_dry_run_removes_nothing(self) -> None:
+        self.old.write_bytes(self.SEEDED)
+        rc, out = self.install("--user", "--dry-run")
+        self.assertEqual(rc, 0)
+        self.assertTrue(self.old.is_file())
+        self.assertIn(f"would retire predecessor: {self.old}", out)
+
+    def test_status_names_a_retirable_predecessor(self) -> None:
+        self.old.write_bytes(self.SEEDED)
+        _, status = self.install("--status")
+        self.assertIn(
+            f"predecessor: {self.old} (superseded by sd-slice-builder) remains -- run --user",
+            status)
+        self.assertTrue(self.old.is_file())
+
+    def test_a_symlinked_predecessor_is_kept(self) -> None:
+        """A link points at a file this installer never placed; unlinking it is not ours to do."""
+        source = self.home / "elsewhere.md"
+        source.write_bytes(self.SEEDED)
+        self.old.symlink_to(source)
+        rc, out = self.install("--user")
+        self.assertEqual(rc, 0)
+        self.assertTrue(self.old.is_symlink())
+        self.assertIn(f"left in place (a symlink; superseded by sd-slice-builder): {self.old}", out)
+
+    def test_an_unreadable_predecessor_is_kept(self) -> None:
+        self.old.write_bytes(self.SEEDED)
+        original = Path.read_bytes
+
+        def read_bytes(path: Path) -> bytes:
+            if path == self.old:
+                raise PermissionError(13, "Permission denied")
+            return original(path)
+
+        with mock.patch.object(sd_install.Path, "read_bytes", autospec=True,
+                               side_effect=read_bytes):
+            retired, skipped = sd_install.retire_predecessors(
+                sd_install.discover_agents(REPO_ROOT), sd_install.agent_homes(self.home))
+        self.assertEqual(retired, [])
+        self.assertEqual(skipped, [(
+            str(self.old),
+            "unreadable (Permission denied); superseded by sd-slice-builder")])
+        self.assertTrue(self.old.is_file())
+
+    def test_a_predecessor_that_will_not_unlink_is_reported(self) -> None:
+        self.old.write_bytes(self.SEEDED)
+        with mock.patch.object(sd_install.Path, "unlink", autospec=True,
+                               side_effect=PermissionError(13, "Permission denied")):
+            retired, skipped = sd_install.retire_predecessors(
+                sd_install.discover_agents(REPO_ROOT), sd_install.agent_homes(self.home))
+        self.assertEqual(retired, [])
+        self.assertEqual(skipped, [(
+            str(self.old),
+            "could not remove (Permission denied); superseded by sd-slice-builder")])
+        self.assertTrue(self.old.is_file())
+
+    def test_no_predecessor_is_silent(self) -> None:
+        rc, out = self.install("--user")
+        self.assertEqual(rc, 0)
+        self.assertNotIn("predecessor", out)
+        self.assertNotIn("slice-builder.md (", out)
+        _, status = self.install("--status")
+        self.assertNotIn("predecessor", status)
 
 
 if __name__ == "__main__":

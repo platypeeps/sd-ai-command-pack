@@ -236,6 +236,8 @@ command automatically deletes or archives a completed item directory.
 The harness fans work out only when a `CLAUDE.md` or a skill asks for it.
 These rules say when to ask. They hold wherever a pack skill runs. A skill
 that dispatches workers cites this section and restates nothing.
+The pack ships a writer for multi-file code: the `sd-slice-builder` agent,
+which the installer places in `~/.claude/agents`.
 
 - **A writer runs alone in its checkout.** One checkout holds one writer. An
   agent or session that changes files works in its own git worktree or clone.

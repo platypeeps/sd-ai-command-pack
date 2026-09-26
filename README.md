@@ -45,7 +45,10 @@ other halves are, is in [domain packs](docs/domain-packs.md).
 - `~/.claude/skills/sd-*/SKILL.md`
 - `~/.codex/skills/sd-*/SKILL.md`
 - `~/.config/opencode/commands/sd-*.md`
-- `~/.claude/agents/sd-*.md`
+- `~/.claude/agents/sd-*.md` — and `--user` removes a hand-placed agent that
+  one of them replaces, such as `slice-builder.md` for `sd-slice-builder`,
+  when its digest is a known copy; an edited copy stays and is reported.
+  `AGENT_PREDECESSORS` in `bin/sd_install.py` is the list.
 - `~/.local/bin/sd` and `~/.local/bin/sd-*` — one symlink per executable in
   `bin/`, so the commands resolve from any directory; `--bin-dir DIR` puts them
   elsewhere. The installer never edits `PATH`: `--user` warns when the link
@@ -266,7 +269,7 @@ off `main` or over uncommitted changes.
 | Command | What it does |
 |---|---|
 | `python3 bin/sd_install.py --user` | Render skills and link commands into `~/.local/bin`; use `--bin-dir DIR` for another directory |
-| `python3 bin/sd_install.py --status` | Report installed source, drift, and legacy residue without failing on drift |
+| `python3 bin/sd_install.py --status` | Report installed source, drift, legacy residue, and remaining predecessor agents without failing on drift |
 | `python3 bin/sd_install.py --verify --json` | Read-only: fail on receipt, source, rendered-file, command-resolution, or bounded help-probe errors |
 | `python3 bin/sd_install.py --pull` | Fast-forward the clean serving checkout on `main`, then render |
 | `python3 bin/sd_install.py --uninstall` | Remove receipt-owned renders, hooks, and command links; preserve modified files and retargeted links |
