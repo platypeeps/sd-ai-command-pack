@@ -4,6 +4,18 @@
 
 ### Changed
 
+- **Reviewer order has one named source, and nothing else ranks providers
+  (sd:1556).** `sd-review --explain` prints an `order from` line and
+  `--json` an `order_source` key: the database that `sd providers configure`
+  writes and `sd providers list` shows, or the file when there is no database.
+  When the file's `roles.reviewer` seed disagrees with the rows, the line says
+  the seed is overridden. The shipped `providers.yaml` comment says the same.
+  `sd-operator-defaults.md` no longer prefers Codex or holds MiniMax and
+  Baseten back by name; it sends agents to `sd-review` and its resolved order.
+  The `codex auth` line no longer says `ok`: it says the auth mode was read and
+  no call was made, and `codex_preflight.live_call` is `false`. A codex 401
+  still shows only at dispatch; `--preflight` covers URL providers only.
+
 - **CI and local testing run Python 3.14 only.** The operator decided on
   2026-09-26 to test one version per language, the latest stable. The
   `unittest` leg, the other two jobs in `tests.yml` and the Makefile's
@@ -518,6 +530,14 @@
   and records nothing. A repository with no record declines until one render
   by hand. `init-hook` upgrades the previous bodies, which join
   `SUPERSEDED_HOOKS`.
+- **An empty check rollup on a conflicting head names the conflict (sd:1403).**
+  GitHub builds no merge ref for a DIRTY head and dispatches no
+  `pull_request` run, so zero checks there is not a slow queue. `sd-pr-state`
+  and `sd-status` now say the head conflicts and none will run, and say
+  "read again once" on UNKNOWN. `sd-ship merge` refuses a dirty pull request
+  as `merge_conflict` with a resolve-the-conflict next action, and an unknown
+  mergeability as a retryable `mergeability_pending`, instead of one generic
+  merge-rules sentence.
 - **`sd-ship prepare` re-reads a pull object that lags the push (sd:1394).**
   It read the pull object once after pushing and refused when the head
   differed, but GitHub updates it a second or so after the ref. A push that
