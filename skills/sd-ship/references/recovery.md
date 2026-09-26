@@ -72,6 +72,17 @@ merged commit's last paragraph read afterwards. `git interpret-trailers
 --parse` on the merged commit answers it in one line; if `Closes:` is not in
 its output, the trailer did not land.
 
+## A branch built on a squashed branch
+
+A squash merge leaves the merged head off the default branch's history.
+A branch that merged that head conflicts on ancestry when it merges the default branch.
+The conflicts are about history, not content.
+`sd-ship prepare` names the carried head in a receipt warning and splits the squash's paths in two.
+While the branch is still behind the base, the `base_moved` refusal carries the same split.
+Resolve the first list with `git checkout --ours -- <path>`: the default branch holds those blobs exactly as the carried head did.
+Read the second list by hand: the default branch changed those paths after the squash.
+Do not rebase onto the squash; that needs a force-push.
+
 ## Copilot request recovery
 
 A successful local Copilot request remains a merge gate.

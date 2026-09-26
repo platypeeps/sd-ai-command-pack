@@ -538,6 +538,43 @@ roles:
         self.assertEqual(after["body"], before["body"])
         self.assertEqual(len(after["passes"]), 2)
 
+    def test_a_branch_carrying_a_squashed_head_is_told_which_paths_ours_may_take(self):
+        """sd:1409. A squash leaves the merged head off main's history, so a
+        branch built on that head conflicts on ancestry when it merges main.
+        The remedy is `--ours`, gated by blob identity: Makefile is on main
+        exactly as the squashed head had it, and src.py moved again after."""
+        self.prepare()
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+        tip = _git(self.root, "rev-parse", "HEAD")
+        self.remote.commit_on("main", "later main work\n\nAuthored-with: human", files={"src.py": "value = 3\n"})
+        _git(self.root, "checkout", "-q", "-b", "second")
+        (self.root / "more.py").write_text("more = 1\n")
+        _git(self.root, "add", "more.py")
+        _git(self.root, "commit", "-qm", "build on the first\n\nAuthored-with: human")
+        second = create_item(self.connection, kind="work", title="second", status="in_progress",
+                             repo=str(self.operator), branch="second")
+
+        def operation():
+            args = ship.parser().parse_args(["prepare", "--item", str(second), "--json"])
+            return ship.Ship(self.root, self.connection, self.database, args)
+
+        # sd:1346 refuses the branch until it merges main, and that merge is
+        # where the ancestry conflict lands, so the refusal names the remedy.
+        with self.assertRaisesRegex(ship.Refusal, "behind the current default branch") as caught:
+            operation().prepare()
+        self.assertIn(tip, str(caught.exception))
+        self.assertIn("safe for: Makefile (", str(caught.exception))
+        self.assertIn("read by hand: src.py (", str(caught.exception))
+        _git(self.root, "merge", "-q", "--no-ff", "-X", "ours", "-m",
+             "Merge origin/main into second\n\nAuthored-with: human", "origin/main")
+        operation().prepare()
+        warnings = operation().state.get("warnings") or []
+        notes = [warning for warning in warnings if tip in warning]
+        self.assertEqual(len(notes), 1, warnings)
+        self.assertIn("safe for: Makefile (", notes[0])
+        self.assertIn("read by hand: src.py (", notes[0])
+
     def test_a_merge_forward_before_the_first_prepare_does_not_become_the_title(self):
         # sd:1377: the merge-forward sd-ship demands left HEAD's subject naming
         # a branch operation, and it was stored as the title and landed on main.
