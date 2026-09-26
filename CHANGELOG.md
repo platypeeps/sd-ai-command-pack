@@ -43,6 +43,15 @@
   `continue-on-error`, so a removed library name shows before the pin moves
   (sd:1542). The `MONEY_NOISE` removal broke every local gate with no CI signal.
 
+- **`SD_REVIEW_RAW_DIR` keeps a failed review's raw output for debugging.**
+  A MiniMax pass on system #590 failed with only "local review emitted no
+  valid receipt"; sd-ship had dropped sd-review's exit code and stderr. Now
+  the pass's `execution_error` records the exit code and bounded stdout and
+  stderr tails. With `SD_REVIEW_RAW_DIR` set, sd-review also carries each
+  URL provider's raw response body, and sd-ship moves it and any unparsable
+  receipt into an owner-only (0600) JSON file there, recording only the
+  path in the ship state. Unset, no model output is kept.
+
 - **`sd-docs-lint`'s Jev claim-support reading is opt-in per repository.**
   The reading sends `docs/work` prose to a third-party model, and it ran in
   every checkout where `jev` could answer. A checkout whose prose must not
