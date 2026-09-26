@@ -4,6 +4,18 @@
 
 ### Changed
 
+- **`sd-ship` holds delivery when the base advanced under the merge.** GitHub
+  squashes onto the base it holds at the `PUT`, and no request field pins that
+  base, so a base advance after the last freshness read landed a combined tree
+  nobody reviewed (sd:1089, seen on #1075). `reconcile` now reads the squash
+  parent. When the reviewed head does not contain it, the merge is recorded and
+  delivery stops at `base_advanced_at_merge`, naming the commit to verify.
+  The squash also carries `Reviewed-base: <sha>`, the parent the review
+  covered. `sd_lib.held_at_merge` compares it with the landed parent, and
+  reconcile, `delivered()` and `sd-status` all ask it, so a held `Delivers:`
+  no longer reads as done in git (#1179). A hand delivery recorded on the row
+  clears the hold on the next reconcile.
+
 - **`sd work register` works from a linked worktree.** It refused with
   `repository '<worktree>' is not registered` whenever the worktree had no
   origin to match (sd:1293). The lookup now resolves the worktree to its main

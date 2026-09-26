@@ -1861,6 +1861,71 @@ roles:
         self.assertEqual(self.merge()["phase"], "merged")
         self.assertEqual(len([call for call in self.remote.calls if call.method == "PUT"]), 1)
 
+    def test_a_base_that_advanced_under_the_put_holds_delivery(self):
+        """GitHub squashes onto the base it holds at the `PUT`, not the one the
+        freshness reads saw. A same-file advance between them lands a combined
+        tree nobody reviewed, so the merge is recorded and delivery waits (sd:1089)."""
+        self.remote.commit_on("main", "shared\n\nAuthored-with: human", files={"shared.py": "a = 1\nb = 2\nc = 3\nd = 4\n"})
+        _git(self.root, "pull", "-q", "--no-rebase", "--no-edit", str(self.remote.path), "main")
+        (self.root / "shared.py").write_text("a = 10\nb = 2\nc = 3\nd = 4\n")
+        _git(self.root, "commit", "-qam", "topic edits shared\n\nAuthored-with: human")
+        acceptance = self.directory / "acceptance.json"
+        acceptance.write_text(json.dumps({"item": self.item, "complete": True, "criteria": [{"criterion": "actual scope", "passed": True, "evidence": "fixture-check-pass"}]}))
+        self.prepare("--deliver", "--acceptance-file", str(acceptance))
+        saved = self.double._route
+
+        def route(method, path, body):
+            if method == "PUT" and path.endswith("/merge"):
+                self.remote.commit_on("main", "raced\n\nAuthored-with: human", files={"shared.py": "a = 1\nb = 2\nc = 3\nd = 40\n"})
+            return saved(method, path, body)
+        self.double._route = route
+        result = self.merge()
+        self.assertEqual(result["phase"], "merged")
+        self.assertTrue(result["delivery_pending"])
+        self.assertEqual(result["workflow"]["blocker"]["code"], "base_advanced_at_merge")
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "in_progress")
+        self.assertEqual(len([call for call in self.remote.calls if call.method == "PUT"]), 1)
+
+    def held_merge(self) -> dict:
+        """A `--deliver` merge whose base advances under the `PUT` (sd:1089)."""
+        acceptance = self.directory / "acceptance.json"
+        acceptance.write_text(json.dumps({"item": self.item, "complete": True, "criteria": [{"criterion": "actual scope", "passed": True, "evidence": "fixture-check-pass"}]}))
+        self.prepare("--deliver", "--acceptance-file", str(acceptance))
+        saved = self.double._route
+
+        def route(method, path, body):
+            if method == "PUT" and path.endswith("/merge"):
+                self.remote.commit_on("main", "raced\n\nAuthored-with: human", files={"raced.py": "x = 1\n"})
+            return saved(method, path, body)
+        self.double._route = route
+        result = self.merge()
+        self.assertEqual(result["workflow"]["blocker"]["code"], "base_advanced_at_merge")
+        return result
+
+    def test_a_held_squash_does_not_read_as_delivered_in_git(self):
+        """The squash carries `Delivers:` because its message is fixed before the
+        `PUT`. Git readers must see the same hold the row does, or a checkout
+        with no database reads the held item as done (#1179)."""
+        self.held_merge()
+        self.assertNotEqual(ship.sd_lib.delivered(self.root, f"sd:{self.item}"), ship.sd_lib.YES)
+
+    def test_an_unheld_squash_still_reads_as_delivered_in_git(self):
+        acceptance = self.directory / "acceptance.json"
+        acceptance.write_text(json.dumps({"item": self.item, "complete": True, "criteria": [{"criterion": "actual scope", "passed": True, "evidence": "fixture-check-pass"}]}))
+        self.prepare("--deliver", "--acceptance-file", str(acceptance))
+        self.assertFalse(self.merge()["delivery_pending"])
+        self.assertEqual(ship.sd_lib.delivered(self.root, f"sd:{self.item}"), ship.sd_lib.YES)
+
+    def test_a_hand_delivery_clears_the_hold(self):
+        """The operator verifies the combined tree and delivers by hand; a later
+        reconcile reads that completion instead of reissuing the hold (#1179)."""
+        from sd_db.progress import deliver_work
+        commit = self.held_merge()["merge_commit"]
+        deliver_work(self.connection, self.item, commit, who="operator", verification_root=self.root)
+        again = self.merge()
+        self.assertFalse(again["delivery_pending"])
+        self.assertIsNone(again["workflow"]["blocker"])
+
     def test_empty_search_after_uncertain_create_cannot_duplicate_pr(self):
         self.double.no_create_result = True
         with self.assertRaises(ship.Refusal):

@@ -2319,6 +2319,11 @@ def attribute(
 #: alone, and the item stays open.
 DELIVERS_TRAILER = "Delivers:"
 CLOSES_TRAILER = "Closes:"
+#: The squash parent a `--deliver` merge's review covered. GitHub squashes
+#: onto the base it holds at the `PUT`, so the message is fixed before the
+#: parent is known; this trailer lets every git reader hold what reconcile
+#: holds (sd:1089).
+REVIEWED_BASE_TRAILER = "Reviewed-base:"
 
 #: `no` is a positive finding from history the checkout actually has;
 #: `unknown` is what a checkout that cannot see far enough says instead.
@@ -2353,7 +2358,22 @@ def _spellings(item: "str | tuple[str, ...]") -> tuple[str, ...]:
     return (item,) if isinstance(item, str) else tuple(item)
 
 
-def _closes(message: str, item: "str | tuple[str, ...]") -> bool:
+def held_at_merge(message: str, parents: str) -> bool | None:
+    """Whether this squash landed on a parent other than the one its review
+    covered; `None` when its trailer block names no reviewed base.
+
+    `parents` is git's `%P` for the commit, first parent first. Reconcile and
+    every trailer reader ask this one question, so the row's hold and git's
+    answer cannot disagree about the same commit (#1179).
+    """
+    for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines():
+        name, _, value = line.rstrip().partition(" ")
+        if name == REVIEWED_BASE_TRAILER:
+            return value.strip() != (parents.split() or [""])[0]
+    return None
+
+
+def _closes(message: str, item: "str | tuple[str, ...]", parents: str | None = None) -> bool:
     """True when this message's trailer block -- its last paragraph, which is
     what makes a trailer a trailer -- closes `item`. Reading the whole message
     would let a commit that quoted a trailer close the item it named.
@@ -2362,7 +2382,13 @@ def _closes(message: str, item: "str | tuple[str, ...]") -> bool:
     it. The id `sd-ship` writes, `Delivers: sd:<id>`, and the folder name a
     database-free checkout has to ask by are the same item said two ways, and
     `main` carries both forms.
+
+    With `parents`, a squash held at merge closes nothing: its `Delivers:` was
+    written before the base advanced under it. A later closing commit, written
+    once the combined tree is verified, closes the item as usual.
     """
+    if parents is not None and held_at_merge(message, parents):
+        return False
     wanted = _spellings(item)
     for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines():
         name, _, value = line.rstrip().partition(" ")
@@ -2375,8 +2401,9 @@ def _closed_by(root: pathlib.Path, ref: str, item: "str | tuple[str, ...]") -> b
     """Whether a commit reachable from `ref` closes `item`; a ref git cannot
     resolve closes nothing. `--grep` only narrows the walk; `_closes` decides."""
     grep = f"{DELIVERS_TRAILER}|{CLOSES_TRAILER}"
-    raw = git_output(["log", "--format=%H%x1f%B%x1e", "-E", "--grep", grep, ref], root) or ""
-    return any(_closes(c.partition("\x1f")[2], item) for c in raw.split("\x1e"))
+    raw = git_output(["log", "--format=%H%x1f%P%x1f%B%x1e", "-E", "--grep", grep, ref], root) or ""
+    return any(_closes(message, item, parents)
+               for _, parents, message in (c.split("\x1f", 2) for c in raw.split("\x1e") if c.count("\x1f") >= 2))
 
 
 def upstream(root: pathlib.Path) -> tuple[str, str]:
