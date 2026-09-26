@@ -4,6 +4,13 @@
 
 ### Changed
 
+- **`sd-ship prepare` refuses a branch behind the default branch before the
+  review.** Merge refused such a branch, but prepare spent the full review and
+  answered `ready_to_send` first (sd:1346, sd:1367). After its fetch, prepare
+  now checks that `origin/<default>` is an ancestor of the head. It refuses
+  with `base_moved` and names `git merge origin/<default>`; a merge keeps the
+  next push a fast-forward, which a rebase does not.
+
 - **Reviews ignore cosmetic findings (sd:1602).** A finding is cosmetic when
   fixing it changes no behaviour and no action a reader takes. Text that is a
   contract is not cosmetic: a wrong command or flag, a parsed string, a config
