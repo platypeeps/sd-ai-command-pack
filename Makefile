@@ -1,5 +1,5 @@
-BREW_PYTHON ?= /opt/homebrew/bin/python3.13
-PYTHON ?= $(shell if [ -x "$(BREW_PYTHON)" ]; then printf '%s' "$(BREW_PYTHON)"; elif [ -x /usr/local/bin/python3.13 ]; then printf '%s' /usr/local/bin/python3.13; elif [ -x /opt/homebrew/bin/python3 ]; then printf '%s' /opt/homebrew/bin/python3; elif [ -x /usr/local/bin/python3 ]; then printf '%s' /usr/local/bin/python3; else command -v python3; fi)
+BREW_PYTHON ?= /opt/homebrew/bin/python3.14
+PYTHON ?= $(shell if [ -x "$(BREW_PYTHON)" ]; then printf '%s' "$(BREW_PYTHON)"; elif [ -x /usr/local/bin/python3.14 ]; then printf '%s' /usr/local/bin/python3.14; elif [ -x /opt/homebrew/bin/python3 ]; then printf '%s' /opt/homebrew/bin/python3; elif [ -x /usr/local/bin/python3 ]; then printf '%s' /usr/local/bin/python3; else command -v python3; fi)
 # `make setup` provisions one virtualenv, into the checkout it ran in, so a
 # linked worktree has none and every recipe below died on `.venv/bin/python:
 # No such file or directory`. `--git-common-dir` names the shared git
