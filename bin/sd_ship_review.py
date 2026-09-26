@@ -338,10 +338,11 @@ class SharedReview:
             stage = "execution"
             return self.runtime.process(self.root, argv + ["--expected-timing", digest(plan)], timeout=plan["execution_seconds"])
         except ReviewTimeout as error:
+            diagnostic = withhold_raw(dict(error.diagnostic, stage=stage), head)
             if stage == "planning":
-                self.save(review_preflight_error=dict(error.diagnostic, stage=stage))
+                self.save(review_preflight_error=diagnostic)
             else:
-                passes[-1].update(execution_error=withhold_raw(dict(error.diagnostic, stage=stage), head), exit_code=124)
+                passes[-1].update(execution_error=diagnostic, exit_code=124)
                 self.save(passes=passes, reviewed_head=None, phase="reviewed")
             raise Refusal(f"local review {stage} watchdog expired after {error.diagnostic['allowed_seconds']}s; "
                           + ("no provider pass reserved; " if stage == "planning" else "reserved pass retained; ")

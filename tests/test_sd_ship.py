@@ -2549,6 +2549,25 @@ roles:
         written = json.loads(pathlib.Path(error["raw_capture"]).read_text())
         self.assertEqual((written["stdout"], written["stderr"], written["head"]), ("partial model", "warn", head))
 
+    def test_a_planning_watchdog_kill_writes_its_output_to_the_file_not_the_receipt(self):
+        """#1201 review. The `--explain` stage times out before execution; its
+        diagnostic is saved as `review_preflight_error` and must be withheld too."""
+        operation = self.operation()
+        head = _git(self.root, "rev-parse", "HEAD")
+        def killed(root, argv, **kwargs):
+            raise ship.ReviewTimeout({"kind": "watchdog_expired", "allowed_seconds": kwargs["timeout"],
+                                      "stdout": {"bytes": 12, "tail": "planning out", "truncated": False},
+                                      "raw_output": {"stdout": "planning out", "stderr": ""}})
+        capture = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory())) / "raw"
+        with patch.dict(os.environ, {"SD_REVIEW_RAW_DIR": str(capture)}), \
+                patch.object(ship, "review_process", side_effect=killed):
+            with self.assertRaisesRegex(ship.Refusal, "planning watchdog expired"):
+                operation.review(head)
+        error = self.operation().state["review_preflight_error"]
+        self.assertNotIn("planning out", json.dumps(error))
+        self.assertNotIn("raw_output", error)
+        self.assertEqual(json.loads(pathlib.Path(error["raw_capture"]).read_text())["stdout"], "planning out")
+
     def test_review_process_hands_over_its_whole_output_only_under_capture(self):
         script = "import sys, time\nprint('x' * 10000, flush=True)\nprint('e', file=sys.stderr, flush=True)\ntime.sleep(30)\n"
         for capture, expected in (("", None), ("/nonexistent-raw-dir", "x" * 10000 + "\n")):
