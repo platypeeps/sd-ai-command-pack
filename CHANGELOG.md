@@ -4,6 +4,16 @@
 
 ### Changed
 
+- **CI and local testing run Python 3.14 only.** The operator decided on
+  2026-09-26 to test one version per language, the latest stable. The
+  `unittest` leg, the other two jobs in `tests.yml` and the Makefile's
+  `BREW_PYTHON` move from 3.13 to 3.14. `requires-python` stays `>=3.13`, and
+  the hash-pinned requirements stay compiled for that floor. The required
+  status context becomes `unittest (ubuntu-latest, 3.14)`, so branch
+  protection must name it before a pull request can merge. A `.venv` built on
+  3.13 keeps working until `make setup` rebuilds it. `WORKFLOW.md` states the
+  rule under **Parallel work**.
+
 - **`tests.test_sd_ship` runs about 40% faster (sd:1605).** The module
   sets the `make check` critical path. Its fixture now builds the bare remote,
   seed and both clones once per process and copies them per test. It switches

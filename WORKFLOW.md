@@ -274,6 +274,8 @@ that dispatches workers cites this section and restates nothing.
   a shared machine set `SD_GATE_SLOTS=1`: each gate already runs a test worker
   on nearly every core, and overlapping gates slow all of them. Only the full
   gate counts as evidence; a narrowed run exits 2 to say so.
+- **Test one version per language, the latest stable (Python 3.14, Node
+  26), in CI and locally; no version matrices.**
 
 The pack has two write lanes, and each holds one writer. A session writes on
 its own branch in its own worktree: `sd runner prepare <item> --branch <name>`
