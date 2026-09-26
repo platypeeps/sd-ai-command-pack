@@ -730,11 +730,23 @@ class LineBudgetTests(unittest.TestCase):
         # tree. This raise is its own commit, before the one that spends it.
         # Shared-core classification and the complexity ceilings are
         # unchanged.
+        #
+        # 3641 -> 3644 is #1194 (PR #1199), `sd-review --lens research-brief`.
+        # `bin/sd-review` grows +3: the `--lens` argument, the `lens` report
+        # key, and the one-line comment saying a lens, like `--challenge`, is
+        # a request to be read that `docs_skip` does not answer. The lens is
+        # part of the prompt and of the tier decision, which is review
+        # mechanics, so its switch belongs in the lane. The lens text itself
+        # is `sd_lib.REVIEW_LENSES`, shared core, so none of it is spent here.
+        # Measured, not carried: `sd-review` is 2350 on this tree. This raise
+        # is its own commit, but after the pushed commit that spends it, not
+        # before. Shared-core classification and the complexity ceilings are
+        # unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3641,
+            3644,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
