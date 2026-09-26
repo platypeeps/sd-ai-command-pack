@@ -4,6 +4,16 @@
 
 ### Changed
 
+- **`sd work register` works from a linked worktree.** It refused with
+  `repository '<worktree>' is not registered` whenever the worktree had no
+  origin to match (sd:1293). The lookup now resolves the worktree to its main
+  checkout, as `sd task add` does; the folder and commit still come from the
+  worktree.
+
+- **`sd task show N` reads one item.** It is an alias for `sd store item N`,
+  which stays the canonical read for every kind (sd:1112). Both print the same
+  item, notes and revision, as text or with `--json`, and neither writes.
+
 - **A watchdog-killed review keeps its output under `SD_REVIEW_RAW_DIR`.**
   With capture on, sd-ship withheld the stdout tail of a timed-out review but
   wrote no file, so a truncated or oversized output left no evidence
