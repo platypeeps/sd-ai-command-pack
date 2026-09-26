@@ -1124,7 +1124,7 @@ log, not here.
 
 **Shared scripts.**
 
-- Bugs: `bin/sd-status:877` passes `root` to `handoff.resolve_root`;
+- Bugs: `source:bin/sd-status::handoff_section` passes `root` to `handoff.resolve_root`;
   `bin/sd-docs-lint:244` tests `value.startswith("none")` where it must
   compare the whole token with `none`, so `Work: nonexistent-item` fails as a
   missing reason rather than as an unresolved path.

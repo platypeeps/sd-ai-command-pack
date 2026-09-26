@@ -2071,8 +2071,8 @@ MUTATIONS: dict[str, Mutation] = {
     "tests/test_doc_citations.py::"
     "test_line_citations_into_a_symbol_match_their_baseline": Mutation(
         path=PROSE_RULES_PAGE,
-        old="where the line it would name sits inside one.",
-        new=f"where the line it would name sits inside one (the line "
+        old="every `path:line` into code counts.",
+        new=f"every `path:line` into code counts (the line "
             f"`{INSIDE_A_SYMBOL}` does).",
         test="tests.test_doc_citations.TheSymbolPreference"
              ".test_line_citations_into_a_symbol_match_their_baseline",
