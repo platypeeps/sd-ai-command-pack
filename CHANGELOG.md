@@ -506,13 +506,18 @@
   After sd:1353 the post-merge and post-checkout arms rendered on every pull
   and branch switch, so a config from a tree the operator had not read ran
   without any command of theirs. `sd-research-kit render` now records the
-  sha256 of the config it executed under the git directory, and those arms
-  render only a config whose digest matches. Otherwise they decline and name
-  `sd-research-kit render`. A record, not a question about the one operation:
-  a declined pull leaves the incoming config in the tree, and the next
-  `git checkout HEAD -- doc.md` would have executed it. Post-commit renders as
-  before. A repository with no record declines until one render by hand.
-  `init-hook` upgrades the previous bodies, which join `SUPERSEDED_HOOKS`.
+  sha256 of the config it executed under the git directory, and all three
+  arms, post-commit included, render only a config whose digest matches.
+  Otherwise they decline and name `sd-research-kit render`. A record, not a
+  question about the one operation: a declined pull leaves the incoming config
+  in the tree, and the next `git checkout HEAD -- doc.md`, or a commit of
+  `doc.md` alone, would have executed it. Only a render by hand writes the
+  record. A render the hook runs (`SD_RESEARCH_TRIGGER`) or git runs
+  (`GIT_EXEC_PATH`, which covers a not yet upgraded hook body) checks the
+  digest of the bytes it is about to execute, exits non-zero on a mismatch,
+  and records nothing. A repository with no record declines until one render
+  by hand. `init-hook` upgrades the previous bodies, which join
+  `SUPERSEDED_HOOKS`.
 - **`sd-ship prepare` re-reads a pull object that lags the push (sd:1394).**
   It read the pull object once after pushing and refused when the head
   differed, but GitHub updates it a second or so after the ref. A push that

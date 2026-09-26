@@ -72,7 +72,13 @@ except ImportError:
 
 from sd_lib import GIT_TIMEOUT_SECONDS
 from sd_research_fonts import FONTS_CSS
-from sd_research_publish import publish, repo_home, trust_conf
+from sd_research_publish import (
+    automatic_render,
+    conf_trusted,
+    publish,
+    repo_home,
+    trust_conf,
+)
 from sd_research_tokens import TOKENS_CSS
 
 CSS = TOKENS_CSS
@@ -230,10 +236,17 @@ def main():
     # one live config builds its DOCS list with a loop.
     with open(conf, "rb") as handle:
         source = handle.read()
+    # A render nobody typed executes only a config a render by hand recorded,
+    # checked on the bytes it is about to execute, and records nothing: only
+    # the operator's own render says the config has been read (sd:1376).
+    trigger = automatic_render()
+    if trigger and not conf_trusted(Path(repo), source):
+        sys.exit("%s: no render by hand has executed this research.conf.py, and "
+                 "a render executes it; read it, then run `sd-research-kit "
+                 "render`. docs/dashboard/ is stale until then" % trigger)
     exec(compile(source, conf, "exec"), ns)  # nosec B102
-    # The hook renders after a pull or checkout only a config a render has
-    # executed before (sd:1376). This is that record.
-    trust_conf(Path(repo), source)
+    if not trigger:
+        trust_conf(Path(repo), source)
     # The fallback badge comes from the repository's name, not the checkout's:
     # a worktree is called after its branch, and its name is nobody's project.
     project = ns.get("PROJECT", repo_home(Path(repo)).name.split("-")[0].upper())

@@ -58,7 +58,8 @@ USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pi
   init-hook     install the hook that re-renders this repo, under all three
                 triggers at once -- post-commit, post-merge and post-checkout,
                 so a pull and a branch switch render too; upgrades an earlier
-                install of its own
+                install of its own. The hook renders only a research.conf.py
+                that a render by hand has executed here
   delivered <request file name> <fingerprint>
                 the drain's last step: record that generation of the request
                 as delivered and remove the request only while it is still
