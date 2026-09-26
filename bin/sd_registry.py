@@ -1685,3 +1685,46 @@ def select_reviewers(
         )
         if candidate.eligible
     ]
+
+
+def ranked(registry: Registry, role: str) -> list[str]:
+    """Every entry ranked for `role`, enabled or not, best first."""
+    holders = [provider for provider in registry.providers.values() if role in provider.ranks]
+    return [provider.name for provider in sorted(holders, key=lambda provider: provider.ranks[role])]
+
+
+def order_source(
+    registry: Registry,
+    *,
+    home: Path | str | None = None,
+    database_path: Path | str | None = None,
+) -> str:
+    """Where `read_runtime` took each role's order from, for `--explain` (sd:1556).
+
+    With a provider database the rows `sd providers configure` writes win over
+    the file's `roles:` lists, which only seed them; `sd providers list` shows
+    the result. The file's list is named when it disagrees, because a reader
+    who opens the file otherwise takes its list for the order in force. Empty
+    for a registry that did not read. This follows `read_runtime`'s branches:
+    no library or no database file means the file alone.
+    """
+    if not registry.providers:
+        return ""
+    file_source = f"file {registry.path} (roles:); no provider database"
+    try:
+        import sd_lib  # noqa: PLC0415 - the same optional import `read_runtime` makes
+        sd_lib.import_sd_db()
+        from sd_db import database  # noqa: PLC0415 - optional at runtime
+    except ImportError:
+        return file_source
+    path = Path(database_path) if database_path is not None else database.default_path(home)
+    if not path.exists():
+        return file_source
+    source = f"database {path} (`sd providers configure` sets it; `sd providers list` shows it)"
+    try:
+        seed = ranked(read_file(registry.path), "reviewer")
+    except RegistryError:  # this reader refuses a file the library accepted: nothing to compare
+        return source
+    if seed != ranked(registry, "reviewer"):
+        source += f"; {registry.path.name} roles.reviewer [{', '.join(seed)}] is only the seed, overridden here"
+    return source
