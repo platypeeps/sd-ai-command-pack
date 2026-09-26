@@ -150,3 +150,76 @@ class AdvisoryAuthorshipTests(ReviewFixture):
                                    cwd=root, env=environment, capture_output=True, text=True, timeout=30)
         self.assertEqual(explained.returncode, 0, explained.stderr)
         self.assertTrue(json.loads(explained.stdout)["authorship_refusal"])
+
+
+class DefaultBranchAuthorshipTests(ReviewFixture):
+    """sd:1547: on the default branch the refreshed target boundary is HEAD itself.
+
+    The authored range then held no commit, read as `()`, and printed "human
+    (every commit says so)" while the subject under review was a claude
+    commit -- so its own vendor stayed eligible to review it.
+    """
+
+    def on_main(self, message):
+        root = self.make_repo()
+        (root / "work.txt").write_text("work\n")
+        subprocess.run(["git", "add", "work.txt"], cwd=root, check=True)
+        subprocess.run(["git", "commit", "-qm", message], cwd=root, check=True)
+        return root
+
+    def parent(self, root):
+        return subprocess.check_output(["git", "rev-parse", "HEAD~1"], cwd=root, text=True).strip()
+
+    def explained(self, root, **kwargs):
+        runner, client = FakeRunner(), Mock(side_effect=AssertionError("URL provider must not run"))
+        result = sd_review.review(root, namespace(scope="branch", explain=True, **kwargs), runner,
+                                  self.environment(), self.chatgpt_home(), client=client)
+        self.assert_no_session_started(runner)
+        return result
+
+    def test_base_on_default_branch_reads_the_reviewed_commits(self):
+        root = self.on_main("change\n\nAuthored-with: claude/anthropic")
+        result = self.explained(root, base=self.parent(root))
+        self.assertFalse(result["authorship_refusal"])
+        self.assertEqual(result["authored_with"], ["anthropic"])
+        self.assertEqual(result["authored_with_report"], "anthropic")
+
+    def test_base_on_default_branch_keeps_the_author_vendor_off_the_chain(self):
+        root = self.on_main("change\n\nAuthored-with: codex/openai")
+        result = self.explained(root, base=self.parent(root))
+        self.assertEqual(result["authored_with"], ["openai"])
+        self.assertFalse(next(row for row in result["chain"] if row["provider"] == "codex")["eligible"])
+        self.assertTrue(next(row for row in result["chain"] if row["provider"] == "second")["eligible"])
+
+    def test_empty_range_is_not_read_and_not_human(self):
+        root = self.on_main("change\n\nAuthored-with: claude/anthropic")
+        head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+        result = self.explained(root)
+        self.assertIn(f"not read: no commits in {head}..{head}", result["authored_with_report"])
+        self.assertNotIn("human", result["authored_with_report"])
+        self.assertEqual(result["providers"], [])
+        self.assertTrue(all(not row["eligible"] for row in result["chain"]))
+        output = io.StringIO()
+        sd_review.render(result, output)
+        self.assertIn(f"not read: no commits in {head}..{head}", output.getvalue())
+
+    def test_empty_range_refuses_outside_explain(self):
+        root = self.on_main("change\n\nAuthored-with: claude/anthropic")
+        runner = FakeRunner()
+        with self.assertRaisesRegex(sd_review.Refusal, "not read: no commits in"):
+            sd_review.review(root, namespace(scope="branch"), runner, self.environment(), self.chatgpt_home(),
+                             client=Mock(side_effect=AssertionError("URL provider must not run")))
+        self.assertEqual(runner.calls, [])
+
+    def test_branch_commit_with_base_stays_anthropic(self):
+        root = self.make_repo()
+        subprocess.run(["git", "checkout", "-qb", "work"], cwd=root, check=True)
+        (root / "work.txt").write_text("work\n")
+        subprocess.run(["git", "add", "work.txt"], cwd=root, check=True)
+        subprocess.run(["git", "commit", "-qm", "change\n\nAuthored-with: claude/anthropic"], cwd=root, check=True)
+        main = subprocess.check_output(["git", "rev-parse", "main"], cwd=root, text=True).strip()
+        for base in (None, main):
+            with self.subTest(base=base):
+                result = self.explained(root, base=base)
+                self.assertEqual(result["authored_with"], ["anthropic"])
+                self.assertEqual(result["authored_with_report"], "anthropic")

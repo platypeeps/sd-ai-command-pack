@@ -32,7 +32,7 @@ from sd_ship_history import timeout_evidence as timeout_evidence
 from sd_ship_history import validate_additional_requests as validate_additional_requests
 from sd_ship_item import ItemIdentity
 from sd_ship_remote import GitHub, Refusal, git, run, slug
-from sd_ship_review import ReviewRuntime, ReviewTimeout, SharedReview
+from sd_ship_review import RAW_CAPTURE_ENV, ReviewRuntime, ReviewTimeout, SharedReview
 from sd_ship_workflow import blocked, failure
 
 BIN = pathlib.Path(__file__).resolve().parent
@@ -236,6 +236,9 @@ def review_process(root: pathlib.Path, argv: list[str], *, timeout: float) -> su
                 diagnostic[name] = {"bytes": len(data), "truncated": len(data) > REVIEW_DIAGNOSTIC_BYTES,
                                     "tail": data[-REVIEW_DIAGNOSTIC_BYTES:].decode("utf-8", "replace")}
             diagnostic.update(captured_evidence(output))
+            if os.environ.get(RAW_CAPTURE_ENV):  # sd:1588: only this frame holds the whole output
+                diagnostic["raw_output"] = {"stdout": output.decode("utf-8", "replace"),
+                                            "stderr": errors.decode("utf-8", "replace")}
             raise ReviewTimeout(diagnostic) from None
         return subprocess.CompletedProcess(argv, process.returncode, output.decode("utf-8", "replace"),
                                            errors.decode("utf-8", "replace"))
