@@ -123,9 +123,10 @@ records the differences that are on purpose. Both are in
    act on. This is the research flow's review point *after the brief and
    decisions*. Its cap is the one on that row in the sd-ai-command-pack
    checkout's `.claude/rules/sd-planning-adversarial-review.md`. A research
-   repo does not carry that file; read it in the pack. The second reader is a
-   CLI invoked on the working tree with focus text that redirects it from code
-   review to prose — the exact invocation and its limits are in
+   repo does not carry that file; read it in the pack. The second reader is
+   `sd-review --lens research-brief`, which takes the reviewer from the
+   provider registry's order and re-aims the prompt from code review to the
+   argument — the exact invocation and its limits are in
    `references/conventions.md`. If it is unavailable, record that in Status
    rather than letting self-review pass as review.
 8. Local publication already happened: `render` wrote each document's Markdown

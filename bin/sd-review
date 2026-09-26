@@ -1645,7 +1645,7 @@ def metered_bills(
 def prepared_prompt(root: pathlib.Path, subject: Subject, args: argparse.Namespace,
                     previous: dict[str, Any] | None, env: Mapping[str, str]) -> tuple[str, bool, list[dict[str, Any]]]:
     conventions = local_conventions(root)
-    prompt = build_prompt(subject, args.challenge, conventions)
+    prompt = build_prompt(subject, args.challenge, conventions) + sd_lib.review_lens(getattr(args, "lens", None))
     context = []
     if previous:
         evidence = json.dumps(previous["findings"], sort_keys=True)
@@ -1716,7 +1716,7 @@ def review(
 
     preflight = bool(getattr(args, "preflight", False))
     if preflight and (not args.provider or args.scope not in ("worktree", "branch") or any(
-            getattr(args, name, None) for name in ("base", "verify_report", "resume_report", "item", "draft", "challenge", "dry_run", "expected_timing", "reuse_check"))):
+            getattr(args, name, None) for name in ("base", "verify_report", "resume_report", "item", "draft", "challenge", "lens", "dry_run", "expected_timing", "reuse_check"))):
         raise UsageError("--preflight requires --provider and cannot combine with review modifiers; use --explain for zero calls")
     policy, source = load_policy(root)
     item = getattr(args, "item", None)
@@ -1825,7 +1825,8 @@ def review(
     # cap is passed over by fallthrough and refused by a pick, both naming the
     # month's total; a fault names itself the same way on every capped bill.
     ledger = open_ledger(env, getattr(args, "database", None), registry)
-    depth = 1 if args.provider else review_depth(plan, args.challenge, args.scope)
+    # A lens, like the challenge stance, is a request to be read: docs_skip does not answer it.
+    depth = 1 if args.provider else review_depth(plan, args.challenge or bool(getattr(args, "lens", None)), args.scope)
     meter_candidates, selection_refusal = ([], "") if authorship_refusal or not depth else sd_review_readiness.select_ready_candidates(
         registry, args.provider, explain=args.explain, consent=consent, author_vendors=vendors, readers=READERS,
     )
@@ -1881,6 +1882,7 @@ def review(
         "resume_report_digest": hashlib.sha256(json.dumps(previous, sort_keys=True).encode()).hexdigest() if resume and previous else None,
         "item": item,
         "challenge": bool(args.challenge),
+        "lens": getattr(args, "lens", None),
         "draft": bool(args.draft),
         "policy_source": source,
         "severity_floor": str(policy["severity_floor"]),
@@ -2271,6 +2273,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--resume-report", help="incomplete prior review JSON whose findings must survive a full-branch retry")
     parser.add_argument("--base", help="branch-only exact ancestor SHA for one fix verification")
     parser.add_argument("--challenge", action="store_true", help="add the adversarial design-challenge stance")
+    parser.add_argument("--lens", choices=sorted(sd_lib.REVIEW_LENSES), help="re-aim the prompt at a non-code subject; the chain is unchanged")
     parser.add_argument(
         "--provider",
         default=None,

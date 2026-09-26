@@ -20,6 +20,7 @@ import importlib.machinery
 import importlib.util
 import io
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -105,53 +106,47 @@ class VerbSurfaceTests(unittest.TestCase):
 
 
 class SecondReaderCommandTests(unittest.TestCase):
-    """Step 9 of the printed checklist is a command a reader types by hand.
+    """Step 9 of the printed checklist routes the second reader through `sd-review`.
 
-    When stdin is not a terminal `codex exec` reads it as more prompt, and a
-    backgrounded shell call keeps it open, so a printed command without
-    `< /dev/null` hangs at `Reading additional input from stdin...` at 0% CPU
-    (sd:1339). The checklist is the one place the pack hands a reader that
-    command, so the guards live in the printed text, not in a wrapper.
+    #1194. It used to print a fixed `codex exec` line, which skipped the
+    provider registry's reviewer order and blocked the pass whenever Codex was
+    down. `sd-review` takes the reviewer from the chain, with consent, vendor
+    independence and fallback, and `--lens research-brief` carries the research
+    framing to whichever provider the chain picks. The stdin, hang and
+    read-only guards the old command needed are the lane's own now.
     """
 
     def setUp(self) -> None:
+        load_publish()  # puts `bin/` on the path, so the class runs on its own
         self.checklist = load_kit().load("sd_research_review").CHECKLIST
 
-    def test_the_printed_codex_command_closes_stdin(self) -> None:
-        self.assertIn("< /dev/null", self._codex_command())
+    def test_the_second_reader_is_sd_review_with_the_research_lens(self) -> None:
+        for scope in ("worktree", "branch"):
+            self.assertRegex(self.checklist, rf"sd-review --scope {scope} --lens research-brief\b")
+        self.assertNotIn("codex exec", self.checklist)
 
-    def test_the_printed_codex_command_is_observable_and_portable(self) -> None:
-        # The answer and the log go to files a reader can watch, in a folder
-        # git does not keep, so the command makes it first. No `timeout`: it
-        # is GNU coreutils, which macOS does not ship, and a command that
-        # fails with `command not found` loses the whole second-reader step.
-        command = self._codex_command()
-        self.assertRegex(command, r"^\s*mkdir -p 90-scratch && codex exec -s read-only")
-        self.assertNotRegex(command, r"\btimeout\b")
-        self.assertIn(" -o 90-scratch/", command)
-        self.assertIn("> 90-scratch/", command)
-        self.assertIn("2>&1", command)
-        self.assertIn("coreutils", self.checklist)
+    def test_the_checklist_names_no_registry_provider(self) -> None:
+        # Enumerated from the shipped registry, so a provider added there is
+        # checked here without anyone remembering to list it.
+        registry = (REPO_ROOT / "providers.yaml").read_text(encoding="utf-8")
+        block = registry.split("\nproviders:\n", 1)[1].split("\nroles:\n", 1)[0]
+        names = re.findall(r"^  ([a-z][a-z0-9_-]*):", block, flags=re.MULTILINE)
+        self.assertIn("codex", names)
+        # A file name is not a provider: `CLAUDE.local.md` holds the consent.
+        named = [name for name in names
+                 if re.search(rf"\b{name}\b(?!(?:\.\w+)*\.md\b)", self.checklist, flags=re.IGNORECASE)]
+        self.assertEqual(named, [])
 
-    def test_the_checklist_says_how_to_tell_a_hang(self) -> None:
-        # "it buffers, so no output until it exits" told a reader a hang was
-        # normal; what replaced it is the rollout-file check.
-        self.assertNotIn("it buffers", self.checklist)
-        self.assertIn("rollout-*.jsonl", self.checklist)
-        self.assertIn("Reading additional input from stdin", self.checklist)
+    def test_the_lens_the_checklist_names_is_one_sd_review_takes(self) -> None:
+        import sd_lib
 
-    def _codex_command(self) -> str:
-        # The command is the indented block from the `codex exec` line to the
-        # next blank line; the prompt and the redirects are its continuation.
-        lines = self.checklist.splitlines()
-        start = next(i for i, line in enumerate(lines)
-                     if "codex exec -s read-only" in line)
-        block = []
-        for line in lines[start:]:
-            if not line.strip():
-                break
-            block.append(line)
-        return "\n".join(block)
+        self.assertIn("research-brief", sd_lib.REVIEW_LENSES)
+
+    def test_the_registry_independent_fallback_is_stated_as_such(self) -> None:
+        text = " ".join(self.checklist.split())
+        self.assertIn("Only if `sd-review` cannot run at all", text)
+        self.assertIn("does not use the registry", text)
+        self.assertIn("adversarial-gate render --lens research-brief", text)
 
 
 class RepositoryFromCwdTests(unittest.TestCase):

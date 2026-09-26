@@ -89,6 +89,7 @@ An unreadable database stops execution instead of ignoring operator controls.
 | Flag | Meaning |
 |---|---|
 | `--challenge` | Apply an adversarial design-challenge stance. |
+| `--lens NAME` | Re-aim the prompt at a non-code subject (`research-brief`); the chain is unchanged, and a docs-only change is still read. |
 | `--item NAME` | Select the active planning directory. |
 | `--provider NAME` | Select one registry entry, without fallback. |
 | `--explain` | Explain routing and eligibility without dispatch. |
