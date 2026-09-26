@@ -445,6 +445,9 @@ jobs:
         with:
           repository: platypeeps/system
           ref: main
+          # The whole history: test_system_pin reads SCHEMA_VERSION at the
+          # pinned commit, which a shallow clone of main cannot reach.
+          fetch-depth: 0
           token: ${{ secrets.SYSTEM_REPO_TOKEN }}
           path: system-checkout
           persist-credentials: false
