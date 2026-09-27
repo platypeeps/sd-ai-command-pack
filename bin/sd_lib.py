@@ -2088,6 +2088,31 @@ def _in_range(named: str, shas: list[str]) -> str:
     return matches[0] if len(matches) == 1 else ""
 
 
+def base_attributions(root: pathlib.Path, base: str, head: str, landed: str) -> list[str]:
+    """The `Attributes:` lines in `base..head` that name a commit `landed` holds.
+
+    A squash keeps none of the range's messages but the one it composes, and
+    a line naming a commit of the range names a sha the squash removes, so
+    `attribution` turns those into the squash's `Authored-with:`. A line
+    naming a commit the base already holds is different: that is an `sd
+    attribute` repair of history, and dropping it landed rwbp-coordinator
+    #310 as an empty commit that attributed nothing (sd:1753). Each is
+    written with the full sha, so a prefix unique today stays unique.
+    """
+    carried: dict[str, str] = {}
+    for _, message in commit_messages(root, base, head):
+        for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines():
+            if not line.rstrip().startswith(ATTRIBUTES_TRAILER):
+                continue
+            parts = line[len(ATTRIBUTES_TRAILER) :].split()
+            if len(parts) != 2 or len(parts[0]) < 7:
+                continue
+            full = git_output(["rev-parse", "--verify", "--quiet", f"{parts[0]}^{{commit}}"], root)
+            if full and git_output(["merge-base", "--is-ancestor", full, landed], root) is not None:
+                carried.setdefault(full, parts[1])
+    return [f"{ATTRIBUTES_TRAILER} {sha} {value}" for sha, value in carried.items()]
+
+
 def author_vendors(root: pathlib.Path, base: str, head: str) -> tuple[str, ...]:
     """The vendors this range was written with. Raises when a commit is silent."""
     said = attribution(root, base, head)
@@ -2281,8 +2306,9 @@ def attribute(
 
     A commit rather than a note: a notes ref is one mutable ref a repository
     shares, and two clones attributing different commits of one branch diverge
-    on it. A commit is branch-local, pushes with the branch, and squashes away
-    at the merge with everything else.
+    on it. A commit is branch-local and pushes with the branch. At the squash,
+    a line naming a branch commit becomes the squash's `Authored-with:`, and a
+    line naming a commit the base holds is carried (`base_attributions`).
 
     Empty is also why the content gate is skipped for it; the condition and
     its measurement are in `_attribution_environment`.

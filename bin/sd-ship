@@ -1405,6 +1405,22 @@ class Ship(SharedReview):
                     body += f"{sd_lib.REVIEWED_BASE_TRAILER} {reviewed_base}\n"
         return body
 
+    def squash_authorship(self, head: str, reviewed_base: str) -> str:
+        """The squash's `Attributes:` and `Authored-with:` trailers, in that order."""
+        # Preserve actual authorship through the squash, including its vendor
+        # at authoring time. No declaration supplied to merge can rewrite it.
+        start = self.authorship_start()
+        sd_lib.author_vendors(self.root, start, head)
+        # A repair of commits the base already holds survives the squash;
+        # one naming a branch commit becomes an `Authored-with:` below (sd:1753).
+        lines = sd_lib.base_attributions(self.root, start, head, reviewed_base)
+        authors = set(sd_lib.attribution(self.root, start, head).values())
+        for _, message in sd_lib.commit_messages(self.root, start, head):
+            authors.update(line.partition(":")[2].strip() for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines()
+                           if line.startswith("Authored-with:"))
+        lines += [f"Authored-with: {author}" for author in sorted(authors)]
+        return "".join(line + "\n" for line in lines)
+
     def reviewed_base(self, head: str, base: str) -> str:
         """The newest `base` commit `head` contains, read after a fresh fetch."""
         git(self.root, "fetch", "--no-tags", "origin", f"refs/heads/{base}")
@@ -1479,17 +1495,8 @@ class Ship(SharedReview):
         self.abandon_copilot_review(observed["number"], head)
         self.require_copilot_clearance(observed["number"], observed, head)
         self.save(phase="ci_passed", protection=protection)
-        body = self.squash_body(self.reviewed_base(head, base))
-        # Preserve actual authorship through the squash, including its vendor
-        # at authoring time. No declaration supplied to merge can rewrite it.
-        start = self.authorship_start()
-        sd_lib.author_vendors(self.root, start, head)
-        authors = set(sd_lib.attribution(self.root, start, head).values())
-        for _, message in sd_lib.commit_messages(self.root, start, head):
-            authors.update(line.partition(":")[2].strip() for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines()
-                           if line.startswith("Authored-with:"))
-        for author in sorted(authors):
-            body += f"Authored-with: {author}\n"
+        reviewed = self.reviewed_base(head, base)
+        body = self.squash_body(reviewed) + self.squash_authorship(head, reviewed)
         # The squash message is composed here and read by `git
         # interpret-trailers --parse` afterwards, and those two only agree
         # while the trailers sit in the message's *last* paragraph. One blank

@@ -448,7 +448,9 @@ mid-item; outside the runner, `SD_AUTHOR` or `--author` names it to
 review reads no declaration: every commit in the reviewed range is attributed
 by its own trailer, or by an `Attributes: <sha> <name>/<vendor>` trailer on a
 later commit in the range that `sd attribute` makes, and a commit with neither
-refuses the review by name rather than being guessed. `reviewer` is the first entry that is enabled, is of no vendor the
+refuses the review by name rather than being guessed. `sd-ship merge` carries
+into the squash each `Attributes:` line that names a commit the base already
+holds, so a repair of landed history survives the merge. `reviewer` is the first entry that is enabled, is of no vendor the
 range's trailers carry, is on no bill at its cap this month, and answers
 its preflight (the cap check is below). A rate limit,
 a missing binary, a failed run or a timeout falls through to the next, and the

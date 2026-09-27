@@ -4,6 +4,16 @@
 
 ### Changed
 
+- **`sd-ship merge` keeps an `sd attribute` repair of landed history
+  (sd:1753).** The squash message carried only the PR body, `Item:`,
+  `Delivers:` and `Authored-with:`, so a PR whose `Attributes:` lines named
+  commits already on the base landed as an empty commit that attributed
+  nothing; rwbp-coordinator #310 escaped only by a hand-written squash
+  message. The squash now carries each `Attributes:` line whose sha the
+  reviewed base holds, with the full sha. A line naming a branch commit still
+  stays behind, because the squash removes that sha; it reaches the squash as
+  `Authored-with:`, as before.
+
 - **`sd fleet stamp` lays the `unprotected` declaration only where GitHub
   says so (sd:1655).** The stamp assumed every owned auto repository was
   unprotected, so its dry run proposed `.github/sd-status.json` in fifteen
