@@ -396,6 +396,42 @@ class RecoveryDiagnostics(ReviewFixture):
             self.assertEqual(outcome.diagnostic["failure_stage"], stage, response)
             self.assertNotIn(outcome.status, (sd_review.CLEAN, sd_review.FINDINGS))
 
+    def test_a_free_entry_retries_one_schema_failure_and_a_priced_one_does_not(self):
+        """sd:1821: MiniMax-M3 (price 0/0) added a `severity_note` key on about
+        one run in nine; a failed pass fell through to a reviewer that bills."""
+        bad = (0, json.dumps(self.envelope(json.dumps({"findings": [{**finding("high"), "severity_note": "x"}]}))), "", True)
+        good = (0, json.dumps(self.envelope(json.dumps({"findings": [finding("high", "real blocker")]}))), "", True)
+        for price, calls, stage in (({"in": 0, "out": 0}, 2, None), ({"in": 0.3, "out": 1.2}, 1, "schema"),
+                                    ({}, 1, "schema"), ({"in": 0}, 1, "schema")):
+            answers = iter((bad, good))
+            client = FakeClient(default=lambda _provider, answers=answers: next(answers))
+            provider = sd_review.sd_registry.Provider(name="fixture", vendor="fixture", bill="fixture",
+                url="https://fixture.invalid/v1", model="fixture-model", env=("KEY",), price=price)
+            outcome = sd_review.run_provider(provider, self.tmp,
+                sd_review.Subject("branch", "a" * 40, "b" * 40, (), 0, ""), "synthetic", FakeRunner(),
+                {"KEY": "secret"}, 1, client=client)
+            self.assertEqual(len(client.sent), calls, price)
+            self.assertEqual(outcome.diagnostic["failure_stage"], stage, price)
+            if calls == 2:
+                self.assertEqual(outcome.status, sd_review.FINDINGS)
+                self.assertEqual(outcome.findings[0]["summary"], "real blocker")
+                self.assertEqual(outcome.diagnostic["schema_retry"]["first_schema"], "invalid")
+                self.assertIn("unexpected field", outcome.diagnostic["schema_retry"]["first_validation_error"])
+            else:
+                self.assertNotIn("schema_retry", outcome.diagnostic)
+
+    def test_a_free_entry_retries_a_schema_failure_only_once(self):
+        bad = (0, json.dumps(self.envelope('{}')), "", True)
+        client = FakeClient(default=bad)
+        provider = sd_review.sd_registry.Provider(name="fixture", vendor="fixture", bill="fixture",
+            url="https://fixture.invalid/v1", model="fixture-model", env=("KEY",), price={"in": 0, "out": 0})
+        outcome = sd_review.run_provider(provider, self.tmp,
+            sd_review.Subject("branch", "a" * 40, "b" * 40, (), 0, ""), "synthetic", FakeRunner(),
+            {"KEY": "secret"}, 1, client=client)
+        self.assertEqual(len(client.sent), 2)
+        self.assertEqual(outcome.diagnostic["failure_stage"], "schema")
+        self.assertNotIn(outcome.status, (sd_review.CLEAN, sd_review.FINDINGS))
+
     def test_actual_http_status_requested_model_and_prompt_digest_survive(self):
         registry = sd_review.sd_registry
         provider = registry.Provider(name="fixture", vendor="vendor", bill="fixture",

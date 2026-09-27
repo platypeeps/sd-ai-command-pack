@@ -457,6 +457,12 @@ supports effort `none`. Lower reasoning can change finding quality; full
 subject coverage and the required reviewer count remain mandatory.
 Incomplete output still fails the review. A pin is changed by editing the
 registry file, never by a page.
+A `url` answer that fails the findings schema is retried once on the same
+entry only when its `price` names both `in` and `out` as zero, so a retry
+never doubles a bill; the outcome's diagnostic records the first failure
+under `schema_retry`. A priced entry falls through to the next reviewer as
+before. Temperature is not a registry field: `kimi-k3` refuses any value but
+1, and MiniMax-M3 at 0.2 broke the schema as often as at its default (sd:1821).
 
 Adding a provider is an entry; adding money is a bill. Both role lines are
 read in order. `author` is picked when an assignment starts and never switched
