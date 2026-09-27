@@ -1953,6 +1953,36 @@ roles:
             self.merge()
         self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
 
+    def test_two_suites_that_disagree_still_refuse_and_name_the_fresh_commit(self):
+        """sd:1779. A body edit or a close/reopen starts a second check suite on
+        the same head; its pass does not clear the first suite's failure, and
+        a re-run of that failure replays its stale event (#1221 at 59f8fde:
+        suites 98314641878 and 98314947143). The gate still refuses with the
+        same code; the next action names the remedy, a fresh commit. One
+        failing run alone, two failures, or a pass inside the failing suite
+        gets no such hint."""
+        self.prepare()
+        pull = self.remote.pull(1)
+        valid = dict(pull.checks[0])
+        failed = {**valid, "conclusion": "failure", "check_suite": {"id": 98314641878}}
+        passed = {**valid, "check_suite": {"id": 98314947143}}
+        for label, checks, hinted in (
+            ("two suites disagree", [failed, passed], True),
+            ("two suites disagree, listed the other way", [passed, failed], True),
+            ("one failing run", [failed], False),
+            ("both suites fail", [failed, {**passed, "conclusion": "failure"}], False),
+            ("one suite, no suite ids", [{**valid, "conclusion": "failure"}, dict(valid)], False),
+            ("one suite both fails and passes", [failed, {**valid, "check_suite": failed["check_suite"]}], False),
+        ):
+            with self.subTest(label=label):
+                pull.checks = checks
+                with self.assertRaisesRegex(ship.Refusal, "required CI is not passing") as caught:
+                    self.merge()
+                workflow = caught.exception.workflow
+                self.assertEqual(workflow["blocker"]["code"], "ci_not_passing")
+                self.assertEqual("push a fresh commit" in workflow["next_action"], hinted, workflow["next_action"])
+        self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
+
     def test_remote_ownership_protection_and_rules_are_fresh(self):
         self.prepare()
         self.double.admin = False
@@ -4185,6 +4215,30 @@ class DeclaredGapCase(unittest.TestCase):
         pull = next(iter(self.remote.pull_requests.values()))
         pull.checks.append(self.check("unittest (ubuntu-latest, 3.13)", conclusion="failure", sha="0" * 40))
         self.refuse("CI is not passing", "ci_not_passing")
+
+    def test_two_suites_that_disagree_refuse_under_the_gap_and_name_the_fresh_commit(self):
+        """sd:1779 on the declared-gap path: the same refusal and code, with the
+        fresh-commit hint only when one check fails in one suite and passes
+        in another."""
+        for label, runs, hinted in (
+            ("two suites disagree", ((98314641878, "failure"), (98314947143, "success")), True),
+            ("two suites disagree, listed the other way", ((98314947143, "success"), (98314641878, "failure")), True),
+            ("one failing run", ((98314641878, "failure"),), False),
+        ):
+            with self.subTest(label=label):
+                self.restart()
+                self.declare()
+                self.green()
+                pull = next(iter(self.remote.pull_requests.values()))
+                pull.checks = [check for check in pull.checks if check["name"] != "route"]
+                pull.checks += [{**self.check("route", conclusion=conclusion), "check_suite": {"id": suite}}
+                                for suite, conclusion in runs]
+                with self.assertRaisesRegex(ship.Refusal, "CI is not passing on .*: route") as caught:
+                    self.merge()
+                workflow = caught.exception.workflow
+                self.assertEqual(workflow["blocker"]["code"], "ci_not_passing")
+                self.assertEqual("push a fresh commit" in workflow["next_action"], hinted, workflow["next_action"])
+                self.assertEqual(self.puts(), 0)
 
     def test_status_history_is_read_newest_first_per_context(self):
         for history, puts in (("success,pending", 1), ("success,failure", 1), ("failure,success", 0), ("pending,success", 0)):

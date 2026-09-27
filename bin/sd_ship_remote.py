@@ -55,6 +55,33 @@ def git(root: Path, *args: str) -> str:
     return run(root, ["git", *args])
 
 
+PASSING = ("success", "neutral", "skipped")
+CI_NEXT_ACTION = "Wait for or fix exact-head CI, then retry merge."
+
+
+def ci_next_action(runs: list[dict], head: str) -> str:
+    """What to do about a failed check whose `runs` at `head` share its name (sd:1779).
+
+    A body edit or a close/reopen starts a second check suite on the head,
+    and its pass does not clear the first suite's failure: every run is
+    judged. Re-running the failure replays its original event, stale body
+    included, so when one suite fails and another passes, the remedy is a
+    fresh commit. The hint changes the words only, never the decision.
+    """
+    def suites(passing: bool) -> set:
+        return {(entry.get("check_suite") or {}).get("id") for entry in runs
+                if entry.get("head_sha") == head and entry.get("status") == "completed"
+                and (entry.get("conclusion") in PASSING) == passing
+                and type((entry.get("check_suite") or {}).get("id")) is int}
+
+    failed, passed = suites(False), suites(True)
+    if failed and passed - failed:
+        return ("A run of this check passed in another check suite on this head, which does not clear the failed one, "
+                "and re-running the failure replays its stale event; push a fresh commit so every check runs again, "
+                "then retry merge.")
+    return CI_NEXT_ACTION
+
+
 def slug(remote: str) -> str:
     match = re.fullmatch(r"(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([\w.-]+/[\w.-]+?)(?:\.git)?/?", remote)
     if not match:
@@ -468,9 +495,10 @@ class GitHub:
                           next_action="Run the repository's checks for this exact head, then retry merge.", boundary="ci", state="retryable_failure")
         for entry in runs:
             if (entry.get("head_sha") != head or entry.get("status") != "completed"
-                    or entry.get("conclusion") not in ("success", "neutral", "skipped")):
+                    or entry.get("conclusion") not in PASSING):
+                same = [other for other in runs if other.get("name") == entry.get("name")]
                 raise Refusal(f"CI is not passing on {head}: {entry.get('name')}", code="ci_not_passing",
-                              next_action="Wait for or fix exact-head CI, then retry merge.", boundary="ci", state="retryable_failure")
+                              next_action=ci_next_action(same, head), boundary="ci", state="retryable_failure")
         newest: dict[str, dict] = {}
         for entry in statuses:  # newest first, so the first record per context is the current one
             newest.setdefault(str(entry.get("context")), entry)
@@ -525,9 +553,9 @@ class GitHub:
             # The statuses endpoint is newest first. A successful old rerun
             # cannot mask a failed or pending current run of the same check.
             if any(entry.get("head_sha") != head or entry.get("status") != "completed"
-                   or entry.get("conclusion") not in ("success", "neutral", "skipped") for entry in matching):
+                   or entry.get("conclusion") not in PASSING for entry in matching):
                 raise Refusal(f"required CI is not passing on {head}: {context}", code="ci_not_passing",
-                              boundary="ci", state="retryable_failure", next_action="Wait for or fix exact-head CI, then retry merge.")
+                              boundary="ci", state="retryable_failure", next_action=ci_next_action(matching, head))
             if legacy and (legacy[0].get("sha", head) != head or legacy[0].get("state") != "success"):
                 raise Refusal(f"required status is not passing on {head}: {context}")
             if not matching and not legacy:
