@@ -4,6 +4,13 @@
 
 ### Changed
 
+- **`sd-review` no longer says a Copilot review was requested (sd:1568).**
+  The `copilot` line printed `requested` whenever the policy selected the
+  change, including before any pull request existed; sd-review requests
+  nothing. It now prints `not requested by sd-review` and whether `sd-ship`
+  will request it on the pull request. `remote_reviews.copilot.automatic`
+  keeps its meaning: what `sd-ship` will do, not what was done.
+
 - **`sd fleet stamp` lays the `unprotected` declaration only where GitHub
   says so (sd:1655).** The stamp assumed every owned auto repository was
   unprotected, so its dry run proposed `.github/sd-status.json` in fifteen
