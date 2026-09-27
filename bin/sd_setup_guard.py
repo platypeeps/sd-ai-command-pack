@@ -31,7 +31,7 @@ from __future__ import annotations
 import difflib
 import pathlib
 import re
-from typing import Mapping, TextIO
+from typing import Any, Mapping, TextIO
 
 DEPENDABOT_RELATIVE_PATH = pathlib.Path(".github") / "dependabot.yml"
 
@@ -404,3 +404,41 @@ def report_drift(root: pathlib.Path, expected: Mapping[pathlib.Path, str], strea
             # the next diff line -- or the next file's verdict -- joins it.
             stream.write(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n")
     return 1 if differs else 0
+
+
+def report_mode(root: pathlib.Path, workflow: pathlib.Path, repo_mode: str, demotion: Any,
+                stream: TextIO) -> int | None:
+    """`--check`'s mode guard: an exit code, or None when the template is compared.
+
+    Only a mode the operator wrote marks a tracked lane for removal. A remote
+    that lowers a written `full`, or that could not be asked at all, says what
+    this run may install, not whether the committed lane should exist: the
+    template is still compared, and the demotion is printed beside it.
+    """
+
+    if demotion is None:
+        return None if repo_mode == "full" else report_unwanted(root, workflow, repo_mode, stream)
+    stream.write(f"note: this run resolves to {repo_mode} mode ({demotion.reason}); "
+                 "compared against the full-mode template\n")
+    return None
+
+
+def report_unwanted(root: pathlib.Path, workflow: pathlib.Path, repo_mode: str, stream: TextIO) -> int:
+    """`setup-github --check` outside full mode, where the installer refuses (sd:1285).
+
+    With no template to converge on, a tracked workflow is not `DIFFERS` --
+    that is drift `--force` cannot fix -- but `REMOVE`, exit 1. Passing
+    silently would hide a lane the mode says must not exist. The Dependabot
+    guard is named, not judged: another of the pack's actions may pin under it.
+    """
+
+    if not (root / workflow).is_file():
+        stream.write(f"absent {workflow} ({repo_mode} mode carries no routing lane)\n")
+        return 0
+    stream.write(
+        f"REMOVE {workflow}\n"
+        f"  this repository is in {repo_mode} mode; only a full-mode repository carries the "
+        f"routing lane. Delete the workflow, and its guard in {DEPENDABOT_RELATIVE_PATH} "
+        "unless another pack action's pin needs it.\n"
+    )
+    return 1

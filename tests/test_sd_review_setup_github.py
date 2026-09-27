@@ -215,7 +215,11 @@ class WorkflowContentTests(SetupFixture):
         dependabot = (REPO_ROOT / guard.DEPENDABOT_RELATIVE_PATH).read_text(encoding="utf-8")
         self.assertEqual(guard.guard_state(dependabot), "absent")
         stream = io.StringIO()
-        code = setup.check_files(REPO_ROOT, setup_args(check=True, pin=None), stream)
+        # The remote's answer is pinned: CI cannot ask GitHub about this
+        # checkout, and a demotion adds a `note:` line (sd:1285).
+        full = setup.sd_lib.RemoteAnswer(full=True, answered=True)
+        with mock.patch.object(setup.sd_lib, "remote_permits_full", return_value=full):
+            code = setup.check_files(REPO_ROOT, setup_args(check=True, pin=None), stream)
         self.assertEqual((code, stream.getvalue()), (0, f"same {setup.WORKFLOW_RELATIVE_PATH}\n"))
 
     def test_the_lane_holds_no_write_permission_and_requests_nobody(self) -> None:
@@ -1011,6 +1015,49 @@ class CheckTests(SetupFixture):
         self.assertEqual(out.count("DIFFERS"), 2)
         self.assertFalse(self.workflow(root).exists())
         self.assertFalse(self.dependabot(root).exists())
+
+    def test_a_tracked_lane_outside_full_mode_is_to_remove_not_drift(self) -> None:
+        # sd:1285: the installer refuses these modes, so DIFFERS would be a
+        # finding nothing could fix. The lane is reported as one to remove.
+        for value in ("minimal", "guest"):
+            with self.subTest(mode=value):
+                root = self.make_repo(value)
+                install(root)
+                self.set_mode(root, value)
+                before = self.workflow(root).read_text(encoding="utf-8")
+                code, out = self.run_check(root)
+                self.assertEqual(code, 1)
+                self.assertNotIn("DIFFERS", out)
+                self.assertEqual(out.splitlines()[0], f"REMOVE {setup.WORKFLOW_RELATIVE_PATH}")
+                self.assertIn(f"{value} mode", out)
+                self.assertEqual(self.workflow(root).read_text(encoding="utf-8"), before)
+
+    def test_a_remote_demotion_still_compares_the_template(self) -> None:
+        # A written `full` that the remote lowers -- or that no remote could be
+        # asked about, offline or unauthenticated -- is not the operator
+        # choosing a lower mode: the lane is compared, never marked for removal.
+        answers = {
+            "unanswered": setup.sd_lib.RemoteAnswer(full=False, answered=False, reason="gh is not available"),
+            "answered no": setup.sd_lib.RemoteAnswer(full=False, answered=True, reason="the remote is a fork"),
+        }
+        for label, answer in answers.items():
+            with self.subTest(answer=label):
+                root = self.make_repo(label.replace(" ", "-"))
+                install(root)
+                with mock.patch.object(setup.sd_lib, "remote_permits_full", return_value=answer):
+                    code, out = self.run_check(root)
+                self.assertEqual(code, 0, out)
+                self.assertNotIn("REMOVE", out)
+                self.assertEqual(out.count("same "), 2)
+                self.assertIn(answer.reason, out)
+
+    def test_no_lane_outside_full_mode_passes_without_a_pin(self) -> None:
+        root = self.make_repo()
+        self.set_mode(root, "minimal")
+        code, out = self.run_check(root)
+        self.assertEqual(code, 0)
+        self.assertEqual(out, f"absent {setup.WORKFLOW_RELATIVE_PATH} (minimal mode carries no routing lane)\n")
+        self.assertFalse(self.workflow(root).exists())
 
 
 class CliTests(SetupFixture):
