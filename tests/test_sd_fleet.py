@@ -40,14 +40,31 @@ def args(**overrides) -> argparse.Namespace:
     return argparse.Namespace(**values)
 
 
-def remote(*, admin: bool = True, fork: bool = False, others: tuple[str, ...] = ()):
-    """An `ask` seam answering the three ownership questions; nothing reaches the network."""
+CLASSIC = "repos/{owner}/{repo}/branches/main/protection"
+RULES = "repos/{owner}/{repo}/rules/branches/main?per_page=30&page=1"
+#: What `gh api` says, as `sd_lib.gh_api` passes it on, for an admin's bare branch.
+NOT_PROTECTED = (None, "gh: Branch not protected (HTTP 404)")
+GATING_RULESET = {7: {"id": 7, "name": "main", "enforcement": "active", "bypass_actors": []}}
+PULL_REQUEST_RULE = {"type": "pull_request", "ruleset_id": 7,
+                     "parameters": {"required_approving_review_count": 0}}
+
+
+def remote(*, admin: bool = True, fork: bool = False, others: tuple[str, ...] = (),
+           classic: tuple = NOT_PROTECTED, rules: tuple = ([], ""), rulesets: dict | None = None):
+    """An `ask` seam answering the three ownership questions and the default
+    branch's two protection reads; nothing reaches the network. The default
+    is a branch GitHub positively reports unprotected: classic 404 to an
+    admin, and no rule from any ruleset."""
     people = [{"login": "me", "permissions": {"push": True}}]
     people += [{"login": who, "permissions": {"push": True}} for who in others]
-    answers = {sd_lib.VIEWER_QUERY: {"login": "me"},
-               sd_lib.REPOSITORY_QUERY: {"full_name": "o/r", "fork": fork, "permissions": {"admin": admin}},
-               sd_lib.COLLABORATOR_QUERY: people}
-    return lambda endpoint, root: (answers[endpoint], "")
+    answers = {sd_lib.VIEWER_QUERY: ({"login": "me"}, ""),
+               sd_lib.REPOSITORY_QUERY: ({"full_name": "o/r", "fork": fork, "default_branch": "main",
+                                          "permissions": {"admin": admin}}, ""),
+               sd_lib.COLLABORATOR_QUERY: (people, ""),
+               CLASSIC: classic, RULES: rules}
+    for ruleset_id, value in (rulesets or {}).items():
+        answers[f"repos/{{owner}}/{{repo}}/rulesets/{ruleset_id}"] = value if isinstance(value, tuple) else (value, "")
+    return lambda endpoint, root: answers[endpoint]
 
 
 def snapshot(root: pathlib.Path) -> dict[str, bytes]:
@@ -320,6 +337,99 @@ class Write(Fleet):
         root, remote = self.repo("unnamed")
         with self.assertRaisesRegex(sd_fleet.FleetRefusal, "--only"):
             self.run_stamp([(root, remote)], cwd=root, dry_run=False, only=["platypeeps/unnamed"])
+
+
+class LiveProtection(Fleet):
+    """The `unprotected` declaration goes only where GitHub positively says so (sd:1655)."""
+
+    def declared(self, ask) -> tuple[dict, list[str]]:
+        root, remote_url = self.repo(f"r{len(list(self.tmp.iterdir()))}")
+        [plan] = self.plan([(root, remote_url)], ask=ask)
+        return plan, [change["path"] for change in plan["changes"]]
+
+    def test_unprotected_remote_gets_the_declaration(self) -> None:
+        plan, paths = self.declared(remote())
+        self.assertIn(sd_fleet.STATUS_PATH, paths)
+        self.assertEqual(plan["protection"], "unprotected")
+
+    def test_a_ruleset_that_gates_no_merge_is_still_unprotected(self) -> None:
+        deletion = {"type": "deletion", "ruleset_id": 7}
+        plan, paths = self.declared(remote(rules=([deletion], ""), rulesets=GATING_RULESET))
+        self.assertIn(sd_fleet.STATUS_PATH, paths)
+        self.assertEqual(plan["protection"], "unprotected")
+
+    def test_classic_protection_gets_no_declaration(self) -> None:
+        plan, paths = self.declared(remote(classic=({"enforce_admins": {"enabled": True}}, "")))
+        self.assertNotIn(sd_fleet.STATUS_PATH, paths)
+        self.assertEqual(plan["protection"], "protected")
+        self.assertTrue(any(line.startswith(f"{sd_fleet.STATUS_PATH}: not declared; GitHub reports main protected")
+                            for line in plan["adapted"]), plan["adapted"])
+
+    def test_ruleset_protection_gets_no_declaration(self) -> None:
+        plan, paths = self.declared(remote(rules=([PULL_REQUEST_RULE], ""), rulesets=GATING_RULESET))
+        self.assertNotIn(sd_fleet.STATUS_PATH, paths)
+        self.assertEqual(plan["protection"], "protected")
+        self.assertTrue(any("ruleset main (#7)" in line for line in plan["adapted"]), plan["adapted"])
+
+    def test_classic_and_ruleset_together_get_no_declaration(self) -> None:
+        plan, paths = self.declared(remote(classic=({"enforce_admins": {"enabled": True}}, ""),
+                                           rules=([PULL_REQUEST_RULE], ""), rulesets=GATING_RULESET))
+        self.assertNotIn(sd_fleet.STATUS_PATH, paths)
+        self.assertEqual(plan["protection"], "protected")
+
+    def test_unknown_state_gets_no_declaration(self) -> None:
+        cases = {
+            "classic forbidden": remote(classic=(None, "gh: Resource not accessible by integration (HTTP 403)")),
+            "rate limited": remote(classic=(None, "gh: API rate limit exceeded for user ID 1. (HTTP 403)")),
+            "server error": remote(classic=(None, "gh: Server Error (HTTP 502)")),
+            "no status at all": remote(classic=(None, "gh could not be run: [Errno 2] No such file")),
+            "classic not an object": remote(classic=([], "")),
+            "rules forbidden": remote(rules=(None, "gh: Not Found (HTTP 404)")),
+            "rules rate limited": remote(rules=(None, "gh: API rate limit exceeded (HTTP 429)")),
+            "ruleset unreadable": remote(rules=([PULL_REQUEST_RULE], ""),
+                                         rulesets={7: (None, "gh: Not Found (HTTP 404)")}),
+        }
+        for name, ask in cases.items():
+            with self.subTest(name):
+                plan, paths = self.declared(ask)
+                self.assertNotIn(sd_fleet.STATUS_PATH, paths)
+                self.assertEqual(plan["protection"], "unknown")
+                self.assertTrue(any(line.startswith(f"{sd_fleet.STATUS_PATH}: not declared; protection is unknown")
+                                    for line in plan["adapted"]), plan["adapted"])
+
+    def test_the_summary_names_a_repository_whose_protection_is_unknown(self) -> None:
+        root, remote_url = self.repo("dark")
+        code, text = self.run_stamp([(root, remote_url)], ask=remote(classic=(None, "gh: Bad credentials (HTTP 401)")))
+        self.assertEqual(code, sd_fleet.EXIT_OK)
+        self.assertIn("1 protection unknown", text)
+        self.assertIn("platypeeps/dark: ", text)
+        self.assertIn("protection: unknown", text)
+
+
+class ProtectionProbe(unittest.TestCase):
+    """`branch_protection` on its own, for the answers a stamp never reaches."""
+
+    ROOT = pathlib.Path("/nonexistent")
+
+    def test_no_token_is_unknown(self) -> None:
+        answer = sd_fleet.branch_protection(
+            self.ROOT, ask=lambda endpoint, root: (None, "gh: To get started with GitHub CLI, please run: gh auth login"))
+        self.assertEqual(answer.state, "unknown")
+        self.assertIn("gh auth login", answer.reason)
+
+    def test_a_404_to_a_non_admin_is_unknown(self) -> None:
+        self.assertEqual(sd_fleet.branch_protection(self.ROOT, ask=remote(admin=False)).state, "unknown")
+
+    def test_a_repository_without_a_default_branch_is_unknown(self) -> None:
+        answers = {sd_lib.REPOSITORY_QUERY: ({"permissions": {"admin": True}}, "")}
+        answer = sd_fleet.branch_protection(self.ROOT, ask=lambda endpoint, root: answers[endpoint])
+        self.assertEqual(answer.state, "unknown")
+
+    def test_a_plan_without_protection_reads_the_rulesets(self) -> None:
+        limited = (None, "gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)")
+        self.assertEqual(sd_fleet.branch_protection(self.ROOT, ask=remote(classic=limited)).state, "unprotected")
+        blind = remote(classic=limited, rules=(None, limited[1]))
+        self.assertEqual(sd_fleet.branch_protection(self.ROOT, ask=blind).state, "unknown")
 
 
 class Wiring(unittest.TestCase):
