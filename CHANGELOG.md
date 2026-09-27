@@ -11,9 +11,9 @@
   before the review input, so the contract now repeats the exact shape after
   it, built from the validator's own constants; that cut failures to 5 of 45.
   An entry whose price is zero in and out now retries a schema failure once
-  on itself instead of falling through to a reviewer that may bill; a priced
-  entry never retries. The diagnostic records the first failure under
-  `schema_retry`. Lowering temperature did not help (6 of 30 at 0.2).
+  on itself instead of falling through to a reviewer that may bill, and the
+  failed attempt stays in the outcomes with any blocker it recovered, as a
+  fallback's does. A priced entry never retries. Lowering temperature did not help (6 of 30 at 0.2).
 
 - **`sd-ship merge` keeps an `sd attribute` repair of landed history
   (sd:1753).** The squash message carried only the PR body, `Item:`,

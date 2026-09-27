@@ -762,7 +762,7 @@ class LineBudgetTests(unittest.TestCase):
         # complexity ceilings are unchanged.
         # 3652 -> 3699 is sd:1821. MiniMax-M3 broke the findings schema on 13
         # of 45 runs; the URL contract restates the validated shape last (10
-        # lines), and a free entry retries one schema failure on itself (14).
+        # lines), and a free entry retries one schema failure on itself.
         # Moving the url call out of `run_provider` to hold the complexity
         # ceiling costs the rest: three helper signatures and docstrings.
         lane = sorted(REVIEW_LANE)

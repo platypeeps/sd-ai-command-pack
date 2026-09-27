@@ -19,7 +19,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
-from typing import Any, Mapping, NamedTuple, Protocol, Sequence, TextIO
+from typing import Any, Callable, Mapping, NamedTuple, Protocol, Sequence, TextIO
 
 _BIN = str(pathlib.Path(__file__).resolve().parent)
 if _BIN not in sys.path:
@@ -1246,6 +1246,17 @@ def _free(provider: sd_registry.Provider) -> bool:
     return "in" in price and "out" in price and not price["in"] and not price["out"]
 
 
+def _attempts(provider: sd_registry.Provider, run: Callable[[], Outcome]) -> list[Outcome]:
+    """sd:1821: a free entry (both prices zero) runs once more after a schema
+    failure, not falling through to a reviewer that may bill. The failed
+    attempt is returned too, so its recovered blockers stay, as a fallback's do."""
+    outcome = run()
+    if (outcome.status not in (CLEAN, FINDINGS) and _free(provider)
+            and (outcome.diagnostic or {}).get("failure_stage") == "schema"):
+        return [outcome, run()]
+    return [outcome]
+
+
 def _request_record(provider: sd_registry.Provider, subject: Subject, request_prompt: str) -> dict[str, Any]:
     """What was asked of a `url` entry, by digest; never the prompt itself."""
     return {"provider": provider.name, "vendor": provider.vendor, "model": provider.model,
@@ -1353,19 +1364,7 @@ def run_provider(
     if len(request_prompt.encode()) > MAX_OUTPUT_BYTES:
         return _outcome(provider.name, REFUSED, f"review input exceeds {MAX_OUTPUT_BYTES} bytes; split the review subject")
     if provider.url:
-        # sd:1821: MiniMax-M3 broke the findings schema on about one run in
-        # nine even after the restated contract, and a failed pass falls
-        # through to the next reviewer, which may bill. A free entry (both
-        # prices zero) retries a schema failure once on itself; a priced one
-        # never does, so a retry cannot double a bill.
-        outcome = _url_attempt(provider, subject, request_prompt, provider_env, timeout, client, ledger, root)
-        if outcome.diagnostic and outcome.diagnostic.get("failure_stage") == "schema" and _free(provider):
-            first = outcome.diagnostic
-            outcome = _url_attempt(provider, subject, request_prompt, provider_env, timeout, client, ledger, root)
-            if outcome.diagnostic is not None:
-                outcome.diagnostic["schema_retry"] = {"first_schema": first["schema"],
-                                                      "first_validation_error": first.get("validation_error")}
-        return outcome
+        return _url_attempt(provider, subject, request_prompt, provider_env, timeout, client, ledger, root)
 
     if provider.reader not in ("claude-json", "codex-json", "agy-json", "opencode-json"):
         # Keep a missing implementation nonpassing if READERS ever gains a name.
@@ -2047,11 +2046,12 @@ def review(
         # itself. The result key carries the last; each outcome carries its own.
         if provider.reader == "codex-json" and auth["ok"]:
             skills = result["codex_skill_suppression"] = codex_skill_state(provider, root, runner, env, auth_home)
-        outcome = unlocated(run_provider(provider, root, subject, prompt, runner, env, args.timeout,
-                                         codex_auth_home, client, ledger, skills), cited, result["severity_floor"])
-        outcomes.append(outcome)
-        if outcome.status in (CLEAN, FINDINGS):
-            reviewed.append(outcome.backend)
+        for outcome in _attempts(provider, lambda: unlocated(run_provider(
+                provider, root, subject, prompt, runner, env, args.timeout,  # noqa: B023 -- run in this iteration
+                codex_auth_home, client, ledger, skills), cited, result["severity_floor"])):  # noqa: B023
+            outcomes.append(outcome)
+            if outcome.status in (CLEAN, FINDINGS):
+                reviewed.append(outcome.backend)
     return finish_review(result, outcomes, reviewed)
 
 
