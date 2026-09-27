@@ -4,6 +4,16 @@
 
 ### Changed
 
+- **`sd-ship merge` keeps an `sd attribute` repair of landed history
+  (sd:1753).** The squash message carried only the PR body, `Item:`,
+  `Delivers:` and `Authored-with:`, so a PR whose `Attributes:` lines named
+  commits already on the base landed as an empty commit that attributed
+  nothing; rwbp-coordinator #310 escaped only by a hand-written squash
+  message. The squash now carries each `Attributes:` line whose sha the
+  reviewed base holds, with the full sha. A line naming a branch commit still
+  stays behind, because the squash removes that sha; it reaches the squash as
+  `Authored-with:`, as before.
+
 - **The shipped `url` reviewers get 65536 tokens, and a stop at the ceiling
   names itself (sd:1805).** `kimi`, `minimax` and `baseten` carried
   `max_tokens: 16384`. On mezmo-world-simulator#215 `kimi-k3` spent all

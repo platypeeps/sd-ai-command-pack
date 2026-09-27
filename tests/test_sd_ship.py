@@ -2121,6 +2121,23 @@ roles:
         self.assertFalse(self.merge()["delivery_pending"])
         self.assertEqual(ship.sd_lib.delivered(self.root, f"sd:{self.item}"), ship.sd_lib.YES)
 
+    def test_a_squash_keeps_an_attributes_line_that_names_a_base_commit(self):
+        """An `sd attribute` repair of commits already on the base is the whole
+        change, so the squash has to carry its `Attributes:` lines or it lands
+        as an empty commit that attributes nothing (sd:1753). A line naming a
+        branch commit names a sha the squash removes, so it stays behind."""
+        on_base = _git(self.root, "rev-parse", "origin/main")
+        on_branch = _git(self.root, "rev-parse", "HEAD")
+        _git(self.root, "commit", "-q", "--allow-empty", "-m",
+             "chore(attribution): repair\n\n"
+             f"Attributes: {on_base} author/firstvendor\n"
+             f"Attributes: {on_branch} author/firstvendor\n"
+             "Authored-with: human")
+        self.prepare()
+        self.assertEqual(self.merge()["phase"], "merged")
+        landed = _git(self.remote.path, "log", "-1", "--format=%(trailers:key=Attributes,valueonly)", "main")
+        self.assertEqual(landed.strip(), f"{on_base} author/firstvendor")
+
     def test_a_hand_delivery_clears_the_hold(self):
         """The operator verifies the combined tree and delivers by hand; a later
         reconcile reads that completion instead of reissuing the hold (#1179)."""
