@@ -370,6 +370,21 @@
 
 ### Added
 
+- **`sd-ship prepare` names a squashed head the branch carries (sd:1409).**
+  A squash merge leaves the merged head off the default branch's history. A
+  second branch that merged that head then conflicts on ancestry, not
+  content, when it merges the default branch. `prepare` reads this machine's
+  merged ship receipts in `bin/sd_ship_squash.py`. For each receipt whose
+  head the branch carries and the base does not, a receipt warning names the
+  carried head and the squash, and lists every path the squash changed for
+  resolution by hand. It calls no path safe for `git checkout --ours`.
+  Tree-entry equality cannot prove that: a base that leaves a path and
+  returns to it defeats each rule tried, and `--ours` would discard its
+  change. Names are read NUL-delimited and unstripped, so a leading or inner
+  space survives. A branch still behind the base gets the same warning in its
+  `base_moved` refusal, since the merge that refusal asks for is where the
+  conflict lands. The ship skill's recovery reference documents the
+  procedure.
 - **The `sd-slice-builder` agent ships with the pack.** It is the
   implementation worker for a planned multi-file slice. It existed only as a
   hand-placed `~/.claude/agents/slice-builder.md`, so no other machine had it.
