@@ -24,6 +24,10 @@ def run(args: argparse.Namespace) -> int:
         raise WorkRefusal("writing controls require the writing Git checkout as the current directory")
     repo = sd_lib.stored_repo(root.resolve())
     action = args.writing_action
+    if action == "verify" and not any((root / name).is_dir() for name in ("content", "content-parked")):
+        # Another checkout has no pieces, so verify would pass on zero files and zero rows (sd:1660).
+        raise WorkRefusal(f"{root} holds no content/ folder, so there is nothing to verify; "
+                          "run sd writing verify from the writing Git checkout")
     write = action in {"cutover", "recover", "register", "stage", "metadata", "gate", "park",
                        "publication-claim", "publication-dispatch", "publication-receipt", "publication-reconcile", "publication-abandon", "publication-recover"} or (
         action == "import" and args.apply)

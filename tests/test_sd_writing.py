@@ -71,5 +71,57 @@ class WritingImport(unittest.TestCase):
         self.imported.assert_not_called()
 
 
+class WritingVerifyCheckout(unittest.TestCase):
+    """`sd writing verify` refuses where there is nothing to verify (sd:1660)."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.repo = Path(tmp.name).resolve()
+        self.parser = argparse.ArgumentParser()
+        cli.register(self.parser.add_subparsers(required=True))
+        self.connection = Mock()
+        self.connect = Mock(return_value=self.connection)
+        self.root = patch.object(cli.sd_lib, "repo_root", return_value=self.repo)
+        for patcher in (
+            patch.object(cli.sd_handoff_rows, "library", return_value=sd_db),
+            patch.object(cli.sd_handoff_rows, "connect", self.connect),
+            self.root,
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = patch.object(writing, "verify_pieces", autospec=True, return_value={
+            "ok": True, "owner": "row", "files": 1, "rows": 1, "differences": []})
+        self.verified = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def run_verify(self):
+        arguments = self.parser.parse_args(["writing", "verify", "--json"])
+        with redirect_stdout(io.StringIO()) as output:
+            code = arguments.handler(arguments)
+        return code, output.getvalue()
+
+    def test_outside_any_checkout_refuses(self):
+        self.root.stop()
+        with patch.object(cli.sd_lib, "repo_root", return_value=None):
+            with self.assertRaisesRegex(cli.WorkRefusal, "writing Git checkout"):
+                self.run_verify()
+        self.root.start()
+        self.connect.assert_not_called()
+
+    def test_checkout_without_content_refuses(self):
+        with self.assertRaisesRegex(cli.WorkRefusal, "no content/ folder.*writing Git checkout"):
+            self.run_verify()
+        self.connect.assert_not_called()
+        self.verified.assert_not_called()
+
+    def test_writing_checkout_verifies(self):
+        (self.repo / "content").mkdir()
+        code, output = self.run_verify()
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output)["files"], 1)
+        self.verified.assert_called_once_with(self.connection, str(self.repo))
+
+
 if __name__ == "__main__":
     unittest.main()
