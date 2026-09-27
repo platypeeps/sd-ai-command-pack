@@ -1044,8 +1044,8 @@ class Ship(SharedReview):
         # Rules 5 and 8 read the pull request body, and the body is built by
         # now. Without it the rules report themselves not run and CI is the
         # first to check the `Work:` line, which the skill said happened
-        # here. With no work root the tree rules cannot run and the linter
-        # says so before any rule does, so until #972 the whole call was
+        # here. With no work root the tree rules cannot run, and before
+        # sd:1570 the linter failed on that before any rule ran, so until #972 the whole call was
         # withheld there, scope rule included, and a diff touching
         # `.github/**` shipped without its scope line. `--body-only` runs the
         # two body rules and nothing else; no planning directory is created

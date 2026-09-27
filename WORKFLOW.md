@@ -167,7 +167,9 @@ Uncertain findings remain open; no automatic Copilot request follows.
 
 ## Never in a shared repository
 
-A shared repository resolves to `guest` or `minimal` mode.
+A shared repository resolves to `guest` mode. Detection never produces
+`minimal`; only an operator writes it, and the refusals below that name
+`guest` do not apply to it.
 `full` requires administration, a non-fork remote, and exclusive push access.
 In a shared repository:
 
@@ -306,8 +308,15 @@ the block; the file is untracked by construction.
 | Mode | Where planning artifacts go | What ships |
 |---|---|---|
 | `full` | `docs/work/` in the repository | everything above; merge only with `runner_merge: auto` on the row |
-| `minimal` | nowhere; no work items | the small-change path only |
+| `minimal` | nowhere, by convention only; nothing enforces it | the small-change path only |
 | `guest` | the fork's integration branch | the small-change path to pull-request-ready; no posts, no labels |
+
+`minimal` holds no work items by agreement, not by a check.
+`sd_lib.guest_artifact_refusal` and `sd-ship`'s push check refuse
+`docs/work/`, `docs/spec/` and `docs/decisions/` in `guest` only, so a
+`minimal` repository can commit and push them unrefused. `sd-ship` also adds
+the `Work: sd:<id>` line in `minimal`, as it does in `full`. What `minimal`
+refuses is the review routing lane (R10-D5), as `guest` does.
 
 Access decides where artifacts go, whichever namespace holds the
 repository. Without a `mode:` line, the pack asks three questions of the
