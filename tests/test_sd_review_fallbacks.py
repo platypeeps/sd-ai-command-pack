@@ -347,6 +347,9 @@ class OrderSourceTests(ReviewRunFixture):
         self.assertIn("sd providers list", result["order_source"])
         self.assertIn("roles.reviewer [codex, second, third] is only the seed", result["order_source"])
         self.assertIn(f"  order from  database {database}", text)
+        # The chain heading names the ranks that decide, not the seed file (sd:1789).
+        registry = self.registry_home / ".local/share/sd/providers.yaml"
+        self.assertIn(f"reviewer chain (provider ranks in {database}; seeded from {registry}):", text)
 
     def test_a_database_that_agrees_with_the_seed_names_no_disagreement(self) -> None:
         root, database = self.prepare_state()
@@ -359,6 +362,10 @@ class OrderSourceTests(ReviewRunFixture):
         registry = self.registry_home / ".local/share/sd/providers.yaml"
         self.assertEqual(result["order_source"], f"file {registry} (roles:); no provider database")
         self.assertIn(f"  order from  file {registry}", text)
+        self.assertIn(f"reviewer chain (roles: in {registry}):", text)
+
+    def test_a_registry_that_did_not_read_keeps_its_path_in_the_heading(self) -> None:
+        self.assertEqual(sd_review.sd_registry.chain_heading("", "/x/providers.yaml"), "/x/providers.yaml")
 
 
 class ClaudeReaderTests(ReviewFixture):
