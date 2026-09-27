@@ -1318,7 +1318,7 @@ def run_provider(
             "completion" if diagnostic["category"] in ("response_limit", "truncated", "incomplete_finish") else
             "api" if diagnostic["category"] == "api_error" else "envelope" if not text else
             "transport" if result.exit_code else "schema" if parsed is None or parsed.error else None)
-        return outcome._replace(diagnostic=diagnostic)
+        return outcome._replace(diagnostic=diagnostic, detail=sd_registry.stop_detail(provider, diagnostic, outcome.detail))
 
     if provider.reader not in ("claude-json", "codex-json", "agy-json", "opencode-json"):
         # Keep a missing implementation nonpassing if READERS ever gains a name.
@@ -2160,8 +2160,8 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
             write(f"  consent     {result['authorization']['source']} ({result['authorization']['path']})\n")
     copilot = (result.get("remote_reviews") or {}).get("copilot")
     if isinstance(copilot, dict) and "policy" in copilot:
-        asked = "requested" if copilot["automatic"] else "not requested"
-        write(f"  copilot     {copilot['policy']} ({copilot['source']}); tier {copilot['tier']}, {asked}\n")
+        later = "will request it on the pull request" if copilot["automatic"] else "will not request it"  # sd:1568
+        write(f"  copilot     {copilot['policy']} ({copilot['source']}); tier {copilot['tier']}; not requested by sd-review, sd-ship {later}\n")
     if result.get("fallback_candidates"):
         write(f"  fallbacks   {', '.join(result['fallback_candidates'])}\n")
     write(f"  authored    {result['authored_with_report']}\n")

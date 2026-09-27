@@ -1518,6 +1518,30 @@ def url_response(body: str) -> tuple[str, dict[str, Any]]:
     return text, diagnostic
 
 
+def stop_detail(provider: Provider, diagnostic: Mapping[str, Any], detail: str) -> str:
+    """Name a `finish_reason: length` stop as the ceiling it hit (sd:1805).
+
+    A reasoning model can spend the whole `max_tokens` thinking and send no
+    answer; "did not produce a usable answer" hid that on
+    mezmo-world-simulator#215. Any other outcome keeps `detail`. Counts
+    only: model text never enters the sentence.
+    """
+    if diagnostic.get("category") != "truncated":
+        return detail
+    used = diagnostic.get("sanitized_response", {}).get("usage", {}).get("completion_tokens")
+    content, reasoning = diagnostic.get("content_bytes", 0), diagnostic.get("reasoning_bytes", 0)
+    what = f"its answer was cut off after {content} bytes" if content else "it sent no answer"
+    counts = (f"{used} completion tokens" if used is not None else "no completion count") + \
+        f", {reasoning} bytes of reasoning (finish_reason length)"
+    # `length` also means a full context window; only a count at the ceiling
+    # proves the ceiling, so anything else names both remedies.
+    if type(used) is int and provider.max_tokens is not None and used >= provider.max_tokens:
+        return (f"{provider.name} hit max_tokens ({provider.max_tokens}) and {what}: {counts}; "
+                f"raise max_tokens for {provider.name} in the provider registry or lower its reasoning")
+    return (f"{provider.name} stopped on length below max_tokens ({provider.max_tokens}) and {what}: "
+            f"{counts}; the context window may be full, so shorten the review input, or raise max_tokens")
+
+
 def url_answer(body: str) -> str:
     """Return final answer text, or an empty string for unreadable output.
 

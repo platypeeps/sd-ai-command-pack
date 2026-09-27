@@ -392,11 +392,11 @@ Only submitted, non-pending reviews mark matching request heads complete.
       opencode: { start: "opencode run", model: openai/gpt-5.5, vendor: openai, bill: openai,
                   roles: [reviewer], reader: opencode-json }
       kimi:    { url: "https://api.moonshot.ai/v1", model: kimi-k3, vendor: moonshot, bill: moonshot,
-                 roles: [reviewer], max_tokens: 16384, price: { in: 3.00, out: 15.00 } }
+                 roles: [reviewer], max_tokens: 65536, price: { in: 3.00, out: 15.00 } }
       minimax: { url: "https://api.minimax.io/v1", model: MiniMax-M3, vendor: minimax, bill: minimax,
-                 roles: [reviewer], max_tokens: 16384, price: { in: 0, out: 0 } }
+                 roles: [reviewer], max_tokens: 65536, price: { in: 0, out: 0 } }
       baseten: { url: "https://inference.baseten.co/v1", model: deepseek-ai/DeepSeek-V4-Pro-0813, vendor: deepseek,
-                 bill: baseten, roles: [reviewer], max_tokens: 16384, price: { in: 1.32, out: 3.96 } }
+                 bill: baseten, roles: [reviewer], max_tokens: 65536, price: { in: 1.32, out: 3.96 } }
     roles:
       author:   [claude, codex]
       reviewer: [codex, claude, opencode]
@@ -438,6 +438,15 @@ the missing field, because a reinstall never rewrites this file in your
 home. The Baseten registry entry pins `deepseek-ai/DeepSeek-V4-Pro-0813`.
 `max_tokens` bounds generated reasoning and the final answer together;
 exhausting it does not establish that the review subject was too large.
+The shipped entries give each reviewer 65536, well under each model's
+documented output ceiling. At 16384, `kimi-k3` spent the whole budget
+reasoning on a 35k-token prompt and sent no answer (sd:1805); K3 always
+thinks, and its effort can only drop to `low`. A stop at the ceiling reads
+`<name> hit max_tokens (N) and it sent no answer`, with the completion
+tokens and reasoning bytes, and `sd-ship` repeats that detail in its
+refusal. A `length` stop below the ceiling says the context window may be
+full and names shortening the review input first. The installer never rewrites the registry in your home, so a
+home copy still at 16384 keeps the old ceiling until you edit it.
 URL entries can declare one optional control: `thinking: disabled|adaptive`
 or `reasoning_effort: none|low|high|max`. The client sends `thinking` as
 `{"type": "disabled"}` or `{"type": "adaptive"}`, and effort as a top-level

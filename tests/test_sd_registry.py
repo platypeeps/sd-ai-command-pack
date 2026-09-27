@@ -113,6 +113,26 @@ class TheShippedRegistry(unittest.TestCase):
                 self.assertIn("reviewer", provider.roles)
                 self.assertNotIn("reviewer", provider.ranks)
 
+    #: Each shipped `url` reviewer's documented output ceiling, read 2026-09-27:
+    #: kimi-k3 `max_completion_tokens` "can be set up to 1048576" (Kimi API
+    #: platform, K3 quickstart); MiniMax-M3 counts input and output together
+    #: against 1,000,000 (MiniMax API overview); Baseten's DeepSeek-V4-Pro-0813
+    #: lists 262,144 max tokens (pi.dev model table for the Baseten entry).
+    OUTPUT_CEILINGS = {"kimi-k3": 1_048_576, "MiniMax-M3": 1_000_000,
+                       "deepseek-ai/DeepSeek-V4-Pro-0813": 262_144}
+    #: The fewest tokens a reasoning reviewer gets (sd:1805). kimi-k3 spent all
+    #: 16384 reasoning on a 35k-token prompt (mezmo-world-simulator#215) and
+    #: sent no answer; K3 always thinks, so the budget holds reasoning too.
+    REASONING_FLOOR = 65536
+
+    def test_every_url_reviewer_has_room_to_reason_and_answer(self) -> None:
+        reviewers = [p for p in self.registry.providers.values() if p.url and "reviewer" in p.roles]
+        self.assertEqual(sorted(p.model for p in reviewers), sorted(self.OUTPUT_CEILINGS))
+        for provider in reviewers:
+            with self.subTest(provider=provider.name):
+                self.assertGreaterEqual(provider.max_tokens, self.REASONING_FLOOR)
+                self.assertLessEqual(provider.max_tokens, self.OUTPUT_CEILINGS[provider.model])
+
     def test_every_entry_carries_a_vendor(self) -> None:
         """Criterion 6: an entry whose vendor matches the author's is skipped,
         which needs every entry to have one."""
