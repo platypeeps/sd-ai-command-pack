@@ -420,6 +420,18 @@ class ProtectionProbe(unittest.TestCase):
     def test_a_404_to_a_non_admin_is_unknown(self) -> None:
         self.assertEqual(sd_fleet.branch_protection(self.ROOT, ask=remote(admin=False)).state, "unknown")
 
+    def test_a_404_to_a_non_admin_reads_the_rulesets_first(self) -> None:
+        # GitHub hides classic protection from a non-admin behind 404 `Not
+        # Found`, but answers the rules endpoint; a gating ruleset settles it.
+        hidden = (None, "gh: Not Found (HTTP 404)")
+        answer = sd_fleet.branch_protection(self.ROOT, ask=remote(
+            admin=False, classic=hidden, rules=([PULL_REQUEST_RULE], ""), rulesets=GATING_RULESET))
+        self.assertEqual(answer.state, "protected")
+        self.assertIn("ruleset main (#7)", answer.reason)
+        answer = sd_fleet.branch_protection(self.ROOT, ask=remote(admin=False, classic=hidden))
+        self.assertEqual(answer.state, "unknown")
+        self.assertIn("without admin", answer.reason)
+
     def test_a_repository_without_a_default_branch_is_unknown(self) -> None:
         answers = {sd_lib.REPOSITORY_QUERY: ({"permissions": {"admin": True}}, "")}
         answer = sd_fleet.branch_protection(self.ROOT, ask=lambda endpoint, root: answers[endpoint])
