@@ -42,8 +42,10 @@ It prints `same <path>` or `DIFFERS <path>`, with a diff for changed content.
 Exit 1 means drift; exit 0 means no drift.
 The check writes nothing and does not require policy approval.
 
-The check applies the installer's mode guard.
-Outside full mode, a tracked workflow prints `REMOVE <path>` and exits 1.
+The check applies the installer's mode guard to the mode the operator wrote.
+In a written `guest` or `minimal` mode, a tracked workflow prints `REMOVE <path>` and exits 1.
+A remote that lowers a written `full`, or cannot be asked, does not mark the lane for removal.
+The check then prints a `note:` naming the demotion and compares the full-mode template.
 With no tracked workflow, it prints `absent <path>` and exits 0.
 Delete the workflow by hand.
 Delete its Dependabot guard too, unless another pack action pin needs it.

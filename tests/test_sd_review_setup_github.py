@@ -1028,6 +1028,25 @@ class CheckTests(SetupFixture):
                 self.assertIn(f"{value} mode", out)
                 self.assertEqual(self.workflow(root).read_text(encoding="utf-8"), before)
 
+    def test_a_remote_demotion_still_compares_the_template(self) -> None:
+        # A written `full` that the remote lowers -- or that no remote could be
+        # asked about, offline or unauthenticated -- is not the operator
+        # choosing a lower mode: the lane is compared, never marked for removal.
+        answers = {
+            "unanswered": setup.sd_lib.RemoteAnswer(full=False, answered=False, reason="gh is not available"),
+            "answered no": setup.sd_lib.RemoteAnswer(full=False, answered=True, reason="the remote is a fork"),
+        }
+        for label, answer in answers.items():
+            with self.subTest(answer=label):
+                root = self.make_repo(label.replace(" ", "-"))
+                install(root)
+                with mock.patch.object(setup.sd_lib, "remote_permits_full", return_value=answer):
+                    code, out = self.run_check(root)
+                self.assertEqual(code, 0, out)
+                self.assertNotIn("REMOVE", out)
+                self.assertEqual(out.count("same "), 2)
+                self.assertIn(answer.reason, out)
+
     def test_no_lane_outside_full_mode_passes_without_a_pin(self) -> None:
         root = self.make_repo()
         self.set_mode(root, "minimal")

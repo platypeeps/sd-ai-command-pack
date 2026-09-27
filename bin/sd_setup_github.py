@@ -314,8 +314,8 @@ def check_files(root: pathlib.Path, args: argparse.Namespace, stream: TextIO) ->
     Writes nothing; the mode guard is `setup_github`'s own (sd:1285).
     """
 
-    if (repo_mode := sd_lib.mode(root)) != "full":
-        return sd_setup_guard.report_unwanted(root, WORKFLOW_RELATIVE_PATH, repo_mode, stream)
+    if (code := sd_setup_guard.report_mode(root, WORKFLOW_RELATIVE_PATH, *sd_lib.mode_answer(root), stream)) is not None:
+        return code
     tracked = _read(root / WORKFLOW_RELATIVE_PATH) or ""
     self_install = root == pack_root()
     pin = None if self_install else args.pin or sd_setup_guard.read_pin(tracked)
