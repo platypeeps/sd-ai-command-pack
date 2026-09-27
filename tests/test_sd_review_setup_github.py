@@ -1012,6 +1012,30 @@ class CheckTests(SetupFixture):
         self.assertFalse(self.workflow(root).exists())
         self.assertFalse(self.dependabot(root).exists())
 
+    def test_a_tracked_lane_outside_full_mode_is_to_remove_not_drift(self) -> None:
+        # sd:1285: the installer refuses these modes, so DIFFERS would be a
+        # finding nothing could fix. The lane is reported as one to remove.
+        for value in ("minimal", "guest"):
+            with self.subTest(mode=value):
+                root = self.make_repo(value)
+                install(root)
+                self.set_mode(root, value)
+                before = self.workflow(root).read_text(encoding="utf-8")
+                code, out = self.run_check(root)
+                self.assertEqual(code, 1)
+                self.assertNotIn("DIFFERS", out)
+                self.assertEqual(out.splitlines()[0], f"REMOVE {setup.WORKFLOW_RELATIVE_PATH}")
+                self.assertIn(f"{value} mode", out)
+                self.assertEqual(self.workflow(root).read_text(encoding="utf-8"), before)
+
+    def test_no_lane_outside_full_mode_passes_without_a_pin(self) -> None:
+        root = self.make_repo()
+        self.set_mode(root, "minimal")
+        code, out = self.run_check(root, pin=PIN)
+        self.assertEqual(code, 0)
+        self.assertEqual(out, f"absent {setup.WORKFLOW_RELATIVE_PATH} (minimal mode carries no routing lane)\n")
+        self.assertFalse(self.workflow(root).exists())
+
 
 class CliTests(SetupFixture):
     def test_the_subcommand_does_not_disturb_the_default_parser(self) -> None:

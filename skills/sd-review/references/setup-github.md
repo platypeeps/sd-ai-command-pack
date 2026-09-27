@@ -40,7 +40,13 @@ Run `sd-review setup-github --check`.
 It compares rendered files against tracked content using the repository's existing pin, or an explicit `--pin`.
 It prints `same <path>` or `DIFFERS <path>`, with a diff for changed content.
 Exit 1 means drift; exit 0 means no drift.
-The check writes nothing and does not require installation mode or policy approval.
+The check writes nothing and does not require policy approval.
+
+The check applies the installer's mode guard.
+Outside full mode, a tracked workflow prints `REMOVE <path>` and exits 1.
+With no tracked workflow, it prints `absent <path>` and exits 0.
+Delete the workflow by hand.
+Delete its Dependabot guard too, unless another pack action pin needs it.
 
 A pin behind pack HEAD is not template drift.
 Change a pin deliberately through `--pin <sha> --force`, in its own reviewed commit.

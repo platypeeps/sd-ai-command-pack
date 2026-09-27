@@ -310,12 +310,12 @@ def check_files(root: pathlib.Path, args: argparse.Namespace, stream: TextIO) ->
     """`--check`: the files this build would write, against the tracked ones.
 
     The pin is the repository's own, read from its tracked workflow, so the
-    comparison is "does the template still match", not "is the pin current" --
-    a stale pin is a decision for `--pin ... --force`, not a drift finding.
-    Writes nothing, and asks nothing of the mode or the policy: reading is
-    allowed everywhere.
+    comparison is "does the template still match", not "is the pin current".
+    Writes nothing; the mode guard is `setup_github`'s own (sd:1285).
     """
 
+    if (repo_mode := sd_lib.mode(root)) != "full":
+        return sd_setup_guard.report_unwanted(root, WORKFLOW_RELATIVE_PATH, repo_mode, stream)
     tracked = _read(root / WORKFLOW_RELATIVE_PATH) or ""
     self_install = root == pack_root()
     pin = None if self_install else args.pin or sd_setup_guard.read_pin(tracked)
@@ -359,7 +359,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--check",
         action="store_true",
-        help="diff both files against what this build writes; exit 1 on DIFFERS, write nothing",
+        help="diff both files against what this build writes; exit 1 on DIFFERS or REMOVE, write nothing",
     )
     parser.add_argument(
         "--remove-legacy",

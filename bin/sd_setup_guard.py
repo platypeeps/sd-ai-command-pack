@@ -404,3 +404,24 @@ def report_drift(root: pathlib.Path, expected: Mapping[pathlib.Path, str], strea
             # the next diff line -- or the next file's verdict -- joins it.
             stream.write(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n")
     return 1 if differs else 0
+
+
+def report_unwanted(root: pathlib.Path, workflow: pathlib.Path, repo_mode: str, stream: TextIO) -> int:
+    """`setup-github --check` outside full mode, where the installer refuses (sd:1285).
+
+    With no template to converge on, a tracked workflow is not `DIFFERS` --
+    that is drift `--force` cannot fix -- but `REMOVE`, exit 1. Passing
+    silently would hide a lane the mode says must not exist. The Dependabot
+    guard is named, not judged: another of the pack's actions may pin under it.
+    """
+
+    if not (root / workflow).is_file():
+        stream.write(f"absent {workflow} ({repo_mode} mode carries no routing lane)\n")
+        return 0
+    stream.write(
+        f"REMOVE {workflow}\n"
+        f"  this repository is in {repo_mode} mode; only a full-mode repository carries the "
+        f"routing lane. Delete the workflow, and its guard in {DEPENDABOT_RELATIVE_PATH} "
+        "unless another pack action's pin needs it.\n"
+    )
+    return 1
