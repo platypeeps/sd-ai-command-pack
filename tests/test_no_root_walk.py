@@ -11,7 +11,9 @@ walker landed.
 **What counts as a walk.** A call to `rglob`, `glob`, `iterdir` or `walk` on
 a receiver that is the root; `os.walk`, `os.listdir` or `os.scandir` given the
 root; and `glob.glob`/`glob.iglob` given `root_dir=` the root, or a pattern
-whose first component under the root is a wildcard.
+whose first component under the root is a wildcard. An argument passed by
+keyword (`os.walk(top=...)`, `os.listdir(path=...)`, `glob.glob(pathname=...)`,
+`.glob(pattern=...)`) is read as its positional form is.
 
 **What counts as the root.** Not a name. `REPO_ROOT.rglob` is the spelling a
 token match catches, and the spelling nobody needs help with. The receiver is
@@ -68,8 +70,9 @@ ABOVE = ROOT_DEPTH + 1
 
 #: Methods that list a directory when called on a path.
 WALK_METHODS = frozenset({"rglob", "glob", "iterdir", "walk"})
-#: `os` functions that list the directory in their first argument.
-OS_WALKS = frozenset({"walk", "listdir", "scandir"})
+#: `os` functions that list the directory in their first argument, with that
+#: argument's keyword name: `os.walk(top=...)` walks as surely as `os.walk(...)`.
+OS_WALKS = {"walk": "top", "listdir": "path", "scandir": "path"}
 #: Calls that return their path argument's location unchanged.
 SAME_PLACE = frozenset({"Path", "PurePath", "PosixPath", "str", "fspath",
                         "abspath", "realpath", "normpath", "expanduser"})
@@ -330,19 +333,22 @@ class Module:
             func = node.func
             owner = func.value
             if isinstance(owner, ast.Name) and owner.id == "os":
-                if func.attr in OS_WALKS and node.args and self.is_root(node.args[0]):
+                top = _argument(node, 0, OS_WALKS[func.attr]) if func.attr in OS_WALKS else None
+                if top is not None and self.is_root(top):
                     found.append(node)
                 continue
             if isinstance(owner, ast.Name) and owner.id == "glob" and func.attr in ("glob", "iglob"):
-                root_dir = next((k.value for k in node.keywords if k.arg == "root_dir"), None)
+                root_dir = _argument(node, None, "root_dir")
+                pattern = _argument(node, 0, "pathname")
                 if ((root_dir is not None and self.is_root(root_dir))
-                        or (node.args and self._pattern_walks_root(node.args[0]))):
+                        or (pattern is not None and self._pattern_walks_root(pattern))):
                     found.append(node)
                 continue
             if func.attr not in WALK_METHODS:
                 continue
             if self.is_root(owner):
-                args = node.args
+                pattern = _argument(node, 0, "pattern")
+                args = [pattern] if pattern is not None else []
             elif node.args and _names_path_class(owner) and self.is_root(node.args[0]):
                 # `Path.rglob(REPO_ROOT, "*")`: the unbound spelling.
                 args = node.args[1:]
@@ -359,6 +365,15 @@ class Module:
         rel = self.path.name
         return [f"{rel}:{call.lineno}: {ast.get_source_segment(self.source, call)}"
                 for call in sorted(self.walks(), key=lambda c: (c.lineno, c.col_offset))]
+
+
+def _argument(call: ast.Call, index: int | None, keyword: str | None) -> ast.AST | None:
+    """The argument at `index`, or else the one passed as `keyword=`."""
+    if index is not None and len(call.args) > index and not isinstance(call.args[index], ast.Starred):
+        return call.args[index]
+    if keyword is None:
+        return None
+    return next((k.value for k in call.keywords if k.arg == keyword), None)
 
 
 def _climb(depths: frozenset[int], levels: int) -> frozenset[int]:
@@ -495,6 +510,27 @@ class DetectorTests(unittest.TestCase):
         REPO_ROOT.rglob("docs/*.md")
         """)
         self.assertEqual(len(found), 11, "\n".join(found))
+
+    def test_a_root_passed_by_keyword_is_a_walk(self) -> None:
+        """sd:1651. `os.walk(top=...)` lists the root as surely as `os.walk(...)`;
+        so does a glob pattern passed as `pathname=`."""
+        found = self.walks("""\
+        os.walk(top=REPO_ROOT)
+        os.listdir(path=str(REPO_ROOT))
+        os.scandir(path=REPO_ROOT)
+        glob.glob(pathname=os.path.join(REPO_ROOT, "**", "*.py"), recursive=True)
+        glob.iglob(pathname=f"{REPO_ROOT}/*.md")
+        """)
+        self.assertEqual(len(found), 5, "\n".join(found))
+
+    def test_a_derived_pattern_by_keyword_is_not_a_walk(self) -> None:
+        """A keyword pattern is read like a positional one: a derived tree is not the root."""
+        found = self.walks("""\
+        os.walk(top=os.path.join(REPO_ROOT, "docs"))
+        glob.glob(pathname=os.path.join(REPO_ROOT, "docs", "*.md"))
+        REPO_ROOT.glob(pattern="skills/*/SKILL.md")
+        """)
+        self.assertEqual(found, [])
 
     def test_a_fixture_attribute_a_default_and_a_parameter_carry_the_root(self) -> None:
         found = self.walks("""\
