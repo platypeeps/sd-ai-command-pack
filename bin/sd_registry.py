@@ -1728,3 +1728,17 @@ def order_source(
     if seed != ranked(registry, "reviewer"):
         source += f"; {registry.path.name} roles.reviewer [{', '.join(seed)}] is only the seed, overridden here"
     return source
+
+
+def chain_heading(source: str, registry: str) -> str:
+    """What the `--explain` `reviewer chain` heading names, from `order_source` (sd:1789).
+
+    The heading named the file whatever `order_source` said, so a reader who
+    opened it to change the order found a different list and edited the store
+    that does not decide. It names the database ranks when they decide and the
+    file only as their seed. A registry that did not read keeps its path.
+    """
+    if source.startswith("database "):
+        store = source.removeprefix("database ").split(" (", 1)[0]
+        return f"provider ranks in {store}; seeded from {registry}"
+    return f"roles: in {registry}" if source.startswith("file ") else registry
