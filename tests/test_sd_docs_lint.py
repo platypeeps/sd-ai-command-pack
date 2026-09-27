@@ -810,6 +810,33 @@ class Rule8PullRequestScopeTests(LintFixture):
         report = self.run_lint("Work: sd:1\n")
         self.assertIn("touches .github/workflows/tëst.yml", "\n".join(report.failures))
 
+    def test_cli_a_nul_terminated_list_keeps_a_quoted_path_whole(self) -> None:
+        # The body workflow passes the list as a file (sd:1408). Written with
+        # a newline `--name-only`, it quoted `.github/workflows/tëst.yml` and
+        # reopened the sd:1440 bypass (#1214 review). CI writes it with `-z`,
+        # and the linter reads that form path by path.
+        self.policy()
+        self.commit_all("base")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        (self.repo / ".github" / "workflows").mkdir(parents=True)
+        (self.repo / ".github" / "workflows" / "tëst.yml").write_text("on: push\n", encoding="utf-8")
+        (self.repo / "notes.md").write_text("notes\n", encoding="utf-8")
+        self.commit_all("touch a workflow with a non-ASCII name")
+        quoted = lint.sd_lib.git_output(["diff", "--name-only", "--no-renames", "origin/main", "HEAD"], self.repo)
+        self.assertIn('"', quoted, "the newline listing quotes the path, or this tests nothing")
+        listed = self.repo / "changed.txt"
+        listed.write_text(
+            lint.sd_lib.git_output(["diff", "--name-only", "--no-renames", "-z", "origin/main", "HEAD"], self.repo),
+            encoding="utf-8",
+        )
+        body = self.repo / "body.md"
+        body.write_text("Work: sd:1\n", encoding="utf-8")
+        with in_directory(self.repo), contextlib.redirect_stderr(io.StringIO()) as said, \
+                contextlib.redirect_stdout(io.StringIO()) as printed:
+            self.assertEqual(lint.main(["--pr-body", str(body), "--changed", str(listed)]), 1)
+        self.assertIn("touches .github/workflows/tëst.yml", said.getvalue())
+        self.assertIn("2 changed path(s) from --changed", printed.getvalue())
+
     def test_origin_main_is_read_when_origin_head_is_not_set(self) -> None:
         self.policy()
         self.commit_all("base")
@@ -2431,6 +2458,8 @@ class Rule6ClaimSupportTests(LintFixture):
 
 
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "tests.yml"
+#: The workflow that grades the pull request body (sd:1408).
+BODY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "pr-body-lint.yml"
 
 
 def docs_lint_step_code(text: str) -> str:
@@ -2518,11 +2547,65 @@ class ChangedPathsComeFromTheMergeRefTests(unittest.TestCase):
         self.assertEqual(self.changed("HEAD^1", "HEAD"), ["bin/mine.py"])
 
     def test_the_workflow_diffs_the_first_parent_and_refuses_a_plain_checkout(self) -> None:
-        code = docs_lint_step_code(WORKFLOW.read_text(encoding="utf-8"))
-        self.assertIn("git diff --name-only --no-renames HEAD^1 HEAD", code)
+        code = docs_lint_step_code(BODY_WORKFLOW.read_text(encoding="utf-8"))
+        # `-z`: a newline listing quotes a non-ASCII path, and a quoted path
+        # matches no scope glob (sd:1440, #1214 review).
+        self.assertIn("git diff --name-only --no-renames -z HEAD^1 HEAD", code)
         self.assertIn("HEAD^2", code)
         self.assertNotIn("pull_request.base.sha", code)
 
+
+class AnEditedBodyIsGradedTests(unittest.TestCase):
+    """sd:1408. The body a check grades is the one in its event's payload.
+
+    `tests.yml` fires on `opened`, `synchronize` and `reopened`, so a body
+    edited after the last push was graded by nothing, and a failing body could
+    not be cleared by fixing it. The body rules now run in a workflow of their
+    own that also fires on `edited`, and `tests.yml` no longer grades the body:
+    a red `lint` left by an old body would outlive the fix, and `lint` is a
+    required check.
+    """
+
+    @staticmethod
+    def header(path: pathlib.Path) -> str:
+        """The workflow above `jobs:`, comments dropped: where its trigger is."""
+        text = path.read_text(encoding="utf-8").split("\njobs:\n", 1)[0]
+        return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+
+    def test_the_body_workflow_runs_on_an_edit_and_on_every_push_event(self) -> None:
+        match = re.search(r"^on:\n  pull_request:\n    types: \[([^\]]*)\]$", self.header(BODY_WORKFLOW), re.MULTILINE)
+        self.assertIsNotNone(match, "pr-body-lint.yml has no `pull_request: types:` trigger")
+        types = {word.strip() for word in match.group(1).split(",")}
+        self.assertIn("edited", types)
+        # A required check has to report on a pull request nobody edits.
+        self.assertTrue({"opened", "synchronize", "reopened"} <= types, types)
+
+    def test_the_body_check_has_the_stable_name_the_ruleset_requires(self) -> None:
+        jobs = BODY_WORKFLOW.read_text(encoding="utf-8").split("\njobs:\n", 1)[1]
+        self.assertEqual(re.findall(r"^  (\S+):$", jobs, re.MULTILINE), ["body-lint"])
+        self.assertRegex(jobs, r"(?m)^    name: body-lint$")
+
+    def test_the_body_check_runs_the_body_rules_alone(self) -> None:
+        code = docs_lint_step_code(BODY_WORKFLOW.read_text(encoding="utf-8"))
+        self.assertIn("bin/sd-docs-lint --body-only --pr-body", code)
+        self.assertIn("PR_BODY: ${{ github.event.pull_request.body }}", code)
+
+    def test_the_body_check_reads_the_repository_and_keeps_no_credential(self) -> None:
+        # It runs on `edited`, so any author's body edit starts it: it gets a
+        # read-only token and leaves no credential in the checkout (#1214 review).
+        match = re.search(r"^permissions:\n((?:  \S.*\n?)+)", self.header(BODY_WORKFLOW), re.MULTILINE)
+        self.assertIsNotNone(match, "pr-body-lint.yml sets no top-level permissions")
+        self.assertEqual(match.group(1).split(), ["contents:", "read"])
+        jobs = BODY_WORKFLOW.read_text(encoding="utf-8").split("\njobs:\n", 1)[1]
+        self.assertNotIn("permissions:", jobs)
+        self.assertEqual(jobs.count("uses: actions/checkout@"), 1)
+        self.assertRegex(jobs, r"(?m)^          persist-credentials: false$")
+
+    def test_the_test_workflow_neither_grades_the_body_nor_reruns_on_an_edit(self) -> None:
+        code = docs_lint_step_code(WORKFLOW.read_text(encoding="utf-8"))
+        self.assertNotIn("--pr-body", code)
+        self.assertNotIn("PR_BODY", code)
+        self.assertNotIn("edited", self.header(WORKFLOW))
 
 
 class ArchiveIsBelowTheWorkRootTests(unittest.TestCase):

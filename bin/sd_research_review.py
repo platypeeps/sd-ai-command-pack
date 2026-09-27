@@ -658,52 +658,52 @@ The half no script can do — work it before publishing, per document:
        H1 and rendered title and said so; these two nothing read.
 
   The second reader
-    9. Run the independent pass through the `codex` CLI, from the repo, with
-       the document still UNCOMMITTED -- the prompt below points it at
-       working-tree changes, so committed work shows it an empty diff without
-       saying so. Already committed on a branch: name the comparison in the
-       prompt instead ("review `git diff main...HEAD`"). The framing is
-       shared, not retyped -- `adversarial-gate render --lens research-brief`
-       prints it, from local-adversarial-gate in the `system` repo:
+    9. Run the independent pass through `sd-review`, from the repo. It takes
+       the reviewer from the provider registry's reviewer order, with this
+       repo's consent (`reviewers:` in CLAUDE.local.md), vendor independence
+       and fallback: a reviewer that fails or is disabled hands the pass to
+       the next enabled one instead of blocking it. `--lens research-brief`
+       keeps the research framing -- the prompt says this is a markdown
+       brief, not code, and attacks the argument: load-bearing claims,
+       citation strength, numbers missing a unit, date or denominator, the
+       assumption the document never states.
 
-         mkdir -p 90-scratch && codex exec -s read-only -o 90-scratch/codex-pass.md \
-           "This is a markdown research brief, not code.
-           Review the uncommitted working-tree changes (git status, git diff,
-           plus untracked new files) as an adversarial reader.
-           Attack the argument, not the syntax: unsupported load-bearing claims,
-           numbers missing a unit/date/denominator, the assumption the document
-           never states. Cite file and line. Do not modify any files." \
-           < /dev/null > 90-scratch/codex-pass.log 2>&1
+       The document still UNCOMMITTED:
 
-       `-s read-only` is not optional -- it is what stops an adversarial reader
-       editing the work it reviews. Neither is `< /dev/null`: when stdin is not
-       a terminal, `codex exec` reads it as more prompt, and a backgrounded
-       shell call keeps stdin open, so Codex prints
-       `Reading additional input from stdin...` and waits forever at 0% CPU.
-       The prompt as an argument does not prevent that; only a closed stdin
-       does (sd:1339). `-o` puts the answer in a file and the redirect keeps
-       the log readable while it runs; both sit in `90-scratch/`, which is
-       never cited or published, and the `mkdir -p` is there because git
-       keeps no empty folder, so a fresh clone has none. GNU `timeout 1500`
-       in front bounds the run where coreutils is installed (`brew install
-       coreutils` on macOS, which ships none); without it the check below is
-       the bound. Run it in the background for anything past a page, and tell
-       a slow run from a hung one within a minute: a live run writes a new
-       `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` and its log grows past
-       the echoed prompt. No new rollout file, or a log ending at the stdin
-       line, is a hang -- stop it and fix stdin. Do not pipe through `tail`:
-       it shows nothing until exit, so a hang and a slow run look the same.
+         mkdir -p 90-scratch && sd-review --scope worktree --lens research-brief \
+           > 90-scratch/second-reader.txt 2>&1
 
-       Not the `/codex:*` slash commands. The `codex@openai-codex` plugin is
-       not a dependency of this kit and may not be installed; the CLI is the
-       supported path. `codex doctor` says whether it is available and logged
-       in. It sees the repo, not the sources, so it does not discharge step 2.
-       Unavailable is a Status line, not a silent skip.
+       Already committed on a branch:
+
+         mkdir -p 90-scratch && sd-review --scope branch --lens research-brief \
+           > 90-scratch/second-reader.txt 2>&1
+
+       `--scope worktree` has no commit to read an `Authored-with:` trailer
+       from, so it cannot pass over the author's vendor: check that the
+       reviewer the output names is another vendor's, or commit with the
+       trailer first and use `--scope branch`, which does the check itself.
+       Add `--explain` to see which reviewer the chain would pick, and why,
+       without running one. It runs the repository's own check first, as for
+       any change. Exit 0 is clean and 1 is findings; any other exit means no
+       reviewer completed or the run was refused, and the output says which
+       reviewers were tried and why. `90-scratch/` is never cited or
+       published, and the `mkdir -p` is there because git keeps no empty
+       folder. It sees the repo, not the sources, so it does not discharge
+       step 2.
+
+       Only if `sd-review` cannot run at all -- not installed, or it exits 2
+       on a usage or configuration error -- use a path that does not use the
+       registry: `adversarial-gate render --lens research-brief`, from
+       local-adversarial-gate in the `system` repo, prints the same framing;
+       hand it to a read-only reviewer of another vendor than the author, and
+       say in Status that the registry was bypassed and why. A reviewer that
+       failed is not that case; the chain has already moved on. Unavailable is
+       a Status line, not a silent skip.
 
   Then record the outcome in the Status section: what was verified and how,
-  what was not, what was cut, and the Codex pass — what it raised, what
-  changed, what was rejected and why. A review that found nothing says so, and
-  says what it checked.
+  what was not, what was cut, and the second reader's pass -- which reviewer
+  the chain picked, what it raised, what changed, what was rejected and why.
+  A review that found nothing says so, and says what it checked.
 """
 
 

@@ -748,11 +748,23 @@ class LineBudgetTests(unittest.TestCase):
         # so the merge of main stacks it on top. Measured, not carried:
         # `sd-review` is 2355 on the merged tree. Shared-core classification
         # and the complexity ceilings are unchanged.
+        #
+        # 3649 -> 3652 is #1194 (PR #1199), `sd-review --lens research-brief`.
+        # `bin/sd-review` grows +3: the `--lens` argument, the `lens` report
+        # key, and the one-line comment saying a lens, like `--challenge`, is
+        # a request to be read that `docs_skip` does not answer. The lens is
+        # part of the prompt and of the tier decision, which is review
+        # mechanics, so its switch belongs in the lane. The lens text itself
+        # is `sd_lib.REVIEW_LENSES`, shared core, so none of it is spent here.
+        # The branch raised 3645 -> 3648 alongside sd:1602; the merge of
+        # sd:1556 on main stacks it on top. Measured, not carried: `sd-review`
+        # is 2358 on the merged tree. Shared-core classification and the
+        # complexity ceilings are unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3649,
+            3652,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
