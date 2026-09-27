@@ -327,6 +327,7 @@ jobs:
         with:
           repository: platypeeps/system
           # Schema 15; `tests/test_system_pin.py` holds it to the installed library.
+          # A full commit or an `sd-db-v*` release tag (sd:1854); both are immutable.
           ref: 5fb29ef2c3cc26b845296d946b8128912da003d0
           token: ${{ secrets.SYSTEM_REPO_TOKEN }}
           path: system-checkout
