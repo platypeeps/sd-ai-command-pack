@@ -273,13 +273,17 @@ Reviewing your own work is the weak form; it is the one that ships most often, s
 it is the one to be disciplined about. Where the document carries a decision
 someone will act on, get a second reader who was not involved in writing it.
 
-**The second reader is an independent CLI reviewer**, and its framing is not
-written here any more. The stance, the four-part finding format and the
-confidence tags live in `local-adversarial-gate/core.md` in the `system` repo,
-shared with `sd-writing-pack`, which built the same gate separately and kept its
-own copy of the same caveats. `adversarial-gate render --lens research-brief`
-prints the focus text; `adversarial-gate run` does the whole pass for a caller
-that wants the scripted path.
+**The second reader is the pack's review lane, `sd-review`, with the
+`research-brief` lens.** It takes the reviewer from the provider registry's
+reviewer order, not from one named CLI: this repo's consent, vendor
+independence and fallback apply, so a reviewer that fails or is disabled hands
+the pass to the next enabled one. The lens is what keeps the framing: the
+prompt says the subject is a markdown brief, not code, and attacks the
+argument. Its axes and caveats come from
+`local-adversarial-gate/lenses/research-brief.md` and `core.md` in the `system`
+repo, shared with `sd-writing-pack`; the lane carries them in its findings
+schema, so each finding states what would have to be true and a confidence tag
+inside its summary.
 
 This pass is the research flow's first review point, *after the brief and
 decisions*. Its cap is the one on that row in the sd-ai-command-pack checkout's
@@ -288,44 +292,31 @@ product, before the send box, is the second row and has its own cap. Read the
 caps there — in the pack, which is where that file lives; a research repo does
 not carry it. This file states none.
 
-**It runs as a CLI, not as a harness plugin.** Which reviewer runs the pass,
-and the exact invocation, are not retyped here — the kit's own checklist is the
-one place they are written, so nothing here can go stale against it:
+**The exact invocation is not retyped here** — the kit's own checklist is the
+one place it is written, so nothing here can go stale against it:
 
 ```bash
 sd-research-kit review
 ```
 
-Under *The second reader* it prints two commands: the availability check, which
-says whether the CLI is installed and logged in, and the pass itself. Run it
-first and take the invocation from there. The plugin that supplies the
-`/codex:*` slash commands is not a dependency of this kit and may not be
-installed, and a research repo that tells its reader to run
-`/codex:adversarial-review` sends them to a command that does not exist. Do
-not reach for the `/codex:*` slash commands.
+Under *The second reader* it prints the pass for both cases, and the fallback.
+`CHECKLIST` in `bin/sd_research_review.py` owns that text. Do not copy it into
+a repository guide, and do not name a provider there either: the registry
+chooses.
 
 Three things to get right:
 
-- **`-s read-only` is not optional.** It is what keeps an adversarial reader
-  from editing the work it is reviewing. There is no reason to run this pass
-  without it.
-- **It reads the repository, not a file path and not a URL**, and the focus text
-  below points it at **uncommitted** working-tree changes. So the ordinary case
-  is: review before committing. Already committed — on a branch, or merged to
-  `main` — `git status` and `git diff` show it nothing, and the pass silently
-  reviews an empty diff. For work already committed on a branch, say so in the
-  prompt and name the comparison: *"review `git diff main...HEAD`"*. Name the
-  documents too when the diff is large.
-- **Its default framing is a code review** — auth boundaries, races, migrations,
-  rollback. Use the focus text printed by `sd-research-kit review`.
-  `CHECKLIST` in `bin/sd_research_review.py` owns that text.
-  Do not copy the prompt into a repository guide.
-
-  Run it in the background for anything past a page, with stdin closed
-  (`< /dev/null`). An open stdin makes the CLI wait forever.
-  Silence does not prove a slow run. A live run writes a new
-  `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` within a minute. No new
-  rollout file means a hang: stop it and fix stdin.
+- **Pick the scope that matches the commit state.** `--scope worktree` reviews
+  the uncommitted change; `--scope branch` reviews what is committed on the
+  branch. Worktree scope has no commit to read an `Authored-with:` trailer
+  from, so it cannot pass over the author's vendor; check who reviewed, or
+  commit with the trailer first.
+- **Keep the lens.** Without `--lens research-brief` the lane's framing is a
+  code review, and a change of only Markdown is routed to no reviewer at all.
+- **The registry-independent fallback is for a lane that cannot run** — not
+  installed, or a usage or configuration error. A reviewer that fails is not
+  that case: the chain has already moved on. The checklist says what to do
+  then, and Status says the registry was bypassed.
 
 **What it cannot do.** The second reader sees the repository, not the sources.
 It cannot discharge step 2 — opening the citation and reading it is yours, and
@@ -334,10 +325,10 @@ citation behind it, the rate without its base, the assumption doing load-bearing
 work off the page, and the conclusion that only follows if you already know the
 material.
 
-Record the pass in Status like any other check: which reader ran it and on
-`<date>`, what it raised, what was changed and what was rejected with the
-reason. If that CLI is missing or not logged in — the availability check the
-checklist prints reports it — say *that* in Status. "No independent pass" is a
+Record the pass in Status like any other check: which reviewer the chain picked
+and on `<date>`, what it raised, what was changed and what was rejected with
+the reason. If no reviewer completed — the lane's output says which were tried
+and why — say *that* in Status. "No independent pass" is a
 stated gap; self-review that quietly presents itself as review is the defect
 this section exists to prevent.
 

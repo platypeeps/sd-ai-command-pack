@@ -4,6 +4,22 @@
 
 ### Changed
 
+- **`sd-research-kit review` routes the second reader through `sd-review` (#1194).**
+  The checklist printed a fixed `codex exec` line, so a research pass skipped
+  the provider registry's reviewer order and stopped whenever Codex was down.
+  It now prints `sd-review --scope worktree --lens research-brief` for an
+  uncommitted document and `--scope branch` for a committed one, and names no
+  provider. `sd-review --lens research-brief` is new: it appends the research
+  framing from `sd_lib.REVIEW_LENSES` to the prompt of whichever reviewer the
+  chain picks, and a lensed change of only Markdown is still read rather than
+  routed to tier `skip` with no reviewer. A registry-independent fallback
+  (`adversarial-gate render --lens research-brief` handed to a reviewer of
+  another vendor) is printed only for when `sd-review` cannot run. The
+  research-repo `CLAUDE.md` template, `conventions.md` and the skill say the
+  same. A lensed review also hands every reviewer each changed document whole,
+  at the reviewed revision, so a `url` reviewer with only the patch still sees
+  the conclusion, citations and Status an edit leaves outside it.
+
 - **Reviewer order has one named source, and nothing else ranks providers
   (sd:1556).** `sd-review --explain` prints an `order from` line and
   `--json` an `order_source` key: the database that `sd providers configure`

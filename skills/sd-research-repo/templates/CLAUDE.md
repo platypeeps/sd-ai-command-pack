@@ -66,6 +66,10 @@ sd-research-kit review
 It checks provenance blocks, Status sections and build freshness, then prints the checklist
 for the half no script can do. Exit 1 means fix it first.
 
+The second reader is `sd-review --lens research-brief`, as the checklist prints it. It takes
+the reviewer from the provider registry's reviewer order, not from one named CLI, and moves to
+the next enabled reviewer when one fails. The lens keeps the brief attacked as an argument.
+
 Record the outcome in the Status section: what was verified and how, what was not, what was
 cut, and the second reader's pass — which reader, date, what it raised, what changed, what
 was rejected and why. A review that found nothing says what it checked.
