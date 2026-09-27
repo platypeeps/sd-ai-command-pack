@@ -1011,6 +1011,47 @@ class BodyOnlyTests(LintFixture):
         self.assertNotIn("the work directory does not exist", said.getvalue())
 
 
+class NoDefaultWorkRootTests(LintFixture):
+    """A repository that tracks its work in sd has no `docs/work` (sd:1570).
+
+    From the root of traces-poc the linter printed `FAIL <repo>/docs/work:
+    the work directory does not exist` and exited 1, so a valid repository
+    failed. The default root missing is a skip; a root named with
+    `--work-dir` and missing is still the failure it was.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        shutil.rmtree(self.work)
+        self.git("add", "-A")
+
+    def cli(self, *argv: str) -> tuple[int, str, str]:
+        with in_directory(self.repo), contextlib.redirect_stderr(io.StringIO()) as said, \
+                contextlib.redirect_stdout(io.StringIO()) as printed:
+            code = lint.main(list(argv))
+        return code, printed.getvalue(), said.getvalue()
+
+    def test_red_the_default_root_missing_is_a_skip_and_exit_0(self) -> None:
+        code, printed, said = self.cli()
+        self.assertEqual(code, 0, said)
+        self.assertIn("rules 1-2, 6-7: no docs/work; nothing to lint", printed)
+        self.assertIn("sd-docs-lint: clean", printed)
+        self.assertNotIn("does not exist", said)
+
+    def test_the_other_rules_still_run_without_the_default_root(self) -> None:
+        body = self.repo / "body.md"
+        body.write_text("Work: docs/work/2026-08-29-a-workable-item\n", encoding="utf-8")
+        code, printed, said = self.cli("--pr-body", str(body))
+        self.assertEqual(code, 1)
+        self.assertIn("does not resolve to a work item", said)
+        self.assertIn("rule 3 decision shape", printed)
+
+    def test_an_explicit_work_dir_that_is_missing_still_fails(self) -> None:
+        code, _, said = self.cli("--work-dir", "docs/work")
+        self.assertEqual(code, 1)
+        self.assertIn("the work directory does not exist", said)
+
+
 class ScopePolicyTests(unittest.TestCase):
     """This repository's own table, and the template that points at it.
 
