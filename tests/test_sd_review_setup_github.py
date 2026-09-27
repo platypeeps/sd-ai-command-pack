@@ -1054,7 +1054,7 @@ class CheckTests(SetupFixture):
     def test_no_lane_outside_full_mode_passes_without_a_pin(self) -> None:
         root = self.make_repo()
         self.set_mode(root, "minimal")
-        code, out = self.run_check(root, pin=PIN)
+        code, out = self.run_check(root)
         self.assertEqual(code, 0)
         self.assertEqual(out, f"absent {setup.WORKFLOW_RELATIVE_PATH} (minimal mode carries no routing lane)\n")
         self.assertFalse(self.workflow(root).exists())

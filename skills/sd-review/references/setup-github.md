@@ -38,8 +38,10 @@ Self-installation updates only the workflow and leaves Dependabot configuration 
 
 Run `sd-review setup-github --check`.
 It compares rendered files against tracked content using the repository's existing pin, or an explicit `--pin`.
-It prints `same <path>` or `DIFFERS <path>`, with a diff for changed content.
-Exit 1 means drift; exit 0 means no drift.
+In full mode it prints `same <path>` or `DIFFERS <path>`, with a diff for changed content.
+There, exit 1 means drift and exit 0 means no drift.
+Outside full mode it prints `REMOVE <path>` or `absent <path>` instead, as below.
+Exit 1 then means an unwanted lane, not template drift.
 The check writes nothing and does not require policy approval.
 
 The check applies the installer's mode guard to the mode the operator wrote.
