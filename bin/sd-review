@@ -2160,8 +2160,8 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
             write(f"  consent     {result['authorization']['source']} ({result['authorization']['path']})\n")
     copilot = (result.get("remote_reviews") or {}).get("copilot")
     if isinstance(copilot, dict) and "policy" in copilot:
-        asked = "requested" if copilot["automatic"] else "not requested"
-        write(f"  copilot     {copilot['policy']} ({copilot['source']}); tier {copilot['tier']}, {asked}\n")
+        later = "will request it on the pull request" if copilot["automatic"] else "will not request it"  # sd:1568
+        write(f"  copilot     {copilot['policy']} ({copilot['source']}); tier {copilot['tier']}; not requested by sd-review, sd-ship {later}\n")
     if result.get("fallback_candidates"):
         write(f"  fallbacks   {', '.join(result['fallback_candidates'])}\n")
     write(f"  authored    {result['authored_with_report']}\n")
