@@ -529,6 +529,23 @@
 
 ### Fixed
 
+- **The research re-render hook no longer executes a `research.conf.py` that a
+  pull or checkout just brought in (sd:1376).** A render executes the config.
+  After sd:1353 the post-merge and post-checkout arms rendered on every pull
+  and branch switch, so a config from a tree the operator had not read ran
+  without any command of theirs. `sd-research-kit render` now records the
+  sha256 of the config it executed under the git directory, and all three
+  arms, post-commit included, render only a config whose digest matches.
+  Otherwise they decline and name `sd-research-kit render`. A record, not a
+  question about the one operation: a declined pull leaves the incoming config
+  in the tree, and the next `git checkout HEAD -- doc.md`, or a commit of
+  `doc.md` alone, would have executed it. Only a render by hand writes the
+  record. A render the hook runs (`SD_RESEARCH_TRIGGER`) or git runs
+  (`GIT_EXEC_PATH`, which covers a not yet upgraded hook body) checks the
+  digest of the bytes it is about to execute, exits non-zero on a mismatch,
+  and records nothing. A repository with no record declines until one render
+  by hand. `init-hook` upgrades the previous bodies, which join
+  `SUPERSEDED_HOOKS`.
 - **An empty check rollup on a conflicting head names the conflict (sd:1403).**
   GitHub builds no merge ref for a DIRTY head and dispatches no
   `pull_request` run, so zero checks there is not a slow queue. `sd-pr-state`
