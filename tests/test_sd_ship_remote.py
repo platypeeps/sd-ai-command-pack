@@ -855,13 +855,15 @@ class ClassicAndRulesetCase(unittest.TestCase):
 # --------------------------------------------------------------------------
 
 class CurrentRunsTest(unittest.TestCase):
-    """`current_runs` keeps the newest run per workflow, app and check name.
+    """`current_runs` keeps the newest run per execution, app and check name.
 
-    Suite `n` belongs to workflow `WORKFLOWS[n]`; a suite missing there is
-    one no Actions run owns, whose runs are all judged.
+    Suite `n` belongs to the (workflow, event, branch) `WORKFLOWS[n]`; a
+    suite missing there is one no Actions run owns, whose runs are all judged.
     """
 
-    WORKFLOWS = {1: 11, 2: 11, 3: 12}
+    WORKFLOWS = {1: (11, "pull_request", "topic"), 2: (11, "pull_request", "topic"),
+                 3: (12, "pull_request", "topic"), 4: (11, "workflow_dispatch", "topic"),
+                 5: (11, "pull_request", "other")}
 
     @staticmethod
     def run_of(run_id: int, started: str | None, *, suite: int = 1, name: str = "lint", app: int = 7) -> dict:
@@ -895,6 +897,12 @@ class CurrentRunsTest(unittest.TestCase):
     def test_another_workflow_does_not_supersede(self) -> None:
         self.assertEqual(self.ids([self.run_of(1, "2026-09-27T10:00:00Z"),
                                    self.run_of(2, "2026-09-27T10:05:00Z", suite=3)]), [1, 2])
+
+    def test_another_event_or_branch_does_not_supersede(self) -> None:
+        for suite in (4, 5):
+            with self.subTest(suite=suite):
+                self.assertEqual(self.ids([self.run_of(1, "2026-09-27T10:00:00Z"),
+                                           self.run_of(2, "2026-09-27T10:05:00Z", suite=suite)]), [1, 2])
 
     def test_a_suite_no_workflow_owns_is_judged_run_by_run(self) -> None:
         runs = [self.run_of(1, "2026-09-27T10:00:00Z", suite=8), self.run_of(2, "2026-09-27T10:05:00Z", suite=9)]
