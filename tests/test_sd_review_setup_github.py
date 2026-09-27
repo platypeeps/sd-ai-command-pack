@@ -215,7 +215,11 @@ class WorkflowContentTests(SetupFixture):
         dependabot = (REPO_ROOT / guard.DEPENDABOT_RELATIVE_PATH).read_text(encoding="utf-8")
         self.assertEqual(guard.guard_state(dependabot), "absent")
         stream = io.StringIO()
-        code = setup.check_files(REPO_ROOT, setup_args(check=True, pin=None), stream)
+        # The remote's answer is pinned: CI cannot ask GitHub about this
+        # checkout, and a demotion adds a `note:` line (sd:1285).
+        full = setup.sd_lib.RemoteAnswer(full=True, answered=True)
+        with mock.patch.object(setup.sd_lib, "remote_permits_full", return_value=full):
+            code = setup.check_files(REPO_ROOT, setup_args(check=True, pin=None), stream)
         self.assertEqual((code, stream.getvalue()), (0, f"same {setup.WORKFLOW_RELATIVE_PATH}\n"))
 
     def test_the_lane_holds_no_write_permission_and_requests_nobody(self) -> None:
