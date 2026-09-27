@@ -55,6 +55,30 @@ def git(root: Path, *args: str) -> str:
     return run(root, ["git", *args])
 
 
+def current_runs(runs: list[dict]) -> list[dict]:
+    """The runs that decide each check: the newest per name and app (sd:1610).
+
+    `check-runs?filter=latest` keeps one run per check suite, and a
+    close/reopen or a body edit starts a second suite on the same head, so the
+    old run and the new one of one check both come back. The newest by
+    `started_at`, then `id`, decides, as the newest status per context does.
+    A run without `started_at` counts as newest, and runs tied on both keys
+    are all kept, so an unordered answer can refuse but never pass.
+    """
+    def recency(entry: dict) -> tuple:
+        started = entry.get("started_at")
+        return (not started, str(started or ""), entry.get("id") if isinstance(entry.get("id"), int) else 0)
+
+    groups: dict[tuple, list[dict]] = {}
+    for entry in runs:
+        groups.setdefault((entry.get("name"), (entry.get("app") or {}).get("id")), []).append(entry)
+    current: list[dict] = []
+    for group in groups.values():
+        newest = max(recency(entry) for entry in group)
+        current += [entry for entry in group if recency(entry) == newest]
+    return current
+
+
 def slug(remote: str) -> str:
     match = re.fullmatch(r"(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([\w.-]+/[\w.-]+?)(?:\.git)?/?", remote)
     if not match:
@@ -454,9 +478,10 @@ class GitHub:
     def every_check(self, head: str) -> None:
         """The substitute for required checks under a declared gap: all of them.
 
-        Every check run `filter=latest` reports at `head` must have completed
-        `success`, `neutral` or `skipped`; the newest status per context must
-        be `success`; the set must not be empty; and every workflow at `head`
+        Every check run `filter=latest` reports must be at `head`, and the
+        newest run of each check must have completed `success`, `neutral` or
+        `skipped`; the newest status per context must be `success`; the set
+        must not be empty; and every workflow at `head`
         that runs on `pull_request` must have a completed, successful run for
         that event at this exact SHA, so a commit the Tests workflow never ran
         on cannot pass on an advisory check alone.
@@ -466,7 +491,8 @@ class GitHub:
         if not runs and not statuses:
             raise Refusal(f"nothing validated {head}: no check run and no status exists for it", code="ci_missing",
                           next_action="Run the repository's checks for this exact head, then retry merge.", boundary="ci", state="retryable_failure")
-        for entry in runs:
+        stray = [entry for entry in runs if entry.get("head_sha") != head]
+        for entry in stray + current_runs(runs):
             if (entry.get("head_sha") != head or entry.get("status") != "completed"
                     or entry.get("conclusion") not in ("success", "neutral", "skipped")):
                 raise Refusal(f"CI is not passing on {head}: {entry.get('name')}", code="ci_not_passing",
@@ -522,10 +548,13 @@ class GitHub:
             matching = [entry for entry in runs if entry.get("name") == context
                         and (app in (-1, None) or entry.get("app", {}).get("id") == app)]
             legacy = [entry for entry in statuses if entry.get("context") == context] if app in (-1, None) else []
-            # The statuses endpoint is newest first. A successful old rerun
-            # cannot mask a failed or pending current run of the same check.
+            # The statuses endpoint is newest first, and only the newest run of
+            # a check decides (sd:1610): a successful old run cannot mask a
+            # failed or pending current one, nor an old failure a current pass.
+            # A run at another head refuses whatever its age.
+            judged = [entry for entry in matching if entry.get("head_sha") != head] + current_runs(matching)
             if any(entry.get("head_sha") != head or entry.get("status") != "completed"
-                   or entry.get("conclusion") not in ("success", "neutral", "skipped") for entry in matching):
+                   or entry.get("conclusion") not in ("success", "neutral", "skipped") for entry in judged):
                 raise Refusal(f"required CI is not passing on {head}: {context}", code="ci_not_passing",
                               boundary="ci", state="retryable_failure", next_action="Wait for or fix exact-head CI, then retry merge.")
             if legacy and (legacy[0].get("sha", head) != head or legacy[0].get("state") != "success"):

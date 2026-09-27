@@ -849,5 +849,39 @@ class ClassicAndRulesetCase(unittest.TestCase):
         self.assertEqual(remote.gate("main", HEAD), protection_document())
 
 
+
+# --------------------------------------------------------------------------
+# Which run of a check decides (sd:1610)
+# --------------------------------------------------------------------------
+
+class CurrentRunsTest(unittest.TestCase):
+    """`current_runs` keeps the newest run per check name and app."""
+
+    @staticmethod
+    def run_of(run_id: int, started: str | None, *, name: str = "lint", app: int = 7) -> dict:
+        return {"id": run_id, "name": name, "app": {"id": app}, "started_at": started}
+
+    def ids(self, runs: list[dict]) -> list[int]:
+        return sorted(entry["id"] for entry in sd_ship_remote.current_runs(runs))
+
+    def test_the_later_start_wins_in_either_order(self) -> None:
+        older, newer = self.run_of(2, "2026-09-27T10:00:00Z"), self.run_of(1, "2026-09-27T10:05:00Z")
+        self.assertEqual(self.ids([older, newer]), [1])
+        self.assertEqual(self.ids([newer, older]), [1])
+
+    def test_the_higher_id_breaks_a_tie_on_start(self) -> None:
+        self.assertEqual(self.ids([self.run_of(9, "2026-09-27T10:00:00Z"), self.run_of(3, "2026-09-27T10:00:00Z")]), [9])
+
+    def test_a_run_that_has_not_started_counts_as_newest(self) -> None:
+        self.assertEqual(self.ids([self.run_of(5, "2026-09-27T10:00:00Z"), self.run_of(4, None)]), [4])
+
+    def test_runs_tied_on_both_keys_are_all_kept(self) -> None:
+        self.assertEqual(self.ids([self.run_of(6, "2026-09-27T10:00:00Z"), self.run_of(6, "2026-09-27T10:00:00Z")]), [6, 6])
+
+    def test_each_name_and_app_keeps_its_own_newest(self) -> None:
+        runs = [self.run_of(1, "2026-09-27T10:00:00Z"), self.run_of(2, "2026-09-27T10:00:00Z", app=8),
+                self.run_of(3, "2026-09-27T10:00:00Z", name="test")]
+        self.assertEqual(self.ids(runs), [1, 2, 3])
+
 if __name__ == "__main__":
     unittest.main()

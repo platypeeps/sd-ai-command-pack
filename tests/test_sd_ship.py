@@ -1953,6 +1953,39 @@ roles:
             self.merge()
         self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
 
+    def test_only_the_newest_run_of_a_required_check_decides(self):
+        """sd:1610. A close/reopen or a body edit starts a second check suite
+        on the same head, and `filter=latest` keeps one run per suite, so the
+        old run and the new one of the same check both come back (#1207,
+        #1221). The newest by `started_at`, then `id`, decides, in whichever
+        order GitHub lists them: a newer failure or a newer pending run still
+        refuses, and an older failure no longer blocks a newer pass. A run at
+        another head refuses however old it is."""
+        self.prepare()
+        pull = self.remote.pull(1)
+        valid = dict(pull.checks[0])
+        older = {"id": 36248240346, "started_at": "2026-09-27T10:00:00Z"}
+        newer = {"id": 36249144474, "started_at": "2026-09-27T10:05:00Z"}
+        same_start = {"id": 36249144475, "started_at": older["started_at"]}
+        failed = {"conclusion": "failure"}
+        pending = {"status": "in_progress", "conclusion": None}
+        for label, old, new, pattern in (
+            ("newer failure", {}, failed, "required CI is not passing"),
+            ("newer pending", {}, pending, "required CI is not passing"),
+            ("same start, higher id fails", {}, failed, "required CI is not passing"),
+            ("older failure at another head", {**failed, "head_sha": "0" * 40}, {}, "required CI is not passing"),
+        ):
+            stamp = same_start if label.startswith("same start") else newer
+            for order in (1, -1):
+                with self.subTest(label=label, order=order):
+                    pull.checks = [{**valid, **older, **old}, {**valid, **stamp, **new}][::order]
+                    with self.assertRaisesRegex(ship.Refusal, pattern) as caught:
+                        self.merge()
+                    self.assertEqual(caught.exception.workflow["blocker"]["code"], "ci_not_passing")
+        self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
+        pull.checks = [{**valid, **newer}, {**valid, **older, **failed}]
+        self.assertEqual(self.merge()["phase"], "merged")
+
     def test_remote_ownership_protection_and_rules_are_fresh(self):
         self.prepare()
         self.double.admin = False
@@ -4185,6 +4218,33 @@ class DeclaredGapCase(unittest.TestCase):
         pull = next(iter(self.remote.pull_requests.values()))
         pull.checks.append(self.check("unittest (ubuntu-latest, 3.13)", conclusion="failure", sha="0" * 40))
         self.refuse("CI is not passing", "ci_not_passing")
+
+    def test_only_the_newest_run_of_each_check_decides_under_the_gap(self):
+        """sd:1610 on the declared-gap path: two suites on one head report two
+        runs of `route`. The newest decides; a newer failure or pending run
+        refuses, and an older failure does not block a newer pass unless it
+        ran at another head."""
+        older = {"id": 108587626402, "started_at": "2026-09-27T10:00:00Z"}
+        newer = {"id": 108587965767, "started_at": "2026-09-27T10:05:00Z"}
+        for label, old, new, puts in (
+            ("newer failure", {}, {"conclusion": "failure"}, 0),
+            ("newer pending", {}, {"status": "in_progress", "conclusion": None}, 0),
+            ("older failure at another head", {"conclusion": "failure", "head_sha": "0" * 40}, {}, 0),
+            ("older failure", {"conclusion": "failure"}, {}, 1),
+        ):
+            with self.subTest(label=label):
+                self.restart()
+                self.declare()
+                self.green()
+                pull = next(iter(self.remote.pull_requests.values()))
+                pull.checks.append({**self.check("route"), **newer, **new})
+                pull.checks.append({**self.check("route"), **older, **old})
+                pull.checks = [check for check in pull.checks if check.get("id") or check["name"] != "route"]
+                if puts:
+                    self.merge()
+                    self.assertEqual(self.puts(), 1)
+                else:
+                    self.refuse("CI is not passing on .*: route", "ci_not_passing")
 
     def test_status_history_is_read_newest_first_per_context(self):
         for history, puts in (("success,pending", 1), ("success,failure", 1), ("failure,success", 0), ("pending,success", 0)):
