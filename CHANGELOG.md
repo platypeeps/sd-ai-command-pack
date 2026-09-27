@@ -4,6 +4,17 @@
 
 ### Changed
 
+- **A free `url` reviewer retries one schema failure, and the output
+  contract restates the findings shape last (sd:1821).** MiniMax-M3 broke the
+  findings schema on 13 of 45 runs over one 35k-token prompt: an extra
+  `severity_note` key, a missing `family`, more than 50 rows. The schema sat
+  before the review input, so the contract now repeats the exact shape after
+  it, built from the validator's own constants; that cut failures to 5 of 45.
+  An entry whose price is zero in and out now retries a schema failure once
+  on itself instead of falling through to a reviewer that may bill, and the
+  failed attempt stays in the outcomes with any blocker it recovered, as a
+  fallback's does. A priced entry never retries. Lowering temperature did not help (6 of 30 at 0.2).
+
 - **`sd-ship merge` keeps an `sd attribute` repair of landed history
   (sd:1753).** The squash message carried only the PR body, `Item:`,
   `Delivers:` and `Authored-with:`, so a PR whose `Attributes:` lines named

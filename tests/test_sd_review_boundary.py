@@ -760,11 +760,16 @@ class LineBudgetTests(unittest.TestCase):
         # sd:1556 on main stacks it on top. Measured, not carried: `sd-review`
         # is 2358 on the merged tree. Shared-core classification and the
         # complexity ceilings are unchanged.
+        # 3652 -> 3699 is sd:1821. MiniMax-M3 broke the findings schema on 13
+        # of 45 runs; the URL contract restates the validated shape last (10
+        # lines), and a free entry retries one schema failure on itself.
+        # Moving the url call out of `run_provider` to hold the complexity
+        # ceiling costs the rest: three helper signatures and docstrings.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3652,
+            3699,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

@@ -396,6 +396,49 @@ class RecoveryDiagnostics(ReviewFixture):
             self.assertEqual(outcome.diagnostic["failure_stage"], stage, response)
             self.assertNotIn(outcome.status, (sd_review.CLEAN, sd_review.FINDINGS))
 
+    def attempts(self, price, answers):
+        answers = iter(answers)
+        client = FakeClient(default=lambda _provider: next(answers))
+        provider = sd_review.sd_registry.Provider(name="fixture", vendor="fixture", bill="fixture",
+            url="https://fixture.invalid/v1", model="fixture-model", env=("KEY",), price=price)
+        outcomes = list(sd_review._attempts(provider, lambda: sd_review.run_provider(provider, self.tmp,
+            sd_review.Subject("branch", "a" * 40, "b" * 40, (), 0, ""), "synthetic", FakeRunner(),
+            {"KEY": "secret"}, 1, client=client)))
+        return outcomes, client
+
+    def test_a_free_entry_retries_one_schema_failure_and_a_priced_one_does_not(self):
+        """sd:1821: MiniMax-M3 (price 0/0) added a `severity_note` key on about
+        one run in nine; a failed pass fell through to a reviewer that bills."""
+        bad = (0, json.dumps(self.envelope(json.dumps({"findings": [{**finding("high"), "severity_note": "x"}]}))), "", True)
+        good = (0, json.dumps(self.envelope(json.dumps({"findings": [finding("high", "real blocker")]}))), "", True)
+        for price, calls in (({"in": 0, "out": 0}, 2), ({"in": 0.3, "out": 1.2}, 1), ({}, 1), ({"in": 0}, 1)):
+            outcomes, client = self.attempts(price, (bad, good))
+            self.assertEqual(len(client.sent), calls, price)
+            self.assertEqual(len(outcomes), calls, price)
+            self.assertEqual(outcomes[0].diagnostic["failure_stage"], "schema", price)
+            if calls == 2:
+                self.assertEqual(outcomes[1].status, sd_review.FINDINGS)
+                self.assertEqual(outcomes[1].findings[0]["summary"], "real blocker")
+
+    def test_a_retry_keeps_the_blockers_the_failed_attempt_recovered(self):
+        """Codex on the sd:1821 PR: a clean retry must not clear a blocker the
+        schema-invalid first answer carried; both outcomes reach the review."""
+        bad = (0, json.dumps(self.envelope(json.dumps({"findings": [{**finding("high", "first blocker"), "extra": 1}]}))), "", True)
+        clean = (0, json.dumps(self.envelope('{"findings": []}')), "", True)
+        outcomes, _ = self.attempts({"in": 0, "out": 0}, (bad, clean))
+        self.assertEqual([o.status for o in outcomes][1], sd_review.CLEAN)
+        self.assertIn("first blocker", json.dumps([row for o in outcomes for row in o.findings]))
+
+    def test_a_free_entry_retries_a_schema_failure_only_once(self):
+        bad = (0, json.dumps(self.envelope('{}')), "", True)
+        outcomes, client = self.attempts({"in": 0, "out": 0}, (bad, bad, bad))
+        self.assertEqual(len(client.sent), 2)
+        self.assertTrue(all(o.diagnostic["failure_stage"] == "schema" for o in outcomes))
+
+    def test_a_transport_failure_is_not_retried(self):
+        outcomes, client = self.attempts({"in": 0, "out": 0}, ((503, "{}", "HTTP 503", True),) * 2)
+        self.assertEqual(len(client.sent), 1)
+
     def test_actual_http_status_requested_model_and_prompt_digest_survive(self):
         registry = sd_review.sd_registry
         provider = registry.Provider(name="fixture", vendor="vendor", bill="fixture",
