@@ -5,7 +5,8 @@ extends the framework from outside it. It keeps its own manifest, its own
 `<prefix>-*` skills, its own tools, and its rows in the shared database. The
 pack installs nothing into it and reads nothing out of it except the manifest.
 
-Three exist:
+`sd plugin list` names every registered root; this page does not keep a count.
+Three of them show the range:
 
 | Prefix | Repository | Declares |
 |---|---|---|
@@ -13,7 +14,7 @@ Three exist:
 | `sys` | `system` | four `dashboard.actions` and nothing else |
 | `hoa` | `hoa` | `issues`, two `config` keys, seven `hoa-*` skills, no kinds |
 
-The three differ that widely on purpose. A domain pack declares the surfaces it
+They differ that widely on purpose. A domain pack declares the surfaces it
 uses and leaves the rest absent; absence is the default everywhere, and every
 optional block refuses at *registration* rather than at use time when it is
 present and malformed.
@@ -150,8 +151,8 @@ logic and stays with the plugin.
 on disk, so a reordered key is drift — and a hash per vendored tree.
 `sd plugin lock --check` is the half with a consumer: a plugin's own CI asserting
 that neither moved without the lock moving with them. A domain pack with no CI
-gets nothing from the file; `system` carries one, `sd-writing-pack` and `hoa` do
-not.
+gets nothing from the file. To see whether a root carries one, run
+`sd plugin lock --check <root>`: it names the missing file, or reports a match.
 
 ## The halves that are not the manifest
 
