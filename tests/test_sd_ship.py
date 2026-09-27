@@ -3011,7 +3011,8 @@ roles:
         provider.write_text(working)
         head = _git(self.root, "rev-parse", "HEAD")
         operation = self.operation("prepare")
-        with patch.object(ship.subprocess, "run", side_effect=AssertionError("review dispatched")):
+        with patch.object(ship, "review_process", side_effect=AssertionError("review dispatched")), \
+                patch.object(ship, "binding", side_effect=AssertionError("review binding read before the cap refusal")):
             with self.assertRaisesRegex(ship.Refusal, "spent"):
                 operation.review(head)
         self.assertEqual(self.operation().state["passes"], prior)
@@ -3048,7 +3049,7 @@ roles:
                       ["--additional-review-for", "0" * 40, "--request-reason", "reason"],
                       ["--additional-review-for", head, "--request-reason", "reason", "--retry-review"]):
             operation = self.operation("prepare", *flags)
-            with self.subTest(flags=flags), patch.object(ship.subprocess, "run", side_effect=AssertionError("review dispatched")):
+            with self.subTest(flags=flags), patch.object(ship, "review_process", side_effect=AssertionError("review dispatched")):
                 with self.assertRaises(ship.Refusal):
                     operation.review(head)
             self.assertEqual(self.operation().state["passes"], prior)
@@ -3173,7 +3174,7 @@ roles:
                       ["--review-history-digest", ship.digest(saved["passes"])],
                       [*prefix, "--review-history-digest", ship.digest(saved["passes"]), "--retry-review"]):
             operation = self.operation("prepare", *flags)
-            with self.subTest(flags=flags), patch.object(ship.subprocess, "run", side_effect=AssertionError("review dispatched")):
+            with self.subTest(flags=flags), patch.object(ship, "review_process", side_effect=AssertionError("review dispatched")):
                 with self.assertRaises(ship.Refusal):
                     operation.review(head)
             self.assertEqual(self.operation().state, saved)
@@ -3213,7 +3214,7 @@ roles:
             revision = operation.revision
             candidate = self.operation("prepare", "--additional-review-for", head, "--request-reason", "renew",
                                        "--review-history-digest", ship.digest(state["passes"]))
-            with self.subTest(change=change), patch.object(ship.subprocess, "run", side_effect=AssertionError("review dispatched")):
+            with self.subTest(change=change), patch.object(ship, "review_process", side_effect=AssertionError("review dispatched")):
                 with self.assertRaises(ship.Refusal):
                     candidate.review(head)
             self.assertEqual(self.operation().state, state)
@@ -3338,7 +3339,7 @@ roles:
         head = _git(self.root, "rev-parse", "HEAD")
         operation = self.operation("prepare", "--additional-review-for", head, "--request-reason", "renew",
                                    "--review-history-digest", ship.digest(prior))
-        with patch.object(ship.subprocess, "run", side_effect=AssertionError("review dispatched")), self.assertRaises(ship.Refusal):
+        with patch.object(ship, "review_process", side_effect=AssertionError("review dispatched")), self.assertRaises(ship.Refusal):
             operation.review(head)
         self.assertEqual(self.operation().state["passes"], prior)
 
