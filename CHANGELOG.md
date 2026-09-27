@@ -13,7 +13,8 @@
   ledger's bound moves with it: about $1.08 for `kimi` and $0.30 for
   `baseten` on that prompt. A `finish_reason: length` stop now reads
   `kimi hit max_tokens (16384) and it sent no answer`, with completion tokens
-  and reasoning bytes, and `sd-ship`'s refusal carries each failed
+  and reasoning bytes; a `length` stop below the ceiling names a full
+  context window instead. `sd-ship`'s refusal carries each failed
   reviewer's detail. A registry already in your home keeps its old value
   until edited.
 

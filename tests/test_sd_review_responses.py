@@ -121,8 +121,22 @@ class URLDiagnostics(ReviewFixture):
         self.assertIn(f"{outcome.diagnostic['reasoning_bytes']} bytes of reasoning (finish_reason length)", outcome.detail)
         self.assertNotIn("did not produce a usable answer", outcome.detail)
         self.assertNotIn("private reasoning marker", outcome.detail)
-        cut = self.run_response(self.envelope('{"findings": [', "length"))
+        body = self.envelope('{"findings": [', "length")
+        body["usage"] = {"prompt_tokens": 10, "completion_tokens": 16384, "total_tokens": 16394}
+        cut = self.run_response(body)
         self.assertIn("url hit max_tokens (16384) and its answer was cut off after 14 bytes", cut.detail)
+
+    def test_length_finish_below_max_tokens_does_not_blame_the_budget(self) -> None:
+        """`length` also means a full context window (DeepSeek's contract);
+        a count below the ceiling must not send the operator to raise it."""
+        for usage in ({"prompt_tokens": 10, "completion_tokens": 4096, "total_tokens": 4106}, None):
+            body = self.envelope("", "length", reasoning_content="thinking")
+            if usage:
+                body["usage"] = usage
+            outcome = self.run_response(body)
+            self.assertIn("url stopped on length below max_tokens (16384) and it sent no answer", outcome.detail)
+            self.assertIn("shorten the review input", outcome.detail)
+            self.assertNotIn("hit max_tokens", outcome.detail)
 
     def test_valid_findings_about_rate_limits_complete(self) -> None:
         outcome = self.run_response(self.envelope(json.dumps({"findings": [finding("high", "rate_limit defect")]})))
