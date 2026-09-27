@@ -10,6 +10,15 @@
   nothing. It now prints `not requested by sd-review` and whether `sd-ship`
   will request it on the pull request. `remote_reviews.copilot.automatic`
   keeps its meaning: what `sd-ship` will do, not what was done.
+- **`sd task status done --delivered-by` verifies a commit in another
+  checkout (sd:1569).** A task filed in one repository and fixed in another
+  could not record its delivery: the SHA was looked up only in the row's own
+  checkout, which "has no commit" for it. The workaround moved the row with
+  `--belongs-to` and lost where it was filed. `--delivered-in <path>` names
+  the registered checkout that carries the commit; the reachability and
+  `Delivers:` checks run there, the transition reads
+  `delivered at <sha> on <ref> in <checkout>`, and the row keeps its repo.
+  The "has no commit" refusal names the flag.
 
 - **`sd fleet stamp` lays the `unprotected` declaration only where GitHub
   says so (sd:1655).** The stamp assumed every owned auto repository was

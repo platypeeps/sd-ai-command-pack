@@ -196,6 +196,9 @@ way `sd work deliver` verifies one — reachable from the checkout's default
 branch and carrying a `Delivers: sd:42` trailer in the block
 `git interpret-trailers` reads — and is recorded on the transition, so the
 history answers "what delivered this" for a task and for a work item alike.
+A fix that landed in another registered checkout adds
+`--delivered-in <path>`: the commit is verified there, the transition names
+that checkout, and the task keeps the checkout it was filed in.
 A commit that states the trailer outside that block is refused by name rather
 than reported as carrying none. An item that belongs to no checkout has no
 default branch to verify a commit against, so `--delivered-by` on a
