@@ -4,6 +4,19 @@
 
 ### Changed
 
+- **`sd fleet stamp` lays the `unprotected` declaration only where GitHub
+  says so (sd:1655).** The stamp assumed every owned auto repository was
+  unprotected, so its dry run proposed `.github/sd-status.json` in fifteen
+  repositories whose `main` classic protection or a ruleset guards, some of
+  which had deleted the file on purpose. It now reads the default branch's
+  classic protection and its rulesets through `sd_protection`, the reader
+  `sd-ship` and `sd-status` share, and files one of `sd_db`'s three states.
+  `unprotected` -- classic 404 to an admin, or a plan without the feature,
+  and no active ruleset rule that gates a merge -- lays the entry.
+  `protected` says which mechanism guards the branch. `unknown` -- a 403,
+  a rate limit, no token, a failed rules read -- lays nothing; the plan's
+  `protection` field and the summary line name it.
+
 - **`sd-research-kit review` routes the second reader through `sd-review` (#1194).**
   The checklist printed a fixed `codex exec` line, so a research pass skipped
   the provider registry's reviewer order and stopped whenever Codex was down.

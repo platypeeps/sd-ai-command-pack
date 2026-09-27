@@ -76,8 +76,10 @@ else is. Its executables write these paths, and no others:
   its Dependabot guard as `setup-github` writes them,
   `.github/workflows/sd-check.yml` where no other workflow runs on
   `pull_request` (created only: an existing one is kept as written), the `unprotected` entry in `.github/sd-status.json`
-  (only where the remote says nobody else may push, and only where the file
-  declares no gap yet), and a `docs/dashboard/` line in
+  (only where the remote says nobody else may push, where GitHub reports the
+  default branch unprotected by both classic protection and rulesets, and only
+  where the file declares no gap yet; a protection read that fails is reported
+  `unknown` and lays nothing), and a `docs/dashboard/` line in
   `.gitignore`. **Tracked**, and written only on a feature branch. A repository
   whose `sd-status.json` entry or `CLAUDE.md` rule forbids CI gets no workflow.
   It also adds the template's new lines to that checkout's `CLAUDE.local.md`

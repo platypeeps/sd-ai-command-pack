@@ -10,7 +10,8 @@ things the repository itself carries (sd:1326, decision D5 on sd:1334):
   * a check workflow, because `every_check` refuses a head nothing validated
     and a repository with no `pull_request` workflow has nothing to run;
   * the `unprotected` entry in `.github/sd-status.json`, in the plain
-    "no protection by decision" form;
+    "no protection by decision" form, only where GitHub positively reports
+    the default branch unprotected (see `branch_protection`);
   * the `CLAUDE.local.md` block, rendered by `bin/sd_install.py`, and
     `docs/dashboard/` ignored and present for generated HTML.
 
@@ -34,6 +35,16 @@ and says the rest needs a worktree.
 Employer repositories -- any owner not in `OWNERS` -- are adapted, never
 changed in their settings: they keep their protection, so they get no
 `unprotected` declaration, and the dry run says so rather than going quiet.
+
+An owned repository gets the declaration only where GitHub says, live, that
+its default branch has no protection (sd:1655). Before, every owned auto repo
+was assumed unprotected, and the dry run proposed the declaration in
+repositories whose `main` a ruleset or classic protection guards -- some of
+which had deleted the file on purpose. Protection is read both ways GitHub
+offers it, through `sd_protection`, the reader `sd-ship` and `sd-status`
+share, and the answer takes one of the three states `sd_db.protection` files
+per repository: `protected`, `unprotected`, `unknown`. Only `unprotected`
+lays the entry; `unknown` never does, and the summary names it.
 """
 
 from __future__ import annotations
@@ -46,8 +57,10 @@ import pathlib
 import re
 import sys
 from typing import Any, Callable, Iterable
+from urllib.parse import quote
 
 import sd_lib
+import sd_protection
 import sd_setup_github
 import sd_setup_guard
 
@@ -139,6 +152,89 @@ jobs:
 """
 
 
+#: The states a repository's protection takes, as `sd_db.protection` names them.
+PROTECTED, UNPROTECTED, UNKNOWN = "protected", "unprotected", "unknown"
+
+#: The repository, as `gh api` fills it in from the checkout's origin.
+REPO_PREFIX = sd_lib.REPOSITORY_QUERY
+
+
+@dataclasses.dataclass(frozen=True)
+class Protection:
+    """What GitHub said about the default branch: a state, and why."""
+
+    state: str
+    reason: str
+
+
+def asked_fetch(ask: sd_lib.Asker, root: pathlib.Path) -> sd_protection.Fetch:
+    """`ask` in the `(status, body)` shape `sd_protection` reads.
+
+    `gh api` ends its error line with `(HTTP nnn)`; the status is lifted
+    back out so a 404 reads apart from a 403. An error with no status -- no
+    `gh`, no token, no network -- is status 0, which nothing reads as an
+    answer.
+    """
+
+    def answered(path: str) -> tuple[int, Any]:
+        payload, error = ask(path, root)
+        if not error:
+            return 200, payload
+        match = re.search(r"^(?:gh: )?(.*?)\s*\(HTTP (\d{3})\)$", error)
+        if match:
+            return int(match[2]), {"message": match[1]}
+        return 0, {"message": error}
+
+    return answered
+
+
+def _said(status: int, body: Any) -> str:
+    message = body.get("message") if isinstance(body, dict) else None
+    return f"{message or 'no message'}" + (f" (HTTP {status})" if status else "")
+
+
+def branch_protection(root: pathlib.Path, *, ask: sd_lib.Asker = sd_lib.gh_api) -> Protection:
+    """Whether the default branch of `root`'s origin is protected, read live.
+
+    `unprotected` only on a positive answer from both mechanisms: classic
+    protection answers 404 to an administrator (to anyone else GitHub answers
+    404 whether or not the branch is protected), or 403 saying the plan does
+    not offer it; and the branch's rules read as a whole, with no active
+    ruleset rule that gates a merge -- the same test `sd-ship`'s gate applies
+    before it honours the declaration. A classic object, or a gating
+    ruleset, is `protected`. Every other answer, a failed read included, is
+    `unknown`, never `unprotected`.
+    """
+    fetch = asked_fetch(ask, root)
+    status, repo = fetch(REPO_PREFIX)
+    branch = repo.get("default_branch") if status == 200 and isinstance(repo, dict) else None
+    if not isinstance(branch, str) or not branch:
+        return Protection(UNKNOWN, f"the remote did not name its default branch: {_said(status, repo)}")
+    rights = repo.get("permissions")
+    admin = isinstance(rights, dict) and rights.get("admin") is True
+
+    status, classic = fetch(f"{REPO_PREFIX}/branches/{quote(branch, safe='')}/protection")
+    if status == 200:
+        if isinstance(classic, dict):
+            return Protection(PROTECTED, f"GitHub reports {branch} protected by classic branch protection")
+        return Protection(UNKNOWN, f"classic protection on {branch} answered something other than an object")
+    plan_limited = status == 403 and sd_protection.plan_limited(_said(status, classic))
+    if status == 404 and not admin:
+        return Protection(UNKNOWN, f"classic protection on {branch} is hidden from a token without admin")
+    if status != 404 and not plan_limited:
+        return Protection(UNKNOWN, f"classic protection on {branch} could not be read: {_said(status, classic)}")
+
+    read = sd_protection.read_rulesets(fetch, REPO_PREFIX, branch)
+    if read["error"]:
+        return Protection(UNKNOWN, f"the rulesets on {branch} could not be read: {read['error']}")
+    synthesized = sd_protection.synthesize(read["rules"], read["rulesets"])
+    if synthesized is not None:
+        names = ", ".join(f"ruleset {entry['name']} (#{entry['id']})" for entry in synthesized["rulesets"])
+        return Protection(PROTECTED, f"GitHub reports {branch} protected by {names}")
+    classic_word = "the plan offers no classic protection" if plan_limited else "no classic protection"
+    return Protection(UNPROTECTED, f"{branch} has {classic_word} and no active ruleset gates a merge")
+
+
 class FleetRefusal(Exception):
     """The invocation cannot go ahead; the message names why."""
 
@@ -168,9 +264,11 @@ class Plan:
     changes: list[Change] = dataclasses.field(default_factory=list)
     adapted: list[str] = dataclasses.field(default_factory=list)
     refused: list[str] = dataclasses.field(default_factory=list)
+    #: `branch_protection`'s state, or "" where it was not asked.
+    protection: str = ""
 
     def as_json(self) -> dict[str, Any]:
-        return {"repo": self.root, "slug": self.slug, "base": self.base,
+        return {"repo": self.root, "slug": self.slug, "base": self.base, "protection": self.protection or None,
                 "changes": [{"path": c.path, "where": c.where,
                              "action": "create" if c.before is None else "update",
                              "diff": c.diff()} for c in self.changes],
@@ -334,7 +432,7 @@ def pull_request_workflows(tree: Tree, *, besides: Iterable[str]) -> list[str]:
 
 
 def tracked_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None], *, pin: str,
-                    owned: bool, self_install: bool) -> None:
+                    owned: bool, self_install: bool, protection: Protection | None = None) -> None:
     """The tracked half of a plan: route, guard, check, declaration, ignore line."""
     no_ci = forbids_ci(tree)
     if no_ci:
@@ -342,10 +440,17 @@ def tracked_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None],
     else:
         workflow_changes(plan, tree, propose, pin=pin, self_install=self_install)
 
-    # The declared gap, on owned repositories only, and only where none is declared.
+    # The declared gap, on owned repositories only, only where GitHub says
+    # the branch is unprotected, and only where none is declared.
     if not owned:
         plan.adapted.append(f"{STATUS_PATH}: not declared; {plan.slug or 'this remote'} is an employer's repository "
                             "or others may push to it, so its protection stands")
+    elif protection is None or protection.state == UNKNOWN:
+        why = protection.reason if protection else "it was not read"
+        plan.adapted.append(f"{STATUS_PATH}: not declared; protection is unknown ({why}), and only a positive "
+                            "\"unprotected\" from GitHub lays the declaration")
+    elif protection.state == PROTECTED:
+        plan.adapted.append(f"{STATUS_PATH}: not declared; {protection.reason}")
     else:
         try:
             after = status_text(tree.text_at(STATUS_PATH))
@@ -442,8 +547,10 @@ def plan_repo(root: pathlib.Path, remote: str | None, *, pin: str, tree: Tree,
         else:
             answer = sd_lib.remote_permits_full(root, ask=ask)
             if answer.full or sd_lib.coownership_only(answer):
+                protection = branch_protection(root, ask=ask) if owned and answer.full else None
+                plan.protection = protection.state if protection else ""
                 tracked_changes(plan, tree, propose, pin=pin, owned=owned and answer.full,
-                                self_install=self_install)
+                                self_install=self_install, protection=protection)
             else:
                 plan.refused.append(f"tracked files: {answer.reason}; the stamp writes only where the "
                                     "remote permits full mode, or where co-ownership alone says no")
@@ -536,12 +643,15 @@ def render_plans(plans: list[Plan], stream: Any, *, dry_run: bool) -> None:
         for line in plan.refused:
             write(f"   refused  {line}\n")
     changing = [plan for plan in plans if plan.changes]
+    unknown = sum(1 for plan in plans if plan.protection == UNKNOWN)
     write(f"\nsd fleet stamp{' --dry-run' if dry_run else ''}: {len(plans)} repositories, "
           f"{len(changing)} with changes, {len(plans) - len(changing)} unchanged, "
-          f"{sum(len(plan.refused) for plan in plans)} refused\n")
+          f"{sum(len(plan.refused) for plan in plans)} refused"
+          + (f", {unknown} protection unknown" if unknown else "") + "\n")
     for plan in plans:
         files = ", ".join(change.path for change in plan.changes) or "none"
         flag = f"  refused: {len(plan.refused)}" if plan.refused else ""
+        flag += f"  protection: {UNKNOWN}" if plan.protection == UNKNOWN else ""
         write(f"  {plan.slug or plan.root}: {files}{flag}\n")
     if dry_run:
         write("dry run: nothing was written\n")
