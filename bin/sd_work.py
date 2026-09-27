@@ -575,7 +575,7 @@ def _verified_tip(root: pathlib.Path) -> tuple[str, str]:
     return tip, f"{remote}/{default}"
 
 
-def _delivery_reason(row: Any, commit: str) -> str:
+def _delivery_reason(row: Any, commit: str, checkout: str | None = None) -> str:
     """The delivery sentence for `commit`, or a refusal naming what failed.
 
     `sd work deliver` is the only writer of delivery evidence and it refuses a
@@ -588,18 +588,26 @@ def _delivery_reason(row: Any, commit: str) -> str:
     A trailer git will not read back is named as that, and never as a missing
     one. `demoted_trailers` is the whole of sd:590 in this path: the blank line
     that costs an item its evidence looks exactly like an author who forgot.
+
+    `checkout` is where the commit lives when that is not the row's own
+    repository (sd:1569): an item filed in one checkout and fixed in another.
+    The row keeps the checkout it was filed in, and the sentence names the
+    other one, since `origin/main` alone would read as the row's branch.
     """
     if not _is_commit(commit):
         raise WorkRefusal("--delivered-by takes the full lowercase commit ID")
-    if not row["repo"]:
+    if not row["repo"] and not checkout:
         raise WorkRefusal(
             f"item {row['id']} belongs to no checkout, so no commit can be verified "
-            "for it; `sd task edit` with `--belongs-to` names one")
-    root = sd_lib.repo_disk(row["repo"])
+            "for it; `--delivered-in` names the checkout the commit landed in")
+    elsewhere = checkout if checkout and not sd_lib.same_repo(checkout, row["repo"]) else None
+    root = sd_lib.repo_disk(checkout or row["repo"])
     if not root.is_dir():
         raise WorkRefusal(f"{root} is unavailable; delivery cannot be verified")
     if sd_lib.git_output(["rev-parse", "--verify", f"{commit}^{{commit}}"], root) != commit:
-        raise WorkRefusal(f"{root} has no commit {commit}")
+        raise WorkRefusal(
+            f"{root} has no commit {commit}" + ("" if checkout else
+            "; a commit in another checkout is named with `--delivered-in <path>`"))
     tip, ref = _verified_tip(root)
     if sd_lib.git_output(["merge-base", "--is-ancestor", commit, tip], root) is None:
         raise WorkRefusal(f"{commit} is not reachable from {ref}")
@@ -615,7 +623,22 @@ def _delivery_reason(row: Any, commit: str) -> str:
     if not any(line.partition(":")[0] == "Delivers" and line.partition(":")[2].strip() == wanted
                for line in block):
         raise WorkRefusal(f"{commit} carries no `Delivers: {wanted}` trailer")
-    return DELIVERY_REASON.format(commit=commit, ref=ref)
+    reason = DELIVERY_REASON.format(commit=commit, ref=ref)
+    return f"{reason} in {elsewhere}" if elsewhere else reason
+
+
+def _delivered_in(connection: Any, value: str) -> str:
+    """The registered checkout `--delivered-in` names, as the `repo` table spells it.
+
+    Read the way `--belongs-to` reads a path, and held to a registered
+    repository here rather than by the library, because nothing is written
+    to the row's `repo`: the checkout only says where to verify the commit.
+    """
+    key = _belongs_to(value)
+    found = sd_lib.repo_row(connection, key)
+    if not found:
+        raise WorkRefusal(f"--delivered-in: {sd_lib.repo_disk(key)} is not a registered repository")
+    return str(found["path"])
 
 
 def _status_reason(workflow: Any, connection: Any, args: argparse.Namespace) -> str | None:
@@ -624,7 +647,11 @@ def _status_reason(workflow: Any, connection: Any, args: argparse.Namespace) -> 
     Read and refused before the write, because a status that landed and then
     failed to record what shipped it is the hole the flag exists to close.
     """
+    delivered_in = getattr(args, "delivered_in", None)
     if not args.delivered_by:
+        if delivered_in:
+            raise WorkRefusal("--delivered-in names where --delivered-by is verified; "
+                              "it takes no effect alone")
         return args.reason
     if args.status != "done":
         raise WorkRefusal("--delivered-by belongs on the move to done")
@@ -649,7 +676,8 @@ def _status_reason(workflow: Any, connection: Any, args: argparse.Namespace) -> 
         raise WorkRefusal(
             f"{kind} item {args.item} takes no --delivered-by; only a task's "
             "move to done records one")
-    return _delivery_reason(row, args.delivered_by)
+    checkout = _delivered_in(connection, delivered_in) if delivered_in else None
+    return _delivery_reason(row, args.delivered_by, checkout)
 
 
 def _change_status(workflow: Any, connection: Any, args: argparse.Namespace,
@@ -1061,6 +1089,11 @@ def register(groups: Any, store: Any) -> None:
     reason.add_argument("--delivered-by", metavar="SHA",
                         help="full SHA carrying `Delivers: sd:<id>`, verified against "
                              "the default branch and recorded on the transition")
+    # Not in the group: it qualifies `--delivered-by` rather than replacing it.
+    # Not `--repo`, for the reason `_belongs_to` gives.
+    status.add_argument("--delivered-in", metavar="PATH",
+                        help="registered checkout the --delivered-by commit landed in, "
+                             "when it is not the item's own; the item keeps its checkout")
     _output(status, "status", revision=True)
 
     note = verbs.add_parser("note", help="add an item note or follow-up")
