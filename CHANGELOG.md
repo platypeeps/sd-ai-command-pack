@@ -14,6 +14,12 @@
   stays behind, because the squash removes that sha; it reaches the squash as
   `Authored-with:`, as before.
 
+- **`sd-review` no longer says a Copilot review was requested (sd:1568).**
+  The `copilot` line printed `requested` whenever the policy selected the
+  change, including before any pull request existed; sd-review requests
+  nothing. It now prints `not requested by sd-review` and whether `sd-ship`
+  will request it on the pull request. `remote_reviews.copilot.automatic`
+  keeps its meaning: what `sd-ship` will do, not what was done.
 - **`sd task status done --delivered-by` verifies a commit in another
   checkout (sd:1569).** A task filed in one repository and fixed in another
   could not record its delivery: the SHA was looked up only in the row's own
