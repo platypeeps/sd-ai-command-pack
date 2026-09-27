@@ -33,9 +33,10 @@ everywhere; no environment variable can switch it on without the opt-in.
 
 Rules 1 to 4, 6 and 7 read the tree. Rules 5 and 8 need the pull request body,
 so they run only when `--pr-body` supplies one and report themselves as not run
-otherwise. Rule 8 also needs the changed paths: `--changed` lists them, and
-without it they are read from git against `origin/HEAD`, with renames split
-into their two paths so a file moved out of a scope class still names it.
+otherwise. Rule 8 also needs the changed paths: `--changed` lists them, one
+per line or NUL-terminated as `git diff -z` writes them, and without it they
+are read from git against `origin/HEAD`, with renames split into their two
+paths so a file moved out of a scope class still names it.
 `--body-only` runs rules 5 and 8 and nothing else, for a repository with no
 work root: the tree rules need one and say so, the body rules do not.
 
@@ -1739,6 +1740,13 @@ def body_arguments(args: argparse.Namespace) -> tuple[str | None, list[str] | No
         listed = args.changed.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as error:
         return None, None, f"cannot read --changed: {error}"
+    # A NUL in the list means `git diff -z` wrote it, and NUL is the only
+    # separator then. A newline listing quotes a non-ASCII path, which
+    # matched no scope glob and passed without its line (sd:1440); the
+    # `-z` listing is the one CI writes, and splitting it on newlines would
+    # read a path with a newline in it as two.
+    if "\0" in listed:
+        return body, [name for name in listed.split("\0") if name], ""
     return body, [line.strip() for line in listed.splitlines() if line.strip()], ""
 
 
@@ -1767,7 +1775,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--changed",
         type=pathlib.Path,
-        help="the pull request's changed paths, one per line, for rule 8; "
+        help="the pull request's changed paths, one per line or NUL-terminated "
+        "as `git diff -z` writes them, for rule 8; "
         "without it they are read from git against origin/HEAD",
     )
     parser.add_argument(

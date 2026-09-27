@@ -400,13 +400,14 @@ make setup   # once
 make check   # test + lint + audit + docs-lint
 ```
 
-CI is two gating jobs in `tests.yml`, named here by the status context GitHub
-emits for each (the matrix job's context carries its matrix values), plus the
-advisory `route` job in `sd-review-route.yml`:
+CI is two gating jobs in `tests.yml` and one in `pr-body-lint.yml`, named here
+by the status context GitHub emits for each (the matrix job's context carries
+its matrix values), plus the advisory `route` job in `sd-review-route.yml`:
 
 | Context | What it runs |
 |---|---|
 | `unittest (ubuntu-latest, 3.14)` | The suite on Ubuntu, Python 3.14, plus the installer coverage gate |
+| `body-lint` | `sd-docs-lint --body-only` over the pull request's body and changed paths; it also runs when the body is edited, so a body fixed after a red run is graded again |
 | `lint` | Ruff over `bin/` and `tests/` and mypy over `bin/` (the path lists are `LINT_RUFF_PATHS` and `LINT_MYPY_PATHS` in the `Makefile`, read rather than restated), `sd-docs-lint` over this checkout's `docs/`, then Bandit over `bin/`, zizmor over the workflows, and ShellCheck over the tracked shell |
 
 `sd-status` compares the live protection object with the contexts the
@@ -414,7 +415,7 @@ workflow files produce, not with this table, so a row here can go stale
 without anything saying so; the workflow files are the inventory.
 
 `main` carries classic branch protection: pull requests with no required
-approvals, the strict `lint` and `unittest` checks above, and enforce_admins.
+approvals, the strict `lint`, `unittest` and `body-lint` checks above, and enforce_admins.
 `.github/sd-status.json` accepts one gap, `reviews`: the approval count is 0
 because the sole maintainer cannot approve their own pull request. `sd-ship merge`
 reads the protection object before it reads the pull request's checks and
