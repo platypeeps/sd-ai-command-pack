@@ -204,7 +204,7 @@ class SharedReview:
         the cap refusal below has to come first: a pass past the cap is
         refused before anything is dispatched or even asked, which is what
         `test_the_pass_after_the_cap_refuses_and_an_explicit_request_still_admits_it`
-        pins by making every `subprocess.run` raise.
+        pins by making the binding read itself raise, not every subprocess.
         """
         if not hasattr(self, "_binding_moved"):
             self._binding_moved = bool(self.history.native(self.state)) and self.state.get("binding") != self.runtime.binding(self.root)

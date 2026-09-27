@@ -313,6 +313,38 @@ class DeliveryReasonTests(unittest.TestCase):
         with self.assertRaisesRegex(sd_work.WorkRefusal, "belongs to no checkout"):
             sd_work._delivery_reason({"id": 7, "repo": None}, self.delivered)
 
+    def test_a_commit_in_another_checkout_is_verified_there(self) -> None:
+        """sd:1569. #1304 was filed in one repository and fixed in another,
+        and the row's own checkout "has no commit" for the SHA that fixed it.
+        Named with `checkout`, the SHA is verified in that repository and the
+        sentence says where, because `origin/main` alone would name the
+        row's branch, not the one that carries the commit."""
+        elsewhere = tempfile.TemporaryDirectory()
+        self.addCleanup(elsewhere.cleanup)
+        other = pathlib.Path(elsewhere.name).resolve()
+        subprocess.run(["git", "-C", str(other), "init", "-q", "-b", "main"],
+                       check=True, timeout=30)
+        row = {"id": 7, "repo": str(other)}
+        with self.assertRaisesRegex(sd_work.WorkRefusal, "--delivered-in"):
+            sd_work._delivery_reason(row, self.delivered)
+        self.assertEqual(
+            f"delivered at {self.delivered} on refs/heads/main in {self.root}",
+            sd_work._delivery_reason(row, self.delivered, str(self.root)),
+        )
+        # The row's own checkout, named explicitly, is the same sentence as
+        # naming none: nothing downstream reads a second spelling for it.
+        self.assertEqual(
+            f"delivered at {self.delivered} on refs/heads/main",
+            sd_work._delivery_reason(self.row, self.delivered, str(self.root)),
+        )
+
+    def test_a_task_with_no_checkout_is_verified_where_it_was_delivered(self) -> None:
+        self.assertEqual(
+            f"delivered at {self.delivered} on refs/heads/main in {self.root}",
+            sd_work._delivery_reason({"id": 7, "repo": None}, self.delivered,
+                                     str(self.root)),
+        )
+
 
 class TaskDeliveryCLITests(unittest.TestCase):
     """The whole of sd:591, through the real `sd` binary on a scratch database.
@@ -414,6 +446,72 @@ class TaskDeliveryCLITests(unittest.TestCase):
         self.assertIn("carries no `Delivers:", refused.stderr)
         readback = json.loads(case.call("store", "item", item, "--json", cwd=root).stdout)
         self.assertEqual("planning", readback["item"]["status"])
+
+    def second_repository(self, case, name: str, register: bool = True) -> pathlib.Path:
+        """Another checkout on the same scratch database, registered or not."""
+        import sd_db
+        import sd_db.repos
+
+        root = (case.home / name).resolve()
+        root.mkdir()
+        for command in (("init", "-q", "-b", "main"), ("config", "user.name", "Fixture"),
+                        ("config", "user.email", "fixture@example.invalid")):
+            subprocess.run(["git", "-C", str(root), *command], check=True, timeout=30)
+        if register:
+            with sd_db.connect(sd_db.default_path(case.home), write=True) as connection:
+                sd_db.repos.upsert_repo(connection, sd_lib.stored_repo(root),
+                                        status_source="row")
+        return root
+
+    def test_a_fix_shipped_in_another_repository_closes_the_task_where_it_was_filed(
+            self) -> None:
+        """sd:1569, the #1304 shape: filed in one checkout, delivered by a
+        commit in another. Without `--delivered-in` the row's checkout has no
+        such commit; with it the commit is verified there, the task closes,
+        and the row keeps the checkout it was filed in."""
+        case = self.host()
+        filed = self.repository(case)
+        shipped = self.second_repository(case, "pack")
+        state = json.loads(case.call("task", "add", "Fix the thing", "--json",
+                                     cwd=filed).stdout)
+        item = state["item"]["id"]
+        sha = self.commit(shipped, f"fix: the thing\n\nDelivers: sd:{item}\n", "one\n")
+
+        refused = case.call("task", "status", item, "done", "--delivered-by", sha,
+                            code=1, cwd=shipped)
+        self.assertIn(f"has no commit {sha}", refused.stderr)
+        self.assertIn("--delivered-in", refused.stderr)
+
+        done = json.loads(case.call("task", "status", item, "done", "--delivered-by", sha,
+                                    "--delivered-in", str(shipped), "--json",
+                                    cwd=filed).stdout)
+        self.assertEqual("done", done["item"]["status"])
+        self.assertEqual(state["item"]["repo"], done["item"]["repo"])
+        self.assertIn(f"delivered at {sha} on refs/heads/main in "
+                      f"{sd_lib.stored_repo(shipped)}", self.statuses(case, item)[-1])
+
+    def test_delivered_in_names_only_a_registered_checkout(self) -> None:
+        case = self.host()
+        filed = self.repository(case)
+        stray = self.second_repository(case, "stray", register=False)
+        item = json.loads(case.call("task", "add", "Fix the thing", "--json",
+                                    cwd=filed).stdout)["item"]["id"]
+        sha = self.commit(stray, f"fix: the thing\n\nDelivers: sd:{item}\n", "one\n")
+
+        refused = case.call("task", "status", item, "done", "--delivered-by", sha,
+                            "--delivered-in", str(stray), code=1, cwd=filed)
+        self.assertIn("is not a registered repository", refused.stderr)
+        readback = json.loads(case.call("store", "item", item, "--json", cwd=filed).stdout)
+        self.assertEqual("planning", readback["item"]["status"])
+
+    def test_delivered_in_needs_delivered_by(self) -> None:
+        case = self.host()
+        filed = self.repository(case)
+        item = json.loads(case.call("task", "add", "Fix the thing", "--json",
+                                    cwd=filed).stdout)["item"]["id"]
+        refused = case.call("task", "status", item, "done", "--delivered-in", str(filed),
+                            code=1, cwd=filed)
+        self.assertIn("--delivered-in names where --delivered-by", refused.stderr)
 
     def test_work_deliver_on_a_task_names_the_flag_that_records_it(self) -> None:
         """The refusal sd:591 was filed against, with the remedy in it.
