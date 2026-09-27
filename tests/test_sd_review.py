@@ -2222,7 +2222,7 @@ class CopilotPolicyTests(ReviewFixture):
         explained = sd_review.review(root, namespace(explain=True), runner, self.environment(), self.chatgpt_home())
         out = io.StringIO()
         sd_review.render(explained, out)
-        self.assertIn("copilot     never (machine config); tier deep, not requested", out.getvalue())
+        self.assertIn("copilot     never (machine config); tier deep; not requested by sd-review, sd-ship will not request it", out.getvalue())
 
     def test_a_repository_file_without_the_key_inherits_the_machine(self) -> None:
         self.machine("never")
@@ -2245,6 +2245,12 @@ class CopilotPolicyTests(ReviewFixture):
         out = io.StringIO()
         sd_review.render(explained, out)
         self.assertIn("copilot     always (machine config)", out.getvalue())
+        # sd:1568: sd-review requests nothing, so `automatic` must not print
+        # as "requested"; before any pull request exists that claimed a
+        # review nobody asked for.
+        self.assertIn("tier standard; not requested by sd-review, sd-ship will request it"
+                      " on the pull request", out.getvalue())
+        self.assertNotIn(", requested", out.getvalue())
 
     def test_a_malformed_machine_value_stops_the_run(self) -> None:
         self.machine("sometimes")
