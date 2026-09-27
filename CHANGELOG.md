@@ -14,6 +14,20 @@
   stays behind, because the squash removes that sha; it reaches the squash as
   `Authored-with:`, as before.
 
+- **The shipped `url` reviewers get 65536 tokens, and a stop at the ceiling
+  names itself (sd:1805).** `kimi`, `minimax` and `baseten` carried
+  `max_tokens: 16384`. On mezmo-world-simulator#215 `kimi-k3` spent all
+  16384 reasoning over a 35k-token prompt and sent no answer, which
+  `sd-review` reported as `kimi did not produce a usable answer (exit 0)` and
+  `sd-ship` as `0/1 completed`. The three entries now carry 65536, and the
+  ledger's bound moves with it: about $1.08 for `kimi` and $0.30 for
+  `baseten` on that prompt. A `finish_reason: length` stop now reads
+  `kimi hit max_tokens (16384) and it sent no answer`, with completion tokens
+  and reasoning bytes; a `length` stop below the ceiling names a full
+  context window instead. `sd-ship`'s refusal carries each failed
+  reviewer's detail. A registry already in your home keeps its old value
+  until edited.
+
 - **`sd-review` no longer says a Copilot review was requested (sd:1568).**
   The `copilot` line printed `requested` whenever the policy selected the
   change, including before any pull request existed; sd-review requests
