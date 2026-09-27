@@ -55,23 +55,39 @@ def git(root: Path, *args: str) -> str:
     return run(root, ["git", *args])
 
 
-def current_runs(runs: list[dict]) -> list[dict]:
-    """The runs that decide each check: the newest per name and app (sd:1610).
+def current_runs(runs: list[dict], workflows: Callable[[], dict[int, int]]) -> list[dict]:
+    """The runs that decide each check: the newest per workflow run's producer (sd:1610).
 
     `check-runs?filter=latest` keeps one run per check suite, and a
-    close/reopen or a body edit starts a second suite on the same head, so the
-    old run and the new one of one check both come back. The newest by
-    `started_at`, then `id`, decides, as the newest status per context does.
-    A run without `started_at` counts as newest, and runs tied on both keys
-    are all kept, so an unordered answer can refuse but never pass.
+    close/reopen or a body edit starts a second suite of the same workflow on
+    the same head, so the old run and the new one of one check both come
+    back. Only a later suite of the same workflow supersedes: runs group by
+    app, workflow and name, and the newest by `started_at`, then `id`,
+    decides, as the newest status per context does. Two workflows can each
+    have a job named `lint`, and an external app can post one name from
+    independent suites, so a run whose suite `workflows()` does not map to a
+    workflow supersedes nothing and is judged on its own.
+
+    `workflows()` maps a check-suite id to its workflow id. It is called only
+    when a name repeats within an app, so a head with one run per check costs
+    no extra request. A run without `started_at` counts as newest, and runs
+    tied on both keys are all kept, so an unordered answer can refuse but
+    never pass.
     """
     def recency(entry: dict) -> tuple:
         started = entry.get("started_at")
         return (not started, str(started or ""), entry.get("id") if isinstance(entry.get("id"), int) else 0)
 
+    def producer(entry: dict) -> tuple:
+        return ((entry.get("app") or {}).get("id"), entry.get("name"))
+
+    names = [producer(entry) for entry in runs]
+    suites = workflows() if len(set(names)) < len(names) else {}
     groups: dict[tuple, list[dict]] = {}
-    for entry in runs:
-        groups.setdefault((entry.get("name"), (entry.get("app") or {}).get("id")), []).append(entry)
+    for index, entry in enumerate(runs):
+        suite = (entry.get("check_suite") or {}).get("id")
+        workflow = suites.get(suite) if type(suite) is int else None
+        groups.setdefault(producer(entry) + ((workflow,) if workflow is not None else ("run", index)), []).append(entry)
     current: list[dict] = []
     for group in groups.values():
         newest = max(recency(entry) for entry in group)
@@ -492,7 +508,7 @@ class GitHub:
             raise Refusal(f"nothing validated {head}: no check run and no status exists for it", code="ci_missing",
                           next_action="Run the repository's checks for this exact head, then retry merge.", boundary="ci", state="retryable_failure")
         stray = [entry for entry in runs if entry.get("head_sha") != head]
-        for entry in stray + current_runs(runs):
+        for entry in stray + current_runs(runs, lambda: self.suite_workflows(head)):
             if (entry.get("head_sha") != head or entry.get("status") != "completed"
                     or entry.get("conclusion") not in ("success", "neutral", "skipped")):
                 raise Refusal(f"CI is not passing on {head}: {entry.get('name')}", code="ci_not_passing",
@@ -511,6 +527,19 @@ class GitHub:
                        for run in pull_request_runs):
                 raise Refusal(f"workflow {name} ({path}) has no successful pull_request run on {head}", code="ci_missing",
                               next_action="Run the workflow for this exact head, then retry merge.", boundary="ci", state="retryable_failure")
+
+    def suite_workflows(self, head: str) -> dict[int, int]:
+        """Which workflow each check suite at `head` belongs to, from one listing.
+
+        Every workflow run names its `check_suite_id` and `workflow_id`, so
+        `actions/runs?head_sha=` maps every Actions suite on the head at once,
+        with no request per check. `details_url` is not parsed: its shape is
+        undocumented, and an external app sets it to anything. A suite missing
+        here, or a record without both ids, is one no workflow is known to own.
+        """
+        return {run["check_suite_id"]: run["workflow_id"]
+                for run in self.pages(f"{self.prefix}/actions/runs?head_sha={head}", "workflow_runs")
+                if isinstance(run, dict) and type(run.get("check_suite_id")) is int and type(run.get("workflow_id")) is int}
 
     def commits_behind(self, base: str, head: str) -> int | None:
         """How many commits of `base` are missing from `head`, GitHub's count."""
@@ -541,6 +570,13 @@ class GitHub:
         runs = self.pages(f"{self.prefix}/commits/{head}/check-runs?filter=latest", "check_runs")
         statuses = self.pages(f"{self.prefix}/commits/{head}/statuses")
         required = protection["required_status_checks"]
+        known: list[dict[int, int]] = []
+
+        def workflows_once() -> dict[int, int]:
+            if not known:
+                known.append(self.suite_workflows(head))
+            return known[0]
+
         bindings = {entry["context"]: entry.get("app_id", -1) for entry in required.get("checks", [])}
         for context in required.get("contexts", []):
             bindings.setdefault(context, -1)
@@ -552,7 +588,7 @@ class GitHub:
             # a check decides (sd:1610): a successful old run cannot mask a
             # failed or pending current one, nor an old failure a current pass.
             # A run at another head refuses whatever its age.
-            judged = [entry for entry in matching if entry.get("head_sha") != head] + current_runs(matching)
+            judged = [entry for entry in matching if entry.get("head_sha") != head] + current_runs(matching, workflows_once)
             if any(entry.get("head_sha") != head or entry.get("status") != "completed"
                    or entry.get("conclusion") not in ("success", "neutral", "skipped") for entry in judged):
                 raise Refusal(f"required CI is not passing on {head}: {context}", code="ci_not_passing",

@@ -1953,36 +1953,58 @@ roles:
             self.merge()
         self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
 
+    #: Two check suites on one head, and the workflow run each belongs to.
+    OLDER_RUN = {"id": 36248240346, "started_at": "2026-09-27T10:00:00Z", "check_suite": {"id": 501}}
+    NEWER_RUN = {"id": 36249144474, "started_at": "2026-09-27T10:05:00Z", "check_suite": {"id": 502}}
+
+    @staticmethod
+    def suites(head: str, *workflows) -> list[dict]:
+        """`actions/runs` records mapping suites 501, 502, ... to `workflows`;
+        `None` leaves that record's `workflow_id` out."""
+        return [{"check_suite_id": 501 + index, "head_sha": head, "event": "pull_request", "status": "completed",
+                 "conclusion": "success", **({} if workflow is None else {"workflow_id": workflow})}
+                for index, workflow in enumerate(workflows)]
+
     def test_only_the_newest_run_of_a_required_check_decides(self):
         """sd:1610. A close/reopen or a body edit starts a second check suite
-        on the same head, and `filter=latest` keeps one run per suite, so the
-        old run and the new one of the same check both come back (#1207,
-        #1221). The newest by `started_at`, then `id`, decides, in whichever
-        order GitHub lists them: a newer failure or a newer pending run still
-        refuses, and an older failure no longer blocks a newer pass. A run at
-        another head refuses however old it is."""
+        of the same workflow on the same head, and `filter=latest` keeps one
+        run per suite, so the old run and the new one of the same check both
+        come back (#1207, #1221). Within one workflow the newest by
+        `started_at`, then `id`, decides, in whichever order GitHub lists
+        them: a newer failure or a newer pending run still refuses, and an
+        older failure no longer blocks a newer pass. A run at another head
+        refuses however old it is. Supersession needs the same workflow: two
+        workflows with a job of one name, suites no Actions run owns (an
+        external app), or a run whose workflow is unknown are all judged run
+        by run, so an older failure there still refuses."""
         self.prepare()
         pull = self.remote.pull(1)
+        head = pull.head_sha(self.remote)
         valid = dict(pull.checks[0])
-        older = {"id": 36248240346, "started_at": "2026-09-27T10:00:00Z"}
-        newer = {"id": 36249144474, "started_at": "2026-09-27T10:05:00Z"}
-        same_start = {"id": 36249144475, "started_at": older["started_at"]}
+        older, newer = self.OLDER_RUN, self.NEWER_RUN
+        same_start = {**newer, "started_at": older["started_at"]}
         failed = {"conclusion": "failure"}
         pending = {"status": "in_progress", "conclusion": None}
-        for label, old, new, pattern in (
-            ("newer failure", {}, failed, "required CI is not passing"),
-            ("newer pending", {}, pending, "required CI is not passing"),
-            ("same start, higher id fails", {}, failed, "required CI is not passing"),
-            ("older failure at another head", {**failed, "head_sha": "0" * 40}, {}, "required CI is not passing"),
+        one_workflow = self.suites(head, 11, 11)
+        for label, old, new, suites in (
+            ("newer failure", {}, failed, one_workflow),
+            ("newer pending", {}, pending, one_workflow),
+            ("same start, higher id fails", {}, failed, one_workflow),
+            ("older failure at another head", {**failed, "head_sha": "0" * 40}, {}, one_workflow),
+            ("older failure in another workflow", failed, {}, self.suites(head, 11, 12)),
+            ("older failure in suites no workflow owns", failed, {}, []),
+            ("older failure with an unknown workflow", failed, {}, self.suites(head, 11, None)),
         ):
             stamp = same_start if label.startswith("same start") else newer
+            self.double.workflow_runs = suites
             for order in (1, -1):
                 with self.subTest(label=label, order=order):
                     pull.checks = [{**valid, **older, **old}, {**valid, **stamp, **new}][::order]
-                    with self.assertRaisesRegex(ship.Refusal, pattern) as caught:
+                    with self.assertRaisesRegex(ship.Refusal, "required CI is not passing") as caught:
                         self.merge()
                     self.assertEqual(caught.exception.workflow["blocker"]["code"], "ci_not_passing")
         self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
+        self.double.workflow_runs = one_workflow
         pull.checks = [{**valid, **newer}, {**valid, **older, **failed}]
         self.assertEqual(self.merge()["phase"], "merged")
 
@@ -4221,25 +4243,30 @@ class DeclaredGapCase(unittest.TestCase):
 
     def test_only_the_newest_run_of_each_check_decides_under_the_gap(self):
         """sd:1610 on the declared-gap path: two suites on one head report two
-        runs of `route`. The newest decides; a newer failure or pending run
-        refuses, and an older failure does not block a newer pass unless it
-        ran at another head."""
-        older = {"id": 108587626402, "started_at": "2026-09-27T10:00:00Z"}
-        newer = {"id": 108587965767, "started_at": "2026-09-27T10:05:00Z"}
-        for label, old, new, puts in (
-            ("newer failure", {}, {"conclusion": "failure"}, 0),
-            ("newer pending", {}, {"status": "in_progress", "conclusion": None}, 0),
-            ("older failure at another head", {"conclusion": "failure", "head_sha": "0" * 40}, {}, 0),
-            ("older failure", {"conclusion": "failure"}, {}, 1),
+        runs of `route`. Within one workflow the newest decides; a newer
+        failure or pending run refuses, and an older failure does not block a
+        newer pass unless it ran at another head. Across workflows, in suites
+        no workflow owns, or with an unknown workflow, every run is judged."""
+        older, newer = ShipCase.OLDER_RUN, ShipCase.NEWER_RUN
+        failed = {"conclusion": "failure"}
+        for label, old, new, workflows, puts in (
+            ("newer failure", {}, failed, (11, 11), 0),
+            ("newer pending", {}, {"status": "in_progress", "conclusion": None}, (11, 11), 0),
+            ("older failure at another head", {**failed, "head_sha": "0" * 40}, {}, (11, 11), 0),
+            ("older failure in another workflow", failed, {}, (11, 12), 0),
+            ("older failure in suites no workflow owns", failed, {}, (), 0),
+            ("older failure with an unknown workflow", failed, {}, (11, None), 0),
+            ("older failure", failed, {}, (11, 11), 1),
         ):
             with self.subTest(label=label):
                 self.restart()
                 self.declare()
                 self.green()
+                self.double.workflow_runs += ShipCase.suites(self.head(), *workflows)
                 pull = next(iter(self.remote.pull_requests.values()))
+                pull.checks = [check for check in pull.checks if check["name"] != "route"]
                 pull.checks.append({**self.check("route"), **newer, **new})
                 pull.checks.append({**self.check("route"), **older, **old})
-                pull.checks = [check for check in pull.checks if check.get("id") or check["name"] != "route"]
                 if puts:
                     self.merge()
                     self.assertEqual(self.puts(), 1)

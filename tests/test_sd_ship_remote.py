@@ -855,33 +855,58 @@ class ClassicAndRulesetCase(unittest.TestCase):
 # --------------------------------------------------------------------------
 
 class CurrentRunsTest(unittest.TestCase):
-    """`current_runs` keeps the newest run per check name and app."""
+    """`current_runs` keeps the newest run per workflow, app and check name.
+
+    Suite `n` belongs to workflow `WORKFLOWS[n]`; a suite missing there is
+    one no Actions run owns, whose runs are all judged.
+    """
+
+    WORKFLOWS = {1: 11, 2: 11, 3: 12}
 
     @staticmethod
-    def run_of(run_id: int, started: str | None, *, name: str = "lint", app: int = 7) -> dict:
-        return {"id": run_id, "name": name, "app": {"id": app}, "started_at": started}
+    def run_of(run_id: int, started: str | None, *, suite: int = 1, name: str = "lint", app: int = 7) -> dict:
+        return {"id": run_id, "name": name, "app": {"id": app}, "started_at": started, "check_suite": {"id": suite}}
 
-    def ids(self, runs: list[dict]) -> list[int]:
-        return sorted(entry["id"] for entry in sd_ship_remote.current_runs(runs))
+    def ids(self, runs: list[dict], workflows: dict | None = None) -> list[int]:
+        mapping = self.WORKFLOWS if workflows is None else workflows
+        return sorted(entry["id"] for entry in sd_ship_remote.current_runs(runs, lambda: mapping))
 
     def test_the_later_start_wins_in_either_order(self) -> None:
-        older, newer = self.run_of(2, "2026-09-27T10:00:00Z"), self.run_of(1, "2026-09-27T10:05:00Z")
+        older, newer = self.run_of(2, "2026-09-27T10:00:00Z"), self.run_of(1, "2026-09-27T10:05:00Z", suite=2)
         self.assertEqual(self.ids([older, newer]), [1])
         self.assertEqual(self.ids([newer, older]), [1])
 
     def test_the_higher_id_breaks_a_tie_on_start(self) -> None:
-        self.assertEqual(self.ids([self.run_of(9, "2026-09-27T10:00:00Z"), self.run_of(3, "2026-09-27T10:00:00Z")]), [9])
+        self.assertEqual(self.ids([self.run_of(9, "2026-09-27T10:00:00Z"),
+                                   self.run_of(3, "2026-09-27T10:00:00Z", suite=2)]), [9])
 
     def test_a_run_that_has_not_started_counts_as_newest(self) -> None:
-        self.assertEqual(self.ids([self.run_of(5, "2026-09-27T10:00:00Z"), self.run_of(4, None)]), [4])
+        self.assertEqual(self.ids([self.run_of(5, "2026-09-27T10:00:00Z"), self.run_of(4, None, suite=2)]), [4])
 
     def test_runs_tied_on_both_keys_are_all_kept(self) -> None:
-        self.assertEqual(self.ids([self.run_of(6, "2026-09-27T10:00:00Z"), self.run_of(6, "2026-09-27T10:00:00Z")]), [6, 6])
+        self.assertEqual(self.ids([self.run_of(6, "2026-09-27T10:00:00Z"),
+                                   self.run_of(6, "2026-09-27T10:00:00Z", suite=2)]), [6, 6])
 
     def test_each_name_and_app_keeps_its_own_newest(self) -> None:
         runs = [self.run_of(1, "2026-09-27T10:00:00Z"), self.run_of(2, "2026-09-27T10:00:00Z", app=8),
                 self.run_of(3, "2026-09-27T10:00:00Z", name="test")]
         self.assertEqual(self.ids(runs), [1, 2, 3])
+
+    def test_another_workflow_does_not_supersede(self) -> None:
+        self.assertEqual(self.ids([self.run_of(1, "2026-09-27T10:00:00Z"),
+                                   self.run_of(2, "2026-09-27T10:05:00Z", suite=3)]), [1, 2])
+
+    def test_a_suite_no_workflow_owns_is_judged_run_by_run(self) -> None:
+        runs = [self.run_of(1, "2026-09-27T10:00:00Z", suite=8), self.run_of(2, "2026-09-27T10:05:00Z", suite=9)]
+        self.assertEqual(self.ids(runs), [1, 2])
+        runs = [self.run_of(1, "2026-09-27T10:00:00Z"), {**self.run_of(2, "2026-09-27T10:05:00Z"), "check_suite": None}]
+        self.assertEqual(self.ids(runs), [1, 2])
+
+    def test_the_workflow_lookup_runs_only_when_a_check_repeats(self) -> None:
+        def refuse() -> dict:
+            raise AssertionError("looked up workflows for runs that do not repeat")
+        runs = [self.run_of(1, "2026-09-27T10:00:00Z"), self.run_of(2, "2026-09-27T10:00:00Z", name="test")]
+        self.assertEqual(sorted(entry["id"] for entry in sd_ship_remote.current_runs(runs, refuse)), [1, 2])
 
 if __name__ == "__main__":
     unittest.main()
