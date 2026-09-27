@@ -2189,7 +2189,7 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
             write(f"\nno provider registry at {result['registry']}, and no reviewer resolves"
                   " here; the provider lines are not reported.\n")
         else:
-            write(f"\nreviewer chain ({result['registry']}):\n")
+            write(f"\nreviewer chain ({sd_registry.chain_heading(result.get('order_source') or '', result['registry'])}):\n")
             if result["registry_refusal"]:
                 write(f"  {result['registry_refusal']}\n")
             if result["consent_refusal"]:
