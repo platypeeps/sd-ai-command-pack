@@ -436,7 +436,8 @@ class SharedReview:
             self.save(reviewed_head=None)
             raise
         if result.returncode:
-            raise Refusal(f"local review {report.get('status')}: {report.get('completed_reviews', 0)}/{report.get('requested_reviews', 0)} completed; see item ship receipt")
+            raise Refusal(f"local review {report.get('status')}: {report.get('completed_reviews', 0)}/{report.get('requested_reviews', 0)} completed"
+                          f"{failed_outcomes(report)}; see item ship receipt")
         self.check_review(head)
         if self.runtime.current_head(self.root) != head:
             raise Refusal("HEAD or checkout changed during local checks and review")
@@ -463,6 +464,23 @@ def gate_diagnostics(check: dict, limit: int) -> list[dict]:
              "reason": str(record.get("reason") or "")[-limit:],
              "stdout": str(record.get("stdout") or "")[-limit:], "stderr": str(record.get("stderr") or "")[-limit:]}
             for record in records[:len(sd_lib.CHECK_NAMES)] if isinstance(record, dict)]
+
+
+#: Statuses of a reviewer that answered usably; any other outcome names its cause.
+ANSWERED = ("clean", "findings")
+
+
+def failed_outcomes(report: dict, limit: int = 600) -> str:
+    """The failed reviewers' own details, so a refusal names why (sd:1805).
+
+    "0/1 completed" alone sent the operator to the receipt to learn that kimi
+    spent its whole max_tokens reasoning. sd-review writes each detail from
+    counts and its own sentences, never model text; bounded all the same.
+    """
+    details = [str(row["detail"]) for row in report.get("outcomes") or []
+               if isinstance(row, dict) and row.get("status") not in ANSWERED and row.get("detail")]
+    text = "; ".join(details)
+    return f" ({text[:limit]}{'...' if len(text) > limit else ''})" if text else ""
 
 
 def unreviewed_gate_failure(report: dict, exit_code: int) -> bool:

@@ -1318,7 +1318,7 @@ def run_provider(
             "completion" if diagnostic["category"] in ("response_limit", "truncated", "incomplete_finish") else
             "api" if diagnostic["category"] == "api_error" else "envelope" if not text else
             "transport" if result.exit_code else "schema" if parsed is None or parsed.error else None)
-        return outcome._replace(diagnostic=diagnostic)
+        return outcome._replace(diagnostic=diagnostic, detail=sd_registry.stop_detail(provider, diagnostic, outcome.detail))
 
     if provider.reader not in ("claude-json", "codex-json", "agy-json", "opencode-json"):
         # Keep a missing implementation nonpassing if READERS ever gains a name.
