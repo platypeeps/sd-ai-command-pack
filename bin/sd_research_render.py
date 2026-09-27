@@ -72,7 +72,13 @@ except ImportError:
 
 from sd_lib import GIT_TIMEOUT_SECONDS
 from sd_research_fonts import FONTS_CSS
-from sd_research_publish import publish, repo_home
+from sd_research_publish import (
+    automatic_render,
+    conf_trusted,
+    publish,
+    repo_home,
+    trust_conf,
+)
 from sd_research_tokens import TOKENS_CSS
 
 CSS = TOKENS_CSS
@@ -228,7 +234,19 @@ def main():
     # nosec B102 - research.conf.py is a file in the repo being rendered, at the
     # same trust level as this script, and the format needs execution: at least
     # one live config builds its DOCS list with a loop.
-    exec(compile(open(conf).read(), conf, "exec"), ns)  # nosec B102
+    with open(conf, "rb") as handle:
+        source = handle.read()
+    # A render nobody typed executes only a config a render by hand recorded,
+    # checked on the bytes it is about to execute, and records nothing: only
+    # the operator's own render says the config has been read (sd:1376).
+    trigger = automatic_render()
+    if trigger and not conf_trusted(Path(repo), source):
+        sys.exit("%s: no render by hand has executed this research.conf.py, and "
+                 "a render executes it; read it, then run `sd-research-kit "
+                 "render`. docs/dashboard/ is stale until then" % trigger)
+    exec(compile(source, conf, "exec"), ns)  # nosec B102
+    if not trigger:
+        trust_conf(Path(repo), source)
     # The fallback badge comes from the repository's name, not the checkout's:
     # a worktree is called after its branch, and its name is nobody's project.
     project = ns.get("PROJECT", repo_home(Path(repo)).name.split("-")[0].upper())
