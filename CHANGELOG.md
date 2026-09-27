@@ -4,6 +4,19 @@
 
 ### Changed
 
+- **The shipped `url` reviewers get 65536 tokens, and a stop at the ceiling
+  names itself (sd:1805).** `kimi`, `minimax` and `baseten` carried
+  `max_tokens: 16384`. On mezmo-world-simulator#215 `kimi-k3` spent all
+  16384 reasoning over a 35k-token prompt and sent no answer, which
+  `sd-review` reported as `kimi did not produce a usable answer (exit 0)` and
+  `sd-ship` as `0/1 completed`. The three entries now carry 65536, and the
+  ledger's bound moves with it: about $1.08 for `kimi` and $0.30 for
+  `baseten` on that prompt. A `finish_reason: length` stop now reads
+  `kimi hit max_tokens (16384) and it sent no answer`, with completion tokens
+  and reasoning bytes, and `sd-ship`'s refusal carries each failed
+  reviewer's detail. A registry already in your home keeps its old value
+  until edited.
+
 - **`sd fleet stamp` lays the `unprotected` declaration only where GitHub
   says so (sd:1655).** The stamp assumed every owned auto repository was
   unprotected, so its dry run proposed `.github/sd-status.json` in fifteen

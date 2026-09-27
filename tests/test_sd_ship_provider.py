@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import importlib
 import json
 import pathlib
 import subprocess
@@ -16,6 +17,8 @@ from tests import test_sd_ship as fixture
 from tests import test_sd_ship_no_item_publication as publication
 
 ship = fixture.ship
+# After the fixture import, which puts `bin/` on the path.
+sd_ship_review = importlib.import_module("sd_ship_review")
 CAP = fixture.CAP
 HEAD, BASE = "a" * 40, "b" * 40
 
@@ -204,6 +207,25 @@ class ProviderSelection(unittest.TestCase):
                 self.assertEqual(argv[argv.index("--base") + 1], HEAD)
                 self.assertEqual("--provider" in argv, choice is not None)
                 self.assertEqual(review.state["passes"][-1]["report"]["reviewed_by"], [choice or "automatic"])
+
+    def test_failed_review_refusal_names_each_failed_reviewers_cause(self):
+        """sd:1805: "0/1 completed" alone hid that kimi spent max_tokens reasoning."""
+        cause = "kimi hit max_tokens (16384) and it sent no answer: 16384 completion tokens"
+        failed = {"status": "unavailable", "completed_reviews": 0, "reviewed_by": [],
+                  "outcomes": [{"backend": "kimi", "status": "unavailable", "detail": cause}]}
+        review, _process = self.context("kimi", report_changes=failed)
+        with self.assertRaises(ship.Refusal) as refused:
+            review.review(HEAD)
+        self.assertIn(f"0/1 completed ({cause}); see item ship receipt", str(refused.exception))
+
+    def test_failed_outcome_details_skip_answered_reviewers_and_stay_bounded(self):
+        report = {"outcomes": [{"backend": "codex", "status": "clean", "detail": "0 finding(s)"},
+                               {"backend": "kimi", "status": "unavailable", "detail": "x" * 900},
+                               "not a row"]}
+        text = sd_ship_review.failed_outcomes(report)
+        self.assertNotIn("finding(s)", text)
+        self.assertEqual(len(text), len(" (") + 600 + len("...)"))
+        self.assertEqual(sd_ship_review.failed_outcomes({"outcomes": []}), "")
 
     def test_failed_retry_and_additional_request_preserve_selectors_and_budget(self):
         incomplete = {"status": "unavailable", "completed_reviews": 0, "reviewed_by": []}

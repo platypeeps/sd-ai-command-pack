@@ -1518,6 +1518,25 @@ def url_response(body: str) -> tuple[str, dict[str, Any]]:
     return text, diagnostic
 
 
+def stop_detail(provider: Provider, diagnostic: Mapping[str, Any], detail: str) -> str:
+    """Name a `finish_reason: length` stop as the ceiling it hit (sd:1805).
+
+    A reasoning model can spend the whole `max_tokens` thinking and send no
+    answer; "did not produce a usable answer" hid that on
+    mezmo-world-simulator#215. Any other outcome keeps `detail`. Counts
+    only: model text never enters the sentence.
+    """
+    if diagnostic.get("category") != "truncated":
+        return detail
+    used = diagnostic.get("sanitized_response", {}).get("usage", {}).get("completion_tokens")
+    content, reasoning = diagnostic.get("content_bytes", 0), diagnostic.get("reasoning_bytes", 0)
+    what = f"its answer was cut off after {content} bytes" if content else "it sent no answer"
+    spent = f"{used} completion tokens" if used is not None else "no completion count"
+    return (f"{provider.name} hit max_tokens ({provider.max_tokens}) and {what}: {spent}, "
+            f"{reasoning} bytes of reasoning (finish_reason length); raise max_tokens for "
+            f"{provider.name} in the provider registry or lower its reasoning")
+
+
 def url_answer(body: str) -> str:
     """Return final answer text, or an empty string for unreadable output.
 

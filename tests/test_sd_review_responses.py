@@ -63,7 +63,7 @@ class URLDiagnostics(ReviewFixture):
         body = payload if isinstance(payload, str) else json.dumps(payload)
         client = FakeClient(default=(exit_code, body, stderr, True))
         provider = sd_review.sd_registry.Provider(name="url", vendor="fixture", bill="free",
-            url="https://fixture.example/v1", env=("OWN_KEY",))
+            url="https://fixture.example/v1", env=("OWN_KEY",), max_tokens=16384)
         return sd_review.run_provider(provider, self.tmp,
             sd_review.Subject("worktree", "HEAD", "worktree", (), 0, ""),
             "private-prompt-marker", FakeRunner(), {"OWN_KEY": "credential-marker"}, 7,
@@ -109,6 +109,20 @@ class URLDiagnostics(ReviewFixture):
             self.assertEqual(outcome.diagnostic["category"], "truncated")
             self.assertEqual(outcome.diagnostic["schema"], "invalid")
             self.assertEqual(bool(outcome.findings), bool(rows))
+
+    def test_length_finish_names_the_max_tokens_it_hit(self) -> None:
+        """sd:1805: kimi-k3 on mezmo-world-simulator#215 reasoned through all
+        16384 tokens and sent no content; the detail must say so, not shrug."""
+        body = self.envelope("", "length", reasoning_content="private reasoning marker " * 40)
+        body["usage"] = {"prompt_tokens": 34946, "completion_tokens": 16384, "total_tokens": 51330}
+        outcome = self.run_response(body)
+        self.assertEqual(outcome.status, sd_review.UNAVAILABLE)
+        self.assertIn("url hit max_tokens (16384) and it sent no answer: 16384 completion tokens", outcome.detail)
+        self.assertIn(f"{outcome.diagnostic['reasoning_bytes']} bytes of reasoning (finish_reason length)", outcome.detail)
+        self.assertNotIn("did not produce a usable answer", outcome.detail)
+        self.assertNotIn("private reasoning marker", outcome.detail)
+        cut = self.run_response(self.envelope('{"findings": [', "length"))
+        self.assertIn("url hit max_tokens (16384) and its answer was cut off after 14 bytes", cut.detail)
 
     def test_valid_findings_about_rate_limits_complete(self) -> None:
         outcome = self.run_response(self.envelope(json.dumps({"findings": [finding("high", "rate_limit defect")]})))
