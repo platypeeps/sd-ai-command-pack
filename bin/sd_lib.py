@@ -332,25 +332,27 @@ class DirectoryAction(argparse.Action):
         setattr(namespace, self.dest, values)
 
 
-def enter_leading_directory(argv: list[str], *, error: type[Exception]) -> list[str]:
-    """Honour a leading `-C DIR` in a raw argv and return the rest.
+def enter_directory_from_argv(argv: list[str], *, error: type[Exception]) -> list[str]:
+    """Honour `-C DIR` in a raw argv, wherever and however spelled, and return the rest.
 
     For a command that dispatches a subcommand before its argparse parser
     sees the line (`sd-review setup-github`): the directory changes first,
-    so the dispatch runs where the line says. Anything else is returned as
-    it came, and a `-C` that is not leading is the parser's to see.
+    so the dispatch runs where the line says. Directory selection is parsed
+    once, here, by argparse itself, so `-C DIR`, `-CDIR` and a second one in
+    either spelling all meet `DirectoryAction` (sd:1910, pass 3: a hand-rolled
+    token check let `-C /approved -C/unrelated` through to the main parser).
+    A missing operand, a duplicate and a bad directory all raise `error`.
     """
-    if argv[:1] != ["-C"]:
-        return argv
-    if len(argv) < 2:
-        # This runs before argparse, so its required-value check is ours to
-        # make: a bare `-C` must not fall through to a default run in cwd.
-        raise error("-C: expected a directory")
-    if "-C" in argv[2:]:
-        # The parser behind this would see the second one as the first.
-        raise error("-C given twice")
-    enter_directory(argv[1], error=error)
-    return argv[2:]
+
+    class Parser(argparse.ArgumentParser):
+        def error(self, message: str) -> None:  # type: ignore[override]
+            raise error(message)
+
+    parser = Parser(add_help=False, allow_abbrev=False)
+    parser.add_argument("-C", dest="chdir", action=DirectoryAction)
+    selected, rest = parser.parse_known_args(argv)
+    enter_directory(selected.chdir, error=error)
+    return rest
 
 
 def main_worktree_root(root: pathlib.Path) -> pathlib.Path:

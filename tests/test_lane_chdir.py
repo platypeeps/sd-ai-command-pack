@@ -92,12 +92,14 @@ class LaneChdirTests(unittest.TestCase):
         # match on the command line, so `-C /approved -C /unrelated` must not
         # select /unrelated. argparse would let the last value win; the shared
         # action refuses the second, and sd-review's pre-parser refuses it too.
+        # Pass 3: the attached spelling `-C/unrelated` is a second `-C` too.
         for command, arguments in {**LANE_COMMANDS, "sd-ship": ["body", "--item", "1", "--json"]}.items():
-            with self.subTest(command=command):
-                result = run(command, "-C", str(REPO_ROOT), "-C", str(self.empty), *arguments, cwd=self.outside)
-                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-                self.assertIn("-C given twice", result.stderr)
-                self.assertNotIn("is not inside a git repository", result.stderr)
+            for second in (["-C", str(self.empty)], [f"-C{self.empty}"]):
+                with self.subTest(command=command, second=second):
+                    result = run(command, "-C", str(REPO_ROOT), *second, *arguments, cwd=self.outside)
+                    self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                    self.assertIn("-C given twice", result.stderr)
+                    self.assertNotIn("is not inside a git repository", result.stderr)
 
     def test_a_parent_component_is_refused(self) -> None:
         # The same prefix match: `-C /approved/../unrelated` keeps the approved
@@ -119,7 +121,7 @@ class LaneChdirTests(unittest.TestCase):
             with self.subTest(arguments=arguments):
                 result = run("sd-review", *arguments, cwd=self.outside)
                 self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-                self.assertRegex(result.stderr, r"-C(: expected a directory| setup-github: not a directory)")
+                self.assertRegex(result.stderr, r"-C(: expected a directory|: expected one argument| setup-github: not a directory)")
                 self.assertNotIn("is not inside a git repository", result.stderr)
 
     def test_sd_review_setup_github_honours_a_leading_c(self) -> None:

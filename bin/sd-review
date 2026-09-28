@@ -2358,10 +2358,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     raw = list(sys.argv[1:] if argv is None else argv)
     # One subcommand, dispatched before the main parser: `add_subparsers` would
-    # have made every invocation positional-first and broken `--scope pr`. A
-    # leading `-C DIR` comes first, so the seam runs where the line says (sd:1910).
+    # have made every invocation positional-first and broken `--scope pr`. `-C`
+    # is parsed once, here, for both paths, so the seam runs where the line says (sd:1910).
     try:
-        raw = sd_lib.enter_leading_directory(raw, error=UsageError)
+        raw = sd_lib.enter_directory_from_argv(raw, error=UsageError)
     except UsageError as error:
         print(f"sd-review: error: {error}", file=sys.stderr)
         return EXIT_USAGE
@@ -2375,7 +2375,6 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.timeout <= 0:
             raise UsageError("--timeout takes a positive number of seconds")
-        sd_lib.enter_directory(args.chdir, error=UsageError)
         root = sd_lib.repo_root(None)
         if root is None:
             raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")

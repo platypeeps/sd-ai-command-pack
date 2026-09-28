@@ -40,10 +40,14 @@ BIN = REPO_ROOT / "bin"
 # standing in. `--work-dir` and friends are repo-relative and stay.
 REPO_PATH_OPTIONS = frozenset({"--repo", "--repo-path", "--root", "--checkout", "--directory"})
 
-# The lane commands R10-D6 names: the only files under `bin/` that may declare
-# `-C`. A sixth is an offender; a long spelling is one of the banned above.
+# The lane commands R10-D6 names: the only commands under `bin/` that may
+# declare `-C`. A sixth is an offender; a long spelling is one of the banned
+# above. `sd_lib.py` declares it once more, in `enter_directory_from_argv`,
+# the pre-parser a lane command uses when it dispatches a subcommand before
+# its own parser runs; the library is named here so the scan stays whole.
 DIRECTORY_OPTION = "-C"
 LANE_COMMANDS = frozenset({"sd-ship", "sd-check", "sd-review", "sd-review-ack", "sd-pr-state"})
+DIRECTORY_OPTION_DECLARERS = LANE_COMMANDS | {"sd_lib.py"}
 
 
 def scanned_files() -> list[pathlib.Path]:
@@ -109,7 +113,7 @@ class InventoryTests(unittest.TestCase):
             options = option_strings(tree)
             for option in sorted(options & REPO_PATH_OPTIONS):
                 offenders.append(f"{path.name} takes {option}")
-            if DIRECTORY_OPTION in options and path.name not in LANE_COMMANDS:
+            if DIRECTORY_OPTION in options and path.name not in DIRECTORY_OPTION_DECLARERS:
                 offenders.append(f"{path.name} takes {DIRECTORY_OPTION}, which only the lane commands may")
         self.assertEqual(offenders, [], "R10-D6: sd-* commands resolve the repo from cwd only")
 

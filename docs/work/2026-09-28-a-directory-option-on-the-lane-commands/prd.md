@@ -117,3 +117,15 @@ shows the need.
   hole spelled as a path. Tests for both on all five commands. The
   rejection of the design point stands as recorded under pass 1; the
   operator decided it, and the prefix rule now holds.
+- 2026-09-28 pass 3 (codex, challenge): the high finding held once more, with
+  one more concrete hole: sd-review's hand-rolled pre-parser checked for the
+  token `-C` and let the attached spelling `-C/unrelated` through to the main
+  parser, whose `DirectoryAction` then saw it as the first `-C`. Fixed: the
+  pre-parser is `sd_lib.enter_directory_from_argv` (was
+  `enter_leading_directory`), argparse itself with `DirectoryAction`, so `-C
+  DIR`, `-CDIR` and a second one in either spelling all meet the same refusal;
+  sd-review parses `-C` once, there, for both the `setup-github` and the
+  default path. The attached second spelling is tested on all five commands.
+  `tests/test_verb_inventory.py` names `sd_lib.py` as the one library file
+  that may declare `-C`, for that helper. The design rejection stands as
+  recorded under pass 1.
