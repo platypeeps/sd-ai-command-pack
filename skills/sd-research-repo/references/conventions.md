@@ -357,7 +357,9 @@ checkout owns it and that the note is not the place to edit.
 tab, and the tab lists and serves **everything it finds there**. That folder is
 gitignored — it is regenerated whenever git moves the tree — and `render` adds
 the ignore entry itself. Registration is one line in the dashboard's
-`documents.conf`, `label|<key>|<label>`, written once and idempotent. It
+`documents.conf`, `label|<key>|<label>`, written once and idempotent. The file
+is `project-dashboard/documents.conf` under `$SYSTEM_TOOLS_CONFIG`, which
+defaults to `$XDG_CONFIG_HOME/system`, else `~/.config/system`. It
 carries no path: the dashboard enumerates `docs/dashboard/` from disk, so a
 path in the row would be the default location written down a second time and
 would go stale the moment the repo moved. The dashboard reads that file and
