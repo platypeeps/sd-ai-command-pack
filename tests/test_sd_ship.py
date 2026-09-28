@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import atexit
+import contextlib
 import hashlib
 import importlib.machinery
 import importlib.util
+import io
 import json
 import os
 import pathlib
@@ -2475,6 +2477,55 @@ roles:
         self.assertIn("another ship operation owns this repository", str(refused.exception))
         self.assertIn(f"pid {child.pid}", str(refused.exception))
         self.assertIn("sd-ship prepare --item 1872", str(refused.exception))
+
+    def test_prepare_wait_refuses_at_its_deadline_and_names_the_holder(self):
+        """sd:1937. `--wait 5` against a held lock refuses after about 5 s, naming the holder."""
+        from sd_db.workflow import WorkflowError
+        child = self.hold_ship_lock(self.operation().repository)
+        started = time.monotonic()
+        with patch.object(ship.Ship, "prepare", side_effect=AssertionError("ran under a held lock")):
+            with self.assertRaises(WorkflowError) as refused:
+                ship.dispatch(self.root, self.connection, self.database, self.args("prepare", "--wait", "5"), receipts, False)
+        elapsed = time.monotonic() - started
+        self.assertGreaterEqual(elapsed, 5)
+        self.assertLess(elapsed, 5 + receipts.WAIT_POLL_SECONDS + 2)
+        self.assertIn(f"pid {child.pid}", str(refused.exception))
+        self.assertIn("waited 5s", str(refused.exception))
+
+    def test_prepare_wait_runs_once_the_holder_releases(self):
+        """sd:1937. With the lock released at 2 s, `--wait 5` runs the prepare once."""
+        self.hold_ship_lock(self.operation().repository, seconds=2)
+        started = time.monotonic()
+        with patch.object(ship.Ship, "prepare", return_value={"ok": True}) as prepare:
+            ship.dispatch(self.root, self.connection, self.database, self.args("prepare", "--wait", "5"), receipts, False)
+        self.assertEqual(prepare.call_count, 1)
+        self.assertLess(time.monotonic() - started, 2 + receipts.WAIT_POLL_SECONDS + 2)
+
+    def test_without_wait_a_held_lock_refuses_at_once(self):
+        self.hold_ship_lock(self.operation().repository)
+        started = time.monotonic()
+        with patch.object(ship.Ship, "merge", side_effect=AssertionError("ran under a held lock")):
+            with self.assertRaisesRegex(Exception, "another ship operation owns this repository"):
+                ship.dispatch(self.root, self.connection, self.database,
+                              self.args("merge", "--manual", "--expected-head", "0" * 40), receipts, False)
+        self.assertLess(time.monotonic() - started, 1)
+
+    def test_wait_takes_finite_non_negative_seconds_on_prepare_and_merge(self):
+        for command in ("prepare", "merge"):
+            extra = ("--expected-head", "0" * 40) if command == "merge" else ()
+            self.assertEqual(self.args(command, *extra, "--wait", "2.5").lock_wait, 2.5)
+            self.assertEqual(self.args(command, *extra).lock_wait, 0)
+            for bad in ("-1", "inf", "nan"):
+                with self.subTest(command=command, value=bad), contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit):
+                        self.args(command, *extra, "--wait", bad)
+
+    def test_an_older_library_locks_without_options_and_refuses_a_wait(self):
+        """An sd_db without the holder record still serializes; it cannot wait, so --wait refuses."""
+        older = SimpleNamespace(repository_lock=receipts.repository_lock)
+        self.assertEqual(ship.lock_options(self.args("prepare"), older), {})
+        with self.assertRaisesRegex(ship.Refusal, "--wait needs an sd_db whose ship lock can wait"):
+            ship.lock_options(self.args("prepare", "--wait", "5"), older)
 
     def test_ending_assignment_keeps_work_and_manual_merge_controls_guarded(self):
         from sd_db.progress import cancel_work, work_controls
