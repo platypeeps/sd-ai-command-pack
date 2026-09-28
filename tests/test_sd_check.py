@@ -125,6 +125,52 @@ class ExitCodeTests(CheckFixture):
                 self.assertNotIn("Traceback", completed.stderr)
 
 
+class HiddenBuildFileTests(CheckFixture):
+    """sd:1894: the local block replaces build-file detection whole, so say what it hides."""
+
+    def package(self, root: pathlib.Path, *names: str) -> None:
+        scripts = {name: "exit 0" for name in names}
+        (root / "package.json").write_text(json.dumps({"scripts": scripts}), encoding="utf-8")
+
+    def test_a_block_without_check_names_the_check_script_it_hides(self) -> None:
+        root = self.make_repo()
+        self.package(root, "check", "test", "lint")
+        self.declare(root, test=f"{PY} -c pass", lint=f"{PY} -c pass")
+        result = self.run_json(root)
+        self.assertEqual(result["source"], "local-block")
+        [warning] = result["warnings"]
+        self.assertIn("package.json defines check (npm run check)", warning)
+        self.assertIn("warning: CLAUDE.local.md replaces package.json detection", self.run_check(root).stdout)
+
+    def test_a_block_that_omits_a_makefile_target_names_it(self) -> None:
+        root = self.make_repo()
+        (root / "Makefile").write_text("test:\n\t@true\nlint:\n\t@true\n", encoding="utf-8")
+        self.declare(root, test=f"{PY} -c pass")
+        [warning] = self.run_json(root)["warnings"]
+        self.assertIn("Makefile defines lint (make lint)", warning)
+
+    def test_a_block_that_declares_check_hides_nothing(self) -> None:
+        root = self.make_repo()
+        self.package(root, "check", "test", "lint")
+        self.declare(root, check=f"{PY} -c pass")
+        self.assertEqual(self.run_json(root)["warnings"], [])
+
+    def test_no_build_file_or_an_unreadable_one_warns_about_nothing(self) -> None:
+        bare, broken = self.make_repo("bare"), self.make_repo("broken")
+        (broken / "package.json").write_text("{not json", encoding="utf-8")
+        for root in (bare, broken):
+            with self.subTest(root=root.name):
+                self.declare(root, test=f"{PY} -c pass")
+                result = self.run_json(root)
+                self.assertEqual((result["_exit"], result["warnings"]), (0, []))
+
+    def test_a_build_file_answering_alone_carries_no_warning(self) -> None:
+        root = self.make_repo()
+        (root / "Makefile").write_text("check:\n\t@true\n", encoding="utf-8")
+        result = self.run_json(root)
+        self.assertEqual((result["source"], result["warnings"]), ("makefile", []))
+
+
 class JsonShapeTests(CheckFixture):
     def test_one_object_naming_every_check(self) -> None:
         root = self.make_repo()
