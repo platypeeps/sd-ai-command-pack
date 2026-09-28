@@ -27,6 +27,18 @@
 
 ### Changed
 
+- **The first `sd-ship prepare` of an item names its claim (sd:1928).**
+  Associate-only was the silent default, so a forgotten `--deliver` merged
+  sd:1910 with `Item:` alone and left its row planning with the code on
+  main. A first item prepare now refuses unless it gets `--deliver` (the
+  item's last pull request) or the new `--associate-only` (an earlier one).
+  A reprepare keeps the stored claim. The owned runner, which names its
+  `--database`, keeps the old default. `--deliver` now also takes a task or
+  followup, with no acceptance file: its squash carries `Delivers:` and the
+  verified merge moves it to done with the sentence
+  `sd task status N done --delivered-by` records, so a task merge no longer
+  needs a hand close.
+
 - **The lane commands take `-C <dir>` (sd:1910).** `sd-ship`, `sd-check`,
   `sd-review`, `sd-review-ack` and `sd-pr-state` accept a global `-C <dir>`
   before any other argument, as `git -C` does: the command changes its
