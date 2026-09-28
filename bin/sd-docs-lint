@@ -77,7 +77,8 @@ DECISION_HEADING_RE = re.compile(r"^#{1,6}\s+decision\b", re.IGNORECASE)
 # open marker is a line that starts with the word, optionally as a list item.
 BLOCKING_RE = re.compile(r"^\s*(?:[-*]\s+)?BLOCKING\b")
 MARKDOWN_LINK_RE = re.compile(r"\]\(([^)\s]+)\)")
-WORK_LINE_RE = re.compile(r"^Work:[ \t]*(?P<value>.*?)[ \t]*$", re.MULTILINE)
+# Rule 5's key is one of the lines `sd-ship` owns, spelled once in sd_lib.
+WORK_LINE_RE = re.compile(r"^" + re.escape(sd_lib.WORK_TRAILER) + r"[ \t]*(?P<value>.*?)[ \t]*$", re.MULTILINE)
 
 WORKABLE_STATUSES = ("ready", "in_progress")
 DECISION_STATUSES = ("proposed", "accepted", "superseded", "rejected")

@@ -2352,6 +2352,18 @@ CLOSES_TRAILER = "Closes:"
 #: parent is known; this trailer lets every git reader hold what reconcile
 #: holds (sd:1089).
 REVIEWED_BASE_TRAILER = "Reviewed-base:"
+#: `Item:` ties a merge to an item without closing it; `Work:` ties a pull
+#: request to one, and rule 5 of `sd-docs-lint` counts it in the body.
+ITEM_TRAILER = "Item:"
+WORK_TRAILER = "Work:"
+#: The trailer lines `sd-ship` owns in a pull-request body (sd:1870). It
+#: writes `Work:` into the body it publishes and `Item:`, `Delivers:` and the
+#: authorship lines into the squash message; `Closes:` rides a later merge or
+#: an empty commit, never a body `sd-ship` publishes. `sd_ship_body` reads a
+#: supplied body against this tuple, and the template test holds the
+#: template's closing block to it.
+OWNED_TRAILERS = (ITEM_TRAILER, WORK_TRAILER, DELIVERS_TRAILER, CLOSES_TRAILER,
+                  AUTHORED_TRAILER, ATTRIBUTES_TRAILER)
 
 #: `no` is a positive finding from history the checkout actually has;
 #: `unknown` is what a checkout that cannot see far enough says instead.
@@ -2592,7 +2604,7 @@ def shared_tree_artifacts(root: pathlib.Path) -> tuple[str, ...]:
 #: The trailer names whose demotion costs something. `Delivers:` and `Closes:`
 #: close an item; `Item:` associates a merge with one. A line naming any of the
 #: three outside the block git reads is a statement the tools cannot see.
-STATED_TRAILERS = (DELIVERS_TRAILER, CLOSES_TRAILER, "Item:")
+STATED_TRAILERS = (DELIVERS_TRAILER, CLOSES_TRAILER, ITEM_TRAILER)
 
 #: A trailer as it has to be written to count: at column zero, a name, a colon,
 #: and a value. Indented and backticked forms are prose *about* a trailer --

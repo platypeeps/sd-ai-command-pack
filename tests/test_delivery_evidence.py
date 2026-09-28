@@ -144,13 +144,15 @@ class TrailerBlockTests(unittest.TestCase):
     def test_the_pull_request_template_ends_in_the_trailer_block(self) -> None:
         """The template is the shape every hand-written body starts from, so
         it is pinned here: its last paragraph is trailers and nothing else,
-        `Delivers:` is among them, and the attribution line sits above it."""
+        none of them a line `sd-ship` owns (sd:1870), and the attribution line
+        sits above it."""
         template = TEMPLATE.read_text(encoding="utf-8")
         block = sd_lib.trailer_block(template).splitlines()
         self.assertTrue(block)
         for line in block:
             self.assertRegex(line, r"^[A-Za-z-]+: \S")
-        self.assertIn("Delivers:", {line.partition(" ")[0] for line in block})
+        self.assertIn("Refs:", {line.partition(" ")[0] for line in block})
+        self.assertFalse({line.partition(" ")[0] for line in block} & set(sd_lib.OWNED_TRAILERS))
         self.assertLess(template.index("Generated with"), template.index(block[0]))
         self.assertEqual((), sd_lib.demoted_trailers(template))
 

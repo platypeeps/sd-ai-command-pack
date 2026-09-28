@@ -4,6 +4,23 @@
 
 ### Changed
 
+- **`sd-ship` accepts the body it published (sd:1870).** `prepare` appended
+  `Work: sd:<item>` to the body and then refused a `--body-file` carrying it,
+  so the live body of #1236 and #1238 fed back was refused. `sd_ship_body`
+  now strips an owned line that says what `sd-ship` would write -- `Item:` or
+  `Work:` naming the item, `Delivers:` under `--deliver`, `Authored-with:` a
+  registry resolves -- and lists it in the result's `normalized`. Another
+  item, an unclaimed `Delivers:`, `Attributes:` and `Closes:` refuse, each by
+  line number with the expected value. The no-item path shares the parser
+  and still refuses every owned line. Without `--body-file`, `prepare` reads
+  an open pull request's live body, so an edit made on GitHub is no longer
+  lost; `body_source` in the result names `file`, `live_pr`, `state` or
+  `default`. The new `sd-ship body --item N [--body-file F]` prints the body
+  `prepare` would publish and its body lint, touching no sd state and no
+  GitHub API. `sd_lib.OWNED_TRAILERS` is the one list of the owned keys;
+  rule 5 of `sd-docs-lint` reads `WORK_TRAILER` from it. The pull-request
+  template drops its `Item:` and `Delivers:` lines and keeps `Refs:`.
+
 - **CI pins `sd_db` by its release tag, `sd-db-v0.1.0` (sd:1867, system
   sd:1854).** `tests/test_system_pin.py` now accepts a full commit or an
   `sd-db-v*` tag, the pattern the installer already prefers; branches,
