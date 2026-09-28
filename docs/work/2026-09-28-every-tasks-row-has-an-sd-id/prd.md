@@ -24,11 +24,11 @@ log, an HOA runbook) that the dashboard pastes in as if it were a task.
    followup through `sd task add --kind followup --ref <source>:<id>`, and an
    HOA followup does the same from its runbook step.
 3. `--ref` is new on `sd task add`: it records the source id on the task, and a
-   second add with the same reference updates the existing task while that
-   task is open. Once the task is done or cancelled, the same reference
-   creates a new task that names the earlier one, so a job that fails again
-   next week raises new work instead of touching a resolved row. A job
-   therefore references its run (`job:<name>:<run>`), not its lifetime.
+   second add with the same reference updates the existing task whatever its
+   status, so a retried delivery of the same occurrence never reopens work
+   the operator resolved or cancelled. A reference names one occurrence, a
+   job by its run (`job:<name>:<run>`), not its lifetime: the next failing
+   run carries a new reference and raises a new task.
 4. `sd today --json` and `sd task show` print the reference, so the row can be
    traced back to the log or document that raised it.
 5. The mockup's two id-less rows become rows with ids, the "no sd id" reasons
@@ -40,8 +40,8 @@ log, an HOA runbook) that the dashboard pastes in as if it were a task.
 - [ ] `sd task add --help` lists `--ref`.
 - [ ] `sd task add "x" --kind followup --ref job:repo-sync:42` twice leaves
       one task, and `sd task show` on it prints the reference.
-- [ ] After that task is done, the same add creates a second task that names
-      the first.
+- [ ] After that task is done, the same add leaves it done and creates
+      nothing; `--ref job:repo-sync:43` creates a second task.
 - [ ] Every row in `sd today --json`'s task list carries an `id`.
 - [ ] `designs/v2/commands.html` shows no declaration with the reason "this row
       has no sd id".
@@ -58,5 +58,8 @@ log, an HOA runbook) that the dashboard pastes in as if it were a task.
 - 2026-09-28 created
 - 2026-09-28 review pass 1 (codex, advisory, addressed): a reference that
   deduplicates for a job's lifetime would send a later failure to a done row.
-  Requirement 3 now deduplicates among open tasks only and keys a job by its
-  run; a criterion covers the second failure.
+  Requirement 3 now keys a job by its run; a criterion covers the second failure.
+- 2026-09-28 review pass 2 (codex, advisory, addressed): with run-scoped
+  references, deduplicating only among open tasks let a retried delivery of a
+  resolved run raise new work. Requirement 3 now deduplicates across every
+  status; the criterion shows run 43 as the new task.
