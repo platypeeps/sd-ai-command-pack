@@ -68,6 +68,21 @@ PYTHON ?= $(shell if [ -x "$(BREW_PYTHON)" ]; then printf '%s' "$(BREW_PYTHON)";
 # One shell for the whole decision, run once per make (`:=`), not once per
 # expansion. A checkout with a real `.venv` pays one `test -x` and one
 # `test -L`, and reaches neither git nor `cmp`.
+#
+# None of it applies to the local gate (sd:1918). `bin/sd_local_gate.py` runs
+# `sd-check` in a fresh detached worktree with `SD_LOCAL_GATE=1` exported, and
+# there a borrowed environment is exactly what must not pass: it is the
+# operator's, and its `sd_db` is whatever `make setup` last took from the
+# system checkout's HEAD rather than the ref CI pins. So gate mode never
+# borrows. VENV is `.venv` in the worktree, whatever the caller exported, and
+# every lane first runs `gate-env`, which builds it pinned as `tests.yml` pins
+# CI. The variable is not passed on to recipes: the suite runs `make` in its
+# own fixtures, and those must see the ordinary rules.
+ifeq ($(SD_LOCAL_GATE),1)
+override VENV := .venv
+GATE_ENV := gate-env
+unexport SD_LOCAL_GATE
+else
 BORROWED := $(shell \
   venv=.venv; name=.venv; record=; strict=; \
   if [ -x .venv/bin/python ]; then \
@@ -100,6 +115,7 @@ BORROWED := $(shell \
 # `setup` is the remedy and must stay runnable in a worktree that is refused,
 # and SETUP_VENV below reaches `$(VENV)` only when VENV was set deliberately.
 VENV ?= $(if $(filter refusing-to-borrow:,$(firstword $(BORROWED))),$(error $(BORROWED)),$(BORROWED))
+endif
 VENV_PYTHON = $(VENV)/bin/python
 VENV_BIN = $(VENV)/bin
 # Borrowing is for commands that *consume* an environment. `setup` creates one,
@@ -110,7 +126,7 @@ VENV_BIN = $(VENV)/bin
 SETUP_VENV = $(if $(filter command line environment,$(origin VENV)),$(VENV),.venv)
 SETUP_PYTHON = $(SETUP_VENV)/bin/python
 
-.PHONY: setup hooks fonts test lint audit docs-lint check
+.PHONY: setup hooks fonts test lint audit docs-lint check gate-env
 
 # The record BORROWED reads lives inside the environment, so `rm -rf .venv`
 # takes both and a record can never outlive what it describes. The rest of
@@ -421,3 +437,11 @@ fonts:
 # rather than a whole suite away. tests/test_changed_files_fast_path.py pins
 # the position; do not move `test` back to the front.
 check: lint audit docs-lint test
+
+# Gate mode only (see SD_LOCAL_GATE above): every lane waits for the pinned
+# in-tree environment, which is built once per make. Outside the gate
+# GATE_ENV is empty and this line adds nothing.
+lint audit docs-lint test: $(GATE_ENV)
+
+gate-env:
+	"$(PYTHON)" .github/scripts/provision-gate-env.py "$(PYTHON)"

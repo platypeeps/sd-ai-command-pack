@@ -194,6 +194,7 @@ def execute(
         "source": detection.source,
         "origin": str(detection.origin) if detection.origin else None,
         "detected": detection.reason,
+        "warnings": list(detection.warnings),
         "dry_run": dry_run,
         "status": SKIPPED if dry_run and detection.commands else overall(statuses),
         "checks": checks,
@@ -206,6 +207,10 @@ def render(result: dict[str, object], stream: TextIO) -> None:
     source = result["source"] or "none"
     write(f"sd-check: {result['repo']}\n")
     write(f"  entrypoints: {source} ({result['detected']})\n")
+    warnings = result.get("warnings") or []
+    assert isinstance(warnings, list)
+    for warning in warnings:
+        write(f"  warning: {warning}\n")
     checks = result["checks"]
     assert isinstance(checks, list)
     for record in checks:
