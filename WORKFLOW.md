@@ -254,8 +254,9 @@ stripped and listed in the result's `normalized`; any other owned line is
 refused by line number, with the expected value. So the body `sd-ship`
 published, fed back as `--body-file`, prepares again. Without `--body-file`,
 `prepare` reads an open pull request's live body, so an edit made on GitHub
-survives; the result's `body_source` says `file`, `live_pr`, `state` or
-`default`. `sd-ship body --item <item> [--body-file <file>]` prints the body
+survives; with no receipt, the pull request open for the branch is the one
+read, so a pull request opened by hand keeps its body. The result's
+`body_source` says `file`, `live_pr`, `state` or `default`. `sd-ship body --item <item> [--body-file <file>]` prints the body
 `prepare` would publish and runs the body lint on it. It reads no sd state,
 calls no GitHub API, and exits non-zero on a refusal or a lint failure. A merge
 made without `sd-ship` writes the trailers by hand, in the order above.

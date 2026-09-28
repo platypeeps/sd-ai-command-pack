@@ -13,6 +13,15 @@
 
 ### Changed
 
+- **`sd-ship prepare` reads a hand-opened pull request's live body (sd:1878).**
+  The live body outranked the stored one only when a receipt named the pull
+  request. A pull request opened by hand has no receipt, so `prepare`
+  reviewed, linted and squashed its default body while GitHub showed the
+  author's. With no receipt and no `--body-file`, the one open pull request
+  from this branch of this repository is now read; `body_source` says
+  `live_pr`. A blank body, or more than one open pull request, falls back as
+  before.
+
 - **The lane commands take `-C <dir>` (sd:1910).** `sd-ship`, `sd-check`,
   `sd-review`, `sd-review-ack` and `sd-pr-state` accept a global `-C <dir>`
   before any other argument, as `git -C` does: the command changes its

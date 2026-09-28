@@ -145,6 +145,25 @@ class PrepareTests(unittest.TestCase):
                          self.operation().state["body"])
         self.assertEqual("live_pr", result["body_source"])
 
+    def test_a_hand_opened_pull_request_without_a_receipt_is_prepared_from_its_live_body(self) -> None:
+        # sd:1878: no receipt names the pull request, so before this the
+        # default body was reviewed and squashed while GitHub showed another.
+        _git(self.root, "push", "-q", "origin", "HEAD:refs/heads/topic")
+        written = f"Opened by hand.\r\n\r\nCI/review scope: none.\r\n\r\nWork: sd:{self.item}\r\n"
+        pull = self.remote.open_pull_request("topic", title="by hand", body=written)
+        self.remote.commit_on("elsewhere", "another branch\n\nAuthored-with: human")
+        self.remote.open_pull_request("elsewhere", title="another branch", body="Not this one.\n")
+        result = self.prepare()
+        self.assertEqual(("live_pr", [f"Work: sd:{self.item}"]), (result["body_source"], result["normalized"]))
+        self.assertEqual(f"Opened by hand.\n\nCI/review scope: none.\n\nWork: sd:{self.item}\n",
+                         self.operation().state["body"])
+        self.assertEqual(pull.number, self.operation().state["pull_request"]["number"])
+
+    def test_a_blank_hand_opened_body_falls_back_to_the_default(self) -> None:
+        _git(self.root, "push", "-q", "origin", "HEAD:refs/heads/topic")
+        self.remote.open_pull_request("topic", title="by hand", body="  \n")
+        self.assertEqual("default", self.prepare()["body_source"])
+
     def test_a_different_item_in_the_body_file_is_refused_before_anything_is_pushed(self) -> None:
         body = self.directory / "body.md"
         body.write_text(f"A slice.\n\nWork: sd:{self.item + 1}\n")
