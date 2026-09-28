@@ -49,11 +49,27 @@ In a written `guest` or `minimal` mode, a tracked workflow prints `REMOVE <path>
 A remote that lowers a written `full`, or cannot be asked, does not mark the lane for removal.
 The check then prints a `note:` naming the demotion and compares the full-mode template.
 With no tracked workflow, it prints `absent <path>` and exits 0.
-Delete the workflow by hand.
-Delete its Dependabot guard too, unless another pack action pin needs it.
+Remove the lane with `sd-review setup-github --remove`, as below.
+
+A repository whose `repo.ci` is `local` runs no GitHub Actions (sd:1843).
+There the installer lays nothing and says why, and exits 0.
+`--check` prints `absent <path>` and exits 0: absence is the target, not drift.
+A tracked workflow prints `REMOVE <path>` and exits 1.
 
 A pin behind pack HEAD is not template drift.
 Change a pin deliberately through `--pin <sha> --force`, in its own reviewed commit.
 
 Other flags: `--dry-run`, `--json`, and `--force`.
 Dry-run prints planned writes without changing files.
+
+## Removal
+
+`sd-review setup-github --remove` deletes the routing workflow.
+It also takes the review-route guard out of `.github/dependabot.yml`.
+It works in every mode and under `repo.ci = local`.
+Add `--dry-run` to print the plan and write nothing.
+
+- A workflow edited beyond its pin needs `--force`.
+- The guard stays while another workflow still pins `actions/review-route`.
+- A `dependabot.yml` the installer created whole is deleted.
+- In any other file, only the guard lines go, with an `ignore:` key they leave empty.

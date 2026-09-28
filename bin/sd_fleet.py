@@ -40,6 +40,8 @@ A repository whose `repo.ci` row says `local` gets no workflow at all
 (sd:1843): neither the route workflow and its guard nor the check workflow.
 `sd-ship merge` runs `sd-check` at the head and posts `sd/local-gate` in their
 place, and the plan says so as an adapted line rather than going quiet.
+A route workflow still tracked there is named with `sd-review setup-github
+--remove`; the stamp lays files and deletes none.
 
 An owned repository gets the declaration only where GitHub says, live, that
 its default branch has no protection (sd:1655). Before, every owned auto repo
@@ -445,6 +447,9 @@ def tracked_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None],
         plan.adapted.append(f"workflows: none laid ({ROUTE_PATH}, {DEPENDABOT_PATH}, {CHECK_PATH}); repo.ci is "
                             f"local, so sd-ship merge runs sd-check at the head and posts "
                             f"{sd_lib.LOCAL_GATE_CONTEXT} instead")
+        if tree.text_at(ROUTE_PATH) is not None:
+            plan.adapted.append(f"{ROUTE_PATH}: still tracked and never runs under repo.ci local; the stamp "
+                                "does not delete it, run `sd-review setup-github --remove` there")
     elif no_ci:
         plan.adapted.append(f"workflows: none laid ({ROUTE_PATH}, {DEPENDABOT_PATH}, {CHECK_PATH}); {no_ci}")
     else:

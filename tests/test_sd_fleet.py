@@ -132,6 +132,15 @@ class DryRun(Fleet):
         self.assertIn("repo.ci is local", line)
         self.assertIn("sd/local-gate", line)
 
+    def test_ci_local_names_the_removal_of_a_tracked_route_workflow(self) -> None:
+        """Its absence is not drift under `repo.ci = local`; its presence is a
+        dead file, and the plan names the supported way to remove it."""
+        root, remote = self.repo("local-route", {sd_fleet.ROUTE_PATH: "name: sd-review route\n"})
+        [plan] = self.plan([(root, remote)], ci="local")
+        self.assertNotIn(sd_fleet.ROUTE_PATH, [change["path"] for change in plan["changes"]])
+        [line] = [line for line in plan["adapted"] if line.startswith(sd_fleet.ROUTE_PATH)]
+        self.assertIn("sd-review setup-github --remove", line)
+
     def test_ci_github_lays_the_workflows_as_before(self) -> None:
         root, remote = self.repo("github-ci")
         [plan] = self.plan([(root, remote)], ci="github")

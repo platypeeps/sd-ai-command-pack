@@ -26,6 +26,8 @@ Three refusals, each with a decision behind it:
     reviewed twice and read once.
   * A pack checkout with uncommitted changes refuses to pin itself, because a
     pin is a promise that the bytes a consumer runs are the bytes reviewed here.
+`--remove` deletes the workflow and its guard: how a `repo.ci = local`
+repository (sd:1843), where the workflow never runs, sheds the lane.
 """
 
 from __future__ import annotations
@@ -34,7 +36,7 @@ import argparse
 import json
 import pathlib
 import sys
-from typing import Any, Callable, Mapping, TextIO
+from typing import Any, Callable, Iterable, Mapping, TextIO
 
 _BIN = str(pathlib.Path(__file__).resolve().parent)
 if _BIN not in sys.path:
@@ -271,13 +273,31 @@ def setup_github(
     for rel in legacy:
         (root / rel).unlink()
         result["legacy_removed"].append(rel)
-    # The one write site in the lane; `tests/test_sd_review_boundary.py` counts it.
-    # `content` is None only for a self-install with no `dependabot.yml`: no file, none written.
-    for path, content, before in ((target, text, existing), (dependabot, guard_text, current)):
-        if content is not None and content != before:
+    # `guard_text` is None only for a self-install with no `dependabot.yml`: no file, none written.
+    _apply(((target, text), (dependabot, guard_text)))
+    return result
+
+
+def _apply(changes: Iterable[tuple[pathlib.Path, str | None]]) -> None:
+    """The one write site in the lane; `tests/test_sd_review_boundary.py` counts it. None deletes."""
+
+    for path, content in changes:
+        if content is None:
+            path.unlink(missing_ok=True)
+        elif _read(path) != content:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
-    return result
+
+
+def remove(root: pathlib.Path, args: argparse.Namespace, stream: TextIO) -> int:
+    """`--remove`, in any mode (sd:1843). The plan is `sd_setup_guard.removal`'s; `--dry-run` writes nothing."""
+
+    plan = sd_setup_guard.removal(root, WORKFLOW_RELATIVE_PATH, lambda pin: workflow_text(action_reference(pin)),
+                                  self_install=root == pack_root(), force=args.force)
+    if not args.dry_run:
+        _apply((path, content) for path, content, _line in plan)
+    stream.write("".join(f"{line}\n" for *_, line in plan) + ("dry run: nothing written\n" if args.dry_run else ""))
+    return EXIT_OK
 
 
 def _read(path: pathlib.Path) -> str | None:
@@ -361,6 +381,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="diff both files against what this build writes; exit 1 on DIFFERS or REMOVE, write nothing",
     )
+    parser.add_argument("--remove", action="store_true", help="delete the routing workflow and its Dependabot guard")
     parser.add_argument(
         "--remove-legacy",
         action="store_true",
@@ -385,7 +406,11 @@ def main(
         root = sd_lib.repo_root(None)
         if root is None:
             raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")
-        if skipped := sd_setup_guard.ci_local_skip(root):  # repo.ci = local lays no workflow (sd:1843)
+        if args.remove:
+            return remove(root, args, sys.stdout)
+        if skipped := sd_setup_guard.ci_local_skip(root, WORKFLOW_RELATIVE_PATH):  # repo.ci = local (sd:1843)
+            if args.check:
+                return sd_setup_guard.report_unwanted(root, WORKFLOW_RELATIVE_PATH, skipped, skipped, sys.stdout)
             print(json.dumps({"repo": str(root), "status": "skipped", "reason": skipped}) if args.json else skipped)
             return EXIT_OK
         if args.check:

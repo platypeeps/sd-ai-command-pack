@@ -68,6 +68,7 @@ def setup_args(**overrides: Any) -> argparse.Namespace:
         "remove_legacy": False,
         "pin": PIN,
         "check": False,
+        "remove": False,
     }
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -1110,6 +1111,27 @@ class CliTests(SetupFixture):
                 self.assertFalse(self.dependabot(root).exists())
         self.assertEqual(json.loads(self.run_main(root, ["--json"], "local")[1])["status"], "skipped")
 
+    def test_ci_local_check_reports_an_installed_lane_as_remove(self) -> None:
+        """A route workflow still tracked under `repo.ci = local` never runs, so
+        `--check` names it REMOVE and exits 1, where absence is exit 0."""
+        root = self.make_repo()
+        install(root)
+        code, text = self.run_main(root, ["--check"], "local")
+        self.assertEqual(code, 1)
+        self.assertIn(f"REMOVE {setup.WORKFLOW_RELATIVE_PATH}", text)
+        self.assertIn("setup-github --remove", text)
+        code, text = self.run_main(root, [], "local")
+        self.assertEqual(code, 0)
+        self.assertIn("setup-github --remove", text)
+
+    def test_remove_runs_under_ci_local(self) -> None:
+        root = self.make_repo()
+        install(root)
+        code, text = self.run_main(root, ["--remove"], "local")
+        self.assertEqual(code, 0, text)
+        self.assertFalse(self.workflow(root).exists())
+        self.assertFalse(self.dependabot(root).exists())
+
     def test_ci_github_installs_as_before(self) -> None:
         root = self.make_repo()
         code, text = self.run_main(root, ["--pin", PIN], "github")
@@ -1133,3 +1155,96 @@ class CliTests(SetupFixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RemoveTests(SetupFixture):
+    """`--remove`: the supported way out of the lane (sd:1843 fleet cleanup)."""
+
+    def remove(self, root: pathlib.Path, **overrides: Any) -> tuple[int, str]:
+        stream = io.StringIO()
+        code = setup.remove(root, setup_args(remove=True, **overrides), stream)
+        return code, stream.getvalue()
+
+    def test_dry_run_names_both_files_and_writes_nothing(self) -> None:
+        root = self.make_repo()
+        install(root)
+        before = (self.workflow(root).read_text(), self.dependabot(root).read_text())
+        code, text = self.remove(root, dry_run=True)
+        self.assertEqual(code, 0)
+        self.assertIn(f"remove {setup.WORKFLOW_RELATIVE_PATH}", text)
+        self.assertIn(f"remove {guard.DEPENDABOT_RELATIVE_PATH}", text)
+        self.assertIn("nothing written", text)
+        self.assertEqual((self.workflow(root).read_text(), self.dependabot(root).read_text()), before)
+
+    def test_remove_deletes_the_workflow_and_the_file_the_installer_created(self) -> None:
+        root = self.make_repo()
+        install(root)
+        code, _ = self.remove(root)
+        self.assertEqual(code, 0)
+        self.assertFalse(self.workflow(root).exists())
+        self.assertFalse(self.dependabot(root).exists())
+
+    def test_remove_takes_only_the_guard_out_of_a_consumer_file(self) -> None:
+        root = self.make_repo()
+        original = (
+            "version: 2\n"
+            "updates:\n"
+            "  - package-ecosystem: pip\n"
+            "    directory: /\n"
+            "    schedule:\n"
+            "      interval: weekly\n"
+            "  - package-ecosystem: github-actions\n"
+            "    directory: /\n"
+            "    schedule:\n"
+            "      interval: weekly\n"
+        )
+        self.seed_dependabot(root, original)
+        install(root)
+        self.assertNotEqual(self.dependabot(root).read_text(), original)
+        code, text = self.remove(root)
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self.dependabot(root).read_text(), original)
+
+    def test_remove_keeps_other_ignore_items_and_the_docs_gate_guard(self) -> None:
+        root = self.make_repo()
+        original = (
+            "version: 2\n"
+            "updates:\n"
+            "  - package-ecosystem: github-actions\n"
+            "    directory: /\n"
+            "    ignore:\n"
+            "      - dependency-name: actions/checkout\n"
+            + guard.guard_block("      ", "docs-gate")
+        )
+        self.seed_dependabot(root, original)
+        install(root)
+        self.remove(root)
+        self.assertEqual(self.dependabot(root).read_text(), original)
+
+    def test_a_changed_workflow_needs_force(self) -> None:
+        root = self.make_repo()
+        install(root)
+        self.workflow(root).write_text(self.workflow(root).read_text() + "# local edit\n")
+        with self.assertRaises(guard.GuardError) as caught:
+            self.remove(root)
+        self.assertIn("--force", str(caught.exception))
+        self.assertTrue(self.workflow(root).exists())
+        self.assertEqual(self.remove(root, force=True)[0], 0)
+        self.assertFalse(self.workflow(root).exists())
+
+    def test_another_workflow_pinning_review_route_keeps_the_guard(self) -> None:
+        root = self.make_repo()
+        install(root)
+        other = root / ".github" / "workflows" / "other.yml"
+        other.write_text(f"      - uses: {guard.DEPENDENCY}@{PIN}\n")
+        guarded = self.dependabot(root).read_text()
+        code, text = self.remove(root)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.dependabot(root).read_text(), guarded)
+        self.assertIn("other.yml", text)
+
+    def test_nothing_installed_is_nothing_to_do(self) -> None:
+        root = self.make_repo()
+        code, text = self.remove(root)
+        self.assertEqual(code, 0)
+        self.assertIn(f"absent {setup.WORKFLOW_RELATIVE_PATH}", text)
