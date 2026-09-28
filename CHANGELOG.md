@@ -18,6 +18,14 @@
 
 ### Fixed
 
+- **`sd-ship`'s squash subject is the pull request's title (sd:1876).**
+  `prepare` stores the newest non-merge commit subject when no `--title` is
+  given, and `merge` used that stored title, so a pull request adopted with
+  its own title, or retitled after prepare, landed on main under a commit
+  subject such as `ci: re-run on the local gate`. The merge now takes the
+  title from the pull request it has just read, falling back to the stored
+  one, and still refuses a `wip` title.
+
 - **`sd-ship merge --watch` accepts a `ci = local` pull request (sd:1875).**
   `--watch` ran `gh pr checks --watch --fail-fast` before reading `repo.ci`,
   and on a pull request with no remote check that command fails, so the

@@ -1644,11 +1644,12 @@ class Ship(SharedReview):
         # passing `None` retracts what an earlier attempt recorded. An
         # ownership-only merge therefore cannot inherit a claim from a merge
         # that never happened (sd:1347).
+        title = squash_title(observed, self.state["title"])
         self.save(phase="merge_dispatch", merge_message=body, row_authorized_merge=self.row_authority,
                   warnings=self.dispatch_warnings())
         try:
             self.api.api(f"{self.api.prefix}/pulls/{observed['number']}/merge", method="PUT",
-                         body={"sha": head, "merge_method": "squash", "commit_title": f"{self.state['title']} (#{observed['number']})",
+                         body={"sha": head, "merge_method": "squash", "commit_title": f"{title} (#{observed['number']})",
                                "commit_message": body})
         except Refusal:
             # A response can be lost after GitHub merged. Read back the same
@@ -1778,6 +1779,20 @@ def adjudication_flags(action) -> None:
     action.add_argument("--dispositions-file", type=pathlib.Path, help="canonical absolute path to an evidenced proposal")
     action.add_argument("--prepare-evidence", action="store_true", help="copy the cited evidence into this record's durable archive; it never accepts in the same command")
     action.add_argument("--accept-dispositions", metavar="SHA256", help="explicit acceptance of this exact validated proposal; not proof of user approval")
+
+
+def squash_title(pull: dict, prepared: str) -> str:
+    """The squash subject: the pull request's live title, else the prepared one (sd:1876).
+
+    `prepare` stores the newest non-merge commit subject when no `--title` is
+    given, and an adopted or retitled pull request keeps its own title; the
+    title a reader saw on the pull request is the one main should carry. A
+    `wip` title still never reaches the default branch.
+    """
+    title = str(pull.get("title") or "").strip() or prepared
+    if re.match(r"(?i)wip\b", title):
+        raise Refusal("the pull request's title starts with wip; retitle it before merging")
+    return title
 
 
 def identity_flags(action) -> None:

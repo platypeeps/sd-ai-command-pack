@@ -84,6 +84,7 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    Stop and obtain permission before that history rewrite.
 7. **Merge through the authorized adapter.**
    It uses `gh pr merge --squash --match-head-commit <the reviewed sha> -t "<title> (#N)" -b "<body>"`.
+   `<title>` is the pull request's current title, not the last commit subject.
    Keep the explicit title and body; exclude `wip:` subjects from main.
    Put contiguous trailers in the body's final paragraph.
    Never use the CLI's branch-deletion option.
