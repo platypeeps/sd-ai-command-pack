@@ -131,6 +131,24 @@ class RunCheck(Repository):
         self.assertEqual((result["status"], result["exit_code"]), ("failure", 1))
         self.assertIn("check fail", result["summary"])
 
+    def test_the_result_keeps_the_full_sd_check_report(self) -> None:
+        """The worktree is deleted after the run, so the receipt is the only place its output survives (sd:1872)."""
+        head = self.commit("check:\n\t@echo gate-output-marker; false\n")
+        result = sd_local_gate.check_in_worktree(self.root, head)
+        [check] = [entry for entry in result["report"]["checks"] if entry["name"] == "check"]
+        self.assertEqual((result["report"]["status"], check["exit_code"]), ("fail", 2))
+        self.assertIn("gate-output-marker", check["stdout"])
+
+    def test_a_configuration_fault_keeps_sd_checks_stderr(self) -> None:
+        """Exit 2 prints no report; what is wrong is on sd-check's stderr, and the receipt keeps it."""
+        head = self.commit("check:\n\t@echo ok\n")
+        (self.root / "CLAUDE.local.md").write_text(
+            "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->\ncheck: 'unterminated\n<!-- SD-AI-COMMAND-PACK:LOCAL:END -->\n",
+            encoding="utf-8")
+        result = sd_local_gate.check_in_worktree(self.root, head)
+        self.assertEqual((result["status"], result["exit_code"], result["report"]), ("failure", 2, None))
+        self.assertIn("does not parse", result["stderr"])
+
     def test_the_worktree_is_removed_after_the_run(self) -> None:
         head = self.commit("check:\n\t@echo ok\n")
         before = self.worktrees()
@@ -146,6 +164,15 @@ class Reading(unittest.TestCase):
                              (1, '{"status": "fail"}'), (2, ""), (None, "timed out"), (0, "not json")):
             with self.subTest(code=code, output=output):
                 self.assertEqual(sd_local_gate.check_reading(code, output)["status"], "failure")
+
+
+    def test_the_report_and_stderr_tail_are_kept_and_the_summary_stays_one_line(self) -> None:
+        passed = '{"status": "pass", "checks": [{"name": "check", "status": "pass", "stdout": "ok"}]}'
+        reading = sd_local_gate.check_reading(0, passed, "e" * 5000)
+        self.assertEqual(reading["report"]["checks"][0]["stdout"], "ok")
+        self.assertEqual(len(reading["stderr"]), sd_local_gate.STDERR_TAIL_CHARS)
+        self.assertEqual(reading["summary"], "sd-check pass (check pass)")
+        self.assertIsNone(sd_local_gate.check_reading(0, "not json")["report"])
 
 
 class Post(unittest.TestCase):
