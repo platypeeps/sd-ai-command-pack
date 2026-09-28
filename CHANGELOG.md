@@ -4,6 +4,14 @@
 
 ### Changed
 
+- **CI pins `sd_db` by its release tag, `sd-db-v0.1.0` (sd:1867, system
+  sd:1854).** `tests/test_system_pin.py` now accepts a full commit or an
+  `sd-db-v*` tag, the pattern the installer already prefers; branches,
+  short commits and other tools' tags stay refused. The first tag is system
+  `85e6f88a`, schema 16: `repo.ci` (sd:1843) is the only `sd_db` change since
+  `8ca78c87`. A machine whose `~/repos/system` lacks the tag fails the pin
+  test until it fetches tags.
+
 - **CI reads `sd_db` from the public `platypeeps/system`, with no token
   (sd:1859).** The private repository became `platypeeps/system-archived`, and
   a new public `platypeeps/system` replaced it with rewritten history, so the
