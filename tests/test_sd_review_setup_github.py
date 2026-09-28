@@ -199,30 +199,13 @@ class WorkflowContentTests(SetupFixture):
         # the pack's own arm of this function is not a path (item 839).
         self.assertNotIn("./", setup.action_reference(None))
 
-    def test_the_packs_own_workflow_is_what_this_build_writes(self) -> None:
-        # The pack's `.github/workflows/sd-review-route.yml` is not a
-        # hand-maintained file that happens to resemble the template: it is
-        # the template's self-install output, tracked. Nothing compared the
-        # two, so an edit to either drifted in silence -- and `setup-github`
-        # re-run in the pack would then refuse over a file it wrote itself.
-        # Found while fixing the `./` reference (item 839), where the fix had
-        # to land in both places or in neither.
-        tracked = (REPO_ROOT / setup.WORKFLOW_RELATIVE_PATH).read_text(encoding="utf-8")
-        self.assertEqual(tracked, setup.workflow_text(setup.action_reference(None)))
-        # The self-install writes one file, not two. Its workflow names no pin
-        # (`action_reference(None)`), so there is nothing for Dependabot to
-        # bump and no guard to hold it: the pack's own `dependabot.yml` carries
-        # none, and `--check` in this checkout agrees rather than reporting
-        # the guard it would have written as drift (item 940).
+    def test_the_pack_tracks_no_route_workflow_and_no_guard(self) -> None:
+        # The pack gates locally (`repo.ci = local`), so it no longer tracks
+        # its own self-install of the route workflow. Its `dependabot.yml`
+        # carries no guard either (item 940): nothing here names a pin.
+        self.assertFalse((REPO_ROOT / setup.WORKFLOW_RELATIVE_PATH).exists())
         dependabot = (REPO_ROOT / guard.DEPENDABOT_RELATIVE_PATH).read_text(encoding="utf-8")
         self.assertEqual(guard.guard_state(dependabot), "absent")
-        stream = io.StringIO()
-        # The remote's answer is pinned: CI cannot ask GitHub about this
-        # checkout, and a demotion adds a `note:` line (sd:1285).
-        full = setup.sd_lib.RemoteAnswer(full=True, answered=True)
-        with mock.patch.object(setup.sd_lib, "remote_permits_full", return_value=full):
-            code = setup.check_files(REPO_ROOT, setup_args(check=True, pin=None), stream)
-        self.assertEqual((code, stream.getvalue()), (0, f"same {setup.WORKFLOW_RELATIVE_PATH}\n"))
 
     def test_the_lane_holds_no_write_permission_and_requests_nobody(self) -> None:
         root = self.make_repo()
