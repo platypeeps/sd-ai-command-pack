@@ -49,6 +49,24 @@ def service(args):
         connection.close()
 
 
+def ship_lock_status() -> dict:
+    """The ship locks a live process holds, and every lock file by state (sd:1936, sd:1940).
+
+    An idle lock file is not listed: each file stays after its holder ends,
+    so the files are counted by state rather than read as a queue, and
+    nothing here removes one. An sd_db without the holder record adds nothing.
+    """
+    from sd_db import ship
+    if not hasattr(ship, "lock_files"):
+        return {}
+    from sd_db.database import default_path
+    files = ship.lock_files(default_path())
+    held = [{key: value for key, value in entry.items() if key not in ("state", "alive")}
+            for entry in files if entry["state"] == "held"]
+    counts = {state: sum(entry["state"] == state for entry in files) for state in ("held", "stale", "idle")}
+    return {"ship_locks": held, "ship_lock_files": counts}
+
+
 def run(args: argparse.Namespace) -> int:
     sd_db = sd_handoff_rows.library()
     try:
@@ -64,11 +82,7 @@ def run(args: argparse.Namespace) -> int:
                                     scope=args.scope, budget_minutes=args.budget_minutes, who=getpass.getuser())
         elif action == "status":
             result = runner.heartbeat_state(connection)
-            from sd_db import ship
-            if hasattr(ship, "held_locks"):
-                # The ship locks a live process holds; an idle lock file is not listed (sd:1936).
-                from sd_db.database import default_path
-                result = {**result, "ship_locks": ship.held_locks(default_path())}
+            result = {**result, **ship_lock_status()}
         elif action == "list":
             result = {"queued": runner.queued(connection), "active": runner.active_runs(connection)}
         elif action == "get":

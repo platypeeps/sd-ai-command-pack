@@ -1,6 +1,7 @@
 """The pack forwards the finite command CLI and preserves its durable evidence."""
 
 import argparse
+import hashlib
 import importlib
 import io
 import json
@@ -213,6 +214,33 @@ class RunnerCommands(unittest.TestCase):
         self.assertEqual(held["item"], 1872)
         self.assertEqual(held["command"], "sd-ship prepare --item 1872")
         self.assertIsInstance(held["age_seconds"], int)
+
+    def test_status_counts_lock_files_by_state_and_removes_none(self):
+        """sd:1940. A lock file with no live holder is idle or stale, never a hold, and stays."""
+        from sd_db import ship
+        initialise(home=self.process_home)
+        database = sd_db.database.default_path(self.process_home)
+        with ship.repository_lock(database, "fixture/idle"):
+            pass
+        with ship.repository_lock(database, "fixture/stale"):
+            pass
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        stale = next(entry for entry in ship.lock_files(database) if entry["path"].endswith(
+            hashlib.sha256(b"fixture/stale").hexdigest() + ".lock"))
+        Path(stale["path"]).write_text(json.dumps({"pid": gone.pid, "repository": "fixture/stale",
+                                                   "started_at": "2026-09-01T00:00:00+00:00"}))
+        before = sorted((database.parent / "ship-locks").iterdir())
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "bin/sd"), "runner", "status", "--json"],
+            env={**os.environ, "HOME": str(self.process_home)},
+            capture_output=True, text=True, check=False, timeout=10,
+        )
+        self.assertNotIn("Traceback", result.stderr)
+        status = json.loads(result.stdout)
+        self.assertEqual(status["ship_locks"], [])
+        self.assertEqual(status["ship_lock_files"], {"held": 0, "stale": 1, "idle": 1})
+        self.assertEqual(sorted((database.parent / "ship-locks").iterdir()), before)
 
 
 class RunnerServiceControls(unittest.TestCase):
