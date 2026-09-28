@@ -1835,6 +1835,8 @@ def parser():
     body.add_argument("--item", type=int, required=True)
     body.add_argument("--body-file", type=pathlib.Path, help="the body to read; - reads stdin; default is prepare's default body")
     body.add_argument("--deliver", action="store_true", help="accept a matching Delivers: line, as prepare --deliver does")
+    body.add_argument("--pr", type=int, metavar="N",
+                      help="lint pull request N: its files are the diff, and without --body-file its live body is read")
     body.add_argument("--json", action="store_true")
     for name in ("prepare", "merge", "reconcile", "observe"):
         action = commands.add_parser(name)
@@ -1884,50 +1886,86 @@ def parser():
 
 
 BODY_EPILOG = """\
-body: `sd-ship body --item N [--body-file F]` prints the body prepare would
-publish and runs the body lint (sd-docs-lint --body-only: one Work: line, and
-the scope line a changed path demands). It strips an Item:, Work:, Delivers:
-or Authored-with: line that says what sd-ship would write, and refuses any
-other owned line by number. It reads no sd state and calls no GitHub API.
+body: `sd-ship body --item N [--body-file F] [--pr P]` prints the body prepare
+would publish and runs the body lint (sd-docs-lint --body-only: one Work:
+line, and the scope line a changed path demands). It strips an Item:, Work:,
+Delivers: or Authored-with: line that says what sd-ship would write, and
+refuses any other owned line by number. The result's `scope` names each
+scope line the diff demands, such as `CI/review scope:` for `.github/**`, the
+path that demands it, and whether the body carries it. The diff is the
+checkout's HEAD against origin/HEAD; with --pr it is that pull request's
+files, and without --body-file its live body is the one read. It reads no sd
+state, and calls the GitHub API only for --pr.
 Exit 0 when the body would prepare, 3 on a refusal or a lint failure.
 """
 
 
-def body_text(args) -> tuple[str, str]:
-    """The body `sd-ship body` reads, and its source: file, stdin or default."""
+def body_text(args, root: pathlib.Path, api: GitHub | None) -> tuple[str, str]:
+    """The body `sd-ship body` reads, and its source: file, stdin, live_pr or default."""
     if args.body_file is None:
+        if api is not None:
+            return str(api.pull(args.pr).get("body") or "").replace("\r\n", "\n"), "live_pr"
         return f"Code changes associated with sd:{args.item}.", "default"
     if str(args.body_file) == "-":
         return sys.stdin.read(), "stdin"
     return args.body_file.read_text(encoding="utf-8"), "file"
 
 
+def body_diff(root: pathlib.Path, api: GitHub | None, number: int | None) -> tuple[list[str] | None, str]:
+    """The changed paths rule 8 reads, and where they came from (sd:1877).
+
+    A pull request's are its `files` listing, so a PR opened from another
+    checkout, or by hand, is linted against its own diff. Otherwise they are
+    the checkout's HEAD against origin/HEAD, read the way `sd-docs-lint`
+    reads them; `None` carries its reason, and the lint then fails by name.
+    """
+    if api is not None:
+        files = api.pages(f"{api.prefix}/pulls/{number}/files")
+        return sd_ship_body.pull_paths(files), f"pull request #{number}"
+    changed, base = sd_ship_body.docs_lint().changed_paths(root)
+    return changed, (f"{base}...HEAD" if changed is not None else base)
+
+
 def body_command(args) -> int:
-    """`sd-ship body`: normalize, append `Work:`, lint; no database, no GitHub (sd:1870)."""
+    """`sd-ship body`: normalize, append `Work:`, lint; no database (sd:1870, sd:1877)."""
     try:
         root = sd_lib.repo_root(None)
         if root is None:
             raise Refusal("cwd is not inside a Git repository")
-        text, source = body_text(args)
+        api = None if args.pr is None else GitHub(root, slug(git(root, "config", "--get", "remote.origin.url")))
+        text, source = body_text(args, root, api)
         normalized, stripped = sd_ship_body.normalize(text, args.item, deliver=args.deliver)
         body = sd_ship_body.published(normalized, args.item)
+        changed, changed_from = body_diff(root, api, args.pr)
+        demanded = None if changed is None else sd_ship_body.demanded_scope(root, body, changed)
         with tempfile.TemporaryDirectory(prefix="sd-ship-body-") as directory:
             path = pathlib.Path(directory) / "pr-body.md"
             path.write_text(body, encoding="utf-8")
-            linted = subprocess.run([sys.executable, str(BIN / "sd-docs-lint"), "--body-only", "--pr-body", str(path)],
-                                    cwd=root, capture_output=True, text=True, timeout=300, check=False)
+            lint = [sys.executable, str(BIN / "sd-docs-lint"), "--body-only", "--pr-body", str(path)]
+            if changed is not None:
+                # One enumeration for both answers: the lint reads the paths
+                # `demanded_scope` read, so the two cannot disagree about the diff.
+                listing = pathlib.Path(directory) / "changed"
+                listing.write_text("".join(f"{name}\0" for name in changed), encoding="utf-8")
+                lint += ["--changed", str(listing)]
+            linted = subprocess.run(lint, cwd=root, capture_output=True, text=True, timeout=300, check=False)
         output = (linted.stdout + linted.stderr).strip()
         result = {"ok": linted.returncode == 0, "body": body, "body_source": source,
-                  "normalized": list(stripped), "lint": {"exit": linted.returncode, "output": output}}
+                  "normalized": list(stripped), "lint": {"exit": linted.returncode, "output": output},
+                  "scope": {"changed_from": changed_from, "changed": None if changed is None else len(changed),
+                            "demanded": demanded}}
     except (Refusal, OSError, UnicodeDecodeError, subprocess.SubprocessError) as error:
         result = failure("body", error)
-        body, stripped, output = "", (), str(error)
+        body, stripped, output, demanded = "", (), str(error), None
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
         print(body, end="")
         for line in stripped:
             print(f"normalized: {line}", file=sys.stderr)
+        for row in demanded or ():
+            print(f"scope: {row['path']} demands `{row['line']}`; the body "
+                  + ("carries it" if row["present"] else "does not carry it"), file=sys.stderr)
         print(output, file=sys.stderr)
     return 0 if result["ok"] else 3
 

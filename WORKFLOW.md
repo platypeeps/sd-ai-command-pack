@@ -274,9 +274,13 @@ refused by line number, with the expected value. So the body `sd-ship`
 published, fed back as `--body-file`, prepares again. Without `--body-file`,
 `prepare` reads an open pull request's live body, so an edit made on GitHub
 survives; the result's `body_source` says `file`, `live_pr`, `state` or
-`default`. `sd-ship body --item <item> [--body-file <file>]` prints the body
-`prepare` would publish and runs the body lint on it. It reads no sd state,
-calls no GitHub API, and exits non-zero on a refusal or a lint failure. A merge
+`default`. `sd-ship body --item <item> [--body-file <file>] [--pr <n>]` prints
+the body `prepare` would publish and runs the body lint on it. Its `scope`
+names each scope line the diff demands, such as `CI/review scope:` for a
+`.github/**` path, and whether the body carries it. The diff is the checkout's
+HEAD against `origin/HEAD`; with `--pr` it is that pull request's files, and
+without `--body-file` its live body is read. It reads no sd state, calls the
+GitHub API only for `--pr`, and exits non-zero on a refusal or a lint failure. A merge
 made without `sd-ship` writes the trailers by hand, in the order above.
 
 After the remote confirms the delivering merge, `sd work deliver <row-id>
