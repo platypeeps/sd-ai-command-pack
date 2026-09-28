@@ -2015,6 +2015,13 @@ def dispatch(root, connection, database, args, store, readonly):
         delivery.revision, delivery.state = store.read(connection, delivery.key)
         if args.no_item and (delivery.state.get("branch") != delivery.branch or delivery.state.get("lifecycle") != "active"):
             raise Refusal("no-item record changed concurrently; select its current identity before publication")
+        # `Ship` read the checkout before the lock, and `--wait` can hold that
+        # read for minutes: a branch switch meanwhile would push the new HEAD
+        # under the old branch's pull request (sd:1937 review).
+        if not args.no_item and (git(root, "symbolic-ref", "--quiet", "--short", "HEAD") != delivery.branch
+                                 or slug(git(root, "config", "--get", "remote.origin.url")) != delivery.repository):
+            raise Refusal(f"the checkout left {delivery.branch} while this command waited for the ship lock; "
+                          "rerun it from the branch it ships")
         return getattr(delivery, args.command)()
 
 

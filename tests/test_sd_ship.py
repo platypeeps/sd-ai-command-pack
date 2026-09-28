@@ -2668,6 +2668,21 @@ roles:
                     with self.assertRaises(SystemExit):
                         self.args(command, *extra, "--wait", bad)
 
+    def test_a_branch_switch_while_waiting_refuses_before_the_command_runs(self):
+        """sd:1937 review. The identity `Ship` read before the lock is checked again under it."""
+        real = receipts.repository_lock
+
+        @contextlib.contextmanager
+        def switching(*args, **options):
+            with real(*args, **options):
+                _git(self.root, "checkout", "-q", "-b", "elsewhere")
+                yield
+
+        with patch.object(receipts, "repository_lock", switching), \
+                patch.object(ship.Ship, "prepare", side_effect=AssertionError("ran on a switched checkout")):
+            with self.assertRaisesRegex(ship.Refusal, "left .* while this command waited"):
+                ship.dispatch(self.root, self.connection, self.database, self.args("prepare"), receipts, False)
+
     def test_an_older_library_locks_without_options_and_refuses_a_wait(self):
         """An sd_db without the holder record still serializes; it cannot wait, so --wait refuses."""
         older = SimpleNamespace(repository_lock=receipts.repository_lock)
