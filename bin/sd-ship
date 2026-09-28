@@ -1832,6 +1832,18 @@ def body_command(args) -> int:
     return 0 if result["ok"] else 3
 
 
+def lock_options(args, store) -> dict:
+    """What the ship lock records about this holder, for a refusal and `sd runner status` (sd:1936).
+
+    An `sd_db` built before the holder record takes no options; the lock is
+    the same flock either way, so an older library still serializes.
+    """
+    if not hasattr(store, "held_locks"):
+        return {}
+    selector = f"--item {args.item}" if args.item is not None else f"--no-item --review-id {args.review_id}"
+    return {"holder": {"command": f"sd-ship {args.command} {selector}", "item": args.item, "review": args.review_id}}
+
+
 def dispatch(root, connection, database, args, store, readonly):
     if args.no_item and args.command in ("review", "verify-review", "adjudicate"):
         import sd_ship_no_item
@@ -1839,7 +1851,7 @@ def dispatch(root, connection, database, args, store, readonly):
     delivery = Ship(root, connection, database, args)
     if readonly:
         return getattr(delivery, args.command)()
-    with store.repository_lock(database, delivery.repository):
+    with store.repository_lock(database, delivery.repository, **lock_options(args, store)):
         delivery.revision, delivery.state = store.read(connection, delivery.key)
         if args.no_item and (delivery.state.get("branch") != delivery.branch or delivery.state.get("lifecycle") != "active"):
             raise Refusal("no-item record changed concurrently; select its current identity before publication")

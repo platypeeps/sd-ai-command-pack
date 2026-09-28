@@ -53,6 +53,18 @@ loader.exec_module(ship)
 CAP = importlib.import_module("sd_ship_history").AUTOMATIC_CODE_REVIEW_PASSES
 
 
+#: Hold `argv[2]`'s ship lock over the database at `argv[1]` for `argv[3]` seconds.
+SHIP_LOCK_HOLDER = """
+import sys, time
+from pathlib import Path
+from sd_db import ship
+with ship.repository_lock(Path(sys.argv[1]), sys.argv[2],
+                          holder={"command": "sd-ship prepare --item 1872", "item": 1872}):
+    print("held", flush=True)
+    time.sleep(float(sys.argv[3]))
+"""
+
+
 #: The head a lagging pull object still reports: the pre-push one on #1145.
 LAGGING_HEAD = "a3b265f4" * 5
 
@@ -2421,6 +2433,48 @@ roles:
             with self.assertRaisesRegex(WorkflowError, "another ship"):
                 with receipts.repository_lock(self.database, "fixture/repo"):
                     self.fail("second owner")
+
+    def hold_ship_lock(self, repository, seconds=60.0):
+        """A child process holding the real flock on `repository`'s ship lock until killed."""
+        child = subprocess.Popen([sys.executable, "-c", SHIP_LOCK_HOLDER, str(self.database), repository, str(seconds)],
+                                 stdout=subprocess.PIPE, text=True,
+                                 env={**os.environ, "PYTHONPATH": str(SITE_PACKAGES)})
+
+        def stop():
+            child.kill()
+            child.wait()
+            child.stdout.close()
+
+        self.addCleanup(stop)
+        self.assertEqual(child.stdout.readline().strip(), "held")
+        return child
+
+    def test_the_ship_lock_records_this_prepare_as_its_holder(self):
+        """sd:1936. The lock names this command and item while dispatch holds it."""
+        seen = []
+
+        def prepare(operation):
+            seen.extend(receipts.held_locks(self.database))
+            return {"ok": True}
+
+        with patch.object(ship.Ship, "prepare", prepare):
+            ship.dispatch(self.root, self.connection, self.database, self.args("prepare"), receipts, False)
+        (record,) = seen
+        self.assertEqual(record["pid"], os.getpid())
+        self.assertEqual(record["item"], self.item)
+        self.assertEqual(record["command"], f"sd-ship prepare --item {self.item}")
+        self.assertEqual(receipts.held_locks(self.database), [])
+
+    def test_a_held_ship_lock_refusal_names_the_holder(self):
+        """sd:1936. A second prepare is refused with the holder's pid and command."""
+        from sd_db.workflow import WorkflowError
+        child = self.hold_ship_lock(self.operation().repository)
+        with patch.object(ship.Ship, "prepare", side_effect=AssertionError("ran under a held lock")):
+            with self.assertRaises(WorkflowError) as refused:
+                ship.dispatch(self.root, self.connection, self.database, self.args("prepare"), receipts, False)
+        self.assertIn("another ship operation owns this repository", str(refused.exception))
+        self.assertIn(f"pid {child.pid}", str(refused.exception))
+        self.assertIn("sd-ship prepare --item 1872", str(refused.exception))
 
     def test_ending_assignment_keeps_work_and_manual_merge_controls_guarded(self):
         from sd_db.progress import cancel_work, work_controls
