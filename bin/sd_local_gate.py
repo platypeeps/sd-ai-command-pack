@@ -32,6 +32,12 @@ and minus any `PATH` entry whose parent holds `pyvenv.cfg`, a virtualenv's
 `bin` wherever it lives. So an editable install cannot import the dirty
 checkout, and no virtualenv's interpreter answers for `python3`.
 
+It also gets `SD_LOCAL_GATE=1` (`GATE_VARIABLE`), and that is the gate's
+contract with the repository under test: this run is the gate, so build what
+the check needs here and borrow nothing from the operator. The pack's own
+Makefile reads it to provision a pinned in-tree virtualenv (sd:1918); a
+repository that does not read it runs as it always did.
+
 This is a self-hosted runner, not a hermetic build. The gate guarantees a clean
 tree at the exact head, a scrubbed Python environment and no virtualenv on
 `PATH`. The rest of `PATH`, the interpreter running `sd-ship` and the system
@@ -59,13 +65,20 @@ BIN = pathlib.Path(__file__).resolve().parent
 CONTEXT = sd_lib.LOCAL_GATE_CONTEXT
 #: GitHub truncates nothing and refuses a description past 140 characters.
 DESCRIPTION_LIMIT = 140
-#: A bound on the whole `sd-check` run, above its own per-check default.
+#: The gate's bound on each check, handed to `sd-check --timeout`. Its own
+#: 900-second default is for an interactive run; the gate's `make check` also
+#: builds a virtualenv (sd:1918) and shares the machine's test slots, and on a
+#: busy machine it ran past 900 s and failed as a timeout.
 CHECK_SECONDS = 3600
+#: How much longer the child may take than `sd-check` needs to report its own timeout.
+REPORT_GRACE_SECONDS = 60
 #: The tail of `sd-check`'s own stderr the receipt keeps, as `sd-check` tails each check's.
 STDERR_TAIL_CHARS = 4000
 LOCAL_BLOCK = "CLAUDE.local.md"
 #: Variables that pick Python packages; the child must not inherit the caller's.
 DROPPED_ENVIRONMENT = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX", "__PYVENV_LAUNCHER__")
+#: Set to "1" in the child: the run is the gate, so the check provisions rather than borrows.
+GATE_VARIABLE = "SD_LOCAL_GATE"
 
 
 def untracked_local_block(root: pathlib.Path) -> pathlib.Path | None:
@@ -88,7 +101,10 @@ def gate_inputs(root: pathlib.Path, head: str) -> str:
 
 
 def gate_environment(root: pathlib.Path, environ: dict[str, str] | None = None) -> dict[str, str]:
-    """The caller's environment without package selectors, `PATH` entries inside `root`, or virtualenv `bin`s."""
+    """The caller's environment without package selectors, `PATH` entries inside `root`, or virtualenv `bin`s.
+
+    Plus `SD_LOCAL_GATE=1`, whatever the caller had it set to.
+    """
     source = os.environ if environ is None else environ
     env = {key: value for key, value in source.items() if key not in DROPPED_ENVIRONMENT}
     top = root.resolve()
@@ -96,6 +112,7 @@ def gate_environment(root: pathlib.Path, environ: dict[str, str] | None = None) 
             if entry and os.path.isabs(entry) and not pathlib.Path(entry).resolve().is_relative_to(top)
             and not (pathlib.Path(entry).resolve().parent / "pyvenv.cfg").is_file()]
     env["PATH"] = os.pathsep.join(kept)
+    env[GATE_VARIABLE] = "1"
     return env
 
 
@@ -115,8 +132,9 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
             if local := untracked_local_block(root):
                 shutil.copyfile(local, tree / LOCAL_BLOCK)
             try:
-                result = subprocess.run([sys.executable, str(BIN / "sd-check"), "--json"], cwd=tree, text=True,
-                                        capture_output=True, timeout=timeout, check=False,
+                result = subprocess.run([sys.executable, str(BIN / "sd-check"), "--json", "--timeout", str(timeout)],
+                                        cwd=tree, text=True, capture_output=True,
+                                        timeout=timeout + REPORT_GRACE_SECONDS, check=False,
                                         env=gate_environment(root))
                 code, output, errors = result.returncode, result.stdout, result.stderr
             except (OSError, subprocess.SubprocessError) as error:
