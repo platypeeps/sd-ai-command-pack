@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import atexit
+import contextlib
 import hashlib
 import importlib.machinery
 import importlib.util
+import io
 import json
 import os
 import pathlib
@@ -400,7 +402,13 @@ roles:
         return ship.parser().parse_args([command, "--item", str(self.item), "--json", *extra])
 
     def operation(self, command="prepare", *extra):
-        return ship.Ship(self.root, self.connection, self.database, self.args(command, *extra))
+        operation = ship.Ship(self.root, self.connection, self.database, self.args(command, *extra))
+        # A first prepare must say whether it delivers (sd:1928). Most cases
+        # here are about something else, so they take the associate-only
+        # answer unless they give one; `unanswered` below asks without it.
+        if command == "prepare" and operation.args.deliver is None and "deliver" not in operation.state:
+            operation.args.deliver = False
+        return operation
 
     def prepare(self, *extra):
         return self.operation("prepare", *extra).prepare()
@@ -562,7 +570,7 @@ roles:
                              repo=str(self.operator), branch="second")
 
         def operation():
-            args = ship.parser().parse_args(["prepare", "--item", str(second), "--json"])
+            args = ship.parser().parse_args(["prepare", "--item", str(second), "--associate-only", "--json"])
             return ship.Ship(self.root, self.connection, self.database, args)
 
         # sd:1346 refuses the branch until it merges main, and that merge is
@@ -1850,7 +1858,7 @@ roles:
         self.assertEqual(run.call_args.kwargs["timeout"], CLI_TIMEOUT)
 
     def test_real_cli_review_prepare_slice_merge_and_repeat_reconcile(self):
-        prepared = self.cli("prepare")
+        prepared = self.cli("prepare", "--associate-only")
         self.assertEqual(prepared.returncode, 0, prepared.stdout + prepared.stderr)
         self.assertEqual(json.loads(prepared.stdout)["phase"], "ready_to_send")
         body = self.directory / "prepared-pr.md"
@@ -2152,6 +2160,102 @@ roles:
         again = self.merge()
         self.assertFalse(again["delivery_pending"])
         self.assertIsNone(again["workflow"]["blocker"])
+
+    # -- sd:1928: a first prepare says whether it delivers ------------------
+
+    def unanswered(self, *extra):
+        """A prepare exactly as the command line builds it, with no default claim."""
+        return ship.Ship(self.root, self.connection, self.database, self.args("prepare", *extra))
+
+    def test_a_first_prepare_without_a_claim_refuses_before_any_write(self):
+        """sd:1910 merged with `Item:` only because associate-only was the
+        silent default. The first prepare now asks, and asks before it commits,
+        pushes or opens anything."""
+        head = _git(self.root, "rev-parse", "HEAD")
+        with self.assertRaisesRegex(ship.Refusal, r"--deliver.*--associate-only") as caught:
+            self.unanswered().prepare()
+        self.assertIn("last", str(caught.exception))
+        self.assertEqual(_git(self.root, "rev-parse", "HEAD"), head)
+        self.assertEqual(receipts.read(self.connection, receipts.receipt_key(self.remote.slug, "topic", self.item)), (0, {}))
+        self.assertFalse([call for call in self.remote.calls if call.method in ("POST", "PUT", "PATCH")])
+
+    def test_the_command_line_takes_one_claim_only(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.args("prepare", "--deliver", "--associate-only")
+
+    def test_associate_only_is_an_answer_and_lands_item_without_delivers(self):
+        self.unanswered("--associate-only").prepare()
+        self.assertFalse(self.operation().state["deliver"])
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        message = _git(self.remote.path, "log", "-1", "--format=%B", "main")
+        self.assertIn(f"Item: sd:{self.item}", message)
+        self.assertNotIn("Delivers:", message)
+        self.assertFalse(result["delivery_pending"])
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "in_progress")
+
+    def test_a_reprepare_keeps_the_claim_the_first_prepare_stored(self):
+        self.unanswered("--associate-only").prepare()
+        _git(self.root, "commit", "--allow-empty", "-m", "more\n\nAuthored-with: human")
+        self.unanswered().prepare()
+        self.assertFalse(self.operation().state["deliver"])
+
+    def test_an_owned_runner_prepare_keeps_the_associate_only_default(self):
+        """The runner passes `--database` and no claim flag; it records its own
+        delivery proof, so its prepare is unchanged."""
+        self.unanswered("--database", str(self.database)).prepare()
+        self.assertFalse(self.operation().state["deliver"])
+
+    def task_item(self, kind: str) -> None:
+        self.connection.execute("UPDATE item SET branch = NULL WHERE id = ?", (self.item,))
+        self.connection.commit()
+        self.item = create_item(self.connection, kind=kind, title=f"fixture {kind}", status="in_progress",
+                                repo=str(self.operator), branch="topic")
+
+    def assert_closed_by_merge(self, result: dict) -> None:
+        self.assertFalse(result["delivery_pending"], result)
+        commit = result["merge_commit"]
+        message = _git(self.remote.path, "log", "-1", "--format=%B", "main")
+        self.assertIn(f"Delivers: sd:{self.item}", message)
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "done")
+        reasons = [row[0] for row in self.connection.execute(
+            "SELECT body FROM note WHERE item = ? AND kind = 'status_change'", (self.item,))]
+        import sd_work
+        # The sentence `sd task status N done --delivered-by` writes, spelled once there.
+        self.assertIn(f"in_progress -> done by sd-ship: {sd_work.DELIVERY_REASON.format(commit=commit, ref='origin/main')}",
+                      reasons)
+
+    def test_a_task_delivers_on_merge_with_the_delivered_by_sentence(self):
+        """Tasks refused `--deliver`, so every task merge needed a hand
+        `sd task status N done`, and `--delivered-by` then refused the squash
+        for want of `Delivers:`. A task takes `--deliver` without criteria and
+        closes on the verified merge."""
+        self.task_item("task")
+        self.unanswered("--deliver").prepare()
+        with patch.object(ship.time, "sleep"):
+            self.assert_closed_by_merge(self.merge())
+
+    def test_a_followup_delivers_on_merge(self):
+        self.task_item("followup")
+        self.unanswered("--deliver").prepare()
+        with patch.object(ship.time, "sleep"):
+            self.assert_closed_by_merge(self.merge())
+
+    def test_a_task_closed_by_hand_is_not_closed_again(self):
+        self.task_item("task")
+        self.unanswered("--deliver").prepare()
+        with patch.object(ship.time, "sleep"):
+            first = self.merge()
+        again = self.operation("reconcile").reconcile()
+        self.assertFalse(again["delivery_pending"])
+        self.assertEqual(first["merge_commit"], again["merge_commit"])
+        closes = self.connection.execute(
+            "SELECT COUNT(*) FROM note WHERE item = ? AND kind = 'status_change' AND body LIKE '%delivered at%'", (self.item,)).fetchone()[0]
+        self.assertEqual(closes, 1)
+
+    def test_work_still_needs_acceptance_evidence_to_deliver(self):
+        with self.assertRaisesRegex(ship.Refusal, "--acceptance-file"):
+            self.unanswered("--deliver").prepare()
 
     def test_empty_search_after_uncertain_create_cannot_duplicate_pr(self):
         self.double.no_create_result = True
