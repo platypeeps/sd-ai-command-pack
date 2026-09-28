@@ -22,15 +22,19 @@ per alias and nothing in `sd` reads it.
 
 1. A message table in the database: one row per message an intake delivers,
    with the source, the external id, the subject, the sender, the received time,
-   `read_at` and `acked_at`. The external id makes a second delivery a no-op.
+   `delivered_at`, `read_at` and `acked_at`. The external id makes a second
+   delivery a no-op. Delivery is the intake's bookkeeping; read and ack are
+   the operator's, and nothing but an operator action sets them.
 2. `sd message list [--unread] [--source <name>] [--json]` prints the rows.
 3. `sd message read <id>` and `sd message ack <id>` stamp the row and print it;
    `--json` returns it. Both are idempotent, and ack implies read.
 4. `sd message ack --all --source <name>` acknowledges what one source
    delivered, so a morning's briefs clear with one command.
 5. One intake writes rows: `local-mail-intake` adds a row per arrival, and its
-   `stamp` verb maps to ack. Brief mail (`Brief:` subjects) enters through the
-   same intake with its own source name.
+   `stamp` verb sets `delivered_at` and nothing else, so a delivered message
+   is still unread on Today until the operator reads or acks it. Brief mail
+   (`Brief:` subjects) enters through the same intake with its own source
+   name.
 6. `sd today --json` reads the unread and unacknowledged rows from the store,
    not from Gmail, and the Briefs page reads the same rows.
 7. The mockups' declarations turn on with the verbs as built, and
@@ -44,6 +48,8 @@ its rule of reading headers only.
 
 - [ ] `sd message --help` lists `list`, `read` and `ack`.
 - [ ] Delivering the same external id twice leaves one row.
+- [ ] After `mail-intake.sh stamp`, the stamped rows carry `delivered_at` and
+      still list under `sd message list --unread`.
 - [ ] `sd message ack <id>` twice prints the same row and exits 0 both times.
 - [ ] After an ack, `sd today --json` no longer lists that message.
 - [ ] `local-mail-intake` tests still pass `TestNeverSends`.
@@ -60,3 +66,7 @@ its rule of reading headers only.
 ## Log
 
 - 2026-09-28 created
+- 2026-09-28 review pass 1 (codex, advisory, addressed): `stamp` records
+  delivery, not acknowledgment; mapping it to ack would hide new mail before
+  the operator saw it. Requirements 1 and 5 separate `delivered_at` from
+  `read_at` and `acked_at`.
