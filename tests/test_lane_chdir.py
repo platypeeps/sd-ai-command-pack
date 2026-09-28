@@ -87,6 +87,28 @@ class LaneChdirTests(unittest.TestCase):
         statuses = {check["name"]: check["status"] for check in json.loads(result.stdout)["checks"]}
         self.assertEqual(statuses, {"check": "absent", "test": "absent", "lint": "absent"}, statuses)
 
+    def test_a_repeated_c_is_refused_rather_than_last_wins(self) -> None:
+        # Pass 2 of sd:1910: an allow rule that names the directory is a prefix
+        # match on the command line, so `-C /approved -C /unrelated` must not
+        # select /unrelated. argparse would let the last value win; the shared
+        # action refuses the second, and sd-review's pre-parser refuses it too.
+        for command, arguments in {**LANE_COMMANDS, "sd-ship": ["body", "--item", "1", "--json"]}.items():
+            with self.subTest(command=command):
+                result = run(command, "-C", str(REPO_ROOT), "-C", str(self.empty), *arguments, cwd=self.outside)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn("-C given twice", result.stderr)
+                self.assertNotIn("is not inside a git repository", result.stderr)
+
+    def test_a_parent_component_is_refused(self) -> None:
+        # The same prefix match: `-C /approved/../unrelated` keeps the approved
+        # prefix and leaves the directory. `..` is refused; name the directory.
+        dodge = str(REPO_ROOT / ".." / REPO_ROOT.name)
+        for command, arguments in {**LANE_COMMANDS, "sd-ship": ["body", "--item", "1", "--json"]}.items():
+            with self.subTest(command=command):
+                result = run(command, "-C", dodge, *arguments, cwd=self.outside)
+                self.assertEqual(result.returncode, 3 if command == "sd-ship" else 2, result.stdout + result.stderr)
+                self.assertIn("'..' is not allowed", result.stdout + result.stderr)
+
     def test_sd_review_refuses_a_c_without_an_operand(self) -> None:
         # The pre-parser in front of `setup-github` runs before argparse, so a
         # bare `-C` used to become `.` and fall through to a default review in

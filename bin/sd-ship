@@ -1729,7 +1729,7 @@ def validate_identity(args) -> None:
 def parser():
     command = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
                                       epilog=BODY_EPILOG)
-    command.add_argument("-C", dest="chdir", metavar="DIR", help=sd_lib.DIRECTORY_OPTION_HELP)
+    command.add_argument("-C", dest="chdir", metavar="DIR", action=sd_lib.DirectoryAction, help=sd_lib.DIRECTORY_OPTION_HELP)
     commands = command.add_subparsers(dest="command", required=True)
     body = commands.add_parser("body", help="print the body prepare would publish, and its body lint; no state",
                                description=BODY_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)

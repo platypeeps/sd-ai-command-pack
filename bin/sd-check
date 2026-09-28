@@ -237,7 +237,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="sd-check",
         description="Run this repository's own check entrypoints and report a typed result.",
     )
-    parser.add_argument("-C", dest="chdir", metavar="DIR", help=sd_lib.DIRECTORY_OPTION_HELP)
+    parser.add_argument("-C", dest="chdir", metavar="DIR", action=sd_lib.DirectoryAction, help=sd_lib.DIRECTORY_OPTION_HELP)
     parser.add_argument("--json", action="store_true", help="emit one machine-readable object")
     parser.add_argument("--dry-run", action="store_true", help="print what would run, then exit 0")
     parser.add_argument("--only", metavar="NAME", help=f"run one of {', '.join(sd_lib.CHECK_NAMES)}")

@@ -9,6 +9,7 @@ Stdlib only, Python 3.10+, no network. A caller that cannot proceed gets a
 
 from __future__ import annotations
 
+import argparse
 import datetime
 import json
 import os
@@ -307,9 +308,28 @@ def enter_directory(directory: str | None, *, error: type[Exception]) -> None:
         # `pathlib.Path("")` is `.`: an empty operand would silently stay put.
         raise error("-C: expected a directory")
     target = pathlib.Path(directory).expanduser()
+    if ".." in target.parts:
+        # An allow rule that names the directory is a prefix match on the
+        # command line: `-C /approved/../unrelated` keeps the approved prefix
+        # and leaves the directory (sd:1910, pass 2). Name the directory.
+        raise error(f"-C {directory}: '..' is not allowed, name the directory")
     if not target.is_dir():
         raise error(f"-C {directory}: not a directory")
     os.chdir(target)
+
+
+class DirectoryAction(argparse.Action):
+    """`-C` once. A second `-C` is an error, not a later value that wins.
+
+    argparse keeps the last value of a repeated option, so under an allow
+    rule that names the directory, `-C /approved -C /unrelated` would keep
+    the approved prefix and act on the other checkout (sd:1910, pass 2).
+    """
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        if getattr(namespace, self.dest, None) is not None:
+            parser.error(f"{option_string} given twice")
+        setattr(namespace, self.dest, values)
 
 
 def enter_leading_directory(argv: list[str], *, error: type[Exception]) -> list[str]:
@@ -326,6 +346,9 @@ def enter_leading_directory(argv: list[str], *, error: type[Exception]) -> list[
         # This runs before argparse, so its required-value check is ours to
         # make: a bare `-C` must not fall through to a default run in cwd.
         raise error("-C: expected a directory")
+    if "-C" in argv[2:]:
+        # The parser behind this would see the second one as the first.
+        raise error("-C given twice")
     enter_directory(argv[1], error=error)
     return argv[2:]
 

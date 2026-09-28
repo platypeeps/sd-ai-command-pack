@@ -107,3 +107,13 @@ shows the need.
   `sd-review -C` with no operand became `.` and ran a default review in cwd;
   `enter_leading_directory` and `enter_directory` now refuse a missing or
   empty operand, with a test on the message.
+- 2026-09-28 pass 2 (codex, challenge): the high finding held, with one
+  concrete hole in the rejection's evidence: argparse keeps the last value
+  of a repeated option, so `-C /approved -C /unrelated` keeps the prefix a
+  directory-scoped allow rule matches and acts on the other checkout. The
+  reviewer ran the parser to show it. Fixed: `sd_lib.DirectoryAction`
+  refuses a second `-C`, sd-review's pre-parser refuses one after a leading
+  `-C`, and `enter_directory` refuses a `..` component, which is the same
+  hole spelled as a path. Tests for both on all five commands. The
+  rejection of the design point stands as recorded under pass 1; the
+  operator decided it, and the prefix rule now holds.

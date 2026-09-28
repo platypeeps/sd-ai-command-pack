@@ -18,6 +18,9 @@
   rule that names the directory, `Bash(sd-ship -C /path/to/checkout:*)`,
   scopes the approval to one repository; `Bash(sd-ship:*)` approves every
   one, and a `cd <dir> &&` line could never be scoped by a rule at all.
+  Because such a rule is a prefix match, a second `-C` and a `..` component
+  are usage errors: `-C /approved -C /unrelated` and `-C /approved/../x`
+  keep the approved prefix and would leave the directory.
 
 - **`sd-ship` accepts the body it published (sd:1870).** `prepare` appended
   `Work: sd:<item>` to the body and then refused a `--body-file` carrying it,
