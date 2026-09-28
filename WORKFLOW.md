@@ -122,11 +122,14 @@ Every reader treats a missing column, row or library as `github`.
 
 - `sd-ship merge` checks the reviewed head out into a clean, detached `git worktree`.
   It runs `sd-check` there, not in your checkout, and removes the worktree after.
+- The child drops `PYTHONPATH`, `PYTHONHOME`, `VIRTUAL_ENV`, `CONDA_PREFIX` and `PATH` entries inside your checkout.
+  The rest of the environment is this machine's image, as a runner's image is on GitHub.
 - It posts the result to that exact commit as the `sd/local-gate` status, `success` or `failure`.
   It refuses to post for any commit other than the one the worktree held.
-- A `success` already posted at the head is reused, so a retried merge does not rerun the check.
-- The merge then requires that status as `success` at the head.
-  Missing, failed, pending, or naming another commit: each refuses.
+- The description carries `inputs <digest>`: the head, the copied `CLAUDE.local.md` and the pack's `bin/` files.
+- A retried merge reuses a `success` only when this account posted it for the same inputs.
+- The merge then requires that status as `success` at the head, posted by the authenticated account.
+  Missing, failed, pending, naming another commit, or from another account: each refuses.
 - Under a declared gap, the status replaces the `pull_request` workflow runs `every_check` asks for.
   Under protection, the status is required beside the protection's own contexts.
 - Protection for such a repository should require `sd/local-gate`.

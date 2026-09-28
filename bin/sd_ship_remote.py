@@ -17,6 +17,13 @@ COPILOT_REVIEWER = "copilot-pull-request-reviewer[bot]"
 COPILOT_LOGINS = frozenset({COPILOT_REVIEWER, "copilot-pull-request-reviewer", "copilot"})
 
 
+def gate_creator(status: dict) -> str:
+    """The lower-cased login that posted a commit status, or "" when GitHub named none."""
+    creator = status.get("creator")
+    login = creator.get("login") if isinstance(creator, dict) else None
+    return login.lower() if isinstance(login, str) else ""
+
+
 class Refusal(Exception):
     """A failed or uncertain prerequisite; never authority to merge."""
 
@@ -108,6 +115,20 @@ class GitHub:
         #: `repo.ci` for this repository, set by the caller that read the row.
         #: `local` swaps the `pull_request` runs for the `sd/local-gate` status.
         self.ci = "github"
+        #: The authenticated account, read once by `viewer_login`.
+        self.viewer: str | None = None
+
+    def viewer_login(self) -> str:
+        """The login this token authenticates as, the only author a local gate status may have."""
+        if self.viewer is None:
+            user = self.api("user")
+            login = user.get("login") if isinstance(user, dict) else None
+            if not isinstance(login, str) or not login:
+                raise Refusal("GitHub did not name the authenticated account", code="command_failed",
+                              boundary="runtime", state="retryable_failure",
+                              next_action="Check `gh auth status`, then retry.")
+            self.viewer = login
+        return self.viewer
 
     def api(self, path: str, *, method: str = "GET", body: dict | None = None) -> Any:
         argv = ["gh", "api", path, "--method", method]
@@ -531,8 +552,10 @@ class GitHub:
     def local_gate_passed(self, head: str, statuses: list | None = None) -> None:
         """Refuse unless the newest `sd/local-gate` status at `head` is `success`.
 
-        Missing, failed, pending, or naming another SHA: each refuses, because
-        under `ci = local` that status is the only thing that ran the checks.
+        Missing, failed, pending, naming another SHA, or posted by an account
+        other than this token's: each refuses, because under `ci = local` that
+        status is the only thing that ran the checks, and anyone with write
+        access can post one through the statuses API.
         """
         context = sd_lib.LOCAL_GATE_CONTEXT
         if statuses is None:
@@ -542,6 +565,12 @@ class GitHub:
             raise Refusal(f"repo.ci is local and {context} has no status on {head}", code="ci_missing",
                           boundary="ci", state="retryable_failure",
                           next_action="Retry sd-ship merge, which runs sd-check at this head and posts the status.")
+        creator = gate_creator(current)
+        if creator != self.viewer_login().lower():
+            raise Refusal(f"repo.ci is local and {context} on {head} was posted by {creator or 'an unknown account'}, "
+                          f"not {self.viewer_login()}; only a status this account posted counts",
+                          code="local_gate_foreign", boundary="ci", state="retryable_failure",
+                          next_action="Retry sd-ship merge, which runs sd-check at this head and posts its own status.")
         if current.get("state") != "success":
             raise Refusal(f"repo.ci is local and {context} is {current.get('state')} on {head}: "
                           f"{current.get('description') or 'no description'}", code="ci_not_passing",

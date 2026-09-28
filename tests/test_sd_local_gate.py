@@ -28,7 +28,7 @@ def git(root: pathlib.Path, *args: str) -> str:
 
 
 class Recorder:
-    """The two `GitHub` calls the gate makes, answered from memory."""
+    """The `GitHub` calls the gate makes, answered from memory; posts land as `me`'s statuses."""
 
     prefix = "repos/o/r"
 
@@ -36,12 +36,16 @@ class Recorder:
         self.statuses = statuses or []
         self.posts: list[tuple[str, dict]] = []
 
+    def viewer_login(self) -> str:
+        return "Me"
+
     def pages(self, path: str, field: str | None = None) -> list:
         return list(self.statuses)
 
     def api(self, path: str, *, method: str = "GET", body: dict | None = None) -> dict:
         assert method == "POST", method
         self.posts.append((path, body or {}))
+        self.statuses.insert(0, {**(body or {}), "sha": path.rsplit("/", 1)[1], "creator": {"login": "Me"}})
         return {"state": (body or {}).get("state")}
 
 
@@ -90,6 +94,19 @@ class RunCheck(Repository):
         result = sd_local_gate.check_in_worktree(self.root, first)
         self.assertEqual((result["head"], result["status"]), (first, "failure"))
 
+    def test_a_pythonpath_at_the_root_does_not_reach_the_child(self) -> None:
+        """An editable install pointed at the dirty checkout must not be importable in the gate."""
+        head = self.commit('check:\n\t@test -z "$$PYTHONPATH" && test -z "$$VIRTUAL_ENV"\n')
+        with mock.patch.dict(os.environ, {"PYTHONPATH": str(self.root), "VIRTUAL_ENV": str(self.root / ".venv")}):
+            self.assertEqual(sd_local_gate.check_in_worktree(self.root, head)["status"], "success")
+
+    def test_the_environment_drops_package_selectors_and_path_entries_in_the_checkout(self) -> None:
+        inside, outside = str(self.root / ".venv/bin"), "/usr/bin"
+        env = sd_local_gate.gate_environment(self.root, {
+            "PATH": os.pathsep.join([inside, outside, "relative/bin"]), "PYTHONPATH": str(self.root),
+            "PYTHONHOME": "/x", "VIRTUAL_ENV": inside, "CONDA_PREFIX": "/c", "__PYVENV_LAUNCHER__": "/l", "HOME": "/h"})
+        self.assertEqual(env, {"PATH": outside, "HOME": "/h"})
+
     def test_the_worktree_is_removed_after_the_run(self) -> None:
         head = self.commit("check:\n\t@echo ok\n")
         before = self.worktrees()
@@ -112,32 +129,64 @@ class Post(unittest.TestCase):
 
     def test_success_is_posted_to_the_checked_head_under_the_context(self) -> None:
         api = Recorder()
-        sd_local_gate.post_gate_status(api, self.HEAD, {"head": self.HEAD, "status": "success", "summary": "sd-check pass"})
+        sd_local_gate.post_gate_status(api, self.HEAD, {"head": self.HEAD, "status": "success", "summary": "sd-check pass"},
+                                       "0123456789ab")
         [(path, body)] = api.posts
         self.assertEqual(path, f"repos/o/r/statuses/{self.HEAD}")
         self.assertEqual((body["state"], body["context"]), ("success", "sd/local-gate"))
+        self.assertTrue(body["description"].startswith(f"{self.HEAD[:12]} inputs 0123456789ab: "))
         self.assertLessEqual(len(body["description"]), 140)
 
     def test_a_result_for_another_sha_is_refused_and_nothing_is_posted(self) -> None:
         api = Recorder()
         with self.assertRaisesRegex(Refusal, "no status is posted for a commit that was not checked"):
-            sd_local_gate.post_gate_status(api, self.HEAD, {"head": "b" * 40, "status": "success"})
+            sd_local_gate.post_gate_status(api, self.HEAD, {"head": "b" * 40, "status": "success"}, "0" * 12)
         self.assertEqual(api.posts, [])
 
     def test_a_failure_posts_failure(self) -> None:
         api = Recorder()
-        sd_local_gate.post_gate_status(api, self.HEAD, {"head": self.HEAD, "status": "failure", "summary": "x" * 300})
+        sd_local_gate.post_gate_status(api, self.HEAD, {"head": self.HEAD, "status": "failure", "summary": "x" * 300},
+                                       "0" * 12)
         self.assertEqual(api.posts[0][1]["state"], "failure")
         self.assertEqual(len(api.posts[0][1]["description"]), 140)
 
 
 class Gate(Repository):
-    def test_a_success_already_at_the_head_is_reused_without_a_run(self) -> None:
+    def success(self, head: str, *, inputs: str | None = None, creator: str = "me") -> dict:
+        inputs = inputs or sd_local_gate.gate_inputs(self.root, head)
+        return {"context": "sd/local-gate", "state": "success", "sha": head, "creator": {"login": creator},
+                "description": f"{head[:12]} inputs {inputs}: sd-check pass (check pass)"}
+
+    def test_this_accounts_success_for_the_same_inputs_is_reused_without_a_run(self) -> None:
         head = self.commit("check:\n\t@false\n")
-        api = Recorder([{"context": "sd/local-gate", "state": "success", "description": "earlier"}])
+        api = Recorder([self.success(head)])
         result = sd_local_gate.local_gate(api, self.root, head)
         self.assertTrue(result["reused"])
         self.assertEqual(api.posts, [])
+
+    def test_a_success_for_other_inputs_runs_again(self) -> None:
+        head = self.commit("check:\n\t@false\n")
+        for description in ("earlier", f"{head[:12]} inputs 000000000000: sd-check pass"):
+            with self.subTest(description=description):
+                api = Recorder([{**self.success(head), "description": description}])
+                result = sd_local_gate.local_gate(api, self.root, head)
+                self.assertEqual((result["reused"], api.posts[0][1]["state"]), (False, "failure"))
+
+    def test_a_changed_local_block_runs_again_at_the_same_head(self) -> None:
+        head = self.commit("check:\n\t@echo ok\n")
+        api = Recorder()
+        self.assertFalse(sd_local_gate.local_gate(api, self.root, head)["reused"])
+        self.assertTrue(sd_local_gate.local_gate(api, self.root, head)["reused"])
+        (self.root / "CLAUDE.local.md").write_text("check: make other\n", encoding="utf-8")
+        self.assertFalse(sd_local_gate.local_gate(api, self.root, head)["reused"])
+        self.assertEqual(len(api.posts), 2)
+
+    def test_another_accounts_success_is_not_reused(self) -> None:
+        """Anyone with write access can post a status; only this account's own counts."""
+        head = self.commit("check:\n\t@false\n")
+        api = Recorder([self.success(head, creator="someone-else")])
+        result = sd_local_gate.local_gate(api, self.root, head)
+        self.assertEqual((result["reused"], api.posts[0][1]["state"]), (False, "failure"))
 
     def test_a_failure_at_the_head_runs_again(self) -> None:
         head = self.commit("check:\n\t@echo ok\n")

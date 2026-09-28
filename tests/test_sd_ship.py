@@ -148,7 +148,7 @@ class ShipDouble(GitHubDouble):
             return 201, self._pull(self.remote.pull(number))
         if method == "POST" and path.startswith(f"{prefix}/statuses/"):
             # The local gate's write (sd:1843), newest first as GitHub lists.
-            record = {**body, "sha": path.rsplit("/", 1)[1]}
+            record = {**body, "sha": path.rsplit("/", 1)[1], "creator": {"login": "fixture"}}
             self.statuses.insert(0, record)
             return 201, record
         if path.endswith("/statuses"):
@@ -4122,6 +4122,26 @@ class DeclaredGapCase(unittest.TestCase):
                           lambda root, head: {"head": "e" * 40, "status": "success", "summary": "elsewhere"}):
             self.refuse(r"no status is posted for a commit that was not checked", "local_gate_mismatch")
         self.assertEqual(self.gate_posts(), [])
+
+    def test_ci_local_refuses_a_gate_success_another_account_posted(self):
+        """Anyone with write access can post `sd/local-gate`; readiness trusts only this token's own."""
+        self.declare()
+        self.local_ci()
+        self.local_green()
+        self.double.statuses = [{"context": "sd/local-gate", "state": "success", "sha": self.head(),
+                                 "creator": {"login": "someone-else"}, "description": "posted elsewhere"}]
+        with patch.object(ship.sd_local_gate, "local_gate", lambda api, root, head: {"head": head, "reused": True}):
+            self.refuse(r"sd/local-gate on .* was posted by someone-else, not fixture", "local_gate_foreign")
+
+    def test_ci_local_runs_its_own_gate_over_another_accounts_success(self):
+        self.declare()
+        self.local_ci()
+        self.local_green()
+        self.double.statuses = [{"context": "sd/local-gate", "state": "success", "sha": self.head(),
+                                 "creator": {"login": "someone-else"}, "description": "posted elsewhere"}]
+        self.merge()
+        self.assertEqual(self.puts(), 1)
+        self.assertEqual([call.body["state"] for call in self.gate_posts()], ["success"])
 
     def test_ci_local_with_no_gate_status_refuses_as_missing(self):
         """Nothing posted, nothing ran: no pull_request run is asked for, so the

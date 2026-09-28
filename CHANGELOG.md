@@ -15,6 +15,11 @@
   context such a repository produces. Every reader treats a missing
   `repo.ci` column, row or library as `github`, so other repositories are
   unchanged. The column lands in the `system` repository's schema 16.
+  A posted success counts only when the authenticated account posted it,
+  and a retry reuses it only for the same inputs digest (head, copied
+  `CLAUDE.local.md`, pack `bin/`). `sd-check` runs without `PYTHONPATH`,
+  `VIRTUAL_ENV` and the other package selectors, and without `PATH` entries
+  inside the checkout.
 
 - **CI pins `sd_db` by its release tag, `sd-db-v0.1.0` (sd:1867, system
   sd:1854).** `tests/test_system_pin.py` now accepts a full commit or an
