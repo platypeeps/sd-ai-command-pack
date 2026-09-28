@@ -306,14 +306,27 @@ class CiLocal(unittest.TestCase):
         self.assertIn("classic protection on release/1.x requires tests", done.stderr)
         self.assertEqual(self.writes(), [])
 
-    def test_a_rewritten_ruleset_answers_for_the_other_branches_it_covers(self) -> None:
+    def test_a_ruleset_shared_with_another_branch_refuses(self) -> None:
+        # sd-ship posts sd/local-gate only for pull requests into the default
+        # branch, so rewriting a ruleset that also covers a release branch
+        # would leave that branch requiring a context nothing produces.
         checks = {"type": "required_status_checks", "parameters": {
             "strict_required_status_checks_policy": True, "required_status_checks": [{"context": "tests"}]}}
         self.model(repo=repo(private=True), classic=None, branches={"release/1.x": None},
                    rulesets={"7": ruleset(7, [checks])}, actions={"enabled": True}, workflows=[])
         done = self.run_sd("--apply")
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(ruleset_contexts(self.state()["rulesets"]["7"]), ["sd/local-gate"])
+        self.assertEqual(done.returncode, 3, done.stdout)
+        self.assertIn("ruleset guard-7 (#7) also covers release/1.x, where sd-ship posts no sd/local-gate", done.stderr)
+        self.assertEqual(self.writes(), [])
+        self.assertEqual(ruleset_contexts(self.state()["rulesets"]["7"]), ["tests"])
+
+    def test_a_ruleset_gaining_the_rule_refuses_when_shared_with_another_branch(self) -> None:
+        self.model(repo=repo(private=True), classic=None, branches={"release/1.x": None},
+                   rulesets={"9": ruleset(9, [{"type": "deletion"}])}, actions={"enabled": False}, workflows=[])
+        done = self.run_sd("--apply")
+        self.assertEqual(done.returncode, 3, done.stdout)
+        self.assertIn("ruleset guard-9 (#9) also covers release/1.x", done.stderr)
+        self.assertEqual(self.writes(), [])
 
     def test_refusals_write_nothing(self) -> None:
         cases = {

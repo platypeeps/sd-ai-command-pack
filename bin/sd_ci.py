@@ -20,7 +20,9 @@ changes together, each read live and each skipped when it already holds:
     protection object from a read is lossy. A requirement this verb cannot
     rewrite -- an organization ruleset, or another protected branch's own
     protection -- refuses the whole run when it names a context other than
-    the gate, because the workflow that produced it is about to stop;
+    the gate, because the workflow that produced it is about to stop. A
+    ruleset this verb would write that also covers another protected branch
+    refuses too: `sd-ship` posts the gate only into the default branch;
   * Actions: a private repository has Actions disabled outright, because the
     runner minutes are what stopped. A public repository keeps Actions on,
     because CodeQL, Dependabot and Copilot run as *dynamic* workflows (path
@@ -293,8 +295,10 @@ def other_branch_requirements(call: Call, branch: str, rewritten: set[int]) -> l
 
     Actions go off for the whole repository, so a release branch whose
     protection names a workflow's context could never merge again. A ruleset
-    this run rewrites answers for every branch it targets; anything else
-    that requires a context other than the gate is named.
+    this run rewrites is named when it also covers another protected branch:
+    `sd-ship` posts the gate only for pull requests into the default branch,
+    so that branch would require a context nothing produces. Anything else
+    that requires a context other than the gate is named too.
     """
     stranded: list[str] = []
     for name in protected_branches(call):
@@ -303,9 +307,12 @@ def other_branch_requirements(call: Call, branch: str, rewritten: set[int]) -> l
         classic, active = read_protection(call, name)
         if _foreign(classic_contexts(classic)):
             stranded.append(_stranded(f"classic protection on {name}", _foreign(classic_contexts(classic))))
-        stranded += [_stranded(f"ruleset {ruleset.get('name')} (#{ruleset.get('id')}) on {name}",
-                               _foreign(ruleset_contexts(ruleset)))
-                     for ruleset in active if ruleset.get("id") not in rewritten and _foreign(ruleset_contexts(ruleset))]
+        for ruleset in active:
+            label = f"ruleset {ruleset.get('name')} (#{ruleset.get('id')})"
+            if ruleset.get("id") in rewritten:
+                stranded.append(f"{label} also covers {name}, where sd-ship posts no {CONTEXT}")
+            elif _foreign(ruleset_contexts(ruleset)):
+                stranded.append(_stranded(f"{label} on {name}", _foreign(ruleset_contexts(ruleset))))
     return stranded
 
 
@@ -319,13 +326,15 @@ def check_steps(call: Call, branch: str) -> list[Step]:
     classic, active = read_protection(call, branch)
     ours = [ruleset for ruleset in active if ruleset.get("source_type", "Repository") == "Repository"]
     requiring = [ruleset for ruleset in ours if _requires_checks(ruleset)]
+    classic_requires = classic is not None and bool(classic.get("required_status_checks"))
+    # The rulesets this run writes: those it rewrites, or the one it adds a rule to.
+    written = requiring or ([] if classic_requires or not ours else ours[:1])
     stranded = organization_requirements(active, ours)
-    stranded += other_branch_requirements(call, branch, {int(ruleset["id"]) for ruleset in requiring})
+    stranded += other_branch_requirements(call, branch, {int(ruleset["id"]) for ruleset in written})
     if stranded:
         raise CiRefusal("these required checks would never report once the workflows are off, and this verb "
                         f"does not rewrite them: {'; '.join(stranded)}; change them to {CONTEXT} first, then rerun")
     steps: list[Step] = []
-    classic_requires = classic is not None and bool(classic.get("required_status_checks"))
     if classic is not None and classic_requires:
         steps.append(classic_step(call, branch, classic))
     steps += [ruleset_step(call, ruleset, add=False) for ruleset in requiring]
