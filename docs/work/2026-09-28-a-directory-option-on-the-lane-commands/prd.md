@@ -62,9 +62,10 @@ shows the need.
 - [x] `tests/test_verb_inventory.py` passes, and adding `-C` to a sixth
       command turns it red. (`LANE_COMMANDS` is the allow-list; a sixth file
       declaring `-C` is an offender.)
-- [ ] A bare `sd-ship -C <checkout> merge …` from another repository's
+- [x] A bare `sd-ship -C <checkout> merge …` from another repository's
       session runs under `Bash(sd-ship:*)` without a prompt. Operator-observed:
-      a session cannot verify its own permission layer.
+      a session cannot verify its own permission layer. (PR #1241's own
+      prepare and merge ran that way from the ui-design session, 2026-09-28.)
 - [x] `make check` passes. (Second run, exit 0. The first found two more
       enforcement tests: `tests/test_sd_status.py`'s parser scan, which now
       allows `-C` on `sd-pr-state` for the same reason, and the review-lane
@@ -129,3 +130,28 @@ shows the need.
   `tests/test_verb_inventory.py` names `sd_lib.py` as the one library file
   that may declare `-C`, for that helper. The design rejection stands as
   recorded under pass 1.
+- 2026-09-28 pass 4 (codex, challenge, at `b0c440ad`): one finding, the
+  design point again, with no new hole; the reviewer's replay confirmed the
+  missing-operand and both duplicate-spelling refusals and that a single `-C`
+  selects the directory it names. Rejected on the evidence under pass 1 and
+  recorded as an evidenced rebuttal through `sd-ship adjudicate`, acceptance
+  digest `370208c9…`, revision 12873, evidence this PRD, `CHANGELOG.md` and
+  `tests/test_lane_chdir.py` by SHA-256, and the reasons on the PR thread.
+  The review clearance on that head is `adjudicated`, not a clean raw review.
+- 2026-09-28 Copilot on PR #1241: the empty-directory test loop covers four
+  commands and not `sd-ship`. Real, carried to sd:1911 rather than fixed on
+  the branch, since a test-only commit would have spent the lane's fifth and
+  last review pass.
+- 2026-09-28 merged: PR #1241 at `651b59dc`, by `sd-ship -C <checkout> merge`
+  run from the ui-design session under `Bash(sd-ship:*)` without a prompt,
+  which is the operator-observed criterion above. The `Needed-by:` trailer on
+  the pass 3 commit sat in its own paragraph, so git did not read it; sd-ship
+  warned and continued, and the squash commit carries `Item:` and
+  `Authored-with:` in one block. It carries no `Delivers:`, because prepare
+  ran without `--deliver`. The row cannot be closed afterwards: `sd-ship
+  prepare --item 1910 --deliver` on the merged record only reconciles it,
+  `sd task status 1910 done` refuses a work row without delivery evidence,
+  and no verb re-points the item at another branch. The row stays `planning`
+  with its code on `main` until a commit carrying `Delivers: sd:1910`
+  reaches `main`; the gap is filed as a follow-up task, and this closeout
+  lands through the no-item lane.
