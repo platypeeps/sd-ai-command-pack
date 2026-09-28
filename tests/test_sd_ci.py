@@ -51,6 +51,8 @@ FAKE_GH = textwrap.dedent('''\
         sys.exit(0)
 
     def fail(status, message):
+        # A warning ahead of gh's status line, as an interpreter hook prints one.
+        print("sitecustomize: a warning on stderr", file=sys.stderr)
         print(f"gh: {message} (HTTP {status})", file=sys.stderr)
         sys.exit(1)
 

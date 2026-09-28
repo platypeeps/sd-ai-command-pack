@@ -73,6 +73,9 @@ WORKFLOW_PAGE = 100
 #: The fields `PUT repos/{o}/{r}/rulesets/{id}` accepts; the read carries more.
 RULESET_FIELDS = ("name", "target", "enforcement", "bypass_actors", "conditions", "rules")
 
+#: `gh api`'s error line: the message, then `(HTTP nnn)`.
+HTTP_LINE = re.compile(r"^(?:gh: )?(.*?)\s*\(HTTP (\d{3})\)$")
+
 #: `(method, path, body)` -> `(status, payload)`; status 0 is "gh could not answer".
 Call = Callable[[str, str, Any], tuple[int, Any]]
 
@@ -95,9 +98,11 @@ def gh_call(root: pathlib.Path) -> Call:
             return 0, {"message": f"gh could not be run: {error}"}
         if completed.returncode != 0:
             said = (completed.stderr or completed.stdout).strip().splitlines()
-            line = said[0] if said else f"gh api {path} exited {completed.returncode}"
-            match = re.search(r"^(?:gh: )?(.*?)\s*\(HTTP (\d{3})\)$", line)
-            return (int(match[2]), {"message": match[1]}) if match else (0, {"message": line})
+            # The status line is gh's last word; a warning can precede it.
+            matches = [found for found in map(HTTP_LINE.search, said) if found]
+            if matches:
+                return int(matches[-1][2]), {"message": matches[-1][1]}
+            return 0, {"message": said[0] if said else f"gh api {path} exited {completed.returncode}"}
         try:
             return 200, json.loads(completed.stdout) if completed.stdout.strip() else None
         except json.JSONDecodeError as error:
