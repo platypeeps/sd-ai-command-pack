@@ -149,6 +149,8 @@ def _build_fixture(root, widen_publish=False, widen_assembly=False):
     scripts.mkdir(parents=True)
     harness = scripts / "run-tests.sh"
     shutil.copy2(HARNESS, harness)
+    (root / "bin").mkdir()
+    shutil.copy2(REPO_ROOT / "bin" / "sd_gate_slots.py", root / "bin" / "sd_gate_slots.py")
     if widen_publish:
         _widen_publish_window(harness)
     if widen_assembly:

@@ -343,10 +343,18 @@ which the installer places in `~/.claude/agents`.
   close each one when it merges.
 - **Iterate on the fast path; gate once before the push.** While fixing, run
   `make check CHANGED="<paths>"`, which runs only the tests those paths need
-  plus an always-run set. Before the push, run the full `make check` once. On
-  a shared machine set `SD_GATE_SLOTS=1`: each gate already runs a test worker
-  on nearly every core, and overlapping gates slow all of them. Only the full
-  gate counts as evidence; a narrowed run exits 2 to say so.
+  plus an always-run set. Before the push, run the full `make check` once.
+  Only the full gate counts as evidence; a narrowed run exits 2 to say so.
+- **Gates share the machine through slots.** Every `sd-check` run, and so
+  every gate `sd-ship prepare` or `merge` runs in any repository, first takes
+  one of `sd.gate_slots` machine-wide slots (unset: a quarter of the cores,
+  4 on 16). `SD_GATE_SLOTS` overrides it for one run, `0` lifts the cap, and
+  CI takes none. A queued gate prints `waiting for a gate slot` on stderr and
+  again each minute. The wait counts against `sd-check --timeout`, and each
+  check gets the rest. A holder runs its checks with `SD_GATE_SLOTS=0`, so the
+  pack's own `make test` inside a gate takes no second slot; run directly,
+  `make test` takes one of 2. Slots are kernel locks under
+  `$XDG_STATE_HOME/sd/gate-slots`, so a dead holder's slot is free at once.
 - **Test one version per language, the latest stable (Python 3.14, Node
   26), in CI and locally; no version matrices.**
 
@@ -599,7 +607,7 @@ reviewer chain before vendor, transport, availability and spending gates run.
 
 Core settings use `sd config get|set|unset|list` and the existing atomic machine configuration writer.
 The file is `~/.config/sd-ai-command-pack/config.json`, honoring `XDG_CONFIG_HOME`.
-The reserved `sd` namespace declares three settings:
+The reserved `sd` namespace declares four settings:
 
 - `sd.external_reviews`: `configured` permits private code and scoped review context to eligible configured providers.
   It includes future registry entries; registry configuration chooses capability, while this explicit operator grant authorizes transmission.
@@ -622,6 +630,9 @@ The reserved `sd` namespace declares three settings:
   `sd-review` reports the effective policy, its source and the repository's say under `remote_reviews.copilot`.
   `sd-ship` resolves the decision again at dispatch, from the setting as it stands then and the tiers the
   retained passes recorded, so a setting changed after the review takes effect without another review.
+- `sd.gate_slots`: how many repository gates (`sd-check` runs) may run at once on this machine; `0` is no cap.
+  Absence reads a quarter of the cores. `SD_GATE_SLOTS` overrides it for one run. It grants nothing;
+  see [Parallel work](#parallel-work).
 
 Installation supplies neither grant. A new operator must state their own policy; never copy another user's personal permission.
 These settings start no background work, enable no runner policy, and bypass no ownership, review, CI, or protection gate.
