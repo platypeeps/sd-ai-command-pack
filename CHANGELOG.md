@@ -13,6 +13,17 @@
 
 ### Changed
 
+- **An associate-only merge can be delivered afterwards (sd:1913).**
+  `sd-ship reconcile --item N --deliver --reason TEXT` delivers an item whose
+  whole-item merge carried `Item:` where `Delivers:` was meant. It finds the
+  record by item from any branch, reverifies the merge, and requires
+  `Item: sd:N` on the squash. A work item goes through
+  `sd_db.progress.deliver_associated_work`, which records `trailer: Item` and
+  the reason; an older library refuses as `library_incompatible`. A task or
+  followup closes with the delivery sentence and the reason. `prepare
+  --deliver` on such a record, and `sd task status N done --delivered-by` on
+  an `Item:`-only commit, now name this repair.
+
 - **The first `sd-ship prepare` of an item names its claim (sd:1928).**
   Associate-only was the silent default, so a forgotten `--deliver` merged
   sd:1910 with `Item:` alone and left its row planning with the code on

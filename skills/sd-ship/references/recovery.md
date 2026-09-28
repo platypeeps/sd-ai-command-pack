@@ -14,6 +14,11 @@ Reconciliation inspects that remote result; no merge is called.
 
 For `Delivers:`, run `sd work deliver <row-id> <full-merge-commit-sha>` to verify and record completion.
 A merge carrying `Item:` alone records the squash commit; its item stays open.
+When that merge was the whole item, run `sd-ship reconcile --item ID --deliver --reason TEXT`.
+It finds the record by item from any branch and verifies the squash on the default branch with `Item: sd:ID`.
+A work item then needs `sd_db.progress.deliver_associated_work`; an older library refuses with `library_incompatible`.
+A task or followup moves to done with the delivery sentence and the reason.
+`sd-ship prepare --deliver` on such a record refuses and names this repair.
 An open PR has not merged yet; leave it standing.
 A repeated reconciliation writes nothing: no `status_change`, unchanged `shipped_at`, and no merge call.
 

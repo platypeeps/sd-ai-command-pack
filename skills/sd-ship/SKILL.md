@@ -153,6 +153,7 @@ Never allocate another review ID to reset spent passes or discard history.
   Under `repo.ci = local` it starts none: the local gate runs inside the merge and is the wait.
 - `sd-ship observe --item ID --json` reads receipt and remote state without changing files, refs, or database.
 - `sd-ship reconcile --item ID --json` fetches merge evidence in an owned clone.
+  `--deliver --reason TEXT` delivers an item whose merge was associate-only; see `references/recovery.md`.
   Observation alone does not establish ancestry.
   Reconciliation removes no branch, worktree, or clone.
 

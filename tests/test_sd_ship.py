@@ -2284,6 +2284,70 @@ roles:
         self.assertTrue(result["delivery_pending"])
         self.assertIn("without delivery evidence", result["delivery_error"])
 
+    # -- sd:1913: deliver an item whose merge was associate-only ------------
+
+    REASON = "prepared without --deliver; this merge is the whole item"
+
+    def associated_merge(self) -> str:
+        self.unanswered("--associate-only").prepare()
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        self.assertFalse(result["delivery_pending"])
+        self.assertNotEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "done")
+        return result["merge_commit"]
+
+    def test_an_associate_only_merge_delivers_after_the_fact(self):
+        """sd:1910 merged with `Item:` only, and nothing could deliver it after."""
+        commit = self.associated_merge()
+        result = self.operation("reconcile", "--deliver", "--reason", self.REASON).reconcile()
+        self.assertFalse(result["delivery_pending"], result)
+        row = self.connection.execute("SELECT * FROM item WHERE id=?", (self.item,)).fetchone()
+        self.assertEqual(row["status"], "done")
+        from sd_db.progress import completion_record
+        record = completion_record(row)
+        self.assertEqual((record["commit"], record["trailer"], record["after_the_fact"]), (commit, "Item", self.REASON))
+        again = self.operation("reconcile", "--deliver", "--reason", self.REASON).reconcile()
+        self.assertFalse(again["delivery_pending"])
+
+    def test_after_the_fact_delivery_runs_from_any_branch(self):
+        """The branch that merged is often gone from the checkout at hand."""
+        self.associated_merge()
+        _git(self.root, "checkout", "-q", "--detach")
+        _git(self.root, "checkout", "-q", "-b", "elsewhere")
+        self.operation("reconcile", "--deliver", "--reason", self.REASON).reconcile()
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "done")
+
+    def test_after_the_fact_delivery_needs_a_reason(self):
+        self.associated_merge()
+        for extra in ((), ("--reason", "  ")):
+            with self.subTest(extra=extra), self.assertRaisesRegex(ship.Refusal, "--reason"):
+                self.operation("reconcile", "--deliver", *extra).reconcile()
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "in_progress")
+
+    def test_an_older_library_refuses_after_the_fact_delivery_by_name(self):
+        self.associated_merge()
+        with patch("sd_db.progress.deliver_associated_work", new=None), \
+                self.assertRaisesRegex(ship.Refusal, "deliver_associated_work") as caught:
+            self.operation("reconcile", "--deliver", "--reason", self.REASON).reconcile()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "library_incompatible")
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "in_progress")
+
+    def test_a_task_delivers_after_the_fact_with_the_delivered_by_sentence(self):
+        self.task_item("task")
+        commit = self.associated_merge()
+        with patch("sd_db.progress.deliver_associated_work", new=None):
+            self.operation("reconcile", "--deliver", "--reason", self.REASON).reconcile()
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "done")
+        last = self.connection.execute("SELECT body FROM note WHERE item = ? AND kind = 'status_change' ORDER BY id DESC",
+                                       (self.item,)).fetchone()[0]
+        self.assertIn(f"delivered at {commit} on origin/main", last)
+        self.assertIn(self.REASON, last)
+
+    def test_prepare_on_an_associate_only_merge_names_the_repair(self):
+        self.associated_merge()
+        with self.assertRaisesRegex(ship.Refusal, r"sd-ship reconcile --item \d+ --deliver --reason"):
+            self.unanswered("--deliver").prepare()
+
     def test_work_still_needs_acceptance_evidence_to_deliver(self):
         with self.assertRaisesRegex(ship.Refusal, "--acceptance-file"):
             self.unanswered("--deliver").prepare()

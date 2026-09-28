@@ -622,9 +622,16 @@ def _delivery_reason(row: Any, commit: str, checkout: str | None = None) -> str:
     block = sd_lib.trailer_block(message).splitlines()
     if not any(line.partition(":")[0] == "Delivers" and line.partition(":")[2].strip() == wanted
                for line in block):
-        raise WorkRefusal(f"{commit} carries no `Delivers: {wanted}` trailer")
+        raise WorkRefusal(f"{commit} carries no `Delivers: {wanted}` trailer{_repair(row['id'], block)}")
     reason = DELIVERY_REASON.format(commit=commit, ref=ref)
     return f"{reason} in {elsewhere}" if elsewhere else reason
+
+
+def _repair(item: int, block: list[str]) -> str:
+    """The way out for `Item:` alone: a merge prepared associate-only (sd:1913)."""
+    if f"Item: sd:{item}" not in block:
+        return ""
+    return f"; it carries `Item: sd:{item}`, so `sd-ship reconcile --item {item} --deliver --reason TEXT` delivers it"
 
 
 def _delivered_in(connection: Any, value: str) -> str:

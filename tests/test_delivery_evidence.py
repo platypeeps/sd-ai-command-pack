@@ -254,6 +254,16 @@ class DeliveryReasonTests(unittest.TestCase):
         with self.assertRaisesRegex(sd_work.WorkRefusal, "outside the trailer block"):
             sd_work._delivery_reason(self.row, commit)
 
+    def test_an_item_only_merge_is_sent_to_the_after_the_fact_repair(self) -> None:
+        """sd:1913. `Item:` where `Delivers:` was meant is an associate-only
+        merge; the refusal names the one verb that can deliver it."""
+        (self.root / "file.txt").write_text("four\n", encoding="utf-8")
+        self.git("commit", "-q", "-a", "-m", "feat: the whole item\n\nItem: sd:7\n")
+        commit = self.git("rev-parse", "HEAD")
+        with self.assertRaisesRegex(sd_work.WorkRefusal,
+                                    r"carries no `Delivers: sd:7`.*sd-ship reconcile --item 7 --deliver --reason"):
+            sd_work._delivery_reason(self.row, commit)
+
     def test_a_commit_with_no_delivers_trailer_is_refused(self) -> None:
         (self.root / "file.txt").write_text("three\n", encoding="utf-8")
         self.git("commit", "-q", "-a", "-m", "chore: no trailer at all\n")
