@@ -591,6 +591,21 @@ roles:
         self.assertEqual(self.operation().state["title"], "change")
         self.assertEqual(self.remote.pull(result["pull_request"]["number"]).title, "change")
 
+    def test_the_squash_subject_is_the_pull_requests_title(self):
+        # sd:1876: prepare stored the newest commit subject, and the merge
+        # used it even when the pull request carried a different title.
+        number = self.prepare()["pull_request"]["number"]
+        self.remote.pull(number).title = "Switch the widget to local CI"
+        self.assertEqual(self.merge()["phase"], "merged")
+        self.assertEqual(self.remote.pull(number).title.split("\n")[0], f"Switch the widget to local CI (#{number})")
+
+    def test_a_wip_pull_request_title_never_reaches_the_default_branch(self):
+        number = self.prepare()["pull_request"]["number"]
+        self.remote.pull(number).title = "WIP switch the widget"
+        with self.assertRaisesRegex(ship.Refusal, "title starts with wip"):
+            self.merge()
+        self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
+
     def test_a_branch_behind_the_default_branch_is_refused_before_the_review(self):
         # sd:1346, sd:1367: merge refuses a branch behind the default branch,
         # so prepare refused nothing, spent the review and answered

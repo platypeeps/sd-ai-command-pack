@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Fixed
+
+- **`sd-ship`'s squash subject is the pull request's title (sd:1876).**
+  `prepare` stores the newest non-merge commit subject when no `--title` is
+  given, and `merge` used that stored title, so a pull request adopted with
+  its own title, or retitled after prepare, landed on main under a commit
+  subject such as `ci: re-run on the local gate`. The merge now takes the
+  title from the pull request it has just read, falling back to the stored
+  one, and still refuses a `wip` title.
+
 ### Changed
 
 - **The lane commands take `-C <dir>` (sd:1910).** `sd-ship`, `sd-check`,
