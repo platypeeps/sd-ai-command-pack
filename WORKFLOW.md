@@ -114,6 +114,27 @@ These run only when asked by name.
 - `sd-handoff`. Write a packet when you stop mid-task. Followups, decisions and
   open questions are already on the item; the packet carries only what is not.
 
+## No-CI mode
+
+A repository whose `repo.ci` row says `local` runs no GitHub Actions (sd:1843).
+Set the row with `sd-db.sh repo ci <path> local`; `github` is the default.
+Every reader treats a missing column, row or library as `github`.
+
+- `sd-ship merge` checks the reviewed head out into a clean, detached `git worktree`.
+  It runs `sd-check` there, not in your checkout, and removes the worktree after.
+- It posts the result to that exact commit as the `sd/local-gate` status, `success` or `failure`.
+  It refuses to post for any commit other than the one the worktree held.
+- A `success` already posted at the head is reused, so a retried merge does not rerun the check.
+- The merge then requires that status as `success` at the head.
+  Missing, failed, pending, or naming another commit: each refuses.
+- Under a declared gap, the status replaces the `pull_request` workflow runs `every_check` asks for.
+  Under protection, the status is required beside the protection's own contexts.
+- Protection for such a repository should require `sd/local-gate`.
+  `sd-status` reports it as the one produced context, so a required workflow context shows as not produced.
+- `sd fleet stamp` and `sd-review setup-github` lay no workflow and say why.
+- Routing needs no workflow. `sd-ship prepare` routes in its local review pass and records the plan in the receipt.
+  The route workflow only printed that plan to a job summary; nothing reads it.
+
 ## Reviews
 
 Adversarial review runs at four points, each with a cap on automatic passes.

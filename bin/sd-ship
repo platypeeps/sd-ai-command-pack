@@ -23,6 +23,7 @@ import time
 from datetime import datetime, timezone
 
 import sd_lib
+import sd_local_gate
 import sd_ship_dispositions as sd_ship_dispositions
 import sd_ship_squash
 from sd_ship_bindings import review_binding
@@ -1490,6 +1491,11 @@ class Ship(SharedReview):
             raise Refusal("default branch changed or squash merging is disabled")
         protection = self.api.gate(base, head)  # the object, or the declared gap at this head (sd:1110)
         squash_allowed(base, protection)
+        # `repo.ci = local` (sd:1843): no Actions run, so the checks run here,
+        # at the reviewed head in a clean worktree, before readiness reads them.
+        self.api.ci = sd_lib.repo_ci(self.connection, self.root)
+        if self.api.ci == "local":
+            self.save(local_gate=sd_local_gate.local_gate(self.api, self.root, head))
         observed = self.api.pull(observed["number"])
         self.api.ready(observed, head, base, protection)
         self.abandon_copilot_review(observed["number"], head)

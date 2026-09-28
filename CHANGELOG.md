@@ -4,6 +4,18 @@
 
 ### Changed
 
+- **No-CI mode: a `repo.ci = local` repository is gated by `sd/local-gate`
+  (sd:1843).** `sd-ship merge` runs `sd-check` in a clean worktree of the
+  exact reviewed head and posts the result to that commit as the
+  `sd/local-gate` status. It refuses to post for any other commit. The merge
+  then requires that status as `success`: under a declared gap in place of
+  the `pull_request` workflow runs, under protection beside the required
+  contexts. `sd fleet stamp` and `sd-review setup-github` lay no workflow
+  there and say why, and `sd-status` reports `sd/local-gate` as the one
+  context such a repository produces. Every reader treats a missing
+  `repo.ci` column, row or library as `github`, so other repositories are
+  unchanged. The column lands in the `system` repository's schema 16.
+
 - **A free `url` reviewer retries one schema failure, and the output
   contract restates the findings shape last (sd:1821).** MiniMax-M3 broke the
   findings schema on 13 of 45 runs over one 35k-token prompt: an extra

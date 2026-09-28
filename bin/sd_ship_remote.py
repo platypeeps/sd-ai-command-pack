@@ -105,6 +105,9 @@ class GitHub:
         self.metadata: dict | None = None
         #: Why the last `declared_gap` read found no declaration, for the refusal.
         self.declaration_faults: list[str] = []
+        #: `repo.ci` for this repository, set by the caller that read the row.
+        #: `local` swaps the `pull_request` runs for the `sd/local-gate` status.
+        self.ci = "github"
 
     def api(self, path: str, *, method: str = "GET", body: dict | None = None) -> Any:
         argv = ["gh", "api", path, "--method", method]
@@ -487,9 +490,15 @@ class GitHub:
         that runs on `pull_request` must have a completed, successful run for
         that event at this exact SHA, so a commit the Tests workflow never ran
         on cannot pass on an advisory check alone.
+
+        Under `ci = local` (sd:1843) the `pull_request` runs are not expected:
+        the `sd/local-gate` status at this exact SHA is, and a missing one
+        refuses as a missing run does. A failed one already refused above.
         """
         runs = self.pages(f"{self.prefix}/commits/{head}/check-runs?filter=latest", "check_runs")
         statuses = self.pages(f"{self.prefix}/commits/{head}/statuses")
+        if self.ci == "local":
+            self.local_gate_passed(head, statuses)
         if not runs and not statuses:
             raise Refusal(f"nothing validated {head}: no check run and no status exists for it", code="ci_missing",
                           next_action="Run the repository's checks for this exact head, then retry merge.", boundary="ci", state="retryable_failure")
@@ -506,6 +515,11 @@ class GitHub:
             if entry.get("sha", head) != head or entry.get("state") != "success":
                 raise Refusal(f"status is not passing on {head}: {context}", code="ci_not_passing",
                               next_action="Wait for or fix exact-head CI, then retry merge.", boundary="ci", state="retryable_failure")
+        if self.ci != "local":
+            self.pull_request_runs_passed(head)
+
+    def pull_request_runs_passed(self, head: str) -> None:
+        """Every workflow at `head` that runs on `pull_request` has a successful run there."""
         pull_request_runs = self.pages(f"{self.prefix}/actions/runs?head_sha={head}&event=pull_request", "workflow_runs")
         for path, name in self.expected_workflows(head):
             if not any(run.get("path") == path and run.get("head_sha") == head and run.get("event") == "pull_request"
@@ -513,6 +527,26 @@ class GitHub:
                        for run in pull_request_runs):
                 raise Refusal(f"workflow {name} ({path}) has no successful pull_request run on {head}", code="ci_missing",
                               next_action="Run the workflow for this exact head, then retry merge.", boundary="ci", state="retryable_failure")
+
+    def local_gate_passed(self, head: str, statuses: list | None = None) -> None:
+        """Refuse unless the newest `sd/local-gate` status at `head` is `success`.
+
+        Missing, failed, pending, or naming another SHA: each refuses, because
+        under `ci = local` that status is the only thing that ran the checks.
+        """
+        context = sd_lib.LOCAL_GATE_CONTEXT
+        if statuses is None:
+            statuses = self.pages(f"{self.prefix}/commits/{head}/statuses")
+        current = next((entry for entry in statuses if isinstance(entry, dict) and entry.get("context") == context), None)
+        if current is None or current.get("sha", head) != head:
+            raise Refusal(f"repo.ci is local and {context} has no status on {head}", code="ci_missing",
+                          boundary="ci", state="retryable_failure",
+                          next_action="Retry sd-ship merge, which runs sd-check at this head and posts the status.")
+        if current.get("state") != "success":
+            raise Refusal(f"repo.ci is local and {context} is {current.get('state')} on {head}: "
+                          f"{current.get('description') or 'no description'}", code="ci_not_passing",
+                          boundary="ci", state="retryable_failure",
+                          next_action="Fix the failing check, push, then retry merge.")
 
     def commits_behind(self, base: str, head: str) -> int | None:
         """How many commits of `base` are missing from `head`, GitHub's count."""
@@ -540,6 +574,10 @@ class GitHub:
         if "declared_gap" in protection:
             self.every_check(head)
             return
+        if self.ci == "local":
+            # Required contexts are the repository's word; the gate is ours,
+            # and is required whether or not protection names it.
+            self.local_gate_passed(head)
         runs = self.pages(f"{self.prefix}/commits/{head}/check-runs?filter=latest", "check_runs")
         statuses = self.pages(f"{self.prefix}/commits/{head}/statuses")
         required = protection["required_status_checks"]
