@@ -129,6 +129,7 @@ It needs `admin` on the repository and makes three changes, each only where it d
   A repository ruleset keeps every other rule; only its status-check rule changes, or is added.
   The dropped contexts are named: their workflows no longer run, and a required context that never reports blocks every merge.
   A branch protected classically with no required checks refuses; add the check in the branch settings.
+  A required check it cannot rewrite stops the run before any write: an organization ruleset's, or another protected branch's.
 - A private repository has Actions disabled outright.
   A public one keeps Actions on for its dynamic workflows (CodeQL, Dependabot, Copilot).
   Each workflow its files declare is disabled.

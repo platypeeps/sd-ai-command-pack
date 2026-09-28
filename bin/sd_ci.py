@@ -17,8 +17,10 @@ changes together, each read live and each skipped when it already holds:
     requires a check yet, the first active repository ruleset gains the rule.
     A branch protected only classically, with no required checks, refuses:
     GitHub offers no write for that sub-object alone, and rewriting the whole
-    protection object from a read is lossy. An organization ruleset cannot be
-    changed from here, and the plan names it;
+    protection object from a read is lossy. A requirement this verb cannot
+    rewrite -- an organization ruleset, or another protected branch's own
+    protection -- refuses the whole run when it names a context other than
+    the gate, because the workflow that produced it is about to stop;
   * Actions: a private repository has Actions disabled outright, because the
     runner minutes are what stopped. A public repository keeps Actions on,
     because CodeQL, Dependabot and Copilot run as *dynamic* workflows (path
@@ -186,7 +188,7 @@ def _dropped(contexts: list[str]) -> str:
 
 def classic_step(call: Call, branch: str, classic: dict) -> Step:
     checks = classic.get("required_status_checks") or {}
-    contexts = _contexts(checks.get("checks")) or list(checks.get("contexts") or [])
+    contexts = classic_contexts(classic)
     where = f"classic protection on {branch}"
     if checks.get("strict") is True and contexts == [CONTEXT]:
         return Step("ok", where, f"requires {CONTEXT}, strict")
@@ -248,14 +250,81 @@ def _requires_checks(ruleset: dict) -> bool:
     return any(rule.get("type") == "required_status_checks" for rule in ruleset.get("rules") or [])
 
 
+def _foreign(contexts: list[str]) -> list[str]:
+    """The required contexts other than the gate: a disabled workflow produced them."""
+    return sorted(set(contexts) - {CONTEXT})
+
+
+def ruleset_contexts(ruleset: dict) -> list[str]:
+    return [context for rule in ruleset.get("rules") or [] if rule.get("type") == "required_status_checks"
+            for context in _contexts((rule.get("parameters") or {}).get("required_status_checks"))]
+
+
+def classic_contexts(classic: dict | None) -> list[str]:
+    checks = (classic or {}).get("required_status_checks") or {}
+    return _contexts(checks.get("checks")) or list(checks.get("contexts") or [])
+
+
+def _stranded(label: str, contexts: list[str]) -> str:
+    return f"{label} requires {', '.join(contexts)}"
+
+
+def organization_requirements(active: list[dict], ours: list[dict]) -> list[str]:
+    """Checks an organization ruleset requires, which this verb cannot rewrite."""
+    return [_stranded(f"ruleset {ruleset.get('name')} (#{ruleset.get('id')}) of "
+                      f"{ruleset.get('source') or 'the organization'}", _foreign(ruleset_contexts(ruleset)))
+            for ruleset in active if ruleset not in ours and _foreign(ruleset_contexts(ruleset))]
+
+
+def protected_branches(call: Call) -> list[str]:
+    names: list[str] = []
+    for page in range(1, sd_protection.MAX_PAGES + 1):
+        status, listing = call("GET", f"{PREFIX}/branches?protected=true&per_page={WORKFLOW_PAGE}&page={page}", None)
+        if status != 200 or not isinstance(listing, list):
+            raise CiRefusal(f"the protected branches could not be listed: {sd_fleet._said(status, listing)}")
+        names += [str(entry.get("name")) for entry in listing if isinstance(entry, dict)]
+        if len(listing) < WORKFLOW_PAGE:
+            return names
+    raise CiRefusal("the protected branches ran past the page limit")
+
+
+def other_branch_requirements(call: Call, branch: str, rewritten: set[int]) -> list[str]:
+    """Checks other protected branches require that disabling the workflows would strand.
+
+    Actions go off for the whole repository, so a release branch whose
+    protection names a workflow's context could never merge again. A ruleset
+    this run rewrites answers for every branch it targets; anything else
+    that requires a context other than the gate is named.
+    """
+    stranded: list[str] = []
+    for name in protected_branches(call):
+        if name == branch:
+            continue
+        classic, active = read_protection(call, name)
+        if _foreign(classic_contexts(classic)):
+            stranded.append(_stranded(f"classic protection on {name}", _foreign(classic_contexts(classic))))
+        stranded += [_stranded(f"ruleset {ruleset.get('name')} (#{ruleset.get('id')}) on {name}",
+                               _foreign(ruleset_contexts(ruleset)))
+                     for ruleset in active if ruleset.get("id") not in rewritten and _foreign(ruleset_contexts(ruleset))]
+    return stranded
+
+
 def check_steps(call: Call, branch: str) -> list[Step]:
-    """Where `sd/local-gate` becomes required: classic, rulesets, or nowhere."""
+    """Where `sd/local-gate` becomes required: classic, rulesets, or nowhere.
+
+    Before anything is written, a requirement this verb cannot rewrite that
+    names a context other than the gate -- an organization ruleset, or
+    another protected branch's own protection -- stops the run.
+    """
     classic, active = read_protection(call, branch)
     ours = [ruleset for ruleset in active if ruleset.get("source_type", "Repository") == "Repository"]
     requiring = [ruleset for ruleset in ours if _requires_checks(ruleset)]
-    steps = [Step("note", f"ruleset {ruleset.get('name')} (#{ruleset.get('id')})",
-                  f"belongs to {ruleset.get('source') or 'the organization'}; change its status checks there")
-             for ruleset in active if ruleset not in ours and _requires_checks(ruleset)]
+    stranded = organization_requirements(active, ours)
+    stranded += other_branch_requirements(call, branch, {int(ruleset["id"]) for ruleset in requiring})
+    if stranded:
+        raise CiRefusal("these required checks would never report once the workflows are off, and this verb "
+                        f"does not rewrite them: {'; '.join(stranded)}; change them to {CONTEXT} first, then rerun")
+    steps: list[Step] = []
     classic_requires = classic is not None and bool(classic.get("required_status_checks"))
     if classic is not None and classic_requires:
         steps.append(classic_step(call, branch, classic))

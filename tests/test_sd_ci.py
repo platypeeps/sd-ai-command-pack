@@ -24,6 +24,7 @@ FAKE_GH = textwrap.dedent('''\
     #!/usr/bin/env python3
     """A `gh api` for one repository, read from and written to $FAKE_GH_STATE."""
     import json, os, re, sys
+    from urllib.parse import unquote
 
     state_path = os.environ["FAKE_GH_STATE"]
     with open(state_path) as handle:
@@ -63,19 +64,26 @@ FAKE_GH = textwrap.dedent('''\
     if f"{method} {route}" in state.get("fail", {}):
         fail(*state["fail"][f"{method} {route}"])
     branch = state["repo"]["default_branch"]
+    # Other protected branches: name -> classic protection object or null.
+    others = state.get("branches", {})
     if (method, route) == ("GET", ""):
         answer(state["repo"])
-    if route == f"/branches/{branch}/protection" and method == "GET":
-        if state.get("classic") is None:
+    if (method, route) == ("GET", "/branches"):
+        answer([{"name": name, "protected": True} for name in [branch, *others]])
+    match = re.fullmatch(r"/branches/([^/]+)/protection", route)
+    if match and method == "GET":
+        name = unquote(match[1])
+        classic = state.get("classic") if name == branch else others.get(name)
+        if classic is None:
             fail(404, "Branch not protected")
-        answer(state["classic"])
+        answer(classic)
     if route == f"/branches/{branch}/protection/required_status_checks" and method == "PATCH":
         if not (state.get("classic") or {}).get("required_status_checks"):
             fail(404, "Required status checks not enabled")
         state["classic"]["required_status_checks"] = {"strict": body["strict"], "checks": body["checks"],
                                                       "contexts": [c["context"] for c in body["checks"]]}
         save(); answer(state["classic"]["required_status_checks"])
-    if route == f"/rules/branches/{branch}" and method == "GET":
+    if route.startswith("/rules/branches/") and method == "GET":
         rules = []
         for key, ruleset in sorted(state.get("rulesets", {}).items()):
             if ruleset["enforcement"] == "active":
@@ -124,6 +132,11 @@ WORKFLOWS = [
     {"id": 3, "path": "dynamic/github-code-scanning/codeql", "state": "active"},
     {"id": 4, "path": "dynamic/dependabot/dependabot-updates", "state": "active"},
 ]
+
+
+def ruleset_contexts(value: dict) -> list:
+    return [check["context"] for rule in value["rules"] if rule["type"] == "required_status_checks"
+            for check in rule["parameters"]["required_status_checks"]]
 
 
 class CiLocal(unittest.TestCase):
@@ -260,6 +273,47 @@ class CiLocal(unittest.TestCase):
             {"type": "required_status_checks", "parameters": {
                 "required_status_checks": [{"context": "sd/local-gate"}],
                 "strict_required_status_checks_policy": True}}])
+
+    def test_an_organization_ruleset_requiring_a_workflow_check_refuses(self) -> None:
+        checks = {"type": "required_status_checks", "parameters": {
+            "strict_required_status_checks_policy": True, "required_status_checks": [{"context": "tests"}]}}
+        self.model(repo=repo(private=True), classic=None,
+                   rulesets={"5": ruleset(5, [checks], source_type="Organization")},
+                   actions={"enabled": True}, workflows=[])
+        done = self.run_sd("--apply")
+        self.assertEqual(done.returncode, 3, done.stdout)
+        self.assertIn("ruleset guard-5 (#5) of example/widget requires tests", done.stderr)
+        self.assertEqual(self.writes(), [])
+        self.assertIs(self.state()["actions"]["enabled"], True)
+
+    def test_an_organization_ruleset_requiring_only_the_gate_is_fine(self) -> None:
+        checks = {"type": "required_status_checks", "parameters": {
+            "strict_required_status_checks_policy": True, "required_status_checks": [{"context": "sd/local-gate"}]}}
+        self.model(repo=repo(private=True), classic=None,
+                   rulesets={"5": ruleset(5, [checks], source_type="Organization")},
+                   actions={"enabled": False}, workflows=[])
+        done = self.run_sd("--apply")
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_another_branchs_workflow_check_refuses_before_actions_go_off(self) -> None:
+        self.model(repo=repo(private=True), classic={"required_status_checks": {
+            "strict": True, "contexts": ["tests"], "checks": [{"context": "tests"}]}},
+            branches={"release/1.x": {"required_status_checks": {
+                "strict": True, "contexts": ["tests"], "checks": [{"context": "tests"}]}}},
+            rulesets={}, actions={"enabled": True}, workflows=[])
+        done = self.run_sd("--apply")
+        self.assertEqual(done.returncode, 3, done.stdout)
+        self.assertIn("classic protection on release/1.x requires tests", done.stderr)
+        self.assertEqual(self.writes(), [])
+
+    def test_a_rewritten_ruleset_answers_for_the_other_branches_it_covers(self) -> None:
+        checks = {"type": "required_status_checks", "parameters": {
+            "strict_required_status_checks_policy": True, "required_status_checks": [{"context": "tests"}]}}
+        self.model(repo=repo(private=True), classic=None, branches={"release/1.x": None},
+                   rulesets={"7": ruleset(7, [checks])}, actions={"enabled": True}, workflows=[])
+        done = self.run_sd("--apply")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(ruleset_contexts(self.state()["rulesets"]["7"]), ["sd/local-gate"])
 
     def test_refusals_write_nothing(self) -> None:
         cases = {
