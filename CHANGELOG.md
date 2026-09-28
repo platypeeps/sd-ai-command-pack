@@ -2,7 +2,29 @@
 
 ## Unreleased
 
+### Added
+
+- **`sd ci local` switches a repository to local CI (sd:1914).** Run from a
+  checkout, it sets `repo.ci` to `local`, makes `sd/local-gate` the one
+  required status check with `strict` on -- in classic protection, or in each
+  repository ruleset that requires checks, keeping every other rule -- and
+  turns Actions off for a private repository. A public repository keeps
+  Actions for its dynamic workflows (CodeQL, Dependabot, Copilot) and has
+  each workflow its files declare disabled. It is a dry run unless `--apply`
+  is given, refuses without `admin`, and a second run finds nothing to do.
+  The contexts it drops are named. A head that already carries a failed
+  (billing-blocked) check run still refuses; WORKFLOW.md § No-CI mode names
+  the remedy, a fresh commit.
+
 ### Fixed
+
+- **`sd-ship`'s squash subject is the pull request's title (sd:1876).**
+  `prepare` stores the newest non-merge commit subject when no `--title` is
+  given, and `merge` used that stored title, so a pull request adopted with
+  its own title, or retitled after prepare, landed on main under a commit
+  subject such as `ci: re-run on the local gate`. The merge now takes the
+  title from the pull request it has just read, falling back to the stored
+  one, and still refuses a `wip` title.
 
 - **`sd-ship merge --watch` accepts a `ci = local` pull request (sd:1875).**
   `--watch` ran `gh pr checks --watch --fail-fast` before reading `repo.ci`,
@@ -12,6 +34,18 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **The first `sd-ship prepare` of an item names its claim (sd:1928).**
+  Associate-only was the silent default, so a forgotten `--deliver` merged
+  sd:1910 with `Item:` alone and left its row planning with the code on
+  main. A first item prepare now refuses unless it gets `--deliver` (the
+  item's last pull request) or the new `--associate-only` (an earlier one).
+  A reprepare keeps the stored claim. The owned runner, which names its
+  `--database`, keeps the old default. `--deliver` now also takes a task or
+  followup, with no acceptance file: its squash carries `Delivers:` and the
+  verified merge moves it to done with the sentence
+  `sd task status N done --delivered-by` records, so a task merge no longer
+  needs a hand close.
 
 - **`sd-ship body` says which scope line a diff demands, for a given pull
   request too (sd:1877).** The result's `scope` lists each line the diff

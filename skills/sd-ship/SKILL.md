@@ -36,7 +36,9 @@ Do not substitute an unrequested provider.
 Nine steps coordinate the executable operations below.
 First verify the actual scope and inspect its check output.
 A slice may ship with later item criteria open.
-Only `--deliver` claims the whole item; every acceptance criterion then needs evidence.
+Only `--deliver` claims the whole item; for a work item, every acceptance criterion then needs evidence.
+The first prepare of an item names its claim: `--deliver` on the item's last PR, `--associate-only` on an earlier one.
+Without either flag, the first prepare refuses; a reprepare keeps the stored claim.
 Small changes need no placeholder work item.
 The checkout holds one writer: this session in its own worktree, or the runner in its clone.
 The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is the rule; do not ship from a checkout another session is writing in.
@@ -82,6 +84,7 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    Stop and obtain permission before that history rewrite.
 7. **Merge through the authorized adapter.**
    It uses `gh pr merge --squash --match-head-commit <the reviewed sha> -t "<title> (#N)" -b "<body>"`.
+   `<title>` is the pull request's current title, not the last commit subject.
    Keep the explicit title and body; exclude `wip:` subjects from main.
    Put contiguous trailers in the body's final paragraph.
    Never use the CLI's branch-deletion option.
@@ -120,7 +123,7 @@ Itemless publication rejects commit flags, runner authority, and whole-item deli
 It creates no task row, `Work:` line, `Item:`, or `Delivers:` trailer.
 Never allocate another review ID to reset spent passes or discard history.
 
-- `sd-ship prepare --item ID --json` reviews, pushes, and opens or reconciles the PR.
+- `sd-ship prepare --item ID --deliver|--associate-only --json` reviews, pushes, and opens or reconciles the PR.
   It returns `ready_to_send` and never merges.
   `--title` and `--body-file` supply the PR description.
   Without `--body-file`, an open PR's live body is the description; reprepare preserves the delivery claim.

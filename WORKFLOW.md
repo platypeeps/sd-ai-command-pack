@@ -117,8 +117,24 @@ These run only when asked by name.
 ## No-CI mode
 
 A repository whose `repo.ci` row says `local` runs no GitHub Actions (sd:1843).
-Set the row with `sd-db.sh repo ci <path> local`; `github` is the default.
-Every reader treats a missing column, row or library as `github`.
+`github` is the default. Every reader treats a missing column, row or library as `github`.
+
+Switch a repository with `sd ci local`, run from its checkout (sd:1914).
+It is a dry run; `--apply` makes the changes, and a second run finds none.
+It needs `admin` on the repository and makes three changes, each only where it does not hold yet:
+
+- It sets `repo.ci` to `local`, as `sd-db.sh repo ci <path> local` does.
+- It makes `sd/local-gate` the one required status check, `strict` on, in whichever mechanism the default branch uses.
+  Classic protection has its required checks replaced.
+  A repository ruleset keeps every other rule; only its status-check rule changes, or is added.
+  The dropped contexts are named: their workflows no longer run, and a required context that never reports blocks every merge.
+  A branch protected classically with no required checks refuses; add the check in the branch settings.
+  A required check it cannot rewrite stops the run before any write: an organization ruleset's, or another protected branch's.
+- A private repository has Actions disabled outright.
+  A public one keeps Actions on for its dynamic workflows (CodeQL, Dependabot, Copilot).
+  Each workflow its files declare is disabled.
+
+After the switch:
 
 - `sd-ship merge` checks the reviewed head out into a clean, detached `git worktree`.
   It runs `sd-check` there, not in your checkout, and removes the worktree after.
@@ -137,8 +153,11 @@ Every reader treats a missing column, row or library as `github`.
   Missing, failed, pending, naming another commit, or from another account: each refuses.
 - Under a declared gap, the status replaces the `pull_request` workflow runs `every_check` asks for.
   Under protection, the status is required beside the protection's own contexts.
-- Protection for such a repository should require `sd/local-gate`.
+- Protection for such a repository should require `sd/local-gate`; `sd ci local` sets that.
   `sd-status` reports it as the one produced context, so a required workflow context shows as not produced.
+- A head that already carries a failed check run still refuses: a workflow that ran before the switch, or a billing-blocked one.
+  GitHub reports the pull request `unstable`, not `clean`, and under a declared gap `every_check` requires every check run to pass.
+  Push a fresh commit to the branch; an empty one will do. Nothing runs on it but the local gate.
 - `sd fleet stamp` and `sd-review setup-github` lay no workflow and say why.
 - Routing needs no workflow. `sd-ship prepare` routes in its local review pass and records the plan in the receipt.
   The route workflow only printed that plan to a job summary; nothing reads it.

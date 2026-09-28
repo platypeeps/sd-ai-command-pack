@@ -347,13 +347,20 @@ jobs:
       # `path remote status_source managed ci runner_merge`; `runner_merge`
       # stays last, and no pack surface parses that output. It is the only
       # `sd_db` change since `8ca78c87`.
+      #
+      # `2facc3fe` (system #16, sd:1958) is the next pin, for the ship lock
+      # holder record: `ship.repository_lock` takes `holder` and `wait`, and
+      # `ship.lock_files` and `ship.held_locks` read the lock files back.
+      # `bin/sd-ship` and `bin/sd_runner.py` use them (sd:1936, sd:1937,
+      # sd:1940) and degrade on a library without them. Migration-free:
+      # `SCHEMA_VERSION` stays 16.
       - name: Check out the system checkout, for sd_db
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: platypeeps/system
           # Schema 16; `tests/test_system_pin.py` holds it to the installed library.
           # A full commit or an `sd-db-v*` release tag (sd:1854); both are immutable.
-          ref: sd-db-v0.1.0
+          ref: 2facc3fe78594688507dc63ab6e383c2298855d9
           path: system-checkout
           persist-credentials: false
 
