@@ -21,6 +21,7 @@ prose about a trailer, and the body keeps it.
 from __future__ import annotations
 
 import dataclasses
+import functools
 import pathlib
 import re
 
@@ -143,3 +144,41 @@ def normalize(body: str, item: int | None, *, deliver: bool = False,
 def published(body: str, item: int) -> str:
     """The body as `sd-ship` publishes it: normalized, then one `Work:` line."""
     return f"{body}\n\n{sd_lib.WORK_TRAILER} sd:{item}\n"
+
+
+@functools.cache
+def docs_lint():
+    """`sd-docs-lint` as a module, loaded once: rule 8 is the one reading of scope."""
+    return sd_lib.sibling("sd_docs_lint_scope", "sd-docs-lint")
+
+
+def pull_paths(files: list) -> list[str]:
+    """Every path a pull request's `files` listing touches, both ends of a rename.
+
+    GitHub lists a moved file under its new name and keeps the old one in
+    `previous_filename`. Rule 8 reads both, as `git diff --no-renames` does,
+    so a workflow moved out of `.github/` still demands its scope line.
+    """
+    paths: list[str] = []
+    for row in files:
+        for key in ("previous_filename", "filename"):
+            name = row.get(key) if isinstance(row, dict) else None
+            if isinstance(name, str) and name and name not in paths:
+                paths.append(name)
+    return paths
+
+
+def demanded_scope(root: pathlib.Path, body: str, changed: list[str]) -> list[dict]:
+    """Each scope line `changed` demands: the line, the first path demanding it, and whether `body` has it.
+
+    The classes, the glob match and the line match are rule 8's own, read from
+    `sd-docs-lint`, so this answer and the lint's verdict cannot disagree. An
+    empty list is a diff that demands nothing, or a repository with no policy.
+    """
+    lint = docs_lint()
+    demanded = []
+    for line, globs in lint.scope_classes(root) or []:
+        path = next((name for name in changed if any(lint.matches_scope(name, glob) for glob in globs)), None)
+        if path is not None:
+            demanded.append({"line": line, "path": path, "present": lint.scope_line_present(body, line)})
+    return demanded

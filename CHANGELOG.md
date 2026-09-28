@@ -13,6 +13,15 @@
 
 ### Changed
 
+- **`sd-ship body` says which scope line a diff demands, for a given pull
+  request too (sd:1877).** The result's `scope` lists each line the diff
+  demands -- `CI/review scope:` for a `.github/**` path -- with the path that
+  demands it and whether the body carries it, read with rule 8's own classes
+  and matchers. `--pr N` takes the diff from that pull request's files, both
+  ends of a rename, and without `--body-file` reads its live body, so a pull
+  request opened by hand is checked before `prepare` refuses it. The lint is
+  handed the same path list, so the two answers cannot disagree.
+
 - **The lane commands take `-C <dir>` (sd:1910).** `sd-ship`, `sd-check`,
   `sd-review`, `sd-review-ack` and `sd-pr-state` accept a global `-C <dir>`
   before any other argument, as `git -C` does: the command changes its
