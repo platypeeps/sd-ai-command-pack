@@ -84,6 +84,7 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    Stop and obtain permission before that history rewrite.
 7. **Merge through the authorized adapter.**
    It uses `gh pr merge --squash --match-head-commit <the reviewed sha> -t "<title> (#N)" -b "<body>"`.
+   `<title>` is the pull request's current title, not the last commit subject.
    Keep the explicit title and body; exclude `wip:` subjects from main.
    Put contiguous trailers in the body's final paragraph.
    Never use the CLI's branch-deletion option.
@@ -127,8 +128,10 @@ Never allocate another review ID to reset spent passes or discard history.
   `--title` and `--body-file` supply the PR description.
   Without `--body-file`, an open PR's live body is the description; reprepare preserves the delivery claim.
   The sd-ai-command-pack checkout's `WORKFLOW.md`, section **The path for a change**, lists the body lines sd-ship owns.
-- `sd-ship body --item ID [--body-file FILE]` prints the body prepare would publish and its body lint.
-  It reads no sd state, calls no GitHub API, and exits non-zero on a refusal or a lint failure.
+- `sd-ship body --item ID [--body-file FILE] [--pr N]` prints the body prepare would publish and its body lint.
+  Its `scope` says whether the diff demands a scope line, such as `CI/review scope:` for `.github/**`, and whether the body has it.
+  The diff is the checkout's HEAD; `--pr N` lints that pull request's files and, without `--body-file`, its live body.
+  It reads no sd state, calls GitHub only for `--pr`, and exits non-zero on a refusal or a lint failure.
 - Optional commits require `--path FILE` for each file, `--message-file FILE`, and `--author ENTRY`.
   Directories and a pre-populated index are invalid.
   Actual provider/vendor attribution belongs on the commit.

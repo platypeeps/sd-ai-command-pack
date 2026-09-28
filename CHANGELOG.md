@@ -18,6 +18,14 @@
 
 ### Fixed
 
+- **`sd-ship`'s squash subject is the pull request's title (sd:1876).**
+  `prepare` stores the newest non-merge commit subject when no `--title` is
+  given, and `merge` used that stored title, so a pull request adopted with
+  its own title, or retitled after prepare, landed on main under a commit
+  subject such as `ci: re-run on the local gate`. The merge now takes the
+  title from the pull request it has just read, falling back to the stored
+  one, and still refuses a `wip` title.
+
 - **`sd-ship merge --watch` accepts a `ci = local` pull request (sd:1875).**
   `--watch` ran `gh pr checks --watch --fail-fast` before reading `repo.ci`,
   and on a pull request with no remote check that command fails, so the
@@ -38,6 +46,15 @@
   verified merge moves it to done with the sentence
   `sd task status N done --delivered-by` records, so a task merge no longer
   needs a hand close.
+
+- **`sd-ship body` says which scope line a diff demands, for a given pull
+  request too (sd:1877).** The result's `scope` lists each line the diff
+  demands -- `CI/review scope:` for a `.github/**` path -- with the path that
+  demands it and whether the body carries it, read with rule 8's own classes
+  and matchers. `--pr N` takes the diff from that pull request's files, both
+  ends of a rename, and without `--body-file` reads its live body, so a pull
+  request opened by hand is checked before `prepare` refuses it. The lint is
+  handed the same path list, so the two answers cannot disagree.
 
 - **The lane commands take `-C <dir>` (sd:1910).** `sd-ship`, `sd-check`,
   `sd-review`, `sd-review-ack` and `sd-pr-state` accept a global `-C <dir>`
