@@ -1152,11 +1152,6 @@ class CliTests(SetupFixture):
         self.assertIn("every provider", text)
         self.assertIn("requests nobody", text)
 
-
-if __name__ == "__main__":
-    unittest.main()
-
-
 class RemoveTests(SetupFixture):
     """`--remove`: the supported way out of the lane (sd:1843 fleet cleanup)."""
 
@@ -1248,3 +1243,7 @@ class RemoveTests(SetupFixture):
         code, text = self.remove(root)
         self.assertEqual(code, 0)
         self.assertIn(f"absent {setup.WORKFLOW_RELATIVE_PATH}", text)
+
+
+if __name__ == "__main__":
+    unittest.main()
