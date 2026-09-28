@@ -26,6 +26,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import unittest.mock
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -88,17 +89,17 @@ class Fixture(Configured):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        self.dashboard = self.root / "dashboard"
-        self.dashboard.mkdir()
+        self.dashboard = self.root / "config" / "project-dashboard"
+        self.dashboard.mkdir(parents=True)
         self.conf = self.dashboard / "documents.conf"
         self.conf.write_text(HEADER, encoding="utf-8")
         self.repo = self.root / "my-research"
         (self.repo / "build").mkdir(parents=True)
 
         self.vault = self.root / "vault"
-        original = (PUBLISH.DASHBOARD_HOME, PUBLISH.QUEUE, PUBLISH.VAULT,
+        original = (PUBLISH.DASHBOARD_CONFIG, PUBLISH.QUEUE, PUBLISH.VAULT,
                     PUBLISH.LEGACY_QUEUE)
-        PUBLISH.DASHBOARD_HOME = self.dashboard
+        PUBLISH.DASHBOARD_CONFIG = self.dashboard
         PUBLISH.QUEUE = self.root / "queue"
         PUBLISH.VAULT = str(self.vault)
         # Pointed inside the fixture even when a test does not use it, so no
@@ -107,7 +108,7 @@ class Fixture(Configured):
         PUBLISH.LEGACY_QUEUE = self.legacy
 
         def restore() -> None:
-            (PUBLISH.DASHBOARD_HOME, PUBLISH.QUEUE, PUBLISH.VAULT,
+            (PUBLISH.DASHBOARD_CONFIG, PUBLISH.QUEUE, PUBLISH.VAULT,
              PUBLISH.LEGACY_QUEUE) = original
 
         self.addCleanup(restore)
@@ -172,9 +173,72 @@ class RegisterTests(Fixture):
         self.assertIn("~/elsewhere", self.roots()[1])
 
     def test_no_dashboard_is_reported_not_raised(self) -> None:
-        PUBLISH.DASHBOARD_HOME = self.root / "absent"
+        PUBLISH.DASHBOARD_CONFIG = self.root / "absent"
         said = PUBLISH.register_root(self.repo, "MINE", self.repo / "build")
         self.assertIn("not registered", said)
+
+
+class DashboardConfigTests(unittest.TestCase):
+    """`documents.conf` is where the dashboard reads it (sd:2010).
+
+    Since system 350553a the dashboard reads `<config>/project-dashboard/
+    documents.conf`, `<config>` being `$SYSTEM_TOOLS_CONFIG` or
+    `~/.config/system`. The renderer kept looking in the dashboard checkout,
+    found nothing there, and printed "not registered" on every render of a
+    repository the dashboard already listed.
+
+    Each case loads the module afresh under a patched environment, because
+    the path is read when the module loads -- the way a render reads it.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.repo = self.root / "my-research"
+        (self.repo / "docs" / "dashboard").mkdir(parents=True)
+
+    def loaded(self, **env: str):
+        """The module as a render with `env` in its environment loads it."""
+        clean = {k: v for k, v in os.environ.items()
+                 if k not in ("SYSTEM_TOOLS_CONFIG", "XDG_CONFIG_HOME")}
+        with unittest.mock.patch.dict(os.environ, dict(clean, **env), clear=True):
+            return load()
+
+    def test_system_tools_config_names_the_file_the_dashboard_reads(self) -> None:
+        conf = self.root / "config" / "project-dashboard" / "documents.conf"
+        conf.parent.mkdir(parents=True)
+        conf.write_text(HEADER, encoding="utf-8")
+        module = self.loaded(SYSTEM_TOOLS_CONFIG=str(self.root / "config"))
+
+        said = module.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
+        self.assertNotIn("not registered", said)
+        self.assertIn("registered my-research", said)
+        self.assertIn("label|my-research|MINE\n", conf.read_text(encoding="utf-8"))
+
+        said = module.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
+        self.assertIn("already registered", said)
+
+    def test_no_file_at_the_config_path_is_reported_not_raised(self) -> None:
+        module = self.loaded(SYSTEM_TOOLS_CONFIG=str(self.root / "empty"))
+        said = module.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
+        self.assertIn("not registered", said)
+        self.assertIn(str(self.root / "empty" / "project-dashboard" / "documents.conf"), said)
+
+    def test_the_directory_follows_the_system_repositorys_rule(self) -> None:
+        """`lib/system_tools_config.py` in the system repository, case by case."""
+        cases = (
+            ({"SYSTEM_TOOLS_CONFIG": "/cfg", "XDG_CONFIG_HOME": "/xdg", "HOME": "/h"},
+             Path("/cfg/project-dashboard")),
+            ({"SYSTEM_TOOLS_CONFIG": "", "XDG_CONFIG_HOME": "/xdg", "HOME": "/h"},
+             Path("/xdg/system/project-dashboard")),
+            ({"HOME": "/h"}, Path("/h/.config/system/project-dashboard")),
+            ({"SYSTEM_TOOLS_CONFIG": "~/cfg"},
+             Path.home() / "cfg" / "project-dashboard"),
+        )
+        for environ, expected in cases:
+            with self.subTest(environ):
+                self.assertEqual(PUBLISH.dashboard_config(environ), expected)
 
 
 class MirrorTargetTests(Configured):

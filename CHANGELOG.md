@@ -18,6 +18,16 @@
 
 ### Fixed
 
+- **`sd-research-kit render` registers in the file the dashboard reads
+  (sd:2010).** Since system 350553a the dashboard reads
+  `<config>/project-dashboard/documents.conf`, `<config>` being
+  `$SYSTEM_TOOLS_CONFIG`, else `$XDG_CONFIG_HOME/system`, else
+  `~/.config/system`. The renderer still looked in the dashboard checkout,
+  found no file there, and printed `dashboard not registered` on every render,
+  even for a repository the dashboard already listed. It now resolves the path
+  by the dashboard's rule. `SD_DASHBOARD_HOME` is gone: nothing else read the
+  checkout.
+
 - **`sd-ship`'s squash subject is the pull request's title (sd:1876).**
   `prepare` stores the newest non-merge commit subject when no `--title` is
   given, and `merge` used that stored title, so a pull request adopted with
