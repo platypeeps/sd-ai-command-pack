@@ -1402,6 +1402,26 @@ class RepoResolutionTests(StatusFixture):
             (_load("sd-pr-state", "sd_pr_state_under_test"), "sd-pr-state"),
         ):
             parser = module.build_parser()
+            banned = {
+                "repo",
+                "repo-path",
+                "path",
+                "root",
+                "dir",
+                "directory",
+                "cwd",
+                "checkout",
+                "worktree",
+                "fleet",
+                "all",
+                "all-repos",
+                "C",
+            }
+            if tool == "sd-pr-state":
+                # R10-D6's one exception (sd:1910): a lane command takes `-C`,
+                # a change of working directory before anything resolves.
+                # `tests/test_verb_inventory.py` allow-lists the five by name.
+                banned.discard("C")
             with self.subTest(tool=tool):
                 for action in parser._actions:
                     self.assertTrue(
@@ -1409,24 +1429,7 @@ class RepoResolutionTests(StatusFixture):
                         f"{tool} takes a positional argument: {action.dest}",
                     )
                     for option in action.option_strings:
-                        self.assertNotIn(
-                            option.lstrip("-"),
-                            {
-                                "repo",
-                                "repo-path",
-                                "path",
-                                "root",
-                                "dir",
-                                "directory",
-                                "cwd",
-                                "checkout",
-                                "worktree",
-                                "fleet",
-                                "all",
-                                "all-repos",
-                                "C",
-                            },
-                        )
+                        self.assertNotIn(option.lstrip("-"), banned)
 
     def test_there_is_no_fleet_walk(self) -> None:
         text = self.run_tool(SD_STATUS, "--help").stdout

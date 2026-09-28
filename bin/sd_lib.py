@@ -9,6 +9,7 @@ Stdlib only, Python 3.10+, no network. A caller that cannot proceed gets a
 
 from __future__ import annotations
 
+import argparse
 import datetime
 import json
 import os
@@ -285,6 +286,73 @@ def repo_root(start: pathlib.Path | str | None = None) -> pathlib.Path | None:
         return None
     answer = _git(["rev-parse", "--show-toplevel"], cwd=base)
     return pathlib.Path(answer).resolve() if answer else None
+
+
+#: The help text of `-C DIR` on the lane commands (R10-D6 names them).
+DIRECTORY_OPTION_HELP = "run as if started in DIR, as `git -C` does; the repository is resolved from there"
+
+
+def enter_directory(directory: str | None, *, error: type[Exception]) -> None:
+    """`-C <dir>`, as `git -C` means it (sd:1910).
+
+    Changes the working directory once, before anything resolves the
+    repository, so everything after still reads cwd and `repo_root(None)`
+    stays the one resolver. R10-D6 allows this on the lane commands only,
+    because the permission layer that approves a command line sees `-C` and
+    does not see a `cd <dir> &&` in front of the same command. A missing or
+    non-directory path raises `error`, the caller's usage exception.
+    """
+    if directory is None:
+        return
+    if not directory:
+        # `pathlib.Path("")` is `.`: an empty operand would silently stay put.
+        raise error("-C: expected a directory")
+    target = pathlib.Path(directory).expanduser()
+    if ".." in target.parts:
+        # An allow rule that names the directory is a prefix match on the
+        # command line: `-C /approved/../unrelated` keeps the approved prefix
+        # and leaves the directory (sd:1910, pass 2). Name the directory.
+        raise error(f"-C {directory}: '..' is not allowed, name the directory")
+    if not target.is_dir():
+        raise error(f"-C {directory}: not a directory")
+    os.chdir(target)
+
+
+class DirectoryAction(argparse.Action):
+    """`-C` once. A second `-C` is an error, not a later value that wins.
+
+    argparse keeps the last value of a repeated option, so under an allow
+    rule that names the directory, `-C /approved -C /unrelated` would keep
+    the approved prefix and act on the other checkout (sd:1910, pass 2).
+    """
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        if getattr(namespace, self.dest, None) is not None:
+            parser.error(f"{option_string} given twice")
+        setattr(namespace, self.dest, values)
+
+
+def enter_directory_from_argv(argv: list[str], *, error: type[Exception]) -> list[str]:
+    """Honour `-C DIR` in a raw argv, wherever and however spelled, and return the rest.
+
+    For a command that dispatches a subcommand before its argparse parser
+    sees the line (`sd-review setup-github`): the directory changes first,
+    so the dispatch runs where the line says. Directory selection is parsed
+    once, here, by argparse itself, so `-C DIR`, `-CDIR` and a second one in
+    either spelling all meet `DirectoryAction` (sd:1910, pass 3: a hand-rolled
+    token check let `-C /approved -C/unrelated` through to the main parser).
+    A missing operand, a duplicate and a bad directory all raise `error`.
+    """
+
+    class Parser(argparse.ArgumentParser):
+        def error(self, message: str) -> None:  # type: ignore[override]
+            raise error(message)
+
+    parser = Parser(add_help=False, allow_abbrev=False)
+    parser.add_argument("-C", dest="chdir", action=DirectoryAction)
+    selected, rest = parser.parse_known_args(argv)
+    enter_directory(selected.chdir, error=error)
+    return rest
 
 
 def main_worktree_root(root: pathlib.Path) -> pathlib.Path:

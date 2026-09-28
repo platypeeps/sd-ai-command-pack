@@ -1729,6 +1729,7 @@ def validate_identity(args) -> None:
 def parser():
     command = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
                                       epilog=BODY_EPILOG)
+    command.add_argument("-C", dest="chdir", metavar="DIR", action=sd_lib.DirectoryAction, help=sd_lib.DIRECTORY_OPTION_HELP)
     commands = command.add_subparsers(dest="command", required=True)
     body = commands.add_parser("body", help="print the body prepare would publish, and its body lint; no state",
                                description=BODY_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1844,6 +1845,12 @@ def dispatch(root, connection, database, args, store, readonly):
 
 def main(argv=None) -> int:
     args = parser().parse_args(argv)
+    try:
+        sd_lib.enter_directory(args.chdir, error=Refusal)
+    except Refusal as error:
+        result = failure(args.command, error)
+        print(json.dumps(result, indent=2, sort_keys=True) if args.json else result)
+        return 3
     if args.command == "body":
         return body_command(args)
     # Two refusals, because there are two faults and one remedy each.

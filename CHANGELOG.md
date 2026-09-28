@@ -4,6 +4,24 @@
 
 ### Changed
 
+- **The lane commands take `-C <dir>` (sd:1910).** `sd-ship`, `sd-check`,
+  `sd-review`, `sd-review-ack` and `sd-pr-state` accept a global `-C <dir>`
+  before any other argument, as `git -C` does: the command changes its
+  working directory once, before anything resolves the repository, and
+  `repo_root(None)` stays the one resolver. R10-D6 names this as its one
+  exception, because a session's permission layer approves a whole command
+  line: `sd-ship -C <checkout> merge …` matches an allow rule, and the
+  `cd <checkout> && sd-ship merge …` it replaces went to a classifier that
+  denied two merges on 2026-09-28. `tests/test_verb_inventory.py` fails when
+  `-C` appears on any other file under `bin/`; the banned long spellings stay
+  banned. `sd-review -C <dir> setup-github` runs the seam there too. An allow
+  rule that names the directory, `Bash(sd-ship -C /path/to/checkout:*)`,
+  scopes the approval to one repository; `Bash(sd-ship:*)` approves every
+  one, and a `cd <dir> &&` line could never be scoped by a rule at all.
+  Because such a rule is a prefix match, a second `-C` and a `..` component
+  are usage errors: `-C /approved -C /unrelated` and `-C /approved/../x`
+  keep the approved prefix and would leave the directory.
+
 - **`sd-ship` accepts the body it published (sd:1870).** `prepare` appended
   `Work: sd:<item>` to the body and then refused a `--body-file` carrying it,
   so the live body of #1236 and #1238 fed back was refused. `sd_ship_body`
