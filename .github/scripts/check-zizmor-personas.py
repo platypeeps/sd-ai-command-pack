@@ -128,53 +128,6 @@ DECIDED: tuple[Decision, ...] = (
                 route="/jobs/sd-db-main-canary",
                 feature="sd-db-main-canary"),
         reason=JOB_NAME_REASON),
-    Decision(
-        key=Key(ident="secrets-outside-env",
-                path=f"{WORKFLOWS}/tests.yml",
-                route="/jobs/sd-db-main-canary",
-                feature="secrets.SYSTEM_REPO_TOKEN"),
-        reason=(
-            "The same acceptance as the unittest job's use of this token, on "
-            "the same trusted-writer threat model: the canary (sd:1542) runs "
-            "on the same triggers, reads the same private repository with "
-            "the same token and `persist-credentials: false`, and differs "
-            "only in checking out system `main` instead of the pin. A fork's "
-            "pull request receives no secret, so every run that reads it "
-            "starts from a head a writer here pushed.")),
-    Decision(
-        key=Key(ident="secrets-outside-env",
-                path=f"{WORKFLOWS}/tests.yml",
-                route="/jobs/unittest",
-                feature="secrets.SYSTEM_REPO_TOKEN"),
-        reason=(
-            "Accepted on a trusted-writer threat model, which is named here "
-            "rather than implied, and this is the one of the three worth "
-            "re-reading when anything about the job changes. The audit wants "
-            "the secret behind a GitHub environment, so that environment "
-            "protection rules govern who can start a run that reads it. What "
-            "stands in for that is the population who can start such a run, "
-            "and nothing narrower. The workflow runs on `pull_request` and on "
-            "`push` to `main`, and GitHub hands no secret to a `pull_request` "
-            "run from a fork, so every head that reaches this token is a head "
-            "in this repository pushed by somebody who already has write "
-            "access. Such a writer controls the workflow YAML on their own "
-            "branch and can therefore print the secret whatever this job does "
-            "with it, so the acceptance is exactly this: every writer here is "
-            "trusted with it. The mitigations inside the job are real but do "
-            "not carry that weight and are not offered as if they did -- the "
-            "token is referenced by one step, a checkout of "
-            "`platypeeps/system` at a pinned commit, and `persist-credentials: "
-            "false` keeps that checkout's credential out of the workspace's "
-            "git config for the steps after it, which stops a later step "
-            "picking it up by accident and stops nothing a later step does on "
-            "purpose. An environment would narrow the population to \"and "
-            "approved by a named reviewer\", at the price of a manual approval "
-            "on every run of the default test lane, which is declined while "
-            "every writer is trusted. What would reopen it: a writer this "
-            "repository does not trust with a `platypeeps/system` token, this "
-            "repository taking fork pull requests with secrets, this job "
-            "running a third party's code, or the token being read anywhere "
-            "but that one pinned checkout.")),
 )
 
 

@@ -4,6 +4,16 @@
 
 ### Changed
 
+- **CI reads `sd_db` from the public `platypeeps/system`, with no token
+  (sd:1859).** The private repository became `platypeeps/system-archived`, and
+  a new public `platypeeps/system` replaced it with rewritten history, so the
+  old pin no longer resolves. Both system checkouts in `tests.yml` drop their
+  repository-secret token, and the pin moves to `8ca78c87`, still schema 15.
+  The two `secrets-outside-env` decisions in
+  `.github/scripts/check-zizmor-personas.py` go with the token they accepted.
+  A machine whose `~/repos/system` still holds the old history fails
+  `tests/test_system_pin.py` until it carries the new commit.
+
 - **A free `url` reviewer retries one schema failure, and the output
   contract restates the findings shape last (sd:1821).** MiniMax-M3 broke the
   findings schema on 13 of 45 runs over one 35k-token prompt: an extra
