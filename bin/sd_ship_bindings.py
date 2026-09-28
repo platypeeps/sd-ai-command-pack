@@ -22,7 +22,7 @@ REVIEW_TOOL_FILES = (
     "sd_ship_history.py", "sd_ship_identity.py", "sd_ship_item.py", "sd_ship_no_item.py",
     "sd_ship_evidence.py", "sd_ship_bindings.py", "sd_ship_workflow.py", "sd_ship_squash.py", "sd_ship_body.py",
     "sd_protection.py",
-    "sd_check_receipts.py", "sd_review_material.py", "sd_review_readiness.py",
+    "sd_check_receipts.py", "sd_review_material.py", "sd_review_readiness.py", "sd_local_gate.py",
 )
 ADJUDICATOR_POLICY_FILES = (
     "skills/sd-check/SKILL.md", "skills/sd-review/SKILL.md", "skills/sd-ship/SKILL.md",

@@ -36,6 +36,11 @@ Employer repositories -- any owner not in `OWNERS` -- are adapted, never
 changed in their settings: they keep their protection, so they get no
 `unprotected` declaration, and the dry run says so rather than going quiet.
 
+A repository whose `repo.ci` row says `local` gets no workflow at all
+(sd:1843): neither the route workflow and its guard nor the check workflow.
+`sd-ship merge` runs `sd-check` at the head and posts `sd/local-gate` in their
+place, and the plan says so as an adapted line rather than going quiet.
+
 An owned repository gets the declaration only where GitHub says, live, that
 its default branch has no protection (sd:1655). Before, every owned auto repo
 was assumed unprotected, and the dry run proposed the declaration in
@@ -432,10 +437,15 @@ def pull_request_workflows(tree: Tree, *, besides: Iterable[str]) -> list[str]:
 
 
 def tracked_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None], *, pin: str,
-                    owned: bool, self_install: bool, protection: Protection | None = None) -> None:
+                    owned: bool, self_install: bool, protection: Protection | None = None,
+                    ci: str = "github") -> None:
     """The tracked half of a plan: route, guard, check, declaration, ignore line."""
     no_ci = forbids_ci(tree)
-    if no_ci:
+    if ci == "local":
+        plan.adapted.append(f"workflows: none laid ({ROUTE_PATH}, {DEPENDABOT_PATH}, {CHECK_PATH}); repo.ci is "
+                            f"local, so sd-ship merge runs sd-check at the head and posts "
+                            f"{sd_lib.LOCAL_GATE_CONTEXT} instead")
+    elif no_ci:
         plan.adapted.append(f"workflows: none laid ({ROUTE_PATH}, {DEPENDABOT_PATH}, {CHECK_PATH}); {no_ci}")
     else:
         workflow_changes(plan, tree, propose, pin=pin, self_install=self_install)
@@ -512,7 +522,7 @@ def workflow_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None]
 
 def plan_repo(root: pathlib.Path, remote: str | None, *, pin: str, tree: Tree,
               local_block: Callable[[str], str], tracked: Callable[[pathlib.Path, str], bool],
-              ask: sd_lib.Asker = sd_lib.gh_api) -> Plan:
+              ask: sd_lib.Asker = sd_lib.gh_api, ci: str = "github") -> Plan:
     """What stamping `root` would change, rendered and diffed; writes nothing.
 
     `local_block` renders the `CLAUDE.local.md` text from the current text,
@@ -550,7 +560,7 @@ def plan_repo(root: pathlib.Path, remote: str | None, *, pin: str, tree: Tree,
                 protection = branch_protection(root, ask=ask) if owned and answer.full else None
                 plan.protection = protection.state if protection else ""
                 tracked_changes(plan, tree, propose, pin=pin, owned=owned and answer.full,
-                                self_install=self_install, protection=protection)
+                                self_install=self_install, protection=protection, ci=ci)
             else:
                 plan.refused.append(f"tracked files: {answer.reason}; the stamp writes only where the "
                                     "remote permits full mode, or where co-ownership alone says no")
@@ -703,7 +713,8 @@ def write_here(rows: list[tuple[pathlib.Path, str | None]], cwd: pathlib.Path, p
 
 
 def fleet_stamp(args: argparse.Namespace, *, rows: Rows = auto_rows, stream: Any = None,
-                cwd: pathlib.Path | None = None, ask: sd_lib.Asker = sd_lib.gh_api) -> int:
+                cwd: pathlib.Path | None = None, ask: sd_lib.Asker = sd_lib.gh_api,
+                ci: Callable[[pathlib.Path], str] = sd_lib.ci_mode) -> int:
     """Plan every selected repository, print the plans, and write only on a write run.
 
     A dry run walks the auto rows and reads each at its `origin/HEAD`. A
@@ -720,7 +731,7 @@ def fleet_stamp(args: argparse.Namespace, *, rows: Rows = auto_rows, stream: Any
     def planned(root: pathlib.Path, remote: str | None, tree: Tree) -> Plan:
         return plan_repo(root, remote, pin=pin, tree=tree,
                          local_block=lambda text: installer.local_block_text(text)[0],
-                         tracked=installer.path_is_tracked, ask=ask)
+                         tracked=installer.path_is_tracked, ask=ask, ci=ci(root))
 
     if args.dry_run:
         plans = dry_run_plans(selected(rows(), args.only), planned)

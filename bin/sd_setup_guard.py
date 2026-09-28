@@ -442,3 +442,19 @@ def report_unwanted(root: pathlib.Path, workflow: pathlib.Path, repo_mode: str, 
         "unless another pack action's pin needs it.\n"
     )
     return 1
+
+
+def ci_local_skip(root: pathlib.Path) -> str | None:
+    """Why a workflow installer lays nothing in `root`, or None when it may.
+
+    A repository whose `repo.ci` row says `local` runs no GitHub Actions
+    (sd:1843): `sd-ship merge` runs `sd-check` at the head and posts
+    `sd/local-gate` instead. `sd_lib.ci_mode` answers `github` on any doubt,
+    so an unread row installs as before.
+    """
+    import sd_lib  # noqa: PLC0415 - kept out of this module's import-time surface
+
+    if sd_lib.ci_mode(root) != "local":
+        return None
+    return (f"skipped: repo.ci is local for {root}, so no GitHub workflow is laid; sd-ship merge runs "
+            f"sd-check at the exact head and posts the {sd_lib.LOCAL_GATE_CONTEXT} status instead")

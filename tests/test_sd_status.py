@@ -5814,6 +5814,23 @@ class RulesetProtectionCase(unittest.TestCase):
         result["_seen"] = seen
         return result
 
+    def test_ci_local_expects_the_local_gate_in_place_of_workflow_contexts(self) -> None:
+        """sd:1843: a `repo.ci = local` repository produces `sd/local-gate` and
+        nothing else, so requiring `lint` is `required_not_produced` and the
+        gate is the context it should require."""
+        with mock.patch.object(status.sd_lib, "ci_mode", lambda root: "local"):
+            result = self.section(self.gating_rules())
+        self.assertEqual(result["detail"]["produced_contexts"], ["sd/local-gate"])
+        self.assertEqual(result["detail"]["required_not_produced"], ["lint"])
+        self.assertEqual(result["detail"]["produced_not_required"], ["sd/local-gate"])
+        self.assertIn("repo.ci is local", " ".join(result["detail"]["workflow_notes"]))
+
+    def test_ci_github_leaves_the_produced_contexts_to_the_workflows(self) -> None:
+        with mock.patch.object(status.sd_lib, "ci_mode", lambda root: "github"):
+            result = self.section(self.gating_rules())
+        self.assertEqual(result["detail"]["produced_contexts"], [])
+        self.assertNotIn("repo.ci", " ".join(result["detail"]["workflow_notes"]))
+
     def test_a_ruleset_that_gates_the_merge_is_reported_as_protection(self) -> None:
         result = self.section(self.gating_rules())
         self.assertTrue(result["protected"])

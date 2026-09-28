@@ -17,6 +17,13 @@ COPILOT_REVIEWER = "copilot-pull-request-reviewer[bot]"
 COPILOT_LOGINS = frozenset({COPILOT_REVIEWER, "copilot-pull-request-reviewer", "copilot"})
 
 
+def gate_creator(status: dict) -> str:
+    """The lower-cased login that posted a commit status, or "" when GitHub named none."""
+    creator = status.get("creator")
+    login = creator.get("login") if isinstance(creator, dict) else None
+    return login.lower() if isinstance(login, str) else ""
+
+
 class Refusal(Exception):
     """A failed or uncertain prerequisite; never authority to merge."""
 
@@ -105,6 +112,23 @@ class GitHub:
         self.metadata: dict | None = None
         #: Why the last `declared_gap` read found no declaration, for the refusal.
         self.declaration_faults: list[str] = []
+        #: `repo.ci` for this repository, set by the caller that read the row.
+        #: `local` swaps the `pull_request` runs for the `sd/local-gate` status.
+        self.ci = "github"
+        #: The authenticated account, read once by `viewer_login`.
+        self.viewer: str | None = None
+
+    def viewer_login(self) -> str:
+        """The login this token authenticates as, the only author a local gate status may have."""
+        if self.viewer is None:
+            user = self.api("user")
+            login = user.get("login") if isinstance(user, dict) else None
+            if not isinstance(login, str) or not login:
+                raise Refusal("GitHub did not name the authenticated account", code="command_failed",
+                              boundary="runtime", state="retryable_failure",
+                              next_action="Check `gh auth status`, then retry.")
+            self.viewer = login
+        return self.viewer
 
     def api(self, path: str, *, method: str = "GET", body: dict | None = None) -> Any:
         argv = ["gh", "api", path, "--method", method]
@@ -487,9 +511,15 @@ class GitHub:
         that runs on `pull_request` must have a completed, successful run for
         that event at this exact SHA, so a commit the Tests workflow never ran
         on cannot pass on an advisory check alone.
+
+        Under `ci = local` (sd:1843) the `pull_request` runs are not expected:
+        the `sd/local-gate` status at this exact SHA is, and a missing one
+        refuses as a missing run does. A failed one already refused above.
         """
         runs = self.pages(f"{self.prefix}/commits/{head}/check-runs?filter=latest", "check_runs")
         statuses = self.pages(f"{self.prefix}/commits/{head}/statuses")
+        if self.ci == "local":
+            self.local_gate_passed(head, statuses)
         if not runs and not statuses:
             raise Refusal(f"nothing validated {head}: no check run and no status exists for it", code="ci_missing",
                           next_action="Run the repository's checks for this exact head, then retry merge.", boundary="ci", state="retryable_failure")
@@ -506,6 +536,11 @@ class GitHub:
             if entry.get("sha", head) != head or entry.get("state") != "success":
                 raise Refusal(f"status is not passing on {head}: {context}", code="ci_not_passing",
                               next_action="Wait for or fix exact-head CI, then retry merge.", boundary="ci", state="retryable_failure")
+        if self.ci != "local":
+            self.pull_request_runs_passed(head)
+
+    def pull_request_runs_passed(self, head: str) -> None:
+        """Every workflow at `head` that runs on `pull_request` has a successful run there."""
         pull_request_runs = self.pages(f"{self.prefix}/actions/runs?head_sha={head}&event=pull_request", "workflow_runs")
         for path, name in self.expected_workflows(head):
             if not any(run.get("path") == path and run.get("head_sha") == head and run.get("event") == "pull_request"
@@ -513,6 +548,34 @@ class GitHub:
                        for run in pull_request_runs):
                 raise Refusal(f"workflow {name} ({path}) has no successful pull_request run on {head}", code="ci_missing",
                               next_action="Run the workflow for this exact head, then retry merge.", boundary="ci", state="retryable_failure")
+
+    def local_gate_passed(self, head: str, statuses: list | None = None) -> None:
+        """Refuse unless the newest `sd/local-gate` status at `head` is `success`.
+
+        Missing, failed, pending, naming another SHA, or posted by an account
+        other than this token's: each refuses, because under `ci = local` that
+        status is the only thing that ran the checks, and anyone with write
+        access can post one through the statuses API.
+        """
+        context = sd_lib.LOCAL_GATE_CONTEXT
+        if statuses is None:
+            statuses = self.pages(f"{self.prefix}/commits/{head}/statuses")
+        current = next((entry for entry in statuses if isinstance(entry, dict) and entry.get("context") == context), None)
+        if current is None or current.get("sha", head) != head:
+            raise Refusal(f"repo.ci is local and {context} has no status on {head}", code="ci_missing",
+                          boundary="ci", state="retryable_failure",
+                          next_action="Retry sd-ship merge, which runs sd-check at this head and posts the status.")
+        creator = gate_creator(current)
+        if creator != self.viewer_login().lower():
+            raise Refusal(f"repo.ci is local and {context} on {head} was posted by {creator or 'an unknown account'}, "
+                          f"not {self.viewer_login()}; only a status this account posted counts",
+                          code="local_gate_foreign", boundary="ci", state="retryable_failure",
+                          next_action="Retry sd-ship merge, which runs sd-check at this head and posts its own status.")
+        if current.get("state") != "success":
+            raise Refusal(f"repo.ci is local and {context} is {current.get('state')} on {head}: "
+                          f"{current.get('description') or 'no description'}", code="ci_not_passing",
+                          boundary="ci", state="retryable_failure",
+                          next_action="Fix the failing check, push, then retry merge.")
 
     def commits_behind(self, base: str, head: str) -> int | None:
         """How many commits of `base` are missing from `head`, GitHub's count."""
@@ -540,6 +603,10 @@ class GitHub:
         if "declared_gap" in protection:
             self.every_check(head)
             return
+        if self.ci == "local":
+            # Required contexts are the repository's word; the gate is ours,
+            # and is required whether or not protection names it.
+            self.local_gate_passed(head)
         runs = self.pages(f"{self.prefix}/commits/{head}/check-runs?filter=latest", "check_runs")
         statuses = self.pages(f"{self.prefix}/commits/{head}/statuses")
         required = protection["required_status_checks"]

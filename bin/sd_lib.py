@@ -825,6 +825,64 @@ def repo_row(connection: Any, path: pathlib.Path | str) -> Any:
     return row_for(connection, str(path))
 
 
+#: The values `repo.ci` takes (sd:1843). `github` is the column's default and
+#: this reader's answer to every doubt; `local` says the repository runs no
+#: GitHub Actions and `sd-ship` validates the head itself.
+CI_MODES = ("github", "local")
+#: The commit status `sd-ship` posts for a `ci = local` head, and the one
+#: required context such a repository's protection names.
+LOCAL_GATE_CONTEXT = "sd/local-gate"
+
+
+def repo_ci(connection: Any, root: pathlib.Path | str) -> str:
+    """`repo.ci` for the repository `root` is a checkout of, else `github`.
+
+    Resolved through `registered_for`, as `sd-ship`'s runner-merge read is, so
+    a worktree or a runner clone answers for its row. Every failure answers
+    `github`: an older library or schema without the column, no row, a
+    database that will not read. That is the fail-closed direction, because
+    `github` asks for workflow runs a `local` repository never produces, so a
+    misread refuses a merge rather than waiving a check.
+    """
+    if import_sd_db().module is None:
+        return "github"
+    try:
+        from sd_db import repos  # noqa: PLC0415
+
+        origin = git_output(["config", "--get", "remote.origin.url"], pathlib.Path(root))
+        path = repos.registered_for(connection, str(pathlib.Path(root).resolve()), origin)
+        reader = getattr(repos, "repo_ci", None)
+        if reader is not None:
+            value = reader(connection, path)
+        else:
+            row = repo_row(connection, path)
+            value = row["ci"] if row is not None and "ci" in row.keys() else "github"
+    except Exception:  # every fault is "not said"; see the docstring
+        return "github"
+    return value if value in CI_MODES else "github"
+
+
+def ci_mode(root: pathlib.Path | str) -> str:
+    """`repo_ci` over a read-only connection this call opens and closes.
+
+    For callers that hold no connection: `sd fleet stamp`, `sd-review
+    setup-github`, `sd-status`. No library and no database both answer
+    `github`, the behaviour every repository had before the column existed.
+    """
+    if import_sd_db().module is None:
+        return "github"
+    try:
+        from sd_db.database import connect, default_path  # noqa: PLC0415
+
+        connection = connect(default_path(), write=False)
+    except Exception:  # no database is the database-free case, not an error
+        return "github"
+    try:
+        return repo_ci(connection, root)
+    finally:
+        connection.close()
+
+
 def repo_disk(value: pathlib.Path | str) -> pathlib.Path:
     """The path on this disk for a stored repository value, for git and `is_dir`."""
     paths = _library_paths()

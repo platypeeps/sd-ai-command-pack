@@ -99,14 +99,14 @@ class Fleet(unittest.TestCase):
             (root / "CLAUDE.local.md").write_text(local, encoding="utf-8")
         return root, remote
 
-    def run_stamp(self, rows, cwd=None, ask=None, **overrides) -> tuple[int, str]:
+    def run_stamp(self, rows, cwd=None, ask=None, ci="github", **overrides) -> tuple[int, str]:
         out = io.StringIO()
         code = sd_fleet.fleet_stamp(args(**overrides), rows=lambda: rows, stream=out, cwd=cwd,
-                                    ask=ask or remote())
+                                    ask=ask or remote(), ci=lambda root: ci)
         return code, out.getvalue()
 
-    def plan(self, rows, cwd=None, ask=None, **overrides) -> list[dict]:
-        code, text = self.run_stamp(rows, cwd, ask, json=True, **overrides)
+    def plan(self, rows, cwd=None, ask=None, ci="github", **overrides) -> list[dict]:
+        code, text = self.run_stamp(rows, cwd, ask, ci, json=True, **overrides)
         return json.loads(text)["repos"]
 
 
@@ -120,6 +120,25 @@ class DryRun(Fleet):
                                  "CLAUDE.local.md", "docs/dashboard"])
         self.assertIn(f"review-route@{PIN}", plan["changes"][0]["diff"])
         self.assertEqual(plan["refused"], [])
+
+    def test_ci_local_lays_no_workflow_and_says_why(self) -> None:
+        """sd:1843: `repo.ci = local` gets no route, guard or check workflow;
+        the declaration, the ignore line and the local files are unchanged."""
+        root, remote = self.repo("local-ci")
+        [plan] = self.plan([(root, remote)], ci="local")
+        paths = [change["path"] for change in plan["changes"]]
+        self.assertEqual(paths, [".github/sd-status.json", ".gitignore", "CLAUDE.local.md", "docs/dashboard"])
+        [line] = [line for line in plan["adapted"] if line.startswith("workflows: none laid")]
+        self.assertIn("repo.ci is local", line)
+        self.assertIn("sd/local-gate", line)
+
+    def test_ci_github_lays_the_workflows_as_before(self) -> None:
+        root, remote = self.repo("github-ci")
+        [plan] = self.plan([(root, remote)], ci="github")
+        paths = [change["path"] for change in plan["changes"]]
+        self.assertIn(sd_fleet.ROUTE_PATH, paths)
+        self.assertIn(sd_fleet.CHECK_PATH, paths)
+        self.assertFalse(any("repo.ci" in line for line in plan["adapted"]))
 
     def test_dry_run_writes_nothing(self) -> None:
         root, remote = self.repo("quiet")
