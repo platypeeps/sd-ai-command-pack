@@ -1806,20 +1806,19 @@ def body_command(args) -> int:
             path.write_text(body, encoding="utf-8")
             linted = subprocess.run([sys.executable, str(BIN / "sd-docs-lint"), "--body-only", "--pr-body", str(path)],
                                     cwd=root, capture_output=True, text=True, timeout=300, check=False)
-        lint = {"exit": linted.returncode, "output": (linted.stdout + linted.stderr).strip()}
+        output = (linted.stdout + linted.stderr).strip()
         result = {"ok": linted.returncode == 0, "body": body, "body_source": source,
-                  "normalized": list(stripped), "lint": lint}
+                  "normalized": list(stripped), "lint": {"exit": linted.returncode, "output": output}}
     except (Refusal, OSError, UnicodeDecodeError, subprocess.SubprocessError) as error:
         result = failure("body", error)
+        body, stripped, output = "", (), str(error)
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
-    elif "body" in result:
-        print(result["body"], end="")
-        for line in result["normalized"]:
-            print(f"normalized: {line}", file=sys.stderr)
-        print(result["lint"]["output"], file=sys.stderr)
     else:
-        print(result["error"], file=sys.stderr)
+        print(body, end="")
+        for line in stripped:
+            print(f"normalized: {line}", file=sys.stderr)
+        print(output, file=sys.stderr)
     return 0 if result["ok"] else 3
 
 
