@@ -1132,6 +1132,14 @@ class CliTests(SetupFixture):
         self.assertFalse(self.workflow(root).exists())
         self.assertFalse(self.dependabot(root).exists())
 
+    def test_check_and_remove_do_not_combine(self) -> None:
+        """Review: `--check` writes nothing, so `--check --remove` is a usage error, not a removal."""
+        root = self.make_repo()
+        install(root)
+        code, _ = self.run_main(root, ["--check", "--remove"], "github")
+        self.assertEqual(code, setup.EXIT_USAGE)
+        self.assertTrue(self.workflow(root).is_file())
+
     def test_ci_github_installs_as_before(self) -> None:
         root = self.make_repo()
         code, text = self.run_main(root, ["--pin", PIN], "github")
@@ -1237,6 +1245,16 @@ class RemoveTests(SetupFixture):
         self.assertEqual(code, 0)
         self.assertEqual(self.dependabot(root).read_text(), guarded)
         self.assertIn("other.yml", text)
+
+    def test_a_quoted_uses_line_still_keeps_the_guard(self) -> None:
+        """Review: `read_pin` does not match a quoted `uses:`; any mention keeps the guard."""
+        root = self.make_repo()
+        install(root)
+        other = root / ".github" / "workflows" / "other.yml"
+        other.write_text(f'      - uses: "{guard.DEPENDENCY}@{PIN}"\n')
+        guarded = self.dependabot(root).read_text()
+        self.remove(root)
+        self.assertEqual(self.dependabot(root).read_text(), guarded)
 
     def test_nothing_installed_is_nothing_to_do(self) -> None:
         root = self.make_repo()

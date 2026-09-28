@@ -412,8 +412,9 @@ def removal(root: pathlib.Path, workflow: pathlib.Path, template: Any, *, self_i
     Text in, a plan out; the installer does the writing. `template(pin)` is
     the workflow the installer writes at `pin`, so a workflow the repository
     edited beyond its pin needs `force`, as replacing one does.
-    The guard stays while another workflow still pins review-route, because
-    Dependabot would bump that pin the day the guard went.
+    The guard stays while another workflow still names review-route, because
+    Dependabot would bump that pin the day the guard went. Any mention counts,
+    quoted or not: keeping a guard costs nothing, and lifting a needed one does.
     """
 
     target = root / workflow
@@ -426,7 +427,7 @@ def removal(root: pathlib.Path, workflow: pathlib.Path, template: Any, *, self_i
     dependabot = root / DEPENDABOT_RELATIVE_PATH
     before = dependabot.read_text(encoding="utf-8") if dependabot.is_file() else None
     pinned = sorted(str(path.relative_to(root)) for path in (root / workflow.parent).glob("*.y*ml")
-                    if path != target and read_pin(path.read_text(encoding="utf-8")) is not None)
+                    if path != target and DEPENDENCY in path.read_text(encoding="utf-8"))
     if before is None:
         plan.append((dependabot, None, f"absent {DEPENDABOT_RELATIVE_PATH}"))
     elif pinned:

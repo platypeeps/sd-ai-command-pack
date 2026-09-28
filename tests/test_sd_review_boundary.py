@@ -777,10 +777,10 @@ class LineBudgetTests(unittest.TestCase):
         # comment lines). The parse and the change of directory are
         # `sd_lib.enter_directory_from_argv` and `sd_lib.enter_directory`,
         # shared core, so none of that is spent here. Measured on the branch.
-        # 3709 -> 3734 is `setup-github --remove`, the supported way for a
+        # 3709 -> 3736 is `setup-github --remove`, the supported way for a
         # `repo.ci = local` repository (sd:1843) to shed a route workflow that
-        # never runs. `bin/sd_setup_github.py` grows +25: the flag, its
-        # dispatch in `main`, `--check` naming a tracked workflow REMOVE there,
+        # never runs. `bin/sd_setup_github.py` grows +27: the flag, its
+        # dispatch in `main` (refused beside `--check`, which never writes), `--check` naming a tracked workflow REMOVE there,
         # `remove` itself, and `_apply`, which the install and the removal now
         # share as the lane's one write site. What goes and what stays --
         # the guard lifted out of `dependabot.yml`, kept while another
@@ -790,7 +790,7 @@ class LineBudgetTests(unittest.TestCase):
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3734,
+            3736,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

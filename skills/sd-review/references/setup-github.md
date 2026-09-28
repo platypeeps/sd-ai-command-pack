@@ -68,8 +68,9 @@ Dry-run prints planned writes without changing files.
 It also takes the review-route guard out of `.github/dependabot.yml`.
 It works in every mode and under `repo.ci = local`.
 Add `--dry-run` to print the plan and write nothing.
+`--remove` with `--check` is a usage error, because `--check` never writes.
 
 - A workflow edited beyond its pin needs `--force`.
-- The guard stays while another workflow still pins `actions/review-route`.
+- The guard stays while another workflow still names `actions/review-route`, quoted or not.
 - A `dependabot.yml` the installer created whole is deleted.
 - In any other file, only the guard lines go, with an `ignore:` key they leave empty.

@@ -406,6 +406,8 @@ def main(
         root = sd_lib.repo_root(None)
         if root is None:
             raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")
+        if args.remove and args.check:
+            raise UsageError("--remove writes and --check never does; pass one")
         if args.remove:
             return remove(root, args, sys.stdout)
         if skipped := sd_setup_guard.ci_local_skip(root, WORKFLOW_RELATIVE_PATH):  # repo.ci = local (sd:1843)
