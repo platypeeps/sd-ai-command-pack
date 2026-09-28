@@ -147,6 +147,7 @@ After the switch:
   It refuses to post for any commit other than the one the worktree held.
 - The description carries `inputs <digest>` as provenance: the head, the copied `CLAUDE.local.md` and the pack's `bin/` files.
 - Nothing is reused. Every merge attempt runs `sd-check` again and posts a fresh status.
+- `sd-ship merge --watch` starts no remote watch: no remote check is coming, and the gate runs to completion in the merge (sd:1875).
 - The merge then requires that status as `success` at the head, posted by the authenticated account.
   Missing, failed, pending, naming another commit, or from another account: each refuses.
 - Under a declared gap, the status replaces the `pull_request` workflow runs `every_check` asks for.

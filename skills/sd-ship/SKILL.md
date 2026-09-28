@@ -148,6 +148,7 @@ Never allocate another review ID to reset spent passes or discard history.
   A refusal returns `manualRequired: true`; it changes no protection and requests no reviewer.
 - `--watch --wait-seconds 900` starts one bounded fail-fast CI watcher.
   Its persisted start prevents another automatic watch on rerun.
+  Under `repo.ci = local` it starts none: the local gate runs inside the merge and is the wait.
 - `sd-ship observe --item ID --json` reads receipt and remote state without changing files, refs, or database.
 - `sd-ship reconcile --item ID --json` fetches merge evidence in an owned clone.
   Observation alone does not establish ancestry.
