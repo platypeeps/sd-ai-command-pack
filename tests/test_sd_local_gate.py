@@ -165,9 +165,16 @@ class CiMode(unittest.TestCase):
         git(self.root, "init", "-q")
         upsert_repo(self.connection, str(self.root), remote=None)
 
+    def columns(self) -> set[str]:
+        return {row[1] for row in self.connection.execute("PRAGMA table_info(repo)")}
+
     def test_a_library_without_the_reader_answers_github(self) -> None:
         import sd_db.repos
 
+        # A schema-15 database: the pinned library creates repo.ci, so drop it.
+        if "ci" in self.columns():
+            self.connection.execute("ALTER TABLE repo DROP COLUMN ci")
+        self.assertNotIn("ci", self.columns())
         with mock.patch.object(sd_db.repos, "repo_ci", None, create=True):
             self.assertEqual(sd_lib.repo_ci(self.connection, self.root), "github")
 
@@ -180,7 +187,8 @@ class CiMode(unittest.TestCase):
     def test_without_the_reader_the_column_is_read_when_present(self) -> None:
         import sd_db.repos
 
-        self.connection.execute("ALTER TABLE repo ADD COLUMN ci TEXT NOT NULL DEFAULT 'github'")
+        if "ci" not in self.columns():  # a library older than schema 16
+            self.connection.execute("ALTER TABLE repo ADD COLUMN ci TEXT NOT NULL DEFAULT 'github'")
         self.connection.execute("UPDATE repo SET ci = 'local'")
         with mock.patch.object(sd_db.repos, "repo_ci", None, create=True):
             self.assertEqual(sd_lib.repo_ci(self.connection, self.root), "local")
