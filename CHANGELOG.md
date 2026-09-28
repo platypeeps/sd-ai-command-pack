@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Fixed
+
+- **`sd-ship merge --watch` accepts a `ci = local` pull request (sd:1875).**
+  `--watch` ran `gh pr checks --watch --fail-fast` before reading `repo.ci`,
+  and on a pull request with no remote check that command fails, so the
+  merge refused with `command_failed` before the local gate ran. The merge
+  now reads `repo.ci` first and, under `local`, starts no remote watch: the
+  gate runs `sd-check` to completion inside the merge, so it is the wait.
+
 ### Changed
 
 - **The lane commands take `-C <dir>` (sd:1910).** `sd-ship`, `sd-check`,
