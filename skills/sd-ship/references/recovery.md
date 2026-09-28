@@ -83,6 +83,15 @@ Resolve every conflicted path by hand, against the merge base, not with `git che
 No path is proven safe for `--ours`: the default branch can leave a path and return to it, and `--ours` would discard that change.
 Do not rebase onto the squash; that needs a force-push.
 
+## A failed check run under local CI
+
+`sd ci local` switches a repository to the local gate; its dry run shows the changes, and `--apply` makes them.
+A pull request opened before the switch can still carry a failed check run at its head.
+A billing-blocked run is the common case.
+That run still blocks the merge, whatever `sd/local-gate` says: GitHub reports the pull request `unstable`, and `every_check` requires every check run to pass.
+Push a fresh commit to the branch, an empty one if nothing else is due, and prepare again.
+With the workflows off, nothing but the local gate runs on the new head.
+
 ## Copilot request recovery
 
 A successful local Copilot request remains a merge gate.
