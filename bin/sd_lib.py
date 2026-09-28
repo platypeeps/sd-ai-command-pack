@@ -303,6 +303,9 @@ def enter_directory(directory: str | None, *, error: type[Exception]) -> None:
     """
     if directory is None:
         return
+    if not directory:
+        # `pathlib.Path("")` is `.`: an empty operand would silently stay put.
+        raise error("-C: expected a directory")
     target = pathlib.Path(directory).expanduser()
     if not target.is_dir():
         raise error(f"-C {directory}: not a directory")
@@ -319,7 +322,11 @@ def enter_leading_directory(argv: list[str], *, error: type[Exception]) -> list[
     """
     if argv[:1] != ["-C"]:
         return argv
-    enter_directory(argv[1] if len(argv) > 1 else "", error=error)
+    if len(argv) < 2:
+        # This runs before argparse, so its required-value check is ours to
+        # make: a bare `-C` must not fall through to a default run in cwd.
+        raise error("-C: expected a directory")
+    enter_directory(argv[1], error=error)
     return argv[2:]
 
 

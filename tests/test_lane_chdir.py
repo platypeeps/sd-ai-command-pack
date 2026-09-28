@@ -87,6 +87,19 @@ class LaneChdirTests(unittest.TestCase):
         statuses = {check["name"]: check["status"] for check in json.loads(result.stdout)["checks"]}
         self.assertEqual(statuses, {"check": "absent", "test": "absent", "lint": "absent"}, statuses)
 
+    def test_sd_review_refuses_a_c_without_an_operand(self) -> None:
+        # The pre-parser in front of `setup-github` runs before argparse, so a
+        # bare `-C` used to become `.` and fall through to a default review in
+        # whatever checkout the caller stood in (pass 1 of sd:1910). From a
+        # non-repository cwd a fall-through says "not inside a git repository",
+        # which is the wrong message, so the assertion is on the message.
+        for arguments in (["-C"], ["-C", "setup-github"], ["-C", "", "--explain"]):
+            with self.subTest(arguments=arguments):
+                result = run("sd-review", *arguments, cwd=self.outside)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertRegex(result.stderr, r"-C(: expected a directory| setup-github: not a directory)")
+                self.assertNotIn("is not inside a git repository", result.stderr)
+
     def test_sd_review_setup_github_honours_a_leading_c(self) -> None:
         result = run("sd-review", "-C", str(self.missing), "setup-github", "--help", cwd=self.outside)
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)

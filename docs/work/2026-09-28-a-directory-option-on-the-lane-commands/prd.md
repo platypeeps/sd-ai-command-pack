@@ -95,3 +95,15 @@ shows the need.
   changed after review" until this work was stashed. Land or stash pack tool
   changes before merging elsewhere; a landed change moves the binding for
   every open record, which then needs one more review pass.
+- 2026-09-28 pass 1 (codex, challenge): two findings. High, rejected: under
+  `Bash(sd-ship:*)` every target directory receives the same approval, so
+  `-C` permits a cross-checkout merge that a `cd &&` line handed to the
+  classifier. Evidence for the rejection: that widening is the operator's
+  stated request (Problem, above), and a visible `-C` is what makes a
+  repository-scoped allow rule possible at all,
+  `Bash(sd-ship -C /path/to/checkout:*)`, where a `cd <dir> &&` line matches
+  no rule and can only be classified. The merge itself stays behind the
+  record, the review passes, CI and `sd.assistant_merge`. Medium, fixed:
+  `sd-review -C` with no operand became `.` and ran a default review in cwd;
+  `enter_leading_directory` and `enter_directory` now refuse a missing or
+  empty operand, with a test on the message.

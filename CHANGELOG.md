@@ -14,7 +14,10 @@
   `cd <checkout> && sd-ship merge …` it replaces went to a classifier that
   denied two merges on 2026-09-28. `tests/test_verb_inventory.py` fails when
   `-C` appears on any other file under `bin/`; the banned long spellings stay
-  banned. `sd-review -C <dir> setup-github` runs the seam there too.
+  banned. `sd-review -C <dir> setup-github` runs the seam there too. An allow
+  rule that names the directory, `Bash(sd-ship -C /path/to/checkout:*)`,
+  scopes the approval to one repository; `Bash(sd-ship:*)` approves every
+  one, and a `cd <dir> &&` line could never be scoped by a rule at all.
 
 - **`sd-ship` accepts the body it published (sd:1870).** `prepare` appended
   `Work: sd:<item>` to the body and then refused a `--body-file` carrying it,
