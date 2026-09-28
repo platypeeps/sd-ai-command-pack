@@ -4,6 +4,23 @@
 
 ### Changed
 
+- **`sd-ship` accepts the body it published (sd:1870).** `prepare` appended
+  `Work: sd:<item>` to the body and then refused a `--body-file` carrying it,
+  so the live body of #1236 and #1238 fed back was refused. `sd_ship_body`
+  now strips an owned line that says what `sd-ship` would write -- `Item:` or
+  `Work:` naming the item, `Delivers:` under `--deliver`, `Authored-with:` a
+  registry resolves -- and lists it in the result's `normalized`. Another
+  item, an unclaimed `Delivers:`, `Attributes:` and `Closes:` refuse, each by
+  line number with the expected value. The no-item path shares the parser
+  and still refuses every owned line. Without `--body-file`, `prepare` reads
+  an open pull request's live body, so an edit made on GitHub is no longer
+  lost; `body_source` in the result names `file`, `live_pr`, `state` or
+  `default`. The new `sd-ship body --item N [--body-file F]` prints the body
+  `prepare` would publish and its body lint, touching no sd state and no
+  GitHub API. `sd_lib.OWNED_TRAILERS` is the one list of the owned keys;
+  rule 5 of `sd-docs-lint` reads `WORK_TRAILER` from it. The pull-request
+  template drops its `Item:` and `Delivers:` lines and keeps `Refs:`.
+
 - **No-CI mode: a `repo.ci = local` repository is gated by `sd/local-gate`
   (sd:1843).** `sd-ship merge` runs `sd-check` in a clean worktree of the
   exact reviewed head and posts the result to that commit as the

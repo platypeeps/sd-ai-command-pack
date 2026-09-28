@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 
 import sd_lib
 import sd_local_gate
+import sd_ship_body
 import sd_ship_dispositions as sd_ship_dispositions
 import sd_ship_squash
 from sd_ship_bindings import review_binding
@@ -376,6 +377,10 @@ class Ship(SharedReview):
     #: written when the gate cleared, it outlived every later refusal and each
     #: retry appended another copy (sd:1373).
     copilot_clearance_note: str | None = None
+    #: Where `prepare` took the body from -- `file`, `live_pr`, `state` or
+    #: `default` -- and the owned lines it stripped from it (sd:1870).
+    body_source: str = "default"
+    body_normalized: tuple[str, ...] = ()
 
     def __init__(self, root: pathlib.Path, connection, database: pathlib.Path, args):
         from sd_db import ship
@@ -429,17 +434,34 @@ class Ship(SharedReview):
             if self.state.get("acceptance", {}).get("item_scope") != scope:
                 raise Refusal("item acceptance scope changed after the delivery claim")
 
+    def body_input(self, default: str) -> tuple[str, str]:
+        """The body to publish and where it came from (sd:1870).
+
+        An open pull request's live body outranks the stored one: an edit made
+        on GitHub, such as an added scope line, is what the author meant, and
+        preparing from the stored copy dropped it in silence. A blank live
+        body says nothing, so the stored one answers instead.
+        """
+        if self.args.body_file:
+            return self.args.body_file.read_text(encoding="utf-8"), "file"
+        pull = self.state.get("pull_request") or {}
+        if type(pull.get("number")) is int:
+            live = str(self.api.pull(pull["number"]).get("body") or "").replace("\r\n", "\n")
+            if live.strip():
+                return live, "live_pr"
+        if self.state.get("body"):
+            return self.state["body"], "state"
+        return default, "default"
+
     def publication_claim(self) -> tuple[str, bool, dict | None, bool]:
         if self.args.no_item:
-            body = self.args.body_file.read_text(encoding="utf-8") if self.args.body_file else self.state.get("body") or "Code changes reviewed locally."
-            if re.search(r"(?im)^[ \t]*(?:Item|Delivers|Closes|Authored-with|Attributes|Work)[ \t]*:", body):
-                raise Refusal("no-item publication cannot carry item or caller-supplied authorship trailers")
+            body, self.body_source = self.body_input("Code changes reviewed locally.")
+            body, self.body_normalized = sd_ship_body.normalize(body, None)
             return body, False, None, False
         deliver = bool(self.args.deliver) if self.args.deliver is not None else bool(self.state.get("deliver"))
         claim = self.acceptance() if self.args.deliver is not None or not self.state else self.state.get("acceptance")
-        body = self.args.body_file.read_text(encoding="utf-8") if self.args.body_file else self.state.get("body") or f"Code changes associated with sd:{self.args.item}."
-        if self.args.body_file and re.search(r"(?im)^(?:Item|Delivers|Closes|Authored-with|Attributes|Work):", body):
-            raise Refusal("the ship adapter owns association and delivery trailers")
+        body, self.body_source = self.body_input(f"Code changes associated with sd:{self.args.item}.")
+        body, self.body_normalized = sd_ship_body.normalize(body, self.args.item, deliver=deliver)
         local_work = bool(self.item["kind"] == "work" and self.item.get("path")
                           and git(self.root, "ls-files", "--deduplicate", "--", self.item["path"]))
         return body, deliver, claim, local_work
@@ -1031,8 +1053,8 @@ class Ship(SharedReview):
         mode = self.resolve_mode()
         if self.args.copilot_review == "request" and mode != "full":
             raise Refusal("explicit Copilot review requires a full-owned repository")
-        if not self.args.no_item and (mode != "guest" or local_work) and f"Work: sd:{self.args.item}" not in body:
-            body += f"\n\nWork: sd:{self.args.item}\n"
+        if not self.args.no_item and (mode != "guest" or local_work):
+            body = sd_ship_body.published(body, self.args.item)
         if self.state.get("pull_request") and (self.state.get("title") != title
                                                or (not self.args.no_item and self.state.get("deliver") != deliver)):
             raise Refusal("existing PR delivery claim or title differs; reconcile the prepared scope first")
@@ -1065,7 +1087,7 @@ class Ship(SharedReview):
         mode = self.resolve_mode()
         if mode == "guest":
             if not self.args.no_item and not local_work:
-                body = body.replace(f"\n\nWork: sd:{self.args.item}\n", "")
+                body = body.replace(f"\n\n{sd_lib.WORK_TRAILER} sd:{self.args.item}\n", "")
                 self.save(body=body)
             if self.planning_artifacts(f"origin/{base}", head):
                 raise Refusal("guest destination cannot receive local planning artifacts")
@@ -1103,7 +1125,8 @@ class Ship(SharedReview):
         copilot = self.prepare_copilot_review(number, pull, head, mode)
         if copilot.get("warning"):
             self.save(warnings=list(self.state.get("warnings") or []) + [copilot["warning"]])
-        return self.result("ready_to_send", copilot_review=copilot)
+        return self.result("ready_to_send", copilot_review=copilot,
+                           body_source=self.body_source, normalized=list(self.body_normalized))
 
     def pushed_pull(self, number: int, head: str) -> dict:
         """Read the pull object until it shows the head just pushed (sd:1394).
@@ -1396,9 +1419,9 @@ class Ship(SharedReview):
     def squash_body(self, reviewed_base: str = "") -> str:
         body = self.state["body"].rstrip() + "\n\n"
         if not self.args.no_item:
-            body += f"Item: sd:{self.args.item}\n"
+            body += f"{sd_lib.ITEM_TRAILER} sd:{self.args.item}\n"
             if self.state.get("deliver"):
-                body += f"Delivers: sd:{self.args.item}\n"
+                body += f"{sd_lib.DELIVERS_TRAILER} sd:{self.args.item}\n"
                 # The message is fixed before GitHub picks the squash parent,
                 # so it names the parent the review covered; a git reader
                 # holds `Delivers:` when the landed parent differs (#1179).
@@ -1418,8 +1441,8 @@ class Ship(SharedReview):
         authors = set(sd_lib.attribution(self.root, start, head).values())
         for _, message in sd_lib.commit_messages(self.root, start, head):
             authors.update(line.partition(":")[2].strip() for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines()
-                           if line.startswith("Authored-with:"))
-        lines += [f"Authored-with: {author}" for author in sorted(authors)]
+                           if line.startswith(sd_lib.AUTHORED_TRAILER))
+        lines += [f"{sd_lib.AUTHORED_TRAILER} {author}" for author in sorted(authors)]
         return "".join(line + "\n" for line in lines)
 
     def reviewed_base(self, head: str, base: str) -> str:
@@ -1704,8 +1727,15 @@ def validate_identity(args) -> None:
 
 
 def parser():
-    command = argparse.ArgumentParser(description=__doc__)
+    command = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
+                                      epilog=BODY_EPILOG)
     commands = command.add_subparsers(dest="command", required=True)
+    body = commands.add_parser("body", help="print the body prepare would publish, and its body lint; no state",
+                               description=BODY_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
+    body.add_argument("--item", type=int, required=True)
+    body.add_argument("--body-file", type=pathlib.Path, help="the body to read; - reads stdin; default is prepare's default body")
+    body.add_argument("--deliver", action="store_true", help="accept a matching Delivers: line, as prepare --deliver does")
+    body.add_argument("--json", action="store_true")
     for name in ("prepare", "merge", "reconcile", "observe"):
         action = commands.add_parser(name)
         identity_flags(action)
@@ -1749,6 +1779,55 @@ def parser():
     return command
 
 
+BODY_EPILOG = """\
+body: `sd-ship body --item N [--body-file F]` prints the body prepare would
+publish and runs the body lint (sd-docs-lint --body-only: one Work: line, and
+the scope line a changed path demands). It strips an Item:, Work:, Delivers:
+or Authored-with: line that says what sd-ship would write, and refuses any
+other owned line by number. It reads no sd state and calls no GitHub API.
+Exit 0 when the body would prepare, 3 on a refusal or a lint failure.
+"""
+
+
+def body_text(args) -> tuple[str, str]:
+    """The body `sd-ship body` reads, and its source: file, stdin or default."""
+    if args.body_file is None:
+        return f"Code changes associated with sd:{args.item}.", "default"
+    if str(args.body_file) == "-":
+        return sys.stdin.read(), "stdin"
+    return args.body_file.read_text(encoding="utf-8"), "file"
+
+
+def body_command(args) -> int:
+    """`sd-ship body`: normalize, append `Work:`, lint; no database, no GitHub (sd:1870)."""
+    try:
+        root = sd_lib.repo_root(None)
+        if root is None:
+            raise Refusal("cwd is not inside a Git repository")
+        text, source = body_text(args)
+        normalized, stripped = sd_ship_body.normalize(text, args.item, deliver=args.deliver)
+        body = sd_ship_body.published(normalized, args.item)
+        with tempfile.TemporaryDirectory(prefix="sd-ship-body-") as directory:
+            path = pathlib.Path(directory) / "pr-body.md"
+            path.write_text(body, encoding="utf-8")
+            linted = subprocess.run([sys.executable, str(BIN / "sd-docs-lint"), "--body-only", "--pr-body", str(path)],
+                                    cwd=root, capture_output=True, text=True, timeout=300, check=False)
+        output = (linted.stdout + linted.stderr).strip()
+        result = {"ok": linted.returncode == 0, "body": body, "body_source": source,
+                  "normalized": list(stripped), "lint": {"exit": linted.returncode, "output": output}}
+    except (Refusal, OSError, UnicodeDecodeError, subprocess.SubprocessError) as error:
+        result = failure("body", error)
+        body, stripped, output = "", (), str(error)
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print(body, end="")
+        for line in stripped:
+            print(f"normalized: {line}", file=sys.stderr)
+        print(output, file=sys.stderr)
+    return 0 if result["ok"] else 3
+
+
 def dispatch(root, connection, database, args, store, readonly):
     if args.no_item and args.command in ("review", "verify-review", "adjudicate"):
         import sd_ship_no_item
@@ -1765,6 +1844,8 @@ def dispatch(root, connection, database, args, store, readonly):
 
 def main(argv=None) -> int:
     args = parser().parse_args(argv)
+    if args.command == "body":
+        return body_command(args)
     # Two refusals, because there are two faults and one remedy each.
     # `sd_lib.import_sd_db` owns the first: it makes the second attempt this
     # entrypoint used not to make -- the provisioned copy, which is the only

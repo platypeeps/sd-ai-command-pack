@@ -122,7 +122,10 @@ Never allocate another review ID to reset spent passes or discard history.
 - `sd-ship prepare --item ID --json` reviews, pushes, and opens or reconciles the PR.
   It returns `ready_to_send` and never merges.
   `--title` and `--body-file` supply the PR description.
-  Reprepare preserves the saved description and delivery claim.
+  Without `--body-file`, an open PR's live body is the description; reprepare preserves the delivery claim.
+  The sd-ai-command-pack checkout's `WORKFLOW.md`, section **The path for a change**, lists the body lines sd-ship owns.
+- `sd-ship body --item ID [--body-file FILE]` prints the body prepare would publish and its body lint.
+  It reads no sd state, calls no GitHub API, and exits non-zero on a refusal or a lint failure.
 - Optional commits require `--path FILE` for each file, `--message-file FILE`, and `--author ENTRY`.
   Directories and a pre-populated index are invalid.
   Actual provider/vendor attribution belongs on the commit.

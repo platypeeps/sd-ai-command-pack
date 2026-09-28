@@ -237,12 +237,27 @@ path runs with the applicable review points. An item can span several pull
 requests. `Item: <item>` associates a merge without closing the item;
 `Delivers: <item>` declares the delivering merge. Changes without an associated
 item omit those trailers and create no placeholder record. The trailers are the
-last paragraph of the pull-request body, contiguous, with the attribution
+last paragraph of the squash message, contiguous, with the attribution
 paragraph above them and nothing below: a squash merge concatenates the body
 into the commit message, git reads trailers only out of the final paragraph,
 and GitHub's appended `Co-authored-by:` joins a trailer block that ends the
 message but opens a new paragraph after anything else.
-`.github/PULL_REQUEST_TEMPLATE.md` ends in that order.
+`.github/PULL_REQUEST_TEMPLATE.md` ends in that order, with `Refs:` only.
+
+`sd-ship` owns the lines `sd_lib.OWNED_TRAILERS` names: `Item:`, `Work:`,
+`Delivers:`, `Closes:`, `Authored-with:` and `Attributes:`. `prepare` appends
+`Work:` to the body it publishes, and `merge` appends `Item:`, `Delivers:` and
+the authorship lines to the squash message, so a body written for `sd-ship`
+carries none of them. A supplied line that says what `sd-ship` would write is
+stripped and listed in the result's `normalized`; any other owned line is
+refused by line number, with the expected value. So the body `sd-ship`
+published, fed back as `--body-file`, prepares again. Without `--body-file`,
+`prepare` reads an open pull request's live body, so an edit made on GitHub
+survives; the result's `body_source` says `file`, `live_pr`, `state` or
+`default`. `sd-ship body --item <item> [--body-file <file>]` prints the body
+`prepare` would publish and runs the body lint on it. It reads no sd state,
+calls no GitHub API, and exits non-zero on a refusal or a lint failure. A merge
+made without `sd-ship` writes the trailers by hand, in the order above.
 
 After the remote confirms the delivering merge, `sd work deliver <row-id>
 <full-commit-sha>` verifies the commit, default branch and delivery trailer. It
