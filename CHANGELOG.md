@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Added
+
+- **`sd ci local` switches a repository to local CI (sd:1914).** Run from a
+  checkout, it sets `repo.ci` to `local`, makes `sd/local-gate` the one
+  required status check with `strict` on -- in classic protection, or in each
+  repository ruleset that requires checks, keeping every other rule -- and
+  turns Actions off for a private repository. A public repository keeps
+  Actions for its dynamic workflows (CodeQL, Dependabot, Copilot) and has
+  each workflow its files declare disabled. It is a dry run unless `--apply`
+  is given, refuses without `admin`, and a second run finds nothing to do.
+  The contexts it drops are named. A head that already carries a failed
+  (billing-blocked) check run still refuses; WORKFLOW.md § No-CI mode names
+  the remedy, a fresh commit.
+
 ### Fixed
 
 - **`sd-ship merge --watch` accepts a `ci = local` pull request (sd:1875).**
