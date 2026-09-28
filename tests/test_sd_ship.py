@@ -2541,6 +2541,30 @@ roles:
                 self.merge()
         self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
 
+    def watched_merge(self, ci):
+        """`merge --watch` under `repo.ci = ci`, stopped at readiness; the `run` calls it made."""
+        self.prepare()
+        stop = ship.Refusal("stopped at readiness")
+        with (patch.object(ship.sd_lib, "repo_ci", return_value=ci),
+              patch.object(ship.sd_local_gate, "local_gate", return_value={"status": "success"}),
+              patch.object(ship.GitHub, "ready", side_effect=stop),
+              patch.object(ship, "run", wraps=ship.run) as calls):
+            with self.assertRaises(ship.Refusal) as raised:
+                self.merge("--watch")
+        return raised.exception, [call.args[1][:3] for call in calls.call_args_list]
+
+    def test_watch_waits_on_the_local_gate_under_ci_local(self):
+        """sd:1875. A `ci = local` pull request has no remote check to watch, and
+        `gh pr checks --watch` fails on one that has none; the local gate is the wait."""
+        refusal, calls = self.watched_merge("local")
+        self.assertEqual(str(refusal), "stopped at readiness")
+        self.assertNotIn(["gh", "pr", "checks"], calls)
+
+    def test_watch_still_watches_remote_checks_under_ci_github(self):
+        refusal, calls = self.watched_merge("github")
+        self.assertIn(["gh", "pr", "checks"], calls)
+        self.assertNotEqual(str(refusal), "stopped at readiness")
+
     def test_delivery_clone_identity_cannot_be_replaced(self):
         from sd_db.progress import deliver_work
         from sd_db.workflow import WorkflowError
