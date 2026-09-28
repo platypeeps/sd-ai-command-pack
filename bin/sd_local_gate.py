@@ -18,21 +18,26 @@ A success is posted only for the commit the worktree held when `sd-check`
 finished. `post` refuses any other SHA, so a result cannot be carried to a
 head that was never checked.
 
-A posted success is reused only when it is bound to the same inputs and this
-account posted it. The description carries `inputs <digest>`, a digest of the
-head, the copied `CLAUDE.local.md` (or its absence) and the pack's own `bin/`
-files, so a changed local block or a changed pack runs the check again. A
-status from another account (anyone with write access can post one) is never
-reused, and `local_gate_passed` refuses it.
+Nothing is reused: every merge attempt runs `sd-check` and posts a fresh
+status, because no digest can name every input a check reads (a tool on
+`PATH`, for one). The description carries `inputs <digest>` as provenance: a
+digest of the head, the copied `CLAUDE.local.md` (or its absence) and the
+pack's own `bin/` files. Anyone with write access can post a status, so
+`local_gate_passed` trusts only one the authenticated account posted.
 
 The child gets the caller's environment minus the variables that choose Python
 packages (`PYTHONPATH`, `PYTHONHOME`, `VIRTUAL_ENV`, `CONDA_PREFIX`,
-`__PYVENV_LAUNCHER__`) and minus `PATH` entries inside the operator's checkout,
-so an editable install cannot import the dirty checkout. The residual is
-deliberate: the rest of `PATH`, the interpreter running `sd-ship` and the
-system tools are this machine's image, as a runner's image is on GitHub. When
-the checkout under test is the pack itself and `sd-ship` runs from it, the
-gate's own `bin/` is that checkout; the inputs digest then covers its files.
+`__PYVENV_LAUNCHER__`), minus `PATH` entries inside the operator's checkout,
+and minus any `PATH` entry whose parent holds `pyvenv.cfg`, a virtualenv's
+`bin` wherever it lives. So an editable install cannot import the dirty
+checkout, and no virtualenv's interpreter answers for `python3`.
+
+This is a self-hosted runner, not a hermetic build. The gate guarantees a clean
+tree at the exact head, a scrubbed Python environment and no virtualenv on
+`PATH`. The rest of `PATH`, the interpreter running `sd-ship` and the system
+tools are this machine's image; the repository's own `check` entrypoint owns a
+hermetic environment if it needs one. When the checkout under test is the pack
+itself and `sd-ship` runs from it, the gate's own `bin/` is that checkout.
 """
 
 from __future__ import annotations
@@ -41,7 +46,6 @@ import hashlib
 import json
 import os
 import pathlib
-import re
 import shutil
 import subprocess
 import sys
@@ -49,7 +53,7 @@ import tempfile
 from typing import Any
 
 import sd_lib
-from sd_ship_remote import Refusal, gate_creator, git
+from sd_ship_remote import Refusal, git
 
 BIN = pathlib.Path(__file__).resolve().parent
 CONTEXT = sd_lib.LOCAL_GATE_CONTEXT
@@ -60,7 +64,6 @@ CHECK_SECONDS = 3600
 LOCAL_BLOCK = "CLAUDE.local.md"
 #: Variables that pick Python packages; the child must not inherit the caller's.
 DROPPED_ENVIRONMENT = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX", "__PYVENV_LAUNCHER__")
-INPUTS = re.compile(r"\binputs ([0-9a-f]{12})\b")
 
 
 def untracked_local_block(root: pathlib.Path) -> pathlib.Path | None:
@@ -83,27 +86,15 @@ def gate_inputs(root: pathlib.Path, head: str) -> str:
 
 
 def gate_environment(root: pathlib.Path, environ: dict[str, str] | None = None) -> dict[str, str]:
-    """The caller's environment without package selectors or `PATH` entries inside `root`."""
+    """The caller's environment without package selectors, `PATH` entries inside `root`, or virtualenv `bin`s."""
     source = os.environ if environ is None else environ
     env = {key: value for key, value in source.items() if key not in DROPPED_ENVIRONMENT}
     top = root.resolve()
     kept = [entry for entry in env.get("PATH", "").split(os.pathsep)
-            if entry and os.path.isabs(entry) and not pathlib.Path(entry).resolve().is_relative_to(top)]
+            if entry and os.path.isabs(entry) and not pathlib.Path(entry).resolve().is_relative_to(top)
+            and not (pathlib.Path(entry).resolve().parent / "pyvenv.cfg").is_file()]
     env["PATH"] = os.pathsep.join(kept)
     return env
-
-
-def current_gate_status(statuses: list, head: str) -> dict | None:
-    """The current `sd/local-gate` status at `head`, or None.
-
-    The statuses endpoint lists newest first, so the first entry for the
-    context is the current one; an entry naming another SHA is not evidence
-    for this one.
-    """
-    for entry in statuses:
-        if isinstance(entry, dict) and entry.get("context") == CONTEXT:
-            return entry if entry.get("sha", head) == head else None
-    return None
 
 
 def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SECONDS) -> dict[str, Any]:
@@ -170,26 +161,8 @@ def post_gate_status(api: Any, head: str, result: dict[str, Any], inputs: str) -
 
 
 def local_gate(api: Any, root: pathlib.Path, head: str) -> dict[str, Any]:
-    """Run and post the local gate at `head`, unless this account's matching success is there.
-
-    A success at this exact head, posted by this account for the same inputs,
-    is reused, so a merge retried after a mergeability wait does not repeat a
-    full check. A failure, a missing status, another account's status or a
-    changed input digest runs the check.
-    """
+    """Run `sd-check` at `head` and post the result; every merge attempt runs it afresh."""
     inputs = gate_inputs(root, head)
-    current = current_gate_status(api.pages(f"{api.prefix}/commits/{head}/statuses"), head)
-    if current is not None and reusable(current, api.viewer_login(), inputs):
-        return {"head": head, "status": "success", "reused": True, "inputs": inputs,
-                "summary": current.get("description")}
     result = check_in_worktree(root, head)
     post_gate_status(api, head, result, inputs)
-    return {**result, "inputs": inputs, "reused": False}
-
-
-def reusable(current: dict, viewer: str, inputs: str) -> bool:
-    """Whether `current` is a success this account posted for exactly these inputs."""
-    if current.get("state") != "success" or gate_creator(current) != viewer.lower():
-        return False
-    match = INPUTS.search(str(current.get("description") or ""))
-    return match is not None and match[1] == inputs
+    return {**result, "inputs": inputs}

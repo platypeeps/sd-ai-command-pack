@@ -4098,7 +4098,7 @@ class DeclaredGapCase(unittest.TestCase):
         self.assertEqual((post.body["context"], post.body["state"]), ("sd/local-gate", "success"))
         key = receipts.receipt_key(self.remote.slug, "topic", self.item)
         gate = receipts.read(self.connection, key)[1]["local_gate"]
-        self.assertEqual((gate["head"], gate["status"], gate["reused"]), (self.head(), "success", False))
+        self.assertEqual((gate["head"], gate["status"]), (self.head(), "success"))
         self.assertEqual(result["protection"]["declared_gap"], "unprotected")
 
     def test_ci_local_with_a_failing_check_posts_failure_and_refuses(self):
@@ -4130,7 +4130,7 @@ class DeclaredGapCase(unittest.TestCase):
         self.local_green()
         self.double.statuses = [{"context": "sd/local-gate", "state": "success", "sha": self.head(),
                                  "creator": {"login": "someone-else"}, "description": "posted elsewhere"}]
-        with patch.object(ship.sd_local_gate, "local_gate", lambda api, root, head: {"head": head, "reused": True}):
+        with patch.object(ship.sd_local_gate, "local_gate", lambda api, root, head: {"head": head}):
             self.refuse(r"sd/local-gate on .* was posted by someone-else, not fixture", "local_gate_foreign")
 
     def test_ci_local_runs_its_own_gate_over_another_accounts_success(self):

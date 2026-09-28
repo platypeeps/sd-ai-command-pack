@@ -107,6 +107,17 @@ class RunCheck(Repository):
             "PYTHONHOME": "/x", "VIRTUAL_ENV": inside, "CONDA_PREFIX": "/c", "__PYVENV_LAUNCHER__": "/l", "HOME": "/h"})
         self.assertEqual(env, {"PATH": outside, "HOME": "/h"})
 
+    def test_a_virtualenv_bin_outside_the_checkout_is_dropped_from_path(self) -> None:
+        """A venv's `bin` is found by the `pyvenv.cfg` beside it, wherever it lives."""
+        outside = tempfile.TemporaryDirectory()
+        self.addCleanup(outside.cleanup)
+        venv, plain = pathlib.Path(outside.name) / "venv", pathlib.Path(outside.name) / "tools"
+        (venv / "bin").mkdir(parents=True)
+        (venv / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="utf-8")
+        plain.mkdir()
+        env = sd_local_gate.gate_environment(self.root, {"PATH": os.pathsep.join([str(venv / "bin"), str(plain)])})
+        self.assertEqual(env["PATH"], str(plain))
+
     def test_the_worktree_is_removed_after_the_run(self) -> None:
         head = self.commit("check:\n\t@echo ok\n")
         before = self.worktrees()
@@ -152,48 +163,30 @@ class Post(unittest.TestCase):
 
 
 class Gate(Repository):
-    def success(self, head: str, *, inputs: str | None = None, creator: str = "me") -> dict:
-        inputs = inputs or sd_local_gate.gate_inputs(self.root, head)
-        return {"context": "sd/local-gate", "state": "success", "sha": head, "creator": {"login": creator},
-                "description": f"{head[:12]} inputs {inputs}: sd-check pass (check pass)"}
+    """Every merge attempt runs `sd-check` and posts a fresh status; nothing is reused."""
 
-    def test_this_accounts_success_for_the_same_inputs_is_reused_without_a_run(self) -> None:
+    def test_a_prior_matching_success_at_the_head_still_runs_the_check(self) -> None:
         head = self.commit("check:\n\t@false\n")
-        api = Recorder([self.success(head)])
+        inputs = sd_local_gate.gate_inputs(self.root, head)
+        api = Recorder([{"context": "sd/local-gate", "state": "success", "sha": head, "creator": {"login": "Me"},
+                         "description": f"{head[:12]} inputs {inputs}: sd-check pass (check pass)"}])
         result = sd_local_gate.local_gate(api, self.root, head)
-        self.assertTrue(result["reused"])
-        self.assertEqual(api.posts, [])
+        self.assertEqual((result["status"], [body["state"] for _, body in api.posts]), ("failure", ["failure"]))
 
-    def test_a_success_for_other_inputs_runs_again(self) -> None:
-        head = self.commit("check:\n\t@false\n")
-        for description in ("earlier", f"{head[:12]} inputs 000000000000: sd-check pass"):
-            with self.subTest(description=description):
-                api = Recorder([{**self.success(head), "description": description}])
-                result = sd_local_gate.local_gate(api, self.root, head)
-                self.assertEqual((result["reused"], api.posts[0][1]["state"]), (False, "failure"))
-
-    def test_a_changed_local_block_runs_again_at_the_same_head(self) -> None:
+    def test_each_attempt_posts_its_own_status_carrying_the_inputs_digest(self) -> None:
         head = self.commit("check:\n\t@echo ok\n")
         api = Recorder()
-        self.assertFalse(sd_local_gate.local_gate(api, self.root, head)["reused"])
-        self.assertTrue(sd_local_gate.local_gate(api, self.root, head)["reused"])
-        (self.root / "CLAUDE.local.md").write_text("check: make other\n", encoding="utf-8")
-        self.assertFalse(sd_local_gate.local_gate(api, self.root, head)["reused"])
-        self.assertEqual(len(api.posts), 2)
+        sd_local_gate.local_gate(api, self.root, head)
+        sd_local_gate.local_gate(api, self.root, head)
+        inputs = sd_local_gate.gate_inputs(self.root, head)
+        self.assertEqual([body["state"] for _, body in api.posts], ["success", "success"])
+        self.assertTrue(api.posts[1][1]["description"].startswith(f"{head[:12]} inputs {inputs}: "))
 
-    def test_another_accounts_success_is_not_reused(self) -> None:
-        """Anyone with write access can post a status; only this account's own counts."""
-        head = self.commit("check:\n\t@false\n")
-        api = Recorder([self.success(head, creator="someone-else")])
-        result = sd_local_gate.local_gate(api, self.root, head)
-        self.assertEqual((result["reused"], api.posts[0][1]["state"]), (False, "failure"))
-
-    def test_a_failure_at_the_head_runs_again(self) -> None:
+    def test_the_digest_follows_the_local_block(self) -> None:
         head = self.commit("check:\n\t@echo ok\n")
-        api = Recorder([{"context": "sd/local-gate", "state": "failure"}])
-        result = sd_local_gate.local_gate(api, self.root, head)
-        self.assertFalse(result["reused"])
-        self.assertEqual(api.posts[0][1]["state"], "success")
+        before = sd_local_gate.gate_inputs(self.root, head)
+        (self.root / "CLAUDE.local.md").write_text("check: make other\n", encoding="utf-8")
+        self.assertNotEqual(sd_local_gate.gate_inputs(self.root, head), before)
 
 
 class CiMode(unittest.TestCase):
