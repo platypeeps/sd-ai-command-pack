@@ -1,0 +1,97 @@
+"""`-C <dir>` on the five lane commands (sd:1910), R10-D6's one named exception.
+
+Each command changes its working directory once, before anything resolves the
+repository, as `git -C` does. Everything after still reads cwd, so a bad `-C`
+fails the same way a bad cwd does: an empty directory is "not inside a git
+repository", named; a missing path is "not a directory", named. The tests run
+each command as a subprocess from a temporary directory that is not a
+repository, so `-C` is the only thing that can point them at one.
+"""
+
+from __future__ import annotations
+
+import json
+import pathlib
+import subprocess
+import sys
+import tempfile
+import unittest
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+BIN = REPO_ROOT / "bin"
+
+# (command, the cheapest arguments that reach repository resolution)
+LANE_COMMANDS = {
+    "sd-check": ["--dry-run", "--json"],
+    "sd-review": ["--explain", "--json"],
+    "sd-review-ack": ["--check", "--json"],
+    "sd-pr-state": ["--json"],
+}
+
+
+def run(command: str, *arguments: str, cwd: pathlib.Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(BIN / command), *arguments],
+        cwd=cwd, capture_output=True, text=True, timeout=120, check=False,
+    )
+
+
+class LaneChdirTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.scratch = tempfile.TemporaryDirectory(prefix="sd-lane-chdir-")
+        self.addCleanup(self.scratch.cleanup)
+        self.outside = pathlib.Path(self.scratch.name) / "outside"
+        self.outside.mkdir()
+        self.empty = pathlib.Path(self.scratch.name) / "empty"
+        self.empty.mkdir()
+        self.missing = pathlib.Path(self.scratch.name) / "missing"
+
+    def test_an_empty_directory_is_not_a_repository_and_is_named(self) -> None:
+        for command, arguments in LANE_COMMANDS.items():
+            with self.subTest(command=command):
+                result = run(command, "-C", str(self.empty), *arguments, cwd=self.outside)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("is not inside a git repository", result.stderr)
+                self.assertIn(str(self.empty.resolve()), result.stderr, "the named cwd is the -C one")
+                self.assertNotIn(str(self.outside.resolve()), result.stderr)
+
+    def test_a_missing_path_is_refused_by_name(self) -> None:
+        for command, arguments in LANE_COMMANDS.items():
+            with self.subTest(command=command):
+                result = run(command, "-C", str(self.missing), *arguments, cwd=self.outside)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn(f"-C {self.missing}: not a directory", result.stderr)
+
+    def test_sd_ship_refuses_a_missing_path_as_a_failure_object(self) -> None:
+        result = run("sd-ship", "-C", str(self.missing), "body", "--item", "1", "--json", cwd=self.outside)
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        report = json.loads(result.stdout)
+        self.assertFalse(report.get("ok", True))
+        self.assertIn(f"-C {self.missing}: not a directory", json.dumps(report))
+
+    def test_sd_ship_body_resolves_the_repository_from_the_c_directory(self) -> None:
+        # `body` is the one sd-ship verb with no database and no GitHub; it
+        # still refuses outside a repository, so it observes where -C went.
+        without = run("sd-ship", "body", "--item", "1", "--json", cwd=self.outside)
+        self.assertNotEqual(without.returncode, 0, "the control: outside a repository, body refuses")
+        result = run("sd-ship", "-C", str(REPO_ROOT), "body", "--item", "1", "--json", cwd=self.outside)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(json.loads(result.stdout)["ok"])
+
+    def test_sd_check_reports_the_c_repository_not_the_cwd(self) -> None:
+        subprocess.run(["git", "init", "-q", str(self.empty)], check=True)
+        # An initialised, buildfile-less repository has every entrypoint absent;
+        # the pack has `make check`. The dry run says which one it looked at.
+        result = run("sd-check", "-C", str(self.empty), "--dry-run", "--json", cwd=REPO_ROOT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        statuses = {check["name"]: check["status"] for check in json.loads(result.stdout)["checks"]}
+        self.assertEqual(statuses, {"check": "absent", "test": "absent", "lint": "absent"}, statuses)
+
+    def test_sd_review_setup_github_honours_a_leading_c(self) -> None:
+        result = run("sd-review", "-C", str(self.missing), "setup-github", "--help", cwd=self.outside)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn(f"-C {self.missing}: not a directory", result.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()

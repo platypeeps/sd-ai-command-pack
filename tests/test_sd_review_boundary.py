@@ -770,11 +770,18 @@ class LineBudgetTests(unittest.TestCase):
         # repository gets no workflow and exits 0. The reason and the row read
         # are `sd_setup_guard.ci_local_skip` and `sd_lib.ci_mode`, outside the
         # lane, so only the dispatch is spent here.
+        # 3702 -> 3710 is sd:1910, `-C <dir>` on the lane commands. `bin/sd-review`
+        # grows +8: the argument, the call before `repo_root`, and a leading
+        # `-C` honoured before the `setup-github` dispatch, with its usage
+        # error printed (a try, an except, a print, a return, one comment
+        # line). The change of directory itself is `sd_lib.enter_directory`
+        # and `sd_lib.enter_leading_directory`, shared core, so none of it is
+        # spent here. Measured on the branch, not carried.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3702,
+            3710,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

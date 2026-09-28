@@ -1556,6 +1556,7 @@ def ack_parser() -> argparse.ArgumentParser:
             "where an automated reviewer states the ones no comment count sees."
         ),
     )
+    parser.add_argument("-C", dest="chdir", metavar="DIR", help=sd_lib.DIRECTORY_OPTION_HELP)
     parser.add_argument("--pr", type=int, metavar="N", help="one pull request instead of every open one")
     parser.add_argument("--from", dest="source", metavar="FILE",
                         help="replay a captured round instead of reading GitHub")
@@ -1656,6 +1657,7 @@ def review_report(args: argparse.Namespace, root: pathlib.Path) -> tuple[dict, i
 def ack_main(argv: list[str] | None = None) -> int:
     args = ack_parser().parse_args(argv)
     try:
+        sd_lib.enter_directory(args.chdir, error=UsageError)
         root = sd_lib.repo_root()
         if root is None:
             raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")

@@ -68,11 +68,13 @@ Receipt-storage failure reports `receipt_error` and provides no reusable receipt
 
 ## Never
 
-- **Never try to point sd-check at another checkout.** There is no `--repo` and
-  there will not be one (R10-D6): the repository is resolved from the working
-  directory and nowhere else, and `tests/test_verb_inventory.py` enumerates
-  `bin/` to keep it that way. If you need another repo's result, `cd` there in a
-  session that belongs there.
+- **Never try to point sd-check at another checkout by a path option.** There
+  is no `--repo` and there will not be one (R10-D6): the repository is resolved
+  from the working directory and nowhere else, and `tests/test_verb_inventory.py`
+  enumerates `bin/` to keep it that way. The one way to run it elsewhere is
+  `sd-check -C <dir>`, which changes the working directory first, as `git -C`
+  does; it exists on the lane commands only, because a permission layer that
+  approves a command line sees `-C` and does not see a `cd <dir> &&` in front.
 - **Never treat sd-check as a gate you can wave through.** `sd-review` runs it
   first, and a failing deterministic gate is a failing review: no model is
   asked to guess at a change that does not build.

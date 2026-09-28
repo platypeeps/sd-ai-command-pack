@@ -105,7 +105,8 @@ Use it on the PR branch when documented behavior changes and the operator reques
 
 ## Executable interface
 
-The Git repository enclosing cwd determines the target.
+The Git repository enclosing cwd determines the target; `-C <dir>` before the
+subcommand changes cwd first, as `git -C` does (R10-D6 names it).
 Use the matching installed `sd_db` library.
 `--database PATH` selects an explicitly provisioned receipt/provider database; otherwise use operator HOME.
 The runner uses its provisioned interpreter.
@@ -239,7 +240,7 @@ Acknowledgement failures produce warnings, not review clearance.
 - Never treat a written reason as executable clearance.
 - Never delete local branches, worktrees, or checkouts as an implicit shipping step.
   Routine closeout inventories retained work; a separate, explicitly approved cleanup may remove only its enumerated targets.
-- Never accept a repository path; cwd determines the checkout (R10-D6).
+- Never accept a repository path; cwd determines the checkout, and `-C <dir>` only changes cwd first (R10-D6).
 - Never post reviews or labels in a guest upstream repository.
 - Make no further change after settled-green.
   A new finding requires a new branch, not an amend or force-push.

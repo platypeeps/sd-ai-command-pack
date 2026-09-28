@@ -176,7 +176,12 @@ RULES: tuple[Rule, ...] = (
         id="R10-D6",
         subject="an `sd-*` command resolves its repository from the working "
                 "directory and takes no path to another one, so a session "
-                "that can be pointed at another checkout cannot exist",
+                "that can be pointed at another checkout cannot exist; the "
+                "one exception is `-C <dir>` on the lane commands `sd-ship`, "
+                "`sd-check`, `sd-review`, `sd-review-ack` and `sd-pr-state`, "
+                "which changes the working directory before anything resolves, "
+                "as `git -C` does, because the permission layer that approves "
+                "a command line sees `-C` and does not see a `cd &&` in front",
         checker="tests/test_verb_inventory.py::"
                 "test_no_command_accepts_a_repository_path",
         proof="rename the `--belongs-to` option in `bin/sd_work.py` to the "

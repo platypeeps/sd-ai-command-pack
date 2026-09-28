@@ -198,4 +198,4 @@ This evidence does not authorize replacing a ship receipt with a claimed reviewe
 - Never invoke providers directly to bypass routing, authentication, consent, or severity checks.
 - Never count an incomplete attempt as completed coverage.
 - Never discard adverse findings during fallback.
-- Never accept a repository path; cwd determines the checkout (R10-D6).
+- Never accept a repository path; cwd determines the checkout, and `-C <dir>` only changes cwd first (R10-D6).

@@ -287,6 +287,42 @@ def repo_root(start: pathlib.Path | str | None = None) -> pathlib.Path | None:
     return pathlib.Path(answer).resolve() if answer else None
 
 
+#: The help text of `-C DIR` on the lane commands (R10-D6 names them).
+DIRECTORY_OPTION_HELP = "run as if started in DIR, as `git -C` does; the repository is resolved from there"
+
+
+def enter_directory(directory: str | None, *, error: type[Exception]) -> None:
+    """`-C <dir>`, as `git -C` means it (sd:1910).
+
+    Changes the working directory once, before anything resolves the
+    repository, so everything after still reads cwd and `repo_root(None)`
+    stays the one resolver. R10-D6 allows this on the lane commands only,
+    because the permission layer that approves a command line sees `-C` and
+    does not see a `cd <dir> &&` in front of the same command. A missing or
+    non-directory path raises `error`, the caller's usage exception.
+    """
+    if directory is None:
+        return
+    target = pathlib.Path(directory).expanduser()
+    if not target.is_dir():
+        raise error(f"-C {directory}: not a directory")
+    os.chdir(target)
+
+
+def enter_leading_directory(argv: list[str], *, error: type[Exception]) -> list[str]:
+    """Honour a leading `-C DIR` in a raw argv and return the rest.
+
+    For a command that dispatches a subcommand before its argparse parser
+    sees the line (`sd-review setup-github`): the directory changes first,
+    so the dispatch runs where the line says. Anything else is returned as
+    it came, and a `-C` that is not leading is the parser's to see.
+    """
+    if argv[:1] != ["-C"]:
+        return argv
+    enter_directory(argv[1] if len(argv) > 1 else "", error=error)
+    return argv[2:]
+
+
 def main_worktree_root(root: pathlib.Path) -> pathlib.Path:
     """The main checkout's root, so linked worktrees share one local config.
 

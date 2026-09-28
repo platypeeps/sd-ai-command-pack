@@ -597,6 +597,7 @@ def build_parser() -> argparse.ArgumentParser:
             "current directory. Reads only; stores nothing."
         ),
     )
+    parser.add_argument("-C", dest="chdir", metavar="DIR", help=sd_lib.DIRECTORY_OPTION_HELP)
     parser.add_argument("--json", action="store_true", help="emit one machine-readable object")
     parser.add_argument(
         "--limit",
@@ -613,6 +614,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.limit <= 0:
             raise UsageError("--limit takes a positive number of pull requests")
+        sd_lib.enter_directory(args.chdir, error=UsageError)
         root = sd_lib.repo_root()
         if root is None:
             raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")

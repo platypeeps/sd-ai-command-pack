@@ -2322,6 +2322,7 @@ def build_parser() -> argparse.ArgumentParser:
             "the findings locally. Nothing is ever posted."
         ),
     )
+    parser.add_argument("-C", dest="chdir", metavar="DIR", help=sd_lib.DIRECTORY_OPTION_HELP)
     parser.add_argument("--scope", choices=SCOPES, default="worktree", help="what to review (default: worktree)")
     parser.add_argument("--database", type=pathlib.Path, help="explicit provider-state database for an owned runner")
     parser.add_argument("--reuse-check", action="store_true", help="reuse a matching explicit full-check receipt; otherwise rerun")
@@ -2357,7 +2358,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     raw = list(sys.argv[1:] if argv is None else argv)
     # One subcommand, dispatched before the main parser: `add_subparsers` would
-    # have made every invocation positional-first and broken `--scope pr`.
+    # have made every invocation positional-first and broken `--scope pr`. A
+    # leading `-C DIR` comes first, so the seam runs where the line says (sd:1910).
+    try:
+        raw = sd_lib.enter_leading_directory(raw, error=UsageError)
+    except UsageError as error:
+        print(f"sd-review: error: {error}", file=sys.stderr)
+        return EXIT_USAGE
     if raw and raw[0] == "setup-github":
         import sd_setup_github
 
@@ -2368,6 +2375,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.timeout <= 0:
             raise UsageError("--timeout takes a positive number of seconds")
+        sd_lib.enter_directory(args.chdir, error=UsageError)
         root = sd_lib.repo_root(None)
         if root is None:
             raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")
