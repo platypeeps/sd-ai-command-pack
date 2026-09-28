@@ -1504,7 +1504,11 @@ class Ship(SharedReview):
         if sd_lib.written_mode(self.root) == "guest":
             raise Refusal("guest mode has no merge authority")
         self.assert_scope()
-        if self.args.watch and not self.state.get("watch_started"):
+        self.api.ci = sd_lib.repo_ci(self.connection, self.root)
+        # Under `repo.ci = local` no remote check is coming, and `gh pr checks
+        # --watch` fails on a pull request that has none; the local gate
+        # below runs to completion in this process, so it is the wait (sd:1875).
+        if self.args.watch and not self.state.get("watch_started") and self.api.ci != "local":
             self.save(watch_started=True)
             run(self.root, ["gh", "pr", "checks", str(observed["number"]), "--repo", self.repository,
                             "--watch", "--fail-fast"], timeout=self.args.wait_seconds)
@@ -1516,7 +1520,6 @@ class Ship(SharedReview):
         squash_allowed(base, protection)
         # `repo.ci = local` (sd:1843): no Actions run, so the checks run here,
         # at the reviewed head in a clean worktree, before readiness reads them.
-        self.api.ci = sd_lib.repo_ci(self.connection, self.root)
         if self.api.ci == "local":
             self.save(local_gate=sd_local_gate.local_gate(self.api, self.root, head))
         observed = self.api.pull(observed["number"])
