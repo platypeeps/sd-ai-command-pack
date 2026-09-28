@@ -105,7 +105,13 @@ class RunCheck(Repository):
         env = sd_local_gate.gate_environment(self.root, {
             "PATH": os.pathsep.join([inside, outside, "relative/bin"]), "PYTHONPATH": str(self.root),
             "PYTHONHOME": "/x", "VIRTUAL_ENV": inside, "CONDA_PREFIX": "/c", "__PYVENV_LAUNCHER__": "/l", "HOME": "/h"})
-        self.assertEqual(env, {"PATH": outside, "HOME": "/h"})
+        self.assertEqual(env, {"PATH": outside, "HOME": "/h", "SD_LOCAL_GATE": "1"})
+
+    def test_the_check_is_told_it_is_the_gate(self) -> None:
+        """`SD_LOCAL_GATE=1` is the contract a repository reads to provision instead of borrow (sd:1918)."""
+        head = self.commit('check:\n\t@test "$$SD_LOCAL_GATE" = 1\n')
+        with mock.patch.dict(os.environ, {"SD_LOCAL_GATE": "0"}):
+            self.assertEqual(sd_local_gate.check_in_worktree(self.root, head)["status"], "success")
 
     def test_a_virtualenv_bin_outside_the_checkout_is_dropped_from_path(self) -> None:
         """A venv's `bin` is found by the `pyvenv.cfg` beside it, wherever it lives."""
@@ -117,6 +123,13 @@ class RunCheck(Repository):
         plain.mkdir()
         env = sd_local_gate.gate_environment(self.root, {"PATH": os.pathsep.join([str(venv / "bin"), str(plain)])})
         self.assertEqual(env["PATH"], str(plain))
+
+    def test_the_gates_bound_is_the_per_check_timeout_sd_check_reports(self) -> None:
+        """`sd-check`'s own 900 s default must not cut a gate run short; the gate's bound reaches it."""
+        head = self.commit("check:\n\t@sleep 5\n")
+        result = sd_local_gate.check_in_worktree(self.root, head, timeout=1)
+        self.assertEqual((result["status"], result["exit_code"]), ("failure", 1))
+        self.assertIn("check fail", result["summary"])
 
     def test_the_result_keeps_the_full_sd_check_report(self) -> None:
         """The worktree is deleted after the run, so the receipt is the only place its output survives (sd:1872)."""

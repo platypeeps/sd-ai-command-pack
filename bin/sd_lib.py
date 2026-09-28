@@ -1895,6 +1895,7 @@ class Detection:
     origin: pathlib.Path | None
     commands: dict[str, list[str]] = field(default_factory=dict)
     reason: str = ""
+    warnings: tuple[str, ...] = ()
 
 
 def _local_block_entrypoints(root: pathlib.Path) -> Detection | None:
@@ -2100,12 +2101,46 @@ DETECTORS = (
 )
 
 
+def _runs(commands: dict[str, list[str]]) -> list[str]:
+    """The names `sd-check` runs from `commands`: an aggregate `check` covers the rest."""
+    return ["check"] if "check" in commands else list(commands)
+
+
+def _hidden_by_local_block(root: pathlib.Path, block: Detection) -> tuple[str, ...]:
+    """What the build file would have run that the local block, which replaces it whole, does not declare.
+
+    sd:1894: a block that declared `test:` and `lint:` hid the `check` script
+    package.json had just gained, and the local gate then had no check to
+    run. A block that declares `check` hides nothing: that is its aggregate by
+    the same rule `sd-check` applies to every source. A build file that does
+    not read is not this block's problem, so it warns about nothing.
+    """
+    for detector in DETECTORS[1:]:
+        try:
+            found = detector(root)
+        except ConfigError:
+            return ()
+        if found is not None:
+            break
+    else:
+        return ()
+    if "check" in block.commands or found.origin is None:
+        return ()
+    return tuple(
+        f"{LOCAL_FILE_NAME} replaces {found.origin.name} detection, and {found.origin.name} defines "
+        f"{name} ({shlex.join(found.commands[name])}), which the block does not declare, so it does not run"
+        for name in _runs(found.commands) if name not in block.commands
+    )
+
+
 def detect_entrypoints(root: pathlib.Path) -> Detection:
     """Resolve the repo's check commands, reporting which probe answered."""
     root = pathlib.Path(root)
     for detector in DETECTORS:
         found = detector(root)
         if found is not None:
+            if found.source == "local-block":
+                return replace(found, warnings=_hidden_by_local_block(root, found))
             return found
     return Detection(source=None, origin=None, commands={}, reason="no check entrypoint detected")
 
