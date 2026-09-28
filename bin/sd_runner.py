@@ -64,6 +64,11 @@ def run(args: argparse.Namespace) -> int:
                                     scope=args.scope, budget_minutes=args.budget_minutes, who=getpass.getuser())
         elif action == "status":
             result = runner.heartbeat_state(connection)
+            from sd_db import ship
+            if hasattr(ship, "held_locks"):
+                # The ship locks a live process holds; an idle lock file is not listed (sd:1936).
+                from sd_db.database import default_path
+                result = {**result, "ship_locks": ship.held_locks(default_path())}
         elif action == "list":
             result = {"queued": runner.queued(connection), "active": runner.active_runs(connection)}
         elif action == "get":
