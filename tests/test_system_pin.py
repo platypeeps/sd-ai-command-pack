@@ -25,6 +25,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -36,6 +37,14 @@ import sd_library_guard  # noqa: E402
 WORKFLOW = ROOT / ".github" / "workflows" / "tests.yml"
 #: The `ref:` of the checkout step for `platypeeps/system`, comments allowed between.
 PIN = re.compile(r"repository: platypeeps/system\n(?:[ \t]+(?:#.*|\w+: .*)\n)*?[ \t]+ref: (\S+)")
+
+
+#: What the pin may be (sd:1854): a full commit, or a release tag of the
+#: library -- the same `sd-db-v*` pattern the installer prefers, so a tag cut
+#: for another tool in that monorepo is not accepted as `sd_db`'s version.
+#: Both are immutable; the tag is the readable name for the same promise.
+TAG_PREFIX: str = sd_install.LIBRARY_TAGS.rstrip("*")
+PIN_FORM = re.compile(r"^(?:[0-9a-f]{40}|" + re.escape(TAG_PREFIX) + r"\d+(?:\.\d+)*)$")
 
 
 #: The one other system ref (sd:1542): the `sd-db-main-canary` job runs the
@@ -70,10 +79,38 @@ def installed_schema() -> int | None:
 
 
 class ThePinIsReadable(unittest.TestCase):
-    def test_the_workflow_names_one_full_commit(self):
+    def test_the_workflow_names_one_full_commit_or_release_tag(self):
         found = pins(WORKFLOW.read_text(encoding="utf-8"))
         self.assertEqual(len(found), 1, f"expected one platypeeps/system ref in {WORKFLOW}: {found}")
-        self.assertRegex(found[0], r"^[0-9a-f]{40}$", "the pin is a full commit, not a branch or tag")
+        self.assertRegex(found[0], PIN_FORM,
+                         "the pin is a full commit or an sd-db-v* release tag, not a branch")
+
+    def test_a_release_tag_is_a_pin(self):
+        for ref in ("sd-db-v0.1.0", "sd-db-v1.2", "sd-db-v10"):
+            with self.subTest(ref=ref):
+                self.assertRegex(ref, PIN_FORM)
+
+    def test_a_branch_a_short_commit_or_another_tool_s_tag_is_not(self):
+        for ref in ("main", "5fb29ef2", "sd-db-v", "sd-db-vnext", "sd-db-v1.2-rc1",
+                    "local-ha-mcp-v1.0", "v0.1.0"):
+            with self.subTest(ref=ref):
+                self.assertNotRegex(ref, PIN_FORM)
+
+    def test_a_tag_pin_reads_its_schema_through_git(self):
+        """`pinned_schema` takes any ref git resolves, so a tag reads like a commit."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+                   "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
+                   "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"}
+            schema = repo / "local-sd-db" / "sd_db" / "schema.py"
+            schema.parent.mkdir(parents=True)
+            schema.write_text("SCHEMA_VERSION = 15\n", encoding="utf-8")
+            for args in (["init", "-q"], ["add", "."], ["commit", "-q", "-m", "one"],
+                         ["tag", "-a", "sd-db-v0.1.0", "-m", "sd-db 0.1.0"]):
+                subprocess.run(["git", "-C", str(repo), *args], check=True, env=env,
+                               capture_output=True)
+            self.assertEqual(pinned_schema(repo, "sd-db-v0.1.0"), 15)
 
     def test_the_only_unpinned_system_ref_is_the_non_blocking_canary(self):
         text = WORKFLOW.read_text(encoding="utf-8")

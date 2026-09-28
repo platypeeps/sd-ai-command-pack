@@ -16,6 +16,24 @@
   `repo.ci` column, row or library as `github`, so other repositories are
   unchanged. The column lands in the `system` repository's schema 16.
 
+- **CI pins `sd_db` by its release tag, `sd-db-v0.1.0` (sd:1867, system
+  sd:1854).** `tests/test_system_pin.py` now accepts a full commit or an
+  `sd-db-v*` tag, the pattern the installer already prefers; branches,
+  short commits and other tools' tags stay refused. The first tag is system
+  `85e6f88a`, schema 16: `repo.ci` (sd:1843) is the only `sd_db` change since
+  `8ca78c87`. A machine whose `~/repos/system` lacks the tag fails the pin
+  test until it fetches tags.
+
+- **CI reads `sd_db` from the public `platypeeps/system`, with no token
+  (sd:1859).** The private repository became `platypeeps/system-archived`, and
+  a new public `platypeeps/system` replaced it with rewritten history, so the
+  old pin no longer resolves. Both system checkouts in `tests.yml` drop their
+  repository-secret token, and the pin moves to `8ca78c87`, still schema 15.
+  The two `secrets-outside-env` decisions in
+  `.github/scripts/check-zizmor-personas.py` go with the token they accepted.
+  A machine whose `~/repos/system` still holds the old history fails
+  `tests/test_system_pin.py` until it carries the new commit.
+
 - **A free `url` reviewer retries one schema failure, and the output
   contract restates the findings shape last (sd:1821).** MiniMax-M3 broke the
   findings schema on 13 of 45 runs over one 35k-token prompt: an extra

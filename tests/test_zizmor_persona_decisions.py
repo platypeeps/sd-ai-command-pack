@@ -169,9 +169,9 @@ class ThePrimaryLocation(unittest.TestCase):
         # whose text is every line of it. Keying on that would make the finding
         # a different finding after any edit anywhere inside the job.
         found = personas.key_of(finding(
-            "secrets-outside-env", "Auditor", feature="secrets.SYSTEM_REPO_TOKEN",
+            "secrets-outside-env", "Auditor", feature="secrets.EXAMPLE_TOKEN",
             extra_locations=(self.hidden, self.related)))
-        self.assertEqual(found.feature, "secrets.SYSTEM_REPO_TOKEN")
+        self.assertEqual(found.feature, "secrets.EXAMPLE_TOKEN")
 
     def test_a_finding_with_no_primary_location_stops_the_run(self) -> None:
         with self.assertRaises(ValueError) as caught:
