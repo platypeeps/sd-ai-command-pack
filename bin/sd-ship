@@ -1485,8 +1485,13 @@ class Ship(SharedReview):
         from sd_db.progress import completion_record
         row = self.connection.execute("SELECT * FROM item WHERE id = ?", (self.args.item,)).fetchone()
         if row is not None and row["kind"] != "work":
-            # A task keeps no completion receipt; its close is the record.
-            return row["status"] == "done"
+            # A task keeps no completion receipt. Its record is the move to
+            # done, and only one that names this commit counts: a plain close
+            # says nothing about the tree this merge landed.
+            last = self.connection.execute(
+                "SELECT body FROM note WHERE item = ? AND kind = 'status_change' ORDER BY id DESC LIMIT 1",
+                (self.args.item,)).fetchone()
+            return row["status"] == "done" and last is not None and f"delivered at {commit} on " in last["body"]
         record = completion_record(row) if row is not None else None
         return record is not None and record.get("outcome") == "delivered" and record.get("commit") == commit
 
@@ -1500,10 +1505,17 @@ class Ship(SharedReview):
             self.close_task(commit, ref)
 
     def by_hand(self, commit: str) -> str:
-        """The hand close for a held delivery: `sd work deliver`'s, or a task's."""
+        """The hand close for a held delivery: `sd work deliver`'s, or a task's.
+
+        A followup takes no `--delivered-by` (sd:809), so its close states the
+        delivery sentence as its reason; `delivered_at` reads either.
+        """
         if self.item["kind"] == "work":
             return "deliver the item by hand"
-        return f"close it with `sd task status {self.args.item} done --delivered-by {commit}`"
+        if self.item["kind"] == "task":
+            return f"close it with `sd task status {self.args.item} done --delivered-by {commit}`"
+        base = self.state["pull_request"]["base"]
+        return f"close it with `sd task status {self.args.item} done --reason 'delivered at {commit} on origin/{base}'`"
 
     def close_task(self, commit: str, ref: str) -> None:
         """Move a delivering task or followup to done once, with the delivery sentence.
@@ -1516,8 +1528,11 @@ class Ship(SharedReview):
         """
         from sd_db.workflow import change_status, item_state
         row = item_state(self.connection, self.args.item)["item"]
-        if row["status"] == "done":
+        if self.delivered_at(commit):
             return
+        if row["status"] == "done":
+            raise ValueError(f"item {self.args.item} is done without delivery evidence for {commit}; "
+                             f"reopen it, then run sd-ship reconcile")
         wanted = f"sd:{self.args.item}"
         block = sd_lib.trailer_block(git(self.root, "show", "-s", "--format=%B", commit)).splitlines()
         if not any(line.partition(":")[0] == "Delivers" and line.partition(":")[2].strip() == wanted for line in block):

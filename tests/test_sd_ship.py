@@ -2253,6 +2253,37 @@ roles:
             "SELECT COUNT(*) FROM note WHERE item = ? AND kind = 'status_change' AND body LIKE '%delivered at%'", (self.item,)).fetchone()[0]
         self.assertEqual(closes, 1)
 
+    def test_a_plain_close_does_not_clear_a_held_task_merge(self):
+        """A close that names no commit says nothing about the combined tree a
+        held merge landed, so only a close naming this merge clears the hold."""
+        from sd_db.workflow import change_status
+        self.task_item("task")
+        commit = self.held_merge()["merge_commit"]
+        change_status(self.connection, self.item, "done", who="operator")
+        held = self.merge()
+        self.assertTrue(held["delivery_pending"])
+        self.assertEqual(held["workflow"]["blocker"]["code"], "base_advanced_at_merge")
+        self.assertIn(f"--delivered-by {commit}", held["workflow"]["next_action"])
+        change_status(self.connection, self.item, "in_progress", who="operator")
+        change_status(self.connection, self.item, "done", who="operator", reason=f"delivered at {commit} on origin/main")
+        self.assertFalse(self.merge()["delivery_pending"])
+
+    def test_a_held_followup_names_a_close_it_can_take(self):
+        """A followup takes no `--delivered-by` (sd:809); its hold names the reason form."""
+        self.task_item("followup")
+        result = self.held_merge()
+        self.assertIn(f"--reason 'delivered at {result['merge_commit']} on origin/main'", result["workflow"]["next_action"])
+
+    def test_a_task_done_without_evidence_is_not_counted_as_delivered(self):
+        from sd_db.workflow import change_status
+        self.task_item("task")
+        self.unanswered("--deliver").prepare()
+        change_status(self.connection, self.item, "done", who="operator")
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        self.assertTrue(result["delivery_pending"])
+        self.assertIn("without delivery evidence", result["delivery_error"])
+
     def test_work_still_needs_acceptance_evidence_to_deliver(self):
         with self.assertRaisesRegex(ship.Refusal, "--acceptance-file"):
             self.unanswered("--deliver").prepare()
