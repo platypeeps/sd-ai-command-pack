@@ -72,9 +72,13 @@ class LaneChdirTests(unittest.TestCase):
     def test_sd_ship_body_resolves_the_repository_from_the_c_directory(self) -> None:
         # `body` is the one sd-ship verb with no database and no GitHub; it
         # still refuses outside a repository, so it observes where -C went.
+        # A fresh repository, not this checkout: `body` lints the scope line
+        # this checkout's own branch demands, so a branch touching
+        # `.github/**` failed here for a reason that has nothing to do with -C.
         without = run("sd-ship", "body", "--item", "1", "--json", cwd=self.outside)
         self.assertNotEqual(without.returncode, 0, "the control: outside a repository, body refuses")
-        result = run("sd-ship", "-C", str(REPO_ROOT), "body", "--item", "1", "--json", cwd=self.outside)
+        subprocess.run(["git", "init", "-q", str(self.empty)], check=True)
+        result = run("sd-ship", "-C", str(self.empty), "body", "--item", "1", "--json", cwd=self.outside)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(json.loads(result.stdout)["ok"])
 

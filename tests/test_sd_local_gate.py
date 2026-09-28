@@ -124,6 +124,13 @@ class RunCheck(Repository):
         env = sd_local_gate.gate_environment(self.root, {"PATH": os.pathsep.join([str(venv / "bin"), str(plain)])})
         self.assertEqual(env["PATH"], str(plain))
 
+    def test_the_gates_bound_is_the_per_check_timeout_sd_check_reports(self) -> None:
+        """`sd-check`'s own 900 s default must not cut a gate run short; the gate's bound reaches it."""
+        head = self.commit("check:\n\t@sleep 5\n")
+        result = sd_local_gate.check_in_worktree(self.root, head, timeout=1)
+        self.assertEqual((result["status"], result["exit_code"]), ("failure", 1))
+        self.assertIn("check fail", result["summary"])
+
     def test_the_worktree_is_removed_after_the_run(self) -> None:
         head = self.commit("check:\n\t@echo ok\n")
         before = self.worktrees()

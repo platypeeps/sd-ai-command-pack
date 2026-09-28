@@ -65,8 +65,13 @@ BIN = pathlib.Path(__file__).resolve().parent
 CONTEXT = sd_lib.LOCAL_GATE_CONTEXT
 #: GitHub truncates nothing and refuses a description past 140 characters.
 DESCRIPTION_LIMIT = 140
-#: A bound on the whole `sd-check` run, above its own per-check default.
+#: The gate's bound on each check, handed to `sd-check --timeout`. Its own
+#: 900-second default is for an interactive run; the gate's `make check` also
+#: builds a virtualenv (sd:1918) and shares the machine's test slots, and on a
+#: busy machine it ran past 900 s and failed as a timeout.
 CHECK_SECONDS = 3600
+#: How much longer the child may take than `sd-check` needs to report its own timeout.
+REPORT_GRACE_SECONDS = 60
 LOCAL_BLOCK = "CLAUDE.local.md"
 #: Variables that pick Python packages; the child must not inherit the caller's.
 DROPPED_ENVIRONMENT = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX", "__PYVENV_LAUNCHER__")
@@ -122,8 +127,9 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
             if local := untracked_local_block(root):
                 shutil.copyfile(local, tree / LOCAL_BLOCK)
             try:
-                result = subprocess.run([sys.executable, str(BIN / "sd-check"), "--json"], cwd=tree, text=True,
-                                        capture_output=True, timeout=timeout, check=False,
+                result = subprocess.run([sys.executable, str(BIN / "sd-check"), "--json", "--timeout", str(timeout)],
+                                        cwd=tree, text=True, capture_output=True,
+                                        timeout=timeout + REPORT_GRACE_SECONDS, check=False,
                                         env=gate_environment(root))
                 code, output = result.returncode, result.stdout
             except (OSError, subprocess.SubprocessError) as error:
