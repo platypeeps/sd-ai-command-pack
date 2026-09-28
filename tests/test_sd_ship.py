@@ -2683,6 +2683,31 @@ roles:
             with self.assertRaisesRegex(ship.Refusal, "left .* while this command waited"):
                 ship.dispatch(self.root, self.connection, self.database, self.args("prepare"), receipts, False)
 
+    def test_an_item_reassigned_while_waiting_refuses_before_the_command_runs(self):
+        """sd:1937 review. The item row is read again under the lock, not trusted from before it."""
+        real = receipts.repository_lock
+
+        @contextlib.contextmanager
+        def reassigning(*args, **options):
+            with real(*args, **options):
+                self.connection.execute("UPDATE item SET branch = 'elsewhere' WHERE id = ?", (self.item,))
+                self.connection.commit()
+                yield
+
+        with patch.object(receipts, "repository_lock", reassigning), \
+                patch.object(ship.Ship, "prepare", side_effect=AssertionError("ran for a reassigned item")):
+            with self.assertRaisesRegex(ship.Refusal, "changed repository or branch while this command waited"):
+                ship.dispatch(self.root, self.connection, self.database, self.args("prepare"), receipts, False)
+
+    def test_a_no_item_record_refuses_a_live_branch_switch(self):
+        """sd:1937 review. `--no-item` compares the live checkout too, not only its stored record."""
+        delivery = SimpleNamespace(branch="topic", repository=ship.slug(REMOTE_URL))
+        _git(self.root, "checkout", "-q", "-b", "elsewhere")
+        with self.assertRaisesRegex(ship.Refusal, "the checkout left topic"):
+            ship.identity_unchanged(self.root, self.connection, SimpleNamespace(no_item=True), receipts, delivery)
+        _git(self.root, "checkout", "-q", "topic")
+        ship.identity_unchanged(self.root, self.connection, SimpleNamespace(no_item=True), receipts, delivery)
+
     def test_an_older_library_locks_without_options_and_refuses_a_wait(self):
         """An sd_db without the holder record still serializes; it cannot wait, so --wait refuses."""
         older = SimpleNamespace(repository_lock=receipts.repository_lock)
