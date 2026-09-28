@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import atexit
+import contextlib
 import hashlib
 import importlib.machinery
 import importlib.util
+import io
 import json
 import os
 import pathlib
@@ -51,6 +53,18 @@ loader.exec_module(ship)
 #: The *Development / Code, before merge* cap. Read from the module that
 #: owns it, so these fixtures follow the row instead of restating it.
 CAP = importlib.import_module("sd_ship_history").AUTOMATIC_CODE_REVIEW_PASSES
+
+
+#: Hold `argv[2]`'s ship lock over the database at `argv[1]` for `argv[3]` seconds.
+SHIP_LOCK_HOLDER = """
+import sys, time
+from pathlib import Path
+from sd_db import ship
+with ship.repository_lock(Path(sys.argv[1]), sys.argv[2],
+                          holder={"command": "sd-ship prepare --item 1872", "item": 1872}):
+    print("held", flush=True)
+    time.sleep(float(sys.argv[3]))
+"""
 
 
 #: The head a lagging pull object still reports: the pre-push one on #1145.
@@ -400,7 +414,13 @@ roles:
         return ship.parser().parse_args([command, "--item", str(self.item), "--json", *extra])
 
     def operation(self, command="prepare", *extra):
-        return ship.Ship(self.root, self.connection, self.database, self.args(command, *extra))
+        operation = ship.Ship(self.root, self.connection, self.database, self.args(command, *extra))
+        # A first prepare must say whether it delivers (sd:1928). Most cases
+        # here are about something else, so they take the associate-only
+        # answer unless they give one; `unanswered` below asks without it.
+        if command == "prepare" and operation.args.deliver is None and "deliver" not in operation.state:
+            operation.args.deliver = False
+        return operation
 
     def prepare(self, *extra):
         return self.operation("prepare", *extra).prepare()
@@ -562,7 +582,7 @@ roles:
                              repo=str(self.operator), branch="second")
 
         def operation():
-            args = ship.parser().parse_args(["prepare", "--item", str(second), "--json"])
+            args = ship.parser().parse_args(["prepare", "--item", str(second), "--associate-only", "--json"])
             return ship.Ship(self.root, self.connection, self.database, args)
 
         # sd:1346 refuses the branch until it merges main, and that merge is
@@ -1865,7 +1885,7 @@ roles:
         self.assertEqual(run.call_args.kwargs["timeout"], CLI_TIMEOUT)
 
     def test_real_cli_review_prepare_slice_merge_and_repeat_reconcile(self):
-        prepared = self.cli("prepare")
+        prepared = self.cli("prepare", "--associate-only")
         self.assertEqual(prepared.returncode, 0, prepared.stdout + prepared.stderr)
         self.assertEqual(json.loads(prepared.stdout)["phase"], "ready_to_send")
         body = self.directory / "prepared-pr.md"
@@ -2168,6 +2188,133 @@ roles:
         self.assertFalse(again["delivery_pending"])
         self.assertIsNone(again["workflow"]["blocker"])
 
+    # -- sd:1928: a first prepare says whether it delivers ------------------
+
+    def unanswered(self, *extra):
+        """A prepare exactly as the command line builds it, with no default claim."""
+        return ship.Ship(self.root, self.connection, self.database, self.args("prepare", *extra))
+
+    def test_a_first_prepare_without_a_claim_refuses_before_any_write(self):
+        """sd:1910 merged with `Item:` only because associate-only was the
+        silent default. The first prepare now asks, and asks before it commits,
+        pushes or opens anything."""
+        head = _git(self.root, "rev-parse", "HEAD")
+        with self.assertRaisesRegex(ship.Refusal, r"--deliver.*--associate-only") as caught:
+            self.unanswered().prepare()
+        self.assertIn("last", str(caught.exception))
+        self.assertEqual(_git(self.root, "rev-parse", "HEAD"), head)
+        self.assertEqual(receipts.read(self.connection, receipts.receipt_key(self.remote.slug, "topic", self.item)), (0, {}))
+        self.assertFalse([call for call in self.remote.calls if call.method in ("POST", "PUT", "PATCH")])
+
+    def test_the_command_line_takes_one_claim_only(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.args("prepare", "--deliver", "--associate-only")
+
+    def test_associate_only_is_an_answer_and_lands_item_without_delivers(self):
+        self.unanswered("--associate-only").prepare()
+        self.assertFalse(self.operation().state["deliver"])
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        message = _git(self.remote.path, "log", "-1", "--format=%B", "main")
+        self.assertIn(f"Item: sd:{self.item}", message)
+        self.assertNotIn("Delivers:", message)
+        self.assertFalse(result["delivery_pending"])
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "in_progress")
+
+    def test_a_reprepare_keeps_the_claim_the_first_prepare_stored(self):
+        self.unanswered("--associate-only").prepare()
+        _git(self.root, "commit", "--allow-empty", "-m", "more\n\nAuthored-with: human")
+        self.unanswered().prepare()
+        self.assertFalse(self.operation().state["deliver"])
+
+    def test_an_owned_runner_prepare_keeps_the_associate_only_default(self):
+        """The runner passes `--database` and no claim flag; it records its own
+        delivery proof, so its prepare is unchanged."""
+        self.unanswered("--database", str(self.database)).prepare()
+        self.assertFalse(self.operation().state["deliver"])
+
+    def task_item(self, kind: str) -> None:
+        self.connection.execute("UPDATE item SET branch = NULL WHERE id = ?", (self.item,))
+        self.connection.commit()
+        self.item = create_item(self.connection, kind=kind, title=f"fixture {kind}", status="in_progress",
+                                repo=str(self.operator), branch="topic")
+
+    def assert_closed_by_merge(self, result: dict) -> None:
+        self.assertFalse(result["delivery_pending"], result)
+        commit = result["merge_commit"]
+        message = _git(self.remote.path, "log", "-1", "--format=%B", "main")
+        self.assertIn(f"Delivers: sd:{self.item}", message)
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "done")
+        reasons = [row[0] for row in self.connection.execute(
+            "SELECT body FROM note WHERE item = ? AND kind = 'status_change'", (self.item,))]
+        import sd_work
+        # The sentence `sd task status N done --delivered-by` writes, spelled once there.
+        self.assertIn(f"in_progress -> done by sd-ship: {sd_work.DELIVERY_REASON.format(commit=commit, ref='origin/main')}",
+                      reasons)
+
+    def test_a_task_delivers_on_merge_with_the_delivered_by_sentence(self):
+        """Tasks refused `--deliver`, so every task merge needed a hand
+        `sd task status N done`, and `--delivered-by` then refused the squash
+        for want of `Delivers:`. A task takes `--deliver` without criteria and
+        closes on the verified merge."""
+        self.task_item("task")
+        self.unanswered("--deliver").prepare()
+        with patch.object(ship.time, "sleep"):
+            self.assert_closed_by_merge(self.merge())
+
+    def test_a_followup_delivers_on_merge(self):
+        self.task_item("followup")
+        self.unanswered("--deliver").prepare()
+        with patch.object(ship.time, "sleep"):
+            self.assert_closed_by_merge(self.merge())
+
+    def test_a_task_closed_by_hand_is_not_closed_again(self):
+        self.task_item("task")
+        self.unanswered("--deliver").prepare()
+        with patch.object(ship.time, "sleep"):
+            first = self.merge()
+        again = self.operation("reconcile").reconcile()
+        self.assertFalse(again["delivery_pending"])
+        self.assertEqual(first["merge_commit"], again["merge_commit"])
+        closes = self.connection.execute(
+            "SELECT COUNT(*) FROM note WHERE item = ? AND kind = 'status_change' AND body LIKE '%delivered at%'", (self.item,)).fetchone()[0]
+        self.assertEqual(closes, 1)
+
+    def test_a_plain_close_does_not_clear_a_held_task_merge(self):
+        """A close that names no commit says nothing about the combined tree a
+        held merge landed, so only a close naming this merge clears the hold."""
+        from sd_db.workflow import change_status
+        self.task_item("task")
+        commit = self.held_merge()["merge_commit"]
+        change_status(self.connection, self.item, "done", who="operator")
+        held = self.merge()
+        self.assertTrue(held["delivery_pending"])
+        self.assertEqual(held["workflow"]["blocker"]["code"], "base_advanced_at_merge")
+        self.assertIn(f"--delivered-by {commit}", held["workflow"]["next_action"])
+        change_status(self.connection, self.item, "in_progress", who="operator")
+        change_status(self.connection, self.item, "done", who="operator", reason=f"delivered at {commit} on origin/main")
+        self.assertFalse(self.merge()["delivery_pending"])
+
+    def test_a_held_followup_names_a_close_it_can_take(self):
+        """A followup takes no `--delivered-by` (sd:809); its hold names the reason form."""
+        self.task_item("followup")
+        result = self.held_merge()
+        self.assertIn(f"--reason 'delivered at {result['merge_commit']} on origin/main'", result["workflow"]["next_action"])
+
+    def test_a_task_done_without_evidence_is_not_counted_as_delivered(self):
+        from sd_db.workflow import change_status
+        self.task_item("task")
+        self.unanswered("--deliver").prepare()
+        change_status(self.connection, self.item, "done", who="operator")
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        self.assertTrue(result["delivery_pending"])
+        self.assertIn("without delivery evidence", result["delivery_error"])
+
+    def test_work_still_needs_acceptance_evidence_to_deliver(self):
+        with self.assertRaisesRegex(ship.Refusal, "--acceptance-file"):
+            self.unanswered("--deliver").prepare()
+
     def test_empty_search_after_uncertain_create_cannot_duplicate_pr(self):
         self.double.no_create_result = True
         with self.assertRaises(ship.Refusal):
@@ -2436,6 +2583,48 @@ roles:
             with self.assertRaisesRegex(WorkflowError, "another ship"):
                 with receipts.repository_lock(self.database, "fixture/repo"):
                     self.fail("second owner")
+
+    def hold_ship_lock(self, repository, seconds=60.0):
+        """A child process holding the real flock on `repository`'s ship lock until killed."""
+        child = subprocess.Popen([sys.executable, "-c", SHIP_LOCK_HOLDER, str(self.database), repository, str(seconds)],
+                                 stdout=subprocess.PIPE, text=True,
+                                 env={**os.environ, "PYTHONPATH": str(SITE_PACKAGES)})
+
+        def stop():
+            child.kill()
+            child.wait()
+            child.stdout.close()
+
+        self.addCleanup(stop)
+        self.assertEqual(child.stdout.readline().strip(), "held")
+        return child
+
+    def test_the_ship_lock_records_this_prepare_as_its_holder(self):
+        """sd:1936. The lock names this command and item while dispatch holds it."""
+        seen = []
+
+        def prepare(operation):
+            seen.extend(receipts.held_locks(self.database))
+            return {"ok": True}
+
+        with patch.object(ship.Ship, "prepare", prepare):
+            ship.dispatch(self.root, self.connection, self.database, self.args("prepare"), receipts, False)
+        (record,) = seen
+        self.assertEqual(record["pid"], os.getpid())
+        self.assertEqual(record["item"], self.item)
+        self.assertEqual(record["command"], f"sd-ship prepare --item {self.item}")
+        self.assertEqual(receipts.held_locks(self.database), [])
+
+    def test_a_held_ship_lock_refusal_names_the_holder(self):
+        """sd:1936. A second prepare is refused with the holder's pid and command."""
+        from sd_db.workflow import WorkflowError
+        child = self.hold_ship_lock(self.operation().repository)
+        with patch.object(ship.Ship, "prepare", side_effect=AssertionError("ran under a held lock")):
+            with self.assertRaises(WorkflowError) as refused:
+                ship.dispatch(self.root, self.connection, self.database, self.args("prepare"), receipts, False)
+        self.assertIn("another ship operation owns this repository", str(refused.exception))
+        self.assertIn(f"pid {child.pid}", str(refused.exception))
+        self.assertIn("sd-ship prepare --item 1872", str(refused.exception))
 
     def test_ending_assignment_keeps_work_and_manual_merge_controls_guarded(self):
         from sd_db.progress import cancel_work, work_controls
