@@ -765,11 +765,16 @@ class LineBudgetTests(unittest.TestCase):
         # lines), and a free entry retries one schema failure on itself.
         # Moving the url call out of `run_provider` to hold the complexity
         # ceiling costs the rest: three helper signatures and docstrings.
+        # 3699 -> 3702 is sd:1843, no-CI mode. `bin/sd_setup_github.py` grows
+        # +3: one branch in `main` that prints why a `repo.ci = local`
+        # repository gets no workflow and exits 0. The reason and the row read
+        # are `sd_setup_guard.ci_local_skip` and `sd_lib.ci_mode`, outside the
+        # lane, so only the dispatch is spent here.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3699,
+            3702,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
