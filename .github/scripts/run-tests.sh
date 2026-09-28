@@ -393,7 +393,16 @@ trap 'on_signal' INT TERM HUP
 # flock(1), so this shell opens every slot file and the helper locks one of the
 # descriptors it inherits; the lock is on the shell's open file and outlives the
 # helper. The helper waits in the background so a signal reaches `on_signal`.
+# The descriptors are fixed numbers from 20 up, opened through `eval`: macOS
+# /bin/bash is 3.2, which has neither `{fd}` allocation nor safe empty arrays.
 slots_helper="$REPO_ROOT/bin/sd_gate_slots.py"
+slot_fd_base=20
+slot_fds=""
+close_slot_fds() {
+  local fd
+  for fd in $slot_fds; do eval "exec $fd>&-"; done
+  slot_fds=""
+}
 gate_slot=""
 slot_waiter=""
 release_gate_slot() {
@@ -418,7 +427,6 @@ stop_if_launcher_exited() {
 }
 acquire_gate_slot() {
   local slots="${SD_GATE_SLOTS:-0}" dir i fd index waited
-  local -a fds=()
   case "$slots" in
     '' | *[!0-9]*)
       printf '%s\n' "error: SD_GATE_SLOTS must be a non-negative integer (got '$slots')" >&2
@@ -434,26 +442,28 @@ acquire_gate_slot() {
     return 0
   fi
   for ((i = 1; i <= slots; i++)); do
-    exec {fd}>>"$dir/slot.$i.lock" || break
-    fds+=("$fd")
+    fd=$((slot_fd_base + i - 1))
+    eval "exec $fd>>\"\$dir/slot.\$i.lock\"" 2>/dev/null || break
+    slot_fds="$slot_fds $fd"
   done
-  if [ "${#fds[@]}" -ne "$slots" ]; then
-    for fd in "${fds[@]}"; do exec {fd}>&-; done
+  if [ "$i" -le "$slots" ]; then
+    close_slot_fds
     printf '%s\n' "warning: cannot open the slot files under $dir; running without the gate cap" >&2
     return 0
   fi
-  "$toolchain_python" "$slots_helper" wait --pid "$$" --ppid "$gate_ppid" --dir "$dir" "${fds[@]}" \
+  "$toolchain_python" "$slots_helper" wait --pid "$$" --ppid "$gate_ppid" --dir "$dir" $slot_fds \
     >"$work_dir/gate-slot" 9>&- &
   slot_waiter=$!
   wait "$slot_waiter"
   waited=$?
   slot_waiter=""
-  if [ "$waited" -eq 0 ] && index="$(cat -- "$work_dir/gate-slot")" && [ -n "${fds[$index]:-}" ]; then
-    exec 9>&"${fds[$index]}"
+  if [ "$waited" -eq 0 ] && index="$(cat -- "$work_dir/gate-slot")" &&
+    case "$index" in '' | *[!0-9]*) false ;; *) [ "$index" -lt "$slots" ] ;; esac; then
+    eval "exec 9>&$((slot_fd_base + index))"
     # Named before the pid is written: a signal in between releases the slot.
     gate_slot="$dir/slot.$((index + 1)).lock"
   fi
-  for fd in "${fds[@]}"; do exec {fd}>&-; done
+  close_slot_fds
   if [ "$waited" -eq 3 ]; then
     printf '%s\n' "$launcher_exited_message" >&2
     exit 1
