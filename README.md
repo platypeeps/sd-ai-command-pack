@@ -82,6 +82,8 @@ else is. Its executables write these paths, and no others:
   `unknown` and lays nothing), and a `docs/dashboard/` line in
   `.gitignore`. **Tracked**, and written only on a feature branch. A repository
   whose `sd-status.json` entry or `CLAUDE.md` rule forbids CI gets no workflow.
+  A repository whose `repo.ci` row says `local` gets no workflow either, from
+  the stamp or from `setup-github`; see [WORKFLOW.md § No-CI mode](WORKFLOW.md#no-ci-mode).
   It also adds the template's new lines to that checkout's `CLAUDE.local.md`
   block, removing none, and creates its untracked `docs/dashboard/`. `--dry-run` prints every auto repository's diff against
   its `origin/HEAD` and writes nothing.

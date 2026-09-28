@@ -385,6 +385,9 @@ def main(
         root = sd_lib.repo_root(None)
         if root is None:
             raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")
+        if skipped := sd_setup_guard.ci_local_skip(root):  # repo.ci = local lays no workflow (sd:1843)
+            print(json.dumps({"repo": str(root), "status": "skipped", "reason": skipped}) if args.json else skipped)
+            return EXIT_OK
         if args.check:
             return check_files(root, args, sys.stdout)
         result = setup_github(root, args, load_policy=load_policy)

@@ -146,6 +146,11 @@ class ShipDouble(GitHubDouble):
             self.copilot_requests.append({"number": number, "body": body})
             self.copilot_pending.add(number)
             return 201, self._pull(self.remote.pull(number))
+        if method == "POST" and path.startswith(f"{prefix}/statuses/"):
+            # The local gate's write (sd:1843), newest first as GitHub lists.
+            record = {**body, "sha": path.rsplit("/", 1)[1], "creator": {"login": "fixture"}}
+            self.statuses.insert(0, record)
+            return 201, record
         if path.endswith("/statuses"):
             return 200, self.statuses
         if method == "GET" and path.endswith("/protection") and isinstance(self.remote.protection, RemoteRefusal):
@@ -4062,6 +4067,119 @@ class DeclaredGapCase(unittest.TestCase):
         self.assertEqual(result["protection"], {"declared_gap": "unprotected", "until": "a second account with push or merge rights exists"})
         key = receipts.receipt_key(self.remote.slug, "topic", self.item)
         self.assertEqual(receipts.read(self.connection, key)[1]["protection"]["declared_gap"], "unprotected")
+
+    # -- sd:1843: `repo.ci = local` swaps pull_request runs for sd/local-gate --
+
+    def local_ci(self) -> None:
+        """The row says `local`. Patched at the one reader, because the
+        library this suite pins predates the column."""
+        patcher = patch.object(ship.sd_lib, "repo_ci", lambda connection, root: "local")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def gate_posts(self) -> list:
+        return [call for call in self.remote.calls if call.method == "POST" and "/statuses/" in call.path]
+
+    def local_green(self) -> None:
+        """Every check green and no pull_request run at all: nothing ran on Actions."""
+        self.prepare()
+        pull = next(iter(self.remote.pull_requests.values()))
+        pull.checks = [self.check("route"), self.check("copilot-pull-request-reviewer")]
+        self.double.workflow_runs = []
+
+    def test_ci_local_merges_on_the_local_gate_without_pull_request_runs(self):
+        self.declare()
+        self.local_ci()
+        self.local_green()
+        result = self.merge()
+        self.assertEqual(self.puts(), 1)
+        [post] = self.gate_posts()
+        self.assertTrue(post.path.endswith(f"/statuses/{self.head()}"))
+        self.assertEqual((post.body["context"], post.body["state"]), ("sd/local-gate", "success"))
+        key = receipts.receipt_key(self.remote.slug, "topic", self.item)
+        gate = receipts.read(self.connection, key)[1]["local_gate"]
+        self.assertEqual((gate["head"], gate["status"]), (self.head(), "success"))
+        self.assertEqual(result["protection"]["declared_gap"], "unprotected")
+
+    def test_ci_local_with_a_failing_check_posts_failure_and_refuses(self):
+        """The check passes in the operator's clone, where `.git` is a directory,
+        and fails in the gate's worktree, where it is a file: the real run, and
+        proof it ran in the worktree rather than the checkout."""
+        self.commit({"Makefile": "check:\n\t@test -d .git\n"})
+        self.declare()
+        self.local_ci()
+        self.local_green()
+        self.refuse(r"sd/local-gate is failure", "ci_not_passing")
+        self.assertEqual([call.body["state"] for call in self.gate_posts()], ["failure"])
+
+    def test_ci_local_refuses_a_gate_status_for_another_sha(self):
+        """A success recorded against another commit is not evidence for this head."""
+        self.declare()
+        self.local_ci()
+        self.local_green()
+        self.double.statuses = [{"context": "sd/local-gate", "state": "success", "sha": "f" * 40}]
+        with patch.object(ship.sd_local_gate, "check_in_worktree",
+                          lambda root, head: {"head": "e" * 40, "status": "success", "summary": "elsewhere"}):
+            self.refuse(r"no status is posted for a commit that was not checked", "local_gate_mismatch")
+        self.assertEqual(self.gate_posts(), [])
+
+    def test_ci_local_refuses_a_gate_success_another_account_posted(self):
+        """Anyone with write access can post `sd/local-gate`; readiness trusts only this token's own."""
+        self.declare()
+        self.local_ci()
+        self.local_green()
+        self.double.statuses = [{"context": "sd/local-gate", "state": "success", "sha": self.head(),
+                                 "creator": {"login": "someone-else"}, "description": "posted elsewhere"}]
+        with patch.object(ship.sd_local_gate, "local_gate", lambda api, root, head: {"head": head}):
+            self.refuse(r"sd/local-gate on .* was posted by someone-else, not fixture", "local_gate_foreign")
+
+    def test_ci_local_runs_its_own_gate_over_another_accounts_success(self):
+        self.declare()
+        self.local_ci()
+        self.local_green()
+        self.double.statuses = [{"context": "sd/local-gate", "state": "success", "sha": self.head(),
+                                 "creator": {"login": "someone-else"}, "description": "posted elsewhere"}]
+        self.merge()
+        self.assertEqual(self.puts(), 1)
+        self.assertEqual([call.body["state"] for call in self.gate_posts()], ["success"])
+
+    def test_ci_local_with_no_gate_status_refuses_as_missing(self):
+        """Nothing posted, nothing ran: no pull_request run is asked for, so the
+        missing status is the one thing that stops the merge."""
+        self.declare()
+        self.local_ci()
+        self.local_green()
+        with patch.object(ship.sd_local_gate, "local_gate", lambda api, root, head: {"head": head, "status": "skipped"}):
+            self.refuse(r"sd/local-gate has no status on", "ci_missing")
+
+    def test_ci_local_under_protection_requires_the_gate_beside_the_required_contexts(self):
+        """Path A: protection requires `route` only; a local repository needs its gate too."""
+        self.commit({".github/sd-review.json": "{}\n"})
+        self.remote.protection = {"enforce_admins": {"enabled": True},
+                                  "required_pull_request_reviews": {"required_approving_review_count": 0},
+                                  "required_status_checks": {"strict": True, "contexts": ["route"]}}
+        self.local_ci()
+        self.local_green()
+        with patch.object(ship.sd_local_gate, "check_in_worktree",
+                          lambda root, head: {"head": head, "status": "failure", "summary": "sd-check fail"}):
+            self.refuse(r"sd/local-gate is failure")
+        self.restart()
+        self.commit({".github/sd-review.json": "{}\n"})
+        self.remote.protection = {"enforce_admins": {"enabled": True},
+                                  "required_pull_request_reviews": {"required_approving_review_count": 0},
+                                  "required_status_checks": {"strict": True, "contexts": ["sd/local-gate"]}}
+        self.local_ci()
+        self.local_green()
+        self.merge()
+        self.assertEqual(self.puts(), 1)
+
+    def test_ci_github_is_unchanged_no_gate_runs_and_pull_request_runs_are_required(self):
+        self.declare()
+        self.green()
+        self.double.workflow_runs = [self.run_record(".github/workflows/sd-review-route.yml")]
+        with patch.object(ship.sd_local_gate, "local_gate", side_effect=AssertionError("gate ran under ci=github")):
+            self.refuse(r"workflow .* has no successful pull_request run", "ci_missing")
+        self.assertEqual(self.gate_posts(), [])
 
     def test_a_ruleset_that_gates_the_merge_is_path_a_without_a_declaration(self):
         """answerbook/log-distiller's shape on the fixture: no classic object, one

@@ -16,6 +16,7 @@ import contextlib
 import importlib.machinery
 import importlib.util
 import io
+import json
 import pathlib
 import subprocess
 import sys
@@ -1081,6 +1082,40 @@ class CliTests(SetupFixture):
             os.chdir(cwd)
         self.assertEqual(code, 0)
         self.assertEqual(stdout.getvalue().count("same "), 2)
+
+    def run_main(self, root: pathlib.Path, argv: list[str], ci: str) -> tuple[int, str]:
+        import os
+        from unittest import mock
+
+        cwd = pathlib.Path.cwd()
+        os.chdir(root)
+        try:
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout), mock.patch.object(setup.sd_lib, "ci_mode", lambda path: ci):
+                code = setup.main(argv, load_policy=sd_review.load_policy)
+        finally:
+            os.chdir(cwd)
+        return code, stdout.getvalue()
+
+    def test_ci_local_lays_no_workflow_and_says_why(self) -> None:
+        """sd:1843: exit 0, a sentence naming repo.ci and the gate, and no file written."""
+        root = self.make_repo()
+        for argv in ([], ["--json"], ["--check"]):
+            with self.subTest(argv=argv):
+                code, text = self.run_main(root, argv, "local")
+                self.assertEqual(code, 0)
+                self.assertIn("repo.ci is local", text)
+                self.assertIn("sd/local-gate", text)
+                self.assertFalse(self.workflow(root).exists())
+                self.assertFalse(self.dependabot(root).exists())
+        self.assertEqual(json.loads(self.run_main(root, ["--json"], "local")[1])["status"], "skipped")
+
+    def test_ci_github_installs_as_before(self) -> None:
+        root = self.make_repo()
+        code, text = self.run_main(root, ["--pin", PIN], "github")
+        self.assertEqual(code, 0)
+        self.assertTrue(self.workflow(root).is_file())
+        self.assertNotIn("repo.ci", text)
 
     def test_render_names_what_the_lane_will_not_do(self) -> None:
         """It used to list the GitHub-lane backends it was not going to ask.
