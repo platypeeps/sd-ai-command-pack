@@ -3813,7 +3813,7 @@ roles:
         with patch.object(ship, "review_process", side_effect=child):
             self.operation().review(_git(self.root, "rev-parse", "HEAD"))
         state = self.operation().state
-        self.assertEqual(stages, [(True, 3600), (False, 9000)])
+        self.assertEqual(stages, [(True, 3600), (False, 10800)])
         self.assertEqual(trace, ["check", "provider"])
         self.assertEqual(len(state["passes"]), 1)
         self.assertEqual(state["passes"][0]["report"]["completed_reviews"], 1)
@@ -4625,10 +4625,33 @@ class DeclaredGapCase(unittest.TestCase):
         proof it ran in the worktree rather than the checkout."""
         self.commit({"Makefile": "check:\n\t@test -d .git\n"})
         self.declare()
-        self.local_ci()
+        # Prepared before the switch, so prepare's check ran in the clone and passed.
         self.local_green()
+        self.local_ci()
         self.refuse(r"sd/local-gate is failure", "ci_not_passing")
         self.assertEqual([call.body["state"] for call in self.gate_posts()], ["failure"])
+
+    def test_ci_local_prepare_runs_its_check_in_the_gates_worktree(self):
+        """sd:2041. Under `repo.ci = local` prepare's check is the gate's, so the
+        same Makefile fails at prepare, before any reviewer, and not first at merge."""
+        self.commit({"Makefile": "check:\n\t@test -d .git\n"})
+        self.declare()
+        self.local_ci()
+        with self.assertRaisesRegex(ship.Refusal, "the repository gate failed before any reviewer was asked"):
+            self.local_green()
+
+    def test_ci_local_merge_reuses_prepares_passing_gate(self):
+        """sd:2041. Prepare's gate leaves a receipt at the head; the merge gate reads it and says so."""
+        counter = self.root.parent / "gate-runs"
+        self.commit({"Makefile": f"check:\n\t@echo run >> {counter}\n"})
+        self.declare()
+        self.local_ci()
+        self.local_green()
+        self.merge()
+        [post] = self.gate_posts()
+        self.assertEqual(post.body["state"], "success")
+        self.assertTrue(post.body["description"].endswith("(reused)"), post.body["description"])
+        self.assertEqual(len(counter.read_text().splitlines()), 1)
 
     def test_ci_local_refuses_a_gate_status_for_another_sha(self):
         """A success recorded against another commit is not evidence for this head."""
@@ -4637,7 +4660,7 @@ class DeclaredGapCase(unittest.TestCase):
         self.local_green()
         self.double.statuses = [{"context": "sd/local-gate", "state": "success", "sha": "f" * 40}]
         with patch.object(ship.sd_local_gate, "check_in_worktree",
-                          lambda root, head: {"head": "e" * 40, "status": "success", "summary": "elsewhere"}):
+                          lambda root, head, **_: {"head": "e" * 40, "status": "success", "summary": "elsewhere"}):
             self.refuse(r"no status is posted for a commit that was not checked", "local_gate_mismatch")
         self.assertEqual(self.gate_posts(), [])
 
@@ -4648,7 +4671,7 @@ class DeclaredGapCase(unittest.TestCase):
         self.local_green()
         self.double.statuses = [{"context": "sd/local-gate", "state": "success", "sha": self.head(),
                                  "creator": {"login": "someone-else"}, "description": "posted elsewhere"}]
-        with patch.object(ship.sd_local_gate, "local_gate", lambda api, root, head: {"head": head}):
+        with patch.object(ship.sd_local_gate, "local_gate", lambda api, root, head, **_: {"head": head}):
             self.refuse(r"sd/local-gate on .* was posted by someone-else, not fixture", "local_gate_foreign")
 
     def test_ci_local_runs_its_own_gate_over_another_accounts_success(self):
@@ -4667,7 +4690,7 @@ class DeclaredGapCase(unittest.TestCase):
         self.declare()
         self.local_ci()
         self.local_green()
-        with patch.object(ship.sd_local_gate, "local_gate", lambda api, root, head: {"head": head, "status": "skipped"}):
+        with patch.object(ship.sd_local_gate, "local_gate", lambda api, root, head, **_: {"head": head, "status": "skipped"}):
             self.refuse(r"sd/local-gate has no status on", "ci_missing")
 
     def test_ci_local_under_protection_requires_the_gate_beside_the_required_contexts(self):
@@ -4679,7 +4702,7 @@ class DeclaredGapCase(unittest.TestCase):
         self.local_ci()
         self.local_green()
         with patch.object(ship.sd_local_gate, "check_in_worktree",
-                          lambda root, head: {"head": head, "status": "failure", "summary": "sd-check fail"}):
+                          lambda root, head, **_: {"head": head, "status": "failure", "summary": "sd-check fail"}):
             self.refuse(r"sd/local-gate is failure")
         self.restart()
         self.commit({".github/sd-review.json": "{}\n"})
