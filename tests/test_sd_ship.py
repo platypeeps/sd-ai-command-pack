@@ -4714,6 +4714,31 @@ class DeclaredGapCase(unittest.TestCase):
         self.assertEqual([entry["id"] for entry in result["protection"]["rulesets"]], [42])
         self.assertEqual(result["protection"]["required_status_checks"]["checks"], [{"context": "route", "app_id": 7}])
 
+    def test_a_ruleset_only_main_requiring_ci_is_path_a(self):
+        """The fleet's target shape (sd:1741): no classic object, one active
+        ruleset `main` requiring the strict aggregate `ci` from GitHub Actions
+        (app 15368), no bypass actor. A green `ci` merges once with no
+        declaration; a red one refuses and dispatches nothing (sd:1810)."""
+        tests = self.TESTS + "  ci:\n    needs: [unittest]\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n"
+        self.commit({".github/workflows/tests.yml": tests, ".github/workflows/sd-review-route.yml": self.ROUTE})
+        rules = self.gating_rules()
+        rules[2]["parameters"]["required_status_checks"] = [{"context": "ci", "integration_id": 15368}]
+        self.double.rules = rules
+        self.double.rulesets = {42: {"id": 42, "name": "main", "enforcement": "active", "bypass_actors": []}}
+        self.green()
+        pull = next(iter(self.remote.pull_requests.values()))
+        ci = {**self.check("ci"), "app": {"id": 15368}}
+        pull.checks.append({**ci, "conclusion": "failure"})
+        with self.assertRaisesRegex(ship.Refusal, r"required CI is not passing on [0-9a-f]{40}: ci$"):
+            self.merge()
+        self.assertEqual(self.puts(), 0)
+        pull.checks[-1] = ci
+        result = self.merge()
+        self.assertEqual(self.puts(), 1)
+        self.assertEqual(result["protection"]["source"], "ruleset")
+        self.assertEqual(result["protection"]["required_status_checks"],
+                         {"strict": True, "contexts": ["ci"], "checks": [{"context": "ci", "app_id": 15368}]})
+
     def test_a_ruleset_that_forbids_squash_refuses_before_any_merge_is_dispatched(self):
         """sd:1379. A ruleset's `pull_request` rule names the merge methods the
         branch accepts, and `synthesize` dropped them, so the gate passed and
