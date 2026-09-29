@@ -107,10 +107,11 @@ def validate_additional_requests(passes: list[dict]) -> None:
 def full_branch_pass(entry: dict) -> bool:
     """A pass that reviews the whole branch again rather than a fix delta.
 
-    Two things put a pass in this shape: an explicit post-cap request, and a
-    review binding that moved out from under a completed receipt. Both dispatch
-    with no `--base` and resume the complete prior history, so both are checked
-    by `full_branch_coverage` and both supersede what came before them.
+    Three things put a pass in this shape: an explicit post-cap request, a
+    review binding that moved out from under a completed receipt, and a
+    `--catch-up` merge of the base (sd:2023). All dispatch with no `--base`
+    and resume the complete prior history, so all are checked by
+    `full_branch_coverage` and all supersede what came before them.
 
     The marker needs no separate authentication. What it selects is a rule that
     digests the exact prefix it claims to cover -- `resume_report_digest` over
@@ -118,7 +119,7 @@ def full_branch_pass(entry: dict) -> bool:
     verification refuses instead of passing, and tampering with a covered pass
     changes the digest the covering pass has to carry.
     """
-    return bool(entry.get("additional_review_request") or entry.get("review_binding_change"))
+    return bool(entry.get("additional_review_request") or entry.get("review_binding_change") or entry.get("catch_up"))
 
 
 def verification_link(previous: dict, report: dict) -> bool:

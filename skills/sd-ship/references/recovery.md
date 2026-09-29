@@ -72,6 +72,15 @@ merged commit's last paragraph read afterwards. `git interpret-trailers
 --parse` on the merged commit answers it in one line; if `Closes:` is not in
 its output, the trailer did not land.
 
+## A branch behind its base
+
+Under strict protection, another landing leaves an open branch BEHIND the base, and merge refuses it as `base_moved`.
+Run `sd-ship prepare --catch-up` with the same identity.
+It merges `origin/<base>` into the branch, never rebases, and pushes a fast-forward.
+The new head gets a full-branch pass: the review covers the branch's own diff, not the code the base brought in.
+A conflict aborts the merge and leaves the branch unchanged; resolve it by hand, then prepare again.
+Merge again with the new `--expected-head`; the local gate runs at that head.
+
 ## A branch built on a squashed branch
 
 A squash merge leaves the merged head off the default branch's history.

@@ -152,6 +152,8 @@ Never allocate another review ID to reset spent passes or discard history.
   An app, a team, a role or an admin bypass still refuses.
   The receipt's `protection.accepted_gaps` names the entries a merge honoured.
   GitHub's merge rules must also pass.
+  Under `repo.ci = local`, merge reads GitHub's answer up to five times over 30 seconds after posting `sd/local-gate`.
+  A pull request GitHub reports BEHIND refuses as `base_moved`, before the local gate runs.
   A refusal returns `manualRequired: true`; it changes no protection and requests no reviewer.
 - `--watch --wait-seconds 900` starts one bounded fail-fast CI watcher.
   Its persisted start prevents another automatic watch on rerun.
