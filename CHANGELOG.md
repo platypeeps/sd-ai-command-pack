@@ -54,6 +54,14 @@
 
 ### Changed
 
+- **The pack's own GitHub Actions workflows are gone.** This repository gates
+  locally (`repo.ci = local`), so `tests.yml`, `pr-body-lint.yml` and
+  `sd-review-route.yml` never ran. The gate's `sd_db` pin moved from
+  `tests.yml` to `.sd-system-rev`, and a missing or malformed pin fails the
+  gate. `make audit` says there is no workflow for zizmor to audit.
+  `check-zizmor-personas.py` and its tests are deleted with their subject.
+  Dependabot no longer watches `github-actions`.
+
 - **The first `sd-ship prepare` of an item names its claim (sd:1928).**
   Associate-only was the silent default, so a forgotten `--deliver` merged
   sd:1910 with `Item:` alone and left its row planning with the code on

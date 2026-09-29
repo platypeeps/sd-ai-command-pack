@@ -83,7 +83,7 @@ These are recommendations, not implemented behavior.
 - [Ship procedure and executable boundary](../skills/sd-ship/SKILL.md)
 - [Review procedure](../skills/sd-review/SKILL.md)
 - [Contribution and release policy](../CONTRIBUTING.md)
-- [CI routing implementation](../.github/workflows/sd-review-route.yml)
+- [CI routing implementation](../actions/review-route/action.yml)
 
 Command forms were checked with their local `--help` output on 2026-09-18.
 The settings check found STE-Concise in Claude's configuration and Codex's global instructions.
