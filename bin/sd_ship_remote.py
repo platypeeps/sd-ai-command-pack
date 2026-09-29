@@ -71,6 +71,12 @@ def refuse_behind(pull: dict, base: str) -> None:
                                   "reviews the new head, then merge with the new --expected-head.")
 
 
+#: The `mergeable_state` answers under which GitHub allows the merge (sd:2075).
+#: `unstable` is a required-checks pass with some other check pending or
+#: failed; the required checks are read below, and under a declared gap
+#: `every_check` still refuses any check that is not passing.
+MERGEABLE_STATES = ("clean", "unstable")
+
 PASSING = ("success", "neutral", "skipped")
 CI_NEXT_ACTION = "Wait for or fix exact-head CI, then retry merge."
 
@@ -606,7 +612,7 @@ class GitHub:
             raise Refusal("GitHub has not finished computing mergeability", code="mergeability_pending",
                           boundary="ci", state="retryable_failure", next_action="Wait a minute, then retry merge once.")
         refuse_behind(pull, base)
-        if pull.get("mergeable") is not True or pull.get("mergeable_state") != "clean":
+        if pull.get("mergeable") is not True or pull.get("mergeable_state") not in MERGEABLE_STATES:
             # Retryable: GitHub recomputes the rules after a new status, and
             # `sd-ship merge` reads again for a bounded window (sd:2050).
             raise Refusal("GitHub has not confirmed all required merge rules are satisfied "

@@ -36,6 +36,15 @@
 
 ### Fixed
 
+- **`sd-ship merge` accepts GitHub's `unstable` answer (sd:2075).** The
+  merge-rules poll from sd:2050 treated only `clean` as mergeable, so it
+  refused answerbook/mezmo_benchmark #583 after five reads: `sd/local-gate`,
+  the one required context, had passed, and only the optional CodeQL run was
+  still in progress. `unstable` with `mergeable` true is GitHub allowing the
+  merge, and it now passes readiness on both `repo.ci` paths. `blocked`,
+  `dirty`, `behind` and `mergeable` false still refuse, and a declared gap
+  still requires every check run to pass.
+
 - **`sd-ship merge` waits for GitHub's merge-rules answer after posting
   `sd/local-gate` (sd:2050).** GitHub recomputes mergeability after a new
   status, and one read refused #580 in mezmo_benchmark seconds before a retry
