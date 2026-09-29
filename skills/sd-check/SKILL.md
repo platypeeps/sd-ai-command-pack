@@ -44,8 +44,30 @@ correct, not a gap. `--only lint` still runs one on demand.
 | `--dry-run` | print what would run, exit 0 without running it |
 | `--only NAME` | run exactly one of `check`, `test`, `lint` |
 | `--timeout SECONDS` | per-check timeout, default 900; a timeout is a `fail` |
+| `--base REF` | scope the run to the change since the merge base with `REF`; see Docs-only scope |
 | `--record-receipt` | Explicitly record eligible full-check evidence in the shared database. |
 | `--database PATH` | Select the receipt database; valid only with `--record-receipt`. |
+
+## Docs-only scope
+
+A repository may track `.github/sd-check-scope.json`:
+
+```json
+{"schema_version": 1, "docs_paths": ["docs/**", "*.md"], "docs_command": ["make", "docs-check"]}
+```
+
+With `--base REF`, when every path changed since the merge base matches a `docs_paths` glob, only `docs_command` runs.
+The three names then read `skipped` with reason `docs-only scope`, a fourth row `docs` carries the result, and `scope.mode` is `docs-only`.
+A change to the declaration, a Makefile, the entrypoint's source file, `CLAUDE.local.md`, or a file a check command names runs the full check.
+The full check also runs without a declaration, without `--base`, or on an empty range.
+The local gate and the review lane's gate check pass the pull request's base branch.
+
+## Local gate receipts
+
+Under `repo.ci = local`, `sd-ship prepare` runs the check as the merge gate does, and a pass leaves a gate receipt.
+A later gate at the same head and binding reads it instead of running the check again; its status says `(reused)`.
+`bin/sd_gate_receipts.py` names the binding and its twelve-hour age limit.
+These receipts need no declaration and are separate from the optional receipts below.
 
 ## Optional check receipts
 

@@ -4,6 +4,28 @@
 
 ### Added
 
+- **One passing local gate per head (sd:2041, sd:1912).** Under `repo.ci =
+  local`, `sd-ship prepare` runs its check as the merge gate does -- a clean
+  worktree at the head, the gate's environment, `sd-review --gate-check` --
+  and a pass leaves a receipt in the workflow database. The merge gate, and a
+  later prepare, at the same head and binding read the receipt instead of a
+  second run, and the status says `(reused)`. The binding is the head, its
+  tree, the gate inputs (every pack `bin/` file and an untracked
+  `CLAUDE.local.md`), the scope, the detected commands, each command's
+  executable, the interpreter and `PATH`; a receipt also ages out after
+  twelve hours. The gate's bound in prepare is now the merge gate's 3600 s,
+  not the reviewers' 1800 s, unless `--review-timeout` names one; the timing
+  plan carries it as `check_seconds`.
+
+- **A declared docs-only check scope (sd:2072).** A repository may track
+  `.github/sd-check-scope.json` naming `docs_paths` globs and a
+  `docs_command`. `sd-check --base REF` then runs only the docs command when
+  every path changed since the merge base is a docs path; the merge gate and
+  prepare's gate pass the base branch. A change to the declaration, a
+  Makefile, the file the entrypoints came from, `CLAUDE.local.md` or a file a
+  check command names runs the full check. The status reads `sd-check pass
+  (docs-only)`. No declaration is today's behaviour.
+
 - **`sd-ship prepare --catch-up` merges the base into a BEHIND branch
   (sd:2023).** Under strict protection another landing left a branch behind,
   and the recovery was a hand merge, a push, a review and a prepare. The flag

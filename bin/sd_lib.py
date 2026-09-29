@@ -903,6 +903,11 @@ CI_MODES = ("github", "local")
 #: The commit status `sd-ship` posts for a `ci = local` head, and the one
 #: required context such a repository's protection names.
 LOCAL_GATE_CONTEXT = "sd/local-gate"
+#: The bound on one repository gate run, wherever it runs: the merge-time local
+#: gate and `sd-review`'s check both hand it to `sd-check --timeout` (sd:2041).
+#: `sd-check`'s own 900-second default is for an interactive run; a gate that
+#: builds its environment on a loaded machine ran past 900 s, and past 1800 s.
+GATE_CHECK_SECONDS = 3600
 
 
 def repo_ci(connection: Any, root: pathlib.Path | str) -> str:

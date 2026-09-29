@@ -1556,6 +1556,67 @@ def gate_failed_line(check: Mapping[str, Any] | None) -> str:
     return "sd-review: the repository's own gate failed; no provider was asked"
 
 
+def phase_seconds(args: argparse.Namespace) -> int:
+    """Each reviewer's bound: `--timeout`, else the default."""
+    return getattr(args, "timeout", None) or DEFAULT_TIMEOUT_SECONDS
+
+
+def gate_seconds(args: argparse.Namespace) -> int:
+    """The repository gate's bound: `--timeout` when given (sd:1475), else the local gate's own (sd:2041).
+
+    The gate is the same `sd-check` run the merge-time gate bounds by
+    `sd_lib.GATE_CHECK_SECONDS`; the reviewers' 1800-second default cut it
+    short on a loaded machine where the merge gate would have passed.
+    """
+    return getattr(args, "timeout", None) or sd_lib.GATE_CHECK_SECONDS
+
+
+def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeout: int, branch: str,
+                   args: argparse.Namespace) -> dict[str, Any]:
+    """Step 1 as the local gate runs it: a clean worktree at HEAD, compared with `origin/<branch>` (sd:2041).
+
+    `sd-ship prepare` asks for this under `repo.ci = local`, so the merge gate
+    that follows finds this run's receipt at the same head and binding and does
+    not run the check a second time; and it reuses a receipt it finds itself.
+    The child still runs through `runner`, so the gate's deadline ends its
+    whole process group (sd:1482). Without the library there is no receipt,
+    and the check simply runs.
+    """
+    import sd_gate_run  # noqa: PLC0415 -- the gate's run, which posts nothing; needed only here
+
+    head = sd_lib.git_output(["rev-parse", "HEAD"], root)
+    if not head:
+        raise UsageError("--gate-check needs a commit at HEAD")
+    database = getattr(args, "database", None)
+    if database is None and (library := sd_lib.import_sd_db().module) is not None:
+        database = library.default_path(env.get("HOME"))
+
+    def through_runner(argv: list[str], child: dict[str, str], cwd: pathlib.Path, limit: int) -> tuple[int | None, str, str]:
+        finished = runner(argv, child, cwd, limit)
+        return finished.exit_code, finished.stdout, finished.stderr
+
+    try:
+        gate = sd_gate_run.check_in_worktree(root, head, timeout=timeout, base=sd_gate_run.base_ref(branch),
+                                             database=database, run=through_runner, environ=env)
+    except sd_gate_run.GateError as error:
+        gate = {"status": "failure", "exit_code": None, "stderr": str(error), "head": head}
+    checks = (gate.get("report") or {}).get("checks")
+    report: dict[str, Any] = {
+        "status": "pass" if gate["status"] == "success" else "fail",
+        "exit_code": gate["exit_code"],
+        "detail": (gate.get("stderr") or "").strip()[-2000:],
+        "checks": checks,
+        "source": "gate-receipt" if gate.get("reused") else "gate",
+        "head": gate["head"],
+        "summary": gate.get("summary"),
+    }
+    if gate.get("reused"):
+        report["reused"] = gate["reused"]
+    if report["status"] == "fail":
+        report.update(classify_gate(checks) or {})
+    return report
+
+
 def run_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeout: int) -> dict[str, Any]:
     """Step 1: the repository's own gate, through sd-check, held to the planned phase budget (sd:1475)."""
     argv = [sys.executable, str(pathlib.Path(_BIN) / "sd-check"), "--timeout", str(timeout), "--json"]
@@ -1767,7 +1828,7 @@ def review(
 
     preflight = bool(getattr(args, "preflight", False))
     if preflight and (not args.provider or args.scope not in ("worktree", "branch") or any(
-            getattr(args, name, None) for name in ("base", "verify_report", "resume_report", "item", "draft", "challenge", "lens", "dry_run", "expected_timing", "reuse_check"))):
+            getattr(args, name, None) for name in ("base", "verify_report", "resume_report", "item", "draft", "challenge", "lens", "dry_run", "expected_timing", "reuse_check", "gate_check"))):
         raise UsageError("--preflight requires --provider and cannot combine with review modifiers; use --explain for zero calls")
     policy, source = load_policy(root)
     item = getattr(args, "item", None)
@@ -1921,10 +1982,12 @@ def review(
         registry, args.provider, explain=args.explain, consent=consent, author_vendors=vendors, capped_bills=capped, readers=READERS,
     )
     providers = [provider.name for provider in chosen[:depth]]
-    timing: dict[str, Any] = {"setup_seconds": SETUP_TIMEOUT_SECONDS, "phase_seconds": args.timeout,
+    phase, check_seconds = phase_seconds(args), gate_seconds(args)
+    timing: dict[str, Any] = {"setup_seconds": SETUP_TIMEOUT_SECONDS, "phase_seconds": phase,
+              "check_seconds": check_seconds,
               "candidates": [{"name": provider.name, "recipient": str(sd_registry.recipient(provider))}
                              for provider in chosen]}
-    timing["execution_seconds"] = SETUP_TIMEOUT_SECONDS + args.timeout * (1 + len(chosen))
+    timing["execution_seconds"] = SETUP_TIMEOUT_SECONDS + check_seconds + phase * len(chosen)
     result: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "repo": str(root),
@@ -2021,7 +2084,9 @@ def review(
 
     # Legacy runner rows lack before-check/runtime identity and never grant reuse.
     check = (sd_check_receipts.reuse_checked_result(root, env, getattr(args, "database", None)) if getattr(args, "reuse_check", False) else None)
-    check = check or run_check(root, runner, env, args.timeout)
+    gate_branch = getattr(args, "gate_check", None)
+    check = check or (run_gate_check(root, runner, env, check_seconds, gate_branch, args) if gate_branch
+                      else run_check(root, runner, env, check_seconds))
     result["check"] = check
     if check["status"] == "fail":
         result["status"] = "gate_failed"
@@ -2047,7 +2112,7 @@ def review(
         if provider.reader == "codex-json" and auth["ok"]:
             skills = result["codex_skill_suppression"] = codex_skill_state(provider, root, runner, env, auth_home)
         for outcome in _attempts(provider, lambda: unlocated(run_provider(
-                provider, root, subject, prompt, runner, env, args.timeout,  # noqa: B023 -- run in this iteration
+                provider, root, subject, prompt, runner, env, phase,  # noqa: B023 -- run in this iteration
                 codex_auth_home, client, ledger, skills), cited, result["severity_floor"])):  # noqa: B023
             outcomes.append(outcome)
             if outcome.status in (CLEAN, FINDINGS):
@@ -2074,7 +2139,7 @@ def provider_preflight(result: dict[str, Any], chosen: Sequence[sd_registry.Prov
     prompt = 'Protocol preflight only. No repository is supplied or reviewed. Return exactly {"findings": []}.'
     assert provider is not None
     outcome = (_outcome(provider.name, REFUSED, refusal) if refusal else
-               run_provider(provider, root, subject._replace(paths=(), lines=0), prompt, runner, env, args.timeout, client=client, ledger=ledger))
+               run_provider(provider, root, subject._replace(paths=(), lines=0), prompt, runner, env, phase_seconds(args), client=client, ledger=ledger))
     result["probe_calls"] = 0 if outcome.status in (REFUSED, NOT_RUN) else 1
     result["outcomes"] = [outcome.outcome_report(environment=False)]
     result["protocol_error"] = "synthetic preflight expected an empty findings list" if outcome.findings else None
@@ -2326,6 +2391,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scope", choices=SCOPES, default="worktree", help="what to review (default: worktree)")
     parser.add_argument("--database", type=pathlib.Path, help="explicit provider-state database for an owned runner")
     parser.add_argument("--reuse-check", action="store_true", help="reuse a matching explicit full-check receipt; otherwise rerun")
+    parser.add_argument("--gate-check", metavar="BRANCH",
+                        help="branch scope: run the check as the local gate does, against origin/BRANCH, "
+                             "reusing or leaving a gate receipt at HEAD")
     parser.add_argument("--verify-report", help="prior branch review JSON to verify with --base")
     parser.add_argument("--resume-report", help="incomplete prior review JSON whose findings must survive a full-branch retry")
     parser.add_argument("--base", help="branch-only exact ancestor SHA for one fix verification")
@@ -2348,9 +2416,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--timeout",
         type=int,
-        default=DEFAULT_TIMEOUT_SECONDS,
+        default=None,
         metavar="SECONDS",
-        help=f"per-phase timeout: the repository gate, then each provider (default: {DEFAULT_TIMEOUT_SECONDS})",
+        help=f"per-phase timeout: the repository gate, then each provider (default: {sd_lib.GATE_CHECK_SECONDS} "
+             f"for the gate, {DEFAULT_TIMEOUT_SECONDS} for each provider)",
     )
     return parser
 
@@ -2373,8 +2442,10 @@ def main(argv: list[str] | None = None) -> int:
         return sd_setup_github.main(raw[1:], load_policy=load_policy)
     args = build_parser().parse_args(raw)
     try:
-        if args.timeout <= 0:
+        if args.timeout is not None and args.timeout <= 0:
             raise UsageError("--timeout takes a positive number of seconds")
+        if args.gate_check is not None and args.scope != "branch":
+            raise UsageError("--gate-check checks the committed head; it needs --scope branch")
         root = sd_lib.repo_root(None)
         if root is None:
             raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")

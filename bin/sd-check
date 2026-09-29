@@ -22,6 +22,11 @@ configuration was wrong. A controlled error prints a sentence, never a traceback
 Only --record-receipt writes local checkpoint evidence; it never changes Git.
 The repository's check commands own their effects, including any network calls.
 
+With `--base REF`, a repository that declares a docs-only scope
+(`sd_check_scope`, sd:2072) runs only its docs command when every path changed
+since the merge base is a docs path. The report's `scope` says which ran; the
+three names are then `skipped` and a fourth row, `docs`, carries the result.
+
 Every run that executes a check first takes a machine-wide gate slot
 (`sd_gate_slots`, sd:1996): every `repo.ci = local` repository's gate passes
 through here, so here is where the cap on concurrent gates is kept. The wait
@@ -45,6 +50,7 @@ if _BIN not in sys.path:
     sys.path.insert(0, _BIN)
 
 import sd_check_receipts  # noqa: E402
+import sd_check_scope  # noqa: E402
 import sd_gate_slots  # noqa: E402
 import sd_lib  # noqa: E402
 
@@ -69,7 +75,7 @@ def _tail(text: str) -> tuple[str, bool]:
 
 
 def plan(
-    detection: sd_lib.Detection, only: str | None
+    detection: sd_lib.Detection, only: str | None, scope: sd_check_scope.Scope | None = None
 ) -> list[dict[str, object]]:
     """Decide, before running anything, what each name's outcome will be.
 
@@ -101,6 +107,9 @@ def plan(
                 }
             )
             continue
+        if scope is not None and scope.mode == sd_check_scope.DOCS_ONLY:
+            entries.append({"name": name, "command": command, "status": SKIPPED, "reason": "docs-only scope"})
+            continue
         if only is None and name != "check" and "check" in commands:
             entries.append(
                 {
@@ -112,6 +121,8 @@ def plan(
             )
             continue
         entries.append({"name": name, "command": command, "status": None, "reason": ""})
+    if scope is not None and scope.mode == sd_check_scope.DOCS_ONLY:
+        entries.append({"name": "docs", "command": list(scope.command), "status": None, "reason": ""})
     return entries
 
 
@@ -157,9 +168,10 @@ def execute(
     timeout: int,
     environ: Mapping[str, str] | None = None,
     blocked: str | None = None,
+    scope: sd_check_scope.Scope | None = None,
 ) -> dict[str, object]:
     """Run the planned checks; `blocked` fails every one that would run, unrun, with that reason."""
-    entries = plan(detection, only)
+    entries = plan(detection, only, scope)
     checks: list[dict[str, object]] = []
     for entry in entries:
         record: dict[str, object] = {
@@ -208,6 +220,7 @@ def execute(
         "detected": detection.reason,
         "warnings": list(detection.warnings),
         "dry_run": dry_run,
+        "scope": (scope or sd_check_scope.Scope(sd_check_scope.FULL, "no --base given")).as_report(),
         "status": SKIPPED if dry_run and detection.commands else overall(statuses),
         "checks": checks,
     }
@@ -223,6 +236,9 @@ def render(result: dict[str, object], stream: TextIO) -> None:
     assert isinstance(warnings, list)
     for warning in warnings:
         write(f"  warning: {warning}\n")
+    scope = result.get("scope")
+    if isinstance(scope, dict) and scope.get("mode") == sd_check_scope.DOCS_ONLY:
+        write(f"  scope: docs-only ({scope['reason']})\n")
     checks = result["checks"]
     assert isinstance(checks, list)
     for record in checks:
@@ -261,6 +277,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", help="emit one machine-readable object")
     parser.add_argument("--dry-run", action="store_true", help="print what would run, then exit 0")
     parser.add_argument("--only", metavar="NAME", help=f"run one of {', '.join(sd_lib.CHECK_NAMES)}")
+    parser.add_argument("--base", metavar="REF",
+                        help=f"scope the run to the change since the merge base with REF; see {sd_check_scope.DECLARATION}")
     parser.add_argument("--record-receipt", action="store_true", help="explicitly store a reusable clean full-check receipt")
     parser.add_argument("--database", type=pathlib.Path, help="receipt database; only with --record-receipt")
     parser.add_argument(
@@ -298,22 +316,38 @@ def take_slot(environ: Mapping[str, str], timeout: int) -> tuple[sd_gate_slots.S
 def gated_execute(root: pathlib.Path, detection: sd_lib.Detection, args: argparse.Namespace,
                   environ: Mapping[str, str] | None) -> dict[str, object]:
     """`execute` inside a gate slot when anything will run; the checks get the timeout the wait left."""
-    runnable = any(entry["status"] is None for entry in plan(detection, args.only))
+    scope = getattr(args, "scope", None)
+    runnable = any(entry["status"] is None for entry in plan(detection, args.only, scope))
     if args.dry_run or not runnable:
-        return execute(root, detection, args.only, args.dry_run, args.timeout, environ)
+        return execute(root, detection, args.only, args.dry_run, args.timeout, environ, scope=scope)
     slot, report = take_slot(os.environ, args.timeout)
     children = {**(environ if environ is not None else os.environ), sd_gate_slots.SLOTS_VARIABLE: "0"}
     try:
         if slot is None:
             result = execute(root, detection, args.only, False, args.timeout, children,
-                             f"no gate slot came free within {args.timeout}s")
+                             f"no gate slot came free within {args.timeout}s", scope)
         else:
-            result = execute(root, detection, args.only, False, max(1, int(args.timeout - slot.waited)), children)
+            result = execute(root, detection, args.only, False, max(1, int(args.timeout - slot.waited)), children,
+                             scope=scope)
     finally:
         if slot is not None:
             slot.release()
     result["gate_slot"] = report
     return result
+
+
+def run_scope(args: argparse.Namespace, root: pathlib.Path, detection: sd_lib.Detection) -> sd_check_scope.Scope | None:
+    """What `--base` scopes the run to (sd:2072), or None without it; a bad pairing or declaration is a usage error."""
+    if args.base is None:
+        return None
+    if args.record_receipt:
+        raise UsageError("--record-receipt requires an actual full check")
+    if args.only is not None:
+        raise UsageError("--base scopes a whole run; it does not combine with --only")
+    try:
+        return sd_check_scope.decide(root, args.base, detection)
+    except sd_check_scope.DeclarationError as error:
+        raise UsageError(str(error)) from None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -336,6 +370,7 @@ def main(argv: list[str] | None = None) -> int:
             raise UsageError("--database requires --record-receipt")
         if args.record_receipt and (args.only or args.dry_run):
             raise UsageError("--record-receipt requires an actual full check")
+        args.scope = run_scope(args, root, detection)
         before, controlled = None, None
         if args.record_receipt:
             try:

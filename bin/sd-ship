@@ -280,13 +280,17 @@ def timing_plan(result: subprocess.CompletedProcess) -> dict:
         requested = report["requested_reviews"]
         phase, setup, total, candidates = (plan[key] for key in
                                            ("phase_seconds", "setup_seconds", "execution_seconds", "candidates"))
+        # sd:2041: the gate's own bound, beside the reviewers' phase. A plan
+        # without it is one phase for the gate and each reviewer, as before.
+        check = plan.get("check_seconds", phase)
         valid = (result.returncode == 0 and report.get("status") == "explained" and not report.get("authorship_refusal")
-                 and type(phase) is int and phase > 0 and type(setup) is int and setup == REVIEW_SETUP_SECONDS
+                 and all(type(bound) is int and bound > 0 for bound in (phase, check))
+                 and type(setup) is int and setup == REVIEW_SETUP_SECONDS
                  and type(total) is int and isinstance(candidates, list)
                  and type(requested) is int and 0 < requested <= len(candidates)
                  and all(isinstance(row, dict) and isinstance(row.get("name"), str)
                          and isinstance(row.get("recipient"), str) for row in candidates)
-                 and total == setup + phase * (1 + len(candidates)))
+                 and total == setup + check + phase * len(candidates))
     except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
         valid = False
     if not valid:
@@ -1685,7 +1689,9 @@ class Ship(SharedReview):
             # A BEHIND branch cannot merge whatever the gate says, and the gate
             # takes minutes: name it first (sd:2023).
             refuse_behind(observed, base)
-            self.save(local_gate=sd_local_gate.local_gate(self.api, self.root, head))
+            # Prepare ran this same gate and left a receipt at this head; a
+            # matching one answers instead of a second run (sd:2041).
+            self.save(local_gate=sd_local_gate.local_gate(self.api, self.root, head, base=base, database=self.database))
         observed = self.settled_ready(observed["number"], head, base, protection)
         self.abandon_copilot_review(observed["number"], head)
         self.require_copilot_clearance(observed["number"], observed, head)

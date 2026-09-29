@@ -1,0 +1,229 @@
+"""The local gate's run: `sd-check` at the exact head, in a clean worktree, with no way to post.
+
+`sd_local_gate` posts what this returns as the `sd/local-gate` status, and
+`sd-review --gate-check` reads it as the review's deterministic gate; this
+module is the half they share, so the review lane imports no code that
+posts (sd:2041).
+
+The worktree, not the operator's checkout: an uncommitted file, an untracked
+build product or a stale virtualenv in the checkout must not be what passed.
+The one file copied in is `CLAUDE.local.md`, when the checkout has it and does
+not track it, because that block is where a repository may say how it spells
+`check`; it is configuration, never code under test.
+
+Given a database, a run reuses a passing receipt `sd_gate_receipts` holds for
+the same head and binding instead of running the check again (sd:2041,
+sd:1912); what the binding names and why it also ages out is that module's
+docstring. A reused pass says so in its summary.
+
+Given a base ref, the run passes `--base` to `sd-check`, so a repository that
+declares a docs-only scope (`sd_check_scope`, sd:2072) runs only its docs
+command for a change that touches only docs paths, and the summary says
+`(docs-only)`.
+
+The child gets the caller's environment minus the variables that choose Python
+packages (`PYTHONPATH`, `PYTHONHOME`, `VIRTUAL_ENV`, `CONDA_PREFIX`,
+`__PYVENV_LAUNCHER__`), minus `PATH` entries inside the operator's checkout,
+and minus any `PATH` entry whose parent holds `pyvenv.cfg`, a virtualenv's
+`bin` wherever it lives. So an editable install cannot import the dirty
+checkout, and no virtualenv's interpreter answers for `python3`.
+
+It also gets `SD_LOCAL_GATE=1` (`GATE_VARIABLE`), and that is the gate's
+contract with the repository under test: this run is the gate, so build what
+the check needs here and borrow nothing from the operator. The pack's own
+Makefile reads it to provision a pinned in-tree virtualenv (sd:1918); a
+repository that does not read it runs as it always did.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import pathlib
+import shutil
+import subprocess
+import sys
+import tempfile
+from typing import Any, Callable, Mapping
+
+import sd_gate_receipts
+import sd_lib
+
+BIN = pathlib.Path(__file__).resolve().parent
+#: GitHub truncates nothing and refuses a description past 140 characters.
+DESCRIPTION_LIMIT = 140
+#: The gate's bound on each check, handed to `sd-check --timeout`. Its own
+#: 900-second default is for an interactive run; the gate's `make check` also
+#: builds a virtualenv (sd:1918) and shares the machine's test slots, and on a
+#: busy machine it ran past 900 s and failed as a timeout.
+CHECK_SECONDS = sd_lib.GATE_CHECK_SECONDS
+#: How much longer the child may take than `sd-check` needs to report its own timeout.
+REPORT_GRACE_SECONDS = 60
+#: The tail of `sd-check`'s own stderr the receipt keeps, as `sd-check` tails each check's.
+STDERR_TAIL_CHARS = 4000
+LOCAL_BLOCK = "CLAUDE.local.md"
+#: Variables that pick Python packages; the child must not inherit the caller's.
+DROPPED_ENVIRONMENT = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX", "__PYVENV_LAUNCHER__")
+#: Set to "1" in the child: the run is the gate, so the check provisions rather than borrows.
+GATE_VARIABLE = "SD_LOCAL_GATE"
+
+
+class GateError(RuntimeError):
+    """`git` could not set up or read the gate's worktree; the check did not run."""
+
+
+def gate_git(root: pathlib.Path, *args: str) -> str:
+    """`git <args>` in `root`, stripped; `GateError` on any failure, since a gate must not guess."""
+    try:
+        result = subprocess.run(["git", *args], cwd=root, text=True, capture_output=True, timeout=60, check=False)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise GateError(f"git could not finish: {error}") from None
+    if result.returncode:
+        raise GateError((result.stderr or result.stdout or "git failed").strip()[:2000])
+    return result.stdout.strip()
+
+
+def untracked_local_block(root: pathlib.Path) -> pathlib.Path | None:
+    """The checkout's untracked `CLAUDE.local.md`, the one file the worktree gets copied in."""
+    local = root / LOCAL_BLOCK
+    if local.is_file() and sd_lib.git_output(["ls-files", "--error-unmatch", LOCAL_BLOCK], root) is None:
+        return local
+    return None
+
+
+def gate_inputs(root: pathlib.Path, head: str) -> str:
+    """A 12-hex digest of what a gate run depends on beyond the commit's own tree."""
+    digest = hashlib.sha256(f"head {head}\n".encode())
+    local = untracked_local_block(root)
+    digest.update(b"local " + (local.read_bytes() if local else b"absent") + b"\n")
+    for path in sorted(BIN.iterdir()):
+        if path.is_file() and (path.suffix == ".py" or path.name.startswith("sd-")):
+            digest.update(f"pack {path.name}\n".encode() + path.read_bytes())
+    return digest.hexdigest()[:12]
+
+
+def gate_environment(root: pathlib.Path, environ: dict[str, str] | None = None) -> dict[str, str]:
+    """The caller's environment without package selectors, `PATH` entries inside `root`, or virtualenv `bin`s.
+
+    Plus `SD_LOCAL_GATE=1`, whatever the caller had it set to.
+    """
+    source = os.environ if environ is None else environ
+    env = {key: value for key, value in source.items() if key not in DROPPED_ENVIRONMENT}
+    top = root.resolve()
+    kept = [entry for entry in env.get("PATH", "").split(os.pathsep)
+            if entry and os.path.isabs(entry) and not pathlib.Path(entry).resolve().is_relative_to(top)
+            and not (pathlib.Path(entry).resolve().parent / "pyvenv.cfg").is_file()]
+    env["PATH"] = os.pathsep.join(kept)
+    env[GATE_VARIABLE] = "1"
+    return env
+
+
+#: How a caller runs the `sd-check` child: `(argv, env, cwd, timeout)` to `(exit code or None, stdout, stderr)`.
+Run = Callable[[list[str], dict[str, str], pathlib.Path, int], tuple[int | None, str, str]]
+
+
+def run_child(argv: list[str], env: dict[str, str], cwd: pathlib.Path, timeout: int) -> tuple[int | None, str, str]:
+    try:
+        result = subprocess.run(argv, cwd=cwd, text=True, capture_output=True, timeout=timeout, check=False, env=env)
+    except (OSError, subprocess.SubprocessError) as error:
+        return None, f"sd-check could not finish: {error}", ""
+    return result.returncode, result.stdout, result.stderr
+
+
+def base_ref(branch: str | None) -> str | None:
+    """The ref a pull request's base branch is compared at: the remote-tracking one, as `sd-ship` fetches it."""
+    return f"refs/remotes/origin/{branch}" if branch else None
+
+
+def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SECONDS, base: str | None = None,
+                      database: pathlib.Path | None = None, run: Run | None = None,
+                      environ: Mapping[str, str] | None = None) -> dict[str, Any]:
+    """`sd-check --json` in a clean detached worktree of `head`; the worktree is removed after.
+
+    Returns `{"head", "status", "exit_code", "summary", "report", "stderr"}`,
+    where `head` is the commit the worktree held after the run, read back
+    rather than assumed. The worktree is gone once this returns, so the
+    receipt keeps what `sd-check` said (sd:1872); only the status description
+    posted to GitHub is cut short.
+
+    `base` is a ref for `sd-check --base`; `environ` is what the gate's
+    environment is made from, the process's own by default. With a `database`, a matching
+    receipt answers instead of a run (the result then carries `reused`), and a
+    passing run leaves one when its binding held from before the run to after.
+    """
+    with tempfile.TemporaryDirectory(prefix="sd-local-gate-") as parent:
+        tree = pathlib.Path(parent) / "tree"
+        gate_git(root, "worktree", "add", "--detach", str(tree), head)
+        try:
+            if local := untracked_local_block(root):
+                shutil.copyfile(local, tree / LOCAL_BLOCK)
+            env = gate_environment(root, None if environ is None else dict(environ))
+            key = sd_gate_receipts.receipt_key(root, head)
+            identity = (sd_gate_receipts.gate_binding(tree, head, gate_inputs(root, head), base, env)
+                        if database is not None else None)
+            found = sd_gate_receipts.lookup(database, key, identity) if database and identity else None
+            if found is not None:
+                reading = dict(found["reading"], summary=f"{found['reading']['summary']} (reused)"[:DESCRIPTION_LIMIT],
+                               reused={"revision": found["revision"], "recorded_at": found["recorded_at"],
+                                       "age_seconds": found["age_seconds"]})
+                return {"head": gate_git(tree, "rev-parse", "HEAD"), **reading}
+            argv = [sys.executable, str(BIN / "sd-check"), "--json", "--timeout", str(timeout),
+                    *(["--base", base] if base else [])]
+            code, output, errors = (run or run_child)(argv, env, tree, timeout + REPORT_GRACE_SECONDS)
+            checked = gate_git(tree, "rev-parse", "HEAD")
+            reading = check_reading(code, output, errors)
+            if database and identity and reading["status"] == "success" and checked == head:
+                after = sd_gate_receipts.gate_binding(tree, head, gate_inputs(root, head), base, env)
+                scope = (reading["report"] or {}).get("scope") or {}
+                if after == identity and scope.get("mode") == identity["scope"]["mode"]:
+                    try:
+                        reading["receipt_revision"] = sd_gate_receipts.record_pass(database, key, identity, reading)
+                    except Exception as error:  # the pass stands; only its reuse is lost
+                        reading["receipt_error"] = str(error)
+        finally:
+            # The administrative entry goes with the directory; the temporary
+            # directory's own cleanup removes whatever the removal left.
+            sd_lib.git_output(["worktree", "remove", "--force", str(tree)], root)
+    return {"head": checked, **reading}
+
+
+def named_checks(report: dict[str, Any]) -> str:
+    """The checks a summary names: each that ran, or, in a docs-only run, the scope and the docs row."""
+    rows = [entry for entry in report.get("checks") or [] if isinstance(entry, dict)]
+    scope = report.get("scope")
+    if not (isinstance(scope, dict) and scope.get("mode") == "docs-only"):
+        return ", ".join(f"{row.get('name')} {row.get('status')}" for row in rows if row.get("status") != "absent")
+    # The three names read `skipped` in a docs-only run; the scope is what a reader needs.
+    if report.get("status") == "pass":
+        return "docs-only"
+    return "docs-only: " + ", ".join(f"{row.get('name')} {row.get('status')}" for row in rows if row.get("name") == "docs")
+
+
+def check_reading(code: int | None, output: str, errors: str = "") -> dict[str, Any]:
+    """`sd-check`'s answer as a status, a one-line summary, and what it said.
+
+    Only exit 0 with an overall `pass` is a success. `absent` (no entrypoint),
+    `skipped`, a configuration fault (exit 2) and a timeout all fail: nothing
+    that did not run the repository's checks may stand in for them.
+
+    `report` is the parsed `sd-check --json` object, whose per-check output
+    `sd-check` has already tailed, or None when there was none to parse.
+    `stderr` is the tail of `sd-check`'s own stderr, which is where a
+    configuration fault (exit 2) says what is wrong.
+    """
+    try:
+        report = json.loads(output) if code in (0, 1) else None
+    except ValueError:
+        report = None
+    if not isinstance(report, dict):
+        report = None
+    overall = report.get("status") if report else None
+    named = named_checks(report or {})
+    said = {"report": report, "stderr": errors[-STDERR_TAIL_CHARS:]}
+    if code == 0 and overall == "pass":
+        return {"status": "success", "exit_code": code, "summary": f"sd-check pass ({named})", **said}
+    if code is None:
+        return {"status": "failure", "exit_code": code, "summary": output[:DESCRIPTION_LIMIT], **said}
+    words = f"sd-check {overall or 'error'}" + (f" ({named})" if named else f" (exit {code})")
+    return {"status": "failure", "exit_code": code, "summary": words, **said}
