@@ -97,7 +97,8 @@ Do not rebase onto the squash; that needs a force-push.
 `sd ci local` switches a repository to the local gate; its dry run shows the changes, and `--apply` makes them.
 A pull request opened before the switch can still carry a failed check run at its head.
 A billing-blocked run is the common case.
-That run still blocks the merge, whatever `sd/local-gate` says: GitHub reports the pull request `unstable`, and `every_check` requires every check run to pass.
+Under a declared gap that run still blocks the merge, whatever `sd/local-gate` says: `every_check` requires every check run to pass.
+Under protection it does not block unless the protection requires it: GitHub reports the pull request `unstable` and allows the merge.
 Push a fresh commit to the branch, an empty one if nothing else is due, and prepare again.
 With the workflows off, nothing but the local gate runs on the new head.
 

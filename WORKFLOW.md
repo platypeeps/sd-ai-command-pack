@@ -155,8 +155,9 @@ After the switch:
   Under protection, the status is required beside the protection's own contexts.
 - Protection for such a repository should require `sd/local-gate`; `sd ci local` sets that.
   `sd-status` reports it as the one produced context, so a required workflow context shows as not produced.
-- A head that already carries a failed check run still refuses: a workflow that ran before the switch, or a billing-blocked one.
-  GitHub reports the pull request `unstable`, not `clean`, and under a declared gap `every_check` requires every check run to pass.
+- Under a declared gap, a head that already carries a failed check run still refuses: a workflow that ran before the switch, or a billing-blocked one.
+  GitHub reports the pull request `unstable`, not `clean`, and `every_check` requires every check run to pass.
+  Under protection, `unstable` merges: only the required checks and the local gate are read (sd:2075).
   Push a fresh commit to the branch; an empty one will do. Nothing runs on it but the local gate.
 - `sd fleet stamp` and `sd-review setup-github` lay no workflow and say why.
   Absence is not drift: `setup-github --check` prints `absent` and exits 0.
