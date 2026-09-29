@@ -1,18 +1,18 @@
-"""CI's `sd_db` pin carries the schema of the library this suite runs against.
+"""The gate's `sd_db` pin carries the schema of the library this suite runs against.
 
-sd:1381. `.github/workflows/tests.yml` checks out `platypeeps/system` at one
-commit and installs `sd_db` from it, so CI is reproducible: a change over there
+sd:1381. `.sd-system-rev` names one `platypeeps/system` commit or release tag,
+and the local gate installs `sd_db` from it
+(`.github/scripts/provision-gate-env.py`), so the gate is reproducible: a change over there
 cannot move this suite under it. The cost is that nothing advanced the pin. It
-sat at schema 10 while every machine ran schema 13, and CI was green about a
-library nobody runs. `sd_db` refuses a database newer than itself, so nothing
-crossed the versions inside CI and nothing went red.
+sat at schema 10 while every machine ran schema 13, and the retired CI was
+green about a library nobody runs. `sd_db` refuses a database newer than
+itself, so nothing crossed the versions there and nothing went red.
 
 This test is the alarm. It reads the pin's `SCHEMA_VERSION` through git and
 compares it with the installed library's. Locally the venv is installed from
 the system checkout (`make setup`), so a migration landed there and not in the
-pin fails here, on the next `make check`. In CI the library comes from the pin,
-so the comparison holds by construction; CI stays reproducible, and the
-local gate carries the check.
+pin fails here, on the next `make check`. In the local gate the library comes
+from the pin, so the comparison holds by construction there.
 
 Schema, not commit: a migration is what makes the two libraries disagree about
 a database, and a commit count would fail on documentation changes.
@@ -34,9 +34,8 @@ sys.path.insert(0, str(ROOT / "bin"))
 import sd_install  # noqa: E402
 import sd_library_guard  # noqa: E402
 
-WORKFLOW = ROOT / ".github" / "workflows" / "tests.yml"
-#: The `ref:` of the checkout step for `platypeeps/system`, comments allowed between.
-PIN = re.compile(r"repository: platypeeps/system\n(?:[ \t]+(?:#.*|\w+: .*)\n)*?[ \t]+ref: (\S+)")
+#: One line: the `platypeeps/system` ref the gate installs `sd_db` from.
+PIN_FILE = ROOT / ".sd-system-rev"
 
 
 #: What the pin may be (sd:1854): a full commit, or a release tag of the
@@ -47,20 +46,9 @@ TAG_PREFIX: str = sd_install.LIBRARY_TAGS.rstrip("*")
 PIN_FORM = re.compile(r"^(?:[0-9a-f]{40}|" + re.escape(TAG_PREFIX) + r"\d+(?:\.\d+)*)$")
 
 
-#: The one other system ref (sd:1542): the `sd-db-main-canary` job runs the
-#: suite against system `main`, never as a gate, so a removed `sd_db` name
-#: shows before the pin moves.
-CANARY_REF = "main"
-
-
-def pins(text: str) -> list[str]:
-    """The pinned system refs: every checkout of it except the canary's."""
-    return [ref for ref in PIN.findall(text) if ref != CANARY_REF]
-
-
-def job_block(text: str, name: str) -> str:
-    match = re.search(rf"^  {re.escape(name)}:\n((?:(?:    .*|[ \t]*)\n)*)", text, re.MULTILINE)
-    return match.group(1) if match else ""
+def pin() -> str:
+    """The one ref `.sd-system-rev` holds."""
+    return PIN_FILE.read_text(encoding="utf-8").strip()
 
 
 def pinned_schema(checkout: Path, ref: str) -> int | None:
@@ -79,10 +67,10 @@ def installed_schema() -> int | None:
 
 
 class ThePinIsReadable(unittest.TestCase):
-    def test_the_workflow_names_one_full_commit_or_release_tag(self):
-        found = pins(WORKFLOW.read_text(encoding="utf-8"))
-        self.assertEqual(len(found), 1, f"expected one platypeeps/system ref in {WORKFLOW}: {found}")
-        self.assertRegex(found[0], PIN_FORM,
+    def test_the_pin_file_holds_one_full_commit_or_release_tag(self):
+        lines = PIN_FILE.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 1, f"expected one platypeeps/system ref in {PIN_FILE}: {lines}")
+        self.assertRegex(lines[0], PIN_FORM,
                          "the pin is a full commit or an sd-db-v* release tag, not a branch")
 
     def test_a_release_tag_is_a_pin(self):
@@ -112,46 +100,9 @@ class ThePinIsReadable(unittest.TestCase):
                                capture_output=True)
             self.assertEqual(pinned_schema(repo, "sd-db-v0.1.0"), 15)
 
-    def test_the_only_unpinned_system_ref_is_the_non_blocking_canary(self):
-        text = WORKFLOW.read_text(encoding="utf-8")
-        self.assertEqual(PIN.findall(text).count(CANARY_REF), 1)
-        canary = job_block(text, "sd-db-main-canary")
-        self.assertIn(f"ref: {CANARY_REF}\n", canary)
-        self.assertRegex(canary, r"(?m)^    continue-on-error: true$",
-                         "a red canary must not block a merge")
-        self.assertIn("bash .github/scripts/run-tests.sh", canary)
 
-    def test_comments_between_repository_and_ref_are_skipped(self):
-        text = ("          repository: platypeeps/system\n"
-                "          # why\n"
-                "          ref: " + "a" * 40 + "\n")
-        self.assertEqual(pins(text), ["a" * 40])
-
-
-class TheCanarySkipsNothing(unittest.TestCase):
-    """sd:1557. The canary fails on a skipped test, as the unittest job does.
-
-    Without the gate, a system `main` that loses a capability a test skips on
-    leaves the canary green. Both jobs install opencode from one script, so its
-    live test runs in each, and its version and checksum are written once.
-    """
-
-    INSTALL = "run: bash .github/scripts/install-opencode.sh\n"
-    RUN = "run: bash .github/scripts/run-tests.sh\n"
-    GATE = "- name: Fail on skipped tests\n"
-    SKIPS = "grep -Eq 'skipped=[1-9][0-9]*' unittest-output.log"
-
-    def test_each_suite_job_installs_opencode_runs_then_fails_on_skips(self):
-        text = WORKFLOW.read_text(encoding="utf-8")
-        for name in ("unittest", "sd-db-main-canary"):
-            with self.subTest(job=name):
-                job = job_block(text, name)
-                self.assertEqual(job.count(self.INSTALL), 1, job)
-                self.assertEqual(job.count(self.RUN), 1, job)
-                self.assertEqual(job.count(self.GATE), 1, job)
-                self.assertIn(self.SKIPS, job[job.index(self.GATE):])
-                self.assertLess(job.index(self.INSTALL), job.index(self.RUN))
-                self.assertLess(job.index(self.RUN), job.index(self.GATE))
+class TheOpencodePinIsWrittenOnce(unittest.TestCase):
+    """sd:1557. The opencode version and checksum live in one script."""
 
     def test_the_opencode_version_and_checksum_are_written_once(self):
         definitions = re.compile(r"(?m)^\s*(OPENCODE_VERSION|OPENCODE_SHA256)\s*[:=]")
@@ -166,7 +117,7 @@ class TheCanarySkipsNothing(unittest.TestCase):
 
 class ThePinCarriesTheInstalledSchema(unittest.TestCase):
     def test_pin_schema_equals_installed_schema(self):
-        ref = pins(WORKFLOW.read_text(encoding="utf-8"))[0]
+        ref = pin()
         checkout = sd_install.system_checkout(dict(os.environ))
         installed = installed_schema()
         self.assertIsNotNone(installed, "no sd_db is installed here; run `make setup`")
@@ -175,10 +126,9 @@ class ThePinCarriesTheInstalledSchema(unittest.TestCase):
             pinned, f"cannot read SCHEMA_VERSION at {ref[:12]} in {checkout}; fetch that checkout")
         self.assertEqual(
             pinned, installed,
-            f"CI installs sd_db schema {pinned} (platypeeps/system {ref[:12]}), but this suite "
-            f"runs against schema {installed}. Move the ref in {WORKFLOW.relative_to(ROOT)} to "
-            "the system commit this library came from, and record the move in the comment "
-            "above it; or, if the pin is the newer one, reinstall with `make setup`.")
+            f"The gate installs sd_db schema {pinned} (platypeeps/system {ref[:12]}), but this "
+            f"suite runs against schema {installed}. Move the ref in {PIN_FILE.relative_to(ROOT)} "
+            "to the system commit this library came from, and say why in the commit; or, if the pin is the newer one, reinstall with `make setup`.")
 
 
 if __name__ == "__main__":

@@ -21,7 +21,7 @@ Because a missing record would otherwise mean both "provisioned before this was 
 An environment carrying that file is refused by every path -- the borrow, the symlink and a real local `.venv` alike -- and the refusal names the checkout to run `make setup` in, which rewrites the marker and clears it on success.
 `bin/sd_lib.py` and `hooks/pre-commit` read the same file and treat such an environment as absent.
 A `.venv` the checkout carries as a real directory is its own environment and is never compared against the record.
-The requirements files use `--require-hashes` locally and in CI.
+The requirements files use `--require-hashes`, in `make setup` and in the local gate.
 To update a dependency, change its pin and run the compile command from that file's header:
 
 ```bash
@@ -66,13 +66,13 @@ A narrowed run skips coverage combination and the installer coverage gate, then 
 The other three checks still run over their full scope.
 A narrowed run does not replace the full check before a push.
 
-`.github/scripts/run-tests.sh` uses every available CPU in CI.
-Local runs reserve one CPU when multiple CPUs are available.
+`.github/scripts/run-tests.sh` reserves one CPU when multiple CPUs are available.
+It uses every CPU when `CI` or `GITHUB_ACTIONS` has a non-empty value.
 Set `TEST_WORKERS` to override either default.
 Each shard reports its name, elapsed seconds, and exit status.
 
 Ruff checks `bin/` and `tests/`. Mypy checks `bin/`.
-The Makefile owns both path inventories. CI reads those inventories.
+The Makefile owns both path inventories.
 Missing optional ShellCheck, Bandit, or Zizmor tools produce warnings.
 Use `STRICT=1 make check` to make missing tools fail.
 This also requires a bash 3.2 interpreter.
@@ -81,7 +81,6 @@ The local lint parses tracked `*.sh` files through `.github/scripts/check-bash32
 The script enumerates its inputs from git.
 Set `SD_AI_COMMAND_PACK_BASH32` to override its space-separated interpreter candidates.
 Without bash 3.2, the script warns and passes unless `STRICT=1`.
-CI does not run this syntax check.
 
 Installer coverage requires **100% line and branch coverage** over `bin/sd_install.py`.
 The gate also checks file and statement floors.
@@ -90,21 +89,20 @@ Lower a floor only in the pull request that reduces the measured implementation.
 ## Main Branch Policy
 
 Every change to `main` requires a pull request.
-Branch protection on `main` requires a pull request, the strict `lint` and `unittest` checks, and enforce_admins.
+Branch protection on `main` requires a pull request, the strict `sd/local-gate` check, and enforce_admins.
 It requires no approving review, because the sole maintainer cannot approve their own pull request.
 [.github/sd-status.json](.github/sd-status.json) records that accepted `reviews` gap, its reason, and the condition that ends it.
 Run `bin/sd-status` to inspect live protection.
 
 Use the pack's ship workflow for publication, review and merge.
 `sd-ship merge` checks the protection object, the exact-head checks and the review findings before it merges.
-Keep the required contexts equal to the contexts that the current workflows produce.
+This repository has `repo.ci = local` and carries no GitHub Actions workflow.
+`sd-ship merge` runs `sd-check` in a fresh worktree and posts `sd/local-gate` on the head commit.
+WORKFLOW.md "No-CI mode" describes that gate.
 
-The matrix in `.github/workflows/tests.yml` currently runs Ubuntu with Python 3.14 only.
-CI does not verify other Python versions or macOS behaviour.
-**The macOS CI leg remains disabled** (R11-D4).
-The maintainer restores it manually at the rollout's end. The restoration has no scheduled date.
-The local bash syntax check does not replace macOS CI.
-Treat local results as evidence from the tested machine only.
+The gate runs on the maintainer's machine only.
+Nothing verifies other Python versions or operating systems.
+Treat gate results as evidence from the tested machine only.
 
 ## Payload Rules
 

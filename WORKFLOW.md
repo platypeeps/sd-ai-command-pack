@@ -159,6 +159,9 @@ After the switch:
   GitHub reports the pull request `unstable`, not `clean`, and under a declared gap `every_check` requires every check run to pass.
   Push a fresh commit to the branch; an empty one will do. Nothing runs on it but the local gate.
 - `sd fleet stamp` and `sd-review setup-github` lay no workflow and say why.
+  Absence is not drift: `setup-github --check` prints `absent` and exits 0.
+  A tracked route workflow never runs; `--check` names it `REMOVE`, and the stamp names it too.
+  Remove it with `sd-review setup-github --remove`, which also lifts its Dependabot guard; `--dry-run` previews.
 - Routing needs no workflow. `sd-ship prepare` routes in its local review pass and records the plan in the receipt.
   The route workflow only printed that plan to a job summary; nothing reads it.
 

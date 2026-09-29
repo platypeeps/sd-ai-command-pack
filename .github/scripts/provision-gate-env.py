@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Provision the local gate's own virtualenv, pinned as CI pins it (sd:1918).
+"""Provision the local gate's own virtualenv at the pinned `sd_db` (sd:1918).
 
 `sd-ship merge` runs `sd-check` for a `repo.ci = local` repository in a fresh
 detached worktree and exports `SD_LOCAL_GATE=1` (`bin/sd_local_gate.py`). In
 that mode the Makefile never borrows the main checkout's `.venv`: a borrowed
 environment is the operator's state, and its `sd_db` is whatever `make setup`
-last installed from the system checkout's HEAD, not the pin CI runs. So
+last installed from the system checkout's HEAD, not the pin. So
 `make check` calls this first, and it builds `.venv` in the worktree:
 
 * `requirements-dev.txt` and `requirements-security.txt` under
-  `--require-hashes`, as the `lint` and `unittest` jobs install them;
-* `sd_db` from the system checkout at the ref `tests.yml` pins, read from the
-  workflow rather than restated, so the gate and CI cannot drift apart;
+  `--require-hashes`;
+* `sd_db` from the system checkout at the ref `.sd-system-rev` holds: one
+  line, a full commit or an `sd-db-v*` release tag, or the gate fails;
 * nothing for opencode, which it cannot install on this platform: the live
   confinement test needs it, a skip fails the suite anyway, and this says so
   first, by name, instead of a whole suite later.
@@ -31,14 +31,12 @@ import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-WORKFLOW = ROOT / ".github" / "workflows" / "tests.yml"
+PIN_FILE = ROOT / ".sd-system-rev"
 VENV = ROOT / ".venv"
 #: Written into the environment once it is complete; a rerun may rebuild only a tree carrying it.
 MARKER = "sd-gate-environment"
-#: The checkout of `platypeeps/system` a job names, and the `ref:` under it (as tests/test_system_pin.py reads it).
-PIN = re.compile(r"repository: platypeeps/system\n(?:[ \t]+(?:#.*|\w+: .*)\n)*?[ \t]+ref: (\S+)")
-#: The canary job checks out system `main` on purpose; it is not a pin.
-CANARY_REF = "main"
+#: A full commit or an `sd-db-v*` release tag, as tests/test_system_pin.py reads it; both are immutable.
+PIN_FORM = re.compile(r"^(?:[0-9a-f]{40}|sd-db-v\d+(?:\.\d+)*)$")
 REQUIREMENTS = ("requirements-dev.txt", "requirements-security.txt")
 
 
@@ -47,11 +45,11 @@ class GateError(Exception):
 
 
 def pinned_ref(text: str) -> str:
-    """The one system ref `tests.yml` pins `sd_db` to."""
-    found = [ref for ref in PIN.findall(text) if ref != CANARY_REF]
-    if len(found) != 1:
-        raise GateError(f"expected one pinned platypeeps/system ref in {WORKFLOW.name}, found {found}")
-    return found[0]
+    """The one system ref `.sd-system-rev` pins `sd_db` to."""
+    lines = text.splitlines()
+    if len(lines) != 1 or not PIN_FORM.match(lines[0]):
+        raise GateError(f"{PIN_FILE.name} must hold one full commit or sd-db-v* tag, found {lines}")
+    return lines[0]
 
 
 def system_checkout(environ: dict[str, str]) -> pathlib.Path:
@@ -96,7 +94,11 @@ def main(argv: list[str]) -> int:
     python = argv[1] if len(argv) > 1 else sys.executable
     try:
         opencode = require_opencode()
-        ref = pinned_ref(WORKFLOW.read_text(encoding="utf-8"))
+        try:
+            text = PIN_FILE.read_text(encoding="utf-8")
+        except OSError as error:
+            raise GateError(f"cannot read the sd_db pin {PIN_FILE}: {error}") from error
+        ref = pinned_ref(text)
         checkout = system_checkout(dict(os.environ))
         require_commit(checkout, ref)
         clear_venv()
