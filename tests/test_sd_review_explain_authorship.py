@@ -83,6 +83,23 @@ class AdvisoryAuthorshipTests(ReviewFixture):
         self.assertFalse(next(row for row in result["chain"] if row["provider"] == "codex")["eligible"])
         self.assertTrue(next(row for row in result["chain"] if row["provider"] == "second")["eligible"])
 
+    def test_dependabot_commit_is_authored_by_github_and_excludes_no_reviewer(self):
+        """sd:2065: a bump says who wrote it by the identity GitHub gave it."""
+        root = self.make_repo()
+        subprocess.run(["git", "checkout", "-qb", "dependabot/fixture"], cwd=root, check=True)
+        (root / "requirements.txt").write_text("fixture==2\n")
+        subprocess.run(["git", "add", "requirements.txt"], cwd=root, check=True)
+        bot = {"GIT_AUTHOR_NAME": "dependabot[bot]",
+               "GIT_AUTHOR_EMAIL": "49699333+dependabot[bot]@users.noreply.github.com",
+               "GIT_COMMITTER_NAME": "GitHub", "GIT_COMMITTER_EMAIL": "noreply@github.com"}
+        subprocess.run(["git", "commit", "-qm", "Bump fixture from 1 to 2"], cwd=root, check=True,
+                       env={**os.environ, **bot})
+        result = self.explained(root)
+        self.assertFalse(result["authorship_refusal"])
+        self.assertEqual(result["authored_with"], ["github"])
+        self.assertEqual(result["authored_with_report"], "github")
+        self.assertTrue(all(row["eligible"] for row in result["chain"]))
+
     def test_unknown_advisory_plan_preserves_zero_shipping_reservations(self):
         root = self.branch()
         remote = "https://github.com/fixture/repo.git"

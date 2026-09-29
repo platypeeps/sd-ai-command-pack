@@ -4,6 +4,26 @@
 
 ### Added
 
+- **A Dependabot commit is attributed by the identity GitHub gives it
+  (sd:2065).** Dependabot writes no `Authored-with:`, so `sd-review` refused
+  every bump as `authored unknown` and `sd attribute` had no truthful value to
+  record. A commit whose author is `dependabot[bot]` with its fixed noreply
+  address and whose committer is `GitHub <noreply@github.com>` now reads as
+  `dependabot/github`: vendor `github`, which excludes no reviewer, and the
+  value the squash carries. A local rewrite changes the committer, so it says
+  nothing again; `sd attribute <sha> dependabot` records it by hand. A human
+  fix-up on the branch still needs its own trailer. The identity is a claim,
+  as a trailer is; the GitHub signature is not verified.
+
+- **`sd-ship prepare --catch-up` merges the base into a BEHIND branch
+  (sd:2023).** Under strict protection another landing left a branch behind,
+  and the recovery was a hand merge, a push, a review and a prepare. The flag
+  merges `origin/<base>` (no rebase, no force push), and the new head gets a
+  full-branch pass, so the review covers the branch's own diff and not the
+  base's code. A conflict aborts and leaves the branch unchanged. Merge now
+  names BEHIND as `base_moved`, before the local gate runs, and points at the
+  flag.
+
 - **Every repository gate takes a machine-wide slot (sd:1996).** `sd-check`,
   which every `sd-ship` gate runs, waits for one of `sd.gate_slots` slots
   before it runs a check; unset reads a quarter of the cores, `SD_GATE_SLOTS`
@@ -34,6 +54,23 @@
   cutover, recovery and every `publication-*` verb still run only in the main
   checkout. A library without `checkout` refuses a worktree by name.
 
+- **`sd-ship merge` accepts GitHub's `unstable` answer (sd:2075).** The
+  merge-rules poll from sd:2050 treated only `clean` as mergeable, so it
+  refused answerbook/mezmo_benchmark #583 after five reads: `sd/local-gate`,
+  the one required context, had passed, and only the optional CodeQL run was
+  still in progress. `unstable` with `mergeable` true is GitHub allowing the
+  merge, and it now passes readiness on both `repo.ci` paths. `blocked`,
+  `dirty`, `behind` and `mergeable` false still refuse, and a declared gap
+  still requires every check run to pass.
+
+- **`sd-ship merge` waits for GitHub's merge-rules answer after posting
+  `sd/local-gate` (sd:2050).** GitHub recomputes mergeability after a new
+  status, and one read refused #580 in mezmo_benchmark seconds before a retry
+  merged it, after a second full gate run. Under `repo.ci = local` merge reads
+  again up to five times, waiting 3, 6, 9 and 12 seconds. The refusal is now
+  `merge_rules_unconfirmed`, retryable, and names GitHub's last
+  `mergeable_state` and the time waited.
+
 - **`sd-research-kit render` registers in the file the dashboard reads
   (sd:2010).** Since system 350553a the dashboard reads
   `<config>/project-dashboard/documents.conf`, `<config>` being
@@ -60,6 +97,23 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **`sd-ship prepare` reads a hand-opened pull request's live body (sd:1878).**
+  The live body outranked the stored one only when a receipt named the pull
+  request. A pull request opened by hand has no receipt, so `prepare`
+  reviewed, linted and squashed its default body while GitHub showed the
+  author's. With no receipt and no `--body-file`, the one open pull request
+  from this branch of this repository is now read; `body_source` says
+  `live_pr`. A blank body, or more than one open pull request, falls back as
+  before.
+
+- **The pack's own GitHub Actions workflows are gone.** This repository gates
+  locally (`repo.ci = local`), so `tests.yml`, `pr-body-lint.yml` and
+  `sd-review-route.yml` never ran. The gate's `sd_db` pin moved from
+  `tests.yml` to `.sd-system-rev`, and a missing or malformed pin fails the
+  gate. `make audit` says there is no workflow for zizmor to audit.
+  `check-zizmor-personas.py` and its tests are deleted with their subject.
+  Dependabot no longer watches `github-actions`.
 
 - **The first `sd-ship prepare` of an item names its claim (sd:1928).**
   Associate-only was the silent default, so a forgotten `--deliver` merged

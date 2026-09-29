@@ -113,6 +113,11 @@ class ShipDouble(GitHubDouble):
         #: How many `GET /pulls/{n}` reads still answer the pre-push head, the
         #: way GitHub does for a second or so after a push lands (sd:1394).
         self.lagging_pull_reads = 0
+        #: How many `GET /pulls/{n}` reads answer `mergeable_state: blocked`
+        #: after a status post, the way GitHub did on #580 while it recomputed
+        #: the merge rules for a just-posted `sd/local-gate` (sd:2050).
+        self.blocked_after_status = 0
+        self.blocked_pull_reads = 0
 
     def _pull(self, pull):
         head = getattr(pull, "merged_head", None) or pull.head_sha(self.remote)
@@ -164,6 +169,7 @@ class ShipDouble(GitHubDouble):
             # The local gate's write (sd:1843), newest first as GitHub lists.
             record = {**body, "sha": path.rsplit("/", 1)[1], "creator": {"login": "fixture"}}
             self.statuses.insert(0, record)
+            self.blocked_pull_reads = self.blocked_after_status
             return 201, record
         if path.endswith("/statuses"):
             return 200, self.statuses
@@ -199,6 +205,9 @@ class ShipDouble(GitHubDouble):
             if self.lagging_pull_reads:
                 self.lagging_pull_reads -= 1
                 value["head"]["sha"] = LAGGING_HEAD
+            if self.blocked_pull_reads:
+                self.blocked_pull_reads -= 1
+                value["mergeable_state"] = "blocked"
             return 200, value
         if method == "PUT" and path.endswith("/merge"):
             number = int(path.split("/")[-2])
@@ -637,10 +646,75 @@ roles:
         review.assert_not_called()
         self.assertEqual(caught.exception.workflow["blocker"]["code"], "base_moved")
         self.assertIn("git merge origin/main", caught.exception.workflow["next_action"])
+        self.assertIn("--catch-up", caught.exception.workflow["next_action"])
         self.assertIsNone(self.operation().state.get("pull_request"))
         _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge origin/main into topic\n\nAuthored-with: human", "origin/main")
         self.assertEqual(self.prepare()["phase"], "ready_to_send")
         self.assertEqual(self.merge()["phase"], "merged")
+
+    def test_catch_up_merges_the_base_and_re_reviews_only_the_branchs_own_diff(self):
+        # sd:2023: a branch left behind by another landing needed a hand merge
+        # of origin/main, a push, a review and a prepare. `--catch-up` merges
+        # (no rebase, no force push) and the new head's pass is a full-branch
+        # one, so it reviews merge-base..head and not the code main brought.
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        before = _git(self.root, "rev-parse", "HEAD")
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        self.assertEqual(self.prepare("--catch-up")["phase"], "ready_to_send")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.assertEqual(_git(self.root, "rev-list", "--parents", "-n", "1", head).split()[1:],
+                         [before, _git(self.root, "rev-parse", "refs/remotes/origin/main")])
+        self.assertEqual(_git(self.remote.path, "rev-parse", "refs/heads/topic"), head)
+        fresh = self.operation().state["passes"][-1]
+        self.assertEqual(fresh["head"], head)
+        self.assertIsNone(fresh["base"], "a fix verification from the old head reviews main's commits too")
+        self.assertEqual(fresh["catch_up"]["from"], before)
+        # The merge gate runs at the new head or not at all.
+        with self.assertRaisesRegex(ship.Refusal, "--expected-head must name the current exact reviewed commit"):
+            self.operation("merge", "--manual", "--expected-head", before).merge()
+
+    def test_a_hand_merge_of_the_base_is_scoped_like_a_catch_up(self):
+        # A prepare that failed after its merge, or the merge sd-ship used to
+        # ask for by hand, leaves the same history; the scope follows it.
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        before = _git(self.root, "rev-parse", "HEAD")
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        _git(self.root, "fetch", "-q", "origin", "main:refs/remotes/origin/main")
+        _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge origin/main into topic\n\nAuthored-with: human", "origin/main")
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        fresh = self.operation().state["passes"][-1]
+        self.assertIsNone(fresh["base"])
+        self.assertEqual(fresh["catch_up"]["from"], before)
+
+    def test_a_fix_after_a_review_stays_a_fix_verification(self):
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        before = _git(self.root, "rev-parse", "HEAD")
+        (self.root / "src.py").write_text("value = 3\n")
+        _git(self.root, "commit", "-q", "-am", "fix\n\nAuthored-with: human")
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        fresh = self.operation().state["passes"][-1]
+        self.assertEqual(fresh["base"], before)
+        self.assertNotIn("catch_up", fresh)
+
+    def test_a_catch_up_before_any_review_is_an_ordinary_first_pass(self):
+        # Nothing was reviewed, so there is no history for the pass to cover.
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        self.assertEqual(self.prepare("--catch-up")["phase"], "ready_to_send")
+        [first] = self.operation().state["passes"]
+        self.assertNotIn("catch_up", first)
+        self.assertEqual(self.merge()["phase"], "merged")
+
+    def test_a_catch_up_that_conflicts_leaves_the_branch_as_it_was(self):
+        before = _git(self.root, "rev-parse", "HEAD")
+        self.remote.commit_on("main", "rival\n\nAuthored-with: human", files={"src.py": "value = 2\n"})
+        with patch.object(ship.Ship, "review") as review:
+            with self.assertRaisesRegex(ship.Refusal, "conflicts") as caught:
+                self.prepare("--catch-up")
+        review.assert_not_called()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "merge_conflict")
+        self.assertEqual(_git(self.root, "rev-parse", "HEAD"), before)
+        self.assertFalse((self.root / ".git/MERGE_HEAD").exists())
+        self.assertEqual(_git(self.root, "status", "--porcelain", "--untracked-files=no"), "")
 
     def test_a_moved_binding_re_reviews_the_same_head_instead_of_bricking_it(self):
         # sd:1390, live on #1140. Reuse was decided on head equality and the
@@ -4442,6 +4516,109 @@ class DeclaredGapCase(unittest.TestCase):
         self.assertEqual((gate["head"], gate["status"]), (self.head(), "success"))
         self.assertEqual(result["protection"]["declared_gap"], "unprotected")
 
+    # -- sd:2050: GitHub recomputes the merge rules after the gate's status --
+
+    # -- sd:2075: `unstable` is GitHub allowing the merge with an optional check open --
+
+    def ruleset_protection(self) -> None:
+        """A protection object requiring `route` only, as #583 required `sd/local-gate` only."""
+        self.double.rules = self.gating_rules()
+        self.double.rulesets = {42: {"id": 42, "name": "main", "enforcement": "active", "bypass_actors": []}}
+
+    def optional_check_open(self, *, mergeable: str = "MERGEABLE") -> None:
+        pull = next(iter(self.remote.pull_requests.values()))
+        pull.checks.append(self.check("Analyze (python)", status="in_progress", conclusion=None))
+        pull.mergeable, pull.merge_state_status = mergeable, "UNSTABLE"
+
+    def test_an_unstable_answer_after_the_gate_post_merges_without_waiting(self):
+        # sd:2075, answerbook/mezmo_benchmark #583: sd/local-gate success, the
+        # optional CodeQL run in progress, and five reads refused `unstable`.
+        self.ruleset_protection()
+        self.local_ci()
+        self.local_green()
+        self.optional_check_open()
+        with patch.object(ship.time, "sleep") as sleep:
+            self.merge()
+        self.assertEqual(self.puts(), 1)
+        self.assertEqual(pull_head_waits(sleep), [])
+
+    def test_an_unstable_answer_merges_without_a_local_gate(self):
+        self.ruleset_protection()
+        self.green()
+        self.optional_check_open()
+        self.merge()
+        self.assertEqual(self.puts(), 1)
+
+    def test_an_unstable_answer_github_cannot_merge_still_refuses(self):
+        self.ruleset_protection()
+        self.green()
+        self.optional_check_open(mergeable="CONFLICTING")
+        self.refuse(r"mergeable_state 'unstable', mergeable False", "merge_rules_unconfirmed")
+
+    def test_an_unstable_answer_under_a_declared_gap_still_needs_every_check(self):
+        self.declare()
+        self.local_ci()
+        self.local_green()
+        self.optional_check_open()
+        self.refuse(r"CI is not passing on .*: Analyze \(python\)", "ci_not_passing")
+
+    def test_a_blocked_answer_after_the_gate_post_is_read_again_until_clean(self):
+        self.declare()
+        self.local_ci()
+        self.local_green()
+        self.double.blocked_after_status = 2
+        with patch.object(ship.time, "sleep") as sleep:
+            self.merge()
+        self.assertEqual(self.puts(), 1)
+        self.assertEqual(self.double.blocked_pull_reads, 0)
+        self.assertEqual(pull_head_waits(sleep), [ship.MERGE_RULES_INTERVAL_SECONDS, 2 * ship.MERGE_RULES_INTERVAL_SECONDS])
+
+    def test_merge_rules_that_never_clear_refuse_with_githubs_last_answer(self):
+        self.declare()
+        self.local_ci()
+        self.local_green()
+        self.double.blocked_after_status = ship.MERGE_RULES_ATTEMPTS
+        with patch.object(ship.time, "sleep") as sleep:
+            with self.assertRaisesRegex(ship.Refusal, r"has not confirmed all required merge rules.*'blocked'.*5 reads") as caught:
+                self.merge()
+        workflow = caught.exception.workflow
+        self.assertEqual(workflow["blocker"]["code"], "merge_rules_unconfirmed")
+        self.assertEqual(workflow["state"], "retryable_failure")
+        waits = pull_head_waits(sleep)
+        self.assertEqual(waits, [ship.MERGE_RULES_INTERVAL_SECONDS * n for n in range(1, ship.MERGE_RULES_ATTEMPTS)])
+        self.assertLess(sum(waits), 60)
+        self.assertEqual(self.puts(), 0)
+
+    def test_without_a_posted_gate_a_blocked_answer_is_read_once(self):
+        self.declare()
+        self.green()
+        next(iter(self.remote.pull_requests.values())).merge_state_status = "BLOCKED"
+        with patch.object(ship.time, "sleep") as sleep:
+            self.refuse(r"has not confirmed all required merge rules", "merge_rules_unconfirmed")
+        self.assertEqual(pull_head_waits(sleep), [])
+
+    def test_a_behind_pull_request_is_named_without_a_local_gate(self):
+        self.declare()
+        self.green()
+        next(iter(self.remote.pull_requests.values())).merge_state_status = "BEHIND"
+        self.refuse(r"the pull request is BEHIND main", "base_moved")
+
+    def test_a_behind_pull_request_is_named_before_the_gate_runs(self):
+        # sd:2023: strict protection answers BEHIND, and the refusal said only
+        # that the merge rules were unconfirmed, after a full gate run.
+        self.declare()
+        self.local_ci()
+        self.local_green()
+        next(iter(self.remote.pull_requests.values())).merge_state_status = "BEHIND"
+        with patch.object(ship.time, "sleep") as sleep:
+            with self.assertRaisesRegex(ship.Refusal, "BEHIND") as caught:
+                self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "base_moved")
+        self.assertIn("--catch-up", caught.exception.workflow["next_action"])
+        self.assertEqual(self.gate_posts(), [])
+        self.assertEqual(pull_head_waits(sleep), [])
+        self.assertEqual(self.puts(), 0)
+
     def test_ci_local_with_a_failing_check_posts_failure_and_refuses(self):
         """The check passes in the operator's clone, where `.git` is a directory,
         and fails in the gate's worktree, where it is a file: the real run, and
@@ -4536,6 +4713,31 @@ class DeclaredGapCase(unittest.TestCase):
         self.assertEqual(result["protection"]["source"], "ruleset")
         self.assertEqual([entry["id"] for entry in result["protection"]["rulesets"]], [42])
         self.assertEqual(result["protection"]["required_status_checks"]["checks"], [{"context": "route", "app_id": 7}])
+
+    def test_a_ruleset_only_main_requiring_ci_is_path_a(self):
+        """The fleet's target shape (sd:1741): no classic object, one active
+        ruleset `main` requiring the strict aggregate `ci` from GitHub Actions
+        (app 15368), no bypass actor. A green `ci` merges once with no
+        declaration; a red one refuses and dispatches nothing (sd:1810)."""
+        tests = self.TESTS + "  ci:\n    needs: [unittest]\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n"
+        self.commit({".github/workflows/tests.yml": tests, ".github/workflows/sd-review-route.yml": self.ROUTE})
+        rules = self.gating_rules()
+        rules[2]["parameters"]["required_status_checks"] = [{"context": "ci", "integration_id": 15368}]
+        self.double.rules = rules
+        self.double.rulesets = {42: {"id": 42, "name": "main", "enforcement": "active", "bypass_actors": []}}
+        self.green()
+        pull = next(iter(self.remote.pull_requests.values()))
+        ci = {**self.check("ci"), "app": {"id": 15368}}
+        pull.checks.append({**ci, "conclusion": "failure"})
+        with self.assertRaisesRegex(ship.Refusal, r"required CI is not passing on [0-9a-f]{40}: ci$"):
+            self.merge()
+        self.assertEqual(self.puts(), 0)
+        pull.checks[-1] = ci
+        result = self.merge()
+        self.assertEqual(self.puts(), 1)
+        self.assertEqual(result["protection"]["source"], "ruleset")
+        self.assertEqual(result["protection"]["required_status_checks"],
+                         {"strict": True, "contexts": ["ci"], "checks": [{"context": "ci", "app_id": 15368}]})
 
     def test_a_ruleset_that_forbids_squash_refuses_before_any_merge_is_dispatched(self):
         """sd:1379. A ruleset's `pull_request` rule names the merge methods the

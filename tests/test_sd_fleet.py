@@ -132,6 +132,15 @@ class DryRun(Fleet):
         self.assertIn("repo.ci is local", line)
         self.assertIn("sd/local-gate", line)
 
+    def test_ci_local_names_the_removal_of_a_tracked_route_workflow(self) -> None:
+        """Its absence is not drift under `repo.ci = local`; its presence is a
+        dead file, and the plan names the supported way to remove it."""
+        root, remote = self.repo("local-route", {sd_fleet.ROUTE_PATH: "name: sd-review route\n"})
+        [plan] = self.plan([(root, remote)], ci="local")
+        self.assertNotIn(sd_fleet.ROUTE_PATH, [change["path"] for change in plan["changes"]])
+        [line] = [line for line in plan["adapted"] if line.startswith(sd_fleet.ROUTE_PATH)]
+        self.assertIn("sd-review setup-github --remove", line)
+
     def test_ci_github_lays_the_workflows_as_before(self) -> None:
         root, remote = self.repo("github-ci")
         [plan] = self.plan([(root, remote)], ci="github")
@@ -438,6 +447,18 @@ class ProtectionProbe(unittest.TestCase):
 
     def test_a_404_to_a_non_admin_is_unknown(self) -> None:
         self.assertEqual(sd_fleet.branch_protection(self.ROOT, ask=remote(admin=False)).state, "unknown")
+
+    def test_a_404_to_a_non_admin_reads_the_rulesets_first(self) -> None:
+        # GitHub hides classic protection from a non-admin behind 404 `Not
+        # Found`, but answers the rules endpoint; a gating ruleset settles it.
+        hidden = (None, "gh: Not Found (HTTP 404)")
+        answer = sd_fleet.branch_protection(self.ROOT, ask=remote(
+            admin=False, classic=hidden, rules=([PULL_REQUEST_RULE], ""), rulesets=GATING_RULESET))
+        self.assertEqual(answer.state, "protected")
+        self.assertIn("ruleset main (#7)", answer.reason)
+        answer = sd_fleet.branch_protection(self.ROOT, ask=remote(admin=False, classic=hidden))
+        self.assertEqual(answer.state, "unknown")
+        self.assertIn("without admin", answer.reason)
 
     def test_a_repository_without_a_default_branch_is_unknown(self) -> None:
         answers = {sd_lib.REPOSITORY_QUERY: ({"permissions": {"admin": True}}, "")}

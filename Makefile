@@ -73,10 +73,10 @@ PYTHON ?= $(shell if [ -x "$(BREW_PYTHON)" ]; then printf '%s' "$(BREW_PYTHON)";
 # `sd-check` in a fresh detached worktree with `SD_LOCAL_GATE=1` exported, and
 # there a borrowed environment is exactly what must not pass: it is the
 # operator's, and its `sd_db` is whatever `make setup` last took from the
-# system checkout's HEAD rather than the ref CI pins. So gate mode never
+# system checkout's HEAD rather than the pinned ref. So gate mode never
 # borrows. VENV is `.venv` in the worktree, whatever the caller exported, and
-# every lane first runs `gate-env`, which builds it pinned as `tests.yml` pins
-# CI. The variable is not passed on to recipes: the suite runs `make` in its
+# every lane first runs `gate-env`, which builds it at the ref `.sd-system-rev`
+# holds. The variable is not passed on to recipes: the suite runs `make` in its
 # own fixtures, and those must see the ordinary rules.
 ifeq ($(SD_LOCAL_GATE),1)
 override VENV := .venv
@@ -239,7 +239,7 @@ hooks:
 # counts; one inherited from the environment is ignored, so the full suite
 # stays the default. A run the selector narrowed skips `coverage combine` and
 # the installer gate, which only the full suite can meet; a run it widened to
-# the full suite keeps both. CI calls run-tests.sh itself and never passes it.
+# the full suite keeps both. The local gate runs the full suite.
 #
 # A narrowed run then exits 2, so that a zero from `test` means the full suite
 # ran with both coverage gates and means nothing else. Until sd:840 it printed
@@ -284,9 +284,9 @@ test:
 		PYTHON_BIN="$(VENV_PYTHON)" bash .github/scripts/check-installer-coverage.sh; \
 	fi
 
-# The one definition of what the Python linters cover. CI reads these through
+# The one definition of what the Python linters cover. Readers use
 # the lint-ruff-paths / lint-mypy-paths targets rather than restating them:
-# the workflow carried its own hand-copied list until 2026-08-29 and had
+# the retired CI workflow carried its own hand-copied list until 2026-08-29 and had
 # silently omitted every bin/ file, so each tool added since sd_route.py was
 # lint-clean locally and unlinted in CI. Derive it, do not duplicate it.
 #
@@ -316,9 +316,8 @@ lint-ruff-paths:
 lint-mypy-paths:
 	@printf '%s\n' "$(LINT_MYPY_PATHS)"
 
-# Pass STRICT=1 to turn missing-tool skips below into hard errors. That is
-# parity with the CI lint job, which always runs the ShellCheck lane and
-# never skips it. Ruff and mypy cover the paths named in LINT_RUFF_PATHS and
+# Pass STRICT=1 to turn missing-tool skips below into hard errors, so the
+# ShellCheck lane cannot skip. Ruff and mypy cover the paths named in LINT_RUFF_PATHS and
 # LINT_MYPY_PATHS above: Ruff over the tracked bin/ files and tests/, mypy
 # over the tracked bin/ files. The installer
 # package and the shipped payload that step 3e removed are not in either.
@@ -348,35 +347,25 @@ lint:
 	@STRICT="$(STRICT)" bash .github/scripts/check-bash32-syntax.sh
 
 # A scanner found on PATH is whatever version happens to be installed, while
-# CI runs the requirements-security.txt pin under --require-hashes. When the
-# two differ the gate is not reproducible: a newer scanner invents findings CI
-# never sees, an older one misses findings CI would catch, and either way the
-# local result says nothing about the pipeline. The fallback still runs -- it
+# `make setup` installs the requirements-security.txt pin under
+# --require-hashes. When the two differ the gate is not reproducible: a newer
+# scanner invents findings the pin never reports, an older one misses findings
+# the pin would catch. The fallback still runs -- it
 # is better than no audit -- but it announces the skew instead of hiding it.
 #
 # A scanner that is missing entirely is a silent pass: the `if` exits 0 and
 # `make audit` reports success having audited nothing. STRICT=1 makes that
-# fatal, matching the node and shellcheck lanes above, so a CI lane or a
+# fatal, matching the node and shellcheck lanes above, so the local gate or a
 # release gate can demand the audit actually ran.
-# The zizmor lane runs twice. The first is the gate, and it has been reporting
-# "No findings to report. Good job! (3 suppressed)" for as long as anyone has
-# looked; the second says what those three are. They are not suppressions
-# anybody wrote -- there is no zizmor configuration file here and no
-# `# zizmor: ignore` comment in any workflow -- they are findings carrying a
-# persona the default gate drops, and until sd:876 the only enumeration of
-# them was a sentence in a tracked-work note. The script asks zizmor for the
-# set instead of reciting it, and fails when a workflow earns a fourth one or
-# when a decision outlives its finding. The same binary is handed to both, so
-# the enumeration can never be measured by a different zizmor than the gate.
-# Neither run is chained behind the other: a workflow edit big enough to redden
-# the gate is exactly the edit most likely to have moved the persona-gated set,
-# so the run that would be skipped is the one worth having. Both statuses are
-# kept and the recipe fails if either does.
+# The zizmor lane audits `.github/workflows/` when the directory exists.
+# This repository gates locally (`repo.ci = local`) and carries no workflow,
+# so the lane says it has nothing to audit. A present directory is audited;
+# an absent one is not a pass that looks like an audit.
 audit:
 	@if [ -x "$(VENV_BIN)/bandit" ]; then \
 		"$(VENV_BIN)/bandit" -q -r --severity-level medium bin; \
 	elif command -v bandit >/dev/null 2>&1; then \
-		printf '%s\n' "warning: $(VENV_BIN)/bandit is missing; using an UNPINNED bandit from PATH ($$(bandit --version 2>&1 | head -1 | tr -d '\r')). CI uses the requirements-security.txt pin; run 'make setup' to match it."; \
+		printf '%s\n' "warning: $(VENV_BIN)/bandit is missing; using an UNPINNED bandit from PATH ($$(bandit --version 2>&1 | head -1 | tr -d '\r')). requirements-security.txt holds the pin; run 'make setup' to match it."; \
 		bandit -q -r --severity-level medium bin; \
 	elif [ "$(STRICT)" = "1" ]; then \
 		printf '%s\n' "error: bandit not found and STRICT=1; the Python security audit is required." >&2; \
@@ -384,15 +373,13 @@ audit:
 	else \
 		printf '%s\n' "warning: bandit not found; skipping Python security audit."; \
 	fi
-	@if [ -x "$(VENV_BIN)/zizmor" ]; then \
-		"$(VENV_BIN)/zizmor" --offline .github/workflows/; gate=$$?; \
-		"$(VENV_PYTHON)" .github/scripts/check-zizmor-personas.py --zizmor "$(VENV_BIN)/zizmor"; names=$$?; \
-		[ $$gate -eq 0 ] && [ $$names -eq 0 ]; \
+	@if [ ! -d .github/workflows ]; then \
+		printf '%s\n' "audit: no .github/workflows; no workflow to audit with zizmor."; \
+	elif [ -x "$(VENV_BIN)/zizmor" ]; then \
+		"$(VENV_BIN)/zizmor" --offline .github/workflows/; \
 	elif command -v zizmor >/dev/null 2>&1; then \
-		printf '%s\n' "warning: $(VENV_BIN)/zizmor is missing; using an UNPINNED zizmor from PATH ($$(zizmor --version 2>&1 | head -1 | tr -d '\r')). CI uses the requirements-security.txt pin; run 'make setup' to match it."; \
-		zizmor --offline .github/workflows/; gate=$$?; \
-		"$(PYTHON)" .github/scripts/check-zizmor-personas.py --zizmor zizmor; names=$$?; \
-		[ $$gate -eq 0 ] && [ $$names -eq 0 ]; \
+		printf '%s\n' "warning: $(VENV_BIN)/zizmor is missing; using an UNPINNED zizmor from PATH ($$(zizmor --version 2>&1 | head -1 | tr -d '\r')). requirements-security.txt holds the pin; run 'make setup' to match it."; \
+		zizmor --offline .github/workflows/; \
 	elif [ "$(STRICT)" = "1" ]; then \
 		printf '%s\n' "error: zizmor not found and STRICT=1; the workflow security audit is required." >&2; \
 		exit 1; \
@@ -402,7 +389,7 @@ audit:
 
 # WORKFLOW.md said `make check` ran `sd-docs-lint`, and nothing did:
 # `test` lints temporary fixture repositories, `sd-ship` lints at delivery
-# time, and CI ran neither against this checkout's own docs/work. The lint
+# time, and nothing ran either against this checkout's own docs/work. The lint
 # reads `sd_lib` and the working tree only, so it needs no database and no
 # provisioned library. Item 370.
 docs-lint:
@@ -418,10 +405,9 @@ fonts:
 
 # `full-check` is gone with step 3e: it ran a shipped script that no longer
 # exists, and every lane it wrapped that still has a subject is already a target
-# here. `check` is the four gates CI runs, with one lane CI does not have: the
+# here. `check` is the four gates `sd-check` runs for `sd/local-gate`. The
 # bash 3.2 parse inside `lint` runs only where a bash 3.2 exists, which is
-# this machine when it is a Mac and no runner (sd:10 criterion 17 cut the job
-# that built one).
+# this machine when it is a Mac.
 #
 # `test` runs last, and the order is load-bearing twice over (sd:840). `make`
 # stops at the first prerequisite that fails, and a narrowed `test` now fails

@@ -290,6 +290,24 @@ class SharedReview:
             argv += ["--base", base]
         return argv
 
+    def caught_up_pass(self, passes: list[dict], head: str, additional: bool) -> dict | None:
+        """Where the base was merged in since the last pass, when it was (sd:2023).
+
+        From the previous head, the range then holds every commit the base
+        brought in, and a fix verification would review code this branch never
+        touched, so the pass is full-branch. Read from git ancestry, not from
+        the `--catch-up` flag: a prepare that fails after the merge, or a merge
+        done by hand, must be scoped the same way on the next run.
+        """
+        base = self.state.get("base")
+        if not passes or additional or not base:
+            return None
+        previous = passes[-1]["head"]
+        fork = sd_lib.git_output(["merge-base", head, f"refs/remotes/origin/{base}"], self.root)
+        if not fork or is_ancestor(self.root, fork, previous):
+            return None
+        return {"from": previous, "base": fork}
+
     def review(self, head: str) -> None:
         passes = self.history.native(self.state)
         if not passes and (base := empty_branch_base(self.root, head)):
@@ -313,15 +331,19 @@ class SharedReview:
         # than a review. It resumes the complete prior history so no earlier
         # blocker is dropped, exactly as a post-cap request does.
         moved = not additional and self.binding_moved()
-        if moved:
+        caught_up = self.caught_up_pass(passes, head, additional)
+        full = moved or caught_up is not None
+        if full:
             prior = self.history.aggregate(self.state)
-        base = passes[-1]["head"] if passes and not (retry or additional or moved) else None
+        base = passes[-1]["head"] if passes and not (retry or additional or full) else None
         argv = self.review_argv(base)
         requested = getattr(self.args, "provider", None)
         passes.append({"head": head, "started_at": self.runtime.clock(), "base": base, "retry": retry,
                        "requested_provider": requested})
         if request:
             passes[-1]["additional_review_request"] = request
+        if caught_up is not None:
+            passes[-1]["catch_up"] = caught_up
         if moved:
             passes[-1]["review_binding_change"] = {"head": head, "recorded_at": self.runtime.clock(),
                                                    "superseded_binding": self.state.get("binding")}
@@ -329,7 +351,7 @@ class SharedReview:
             if prior:
                 prior_path = pathlib.Path(directory) / "prior-review.json"
                 prior_path.write_text(json.dumps(prior, sort_keys=True), encoding="utf-8")
-                argv += ["--resume-report" if retry or additional or moved else "--verify-report", str(prior_path)]
+                argv += ["--resume-report" if retry or additional or full else "--verify-report", str(prior_path)]
             result = self.execute_review(argv, head, passes)
         self.record_review(result, head, passes)
 

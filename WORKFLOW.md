@@ -155,10 +155,14 @@ After the switch:
   Under protection, the status is required beside the protection's own contexts.
 - Protection for such a repository should require `sd/local-gate`; `sd ci local` sets that.
   `sd-status` reports it as the one produced context, so a required workflow context shows as not produced.
-- A head that already carries a failed check run still refuses: a workflow that ran before the switch, or a billing-blocked one.
-  GitHub reports the pull request `unstable`, not `clean`, and under a declared gap `every_check` requires every check run to pass.
+- Under a declared gap, a head that already carries a failed check run still refuses: a workflow that ran before the switch, or a billing-blocked one.
+  GitHub reports the pull request `unstable`, not `clean`, and `every_check` requires every check run to pass.
+  Under protection, `unstable` merges: only the required checks and the local gate are read (sd:2075).
   Push a fresh commit to the branch; an empty one will do. Nothing runs on it but the local gate.
 - `sd fleet stamp` and `sd-review setup-github` lay no workflow and say why.
+  Absence is not drift: `setup-github --check` prints `absent` and exits 0.
+  A tracked route workflow never runs; `--check` names it `REMOVE`, and the stamp names it too.
+  Remove it with `sd-review setup-github --remove`, which also lifts its Dependabot guard; `--dry-run` previews.
 - Routing needs no workflow. `sd-ship prepare` routes in its local review pass and records the plan in the receipt.
   The route workflow only printed that plan to a job summary; nothing reads it.
 
@@ -273,8 +277,10 @@ stripped and listed in the result's `normalized`; any other owned line is
 refused by line number, with the expected value. So the body `sd-ship`
 published, fed back as `--body-file`, prepares again. Without `--body-file`,
 `prepare` reads an open pull request's live body, so an edit made on GitHub
-survives; the result's `body_source` says `file`, `live_pr`, `state` or
-`default`. `sd-ship body --item <item> [--body-file <file>] [--pr <n>]` prints
+survives; with no receipt, the pull request open for the branch is the one
+read, so a pull request opened by hand keeps its body. The result's
+`body_source` says `file`, `live_pr`, `state` or `default`.
+`sd-ship body --item <item> [--body-file <file>] [--pr <n>]` prints
 the body `prepare` would publish and runs the body lint on it. Its `scope`
 names each scope line the diff demands, such as `CI/review scope:` for a
 `.github/**` path, and whether the body carries it. The diff is the checkout's
@@ -547,7 +553,13 @@ mid-item; outside the runner, `SD_AUTHOR` or `--author` names it to
 review reads no declaration: every commit in the reviewed range is attributed
 by its own trailer, or by an `Attributes: <sha> <name>/<vendor>` trailer on a
 later commit in the range that `sd attribute` makes, and a commit with neither
-refuses the review by name rather than being guessed. `sd-ship merge` carries
+refuses the review by name rather than being guessed. A Dependabot commit is
+the one exception: its author `dependabot[bot]` with that account's noreply
+address, and its committer `GitHub <noreply@github.com>`, read as
+`dependabot/github`, a reserved value like `human` and no registry entry.
+The pair is a claim, as a trailer is, and a local rewrite names another
+committer, so the commit says nothing again until `sd attribute <sha>
+dependabot` records it. `sd-ship merge` carries
 into the squash each `Attributes:` line that names a commit the base already
 holds, so a repair of landed history survives the merge. `reviewer` is the first entry that is enabled, is of no vendor the
 range's trailers carry, is on no bill at its cap this month, and answers
