@@ -70,6 +70,13 @@
 
 ### Fixed
 
+- **`sd writing` runs from a linked worktree (sd:2024).** It keyed rows to
+  the worktree's own path, so every piece answered "no database piece". It
+  now keys rows to the main checkout and, through `sd_db.writing.checkout`,
+  reads piece files and gate reports from the worktree. Import, register,
+  cutover, recovery and every `publication-*` verb still run only in the main
+  checkout. A library without `checkout` refuses a worktree by name.
+
 - **`sd-ship merge` accepts GitHub's `unstable` answer (sd:2075).** The
   merge-rules poll from sd:2050 treated only `clean` as mergeable, so it
   refused answerbook/mezmo_benchmark #583 after five reads: `sd/local-gate`,
