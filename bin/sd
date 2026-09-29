@@ -2808,7 +2808,7 @@ def cmd_attribute(args: argparse.Namespace) -> int:
     if root is None:
         raise Refusal("not inside a git repository")
     registry, reason = sd_registry.read_or_report()
-    if reason and args.entry.strip() != sd_lib.HUMAN_AUTHOR:
+    if reason and args.entry.strip() not in sd_lib.RESERVED_AUTHORS:
         raise Refusal(f"{reason}; an attribution names an entry the registry has")
     sha, value, covered = sd_lib.attribute(root, args.commits, args.entry, registry)
     print(f"{sha[:12]} attributes {len(covered)} commit(s) to {value}")
@@ -3072,7 +3072,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="record who wrote commits that did not say, as one empty commit")
     attributer.add_argument("commits", help="a commit, or a `<from>..<to>` range, on this branch")
     attributer.add_argument(
-        "entry", help=f"a registry entry, or `{sd_lib.HUMAN_AUTHOR}` for the operator")
+        "entry", help=f"a registry entry, `{sd_lib.HUMAN_AUTHOR}` for the operator, "
+                      f"or `{sd_lib.DEPENDABOT_ENTRY}` for a bump rewritten after GitHub made it")
     attributer.set_defaults(handler=cmd_attribute)
 
     sd_work.register(groups, kept)

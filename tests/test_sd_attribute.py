@@ -523,5 +523,109 @@ class TheContentGateTests(AttributeFixture):
         )
 
 
+#: What GitHub records on a Dependabot commit, read off pack PR #1257 on
+#: 2026-09-29: the bot as author, GitHub's web-flow identity as committer.
+DEPENDABOT = ("dependabot[bot]", "49699333+dependabot[bot]@users.noreply.github.com")
+WEB_FLOW = ("GitHub", "noreply@github.com")
+
+
+class TheDependabotTests(AttributeFixture):
+    """sd:2065: a Dependabot commit says who wrote it by GitHub's identity pair.
+
+    Dependabot writes no trailer, and a person cannot add one without
+    rewriting the commit. Each case below goes through the reader, and each
+    near miss -- a spoofed name, a local rebase -- must stay silent.
+    """
+
+    def bot_commit(self, message: str = "build(deps): bump fixture from 1 to 2",
+                   author: tuple[str, str] = DEPENDABOT,
+                   committer: tuple[str, str] = WEB_FLOW) -> str:
+        target = self.root / f"bump{len(list(self.root.iterdir()))}.txt"
+        target.write_text("fixture==2\n", encoding="utf-8")
+        self.git("add", "-A")
+        subprocess.run(
+            ["git", "commit", "--quiet", "-m", message], cwd=str(self.root), check=True,
+            capture_output=True, text=True,
+            env={**os.environ,
+                 "GIT_AUTHOR_NAME": author[0], "GIT_AUTHOR_EMAIL": author[1],
+                 "GIT_COMMITTER_NAME": committer[0], "GIT_COMMITTER_EMAIL": committer[1]},
+        )
+        return self.git("rev-parse", "HEAD")
+
+    def test_a_dependabot_commit_reads_as_dependabot_without_a_trailer(self) -> None:
+        bump = self.bot_commit()
+        self.assertEqual(self.said()[bump], sd_lib.DEPENDABOT_AUTHOR)
+        self.assertEqual(self.vendors(), ("github",))
+
+    def test_a_trailer_in_a_dependabot_commit_still_outranks_the_identity(self) -> None:
+        bump = self.bot_commit("build(deps): bump\n\nAuthored-with: codex/openai")
+        self.assertEqual(self.said()[bump], "codex/openai")
+
+    def test_the_bot_name_with_another_email_is_not_dependabot(self) -> None:
+        """`git commit --author` sets a name in one flag; the pair is the claim."""
+        self.bot_commit(author=("dependabot[bot]", "fixture@example.invalid"))
+        with self.assertRaises(sd_lib.TrailerError):
+            self.vendors()
+
+    def test_a_dependabot_commit_rebased_locally_is_not_dependabot(self) -> None:
+        """A local rewrite keeps the author and names this machine as committer.
+
+        What the commit holds is then somebody's rewrite, which may carry
+        their changes; it says nothing until they say who they are.
+        """
+        self.bot_commit(committer=("Fixture", "fixture@example.invalid"))
+        with self.assertRaises(sd_lib.TrailerError):
+            self.vendors()
+
+    def test_a_mailmap_on_the_branch_does_not_make_anybody_dependabot(self) -> None:
+        """`.mailmap` is a file under review; the raw fields ignore it."""
+        (self.root / ".mailmap").write_text(
+            f"{DEPENDABOT[0]} <{DEPENDABOT[1]}> Fixture <fixture@example.invalid>\n"
+            f"{WEB_FLOW[0]} <{WEB_FLOW[1]}> Fixture <committer@example.invalid>\n",
+            encoding="utf-8")
+        self.bot_commit("chore: map myself", author=("Fixture", "fixture@example.invalid"),
+                        committer=("Fixture", "committer@example.invalid"))
+        self.git("config", "log.mailmap", "true")
+        with self.assertRaises(sd_lib.TrailerError):
+            self.vendors()
+
+    def test_a_human_fix_up_on_a_dependabot_branch_still_needs_its_trailer(self) -> None:
+        bump = self.bot_commit()
+        fix = self.commit("fix: pin the lockfile")
+        with self.assertRaises(sd_lib.TrailerError) as caught:
+            self.vendors()
+        self.assertIn(fix[:12], str(caught.exception))
+        self.assertNotIn(bump[:12], str(caught.exception))
+        _, _, covered = sd_lib.attribute(
+            self.root, f"{self.base}..HEAD", "claude", registry(claude="anthropic"))
+        self.assertEqual(covered, [fix], "the Dependabot commit already says")
+        self.assertEqual(sorted(self.vendors()), ["anthropic", "github"])
+
+    def test_a_dependabot_commit_is_not_attributed_over(self) -> None:
+        bump = self.bot_commit()
+        with self.assertRaises(sd_lib.TrailerError) as caught:
+            sd_lib.attribute(self.root, bump, "claude", registry(claude="anthropic"))
+        self.assertIn("outranks", str(caught.exception))
+
+    def test_sd_attribute_names_dependabot_for_a_rewritten_bump(self) -> None:
+        """The operator's word after a local rebase, the way `human` is theirs."""
+        rebased = self.bot_commit(committer=("Fixture", "fixture@example.invalid"))
+        _, value, covered = sd_lib.attribute(
+            self.root, rebased, "dependabot", registry(claude="anthropic"))
+        self.assertEqual((value, covered), (sd_lib.DEPENDABOT_AUTHOR, [rebased]))
+        self.assertEqual(self.said()[rebased], sd_lib.DEPENDABOT_AUTHOR)
+
+    def test_a_registry_entry_may_not_be_called_dependabot(self) -> None:
+        silent = self.commit("feat: something")
+        with self.assertRaises(sd_lib.TrailerError) as caught:
+            sd_lib.attribute(self.root, silent, "dependabot", registry(dependabot="anthropic"))
+        self.assertIn("hide its vendor", str(caught.exception))
+
+    def test_the_squash_body_check_knows_the_value(self) -> None:
+        import sd_ship_body  # noqa: PLC0415 - one test reads the body side
+        self.assertTrue(sd_ship_body.known_author(sd_lib.DEPENDABOT_AUTHOR, []))
+        self.assertFalse(sd_ship_body.known_author("dependabot/anthropic", []))
+
+
 if __name__ == "__main__":
     unittest.main()
