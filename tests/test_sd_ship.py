@@ -4518,6 +4518,50 @@ class DeclaredGapCase(unittest.TestCase):
 
     # -- sd:2050: GitHub recomputes the merge rules after the gate's status --
 
+    # -- sd:2075: `unstable` is GitHub allowing the merge with an optional check open --
+
+    def ruleset_protection(self) -> None:
+        """A protection object requiring `route` only, as #583 required `sd/local-gate` only."""
+        self.double.rules = self.gating_rules()
+        self.double.rulesets = {42: {"id": 42, "name": "main", "enforcement": "active", "bypass_actors": []}}
+
+    def optional_check_open(self, *, mergeable: str = "MERGEABLE") -> None:
+        pull = next(iter(self.remote.pull_requests.values()))
+        pull.checks.append(self.check("Analyze (python)", status="in_progress", conclusion=None))
+        pull.mergeable, pull.merge_state_status = mergeable, "UNSTABLE"
+
+    def test_an_unstable_answer_after_the_gate_post_merges_without_waiting(self):
+        # sd:2075, answerbook/mezmo_benchmark #583: sd/local-gate success, the
+        # optional CodeQL run in progress, and five reads refused `unstable`.
+        self.ruleset_protection()
+        self.local_ci()
+        self.local_green()
+        self.optional_check_open()
+        with patch.object(ship.time, "sleep") as sleep:
+            self.merge()
+        self.assertEqual(self.puts(), 1)
+        self.assertEqual(pull_head_waits(sleep), [])
+
+    def test_an_unstable_answer_merges_without_a_local_gate(self):
+        self.ruleset_protection()
+        self.green()
+        self.optional_check_open()
+        self.merge()
+        self.assertEqual(self.puts(), 1)
+
+    def test_an_unstable_answer_github_cannot_merge_still_refuses(self):
+        self.ruleset_protection()
+        self.green()
+        self.optional_check_open(mergeable="CONFLICTING")
+        self.refuse(r"mergeable_state 'unstable', mergeable False", "merge_rules_unconfirmed")
+
+    def test_an_unstable_answer_under_a_declared_gap_still_needs_every_check(self):
+        self.declare()
+        self.local_ci()
+        self.local_green()
+        self.optional_check_open()
+        self.refuse(r"CI is not passing on .*: Analyze \(python\)", "ci_not_passing")
+
     def test_a_blocked_answer_after_the_gate_post_is_read_again_until_clean(self):
         self.declare()
         self.local_ci()

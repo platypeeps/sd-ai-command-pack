@@ -152,7 +152,8 @@ Never allocate another review ID to reset spent passes or discard history.
   Every fact it pins must equal the live state, read as the status report reads it.
   An app, a team, a role or an admin bypass still refuses.
   The receipt's `protection.accepted_gaps` names the entries a merge honoured.
-  GitHub's merge rules must also pass.
+  GitHub's merge rules must also pass: `mergeable` true, and `mergeable_state` `clean` or `unstable`.
+  `unstable` means a check the protection does not require is pending or failed; the required ones are still read.
   Under `repo.ci = local`, merge reads GitHub's answer up to five times over 30 seconds after posting `sd/local-gate`.
   A pull request GitHub reports BEHIND refuses as `base_moved`, before the local gate runs.
   A refusal returns `manualRequired: true`; it changes no protection and requests no reviewer.
