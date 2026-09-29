@@ -20,8 +20,9 @@ This item bundles sd:2041, sd:1912 (the PRD in
 
 ## Requirements
 
-1. A passing gate run at a head leaves a receipt; prepare and the merge gate
-   at the same head and inputs read it instead of running the check again.
+1. Prepare's passing gate run at a head leaves a receipt; the merge gate at
+   the same head and inputs, on this machine, within 30 minutes, reads it
+   instead of running the check again. Nothing else reuses a receipt.
 2. Any gate prepare starts takes the sd:1996 machine-wide slot.
 3. Prepare's gate bound equals the merge gate's `CHECK_SECONDS`.
 4. A repository may declare a docs-only scope in its reviewed tree. When every
@@ -32,10 +33,17 @@ This item bundles sd:2041, sd:1912 (the PRD in
 
 ## Acceptance criteria
 
-- [x] A second gate at a head with an equal binding reuses the first one's
-      receipt; a changed input, environment variable, head or an aged receipt runs again.
+- [x] The merge gate at a head with an equal binding reuses prepare's
+      receipt; a changed input, environment variable, head or a receipt older
+      than 30 minutes runs again. A second prepare, or a second merge gate,
+      runs again.
 - [x] Prepare's gate takes a slot from the shared slot directory.
 - [x] With no `--review-timeout`, prepare's gate gets `sd_lib.GATE_CHECK_SECONDS`.
 - [x] A docs-only change with a declaration posts `sd-check pass (docs-only)`.
+
+Trust boundary: inputs outside the repository (external makefiles, tool
+files, machine state) are not bound. The short same-head window is the
+accepted residual risk. A repository that needs stronger guarantees uses the
+explicit dependency contract; sd:1912 stays open for that.
 
 The decisions, and what the binding does not cover, are in [design.md](design.md).

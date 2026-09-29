@@ -804,11 +804,14 @@ class LineBudgetTests(unittest.TestCase):
         # refusals, and a `check_seconds` bound in the timing plan beside the
         # reviewers' phase. The binding and its age limit are
         # `sd_gate_receipts`, outside the lane, so none of that is spent here.
+        # 4036 -> 4042 is the one-handoff window (sd:2041 review): prepare's
+        # gate check passes `reuse=False` and `sd_gate_run` takes `reuse` and
+        # `record`, so a receipt spans prepare to merge and nothing else.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4036,
+            4042,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

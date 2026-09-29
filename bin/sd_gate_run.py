@@ -13,8 +13,8 @@ not track it, because that block is where a repository may say how it spells
 
 Given a database, a run reuses a passing receipt `sd_gate_receipts` holds for
 the same head and binding instead of running the check again (sd:2041,
-sd:1912); what the binding names and why it also ages out is that module's
-docstring. A reused pass says so in its summary.
+sd:1912); what the binding names, its short window and its trust boundary are
+that module's docstring. A reused pass says so in its summary.
 
 Given a base ref, the run passes `--base` to `sd-check`, so a repository that
 declares a docs-only scope (`sd_check_scope`, sd:2072) runs only its docs
@@ -138,7 +138,8 @@ def base_ref(branch: str | None) -> str | None:
 
 def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SECONDS, base: str | None = None,
                       database: pathlib.Path | None = None, run: Run | None = None,
-                      environ: Mapping[str, str] | None = None) -> dict[str, Any]:
+                      environ: Mapping[str, str] | None = None, reuse: bool = True,
+                      record: bool = True) -> dict[str, Any]:
     """`sd-check --json` in a clean detached worktree of `head`; the worktree is removed after.
 
     Returns `{"head", "status", "exit_code", "summary", "report", "stderr"}`,
@@ -151,6 +152,9 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
     environment is made from, the process's own by default. With a `database`, a matching
     receipt answers instead of a run (the result then carries `reused`), and a
     passing run leaves one when its binding held from before the run to after.
+    `reuse=False` never reads one and `record=False` never writes one: prepare
+    only records and the merge gate only reuses, so a receipt spans one
+    prepare-to-merge handoff and nothing else.
     """
     with tempfile.TemporaryDirectory(prefix="sd-local-gate-") as parent:
         tree = pathlib.Path(parent) / "tree"
@@ -162,7 +166,7 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
             key = sd_gate_receipts.receipt_key(root, head)
             identity = (sd_gate_receipts.gate_binding(tree, head, gate_inputs(root, head), base, env)
                         if database is not None else None)
-            found = sd_gate_receipts.lookup(database, key, identity) if database and identity else None
+            found = sd_gate_receipts.lookup(database, key, identity) if reuse and database and identity else None
             if found is not None:
                 reading = dict(found["reading"], summary=f"{found['reading']['summary']} (reused)"[:DESCRIPTION_LIMIT],
                                reused={"revision": found["revision"], "recorded_at": found["recorded_at"],
@@ -173,7 +177,7 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
             code, output, errors = (run or run_child)(argv, env, tree, timeout + REPORT_GRACE_SECONDS)
             checked = gate_git(tree, "rev-parse", "HEAD")
             reading = check_reading(code, output, errors)
-            if database and identity and reading["status"] == "success" and checked == head:
+            if record and database and identity and reading["status"] == "success" and checked == head:
                 after = sd_gate_receipts.gate_binding(tree, head, gate_inputs(root, head), base, env)
                 scope = (reading["report"] or {}).get("scope") or {}
                 if after == identity and scope.get("mode") == identity["scope"]["mode"]:

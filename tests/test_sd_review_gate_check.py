@@ -71,13 +71,13 @@ class GateCheck(ReviewFixture):
         return sd_review.run_gate_check(root, sd_review.subprocess_runner, self.environment(), 120, "main",
                                         namespace(database=database))
 
-    def test_the_second_gate_check_at_a_head_reads_the_first_ones_receipt(self) -> None:
+    def test_prepare_records_a_receipt_and_never_reads_one(self) -> None:
+        """Reuse spans only prepare to merge: a second prepare at the head runs the check again."""
         root, database = self.repo()
         first, second = self.gate(root, database), self.gate(root, database)
         self.assertEqual((first["status"], first["source"]), ("pass", "gate"), json.dumps(first)[:2000])
-        self.assertEqual((second["status"], second["source"]), ("pass", "gate-receipt"))
-        self.assertEqual(len((self.tmp / "runs").read_text().splitlines()), 1)
-        self.assertEqual(second["head"], git(root, "rev-parse", "HEAD"))
+        self.assertEqual((second["status"], second["source"]), ("pass", "gate"))
+        self.assertEqual(len((self.tmp / "runs").read_text().splitlines()), 2)
 
     def test_the_merge_gate_reads_prepares_receipt(self) -> None:
         import sd_gate_run

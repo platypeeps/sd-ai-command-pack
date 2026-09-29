@@ -330,13 +330,21 @@ class Receipts(Repository):
             merged = self.gate(head)
         self.assertEqual((merged["status"], "reused" in merged, self.runs()), ("failure", False, 2))
 
-    def test_a_receipt_older_than_the_limit_is_not_reused(self) -> None:
+    def test_a_receipt_older_than_the_window_is_not_reused(self) -> None:
+        """The window is one prepare-to-merge handoff: 30 minutes, not hours.
+
+        Inputs outside the repository are not bound, so the window is what
+        limits a change there; 31 minutes after the pass, the check runs.
+        """
         head = self.counted()
         self.gate(head)
-        later = time.time() + sd_gate_receipts.MAX_AGE_SECONDS + 60
-        with mock.patch.object(sd_gate_receipts.time, "time", return_value=later):
+        now = time.time()
+        with mock.patch.object(sd_gate_receipts.time, "time", return_value=now + 29 * 60):
+            self.assertIn("reused", self.gate(head))
+        with mock.patch.object(sd_gate_receipts.time, "time", return_value=now + 31 * 60):
             self.assertNotIn("reused", self.gate(head))
         self.assertEqual(self.runs(), 2)
+        self.assertEqual(sd_gate_receipts.REUSE_WINDOW_SECONDS, 30 * 60)
 
     def test_without_a_database_nothing_is_read_or_written(self) -> None:
         head = self.counted()
@@ -353,6 +361,13 @@ class Receipts(Repository):
         [(_, body)] = api.posts
         self.assertEqual(body["state"], "success")
         self.assertTrue(body["description"].endswith("sd-check pass (check pass) (reused)"), body["description"])
+
+    def test_the_merge_gate_records_no_receipt(self) -> None:
+        """Only prepare's pass is a receipt; a merge gate's pass does not serve a later gate."""
+        head = self.counted()
+        for _ in range(2):
+            self.assertNotIn("reused", sd_local_gate.local_gate(Recorder(), self.root, head, database=self.database))
+        self.assertEqual(self.runs(), 2)
 
     def test_a_receipt_for_another_repository_at_the_same_head_is_not_read(self) -> None:
         head = self.counted()

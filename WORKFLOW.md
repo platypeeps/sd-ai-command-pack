@@ -148,8 +148,9 @@ After the switch:
   It refuses to post for any commit other than the one the worktree held.
 - The description carries `inputs <digest>` as provenance: the head, the copied `CLAUDE.local.md` and the pack's `bin/` files.
 - Every merge attempt posts a fresh status. `sd-ship prepare` runs this same gate, through `sd-review --gate-check`.
-  A pass leaves a receipt, and a later gate at the same head and binding reads it instead of running `sd-check` again.
-  The status then says `(reused)`; `bin/sd_gate_receipts.py` names the binding and its twelve-hour limit.
+  Prepare's pass leaves a receipt; the merge gate at the same head and binding, within 30 minutes, reads it instead of running `sd-check` again.
+  The status then says `(reused)`. Prepare never reads a receipt and the merge gate never writes one.
+  Inputs outside the repository are not bound; `bin/sd_gate_receipts.py` names the binding and this trust boundary.
 - Given the base branch, the gate passes `sd-check --base`: a repository's declared docs-only scope applies (sd:2072).
 - `sd-ship merge --watch` starts no remote watch: no remote check is coming, and the gate runs to completion in the merge (sd:1875).
 - The merge then requires that status as `success` at the head, posted by the authenticated account.

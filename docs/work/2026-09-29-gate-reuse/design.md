@@ -33,19 +33,35 @@ receipts claim less, and say so:
 | each command's executable, by path and bytes | a new `make` or `cargo` is a different check |
 | interpreter path, version and bytes | `sd-check` itself runs on it |
 | the gate's whole environment, every variable by name and value | the gate forwards it whole; `MAKEFLAGS` or `PATH` can choose what runs |
-| age of at most 12 hours | bounds what the rest cannot name |
+| one prepare-to-merge handoff, at most 30 minutes old | bounds what the rest cannot name |
 
-Not bound: a tool a Makefile reaches through another tool, network answers,
-and machine load. The gate is a self-hosted
-runner, not a hermetic build, and its docstring already says so. The receipt
-therefore claims: this machine's gate passed this commit with these inputs,
-recently. That is the claim a CI system makes when it reads a green check on
-a head.
+## Trust boundary
+
+Inputs outside the repository are not bound: an external makefile an unchanged
+`MAKEFILES` names, a file a tool reads, a tool a Makefile reaches through
+another tool, network answers and machine state. Review showed the case: keep
+`MAKEFILES=/external/rules.mk`, change that file from a passing recipe to a
+failing one, and the binding stays equal. The gate is a self-hosted runner,
+not a hermetic build, so it cannot bind them.
+
+The operator's decision (2026-09-29) is to narrow the window, not to widen the
+binding. A receipt serves exactly one handoff: prepare records it, and the
+merge gate of the same head on this machine reads it within
+`REUSE_WINDOW_SECONDS` (30 minutes). Prepare never reads a receipt, and the
+merge gate never writes one. A change outside the repository inside that
+window is the accepted residual risk. A repository that needs more uses the
+explicit dependency contract, `sd-check --record-receipt` with a declared
+inventory; sd:1912 stays open for that.
+
+The receipt therefore claims: this machine's gate passed this commit with
+these inputs minutes ago.
 
 Conservative choices, flagged for the operator:
 
-- **12-hour age limit.** A prepare and its merge are minutes to hours apart.
-  A longer limit saves nothing observed; a shorter one may rerun a slow merge.
+- **30-minute window, one handoff.** The first cut allowed 12 hours and any
+  later gate. That bounded nothing a reviewer could check, so the window is
+  now the prepare-to-merge handoff alone; a merge started later runs the
+  check.
 - **Only successes are recorded.** A failure always reruns.
 - **Every fault means no receipt.** No library, no database, an unreadable
   row, or an unresolvable tool runs the check.

@@ -1577,7 +1577,8 @@ def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], t
 
     `sd-ship prepare` asks for this under `repo.ci = local`, so the merge gate
     that follows finds this run's receipt at the same head and binding and does
-    not run the check a second time; and it reuses a receipt it finds itself.
+    not run the check a second time. It never reads a receipt itself: reuse
+    spans only the prepare-to-merge handoff.
     The child still runs through `runner`, so the gate's deadline ends its
     whole process group (sd:1482). Without the library there is no receipt,
     and the check simply runs.
@@ -1597,7 +1598,8 @@ def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], t
 
     try:
         gate = sd_gate_run.check_in_worktree(root, head, timeout=timeout, base=sd_gate_run.base_ref(branch),
-                                             database=database, run=through_runner, environ=env)
+                                             database=database, run=through_runner, environ=env,
+                                             reuse=False)
     except sd_gate_run.GateError as error:
         gate = {"status": "failure", "exit_code": None, "stderr": str(error), "head": head}
     checks = (gate.get("report") or {}).get("checks")
@@ -2393,7 +2395,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reuse-check", action="store_true", help="reuse a matching explicit full-check receipt; otherwise rerun")
     parser.add_argument("--gate-check", metavar="BRANCH",
                         help="branch scope: run the check as the local gate does, against origin/BRANCH, "
-                             "reusing or leaving a gate receipt at HEAD")
+                             "leaving a gate receipt at HEAD for the merge gate")
     parser.add_argument("--verify-report", help="prior branch review JSON to verify with --base")
     parser.add_argument("--resume-report", help="incomplete prior review JSON whose findings must survive a full-branch retry")
     parser.add_argument("--base", help="branch-only exact ancestor SHA for one fix verification")

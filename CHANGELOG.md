@@ -7,16 +7,20 @@
 - **One passing local gate per head (sd:2041, sd:1912).** Under `repo.ci =
   local`, `sd-ship prepare` runs its check as the merge gate does -- a clean
   worktree at the head, the gate's environment, `sd-review --gate-check` --
-  and a pass leaves a receipt in the workflow database. The merge gate, and a
-  later prepare, at the same head and binding read the receipt instead of a
-  second run, and the status says `(reused)`. The binding is the head, its
-  tree, the gate inputs (every pack `bin/` file and an untracked
+  and a pass leaves a receipt in this machine's workflow database. The merge
+  gate of the same head, within 30 minutes (`REUSE_WINDOW_SECONDS`), reads it
+  instead of a second run, and the status says `(reused)`. Prepare never
+  reads a receipt and the merge gate never writes one. The binding is the
+  head, its tree, the gate inputs (every pack `bin/` file and an untracked
   `CLAUDE.local.md`), the scope, the detected commands, each command's
   executable, the interpreter and the gate's whole environment, every
-  variable by name and value; a receipt also ages out after
-  twelve hours. The gate's bound in prepare is now the merge gate's 3600 s,
-  not the reviewers' 1800 s, unless `--review-timeout` names one; the timing
-  plan carries it as `check_seconds`.
+  variable by name and value. Inputs outside the repository (external
+  makefiles, tool files, machine state) are not bound; the short same-head
+  window is the accepted residual risk, and a repository that needs more uses
+  the explicit dependency contract (sd:1912). The gate's bound in prepare is
+  now the merge gate's 3600 s, not the reviewers' 1800 s, unless
+  `--review-timeout` names one; the timing plan carries it as
+  `check_seconds`.
 
 - **A declared docs-only check scope (sd:2072).** A repository may track
   `.github/sd-check-scope.json` naming `docs_paths` globs and a

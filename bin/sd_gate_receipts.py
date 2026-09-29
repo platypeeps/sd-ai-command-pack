@@ -3,9 +3,11 @@
 `sd-ship prepare` and the `sd-ship merge` local gate each ran the repository's
 full check on the same head, so every pull request paid for it twice. Both now
 run it the same way -- `sd_gate_run.check_in_worktree`, a clean detached
-worktree at the exact head with the gate's environment -- and a pass leaves a
-receipt in the workflow database. The next gate run whose binding is equal
-reads the receipt instead of running the check again.
+worktree at the exact head with the gate's environment. Prepare's pass leaves a
+receipt in this machine's workflow database, and the merge gate at the same
+head, with an equal binding, within `REUSE_WINDOW_SECONDS`, reads it instead of
+running the check again. Only that one handoff reuses: prepare never reads a
+receipt and the merge gate never writes one.
 
 The binding is what this module can name about a run, and nothing weaker:
 
@@ -26,12 +28,16 @@ variable may choose what a check runs, and a hand-kept list of the ones that
 matter would miss the next one. The cost is fewer reuses: a prepare and a
 merge started from shells that differ in any variable run the check twice.
 
-It does not name what a check reads on its own: a tool its Makefile reaches
-through another tool, a network answer, the machine's load. The gate never
-claimed those; it is a self-hosted runner, not a hermetic build. So a receipt
-also ages out after `MAX_AGE_SECONDS`, and only a success is ever recorded. A
-receipt proves that this machine's gate passed this commit with these inputs
-recently; it does not prove the check is deterministic.
+The trust boundary: inputs outside the repository are not bound. An external
+makefile named by an unchanged `MAKEFILES`, a file a tool reads, a tool its
+Makefile reaches through another tool, a network answer, machine state: any of
+these can change between prepare and merge and the binding stays equal. The
+gate never claimed them; it is a self-hosted runner, not a hermetic build. The
+short same-head window is the accepted residual risk, and only a success is
+ever recorded. A receipt proves that this machine's gate passed this commit
+with these inputs minutes ago; it does not prove the check is deterministic.
+A repository that needs more uses the explicit dependency contract,
+`sd-check --record-receipt` with a declared inventory (sd:1912).
 
 Every fault here -- no library, no database, an unreadable row, a tool that
 does not resolve -- means "no receipt", and the check runs. Evidence that
@@ -53,10 +59,12 @@ import sd_check_scope
 import sd_lib
 
 KEY_PREFIX = "sd-gate-receipt:v1:"
-#: How long a receipt stands. The binding cannot name every input a check
-#: reads, so time bounds what it misses; a prepare and its merge are hours apart
-#: at most, and a receipt older than that is not what saved the second run.
-MAX_AGE_SECONDS = 12 * 3600
+#: How long a receipt stands: one prepare-to-merge handoff on this machine.
+#: The binding cannot name inputs outside the repository -- an external
+#: makefile, a tool's own files, machine state -- so a change there inside this
+#: window is the accepted residual risk; a repository that needs more declares
+#: the explicit `sd-check --record-receipt` contract instead (sd:1912).
+REUSE_WINDOW_SECONDS = 30 * 60
 WRITER = "sd-local-gate"
 
 
@@ -109,7 +117,7 @@ def lookup(database: pathlib.Path, key: str, identity: Mapping[str, Any], now: f
             revision, row = ship.read(connection, key)
         age = (time.time() if now is None else now) - float(row.get("recorded_at", "nan"))
         reading = row.get("reading")
-        if (row.get("writer") != WRITER or row.get("binding") != identity or not 0 <= age <= MAX_AGE_SECONDS
+        if (row.get("writer") != WRITER or row.get("binding") != identity or not 0 <= age <= REUSE_WINDOW_SECONDS
                 or not isinstance(reading, dict) or reading.get("status") != "success"):
             return None
         return {"reading": reading, "revision": revision, "recorded_at": row["recorded_at"], "age_seconds": round(age)}

@@ -97,7 +97,7 @@ An unreadable database stops execution instead of ignoring operator controls.
 | `--draft` | Apply draft routing. |
 | `--json` | Emit structured results. |
 | `--reuse-check` | Explicitly reuse eligible full-check evidence; otherwise run the deterministic gate. |
-| `--gate-check BRANCH` | Branch scope: run the gate as the local gate does against `origin/BRANCH`, reusing or leaving a gate receipt; `sd-ship prepare` passes it under `repo.ci = local`. |
+| `--gate-check BRANCH` | Branch scope: run the gate as the local gate does against `origin/BRANCH`, leaving a gate receipt for the merge gate; `sd-ship prepare` passes it under `repo.ci = local`. |
 | `--timeout SECONDS` | Set the per-phase timeout for the gate and each provider; unset, the gate gets 3600 and each provider 1800. |
 
 | Exit | Meaning |

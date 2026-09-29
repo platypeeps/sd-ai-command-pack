@@ -67,7 +67,8 @@ def local_gate(api: Any, root: pathlib.Path, head: str, *, base: str | None = No
     """Run `sd-check` at `head`, or reuse its receipt, and post the result; `base` is the base branch."""
     inputs = gate_inputs(root, head)
     try:
-        result = check_in_worktree(root, head, base=base_ref(base), database=database)
+        # The merge gate only reads prepare's receipt; its own pass records none (sd:2041).
+        result = check_in_worktree(root, head, base=base_ref(base), database=database, record=False)
     except GateError as error:
         raise Refusal(str(error), code="command_failed", boundary="runtime", state="retryable_failure",
                       next_action="Inspect the command error, resolve its cause, then retry.") from None
