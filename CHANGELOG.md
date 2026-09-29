@@ -4,6 +4,15 @@
 
 ### Added
 
+- **Every repository gate takes a machine-wide slot (sd:1996).** `sd-check`,
+  which every `sd-ship` gate runs, waits for one of `sd.gate_slots` slots
+  before it runs a check; unset reads a quarter of the cores, `SD_GATE_SLOTS`
+  overrides it for one run, and CI takes none. The pack's own test harness
+  used a cap alone (sd:1541), and on 2026-09-28 nine gates across repositories
+  reached a load average of 141 on 16 cores. Both now share
+  `bin/sd_gate_slots.py`. A queued gate says so on stderr, the wait counts
+  against `--timeout`, and a holder's checks run with `SD_GATE_SLOTS=0`.
+
 - **`sd ci local` switches a repository to local CI (sd:1914).** Run from a
   checkout, it sets `repo.ci` to `local`, makes `sd/local-gate` the one
   required status check with `strict` on -- in classic protection, or in each
@@ -17,6 +26,16 @@
   the remedy, a fresh commit.
 
 ### Fixed
+
+- **`sd-research-kit render` registers in the file the dashboard reads
+  (sd:2010).** Since system 350553a the dashboard reads
+  `<config>/project-dashboard/documents.conf`, `<config>` being
+  `$SYSTEM_TOOLS_CONFIG`, else `$XDG_CONFIG_HOME/system`, else
+  `~/.config/system`. The renderer still looked in the dashboard checkout,
+  found no file there, and printed `dashboard not registered` on every render,
+  even for a repository the dashboard already listed. It now resolves the path
+  by the dashboard's rule. `SD_DASHBOARD_HOME` is gone: nothing else read the
+  checkout.
 
 - **`sd-ship`'s squash subject is the pull request's title (sd:1876).**
   `prepare` stores the newest non-merge commit subject when no `--title` is
