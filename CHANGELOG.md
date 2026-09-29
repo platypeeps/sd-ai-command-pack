@@ -74,6 +74,13 @@
 
 ### Fixed
 
+- **Jev can no longer lower a review (sd:2132).** `sd-review` replaced the
+  routed tier with Jev's choice, so an answer of `skip` or `cheap` removed a
+  review the policy asked for. An answer below the routed tier now keeps the
+  routed tier and records what Jev said as `below_routed` in the `jev` block;
+  the route reason names it. Answers at or above the routed tier are
+  unchanged.
+
 - **`sd writing` runs from a linked worktree (sd:2024).** It keyed rows to
   the worktree's own path, so every piece answered "no database piece". It
   now keys rows to the main checkout and, through `sd_db.writing.checkout`,
