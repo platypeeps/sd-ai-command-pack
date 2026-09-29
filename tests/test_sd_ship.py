@@ -673,6 +673,29 @@ roles:
         with self.assertRaisesRegex(ship.Refusal, "--expected-head must name the current exact reviewed commit"):
             self.operation("merge", "--manual", "--expected-head", before).merge()
 
+    def test_a_hand_merge_of_the_base_is_scoped_like_a_catch_up(self):
+        # A prepare that failed after its merge, or the merge sd-ship used to
+        # ask for by hand, leaves the same history; the scope follows it.
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        before = _git(self.root, "rev-parse", "HEAD")
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        _git(self.root, "fetch", "-q", "origin", "main:refs/remotes/origin/main")
+        _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge origin/main into topic\n\nAuthored-with: human", "origin/main")
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        fresh = self.operation().state["passes"][-1]
+        self.assertIsNone(fresh["base"])
+        self.assertEqual(fresh["catch_up"]["from"], before)
+
+    def test_a_fix_after_a_review_stays_a_fix_verification(self):
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        before = _git(self.root, "rev-parse", "HEAD")
+        (self.root / "src.py").write_text("value = 3\n")
+        _git(self.root, "commit", "-q", "-am", "fix\n\nAuthored-with: human")
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        fresh = self.operation().state["passes"][-1]
+        self.assertEqual(fresh["base"], before)
+        self.assertNotIn("catch_up", fresh)
+
     def test_a_catch_up_before_any_review_is_an_ordinary_first_pass(self):
         # Nothing was reviewed, so there is no history for the pass to cover.
         self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})

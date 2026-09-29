@@ -290,15 +290,23 @@ class SharedReview:
             argv += ["--base", base]
         return argv
 
-    def caught_up_pass(self, passes: list[dict], additional: bool) -> dict | None:
-        """The `--catch-up` record when this pass must be full-branch (sd:2023).
+    def caught_up_pass(self, passes: list[dict], head: str, additional: bool) -> dict | None:
+        """Where the base was merged in since the last pass, when it was (sd:2023).
 
-        From the previous head, the range holds every commit the base brought
-        in, and a fix verification would review code this branch never
-        touched. With no earlier pass the review is simply the first one.
+        From the previous head, the range then holds every commit the base
+        brought in, and a fix verification would review code this branch never
+        touched, so the pass is full-branch. Read from git ancestry, not from
+        the `--catch-up` flag: a prepare that fails after the merge, or a merge
+        done by hand, must be scoped the same way on the next run.
         """
-        caught_up = getattr(self, "caught_up", None)
-        return caught_up if passes and not additional else None
+        base = self.state.get("base")
+        if not passes or additional or not base:
+            return None
+        previous = passes[-1]["head"]
+        fork = sd_lib.git_output(["merge-base", head, f"refs/remotes/origin/{base}"], self.root)
+        if not fork or is_ancestor(self.root, fork, previous):
+            return None
+        return {"from": previous, "base": fork}
 
     def review(self, head: str) -> None:
         passes = self.history.native(self.state)
@@ -323,7 +331,7 @@ class SharedReview:
         # than a review. It resumes the complete prior history so no earlier
         # blocker is dropped, exactly as a post-cap request does.
         moved = not additional and self.binding_moved()
-        caught_up = self.caught_up_pass(passes, additional)
+        caught_up = self.caught_up_pass(passes, head, additional)
         full = moved or caught_up is not None
         if full:
             prior = self.history.aggregate(self.state)

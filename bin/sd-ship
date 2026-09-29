@@ -1614,8 +1614,8 @@ class Ship(SharedReview):
 
         A merge, never a rebase, so the next push is a fast-forward of the
         branch already pushed and no reviewed head is orphaned. A conflict is
-        aborted, so the branch is left exactly as it was. The new head is then
-        reviewed and, at merge, gated like any other.
+        aborted, so the branch is left exactly as it was. The review scopes
+        the new head from ancestry, and merge gates it like any other.
         """
         if git(self.root, "status", "--porcelain", "--untracked-files=no"):
             raise Refusal("--catch-up needs a clean working tree", code="dirty_worktree", boundary="input",
@@ -1629,9 +1629,7 @@ class Ship(SharedReview):
             raise Refusal(f"merging origin/{base} into {self.branch} conflicts; the branch is unchanged{notes}",
                           code="merge_conflict", boundary="ci", state="operator_decision",
                           next_action=f"Run git merge origin/{base}, resolve the conflict, commit, then run prepare again.")
-        caught = current_head(self.root)
-        self.caught_up = {"from": head, "base": git(self.root, "rev-parse", remote), "head": caught}
-        return caught
+        return current_head(self.root)
 
     def merge(self) -> dict:
         if not self.state.get("pull_request"):
