@@ -1100,10 +1100,7 @@ class Ship(SharedReview):
         if getattr(self.args, "catch_up", False) and not self.current_with(base, head):
             head = self.catch_up(base, head)
         self.assert_current_base(base, head)
-        # A merge-forward's subject names a branch operation, not the change;
-        # the newest commit the branch adds that is not a merge does (sd:1377).
-        title = (self.args.title or self.state.get("title")
-                 or git(self.root, "log", "-1", "--no-merges", "--format=%s", f"refs/remotes/origin/{base}..{head}"))
+        title = self.args.title or self.state.get("title") or self.default_title(base, head)
         if not title or re.match(r"(?i)wip\b", title):
             raise Refusal("provide a final --title; wip titles never reach the default branch")
         body, deliver, claim, local_work = self.publication_claim()
@@ -1204,6 +1201,21 @@ class Ship(SharedReview):
             code="pull_head_mismatch", boundary="runtime", state="retryable_failure",
             next_action="Compare the branch on origin with the pull request's head, then retry prepare.",
         )
+
+    def default_title(self, base: str, head: str) -> str:
+        """The title `prepare` may assume when none is given: a one-commit branch's subject.
+
+        A merge-forward's subject names a branch operation, so merges never
+        count (sd:1377). On a longer branch the newest subject may describe
+        only the last commit, and it reached main that way (sd:2097).
+        """
+        span = f"refs/remotes/origin/{base}..{head}"
+        count = int(git(self.root, "rev-list", "--count", "--no-merges", span) or 0)
+        newest = git(self.root, "log", "-1", "--no-merges", "--format=%s", span)
+        if count > 1:
+            raise Refusal(f'provide --title; the branch has {count} commits, '
+                          f'and the newest subject ("{newest}") may describe only the last')
+        return newest
 
     def current_with(self, base: str, head: str) -> bool:
         """Whether `head` already contains the fetched `origin/<base>`."""
@@ -1891,8 +1903,8 @@ def adjudication_flags(action) -> None:
 def squash_title(pull: dict, prepared: str) -> str:
     """The squash subject: the pull request's live title, else the prepared one (sd:1876).
 
-    `prepare` stores the newest non-merge commit subject when no `--title` is
-    given, and an adopted or retitled pull request keeps its own title; the
+    `prepare` stores a one-commit branch's subject when no `--title` is given
+    (sd:2097), and an adopted or retitled pull request keeps its own title; the
     title a reader saw on the pull request is the one main should carry. A
     `wip` title still never reaches the default branch.
     """

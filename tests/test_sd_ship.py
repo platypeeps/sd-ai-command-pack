@@ -620,6 +620,30 @@ roles:
         self.assertEqual(self.operation().state["title"], "change")
         self.assertEqual(self.remote.pull(result["pull_request"]["number"]).title, "change")
 
+    def test_one_commit_without_a_title_uses_its_subject(self):
+        # sd:2097: a one-commit branch keeps the default; the subject is the change.
+        self.assertEqual(_git(self.root, "rev-list", "--count", "--no-merges", "origin/main..HEAD"), "1")
+        result = self.prepare()
+        self.assertEqual(self.operation().state["title"], "change")
+        self.assertEqual(self.remote.pull(result["pull_request"]["number"]).title, "change")
+
+    def test_several_commits_without_a_title_are_refused(self):
+        # sd:2097: the newest subject of an 11-commit branch became the PR
+        # title (ui-design PR #16) and described only the last commit.
+        _git(self.root, "commit", "--allow-empty", "-qm", "fix a typo\n\nAuthored-with: human")
+        with patch.object(ship.Ship, "review") as review:
+            with self.assertRaisesRegex(ship.Refusal, r'provide --title; the branch has 2 commits, '
+                                                      r'and the newest subject \("fix a typo"\) may describe only the last'):
+                self.prepare()
+        review.assert_not_called()
+        self.assertIsNone(self.operation().state.get("pull_request"))
+
+    def test_several_commits_with_a_title_use_it(self):
+        _git(self.root, "commit", "--allow-empty", "-qm", "fix a typo\n\nAuthored-with: human")
+        result = self.prepare("--title", "Switch the widget to local CI")
+        self.assertEqual(self.operation().state["title"], "Switch the widget to local CI")
+        self.assertEqual(self.remote.pull(result["pull_request"]["number"]).title, "Switch the widget to local CI")
+
     def test_the_squash_subject_is_the_pull_requests_title(self):
         # sd:1876: prepare stored the newest commit subject, and the merge
         # used it even when the pull request carried a different title.

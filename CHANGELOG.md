@@ -47,6 +47,15 @@
 
 ### Fixed
 
+- **`sd-ship prepare` no longer titles a multi-commit branch after its newest
+  commit (sd:2097).** With no `--title` and no stored title, prepare used the
+  newest non-merge subject, so an 11-commit branch opened as a pull request
+  named for its last fix (ui-design PR #16). A one-commit branch still uses
+  its subject. A branch of two or more non-merge commits is refused before the
+  review, and the refusal names the count and the subject it would have used.
+  Merges still never count (sd:1377), and `merge` still squashes with the live
+  pull request title (sd:1876).
+
 - **`sd-ship merge` accepts GitHub's `unstable` answer (sd:2075).** The
   merge-rules poll from sd:2050 treated only `clean` as mergeable, so it
   refused answerbook/mezmo_benchmark #583 after five reads: `sd/local-gate`,
