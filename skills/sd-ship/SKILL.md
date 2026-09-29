@@ -22,6 +22,9 @@ When the value is `controlled` and the gates pass, merge; do not ask the operato
 Installation grants no permission.
 Shared contributors do not revoke permission; existing ownership, protection, review, and CI gates still apply.
 A refusal stops execution.
+When another ship operation owns the repository, rerun `prepare` or `merge` with `--wait <seconds>`; do not write a retry loop.
+`reconcile` and `adjudicate` also take the lock but cannot wait for it; rerun them once the holder is gone.
+`sd runner status` names the holder under `ship_locks`; a file under `ship-locks/` is not a hold.
 Do not change gates to obtain a merge.
 An existing manual operator path needs separate authorization; a gate refusal does not grant it.
 Standing permission starts no background work and does not enable `runner_merge: auto` on the repository row.
@@ -36,7 +39,9 @@ Do not substitute an unrequested provider.
 Nine steps coordinate the executable operations below.
 First verify the actual scope and inspect its check output.
 A slice may ship with later item criteria open.
-Only `--deliver` claims the whole item; every acceptance criterion then needs evidence.
+Only `--deliver` claims the whole item; for a work item, every acceptance criterion then needs evidence.
+The first prepare of an item names its claim: `--deliver` on the item's last PR, `--associate-only` on an earlier one.
+Without either flag, the first prepare refuses; a reprepare keeps the stored claim.
 Small changes need no placeholder work item.
 The checkout holds one writer: this session in its own worktree, or the runner in its clone.
 The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is the rule; do not ship from a checkout another session is writing in.
@@ -82,6 +87,7 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    Stop and obtain permission before that history rewrite.
 7. **Merge through the authorized adapter.**
    It uses `gh pr merge --squash --match-head-commit <the reviewed sha> -t "<title> (#N)" -b "<body>"`.
+   `<title>` is the pull request's current title, not the last commit subject.
    Keep the explicit title and body; exclude `wip:` subjects from main.
    Put contiguous trailers in the body's final paragraph.
    Never use the CLI's branch-deletion option.
@@ -120,13 +126,15 @@ Itemless publication rejects commit flags, runner authority, and whole-item deli
 It creates no task row, `Work:` line, `Item:`, or `Delivers:` trailer.
 Never allocate another review ID to reset spent passes or discard history.
 
-- `sd-ship prepare --item ID --json` reviews, pushes, and opens or reconciles the PR.
+- `sd-ship prepare --item ID --deliver|--associate-only --json` reviews, pushes, and opens or reconciles the PR.
   It returns `ready_to_send` and never merges.
   `--title` and `--body-file` supply the PR description.
   Without `--body-file`, an open PR's live body is the description, found by branch when no receipt names one; reprepare preserves the delivery claim.
   The sd-ai-command-pack checkout's `WORKFLOW.md`, section **The path for a change**, lists the body lines sd-ship owns.
-- `sd-ship body --item ID [--body-file FILE]` prints the body prepare would publish and its body lint.
-  It reads no sd state, calls no GitHub API, and exits non-zero on a refusal or a lint failure.
+- `sd-ship body --item ID [--body-file FILE] [--pr N]` prints the body prepare would publish and its body lint.
+  Its `scope` says whether the diff demands a scope line, such as `CI/review scope:` for `.github/**`, and whether the body has it.
+  The diff is the checkout's HEAD; `--pr N` lints that pull request's files and, without `--body-file`, its live body.
+  It reads no sd state, calls GitHub only for `--pr`, and exits non-zero on a refusal or a lint failure.
 - Optional commits require `--path FILE` for each file, `--message-file FILE`, and `--author ENTRY`.
   Directories and a pre-populated index are invalid.
   Actual provider/vendor attribution belongs on the commit.
@@ -145,6 +153,8 @@ Never allocate another review ID to reset spent passes or discard history.
   An app, a team, a role or an admin bypass still refuses.
   The receipt's `protection.accepted_gaps` names the entries a merge honoured.
   GitHub's merge rules must also pass.
+  Under `repo.ci = local`, merge reads GitHub's answer up to five times over 30 seconds after posting `sd/local-gate`.
+  A pull request GitHub reports BEHIND refuses as `base_moved`, before the local gate runs.
   A refusal returns `manualRequired: true`; it changes no protection and requests no reviewer.
 - `--watch --wait-seconds 900` starts one bounded fail-fast CI watcher.
   Its persisted start prevents another automatic watch on rerun.

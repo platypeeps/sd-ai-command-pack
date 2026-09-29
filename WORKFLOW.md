@@ -117,8 +117,24 @@ These run only when asked by name.
 ## No-CI mode
 
 A repository whose `repo.ci` row says `local` runs no GitHub Actions (sd:1843).
-Set the row with `sd-db.sh repo ci <path> local`; `github` is the default.
-Every reader treats a missing column, row or library as `github`.
+`github` is the default. Every reader treats a missing column, row or library as `github`.
+
+Switch a repository with `sd ci local`, run from its checkout (sd:1914).
+It is a dry run; `--apply` makes the changes, and a second run finds none.
+It needs `admin` on the repository and makes three changes, each only where it does not hold yet:
+
+- It sets `repo.ci` to `local`, as `sd-db.sh repo ci <path> local` does.
+- It makes `sd/local-gate` the one required status check, `strict` on, in whichever mechanism the default branch uses.
+  Classic protection has its required checks replaced.
+  A repository ruleset keeps every other rule; only its status-check rule changes, or is added.
+  The dropped contexts are named: their workflows no longer run, and a required context that never reports blocks every merge.
+  A branch protected classically with no required checks refuses; add the check in the branch settings.
+  A required check it cannot rewrite stops the run before any write: an organization ruleset's, or another protected branch's.
+- A private repository has Actions disabled outright.
+  A public one keeps Actions on for its dynamic workflows (CodeQL, Dependabot, Copilot).
+  Each workflow its files declare is disabled.
+
+After the switch:
 
 - `sd-ship merge` checks the reviewed head out into a clean, detached `git worktree`.
   It runs `sd-check` there, not in your checkout, and removes the worktree after.
@@ -137,9 +153,15 @@ Every reader treats a missing column, row or library as `github`.
   Missing, failed, pending, naming another commit, or from another account: each refuses.
 - Under a declared gap, the status replaces the `pull_request` workflow runs `every_check` asks for.
   Under protection, the status is required beside the protection's own contexts.
-- Protection for such a repository should require `sd/local-gate`.
+- Protection for such a repository should require `sd/local-gate`; `sd ci local` sets that.
   `sd-status` reports it as the one produced context, so a required workflow context shows as not produced.
+- A head that already carries a failed check run still refuses: a workflow that ran before the switch, or a billing-blocked one.
+  GitHub reports the pull request `unstable`, not `clean`, and under a declared gap `every_check` requires every check run to pass.
+  Push a fresh commit to the branch; an empty one will do. Nothing runs on it but the local gate.
 - `sd fleet stamp` and `sd-review setup-github` lay no workflow and say why.
+  Absence is not drift: `setup-github --check` prints `absent` and exits 0.
+  A tracked route workflow never runs; `--check` names it `REMOVE`, and the stamp names it too.
+  Remove it with `sd-review setup-github --remove`, which also lifts its Dependabot guard; `--dry-run` previews.
 - Routing needs no workflow. `sd-ship prepare` routes in its local review pass and records the plan in the receipt.
   The route workflow only printed that plan to a job summary; nothing reads it.
 
@@ -256,9 +278,14 @@ published, fed back as `--body-file`, prepares again. Without `--body-file`,
 `prepare` reads an open pull request's live body, so an edit made on GitHub
 survives; with no receipt, the pull request open for the branch is the one
 read, so a pull request opened by hand keeps its body. The result's
-`body_source` says `file`, `live_pr`, `state` or `default`. `sd-ship body --item <item> [--body-file <file>]` prints the body
-`prepare` would publish and runs the body lint on it. It reads no sd state,
-calls no GitHub API, and exits non-zero on a refusal or a lint failure. A merge
+`body_source` says `file`, `live_pr`, `state` or `default`.
+`sd-ship body --item <item> [--body-file <file>] [--pr <n>]` prints
+the body `prepare` would publish and runs the body lint on it. Its `scope`
+names each scope line the diff demands, such as `CI/review scope:` for a
+`.github/**` path, and whether the body carries it. The diff is the checkout's
+HEAD against `origin/HEAD`; with `--pr` it is that pull request's files, and
+without `--body-file` its live body is read. It reads no sd state, calls the
+GitHub API only for `--pr`, and exits non-zero on a refusal or a lint failure. A merge
 made without `sd-ship` writes the trailers by hand, in the order above.
 
 After the remote confirms the delivering merge, `sd work deliver <row-id>
@@ -321,10 +348,18 @@ which the installer places in `~/.claude/agents`.
   close each one when it merges.
 - **Iterate on the fast path; gate once before the push.** While fixing, run
   `make check CHANGED="<paths>"`, which runs only the tests those paths need
-  plus an always-run set. Before the push, run the full `make check` once. On
-  a shared machine set `SD_GATE_SLOTS=1`: each gate already runs a test worker
-  on nearly every core, and overlapping gates slow all of them. Only the full
-  gate counts as evidence; a narrowed run exits 2 to say so.
+  plus an always-run set. Before the push, run the full `make check` once.
+  Only the full gate counts as evidence; a narrowed run exits 2 to say so.
+- **Gates share the machine through slots.** Every `sd-check` run, and so
+  every gate `sd-ship prepare` or `merge` runs in any repository, first takes
+  one of `sd.gate_slots` machine-wide slots (unset: a quarter of the cores,
+  4 on 16). `SD_GATE_SLOTS` overrides it for one run, `0` lifts the cap, and
+  CI takes none. A queued gate prints `waiting for a gate slot` on stderr and
+  again each minute. The wait counts against `sd-check --timeout`, and each
+  check gets the rest. A holder runs its checks with `SD_GATE_SLOTS=0`, so the
+  pack's own `make test` inside a gate takes no second slot; run directly,
+  `make test` takes one of 2. Slots are kernel locks under
+  `$XDG_STATE_HOME/sd/gate-slots`, so a dead holder's slot is free at once.
 - **Test one version per language, the latest stable (Python 3.14, Node
   26), in CI and locally; no version matrices.**
 
@@ -577,7 +612,7 @@ reviewer chain before vendor, transport, availability and spending gates run.
 
 Core settings use `sd config get|set|unset|list` and the existing atomic machine configuration writer.
 The file is `~/.config/sd-ai-command-pack/config.json`, honoring `XDG_CONFIG_HOME`.
-The reserved `sd` namespace declares three settings:
+The reserved `sd` namespace declares four settings:
 
 - `sd.external_reviews`: `configured` permits private code and scoped review context to eligible configured providers.
   It includes future registry entries; registry configuration chooses capability, while this explicit operator grant authorizes transmission.
@@ -600,6 +635,9 @@ The reserved `sd` namespace declares three settings:
   `sd-review` reports the effective policy, its source and the repository's say under `remote_reviews.copilot`.
   `sd-ship` resolves the decision again at dispatch, from the setting as it stands then and the tiers the
   retained passes recorded, so a setting changed after the review takes effect without another review.
+- `sd.gate_slots`: how many repository gates (`sd-check` runs) may run at once on this machine; `0` is no cap.
+  Absence reads a quarter of the cores. `SD_GATE_SLOTS` overrides it for one run. It grants nothing;
+  see [Parallel work](#parallel-work).
 
 Installation supplies neither grant. A new operator must state their own policy; never copy another user's personal permission.
 These settings start no background work, enable no runner policy, and bypass no ownership, review, CI, or protection gate.

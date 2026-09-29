@@ -6,10 +6,12 @@ The publication contract is
 script can carry out. Two jobs, both run at the end of `render`:
 
 1. **Register.** Append this repo's `label|key|label` line to the dashboard's
-   `documents.conf`, once. The dashboard finds `docs/dashboard/` on disk, so
-   the line says what to call it and carries no path; `root|` stays for a
-   directory the dashboard cannot find. The dashboard reads that file and
-   never writes it, so nothing here touches the dashboard's own source.
+   `documents.conf`, once. The file is in the machine's config directory, not
+   the dashboard checkout; `dashboard_config` says where. The dashboard finds
+   `docs/dashboard/` on disk, so the line says what to call it and carries no
+   path; `root|` stays for a directory the dashboard cannot find. The
+   dashboard reads that file and never writes it, so nothing here touches the
+   dashboard's own source.
 
 2. **Enqueue.** For each document designated for a destination in
    `DESTINATIONS`, write a sync request naming the document, its container, the
@@ -39,19 +41,39 @@ import json
 import os
 import re
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
 from urllib.parse import urlsplit
 
 from sd_lib import git_output, main_worktree_root
 
-#: Where the dashboard checkout lives. Overridable because a fleet machine may
-#: hold it elsewhere; not discovered by searching, because a search that found
-#: two checkouts would have to guess which one the browser is serving.
-DASHBOARD_HOME = Path(
-    os.environ.get("SD_DASHBOARD_HOME", "~/repos/system/local-project-dashboard")
-).expanduser()
+
+def dashboard_config(environ: Mapping[str, str]) -> Path:
+    """The directory the dashboard reads `documents.conf` from.
+
+    `<config>/project-dashboard`, `<config>` being `$SYSTEM_TOOLS_CONFIG`, else
+    `$XDG_CONFIG_HOME/system`, else `~/.config/system`. This mirrors `root` and
+    `config_dir` in the system repository's `lib/system_tools_config.py`, which
+    `sd_dashboard/documents.py` reads `documents.conf` through since system
+    350553a; change the two together. Mirrored rather than imported: a render
+    runs on machines with no system checkout. Before that commit the file sat
+    in the dashboard checkout, and looking there reported every listed
+    repository as not registered (sd:2010).
+    """
+    named = environ.get("SYSTEM_TOOLS_CONFIG")
+    if named:
+        return Path(os.path.expanduser(named)) / "project-dashboard"
+    base = environ.get("XDG_CONFIG_HOME") or os.path.join(
+        environ.get("HOME") or os.path.expanduser("~"), ".config")
+    return Path(os.path.expanduser(base)) / "system" / "project-dashboard"
+
+
+#: Where the dashboard's per-machine configuration lives, `documents.conf`
+#: among it. Read once, when the module loads, as the dashboard reads it; not
+#: discovered by searching, because a search that found two would have to
+#: guess which one the browser is serving.
+DASHBOARD_CONFIG = dashboard_config(os.environ)
 
 #: Durable, outside any repo, and beside the vault-write queue that already
 #: works this way. `~/.claude/` and not `/tmp`: a request that a reboot deletes
@@ -150,7 +172,7 @@ class NotionScope(NamedTuple):
     #: `private` or `team`: which Notion space the mirror may reach.
     scope: str
     #: The environment variable holding this operator's folder page id.
-    #: Beside `OBSIDIAN_VAULT`, `SD_DASHBOARD_HOME` and `SD_MIRROR_QUEUE`,
+    #: Beside `OBSIDIAN_VAULT`, `SYSTEM_TOOLS_CONFIG` and `SD_MIRROR_QUEUE`,
     #: which is where this module's other per-machine destinations live. Not
     #: `sd config`: that namespace holds standing authorization, and a folder
     #: is a destination rather than a permission.
@@ -209,7 +231,7 @@ KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
 def documents_conf() -> Path:
-    return DASHBOARD_HOME / "documents.conf"
+    return DASHBOARD_CONFIG / "documents.conf"
 
 
 #: Where a render by hand records the sha256 of the research.conf.py it

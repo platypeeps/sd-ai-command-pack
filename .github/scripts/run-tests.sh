@@ -376,7 +376,8 @@ trap 'on_signal' INT TERM HUP
 # tests with a fixed bound failed three of them. `make test` sets the cap; unset
 # or 0 means none, and CI never waits. A holder exports SD_GATE_SLOTS=0: the
 # runs its tests start inside it must not wait on the slot their own parent
-# holds.
+# holds, and `sd-check` (sd:1996), which takes a slot around every repository
+# gate, exports it the same way, so `make test` under it takes none.
 #
 # #1195 review. A slot is a kernel `flock` on `slot.N.lock`, held through fd 9
 # of this shell. The kernel drops it when the last copy of that fd closes, so a
@@ -386,28 +387,37 @@ trap 'on_signal' INT TERM HUP
 # each other's new slots. The lock files stay; the pid in one is only a hint.
 # Children that outlive this shell must not inherit fd 9, so the shard and
 # watchdog launches close it.
+#
+# sd:1996. The directory, the wait and the lock are `bin/sd_gate_slots.py`, the
+# one implementation `sd-check` uses too. Bash has no flock and macOS ships no
+# flock(1), so this shell opens every slot file and the helper locks one of the
+# descriptors it inherits; the lock is on the shell's open file and outlives the
+# helper. The helper waits in the background so a signal reaches `on_signal`.
+# The descriptors are fixed numbers from 20 up, opened through `eval`: macOS
+# /bin/bash is 3.2, which has neither `{fd}` allocation nor safe empty arrays.
+slots_helper="$REPO_ROOT/bin/sd_gate_slots.py"
+slot_fd_base=20
+slot_fds=""
+close_slot_fds() {
+  local fd
+  for fd in $slot_fds; do eval "exec $fd>&-"; done
+  slot_fds=""
+}
 gate_slot=""
+slot_waiter=""
 release_gate_slot() {
+  if [ -n "$slot_waiter" ]; then
+    kill -TERM "$slot_waiter" 2>/dev/null
+    slot_waiter=""
+  fi
   if [ -n "$gate_slot" ]; then
     exec 9>&-
     gate_slot=""
   fi
 }
-# True when this shell took the slot's lock on fd 9. Bash has no flock, and
-# macOS ships no flock(1); the interpreter locks the open file it inherits.
-take_gate_slot() {
-  exec 9>>"$1" || return 1
-  if "$toolchain_python" -c 'import fcntl; fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)' 2>/dev/null; then
-    # Named before the pid is written: a signal in between releases the slot.
-    gate_slot="$1"
-    return 0
-  fi
-  exec 9>&-
-  return 1
-}
 # An orphaned waiter must not take a slot: the watchdog starts only with the
-# shards. So the launcher is checked before every attempt, and once more with
-# the slot held, since it can exit while a freed slot is taken.
+# shards. So the helper checks the launcher before every attempt, and this
+# shell once more with the slot held, since it can exit while a slot is taken.
 stop_if_launcher_exited() {
   if [ "$gate_ppid" != "1" ] && launcher_exited; then
     release_gate_slot
@@ -416,7 +426,7 @@ stop_if_launcher_exited() {
   fi
 }
 acquire_gate_slot() {
-  local slots="${SD_GATE_SLOTS:-0}" dir i announced=""
+  local slots="${SD_GATE_SLOTS:-0}" dir i fd index waited
   case "$slots" in
     '' | *[!0-9]*)
       printf '%s\n' "error: SD_GATE_SLOTS must be a non-negative integer (got '$slots')" >&2
@@ -426,26 +436,45 @@ acquire_gate_slot() {
   if [ "$slots" -eq 0 ] || [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
     return 0
   fi
-  dir="${SD_GATE_SLOTS_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/sd/gate-slots}"
-  if ! mkdir -p -- "$dir" 2>/dev/null; then
-    printf '%s\n' "warning: cannot create $dir; running without the gate cap" >&2
+  dir="$("$toolchain_python" "$slots_helper" directory)" || dir=""
+  if [ -z "$dir" ] || ! mkdir -p -- "$dir" 2>/dev/null; then
+    printf '%s\n' "warning: cannot create ${dir:-the gate slot directory}; running without the gate cap" >&2
     return 0
   fi
-  while :; do
-    for ((i = 1; i <= slots; i++)); do
-      stop_if_launcher_exited
-      take_gate_slot "$dir/slot.$i.lock" || continue
-      stop_if_launcher_exited
-      printf '%s\n' "$$" >"$gate_slot" 2>/dev/null || :
-      export SD_GATE_SLOTS=0
-      return 0
-    done
-    if [ -z "$announced" ]; then
-      printf '%s\n' "waiting for a gate slot: $slots of $slots in use under $dir" >&2
-      announced=1
-    fi
-    sleep "${SD_GATE_SLOT_POLL:-5}"
+  for ((i = 1; i <= slots; i++)); do
+    fd=$((slot_fd_base + i - 1))
+    eval "exec $fd>>\"\$dir/slot.\$i.lock\"" 2>/dev/null || break
+    slot_fds="$slot_fds $fd"
   done
+  if [ "$i" -le "$slots" ]; then
+    close_slot_fds
+    printf '%s\n' "warning: cannot open the slot files under $dir; running without the gate cap" >&2
+    return 0
+  fi
+  "$toolchain_python" "$slots_helper" wait --pid "$$" --ppid "$gate_ppid" --dir "$dir" $slot_fds \
+    >"$work_dir/gate-slot" 9>&- &
+  slot_waiter=$!
+  wait "$slot_waiter"
+  waited=$?
+  slot_waiter=""
+  if [ "$waited" -eq 0 ] && index="$(cat -- "$work_dir/gate-slot")" &&
+    case "$index" in '' | *[!0-9]*) false ;; *) [ "$index" -lt "$slots" ] ;; esac; then
+    eval "exec 9>&$((slot_fd_base + index))"
+    # Named before the pid is written: a signal in between releases the slot.
+    gate_slot="$dir/slot.$((index + 1)).lock"
+  fi
+  close_slot_fds
+  if [ "$waited" -eq 3 ]; then
+    printf '%s\n' "$launcher_exited_message" >&2
+    exit 1
+  fi
+  if [ -z "$gate_slot" ]; then
+    printf '%s\n' "error: the gate slot helper failed (exit $waited)" >&2
+    exit 1
+  fi
+  stop_if_launcher_exited
+  printf '%s\n' "$$" >"$gate_slot" 2>/dev/null || :
+  export SD_GATE_SLOTS=0
 }
 acquire_gate_slot
 
