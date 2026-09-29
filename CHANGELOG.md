@@ -80,6 +80,15 @@
 
 ### Changed
 
+- **`sd-ship prepare` reads a hand-opened pull request's live body (sd:1878).**
+  The live body outranked the stored one only when a receipt named the pull
+  request. A pull request opened by hand has no receipt, so `prepare`
+  reviewed, linted and squashed its default body while GitHub showed the
+  author's. With no receipt and no `--body-file`, the one open pull request
+  from this branch of this repository is now read; `body_source` says
+  `live_pr`. A blank body, or more than one open pull request, falls back as
+  before.
+
 - **The pack's own GitHub Actions workflows are gone.** This repository gates
   locally (`repo.ci = local`), so `tests.yml`, `pr-body-lint.yml` and
   `sd-review-route.yml` never ran. The gate's `sd_db` pin moved from

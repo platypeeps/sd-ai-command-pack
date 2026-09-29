@@ -277,8 +277,10 @@ stripped and listed in the result's `normalized`; any other owned line is
 refused by line number, with the expected value. So the body `sd-ship`
 published, fed back as `--body-file`, prepares again. Without `--body-file`,
 `prepare` reads an open pull request's live body, so an edit made on GitHub
-survives; the result's `body_source` says `file`, `live_pr`, `state` or
-`default`. `sd-ship body --item <item> [--body-file <file>] [--pr <n>]` prints
+survives; with no receipt, the pull request open for the branch is the one
+read, so a pull request opened by hand keeps its body. The result's
+`body_source` says `file`, `live_pr`, `state` or `default`.
+`sd-ship body --item <item> [--body-file <file>] [--pr <n>]` prints
 the body `prepare` would publish and runs the body lint on it. Its `scope`
 names each scope line the diff demands, such as `CI/review scope:` for a
 `.github/**` path, and whether the body carries it. The diff is the checkout's
