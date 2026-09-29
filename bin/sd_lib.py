@@ -75,6 +75,9 @@ CORE_CONFIG = {
                        "description": "When sd-ship requests a Copilot review by itself: deep (unset reads deep) on deep-tier "
                                       "changes only, always on every reviewing tier, never on none; a repository's "
                                       ".github/sd-review.json copilot_review overrides deep and always, and never wins over it."},
+    "gate_slots": {"pattern": "[0-9]+",
+                   "description": "How many repository gates (sd-check runs) may run at once on this machine; 0 is no cap. "
+                                  "Unset reads a quarter of the cores; SD_GATE_SLOTS overrides it for one run."},
 }
 
 #: `{current name: the name it was stored under before 1.1.0}`. A rename must
