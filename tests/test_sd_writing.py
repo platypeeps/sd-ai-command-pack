@@ -179,7 +179,7 @@ class WritingFromWorktree(unittest.TestCase):
         self.connect.assert_not_called()
 
     def test_an_older_library_refuses_a_worktree_by_name(self):
-        with patch.object(cli, "hasattr", create=True, return_value=False):
+        with patch.object(writing, "checkout", None, create=True):
             with self.assertRaisesRegex(cli.WorkRefusal, "current system/local-sd-db"):
                 self.run_in(self.linked, "readiness", "--piece", "2026/a")
 

@@ -36,7 +36,9 @@ def run(args: argparse.Namespace) -> int:
     linked = registered != root
     if linked and action in REGISTERED_ONLY:
         raise WorkRefusal(f"sd writing {action} runs only in the main checkout {registered}, not a linked worktree")
-    if linked and not hasattr(writing, "checkout"):
+    # Looked up, not imported: the gate builds an older sd_db that lacks it.
+    checkout: Any = getattr(writing, "checkout", None)
+    if linked and checkout is None:
         raise WorkRefusal("install the current system/local-sd-db build to run writing controls from a worktree")
     if action == "verify" and not any((root / name).is_dir() for name in ("content", "content-parked")):
         # Another checkout has no pieces, so verify would pass on zero files and zero rows (sd:1660).
@@ -49,7 +51,7 @@ def run(args: argparse.Namespace) -> int:
     scope = contextlib.ExitStack()
     try:
         if linked:
-            scope.enter_context(writing.checkout(repo, root))
+            scope.enter_context(checkout(repo, root))
         who = getpass.getuser()
         revision = getattr(args, "if_revision", None)
         result: Any
