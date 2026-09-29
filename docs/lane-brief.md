@@ -221,9 +221,11 @@ for the controls a run passes through.
 >   `bin/sd-ship` writes `Work:` itself — except in `guest` mode for an item
 >   that is not local to the destination, where `prepare` omits the line on
 >   purpose and strips one it finds before the push — and its `prepare` stage
->   refuses a `--body-file` that carries `Item:`, `Delivers:`, `Closes:`,
->   `Authored-with:`, `Attributes:` or `Work:` — "the ship adapter owns
->   association and delivery trailers" — and its `merge` stage appends `Item:`,
+>   strips a `--body-file` line `Item:`, `Work:`, `Delivers:` or
+>   `Authored-with:` that says what it would write, and refuses any other
+>   `Item:`, `Delivers:`, `Closes:`, `Authored-with:`, `Attributes:` or
+>   `Work:` line by number — "the ship adapter owns association and delivery
+>   trailers"; `sd-ship body` shows the result — and its `merge` stage appends `Item:`,
 >   `Delivers:` and `Authored-with:` to the squash. So on the `sd-ship` path
 >   you write none of those lines and skip the two bullets below marked *push
 >   path only*; on the push path you write them exactly as those bullets say,

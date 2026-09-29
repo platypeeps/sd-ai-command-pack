@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import atexit
+import contextlib
 import hashlib
 import importlib.machinery
 import importlib.util
+import io
 import json
 import os
 import pathlib
@@ -51,6 +53,18 @@ loader.exec_module(ship)
 #: The *Development / Code, before merge* cap. Read from the module that
 #: owns it, so these fixtures follow the row instead of restating it.
 CAP = importlib.import_module("sd_ship_history").AUTOMATIC_CODE_REVIEW_PASSES
+
+
+#: Hold `argv[2]`'s ship lock over the database at `argv[1]` for `argv[3]` seconds.
+SHIP_LOCK_HOLDER = """
+import sys, time
+from pathlib import Path
+from sd_db import ship
+with ship.repository_lock(Path(sys.argv[1]), sys.argv[2],
+                          holder={"command": "sd-ship prepare --item 1872", "item": 1872}):
+    print("held", flush=True)
+    time.sleep(float(sys.argv[3]))
+"""
 
 
 #: The head a lagging pull object still reports: the pre-push one on #1145.
@@ -99,6 +113,11 @@ class ShipDouble(GitHubDouble):
         #: How many `GET /pulls/{n}` reads still answer the pre-push head, the
         #: way GitHub does for a second or so after a push lands (sd:1394).
         self.lagging_pull_reads = 0
+        #: How many `GET /pulls/{n}` reads answer `mergeable_state: blocked`
+        #: after a status post, the way GitHub did on #580 while it recomputed
+        #: the merge rules for a just-posted `sd/local-gate` (sd:2050).
+        self.blocked_after_status = 0
+        self.blocked_pull_reads = 0
 
     def _pull(self, pull):
         head = getattr(pull, "merged_head", None) or pull.head_sha(self.remote)
@@ -146,6 +165,12 @@ class ShipDouble(GitHubDouble):
             self.copilot_requests.append({"number": number, "body": body})
             self.copilot_pending.add(number)
             return 201, self._pull(self.remote.pull(number))
+        if method == "POST" and path.startswith(f"{prefix}/statuses/"):
+            # The local gate's write (sd:1843), newest first as GitHub lists.
+            record = {**body, "sha": path.rsplit("/", 1)[1], "creator": {"login": "fixture"}}
+            self.statuses.insert(0, record)
+            self.blocked_pull_reads = self.blocked_after_status
+            return 201, record
         if path.endswith("/statuses"):
             return 200, self.statuses
         if method == "GET" and path.endswith("/protection") and isinstance(self.remote.protection, RemoteRefusal):
@@ -180,6 +205,9 @@ class ShipDouble(GitHubDouble):
             if self.lagging_pull_reads:
                 self.lagging_pull_reads -= 1
                 value["head"]["sha"] = LAGGING_HEAD
+            if self.blocked_pull_reads:
+                self.blocked_pull_reads -= 1
+                value["mergeable_state"] = "blocked"
             return 200, value
         if method == "PUT" and path.endswith("/merge"):
             number = int(path.split("/")[-2])
@@ -395,7 +423,13 @@ roles:
         return ship.parser().parse_args([command, "--item", str(self.item), "--json", *extra])
 
     def operation(self, command="prepare", *extra):
-        return ship.Ship(self.root, self.connection, self.database, self.args(command, *extra))
+        operation = ship.Ship(self.root, self.connection, self.database, self.args(command, *extra))
+        # A first prepare must say whether it delivers (sd:1928). Most cases
+        # here are about something else, so they take the associate-only
+        # answer unless they give one; `unanswered` below asks without it.
+        if command == "prepare" and operation.args.deliver is None and "deliver" not in operation.state:
+            operation.args.deliver = False
+        return operation
 
     def prepare(self, *extra):
         return self.operation("prepare", *extra).prepare()
@@ -557,7 +591,7 @@ roles:
                              repo=str(self.operator), branch="second")
 
         def operation():
-            args = ship.parser().parse_args(["prepare", "--item", str(second), "--json"])
+            args = ship.parser().parse_args(["prepare", "--item", str(second), "--associate-only", "--json"])
             return ship.Ship(self.root, self.connection, self.database, args)
 
         # sd:1346 refuses the branch until it merges main, and that merge is
@@ -586,6 +620,21 @@ roles:
         self.assertEqual(self.operation().state["title"], "change")
         self.assertEqual(self.remote.pull(result["pull_request"]["number"]).title, "change")
 
+    def test_the_squash_subject_is_the_pull_requests_title(self):
+        # sd:1876: prepare stored the newest commit subject, and the merge
+        # used it even when the pull request carried a different title.
+        number = self.prepare()["pull_request"]["number"]
+        self.remote.pull(number).title = "Switch the widget to local CI"
+        self.assertEqual(self.merge()["phase"], "merged")
+        self.assertEqual(self.remote.pull(number).title.split("\n")[0], f"Switch the widget to local CI (#{number})")
+
+    def test_a_wip_pull_request_title_never_reaches_the_default_branch(self):
+        number = self.prepare()["pull_request"]["number"]
+        self.remote.pull(number).title = "WIP switch the widget"
+        with self.assertRaisesRegex(ship.Refusal, "title starts with wip"):
+            self.merge()
+        self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
+
     def test_a_branch_behind_the_default_branch_is_refused_before_the_review(self):
         # sd:1346, sd:1367: merge refuses a branch behind the default branch,
         # so prepare refused nothing, spent the review and answered
@@ -597,10 +646,75 @@ roles:
         review.assert_not_called()
         self.assertEqual(caught.exception.workflow["blocker"]["code"], "base_moved")
         self.assertIn("git merge origin/main", caught.exception.workflow["next_action"])
+        self.assertIn("--catch-up", caught.exception.workflow["next_action"])
         self.assertIsNone(self.operation().state.get("pull_request"))
         _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge origin/main into topic\n\nAuthored-with: human", "origin/main")
         self.assertEqual(self.prepare()["phase"], "ready_to_send")
         self.assertEqual(self.merge()["phase"], "merged")
+
+    def test_catch_up_merges_the_base_and_re_reviews_only_the_branchs_own_diff(self):
+        # sd:2023: a branch left behind by another landing needed a hand merge
+        # of origin/main, a push, a review and a prepare. `--catch-up` merges
+        # (no rebase, no force push) and the new head's pass is a full-branch
+        # one, so it reviews merge-base..head and not the code main brought.
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        before = _git(self.root, "rev-parse", "HEAD")
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        self.assertEqual(self.prepare("--catch-up")["phase"], "ready_to_send")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.assertEqual(_git(self.root, "rev-list", "--parents", "-n", "1", head).split()[1:],
+                         [before, _git(self.root, "rev-parse", "refs/remotes/origin/main")])
+        self.assertEqual(_git(self.remote.path, "rev-parse", "refs/heads/topic"), head)
+        fresh = self.operation().state["passes"][-1]
+        self.assertEqual(fresh["head"], head)
+        self.assertIsNone(fresh["base"], "a fix verification from the old head reviews main's commits too")
+        self.assertEqual(fresh["catch_up"]["from"], before)
+        # The merge gate runs at the new head or not at all.
+        with self.assertRaisesRegex(ship.Refusal, "--expected-head must name the current exact reviewed commit"):
+            self.operation("merge", "--manual", "--expected-head", before).merge()
+
+    def test_a_hand_merge_of_the_base_is_scoped_like_a_catch_up(self):
+        # A prepare that failed after its merge, or the merge sd-ship used to
+        # ask for by hand, leaves the same history; the scope follows it.
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        before = _git(self.root, "rev-parse", "HEAD")
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        _git(self.root, "fetch", "-q", "origin", "main:refs/remotes/origin/main")
+        _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge origin/main into topic\n\nAuthored-with: human", "origin/main")
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        fresh = self.operation().state["passes"][-1]
+        self.assertIsNone(fresh["base"])
+        self.assertEqual(fresh["catch_up"]["from"], before)
+
+    def test_a_fix_after_a_review_stays_a_fix_verification(self):
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        before = _git(self.root, "rev-parse", "HEAD")
+        (self.root / "src.py").write_text("value = 3\n")
+        _git(self.root, "commit", "-q", "-am", "fix\n\nAuthored-with: human")
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        fresh = self.operation().state["passes"][-1]
+        self.assertEqual(fresh["base"], before)
+        self.assertNotIn("catch_up", fresh)
+
+    def test_a_catch_up_before_any_review_is_an_ordinary_first_pass(self):
+        # Nothing was reviewed, so there is no history for the pass to cover.
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        self.assertEqual(self.prepare("--catch-up")["phase"], "ready_to_send")
+        [first] = self.operation().state["passes"]
+        self.assertNotIn("catch_up", first)
+        self.assertEqual(self.merge()["phase"], "merged")
+
+    def test_a_catch_up_that_conflicts_leaves_the_branch_as_it_was(self):
+        before = _git(self.root, "rev-parse", "HEAD")
+        self.remote.commit_on("main", "rival\n\nAuthored-with: human", files={"src.py": "value = 2\n"})
+        with patch.object(ship.Ship, "review") as review:
+            with self.assertRaisesRegex(ship.Refusal, "conflicts") as caught:
+                self.prepare("--catch-up")
+        review.assert_not_called()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "merge_conflict")
+        self.assertEqual(_git(self.root, "rev-parse", "HEAD"), before)
+        self.assertFalse((self.root / ".git/MERGE_HEAD").exists())
+        self.assertEqual(_git(self.root, "status", "--porcelain", "--untracked-files=no"), "")
 
     def test_a_moved_binding_re_reviews_the_same_head_instead_of_bricking_it(self):
         # sd:1390, live on #1140. Reuse was decided on head equality and the
@@ -1845,7 +1959,7 @@ roles:
         self.assertEqual(run.call_args.kwargs["timeout"], CLI_TIMEOUT)
 
     def test_real_cli_review_prepare_slice_merge_and_repeat_reconcile(self):
-        prepared = self.cli("prepare")
+        prepared = self.cli("prepare", "--associate-only")
         self.assertEqual(prepared.returncode, 0, prepared.stdout + prepared.stderr)
         self.assertEqual(json.loads(prepared.stdout)["phase"], "ready_to_send")
         body = self.directory / "prepared-pr.md"
@@ -2121,6 +2235,23 @@ roles:
         self.assertFalse(self.merge()["delivery_pending"])
         self.assertEqual(ship.sd_lib.delivered(self.root, f"sd:{self.item}"), ship.sd_lib.YES)
 
+    def test_a_squash_keeps_an_attributes_line_that_names_a_base_commit(self):
+        """An `sd attribute` repair of commits already on the base is the whole
+        change, so the squash has to carry its `Attributes:` lines or it lands
+        as an empty commit that attributes nothing (sd:1753). A line naming a
+        branch commit names a sha the squash removes, so it stays behind."""
+        on_base = _git(self.root, "rev-parse", "origin/main")
+        on_branch = _git(self.root, "rev-parse", "HEAD")
+        _git(self.root, "commit", "-q", "--allow-empty", "-m",
+             "chore(attribution): repair\n\n"
+             f"Attributes: {on_base} author/firstvendor\n"
+             f"Attributes: {on_branch} author/firstvendor\n"
+             "Authored-with: human")
+        self.prepare()
+        self.assertEqual(self.merge()["phase"], "merged")
+        landed = _git(self.remote.path, "log", "-1", "--format=%(trailers:key=Attributes,valueonly)", "main")
+        self.assertEqual(landed.strip(), f"{on_base} author/firstvendor")
+
     def test_a_hand_delivery_clears_the_hold(self):
         """The operator verifies the combined tree and delivers by hand; a later
         reconcile reads that completion instead of reissuing the hold (#1179)."""
@@ -2130,6 +2261,133 @@ roles:
         again = self.merge()
         self.assertFalse(again["delivery_pending"])
         self.assertIsNone(again["workflow"]["blocker"])
+
+    # -- sd:1928: a first prepare says whether it delivers ------------------
+
+    def unanswered(self, *extra):
+        """A prepare exactly as the command line builds it, with no default claim."""
+        return ship.Ship(self.root, self.connection, self.database, self.args("prepare", *extra))
+
+    def test_a_first_prepare_without_a_claim_refuses_before_any_write(self):
+        """sd:1910 merged with `Item:` only because associate-only was the
+        silent default. The first prepare now asks, and asks before it commits,
+        pushes or opens anything."""
+        head = _git(self.root, "rev-parse", "HEAD")
+        with self.assertRaisesRegex(ship.Refusal, r"--deliver.*--associate-only") as caught:
+            self.unanswered().prepare()
+        self.assertIn("last", str(caught.exception))
+        self.assertEqual(_git(self.root, "rev-parse", "HEAD"), head)
+        self.assertEqual(receipts.read(self.connection, receipts.receipt_key(self.remote.slug, "topic", self.item)), (0, {}))
+        self.assertFalse([call for call in self.remote.calls if call.method in ("POST", "PUT", "PATCH")])
+
+    def test_the_command_line_takes_one_claim_only(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.args("prepare", "--deliver", "--associate-only")
+
+    def test_associate_only_is_an_answer_and_lands_item_without_delivers(self):
+        self.unanswered("--associate-only").prepare()
+        self.assertFalse(self.operation().state["deliver"])
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        message = _git(self.remote.path, "log", "-1", "--format=%B", "main")
+        self.assertIn(f"Item: sd:{self.item}", message)
+        self.assertNotIn("Delivers:", message)
+        self.assertFalse(result["delivery_pending"])
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "in_progress")
+
+    def test_a_reprepare_keeps_the_claim_the_first_prepare_stored(self):
+        self.unanswered("--associate-only").prepare()
+        _git(self.root, "commit", "--allow-empty", "-m", "more\n\nAuthored-with: human")
+        self.unanswered().prepare()
+        self.assertFalse(self.operation().state["deliver"])
+
+    def test_an_owned_runner_prepare_keeps_the_associate_only_default(self):
+        """The runner passes `--database` and no claim flag; it records its own
+        delivery proof, so its prepare is unchanged."""
+        self.unanswered("--database", str(self.database)).prepare()
+        self.assertFalse(self.operation().state["deliver"])
+
+    def task_item(self, kind: str) -> None:
+        self.connection.execute("UPDATE item SET branch = NULL WHERE id = ?", (self.item,))
+        self.connection.commit()
+        self.item = create_item(self.connection, kind=kind, title=f"fixture {kind}", status="in_progress",
+                                repo=str(self.operator), branch="topic")
+
+    def assert_closed_by_merge(self, result: dict) -> None:
+        self.assertFalse(result["delivery_pending"], result)
+        commit = result["merge_commit"]
+        message = _git(self.remote.path, "log", "-1", "--format=%B", "main")
+        self.assertIn(f"Delivers: sd:{self.item}", message)
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "done")
+        reasons = [row[0] for row in self.connection.execute(
+            "SELECT body FROM note WHERE item = ? AND kind = 'status_change'", (self.item,))]
+        import sd_work
+        # The sentence `sd task status N done --delivered-by` writes, spelled once there.
+        self.assertIn(f"in_progress -> done by sd-ship: {sd_work.DELIVERY_REASON.format(commit=commit, ref='origin/main')}",
+                      reasons)
+
+    def test_a_task_delivers_on_merge_with_the_delivered_by_sentence(self):
+        """Tasks refused `--deliver`, so every task merge needed a hand
+        `sd task status N done`, and `--delivered-by` then refused the squash
+        for want of `Delivers:`. A task takes `--deliver` without criteria and
+        closes on the verified merge."""
+        self.task_item("task")
+        self.unanswered("--deliver").prepare()
+        with patch.object(ship.time, "sleep"):
+            self.assert_closed_by_merge(self.merge())
+
+    def test_a_followup_delivers_on_merge(self):
+        self.task_item("followup")
+        self.unanswered("--deliver").prepare()
+        with patch.object(ship.time, "sleep"):
+            self.assert_closed_by_merge(self.merge())
+
+    def test_a_task_closed_by_hand_is_not_closed_again(self):
+        self.task_item("task")
+        self.unanswered("--deliver").prepare()
+        with patch.object(ship.time, "sleep"):
+            first = self.merge()
+        again = self.operation("reconcile").reconcile()
+        self.assertFalse(again["delivery_pending"])
+        self.assertEqual(first["merge_commit"], again["merge_commit"])
+        closes = self.connection.execute(
+            "SELECT COUNT(*) FROM note WHERE item = ? AND kind = 'status_change' AND body LIKE '%delivered at%'", (self.item,)).fetchone()[0]
+        self.assertEqual(closes, 1)
+
+    def test_a_plain_close_does_not_clear_a_held_task_merge(self):
+        """A close that names no commit says nothing about the combined tree a
+        held merge landed, so only a close naming this merge clears the hold."""
+        from sd_db.workflow import change_status
+        self.task_item("task")
+        commit = self.held_merge()["merge_commit"]
+        change_status(self.connection, self.item, "done", who="operator")
+        held = self.merge()
+        self.assertTrue(held["delivery_pending"])
+        self.assertEqual(held["workflow"]["blocker"]["code"], "base_advanced_at_merge")
+        self.assertIn(f"--delivered-by {commit}", held["workflow"]["next_action"])
+        change_status(self.connection, self.item, "in_progress", who="operator")
+        change_status(self.connection, self.item, "done", who="operator", reason=f"delivered at {commit} on origin/main")
+        self.assertFalse(self.merge()["delivery_pending"])
+
+    def test_a_held_followup_names_a_close_it_can_take(self):
+        """A followup takes no `--delivered-by` (sd:809); its hold names the reason form."""
+        self.task_item("followup")
+        result = self.held_merge()
+        self.assertIn(f"--reason 'delivered at {result['merge_commit']} on origin/main'", result["workflow"]["next_action"])
+
+    def test_a_task_done_without_evidence_is_not_counted_as_delivered(self):
+        from sd_db.workflow import change_status
+        self.task_item("task")
+        self.unanswered("--deliver").prepare()
+        change_status(self.connection, self.item, "done", who="operator")
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        self.assertTrue(result["delivery_pending"])
+        self.assertIn("without delivery evidence", result["delivery_error"])
+
+    def test_work_still_needs_acceptance_evidence_to_deliver(self):
+        with self.assertRaisesRegex(ship.Refusal, "--acceptance-file"):
+            self.unanswered("--deliver").prepare()
 
     def test_empty_search_after_uncertain_create_cannot_duplicate_pr(self):
         self.double.no_create_result = True
@@ -2400,6 +2658,161 @@ roles:
                 with receipts.repository_lock(self.database, "fixture/repo"):
                     self.fail("second owner")
 
+    def hold_ship_lock(self, repository, seconds=60.0):
+        """A child process holding the real flock on `repository`'s ship lock until killed."""
+        child = subprocess.Popen([sys.executable, "-c", SHIP_LOCK_HOLDER, str(self.database), repository, str(seconds)],
+                                 stdout=subprocess.PIPE, text=True,
+                                 env={**os.environ, "PYTHONPATH": str(SITE_PACKAGES)})
+
+        def stop():
+            child.kill()
+            child.wait()
+            child.stdout.close()
+
+        self.addCleanup(stop)
+        self.assertEqual(child.stdout.readline().strip(), "held")
+        return child
+
+    def test_the_ship_lock_records_this_prepare_as_its_holder(self):
+        """sd:1936. The lock names this command and item while dispatch holds it."""
+        seen = []
+
+        def prepare(operation):
+            seen.extend(receipts.held_locks(self.database))
+            return {"ok": True}
+
+        with patch.object(ship.Ship, "prepare", prepare):
+            ship.dispatch(self.root, self.connection, self.database, self.args("prepare"), receipts, False)
+        (record,) = seen
+        self.assertEqual(record["pid"], os.getpid())
+        self.assertEqual(record["item"], self.item)
+        self.assertEqual(record["command"], f"sd-ship prepare --item {self.item}")
+        self.assertEqual(receipts.held_locks(self.database), [])
+
+    def test_a_held_ship_lock_refusal_names_the_holder(self):
+        """sd:1936. A second prepare is refused with the holder's pid and command."""
+        from sd_db.workflow import WorkflowError
+        child = self.hold_ship_lock(self.operation().repository)
+        with patch.object(ship.Ship, "prepare", side_effect=AssertionError("ran under a held lock")):
+            with self.assertRaises(WorkflowError) as refused:
+                ship.dispatch(self.root, self.connection, self.database, self.args("prepare"), receipts, False)
+        self.assertIn("another ship operation owns this repository", str(refused.exception))
+        self.assertIn(f"pid {child.pid}", str(refused.exception))
+        self.assertIn("sd-ship prepare --item 1872", str(refused.exception))
+
+    def test_prepare_wait_refuses_at_its_deadline_and_names_the_holder(self):
+        """sd:1937. `--wait 5` against a held lock refuses after about 5 s, naming the holder."""
+        from sd_db.workflow import WorkflowError
+        child = self.hold_ship_lock(self.operation().repository)
+        started = time.monotonic()
+        with patch.object(ship.Ship, "prepare", side_effect=AssertionError("ran under a held lock")):
+            with self.assertRaises(WorkflowError) as refused:
+                ship.dispatch(self.root, self.connection, self.database, self.args("prepare", "--wait", "5"), receipts, False)
+        elapsed = time.monotonic() - started
+        self.assertGreaterEqual(elapsed, 5)
+        self.assertLess(elapsed, 5 + receipts.WAIT_POLL_SECONDS + 2)
+        self.assertIn(f"pid {child.pid}", str(refused.exception))
+        self.assertIn("waited 5s", str(refused.exception))
+
+    def test_prepare_wait_runs_once_the_holder_releases(self):
+        """sd:1937. With the lock released at 2 s, `--wait 5` runs the prepare once."""
+        self.hold_ship_lock(self.operation().repository, seconds=2)
+        started = time.monotonic()
+        with patch.object(ship.Ship, "prepare", return_value={"ok": True}) as prepare:
+            ship.dispatch(self.root, self.connection, self.database, self.args("prepare", "--wait", "5"), receipts, False)
+        self.assertEqual(prepare.call_count, 1)
+        self.assertLess(time.monotonic() - started, 2 + receipts.WAIT_POLL_SECONDS + 2)
+
+    def test_without_wait_a_held_lock_refuses_at_once(self):
+        self.hold_ship_lock(self.operation().repository)
+        started = time.monotonic()
+        with patch.object(ship.Ship, "merge", side_effect=AssertionError("ran under a held lock")):
+            with self.assertRaisesRegex(Exception, "another ship operation owns this repository"):
+                ship.dispatch(self.root, self.connection, self.database,
+                              self.args("merge", "--manual", "--expected-head", "0" * 40), receipts, False)
+        self.assertLess(time.monotonic() - started, 1)
+
+    def test_wait_takes_finite_non_negative_seconds_on_prepare_and_merge(self):
+        for command in ("prepare", "merge"):
+            extra = ("--expected-head", "0" * 40) if command == "merge" else ()
+            self.assertEqual(self.args(command, *extra, "--wait", "2.5").lock_wait, 2.5)
+            self.assertEqual(self.args(command, *extra).lock_wait, 0)
+            for bad in ("-1", "inf", "nan"):
+                with self.subTest(command=command, value=bad), contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit):
+                        self.args(command, *extra, "--wait", bad)
+
+    def test_a_branch_switch_while_waiting_refuses_before_the_command_runs(self):
+        """sd:1937 review. The identity `Ship` read before the lock is checked again under it."""
+        real = receipts.repository_lock
+
+        @contextlib.contextmanager
+        def switching(*args, **options):
+            with real(*args, **options):
+                _git(self.root, "checkout", "-q", "-b", "elsewhere")
+                yield
+
+        with patch.object(receipts, "repository_lock", switching), \
+                patch.object(ship.Ship, "prepare", side_effect=AssertionError("ran on a switched checkout")):
+            with self.assertRaisesRegex(ship.Refusal, "left .* while this command waited"):
+                ship.dispatch(self.root, self.connection, self.database, self.args("prepare"), receipts, False)
+
+    def test_an_item_reassigned_while_waiting_refuses_before_the_command_runs(self):
+        """sd:1937 review. The item row is read again under the lock, not trusted from before it."""
+        real = receipts.repository_lock
+
+        @contextlib.contextmanager
+        def reassigning(*args, **options):
+            with real(*args, **options):
+                self.connection.execute("UPDATE item SET branch = 'elsewhere' WHERE id = ?", (self.item,))
+                self.connection.commit()
+                yield
+
+        with patch.object(receipts, "repository_lock", reassigning), \
+                patch.object(ship.Ship, "prepare", side_effect=AssertionError("ran for a reassigned item")):
+            with self.assertRaisesRegex(ship.Refusal, "changed repository or branch while this command waited"):
+                ship.dispatch(self.root, self.connection, self.database, self.args("prepare"), receipts, False)
+
+    def test_a_repository_remote_changed_while_waiting_refuses_before_the_command_runs(self):
+        """sd:1937 review. The repository row's remote is read again under the lock, as `Ship.__init__` reads it."""
+        real = receipts.repository_lock
+
+        @contextlib.contextmanager
+        def re_registering(*args, **options):
+            with real(*args, **options):
+                self.connection.execute("UPDATE repo SET remote = 'https://github.com/example/elsewhere.git'")
+                self.connection.commit()
+                yield
+
+        with patch.object(receipts, "repository_lock", re_registering), \
+                patch.object(ship.Ship, "prepare", side_effect=AssertionError("ran for a re-registered repository")):
+            with self.assertRaisesRegex(ship.Refusal, "repository remote changed while this command waited"):
+                ship.dispatch(self.root, self.connection, self.database, self.args("prepare"), receipts, False)
+
+    def test_a_no_item_record_refuses_a_live_branch_switch(self):
+        """sd:1937 review. `--no-item` compares the live checkout too, not only its stored record."""
+        delivery = SimpleNamespace(branch="topic", repository=ship.slug(REMOTE_URL))
+        _git(self.root, "checkout", "-q", "-b", "elsewhere")
+        with self.assertRaisesRegex(ship.Refusal, "the checkout left topic"):
+            ship.identity_unchanged(self.root, self.connection, SimpleNamespace(no_item=True), receipts, delivery)
+        _git(self.root, "checkout", "-q", "topic")
+        ship.identity_unchanged(self.root, self.connection, SimpleNamespace(no_item=True), receipts, delivery)
+
+    def test_a_remote_change_alone_refuses(self):
+        """sd:1937 PR review. The branch is unchanged, so only the remote comparison can refuse."""
+        delivery = SimpleNamespace(branch="topic", repository=ship.slug(REMOTE_URL))
+        _git(self.root, "checkout", "-q", "topic")
+        _git(self.root, "remote", "set-url", "origin", "https://github.com/example/elsewhere.git")
+        with self.assertRaisesRegex(ship.Refusal, "the checkout left topic"):
+            ship.identity_unchanged(self.root, self.connection, SimpleNamespace(no_item=True), receipts, delivery)
+
+    def test_an_older_library_locks_without_options_and_refuses_a_wait(self):
+        """An sd_db without the holder record still serializes; it cannot wait, so --wait refuses."""
+        older = SimpleNamespace(repository_lock=receipts.repository_lock)
+        self.assertEqual(ship.lock_options(self.args("prepare"), older), {})
+        with self.assertRaisesRegex(ship.Refusal, "--wait needs an sd_db whose ship lock can wait"):
+            ship.lock_options(self.args("prepare", "--wait", "5"), older)
+
     def test_ending_assignment_keeps_work_and_manual_merge_controls_guarded(self):
         from sd_db.progress import cancel_work, work_controls
         from sd_db.workflow import WorkflowError
@@ -2503,6 +2916,30 @@ roles:
             with self.assertRaisesRegex(ship.sd_lib.ConfigError, "mode 'gust' is not one of"):
                 self.merge()
         self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
+
+    def watched_merge(self, ci):
+        """`merge --watch` under `repo.ci = ci`, stopped at readiness; the `run` calls it made."""
+        self.prepare()
+        stop = ship.Refusal("stopped at readiness")
+        with (patch.object(ship.sd_lib, "repo_ci", return_value=ci),
+              patch.object(ship.sd_local_gate, "local_gate", return_value={"status": "success"}),
+              patch.object(ship.GitHub, "ready", side_effect=stop),
+              patch.object(ship, "run", wraps=ship.run) as calls):
+            with self.assertRaises(ship.Refusal) as raised:
+                self.merge("--watch")
+        return raised.exception, [call.args[1][:3] for call in calls.call_args_list]
+
+    def test_watch_waits_on_the_local_gate_under_ci_local(self):
+        """sd:1875. A `ci = local` pull request has no remote check to watch, and
+        `gh pr checks --watch` fails on one that has none; the local gate is the wait."""
+        refusal, calls = self.watched_merge("local")
+        self.assertEqual(str(refusal), "stopped at readiness")
+        self.assertNotIn(["gh", "pr", "checks"], calls)
+
+    def test_watch_still_watches_remote_checks_under_ci_github(self):
+        refusal, calls = self.watched_merge("github")
+        self.assertIn(["gh", "pr", "checks"], calls)
+        self.assertNotEqual(str(refusal), "stopped at readiness")
 
     def test_delivery_clone_identity_cannot_be_replaced(self):
         from sd_db.progress import deliver_work
@@ -3011,7 +3448,8 @@ roles:
         provider.write_text(working)
         head = _git(self.root, "rev-parse", "HEAD")
         operation = self.operation("prepare")
-        with patch.object(ship.subprocess, "run", side_effect=AssertionError("review dispatched")):
+        with patch.object(ship, "review_process", side_effect=AssertionError("review dispatched")), \
+                patch.object(ship, "binding", side_effect=AssertionError("review binding read before the cap refusal")):
             with self.assertRaisesRegex(ship.Refusal, "spent"):
                 operation.review(head)
         self.assertEqual(self.operation().state["passes"], prior)
@@ -3048,7 +3486,7 @@ roles:
                       ["--additional-review-for", "0" * 40, "--request-reason", "reason"],
                       ["--additional-review-for", head, "--request-reason", "reason", "--retry-review"]):
             operation = self.operation("prepare", *flags)
-            with self.subTest(flags=flags), patch.object(ship.subprocess, "run", side_effect=AssertionError("review dispatched")):
+            with self.subTest(flags=flags), patch.object(ship, "review_process", side_effect=AssertionError("review dispatched")):
                 with self.assertRaises(ship.Refusal):
                     operation.review(head)
             self.assertEqual(self.operation().state["passes"], prior)
@@ -3173,7 +3611,7 @@ roles:
                       ["--review-history-digest", ship.digest(saved["passes"])],
                       [*prefix, "--review-history-digest", ship.digest(saved["passes"]), "--retry-review"]):
             operation = self.operation("prepare", *flags)
-            with self.subTest(flags=flags), patch.object(ship.subprocess, "run", side_effect=AssertionError("review dispatched")):
+            with self.subTest(flags=flags), patch.object(ship, "review_process", side_effect=AssertionError("review dispatched")):
                 with self.assertRaises(ship.Refusal):
                     operation.review(head)
             self.assertEqual(self.operation().state, saved)
@@ -3213,7 +3651,7 @@ roles:
             revision = operation.revision
             candidate = self.operation("prepare", "--additional-review-for", head, "--request-reason", "renew",
                                        "--review-history-digest", ship.digest(state["passes"]))
-            with self.subTest(change=change), patch.object(ship.subprocess, "run", side_effect=AssertionError("review dispatched")):
+            with self.subTest(change=change), patch.object(ship, "review_process", side_effect=AssertionError("review dispatched")):
                 with self.assertRaises(ship.Refusal):
                     candidate.review(head)
             self.assertEqual(self.operation().state, state)
@@ -3338,7 +3776,7 @@ roles:
         head = _git(self.root, "rev-parse", "HEAD")
         operation = self.operation("prepare", "--additional-review-for", head, "--request-reason", "renew",
                                    "--review-history-digest", ship.digest(prior))
-        with patch.object(ship.subprocess, "run", side_effect=AssertionError("review dispatched")), self.assertRaises(ship.Refusal):
+        with patch.object(ship, "review_process", side_effect=AssertionError("review dispatched")), self.assertRaises(ship.Refusal):
             operation.review(head)
         self.assertEqual(self.operation().state["passes"], prior)
 
@@ -4044,6 +4482,222 @@ class DeclaredGapCase(unittest.TestCase):
         self.assertEqual(result["protection"], {"declared_gap": "unprotected", "until": "a second account with push or merge rights exists"})
         key = receipts.receipt_key(self.remote.slug, "topic", self.item)
         self.assertEqual(receipts.read(self.connection, key)[1]["protection"]["declared_gap"], "unprotected")
+
+    # -- sd:1843: `repo.ci = local` swaps pull_request runs for sd/local-gate --
+
+    def local_ci(self) -> None:
+        """The row says `local`. Patched at the one reader, because the
+        library this suite pins predates the column."""
+        patcher = patch.object(ship.sd_lib, "repo_ci", lambda connection, root: "local")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def gate_posts(self) -> list:
+        return [call for call in self.remote.calls if call.method == "POST" and "/statuses/" in call.path]
+
+    def local_green(self) -> None:
+        """Every check green and no pull_request run at all: nothing ran on Actions."""
+        self.prepare()
+        pull = next(iter(self.remote.pull_requests.values()))
+        pull.checks = [self.check("route"), self.check("copilot-pull-request-reviewer")]
+        self.double.workflow_runs = []
+
+    def test_ci_local_merges_on_the_local_gate_without_pull_request_runs(self):
+        self.declare()
+        self.local_ci()
+        self.local_green()
+        result = self.merge()
+        self.assertEqual(self.puts(), 1)
+        [post] = self.gate_posts()
+        self.assertTrue(post.path.endswith(f"/statuses/{self.head()}"))
+        self.assertEqual((post.body["context"], post.body["state"]), ("sd/local-gate", "success"))
+        key = receipts.receipt_key(self.remote.slug, "topic", self.item)
+        gate = receipts.read(self.connection, key)[1]["local_gate"]
+        self.assertEqual((gate["head"], gate["status"]), (self.head(), "success"))
+        self.assertEqual(result["protection"]["declared_gap"], "unprotected")
+
+    # -- sd:2050: GitHub recomputes the merge rules after the gate's status --
+
+    # -- sd:2075: `unstable` is GitHub allowing the merge with an optional check open --
+
+    def ruleset_protection(self) -> None:
+        """A protection object requiring `route` only, as #583 required `sd/local-gate` only."""
+        self.double.rules = self.gating_rules()
+        self.double.rulesets = {42: {"id": 42, "name": "main", "enforcement": "active", "bypass_actors": []}}
+
+    def optional_check_open(self, *, mergeable: str = "MERGEABLE") -> None:
+        pull = next(iter(self.remote.pull_requests.values()))
+        pull.checks.append(self.check("Analyze (python)", status="in_progress", conclusion=None))
+        pull.mergeable, pull.merge_state_status = mergeable, "UNSTABLE"
+
+    def test_an_unstable_answer_after_the_gate_post_merges_without_waiting(self):
+        # sd:2075, answerbook/mezmo_benchmark #583: sd/local-gate success, the
+        # optional CodeQL run in progress, and five reads refused `unstable`.
+        self.ruleset_protection()
+        self.local_ci()
+        self.local_green()
+        self.optional_check_open()
+        with patch.object(ship.time, "sleep") as sleep:
+            self.merge()
+        self.assertEqual(self.puts(), 1)
+        self.assertEqual(pull_head_waits(sleep), [])
+
+    def test_an_unstable_answer_merges_without_a_local_gate(self):
+        self.ruleset_protection()
+        self.green()
+        self.optional_check_open()
+        self.merge()
+        self.assertEqual(self.puts(), 1)
+
+    def test_an_unstable_answer_github_cannot_merge_still_refuses(self):
+        self.ruleset_protection()
+        self.green()
+        self.optional_check_open(mergeable="CONFLICTING")
+        self.refuse(r"mergeable_state 'unstable', mergeable False", "merge_rules_unconfirmed")
+
+    def test_an_unstable_answer_under_a_declared_gap_still_needs_every_check(self):
+        self.declare()
+        self.local_ci()
+        self.local_green()
+        self.optional_check_open()
+        self.refuse(r"CI is not passing on .*: Analyze \(python\)", "ci_not_passing")
+
+    def test_a_blocked_answer_after_the_gate_post_is_read_again_until_clean(self):
+        self.declare()
+        self.local_ci()
+        self.local_green()
+        self.double.blocked_after_status = 2
+        with patch.object(ship.time, "sleep") as sleep:
+            self.merge()
+        self.assertEqual(self.puts(), 1)
+        self.assertEqual(self.double.blocked_pull_reads, 0)
+        self.assertEqual(pull_head_waits(sleep), [ship.MERGE_RULES_INTERVAL_SECONDS, 2 * ship.MERGE_RULES_INTERVAL_SECONDS])
+
+    def test_merge_rules_that_never_clear_refuse_with_githubs_last_answer(self):
+        self.declare()
+        self.local_ci()
+        self.local_green()
+        self.double.blocked_after_status = ship.MERGE_RULES_ATTEMPTS
+        with patch.object(ship.time, "sleep") as sleep:
+            with self.assertRaisesRegex(ship.Refusal, r"has not confirmed all required merge rules.*'blocked'.*5 reads") as caught:
+                self.merge()
+        workflow = caught.exception.workflow
+        self.assertEqual(workflow["blocker"]["code"], "merge_rules_unconfirmed")
+        self.assertEqual(workflow["state"], "retryable_failure")
+        waits = pull_head_waits(sleep)
+        self.assertEqual(waits, [ship.MERGE_RULES_INTERVAL_SECONDS * n for n in range(1, ship.MERGE_RULES_ATTEMPTS)])
+        self.assertLess(sum(waits), 60)
+        self.assertEqual(self.puts(), 0)
+
+    def test_without_a_posted_gate_a_blocked_answer_is_read_once(self):
+        self.declare()
+        self.green()
+        next(iter(self.remote.pull_requests.values())).merge_state_status = "BLOCKED"
+        with patch.object(ship.time, "sleep") as sleep:
+            self.refuse(r"has not confirmed all required merge rules", "merge_rules_unconfirmed")
+        self.assertEqual(pull_head_waits(sleep), [])
+
+    def test_a_behind_pull_request_is_named_without_a_local_gate(self):
+        self.declare()
+        self.green()
+        next(iter(self.remote.pull_requests.values())).merge_state_status = "BEHIND"
+        self.refuse(r"the pull request is BEHIND main", "base_moved")
+
+    def test_a_behind_pull_request_is_named_before_the_gate_runs(self):
+        # sd:2023: strict protection answers BEHIND, and the refusal said only
+        # that the merge rules were unconfirmed, after a full gate run.
+        self.declare()
+        self.local_ci()
+        self.local_green()
+        next(iter(self.remote.pull_requests.values())).merge_state_status = "BEHIND"
+        with patch.object(ship.time, "sleep") as sleep:
+            with self.assertRaisesRegex(ship.Refusal, "BEHIND") as caught:
+                self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "base_moved")
+        self.assertIn("--catch-up", caught.exception.workflow["next_action"])
+        self.assertEqual(self.gate_posts(), [])
+        self.assertEqual(pull_head_waits(sleep), [])
+        self.assertEqual(self.puts(), 0)
+
+    def test_ci_local_with_a_failing_check_posts_failure_and_refuses(self):
+        """The check passes in the operator's clone, where `.git` is a directory,
+        and fails in the gate's worktree, where it is a file: the real run, and
+        proof it ran in the worktree rather than the checkout."""
+        self.commit({"Makefile": "check:\n\t@test -d .git\n"})
+        self.declare()
+        self.local_ci()
+        self.local_green()
+        self.refuse(r"sd/local-gate is failure", "ci_not_passing")
+        self.assertEqual([call.body["state"] for call in self.gate_posts()], ["failure"])
+
+    def test_ci_local_refuses_a_gate_status_for_another_sha(self):
+        """A success recorded against another commit is not evidence for this head."""
+        self.declare()
+        self.local_ci()
+        self.local_green()
+        self.double.statuses = [{"context": "sd/local-gate", "state": "success", "sha": "f" * 40}]
+        with patch.object(ship.sd_local_gate, "check_in_worktree",
+                          lambda root, head: {"head": "e" * 40, "status": "success", "summary": "elsewhere"}):
+            self.refuse(r"no status is posted for a commit that was not checked", "local_gate_mismatch")
+        self.assertEqual(self.gate_posts(), [])
+
+    def test_ci_local_refuses_a_gate_success_another_account_posted(self):
+        """Anyone with write access can post `sd/local-gate`; readiness trusts only this token's own."""
+        self.declare()
+        self.local_ci()
+        self.local_green()
+        self.double.statuses = [{"context": "sd/local-gate", "state": "success", "sha": self.head(),
+                                 "creator": {"login": "someone-else"}, "description": "posted elsewhere"}]
+        with patch.object(ship.sd_local_gate, "local_gate", lambda api, root, head: {"head": head}):
+            self.refuse(r"sd/local-gate on .* was posted by someone-else, not fixture", "local_gate_foreign")
+
+    def test_ci_local_runs_its_own_gate_over_another_accounts_success(self):
+        self.declare()
+        self.local_ci()
+        self.local_green()
+        self.double.statuses = [{"context": "sd/local-gate", "state": "success", "sha": self.head(),
+                                 "creator": {"login": "someone-else"}, "description": "posted elsewhere"}]
+        self.merge()
+        self.assertEqual(self.puts(), 1)
+        self.assertEqual([call.body["state"] for call in self.gate_posts()], ["success"])
+
+    def test_ci_local_with_no_gate_status_refuses_as_missing(self):
+        """Nothing posted, nothing ran: no pull_request run is asked for, so the
+        missing status is the one thing that stops the merge."""
+        self.declare()
+        self.local_ci()
+        self.local_green()
+        with patch.object(ship.sd_local_gate, "local_gate", lambda api, root, head: {"head": head, "status": "skipped"}):
+            self.refuse(r"sd/local-gate has no status on", "ci_missing")
+
+    def test_ci_local_under_protection_requires_the_gate_beside_the_required_contexts(self):
+        """Path A: protection requires `route` only; a local repository needs its gate too."""
+        self.commit({".github/sd-review.json": "{}\n"})
+        self.remote.protection = {"enforce_admins": {"enabled": True},
+                                  "required_pull_request_reviews": {"required_approving_review_count": 0},
+                                  "required_status_checks": {"strict": True, "contexts": ["route"]}}
+        self.local_ci()
+        self.local_green()
+        with patch.object(ship.sd_local_gate, "check_in_worktree",
+                          lambda root, head: {"head": head, "status": "failure", "summary": "sd-check fail"}):
+            self.refuse(r"sd/local-gate is failure")
+        self.restart()
+        self.commit({".github/sd-review.json": "{}\n"})
+        self.remote.protection = {"enforce_admins": {"enabled": True},
+                                  "required_pull_request_reviews": {"required_approving_review_count": 0},
+                                  "required_status_checks": {"strict": True, "contexts": ["sd/local-gate"]}}
+        self.local_ci()
+        self.local_green()
+        self.merge()
+        self.assertEqual(self.puts(), 1)
+
+    def test_ci_github_is_unchanged_no_gate_runs_and_pull_request_runs_are_required(self):
+        self.declare()
+        self.green()
+        self.double.workflow_runs = [self.run_record(".github/workflows/sd-review-route.yml")]
+        with patch.object(ship.sd_local_gate, "local_gate", side_effect=AssertionError("gate ran under ci=github")):
+            self.refuse(r"workflow .* has no successful pull_request run", "ci_missing")
+        self.assertEqual(self.gate_posts(), [])
 
     def test_a_ruleset_that_gates_the_merge_is_path_a_without_a_declaration(self):
         """answerbook/log-distiller's shape on the fixture: no classic object, one

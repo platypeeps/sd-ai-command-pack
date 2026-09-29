@@ -1,6 +1,7 @@
 """The pack forwards the finite command CLI and preserves its durable evidence."""
 
 import argparse
+import hashlib
 import importlib
 import io
 import json
@@ -21,6 +22,18 @@ from sd_db.writes import create_item, upsert_repo
 ROOT = Path(__file__).resolve().parents[1]
 with patch.object(sys, "path", [str(ROOT / "bin"), *sys.path]):
     cli = importlib.import_module("sd_runner")
+
+
+#: Hold `argv[2]`'s ship lock over the database at `argv[1]` until killed.
+SHIP_LOCK_HOLDER = """
+import sys, time
+from pathlib import Path
+from sd_db import ship
+with ship.repository_lock(Path(sys.argv[1]), sys.argv[2],
+                          holder={"command": "sd-ship prepare --item 1872", "item": 1872}):
+    print("held", flush=True)
+    time.sleep(60)
+"""
 
 
 class RunnerCommands(unittest.TestCase):
@@ -168,6 +181,66 @@ class RunnerCommands(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), {"queued": [], "active": []})
+
+    def test_status_lists_the_ship_locks_a_process_holds(self):
+        """sd:1936. A held ship lock is listed with its holder; an idle lock file is not."""
+        from sd_db import ship
+        initialise(home=self.process_home)
+        database = sd_db.database.default_path(self.process_home)
+        with ship.repository_lock(database, "fixture/idle"):
+            pass
+        holder = subprocess.Popen(
+            [sys.executable, "-c", SHIP_LOCK_HOLDER, str(database), "fixture/held"],
+            stdout=subprocess.PIPE, text=True,
+        )
+
+        def stop():
+            holder.kill()
+            holder.wait()
+            holder.stdout.close()
+
+        self.addCleanup(stop)
+        self.assertEqual(holder.stdout.readline().strip(), "held")
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "bin/sd"), "runner", "status", "--json"],
+            env={**os.environ, "HOME": str(self.process_home)},
+            capture_output=True, text=True, check=False, timeout=10,
+        )
+        # No runner has reported a heartbeat here, so status itself exits 1.
+        self.assertNotIn("Traceback", result.stderr)
+        (held,) = json.loads(result.stdout)["ship_locks"]
+        self.assertEqual(held["pid"], holder.pid)
+        self.assertEqual(held["repository"], "fixture/held")
+        self.assertEqual(held["item"], 1872)
+        self.assertEqual(held["command"], "sd-ship prepare --item 1872")
+        self.assertIsInstance(held["age_seconds"], int)
+
+    def test_status_counts_lock_files_by_state_and_removes_none(self):
+        """sd:1940. A lock file with no live holder is idle or stale, never a hold, and stays."""
+        from sd_db import ship
+        initialise(home=self.process_home)
+        database = sd_db.database.default_path(self.process_home)
+        with ship.repository_lock(database, "fixture/idle"):
+            pass
+        with ship.repository_lock(database, "fixture/stale"):
+            pass
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        stale = next(entry for entry in ship.lock_files(database) if entry["path"].endswith(
+            hashlib.sha256(b"fixture/stale").hexdigest() + ".lock"))
+        Path(stale["path"]).write_text(json.dumps({"pid": gone.pid, "repository": "fixture/stale",
+                                                   "started_at": "2026-09-01T00:00:00+00:00"}))
+        before = sorted((database.parent / "ship-locks").iterdir())
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "bin/sd"), "runner", "status", "--json"],
+            env={**os.environ, "HOME": str(self.process_home)},
+            capture_output=True, text=True, check=False, timeout=10,
+        )
+        self.assertNotIn("Traceback", result.stderr)
+        status = json.loads(result.stdout)
+        self.assertEqual(status["ship_locks"], [])
+        self.assertEqual(status["ship_lock_files"], {"held": 0, "stale": 1, "idle": 1})
+        self.assertEqual(sorted((database.parent / "ship-locks").iterdir()), before)
 
 
 class RunnerServiceControls(unittest.TestCase):

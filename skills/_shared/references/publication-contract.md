@@ -114,8 +114,12 @@ only reported.
 
 It does not belong in the dashboard's source: a fleet dashboard carrying one
 repository's path would be wrong in a way that is awkward to undo, which is why
-the conf file exists. A machine with no dashboard checkout still renders its
-documents — the registration is reported as skipped, and the render succeeds.
+the conf file exists. It lives in the machine's config directory, not the
+dashboard checkout: `$SYSTEM_TOOLS_CONFIG/project-dashboard/documents.conf`,
+with `$SYSTEM_TOOLS_CONFIG` defaulting to `$XDG_CONFIG_HOME/system`, else
+`~/.config/system`.
+A machine without that file still renders its documents. The registration is
+reported as skipped, naming the path it looked for, and the render succeeds.
 
 `documents.conf` is shared across machines. A root that is absent on this
 machine is reported by name rather than hidden, because a silently missing

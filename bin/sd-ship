@@ -23,6 +23,8 @@ import time
 from datetime import datetime, timezone
 
 import sd_lib
+import sd_local_gate
+import sd_ship_body
 import sd_ship_dispositions as sd_ship_dispositions
 import sd_ship_squash
 from sd_ship_bindings import review_binding
@@ -32,7 +34,7 @@ from sd_ship_history import review_history as review_history
 from sd_ship_history import timeout_evidence as timeout_evidence
 from sd_ship_history import validate_additional_requests as validate_additional_requests
 from sd_ship_item import ItemIdentity
-from sd_ship_remote import GitHub, Refusal, git, run, slug
+from sd_ship_remote import GitHub, Refusal, git, refuse_behind, run, slug
 from sd_ship_review import RAW_CAPTURE_ENV, ReviewRuntime, ReviewTimeout, SharedReview
 from sd_ship_workflow import blocked, failure
 
@@ -70,6 +72,19 @@ COPILOT_MATERIALIZATION_INTERVAL_SECONDS = 5
 #: The waits grow by the interval each time: 2, 4, 6 and 8 seconds, 20 in all.
 PULL_HEAD_ATTEMPTS = 5
 PULL_HEAD_INTERVAL_SECONDS = 2
+#: How often `merge` reads GitHub's merge-rules answer after it posts
+#: `sd/local-gate` (sd:2050). GitHub recomputes mergeability after a new
+#: status, and one read refused a merge that a retry seconds later landed.
+#: The waits grow by the interval: 3, 6, 9 and 12 seconds, 30 in all.
+MERGE_RULES_ATTEMPTS = 5
+MERGE_RULES_INTERVAL_SECONDS = 3
+#: The readiness refusals that a just-posted status can leave behind for a moment.
+SETTLING_CODES = ("merge_rules_unconfirmed", "mergeability_pending")
+#: The kinds `--deliver` closes on a verified merge. A work item records its
+#: delivery through `sd_db.progress.deliver_work`; a task or followup moves to
+#: done with the sentence `sd task status N done --delivered-by` writes, so
+#: no task merge needs a hand close.
+DELIVERING_KINDS = ("work", "task", "followup")
 #: **The shipped surface, by exclusion** (sd:1366). A Copilot review of an
 #: ancestor of the merge head may stand when the diff from that ancestor to the
 #: merge head touches nothing outside this tuple. Everything else -- `bin/`,
@@ -375,6 +390,10 @@ class Ship(SharedReview):
     #: written when the gate cleared, it outlived every later refusal and each
     #: retry appended another copy (sd:1373).
     copilot_clearance_note: str | None = None
+    #: Where `prepare` took the body from -- `file`, `live_pr`, `state` or
+    #: `default` -- and the owned lines it stripped from it (sd:1870).
+    body_source: str = "default"
+    body_normalized: tuple[str, ...] = ()
 
     def __init__(self, root: pathlib.Path, connection, database: pathlib.Path, args):
         from sd_db import ship
@@ -387,6 +406,9 @@ class Ship(SharedReview):
             return
         self.store, self.root, self.connection, self.args = ship, root, connection, args
         self.database = database
+        if getattr(args, "associate_only", False):
+            # An explicit answer, told apart from no answer by `None` (sd:1928).
+            args.deliver = False
         self.repository = slug(git(root, "config", "--get", "remote.origin.url"))
         self.branch = git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
         info = ship.identity(connection, args.item)
@@ -409,8 +431,13 @@ class Ship(SharedReview):
     def acceptance(self) -> dict | None:
         if not self.args.deliver:
             return None
-        if self.item["kind"] != "work":
-            raise Refusal("--deliver closes work items; ordinary tasks can ship associated slices")
+        if self.item["kind"] not in DELIVERING_KINDS:
+            raise Refusal(f"--deliver closes work, task and followup items; a {self.item['kind']} item ships associated slices")
+        scope = digest({k: self.item[k] for k in ("title", "body", "path")})
+        # A task or followup has no criteria rows, so its claim is the
+        # verified merge alone; evidence it is given is still checked.
+        if self.args.acceptance_file is None and self.item["kind"] != "work":
+            return {"claim": None, "item_scope": scope}
         if self.args.acceptance_file is None:
             raise Refusal("--deliver requires --acceptance-file with evidence for every criterion")
         value = json.loads(self.args.acceptance_file.read_text(encoding="utf-8"))
@@ -419,7 +446,23 @@ class Ship(SharedReview):
                 or not rows or any(not isinstance(row, dict) or not row.get("criterion") or not row.get("evidence")
                                    or row.get("passed") is not True for row in rows)):
             raise Refusal("acceptance file must name this item and passing evidence for every criterion")
-        return {"claim": value, "item_scope": digest({k: self.item[k] for k in ("title", "body", "path")})}
+        return {"claim": value, "item_scope": scope}
+
+    def require_claim(self) -> None:
+        """Refuse a first item prepare that does not say whether it delivers (sd:1928).
+
+        Associate-only was the silent default, and sd:1910 merged that way
+        with its code on main and its row still planning. A stored claim
+        answers for every later prepare of the record. The owned runner names
+        its database and records delivery itself, so its prepare keeps the
+        old default.
+        """
+        if self.args.no_item or self.args.deliver is not None or "deliver" in self.state or self.args.database:
+            return
+        raise Refusal(f"say whether this pull request delivers sd:{self.args.item}: --deliver on the last "
+                      "pull request of the item, which closes it on merge, or --associate-only on an earlier one",
+                      code="delivery_claim_required", boundary="input", state="operator_decision",
+                      next_action="Rerun prepare with --deliver or --associate-only.")
 
     def assert_scope(self) -> None:
         if not self.args.no_item and self.state.get("deliver"):
@@ -428,17 +471,49 @@ class Ship(SharedReview):
             if self.state.get("acceptance", {}).get("item_scope") != scope:
                 raise Refusal("item acceptance scope changed after the delivery claim")
 
+    def body_input(self, default: str) -> tuple[str, str]:
+        """The body to publish and where it came from (sd:1870).
+
+        An open pull request's live body outranks the stored one: an edit made
+        on GitHub, such as an added scope line, is what the author meant, and
+        preparing from the stored copy dropped it in silence. A blank live
+        body says nothing, so the stored one answers instead.
+
+        With no receipt naming a pull request, the one open for this branch
+        answers the same way (sd:1878): a pull request opened by hand has a
+        body its author wrote, and preparing from the default body reviewed,
+        linted and squashed a description nobody wrote. More than one open
+        for the branch is left to the refusal the publish step makes.
+        """
+        if self.args.body_file:
+            return self.args.body_file.read_text(encoding="utf-8"), "file"
+        pull = self.state.get("pull_request") or {}
+        number = pull.get("number") if type(pull.get("number")) is int else self.open_pull_number()
+        if number is not None:
+            live = str(self.api.pull(number).get("body") or "").replace("\r\n", "\n")
+            if live.strip():
+                return live, "live_pr"
+        if self.state.get("body"):
+            return self.state["body"], "state"
+        return default, "default"
+
+    def open_pull_number(self) -> int | None:
+        """The one open pull request from this branch of this repository, or None."""
+        pulls = self.api.pages(f"{self.api.prefix}/pulls?state=open&head={quote_branch(self.repository, self.branch)}")
+        numbers = [pull.get("number") for pull in pulls
+                   if pull.get("state") == "open" and pull.get("head", {}).get("ref") == self.branch
+                   and str(pull.get("head", {}).get("repo", {}).get("full_name", "")).lower() == self.repository]
+        return numbers[0] if len(numbers) == 1 and type(numbers[0]) is int else None
+
     def publication_claim(self) -> tuple[str, bool, dict | None, bool]:
         if self.args.no_item:
-            body = self.args.body_file.read_text(encoding="utf-8") if self.args.body_file else self.state.get("body") or "Code changes reviewed locally."
-            if re.search(r"(?im)^[ \t]*(?:Item|Delivers|Closes|Authored-with|Attributes|Work)[ \t]*:", body):
-                raise Refusal("no-item publication cannot carry item or caller-supplied authorship trailers")
+            body, self.body_source = self.body_input("Code changes reviewed locally.")
+            body, self.body_normalized = sd_ship_body.normalize(body, None)
             return body, False, None, False
         deliver = bool(self.args.deliver) if self.args.deliver is not None else bool(self.state.get("deliver"))
         claim = self.acceptance() if self.args.deliver is not None or not self.state else self.state.get("acceptance")
-        body = self.args.body_file.read_text(encoding="utf-8") if self.args.body_file else self.state.get("body") or f"Code changes associated with sd:{self.args.item}."
-        if self.args.body_file and re.search(r"(?im)^(?:Item|Delivers|Closes|Authored-with|Attributes|Work):", body):
-            raise Refusal("the ship adapter owns association and delivery trailers")
+        body, self.body_source = self.body_input(f"Code changes associated with sd:{self.args.item}.")
+        body, self.body_normalized = sd_ship_body.normalize(body, self.args.item, deliver=deliver)
         local_work = bool(self.item["kind"] == "work" and self.item.get("path")
                           and git(self.root, "ls-files", "--deduplicate", "--", self.item["path"]))
         return body, deliver, claim, local_work
@@ -1005,9 +1080,12 @@ class Ship(SharedReview):
     def prepare(self) -> dict:
         if self.state.get("phase") in ("merged", "merge_dispatch"):
             return self.reconcile()
+        self.require_claim()
         if (any(value is not None for value in (self.args.additional_review_for, self.args.request_reason, self.args.review_history_digest))
                 and (self.args.path or self.args.message_file or self.args.author)):
             raise Refusal("additional review cannot commit; name an already committed exact head")
+        if getattr(self.args, "catch_up", False) and self.args.additional_review_for is not None:
+            raise Refusal("--catch-up makes a new head; an additional review names an existing one")
         commit_paths(self.root, self.args)
         head = current_head(self.root)
         self.additional_request(head, list(self.state.get("passes") or []))
@@ -1019,6 +1097,8 @@ class Ship(SharedReview):
         # an operator's checkout implicitly to make a check pass.
         git(self.root, "fetch", "--no-tags", "origin", f"refs/heads/{base}:refs/remotes/origin/{base}")
         git(self.root, "symbolic-ref", "refs/remotes/origin/HEAD", f"refs/remotes/origin/{base}")
+        if getattr(self.args, "catch_up", False) and not self.current_with(base, head):
+            head = self.catch_up(base, head)
         self.assert_current_base(base, head)
         # A merge-forward's subject names a branch operation, not the change;
         # the newest commit the branch adds that is not a merge does (sd:1377).
@@ -1030,8 +1110,8 @@ class Ship(SharedReview):
         mode = self.resolve_mode()
         if self.args.copilot_review == "request" and mode != "full":
             raise Refusal("explicit Copilot review requires a full-owned repository")
-        if not self.args.no_item and (mode != "guest" or local_work) and f"Work: sd:{self.args.item}" not in body:
-            body += f"\n\nWork: sd:{self.args.item}\n"
+        if not self.args.no_item and (mode != "guest" or local_work):
+            body = sd_ship_body.published(body, self.args.item)
         if self.state.get("pull_request") and (self.state.get("title") != title
                                                or (not self.args.no_item and self.state.get("deliver") != deliver)):
             raise Refusal("existing PR delivery claim or title differs; reconcile the prepared scope first")
@@ -1044,8 +1124,8 @@ class Ship(SharedReview):
         # Rules 5 and 8 read the pull request body, and the body is built by
         # now. Without it the rules report themselves not run and CI is the
         # first to check the `Work:` line, which the skill said happened
-        # here. With no work root the tree rules cannot run and the linter
-        # says so before any rule does, so until #972 the whole call was
+        # here. With no work root the tree rules cannot run, and before
+        # sd:1570 the linter failed on that before any rule ran, so until #972 the whole call was
         # withheld there, scope rule included, and a diff touching
         # `.github/**` shipped without its scope line. `--body-only` runs the
         # two body rules and nothing else; no planning directory is created
@@ -1064,7 +1144,7 @@ class Ship(SharedReview):
         mode = self.resolve_mode()
         if mode == "guest":
             if not self.args.no_item and not local_work:
-                body = body.replace(f"\n\nWork: sd:{self.args.item}\n", "")
+                body = body.replace(f"\n\n{sd_lib.WORK_TRAILER} sd:{self.args.item}\n", "")
                 self.save(body=body)
             if self.planning_artifacts(f"origin/{base}", head):
                 raise Refusal("guest destination cannot receive local planning artifacts")
@@ -1102,7 +1182,8 @@ class Ship(SharedReview):
         copilot = self.prepare_copilot_review(number, pull, head, mode)
         if copilot.get("warning"):
             self.save(warnings=list(self.state.get("warnings") or []) + [copilot["warning"]])
-        return self.result("ready_to_send", copilot_review=copilot)
+        return self.result("ready_to_send", copilot_review=copilot,
+                           body_source=self.body_source, normalized=list(self.body_normalized))
 
     def pushed_pull(self, number: int, head: str) -> dict:
         """Read the pull object until it shows the head just pushed (sd:1394).
@@ -1124,6 +1205,10 @@ class Ship(SharedReview):
             next_action="Compare the branch on origin with the pull request's head, then retry prepare.",
         )
 
+    def current_with(self, base: str, head: str) -> bool:
+        """Whether `head` already contains the fetched `origin/<base>`."""
+        return sd_lib.git_output(["merge-base", "--is-ancestor", f"refs/remotes/origin/{base}", head], self.root) is not None
+
     def assert_current_base(self, base: str, head: str) -> None:
         """Refuse a head that lacks the fetched default branch, before any review.
 
@@ -1139,7 +1224,8 @@ class Ship(SharedReview):
             notes = "".join(f"; {note}" for note in self.squash_notes(base, head))
             raise Refusal(f"the branch is behind the current default branch origin/{base}; nothing was reviewed{notes}",
                           code="base_moved", boundary="ci", state="retryable_failure",
-                          next_action=f"Run git merge origin/{base} on the branch, then run prepare again.") from None
+                          next_action=f"Run sd-ship prepare --catch-up, or git merge origin/{base} on the branch "
+                                      "and then prepare again.") from None
 
     def answer_review(self, number: int, head: str) -> list[str]:
         """Record the review findings this push answers, and never block on it.
@@ -1395,15 +1481,31 @@ class Ship(SharedReview):
     def squash_body(self, reviewed_base: str = "") -> str:
         body = self.state["body"].rstrip() + "\n\n"
         if not self.args.no_item:
-            body += f"Item: sd:{self.args.item}\n"
+            body += f"{sd_lib.ITEM_TRAILER} sd:{self.args.item}\n"
             if self.state.get("deliver"):
-                body += f"Delivers: sd:{self.args.item}\n"
+                body += f"{sd_lib.DELIVERS_TRAILER} sd:{self.args.item}\n"
                 # The message is fixed before GitHub picks the squash parent,
                 # so it names the parent the review covered; a git reader
                 # holds `Delivers:` when the landed parent differs (#1179).
                 if reviewed_base:
                     body += f"{sd_lib.REVIEWED_BASE_TRAILER} {reviewed_base}\n"
         return body
+
+    def squash_authorship(self, head: str, reviewed_base: str) -> str:
+        """The squash's `Attributes:` and `Authored-with:` trailers, in that order."""
+        # Preserve actual authorship through the squash, including its vendor
+        # at authoring time. No declaration supplied to merge can rewrite it.
+        start = self.authorship_start()
+        sd_lib.author_vendors(self.root, start, head)
+        # A repair of commits the base already holds survives the squash;
+        # one naming a branch commit becomes an `Authored-with:` below (sd:1753).
+        lines = sd_lib.base_attributions(self.root, start, head, reviewed_base)
+        authors = set(sd_lib.attribution(self.root, start, head).values())
+        for _, message in sd_lib.commit_messages(self.root, start, head):
+            authors.update(line.partition(":")[2].strip() for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines()
+                           if line.startswith(sd_lib.AUTHORED_TRAILER))
+        lines += [f"{sd_lib.AUTHORED_TRAILER} {author}" for author in sorted(authors)]
+        return "".join(line + "\n" for line in lines)
 
     def reviewed_base(self, head: str, base: str) -> str:
         """The newest `base` commit `head` contains, read after a fresh fetch."""
@@ -1414,8 +1516,61 @@ class Ship(SharedReview):
         """Whether the row already records delivery at `commit`, by hand or earlier."""
         from sd_db.progress import completion_record
         row = self.connection.execute("SELECT * FROM item WHERE id = ?", (self.args.item,)).fetchone()
+        if row is not None and row["kind"] != "work":
+            # A task keeps no completion receipt. Its record is the move to
+            # done, and only one that names this commit counts: a plain close
+            # says nothing about the tree this merge landed.
+            last = self.connection.execute(
+                "SELECT body FROM note WHERE item = ? AND kind = 'status_change' ORDER BY id DESC LIMIT 1",
+                (self.args.item,)).fetchone()
+            return row["status"] == "done" and last is not None and f"delivered at {commit} on " in last["body"]
         record = completion_record(row) if row is not None else None
         return record is not None and record.get("outcome") == "delivered" and record.get("commit") == commit
+
+    def record_delivery(self, commit: str, ref: str) -> None:
+        from sd_db.progress import deliver_work
+        # The tool that verified the merge is the actor, as sd_db's own
+        # ship transition names it; a `--run` merge has no operator.
+        if self.item["kind"] == "work":
+            deliver_work(self.connection, self.args.item, commit, who="sd-ship", verification_root=self.root)
+        else:
+            self.close_task(commit, ref)
+
+    def by_hand(self, commit: str) -> str:
+        """The hand close for a held delivery: `sd work deliver`'s, or a task's.
+
+        A followup takes no `--delivered-by` (sd:809), so its close states the
+        delivery sentence as its reason; `delivered_at` reads either.
+        """
+        if self.item["kind"] == "work":
+            return "deliver the item by hand"
+        if self.item["kind"] == "task":
+            return f"close it with `sd task status {self.args.item} done --delivered-by {commit}`"
+        base = self.state["pull_request"]["base"]
+        return f"close it with `sd task status {self.args.item} done --reason 'delivered at {commit} on origin/{base}'`"
+
+    def close_task(self, commit: str, ref: str) -> None:
+        """Move a delivering task or followup to done once, with the delivery sentence.
+
+        `reconcile` has already verified `commit` on the fetched tip of `ref`.
+        The squash must still carry the `Delivers:` this receipt wrote, the
+        one `sd task status N done --delivered-by` requires, so the two closes
+        agree on what a delivery is. The sentence is the one that command and
+        `sd_db.progress` write, so one query finds every delivering commit.
+        """
+        from sd_db.workflow import change_status, item_state
+        row = item_state(self.connection, self.args.item)["item"]
+        if self.delivered_at(commit):
+            return
+        if row["status"] == "done":
+            raise ValueError(f"item {self.args.item} is done without delivery evidence for {commit}; "
+                             f"reopen it, then run sd-ship reconcile")
+        wanted = f"sd:{self.args.item}"
+        block = sd_lib.trailer_block(git(self.root, "show", "-s", "--format=%B", commit)).splitlines()
+        if not any(line.partition(":")[0] == "Delivers" and line.partition(":")[2].strip() == wanted for line in block):
+            raise ValueError(f"{commit} carries no `Delivers: {wanted}` trailer")
+        change_status(self.connection, self.args.item, "done", who="sd-ship",
+                      reason=f"delivered at {commit} on {ref}")
 
     def require_copilot_abandonment_authority(self) -> None:
         if self.args.abandon_copilot_review is not None and not self.args.manual:
@@ -1445,6 +1600,52 @@ class Ship(SharedReview):
                           code="base_moved", boundary="ci", state="retryable_failure",
                           next_action="Update the branch onto the current default branch, then retry.")
 
+    def settled_ready(self, number: int, head: str, base: str, protection: dict) -> dict:
+        """The pull request once `ready` accepts it, read again while GitHub settles (sd:2050).
+
+        Only under `repo.ci = local`, where this process has just posted
+        `sd/local-gate` and GitHub recomputes the merge rules asynchronously.
+        Anywhere else nothing was posted and the answer is read once. The last
+        refusal carries GitHub's final answer and how long it was waited for.
+        """
+        attempts = MERGE_RULES_ATTEMPTS if self.api.ci == "local" else 1
+        waited = 0
+        for attempt in range(attempts):
+            observed = self.api.pull(number)
+            try:
+                self.api.ready(observed, head, base, protection)
+                return observed
+            except Refusal as refusal:
+                if refusal.workflow["blocker"]["code"] not in SETTLING_CODES or attempt + 1 == attempts:
+                    if attempts > 1 and refusal.workflow["blocker"]["code"] in SETTLING_CODES:
+                        refusal.args = (f"{refusal.args[0]}; still so after {attempts} reads over {waited}s",)
+                    raise
+            time.sleep(MERGE_RULES_INTERVAL_SECONDS * (attempt + 1))
+            waited += MERGE_RULES_INTERVAL_SECONDS * (attempt + 1)
+        raise AssertionError("unreachable")
+
+    def catch_up(self, base: str, head: str) -> str:
+        """Merge `origin/<base>` into the branch and return the new head (sd:2023).
+
+        A merge, never a rebase, so the next push is a fast-forward of the
+        branch already pushed and no reviewed head is orphaned. A conflict is
+        aborted, so the branch is left exactly as it was. The review scopes
+        the new head from ancestry, and merge gates it like any other.
+        """
+        if git(self.root, "status", "--porcelain", "--untracked-files=no"):
+            raise Refusal("--catch-up needs a clean working tree", code="dirty_worktree", boundary="input",
+                          state="operator_decision", next_action="Commit or stash the changes, then run prepare again.")
+        remote = f"refs/remotes/origin/{base}"
+        merged = sd_lib.git_output(["merge", "--no-ff", "--no-edit", "-m", f"Merge origin/{base} into {self.branch}",
+                                    remote], self.root)
+        if merged is None:
+            sd_lib.git_output(["merge", "--abort"], self.root)
+            notes = "".join(f"; {note}" for note in self.squash_notes(base, head))
+            raise Refusal(f"merging origin/{base} into {self.branch} conflicts; the branch is unchanged{notes}",
+                          code="merge_conflict", boundary="ci", state="operator_decision",
+                          next_action=f"Run git merge origin/{base}, resolve the conflict, commit, then run prepare again.")
+        return current_head(self.root)
+
     def merge(self) -> dict:
         if not self.state.get("pull_request"):
             raise Refusal("prepare this branch before merging", code="prepare_required", state="operator_decision",
@@ -1464,7 +1665,11 @@ class Ship(SharedReview):
         if sd_lib.written_mode(self.root) == "guest":
             raise Refusal("guest mode has no merge authority")
         self.assert_scope()
-        if self.args.watch and not self.state.get("watch_started"):
+        self.api.ci = sd_lib.repo_ci(self.connection, self.root)
+        # Under `repo.ci = local` no remote check is coming, and `gh pr checks
+        # --watch` fails on a pull request that has none; the local gate
+        # below runs to completion in this process, so it is the wait (sd:1875).
+        if self.args.watch and not self.state.get("watch_started") and self.api.ci != "local":
             self.save(watch_started=True)
             run(self.root, ["gh", "pr", "checks", str(observed["number"]), "--repo", self.repository,
                             "--watch", "--fail-fast"], timeout=self.args.wait_seconds)
@@ -1474,22 +1679,19 @@ class Ship(SharedReview):
             raise Refusal("default branch changed or squash merging is disabled")
         protection = self.api.gate(base, head)  # the object, or the declared gap at this head (sd:1110)
         squash_allowed(base, protection)
-        observed = self.api.pull(observed["number"])
-        self.api.ready(observed, head, base, protection)
+        # `repo.ci = local` (sd:1843): no Actions run, so the checks run here,
+        # at the reviewed head in a clean worktree, before readiness reads them.
+        if self.api.ci == "local":
+            # A BEHIND branch cannot merge whatever the gate says, and the gate
+            # takes minutes: name it first (sd:2023).
+            refuse_behind(observed, base)
+            self.save(local_gate=sd_local_gate.local_gate(self.api, self.root, head))
+        observed = self.settled_ready(observed["number"], head, base, protection)
         self.abandon_copilot_review(observed["number"], head)
         self.require_copilot_clearance(observed["number"], observed, head)
         self.save(phase="ci_passed", protection=protection)
-        body = self.squash_body(self.reviewed_base(head, base))
-        # Preserve actual authorship through the squash, including its vendor
-        # at authoring time. No declaration supplied to merge can rewrite it.
-        start = self.authorship_start()
-        sd_lib.author_vendors(self.root, start, head)
-        authors = set(sd_lib.attribution(self.root, start, head).values())
-        for _, message in sd_lib.commit_messages(self.root, start, head):
-            authors.update(line.partition(":")[2].strip() for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines()
-                           if line.startswith("Authored-with:"))
-        for author in sorted(authors):
-            body += f"Authored-with: {author}\n"
+        reviewed = self.reviewed_base(head, base)
+        body = self.squash_body(reviewed) + self.squash_authorship(head, reviewed)
         # The squash message is composed here and read by `git
         # interpret-trailers --parse` afterwards, and those two only agree
         # while the trailers sit in the message's *last* paragraph. One blank
@@ -1522,11 +1724,12 @@ class Ship(SharedReview):
         # passing `None` retracts what an earlier attempt recorded. An
         # ownership-only merge therefore cannot inherit a claim from a merge
         # that never happened (sd:1347).
+        title = squash_title(observed, self.state["title"])
         self.save(phase="merge_dispatch", merge_message=body, row_authorized_merge=self.row_authority,
                   warnings=self.dispatch_warnings())
         try:
             self.api.api(f"{self.api.prefix}/pulls/{observed['number']}/merge", method="PUT",
-                         body={"sha": head, "merge_method": "squash", "commit_title": f"{self.state['title']} (#{observed['number']})",
+                         body={"sha": head, "merge_method": "squash", "commit_title": f"{title} (#{observed['number']})",
                                "commit_message": body})
         except Refusal:
             # A response can be lost after GitHub merged. Read back the same
@@ -1590,18 +1793,15 @@ class Ship(SharedReview):
         # reissuing the hold over it would never clear (#1179).
         if held and not self.args.no_item and self.state.get("deliver") and not self.delivered_at(commit):
             pending = blocked("base_advanced_at_merge", "ci",
-                              f"Verify the combined tree at {commit} (default-branch CI), then deliver the item by hand.",
+                              f"Verify the combined tree at {commit} (default-branch CI), then {self.by_hand(commit)}.",
                               state="operator_decision")
             return {**evidence, "delivery_pending": True, "merged_parent": parent,
                     "workflow": {**evidence["workflow"], **pending}}
         if not self.args.no_item and self.state.get("deliver"):
             from sd_db.errors import SdDbError
-            from sd_db.progress import deliver_work
             self.assert_scope()
             try:
-                # The tool that verified the merge is the actor, as sd_db's own
-                # ship transition names it; a `--run` merge has no operator.
-                deliver_work(self.connection, self.args.item, commit, who="sd-ship", verification_root=self.root)
+                self.record_delivery(commit, f"origin/{reference['base']}")
             except (SdDbError, sqlite3.Error, ValueError) as error:
                 pending = blocked("delivery_pending", "database", "Resolve the delivery error, then run sd-ship reconcile.",
                                   state="operator_decision")
@@ -1622,6 +1822,33 @@ def review_seconds(value: str) -> int:
     if seconds <= 0:
         raise argparse.ArgumentTypeError("takes a positive number of seconds")
     return seconds
+
+
+def lock_wait_seconds(value: str) -> float:
+    seconds = float(value)
+    if not seconds >= 0 or seconds == float("inf"):
+        raise argparse.ArgumentTypeError("takes a finite number of seconds, zero or more")
+    return seconds
+
+
+def lock_wait_flag(action) -> None:
+    """sd:1937. Block on the repository's ship lock to a deadline instead of a caller's retry loop."""
+    action.add_argument("--wait", dest="lock_wait", type=lock_wait_seconds, default=0.0, metavar="SECONDS",
+                        help="wait up to SECONDS for another ship operation on this repository to finish; "
+                             "0, the default, refuses at once (not --wait-seconds)")
+
+
+def publication_flags(action) -> None:
+    """What `prepare` publishes: the title, the body, and a base merged in first.
+
+    `--catch-up` (sd:2023) merges the base into a BEHIND branch instead of
+    refusing it.
+    """
+    action.add_argument("--title")
+    action.add_argument("--body-file", type=pathlib.Path)
+    action.add_argument("--catch-up", action="store_true",
+                        help="merge origin/<base> into a branch that is behind it (no rebase, no force push), "
+                             "then review the new head's own diff")
 
 
 def review_timeout_flag(action) -> None:
@@ -1661,6 +1888,20 @@ def adjudication_flags(action) -> None:
     action.add_argument("--accept-dispositions", metavar="SHA256", help="explicit acceptance of this exact validated proposal; not proof of user approval")
 
 
+def squash_title(pull: dict, prepared: str) -> str:
+    """The squash subject: the pull request's live title, else the prepared one (sd:1876).
+
+    `prepare` stores the newest non-merge commit subject when no `--title` is
+    given, and an adopted or retitled pull request keeps its own title; the
+    title a reader saw on the pull request is the one main should carry. A
+    `wip` title still never reaches the default branch.
+    """
+    title = str(pull.get("title") or "").strip() or prepared
+    if re.match(r"(?i)wip\b", title):
+        raise Refusal("the pull request's title starts with wip; retitle it before merging")
+    return title
+
+
 def identity_flags(action) -> None:
     identity = action.add_mutually_exclusive_group(required=True)
     identity.add_argument("--item", type=int)
@@ -1678,7 +1919,8 @@ def validate_identity(args) -> None:
     if getattr(args, "provider", None) is not None and any(getattr(args, name, None) for name in
             ("create_record", "import_history", "rebind_branch", "close_record", "reopen_record")):
         raise Refusal("--provider cannot combine with metadata-only record operations")
-    forbidden = [name for name in ("path", "message_file", "author", "run", "deliver", "acceptance_file") if getattr(args, name, None)]
+    forbidden = [name for name in ("path", "message_file", "author", "run", "deliver", "associate_only", "acceptance_file")
+                 if getattr(args, name, None)]
     if forbidden:
         raise Refusal("no-item publication does not accept commit, runner, or delivery flags: "
                       + ", ".join("--" + name.replace("_", "-") for name in forbidden),
@@ -1691,11 +1933,23 @@ def validate_identity(args) -> None:
 
 
 def parser():
-    command = argparse.ArgumentParser(description=__doc__)
+    command = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
+                                      epilog=BODY_EPILOG)
+    command.add_argument("-C", dest="chdir", metavar="DIR", action=sd_lib.DirectoryAction, help=sd_lib.DIRECTORY_OPTION_HELP)
     commands = command.add_subparsers(dest="command", required=True)
+    body = commands.add_parser("body", help="print the body prepare would publish, and its body lint; no state",
+                               description=BODY_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
+    body.add_argument("--item", type=int, required=True)
+    body.add_argument("--body-file", type=pathlib.Path, help="the body to read; - reads stdin; default is prepare's default body")
+    body.add_argument("--deliver", action="store_true", help="accept a matching Delivers: line, as prepare --deliver does")
+    body.add_argument("--pr", type=int, metavar="N",
+                      help="lint pull request N: its files are the diff, and without --body-file its live body is read")
+    body.add_argument("--json", action="store_true")
     for name in ("prepare", "merge", "reconcile", "observe"):
         action = commands.add_parser(name)
         identity_flags(action)
+        if name in ("prepare", "merge"):
+            lock_wait_flag(action)
         if name == "prepare":
             action.add_argument("--provider", metavar="NAME", help="select one guarded reviewer for this invocation; never changes automatic order")
             action.add_argument("--reuse-check", action="store_true", help="opt into exact-input successful check-receipt reuse")
@@ -1707,9 +1961,12 @@ def parser():
             action.add_argument("--path", action="append", default=[])
             action.add_argument("--message-file", type=pathlib.Path)
             action.add_argument("--author")
-            action.add_argument("--title")
-            action.add_argument("--body-file", type=pathlib.Path)
-            action.add_argument("--deliver", action="store_true", default=None)
+            publication_flags(action)
+            claim = action.add_mutually_exclusive_group()
+            claim.add_argument("--deliver", action="store_true", default=None,
+                               help="the item's last pull request: the squash carries Delivers: and the merge closes the item")
+            claim.add_argument("--associate-only", action="store_true",
+                               help="an earlier pull request of the item: the squash carries Item: only")
             action.add_argument("--acceptance-file", type=pathlib.Path)
             action.add_argument(
                 "--copilot-review", choices=("auto", "request", "skip"), default="auto",
@@ -1736,6 +1993,109 @@ def parser():
     return command
 
 
+BODY_EPILOG = """\
+body: `sd-ship body --item N [--body-file F] [--pr P]` prints the body prepare
+would publish and runs the body lint (sd-docs-lint --body-only: one Work:
+line, and the scope line a changed path demands). It strips an Item:, Work:,
+Delivers: or Authored-with: line that says what sd-ship would write, and
+refuses any other owned line by number. The result's `scope` names each
+scope line the diff demands, such as `CI/review scope:` for `.github/**`, the
+path that demands it, and whether the body carries it. The diff is the
+checkout's HEAD against origin/HEAD; with --pr it is that pull request's
+files, and without --body-file its live body is the one read. It reads no sd
+state, and calls the GitHub API only for --pr.
+Exit 0 when the body would prepare, 3 on a refusal or a lint failure.
+"""
+
+
+def body_text(args, root: pathlib.Path, api: GitHub | None) -> tuple[str, str]:
+    """The body `sd-ship body` reads, and its source: file, stdin, live_pr or default."""
+    if args.body_file is None:
+        if api is not None:
+            return str(api.pull(args.pr).get("body") or "").replace("\r\n", "\n"), "live_pr"
+        return f"Code changes associated with sd:{args.item}.", "default"
+    if str(args.body_file) == "-":
+        return sys.stdin.read(), "stdin"
+    return args.body_file.read_text(encoding="utf-8"), "file"
+
+
+def body_diff(root: pathlib.Path, api: GitHub | None, number: int | None) -> tuple[list[str] | None, str]:
+    """The changed paths rule 8 reads, and where they came from (sd:1877).
+
+    A pull request's are its `files` listing, so a PR opened from another
+    checkout, or by hand, is linted against its own diff. Otherwise they are
+    the checkout's HEAD against origin/HEAD, read the way `sd-docs-lint`
+    reads them; `None` carries its reason, and the lint then fails by name.
+    """
+    if api is not None:
+        files = api.pages(f"{api.prefix}/pulls/{number}/files")
+        return sd_ship_body.pull_paths(files), f"pull request #{number}"
+    changed, base = sd_ship_body.docs_lint().changed_paths(root)
+    return changed, (f"{base}...HEAD" if changed is not None else base)
+
+
+def body_command(args) -> int:
+    """`sd-ship body`: normalize, append `Work:`, lint; no database (sd:1870, sd:1877)."""
+    try:
+        root = sd_lib.repo_root(None)
+        if root is None:
+            raise Refusal("cwd is not inside a Git repository")
+        api = None if args.pr is None else GitHub(root, slug(git(root, "config", "--get", "remote.origin.url")))
+        text, source = body_text(args, root, api)
+        normalized, stripped = sd_ship_body.normalize(text, args.item, deliver=args.deliver)
+        body = sd_ship_body.published(normalized, args.item)
+        changed, changed_from = body_diff(root, api, args.pr)
+        demanded = None if changed is None else sd_ship_body.demanded_scope(root, body, changed)
+        with tempfile.TemporaryDirectory(prefix="sd-ship-body-") as directory:
+            path = pathlib.Path(directory) / "pr-body.md"
+            path.write_text(body, encoding="utf-8")
+            lint = [sys.executable, str(BIN / "sd-docs-lint"), "--body-only", "--pr-body", str(path)]
+            if changed is not None:
+                # One enumeration for both answers: the lint reads the paths
+                # `demanded_scope` read, so the two cannot disagree about the diff.
+                listing = pathlib.Path(directory) / "changed"
+                listing.write_text("".join(f"{name}\0" for name in changed), encoding="utf-8")
+                lint += ["--changed", str(listing)]
+            linted = subprocess.run(lint, cwd=root, capture_output=True, text=True, timeout=300, check=False)
+        output = (linted.stdout + linted.stderr).strip()
+        result = {"ok": linted.returncode == 0, "body": body, "body_source": source,
+                  "normalized": list(stripped), "lint": {"exit": linted.returncode, "output": output},
+                  "scope": {"changed_from": changed_from, "changed": None if changed is None else len(changed),
+                            "demanded": demanded}}
+    except (Refusal, OSError, UnicodeDecodeError, subprocess.SubprocessError) as error:
+        result = failure("body", error)
+        body, stripped, output, demanded = "", (), str(error), None
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print(body, end="")
+        for line in stripped:
+            print(f"normalized: {line}", file=sys.stderr)
+        for row in demanded or ():
+            print(f"scope: {row['path']} demands `{row['line']}`; the body "
+                  + ("carries it" if row["present"] else "does not carry it"), file=sys.stderr)
+        print(output, file=sys.stderr)
+    return 0 if result["ok"] else 3
+
+
+def lock_options(args, store) -> dict:
+    """What the ship lock records about this holder, for a refusal and `sd runner status` (sd:1936),
+    and how long it waits for another holder (sd:1937).
+
+    An `sd_db` built before the holder record takes no options; the lock is
+    the same flock either way, so an older library still serializes. It
+    cannot wait, so `--wait` refuses on it rather than refusing at once.
+    """
+    wait = getattr(args, "lock_wait", 0.0)
+    if not hasattr(store, "held_locks"):
+        if wait:
+            raise Refusal("--wait needs an sd_db whose ship lock can wait; install the current system/local-sd-db")
+        return {}
+    selector = f"--item {args.item}" if args.item is not None else f"--no-item --review-id {args.review_id}"
+    return {"holder": {"command": f"sd-ship {args.command} {selector}", "item": args.item, "review": args.review_id},
+            "wait": wait}
+
+
 def dispatch(root, connection, database, args, store, readonly):
     if args.no_item and args.command in ("review", "verify-review", "adjudicate"):
         import sd_ship_no_item
@@ -1743,15 +2103,49 @@ def dispatch(root, connection, database, args, store, readonly):
     delivery = Ship(root, connection, database, args)
     if readonly:
         return getattr(delivery, args.command)()
-    with store.repository_lock(database, delivery.repository):
+    with store.repository_lock(database, delivery.repository, **lock_options(args, store)):
         delivery.revision, delivery.state = store.read(connection, delivery.key)
         if args.no_item and (delivery.state.get("branch") != delivery.branch or delivery.state.get("lifecycle") != "active"):
             raise Refusal("no-item record changed concurrently; select its current identity before publication")
+        identity_unchanged(root, connection, args, store, delivery)
         return getattr(delivery, args.command)()
+
+
+def identity_unchanged(root, connection, args, store, delivery) -> None:
+    """Refuse when what `Ship` read before the lock no longer holds under it (sd:1937 review).
+
+    `--wait` can hold that read for minutes. A branch switch meanwhile would
+    push the new HEAD under the old branch's pull request, and a reassigned
+    item would ship under its old repository or branch. One check for both
+    modes: the live checkout, and for an item its row as it stands now.
+    """
+    live = git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
+    if live != delivery.branch or slug(git(root, "config", "--get", "remote.origin.url")) != delivery.repository:
+        raise Refusal(f"the checkout left {delivery.branch} while this command waited for the ship lock; "
+                      "rerun it from the branch it ships")
+    if args.no_item:
+        return
+    info = store.identity(connection, args.item)
+    now = info["item"]
+    if (now.get("repo"), now.get("branch")) != (delivery.item.get("repo"), delivery.item.get("branch")):
+        raise Refusal(f"item {args.item} changed repository or branch while this command waited for the ship lock; "
+                      "rerun it")
+    # The same repository path can be re-registered under another remote; `Ship.__init__` checks this before the lock.
+    if slug(info["repo"]["remote"] or "") != delivery.repository:
+        raise Refusal(f"item {args.item}'s repository remote changed while this command waited for the ship lock; "
+                      "rerun it")
 
 
 def main(argv=None) -> int:
     args = parser().parse_args(argv)
+    try:
+        sd_lib.enter_directory(args.chdir, error=Refusal)
+    except Refusal as error:
+        result = failure(args.command, error)
+        print(json.dumps(result, indent=2, sort_keys=True) if args.json else result)
+        return 3
+    if args.command == "body":
+        return body_command(args)
     # Two refusals, because there are two faults and one remedy each.
     # `sd_lib.import_sd_db` owns the first: it makes the second attempt this
     # entrypoint used not to make -- the provisioned copy, which is the only

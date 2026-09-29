@@ -97,6 +97,22 @@ class URLContractTests(ReviewFixture):
             self.assertEqual(actual[key], planned[key])
         self.assertEqual([call["provider"] for call in client.sent], planned["providers"])
 
+    def test_footer_restates_the_validated_shape_last(self):
+        # sd:1821: a reviewer that drifts from the schema 35k tokens back
+        # reads the exact shape again, from the validator's own constants.
+        footer = sd_review.URL_OUTPUT_CONTRACT
+        restated = footer[footer.index("Output shape, restated"):]
+        self.assertIn(f"at most {sd_review.MAX_FINDINGS} finding objects", restated)
+        self.assertIn(f"exactly these {len(sd_review.FINDING_PROPERTIES)} keys and no other key: "
+                      + ", ".join(sd_review.FINDING_PROPERTIES), restated)
+        self.assertIn("severity note in summary, never in a new key", restated)
+        self.assertIn("one of high, medium, low;", restated)
+        self.assertNotIn("unspecified", restated)
+        example = json.loads(restated[restated.index("Example: ") + len("Example: "):])
+        parsed = sd_review.parse_findings(json.dumps(example))
+        self.assertEqual(parsed.error, "")
+        self.assertEqual(len(parsed.findings), 1)
+
     def test_summary_guidance_does_not_silently_truncate_findings(self):
         row = {"path": "src.py", "line": 1, "severity": "high", "family": "correctness",
                "summary": ("meaningful defect " * 100).strip()}

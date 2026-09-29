@@ -760,11 +760,37 @@ class LineBudgetTests(unittest.TestCase):
         # sd:1556 on main stacks it on top. Measured, not carried: `sd-review`
         # is 2358 on the merged tree. Shared-core classification and the
         # complexity ceilings are unchanged.
+        # 3652 -> 3699 is sd:1821. MiniMax-M3 broke the findings schema on 13
+        # of 45 runs; the URL contract restates the validated shape last (10
+        # lines), and a free entry retries one schema failure on itself.
+        # Moving the url call out of `run_provider` to hold the complexity
+        # ceiling costs the rest: three helper signatures and docstrings.
+        # 3699 -> 3702 is sd:1843, no-CI mode. `bin/sd_setup_github.py` grows
+        # +3: one branch in `main` that prints why a `repo.ci = local`
+        # repository gets no workflow and exits 0. The reason and the row read
+        # are `sd_setup_guard.ci_local_skip` and `sd_lib.ci_mode`, outside the
+        # lane, so only the dispatch is spent here.
+        # 3702 -> 3709 is sd:1910, `-C <dir>` on the lane commands. `bin/sd-review`
+        # grows +7: the argument (kept for `--help`) and `-C` parsed once from
+        # the raw argv before the `setup-github` dispatch, for both paths, with
+        # its usage error printed (a try, an except, a print, a return, two
+        # comment lines). The parse and the change of directory are
+        # `sd_lib.enter_directory_from_argv` and `sd_lib.enter_directory`,
+        # shared core, so none of that is spent here. Measured on the branch.
+        # 3709 -> 3736 is `setup-github --remove`, the supported way for a
+        # `repo.ci = local` repository (sd:1843) to shed a route workflow that
+        # never runs. `bin/sd_setup_github.py` grows +27: the flag, its
+        # dispatch in `main` (refused beside `--check`, which never writes), `--check` naming a tracked workflow REMOVE there,
+        # `remove` itself, and `_apply`, which the install and the removal now
+        # share as the lane's one write site. What goes and what stays --
+        # the guard lifted out of `dependabot.yml`, kept while another
+        # workflow pins the action -- is `sd_setup_guard.removal` and
+        # `unguarded`, outside the lane, so none of that is spent here.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3652,
+            3736,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

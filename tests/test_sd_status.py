@@ -1402,6 +1402,26 @@ class RepoResolutionTests(StatusFixture):
             (_load("sd-pr-state", "sd_pr_state_under_test"), "sd-pr-state"),
         ):
             parser = module.build_parser()
+            banned = {
+                "repo",
+                "repo-path",
+                "path",
+                "root",
+                "dir",
+                "directory",
+                "cwd",
+                "checkout",
+                "worktree",
+                "fleet",
+                "all",
+                "all-repos",
+                "C",
+            }
+            if tool == "sd-pr-state":
+                # R10-D6's one exception (sd:1910): a lane command takes `-C`,
+                # a change of working directory before anything resolves.
+                # `tests/test_verb_inventory.py` allow-lists the five by name.
+                banned.discard("C")
             with self.subTest(tool=tool):
                 for action in parser._actions:
                     self.assertTrue(
@@ -1409,24 +1429,7 @@ class RepoResolutionTests(StatusFixture):
                         f"{tool} takes a positional argument: {action.dest}",
                     )
                     for option in action.option_strings:
-                        self.assertNotIn(
-                            option.lstrip("-"),
-                            {
-                                "repo",
-                                "repo-path",
-                                "path",
-                                "root",
-                                "dir",
-                                "directory",
-                                "cwd",
-                                "checkout",
-                                "worktree",
-                                "fleet",
-                                "all",
-                                "all-repos",
-                                "C",
-                            },
-                        )
+                        self.assertNotIn(option.lstrip("-"), banned)
 
     def test_there_is_no_fleet_walk(self) -> None:
         text = self.run_tool(SD_STATUS, "--help").stdout
@@ -5813,6 +5816,23 @@ class RulesetProtectionCase(unittest.TestCase):
             result = status.protection_section(pathlib.Path(directory), self.GH)
         result["_seen"] = seen
         return result
+
+    def test_ci_local_expects_the_local_gate_in_place_of_workflow_contexts(self) -> None:
+        """sd:1843: a `repo.ci = local` repository produces `sd/local-gate` and
+        nothing else, so requiring `lint` is `required_not_produced` and the
+        gate is the context it should require."""
+        with mock.patch.object(status.sd_lib, "ci_mode", lambda root: "local"):
+            result = self.section(self.gating_rules())
+        self.assertEqual(result["detail"]["produced_contexts"], ["sd/local-gate"])
+        self.assertEqual(result["detail"]["required_not_produced"], ["lint"])
+        self.assertEqual(result["detail"]["produced_not_required"], ["sd/local-gate"])
+        self.assertIn("repo.ci is local", " ".join(result["detail"]["workflow_notes"]))
+
+    def test_ci_github_leaves_the_produced_contexts_to_the_workflows(self) -> None:
+        with mock.patch.object(status.sd_lib, "ci_mode", lambda root: "github"):
+            result = self.section(self.gating_rules())
+        self.assertEqual(result["detail"]["produced_contexts"], [])
+        self.assertNotIn("repo.ci", " ".join(result["detail"]["workflow_notes"]))
 
     def test_a_ruleset_that_gates_the_merge_is_reported_as_protection(self) -> None:
         result = self.section(self.gating_rules())

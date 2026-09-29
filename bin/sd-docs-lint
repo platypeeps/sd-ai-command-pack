@@ -77,7 +77,8 @@ DECISION_HEADING_RE = re.compile(r"^#{1,6}\s+decision\b", re.IGNORECASE)
 # open marker is a line that starts with the word, optionally as a list item.
 BLOCKING_RE = re.compile(r"^\s*(?:[-*]\s+)?BLOCKING\b")
 MARKDOWN_LINK_RE = re.compile(r"\]\(([^)\s]+)\)")
-WORK_LINE_RE = re.compile(r"^Work:[ \t]*(?P<value>.*?)[ \t]*$", re.MULTILINE)
+# Rule 5's key is one of the lines `sd-ship` owns, spelled once in sd_lib.
+WORK_LINE_RE = re.compile(r"^" + re.escape(sd_lib.WORK_TRAILER) + r"[ \t]*(?P<value>.*?)[ \t]*$", re.MULTILINE)
 
 WORKABLE_STATUSES = ("ready", "in_progress")
 DECISION_STATUSES = ("proposed", "accepted", "superseded", "rejected")
@@ -1577,8 +1578,15 @@ def run(
     pr_body: str | None,
     changed: list[str] | None = None,
     body_only: bool = False,
+    work_dir_named: bool = True,
 ) -> Report:
     """Every rule over `repo`. `changed` is rule 8's path list; None reads git.
+
+    `work_dir_named` is False when the caller took the default root rather
+    than naming one. A repository that tracks its work in sd has no
+    `docs/work`, and it is valid: the rules that read the work root skip
+    with a note and the others run (sd:1570). A root the caller named and
+    that is missing stays a failure, since it is most likely mistyped.
 
     `body_only` runs the two body rules, 5 and 8, and none of the tree rules.
     It exists for `sd-ship` in a repository with no work root: the tree rules
@@ -1620,7 +1628,14 @@ def run(
         check_pr_scope(repo, pr_body, changed, report)
         return report
     if not work_root.is_dir():
-        report.fail(str(work_root), "the work directory does not exist")
+        if work_dir_named:
+            report.fail(str(work_root), "the work directory does not exist")
+            return report
+        report.note(f"rules 1-2, 6-7: no {work_dir}; nothing to lint")
+        check_decisions(repo / decisions_dir, report)
+        check_spec_index(repo / spec_dir, report)
+        check_pr_link(repo, work_root, pr_body, report)
+        check_pr_scope(repo, pr_body, changed, report)
         return report
 
     statuses = sd_lib.Statuses.of(repo, work_dir)
@@ -1762,7 +1777,11 @@ def is_archived(item: pathlib.Path, work_root: pathlib.Path) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Lint docs/work, docs/spec and docs/decisions.")
-    parser.add_argument("--work-dir", default="docs/work", help="work item root, repo-relative")
+    parser.add_argument(
+        "--work-dir",
+        help="work item root, repo-relative; default docs/work, which may be absent "
+        "in a repository that tracks its work in sd",
+    )
     parser.add_argument("--spec-dir", default="docs/spec", help="spec root, repo-relative")
     parser.add_argument(
         "--decisions-dir", default="docs/decisions", help="decision record root, repo-relative"
@@ -1791,6 +1810,9 @@ def main(argv: list[str] | None = None) -> int:
         help="record rule 6's baseline for every active work item, then exit",
     )
     args = parser.parse_args(argv)
+    work_dir_named = args.work_dir is not None
+    if not work_dir_named:
+        args.work_dir = sd_lib.WORK_DIR
 
     # R10-D6: cwd, not a flag. The old default was this script's own repository,
     # so running the linter from inside a consumer checked the pack instead of
@@ -1821,7 +1843,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {problem}", file=sys.stderr)
         return 2
 
-    report = run(root, args.work_dir, args.spec_dir, args.decisions_dir, body, changed, args.body_only)
+    report = run(root, args.work_dir, args.spec_dir, args.decisions_dir, body, changed, args.body_only,
+                 work_dir_named)
     for note in report.notes:
         print(note)
     for failure in report.failures:

@@ -786,8 +786,22 @@ def _merge_settings(repo: dict[str, Any]) -> list[dict[str, Any]]:
     return flags
 
 
-def protection_section(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any]:
+def produced_contexts(root: pathlib.Path) -> tuple[set[str], list[str]]:
+    """The contexts this repository produces: its workflows', or the local gate.
+
+    A `repo.ci = local` repository runs no Actions (sd:1843); `sd-ship merge`
+    posts `sd/local-gate`, the one context such a repository produces and so
+    the one its protection should require.
+    """
     produced, notes = workflow_checks(root)
+    if sd_lib.ci_mode(root) != "local":
+        return produced, notes
+    return {sd_lib.LOCAL_GATE_CONTEXT}, [*notes, f"repo.ci is local: {sd_lib.LOCAL_GATE_CONTEXT} "
+                                                 "replaces the workflow contexts"]
+
+
+def protection_section(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any]:
+    produced, notes = produced_contexts(root)
     acknowledgements, problems = load_acknowledgements(root)
     # A file that exists and is wrong is itself a finding, reported wherever
     # this section gets to -- including the branches that never reach GitHub.

@@ -149,6 +149,8 @@ def _build_fixture(root, widen_publish=False, widen_assembly=False):
     scripts.mkdir(parents=True)
     harness = scripts / "run-tests.sh"
     shutil.copy2(HARNESS, harness)
+    (root / "bin").mkdir()
+    shutil.copy2(REPO_ROOT / "bin" / "sd_gate_slots.py", root / "bin" / "sd_gate_slots.py")
     if widen_publish:
         _widen_publish_window(harness)
     if widen_assembly:
@@ -850,6 +852,22 @@ class GateSlotTests(unittest.TestCase):
                 if holder.poll() is None:
                     holder.kill()
                 holder.wait()
+
+    def test_the_slot_wait_runs_under_the_system_bash(self):
+        """sd:1996 review. macOS `/bin/bash` is 3.2: no `{fd}` allocation, no safe empty arrays.
+
+        `make test` runs `bash` from `PATH`, which can be that one, and it takes
+        a slot before any test starts.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+            run = subprocess.run(["/bin/bash", str(script)], capture_output=True, text=True, check=False,
+                                 env=self.slot_env(root, SD_GATE_SLOTS="2", HARNESS_FIXTURE_SLEEP="0"), timeout=300)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            self.assertIn("run-tests: start ", run.stderr)
+            self.assertEqual(sorted(path.name for path in (root / "slots").iterdir()), ["slot.1.lock", "slot.2.lock"])
+            self.assertTrue(all(_slot_free(root / "slots" / f"slot.{index}.lock") for index in (1, 2)))
 
     def test_without_a_cap_no_slot_is_taken(self):
         with tempfile.TemporaryDirectory() as tmp:

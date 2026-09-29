@@ -72,6 +72,15 @@ merged commit's last paragraph read afterwards. `git interpret-trailers
 --parse` on the merged commit answers it in one line; if `Closes:` is not in
 its output, the trailer did not land.
 
+## A branch behind its base
+
+Under strict protection, another landing leaves an open branch BEHIND the base, and merge refuses it as `base_moved`.
+Run `sd-ship prepare --catch-up` with the same identity.
+It merges `origin/<base>` into the branch, never rebases, and pushes a fast-forward.
+The new head gets a full-branch pass: the review covers the branch's own diff, not the code the base brought in.
+A conflict aborts the merge and leaves the branch unchanged; resolve it by hand, then prepare again.
+Merge again with the new `--expected-head`; the local gate runs at that head.
+
 ## A branch built on a squashed branch
 
 A squash merge leaves the merged head off the default branch's history.
@@ -82,6 +91,16 @@ While the branch is still behind the base, the `base_moved` refusal carries the 
 Resolve every conflicted path by hand, against the merge base, not with `git checkout --ours`.
 No path is proven safe for `--ours`: the default branch can leave a path and return to it, and `--ours` would discard that change.
 Do not rebase onto the squash; that needs a force-push.
+
+## A failed check run under local CI
+
+`sd ci local` switches a repository to the local gate; its dry run shows the changes, and `--apply` makes them.
+A pull request opened before the switch can still carry a failed check run at its head.
+A billing-blocked run is the common case.
+Under a declared gap that run still blocks the merge, whatever `sd/local-gate` says: `every_check` requires every check run to pass.
+Under protection it does not block unless the protection requires it: GitHub reports the pull request `unstable` and allows the merge.
+Push a fresh commit to the branch, an empty one if nothing else is due, and prepare again.
+With the workflows off, nothing but the local gate runs on the new head.
 
 ## Copilot request recovery
 

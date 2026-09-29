@@ -32,13 +32,14 @@ paragraph. GitHub appends its own `Co-authored-by:` line on squash: to an
 existing trailer block it appends contiguously, which is fine because that is
 a trailer too; after anything else it opens a new paragraph, which demotes
 every trailer above it to prose no tool can read (sd:640, sd:5). Keep the
-trailer lines contiguous, with no blank line among them. Omit `Item:` and
-`Delivers:` when the change has no work item; `Delivers:` only on the one
-merge that completes it. -->
+trailer lines contiguous, with no blank line among them.
+Write no association, delivery or authorship line here. sd-ship appends the
+`Work` line to the body it publishes, and the `Item`, `Delivers` and
+authorship lines to the squash message; `sd-ship body` shows the result
+(sd:1870). A merge made without sd-ship writes them by hand, as WORKFLOW.md
+says. -->
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 https://claude.ai/code/session_<id>
 
-Item: sd:<id>
-Delivers: sd:<id>
 Refs: sd:<other>

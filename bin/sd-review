@@ -19,7 +19,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
-from typing import Any, Mapping, NamedTuple, Protocol, Sequence, TextIO
+from typing import Any, Callable, Mapping, NamedTuple, Protocol, Sequence, TextIO
 
 _BIN = str(pathlib.Path(__file__).resolve().parent)
 if _BIN not in sys.path:
@@ -727,6 +727,17 @@ URL_OUTPUT_CONTRACT = (
     "source, prior reports, disposition ledgers, resolved findings, or history narratives. Emit no Markdown fences, "
     "preamble, or reasoning narrative. Use an empty findings array only when no current defect or unresolved "
     "prior blocker remains."
+    # sd:1821: the schema sits before ~35k tokens of review input, and
+    # MiniMax-M3 drifted from it on 29% of runs over one diff (13 of 45):
+    # an extra severity_note key, a missing family or summary, over the row
+    # cap. Restated last, from the validator's own constants, so it cannot drift.
+    f" Output shape, restated: the top level is an object whose only key is findings, holding at most "
+    f"{MAX_FINDINGS} finding objects. Each finding has exactly these {len(FINDING_PROPERTIES)} keys and no "
+    f"other key: {', '.join(FINDING_PROPERTIES)}. severity is one of "
+    f"{', '.join(s for s in SEVERITIES if s != 'unspecified')}; put any severity "
+    "note in summary, never in a new key. path, summary and family are nonempty strings; line is an integer "
+    'or null. Example: {"findings": [{"path": "src/example.rs", "line": 12, "severity": "high", '
+    '"summary": "When X happens, Y fails, so Z breaks.", "family": "correctness"}]}'
 )
 
 
@@ -1229,6 +1240,77 @@ def charged_call(
             f"HTTP {result.http_status} from {provider.name}" if failed else "", True, result.http_status), receipt
 
 
+def _free(provider: sd_registry.Provider) -> bool:
+    """Both prices present and zero: a second call costs nothing."""
+    price = provider.price or {}
+    return "in" in price and "out" in price and not price["in"] and not price["out"]
+
+
+def _attempts(provider: sd_registry.Provider, run: Callable[[], Outcome]) -> list[Outcome]:
+    """sd:1821: a free entry (both prices zero) runs once more after a schema
+    failure, not falling through to a reviewer that may bill. The failed
+    attempt is returned too, so its recovered blockers stay, as a fallback's do."""
+    outcome = run()
+    if (outcome.status not in (CLEAN, FINDINGS) and _free(provider)
+            and (outcome.diagnostic or {}).get("failure_stage") == "schema"):
+        return [outcome, run()]
+    return [outcome]
+
+
+def _request_record(provider: sd_registry.Provider, subject: Subject, request_prompt: str) -> dict[str, Any]:
+    """What was asked of a `url` entry, by digest; never the prompt itself."""
+    return {"provider": provider.name, "vendor": provider.vendor, "model": provider.model,
+        "host": sd_registry.urlsplit(provider.url).hostname, "max_tokens": provider.max_tokens,
+        "thinking": provider.thinking, "reasoning_effort": provider.reasoning_effort,
+        "prompt_bytes": len(request_prompt.encode()), "prompt_sha256": hashlib.sha256(request_prompt.encode()).hexdigest(),
+        "scope": subject.scope, "head": subject.head}
+
+
+def _failure_stage(result: Completed, diagnostic: Mapping[str, Any], text: str,
+                   parsed: ParsedFindings | None) -> str | None:
+    """The first layer that failed, or None for a usable answer."""
+    return ("transport" if not result.launched else
+        "http" if diagnostic["http_status"] is not None and diagnostic["http_status"] >= 300 else
+        "completion" if diagnostic["category"] in ("response_limit", "truncated", "incomplete_finish") else
+        "api" if diagnostic["category"] == "api_error" else "envelope" if not text else
+        "transport" if result.exit_code else "schema" if parsed is None or parsed.error else None)
+
+
+def _url_attempt(provider: sd_registry.Provider, subject: Subject, request_prompt: str,
+                 provider_env: Mapping[str, str], timeout: int, client: sd_registry.Client | None,
+                 ledger: Ledger | None, root: pathlib.Path) -> Outcome:
+    """One charged call to a `url` entry, read back into an outcome."""
+    # Keyed on the url, not on a reader: a `url` entry names none. `argv`
+    # and `scrubbed` stay empty; both are start-entry vocabulary.
+    charged = charged_call(ledger, provider, request_prompt, provider_env, timeout, client, root)
+    if isinstance(charged, Outcome):
+        return charged
+    # `None` is the road's own wire: the library's above, this seam's here.
+    response, receipt = charged or ((client or sd_registry.chat_completion)(provider, request_prompt, provider_env, timeout), None)
+    result = Completed(*response[:4])
+    text, diagnostic = sd_registry.url_response(result.stdout)
+    diagnostic["transport_exit_code"] = result.exit_code
+    diagnostic["http_status"] = response[4] if len(response) == 5 else result.exit_code if 100 <= result.exit_code <= 599 else None
+    diagnostic["request"] = _request_record(provider, subject, request_prompt)
+    model = diagnostic["sanitized_response"].get("model", {})
+    diagnostic["model_matches_requested"] = (model.get("sha256") == hashlib.sha256((provider.model or "").encode()).hexdigest()
+                                              if model.get("type") == "string" else None)
+    diagnostic["response_received"] = result.launched
+    diagnostic.update(sd_lib.raw_response(result))  # opt-in (SD_REVIEW_RAW_DIR); sd-ship moves it to a file
+    diagnostic["ledger"] = receipt
+    parsed = oversized_findings() if diagnostic["category"] == "response_limit" else parse_findings(text, diagnostic, allow_json_fence=True)
+    if parsed is not None and diagnostic["category"] in ("truncated", "incomplete_finish"):
+        parsed = parsed._replace(error="; ".join(filter(None, (parsed.error, "provider reported an incomplete response"))))
+    diagnostic["schema"] = "unparseable" if parsed is None else "invalid" if parsed.error else "valid"
+    diagnostic["retained_findings"] = len(parsed.findings) if parsed is not None else 0
+    if parsed is not None and parsed.error:
+        diagnostic["validation_error"] = parsed.error
+    # Model content is not transport evidence, even when parsing failed.
+    outcome = _answer(provider.name, result._replace(stdout=""), parsed)
+    diagnostic["failure_stage"] = _failure_stage(result, diagnostic, text, parsed)
+    return outcome._replace(diagnostic=diagnostic, detail=sd_registry.stop_detail(provider, diagnostic, outcome.detail))
+
+
 def run_provider(
     provider: sd_registry.Provider,
     root: pathlib.Path,
@@ -1282,43 +1364,7 @@ def run_provider(
     if len(request_prompt.encode()) > MAX_OUTPUT_BYTES:
         return _outcome(provider.name, REFUSED, f"review input exceeds {MAX_OUTPUT_BYTES} bytes; split the review subject")
     if provider.url:
-        # Keyed on the url, not on a reader: a `url` entry names none. `argv`
-        # and `scrubbed` stay empty; both are start-entry vocabulary.
-        charged = charged_call(ledger, provider, request_prompt, provider_env, timeout, client, root)
-        if isinstance(charged, Outcome):
-            return charged
-        # `None` is the road's own wire: the library's above, this seam's here.
-        response, receipt = charged or ((client or sd_registry.chat_completion)(provider, request_prompt, provider_env, timeout), None)
-        result = Completed(*response[:4])
-        text, diagnostic = sd_registry.url_response(result.stdout)
-        diagnostic["transport_exit_code"] = result.exit_code
-        diagnostic["http_status"] = response[4] if len(response) == 5 else result.exit_code if 100 <= result.exit_code <= 599 else None
-        diagnostic["request"] = {"provider": provider.name, "vendor": provider.vendor, "model": provider.model,
-            "host": sd_registry.urlsplit(provider.url).hostname, "max_tokens": provider.max_tokens,
-            "thinking": provider.thinking, "reasoning_effort": provider.reasoning_effort,
-            "prompt_bytes": len(request_prompt.encode()), "prompt_sha256": hashlib.sha256(request_prompt.encode()).hexdigest(),
-            "scope": subject.scope, "head": subject.head}
-        model = diagnostic["sanitized_response"].get("model", {})
-        diagnostic["model_matches_requested"] = (model.get("sha256") == hashlib.sha256((provider.model or "").encode()).hexdigest()
-                                                  if model.get("type") == "string" else None)
-        diagnostic["response_received"] = result.launched
-        diagnostic.update(sd_lib.raw_response(result))  # opt-in (SD_REVIEW_RAW_DIR); sd-ship moves it to a file
-        diagnostic["ledger"] = receipt
-        parsed = oversized_findings() if diagnostic["category"] == "response_limit" else parse_findings(text, diagnostic, allow_json_fence=True)
-        if parsed is not None and diagnostic["category"] in ("truncated", "incomplete_finish"):
-            parsed = parsed._replace(error="; ".join(filter(None, (parsed.error, "provider reported an incomplete response"))))
-        diagnostic["schema"] = "unparseable" if parsed is None else "invalid" if parsed.error else "valid"
-        diagnostic["retained_findings"] = len(parsed.findings) if parsed is not None else 0
-        if parsed is not None and parsed.error:
-            diagnostic["validation_error"] = parsed.error
-        # Model content is not transport evidence, even when parsing failed.
-        outcome = _answer(provider.name, result._replace(stdout=""), parsed)
-        diagnostic["failure_stage"] = ("transport" if not result.launched else
-            "http" if diagnostic["http_status"] is not None and diagnostic["http_status"] >= 300 else
-            "completion" if diagnostic["category"] in ("response_limit", "truncated", "incomplete_finish") else
-            "api" if diagnostic["category"] == "api_error" else "envelope" if not text else
-            "transport" if result.exit_code else "schema" if parsed is None or parsed.error else None)
-        return outcome._replace(diagnostic=diagnostic)
+        return _url_attempt(provider, subject, request_prompt, provider_env, timeout, client, ledger, root)
 
     if provider.reader not in ("claude-json", "codex-json", "agy-json", "opencode-json"):
         # Keep a missing implementation nonpassing if READERS ever gains a name.
@@ -2000,11 +2046,12 @@ def review(
         # itself. The result key carries the last; each outcome carries its own.
         if provider.reader == "codex-json" and auth["ok"]:
             skills = result["codex_skill_suppression"] = codex_skill_state(provider, root, runner, env, auth_home)
-        outcome = unlocated(run_provider(provider, root, subject, prompt, runner, env, args.timeout,
-                                         codex_auth_home, client, ledger, skills), cited, result["severity_floor"])
-        outcomes.append(outcome)
-        if outcome.status in (CLEAN, FINDINGS):
-            reviewed.append(outcome.backend)
+        for outcome in _attempts(provider, lambda: unlocated(run_provider(
+                provider, root, subject, prompt, runner, env, args.timeout,  # noqa: B023 -- run in this iteration
+                codex_auth_home, client, ledger, skills), cited, result["severity_floor"])):  # noqa: B023
+            outcomes.append(outcome)
+            if outcome.status in (CLEAN, FINDINGS):
+                reviewed.append(outcome.backend)
     return finish_review(result, outcomes, reviewed)
 
 
@@ -2160,8 +2207,8 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
             write(f"  consent     {result['authorization']['source']} ({result['authorization']['path']})\n")
     copilot = (result.get("remote_reviews") or {}).get("copilot")
     if isinstance(copilot, dict) and "policy" in copilot:
-        asked = "requested" if copilot["automatic"] else "not requested"
-        write(f"  copilot     {copilot['policy']} ({copilot['source']}); tier {copilot['tier']}, {asked}\n")
+        later = "will request it on the pull request" if copilot["automatic"] else "will not request it"  # sd:1568
+        write(f"  copilot     {copilot['policy']} ({copilot['source']}); tier {copilot['tier']}; not requested by sd-review, sd-ship {later}\n")
     if result.get("fallback_candidates"):
         write(f"  fallbacks   {', '.join(result['fallback_candidates'])}\n")
     write(f"  authored    {result['authored_with_report']}\n")
@@ -2275,6 +2322,7 @@ def build_parser() -> argparse.ArgumentParser:
             "the findings locally. Nothing is ever posted."
         ),
     )
+    parser.add_argument("-C", dest="chdir", metavar="DIR", action=sd_lib.DirectoryAction, help=sd_lib.DIRECTORY_OPTION_HELP)
     parser.add_argument("--scope", choices=SCOPES, default="worktree", help="what to review (default: worktree)")
     parser.add_argument("--database", type=pathlib.Path, help="explicit provider-state database for an owned runner")
     parser.add_argument("--reuse-check", action="store_true", help="reuse a matching explicit full-check receipt; otherwise rerun")
@@ -2310,7 +2358,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     raw = list(sys.argv[1:] if argv is None else argv)
     # One subcommand, dispatched before the main parser: `add_subparsers` would
-    # have made every invocation positional-first and broken `--scope pr`.
+    # have made every invocation positional-first and broken `--scope pr`. `-C`
+    # is parsed once, here, for both paths, so the seam runs where the line says (sd:1910).
+    try:
+        raw = sd_lib.enter_directory_from_argv(raw, error=UsageError)
+    except UsageError as error:
+        print(f"sd-review: error: {error}", file=sys.stderr)
+        return EXIT_USAGE
     if raw and raw[0] == "setup-github":
         import sd_setup_github
 

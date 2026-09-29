@@ -70,7 +70,7 @@ else is. Its executables write these paths, and no others:
 - `.github/workflows/sd-review-route.yml` — the routing lane, from `sd-review
   setup-github`, which runs only in a `full`-mode repository. **Tracked.** With
   `--remove-legacy` it also deletes the three files the old `sd-github-review`
-  installer left.
+  installer left. `--remove` deletes the workflow and its Dependabot guard.
 - The fleet stamp, from `sd fleet stamp`, into the checkout you stand in, which
   must be a checkout of a `runner_merge=auto` repository: the routing lane and
   its Dependabot guard as `setup-github` writes them,
@@ -82,6 +82,8 @@ else is. Its executables write these paths, and no others:
   `unknown` and lays nothing), and a `docs/dashboard/` line in
   `.gitignore`. **Tracked**, and written only on a feature branch. A repository
   whose `sd-status.json` entry or `CLAUDE.md` rule forbids CI gets no workflow.
+  A repository whose `repo.ci` row says `local` gets no workflow either, from
+  the stamp or from `setup-github`; see [WORKFLOW.md § No-CI mode](WORKFLOW.md#no-ci-mode).
   It also adds the template's new lines to that checkout's `CLAUDE.local.md`
   block, removing none, and creates its untracked `docs/dashboard/`. `--dry-run` prints every auto repository's diff against
   its `origin/HEAD` and writes nothing.
@@ -155,6 +157,7 @@ sd config set sd.assistant_merge controlled
 
 These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOME` overrides the configuration root.
 `sd config get`, `list`, and `unset` inspect or remove settings. No personal grant ships in this repository.
+`sd.gate_slots` is load control, not a grant: how many repository gates may run at once on the machine (unset: a quarter of the cores).
 
 `configured` allows private code and scoped review context to the operator's eligible configured providers, including future entries.
 A local `reviewers` list restricts recipients; an explicit empty value denies review.
@@ -196,6 +199,9 @@ way `sd work deliver` verifies one — reachable from the checkout's default
 branch and carrying a `Delivers: sd:42` trailer in the block
 `git interpret-trailers` reads — and is recorded on the transition, so the
 history answers "what delivered this" for a task and for a work item alike.
+A fix that landed in another registered checkout adds
+`--delivered-in <path>`: the commit is verified there, the transition names
+that checkout, and the task keeps the checkout it was filed in.
 A commit that states the trailer outside that block is refused by name rather
 than reported as carrying none. An item that belongs to no checkout has no
 default branch to verify a commit against, so `--delivered-by` on a
@@ -402,22 +408,15 @@ make setup   # once
 make check   # test + lint + audit + docs-lint
 ```
 
-CI is two gating jobs in `tests.yml` and one in `pr-body-lint.yml`, named here
-by the status context GitHub emits for each (the matrix job's context carries
-its matrix values), plus the advisory `route` job in `sd-review-route.yml`:
-
-| Context | What it runs |
-|---|---|
-| `unittest (ubuntu-latest, 3.14)` | The suite on Ubuntu, Python 3.14, plus the installer coverage gate |
-| `body-lint` | `sd-docs-lint --body-only` over the pull request's body and changed paths; it also runs when the body is edited, so a body fixed after a red run is graded again |
-| `lint` | Ruff over `bin/` and `tests/` and mypy over `bin/` (the path lists are `LINT_RUFF_PATHS` and `LINT_MYPY_PATHS` in the `Makefile`, read rather than restated), `sd-docs-lint` over this checkout's `docs/`, then Bandit over `bin/`, zizmor over the workflows, and ShellCheck over the tracked shell |
-
-`sd-status` compares the live protection object with the contexts the
-workflow files produce, not with this table, so a row here can go stale
-without anything saying so; the workflow files are the inventory.
+This repository has `repo.ci = local`: it carries no GitHub Actions workflow.
+`sd-ship merge` runs `sd-check` (here `make check`) in a fresh worktree and
+posts the result as the `sd/local-gate` status on the head commit. The gate
+installs `sd_db` at the `platypeeps/system` ref in `.sd-system-rev`.
+`sd-ship prepare` grades the pull request body with `sd-docs-lint --body-only`.
+WORKFLOW.md "No-CI mode" describes the gate.
 
 `main` carries classic branch protection: pull requests with no required
-approvals, the strict `lint`, `unittest` and `body-lint` checks above, and enforce_admins.
+approvals, the strict `sd/local-gate` check, and enforce_admins.
 `.github/sd-status.json` accepts one gap, `reviews`: the approval count is 0
 because the sole maintainer cannot approve their own pull request. `sd-ship merge`
 reads the protection object before it reads the pull request's checks and
