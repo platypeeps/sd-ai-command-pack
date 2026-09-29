@@ -33,7 +33,7 @@ This item bundles sd:2041, sd:1912 (the PRD in
 ## Acceptance criteria
 
 - [x] A second gate at a head with an equal binding reuses the first one's
-      receipt; a changed input, `PATH`, head or an aged receipt runs again.
+      receipt; a changed input, environment variable, head or an aged receipt runs again.
 - [x] Prepare's gate takes a slot from the shared slot directory.
 - [x] With no `--review-timeout`, prepare's gate gets `sd_lib.GATE_CHECK_SECONDS`.
 - [x] A docs-only change with a declaration posts `sd-check pass (docs-only)`.

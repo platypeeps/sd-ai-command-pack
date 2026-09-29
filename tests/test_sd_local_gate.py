@@ -316,6 +316,20 @@ class Receipts(Repository):
             self.assertNotIn("reused", self.gate(head))
         self.assertEqual(self.runs(), 2)
 
+    def test_a_changed_forwarded_variable_runs_the_check_again(self) -> None:
+        """The gate forwards the environment whole, so the receipt binds it whole.
+
+        Prepare with a `MAKEFLAGS` that makes the check pass must not leave a
+        receipt that a merge without it reuses: there the real check fails.
+        """
+        head = self.commit(f'check:\n\t@echo run >> {self.counter}; test "$(MODE)" = ok\n')
+        with mock.patch.dict(os.environ, {"MAKEFLAGS": "MODE=ok"}):
+            self.assertEqual(self.gate(head)["status"], "success")
+        with mock.patch.dict(os.environ):
+            os.environ.pop("MAKEFLAGS", None)
+            merged = self.gate(head)
+        self.assertEqual((merged["status"], "reused" in merged, self.runs()), ("failure", False, 2))
+
     def test_a_receipt_older_than_the_limit_is_not_reused(self) -> None:
         head = self.counted()
         self.gate(head)

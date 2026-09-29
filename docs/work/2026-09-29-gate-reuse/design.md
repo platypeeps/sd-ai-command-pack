@@ -32,11 +32,11 @@ receipts claim less, and say so:
 | detected commands and source | a changed entrypoint is a different check |
 | each command's executable, by path and bytes | a new `make` or `cargo` is a different check |
 | interpreter path, version and bytes | `sd-check` itself runs on it |
-| the gate's `PATH` value | a different tool set on `PATH` |
+| the gate's whole environment, every variable by name and value | the gate forwards it whole; `MAKEFLAGS` or `PATH` can choose what runs |
 | age of at most 12 hours | bounds what the rest cannot name |
 
 Not bound: a tool a Makefile reaches through another tool, network answers,
-other environment variables, and machine load. The gate is a self-hosted
+and machine load. The gate is a self-hosted
 runner, not a hermetic build, and its docstring already says so. The receipt
 therefore claims: this machine's gate passed this commit with these inputs,
 recently. That is the claim a CI system makes when it reads a green check on
@@ -49,9 +49,13 @@ Conservative choices, flagged for the operator:
 - **Only successes are recorded.** A failure always reruns.
 - **Every fault means no receipt.** No library, no database, an unreadable
   row, or an unresolvable tool runs the check.
-- **Other environment variables are not bound.** Binding the whole
-  environment would never match between two sessions. `PATH` is bound because
-  it chooses the tools.
+- **The whole environment is bound.** The first cut bound `PATH` only, on
+  the view that the whole environment would rarely match between two
+  sessions. Review showed the hole: prepare with a `MAKEFLAGS` that made the
+  check pass left a receipt a merge without it reused, though the real check
+  failed there. Any forwarded variable can choose what runs, so the binding
+  is `sd_gate_run.gate_environment`'s whole output. The cost is reuse: a
+  prepare and a merge from shells that differ in any variable run twice.
 
 ## Decision: prepare's gate bound
 

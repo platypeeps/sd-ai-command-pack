@@ -12,7 +12,8 @@
   second run, and the status says `(reused)`. The binding is the head, its
   tree, the gate inputs (every pack `bin/` file and an untracked
   `CLAUDE.local.md`), the scope, the detected commands, each command's
-  executable, the interpreter and `PATH`; a receipt also ages out after
+  executable, the interpreter and the gate's whole environment, every
+  variable by name and value; a receipt also ages out after
   twelve hours. The gate's bound in prepare is now the merge gate's 3600 s,
   not the reviewers' 1800 s, unless `--review-timeout` names one; the timing
   plan carries it as `check_seconds`.

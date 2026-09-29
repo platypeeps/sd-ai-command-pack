@@ -17,7 +17,14 @@ The binding is what this module can name about a run, and nothing weaker:
   commands     the detected entrypoints and the detection source;
   tools        path and bytes of each command's executable on the gate's PATH;
   python       the interpreter that runs `sd-check`;
-  path         the gate's whole `PATH` value.
+  environment  every variable the check's child is given, by name and
+               value: `sd_gate_run.gate_environment`'s whole output, so a
+               `MAKEFLAGS` or a `CARGO_HOME` that chose what ran is bound too.
+
+The environment is bound whole because the gate forwards it whole: any
+variable may choose what a check runs, and a hand-kept list of the ones that
+matter would miss the next one. The cost is fewer reuses: a prepare and a
+merge started from shells that differ in any variable run the check twice.
 
 It does not name what a check reads on its own: a tool its Makefile reaches
 through another tool, a network answer, the machine's load. The gate never
@@ -77,12 +84,12 @@ def gate_binding(tree: pathlib.Path, head: str, inputs: str, base: str | None, e
             if path.is_relative_to(tree.resolve()):
                 tool["path"] = "tree:" + str(path.relative_to(tree.resolve()))
         python = pathlib.Path(sys.executable).resolve()
-        return {"schema": 1, "head": head, "tree": sd_lib.git_output(["rev-parse", "HEAD^{tree}"], tree),
+        return {"schema": 2, "head": head, "tree": sd_lib.git_output(["rev-parse", "HEAD^{tree}"], tree),
                 "inputs": inputs, "scope": {"mode": scope.mode, "fork": scope.fork, "command": list(scope.command)},
                 "detection": {"source": detection.source, "commands": detection.commands},
                 "tools": tools, "python": {"path": str(python), "version": sys.version,
                                            "sha256": sd_check_receipts.file_digest(python)},
-                "path_sha256": _digest(env.get("PATH", ""))}
+                "environment_sha256": _digest(dict(env))}
     except Exception:  # an input that cannot be named binds nothing; the check runs
         return None
 
