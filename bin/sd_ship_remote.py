@@ -62,6 +62,15 @@ def git(root: Path, *args: str) -> str:
     return run(root, ["git", *args])
 
 
+def refuse_behind(pull: dict, base: str) -> None:
+    """Name GitHub's BEHIND answer, which strict protection gives a branch missing `base` (sd:2023)."""
+    if pull.get("mergeable_state") == "behind":
+        raise Refusal(f"the pull request is BEHIND {base}: strict branch protection requires the branch "
+                      f"to contain the current {base}", code="base_moved", boundary="ci", state="retryable_failure",
+                      next_action=f"Run sd-ship prepare --catch-up, which merges origin/{base} into the branch and "
+                                  "reviews the new head, then merge with the new --expected-head.")
+
+
 PASSING = ("success", "neutral", "skipped")
 CI_NEXT_ACTION = "Wait for or fix exact-head CI, then retry merge."
 
@@ -596,8 +605,14 @@ class GitHub:
         if pull.get("mergeable_state") == "unknown":
             raise Refusal("GitHub has not finished computing mergeability", code="mergeability_pending",
                           boundary="ci", state="retryable_failure", next_action="Wait a minute, then retry merge once.")
+        refuse_behind(pull, base)
         if pull.get("mergeable") is not True or pull.get("mergeable_state") != "clean":
-            raise Refusal("GitHub has not confirmed all required merge rules are satisfied")
+            # Retryable: GitHub recomputes the rules after a new status, and
+            # `sd-ship merge` reads again for a bounded window (sd:2050).
+            raise Refusal("GitHub has not confirmed all required merge rules are satisfied "
+                          f"(mergeable_state {pull.get('mergeable_state')!r}, mergeable {pull.get('mergeable')!r})",
+                          code="merge_rules_unconfirmed", boundary="ci", state="retryable_failure",
+                          next_action="Read the pull request's merge box for the unmet rule, resolve it, then retry merge.")
         if self.commits_behind(base, head) != 0:
             raise Refusal("the reviewed branch is behind the current default branch")
         if "declared_gap" in protection:
