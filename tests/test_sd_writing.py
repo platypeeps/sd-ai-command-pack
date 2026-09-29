@@ -4,10 +4,12 @@ import argparse
 import importlib
 import io
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import nullcontext, redirect_stdout
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -121,6 +123,65 @@ class WritingVerifyCheckout(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(output)["files"], 1)
         self.verified.assert_called_once_with(self.connection, str(self.repo))
+
+
+class WritingFromWorktree(unittest.TestCase):
+    """A linked worktree keys rows to the main checkout and reads its own files (sd:2024)."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.main = Path(tmp.name).resolve() / "main"
+        self.main.mkdir()
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+               "GIT_COMMITTER_EMAIL": "t@t", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
+        for command in (["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "seed"],
+                        ["worktree", "add", "-q", "-b", "gate", "../linked"]):
+            subprocess.run(["git", *command], cwd=self.main, env=env, check=True, capture_output=True)
+        self.linked = self.main.parent / "linked"
+        self.parser = argparse.ArgumentParser()
+        cli.register(self.parser.add_subparsers(required=True))
+        self.connection = Mock()
+        self.connect = Mock(return_value=self.connection)
+        self.checkout = Mock(return_value=nullcontext())
+        for patcher in (
+            patch.object(cli.sd_handoff_rows, "library", return_value=sd_db),
+            patch.object(cli.sd_handoff_rows, "connect", self.connect),
+            patch.object(cli.sd_lib, "stored_repo", side_effect=str),
+            patch.object(writing, "checkout", self.checkout, create=True),
+            patch.object(writing, "piece_for_key", return_value={"id": 7}),
+            patch.object(writing, "readiness", return_value={"ok": True}),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def run_in(self, root, *argv):
+        arguments = self.parser.parse_args(["writing", *argv, "--json"])
+        with patch.object(cli.sd_lib, "repo_root", return_value=root), redirect_stdout(io.StringIO()):
+            return arguments.handler(arguments)
+
+    def test_worktree_reads_under_the_main_checkout_row(self):
+        self.assertEqual(self.run_in(self.linked, "readiness", "--piece", "2026/a"), 0)
+        writing.piece_for_key.assert_called_once_with(self.connection, str(self.main), "2026/a")
+        self.checkout.assert_called_once_with(str(self.main), self.linked)
+
+    def test_main_checkout_enters_no_override(self):
+        self.assertEqual(self.run_in(self.main, "readiness", "--piece", "2026/a"), 0)
+        writing.piece_for_key.assert_called_once_with(self.connection, str(self.main), "2026/a")
+        self.checkout.assert_not_called()
+
+    def test_publication_and_cutover_refuse_a_worktree(self):
+        for argv in (["publication-render", "--piece", "2026/a"], ["import"], ["recover"],
+                     ["register", "--piece", "2026/a"]):
+            with self.subTest(argv=argv[0]):
+                with self.assertRaisesRegex(cli.WorkRefusal, "only in the main checkout"):
+                    self.run_in(self.linked, *argv)
+        self.connect.assert_not_called()
+
+    def test_an_older_library_refuses_a_worktree_by_name(self):
+        with patch.object(writing, "checkout", None, create=True):
+            with self.assertRaisesRegex(cli.WorkRefusal, "current system/local-sd-db"):
+                self.run_in(self.linked, "readiness", "--piece", "2026/a")
 
 
 if __name__ == "__main__":
