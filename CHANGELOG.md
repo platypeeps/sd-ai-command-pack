@@ -4,6 +4,15 @@
 
 ### Added
 
+- **`sd-ship prepare --catch-up` merges the base into a BEHIND branch
+  (sd:2023).** Under strict protection another landing left a branch behind,
+  and the recovery was a hand merge, a push, a review and a prepare. The flag
+  merges `origin/<base>` (no rebase, no force push), and the new head gets a
+  full-branch pass, so the review covers the branch's own diff and not the
+  base's code. A conflict aborts and leaves the branch unchanged. Merge now
+  names BEHIND as `base_moved`, before the local gate runs, and points at the
+  flag.
+
 - **Every repository gate takes a machine-wide slot (sd:1996).** `sd-check`,
   which every `sd-ship` gate runs, waits for one of `sd.gate_slots` slots
   before it runs a check; unset reads a quarter of the cores, `SD_GATE_SLOTS`
@@ -26,6 +35,14 @@
   the remedy, a fresh commit.
 
 ### Fixed
+
+- **`sd-ship merge` waits for GitHub's merge-rules answer after posting
+  `sd/local-gate` (sd:2050).** GitHub recomputes mergeability after a new
+  status, and one read refused #580 in mezmo_benchmark seconds before a retry
+  merged it, after a second full gate run. Under `repo.ci = local` merge reads
+  again up to five times, waiting 3, 6, 9 and 12 seconds. The refusal is now
+  `merge_rules_unconfirmed`, retryable, and names GitHub's last
+  `mergeable_state` and the time waited.
 
 - **`sd-research-kit render` registers in the file the dashboard reads
   (sd:2010).** Since system 350553a the dashboard reads
