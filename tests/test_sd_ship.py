@@ -429,6 +429,12 @@ roles:
         # answer unless they give one; `unanswered` below asks without it.
         if command == "prepare" and operation.args.deliver is None and "deliver" not in operation.state:
             operation.args.deliver = False
+        # A branch of two or more commits needs a title (sd:2097). Cases that
+        # add commits are about something else, so they take the fixture
+        # commit's subject; `untitled` cases exercise the default itself.
+        if (command == "prepare" and operation.args.title is None and "title" not in operation.state
+                and not getattr(self, "untitled", False)):
+            operation.args.title = "change"
         return operation
 
     def prepare(self, *extra):
@@ -613,6 +619,7 @@ roles:
     def test_a_merge_forward_before_the_first_prepare_does_not_become_the_title(self):
         # sd:1377: the merge-forward sd-ship demands left HEAD's subject naming
         # a branch operation, and it was stored as the title and landed on main.
+        self.untitled = True
         self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
         _git(self.root, "fetch", "-q", "origin", "main")
         _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge origin/main into topic\n\nAuthored-with: human", "FETCH_HEAD")
@@ -622,6 +629,7 @@ roles:
 
     def test_one_commit_without_a_title_uses_its_subject(self):
         # sd:2097: a one-commit branch keeps the default; the subject is the change.
+        self.untitled = True
         self.assertEqual(_git(self.root, "rev-list", "--count", "--no-merges", "origin/main..HEAD"), "1")
         result = self.prepare()
         self.assertEqual(self.operation().state["title"], "change")
@@ -630,6 +638,7 @@ roles:
     def test_several_commits_without_a_title_are_refused(self):
         # sd:2097: the newest subject of an 11-commit branch became the PR
         # title (ui-design PR #16) and described only the last commit.
+        self.untitled = True
         _git(self.root, "commit", "--allow-empty", "-qm", "fix a typo\n\nAuthored-with: human")
         with patch.object(ship.Ship, "review") as review:
             with self.assertRaisesRegex(ship.Refusal, r'provide --title; the branch has 2 commits, '
