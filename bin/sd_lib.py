@@ -9,6 +9,7 @@ Stdlib only, Python 3.10+, no network. A caller that cannot proceed gets a
 
 from __future__ import annotations
 
+import argparse
 import datetime
 import json
 import os
@@ -74,6 +75,9 @@ CORE_CONFIG = {
                        "description": "When sd-ship requests a Copilot review by itself: deep (unset reads deep) on deep-tier "
                                       "changes only, always on every reviewing tier, never on none; a repository's "
                                       ".github/sd-review.json copilot_review overrides deep and always, and never wins over it."},
+    "gate_slots": {"pattern": "[0-9]+",
+                   "description": "How many repository gates (sd-check runs) may run at once on this machine; 0 is no cap. "
+                                  "Unset reads a quarter of the cores; SD_GATE_SLOTS overrides it for one run."},
 }
 
 #: `{current name: the name it was stored under before 1.1.0}`. A rename must
@@ -285,6 +289,73 @@ def repo_root(start: pathlib.Path | str | None = None) -> pathlib.Path | None:
         return None
     answer = _git(["rev-parse", "--show-toplevel"], cwd=base)
     return pathlib.Path(answer).resolve() if answer else None
+
+
+#: The help text of `-C DIR` on the lane commands (R10-D6 names them).
+DIRECTORY_OPTION_HELP = "run as if started in DIR, as `git -C` does; the repository is resolved from there"
+
+
+def enter_directory(directory: str | None, *, error: type[Exception]) -> None:
+    """`-C <dir>`, as `git -C` means it (sd:1910).
+
+    Changes the working directory once, before anything resolves the
+    repository, so everything after still reads cwd and `repo_root(None)`
+    stays the one resolver. R10-D6 allows this on the lane commands only,
+    because the permission layer that approves a command line sees `-C` and
+    does not see a `cd <dir> &&` in front of the same command. A missing or
+    non-directory path raises `error`, the caller's usage exception.
+    """
+    if directory is None:
+        return
+    if not directory:
+        # `pathlib.Path("")` is `.`: an empty operand would silently stay put.
+        raise error("-C: expected a directory")
+    target = pathlib.Path(directory).expanduser()
+    if ".." in target.parts:
+        # An allow rule that names the directory is a prefix match on the
+        # command line: `-C /approved/../unrelated` keeps the approved prefix
+        # and leaves the directory (sd:1910, pass 2). Name the directory.
+        raise error(f"-C {directory}: '..' is not allowed, name the directory")
+    if not target.is_dir():
+        raise error(f"-C {directory}: not a directory")
+    os.chdir(target)
+
+
+class DirectoryAction(argparse.Action):
+    """`-C` once. A second `-C` is an error, not a later value that wins.
+
+    argparse keeps the last value of a repeated option, so under an allow
+    rule that names the directory, `-C /approved -C /unrelated` would keep
+    the approved prefix and act on the other checkout (sd:1910, pass 2).
+    """
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        if getattr(namespace, self.dest, None) is not None:
+            parser.error(f"{option_string} given twice")
+        setattr(namespace, self.dest, values)
+
+
+def enter_directory_from_argv(argv: list[str], *, error: type[Exception]) -> list[str]:
+    """Honour `-C DIR` in a raw argv, wherever and however spelled, and return the rest.
+
+    For a command that dispatches a subcommand before its argparse parser
+    sees the line (`sd-review setup-github`): the directory changes first,
+    so the dispatch runs where the line says. Directory selection is parsed
+    once, here, by argparse itself, so `-C DIR`, `-CDIR` and a second one in
+    either spelling all meet `DirectoryAction` (sd:1910, pass 3: a hand-rolled
+    token check let `-C /approved -C/unrelated` through to the main parser).
+    A missing operand, a duplicate and a bad directory all raise `error`.
+    """
+
+    class Parser(argparse.ArgumentParser):
+        def error(self, message: str) -> None:  # type: ignore[override]
+            raise error(message)
+
+    parser = Parser(add_help=False, allow_abbrev=False)
+    parser.add_argument("-C", dest="chdir", action=DirectoryAction)
+    selected, rest = parser.parse_known_args(argv)
+    enter_directory(selected.chdir, error=error)
+    return rest
 
 
 def main_worktree_root(root: pathlib.Path) -> pathlib.Path:
@@ -823,6 +894,64 @@ def repo_row(connection: Any, path: pathlib.Path | str) -> Any:
     except ImportError:
         return connection.execute("SELECT * FROM repo WHERE path = ?", (str(path),)).fetchone()
     return row_for(connection, str(path))
+
+
+#: The values `repo.ci` takes (sd:1843). `github` is the column's default and
+#: this reader's answer to every doubt; `local` says the repository runs no
+#: GitHub Actions and `sd-ship` validates the head itself.
+CI_MODES = ("github", "local")
+#: The commit status `sd-ship` posts for a `ci = local` head, and the one
+#: required context such a repository's protection names.
+LOCAL_GATE_CONTEXT = "sd/local-gate"
+
+
+def repo_ci(connection: Any, root: pathlib.Path | str) -> str:
+    """`repo.ci` for the repository `root` is a checkout of, else `github`.
+
+    Resolved through `registered_for`, as `sd-ship`'s runner-merge read is, so
+    a worktree or a runner clone answers for its row. Every failure answers
+    `github`: an older library or schema without the column, no row, a
+    database that will not read. That is the fail-closed direction, because
+    `github` asks for workflow runs a `local` repository never produces, so a
+    misread refuses a merge rather than waiving a check.
+    """
+    if import_sd_db().module is None:
+        return "github"
+    try:
+        from sd_db import repos  # noqa: PLC0415
+
+        origin = git_output(["config", "--get", "remote.origin.url"], pathlib.Path(root))
+        path = repos.registered_for(connection, str(pathlib.Path(root).resolve()), origin)
+        reader = getattr(repos, "repo_ci", None)
+        if reader is not None:
+            value = reader(connection, path)
+        else:
+            row = repo_row(connection, path)
+            value = row["ci"] if row is not None and "ci" in row.keys() else "github"
+    except Exception:  # every fault is "not said"; see the docstring
+        return "github"
+    return value if value in CI_MODES else "github"
+
+
+def ci_mode(root: pathlib.Path | str) -> str:
+    """`repo_ci` over a read-only connection this call opens and closes.
+
+    For callers that hold no connection: `sd fleet stamp`, `sd-review
+    setup-github`, `sd-status`. No library and no database both answer
+    `github`, the behaviour every repository had before the column existed.
+    """
+    if import_sd_db().module is None:
+        return "github"
+    try:
+        from sd_db.database import connect, default_path  # noqa: PLC0415
+
+        connection = connect(default_path(), write=False)
+    except Exception:  # no database is the database-free case, not an error
+        return "github"
+    try:
+        return repo_ci(connection, root)
+    finally:
+        connection.close()
 
 
 def repo_disk(value: pathlib.Path | str) -> pathlib.Path:
@@ -1769,6 +1898,7 @@ class Detection:
     origin: pathlib.Path | None
     commands: dict[str, list[str]] = field(default_factory=dict)
     reason: str = ""
+    warnings: tuple[str, ...] = ()
 
 
 def _local_block_entrypoints(root: pathlib.Path) -> Detection | None:
@@ -1974,12 +2104,46 @@ DETECTORS = (
 )
 
 
+def _runs(commands: dict[str, list[str]]) -> list[str]:
+    """The names `sd-check` runs from `commands`: an aggregate `check` covers the rest."""
+    return ["check"] if "check" in commands else list(commands)
+
+
+def _hidden_by_local_block(root: pathlib.Path, block: Detection) -> tuple[str, ...]:
+    """What the build file would have run that the local block, which replaces it whole, does not declare.
+
+    sd:1894: a block that declared `test:` and `lint:` hid the `check` script
+    package.json had just gained, and the local gate then had no check to
+    run. A block that declares `check` hides nothing: that is its aggregate by
+    the same rule `sd-check` applies to every source. A build file that does
+    not read is not this block's problem, so it warns about nothing.
+    """
+    for detector in DETECTORS[1:]:
+        try:
+            found = detector(root)
+        except ConfigError:
+            return ()
+        if found is not None:
+            break
+    else:
+        return ()
+    if "check" in block.commands or found.origin is None:
+        return ()
+    return tuple(
+        f"{LOCAL_FILE_NAME} replaces {found.origin.name} detection, and {found.origin.name} defines "
+        f"{name} ({shlex.join(found.commands[name])}), which the block does not declare, so it does not run"
+        for name in _runs(found.commands) if name not in block.commands
+    )
+
+
 def detect_entrypoints(root: pathlib.Path) -> Detection:
     """Resolve the repo's check commands, reporting which probe answered."""
     root = pathlib.Path(root)
     for detector in DETECTORS:
         found = detector(root)
         if found is not None:
+            if found.source == "local-block":
+                return replace(found, warnings=_hidden_by_local_block(root, found))
             return found
     return Detection(source=None, origin=None, commands={}, reason="no check entrypoint detected")
 
@@ -2086,6 +2250,31 @@ def _in_range(named: str, shas: list[str]) -> str:
         return ""
     matches = [sha for sha in shas if sha.startswith(named)]
     return matches[0] if len(matches) == 1 else ""
+
+
+def base_attributions(root: pathlib.Path, base: str, head: str, landed: str) -> list[str]:
+    """The `Attributes:` lines in `base..head` that name a commit `landed` holds.
+
+    A squash keeps none of the range's messages but the one it composes, and
+    a line naming a commit of the range names a sha the squash removes, so
+    `attribution` turns those into the squash's `Authored-with:`. A line
+    naming a commit the base already holds is different: that is an `sd
+    attribute` repair of history, and dropping it landed rwbp-coordinator
+    #310 as an empty commit that attributed nothing (sd:1753). Each is
+    written with the full sha, so a prefix unique today stays unique.
+    """
+    carried: dict[str, str] = {}
+    for _, message in commit_messages(root, base, head):
+        for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines():
+            if not line.rstrip().startswith(ATTRIBUTES_TRAILER):
+                continue
+            parts = line[len(ATTRIBUTES_TRAILER) :].split()
+            if len(parts) != 2 or len(parts[0]) < 7:
+                continue
+            full = git_output(["rev-parse", "--verify", "--quiet", f"{parts[0]}^{{commit}}"], root)
+            if full and git_output(["merge-base", "--is-ancestor", full, landed], root) is not None:
+                carried.setdefault(full, parts[1])
+    return [f"{ATTRIBUTES_TRAILER} {sha} {value}" for sha, value in carried.items()]
 
 
 def author_vendors(root: pathlib.Path, base: str, head: str) -> tuple[str, ...]:
@@ -2281,8 +2470,9 @@ def attribute(
 
     A commit rather than a note: a notes ref is one mutable ref a repository
     shares, and two clones attributing different commits of one branch diverge
-    on it. A commit is branch-local, pushes with the branch, and squashes away
-    at the merge with everything else.
+    on it. A commit is branch-local and pushes with the branch. At the squash,
+    a line naming a branch commit becomes the squash's `Authored-with:`, and a
+    line naming a commit the base holds is carried (`base_attributions`).
 
     Empty is also why the content gate is skipped for it; the condition and
     its measurement are in `_attribution_environment`.
@@ -2326,6 +2516,18 @@ CLOSES_TRAILER = "Closes:"
 #: parent is known; this trailer lets every git reader hold what reconcile
 #: holds (sd:1089).
 REVIEWED_BASE_TRAILER = "Reviewed-base:"
+#: `Item:` ties a merge to an item without closing it; `Work:` ties a pull
+#: request to one, and rule 5 of `sd-docs-lint` counts it in the body.
+ITEM_TRAILER = "Item:"
+WORK_TRAILER = "Work:"
+#: The trailer lines `sd-ship` owns in a pull-request body (sd:1870). It
+#: writes `Work:` into the body it publishes and `Item:`, `Delivers:` and the
+#: authorship lines into the squash message; `Closes:` rides a later merge or
+#: an empty commit, never a body `sd-ship` publishes. `sd_ship_body` reads a
+#: supplied body against this tuple, and the template test holds the
+#: template's closing block to it.
+OWNED_TRAILERS = (ITEM_TRAILER, WORK_TRAILER, DELIVERS_TRAILER, CLOSES_TRAILER,
+                  AUTHORED_TRAILER, ATTRIBUTES_TRAILER)
 
 #: `no` is a positive finding from history the checkout actually has;
 #: `unknown` is what a checkout that cannot see far enough says instead.
@@ -2566,7 +2768,7 @@ def shared_tree_artifacts(root: pathlib.Path) -> tuple[str, ...]:
 #: The trailer names whose demotion costs something. `Delivers:` and `Closes:`
 #: close an item; `Item:` associates a merge with one. A line naming any of the
 #: three outside the block git reads is a statement the tools cannot see.
-STATED_TRAILERS = (DELIVERS_TRAILER, CLOSES_TRAILER, "Item:")
+STATED_TRAILERS = (DELIVERS_TRAILER, CLOSES_TRAILER, ITEM_TRAILER)
 
 #: A trailer as it has to be written to count: at column zero, a name, a colon,
 #: and a value. Indented and backticked forms are prose *about* a trailer --

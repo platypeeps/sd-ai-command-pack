@@ -2,7 +2,244 @@
 
 ## Unreleased
 
+### Added
+
+- **`sd-ship prepare --catch-up` merges the base into a BEHIND branch
+  (sd:2023).** Under strict protection another landing left a branch behind,
+  and the recovery was a hand merge, a push, a review and a prepare. The flag
+  merges `origin/<base>` (no rebase, no force push), and the new head gets a
+  full-branch pass, so the review covers the branch's own diff and not the
+  base's code. A conflict aborts and leaves the branch unchanged. Merge now
+  names BEHIND as `base_moved`, before the local gate runs, and points at the
+  flag.
+
+- **Every repository gate takes a machine-wide slot (sd:1996).** `sd-check`,
+  which every `sd-ship` gate runs, waits for one of `sd.gate_slots` slots
+  before it runs a check; unset reads a quarter of the cores, `SD_GATE_SLOTS`
+  overrides it for one run, and CI takes none. The pack's own test harness
+  used a cap alone (sd:1541), and on 2026-09-28 nine gates across repositories
+  reached a load average of 141 on 16 cores. Both now share
+  `bin/sd_gate_slots.py`. A queued gate says so on stderr, the wait counts
+  against `--timeout`, and a holder's checks run with `SD_GATE_SLOTS=0`.
+
+- **`sd ci local` switches a repository to local CI (sd:1914).** Run from a
+  checkout, it sets `repo.ci` to `local`, makes `sd/local-gate` the one
+  required status check with `strict` on -- in classic protection, or in each
+  repository ruleset that requires checks, keeping every other rule -- and
+  turns Actions off for a private repository. A public repository keeps
+  Actions for its dynamic workflows (CodeQL, Dependabot, Copilot) and has
+  each workflow its files declare disabled. It is a dry run unless `--apply`
+  is given, refuses without `admin`, and a second run finds nothing to do.
+  The contexts it drops are named. A head that already carries a failed
+  (billing-blocked) check run still refuses; WORKFLOW.md § No-CI mode names
+  the remedy, a fresh commit.
+
+### Fixed
+
+- **`sd-ship merge` accepts GitHub's `unstable` answer (sd:2075).** The
+  merge-rules poll from sd:2050 treated only `clean` as mergeable, so it
+  refused answerbook/mezmo_benchmark #583 after five reads: `sd/local-gate`,
+  the one required context, had passed, and only the optional CodeQL run was
+  still in progress. `unstable` with `mergeable` true is GitHub allowing the
+  merge, and it now passes readiness on both `repo.ci` paths. `blocked`,
+  `dirty`, `behind` and `mergeable` false still refuse, and a declared gap
+  still requires every check run to pass.
+
+- **`sd-ship merge` waits for GitHub's merge-rules answer after posting
+  `sd/local-gate` (sd:2050).** GitHub recomputes mergeability after a new
+  status, and one read refused #580 in mezmo_benchmark seconds before a retry
+  merged it, after a second full gate run. Under `repo.ci = local` merge reads
+  again up to five times, waiting 3, 6, 9 and 12 seconds. The refusal is now
+  `merge_rules_unconfirmed`, retryable, and names GitHub's last
+  `mergeable_state` and the time waited.
+
+- **`sd-research-kit render` registers in the file the dashboard reads
+  (sd:2010).** Since system 350553a the dashboard reads
+  `<config>/project-dashboard/documents.conf`, `<config>` being
+  `$SYSTEM_TOOLS_CONFIG`, else `$XDG_CONFIG_HOME/system`, else
+  `~/.config/system`. The renderer still looked in the dashboard checkout,
+  found no file there, and printed `dashboard not registered` on every render,
+  even for a repository the dashboard already listed. It now resolves the path
+  by the dashboard's rule. `SD_DASHBOARD_HOME` is gone: nothing else read the
+  checkout.
+
+- **`sd-ship`'s squash subject is the pull request's title (sd:1876).**
+  `prepare` stores the newest non-merge commit subject when no `--title` is
+  given, and `merge` used that stored title, so a pull request adopted with
+  its own title, or retitled after prepare, landed on main under a commit
+  subject such as `ci: re-run on the local gate`. The merge now takes the
+  title from the pull request it has just read, falling back to the stored
+  one, and still refuses a `wip` title.
+
+- **`sd-ship merge --watch` accepts a `ci = local` pull request (sd:1875).**
+  `--watch` ran `gh pr checks --watch --fail-fast` before reading `repo.ci`,
+  and on a pull request with no remote check that command fails, so the
+  merge refused with `command_failed` before the local gate ran. The merge
+  now reads `repo.ci` first and, under `local`, starts no remote watch: the
+  gate runs `sd-check` to completion inside the merge, so it is the wait.
+
 ### Changed
+
+- **`sd-ship prepare` reads a hand-opened pull request's live body (sd:1878).**
+  The live body outranked the stored one only when a receipt named the pull
+  request. A pull request opened by hand has no receipt, so `prepare`
+  reviewed, linted and squashed its default body while GitHub showed the
+  author's. With no receipt and no `--body-file`, the one open pull request
+  from this branch of this repository is now read; `body_source` says
+  `live_pr`. A blank body, or more than one open pull request, falls back as
+  before.
+
+- **The pack's own GitHub Actions workflows are gone.** This repository gates
+  locally (`repo.ci = local`), so `tests.yml`, `pr-body-lint.yml` and
+  `sd-review-route.yml` never ran. The gate's `sd_db` pin moved from
+  `tests.yml` to `.sd-system-rev`, and a missing or malformed pin fails the
+  gate. `make audit` says there is no workflow for zizmor to audit.
+  `check-zizmor-personas.py` and its tests are deleted with their subject.
+  Dependabot no longer watches `github-actions`.
+
+- **The first `sd-ship prepare` of an item names its claim (sd:1928).**
+  Associate-only was the silent default, so a forgotten `--deliver` merged
+  sd:1910 with `Item:` alone and left its row planning with the code on
+  main. A first item prepare now refuses unless it gets `--deliver` (the
+  item's last pull request) or the new `--associate-only` (an earlier one).
+  A reprepare keeps the stored claim. The owned runner, which names its
+  `--database`, keeps the old default. `--deliver` now also takes a task or
+  followup, with no acceptance file: its squash carries `Delivers:` and the
+  verified merge moves it to done with the sentence
+  `sd task status N done --delivered-by` records, so a task merge no longer
+  needs a hand close.
+
+- **`sd-ship body` says which scope line a diff demands, for a given pull
+  request too (sd:1877).** The result's `scope` lists each line the diff
+  demands -- `CI/review scope:` for a `.github/**` path -- with the path that
+  demands it and whether the body carries it, read with rule 8's own classes
+  and matchers. `--pr N` takes the diff from that pull request's files, both
+  ends of a rename, and without `--body-file` reads its live body, so a pull
+  request opened by hand is checked before `prepare` refuses it. The lint is
+  handed the same path list, so the two answers cannot disagree.
+
+- **The lane commands take `-C <dir>` (sd:1910).** `sd-ship`, `sd-check`,
+  `sd-review`, `sd-review-ack` and `sd-pr-state` accept a global `-C <dir>`
+  before any other argument, as `git -C` does: the command changes its
+  working directory once, before anything resolves the repository, and
+  `repo_root(None)` stays the one resolver. R10-D6 names this as its one
+  exception, because a session's permission layer approves a whole command
+  line: `sd-ship -C <checkout> merge …` matches an allow rule, and the
+  `cd <checkout> && sd-ship merge …` it replaces went to a classifier that
+  denied two merges on 2026-09-28. `tests/test_verb_inventory.py` fails when
+  `-C` appears on any other file under `bin/`; the banned long spellings stay
+  banned. `sd-review -C <dir> setup-github` runs the seam there too. An allow
+  rule that names the directory, `Bash(sd-ship -C /path/to/checkout:*)`,
+  scopes the approval to one repository; `Bash(sd-ship:*)` approves every
+  one, and a `cd <dir> &&` line could never be scoped by a rule at all.
+  Because such a rule is a prefix match, a second `-C` and a `..` component
+  are usage errors: `-C /approved -C /unrelated` and `-C /approved/../x`
+  keep the approved prefix and would leave the directory.
+
+- **`sd-ship` accepts the body it published (sd:1870).** `prepare` appended
+  `Work: sd:<item>` to the body and then refused a `--body-file` carrying it,
+  so the live body of #1236 and #1238 fed back was refused. `sd_ship_body`
+  now strips an owned line that says what `sd-ship` would write -- `Item:` or
+  `Work:` naming the item, `Delivers:` under `--deliver`, `Authored-with:` a
+  registry resolves -- and lists it in the result's `normalized`. Another
+  item, an unclaimed `Delivers:`, `Attributes:` and `Closes:` refuse, each by
+  line number with the expected value. The no-item path shares the parser
+  and still refuses every owned line. Without `--body-file`, `prepare` reads
+  an open pull request's live body, so an edit made on GitHub is no longer
+  lost; `body_source` in the result names `file`, `live_pr`, `state` or
+  `default`. The new `sd-ship body --item N [--body-file F]` prints the body
+  `prepare` would publish and its body lint, touching no sd state and no
+  GitHub API. `sd_lib.OWNED_TRAILERS` is the one list of the owned keys;
+  rule 5 of `sd-docs-lint` reads `WORK_TRAILER` from it. The pull-request
+  template drops its `Item:` and `Delivers:` lines and keeps `Refs:`.
+
+- **No-CI mode: a `repo.ci = local` repository is gated by `sd/local-gate`
+  (sd:1843).** `sd-ship merge` runs `sd-check` in a clean worktree of the
+  exact reviewed head and posts the result to that commit as the
+  `sd/local-gate` status. It refuses to post for any other commit. The merge
+  then requires that status as `success`: under a declared gap in place of
+  the `pull_request` workflow runs, under protection beside the required
+  contexts. `sd fleet stamp` and `sd-review setup-github` lay no workflow
+  there and say why, and `sd-status` reports `sd/local-gate` as the one
+  context such a repository produces. Every reader treats a missing
+  `repo.ci` column, row or library as `github`, so other repositories are
+  unchanged. The column lands in the `system` repository's schema 16.
+  A posted success counts only when the authenticated account posted it.
+  Nothing is reused: every merge attempt runs `sd-check` and posts afresh,
+  with an inputs digest (head, copied `CLAUDE.local.md`, pack `bin/`) in the
+  description as provenance. `sd-check` runs without `PYTHONPATH`,
+  `VIRTUAL_ENV` and the other package selectors, without `PATH` entries
+  inside the checkout, and without any virtualenv `bin` on `PATH`. It is a
+  self-hosted runner, not a hermetic build.
+
+- **CI pins `sd_db` by its release tag, `sd-db-v0.1.0` (sd:1867, system
+  sd:1854).** `tests/test_system_pin.py` now accepts a full commit or an
+  `sd-db-v*` tag, the pattern the installer already prefers; branches,
+  short commits and other tools' tags stay refused. The first tag is system
+  `85e6f88a`, schema 16: `repo.ci` (sd:1843) is the only `sd_db` change since
+  `8ca78c87`. A machine whose `~/repos/system` lacks the tag fails the pin
+  test until it fetches tags.
+
+- **CI reads `sd_db` from the public `platypeeps/system`, with no token
+  (sd:1859).** The private repository became `platypeeps/system-archived`, and
+  a new public `platypeeps/system` replaced it with rewritten history, so the
+  old pin no longer resolves. Both system checkouts in `tests.yml` drop their
+  repository-secret token, and the pin moves to `8ca78c87`, still schema 15.
+  The two `secrets-outside-env` decisions in
+  `.github/scripts/check-zizmor-personas.py` go with the token they accepted.
+  A machine whose `~/repos/system` still holds the old history fails
+  `tests/test_system_pin.py` until it carries the new commit.
+
+- **A free `url` reviewer retries one schema failure, and the output
+  contract restates the findings shape last (sd:1821).** MiniMax-M3 broke the
+  findings schema on 13 of 45 runs over one 35k-token prompt: an extra
+  `severity_note` key, a missing `family`, more than 50 rows. The schema sat
+  before the review input, so the contract now repeats the exact shape after
+  it, built from the validator's own constants; that cut failures to 5 of 45.
+  An entry whose price is zero in and out now retries a schema failure once
+  on itself instead of falling through to a reviewer that may bill, and the
+  failed attempt stays in the outcomes with any blocker it recovered, as a
+  fallback's does. A priced entry never retries. Lowering temperature did not help (6 of 30 at 0.2).
+
+- **`sd-ship merge` keeps an `sd attribute` repair of landed history
+  (sd:1753).** The squash message carried only the PR body, `Item:`,
+  `Delivers:` and `Authored-with:`, so a PR whose `Attributes:` lines named
+  commits already on the base landed as an empty commit that attributed
+  nothing; rwbp-coordinator #310 escaped only by a hand-written squash
+  message. The squash now carries each `Attributes:` line whose sha the
+  reviewed base holds, with the full sha. A line naming a branch commit still
+  stays behind, because the squash removes that sha; it reaches the squash as
+  `Authored-with:`, as before.
+
+- **The shipped `url` reviewers get 65536 tokens, and a stop at the ceiling
+  names itself (sd:1805).** `kimi`, `minimax` and `baseten` carried
+  `max_tokens: 16384`. On mezmo-world-simulator#215 `kimi-k3` spent all
+  16384 reasoning over a 35k-token prompt and sent no answer, which
+  `sd-review` reported as `kimi did not produce a usable answer (exit 0)` and
+  `sd-ship` as `0/1 completed`. The three entries now carry 65536, and the
+  ledger's bound moves with it: about $1.08 for `kimi` and $0.30 for
+  `baseten` on that prompt. A `finish_reason: length` stop now reads
+  `kimi hit max_tokens (16384) and it sent no answer`, with completion tokens
+  and reasoning bytes; a `length` stop below the ceiling names a full
+  context window instead. `sd-ship`'s refusal carries each failed
+  reviewer's detail. A registry already in your home keeps its old value
+  until edited.
+
+- **`sd-review` no longer says a Copilot review was requested (sd:1568).**
+  The `copilot` line printed `requested` whenever the policy selected the
+  change, including before any pull request existed; sd-review requests
+  nothing. It now prints `not requested by sd-review` and whether `sd-ship`
+  will request it on the pull request. `remote_reviews.copilot.automatic`
+  keeps its meaning: what `sd-ship` will do, not what was done.
+- **`sd task status done --delivered-by` verifies a commit in another
+  checkout (sd:1569).** A task filed in one repository and fixed in another
+  could not record its delivery: the SHA was looked up only in the row's own
+  checkout, which "has no commit" for it. The workaround moved the row with
+  `--belongs-to` and lost where it was filed. `--delivered-in <path>` names
+  the registered checkout that carries the commit; the reachability and
+  `Delivers:` checks run there, the transition reads
+  `delivered at <sha> on <ref> in <checkout>`, and the row keeps its repo.
+  The "has no commit" refusal names the flag.
 
 - **`sd fleet stamp` lays the `unprotected` declaration only where GitHub
   says so (sd:1655).** The stamp assumed every owned auto repository was

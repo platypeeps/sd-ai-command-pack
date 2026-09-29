@@ -21,6 +21,12 @@ Exit 0 when nothing failed, 1 when a check failed, 2 when the invocation or the
 configuration was wrong. A controlled error prints a sentence, never a traceback.
 Only --record-receipt writes local checkpoint evidence; it never changes Git.
 The repository's check commands own their effects, including any network calls.
+
+Every run that executes a check first takes a machine-wide gate slot
+(`sd_gate_slots`, sd:1996): every `repo.ci = local` repository's gate passes
+through here, so here is where the cap on concurrent gates is kept. The wait
+counts against `--timeout`, each check gets what is left, and the checks run
+with `SD_GATE_SLOTS=0`, so a gate inside them never waits on this one's slot.
 """
 
 from __future__ import annotations
@@ -39,6 +45,7 @@ if _BIN not in sys.path:
     sys.path.insert(0, _BIN)
 
 import sd_check_receipts  # noqa: E402
+import sd_gate_slots  # noqa: E402
 import sd_lib  # noqa: E402
 
 PASS = "pass"
@@ -149,7 +156,9 @@ def execute(
     dry_run: bool,
     timeout: int,
     environ: Mapping[str, str] | None = None,
+    blocked: str | None = None,
 ) -> dict[str, object]:
+    """Run the planned checks; `blocked` fails every one that would run, unrun, with that reason."""
     entries = plan(detection, only)
     checks: list[dict[str, object]] = []
     for entry in entries:
@@ -170,6 +179,9 @@ def execute(
             if dry_run:
                 record["status"] = SKIPPED
                 record["reason"] = "dry run"
+            elif blocked is not None:
+                record["status"] = FAIL
+                record["reason"] = blocked
             else:
                 status, code, duration, out, err, note = (run_one(command, root, timeout) if environ is None
                                                         else run_one(command, root, timeout, environ))
@@ -194,6 +206,7 @@ def execute(
         "source": detection.source,
         "origin": str(detection.origin) if detection.origin else None,
         "detected": detection.reason,
+        "warnings": list(detection.warnings),
         "dry_run": dry_run,
         "status": SKIPPED if dry_run and detection.commands else overall(statuses),
         "checks": checks,
@@ -206,6 +219,10 @@ def render(result: dict[str, object], stream: TextIO) -> None:
     source = result["source"] or "none"
     write(f"sd-check: {result['repo']}\n")
     write(f"  entrypoints: {source} ({result['detected']})\n")
+    warnings = result.get("warnings") or []
+    assert isinstance(warnings, list)
+    for warning in warnings:
+        write(f"  warning: {warning}\n")
     checks = result["checks"]
     assert isinstance(checks, list)
     for record in checks:
@@ -224,6 +241,9 @@ def render(result: dict[str, object], stream: TextIO) -> None:
             text = str(record[channel])
             if text.strip():
                 write(f"[{channel}]\n{text.rstrip()}\n")
+    slot = result.get("gate_slot")
+    if isinstance(slot, dict) and slot.get("slots"):
+        write(f"  gate slot: cap {slot['slots']} ({slot['source']}), waited {float(slot['waited_seconds']):.1f}s\n")
     if result["dry_run"]:
         write("sd-check: dry run, nothing executed\n")
     else:
@@ -237,6 +257,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="sd-check",
         description="Run this repository's own check entrypoints and report a typed result.",
     )
+    parser.add_argument("-C", dest="chdir", metavar="DIR", action=sd_lib.DirectoryAction, help=sd_lib.DIRECTORY_OPTION_HELP)
     parser.add_argument("--json", action="store_true", help="emit one machine-readable object")
     parser.add_argument("--dry-run", action="store_true", help="print what would run, then exit 0")
     parser.add_argument("--only", metavar="NAME", help=f"run one of {', '.join(sd_lib.CHECK_NAMES)}")
@@ -247,9 +268,52 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_TIMEOUT_SECONDS,
         metavar="SECONDS",
-        help=f"per-check timeout (default: {DEFAULT_TIMEOUT_SECONDS})",
+        help=f"per-check timeout; a wait for a gate slot counts against it (default: {DEFAULT_TIMEOUT_SECONDS})",
     )
     return parser
+
+
+def take_slot(environ: Mapping[str, str], timeout: int) -> tuple[sd_gate_slots.Slot | None, dict[str, object]]:
+    """A gate slot for this run, waiting at most `timeout`; None when it never came.
+
+    The cap is `SD_GATE_SLOTS`, then the machine's `sd.gate_slots`, then a
+    quarter of the cores; CI and a holder's children (`SD_GATE_SLOTS=0`) take
+    none.
+    """
+    try:
+        slots, source = sd_gate_slots.configured(environ, sd_lib.core_setting("gate_slots", dict(environ)))
+    except ValueError as error:
+        raise UsageError(str(error)) from None
+    try:
+        slot = sd_gate_slots.acquire(slots, environ, stream=sys.stderr, timeout=timeout)
+    except sd_gate_slots.LauncherExited:
+        raise UsageError("the process that started this gate exited while it waited for a slot") from None
+    report: dict[str, object] = {"slots": slots, "source": source, "waited_seconds": float(timeout),
+                                 "path": None}
+    if slot is not None:
+        report.update(waited_seconds=round(slot.waited, 3), path=str(slot.path) if slot.path else None)
+    return slot, report
+
+
+def gated_execute(root: pathlib.Path, detection: sd_lib.Detection, args: argparse.Namespace,
+                  environ: Mapping[str, str] | None) -> dict[str, object]:
+    """`execute` inside a gate slot when anything will run; the checks get the timeout the wait left."""
+    runnable = any(entry["status"] is None for entry in plan(detection, args.only))
+    if args.dry_run or not runnable:
+        return execute(root, detection, args.only, args.dry_run, args.timeout, environ)
+    slot, report = take_slot(os.environ, args.timeout)
+    children = {**(environ if environ is not None else os.environ), sd_gate_slots.SLOTS_VARIABLE: "0"}
+    try:
+        if slot is None:
+            result = execute(root, detection, args.only, False, args.timeout, children,
+                             f"no gate slot came free within {args.timeout}s")
+        else:
+            result = execute(root, detection, args.only, False, max(1, int(args.timeout - slot.waited)), children)
+    finally:
+        if slot is not None:
+            slot.release()
+    result["gate_slot"] = report
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -261,8 +325,9 @@ def main(argv: list[str] | None = None) -> int:
             raise UsageError(
                 f"--only {args.only}: not one of {', '.join(sd_lib.CHECK_NAMES)}"
             )
-        # R10-D6: the repository comes from cwd and nowhere else. A session that
-        # can be pointed at another checkout is a session that can act on one.
+        # R10-D6: the repository comes from cwd and nowhere else. `-C` changes
+        # cwd first, as `git -C` does, and is the rule's one named exception.
+        sd_lib.enter_directory(args.chdir, error=UsageError)
         root = sd_lib.repo_root(None)
         if root is None:
             raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")
@@ -278,7 +343,7 @@ def main(argv: list[str] | None = None) -> int:
                 controlled = sd_check_receipts.receipt_environment(sd_check_receipts.reuse_contract(root), os.environ)
             except Exception as error:
                 raise UsageError(f"receipt unavailable: {error}") from None
-        result = execute(root, detection, args.only, args.dry_run, args.timeout, controlled)
+        result = gated_execute(root, detection, args, controlled)
         if before is not None:
             try:
                 result["receipt_revision"] = sd_check_receipts.store_check_receipt(root, os.environ, args.database, before, result)

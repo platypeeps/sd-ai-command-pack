@@ -14,6 +14,13 @@ see. So every check here starts from `iterdir()`.
 `migrate-*` is deliberately exempt and named as such: a migration tool whose job
 is to convert *another* checkout must be able to name it. Those are temporary
 and deleted at steps 7 and 11.
+
+The one named exception (sd:1910): the lane commands in `LANE_COMMANDS` take
+`-C <dir>`, which changes the working directory before anything resolves, as
+`git -C` does. The permission layer that approves a command line sees `-C`
+there and does not see a `cd <dir> &&` in front of the same command, so the
+visible form is the one to allow. `-C` on any other file under `bin/` is an
+offender like `--repo` is.
 """
 
 # This module reads the whole checkout, so no changed-files fast path may
@@ -32,6 +39,15 @@ BIN = REPO_ROOT / "bin"
 # Option names that hand a command a repository other than the one the caller is
 # standing in. `--work-dir` and friends are repo-relative and stay.
 REPO_PATH_OPTIONS = frozenset({"--repo", "--repo-path", "--root", "--checkout", "--directory"})
+
+# The lane commands R10-D6 names: the only commands under `bin/` that may
+# declare `-C`. A sixth is an offender; a long spelling is one of the banned
+# above. `sd_lib.py` declares it once more, in `enter_directory_from_argv`,
+# the pre-parser a lane command uses when it dispatches a subcommand before
+# its own parser runs; the library is named here so the scan stays whole.
+DIRECTORY_OPTION = "-C"
+LANE_COMMANDS = frozenset({"sd-ship", "sd-check", "sd-review", "sd-review-ack", "sd-pr-state"})
+DIRECTORY_OPTION_DECLARERS = LANE_COMMANDS | {"sd_lib.py"}
 
 
 def scanned_files() -> list[pathlib.Path]:
@@ -94,8 +110,11 @@ class InventoryTests(unittest.TestCase):
                 tree = ast.parse(path.read_text(encoding="utf-8"))
             except (SyntaxError, UnicodeDecodeError):
                 continue  # not Python; nothing with an argparse surface to check
-            for option in sorted(option_strings(tree) & REPO_PATH_OPTIONS):
+            options = option_strings(tree)
+            for option in sorted(options & REPO_PATH_OPTIONS):
                 offenders.append(f"{path.name} takes {option}")
+            if DIRECTORY_OPTION in options and path.name not in DIRECTORY_OPTION_DECLARERS:
+                offenders.append(f"{path.name} takes {DIRECTORY_OPTION}, which only the lane commands may")
         self.assertEqual(offenders, [], "R10-D6: sd-* commands resolve the repo from cwd only")
 
     def test_every_command_resolves_the_root_from_cwd(self) -> None:

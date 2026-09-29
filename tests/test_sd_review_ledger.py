@@ -17,12 +17,15 @@ from __future__ import annotations
 import json
 import os
 import threading
+import unittest
 from typing import Any
 from unittest import mock
 
 from sd_db import connect, initialise, read_registry, record_cost, seed, writes
+from sd_db.calls import bound_for
 from sd_db.ledger import exposure
 
+from tests.test_sd_registry import SHIPPED
 from tests.test_sd_review import (
     FakeClient,
     FakeRunner,
@@ -433,6 +436,29 @@ class TheBoundaries(LedgerFixture):
         self.assertIn("no library to hold the reservation: cannot import name 'calls'", result["ledger_fault"])
         self.assertEqual(result["reviewed_by"], ["free"])
         self.assertEqual(result["capped_bills"], {"paid": result["ledger_fault"]})
+
+
+class TheShippedBounds(unittest.TestCase):
+    """sd:1805 raised the shipped reviewers' `max_tokens`; the reservation
+    must move with it, or a cap is held against a bound the call can exceed.
+
+    Priced at the prompt that ran out of room on mezmo-world-simulator#215:
+    131600 bytes, 32900 estimated tokens.
+    """
+
+    PROMPT = "x" * 131600
+
+    def test_each_bound_reserves_the_whole_new_max_tokens(self) -> None:
+        registry = read_registry(SHIPPED)
+        entries = {name: entry for name, entry in registry.providers.items() if entry.url}
+        self.assertEqual(sorted(entries), ["baseten", "kimi", "minimax"])
+        expected = {"kimi": (32900 * 3.00 + 65536 * 15.00) / 1e6, "minimax": 0.0,
+                    "baseten": (32900 * 1.32 + 65536 * 3.96) / 1e6}
+        for name, entry in entries.items():
+            with self.subTest(provider=name):
+                self.assertAlmostEqual(bound_for(entry, self.PROMPT), expected[name], places=9)
+        cap = registry.bills["baseten"].cap_usd_month
+        self.assertLess(bound_for(entries["baseten"], self.PROMPT), cap)
 
 
 class TheSeamStays(LedgerFixture):

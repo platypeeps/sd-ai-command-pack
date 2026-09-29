@@ -114,6 +114,58 @@ These run only when asked by name.
 - `sd-handoff`. Write a packet when you stop mid-task. Followups, decisions and
   open questions are already on the item; the packet carries only what is not.
 
+## No-CI mode
+
+A repository whose `repo.ci` row says `local` runs no GitHub Actions (sd:1843).
+`github` is the default. Every reader treats a missing column, row or library as `github`.
+
+Switch a repository with `sd ci local`, run from its checkout (sd:1914).
+It is a dry run; `--apply` makes the changes, and a second run finds none.
+It needs `admin` on the repository and makes three changes, each only where it does not hold yet:
+
+- It sets `repo.ci` to `local`, as `sd-db.sh repo ci <path> local` does.
+- It makes `sd/local-gate` the one required status check, `strict` on, in whichever mechanism the default branch uses.
+  Classic protection has its required checks replaced.
+  A repository ruleset keeps every other rule; only its status-check rule changes, or is added.
+  The dropped contexts are named: their workflows no longer run, and a required context that never reports blocks every merge.
+  A branch protected classically with no required checks refuses; add the check in the branch settings.
+  A required check it cannot rewrite stops the run before any write: an organization ruleset's, or another protected branch's.
+- A private repository has Actions disabled outright.
+  A public one keeps Actions on for its dynamic workflows (CodeQL, Dependabot, Copilot).
+  Each workflow its files declare is disabled.
+
+After the switch:
+
+- `sd-ship merge` checks the reviewed head out into a clean, detached `git worktree`.
+  It runs `sd-check` there, not in your checkout, and removes the worktree after.
+- The child drops `PYTHONPATH`, `PYTHONHOME`, `VIRTUAL_ENV`, `CONDA_PREFIX` and `PATH` entries inside your checkout.
+  It also drops any `PATH` entry whose parent holds `pyvenv.cfg`: a virtualenv's `bin`, wherever it lives.
+- This is a self-hosted runner, not a hermetic build.
+  The gate guarantees a clean tree at the exact head, a scrubbed Python environment and no virtualenv on `PATH`.
+  The rest of `PATH` and the system tools are this machine's image.
+  The repository's own `check` entrypoint owns a hermetic environment if it needs one.
+- It posts the result to that exact commit as the `sd/local-gate` status, `success` or `failure`.
+  It refuses to post for any commit other than the one the worktree held.
+- The description carries `inputs <digest>` as provenance: the head, the copied `CLAUDE.local.md` and the pack's `bin/` files.
+- Nothing is reused. Every merge attempt runs `sd-check` again and posts a fresh status.
+- `sd-ship merge --watch` starts no remote watch: no remote check is coming, and the gate runs to completion in the merge (sd:1875).
+- The merge then requires that status as `success` at the head, posted by the authenticated account.
+  Missing, failed, pending, naming another commit, or from another account: each refuses.
+- Under a declared gap, the status replaces the `pull_request` workflow runs `every_check` asks for.
+  Under protection, the status is required beside the protection's own contexts.
+- Protection for such a repository should require `sd/local-gate`; `sd ci local` sets that.
+  `sd-status` reports it as the one produced context, so a required workflow context shows as not produced.
+- Under a declared gap, a head that already carries a failed check run still refuses: a workflow that ran before the switch, or a billing-blocked one.
+  GitHub reports the pull request `unstable`, not `clean`, and `every_check` requires every check run to pass.
+  Under protection, `unstable` merges: only the required checks and the local gate are read (sd:2075).
+  Push a fresh commit to the branch; an empty one will do. Nothing runs on it but the local gate.
+- `sd fleet stamp` and `sd-review setup-github` lay no workflow and say why.
+  Absence is not drift: `setup-github --check` prints `absent` and exits 0.
+  A tracked route workflow never runs; `--check` names it `REMOVE`, and the stamp names it too.
+  Remove it with `sd-review setup-github --remove`, which also lifts its Dependabot guard; `--dry-run` previews.
+- Routing needs no workflow. `sd-ship prepare` routes in its local review pass and records the plan in the receipt.
+  The route workflow only printed that plan to a job summary; nothing reads it.
+
 ## Reviews
 
 Adversarial review runs at four points, each with a cap on automatic passes.
@@ -167,7 +219,9 @@ Uncertain findings remain open; no automatic Copilot request follows.
 
 ## Never in a shared repository
 
-A shared repository resolves to `guest` or `minimal` mode.
+A shared repository resolves to `guest` mode. Detection never produces
+`minimal`; only an operator writes it, and the refusals below that name
+`guest` do not apply to it.
 `full` requires administration, a non-fork remote, and exclusive push access.
 In a shared repository:
 
@@ -207,12 +261,33 @@ path runs with the applicable review points. An item can span several pull
 requests. `Item: <item>` associates a merge without closing the item;
 `Delivers: <item>` declares the delivering merge. Changes without an associated
 item omit those trailers and create no placeholder record. The trailers are the
-last paragraph of the pull-request body, contiguous, with the attribution
+last paragraph of the squash message, contiguous, with the attribution
 paragraph above them and nothing below: a squash merge concatenates the body
 into the commit message, git reads trailers only out of the final paragraph,
 and GitHub's appended `Co-authored-by:` joins a trailer block that ends the
 message but opens a new paragraph after anything else.
-`.github/PULL_REQUEST_TEMPLATE.md` ends in that order.
+`.github/PULL_REQUEST_TEMPLATE.md` ends in that order, with `Refs:` only.
+
+`sd-ship` owns the lines `sd_lib.OWNED_TRAILERS` names: `Item:`, `Work:`,
+`Delivers:`, `Closes:`, `Authored-with:` and `Attributes:`. `prepare` appends
+`Work:` to the body it publishes, and `merge` appends `Item:`, `Delivers:` and
+the authorship lines to the squash message, so a body written for `sd-ship`
+carries none of them. A supplied line that says what `sd-ship` would write is
+stripped and listed in the result's `normalized`; any other owned line is
+refused by line number, with the expected value. So the body `sd-ship`
+published, fed back as `--body-file`, prepares again. Without `--body-file`,
+`prepare` reads an open pull request's live body, so an edit made on GitHub
+survives; with no receipt, the pull request open for the branch is the one
+read, so a pull request opened by hand keeps its body. The result's
+`body_source` says `file`, `live_pr`, `state` or `default`.
+`sd-ship body --item <item> [--body-file <file>] [--pr <n>]` prints
+the body `prepare` would publish and runs the body lint on it. Its `scope`
+names each scope line the diff demands, such as `CI/review scope:` for a
+`.github/**` path, and whether the body carries it. The diff is the checkout's
+HEAD against `origin/HEAD`; with `--pr` it is that pull request's files, and
+without `--body-file` its live body is read. It reads no sd state, calls the
+GitHub API only for `--pr`, and exits non-zero on a refusal or a lint failure. A merge
+made without `sd-ship` writes the trailers by hand, in the order above.
 
 After the remote confirms the delivering merge, `sd work deliver <row-id>
 <full-commit-sha>` verifies the commit, default branch and delivery trailer. It
@@ -274,10 +349,18 @@ which the installer places in `~/.claude/agents`.
   close each one when it merges.
 - **Iterate on the fast path; gate once before the push.** While fixing, run
   `make check CHANGED="<paths>"`, which runs only the tests those paths need
-  plus an always-run set. Before the push, run the full `make check` once. On
-  a shared machine set `SD_GATE_SLOTS=1`: each gate already runs a test worker
-  on nearly every core, and overlapping gates slow all of them. Only the full
-  gate counts as evidence; a narrowed run exits 2 to say so.
+  plus an always-run set. Before the push, run the full `make check` once.
+  Only the full gate counts as evidence; a narrowed run exits 2 to say so.
+- **Gates share the machine through slots.** Every `sd-check` run, and so
+  every gate `sd-ship prepare` or `merge` runs in any repository, first takes
+  one of `sd.gate_slots` machine-wide slots (unset: a quarter of the cores,
+  4 on 16). `SD_GATE_SLOTS` overrides it for one run, `0` lifts the cap, and
+  CI takes none. A queued gate prints `waiting for a gate slot` on stderr and
+  again each minute. The wait counts against `sd-check --timeout`, and each
+  check gets the rest. A holder runs its checks with `SD_GATE_SLOTS=0`, so the
+  pack's own `make test` inside a gate takes no second slot; run directly,
+  `make test` takes one of 2. Slots are kernel locks under
+  `$XDG_STATE_HOME/sd/gate-slots`, so a dead holder's slot is free at once.
 - **Test one version per language, the latest stable (Python 3.14, Node
   26), in CI and locally; no version matrices.**
 
@@ -306,8 +389,15 @@ the block; the file is untracked by construction.
 | Mode | Where planning artifacts go | What ships |
 |---|---|---|
 | `full` | `docs/work/` in the repository | everything above; merge only with `runner_merge: auto` on the row |
-| `minimal` | nowhere; no work items | the small-change path only |
+| `minimal` | nowhere, by convention only; nothing enforces it | the small-change path only |
 | `guest` | the fork's integration branch | the small-change path to pull-request-ready; no posts, no labels |
+
+`minimal` holds no work items by agreement, not by a check.
+`sd_lib.guest_artifact_refusal` and `sd-ship`'s push check refuse
+`docs/work/`, `docs/spec/` and `docs/decisions/` in `guest` only, so a
+`minimal` repository can commit and push them unrefused. `sd-ship` also adds
+the `Work: sd:<id>` line in `minimal`, as it does in `full`. What `minimal`
+refuses is the review routing lane (R10-D5), as `guest` does.
 
 Access decides where artifacts go, whichever namespace holds the
 repository. Without a `mode:` line, the pack asks three questions of the
@@ -383,11 +473,11 @@ Only submitted, non-pending reviews mark matching request heads complete.
       opencode: { start: "opencode run", model: openai/gpt-5.5, vendor: openai, bill: openai,
                   roles: [reviewer], reader: opencode-json }
       kimi:    { url: "https://api.moonshot.ai/v1", model: kimi-k3, vendor: moonshot, bill: moonshot,
-                 roles: [reviewer], max_tokens: 16384, price: { in: 3.00, out: 15.00 } }
+                 roles: [reviewer], max_tokens: 65536, price: { in: 3.00, out: 15.00 } }
       minimax: { url: "https://api.minimax.io/v1", model: MiniMax-M3, vendor: minimax, bill: minimax,
-                 roles: [reviewer], max_tokens: 16384, price: { in: 0, out: 0 } }
+                 roles: [reviewer], max_tokens: 65536, price: { in: 0, out: 0 } }
       baseten: { url: "https://inference.baseten.co/v1", model: deepseek-ai/DeepSeek-V4-Pro-0813, vendor: deepseek,
-                 bill: baseten, roles: [reviewer], max_tokens: 16384, price: { in: 1.32, out: 3.96 } }
+                 bill: baseten, roles: [reviewer], max_tokens: 65536, price: { in: 1.32, out: 3.96 } }
     roles:
       author:   [claude, codex]
       reviewer: [codex, claude, opencode]
@@ -429,6 +519,15 @@ the missing field, because a reinstall never rewrites this file in your
 home. The Baseten registry entry pins `deepseek-ai/DeepSeek-V4-Pro-0813`.
 `max_tokens` bounds generated reasoning and the final answer together;
 exhausting it does not establish that the review subject was too large.
+The shipped entries give each reviewer 65536, well under each model's
+documented output ceiling. At 16384, `kimi-k3` spent the whole budget
+reasoning on a 35k-token prompt and sent no answer (sd:1805); K3 always
+thinks, and its effort can only drop to `low`. A stop at the ceiling reads
+`<name> hit max_tokens (N) and it sent no answer`, with the completion
+tokens and reasoning bytes, and `sd-ship` repeats that detail in its
+refusal. A `length` stop below the ceiling says the context window may be
+full and names shortening the review input first. The installer never rewrites the registry in your home, so a
+home copy still at 16384 keeps the old ceiling until you edit it.
 URL entries can declare one optional control: `thinking: disabled|adaptive`
 or `reasoning_effort: none|low|high|max`. The client sends `thinking` as
 `{"type": "disabled"}` or `{"type": "adaptive"}`, and effort as a top-level
@@ -439,6 +538,12 @@ supports effort `none`. Lower reasoning can change finding quality; full
 subject coverage and the required reviewer count remain mandatory.
 Incomplete output still fails the review. A pin is changed by editing the
 registry file, never by a page.
+A `url` answer that fails the findings schema is retried once on the same
+entry only when its `price` names both `in` and `out` as zero, so a retry
+never doubles a bill; the failed attempt stays in the outcomes with any
+blocker it recovered. A priced entry falls through to the next reviewer as
+before. Temperature is not a registry field: `kimi-k3` refuses any value but
+1, and MiniMax-M3 at 0.2 broke the schema as often as at its default (sd:1821).
 
 Adding a provider is an entry; adding money is a bill. Both role lines are
 read in order. `author` is picked when an assignment starts and never switched
@@ -448,7 +553,9 @@ mid-item; outside the runner, `SD_AUTHOR` or `--author` names it to
 review reads no declaration: every commit in the reviewed range is attributed
 by its own trailer, or by an `Attributes: <sha> <name>/<vendor>` trailer on a
 later commit in the range that `sd attribute` makes, and a commit with neither
-refuses the review by name rather than being guessed. `reviewer` is the first entry that is enabled, is of no vendor the
+refuses the review by name rather than being guessed. `sd-ship merge` carries
+into the squash each `Attributes:` line that names a commit the base already
+holds, so a repair of landed history survives the merge. `reviewer` is the first entry that is enabled, is of no vendor the
 range's trailers carry, is on no bill at its cap this month, and answers
 its preflight (the cap check is below). A rate limit,
 a missing binary, a failed run or a timeout falls through to the next, and the
@@ -506,7 +613,7 @@ reviewer chain before vendor, transport, availability and spending gates run.
 
 Core settings use `sd config get|set|unset|list` and the existing atomic machine configuration writer.
 The file is `~/.config/sd-ai-command-pack/config.json`, honoring `XDG_CONFIG_HOME`.
-The reserved `sd` namespace declares three settings:
+The reserved `sd` namespace declares four settings:
 
 - `sd.external_reviews`: `configured` permits private code and scoped review context to eligible configured providers.
   It includes future registry entries; registry configuration chooses capability, while this explicit operator grant authorizes transmission.
@@ -529,6 +636,9 @@ The reserved `sd` namespace declares three settings:
   `sd-review` reports the effective policy, its source and the repository's say under `remote_reviews.copilot`.
   `sd-ship` resolves the decision again at dispatch, from the setting as it stands then and the tiers the
   retained passes recorded, so a setting changed after the review takes effect without another review.
+- `sd.gate_slots`: how many repository gates (`sd-check` runs) may run at once on this machine; `0` is no cap.
+  Absence reads a quarter of the cores. `SD_GATE_SLOTS` overrides it for one run. It grants nothing;
+  see [Parallel work](#parallel-work).
 
 Installation supplies neither grant. A new operator must state their own policy; never copy another user's personal permission.
 These settings start no background work, enable no runner policy, and bypass no ownership, review, CI, or protection gate.

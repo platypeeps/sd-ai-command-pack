@@ -15,8 +15,8 @@ Two readings of "untouched", both here, because either alone fails open.
 The *diff* reading is the criterion's own words: the commit that landed the
 retire names no path under `docs/work/archive/`. It is the strongest form and
 it needs the history to be present, so it fails rather than skips when the
-commit is not reachable -- `.github/workflows/tests.yml` fetches the whole
-history for that reason.
+commit is not reachable. The local gate runs in a worktree of the full
+clone, so the history is there.
 
 The 2026-09-17 removal changed only its reviewed first batch.
 Git history preserves the removed records.
