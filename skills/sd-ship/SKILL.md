@@ -22,6 +22,8 @@ When the value is `controlled` and the gates pass, merge; do not ask the operato
 Installation grants no permission.
 Shared contributors do not revoke permission; existing ownership, protection, review, and CI gates still apply.
 A refusal stops execution.
+When another ship operation owns the repository, rerun `prepare` or `merge` with `--wait <seconds>`; do not write a retry loop.
+`reconcile` and `adjudicate` also take the lock but cannot wait for it; rerun them once the holder is gone.
 Do not change gates to obtain a merge.
 An existing manual operator path needs separate authorization; a gate refusal does not grant it.
 Standing permission starts no background work and does not enable `runner_merge: auto` on the repository row.
