@@ -283,6 +283,10 @@ class SharedReview:
             argv += ["--provider", requested]
         if getattr(self.args, "reuse_check", False):
             argv.append("--reuse-check")
+        # sd:2041. Under `repo.ci = local` the merge gate runs this same check
+        # again; run it as the gate does, so its receipt answers there.
+        if self.state.get("base") and sd_lib.repo_ci(self.connection, self.root) == "local":
+            argv += ["--gate-check", self.state["base"]]
         if getattr(self.args, "review_timeout", None):
             # sd:1475. sd-review sizes its timing plan, and so this watchdog, from it.
             argv += ["--timeout", str(self.args.review_timeout)]
@@ -482,10 +486,13 @@ def gate_diagnostics(check: dict, limit: int) -> list[dict]:
     records = check.get("checks")
     if not isinstance(records, list):
         return []
+    # A docs-only run (sd:2072) adds one `docs` row after the three names; it is the one that ran.
+    docs = [record for record in records[len(sd_lib.CHECK_NAMES):] if isinstance(record, dict)
+            and record.get("name") == "docs"][:1]
     return [{"name": record.get("name"), "status": record.get("status"), "exit_code": record.get("exit_code"),
              "reason": str(record.get("reason") or "")[-limit:],
              "stdout": str(record.get("stdout") or "")[-limit:], "stderr": str(record.get("stderr") or "")[-limit:]}
-            for record in records[:len(sd_lib.CHECK_NAMES)] if isinstance(record, dict)]
+            for record in [*records[:len(sd_lib.CHECK_NAMES)], *docs] if isinstance(record, dict)]
 
 
 #: Statuses of a reviewer that answered usably; any other outcome names its cause.

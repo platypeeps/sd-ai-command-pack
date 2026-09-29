@@ -4,6 +4,33 @@
 
 ### Added
 
+- **One passing local gate per head (sd:2041, sd:1912).** Under `repo.ci =
+  local`, `sd-ship prepare` runs its check as the merge gate does -- a clean
+  worktree at the head, the gate's environment, `sd-review --gate-check` --
+  and a pass leaves a receipt in this machine's workflow database. The merge
+  gate of the same head, within 30 minutes (`REUSE_WINDOW_SECONDS`), reads it
+  instead of a second run, and the status says `(reused)`. Prepare never
+  reads a receipt and the merge gate never writes one. The binding is the
+  head, its tree, the gate inputs (every pack `bin/` file and an untracked
+  `CLAUDE.local.md`), the scope, the detected commands, each command's
+  executable, the interpreter and the gate's whole environment, every
+  variable by name and value. Inputs outside the repository (external
+  makefiles, tool files, machine state) are not bound; the short same-head
+  window is the accepted residual risk, and a repository that needs more uses
+  the explicit dependency contract (sd:1912). The gate's bound in prepare is
+  now the merge gate's 3600 s, not the reviewers' 1800 s, unless
+  `--review-timeout` names one; the timing plan carries it as
+  `check_seconds`.
+
+- **A declared docs-only check scope (sd:2072).** A repository may track
+  `.github/sd-check-scope.json` naming `docs_paths` globs and a
+  `docs_command`. `sd-check --base REF` then runs only the docs command when
+  every path changed since the merge base is a docs path; the merge gate and
+  prepare's gate pass the base branch. A change to the declaration, a
+  Makefile, the file the entrypoints came from, `CLAUDE.local.md` or a file a
+  check command names runs the full check. The status reads `sd-check pass
+  (docs-only)`. No declaration is today's behaviour.
+
 - **A Dependabot commit is attributed by the identity GitHub gives it
   (sd:2065).** Dependabot writes no `Authored-with:`, so `sd-review` refused
   every bump as `authored unknown` and `sd attribute` had no truthful value to
