@@ -1744,6 +1744,20 @@ def review_seconds(value: str) -> int:
     return seconds
 
 
+def lock_wait_seconds(value: str) -> float:
+    seconds = float(value)
+    if not seconds >= 0 or seconds == float("inf"):
+        raise argparse.ArgumentTypeError("takes a finite number of seconds, zero or more")
+    return seconds
+
+
+def lock_wait_flag(action) -> None:
+    """sd:1937. Block on the repository's ship lock to a deadline instead of a caller's retry loop."""
+    action.add_argument("--wait", dest="lock_wait", type=lock_wait_seconds, default=0.0, metavar="SECONDS",
+                        help="wait up to SECONDS for another ship operation on this repository to finish; "
+                             "0, the default, refuses at once (not --wait-seconds)")
+
+
 def review_timeout_flag(action) -> None:
     """sd:1475. The one limit sd-review plans every phase with, forwarded when given.
 
@@ -1841,6 +1855,8 @@ def parser():
     for name in ("prepare", "merge", "reconcile", "observe"):
         action = commands.add_parser(name)
         identity_flags(action)
+        if name in ("prepare", "merge"):
+            lock_wait_flag(action)
         if name == "prepare":
             action.add_argument("--provider", metavar="NAME", help="select one guarded reviewer for this invocation; never changes automatic order")
             action.add_argument("--reuse-check", action="store_true", help="opt into exact-input successful check-receipt reuse")
@@ -1971,15 +1987,21 @@ def body_command(args) -> int:
 
 
 def lock_options(args, store) -> dict:
-    """What the ship lock records about this holder, for a refusal and `sd runner status` (sd:1936).
+    """What the ship lock records about this holder, for a refusal and `sd runner status` (sd:1936),
+    and how long it waits for another holder (sd:1937).
 
     An `sd_db` built before the holder record takes no options; the lock is
-    the same flock either way, so an older library still serializes.
+    the same flock either way, so an older library still serializes. It
+    cannot wait, so `--wait` refuses on it rather than refusing at once.
     """
+    wait = getattr(args, "lock_wait", 0.0)
     if not hasattr(store, "held_locks"):
+        if wait:
+            raise Refusal("--wait needs an sd_db whose ship lock can wait; install the current system/local-sd-db")
         return {}
     selector = f"--item {args.item}" if args.item is not None else f"--no-item --review-id {args.review_id}"
-    return {"holder": {"command": f"sd-ship {args.command} {selector}", "item": args.item, "review": args.review_id}}
+    return {"holder": {"command": f"sd-ship {args.command} {selector}", "item": args.item, "review": args.review_id},
+            "wait": wait}
 
 
 def dispatch(root, connection, database, args, store, readonly):
@@ -1993,7 +2015,33 @@ def dispatch(root, connection, database, args, store, readonly):
         delivery.revision, delivery.state = store.read(connection, delivery.key)
         if args.no_item and (delivery.state.get("branch") != delivery.branch or delivery.state.get("lifecycle") != "active"):
             raise Refusal("no-item record changed concurrently; select its current identity before publication")
+        identity_unchanged(root, connection, args, store, delivery)
         return getattr(delivery, args.command)()
+
+
+def identity_unchanged(root, connection, args, store, delivery) -> None:
+    """Refuse when what `Ship` read before the lock no longer holds under it (sd:1937 review).
+
+    `--wait` can hold that read for minutes. A branch switch meanwhile would
+    push the new HEAD under the old branch's pull request, and a reassigned
+    item would ship under its old repository or branch. One check for both
+    modes: the live checkout, and for an item its row as it stands now.
+    """
+    live = git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
+    if live != delivery.branch or slug(git(root, "config", "--get", "remote.origin.url")) != delivery.repository:
+        raise Refusal(f"the checkout left {delivery.branch} while this command waited for the ship lock; "
+                      "rerun it from the branch it ships")
+    if args.no_item:
+        return
+    info = store.identity(connection, args.item)
+    now = info["item"]
+    if (now.get("repo"), now.get("branch")) != (delivery.item.get("repo"), delivery.item.get("branch")):
+        raise Refusal(f"item {args.item} changed repository or branch while this command waited for the ship lock; "
+                      "rerun it")
+    # The same repository path can be re-registered under another remote; `Ship.__init__` checks this before the lock.
+    if slug(info["repo"]["remote"] or "") != delivery.repository:
+        raise Refusal(f"item {args.item}'s repository remote changed while this command waited for the ship lock; "
+                      "rerun it")
 
 
 def main(argv=None) -> int:

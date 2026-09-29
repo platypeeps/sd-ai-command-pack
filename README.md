@@ -157,6 +157,7 @@ sd config set sd.assistant_merge controlled
 
 These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOME` overrides the configuration root.
 `sd config get`, `list`, and `unset` inspect or remove settings. No personal grant ships in this repository.
+`sd.gate_slots` is load control, not a grant: how many repository gates may run at once on the machine (unset: a quarter of the cores).
 
 `configured` allows private code and scoped review context to the operator's eligible configured providers, including future entries.
 A local `reviewers` list restricts recipients; an explicit empty value denies review.

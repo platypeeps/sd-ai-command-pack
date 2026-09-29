@@ -269,6 +269,8 @@ TEST_RUNNER_ENV = env -u TEST_CHANGED_FILES
 endif
 
 # sd:1541. Local test runs at once on this machine; `SD_GATE_SLOTS=0 make test` lifts it.
+# Under `sd-check`, which holds a machine-wide gate slot (sd:1996), the variable
+# arrives as 0 and `?=` keeps it, so the gate's own tests take no second slot.
 SD_GATE_SLOTS ?= 2
 
 test:
