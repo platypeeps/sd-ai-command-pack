@@ -2699,6 +2699,22 @@ roles:
             with self.assertRaisesRegex(ship.Refusal, "changed repository or branch while this command waited"):
                 ship.dispatch(self.root, self.connection, self.database, self.args("prepare"), receipts, False)
 
+    def test_a_repository_remote_changed_while_waiting_refuses_before_the_command_runs(self):
+        """sd:1937 review. The repository row's remote is read again under the lock, as `Ship.__init__` reads it."""
+        real = receipts.repository_lock
+
+        @contextlib.contextmanager
+        def re_registering(*args, **options):
+            with real(*args, **options):
+                self.connection.execute("UPDATE repo SET remote = 'https://github.com/example/elsewhere.git'")
+                self.connection.commit()
+                yield
+
+        with patch.object(receipts, "repository_lock", re_registering), \
+                patch.object(ship.Ship, "prepare", side_effect=AssertionError("ran for a re-registered repository")):
+            with self.assertRaisesRegex(ship.Refusal, "repository remote changed while this command waited"):
+                ship.dispatch(self.root, self.connection, self.database, self.args("prepare"), receipts, False)
+
     def test_a_no_item_record_refuses_a_live_branch_switch(self):
         """sd:1937 review. `--no-item` compares the live checkout too, not only its stored record."""
         delivery = SimpleNamespace(branch="topic", repository=ship.slug(REMOTE_URL))

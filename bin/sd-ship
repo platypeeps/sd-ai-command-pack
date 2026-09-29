@@ -2033,9 +2033,14 @@ def identity_unchanged(root, connection, args, store, delivery) -> None:
                       "rerun it from the branch it ships")
     if args.no_item:
         return
-    now = store.identity(connection, args.item)["item"]
+    info = store.identity(connection, args.item)
+    now = info["item"]
     if (now.get("repo"), now.get("branch")) != (delivery.item.get("repo"), delivery.item.get("branch")):
         raise Refusal(f"item {args.item} changed repository or branch while this command waited for the ship lock; "
+                      "rerun it")
+    # The same repository path can be re-registered under another remote; `Ship.__init__` checks this before the lock.
+    if slug(info["repo"]["remote"] or "") != delivery.repository:
+        raise Refusal(f"item {args.item}'s repository remote changed while this command waited for the ship lock; "
                       "rerun it")
 
 
