@@ -171,7 +171,8 @@ class WritingFromWorktree(unittest.TestCase):
         self.checkout.assert_not_called()
 
     def test_publication_and_cutover_refuse_a_worktree(self):
-        for argv in (["publication-render", "--piece", "2026/a"], ["import"], ["recover"]):
+        for argv in (["publication-render", "--piece", "2026/a"], ["import"], ["recover"],
+                     ["register", "--piece", "2026/a"]):
             with self.subTest(argv=argv[0]):
                 with self.assertRaisesRegex(cli.WorkRefusal, "only in the main checkout"):
                     self.run_in(self.linked, *argv)

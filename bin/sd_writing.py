@@ -14,7 +14,7 @@ import sd_lib
 from sd_work import WorkRefusal
 
 #: Verbs that write journals or publish, so they read only merged prose (sd:2024).
-REGISTERED_ONLY = frozenset({"import", "cutover", "recover", "publication-render", "publication-recover",
+REGISTERED_ONLY = frozenset({"import", "register", "cutover", "recover", "publication-render", "publication-recover",
                              "publication-claim", "publication-status", "publication-dispatch",
                              "publication-receipt", "publication-reconcile", "publication-abandon"})
 
