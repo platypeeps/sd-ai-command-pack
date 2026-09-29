@@ -56,10 +56,12 @@ def ship_lock_status() -> dict:
     so the files are counted by state rather than read as a queue, and
     nothing here removes one. An sd_db without the holder record adds nothing.
     """
-    from sd_db import ship
+    if sd_lib.import_sd_db().module is None:
+        return {}
+    from sd_db import ship  # noqa: PLC0415
     if not hasattr(ship, "lock_files"):
         return {}
-    from sd_db.database import default_path
+    from sd_db.database import default_path  # noqa: PLC0415
     files = ship.lock_files(default_path())
     held = [{key: value for key, value in entry.items() if key not in ("state", "alive")}
             for entry in files if entry["state"] == "held"]
