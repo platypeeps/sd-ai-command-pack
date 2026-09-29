@@ -10,6 +10,31 @@ branch: feat/review-binding-1834
 Bundles sd:1834, sd:1397 and sd:1246. sd:1834 is the row of record; the
 other two close with it or narrow to what this plan leaves out.
 
+## Status
+
+2026-09-29, operator decisions (relayed by session system-41):
+
+- The binding is approved as designed. `verdict` files bind by normalized
+  hash; `policy` entries stay byte-exact; `gate` and `check` files leave the
+  digest and are recorded per file, so a refusal names them. Log and refusal
+  strings count as changes; only comments and docstrings are ignored.
+- **Override recorded.** This replaces the archived rule "Tool-binding
+  values must change when gate code changes" for the `gate` and `check`
+  classes. Reason: gate code runs live on every `prepare` and `merge`
+  against the stored report, and the merge gate runs the check again at the
+  landing head, so binding them spent a review pass and added no evidence.
+  The archived "never backfill" rule stands.
+- `adjudicator_binding` changes for tool files only; the `sd_db` library,
+  skills and references stay byte-exact.
+- Slices 1 to 3 ship in one pull request. Slice 4 waits for 14 days of data.
+  sd:1397 narrows to option E.
+
+Slices 1 to 3 built on `feat/review-binding-1834`. The class map as built is
+the four tuples in `bin/sd_ship_bindings.py`, exactly as the design's class
+table lists them. Replayed over the 30 days before 2026-09-29 with the built
+normalizer and `VERDICT_FILES`: 73 of 162 landings that moved the old
+binding leave the new digest unchanged (acceptance floor: 70).
+
 ## Problem
 
 `review_binding` in `bin/sd_ship_bindings.py` is one SHA-256 over the bytes

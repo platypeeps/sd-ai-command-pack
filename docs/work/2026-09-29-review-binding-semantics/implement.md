@@ -10,7 +10,7 @@ picks, so open receipts pay once.
 
 ## Step checklist
 
-- [ ] 1. Classes and normalizer, in `bin/sd_ship_bindings.py`. Size M
+- [x] 1. Classes and normalizer, in `bin/sd_ship_bindings.py`. Size M
       (about 120 lines of code, 200 of tests).
       - Replace `REVIEW_TOOL_FILES` with `VERDICT_FILES`, `GATE_FILES`,
         `CHECK_FILES` and `IMPORT_EXEMPT` (with a reason per entry). Keep
@@ -34,7 +34,7 @@ picks, so open receipts pay once.
         refuse with "required review binding file cannot be read".
       - Fail-first: with `gate` files put back into the digest, the gate
         acceptance test fails naming the member.
-- [ ] 2. Manifest and refusal, in `bin/sd_ship_bindings.py`,
+- [x] 2. Manifest and refusal, in `bin/sd_ship_bindings.py`,
       `bin/sd_ship_review.py` and `bin/sd-ship`. Size M (about 80 lines of
       code, 150 of tests).
       - `binding_manifest(root)` and `binding_change(state, root)`.
@@ -49,7 +49,9 @@ picks, so open receipts pay once.
         full-branch re-review; a changed `gate` file appears under "also
         changed, not binding" only when a `verdict` or `policy` entry also
         moved; a released gate failure restores the manifest.
-- [ ] 3. Records. Size S.
+- [x] 3. Records. Size S. Built 2026-09-29 on `feat/review-binding-1834`
+      with slices 1 and 2; the replayed measurement is in the PRD Status.
+      The PR body narrows sd:1397 to option E; the operator updates the row.
       - This folder's PRD Status: the class table as landed, and the
         replayed measurement (acceptance: at least 70 of 162).
       - `skills/sd-ship/SKILL.md`: one paragraph on what moves a receipt

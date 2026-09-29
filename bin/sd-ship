@@ -27,7 +27,7 @@ import sd_local_gate
 import sd_ship_body
 import sd_ship_dispositions as sd_ship_dispositions
 import sd_ship_squash
-from sd_ship_bindings import review_binding
+from sd_ship_bindings import binding_manifest, review_binding
 from sd_ship_history import ItemHistory, digest
 from sd_ship_history import completed_depth as completed_depth
 from sd_ship_history import review_history as review_history
@@ -316,7 +316,7 @@ def review_runtime() -> ReviewRuntime:
                          process=lambda root, argv, **kwargs: review_process(root, argv, **kwargs),
                          current_head=lambda root: current_head(root), clock=moment,
                          timing_plan=timing_plan, bin_dir=BIN, setup_seconds=REVIEW_SETUP_SECONDS,
-                         diagnostic_bytes=REVIEW_DIAGNOSTIC_BYTES)
+                         diagnostic_bytes=REVIEW_DIAGNOSTIC_BYTES, manifest=lambda root: binding_manifest(root))
 
 
 def commit_paths(root: pathlib.Path, args) -> None:
