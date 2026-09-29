@@ -26,6 +26,17 @@
   check command names runs the full check. The status reads `sd-check pass
   (docs-only)`. No declaration is today's behaviour.
 
+- **A Dependabot commit is attributed by the identity GitHub gives it
+  (sd:2065).** Dependabot writes no `Authored-with:`, so `sd-review` refused
+  every bump as `authored unknown` and `sd attribute` had no truthful value to
+  record. A commit whose author is `dependabot[bot]` with its fixed noreply
+  address and whose committer is `GitHub <noreply@github.com>` now reads as
+  `dependabot/github`: vendor `github`, which excludes no reviewer, and the
+  value the squash carries. A local rewrite changes the committer, so it says
+  nothing again; `sd attribute <sha> dependabot` records it by hand. A human
+  fix-up on the branch still needs its own trailer. The identity is a claim,
+  as a trailer is; the GitHub signature is not verified.
+
 - **`sd-ship prepare --catch-up` merges the base into a BEHIND branch
   (sd:2023).** Under strict protection another landing left a branch behind,
   and the recovery was a hand merge, a push, a review and a prepare. The flag
