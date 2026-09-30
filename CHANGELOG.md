@@ -81,6 +81,15 @@
   `JEV_SD_PROSE_SCORE` with the skill's name, and each stage variable set to
   `0` switches that pass off.
 
+- **`sd-ship prepare` no longer titles a multi-commit branch after its newest
+  commit (sd:2097).** With no `--title` and no stored title, prepare used the
+  newest non-merge subject, so an 11-commit branch opened as a pull request
+  named for its last fix (ui-design PR #16). A one-commit branch still uses
+  its subject. A branch of two or more non-merge commits is refused before the
+  review, and the refusal names the count and the subject it would have used.
+  Merges still never count (sd:1377), and `merge` still squashes with the live
+  pull request title (sd:1876).
+
 - **A post-cap review verifies the fix, and a pass that reviewed nothing
   spends no request (sd:2147).** `sd-ship prepare --additional-review-for`
   reviewed the whole branch against its base on every request. The design
