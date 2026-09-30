@@ -74,6 +74,17 @@
 
 ### Fixed
 
+- **A stopped or timed-out `sd-check` ends everything its check started
+  (sd:1815).** Each check now leads a process group of its own, through
+  `sd_lib.run_group`, and the group is killed when the check ends: at
+  `--timeout`, on SIGTERM or SIGINT to `sd-check` alone (as `pkill` sends
+  it), and after a normal exit. Before, `subprocess.run` killed only the
+  check's first process at the timeout, and a signal reached none of them,
+  so `make check` and its test workers ran on with parent pid 1. A check's
+  stdin is now `/dev/null`. Ctrl-C prints `sd-check: interrupted` instead of
+  a traceback and still exits by SIGINT. A caller that SIGKILLs `sd-check`
+  itself still leaves the group running; nothing can forward that signal.
+
 - **A catch-up keeps both CHANGELOG.md entries (sd:2174).** `sd-ship prepare
   --catch-up` aborted on any conflict, and in the pack it stopped almost every
   time on `CHANGELOG.md`: the branch and the base had each added an entry at
