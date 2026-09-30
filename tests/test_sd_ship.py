@@ -754,6 +754,25 @@ roles:
         # The receipt reads back through the same coverage walk that merge uses.
         self.assertEqual(self.merge()["phase"], "merged")
 
+    def test_a_re_review_records_what_moved_and_stores_a_fresh_manifest(self):
+        """sd:1834, sd:1246. The pass a moved binding spends says which file spent it."""
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        self.assertEqual(self.operation().state["binding_manifest"], ship.binding_manifest(self.root))
+        for stored, changed in ((None, [["receipt predates the per-file manifest", "legacy"]]),
+                                ("verdict", [["sd-review", "verdict"]])):
+            with self.subTest(stored=stored):
+                operation = self.operation()
+                operation.state["binding"] = "a review tool file landed on the default branch"
+                if stored is None:
+                    operation.state.pop("binding_manifest")
+                else:
+                    operation.state["binding_manifest"]["verdict"]["sd-review"] = "ast:before"
+                operation.save()
+                self.assertEqual(self.prepare()["phase"], "ready_to_send")
+                state = self.operation().state
+                self.assertEqual(state["passes"][-1]["review_binding_change"]["changed"], changed)
+                self.assertEqual(state["binding_manifest"], ship.binding_manifest(self.root))
+
     def test_prepare_rereads_a_pull_object_that_lags_the_push(self):
         # sd:1394, live on #1145 and system #572: the pull object still named
         # the pre-push head one second after the push, and one read refused.
