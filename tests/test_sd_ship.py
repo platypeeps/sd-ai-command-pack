@@ -81,6 +81,13 @@ def pull_head_waits(sleep):
             if call.args[0] >= 1 and call.args[0] != ship.COPILOT_MATERIALIZATION_INTERVAL_SECONDS]
 
 
+#: A reviewer that exits nonzero and still reports a located blocker: sd-review
+#: keeps the finding, so the pass reviewed something and is spent (sd:2147).
+FAILED_WITH_BLOCKER = ("#!/usr/bin/env python3\nimport json,sys\nprint(json.dumps({'type':'result','subtype':'success',"
+                       "'structured_output':{'findings':[{'path':'src.py','line':1,'severity':'high','family':'correctness',"
+                       "'summary':'kept from a failed answer'}]}}))\nsys.exit(1)\n")
+
+
 class ShipDouble(GitHubDouble):
     """Adds precisely the write/read surfaces this adapter calls to the shared double."""
     def __init__(self, remote):
@@ -429,6 +436,12 @@ roles:
         # answer unless they give one; `unanswered` below asks without it.
         if command == "prepare" and operation.args.deliver is None and "deliver" not in operation.state:
             operation.args.deliver = False
+        # A branch of two or more commits needs a title (sd:2097). Cases that
+        # add commits are about something else, so they take the fixture
+        # commit's subject; `untitled` cases exercise the default itself.
+        if (command == "prepare" and operation.args.title is None and "title" not in operation.state
+                and not getattr(self, "untitled", False)):
+            operation.args.title = "change"
         return operation
 
     def prepare(self, *extra):
@@ -591,7 +604,8 @@ roles:
                              repo=str(self.operator), branch="second")
 
         def operation():
-            args = ship.parser().parse_args(["prepare", "--item", str(second), "--associate-only", "--json"])
+            args = ship.parser().parse_args(["prepare", "--item", str(second), "--associate-only", "--json",
+                                             "--title", "build on the first"])
             return ship.Ship(self.root, self.connection, self.database, args)
 
         # sd:1346 refuses the branch until it merges main, and that merge is
@@ -613,12 +627,39 @@ roles:
     def test_a_merge_forward_before_the_first_prepare_does_not_become_the_title(self):
         # sd:1377: the merge-forward sd-ship demands left HEAD's subject naming
         # a branch operation, and it was stored as the title and landed on main.
+        self.untitled = True
         self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
         _git(self.root, "fetch", "-q", "origin", "main")
         _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge origin/main into topic\n\nAuthored-with: human", "FETCH_HEAD")
         result = self.prepare()
         self.assertEqual(self.operation().state["title"], "change")
         self.assertEqual(self.remote.pull(result["pull_request"]["number"]).title, "change")
+
+    def test_one_commit_without_a_title_uses_its_subject(self):
+        # sd:2097: a one-commit branch keeps the default; the subject is the change.
+        self.untitled = True
+        self.assertEqual(_git(self.root, "rev-list", "--count", "--no-merges", "origin/main..HEAD"), "1")
+        result = self.prepare()
+        self.assertEqual(self.operation().state["title"], "change")
+        self.assertEqual(self.remote.pull(result["pull_request"]["number"]).title, "change")
+
+    def test_several_commits_without_a_title_are_refused(self):
+        # sd:2097: the newest subject of an 11-commit branch became the PR
+        # title (ui-design PR #16) and described only the last commit.
+        self.untitled = True
+        _git(self.root, "commit", "--allow-empty", "-qm", "fix a typo\n\nAuthored-with: human")
+        with patch.object(ship.Ship, "review") as review:
+            with self.assertRaisesRegex(ship.Refusal, r'provide --title; the branch has 2 commits, '
+                                                      r'and the newest subject \("fix a typo"\) may describe only the last'):
+                self.prepare()
+        review.assert_not_called()
+        self.assertIsNone(self.operation().state.get("pull_request"))
+
+    def test_several_commits_with_a_title_use_it(self):
+        _git(self.root, "commit", "--allow-empty", "-qm", "fix a typo\n\nAuthored-with: human")
+        result = self.prepare("--title", "Switch the widget to local CI")
+        self.assertEqual(self.operation().state["title"], "Switch the widget to local CI")
+        self.assertEqual(self.remote.pull(result["pull_request"]["number"]).title, "Switch the widget to local CI")
 
     def test_the_squash_subject_is_the_pull_requests_title(self):
         # sd:1876: prepare stored the newest commit subject, and the merge
@@ -746,6 +787,25 @@ roles:
                          ship.digest(ship.review_history(before)))
         # The receipt reads back through the same coverage walk that merge uses.
         self.assertEqual(self.merge()["phase"], "merged")
+
+    def test_a_re_review_records_what_moved_and_stores_a_fresh_manifest(self):
+        """sd:1834, sd:1246. The pass a moved binding spends says which file spent it."""
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        self.assertEqual(self.operation().state["binding_manifest"], ship.binding_manifest(self.root))
+        for stored, changed in ((None, [["receipt predates the per-file manifest", "legacy"]]),
+                                ("verdict", [["sd-review", "verdict"]])):
+            with self.subTest(stored=stored):
+                operation = self.operation()
+                operation.state["binding"] = "a review tool file landed on the default branch"
+                if stored is None:
+                    operation.state.pop("binding_manifest")
+                else:
+                    operation.state["binding_manifest"]["verdict"]["sd-review"] = "ast:before"
+                operation.save()
+                self.assertEqual(self.prepare()["phase"], "ready_to_send")
+                state = self.operation().state
+                self.assertEqual(state["passes"][-1]["review_binding_change"]["changed"], changed)
+                self.assertEqual(state["binding_manifest"], ship.binding_manifest(self.root))
 
     def test_prepare_rereads_a_pull_object_that_lags_the_push(self):
         # sd:1394, live on #1145 and system #572: the pull object still named
@@ -3409,8 +3469,9 @@ roles:
                             "--request-reason", reason, *extra)
 
     def test_additional_review_preserves_all_blockers_and_full_branch_coverage(self):
+        # The request names the head the last pass reviewed: there is no fix
+        # to verify, so it reviews the whole branch again (sd:2147).
         provider, _, prior = self.spent_reviews(blockers=True)
-        _git(self.root, "commit", "--allow-empty", "-m", "resolve findings\n\nAuthored-with: human")
         captured = self.directory / "third-prompt.txt"
         provider.write_text("#!/usr/bin/env python3\nimport pathlib,sys\n"
                            "work=pathlib.Path(sys.argv[sys.argv.index('--add-dir')+1])\n"
@@ -3460,9 +3521,69 @@ roles:
         self.assertEqual(state["passes"][CAP]["additional_review_request"]["prior_history_digest"],
                          ship.digest(prior))
 
+    def test_additional_review_verifies_the_fix_when_the_whole_branch_exceeds_the_input_cap(self):
+        """sd:2147. A post-cap request reviews what an automatic pass would at that head.
+
+        Each fix delta fits the review input cap and the whole branch does
+        not, as on ui-design #19 (2.1 MB over 85 files). The request used to
+        review the whole branch and every reviewer refused the input.
+        """
+        self.prepare("--title", "fixture work")
+        # Three commits of about 0.8 MB each: each fix verification fits, the branch does not.
+        for index in range(1, CAP):
+            if index < CAP - 1:
+                (self.root / f"bulk{index}.txt").write_text("".join(f"bulk {index} line {n:07d}\n" for n in range(40_000)))
+                _git(self.root, "add", f"bulk{index}.txt")
+            _git(self.root, "commit", "--allow-empty", "-m", f"fix {index}\n\nAuthored-with: human")
+            self.prepare("--title", "fixture work")
+        prior = json.loads(json.dumps(self.operation().state["passes"]))
+        self.assertEqual(len(prior), CAP)
+        self.assertTrue(all(ship.completed_depth(entry["report"]) for entry in prior))
+        whole = _git(self.root, "diff", prior[0]["report"]["subject"]["base"], "HEAD")
+        self.assertGreater(len(whole.encode()), 2_000_000)
+        _git(self.root, "commit", "--allow-empty", "-m", "fix after the cap\n\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.additional()
+        state = self.operation().state
+        self.assertEqual(state["passes"][:CAP], prior)
+        last = state["passes"][CAP]
+        self.assertEqual(last["base"], prior[-1]["head"])
+        self.assertEqual(last["report"]["subject"]["base"], prior[-1]["head"])
+        self.assertEqual(last["report"]["subject"]["head"], head)
+        self.assertEqual(last["report"]["verification_report_digest"], ship.digest(prior[-1]["report"]))
+        self.assertTrue(ship.completed_depth(last["report"]))
+        self.assertEqual(state["reviewed_head"], head)
+        self.operation().check_review(head)
+        # A stored base cannot be cleared to pass the verification off as a whole-branch review.
+        operation = self.operation()
+        operation.state["passes"][CAP]["base"] = None
+        operation.save()
+        with self.assertRaisesRegex(ship.Refusal, "full-branch coverage does not match"):
+            self.operation().check_review(head)
+
+    def test_additional_pass_that_reviewed_nothing_does_not_consume_the_request(self):
+        """sd:2147. Every reviewer failed and none left a finding: the request stays unspent."""
+        provider, working, prior = self.spent_reviews()
+        head = _git(self.root, "rev-parse", "HEAD")
+        with self.assertRaisesRegex(ship.Refusal, "0/1 completed.*nothing was reviewed, so the operator request was not consumed"):
+            self.additional()
+        state = self.operation().state
+        self.assertEqual(state["passes"], prior)
+        self.assertEqual(state["review_preflight_error"]["kind"], "additional_review_unreviewed")
+        self.assertEqual(state["review_preflight_error"]["head"], head)
+        # The same request, unrenewed, runs once the reviewer answers.
+        provider.write_text(working)
+        self.additional()
+        state = self.operation().state
+        self.assertEqual(state["passes"][:CAP], prior)
+        self.assertEqual(len(state["passes"]), CAP + 1)
+        self.assertEqual(state["passes"][CAP]["additional_review_request"]["prior_history_digest"], ship.digest(prior))
+        self.assertTrue(ship.completed_depth(state["passes"][CAP]["report"]))
+
     def test_additional_failed_reservation_remains_spent_and_cannot_be_reused(self):
-        _, _, prior = self.spent_reviews()
-        with self.assertRaises(ship.Refusal):
+        provider, _, prior = self.spent_reviews()
+        provider.write_text(FAILED_WITH_BLOCKER)
+        with self.assertRaisesRegex(ship.Refusal, "the operator request was consumed"):
             self.additional()
         saved = self.operation().state["passes"]
         self.assertEqual(saved[:CAP], prior)
@@ -3564,12 +3685,16 @@ roles:
         self.assertEqual(self.operation().state["passes"], state["passes"])
 
     def spent_additional(self):
+        # A failed answer that kept a blocker reviewed something, so it stays spent.
         provider, working, _ = self.spent_reviews()
+        provider.write_text(FAILED_WITH_BLOCKER)
         with self.assertRaises(ship.Refusal):
             self.additional()
         return provider, working, json.loads(json.dumps(self.operation().state["passes"]))
 
     def test_renewed_reviews_past_the_cap_preserve_each_prefix_and_full_branch(self):
+        # The first renewal follows an incomplete pass, so it reviews the whole
+        # branch; the second follows that completed pass and verifies its fix (sd:2147).
         provider, working, prior = self.spent_additional()
         provider.write_text(working)
         for count in (CAP + 2, CAP + 3):
@@ -3585,9 +3710,13 @@ roles:
             self.assertEqual(last["additional_review_request"]["prior_history_digest"], ship.digest(prior))
             self.assertEqual(last["additional_review_request"]["allowed_passes"], 1)
             self.assertEqual(last["report"]["subject"]["head"], head)
-            self.assertEqual(last["report"]["subject"]["base"], last["report"]["authorship_base"])
-            self.assertEqual(last["report"]["resume_report_digest"], ship.digest(ship.review_history(prior)))
-            self.assertIn("src.py", last["report"]["subject"]["paths"])
+            if count == CAP + 2:
+                self.assertEqual(last["report"]["subject"]["base"], last["report"]["authorship_base"])
+                self.assertEqual(last["report"]["resume_report_digest"], ship.digest(ship.review_history(prior)))
+                self.assertIn("src.py", last["report"]["subject"]["paths"])
+            else:
+                self.assertEqual(last["report"]["subject"]["base"], prior[-1]["head"])
+                self.assertEqual(last["report"]["verification_report_digest"], ship.digest(prior[-1]["report"]))
             prior = json.loads(json.dumps(state["passes"]))
         with self.assertRaisesRegex(ship.Refusal, "required CI is not passing"):
             self.merge()

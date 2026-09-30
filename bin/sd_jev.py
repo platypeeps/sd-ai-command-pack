@@ -1,9 +1,14 @@
 """An optional Jev reading of the review tier, on wherever Jev can answer.
 
 `sd_route.route` decides the tier from the policy and the changed paths, and it
-stays the decision: this module is a second opinion over a diff shape the
+stays the floor: this module is a second opinion over a diff shape the
 policy's globs cannot see. It is experimental and additive. No output changes
 unless a `jev` on `PATH` says it can answer on this machine.
+
+**Jev may raise the tier, never lower it** (sd:2132). An answer below the
+routed tier -- `skip` included -- keeps the routed tier and records what Jev
+said as `below_routed`. Jev orders, routes and triages; it never removes a
+review the policy asked for.
 
 `jev` lives in a private companion repository and is absent on most machines.
 Absence is the ordinary case and not a fault, so it is silent: a module that
@@ -146,6 +151,9 @@ def jev_tier(
         return _jev_declined(tier, note, f"Jev was unsure below {UNSURE_BELOW} confidence")
     if chosen not in options:
         return _jev_declined(tier, note, f"answer {chosen!r} is not one of {', '.join(options)}")
+    if options.index(chosen) < options.index(tier):
+        return tier, {"routed_tier": tier, "tier": tier, "moved": False, "source": "judged",
+                      "below_routed": chosen}
     return chosen, {"routed_tier": tier, "tier": chosen, "moved": chosen != tier, "source": "judged"}
 
 

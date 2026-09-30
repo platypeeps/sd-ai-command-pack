@@ -1075,6 +1075,36 @@ class ReceiptTests(ReceiptFixture):
         self.assertTrue(any("queued a" in line for line in said), said)
 
 
+class MirrorHoldTests(ReceiptFixture):
+    """A render told to hold its mirrors queues nothing, and says why.
+
+    sd:1991: a branch switch onto a `main` behind its upstream rendered the
+    stale tree, and the render queued that text for the shared mirror a
+    moment before the pull brought the current one. The hook now renders
+    such a checkout with `SD_SKIP_MIRROR` set to its reason, so the dashboard
+    stays current and the queue is left alone.
+    """
+
+    NAME = "my-research.a.notion.json"
+    REASON = "post-checkout: HEAD is 1 commit behind its upstream"
+
+    def test_a_held_render_queues_nothing_and_says_why(self) -> None:
+        self.source("stale\n")
+        PUBLISH.ENVIRON = dict(PUBLISH.ENVIRON, SD_SKIP_MIRROR=self.REASON)
+        said = PUBLISH.enqueue(self.repo, self.doc())
+        self.assertEqual(list(PUBLISH.QUEUE.glob("*.json")), [], said)
+        self.assertTrue(any(self.REASON in line for line in said), said)
+
+    def test_a_held_render_leaves_a_pending_request_as_it_was(self) -> None:
+        self.source("current\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        before = (PUBLISH.QUEUE / self.NAME).read_text()
+        self.source("stale\n")
+        PUBLISH.ENVIRON = dict(PUBLISH.ENVIRON, SD_SKIP_MIRROR=self.REASON)
+        PUBLISH.enqueue(self.repo, self.doc())
+        self.assertEqual((PUBLISH.QUEUE / self.NAME).read_text(), before)
+
+
 class DrainRaceTests(ReceiptFixture):
     """A render that queues during a drain is not acknowledged by that drain.
 
@@ -1284,6 +1314,45 @@ class RevertTests(ReceiptFixture):
         said = PUBLISH.enqueue(self.repo, self.doc(title="A"))
         self.assertTrue(any("unchanged" in line for line in said), said)
         self.assertEqual(list(PUBLISH.QUEUE.glob("*.json")), [])
+
+    def test_a_return_to_the_delivered_text_says_so(self) -> None:
+        """sd:1991's second render: the stale checkout queued old text, and the
+        pull's render asked for exactly what the receipt says was delivered.
+        The request is rewritten to it, and the report says why a request for
+        content the destination already holds is standing."""
+        self.source("current\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        self.drain()
+        self.source("stale\n")
+        PUBLISH.enqueue(self.repo, self.doc())  # the checkout of a stale main
+        self.source("current\n")
+        said = PUBLISH.enqueue(self.repo, self.doc())  # the pull
+        self.assertTrue(any("back to the delivered version" in line for line in said), said)
+        delivered = json.loads((PUBLISH.receipts() / self.NAME).read_text())["delivered"]
+        pending = json.loads((PUBLISH.QUEUE / self.NAME).read_text())
+        self.assertEqual((pending["content"], pending["fingerprint"]), ("current\n", delivered))
+
+    def test_a_drain_holding_the_replaced_request_is_undone_by_the_next(self) -> None:
+        """Why the return to the delivered text rewrites and does not withdraw.
+
+        A drain reads its request outside the queue lock. One that read the
+        stale request and wrote it has only its acknowledgement left; were the
+        request withdrawn, that acknowledgement found nothing, recorded
+        nothing, and every later render read the receipt's old `delivered` and
+        left the stale text on the destination for good.
+        """
+        self.source("current\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        self.drain()
+        self.source("stale\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        read = json.loads((PUBLISH.QUEUE / self.NAME).read_text())  # drain step 1
+        self.source("current\n")
+        PUBLISH.enqueue(self.repo, self.doc())  # the pull, while the drain writes
+        said = PUBLISH.mirror_delivered(self.NAME, read["fingerprint"])  # drain step 6
+        self.assertIn("newer request is pending and stays", said)
+        pending = json.loads((PUBLISH.QUEUE / self.NAME).read_text())
+        self.assertEqual(pending["content"], "current\n", "STALE: remote=stale, queue empty")
 
 
 class MutableSourceTests(ReceiptFixture):

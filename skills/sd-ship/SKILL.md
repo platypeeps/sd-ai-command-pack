@@ -129,6 +129,7 @@ Never allocate another review ID to reset spent passes or discard history.
 - `sd-ship prepare --item ID --deliver|--associate-only --json` reviews, pushes, and opens or reconciles the PR.
   It returns `ready_to_send` and never merges.
   `--title` and `--body-file` supply the PR description.
+  Without `--title` or a stored title, a one-commit branch uses its subject; a longer branch is refused.
   Without `--body-file`, an open PR's live body is the description, found by branch when no receipt names one; reprepare preserves the delivery claim.
   The sd-ai-command-pack checkout's `WORKFLOW.md`, section **The path for a change**, lists the body lines sd-ship owns.
 - `sd-ship body --item ID [--body-file FILE] [--pr N]` prints the body prepare would publish and its body lint.
@@ -214,6 +215,10 @@ Blockers identify `code`, `boundary`, `retryable`, and `approval_required`.
 Existing result fields and exit meanings remain authoritative; the new object does not grant permission.
 
 Receipts bind repository, branch, item or review identity, exact head, tools, policy, and review history.
+The tools bound are the `verdict` class in `bin/sd_ship_bindings.py`: the code `sd-review` runs, compared without comments or docstrings.
+Gate and check code runs again on every `prepare` and `merge`, so a change there does not void a receipt.
+A moved binding refuses with "review tools or repository policy changed after review:" and names each changed file and its class.
+Run `prepare` again; it re-reviews the same head in full.
 `--expected-head` compares evidence; it does not replace evidence.
 There is no `--reviewed-head` override.
 An interrupted review retains its reserved pass.

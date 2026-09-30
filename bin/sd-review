@@ -1852,7 +1852,9 @@ def review(
         plan = plan._replace(
             tier=jev_choice,
             depth=sd_route.TIER_DEPTH.get(jev_choice, sd_route.DEFAULT_DEPTH),
-            reason=f"{plan.reason}; Jev read the diff and chose tier {jev_choice}")
+            reason=f"{plan.reason}; Jev read the diff and chose tier "
+                   + (f"{jev_reading['below_routed']}, below the routed tier, which stands"
+                      if "below_routed" in jev_reading else jev_choice))
     # Read from the home this run was handed, not from the process's, so a run
     # given a different environment reads that operator's pins. A missing
     # registry reports rather than raises; `read_or_report` says why.
