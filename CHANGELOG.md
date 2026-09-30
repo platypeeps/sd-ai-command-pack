@@ -215,6 +215,24 @@
 
 ### Changed
 
+- **A review carries forward across a clean merge-in of the base (sd:1485).**
+  Every catch-up merge moved the head, so the local review spent a
+  full-branch pass again and a Copilot review went stale
+  (`copilot_review_stale`) when main's commits touched shipped files. Both
+  now carry forward when the reviewed head is an ancestor, every commit since
+  it is a two-parent merge of a base commit whose tree is git's own
+  conflict-free merge result, the base's new commits touch no file the
+  branch changes and no file in a directory holding one, and `git patch-id
+  --stable` of the branch's own change against the base is unchanged. An
+  unchanged patch-id alone does not show the branch still works on the new
+  base, so the directory rule is the operator's narrowing. The local review
+  must be clean or advisory, and a `--provider` the receipt's reviewer does
+  not match is never carried, nor reused at a carried head. The receipt
+  records `review_carry_forward` (from, to, patch-id, merges), `prepare`
+  prints it and returns it, and the Copilot merge warning says why the gate
+  cleared. Anything else reviews again as before. A rebase is not carried,
+  so `reviewed_head_orphaned` is unchanged.
+
 - **`sd-ship prepare` reads a hand-opened pull request's live body (sd:1878).**
   The live body outranked the stored one only when a receipt named the pull
   request. A pull request opened by hand has no receipt, so `prepare`
