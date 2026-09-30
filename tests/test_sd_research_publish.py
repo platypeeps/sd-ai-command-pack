@@ -1409,6 +1409,92 @@ class MutableSourceTests(ReceiptFixture):
             request["fingerprint"], "the fingerprint ignores the content")
 
 
+class SourceUrlTests(Fixture):
+    """A request carries the GitHub URL of its source, read from `origin`.
+
+    The request named only a local path, so the drain composed the pointer
+    line's URL itself, and the owner drifted: after a repository moved to
+    a new owner, its Notion pages still pointed at the old owner for six
+    days (sd:1999). The render reads the owner from `origin`, and a repository
+    whose origin is missing or not on github.com carries `None` rather than
+    a guessed URL.
+    """
+
+    NAME = "my-research.a.notion.json"
+    DOC = [dict(src="10-x/a.md", out="a", title="A", notion=dict())]
+    URL = "https://github.com/example-org/research-repo/blob/HEAD/10-x/a.md"
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.repo / "build").rmdir()
+        self.repo.rmdir()
+        self.repo = research_repo(self.root)
+
+    def origin(self, url: str) -> None:
+        if git(self.repo, "remote"):
+            git(self.repo, "remote", "remove", "origin")
+        git(self.repo, "remote", "add", "origin", url)
+
+    def queued(self, docs: list[dict] | None = None, name: str = NAME) -> dict:
+        with unittest.mock.patch.dict(PUBLISH.ENVIRON, SD_MIRROR_REQUEUE="1"):
+            PUBLISH.enqueue(self.repo, docs or self.DOC)
+        return json.loads((PUBLISH.QUEUE / name).read_text())
+
+    def test_ssh_and_https_origins_give_one_https_url(self) -> None:
+        for url in ("git@github.com:example-org/research-repo.git",
+                    "ssh://git@github.com/example-org/research-repo.git",
+                    "https://github.com/example-org/research-repo.git",
+                    "https://github.com/example-org/research-repo"):
+            with self.subTest(origin=url):
+                self.origin(url)
+                self.assertEqual(self.queued()["source_url"], self.URL)
+
+    def test_no_origin_carries_no_url(self) -> None:
+        self.assertIsNone(self.queued()["source_url"])
+
+    def test_an_origin_not_on_github_carries_no_url(self) -> None:
+        for url in ("https://gitlab.com/example-org/research-repo.git",
+                    "https://token@github.com/example-org/research-repo.git",
+                    "/srv/git/research-repo.git"):
+            with self.subTest(origin=url):
+                self.origin(url)
+                request = self.queued()
+                self.assertIsNone(request["source_url"])
+                self.assertNotIn("token", json.dumps(request))
+
+    def test_the_path_is_repo_relative_and_quoted(self) -> None:
+        (self.repo / "10-x" / "a b.md").write_text("# B\n", encoding="utf-8")
+        self.origin("git@github.com:example-org/research-repo.git")
+        request = self.queued([dict(src="10-x/a b.md", out="b", title="B", notion=dict())],
+                              "my-research.b.notion.json")
+        self.assertEqual(request["source_url"],
+                         "https://github.com/example-org/research-repo/blob/HEAD/10-x/a%20b.md")
+
+    def test_a_moved_origin_queues_the_delivered_document_again(self) -> None:
+        """The pointer line is part of the mirror, so a new owner is a new
+        generation: a delivered page naming the old owner is written again."""
+        self.origin("git@github.com:old-owner/research-repo.git")
+        PUBLISH.enqueue(self.repo, self.DOC)
+        fingerprint = json.loads((PUBLISH.QUEUE / self.NAME).read_text())["fingerprint"]
+        self.assertIn("request removed", PUBLISH.mirror_delivered(self.NAME, fingerprint))
+        self.origin("git@github.com:example-org/research-repo.git")
+        said = PUBLISH.enqueue(self.repo, self.DOC)
+        self.assertTrue(any("queued a" in line for line in said), said)
+        request = json.loads((PUBLISH.QUEUE / self.NAME).read_text())
+        self.assertEqual(request["source_url"], self.URL)
+        self.assertNotEqual(request["fingerprint"], fingerprint)
+
+    def test_a_request_without_a_url_keeps_its_fingerprint(self) -> None:
+        """No origin on GitHub adds nothing to the digest, so upgrading the
+        pack re-queues no delivered document of such a repository."""
+        request = self.queued()
+        targets, _ = PUBLISH.mirror_targets(self.DOC[0], self.repo)
+        what = PUBLISH.BY_NAME["notion"].what
+        without = {k: v for k, v in request.items() if k != "source_url"}
+        self.assertEqual(PUBLISH.mirror_fingerprint(without, targets[0], what),
+                         request["fingerprint"])
+
+
 class WorktreeIdentityTests(Fixture):
     """A render from a linked worktree names the repository, not the worktree.
 
