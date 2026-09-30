@@ -401,6 +401,10 @@ class Ship(SharedReview):
     body_source: str = "default"
     body_normalized: tuple[str, ...] = ()
     catch_up_notes: tuple[str, ...] = ()
+    #: The branch this checkout has open, None on a detached HEAD. It is
+    #: `branch` except for a merge that ships the item's receipt branch from
+    #: another checkout (sd:2037).
+    checkout_branch: str | None = None
 
     def __init__(self, root: pathlib.Path, connection, database: pathlib.Path, args):
         from sd_db import ship
@@ -420,21 +424,20 @@ class Ship(SharedReview):
             # An explicit answer, told apart from no answer by `None` (sd:1928).
             args.deliver = False
         self.repository = slug(git(root, "config", "--get", "remote.origin.url"))
-        if args.command == "merge":
-            # A lane merges from its own checkout, whichever branch it has open (sd:2037).
-            self.checkout_branch = sd_lib.git_output(["symbolic-ref", "--quiet", "--short", "HEAD"], root)
-        else:
-            self.checkout_branch = git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
-        self.branch = self.checkout_branch
         info = ship.identity(connection, args.item)
         self.item, self.repo = info["item"], info["repo"]
         if slug(self.repo["remote"] or "") != self.repository:
             raise Refusal("item repository does not match this checkout's origin")
+        if args.command == "merge":
+            # A lane merges from its own checkout, whichever branch it has open (sd:2037).
+            self.checkout_branch = sd_lib.git_output(["symbolic-ref", "--quiet", "--short", "HEAD"], root)
+            self.branch = self.merge_branch()
+        else:
+            self.branch = git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
+            self.checkout_branch = self.branch
         if args.command == "observe":
             self.key, self.revision, self.state = ship.for_item(connection, self.repository, args.item, self.item.get("branch"))
             self.branch = self.state["branch"]
-        if args.command == "merge":
-            self.branch = self.merge_branch()
         if self.item.get("branch") and self.item["branch"] != self.branch:
             raise Refusal("item belongs to a different branch")
         self.key = ship.receipt_key(self.repository, self.branch, args.item)

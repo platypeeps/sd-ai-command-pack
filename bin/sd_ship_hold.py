@@ -63,11 +63,13 @@ def standing(database: pathlib.Path, repository: str) -> dict | None:
     try:
         raw = hold_file(database, repository).read_bytes()[:RECORD_BYTES + 1]
         record = json.loads(raw) if len(raw) <= RECORD_BYTES else None
+        if not isinstance(record, dict):
+            return None
         expires = datetime.fromisoformat(record["expires_at"])
     except (OSError, ValueError, TypeError, KeyError):
         return None
-    if (not isinstance(record, dict) or record.get("repository") != repository
-            or type(record.get("item")) is not int or expires.tzinfo is None or expires <= now()):
+    if (record.get("repository") != repository or type(record.get("item")) is not int
+            or expires.tzinfo is None or expires <= now()):
         return None
     return record
 
