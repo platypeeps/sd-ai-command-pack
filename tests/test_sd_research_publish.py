@@ -1413,17 +1413,16 @@ class SourceUrlTests(Fixture):
     """A request carries the GitHub URL of its source, read from `origin`.
 
     The request named only a local path, so the drain composed the pointer
-    line's URL itself, and the owner drifted: aura-research's Notion pages
-    pointed at `github.com/sdelmas/aura-research` from the 2026-09-22 drain
-    until 2026-09-28, though the repository is `platypeeps/aura-research`
-    (sd:1999). The render reads the owner from `origin`, and a repository
+    line's URL itself, and the owner drifted: after a repository moved to
+    a new owner, its Notion pages still pointed at the old owner for six
+    days (sd:1999). The render reads the owner from `origin`, and a repository
     whose origin is missing or not on github.com carries `None` rather than
     a guessed URL.
     """
 
     NAME = "my-research.a.notion.json"
     DOC = [dict(src="10-x/a.md", out="a", title="A", notion=dict())]
-    URL = "https://github.com/platypeeps/aura-research/blob/HEAD/10-x/a.md"
+    URL = "https://github.com/example-org/research-repo/blob/HEAD/10-x/a.md"
 
     def setUp(self) -> None:
         super().setUp()
@@ -1442,10 +1441,10 @@ class SourceUrlTests(Fixture):
         return json.loads((PUBLISH.QUEUE / name).read_text())
 
     def test_ssh_and_https_origins_give_one_https_url(self) -> None:
-        for url in ("git@github.com:platypeeps/aura-research.git",
-                    "ssh://git@github.com/platypeeps/aura-research.git",
-                    "https://github.com/platypeeps/aura-research.git",
-                    "https://github.com/platypeeps/aura-research"):
+        for url in ("git@github.com:example-org/research-repo.git",
+                    "ssh://git@github.com/example-org/research-repo.git",
+                    "https://github.com/example-org/research-repo.git",
+                    "https://github.com/example-org/research-repo"):
             with self.subTest(origin=url):
                 self.origin(url)
                 self.assertEqual(self.queued()["source_url"], self.URL)
@@ -1454,9 +1453,9 @@ class SourceUrlTests(Fixture):
         self.assertIsNone(self.queued()["source_url"])
 
     def test_an_origin_not_on_github_carries_no_url(self) -> None:
-        for url in ("https://gitlab.com/platypeeps/aura-research.git",
-                    "https://token@github.com/platypeeps/aura-research.git",
-                    "/srv/git/aura-research.git"):
+        for url in ("https://gitlab.com/example-org/research-repo.git",
+                    "https://token@github.com/example-org/research-repo.git",
+                    "/srv/git/research-repo.git"):
             with self.subTest(origin=url):
                 self.origin(url)
                 request = self.queued()
@@ -1465,20 +1464,20 @@ class SourceUrlTests(Fixture):
 
     def test_the_path_is_repo_relative_and_quoted(self) -> None:
         (self.repo / "10-x" / "a b.md").write_text("# B\n", encoding="utf-8")
-        self.origin("git@github.com:platypeeps/aura-research.git")
+        self.origin("git@github.com:example-org/research-repo.git")
         request = self.queued([dict(src="10-x/a b.md", out="b", title="B", notion=dict())],
                               "my-research.b.notion.json")
         self.assertEqual(request["source_url"],
-                         "https://github.com/platypeeps/aura-research/blob/HEAD/10-x/a%20b.md")
+                         "https://github.com/example-org/research-repo/blob/HEAD/10-x/a%20b.md")
 
     def test_a_moved_origin_queues_the_delivered_document_again(self) -> None:
         """The pointer line is part of the mirror, so a new owner is a new
         generation: a delivered page naming the old owner is written again."""
-        self.origin("git@github.com:sdelmas/aura-research.git")
+        self.origin("git@github.com:old-owner/research-repo.git")
         PUBLISH.enqueue(self.repo, self.DOC)
         fingerprint = json.loads((PUBLISH.QUEUE / self.NAME).read_text())["fingerprint"]
         self.assertIn("request removed", PUBLISH.mirror_delivered(self.NAME, fingerprint))
-        self.origin("git@github.com:platypeeps/aura-research.git")
+        self.origin("git@github.com:example-org/research-repo.git")
         said = PUBLISH.enqueue(self.repo, self.DOC)
         self.assertTrue(any("queued a" in line for line in said), said)
         request = json.loads((PUBLISH.QUEUE / self.NAME).read_text())

@@ -342,7 +342,7 @@ Draining is six steps per request, and the order matters:
    absent, the pointer names the `source` path. Never compose a GitHub URL
    from the repository name, a remembered owner or a template: the render
    read the owner from `origin`, and a drain that composed its own pointed
-   aura-research's pages at the wrong owner for six days (sd:1999). A
+   a moved repository's pages at the wrong owner for six days (sd:1999). A
    request written before `source_url` existed gets it on the next render,
    because the field is part of the `fingerprint`. A request written before `content`
    existed names only its paths; the next render rewrites it with the field,

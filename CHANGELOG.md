@@ -146,8 +146,8 @@
 - **A mirror request carries its GitHub URL (sd:1999).** A request under
   `~/.claude/pending-mirror-syncs/` named its source only as a local path, so
   the drain composed the pointer line's URL itself, and the owner drifted:
-  aura-research's Notion pages named `sdelmas` from 2026-09-22 to 2026-09-28,
-  though the repository is `platypeeps/aura-research`. `render` now writes
+  after a repository moved to a new owner, its Notion pages named the old
+  owner for six days. `render` now writes
   `source_url`, read from `origin` and normalized to
   `https://github.com/<owner>/<repo>/blob/HEAD/<path>`, and `null` where
   origin is missing, on another host or carries a credential. The contract's

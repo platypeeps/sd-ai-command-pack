@@ -459,8 +459,8 @@ def source_url(repo: Path, src: str) -> str | None:
     """The GitHub URL of `src` for a mirror's pointer line, or None.
 
     Read from `origin`, so the drain never composes an owner itself: it did,
-    and aura-research's pages named `sdelmas` for six days after the repo
-    moved to `platypeeps` (sd:1999). `blob/HEAD/` is GitHub's name for the
+    and a moved repository's pages named its old owner for six days
+    (sd:1999). `blob/HEAD/` is GitHub's name for the
     default branch, whatever it is called: the link is where to edit, and a
     commit permalink would change the request on every commit.
     """
