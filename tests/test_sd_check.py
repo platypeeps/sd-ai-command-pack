@@ -10,11 +10,14 @@ installed on the machine running the suite.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from typing import Any
 
@@ -323,6 +326,101 @@ class TimeoutTests(CheckFixture):
         self.assertEqual(record["status"], "fail")
         self.assertIsNone(record["exit_code"])
         self.assertIn("timed out", record["reason"])
+
+
+#: A check that records its own pid and a background sleeper's, then waits.
+ORPHAN_CHECK = 'sleep 60 &\necho "$$ $!" > pids\nwait\n'
+
+
+def running(pid: int) -> bool:
+    """Alive and not a zombie waiting for its parent to reap it."""
+    state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+    return bool(state) and not state.startswith("Z")
+
+
+def default_interrupt() -> None:
+    """A child of a runner that ignores SIGINT inherits that; the test needs Python's own handler."""
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+
+
+class ProcessGroupTests(CheckFixture):
+    """A stopped or timed-out `sd-check` ends every process its check started (sd:1815).
+
+    `subprocess.run(timeout=)` kills the one process it started, and a signal
+    to `sd-check` alone reached no child at all: `make check` and its test
+    workers ran on with ppid 1. Real processes, because the defect is in
+    which processes a signal reaches.
+    """
+
+    def orphan_repo(self) -> pathlib.Path:
+        root = self.make_repo()
+        (root / "orphan.sh").write_text(ORPHAN_CHECK, encoding="utf-8")
+        self.declare(root, check="sh orphan.sh")
+        return root
+
+    @staticmethod
+    def kill(pid: int) -> None:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+    def started(self, pids: pathlib.Path) -> list[int]:
+        deadline = time.monotonic() + 10
+        while not (pids.is_file() and pids.read_text().strip()):
+            self.assertLess(time.monotonic(), deadline, "the check never recorded its pids")
+            time.sleep(0.05)
+        found = [int(word) for word in pids.read_text().split()]
+        for pid in found:
+            self.addCleanup(self.kill, pid)
+        return found
+
+    def survivors(self, pids: list[int]) -> list[int]:
+        """What is still running a moment later: a killed process can take a tick to die, an orphan never does."""
+        deadline = time.monotonic() + 5
+        alive = [pid for pid in pids if running(pid)]
+        while alive and time.monotonic() < deadline:
+            time.sleep(0.1)
+            alive = [pid for pid in alive if running(pid)]
+        return alive
+
+    def stopped(self, number: int) -> tuple[int, str, list[int]]:
+        """Start `sd-check` on the orphan check, send `number` to it alone, as `pkill` does."""
+        root = self.orphan_repo()
+        runner = subprocess.Popen([sys.executable, str(SD_CHECK)], cwd=str(root), stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.PIPE, text=True, preexec_fn=default_interrupt)
+        self.addCleanup(self.kill, runner.pid)
+        pids = self.started(root / "pids")
+        runner.send_signal(number)
+        _, errors = runner.communicate(timeout=30)
+        return runner.returncode, errors, self.survivors(pids)
+
+    def test_a_timed_out_check_leaves_nothing_running(self) -> None:
+        root = self.orphan_repo()
+        result = self.run_json(root, "--timeout", "1")
+        pids = self.started(root / "pids")
+        self.assertEqual(result["checks"][0]["reason"], "timed out after 1s")
+        self.assertEqual(self.survivors(pids), [], f"left running after the timeout: {pids}")
+
+    def test_a_terminated_run_takes_its_check_with_it(self) -> None:
+        code, _, alive = self.stopped(signal.SIGTERM)
+        self.assertEqual(code, -signal.SIGTERM)
+        self.assertEqual(alive, [], "left running after sd-check was terminated")
+
+    def test_an_interrupted_run_takes_its_check_with_it(self) -> None:
+        code, errors, alive = self.stopped(signal.SIGINT)
+        self.assertEqual(code, -signal.SIGINT)
+        self.assertNotIn("Traceback", errors)
+        self.assertEqual(alive, [], "left running after sd-check was interrupted")
+
+    def test_a_finished_check_leaves_nothing_behind_either(self) -> None:
+        root = self.make_repo()
+        (root / "leave.sh").write_text('sleep 60 > /dev/null 2>&1 &\necho "$!" > pids\n', encoding="utf-8")
+        self.declare(root, check="sh leave.sh")
+        result = self.run_json(root)
+        pids = self.started(root / "pids")
+        self.assertEqual(result["_exit"], 0)
+        self.assertEqual(self.survivors(pids), [], f"left running after the check passed: {pids}")
 
 
 class PurityTests(CheckFixture):
