@@ -262,7 +262,7 @@ blocked behind it, and the landing order is a hard requirement below.
 
 ## References
 
-- GitHub issue: <https://github.com/platypeeps/sd-ai-command-pack/issues/804>
+- GitHub issue 804, retired with the pack's issues; sd:360 holds the record.
 - sd:244 — the plain task that exists because this gap does.
 - sd:392 — the cross-repository cycle this work crosses. Verdict in `design.md`.
 - Seed rows, re-measured 2026-09-12 with `gh issue view`:
