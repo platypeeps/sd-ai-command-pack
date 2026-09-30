@@ -74,6 +74,13 @@
 
 ### Fixed
 
+- **The writing skills name their Jev calls (sd:2133).** `sd-fact-check`,
+  `sd-publish`, `sd-prose-lint` and `sd-humanizer` probed with a bare `jev
+  enabled` and sent no `--caller` or `--stage`, so the judgment ledger could
+  not count them. They now pass `JEV_SD_FACT_CHECK`, `JEV_SD_PUBLISH` and
+  `JEV_SD_PROSE_SCORE` with the skill's name, and each stage variable set to
+  `0` switches that pass off.
+
 - **`sd writing` runs from a linked worktree (sd:2024).** It keyed rows to
   the worktree's own path, so every piece answered "no database piece". It
   now keys rows to the main checkout and, through `sd_db.writing.checkout`,
