@@ -107,19 +107,26 @@ def validate_additional_requests(passes: list[dict]) -> None:
 def full_branch_pass(entry: dict) -> bool:
     """A pass that reviews the whole branch again rather than a fix delta.
 
-    Three things put a pass in this shape: an explicit post-cap request, a
-    review binding that moved out from under a completed receipt, and a
-    `--catch-up` merge of the base (sd:2023). All dispatch with no `--base`
-    and resume the complete prior history, so all are checked by
-    `full_branch_coverage` and all supersede what came before them.
+    Three things put a pass in this shape: an explicit post-cap request that
+    dispatched with no `--base`, a review binding that moved out from under a
+    completed receipt, and a `--catch-up` merge of the base (sd:2023). All
+    dispatch with no `--base` and resume the complete prior history, so all
+    are checked by `full_branch_coverage` and all supersede what came before
+    them. A request that verified the fix since the last head (sd:2147) stored
+    that head as its `base` and is checked as the fix verification it is.
 
     The marker needs no separate authentication. What it selects is a rule that
     digests the exact prefix it claims to cover -- `resume_report_digest` over
     `review_history(passes[:index])` -- so a marker written onto a fix
     verification refuses instead of passing, and tampering with a covered pass
-    changes the digest the covering pass has to carry.
+    changes the digest the covering pass has to carry. The same holds for the
+    stored `base`: set on a full-branch pass it selects `verification_link`,
+    which a report without that base and verification digest fails, and
+    cleared on a fix verification it selects `full_branch_coverage`, which a
+    report without a resume digest fails.
     """
-    return bool(entry.get("additional_review_request") or entry.get("review_binding_change") or entry.get("catch_up"))
+    request = entry.get("additional_review_request") and entry.get("base") is None
+    return bool(request or entry.get("review_binding_change") or entry.get("catch_up"))
 
 
 def verification_link(previous: dict, report: dict) -> bool:
