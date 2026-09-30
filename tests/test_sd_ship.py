@@ -3628,6 +3628,53 @@ roles:
         with self.assertRaisesRegex(ship.Refusal, "full-branch coverage does not match"):
             self.operation().check_review(head)
 
+    def test_additional_review_after_a_spent_reservation_verifies_from_the_last_completed_pass(self):
+        """sd:2192. A spent request that reviewed nothing is not the base a later request verifies from.
+
+        ui-design #19: pass 5 completed at A, pass 6 was a request at B that
+        every reviewer refused and that stayed spent. The renewed request at B
+        reviewed the whole branch (2.1 MB) instead of A..B, and was refused.
+        """
+        self.prepare("--title", "fixture work")
+        for index in range(1, CAP):
+            if index < CAP - 1:
+                (self.root / f"bulk{index}.txt").write_text("".join(f"bulk {index} line {n:07d}\n" for n in range(40_000)))
+                _git(self.root, "add", f"bulk{index}.txt")
+            _git(self.root, "commit", "--allow-empty", "-m", f"fix {index}\n\nAuthored-with: human")
+            self.prepare("--title", "fixture work")
+        prior = json.loads(json.dumps(self.operation().state["passes"]))
+        self.assertTrue(all(ship.completed_depth(entry["report"]) for entry in prior))
+        _git(self.root, "commit", "--allow-empty", "-m", "fix after the cap\n\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        operation = self.operation()
+        request = {"head": head, "reason": "refused before sd:2147 released it", "recorded_at": "2026-09-30T00:00:00Z",
+                   "allowed_passes": 1, "prior_history_digest": ship.digest(prior),
+                   "operator_context": "untrusted assertion, not proof of user approval"}
+        operation.state["passes"].append({
+            "head": head, "started_at": "2026-09-30T00:00:00Z", "base": None, "retry": False, "requested_provider": None,
+            "additional_review_request": request, "exit_code": 3,
+            "report": {"status": "refused", "requested_reviews": 1, "completed_reviews": 0, "reviewed_by": [],
+                       "findings": [], "outcomes": [], "scope": "branch", "subject": {"head": head}, "authored_with": []}})
+        operation.save()
+        passes = json.loads(json.dumps(self.operation().state["passes"]))
+        self.assertTrue(importlib.import_module("sd_ship_history").reservation(passes[-1]))
+        self.additional(history_digest=ship.digest(passes))
+        state = self.operation().state
+        self.assertEqual(state["passes"][:CAP + 1], passes)
+        last = state["passes"][CAP + 1]
+        self.assertEqual(last["base"], prior[-1]["head"])
+        self.assertEqual(last["report"]["subject"]["base"], prior[-1]["head"])
+        self.assertEqual(last["report"]["subject"]["head"], head)
+        self.assertEqual(last["report"]["verification_report_digest"], ship.digest(prior[-1]["report"]))
+        self.assertTrue(ship.completed_depth(last["report"]))
+        self.operation().check_review(head)
+        # A reservation that kept a finding still has to be resumed by a whole-branch pass.
+        history = importlib.import_module("sd_ship_history")
+        kept = json.loads(json.dumps(passes))
+        kept[-1]["report"]["findings"] = [{"path": "src.py", "summary": "kept"}]
+        self.assertEqual(history.verified_index(passes), CAP - 1)
+        self.assertIsNone(history.verified_index(kept))
+
     def test_additional_pass_that_reviewed_nothing_does_not_consume_the_request(self):
         """sd:2147. Every reviewer failed and none left a finding: the request stays unspent."""
         provider, working, prior = self.spent_reviews()

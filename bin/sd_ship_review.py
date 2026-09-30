@@ -25,6 +25,7 @@ from sd_ship_history import (
     completed_depth,
     digest,
     reservation,
+    verified_index,
 )
 from sd_ship_remote import Refusal, completed_process
 from sd_ship_workflow import success
@@ -324,15 +325,31 @@ class SharedReview:
         empty range), a moved review binding, or an imported history whose
         every native pass is a full-branch continuation. A catch-up merge is
         read after this, by `caught_up_pass`, as it is for an automatic pass.
+        The completed pass is the last one that verified something: a spent
+        request that reviewed nothing and kept no evidence is skipped (sd:2192).
         """
         if not passes or self.history.requires_continuation(self.state):
             return False
-        last = passes[-1]
-        if last["head"] == head or reservation(last):
+        index = verified_index(passes)
+        if index is None or passes[index]["head"] == head:
             return False
         return not self.binding_moved()
 
-    def caught_up_pass(self, passes: list[dict], head: str, whole: bool) -> dict | None:
+    @staticmethod
+    def verified_pass(passes: list[dict], additional: bool) -> dict:
+        """The pass a fix verification continues: for a request, the one `request_verifies_fix` read."""
+        index = verified_index(passes) if additional else None
+        return passes[-1 if index is None else index]
+
+    def dispatch_prior(self, passes: list[dict], prior: dict, full: bool, additional: bool) -> dict:
+        """The evidence a pass resumes, or the report a fix verification verifies (sd:2192)."""
+        if full:
+            return self.history.aggregate(self.state)
+        if additional and reservation(passes[-1]):
+            return self.verified_pass(passes, additional)["report"]
+        return prior
+
+    def caught_up_pass(self, passes: list[dict], head: str, whole: bool, additional: bool = False) -> dict | None:
         """Where the base was merged in since the last pass, when it was (sd:2023).
 
         From the previous head, the range then holds every commit the base
@@ -344,7 +361,7 @@ class SharedReview:
         base = self.state.get("base")
         if not passes or whole or not base:
             return None
-        previous = passes[-1]["head"]
+        previous = self.verified_pass(passes, additional)["head"]
         fork = sd_lib.git_output(["merge-base", head, f"refs/remotes/origin/{base}"], self.root)
         if not fork or is_ancestor(self.root, fork, previous):
             return None
@@ -375,11 +392,10 @@ class SharedReview:
         # than a review. It resumes the complete prior history so no earlier
         # blocker is dropped, exactly as a whole-branch post-cap request does.
         moved = not additional and self.binding_moved()
-        caught_up = self.caught_up_pass(passes, head, whole)
+        caught_up = self.caught_up_pass(passes, head, whole, additional)
         full = whole or moved or caught_up is not None
-        if full:
-            prior = self.history.aggregate(self.state)
-        base = passes[-1]["head"] if passes and not (retry or full) else None
+        prior = self.dispatch_prior(passes, prior, full, additional)
+        base = self.verified_pass(passes, additional)["head"] if passes and not (retry or full) else None
         argv = sd_review_request.review_argv(self.runtime.bin_dir, self.database, self.args, base, gate_check=self.gate_check_base())
         requested = getattr(self.args, "provider", None)
         passes.append({"head": head, "started_at": self.runtime.clock(), "base": base, "retry": retry,
