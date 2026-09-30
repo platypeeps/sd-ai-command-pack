@@ -97,6 +97,13 @@ export SD_COVERAGE_PROCESS_START="$REPO_ROOT/.coveragerc"
 export COVERAGE_FILE="$work_dir/.coverage"
 export PYTHONPATH="$REPO_ROOT/tests/coverage_sitecustomize${PYTHONPATH:+:$PYTHONPATH}"
 
+# No test reaches the real Jev (sd:2136). `sd-review` and `sd-docs-lint` probe a
+# `jev` on PATH, and on a keyed machine a test that runs them against this
+# checkout sent live, metered calls: 141 of them on 2026-09-29. `JEV_ENABLED=0`
+# makes a real `jev` answer "cannot answer here" (exit 3) and send nothing. The
+# Jev tests put their own stub first on a fixture PATH and never read it.
+export JEV_ENABLED=0
+
 # Git 2.54 can detach automatic maintenance after commits and pushes. The test
 # suite creates and removes many short-lived repositories, so a detached repack
 # can race either TemporaryDirectory cleanup or a cached fixture copy. Disable

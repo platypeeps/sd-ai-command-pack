@@ -74,6 +74,13 @@
 
 ### Fixed
 
+- **No test reaches the real Jev (sd:2136).** On a keyed machine, tests that
+  ran `sd-review` or `sd-docs-lint` against the checkout sent live, metered
+  calls: 141 on 2026-09-29. `run-tests.sh` now exports `JEV_ENABLED=0`; the
+  Jev tests keep their own stubs. `sd-docs-lint` now names both of its calls
+  (`JEV_SD_DOCS_LINT`, `--caller sd-docs-lint`) so its intended gate reading
+  is counted.
+
 - **`sd writing` runs from a linked worktree (sd:2024).** It keyed rows to
   the worktree's own path, so every piece answered "no database piece". It
   now keys rows to the main checkout and, through `sd_db.writing.checkout`,
