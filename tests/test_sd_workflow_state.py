@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import json
 import pathlib
@@ -183,21 +184,55 @@ class PolicyReferenceBinding(unittest.TestCase):
         clearance the way a change to `sd_ship_remote.py` does."""
         self.assertIn("sd_protection.py", bindings.REVIEW_TOOL_FILES)
 
-    def test_every_module_sd_ship_imports_is_in_the_review_manifest(self):
-        """The manifest is a hand-maintained tuple, so a module the gate grows
-        a dependency on is a silent gap until somebody adds a line. This walks
-        `sd-ship`'s `sd_*` imports transitively over `bin/` and names any the
-        tuple lacks: the enumeration the tuple itself cannot be."""
+    def test_every_module_a_review_tool_imports_is_classified(self):
+        """The classes are hand-maintained tuples, so a module a review tool
+        grows a dependency on is a silent gap until somebody adds a line. This
+        walks the `sd_*` imports of `sd-ship`, `sd-review` and `sd-check`
+        transitively over `bin/` and names any module that is in no class and
+        not exempt: the enumeration the tuples cannot be. It walked `sd-ship`
+        alone until sd:1834, which left `sd_jev.py` and `sd_opencode.py`,
+        both on the review path, unbound."""
         pattern = re.compile(r"^\s*(?:import|from)\s+(sd_[a-z_]+)", re.MULTILINE)
-        seen, todo = set(), ["sd-ship"]
+        seen, todo = set(), ["sd-ship", "sd-review", "sd-check"]
         while todo:
             name = todo.pop()
-            if name in seen or not (bindings.BIN / name).is_file():
+            if name in seen or name in bindings.IMPORT_EXEMPT or not (bindings.BIN / name).is_file():
                 continue
             seen.add(name)
             todo.extend(f"{module}.py" for module in pattern.findall((bindings.BIN / name).read_text()))
         self.assertEqual(sorted(seen - set(bindings.REVIEW_TOOL_FILES)), [],
-                         "modules sd-ship imports that REVIEW_TOOL_FILES does not bind")
+                         "modules a review tool imports that no binding class holds")
+
+    def test_each_bound_file_has_exactly_one_class(self):
+        classes = bindings.VERDICT_FILES + bindings.GATE_FILES + bindings.CHECK_FILES
+        self.assertEqual(len(classes), len(set(classes)))
+        self.assertFalse(set(classes) & set(bindings.IMPORT_EXEMPT))
+        self.assertTrue({"sd_jev.py", "sd_opencode.py", "sd_review_request.py"}.issubset(bindings.VERDICT_FILES))
+
+    def test_no_verdict_file_reads_its_docstrings(self):
+        """The normalizer drops docstrings, which is only sound while no
+        verdict code reads one: a prompt built from `__doc__` would change
+        without moving the binding."""
+        for name in bindings.VERDICT_FILES:
+            with self.subTest(name=name):
+                self.assertIsNone(re.search(r"__doc__|getdoc|getsource", (bindings.BIN / name).read_text()))
+
+    def test_the_normalized_hash_ignores_comments_and_docstrings_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "module.py"
+
+            def hashed(source):
+                path.write_text(source)
+                return bindings.normalized_hash(path)
+
+            base = hashed('"""Module."""\ndef f():\n    """Doc."""\n    return "prompt"\n')
+            self.assertTrue(base.startswith("ast:"))
+            self.assertEqual(hashed('"""Other."""\n# note\ndef f():\n    """Other doc."""\n\n    return  "prompt"\n'), base)
+            self.assertNotEqual(hashed('"""Module."""\ndef f():\n    """Doc."""\n    return "other prompt"\n'), base)
+            self.assertNotEqual(hashed('"""Module."""\ndef f():\n    """Doc."""\n    log("x")\n    return "prompt"\n'), base)
+            broken = hashed("def f(:\n")
+            self.assertEqual(broken, "raw:" + hashlib.sha256(b"def f(:\n").hexdigest())
+            self.assertNotEqual(hashed("def f(::\n"), broken)
 
     def test_cross_skill_receipt_policy_and_review_helpers_remain_required(self):
         self.assertTrue({"skills/sd-check/SKILL.md", "skills/sd-review/SKILL.md", "skills/sd-ship/SKILL.md",

@@ -75,11 +75,12 @@ class GateFailureSpendsNoPass(unittest.TestCase):
         reviewed.review(HEAD)
         original = copy.deepcopy(reviewed.state)
         failed, _process = self.context(state=reviewed.state, report_changes=GATE_FAILED)
-        failed.runtime = dataclasses.replace(failed.runtime, binding=lambda _root: "moved")
+        failed.runtime = dataclasses.replace(failed.runtime, binding=lambda _root: "moved",
+                                             manifest=lambda _root: {"schema": "moved"})
         with unittest.mock.patch("sd_ship_review.is_ancestor", return_value=True), \
                 self.assertRaisesRegex(ship.Refusal, "no review pass was spent"):
             failed.review(HEAD)
-        for key in ("passes", "binding", "head", "reviewed_head", "review_clearance"):
+        for key in ("passes", "binding", "binding_manifest", "head", "reviewed_head", "review_clearance"):
             self.assertEqual(failed.state.get(key), original.get(key), key)
         again, process = self.context(state=failed.state)
         again.runtime = dataclasses.replace(again.runtime, binding=lambda _root: "moved")
