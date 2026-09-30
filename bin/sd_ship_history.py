@@ -64,11 +64,18 @@ def verified_index(passes: list[dict]) -> int | None:
     A reservation after it is skipped only while it holds no evidence. One that
     kept a finding or a timeout capture still has to be resumed, so a request
     behind it reviews the whole branch as before.
+
+    Nor is a full-branch reservation skipped. A moved binding dispatches one
+    and stores the new binding before it runs, so once it fails the binding no
+    longer reads as moved, and a skip would verify the fix against a report
+    written under the old policy. The whole branch it owed is still owed.
     """
     for index in range(len(passes) - 1, -1, -1):
-        if not reservation(passes[index]):
+        entry = passes[index]
+        if not reservation(entry):
             return index
-        if (passes[index].get("report") or {}).get("findings") or timeout_evidence(passes[index]) is not None:
+        if ((entry.get("report") or {}).get("findings") or timeout_evidence(entry) is not None
+                or full_branch_pass(entry)):
             return None
     return None
 

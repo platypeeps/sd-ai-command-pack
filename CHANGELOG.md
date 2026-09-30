@@ -114,8 +114,10 @@
   branch about 2.1 MB, so every reviewer refused the input and the request
   could not run. The request now verifies the diff since the last completed
   pass, and the coverage check links it to that pass. A reservation that kept
-  a finding or a timeout capture is not passed over; that request still
-  reviews the whole branch. The request's history digest is unchanged.
+  a finding or a timeout capture is not passed over, and neither is a failed
+  full-branch pass such as a re-review for a moved review binding; that
+  request still reviews the whole branch. The request's history digest is
+  unchanged.
 
 - **A post-cap review verifies the fix, and a pass that reviewed nothing
   spends no request (sd:2147).** `sd-ship prepare --additional-review-for`

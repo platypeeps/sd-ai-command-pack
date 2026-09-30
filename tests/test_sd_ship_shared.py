@@ -413,6 +413,27 @@ class HistoryChainTests(unittest.TestCase):
         with self.assertRaisesRegex(ship.Refusal, "never completed"):
             ItemHistory()._validate_coverage(state, verification)
 
+    def test_a_request_does_not_link_past_a_failed_full_branch_review(self):
+        """sd:2192. A binding re-review that failed still owes the whole branch.
+
+        Dispatch stored the new binding before the pass ran, so after it failed
+        the binding no longer reads as moved. Skipping the reservation would
+        verify the fix against a report written under the old policy.
+        """
+        verified_index = importlib.import_module("sd_ship_history").verified_index
+        first = {"head": "a" * 40, "report": self._complete("0" * 40, "a" * 40)}
+        moved = {"head": "a" * 40, "base": None,
+                 "review_binding_change": {"head": "a" * 40, "superseded_binding": "old policy", "changed": []},
+                 "execution_error": {"kind": "unreadable_receipt", "stage": "execution"}}
+        self.assertIsNone(verified_index([first, moved]))
+        # A retry of it that also failed does not clear what it owed.
+        retried = {"head": "a" * 40, "base": None, "retry": True,
+                   "execution_error": {"kind": "unreadable_receipt", "stage": "execution"}}
+        self.assertIsNone(verified_index([first, moved, retried]))
+        state, verification = self._request_past(moved)
+        with self.assertRaisesRegex(ship.Refusal, "never completed"):
+            ItemHistory()._validate_coverage(state, verification)
+
     def test_an_automatic_verification_that_produced_no_report_is_resumed_not_refused(self):
         """A reservation is not a verification, whatever the next pass calls itself.
 
