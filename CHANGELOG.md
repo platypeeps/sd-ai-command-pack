@@ -143,6 +143,18 @@
   Merges still never count (sd:1377), and `merge` still squashes with the live
   pull request title (sd:1876).
 
+- **A mirror request carries its GitHub URL (sd:1999).** A request under
+  `~/.claude/pending-mirror-syncs/` named its source only as a local path, so
+  the drain composed the pointer line's URL itself, and the owner drifted:
+  after a repository moved to a new owner, its Notion pages named the old
+  owner for six days. `render` now writes
+  `source_url`, read from `origin` and normalized to
+  `https://github.com/<owner>/<repo>/blob/HEAD/<path>`, and `null` where
+  origin is missing, on another host or carries a credential. The contract's
+  drain step 3 and the mirror shape link it verbatim. The field is part of
+  the fingerprint only when present, so each document of a repository with a
+  GitHub origin re-queues once, and no other repository re-queues anything.
+
 - **A post-cap request verifies past a reservation (sd:2192).** A request
   whose last pass reviewed nothing -- a watchdog, an unreadable receipt, or a
   pass no reviewer completed -- still reviewed the whole branch. On a guest
