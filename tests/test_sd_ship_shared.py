@@ -386,6 +386,33 @@ class HistoryChainTests(unittest.TestCase):
         with self.assertRaisesRegex(ship.Refusal, "retain the incomplete review evidence"):
             ItemHistory()._validate_coverage(state, broken)
 
+    def _request_past(self, reservation: dict) -> tuple[dict, dict]:
+        """A completed pass at a, `reservation` at b, then a request at c verifying a (sd:2192)."""
+        first = {"head": "a" * 40, "report": self._complete("0" * 40, "a" * 40)}
+        request = {"head": "c" * 40, "reason": "operator asked", "allowed_passes": 1,
+                   "prior_history_digest": digest([first, reservation])}
+        verification = self._complete("a" * 40, "c" * 40, first)
+        return {"passes": [first, reservation, {"head": "c" * 40, "base": "a" * 40, "report": verification,
+                                                "additional_review_request": request}]}, verification
+
+    def test_a_request_links_past_a_reservation_that_holds_no_evidence(self):
+        """sd:2192. The chain check reads the request's link to the last completed pass."""
+        unreadable = {"head": "b" * 40, "base": "a" * 40,
+                      "execution_error": {"kind": "unreadable_receipt", "stage": "execution"}}
+        self.assertEqual(importlib.import_module("sd_ship_history").verified_index([{"head": "a" * 40, "report": self._complete(
+            "0" * 40, "a" * 40)}, unreadable]), 0)
+        state, verification = self._request_past(unreadable)
+        self.assertIsNone(ItemHistory()._validate_coverage(state, verification))
+
+    def test_a_request_does_not_link_past_a_reservation_that_kept_a_finding(self):
+        """sd:2192. Only a full-branch resume keeps that finding, so the skip-link refuses."""
+        incomplete = dict(self._complete("a" * 40, "b" * 40, {"report": self._complete("0" * 40, "a" * 40)}),
+                          status="blocking", requested_reviews=2,
+                          findings=[{"path": "src.py", "summary": "found by the reviewer that completed"}])
+        state, verification = self._request_past({"head": "b" * 40, "base": "a" * 40, "report": incomplete})
+        with self.assertRaisesRegex(ship.Refusal, "never completed"):
+            ItemHistory()._validate_coverage(state, verification)
+
     def test_an_automatic_verification_that_produced_no_report_is_resumed_not_refused(self):
         """A reservation is not a verification, whatever the next pass calls itself.
 
