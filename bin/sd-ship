@@ -22,6 +22,7 @@ import tempfile
 import time
 from datetime import datetime, timezone
 
+import sd_changelog_merge
 import sd_lib
 import sd_local_gate
 import sd_ship_body
@@ -398,6 +399,7 @@ class Ship(SharedReview):
     #: `default` -- and the owned lines it stripped from it (sd:1870).
     body_source: str = "default"
     body_normalized: tuple[str, ...] = ()
+    catch_up_notes: tuple[str, ...] = ()
 
     def __init__(self, root: pathlib.Path, connection, database: pathlib.Path, args):
         from sd_db import ship
@@ -532,7 +534,7 @@ class Ship(SharedReview):
         base = self.state.get("base")
         if base:
             warnings.extend(self.squash_notes(base, head))
-        return warnings
+        return warnings + list(self.catch_up_notes)
 
     def squash_notes(self, base: str, head: str) -> list[str]:
         """One note per pre-squash head this branch carries (sd:1409)."""
@@ -1645,15 +1647,18 @@ class Ship(SharedReview):
 
         A merge, never a rebase, so the next push is a fast-forward of the
         branch already pushed and no reviewed head is orphaned. A conflict is
-        aborted, so the branch is left exactly as it was. The review scopes
+        aborted, so the branch is left exactly as it was, unless it is only two
+        additions to CHANGELOG.md, which are kept both (sd:2174). The review scopes
         the new head from ancestry, and merge gates it like any other.
         """
         if git(self.root, "status", "--porcelain", "--untracked-files=no"):
             raise Refusal("--catch-up needs a clean working tree", code="dirty_worktree", boundary="input",
                           state="operator_decision", next_action="Commit or stash the changes, then run prepare again.")
-        remote = f"refs/remotes/origin/{base}"
-        merged = sd_lib.git_output(["merge", "--no-ff", "--no-edit", "-m", f"Merge origin/{base} into {self.branch}",
-                                    remote], self.root)
+        remote, message = f"refs/remotes/origin/{base}", f"Merge origin/{base} into {self.branch}"
+        merged = sd_lib.git_output(["merge", "--no-ff", "--no-edit", "-m", message, remote], self.root)
+        if merged is None and sd_changelog_merge.resolve_keep_both(self.root):
+            merged = sd_lib.git_output(["commit", "--quiet", "-m", message], self.root)
+            self.catch_up_notes = () if merged is None else (sd_changelog_merge.keep_both_note(base),)
         if merged is None:
             sd_lib.git_output(["merge", "--abort"], self.root)
             notes = "".join(f"; {note}" for note in self.squash_notes(base, head))
