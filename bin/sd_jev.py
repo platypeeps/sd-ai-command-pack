@@ -47,6 +47,7 @@ code and findings are not this module's to change.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -78,6 +79,17 @@ MAX_PATHS = 40
 #: read here as no answer. A tier picked on a coin flip is worse than the
 #: deterministic routing it would displace.
 UNSURE_BELOW = "0.6"
+
+#: The judged change, for the ledger only (sd:2107). `jev --subject` records it
+#: as the row's question id and never puts it in the request, so a later
+#: labeller can find the pull request and its outcome. A GitHub owner cannot
+#: contain `.`, so the first `.` splits owner from repository. The ledger caps
+#: a name at 96 characters; a longer subject is left out, not truncated.
+SUBJECT_PREFIX = "sd-review-tier"
+SUBJECT_MAX = 96
+GITHUB_REMOTE = re.compile(
+    r"(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)"
+    r"([\w-]+)/([\w.-]+?)(?:\.git)?/?")
 UNSURE = "unsure"
 
 #: What `--fallback` prints when Jev is off, unkeyed or failing. It exits 0
@@ -106,6 +118,7 @@ def jev_tier(
     reason: str,
     env: Mapping[str, str],
     stream: TextIO | None = None,
+    root: str | None = None,
 ) -> tuple[str, dict[str, Any] | None]:
     """The tier to review at, and the record of the reading that moved it.
 
@@ -133,7 +146,7 @@ def jev_tier(
         return _jev_declined(tier, note, f"`{COMMAND} enabled` exited {gate.returncode}")
     options = [str(name) for name in order]
     fallback = _jev_fallback(options)
-    answer = _jev_run(_jev_argv(binary, fallback, options), env,
+    answer = _jev_run(_jev_argv(binary, fallback, options, _jev_subject(root, env)), env,
                       _jev_state(paths, lines, reason))
     chosen = (answer.stdout or "").strip()
     if answer.returncode != 0:
@@ -165,7 +178,27 @@ def _jev_declined(tier: str, stream: TextIO, why: str) -> tuple[str, None]:
     return tier, None
 
 
-def _jev_argv(binary: str, fallback: str, options: Sequence[str]) -> list[str]:
+def _jev_subject(root: str | None, env: Mapping[str, str]) -> str | None:
+    """`sd-review-tier:<owner>.<repo>:<sha12>`, or `None` when it cannot be named.
+
+    Read from `origin` and `HEAD` of the reviewed checkout. Anything other than
+    one github.com repository, or a checkout git cannot read, names nothing.
+    """
+
+    if root is None:
+        return None
+    remote = _jev_run(["git", "-C", str(root), "remote", "get-url", "origin"], env)
+    head = _jev_run(["git", "-C", str(root), "rev-parse", "HEAD"], env)
+    match = GITHUB_REMOTE.fullmatch((remote.stdout or "").strip())
+    sha = (head.stdout or "").strip()
+    if remote.returncode or head.returncode or not match or not re.fullmatch(r"[0-9a-f]{40}", sha):
+        return None
+    subject = f"{SUBJECT_PREFIX}:{match[1]}.{match[2]}:{sha[:12]}".lower()
+    return subject if len(subject) <= SUBJECT_MAX else None
+
+
+def _jev_argv(binary: str, fallback: str, options: Sequence[str],
+              subject: str | None = None) -> list[str]:
     """The one place the `jev` command line is written, and it is checked.
 
     `choice` takes its instructions positionally and its named set in
@@ -178,7 +211,8 @@ def _jev_argv(binary: str, fallback: str, options: Sequence[str]) -> list[str]:
             "--criteria", _jev_criteria(options),
             "--unsure-below", UNSURE_BELOW,
             "--state", "-", "--state-format", "json", "--caller", CALLER,
-            "--id", "sd-review-tier", "--stage", STAGE, "--fallback", fallback]
+            "--id", "sd-review-tier", "--stage", STAGE, "--fallback", fallback,
+            *(["--subject", subject] if subject else [])]
 
 
 def _jev_criteria(options: Sequence[str]) -> str:

@@ -257,6 +257,40 @@ class JevTierTests(ReviewFixture):
                         "fixture@example.invalid", "value = 1"):
             self.assertNotIn(private, state + " ".join(argv), f"{private!r} left the machine")
 
+    def test_a_github_checkout_names_the_judged_change_for_the_ledger(self):
+        """sd:2107. The subject goes to `jev --subject`, which records it as the
+        row's question id and never sends it; `--id` stays the constant key
+        the request carries, so no repository name reaches the model."""
+
+        root = self.prepare()
+        subprocess.run(["git", "remote", "add", "origin",
+                        "git@github.com:Example-Owner/privatename.git"],
+                       cwd=str(root), check=True)
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(root), check=True,
+                              capture_output=True, text=True).stdout.strip()
+        record = self.install_stub()
+        self.run_review(root)
+        argv = json.loads(record.read_text())["argv"]
+        self.assertEqual(argv[argv.index("--subject") + 1],
+                         f"sd-review-tier:example-owner.privatename:{head[:12]}")
+        self.assertEqual(argv[argv.index("--id") + 1], "sd-review-tier")
+
+    def test_a_checkout_that_is_not_one_github_repository_names_nothing(self):
+        root = self.prepare()
+        subprocess.run(["git", "remote", "add", "origin", "https://example.test/owner/repo.git"],
+                       cwd=str(root), check=True)
+        record = self.install_stub()
+        self.run_review(root)
+        self.assertNotIn("--subject", json.loads(record.read_text())["argv"])
+
+    def test_a_subject_past_the_ledger_cap_is_left_out(self):
+        root = self.prepare()
+        subprocess.run(["git", "remote", "add", "origin",
+                        f"https://github.com/owner/{'r' * 90}.git"], cwd=str(root), check=True)
+        record = self.install_stub()
+        self.run_review(root)
+        self.assertNotIn("--subject", json.loads(record.read_text())["argv"])
+
     def test_both_calls_name_themselves_for_the_judgment_ledger(self):
         """sd:1253. Without `--caller` and `--stage` the judgment lands under
         `unknown`, and without `--record` a declining gate leaves no row, so
