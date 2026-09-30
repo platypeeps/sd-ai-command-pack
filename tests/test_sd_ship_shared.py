@@ -164,20 +164,61 @@ class SharedBindingTests(unittest.TestCase):
                                       repository="owner/repo", branch="feature", head=self.head,
                                       key="ship:fixture", revision=None, identity=ItemIdentity(7),
                                       history=ItemHistory(), runtime=ship.review_runtime(), state={
-                                          "binding": ship.binding(self.root), "passes": [{"head": self.head,
-                                          "report": self.report, "exit_code": 1}]})
+                                          "binding": ship.binding(self.root), "binding_manifest": ship.binding_manifest(self.root),
+                                          "passes": [{"head": self.head, "report": self.report, "exit_code": 1}]})
         self.git = patch.object(dispositions, "git", side_effect=lambda root, *args: "" if args[0] == "status" else self.head)
         self.git.start()
         self.addCleanup(self.git.stop)
 
-    def test_each_review_manifest_member_mutation_refuses_stale_review(self):
-        self.assertEqual(self.operation.review_inputs(self.head), self.report)
+    @staticmethod
+    def edited(target, suffix=b"changed"):
         original = pathlib.Path.read_bytes
-        for name in bindings.REVIEW_TOOL_FILES:
-            target = bindings.BIN / name
-            with self.subTest(name=name), patch.object(pathlib.Path, "read_bytes", lambda path, target=target: original(path) + (b"changed" if path == target else b"")):
-                with self.assertRaisesRegex(ship.Refusal, "tools or repository policy changed"):
+        return patch.object(pathlib.Path, "read_bytes", lambda path: original(path) + (suffix if path == target else b""))
+
+    def test_each_verdict_member_mutation_refuses_stale_review(self):
+        self.assertEqual(self.operation.review_inputs(self.head), self.report)
+        for name in bindings.VERDICT_FILES:
+            with self.subTest(name=name), self.edited(bindings.BIN / name):
+                with self.assertRaisesRegex(ship.Refusal, f"tools or repository policy changed after review: {name} \\(verdict\\)"):
                     self.operation.review_inputs(self.head)
+
+    def test_a_comment_on_a_verdict_member_keeps_the_review(self):
+        """sd:1834. The reviewer was asked the same thing; a comment cannot change a verdict."""
+        for name in bindings.VERDICT_FILES:
+            with self.subTest(name=name), self.edited(bindings.BIN / name, b"\n# a comment moves no verdict\n"):
+                self.assertEqual(self.operation.review_inputs(self.head), self.report)
+
+    def test_each_gate_and_check_member_mutation_keeps_the_review(self):
+        """sd:1834. Gate code runs live on every prepare and merge, and the merge
+        gate runs the check again; binding them spent a pass for no evidence."""
+        for name in bindings.GATE_FILES + bindings.CHECK_FILES:
+            with self.subTest(name=name), self.edited(bindings.BIN / name):
+                self.assertEqual(self.operation.review_inputs(self.head), self.report)
+
+    def test_a_moved_binding_names_what_moved_and_marks_what_does_not_bind(self):
+        """sd:1246. The refusal names the file; nobody substitutes blobs to find it."""
+        original = pathlib.Path.read_bytes
+        targets = {bindings.BIN / "sd-review", bindings.BIN / "sd-ship"}
+        with patch.object(pathlib.Path, "read_bytes", lambda path: original(path) + (b"changed" if path in targets else b"")):
+            with self.assertRaises(ship.Refusal) as caught:
+                self.operation.review_inputs(self.head)
+        self.assertEqual(str(caught.exception), "review tools or repository policy changed after review: "
+                                                "sd-review (verdict); also changed, not binding: sd-ship (gate)")
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "review_binding_moved")
+        self.assertIn("sd-ship prepare", caught.exception.workflow["next_action"])
+
+    def test_a_policy_change_refuses_and_is_named(self):
+        (self.root / ".github").mkdir()
+        (self.root / ".github" / "sd-review.json").write_text("{}")
+        with self.assertRaisesRegex(ship.Refusal, "changed after review: .github/sd-review.json \\(policy\\)$"):
+            self.operation.review_inputs(self.head)
+
+    def test_a_receipt_without_a_manifest_refuses_once_and_says_why(self):
+        """Stored before sd:1834. Its binding is never backfilled from current files."""
+        self.operation.state.pop("binding_manifest")
+        self.operation.state["binding"] = "schema-1 digest"
+        with self.assertRaisesRegex(ship.Refusal, "changed after review: receipt predates the per-file manifest \\(legacy\\)$"):
+            self.operation.review_inputs(self.head)
 
     def test_each_adjudicator_manifest_member_mutation_refuses_stale_proposal(self):
         context, rows = dispositions.context(self.operation, self.head)
@@ -190,13 +231,20 @@ class SharedBindingTests(unittest.TestCase):
         # Isolate the adjudicator manifest from the earlier review-binding check.
         self.operation.review_inputs = types.MethodType(lambda operation, head: self.report, self.operation)
         original = pathlib.Path.read_bytes
-        targets = [bindings.BIN / name for name in bindings.REVIEW_TOOL_FILES]
+        targets = [bindings.BIN / name for name in bindings.VERDICT_FILES]
         targets += [bindings.BIN.parent / name for name in bindings.ADJUDICATOR_POLICY_FILES]
         targets.append(pathlib.Path(self.operation.store.__file__))
         for target in targets:
             with self.subTest(path=target), patch.object(pathlib.Path, "read_bytes", lambda path, target=target: original(path) + (b"changed" if path == target else b"")):
                 with self.assertRaisesRegex(ship.Refusal, "does not bind"):
                     dispositions.validate(self.operation, self.head, proposal)
+        # sd:1834. Tool files bind by class; the library and policy above stay byte-exact.
+        for name in bindings.GATE_FILES + bindings.CHECK_FILES:
+            with self.subTest(gate=name), self.edited(bindings.BIN / name):
+                self.assertEqual(dispositions.validate(self.operation, self.head, proposal), dispositions.digest(proposal))
+        for name in bindings.VERDICT_FILES:
+            with self.subTest(comment=name), self.edited(bindings.BIN / name, b"\n# a comment moves no verdict\n"):
+                self.assertEqual(dispositions.validate(self.operation, self.head, proposal), dispositions.digest(proposal))
 
     def test_missing_manifest_members_never_fall_back_to_partial_binding(self):
         original = pathlib.Path.read_bytes
