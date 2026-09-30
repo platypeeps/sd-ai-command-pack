@@ -79,6 +79,8 @@ Run `sd-ship prepare --catch-up` with the same identity.
 It merges `origin/<base>` into the branch, never rebases, and pushes a fast-forward.
 The new head gets a full-branch pass: the review covers the branch's own diff, not the code the base brought in.
 A conflict aborts the merge and leaves the branch unchanged; resolve it by hand, then prepare again.
+One conflict is resolved for you: two additions to `CHANGELOG.md` at the root, and no other conflicted path.
+Both entries are kept, the branch's first, and the receipt warnings name the resolution.
 Merge again with the new `--expected-head`; the local gate runs at that head.
 
 ## A branch built on a squashed branch
