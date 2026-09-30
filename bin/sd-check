@@ -40,7 +40,7 @@ import argparse
 import json
 import os
 import pathlib
-import subprocess
+import signal
 import sys
 import time
 from typing import Mapping, TextIO
@@ -129,19 +129,18 @@ def plan(
 def run_one(
     command: list[str], root: pathlib.Path, timeout: int, environ: Mapping[str, str] | None = None
 ) -> tuple[str, int | None, float, str, str, str]:
-    """Run one check. Output is captured and attributed, never interleaved."""
+    """Run one check. Output is captured and attributed, never interleaved.
+
+    The check leads a process group, and the group ends with the call (sd:1815):
+    at the timeout, on SIGTERM or SIGINT, and after a normal exit, so nothing
+    `make check` started outlives the run. Its stdin is /dev/null.
+    """
     started = time.monotonic()
     try:
-        completed = subprocess.run(  # fixed argv, no shell
-            command,
-            cwd=str(root),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-            env=environ,
+        completed = sd_lib.run_group(  # fixed argv, no shell
+            command, cwd=root, env=dict(os.environ if environ is None else environ), timeout=timeout
         )
-    except subprocess.TimeoutExpired:
+    except sd_lib.GroupTimeout:
         return FAIL, None, time.monotonic() - started, "", "", f"timed out after {timeout}s"
     except OSError as error:
         return FAIL, None, time.monotonic() - started, "", "", f"cannot run {command[0]}: {error}"
@@ -400,5 +399,15 @@ def main(argv: list[str] | None = None) -> int:
     return 1 if result["status"] == FAIL or result.get("receipt_error") else 0
 
 
+def interrupted() -> None:
+    """Ctrl-C: `run_group` has ended the check's group; say so, then die of SIGINT as a shell expects."""
+    print("sd-check: interrupted", file=sys.stderr)
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    os.kill(os.getpid(), signal.SIGINT)
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        interrupted()
