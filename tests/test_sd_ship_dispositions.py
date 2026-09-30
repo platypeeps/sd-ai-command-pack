@@ -4,16 +4,24 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import importlib
 import io
 import json
 import os
 import pathlib
+import re
+import shlex
+import subprocess
+import sys
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from tests import test_sd_ship as fixture
 
 ship = fixture.ship
+# `fixture` puts bin/ on sys.path, so this import has to follow it.
+sd_ship_dispositions = importlib.import_module("sd_ship_dispositions")
 
 
 class DispositionTests(unittest.TestCase):
@@ -100,6 +108,38 @@ class DispositionTests(unittest.TestCase):
         result = self.command("--dispositions-file", str(self.proposal_file))
         self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
         self.assertEqual(list(self.connection.execute("SELECT * FROM state")), before)
+
+    def test_the_command_a_blocking_refusal_names_prints_each_finding_whole(self):
+        """sd:2102. `next_action` is only useful if the command it names runs and shows the findings."""
+        self.blocked()
+        with self.assertRaises(ship.Refusal) as caught:
+            self.prepare()
+        named = re.search(r"`sd-ship (adjudicate [^`]+)`", caught.exception.workflow["next_action"]).group(1)
+        result = subprocess.run([sys.executable, str(fixture.ROOT / "bin/sd-ship"), *shlex.split(named)],
+                                cwd=self.root, env=self.environment, text=True, capture_output=True,
+                                timeout=fixture.CLI_TIMEOUT)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        rows = json.loads(result.stdout)["proposal"]["findings"]
+        self.assertEqual([row["raw_finding"]["summary"] for row in rows], ["fixture disputed finding"])
+
+    def test_a_blocking_refusal_bounds_its_message_and_names_a_no_item_record(self):
+        """sd:2102. Five findings are named, a line-less one by path, and `findings` carries every one."""
+        rows = [{"disposition": "blocking", "severity": "high", "path": f"f{n}.py", "line": n, "summary": "x " * 200}
+                for n in range(7)] + [{"disposition": "advisory", "severity": "low", "path": "a.py", "line": 1,
+                                       "summary": "advice"}]
+        rows[0]["line"] = None
+        review = SimpleNamespace(args=SimpleNamespace(no_item=True, review_id="r-1", item=None))
+        refusal = sd_ship_dispositions.blocking_refusal(review, "abc123", {"findings": rows}, "local review blocking")
+        message = str(refusal)
+        self.assertIn("high f0.py x x", message)
+        self.assertIn("f4.py:4", message)
+        self.assertNotIn("f5.py", message)
+        self.assertIn("; and 2 more", message)
+        self.assertIn("sd-ship adjudicate --no-item --review-id r-1 --expected-head abc123 --json",
+                      refusal.workflow["next_action"])
+        findings = ship.failure("prepare", refusal)["findings"]
+        self.assertEqual([row["path"] for row in findings], [f"f{n}.py" for n in range(7)])
+        self.assertTrue(all(len(row["summary"]) == sd_ship_dispositions.SUMMARY_CHARS for row in findings))
 
     def test_blank_template_missing_explicit_acceptance_and_wrong_digest_refuse(self):
         self.blocked()

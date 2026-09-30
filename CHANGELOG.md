@@ -4,6 +4,19 @@
 
 ### Added
 
+- **A held merge lane, and merge from the lane's checkout (sd:2035, sd:2037).**
+  `sd-ship hold --item N --holder NAME [--for SECONDS]` reserves the
+  repository's merge lane for one item. It is written under the ship lock,
+  lasts `--for` seconds (3600 by default, 86400 at most) and renews on a
+  rerun. While it stands, `prepare` and `merge` for any other item refuse as
+  `lane_held`, naming the held item, the holder and the expiry, both before
+  taking the lock and under it. The held item's merge ends the hold, and
+  `sd-ship release --item N` ends it sooner. `sd-ship merge` no longer
+  requires the item's branch to be checked out: when the checkout's branch
+  holds no receipt for the item, the item's one receipt names the branch,
+  `--branch` names it when there are several, and `--expected-head` is checked
+  against the branch's tip fetched from origin. Neither checkout moves.
+
 - **One passing local gate per head (sd:2041, sd:1912).** Under `repo.ci =
   local`, `sd-ship prepare` runs its check as the merge gate does -- a clean
   worktree at the head, the gate's environment, `sd-review --gate-check` --
@@ -73,6 +86,29 @@
   the remedy, a fresh commit.
 
 ### Fixed
+
+- **A blocking local review names its findings (sd:2102).** `sd-ship
+  prepare` refused with `local review blocking: 1/1 completed; see item ship
+  receipt`, and no command printed that receipt: the operator read each
+  finding out of the `state` table by hand. The refusal now has code
+  `review_blocking`, names up to five blocking findings as severity,
+  `path:line` and a summary cut to 160 characters, and carries all of them in
+  the JSON result's `findings` field. Its `next_action` names `sd-ship
+  adjudicate --item N --expected-head SHA --json` (or `--no-item --review-id
+  ID`), whose disposition template prints each finding whole. A later prepare
+  of the same head, refused because no disposition was accepted, reports the
+  same way.
+
+- **A stopped or timed-out `sd-check` ends everything its check started
+  (sd:1815).** Each check now leads a process group of its own, through
+  `sd_lib.run_group`, and the group is killed when the check ends: at
+  `--timeout`, on SIGTERM or SIGINT to `sd-check` alone (as `pkill` sends
+  it), and after a normal exit. Before, `subprocess.run` killed only the
+  check's first process at the timeout, and a signal reached none of them,
+  so `make check` and its test workers ran on with parent pid 1. A check's
+  stdin is now `/dev/null`. Ctrl-C prints `sd-check: interrupted` instead of
+  a traceback and still exits by SIGINT. A caller that SIGKILLs `sd-check`
+  itself still leaves the group running; nothing can forward that signal.
 
 - **A catch-up keeps both CHANGELOG.md entries (sd:2174).** `sd-ship prepare
   --catch-up` aborted on any conflict, and in the pack it stopped almost every
@@ -190,6 +226,24 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **A review carries forward across a clean merge-in of the base (sd:1485).**
+  Every catch-up merge moved the head, so the local review spent a
+  full-branch pass again and a Copilot review went stale
+  (`copilot_review_stale`) when main's commits touched shipped files. Both
+  now carry forward when the reviewed head is an ancestor, every commit since
+  it is a two-parent merge of a base commit whose tree is git's own
+  conflict-free merge result, the base's new commits touch no file the
+  branch changes and no file in a directory holding one, and `git patch-id
+  --stable` of the branch's own change against the base is unchanged. An
+  unchanged patch-id alone does not show the branch still works on the new
+  base, so the directory rule is the operator's narrowing. The local review
+  must be clean or advisory, and a `--provider` the receipt's reviewer does
+  not match is never carried, nor reused at a carried head. The receipt
+  records `review_carry_forward` (from, to, patch-id, merges), `prepare`
+  prints it and returns it, and the Copilot merge warning says why the gate
+  cleared. Anything else reviews again as before. A rebase is not carried,
+  so `reviewed_head_orphaned` is unchanged.
 
 - **`sd-ship prepare` reads a hand-opened pull request's live body (sd:1878).**
   The live body outranked the stored one only when a receipt named the pull

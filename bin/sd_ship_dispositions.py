@@ -86,6 +86,50 @@ def context(operation: Any, head: str) -> tuple[dict, list[dict]]:
             "adjudicator_binding": adjudicator_binding(operation.store.__file__)}, rows
 
 
+#: How much of one finding's summary a refusal repeats; `sd-ship adjudicate` prints it whole (sd:2102).
+SUMMARY_CHARS = 160
+#: How many blocking findings a refusal's message names; its `findings` field carries every one.
+NAMED_FINDINGS = 5
+
+
+def blocking_findings(report: dict) -> list[dict]:
+    """sd:2102. Each blocking finding as a refusal names it: severity, place and a bounded summary."""
+    rows = []
+    for row in report.get("findings") or []:
+        if isinstance(row, dict) and row.get("disposition") == "blocking":
+            summary = " ".join(str(row.get("summary") or "").split())
+            if len(summary) > SUMMARY_CHARS:
+                summary = summary[:SUMMARY_CHARS - 3].rstrip() + "..."
+            rows.append({"severity": row.get("severity"), "path": row.get("path"), "line": row.get("line"),
+                         "summary": summary})
+    return rows
+
+
+def blocking_refusal(operation: Any, head: str, report: dict, lead: str) -> Refusal:
+    """sd:2102. A blocking review refuses naming its findings and the command that prints them.
+
+    The refusal used to say only `see item ship receipt`, and nothing in the
+    CLI printed that receipt: the operator read the findings out of the
+    `state` table by hand. The adjudication template lists each blocking
+    finding whole, so `next_action` names it rather than a new reader.
+    """
+    findings = blocking_findings(report)
+    named = "; ".join(f"{row['severity']} {place(row)} {row['summary']}" for row in findings[:NAMED_FINDINGS])
+    more = f"; and {len(findings) - NAMED_FINDINGS} more" if len(findings) > NAMED_FINDINGS else ""
+    args = operation.args
+    selector = f"--no-item --review-id {args.review_id}" if getattr(args, "no_item", False) else f"--item {args.item}"
+    command = f"sd-ship adjudicate {selector} --expected-head {head} --json"
+    return Refusal(f"{lead}: {named}{more}", code="review_blocking", boundary="review", state="operator_decision",
+                   next_action=f"Run `{command}` to print each blocking finding in full; fix them and prepare "
+                               "again, or rebut or park each one through that adjudication.",
+                   details={"findings": findings})
+
+
+def place(row: dict) -> str:
+    """`path:line`, or the path alone for a finding that names no line."""
+    return str(row["path"]) if row["line"] is None else f"{row['path']}:{row['line']}"
+
+
 def text(value: Any, label: str) -> None:
     if not isinstance(value, str) or not value.strip() or len(value.encode()) > 4096:
         raise Refusal(f"disposition {label} needs nonempty bounded text")
@@ -135,7 +179,8 @@ def validate(operation: Any, head: str, proposal: Any, *, durable: bool = True) 
 def accepted(operation: Any, head: str) -> dict:
     revision, value = operation.store.read(operation.connection, key(operation))
     if not revision or value.get("decision") != "accepted":
-        raise Refusal("local review contains blocking findings without accepted dispositions")
+        raise blocking_refusal(operation, head, operation.review_inputs(head),
+                               "local review contains blocking findings without accepted dispositions")
     proposal_digest = validate(operation, head, value.get("proposal"))
     if value.get("proposal_digest") != proposal_digest:
         raise Refusal("accepted disposition receipt digest does not match")
