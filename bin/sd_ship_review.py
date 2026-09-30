@@ -534,8 +534,11 @@ class SharedReview:
             self.save(reviewed_head=None)
             raise
         if result.returncode:
-            raise Refusal(f"local review {report.get('status')}: {report.get('completed_reviews', 0)}/{report.get('requested_reviews', 0)} completed"
-                          f"{failed_outcomes(report)}{REQUEST_CONSUMED if request else ''}; see item ship receipt")
+            message = (f"local review {report.get('status')}: {report.get('completed_reviews', 0)}/{report.get('requested_reviews', 0)} completed"
+                       f"{failed_outcomes(report)}{REQUEST_CONSUMED if request else ''}")
+            if report.get("status") == "blocking":
+                raise sd_ship_dispositions.blocking_refusal(self, head, report, message)
+            raise Refusal(f"{message}; see item ship receipt")
         self.check_review(head)
         if self.runtime.current_head(self.root) != head:
             raise Refusal("HEAD or checkout changed during local checks and review")

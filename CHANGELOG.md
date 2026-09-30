@@ -87,6 +87,18 @@
 
 ### Fixed
 
+- **A blocking local review names its findings (sd:2102).** `sd-ship
+  prepare` refused with `local review blocking: 1/1 completed; see item ship
+  receipt`, and no command printed that receipt: the operator read each
+  finding out of the `state` table by hand. The refusal now has code
+  `review_blocking`, names up to five blocking findings as severity,
+  `path:line` and a summary cut to 160 characters, and carries all of them in
+  the JSON result's `findings` field. Its `next_action` names `sd-ship
+  adjudicate --item N --expected-head SHA --json` (or `--no-item --review-id
+  ID`), whose disposition template prints each finding whole. A later prepare
+  of the same head, refused because no disposition was accepted, reports the
+  same way.
+
 - **A stopped or timed-out `sd-check` ends everything its check started
   (sd:1815).** Each check now leads a process group of its own, through
   `sd_lib.run_group`, and the group is killed when the check ends: at
