@@ -2107,6 +2107,10 @@ import shutil
 import sys
 
 verb = sys.argv[1] if len(sys.argv) > 1 else ""
+argv_log = os.environ.get("JEV_STUB_ARGV")
+if argv_log:
+    with open(argv_log, "a") as log:
+        log.write(json.dumps(sys.argv[1:]) + "\\n")
 if verb == "enabled":
     probed = os.environ.get("JEV_STUB_PROBED")
     if probed:
@@ -2189,6 +2193,21 @@ class Rule6ClaimSupportTests(LintFixture):
         item = self.cited_item()
         lint.write_citation_manifest(item, self.work)
         return item
+
+    def test_both_calls_name_themselves_for_the_judgment_ledger(self) -> None:
+        """sd:2136. A bare `jev enabled` and an unnamed `ask` land in the ledger
+        as caller "unknown", so this gate's calls could not be counted."""
+
+        argv_log = self.repo / "argv.jsonl"
+        self.recorded_item()
+        with self.jev(JEV_STUB_ARGV=str(argv_log)):
+            self.notes()
+        calls = [json.loads(line) for line in argv_log.read_text().splitlines()]
+        self.assertEqual(calls[0], ["enabled", lint.JEV_STAGE, "--record", "--caller", lint.JEV_CALLER])
+        ask = calls[1]
+        self.assertEqual(ask[0], "ask")
+        self.assertEqual(ask[ask.index("--caller") + 1], lint.JEV_CALLER)
+        self.assertEqual(ask[ask.index("--stage") + 1], lint.JEV_STAGE)
 
     def test_an_opted_in_repository_with_the_switch_unset_takes_the_reading(self) -> None:
         """The opt-in on, the switch unset: the one way a reading is taken."""
