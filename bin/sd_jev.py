@@ -111,6 +111,7 @@ def jev_tier(
     reason: str,
     env: Mapping[str, str],
     stream: TextIO | None = None,
+    root: str | None = None,
 ) -> tuple[str, dict[str, Any] | None]:
     """The tier to review at, and the record of the reading that moved it.
 
@@ -138,7 +139,7 @@ def jev_tier(
         return _jev_declined(tier, note, f"`{COMMAND} enabled` exited {gate.returncode}")
     options = [str(name) for name in order]
     fallback = _jev_fallback(options)
-    answer = _jev_run(_jev_argv(binary, fallback, options), env,
+    answer = _jev_run(_jev_argv(binary, fallback, options, _jev_subject(root)), env,
                       _jev_state(paths, lines, reason))
     chosen = (answer.stdout or "").strip()
     if answer.returncode != 0:
@@ -173,7 +174,17 @@ def _jev_declined(tier: str, stream: TextIO, why: str) -> tuple[str, None]:
     return tier, None
 
 
-def _jev_argv(binary: str, fallback: str, options: Sequence[str]) -> list[str]:
+def _jev_subject(root: str | None) -> str | None:
+    """The judged change, for the ledger only (sd:2107): `jev --subject` records it
+    as the row's question id and never sends it. None past the ledger's 96 characters."""
+
+    head = sd_lib.github_head(root) if root else None
+    subject = f"sd-review-tier:{head[0]}.{head[1]}:{head[2][:12]}" if head else ""
+    return subject if 0 < len(subject) <= 96 else None
+
+
+def _jev_argv(binary: str, fallback: str, options: Sequence[str],
+              subject: str | None = None) -> list[str]:
     """The one place the `jev` command line is written, and it is checked.
 
     `choice` takes its instructions positionally and its named set in
@@ -186,7 +197,8 @@ def _jev_argv(binary: str, fallback: str, options: Sequence[str]) -> list[str]:
             "--criteria", _jev_criteria(options),
             "--unsure-below", UNSURE_BELOW,
             "--state", "-", "--state-format", "json", "--caller", CALLER,
-            "--id", "sd-review-tier", "--stage", STAGE, "--fallback", fallback]
+            "--id", "sd-review-tier", "--stage", STAGE, "--fallback", fallback,
+            *(["--subject", subject] if subject else [])]
 
 
 def _jev_criteria(options: Sequence[str]) -> str:

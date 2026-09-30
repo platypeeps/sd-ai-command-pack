@@ -276,6 +276,21 @@ def git_output(args: list[str], root: pathlib.Path) -> str | None:
     return _git(args, root)
 
 
+#: One github.com repository as `origin` names it. An owner cannot contain `.`.
+GITHUB_ORIGIN = re.compile(r"(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)"
+                           r"([\w-]+)/([\w.-]+?)(?:\.git)?/?")
+
+
+def github_head(root: pathlib.Path | str) -> tuple[str, str, str] | None:
+    """`(owner, repo, head sha)` lower-cased, or None unless `origin` is one github.com repository."""
+    root = pathlib.Path(root)
+    match = GITHUB_ORIGIN.fullmatch(git_output(["remote", "get-url", "origin"], root) or "")
+    head = git_output(["rev-parse", "HEAD"], root) or ""
+    if not match or not re.fullmatch(r"[0-9a-f]{40}", head):
+        return None
+    return match[1].lower(), match[2].lower(), head
+
+
 def repo_root(start: pathlib.Path | str | None = None) -> pathlib.Path | None:
     """The enclosing worktree's own root, or None outside a repository.
 
