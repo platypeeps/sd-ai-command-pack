@@ -315,3 +315,49 @@ class BinaryMaterialTests(ReviewFixture):
         self.assertNotIn("[binary, not sent]", piece)
         self.assertIn('--- "loose.ico" ---\n[binary, base64]\n',
                       sd_review.sd_review_material.file_material(root, "loose.ico", "added (untracked)"))
+
+    def test_a_summarized_path_leaves_a_material_only_review_partial(self):
+        # sd:2181 review pass 2: a hash line is not a review. A `-diff` script that starts
+        # like a GIF is summarized, so a reviewer that reads only material has partial coverage.
+        root = self.make_repo()
+        (root / ".gitattributes").write_text("build.sh -diff\n")
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "--quiet", "-m", "attributes")
+        (root / "build.sh").write_text("GIF89a\nrm -rf \"$HOME\"\n")
+        registry = self.registry_home / ".local/share/sd/providers.yaml"
+        registry.write_text(registry.read_text().replace("reader: codex-json", "reader: claude-json"))
+        answer = sd_review.Completed(0, json.dumps({"type": "result", "subtype": "success",
+                                                   "structured_output": {"findings": []}}), "")
+        result = sd_review.review(root, namespace(), FakeRunner({"codex": answer, "second": answer}),
+                                  self.environment(), self.chatgpt_home())
+        self.assertEqual(result["completed_reviews"], 0, [(row["backend"], row["status"]) for row in result["outcomes"]])
+        self.assertEqual(result["input_manifest"]["omitted_paths"], ["build.sh"])
+        self.assertNotEqual(result["status"], "clean")
+        partial = [row for row in result["outcomes"] if (row["diagnostic"] or {}).get("coverage") == "partial"]
+        self.assertTrue(partial, result["outcomes"])
+        self.assertTrue(all(row["diagnostic"]["omitted_paths"] == ["build.sh"] and "build.sh" in row["detail"]
+                            for row in partial))
+
+    def test_an_encoding_change_is_visible(self):
+        root = self.make_repo()
+        (root / "same.txt").write_text("unchanged words\n")
+        (root / "moved.txt").write_text("old words\n")
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "--quiet", "-m", "utf-8")
+        (root / "same.txt").write_bytes("unchanged words\n".encode("utf-16"))
+        (root / "moved.txt").write_bytes("new words\n".encode("utf-16"))
+        subject = sd_review.resolve_subject(root, "worktree")
+        material, _inventory = sd_review.sd_review_material.collect_review_material(root, subject)
+        same = material[material.index("diff --git a/same.txt"):]
+        moved = material[material.index("diff --git a/moved.txt"):material.index("diff --git a/same.txt")]
+        self.assertIn("GIT binary patch", same)
+        self.assertIn("[encoding] old utf-8; new utf-16-le, BOM\n", moved)
+        self.assertIn("+new words\n", moved)
+
+    def test_a_native_reader_completes_a_screenshot_review(self):
+        root = self.make_repo()
+        (root / "shot.png").write_bytes(self.SHOT)
+        result = sd_review.review(root, namespace(), FakeRunner(), self.environment(), self.chatgpt_home())
+        self.assertEqual(result["input_manifest"]["omitted_paths"], ["shot.png"])
+        self.assertEqual(result["input_manifest"]["partial_providers"], [])
+        self.assertEqual((result["status"], result["completed_reviews"]), ("clean", 1))

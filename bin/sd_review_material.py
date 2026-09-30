@@ -43,6 +43,7 @@ def untracked(root: pathlib.Path) -> list[str]:
 # screenshot overruns the limit. UTF-8 (a `-diff` file) and BOM-marked UTF-16 go as text; anything else
 # stays base64, so the size check refuses honestly. Not media: zip, gzip (can carry source), ICO (weak magic).
 BINARY_MARKER = re.compile(r"(?m)^Binary files .* differ\n?")
+SUMMARY = re.compile(r"(?m)^\[binary, not sent\] ")
 MEDIA_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"wOFF", b"wOF2", b"%PDF-")
 
 
@@ -57,6 +58,11 @@ def as_text(data: bytes) -> str | None:
         return None
 
 
+def encoding(data: bytes) -> str:
+    marks = (("utf-16-le", codecs.BOM_UTF16_LE), ("utf-16-be", codecs.BOM_UTF16_BE), ("utf-8", codecs.BOM_UTF8))
+    return next((f"{name}, BOM" for name, mark in marks if data.startswith(mark)), "utf-8")
+
+
 def content_summary(data: bytes) -> str:
     return f"{len(data)} bytes, sha256 {hashlib.sha256(data).hexdigest()}"
 
@@ -69,7 +75,7 @@ def file_material(root: pathlib.Path, name: str, change: str) -> str:
         data = path.read_bytes()
         text = None if is_media(data) else as_text(data)
         if text is not None:
-            content = text
+            content = ("" if encoding(data) == "utf-8" else f"[encoding] {encoding(data)}\n") + text
         elif is_media(data):
             content = f"[binary, not sent] {change}; {content_summary(data)}"
         else:
@@ -91,7 +97,8 @@ def collect_review_material(root: pathlib.Path, subject: Any) -> tuple[str, list
         part = ("\n" if parts else "") + part
         parts.append(part)
         inventory.append({"path": name, "bytes": len(part.encode("utf-8")),
-                          "boundary": name.split("/", 1)[0] if "/" in name else "repository-root"})
+                          "boundary": name.split("/", 1)[0] if "/" in name else "repository-root",
+                          **({"summarized": True} if SUMMARY.search(part) else {})})
     return "".join(parts), inventory
 
 
@@ -152,12 +159,19 @@ def binary_piece(name: str, piece: str, found: list[Side]) -> str | None:
         change = "added" if "\nnew file mode " in piece else "deleted" if "\ndeleted file mode " in piece else "modified"
         return f"{header}[binary, not sent] {change}; old {found[0][1]}; new {found[1][1]}\n"
     texts = [None if data is None or is_media(data) else as_text(data) for data in present]
-    if not present or None in texts:
+    if not present or None in texts or len(texts) == 2 and texts[0] == texts[1]:
         return None
+    return header + text_diff(name, found)
+
+
+def text_diff(name: str, found: list[Side]) -> str:
+    """The decoded sides as a unified diff, naming any encoding but plain UTF-8."""
+    labels = [encoding(data) if data is not None else "absent" for data, _label in found]
+    note = "" if set(labels) <= {"utf-8", "absent"} else f"[encoding] old {labels[0]}; new {labels[1]}\n"
     old, new = ((as_text(data) or "", "ab"[side] + "/" + name) if data is not None else ("", "/dev/null")
                 for side, (data, _label) in enumerate(found))
     diff = difflib.unified_diff(old[0].splitlines(True), new[0].splitlines(True), old[1], new[1])
-    return header + "".join(line if line.endswith("\n") else line + "\n" for line in diff)
+    return note + "".join(line if line.endswith("\n") else line + "\n" for line in diff)
 
 
 def binary_material(root: pathlib.Path, subject: Any, args: list[str], pieces: dict[str, str]) -> dict[str, str]:
@@ -172,6 +186,13 @@ def binary_material(root: pathlib.Path, subject: Any, args: list[str], pieces: d
             raise ValueError("review patch and path inventory disagree; no partial subject sent")
         material.update(zip(raw, encoded, strict=True))
     return material
+
+
+def coverage(inventory: list[dict[str, Any]], overheads: dict[str, str | None]) -> dict[str, list[str]]:
+    """sd:2181: a summarized path is unread by a transport that sees only this material."""
+    omitted = [row["path"] for row in inventory if row.get("summarized")]
+    return {"omitted_paths": omitted,
+            "partial_providers": sorted(name for name, overhead in overheads.items() if overhead is not None) if omitted else []}
 
 
 def input_manifest(inventory: list[dict[str, Any]], prompt: str, overheads: dict[str, str | None], limit: int,
@@ -198,7 +219,7 @@ def input_manifest(inventory: list[dict[str, Any]], prompt: str, overheads: dict
         groups[-1]["bytes"] += row["bytes"]
     return {"status": "oversized" if measured > limit else "within_limit", "limit_bytes": limit,
             "measured_bytes": measured, "prompt_bytes": prompt_bytes, "material_bytes": material_bytes, "context_bytes": context_bytes,
-            "transport_bytes": transports, "paths": inventory, "suggested_groups": groups,
+            "transport_bytes": transports, "paths": inventory, "suggested_groups": groups, **coverage(inventory, overheads),
             "oversized_paths": [row["path"] for row in inventory if row["bytes"] > allowance],
             "next_action": "split_input_for_oversized_providers" if measured > limit else None,
             "advisory_only": False, "split_plan_advisory_only": True,

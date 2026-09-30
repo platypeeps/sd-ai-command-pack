@@ -817,11 +817,16 @@ class LineBudgetTests(unittest.TestCase):
         # what git calls binary but is UTF-8 or BOM-marked UTF-16 as a text
         # diff, and to read both sides in one `cat-file --batch`; three helpers
         # keep each under the complexity ceiling.
+        # 4148 -> 4183 is sd:2181 review pass 2: a summarized path makes a
+        # material-only reader's coverage partial, so its answer does not count
+        # toward depth (`partial` in `bin/sd-review`, `coverage` in the manifest),
+        # and a text diff names a UTF-16 or BOM encoding, sending an
+        # encoding-only change in binary form (`encoding`, `text_diff`).
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4148,
+            4183,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
