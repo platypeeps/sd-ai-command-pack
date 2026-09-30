@@ -3252,6 +3252,35 @@ roles:
             self.prepare("--body-file", str(body))
         self.assertFalse(any(call.method == "POST" for call in self.remote.calls))
 
+    def test_a_blocking_review_names_its_findings_and_the_command_that_prints_them(self):
+        """sd:2102. The refusal said `see item ship receipt`, and nothing in the CLI printed the receipt.
+
+        The operator dug each finding out of the `state` table by hand. The
+        refusal now names every blocking finding, the JSON carries them as
+        `findings`, and `next_action` names the command that prints them whole.
+        Both prepares refuse that way: the one that ran the review, and the one
+        that reuses its receipt.
+        """
+        program = self.programs / "review-fixture"
+        long = "the value is wrong " * 40
+        payload = {"type": "result", "subtype": "success", "structured_output": {"findings": [
+            {"path": "src.py", "line": 1, "severity": "high", "family": "correctness", "summary": long}]}}
+        program.write_text("#!/usr/bin/env python3\nimport json\nprint(" + repr(json.dumps(payload)) + ")\n")
+        head = _git(self.root, "rev-parse", "HEAD")
+        for attempt in ("review", "reuse"):
+            with self.subTest(attempt), self.assertRaises(ship.Refusal) as caught:
+                self.prepare()
+            message = str(caught.exception)
+            self.assertIn("high src.py:1 the value is wrong", message)
+            self.assertLess(len(message), 600)
+            command = f"sd-ship adjudicate --item {self.item} --expected-head {head} --json"
+            self.assertIn(command, caught.exception.workflow["next_action"])
+            self.assertEqual(caught.exception.workflow["blocker"]["code"], "review_blocking")
+            findings = ship.failure("prepare", caught.exception)["findings"]
+            self.assertEqual([(row["severity"], row["path"], row["line"]) for row in findings], [("high", "src.py", 1)])
+            self.assertTrue(findings[0]["summary"].endswith("..."))
+            self.assertLess(len(findings[0]["summary"]), len(long))
+
     def test_fix_verifications_keep_prior_findings_and_refuse_a_pass_past_the_cap(self):
         program = self.programs / "review-fixture"
         payload = {"type": "result", "subtype": "success", "structured_output": {"findings": [
