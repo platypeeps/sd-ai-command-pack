@@ -1846,7 +1846,8 @@ def review(
     # byte-for-byte what it was. `bin/sd_jev.py` owns the contract and says
     # exactly what leaves the machine, and which failures are loud.
     jev_choice, jev_reading = sd_jev.jev_tier(
-        plan.tier, policy["tier_order"], subject.paths, subject.lines, plan.reason, env)
+        plan.tier, policy["tier_order"], subject.paths, subject.lines, plan.reason, env,
+        root=str(root))
     if jev_reading is not None:
         plan = plan._replace(
             tier=jev_choice,
