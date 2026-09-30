@@ -74,6 +74,13 @@
 
 ### Fixed
 
+- **The local test gate leaves the machine room (sd:1955).**
+  `.github/scripts/run-tests.sh` ran CPUs minus one workers locally, so two
+  gates in the two machine-wide slots put 30 workers on 16 cores; the load
+  average read 65-73 and the runner heartbeat missed during such runs. A local
+  run now takes half the CPUs and runs its shards at `nice -n 10`. CI keeps
+  every CPU at normal priority, and `TEST_WORKERS` still overrides the count.
+
 - **A catch-up keeps both CHANGELOG.md entries (sd:2174).** `sd-ship prepare
   --catch-up` aborted on any conflict, and in the pack it stopped almost every
   time on `CHANGELOG.md`: the branch and the base had each added an entry at
