@@ -19,7 +19,7 @@ def failure(phase: str, error: Exception) -> dict:
         if isinstance(error, (OSError, subprocess.SubprocessError)):
             detail = blocked("execution_failed", "runtime", "Restore the local runtime, then retry this command.",
                              state="retryable_failure")
-    return {"ok": False, "manualRequired": True, "error": str(error),
+    return {**getattr(error, "details", {}), "ok": False, "manualRequired": True, "error": str(error),
             "workflow": {"schema_version": 1, "phase": phase, **detail}}
 
 

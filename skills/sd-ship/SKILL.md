@@ -234,6 +234,8 @@ Read its review-retry section only when a review stopped or exhausted its automa
 
 ## Evidence-backed disposition acceptance
 
+A blocking local review refuses with code `review_blocking`, naming each blocking finding in the error and in `findings`.
+Its `next_action` names the `sd-ship adjudicate` command that prints each finding in full.
 Use acceptance only for a complete review of the exact clean head with passing deterministic checks.
 It cannot waive missing depth, incomplete transport, failed checks, or changed source.
 Fixes still require verification on their new head.
