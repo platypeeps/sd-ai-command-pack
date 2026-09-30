@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -173,7 +174,7 @@ class OversizeTests(ReviewFixture):
         self.assertEqual(set(subject.paths), expected)
         self.assertEqual({entry["path"] for entry in entries}, expected)
         self.assertEqual(sum(entry["bytes"] for entry in entries), len(material.encode()))
-        self.assertIn("[binary, base64]", material)
+        self.assertIn("[binary, not sent]", material)
         self.assertIn("symlink -> ../outside-secret", material)
         plan = sd_review.sd_review_material.input_manifest(entries, "prompt", {"test": "overhead"}, 200)
         grouped = [path for group in plan["suggested_groups"] for path in group["paths"]]
@@ -205,3 +206,64 @@ class OversizeTests(ReviewFixture):
         self.assertEqual(git_calls.call_count, 3)
         self.assertEqual(len(inventory), 20)
         self.assertEqual(sum(row["bytes"] for row in inventory), len(material.encode()))
+
+
+class BinaryMaterialTests(ReviewFixture):
+    """sd:2181: a binary path contributes a short summary, never its bytes."""
+
+    SHOT = b"\x89PNG\r\n\x1a\n" + os.urandom(2_100_000)
+
+    def git(self, root, *args):
+        return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout
+
+    def screenshot_branch(self):
+        root = self.make_repo()
+        (root / "src.py").write_text("".join(f"line = {index}\n" for index in range(200)))
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "--quiet", "-m", "text")
+        base = self.git(root, "rev-parse", "HEAD").strip()
+        self.git(root, "checkout", "--quiet", "-b", "retake")
+        (root / "shot.png").write_bytes(self.SHOT)
+        (root / "src.py").write_text("".join(f"value = {index}\n" for index in range(200)))
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "--quiet", "-m", "retake")
+        return root, base
+
+    def test_branch_adding_a_large_png_fits_the_review_limit(self):
+        root, base = self.screenshot_branch()
+        subject = sd_review.resolve_subject(root, "branch", base=base)
+        material, inventory = sd_review.sd_review_material.collect_review_material(root, subject)
+        manifest = sd_review.sd_review_material.input_manifest(inventory, "prompt", {"fixture": "overhead"},
+                                                               sd_review.MAX_OUTPUT_BYTES)
+        self.assertEqual(manifest["status"], "within_limit", manifest["measured_bytes"])
+        self.assertEqual([row["path"] for row in inventory], ["shot.png", "src.py"])
+        self.assertEqual(sum(row["bytes"] for row in inventory), len(material.encode()))
+        blob = self.git(root, "rev-parse", "HEAD:shot.png").strip()
+        shot = material[material.index('diff --git a/shot.png'):material.index('diff --git a/src.py')]
+        self.assertNotIn("GIT binary patch", shot)
+        self.assertIn("[binary, not sent] added; old absent; new 2100008 bytes, blob " + blob, shot)
+        self.assertLess(len(shot.encode()), 400)
+
+    def test_text_change_beside_a_binary_is_sent_in_full(self):
+        root, base = self.screenshot_branch()
+        subject = sd_review.resolve_subject(root, "branch", base=base)
+        material, _inventory = sd_review.sd_review_material.collect_review_material(root, subject)
+        expected = self.git(root, "diff", "--no-color", base, "HEAD", "--", "src.py")
+        self.assertTrue(material.endswith(expected))
+        self.assertEqual(expected.count("\n+value = "), 200)
+
+    def test_worktree_binaries_report_old_blob_and_new_content_hash(self):
+        root, _base = self.screenshot_branch()
+        changed = b"\x89PNG\r\n\x1a\n\x00changed"
+        old_blob = self.git(root, "rev-parse", "HEAD:shot.png").strip()
+        (root / "shot.png").write_bytes(changed)
+        (root / "new.png").write_bytes(self.SHOT)
+        subject = sd_review.resolve_subject(root, "worktree")
+        material, inventory = sd_review.sd_review_material.collect_review_material(root, subject)
+        self.assertEqual({row["path"] for row in inventory}, {"shot.png", "new.png"})
+        self.assertEqual(sum(row["bytes"] for row in inventory), len(material.encode()))
+        self.assertIn(f"[binary, not sent] modified; old 2100008 bytes, blob {old_blob}; "
+                      f"new {len(changed)} bytes, sha256 {hashlib.sha256(changed).hexdigest()}", material)
+        self.assertIn(f"[binary, not sent] added (untracked); 2100008 bytes, sha256 {hashlib.sha256(self.SHOT).hexdigest()}",
+                      material)
+        self.assertLess(len(material.encode()), 1000)

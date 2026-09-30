@@ -807,11 +807,14 @@ class LineBudgetTests(unittest.TestCase):
         # 4036 -> 4042 is the one-handoff window (sd:2041 review): prepare's
         # gate check passes `reuse=False` and `sd_gate_run` takes `reuse` and
         # `record`, so a receipt spans prepare to merge and nothing else.
+        # 4042 -> 4074 is sd:2181: `bin/sd_review_material.py` grows +32 to send
+        # a binary path as its sizes and hashes, one `cat-file --batch-check`
+        # for the committed blobs, instead of `git diff --binary` base64.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4042,
+            4074,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
