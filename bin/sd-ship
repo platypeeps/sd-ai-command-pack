@@ -36,7 +36,13 @@ from sd_ship_history import timeout_evidence as timeout_evidence
 from sd_ship_history import validate_additional_requests as validate_additional_requests
 from sd_ship_item import ItemIdentity
 from sd_ship_remote import GitHub, Refusal, git, refuse_behind, run, slug
-from sd_ship_review import RAW_CAPTURE_ENV, ReviewRuntime, ReviewTimeout, SharedReview
+from sd_ship_review import (
+    RAW_CAPTURE_ENV,
+    ReviewRuntime,
+    ReviewTimeout,
+    SharedReview,
+    carry_forward,
+)
 from sd_ship_workflow import blocked, failure
 
 BIN = pathlib.Path(__file__).resolve().parent
@@ -390,6 +396,9 @@ class Ship(SharedReview):
     #: `require_copilot_clearance` so the relaxation reaches the merge receipt
     #: as a warning rather than passing in silence.
     copilot_ancestor_review: str | None = None
+    #: That ancestor cleared because the commits since it are clean merge-ins
+    #: of the base and the branch's own patch-id is unchanged (sd:1485).
+    copilot_carried: bool = False
     #: The warning that ancestor clearance earns, held until dispatch. It says
     #: the gate cleared a merge, so the step that sends the merge writes it;
     #: written when the gate cleared, it outlived every later refusal and each
@@ -864,7 +873,7 @@ class Ship(SharedReview):
         # cleared here rather than only written: otherwise an ancestor that
         # cleared attempt one would still be named in the warning after attempt
         # two matched exactly.
-        self.copilot_ancestor_review = None
+        self.copilot_ancestor_review, self.copilot_carried = None, False
         completed = [review for review in reviews
                      if bool(review.get("submitted_at"))
                      and str(review.get("state") or "").upper() not in ("", "PENDING")]
@@ -891,7 +900,10 @@ class Ship(SharedReview):
                     next_action="Request one explicit Copilot review for the current branch, then retry merge.",
                 ) from None
             unshipped = self.unreviewed_shipped_surface(candidate, merge_head)
-            if unshipped:
+            base = self.state.get("base")
+            self.copilot_carried = bool(unshipped and base and carry_forward(
+                self.root, candidate, merge_head, f"refs/remotes/origin/{base}"))
+            if unshipped and not self.copilot_carried:
                 named = ", ".join(unshipped[:UNSHIPPED_NAMED])
                 extra = "" if len(unshipped) <= UNSHIPPED_NAMED else f" and {len(unshipped) - UNSHIPPED_NAMED} more"
                 raise Refusal(
@@ -1032,7 +1044,9 @@ class Ship(SharedReview):
         if self.copilot_ancestor_review:
             self.copilot_clearance_note = (
                 f"Copilot reviewed {self.copilot_ancestor_review}, {ANCESTOR_CLEARANCE} "
-                f"{head}; the commits since it touch no shipped surface, so the gate cleared")
+                f"{head}; " + ("the commits since it are clean merges of the base and the branch's own "
+                               "patch-id is unchanged (sd:1485)" if self.copilot_carried
+                               else "the commits since it touch no shipped surface") + ", so the gate cleared")
         self.record_copilot_completion(entries, reviews)
         try:
             ack = sd_lib.sibling("sd_review_ack_ship_gate", "sd-review-ack")

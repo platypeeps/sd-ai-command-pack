@@ -77,7 +77,9 @@ its output, the trailer did not land.
 Under strict protection, another landing leaves an open branch BEHIND the base, and merge refuses it as `base_moved`.
 Run `sd-ship prepare --catch-up` with the same identity.
 It merges `origin/<base>` into the branch, never rebases, and pushes a fast-forward.
-The new head gets a full-branch pass: the review covers the branch's own diff, not the code the base brought in.
+A clean merge that leaves the branch's own patch-id unchanged carries the last clean or advisory review forward and spends no pass.
+A Copilot review of the earlier head carries forward the same way; the receipt records `review_carry_forward` (sd:1485).
+Otherwise the new head gets a full-branch pass: the review covers the branch's own diff, not the code the base brought in.
 A conflict aborts the merge and leaves the branch unchanged; resolve it by hand, then prepare again.
 One conflict is resolved for you: two additions to `CHANGELOG.md` at the root, and no other conflicted path.
 Both entries are kept, the branch's first, and the receipt warnings name the resolution.

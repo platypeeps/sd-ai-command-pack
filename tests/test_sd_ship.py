@@ -53,6 +53,7 @@ loader.exec_module(ship)
 #: The *Development / Code, before merge* cap. Read from the module that
 #: owns it, so these fixtures follow the row instead of restating it.
 CAP = importlib.import_module("sd_ship_history").AUTOMATIC_CODE_REVIEW_PASSES
+sd_ship_review = importlib.import_module("sd_ship_review")
 
 
 #: Hold `argv[2]`'s ship lock over the database at `argv[1]` for `argv[3]` seconds.
@@ -693,14 +694,30 @@ roles:
         self.assertEqual(self.prepare()["phase"], "ready_to_send")
         self.assertEqual(self.merge()["phase"], "merged")
 
+    def shared_context(self) -> str:
+        """The branch edits a file main shares, then is reviewed; the reviewed head.
+
+        Line 1 is the branch's and line 3 main's next edit: the two merge
+        cleanly, but line 3 sits in the branch's diff context, so the merge
+        moves the branch's own patch-id (sd:1485).
+        """
+        self.remote.commit_on("main", "shared\n\nAuthored-with: human", files={"shared.txt": "a\nb\nc\nd\ne\n"})
+        _git(self.root, "fetch", "-q", "origin", "main:refs/remotes/origin/main")
+        _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge origin/main into topic\n\nAuthored-with: human", "origin/main")
+        (self.root / "shared.txt").write_text("A\nb\nc\nd\ne\n")
+        _git(self.root, "commit", "-qam", "edit shared\n\nAuthored-with: human")
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        self.remote.commit_on("main", "near the branch's hunk\n\nAuthored-with: human", files={"shared.txt": "a\nb\nC\nd\ne\n"})
+        return _git(self.root, "rev-parse", "HEAD")
+
     def test_catch_up_merges_the_base_and_re_reviews_only_the_branchs_own_diff(self):
         # sd:2023: a branch left behind by another landing needed a hand merge
         # of origin/main, a push, a review and a prepare. `--catch-up` merges
         # (no rebase, no force push) and the new head's pass is a full-branch
         # one, so it reviews merge-base..head and not the code main brought.
-        self.assertEqual(self.prepare()["phase"], "ready_to_send")
-        before = _git(self.root, "rev-parse", "HEAD")
-        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        # sd:1485: main's change here moves the branch's own patch-id, so the
+        # earlier review is not carried forward.
+        before = self.shared_context()
         self.assertEqual(self.prepare("--catch-up")["phase"], "ready_to_send")
         head = _git(self.root, "rev-parse", "HEAD")
         self.assertEqual(_git(self.root, "rev-list", "--parents", "-n", "1", head).split()[1:],
@@ -710,22 +727,88 @@ roles:
         self.assertEqual(fresh["head"], head)
         self.assertIsNone(fresh["base"], "a fix verification from the old head reviews main's commits too")
         self.assertEqual(fresh["catch_up"]["from"], before)
+        self.assertNotIn("review_carry_forward", self.operation().state)
         # The merge gate runs at the new head or not at all.
         with self.assertRaisesRegex(ship.Refusal, "--expected-head must name the current exact reviewed commit"):
             self.operation("merge", "--manual", "--expected-head", before).merge()
 
-    def test_a_hand_merge_of_the_base_is_scoped_like_a_catch_up(self):
+    def test_a_clean_catch_up_carries_the_review_forward(self):
+        # sd:1485: every catch-up used to spend a full-branch pass on a branch
+        # whose own change the merge did not touch. The reviewed head is an
+        # ancestor, the merge is git's own clean result, and the branch's
+        # patch-id against the base is the one the review read.
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        before = _git(self.root, "rev-parse", "HEAD")
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        result = self.prepare("--catch-up")
+        self.assertEqual(result["phase"], "ready_to_send")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.assertNotEqual(head, before)
+        state = self.operation().state
+        self.assertEqual([entry["head"] for entry in state["passes"]], [before], "no pass is spent")
+        self.assertEqual(state["reviewed_head"], head)
+        carried = state["review_carry_forward"]
+        self.assertEqual((carried["from"], carried["to"]), (before, head))
+        self.assertEqual(carried["merges"], [head])
+        self.assertRegex(carried["patch_id"], r"^[0-9a-f]{40}$")
+        self.assertEqual(result["review_carry_forward"], carried)
+        pull = self.remote.pull(result["pull_request"]["number"])
+        pull.checks = [{**row, "head_sha": head} for row in pull.checks]
+        self.assertEqual(self.merge()["phase"], "merged")
+
+    def test_a_hand_merge_of_the_base_is_carried_like_a_catch_up(self):
         # A prepare that failed after its merge, or the merge sd-ship used to
-        # ask for by hand, leaves the same history; the scope follows it.
+        # ask for by hand, leaves the same history; the carry follows it.
         self.assertEqual(self.prepare()["phase"], "ready_to_send")
         before = _git(self.root, "rev-parse", "HEAD")
         self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
         _git(self.root, "fetch", "-q", "origin", "main:refs/remotes/origin/main")
         _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge origin/main into topic\n\nAuthored-with: human", "origin/main")
         self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        state = self.operation().state
+        self.assertEqual(len(state["passes"]), 1)
+        self.assertEqual(state["review_carry_forward"]["from"], before)
+
+    def test_a_hand_merge_of_the_base_is_scoped_like_a_catch_up(self):
+        before = self.shared_context()
+        _git(self.root, "fetch", "-q", "origin", "main:refs/remotes/origin/main")
+        _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge origin/main into topic\n\nAuthored-with: human", "origin/main")
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
         fresh = self.operation().state["passes"][-1]
         self.assertIsNone(fresh["base"])
         self.assertEqual(fresh["catch_up"]["from"], before)
+
+    def test_a_merge_with_content_of_its_own_is_not_carried(self):
+        # An edit folded into the merge commit is not git's merge result, so
+        # nothing reviewed it, whatever the patch-id says: `--stable` ignores
+        # whitespace, and this one breaks the file.
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        before = _git(self.root, "rev-parse", "HEAD")
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        _git(self.root, "fetch", "-q", "origin", "main:refs/remotes/origin/main")
+        _git(self.root, "merge", "-q", "--no-ff", "--no-commit", "origin/main")
+        (self.root / "src.py").write_text("    value = 1\n")
+        _git(self.root, "commit", "-qam", "Merge origin/main into topic\n\nAuthored-with: human")
+        operation = self.operation()
+        base = "refs/remotes/origin/main"
+        self.assertEqual(sd_ship_review.own_patch_id(self.root, before, base),
+                         sd_ship_review.own_patch_id(self.root, "HEAD", base),
+                         "the premise: patch-id cannot see a whitespace edit")
+        self.assertEqual(operation.prepare()["phase"], "ready_to_send")
+        state = self.operation().state
+        self.assertNotIn("review_carry_forward", state)
+        self.assertEqual(state["passes"][-1]["catch_up"]["from"], before)
+
+    def test_a_commit_after_the_merge_is_not_carried(self):
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        _git(self.root, "fetch", "-q", "origin", "main:refs/remotes/origin/main")
+        _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge origin/main into topic\n\nAuthored-with: human", "origin/main")
+        _git(self.root, "commit", "--allow-empty", "-qm", "more\n\nAuthored-with: human")
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        state = self.operation().state
+        self.assertNotIn("review_carry_forward", state)
+        self.assertEqual(len(state["passes"]), 2)
 
     def test_a_fix_after_a_review_stays_a_fix_verification(self):
         self.assertEqual(self.prepare()["phase"], "ready_to_send")
@@ -1274,6 +1357,47 @@ roles:
         self.assertTrue(any(reviewed in warning and "ancestor of the merge head" in warning
                             for warning in self.operation().state["warnings"]),
                         self.operation().state.get("warnings"))
+
+    def test_a_clean_catch_up_keeps_the_copilot_review_of_the_branch(self):
+        """sd:1485. Main's commits are shipped surface the Copilot review never
+        read, so every catch-up merge made that review stale and cost a new
+        request and a wait. When the commits since the reviewed head are clean
+        merges of the base and the branch's own patch-id is unchanged, the
+        review still covers the branch, and the merge receipt says why."""
+        self.enable_automatic_copilot()
+        self.prepare()
+        reviewed = _git(self.root, "rev-parse", "HEAD")
+        self.reviewed_at(reviewed)
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        self.assertEqual(self.prepare("--catch-up")["phase"], "ready_to_send")
+        head = _git(self.root, "rev-parse", "HEAD")
+        pull = self.remote.pull(1)
+        pull.checks = [{**row, "head_sha": head} for row in pull.checks]
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+        self.assertEqual(len(self.double.copilot_requests), 1)
+        self.assertTrue(any(reviewed in warning and "patch-id is unchanged" in warning
+                            for warning in self.operation().state["warnings"]),
+                        self.operation().state.get("warnings"))
+
+    def test_a_catch_up_that_moves_the_branchs_patch_leaves_the_copilot_review_stale(self):
+        self.enable_automatic_copilot()
+        self.prepare()
+        reviewed = _git(self.root, "rev-parse", "HEAD")
+        self.reviewed_at(reviewed)
+        self.remote.commit_on("main", "rival src\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        _git(self.root, "fetch", "-q", "origin", "main:refs/remotes/origin/main")
+        _git(self.root, "merge", "-q", "--no-ff", "--no-commit", "origin/main")
+        (self.root / "src.py").write_text("value = 5\n")
+        _git(self.root, "commit", "-qam", "Merge origin/main into topic\n\nAuthored-with: human")
+        self.prepare()
+        head = _git(self.root, "rev-parse", "HEAD")
+        pull = self.remote.pull(1)
+        pull.checks = [{**row, "head_sha": head} for row in pull.checks]
+        with patch.object(ship.time, "sleep"):
+            with self.assertRaisesRegex(ship.Refusal, "change the shipped surface") as caught:
+                self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "copilot_review_stale")
 
     def test_a_merge_refused_after_the_copilot_gate_records_no_ancestor_clearance(self):
         """sd:1373. The ancestor note says the gate cleared a merge, so the step
