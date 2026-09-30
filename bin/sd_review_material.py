@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import codecs
+import difflib
 import hashlib
 import json
 import os
@@ -36,9 +39,22 @@ def untracked(root: pathlib.Path) -> list[str]:
     return list(filter(None, read_git_material(root, ["ls-files", "--others", "--exclude-standard", "-z"]).split("\0")))
 
 
-# sd:2181: binaries are summarized, never encoded. Binary is git's rule: its diff marker for a tracked
-# change, else its no-attribute test (a NUL in the first 8000 bytes); non-UTF-8 bytes are summarized too.
+# sd:2181: of what git calls binary, only media is summarized: reviewers cannot read it and a retaken
+# screenshot overruns the limit. UTF-8 (a `-diff` file) and BOM-marked UTF-16 go as text; anything else
+# stays base64, so the size check refuses honestly. Zip and gzip are not media: they can carry source.
 BINARY_MARKER = re.compile(r"(?m)^Binary files .* differ\n?")
+MEDIA_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"\x00\x00\x01\x00", b"wOFF", b"wOF2", b"%PDF-")
+
+
+def is_media(data: bytes) -> bool:
+    return data.startswith(MEDIA_MAGIC) or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")
+
+
+def as_text(data: bytes) -> str | None:
+    try:
+        return data.decode("utf-16" if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)) else "utf-8")
+    except UnicodeError:
+        return None
 
 
 def content_summary(data: bytes) -> str:
@@ -51,13 +67,13 @@ def file_material(root: pathlib.Path, name: str, change: str) -> str:
         content = "symlink -> " + os.readlink(path)
     else:
         data = path.read_bytes()
-        binary = b"\0" in data[:8000]
-        try:
-            content = "" if binary else data.decode("utf-8")
-        except UnicodeError:
-            binary = True
-        if binary:
+        text = None if is_media(data) else as_text(data)
+        if text is not None:
+            content = text
+        elif is_media(data):
             content = f"[binary, not sent] {change}; {content_summary(data)}"
+        else:
+            content = "[binary, base64]\n" + base64.b64encode(data).decode("ascii")
     return f"\n--- {json.dumps(name)} ---\n{content}"
 
 
@@ -89,25 +105,73 @@ def tracked_material(root: pathlib.Path, subject: Any) -> dict[str, str]:
         raise ValueError("review patch and path inventory disagree; no partial subject sent")
     material = dict(zip(names, pieces, strict=True))
     binary = {name: piece for name, piece in material.items() if BINARY_MARKER.search(piece)}
-    return {**material, **binary_summaries(root, subject, binary)} if binary else material
+    return {**material, **binary_material(root, subject, args, binary)} if binary else material
 
 
-def binary_summaries(root: pathlib.Path, subject: Any, pieces: dict[str, str]) -> dict[str, str]:
-    """Keep git's header lines; replace the binary marker with sizes and hashes."""
-    sides = {name: (re.findall(r"(?m)^index ([0-9a-f]+)\.\.([0-9a-f]+)", piece) or [("", "")])[0] for name, piece in pieces.items()}
-    wanted = sorted({oid for old, new in sides.values() for oid in (old, new) if oid.strip("0")})
-    rows = read_git_material(root, ["cat-file", "--batch-check"], "".join(f"{oid}\n" for oid in wanted)).splitlines() if wanted else []
-    blobs = {oid: f"{row.split()[2]} bytes, blob {row.split()[0]}" for oid, row in zip(wanted, rows, strict=True)
-             if row.split()[1:2] == ["blob"]}
-    summaries = {}
-    for name, piece in pieces.items():
-        old, new = (blobs.get(oid, f"size unknown, blob {oid}") if oid.strip("0") else "absent" for oid in sides[name])
-        if subject.head == "worktree":
+def read_blobs(root: pathlib.Path, oids: list[str]) -> dict[str, tuple[str, bytes]]:
+    """One `cat-file --batch`: abbreviated id -> (full id, bytes); a missing object is left out."""
+    result = subprocess.run(["git", "cat-file", "--batch"], cwd=root, capture_output=True, check=False,
+                            input="".join(f"{oid}\n" for oid in oids).encode(), timeout=sd_lib.GIT_TIMEOUT_SECONDS)
+    if result.returncode:
+        raise ValueError("cannot read the complete review subject")
+    blobs, out = {}, result.stdout
+    for oid in oids:
+        header, out = out.split(b"\n", 1)
+        full, *rest = header.decode().split(" ")
+        if rest[:1] == ["blob"]:
+            size = int(rest[1])
+            blobs[oid], out = (full, out[:size]), out[size + 1:]
+    return blobs
+
+
+Side = tuple[bytes | None, str]
+
+
+def binary_sides(root: pathlib.Path, subject: Any, pieces: dict[str, str]) -> dict[str, list[Side]]:
+    """Each side's bytes and label: a committed blob, working-tree content, or absent."""
+    oids = {name: (re.findall(r"(?m)^index ([0-9a-f]+)\.\.([0-9a-f]+)", piece) or [("", "")])[0] for name, piece in pieces.items()}
+    worktree = subject.head == "worktree"
+    blobs = read_blobs(root, sorted({oid for pair in oids.values() for oid in pair[:1 if worktree else 2] if oid.strip("0")}))
+    sides = {}
+    for name, pair in oids.items():
+        found: list[Side] = [(blobs[oid][1], f"{len(blobs[oid][1])} bytes, blob {blobs[oid][0]}") if oid in blobs
+                             else (None, "unreadable" if oid.strip("0") else "absent") for oid in pair]
+        if worktree:
             path = root / name
-            new = content_summary(path.read_bytes()) if path.is_file() and not path.is_symlink() else "absent"
+            data = path.read_bytes() if path.is_file() and not path.is_symlink() else None
+            found[1] = (data, "absent" if data is None else content_summary(data))
+        sides[name] = found
+    return sides
+
+
+def binary_piece(name: str, piece: str, found: list[Side]) -> str | None:
+    """A media summary, a text diff of decodable sides, or None for `git diff --binary`."""
+    header = BINARY_MARKER.split(piece, 1)[0]
+    present = [data for data, label in found if label != "absent"]
+    if present and all(data is not None and is_media(data) for data in present):
         change = "added" if "\nnew file mode " in piece else "deleted" if "\ndeleted file mode " in piece else "modified"
-        summaries[name] = f"{BINARY_MARKER.split(piece, 1)[0]}[binary, not sent] {change}; old {old}; new {new}\n"
-    return summaries
+        return f"{header}[binary, not sent] {change}; old {found[0][1]}; new {found[1][1]}\n"
+    texts = [None if data is None or is_media(data) else as_text(data) for data in present]
+    if not present or None in texts:
+        return None
+    old, new = ((as_text(data) or "", "ab"[side] + "/" + name) if data is not None else ("", "/dev/null")
+                for side, (data, _label) in enumerate(found))
+    diff = difflib.unified_diff(old[0].splitlines(True), new[0].splitlines(True), old[1], new[1])
+    return header + "".join(line if line.endswith("\n") else line + "\n" for line in diff)
+
+
+def binary_material(root: pathlib.Path, subject: Any, args: list[str], pieces: dict[str, str]) -> dict[str, str]:
+    """Summarize media, diff decodable text, and leave anything else to `git diff --binary`."""
+    sides = binary_sides(root, subject, pieces)
+    material = {name: text for name, piece in pieces.items() if (text := binary_piece(name, piece, sides[name])) is not None}
+    raw = [name for name in pieces if name not in material]
+    if raw:
+        patch = read_git_material(root, ["diff", "--binary", *args, *(":(literal)" + name for name in raw)])
+        encoded = list(filter(None, re.split(r"(?m)(?=^diff --git )", patch)))
+        if len(encoded) != len(raw):
+            raise ValueError("review patch and path inventory disagree; no partial subject sent")
+        material.update(zip(raw, encoded, strict=True))
+    return material
 
 
 def input_manifest(inventory: list[dict[str, Any]], prompt: str, overheads: dict[str, str | None], limit: int,

@@ -174,7 +174,7 @@ class OversizeTests(ReviewFixture):
         self.assertEqual(set(subject.paths), expected)
         self.assertEqual({entry["path"] for entry in entries}, expected)
         self.assertEqual(sum(entry["bytes"] for entry in entries), len(material.encode()))
-        self.assertIn("[binary, not sent]", material)
+        self.assertIn("[binary, base64]", material)
         self.assertIn("symlink -> ../outside-secret", material)
         plan = sd_review.sd_review_material.input_manifest(entries, "prompt", {"test": "overhead"}, 200)
         grouped = [path for group in plan["suggested_groups"] for path in group["paths"]]
@@ -267,3 +267,35 @@ class BinaryMaterialTests(ReviewFixture):
         self.assertIn(f"[binary, not sent] added (untracked); 2100008 bytes, sha256 {hashlib.sha256(self.SHOT).hexdigest()}",
                       material)
         self.assertLess(len(material.encode()), 1000)
+
+    def test_git_binary_text_is_sent_readable_and_unknown_bytes_are_not_summarized(self):
+        # sd:2181 review: git also calls UTF-16 and `-diff` files binary; only media is summarized.
+        root, base = self.screenshot_branch()
+        self.git(root, "checkout", "--quiet", "-b", "configs")
+        (root / ".gitattributes").write_text("notes.txt -diff\n")
+        (root / "notes.txt").write_text("readable note behind -diff\n")
+        (root / "config.ini").write_bytes("[core]\nsetting = utf16-value\n".encode("utf-16"))
+        (root / "blob.dat").write_bytes(b"\x00\x01" + os.urandom(300))
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "--quiet", "-m", "configs")
+        subject = sd_review.resolve_subject(root, "branch", base=base)
+        material, inventory = sd_review.sd_review_material.collect_review_material(root, subject)
+        self.assertEqual(sum(row["bytes"] for row in inventory), len(material.encode()))
+        pieces = {name: material[material.index(f"diff --git a/{name}"):] for name in ("notes.txt", "config.ini", "blob.dat")}
+        for name, expected in (("notes.txt", "+readable note behind -diff\n"), ("config.ini", "+setting = utf16-value\n"),
+                               ("blob.dat", "GIT binary patch")):
+            with self.subTest(name=name):
+                self.assertIn(expected, pieces[name][:400])
+        self.assertNotIn("[binary, not sent]", pieces["blob.dat"].split("diff --git a/config.ini")[0])
+        self.assertIn("[binary, not sent] added; old absent; new 2100008 bytes, blob", material)
+
+    def test_whole_file_material_follows_the_same_rule(self):
+        root = self.make_repo()
+        (root / "wide.ini").write_bytes("setting = utf16-untracked\n".encode("utf-16"))
+        (root / "raw.dat").write_bytes(b"\x00\xff" + os.urandom(64))
+        (root / "new.png").write_bytes(self.SHOT)
+        subject = sd_review.resolve_subject(root, "worktree")
+        material, _inventory = sd_review.sd_review_material.collect_review_material(root, subject)
+        self.assertIn("setting = utf16-untracked", material)
+        self.assertIn('--- "raw.dat" ---\n[binary, base64]\n', material)
+        self.assertIn("[binary, not sent] added (untracked); 2100008 bytes", material)

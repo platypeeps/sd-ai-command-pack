@@ -811,14 +811,17 @@ class LineBudgetTests(unittest.TestCase):
         # it. `bin/sd_jev.py` grows +8: the floor (3) and the docstring that
         # states it (5). `bin/sd-review` grows +2: the route reason names an
         # answer below the routed tier. Measured on the branch.
-        # 4052 -> 4084 is sd:2181: `bin/sd_review_material.py` grows +32 to send
-        # a binary path as its sizes and hashes, one `cat-file --batch-check`
-        # for the committed blobs, instead of `git diff --binary` base64.
+        # 4052 -> 4148 is sd:2181: `bin/sd_review_material.py` grows +96 to send
+        # a media file (PNG, JPEG, GIF, WebP, ICO, WOFF, PDF by magic bytes) as
+        # its sizes and hashes instead of `git diff --binary` base64, to send
+        # what git calls binary but is UTF-8 or BOM-marked UTF-16 as a text
+        # diff, and to read both sides in one `cat-file --batch`; three helpers
+        # keep each under the complexity ceiling.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4084,
+            4148,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
