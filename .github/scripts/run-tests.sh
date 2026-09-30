@@ -110,6 +110,12 @@ export GIT_CONFIG_VALUE_1=0
 export GIT_CONFIG_KEY_2=receive.autogc
 export GIT_CONFIG_VALUE_2=false
 
+# sd:2104: no test reaches the live Jev endpoint. Every Jev caller has a
+# fallback and every Jev test stubs the command, so switching it off here
+# changes no result; it stops a leaked call from being billed and metered.
+unset TYPESAFE_API_KEY
+export JEV_ENABLED=0
+
 # Largest test file first (size approximates runtime) to shorten the tail.
 modules=()
 while IFS= read -r path; do

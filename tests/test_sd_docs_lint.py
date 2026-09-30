@@ -2113,6 +2113,10 @@ if verb == "enabled":
         open(probed, "w").close()
     raise SystemExit(int(os.environ.get("JEV_STUB_ENABLED", "0")))
 state = sys.argv[sys.argv.index("--state") + 1]
+argv = os.environ.get("JEV_STUB_ARGV")
+if argv:
+    with open(argv, "w") as handle:
+        json.dump(sys.argv[1:], handle)
 capture = os.environ.get("JEV_STUB_CAPTURE")
 if capture:
     shutil.copyfile(state, capture)
@@ -2197,6 +2201,18 @@ class Rule6ClaimSupportTests(LintFixture):
         with self.jev():
             self.assertIn("claim support", self.notes())
         self.assertTrue(self.capture.exists(), "an opted-in repository took no reading")
+
+    def test_the_reading_names_its_caller_and_stage(self) -> None:
+        """The meter files an unnamed request under `UNNAMED` (sd:2104): 21
+        rows from `make check` could not be told apart from a leaking suite."""
+
+        self.recorded_item()
+        argv = self.repo / "argv.json"
+        with self.jev(JEV_STUB_ARGV=str(argv)):
+            self.notes()
+        sent = json.loads(argv.read_text(encoding="utf-8"))
+        self.assertEqual(sent[sent.index("--caller") + 1], "sd-docs-lint")
+        self.assertEqual(sent[sent.index("--stage") + 1], lint.JEV_STAGE)
 
     def test_a_repository_that_has_not_opted_in_sends_nothing(self) -> None:
         """The default (sd:1304). No file, the switch unset, `jev` on PATH and

@@ -1306,7 +1306,8 @@ def ask_claims(command: str, cases: dict[str, dict[str, str]]) -> dict[str, dict
         try:
             done = subprocess.run(  # fixed argv, no shell
                 [command, "ask", "--questions", "-", "--state", str(state),
-                 "--state-format", "json", "--fallback", "{}"],
+                 "--state-format", "json", "--fallback", "{}",
+                 "--caller", "sd-docs-lint", "--stage", JEV_STAGE],
                 input=json.dumps(questions), capture_output=True, text=True, timeout=120,
             )
         except (OSError, subprocess.SubprocessError):
