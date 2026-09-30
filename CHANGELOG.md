@@ -155,6 +155,18 @@
   the fingerprint only when present, so each document of a repository with a
   GitHub origin re-queues once, and no other repository re-queues anything.
 
+- **A post-cap request verifies past a reservation (sd:2192).** A request
+  whose last pass reviewed nothing -- a watchdog, an unreadable receipt, or a
+  pass no reviewer completed -- still reviewed the whole branch. On a guest
+  repository PR the fix since the last completed pass was about 8 KB and the
+  branch about 2.1 MB, so every reviewer refused the input and the request
+  could not run. The request now verifies the diff since the last completed
+  pass, and the coverage check links it to that pass. A reservation that kept
+  a finding or a timeout capture is not passed over, and neither is a failed
+  pass dispatched under a moved review binding, which a request now marks as
+  an automatic re-review does; that request still reviews the whole branch.
+  The request's history digest is unchanged.
+
 - **A post-cap review verifies the fix, and a pass that reviewed nothing
   spends no request (sd:2147).** `sd-ship prepare --additional-review-for`
   reviewed the whole branch against its base on every request. The design

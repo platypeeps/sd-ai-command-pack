@@ -58,6 +58,28 @@ def reservation(entry: dict) -> bool:
     return not report or not completed_depth(report)
 
 
+def verified_index(passes: list[dict]) -> int | None:
+    """sd:2192. The last pass that verified something, for a request to verify its fix from.
+
+    A reservation after it is skipped only while it holds no evidence. One that
+    kept a finding or a timeout capture still has to be resumed, so a request
+    behind it reviews the whole branch as before.
+
+    Nor is a reservation dispatched under a moved review binding. Dispatch
+    stores the new binding before the pass runs, so once it fails the binding
+    no longer reads as moved, and a skip would verify the fix against a report
+    written under the old policy. The whole branch it owed is still owed.
+    """
+    for index in range(len(passes) - 1, -1, -1):
+        entry = passes[index]
+        if not reservation(entry):
+            return index
+        if ((entry.get("report") or {}).get("findings") or timeout_evidence(entry) is not None
+                or entry.get("review_binding_change")):
+            return None
+    return None
+
+
 def review_history(passes: list[dict]) -> dict:
     """Preserve the item receipt's aggregate shape and untrusted provenance."""
     findings: list[dict]
@@ -313,8 +335,11 @@ class ItemHistory(ReviewHistory):
             if not retried and not completed_depth(current):
                 raise Refusal("the original branch never completed the requested local review depth")
             return
-        previous = passes[index - 1]
-        if index - 1 > checkpoint and not completed_depth(previous.get("report") or {}):
+        last = index - 1
+        if entry.get("additional_review_request") and (found := verified_index(passes[:index])) is not None:
+            last = found
+        previous = passes[last]
+        if last > checkpoint and not completed_depth(previous.get("report") or {}):
             raise Refusal("the original branch never completed the requested local review depth")
         if not verification_link(previous, current):
             raise Refusal("fix verification does not continue the initially reviewed head")
