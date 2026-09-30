@@ -811,11 +811,28 @@ class LineBudgetTests(unittest.TestCase):
         # it. `bin/sd_jev.py` grows +8: the floor (3) and the docstring that
         # states it (5). `bin/sd-review` grows +2: the route reason names an
         # answer below the routed tier. Measured on the branch.
+        # 4052 -> 4065 is sd:2107: `bin/sd_jev.py` passes `jev --subject`, the
+        # judged change as `sd-review-tier:<owner>.<repo>:<sha12>`, so a later
+        # labeller can score the tier from the pull request's outcome. It grows
+        # +12 (`_jev_subject`, the optional argv pair, the `root` argument) and
+        # `bin/sd-review` +1 (passing `root`). Reading `origin` and `HEAD` is
+        # `sd_lib.github_head`, shared core, so none of that is spent here.
+        # 4065 -> 4161 is sd:2181: `bin/sd_review_material.py` grows +96 to send
+        # a media file (PNG, JPEG, GIF, WebP, WOFF, PDF by magic bytes) as
+        # its sizes and hashes instead of `git diff --binary` base64, to send
+        # what git calls binary but is UTF-8 or BOM-marked UTF-16 as a text
+        # diff, and to read both sides in one `cat-file --batch`; three helpers
+        # keep each under the complexity ceiling.
+        # 4161 -> 4196 is sd:2181 review pass 2: a summarized path makes a
+        # material-only reader's coverage partial, so its answer does not count
+        # toward depth (`partial` in `bin/sd-review`, `coverage` in the manifest),
+        # and a text diff names a UTF-16 or BOM encoding, sending an
+        # encoding-only change in binary form (`encoding`, `text_diff`).
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4052,
+            4196,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

@@ -1846,7 +1846,8 @@ def review(
     # byte-for-byte what it was. `bin/sd_jev.py` owns the contract and says
     # exactly what leaves the machine, and which failures are loud.
     jev_choice, jev_reading = sd_jev.jev_tier(
-        plan.tier, policy["tier_order"], subject.paths, subject.lines, plan.reason, env)
+        plan.tier, policy["tier_order"], subject.paths, subject.lines, plan.reason, env,
+        root=str(root))
     if jev_reading is not None:
         plan = plan._replace(
             tier=jev_choice,
@@ -2108,6 +2109,7 @@ def review(
     outcomes: list[Outcome] = []
     reviewed: list[str] = []
     cited = reviewed_paths(root, subject, previous)
+    omitted = tuple(input_manifest.get("omitted_paths", ()))
     for provider in chosen:
         if len(reviewed) >= depth:
             break
@@ -2115,9 +2117,10 @@ def review(
         # itself. The result key carries the last; each outcome carries its own.
         if provider.reader == "codex-json" and auth["ok"]:
             skills = result["codex_skill_suppression"] = codex_skill_state(provider, root, runner, env, auth_home)
-        for outcome in _attempts(provider, lambda: unlocated(run_provider(
+        unread = omitted if provider.url or provider.reader in MATERIAL_READERS else ()
+        for outcome in _attempts(provider, lambda: partial(unlocated(run_provider(
                 provider, root, subject, prompt, runner, env, phase,  # noqa: B023 -- run in this iteration
-                codex_auth_home, client, ledger, skills), cited, result["severity_floor"])):  # noqa: B023
+                codex_auth_home, client, ledger, skills), cited, result["severity_floor"]), unread)):  # noqa: B023
             outcomes.append(outcome)
             if outcome.status in (CLEAN, FINDINGS):
                 reviewed.append(outcome.backend)
@@ -2209,6 +2212,18 @@ def unlocated(outcome: Outcome, cited: frozenset[str], floor: str) -> Outcome:
     return outcome._replace(status=UNAVAILABLE if completed else outcome.status, findings=kept,
                             detail=note if completed else f"{outcome.detail}; {note}",
                             diagnostic=dict(outcome.diagnostic or {}, unlocated_findings=count))
+
+
+def partial(outcome: Outcome, unread: Sequence[str]) -> Outcome:
+    """sd:2181. A reader that saw a path only as a size-and-hash line did not review it.
+
+    The answer keeps its findings but does not count toward depth, so the chain
+    falls through to a reviewer that reads the repository itself."""
+    if not unread or outcome.status not in (CLEAN, FINDINGS):
+        return outcome
+    note = f"{outcome.backend} saw {len(unread)} path(s) only as a size and hash: {', '.join(unread)}; coverage is partial"
+    return outcome._replace(status=UNAVAILABLE, detail=f"{outcome.detail}; {note}",
+                            diagnostic=dict(outcome.diagnostic or {}, coverage="partial", omitted_paths=list(unread)))
 
 
 def finish_review(result: dict[str, Any], outcomes: Sequence[Outcome], reviewed: list[str]) -> dict[str, Any]:

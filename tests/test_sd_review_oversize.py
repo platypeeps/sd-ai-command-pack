@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -205,3 +206,158 @@ class OversizeTests(ReviewFixture):
         self.assertEqual(git_calls.call_count, 3)
         self.assertEqual(len(inventory), 20)
         self.assertEqual(sum(row["bytes"] for row in inventory), len(material.encode()))
+
+
+class BinaryMaterialTests(ReviewFixture):
+    """sd:2181: a binary path contributes a short summary, never its bytes."""
+
+    SHOT = b"\x89PNG\r\n\x1a\n" + os.urandom(2_100_000)
+
+    def git(self, root, *args):
+        return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout
+
+    def screenshot_branch(self):
+        root = self.make_repo()
+        (root / "src.py").write_text("".join(f"line = {index}\n" for index in range(200)))
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "--quiet", "-m", "text")
+        base = self.git(root, "rev-parse", "HEAD").strip()
+        self.git(root, "checkout", "--quiet", "-b", "retake")
+        (root / "shot.png").write_bytes(self.SHOT)
+        (root / "src.py").write_text("".join(f"value = {index}\n" for index in range(200)))
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "--quiet", "-m", "retake")
+        return root, base
+
+    def test_branch_adding_a_large_png_fits_the_review_limit(self):
+        root, base = self.screenshot_branch()
+        subject = sd_review.resolve_subject(root, "branch", base=base)
+        material, inventory = sd_review.sd_review_material.collect_review_material(root, subject)
+        manifest = sd_review.sd_review_material.input_manifest(inventory, "prompt", {"fixture": "overhead"},
+                                                               sd_review.MAX_OUTPUT_BYTES)
+        self.assertEqual(manifest["status"], "within_limit", manifest["measured_bytes"])
+        self.assertEqual([row["path"] for row in inventory], ["shot.png", "src.py"])
+        self.assertEqual(sum(row["bytes"] for row in inventory), len(material.encode()))
+        blob = self.git(root, "rev-parse", "HEAD:shot.png").strip()
+        shot = material[material.index('diff --git a/shot.png'):material.index('diff --git a/src.py')]
+        self.assertNotIn("GIT binary patch", shot)
+        self.assertIn("[binary, not sent] added; old absent; new 2100008 bytes, blob " + blob, shot)
+        self.assertLess(len(shot.encode()), 400)
+
+    def test_text_change_beside_a_binary_is_sent_in_full(self):
+        root, base = self.screenshot_branch()
+        subject = sd_review.resolve_subject(root, "branch", base=base)
+        material, _inventory = sd_review.sd_review_material.collect_review_material(root, subject)
+        expected = self.git(root, "diff", "--no-color", base, "HEAD", "--", "src.py")
+        self.assertTrue(material.endswith(expected))
+        self.assertEqual(expected.count("\n+value = "), 200)
+
+    def test_worktree_binaries_report_old_blob_and_new_content_hash(self):
+        root, _base = self.screenshot_branch()
+        changed = b"\x89PNG\r\n\x1a\n\x00changed"
+        old_blob = self.git(root, "rev-parse", "HEAD:shot.png").strip()
+        (root / "shot.png").write_bytes(changed)
+        (root / "new.png").write_bytes(self.SHOT)
+        subject = sd_review.resolve_subject(root, "worktree")
+        material, inventory = sd_review.sd_review_material.collect_review_material(root, subject)
+        self.assertEqual({row["path"] for row in inventory}, {"shot.png", "new.png"})
+        self.assertEqual(sum(row["bytes"] for row in inventory), len(material.encode()))
+        self.assertIn(f"[binary, not sent] modified; old 2100008 bytes, blob {old_blob}; "
+                      f"new {len(changed)} bytes, sha256 {hashlib.sha256(changed).hexdigest()}", material)
+        self.assertIn(f"[binary, not sent] added (untracked); 2100008 bytes, sha256 {hashlib.sha256(self.SHOT).hexdigest()}",
+                      material)
+        self.assertLess(len(material.encode()), 1000)
+
+    def test_git_binary_text_is_sent_readable_and_unknown_bytes_are_not_summarized(self):
+        # sd:2181 review: git also calls UTF-16 and `-diff` files binary; only media is summarized.
+        root, base = self.screenshot_branch()
+        self.git(root, "checkout", "--quiet", "-b", "configs")
+        (root / ".gitattributes").write_text("notes.txt -diff\n")
+        (root / "notes.txt").write_text("readable note behind -diff\n")
+        (root / "config.ini").write_bytes("[core]\nsetting = utf16-value\n".encode("utf-16"))
+        (root / "blob.dat").write_bytes(b"\x00\x01" + os.urandom(300))
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "--quiet", "-m", "configs")
+        subject = sd_review.resolve_subject(root, "branch", base=base)
+        material, inventory = sd_review.sd_review_material.collect_review_material(root, subject)
+        self.assertEqual(sum(row["bytes"] for row in inventory), len(material.encode()))
+        pieces = {name: material[material.index(f"diff --git a/{name}"):] for name in ("notes.txt", "config.ini", "blob.dat")}
+        for name, expected in (("notes.txt", "+readable note behind -diff\n"), ("config.ini", "+setting = utf16-value\n"),
+                               ("blob.dat", "GIT binary patch")):
+            with self.subTest(name=name):
+                self.assertIn(expected, pieces[name][:400])
+        self.assertNotIn("[binary, not sent]", pieces["blob.dat"].split("diff --git a/config.ini")[0])
+        self.assertIn("[binary, not sent] added; old absent; new 2100008 bytes, blob", material)
+
+    def test_whole_file_material_follows_the_same_rule(self):
+        root = self.make_repo()
+        (root / "wide.ini").write_bytes("setting = utf16-untracked\n".encode("utf-16"))
+        (root / "raw.dat").write_bytes(b"\x00\xff" + os.urandom(64))
+        (root / "new.png").write_bytes(self.SHOT)
+        subject = sd_review.resolve_subject(root, "worktree")
+        material, _inventory = sd_review.sd_review_material.collect_review_material(root, subject)
+        self.assertIn("setting = utf16-untracked", material)
+        self.assertIn('--- "raw.dat" ---\n[binary, base64]\n', material)
+        self.assertIn("[binary, not sent] added (untracked); 2100008 bytes", material)
+
+    def test_ico_magic_is_not_a_media_pass(self):
+        # sd:2181 review: 00 00 01 00 is too weak a signature to let a file escape review.
+        root, base = self.screenshot_branch()
+        disguised = b"\x00\x00\x01\x00" + os.urandom(64)
+        (root / "favicon.ico").write_bytes(disguised)
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "--quiet", "-m", "icon")
+        (root / "loose.ico").write_bytes(disguised)
+        subject = sd_review.resolve_subject(root, "branch", base=base)
+        material, _inventory = sd_review.sd_review_material.collect_review_material(root, subject)
+        piece = material[material.index("diff --git a/favicon.ico"):material.index("diff --git a/shot.png")]
+        self.assertIn("GIT binary patch", piece)
+        self.assertNotIn("[binary, not sent]", piece)
+        self.assertIn('--- "loose.ico" ---\n[binary, base64]\n',
+                      sd_review.sd_review_material.file_material(root, "loose.ico", "added (untracked)"))
+
+    def test_a_summarized_path_leaves_a_material_only_review_partial(self):
+        # sd:2181 review pass 2: a hash line is not a review. A `-diff` script that starts
+        # like a GIF is summarized, so a reviewer that reads only material has partial coverage.
+        root = self.make_repo()
+        (root / ".gitattributes").write_text("build.sh -diff\n")
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "--quiet", "-m", "attributes")
+        (root / "build.sh").write_text("GIF89a\nrm -rf \"$HOME\"\n")
+        registry = self.registry_home / ".local/share/sd/providers.yaml"
+        registry.write_text(registry.read_text().replace("reader: codex-json", "reader: claude-json"))
+        answer = sd_review.Completed(0, json.dumps({"type": "result", "subtype": "success",
+                                                   "structured_output": {"findings": []}}), "")
+        result = sd_review.review(root, namespace(), FakeRunner({"codex": answer, "second": answer}),
+                                  self.environment(), self.chatgpt_home())
+        self.assertEqual(result["completed_reviews"], 0, [(row["backend"], row["status"]) for row in result["outcomes"]])
+        self.assertEqual(result["input_manifest"]["omitted_paths"], ["build.sh"])
+        self.assertNotEqual(result["status"], "clean")
+        partial = [row for row in result["outcomes"] if (row["diagnostic"] or {}).get("coverage") == "partial"]
+        self.assertTrue(partial, result["outcomes"])
+        self.assertTrue(all(row["diagnostic"]["omitted_paths"] == ["build.sh"] and "build.sh" in row["detail"]
+                            for row in partial))
+
+    def test_an_encoding_change_is_visible(self):
+        root = self.make_repo()
+        (root / "same.txt").write_text("unchanged words\n")
+        (root / "moved.txt").write_text("old words\n")
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "--quiet", "-m", "utf-8")
+        (root / "same.txt").write_bytes("unchanged words\n".encode("utf-16"))
+        (root / "moved.txt").write_bytes("new words\n".encode("utf-16"))
+        subject = sd_review.resolve_subject(root, "worktree")
+        material, _inventory = sd_review.sd_review_material.collect_review_material(root, subject)
+        same = material[material.index("diff --git a/same.txt"):]
+        moved = material[material.index("diff --git a/moved.txt"):material.index("diff --git a/same.txt")]
+        self.assertIn("GIT binary patch", same)
+        self.assertIn("[encoding] old utf-8; new utf-16-le, BOM\n", moved)
+        self.assertIn("+new words\n", moved)
+
+    def test_a_native_reader_completes_a_screenshot_review(self):
+        root = self.make_repo()
+        (root / "shot.png").write_bytes(self.SHOT)
+        result = sd_review.review(root, namespace(), FakeRunner(), self.environment(), self.chatgpt_home())
+        self.assertEqual(result["input_manifest"]["omitted_paths"], ["shot.png"])
+        self.assertEqual(result["input_manifest"]["partial_providers"], [])
+        self.assertEqual((result["status"], result["completed_reviews"]), ("clean", 1))

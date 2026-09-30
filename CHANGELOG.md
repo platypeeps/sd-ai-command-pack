@@ -74,6 +74,16 @@
 
 ### Fixed
 
+- **A catch-up keeps both CHANGELOG.md entries (sd:2174).** `sd-ship prepare
+  --catch-up` aborted on any conflict, and in the pack it stopped almost every
+  time on `CHANGELOG.md`: the branch and the base had each added an entry at
+  the top of the same section. When `CHANGELOG.md` at the root is the only
+  unmerged path and every conflict hunk has an empty base, the merge now keeps
+  both, the branch's entries first and one blank line between them, and the
+  receipt carries a warning that says so. An edit on either side, or any other
+  conflicted path, still aborts with the same `merge_conflict` refusal. No
+  `merge=union` attribute: it drops the blank line between entries.
+
 - **Jev can no longer lower a review (sd:2132).** `sd-review` replaced the
   routed tier with Jev's choice, so an answer of `skip` or `cheap` removed a
   review the policy asked for. An answer below the routed tier now keeps the
