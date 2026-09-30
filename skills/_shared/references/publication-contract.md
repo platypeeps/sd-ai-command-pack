@@ -296,6 +296,8 @@ Draining is six steps per request, and the order matters:
 1. Read the request. It names the destination, the document, its `content`
    -- the Markdown as it stood when the request was queued, and what step 3
    mirrors -- the paths its source, rendered page and vault copy sit at, its
+   `source_url`, the GitHub URL of the source read from the repository's
+   `origin` or `null` where origin names no GitHub repository, its
    container, the page or file to update, the revision the render was made
    from and its `fingerprint`, which step 6 hands back. A Notion request
    also names its `scope`,
@@ -334,7 +336,15 @@ Draining is six steps per request, and the order matters:
    `source`, which may have moved on since -- a drain that reads the path
    publishes what nobody queued and acknowledges a fingerprint of something
    else. `source` and `markdown` say where the text came from and where the
-   vault copy sits, for the pointer line. A request written before `content`
+   vault copy sits.
+
+   **The pointer line links `source_url`, verbatim.** Where it is `null` or
+   absent, the pointer names the `source` path. Never compose a GitHub URL
+   from the repository name, a remembered owner or a template: the render
+   read the owner from `origin`, and a drain that composed its own pointed
+   aura-research's pages at the wrong owner for six days (sd:1999). A
+   request written before `source_url` existed gets it on the next render,
+   because the field is part of the `fingerprint`. A request written before `content`
    existed names only its paths; the next render rewrites it with the field,
    and a drain that reaches one first mirrors the file at `source`, as the
    contract then said.

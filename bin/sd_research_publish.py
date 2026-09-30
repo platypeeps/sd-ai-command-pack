@@ -44,7 +44,7 @@ import sys
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from sd_lib import git_output, main_worktree_root
 
@@ -445,6 +445,34 @@ def revision(repo: Path) -> str:
     would mean a second timeout and a second answer to what a failure means.
     """
     return git_output(["rev-parse", "HEAD"], repo) or "unknown"
+
+
+#: The three spellings of a github.com `origin` this pack reads elsewhere
+#: (`sd_ship_remote.slug`), with no credential in them. Anything else -- no
+#: origin, another host, a token in the URL -- names no GitHub repository.
+GITHUB_ORIGIN = re.compile(
+    r"(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)"
+    r"([\w.-]+)/([\w.-]+?)(?:\.git)?/?")
+
+
+def source_url(repo: Path, src: str) -> str | None:
+    """The GitHub URL of `src` for a mirror's pointer line, or None.
+
+    Read from `origin`, so the drain never composes an owner itself: it did,
+    and aura-research's pages named `sdelmas` for six days after the repo
+    moved to `platypeeps` (sd:1999). `blob/HEAD/` is GitHub's name for the
+    default branch, whatever it is called: the link is where to edit, and a
+    commit permalink would change the request on every commit.
+    """
+    match = GITHUB_ORIGIN.fullmatch(git_output(["remote", "get-url", "origin"], repo) or "")
+    if not match or not src:
+        return None
+    try:
+        path = (repo / src).resolve().relative_to(repo.resolve())
+    except ValueError:
+        return None
+    return "https://github.com/%s/%s/blob/HEAD/%s" % (
+        match[1], match[2], quote(path.as_posix(), safe="/"))
 
 
 def notion_target(
@@ -857,8 +885,12 @@ def mirror_fingerprint(request: dict[str, Any], target: dict[str, str], what: st
     mirror is called; the identity `mirror_identity` compares, because a
     document moved to another container is a new mirror; the designation's
     own page or file id, because a `page=` the user wrote is an instruction
-    the drain has to see; and the source path, because the request carries
-    it and the mirror's pointer line names it.
+    the drain has to see; and the source path and `source_url`, because the
+    request carries them and the mirror's pointer line names them. A request
+    with no `source_url` hashes exactly what it did before the field existed,
+    so a repository without a GitHub origin re-queues nothing on upgrade; one
+    with it re-queues each document once, which is what corrects a pointer a
+    drain composed with the wrong owner (sd:1999).
 
     Not the revision: a commit that touches nothing the mirror is made of
     still moves HEAD, and re-queueing on every commit is the defect this
@@ -869,6 +901,8 @@ def mirror_fingerprint(request: dict[str, Any], target: dict[str, str], what: st
     named = mirror_identity(request, target, what)
     named.update(title=request.get("title", ""), source=request.get("source", ""),
                  designated=request.get(what, ""))
+    if request.get("source_url"):
+        named.update(source_url=request["source_url"])
     digest = hashlib.sha256(json.dumps(named, sort_keys=True).encode("utf-8"))
     digest.update(str(request.get("content", "")).encode("utf-8"))
     return digest.hexdigest()
@@ -1072,6 +1106,9 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
                 "document": out,
                 "title": cfg.get("title", out),
                 "source": str(repo / src) if src else "",
+                # The pointer line's link, read from `origin` and never
+                # composed by the drain; None where origin names no GitHub repo.
+                "source_url": source_url(repo, src),
                 "rendered": str(repo / DASHBOARD_DIR / (out + ".html")),
                 "markdown": str(vault / (out + ".md")) if vault else "",
                 # What the drain mirrors, read once here. The three paths
