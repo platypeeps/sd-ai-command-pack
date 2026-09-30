@@ -166,9 +166,17 @@ Do not combine this request with retry or commit flags.
 
 At least five previous spent passes must exist.
 The reservation binds the head, reason, and preceding history before dispatch.
-It preserves earlier findings with source heads and report digests.
+The request reviews the subject an automatic pass would review at that head.
+After a completed pass on an earlier head, it verifies the diff since that head.
+A fix delta then fits the 2,000,000-byte review input cap even when the whole branch does not.
+Otherwise the request reviews the whole branch again.
+That covers the same head, an incomplete last pass, a moved binding, a catch-up merge, and imported history.
+A whole-branch request preserves earlier findings with source heads and report digests.
 It retains the union of author vendors.
-A failed additional review remains spent.
+A pass in which no reviewer completed and no finding survived reviewed nothing.
+It does not consume the request; repeat the same request after resolving the refusals.
+Any other failed additional review remains spent.
+Each refusal of an additional pass says whether the operator request was consumed.
 
 After six spent passes, each later pass requires a fresh explicit user decision and current history digest.
 Add `--review-history-digest SHA256`.

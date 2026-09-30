@@ -215,6 +215,10 @@ Blockers identify `code`, `boundary`, `retryable`, and `approval_required`.
 Existing result fields and exit meanings remain authoritative; the new object does not grant permission.
 
 Receipts bind repository, branch, item or review identity, exact head, tools, policy, and review history.
+The tools bound are the `verdict` class in `bin/sd_ship_bindings.py`: the code `sd-review` runs, compared without comments or docstrings.
+Gate and check code runs again on every `prepare` and `merge`, so a change there does not void a receipt.
+A moved binding refuses with "review tools or repository policy changed after review:" and names each changed file and its class.
+Run `prepare` again; it re-reviews the same head in full.
 `--expected-head` compares evidence; it does not replace evidence.
 There is no `--reviewed-head` override.
 An interrupted review retains its reserved pass.
