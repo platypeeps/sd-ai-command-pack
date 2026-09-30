@@ -776,6 +776,14 @@ roles:
         head = "# Changelog\n\n## Unreleased\n\n### Fixed\n\n"
         before = self.changelog_rivals(self.CHANGELOG.replace(head, head + entry.format("Ours")),
                                        self.CHANGELOG.replace(head, head + entry.format("Theirs")))
+        # A clean merge runs no pre-commit hook, so the resolved one does not
+        # either: the pack's outlasts the git timeout and would abort it.
+        hook = pathlib.Path(_git(self.root, "rev-parse", "--git-path", "hooks/pre-commit"))
+        if not hook.is_absolute():
+            hook = self.root / hook
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        hook.write_text("#!/bin/sh\nexit 1\n")
+        hook.chmod(0o755)
         self.assertEqual(self.prepare("--catch-up")["phase"], "ready_to_send")
         merged = _git(self.root, "rev-parse", "HEAD")
         self.assertEqual(_git(self.root, "rev-list", "--parents", "-n", "1", merged).split()[1:],
