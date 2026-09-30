@@ -74,8 +74,8 @@ def registries() -> list:
 
 
 def known_author(value: str, readers: list) -> bool:
-    """Whether `value` is `human` or the `<entry>/<vendor>` a registry resolves."""
-    if value == sd_lib.HUMAN_AUTHOR:
+    """Whether `value` is a reserved author or the `<entry>/<vendor>` a registry resolves."""
+    if value in sd_lib.RESERVED_AUTHORS.values():
         return True
     entry, separator, _vendor = value.partition("/")
     for registry in readers:

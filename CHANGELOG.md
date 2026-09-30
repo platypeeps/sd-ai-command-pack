@@ -4,6 +4,53 @@
 
 ### Added
 
+- **One passing local gate per head (sd:2041, sd:1912).** Under `repo.ci =
+  local`, `sd-ship prepare` runs its check as the merge gate does -- a clean
+  worktree at the head, the gate's environment, `sd-review --gate-check` --
+  and a pass leaves a receipt in this machine's workflow database. The merge
+  gate of the same head, within 30 minutes (`REUSE_WINDOW_SECONDS`), reads it
+  instead of a second run, and the status says `(reused)`. Prepare never
+  reads a receipt and the merge gate never writes one. The binding is the
+  head, its tree, the gate inputs (every pack `bin/` file and an untracked
+  `CLAUDE.local.md`), the scope, the detected commands, each command's
+  executable, the interpreter and the gate's whole environment, every
+  variable by name and value. Inputs outside the repository (external
+  makefiles, tool files, machine state) are not bound; the short same-head
+  window is the accepted residual risk, and a repository that needs more uses
+  the explicit dependency contract (sd:1912). The gate's bound in prepare is
+  now the merge gate's 3600 s, not the reviewers' 1800 s, unless
+  `--review-timeout` names one; the timing plan carries it as
+  `check_seconds`.
+
+- **A declared docs-only check scope (sd:2072).** A repository may track
+  `.github/sd-check-scope.json` naming `docs_paths` globs and a
+  `docs_command`. `sd-check --base REF` then runs only the docs command when
+  every path changed since the merge base is a docs path; the merge gate and
+  prepare's gate pass the base branch. A change to the declaration, a
+  Makefile, the file the entrypoints came from, `CLAUDE.local.md` or a file a
+  check command names runs the full check. The status reads `sd-check pass
+  (docs-only)`. No declaration is today's behaviour.
+
+- **A Dependabot commit is attributed by the identity GitHub gives it
+  (sd:2065).** Dependabot writes no `Authored-with:`, so `sd-review` refused
+  every bump as `authored unknown` and `sd attribute` had no truthful value to
+  record. A commit whose author is `dependabot[bot]` with its fixed noreply
+  address and whose committer is `GitHub <noreply@github.com>` now reads as
+  `dependabot/github`: vendor `github`, which excludes no reviewer, and the
+  value the squash carries. A local rewrite changes the committer, so it says
+  nothing again; `sd attribute <sha> dependabot` records it by hand. A human
+  fix-up on the branch still needs its own trailer. The identity is a claim,
+  as a trailer is; the GitHub signature is not verified.
+
+- **`sd-ship prepare --catch-up` merges the base into a BEHIND branch
+  (sd:2023).** Under strict protection another landing left a branch behind,
+  and the recovery was a hand merge, a push, a review and a prepare. The flag
+  merges `origin/<base>` (no rebase, no force push), and the new head gets a
+  full-branch pass, so the review covers the branch's own diff and not the
+  base's code. A conflict aborts and leaves the branch unchanged. Merge now
+  names BEHIND as `base_moved`, before the local gate runs, and points at the
+  flag.
+
 - **Every repository gate takes a machine-wide slot (sd:1996).** `sd-check`,
   which every `sd-ship` gate runs, waits for one of `sd.gate_slots` slots
   before it runs a check; unset reads a quarter of the cores, `SD_GATE_SLOTS`
@@ -26,6 +73,74 @@
   the remedy, a fresh commit.
 
 ### Fixed
+
+- **Jev can no longer lower a review (sd:2132).** `sd-review` replaced the
+  routed tier with Jev's choice, so an answer of `skip` or `cheap` removed a
+  review the policy asked for. An answer below the routed tier now keeps the
+  routed tier and records what Jev said as `below_routed` in the `jev` block;
+  the route reason names it. Answers at or above the routed tier are
+  unchanged.
+
+- **The writing skills name their Jev calls (sd:2133).** `sd-fact-check`,
+  `sd-publish`, `sd-prose-lint` and `sd-humanizer` probed with a bare `jev
+  enabled` and sent no `--caller` or `--stage`, so the judgment ledger could
+  not count them. They now pass `JEV_SD_FACT_CHECK`, `JEV_SD_PUBLISH` and
+  `JEV_SD_PROSE_SCORE` with the skill's name, and each stage variable set to
+  `0` switches that pass off.
+
+- **`sd-ship prepare` no longer titles a multi-commit branch after its newest
+  commit (sd:2097).** With no `--title` and no stored title, prepare used the
+  newest non-merge subject, so an 11-commit branch opened as a pull request
+  named for its last fix (ui-design PR #16). A one-commit branch still uses
+  its subject. A branch of two or more non-merge commits is refused before the
+  review, and the refusal names the count and the subject it would have used.
+  Merges still never count (sd:1377), and `merge` still squashes with the live
+  pull request title (sd:1876).
+
+- **A post-cap review verifies the fix, and a pass that reviewed nothing
+  spends no request (sd:2147).** `sd-ship prepare --additional-review-for`
+  reviewed the whole branch against its base on every request. The design
+  read an explicit request as a full-branch checkpoint that supersedes the
+  history before it, so the one pass the operator asked for was the largest
+  subject the item had. On ui-design #19 the branch was 2.1 MB over 85 files,
+  every reviewer refused the input past the 2,000,000-byte cap, and the
+  refused pass still spent the request. A request after a completed pass on
+  an earlier head now verifies the diff since that head, as an automatic pass
+  would; the whole branch is reviewed only where no such pass exists. A pass
+  in which no reviewer completed and no finding survived is released like a
+  gate failure, and every refusal of an additional pass says whether the
+  request was consumed.
+
+- **No test reaches the real Jev (sd:2136).** On a keyed machine, tests that
+  ran `sd-review` or `sd-docs-lint` against the checkout sent live, metered
+  calls: 141 on 2026-09-29. `run-tests.sh` now exports `JEV_ENABLED=0`; the
+  Jev tests keep their own stubs. `sd-docs-lint` now names both of its calls
+  (`JEV_SD_DOCS_LINT`, `--caller sd-docs-lint`) so its intended gate reading
+  is counted.
+
+- **`sd writing` runs from a linked worktree (sd:2024).** It keyed rows to
+  the worktree's own path, so every piece answered "no database piece". It
+  now keys rows to the main checkout and, through `sd_db.writing.checkout`,
+  reads piece files and gate reports from the worktree. Import, register,
+  cutover, recovery and every `publication-*` verb still run only in the main
+  checkout. A library without `checkout` refuses a worktree by name.
+
+- **`sd-ship merge` accepts GitHub's `unstable` answer (sd:2075).** The
+  merge-rules poll from sd:2050 treated only `clean` as mergeable, so it
+  refused answerbook/mezmo_benchmark #583 after five reads: `sd/local-gate`,
+  the one required context, had passed, and only the optional CodeQL run was
+  still in progress. `unstable` with `mergeable` true is GitHub allowing the
+  merge, and it now passes readiness on both `repo.ci` paths. `blocked`,
+  `dirty`, `behind` and `mergeable` false still refuse, and a declared gap
+  still requires every check run to pass.
+
+- **`sd-ship merge` waits for GitHub's merge-rules answer after posting
+  `sd/local-gate` (sd:2050).** GitHub recomputes mergeability after a new
+  status, and one read refused #580 in mezmo_benchmark seconds before a retry
+  merged it, after a second full gate run. Under `repo.ci = local` merge reads
+  again up to five times, waiting 3, 6, 9 and 12 seconds. The refusal is now
+  `merge_rules_unconfirmed`, retryable, and names GitHub's last
+  `mergeable_state` and the time waited.
 
 - **`sd-research-kit render` registers in the file the dashboard reads
   (sd:2010).** Since system 350553a the dashboard reads
@@ -53,6 +168,15 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **`sd-ship prepare` reads a hand-opened pull request's live body (sd:1878).**
+  The live body outranked the stored one only when a receipt named the pull
+  request. A pull request opened by hand has no receipt, so `prepare`
+  reviewed, linted and squashed its default body while GitHub showed the
+  author's. With no receipt and no `--body-file`, the one open pull request
+  from this branch of this repository is now read; `body_source` says
+  `live_pr`. A blank body, or more than one open pull request, falls back as
+  before.
 
 - **The pack's own GitHub Actions workflows are gone.** This repository gates
   locally (`repo.ci = local`), so `tests.yml`, `pr-body-lint.yml` and

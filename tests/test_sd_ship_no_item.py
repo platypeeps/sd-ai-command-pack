@@ -899,7 +899,7 @@ class NoItemContracts(unittest.TestCase):
             pattern="bind|identity|item",
         )
 
-    def test_each_review_manifest_member_mutation_refuses_no_item_clearance(self):
+    def test_each_verdict_member_mutation_refuses_no_item_clearance(self):
         """The manifest guards both modes, so both modes are measured.
 
         Enumerated from the manifest rather than listed here, so a gate added
@@ -918,10 +918,14 @@ class NoItemContracts(unittest.TestCase):
                 return original(path) + (b"changed" if path == target else b"")
 
             with self.subTest(name=name), patch.object(pathlib.Path, "read_bytes", changed):
-                self.refused(
-                    "verify-review", "--review-id", review_id, "--expected-head", self.head,
-                    pattern="tools or repository policy changed",
-                )
+                if name in bindings.VERDICT_FILES:
+                    self.refused(
+                        "verify-review", "--review-id", review_id, "--expected-head", self.head,
+                        pattern=f"tools or repository policy changed after review: {name} \\(verdict\\)",
+                    )
+                else:
+                    # sd:1834: gate and check code runs live, so it binds no receipt.
+                    self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
         self.assertEqual(len(calls), 1)
         self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
 
@@ -1071,7 +1075,7 @@ class NoItemContracts(unittest.TestCase):
 
         # The cap is spent, so the next head needs an explicit request, and
         # the renewal digest belongs to the pass after that one.
-        self.commit_fix("more.py", "value = 99\n")
+        reviewed = self.commit_fix("more.py", "value = 99\n")
         self.refused("review", "--review-id", review_id, pattern="spent|explicit new request")
         _key, (_revision, state) = self.record(review_id)
         self.refused(
@@ -1079,7 +1083,15 @@ class NoItemContracts(unittest.TestCase):
             "--request-reason", "fixture continuation assertion",
             "--review-history-digest", state["history_digest"], pattern="renews only after",
         )
-        reviewer, extra_calls = self.native_reviewer(review_id, resume=True)
+        # The request follows a completed pass on an earlier head, so it
+        # verifies that fix as an automatic pass would (sd:2147).
+        def extra_verification(report, state, argv):
+            self.assertIn("--verify-report", argv)
+            self.assertEqual(argv[argv.index("--base") + 1], reviewed)
+            report["subject"]["base"] = reviewed
+            report["verification_report_digest"] = ship.digest(state["passes"][CAP - 1]["report"])
+
+        reviewer, extra_calls = self.native_reviewer(review_id, shape=extra_verification)
         self.success(
             "review", "--review-id", review_id, "--additional-review-for", self.head,
             "--request-reason", "fixture continuation assertion", reviewer=reviewer,

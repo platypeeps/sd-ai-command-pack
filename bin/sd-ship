@@ -27,14 +27,14 @@ import sd_local_gate
 import sd_ship_body
 import sd_ship_dispositions as sd_ship_dispositions
 import sd_ship_squash
-from sd_ship_bindings import review_binding
+from sd_ship_bindings import binding_manifest, review_binding
 from sd_ship_history import ItemHistory, digest
 from sd_ship_history import completed_depth as completed_depth
 from sd_ship_history import review_history as review_history
 from sd_ship_history import timeout_evidence as timeout_evidence
 from sd_ship_history import validate_additional_requests as validate_additional_requests
 from sd_ship_item import ItemIdentity
-from sd_ship_remote import GitHub, Refusal, git, run, slug
+from sd_ship_remote import GitHub, Refusal, git, refuse_behind, run, slug
 from sd_ship_review import RAW_CAPTURE_ENV, ReviewRuntime, ReviewTimeout, SharedReview
 from sd_ship_workflow import blocked, failure
 
@@ -72,6 +72,14 @@ COPILOT_MATERIALIZATION_INTERVAL_SECONDS = 5
 #: The waits grow by the interval each time: 2, 4, 6 and 8 seconds, 20 in all.
 PULL_HEAD_ATTEMPTS = 5
 PULL_HEAD_INTERVAL_SECONDS = 2
+#: How often `merge` reads GitHub's merge-rules answer after it posts
+#: `sd/local-gate` (sd:2050). GitHub recomputes mergeability after a new
+#: status, and one read refused a merge that a retry seconds later landed.
+#: The waits grow by the interval: 3, 6, 9 and 12 seconds, 30 in all.
+MERGE_RULES_ATTEMPTS = 5
+MERGE_RULES_INTERVAL_SECONDS = 3
+#: The readiness refusals that a just-posted status can leave behind for a moment.
+SETTLING_CODES = ("merge_rules_unconfirmed", "mergeability_pending")
 #: The kinds `--deliver` closes on a verified merge. A work item records its
 #: delivery through `sd_db.progress.deliver_work`; a task or followup moves to
 #: done with the sentence `sd task status N done --delivered-by` writes, so
@@ -272,13 +280,17 @@ def timing_plan(result: subprocess.CompletedProcess) -> dict:
         requested = report["requested_reviews"]
         phase, setup, total, candidates = (plan[key] for key in
                                            ("phase_seconds", "setup_seconds", "execution_seconds", "candidates"))
+        # sd:2041: the gate's own bound, beside the reviewers' phase. A plan
+        # without it is one phase for the gate and each reviewer, as before.
+        check = plan.get("check_seconds", phase)
         valid = (result.returncode == 0 and report.get("status") == "explained" and not report.get("authorship_refusal")
-                 and type(phase) is int and phase > 0 and type(setup) is int and setup == REVIEW_SETUP_SECONDS
+                 and all(type(bound) is int and bound > 0 for bound in (phase, check))
+                 and type(setup) is int and setup == REVIEW_SETUP_SECONDS
                  and type(total) is int and isinstance(candidates, list)
                  and type(requested) is int and 0 < requested <= len(candidates)
                  and all(isinstance(row, dict) and isinstance(row.get("name"), str)
                          and isinstance(row.get("recipient"), str) for row in candidates)
-                 and total == setup + phase * (1 + len(candidates)))
+                 and total == setup + check + phase * len(candidates))
     except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
         valid = False
     if not valid:
@@ -308,7 +320,7 @@ def review_runtime() -> ReviewRuntime:
                          process=lambda root, argv, **kwargs: review_process(root, argv, **kwargs),
                          current_head=lambda root: current_head(root), clock=moment,
                          timing_plan=timing_plan, bin_dir=BIN, setup_seconds=REVIEW_SETUP_SECONDS,
-                         diagnostic_bytes=REVIEW_DIAGNOSTIC_BYTES)
+                         diagnostic_bytes=REVIEW_DIAGNOSTIC_BYTES, manifest=lambda root: binding_manifest(root))
 
 
 def commit_paths(root: pathlib.Path, args) -> None:
@@ -470,17 +482,32 @@ class Ship(SharedReview):
         on GitHub, such as an added scope line, is what the author meant, and
         preparing from the stored copy dropped it in silence. A blank live
         body says nothing, so the stored one answers instead.
+
+        With no receipt naming a pull request, the one open for this branch
+        answers the same way (sd:1878): a pull request opened by hand has a
+        body its author wrote, and preparing from the default body reviewed,
+        linted and squashed a description nobody wrote. More than one open
+        for the branch is left to the refusal the publish step makes.
         """
         if self.args.body_file:
             return self.args.body_file.read_text(encoding="utf-8"), "file"
         pull = self.state.get("pull_request") or {}
-        if type(pull.get("number")) is int:
-            live = str(self.api.pull(pull["number"]).get("body") or "").replace("\r\n", "\n")
+        number = pull.get("number") if type(pull.get("number")) is int else self.open_pull_number()
+        if number is not None:
+            live = str(self.api.pull(number).get("body") or "").replace("\r\n", "\n")
             if live.strip():
                 return live, "live_pr"
         if self.state.get("body"):
             return self.state["body"], "state"
         return default, "default"
+
+    def open_pull_number(self) -> int | None:
+        """The one open pull request from this branch of this repository, or None."""
+        pulls = self.api.pages(f"{self.api.prefix}/pulls?state=open&head={quote_branch(self.repository, self.branch)}")
+        numbers = [pull.get("number") for pull in pulls
+                   if pull.get("state") == "open" and pull.get("head", {}).get("ref") == self.branch
+                   and str(pull.get("head", {}).get("repo", {}).get("full_name", "")).lower() == self.repository]
+        return numbers[0] if len(numbers) == 1 and type(numbers[0]) is int else None
 
     def publication_claim(self) -> tuple[str, bool, dict | None, bool]:
         if self.args.no_item:
@@ -1061,6 +1088,8 @@ class Ship(SharedReview):
         if (any(value is not None for value in (self.args.additional_review_for, self.args.request_reason, self.args.review_history_digest))
                 and (self.args.path or self.args.message_file or self.args.author)):
             raise Refusal("additional review cannot commit; name an already committed exact head")
+        if getattr(self.args, "catch_up", False) and self.args.additional_review_for is not None:
+            raise Refusal("--catch-up makes a new head; an additional review names an existing one")
         commit_paths(self.root, self.args)
         head = current_head(self.root)
         self.additional_request(head, list(self.state.get("passes") or []))
@@ -1072,11 +1101,10 @@ class Ship(SharedReview):
         # an operator's checkout implicitly to make a check pass.
         git(self.root, "fetch", "--no-tags", "origin", f"refs/heads/{base}:refs/remotes/origin/{base}")
         git(self.root, "symbolic-ref", "refs/remotes/origin/HEAD", f"refs/remotes/origin/{base}")
+        if getattr(self.args, "catch_up", False) and not self.current_with(base, head):
+            head = self.catch_up(base, head)
         self.assert_current_base(base, head)
-        # A merge-forward's subject names a branch operation, not the change;
-        # the newest commit the branch adds that is not a merge does (sd:1377).
-        title = (self.args.title or self.state.get("title")
-                 or git(self.root, "log", "-1", "--no-merges", "--format=%s", f"refs/remotes/origin/{base}..{head}"))
+        title = self.args.title or self.state.get("title") or self.default_title(base, head)
         if not title or re.match(r"(?i)wip\b", title):
             raise Refusal("provide a final --title; wip titles never reach the default branch")
         body, deliver, claim, local_work = self.publication_claim()
@@ -1178,6 +1206,25 @@ class Ship(SharedReview):
             next_action="Compare the branch on origin with the pull request's head, then retry prepare.",
         )
 
+    def default_title(self, base: str, head: str) -> str:
+        """The title `prepare` may assume when none is given: a one-commit branch's subject.
+
+        A merge-forward's subject names a branch operation, so merges never
+        count (sd:1377). On a longer branch the newest subject may describe
+        only the last commit, and it reached main that way (sd:2097).
+        """
+        span = f"refs/remotes/origin/{base}..{head}"
+        count = int(git(self.root, "rev-list", "--count", "--no-merges", span) or 0)
+        newest = git(self.root, "log", "-1", "--no-merges", "--format=%s", span)
+        if count > 1:
+            raise Refusal(f'provide --title; the branch has {count} commits, '
+                          f'and the newest subject ("{newest}") may describe only the last')
+        return newest
+
+    def current_with(self, base: str, head: str) -> bool:
+        """Whether `head` already contains the fetched `origin/<base>`."""
+        return sd_lib.git_output(["merge-base", "--is-ancestor", f"refs/remotes/origin/{base}", head], self.root) is not None
+
     def assert_current_base(self, base: str, head: str) -> None:
         """Refuse a head that lacks the fetched default branch, before any review.
 
@@ -1193,7 +1240,8 @@ class Ship(SharedReview):
             notes = "".join(f"; {note}" for note in self.squash_notes(base, head))
             raise Refusal(f"the branch is behind the current default branch origin/{base}; nothing was reviewed{notes}",
                           code="base_moved", boundary="ci", state="retryable_failure",
-                          next_action=f"Run git merge origin/{base} on the branch, then run prepare again.") from None
+                          next_action=f"Run sd-ship prepare --catch-up, or git merge origin/{base} on the branch "
+                                      "and then prepare again.") from None
 
     def answer_review(self, number: int, head: str) -> list[str]:
         """Record the review findings this push answers, and never block on it.
@@ -1568,6 +1616,52 @@ class Ship(SharedReview):
                           code="base_moved", boundary="ci", state="retryable_failure",
                           next_action="Update the branch onto the current default branch, then retry.")
 
+    def settled_ready(self, number: int, head: str, base: str, protection: dict) -> dict:
+        """The pull request once `ready` accepts it, read again while GitHub settles (sd:2050).
+
+        Only under `repo.ci = local`, where this process has just posted
+        `sd/local-gate` and GitHub recomputes the merge rules asynchronously.
+        Anywhere else nothing was posted and the answer is read once. The last
+        refusal carries GitHub's final answer and how long it was waited for.
+        """
+        attempts = MERGE_RULES_ATTEMPTS if self.api.ci == "local" else 1
+        waited = 0
+        for attempt in range(attempts):
+            observed = self.api.pull(number)
+            try:
+                self.api.ready(observed, head, base, protection)
+                return observed
+            except Refusal as refusal:
+                if refusal.workflow["blocker"]["code"] not in SETTLING_CODES or attempt + 1 == attempts:
+                    if attempts > 1 and refusal.workflow["blocker"]["code"] in SETTLING_CODES:
+                        refusal.args = (f"{refusal.args[0]}; still so after {attempts} reads over {waited}s",)
+                    raise
+            time.sleep(MERGE_RULES_INTERVAL_SECONDS * (attempt + 1))
+            waited += MERGE_RULES_INTERVAL_SECONDS * (attempt + 1)
+        raise AssertionError("unreachable")
+
+    def catch_up(self, base: str, head: str) -> str:
+        """Merge `origin/<base>` into the branch and return the new head (sd:2023).
+
+        A merge, never a rebase, so the next push is a fast-forward of the
+        branch already pushed and no reviewed head is orphaned. A conflict is
+        aborted, so the branch is left exactly as it was. The review scopes
+        the new head from ancestry, and merge gates it like any other.
+        """
+        if git(self.root, "status", "--porcelain", "--untracked-files=no"):
+            raise Refusal("--catch-up needs a clean working tree", code="dirty_worktree", boundary="input",
+                          state="operator_decision", next_action="Commit or stash the changes, then run prepare again.")
+        remote = f"refs/remotes/origin/{base}"
+        merged = sd_lib.git_output(["merge", "--no-ff", "--no-edit", "-m", f"Merge origin/{base} into {self.branch}",
+                                    remote], self.root)
+        if merged is None:
+            sd_lib.git_output(["merge", "--abort"], self.root)
+            notes = "".join(f"; {note}" for note in self.squash_notes(base, head))
+            raise Refusal(f"merging origin/{base} into {self.branch} conflicts; the branch is unchanged{notes}",
+                          code="merge_conflict", boundary="ci", state="operator_decision",
+                          next_action=f"Run git merge origin/{base}, resolve the conflict, commit, then run prepare again.")
+        return current_head(self.root)
+
     def merge(self) -> dict:
         if not self.state.get("pull_request"):
             raise Refusal("prepare this branch before merging", code="prepare_required", state="operator_decision",
@@ -1604,9 +1698,13 @@ class Ship(SharedReview):
         # `repo.ci = local` (sd:1843): no Actions run, so the checks run here,
         # at the reviewed head in a clean worktree, before readiness reads them.
         if self.api.ci == "local":
-            self.save(local_gate=sd_local_gate.local_gate(self.api, self.root, head))
-        observed = self.api.pull(observed["number"])
-        self.api.ready(observed, head, base, protection)
+            # A BEHIND branch cannot merge whatever the gate says, and the gate
+            # takes minutes: name it first (sd:2023).
+            refuse_behind(observed, base)
+            # Prepare ran this same gate and left a receipt at this head; a
+            # matching one answers instead of a second run (sd:2041).
+            self.save(local_gate=sd_local_gate.local_gate(self.api, self.root, head, base=base, database=self.database))
+        observed = self.settled_ready(observed["number"], head, base, protection)
         self.abandon_copilot_review(observed["number"], head)
         self.require_copilot_clearance(observed["number"], observed, head)
         self.save(phase="ci_passed", protection=protection)
@@ -1758,6 +1856,19 @@ def lock_wait_flag(action) -> None:
                              "0, the default, refuses at once (not --wait-seconds)")
 
 
+def publication_flags(action) -> None:
+    """What `prepare` publishes: the title, the body, and a base merged in first.
+
+    `--catch-up` (sd:2023) merges the base into a BEHIND branch instead of
+    refusing it.
+    """
+    action.add_argument("--title")
+    action.add_argument("--body-file", type=pathlib.Path)
+    action.add_argument("--catch-up", action="store_true",
+                        help="merge origin/<base> into a branch that is behind it (no rebase, no force push), "
+                             "then review the new head's own diff")
+
+
 def review_timeout_flag(action) -> None:
     """sd:1475. The one limit sd-review plans every phase with, forwarded when given.
 
@@ -1798,8 +1909,8 @@ def adjudication_flags(action) -> None:
 def squash_title(pull: dict, prepared: str) -> str:
     """The squash subject: the pull request's live title, else the prepared one (sd:1876).
 
-    `prepare` stores the newest non-merge commit subject when no `--title` is
-    given, and an adopted or retitled pull request keeps its own title; the
+    `prepare` stores a one-commit branch's subject when no `--title` is given
+    (sd:2097), and an adopted or retitled pull request keeps its own title; the
     title a reader saw on the pull request is the one main should carry. A
     `wip` title still never reaches the default branch.
     """
@@ -1868,8 +1979,7 @@ def parser():
             action.add_argument("--path", action="append", default=[])
             action.add_argument("--message-file", type=pathlib.Path)
             action.add_argument("--author")
-            action.add_argument("--title")
-            action.add_argument("--body-file", type=pathlib.Path)
+            publication_flags(action)
             claim = action.add_mutually_exclusive_group()
             claim.add_argument("--deliver", action="store_true", default=None,
                                help="the item's last pull request: the squash carries Delivers: and the merge closes the item")

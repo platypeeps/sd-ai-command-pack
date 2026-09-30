@@ -966,6 +966,8 @@ def check_citations(work_root: pathlib.Path, report: Report) -> None:
 # not ask for, because the environment belongs to the machine and the prose
 # belongs to the repository.
 JEV_STAGE = "JEV_SD_DOCS_LINT"
+#: This gate's name in the judgment ledger, beside `JEV_STAGE` (sd:2136).
+JEV_CALLER = "sd-docs-lint"
 
 # Where a repository opts in. A sibling of `.github/sd-review.json` and
 # `.github/sd-status.json`, and for the reason `sd_lib` gives for the second:
@@ -1086,7 +1088,8 @@ def jev_command(repo: pathlib.Path) -> tuple[str, str]:
         return "", NOT_ASKED
     try:
         probe = subprocess.run(  # fixed argv, no shell
-            [found, "enabled"], capture_output=True, text=True, timeout=10
+            [found, "enabled", JEV_STAGE, "--record", "--caller", JEV_CALLER],
+            capture_output=True, text=True, timeout=10,
         )
     except (OSError, subprocess.SubprocessError) as error:
         return "", f"jev enabled did not run: {error}"
@@ -1306,7 +1309,8 @@ def ask_claims(command: str, cases: dict[str, dict[str, str]]) -> dict[str, dict
         try:
             done = subprocess.run(  # fixed argv, no shell
                 [command, "ask", "--questions", "-", "--state", str(state),
-                 "--state-format", "json", "--fallback", "{}"],
+                 "--state-format", "json", "--fallback", "{}",
+                 "--caller", JEV_CALLER, "--stage", JEV_STAGE],
                 input=json.dumps(questions), capture_output=True, text=True, timeout=120,
             )
         except (OSError, subprocess.SubprocessError):

@@ -147,8 +147,8 @@ reading that flags disagreement. It never assigns a verdict.
 
 ### Before the first call
 
-- Run `jev enabled`. It exits `0` when the command can answer here and `3` when
-  it cannot. It calls nothing and costs nothing, so it is safe to run first.
+- Run `jev enabled JEV_SD_FACT_CHECK --record --caller sd-fact-check`. It exits
+  `0` when the command can answer here and `3` when it cannot. It calls nothing and costs nothing, so it is safe to run first.
 - Confirm the claim and its evidence span may leave the machine. Every call is
   a network request to a third party. Skip this pass for confidential,
   embargoed, or personal material.
@@ -210,8 +210,12 @@ State is the claim and its span, one claim per call:
 jev choice 'How does the evidence relate to the claim as written?' \
     --state "$scratch/claim.json" --state-format json \
     --criteria @"$scratch/criteria.json" \
-    --unsure-below 0.8 --fallback not_asked
+    --unsure-below 0.8 --fallback not_asked \
+    --caller sd-fact-check --stage JEV_SD_FACT_CHECK
 ```
+
+`--caller` and `--stage` name this pass in the judgment ledger, and
+`JEV_SD_FACT_CHECK=0` switches it off.
 
 `--fallback not_asked` prints `not_asked` and exits `0` when the command is
 switched off, unkeyed, or failing, and writes the reason to stderr. A failed

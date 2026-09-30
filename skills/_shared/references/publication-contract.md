@@ -269,6 +269,13 @@ The refusal names the checkout to run in. `SD_PUBLISH_FROM_WORKTREE=1` on the
 invocation is the operator saying, in words, that this branch's content is the
 canonical copy.
 
+A render with `SD_SKIP_MIRROR` set queues nothing and leaves a pending request
+as it was; the value is the reason, and the render reports it. The re-render
+hook sets it for a branch checkout that lands behind its upstream, read off the
+local tracking ref without a fetch. That tree is about to be replaced by a pull,
+and a request queued from it is stale text a drain could publish before the
+pull's own render queues the current one.
+
 One queue carries every destination, and `bin/sd-status` reports a pending
 request as `mirror-sync-pending`. A document designated for two places is two
 requests, and either can drain while the other waits.

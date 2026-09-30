@@ -440,10 +440,12 @@ class DispositionTests(unittest.TestCase):
             with self.assertRaises(ship.Refusal):
                 self.operation().check_review(self.head)
         original_read = pathlib.Path.read_bytes
+        # sd:1834: tool files bind by class. Verdict code and the written
+        # acceptance rules refuse; gate code runs live and does not.
         for name in (
-            "sd-ship",
-            "sd_ship_dispositions.py",
-            "sd_ship_remote.py",
+            "sd-review",
+            "sd_lib.py",
+            "sd_registry.py",
             "SKILL.md",
             "sd-planning-adversarial-review.md",
         ):
@@ -457,6 +459,14 @@ class DispositionTests(unittest.TestCase):
                 patch.object(pathlib.Path, "read_bytes", changed),
                 self.assertRaises(ship.Refusal),
             ):
+                self.operation().check_review(self.head)
+        for name in ("sd-ship", "sd_ship_dispositions.py", "sd_ship_remote.py", "sd-check"):
+
+            def changed(path, name=name):
+                value = original_read(path)
+                return value + b"changed" if path.name == name else value
+
+            with self.subTest(gate=name), patch.object(pathlib.Path, "read_bytes", changed):
                 self.operation().check_review(self.head)
 
     def test_typed_json_identity_changes_refuse(self):
