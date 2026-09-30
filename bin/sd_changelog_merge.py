@@ -8,13 +8,21 @@ path, `CHANGELOG.md` at the root, and every hunk must have an empty base, so
 neither side edited or removed a line the other still has. The branch's
 entries come first, then the base's, with one blank line between them.
 
+Each assumption is checked, not taken: the three stages are one regular-file
+mode (a symlink's target reads as text and would merge), the working copy is a
+regular file written without following a link, no attribute converts it on
+checkout or add, and the text is UTF-8 with LF endings. Anything else takes
+the ordinary abort path.
+
 Not `merge=union`: it needs a tracked `.gitattributes`, and it drops the
 blank line between two entries, so the result is one run-on list item.
 """
 
 from __future__ import annotations
 
+import os
 import pathlib
+import stat
 import subprocess
 import tempfile
 
@@ -25,6 +33,12 @@ MARKER_SIZE = 32
 OURS, BASE, SPLIT, THEIRS = ("<" * MARKER_SIZE + " ", "|" * MARKER_SIZE + " ", "=" * MARKER_SIZE,
                              ">" * MARKER_SIZE + " ")
 TIMEOUT_SECONDS = 60
+#: The file modes a merge may rewrite as text; a symlink (120000) or a
+#: gitlink (160000) stores a target, not content.
+REGULAR_MODES = {"100644", "100755"}
+#: Attributes under which the working copy is not the blob's bytes, so text
+#: written from the blobs would be converted again, or wrongly, by `git add`.
+CONVERTING = ("filter", "working-tree-encoding", "ident", "eol")
 
 
 def keep_both_note(base: str) -> str:
@@ -39,18 +53,55 @@ def _git(root: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
 
 
 def _stages(root: pathlib.Path) -> dict[int, str] | None:
-    """The blob of each stage when `CHANGELOG.md` is the only unmerged path."""
+    """The blob of each stage when `CHANGELOG.md` is the only unmerged path.
+
+    None unless all three stages exist with one regular-file mode: a mode
+    conflict is a decision, and a symlink's target would merge as text.
+    """
     listed = _git(root, "ls-files", "--unmerged", "-z")
     if listed.returncode != 0:
         return None
-    stages = {}
+    stages, modes = {}, set()
     for entry in filter(None, listed.stdout.decode("utf-8", "surrogateescape").split("\0")):
         meta, path = entry.split("\t", 1)
         if path != PATH:
             return None
-        _mode, blob, stage = meta.split()
+        mode, blob, stage = meta.split()
         stages[int(stage)] = blob
-    return stages if set(stages) == {1, 2, 3} else None
+        modes.add(mode)
+    return stages if set(stages) == {1, 2, 3} and len(modes) == 1 and modes <= REGULAR_MODES else None
+
+
+def _plain(root: pathlib.Path) -> bool:
+    """Whether the working copy is a regular file that git stores byte for byte."""
+    try:
+        if not stat.S_ISREG(os.lstat(root / PATH).st_mode):
+            return False
+    except OSError:
+        return False
+    checked = _git(root, "check-attr", "-z", *CONVERTING, "--", PATH)
+    if checked.returncode != 0:
+        return False
+    fields = checked.stdout.decode("utf-8", "surrogateescape").split("\0")
+    return all(value in ("unspecified", "unset") or (name == "eol" and value == "lf")
+               for name, value in zip(fields[1::3], fields[2::3], strict=True))
+
+
+def _lines(text: str) -> list[str]:
+    """`text` split after each LF only; `splitlines` also splits on U+2028 and others."""
+    parts = text.split("\n")
+    return [part + "\n" for part in parts[:-1]] + ([parts[-1]] if parts[-1] else [])
+
+
+def _write(path: pathlib.Path, text: str) -> bool:
+    """Replace a regular file's content, refusing to follow a link put there since."""
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW)
+    except OSError:
+        return False
+    with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:
+        stream.write(text)
+    return True
 
 
 def _blank(line: str) -> bool:
@@ -114,14 +165,14 @@ def _keep_both(merged: list[str]) -> list[str] | None:
 def resolve_keep_both(root: pathlib.Path) -> bool:
     """Resolve and stage a keep-both `CHANGELOG.md`; False, touching nothing, otherwise."""
     stages = _stages(root)
-    if stages is None:
+    if stages is None or not _plain(root):
         return False
     with tempfile.TemporaryDirectory(prefix="sd-changelog-merge-") as directory:
         files = []
         for stage in (2, 1, 3):
             blob = _git(root, "cat-file", "blob", stages[stage])
-            if blob.returncode != 0:
-                return False
+            if blob.returncode != 0 or b"\r" in blob.stdout:
+                return False  # a CRLF changelog would get LF separators
             path = pathlib.Path(directory) / str(stage)
             path.write_bytes(blob.stdout)
             files.append(str(path))
@@ -132,7 +183,7 @@ def resolve_keep_both(root: pathlib.Path) -> bool:
     if not 0 < merged.returncode <= 127:
         return False
     try:
-        lines = merged.stdout.decode("utf-8").splitlines(keepends=True)
+        lines = _lines(merged.stdout.decode("utf-8"))
     except UnicodeDecodeError:
         return False
     # Nothing is written unless a conflict hunk parses: an empty resolution
@@ -142,5 +193,4 @@ def resolve_keep_both(root: pathlib.Path) -> bool:
     resolved = _keep_both(lines)
     if resolved is None:
         return False
-    (root / PATH).write_text("".join(resolved), encoding="utf-8")
-    return _git(root, "add", "--", PATH).returncode == 0
+    return _write(root / PATH, "".join(resolved)) and _git(root, "add", "--", PATH).returncode == 0

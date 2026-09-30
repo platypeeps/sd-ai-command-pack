@@ -156,5 +156,90 @@ class KeepBoth(unittest.TestCase):
                                     base={path: BASE}))
 
 
+    # Every assumption the resolver makes about the file is checked (sd:2174
+    # review pass 2): its type in each stage, its type on disk, the attributes
+    # that convert it, and its line endings. Each case below is refused and
+    # leaves the working copy exactly as it was.
+
+    def conflict(self, texts: tuple[str, str, str], modes: tuple[str, str, str] = ("100644",) * 3) -> bytes:
+        """Stages 1-3 of CHANGELOG.md written straight into the index; the working copy's bytes."""
+        info = []
+        for stage, (text, mode) in enumerate(zip(texts, modes, strict=True), start=1):
+            blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=self.root, input=text.encode("utf-8"),
+                                  capture_output=True, check=True).stdout.decode().strip()
+            info.append(f"{mode} {blob} {stage}\tCHANGELOG.md\n")
+        subprocess.run(["git", "update-index", "--index-info"], cwd=self.root, input="".join(info).encode(),
+                       check=True)
+        working = self.root / "CHANGELOG.md"
+        if not working.is_symlink():
+            working.write_text("conflicted working copy\n", encoding="utf-8")
+        return working.read_bytes()
+
+    ADDITIONS = (BASE, BASE.replace("### Fixed\n\n", "### Fixed\n\n- **A.** a.\n\n"),
+                 BASE.replace("### Fixed\n\n", "### Fixed\n\n- **B.** b.\n\n"))
+
+    def assert_refused(self, before: bytes):
+        self.assertFalse(sd_changelog_merge.resolve_keep_both(self.root))
+        self.assertEqual((self.root / "CHANGELOG.md").read_bytes(), before)
+        self.assertEqual(self.git("diff", "--name-only", "--diff-filter=U").stdout, "CHANGELOG.md\n")
+
+    def test_the_index_fixture_resolves_when_nothing_is_wrong(self):
+        # The control for the cases below: the same stages, all regular files.
+        self.conflict(self.ADDITIONS)
+        self.assertTrue(sd_changelog_merge.resolve_keep_both(self.root))
+        self.assertIn("- **A.** a.\n\n- **B.** b.\n\n- **Old.**", (self.root / "CHANGELOG.md").read_text())
+
+    def test_symlink_stages_are_left_alone(self):
+        # A symlink's blob is its target; two targets would merge as text.
+        self.assert_refused(self.conflict(self.ADDITIONS, ("120000",) * 3))
+
+    def test_a_mode_conflict_is_left_alone(self):
+        self.assert_refused(self.conflict(self.ADDITIONS, ("100644", "100755", "100644")))
+
+    def test_a_symlink_destination_is_not_followed(self):
+        outside = tempfile.TemporaryDirectory()
+        self.addCleanup(outside.cleanup)
+        target = pathlib.Path(outside.name) / "outside.md"
+        target.write_text("outside the repository\n", encoding="utf-8")
+        (self.root / "CHANGELOG.md").symlink_to(target)
+        self.conflict(self.ADDITIONS)
+        self.assertFalse(sd_changelog_merge.resolve_keep_both(self.root))
+        self.assertEqual(target.read_text(encoding="utf-8"), "outside the repository\n")
+        self.assertTrue((self.root / "CHANGELOG.md").is_symlink())
+        # Both layers refuse on their own: the type check before any work,
+        # and the no-follow open at the write.
+        self.assertFalse(sd_changelog_merge._plain(self.root))
+        self.assertFalse(sd_changelog_merge._write(self.root / "CHANGELOG.md", "overwritten\n"))
+        self.assertEqual(target.read_text(encoding="utf-8"), "outside the repository\n")
+
+    def test_a_missing_working_copy_is_left_alone(self):
+        self.conflict(self.ADDITIONS)
+        (self.root / "CHANGELOG.md").unlink()
+        self.assertFalse(sd_changelog_merge.resolve_keep_both(self.root))
+        self.assertFalse((self.root / "CHANGELOG.md").exists())
+
+    def test_a_converting_attribute_is_left_alone(self):
+        for attribute in ("filter=example", "working-tree-encoding=UTF-16", "ident", "eol=crlf"):
+            with self.subTest(attribute=attribute):
+                (self.root / ".git/info/attributes").write_text(f"CHANGELOG.md {attribute}\n")
+                self.assert_refused(self.conflict(self.ADDITIONS))
+
+    def test_eol_lf_is_not_a_conversion(self):
+        (self.root / ".git/info/attributes").write_text("CHANGELOG.md text eol=lf\n")
+        self.conflict(self.ADDITIONS)
+        self.assertTrue(sd_changelog_merge.resolve_keep_both(self.root))
+
+    def test_crlf_line_endings_are_left_alone(self):
+        self.assert_refused(self.conflict(tuple(text.replace("\n", "\r\n") for text in self.ADDITIONS)))
+
+    def test_a_unicode_line_separator_is_content(self):
+        # `str.splitlines` splits on U+2028, and the hunk reader then added a
+        # newline after it, rewriting an entry it only meant to keep.
+        texts = tuple(text.replace("- **", "- \u2028**") for text in self.ADDITIONS)
+        self.conflict(texts)
+        self.assertTrue(sd_changelog_merge.resolve_keep_both(self.root))
+        self.assertIn("- \u2028**A.** a.\n\n- \u2028**B.** b.\n\n- \u2028**Old.**",
+                      (self.root / "CHANGELOG.md").read_text(encoding="utf-8"))
+
 if __name__ == "__main__":
     unittest.main()
