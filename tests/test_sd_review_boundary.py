@@ -812,7 +812,7 @@ class LineBudgetTests(unittest.TestCase):
         # states it (5). `bin/sd-review` grows +2: the route reason names an
         # answer below the routed tier. Measured on the branch.
         # 4052 -> 4148 is sd:2181: `bin/sd_review_material.py` grows +96 to send
-        # a media file (PNG, JPEG, GIF, WebP, ICO, WOFF, PDF by magic bytes) as
+        # a media file (PNG, JPEG, GIF, WebP, WOFF, PDF by magic bytes) as
         # its sizes and hashes instead of `git diff --binary` base64, to send
         # what git calls binary but is UTF-8 or BOM-marked UTF-16 as a text
         # diff, and to read both sides in one `cat-file --batch`; three helpers

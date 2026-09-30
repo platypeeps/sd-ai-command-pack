@@ -299,3 +299,19 @@ class BinaryMaterialTests(ReviewFixture):
         self.assertIn("setting = utf16-untracked", material)
         self.assertIn('--- "raw.dat" ---\n[binary, base64]\n', material)
         self.assertIn("[binary, not sent] added (untracked); 2100008 bytes", material)
+
+    def test_ico_magic_is_not_a_media_pass(self):
+        # sd:2181 review: 00 00 01 00 is too weak a signature to let a file escape review.
+        root, base = self.screenshot_branch()
+        disguised = b"\x00\x00\x01\x00" + os.urandom(64)
+        (root / "favicon.ico").write_bytes(disguised)
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "--quiet", "-m", "icon")
+        (root / "loose.ico").write_bytes(disguised)
+        subject = sd_review.resolve_subject(root, "branch", base=base)
+        material, _inventory = sd_review.sd_review_material.collect_review_material(root, subject)
+        piece = material[material.index("diff --git a/favicon.ico"):material.index("diff --git a/shot.png")]
+        self.assertIn("GIT binary patch", piece)
+        self.assertNotIn("[binary, not sent]", piece)
+        self.assertIn('--- "loose.ico" ---\n[binary, base64]\n',
+                      sd_review.sd_review_material.file_material(root, "loose.ico", "added (untracked)"))

@@ -41,9 +41,9 @@ def untracked(root: pathlib.Path) -> list[str]:
 
 # sd:2181: of what git calls binary, only media is summarized: reviewers cannot read it and a retaken
 # screenshot overruns the limit. UTF-8 (a `-diff` file) and BOM-marked UTF-16 go as text; anything else
-# stays base64, so the size check refuses honestly. Zip and gzip are not media: they can carry source.
+# stays base64, so the size check refuses honestly. Not media: zip, gzip (can carry source), ICO (weak magic).
 BINARY_MARKER = re.compile(r"(?m)^Binary files .* differ\n?")
-MEDIA_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"\x00\x00\x01\x00", b"wOFF", b"wOF2", b"%PDF-")
+MEDIA_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"wOFF", b"wOF2", b"%PDF-")
 
 
 def is_media(data: bytes) -> bool:
