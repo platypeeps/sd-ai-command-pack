@@ -127,9 +127,19 @@ def resolve_keep_both(root: pathlib.Path) -> bool:
             files.append(str(path))
         merged = _git(root, "merge-file", "-p", "--diff3", f"--marker-size={MARKER_SIZE}",
                       "-L", "ours", "-L", "base", "-L", "theirs", *files)
-    if merged.returncode <= 0:
-        return False  # 0 has no conflict to resolve; a negative code is an error
-    resolved = _keep_both(merged.stdout.decode("utf-8").splitlines(keepends=True))
+    # The exit code counts the conflicts, capped at 127; 0 has none to resolve,
+    # and an error (binary input, say) exits 255 with nothing on stdout.
+    if not 0 < merged.returncode <= 127:
+        return False
+    try:
+        lines = merged.stdout.decode("utf-8").splitlines(keepends=True)
+    except UnicodeDecodeError:
+        return False
+    # Nothing is written unless a conflict hunk parses: an empty resolution
+    # of output with no hunk would stage an emptied CHANGELOG.md.
+    if not any(line.startswith(OURS) for line in lines):
+        return False
+    resolved = _keep_both(lines)
     if resolved is None:
         return False
     (root / PATH).write_text("".join(resolved), encoding="utf-8")

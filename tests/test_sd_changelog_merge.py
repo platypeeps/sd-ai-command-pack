@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bin"))
@@ -37,6 +38,12 @@ class KeepBoth(unittest.TestCase):
         for name, text in files.items():
             (self.root / name).write_text(text, encoding="utf-8")
         self.git("add", "--", *files)
+        self.assertEqual(self.git("commit", "-qm", "change").returncode, 0)
+
+    def commit_bytes(self, text: str) -> None:
+        """Commit CHANGELOG.md as UTF-16, which git merges as a binary file."""
+        (self.root / "CHANGELOG.md").write_bytes(text.encode("utf-16"))
+        self.git("add", "--", "CHANGELOG.md")
         self.assertEqual(self.git("commit", "-qm", "change").returncode, 0)
 
     def merge(self, ours: dict[str, str], theirs: dict[str, str], base: dict[str, str] | None = None) -> bool:
@@ -98,6 +105,48 @@ class KeepBoth(unittest.TestCase):
             {"CHANGELOG.md": BASE.replace("### Fixed\n\n", "### Fixed\n\n- **B.** b.\n\n"), "src.py": "a = 2\n"},
             base={"CHANGELOG.md": BASE, "src.py": "a = 0\n"}))
         self.assertEqual(self.git("diff", "--name-only", "--diff-filter=U").stdout, "CHANGELOG.md\nsrc.py\n")
+
+    def test_a_binary_changelog_is_left_alone(self):
+        # `git merge-file` exits 255 on binary input with nothing on stdout;
+        # read as a conflict count, that emptied CHANGELOG.md and staged it.
+        self.commit_bytes(BASE)
+        self.git("checkout", "-qb", "other")
+        self.commit_bytes(BASE.replace("### Fixed\n\n", "### Fixed\n\n- **B.** b.\n\n"))
+        self.git("checkout", "-q", "main")
+        self.commit_bytes(BASE.replace("### Fixed\n\n", "### Fixed\n\n- **A.** a.\n\n"))
+        self.assertNotEqual(self.git("merge", "-q", "--no-edit", "other").returncode, 0, "the fixture must conflict")
+        before = (self.root / "CHANGELOG.md").read_bytes()
+        self.assertFalse(sd_changelog_merge.resolve_keep_both(self.root))
+        self.assertEqual((self.root / "CHANGELOG.md").read_bytes(), before)
+        self.assertEqual(self.git("diff", "--name-only", "--diff-filter=U").stdout, "CHANGELOG.md\n")
+
+    def stubbed_merge_file(self, answer) -> bool:
+        """`merge` with `git merge-file`'s real result replaced by `answer(result)`."""
+        real = sd_changelog_merge._git
+
+        def stub(root, *args):
+            result = real(root, *args)
+            return answer(result) if args[0] == "merge-file" else result
+
+        with unittest.mock.patch.object(sd_changelog_merge, "_git", stub):
+            return self.merge({"CHANGELOG.md": BASE.replace("### Fixed\n\n", "### Fixed\n\n- **A.** a.\n\n")},
+                              {"CHANGELOG.md": BASE.replace("### Fixed\n\n", "### Fixed\n\n- **B.** b.\n\n")})
+
+    def assert_untouched(self):
+        self.assertIn("<<<<<<< HEAD", (self.root / "CHANGELOG.md").read_text(encoding="utf-8"))
+        self.assertEqual(self.git("diff", "--name-only", "--diff-filter=U").stdout, "CHANGELOG.md\n")
+
+    def test_an_error_exit_is_not_a_conflict_count(self):
+        # 255 is an error, whatever stdout holds: here a hunk that would resolve.
+        self.assertFalse(self.stubbed_merge_file(lambda result: subprocess.CompletedProcess(
+            result.args, 255, result.stdout, b"error: Cannot merge binary files")))
+        self.assert_untouched()
+
+    def test_a_conflict_count_with_no_hunk_writes_nothing(self):
+        # Resolving output with no hunk wrote an empty CHANGELOG.md and staged it.
+        self.assertFalse(self.stubbed_merge_file(lambda result: subprocess.CompletedProcess(
+            result.args, 1, b"", b"")))
+        self.assert_untouched()
 
     def test_a_nested_changelog_is_not_the_root_one(self):
         (self.root / "docs").mkdir()
