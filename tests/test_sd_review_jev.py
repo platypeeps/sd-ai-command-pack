@@ -211,6 +211,25 @@ class JevTierTests(ReviewFixture):
         self.assertEqual(held["route"]["tier"], "standard")
         self.assertEqual(held["jev"]["moved"], False)
 
+    def test_an_answer_below_the_routed_tier_never_lowers_it(self):
+        """sd:2132. Jev may raise the tier, never lower it: `skip` on a
+        `standard` route would have removed a review the policy asked for."""
+
+        root = self.prepare()
+        baseline = json.loads(self.run_review(root)[0])
+        for lower in ("skip", "cheap"):
+            with self.subTest(answer=lower):
+                self.install_stub(answer=lower)
+                held = json.loads(self.run_review(root)[0])
+                self.assertEqual(held["route"]["tier"], "standard")
+                self.assertEqual(held["route"]["depth"], baseline["route"]["depth"])
+                self.assertEqual(held["remote_reviews"], baseline["remote_reviews"])
+                self.assertEqual(held["jev"], {"routed_tier": "standard", "tier": "standard",
+                                               "moved": False, "source": "judged",
+                                               "below_routed": lower})
+                self.assertTrue(held["route"]["reason"].endswith(
+                    f"Jev read the diff and chose tier {lower}, below the routed tier, which stands"))
+
     def test_the_fallback_token_is_not_an_answer_although_it_exits_zero(self):
         """The case `--fallback` exists for, and the one an exit code cannot see."""
 

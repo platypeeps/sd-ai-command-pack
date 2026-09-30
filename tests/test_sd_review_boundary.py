@@ -807,11 +807,15 @@ class LineBudgetTests(unittest.TestCase):
         # 4036 -> 4042 is the one-handoff window (sd:2041 review): prepare's
         # gate check passes `reuse=False` and `sd_gate_run` takes `reuse` and
         # `record`, so a receipt spans prepare to merge and nothing else.
+        # 4042 -> 4052 is sd:2132: Jev may raise the review tier, never lower
+        # it. `bin/sd_jev.py` grows +8: the floor (3) and the docstring that
+        # states it (5). `bin/sd-review` grows +2: the route reason names an
+        # answer below the routed tier. Measured on the branch.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4042,
+            4052,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

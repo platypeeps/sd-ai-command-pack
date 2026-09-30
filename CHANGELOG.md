@@ -74,6 +74,13 @@
 
 ### Fixed
 
+- **Jev can no longer lower a review (sd:2132).** `sd-review` replaced the
+  routed tier with Jev's choice, so an answer of `skip` or `cheap` removed a
+  review the policy asked for. An answer below the routed tier now keeps the
+  routed tier and records what Jev said as `below_routed` in the `jev` block;
+  the route reason names it. Answers at or above the routed tier are
+  unchanged.
+
 - **The writing skills name their Jev calls (sd:2133).** `sd-fact-check`,
   `sd-publish`, `sd-prose-lint` and `sd-humanizer` probed with a bare `jev
   enabled` and sent no `--caller` or `--stage`, so the judgment ledger could
