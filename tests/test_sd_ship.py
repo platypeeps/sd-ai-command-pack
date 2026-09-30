@@ -597,7 +597,8 @@ roles:
                              repo=str(self.operator), branch="second")
 
         def operation():
-            args = ship.parser().parse_args(["prepare", "--item", str(second), "--associate-only", "--json"])
+            args = ship.parser().parse_args(["prepare", "--item", str(second), "--associate-only", "--json",
+                                             "--title", "build on the first"])
             return ship.Ship(self.root, self.connection, self.database, args)
 
         # sd:1346 refuses the branch until it merges main, and that merge is
