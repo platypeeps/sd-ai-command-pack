@@ -4,6 +4,19 @@
 
 ### Added
 
+- **A held merge lane, and merge from the lane's checkout (sd:2035, sd:2037).**
+  `sd-ship hold --item N --holder NAME [--for SECONDS]` reserves the
+  repository's merge lane for one item. It is written under the ship lock,
+  lasts `--for` seconds (3600 by default, 86400 at most) and renews on a
+  rerun. While it stands, `prepare` and `merge` for any other item refuse as
+  `lane_held`, naming the held item, the holder and the expiry, both before
+  taking the lock and under it. The held item's merge ends the hold, and
+  `sd-ship release --item N` ends it sooner. `sd-ship merge` no longer
+  requires the item's branch to be checked out: when the checkout's branch
+  holds no receipt for the item, the item's one receipt names the branch,
+  `--branch` names it when there are several, and `--expected-head` is checked
+  against the branch's tip fetched from origin. Neither checkout moves.
+
 - **One passing local gate per head (sd:2041, sd:1912).** Under `repo.ci =
   local`, `sd-ship prepare` runs its check as the merge gate does -- a clean
   worktree at the head, the gate's environment, `sd-review --gate-check` --

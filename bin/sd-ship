@@ -27,6 +27,7 @@ import sd_lib
 import sd_local_gate
 import sd_ship_body
 import sd_ship_dispositions as sd_ship_dispositions
+import sd_ship_hold
 import sd_ship_squash
 from sd_ship_bindings import binding_manifest, review_binding
 from sd_ship_history import ItemHistory, digest
@@ -400,14 +401,21 @@ class Ship(SharedReview):
     body_source: str = "default"
     body_normalized: tuple[str, ...] = ()
     catch_up_notes: tuple[str, ...] = ()
+    #: The branch this checkout has open, None on a detached HEAD. It is
+    #: `branch` except for a merge that ships the item's receipt branch from
+    #: another checkout (sd:2037).
+    checkout_branch: str | None = None
 
     def __init__(self, root: pathlib.Path, connection, database: pathlib.Path, args):
         from sd_db import ship
         validate_identity(args)
+        if args.no_item and getattr(args, "branch", None):
+            raise Refusal("--branch selects an item's ship receipt; a no-item record merges from its own checkout")
         if args.no_item:
             from sd_ship_no_item import publication_review
             review = publication_review(root, connection, database, args, ship, review_runtime())
             self.__dict__.update(review.__dict__)
+            self.checkout_branch = self.branch
             self.api = GitHub(root, self.repository)
             return
         self.store, self.root, self.connection, self.args = ship, root, connection, args
@@ -416,11 +424,17 @@ class Ship(SharedReview):
             # An explicit answer, told apart from no answer by `None` (sd:1928).
             args.deliver = False
         self.repository = slug(git(root, "config", "--get", "remote.origin.url"))
-        self.branch = git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
         info = ship.identity(connection, args.item)
         self.item, self.repo = info["item"], info["repo"]
         if slug(self.repo["remote"] or "") != self.repository:
             raise Refusal("item repository does not match this checkout's origin")
+        if args.command == "merge":
+            # A lane merges from its own checkout, whichever branch it has open (sd:2037).
+            self.checkout_branch = sd_lib.git_output(["symbolic-ref", "--quiet", "--short", "HEAD"], root)
+            self.branch = self.merge_branch()
+        else:
+            self.branch = git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
+            self.checkout_branch = self.branch
         if args.command == "observe":
             self.key, self.revision, self.state = ship.for_item(connection, self.repository, args.item, self.item.get("branch"))
             self.branch = self.state["branch"]
@@ -433,6 +447,41 @@ class Ship(SharedReview):
                          branch=self.branch, head=self.state.get("head") or "", key=self.key,
                          revision=self.revision, state=self.state, identity=ItemIdentity(args.item),
                          history=ItemHistory(), runtime=review_runtime())
+
+    def merge_branch(self) -> str:
+        """The branch `merge` ships: `--branch`, the checkout's own, or the item's receipt (sd:2037).
+
+        The checkout's branch answers when it holds this item's receipt, as it
+        always did. Otherwise the item's one receipt in this repository names
+        the branch, so a lane merges from its own checkout while the branch
+        stays open in the author's. With none or several, the checkout's
+        branch stands, and `merge` refuses it as unprepared, naming `--branch`.
+        """
+        if self.args.branch:
+            return self.args.branch
+        if self.checkout_branch and self.store.read(
+                self.connection, self.store.receipt_key(self.repository, self.checkout_branch, self.args.item))[1]:
+            return self.checkout_branch
+        from sd_db.workflow import WorkflowError
+        try:
+            return self.store.for_item(self.connection, self.repository, self.args.item, self.item.get("branch"))[2]["branch"]
+        except WorkflowError:
+            if self.checkout_branch is None:
+                raise Refusal(f"this checkout has no branch open and sd:{self.args.item} has no single ship receipt; "
+                              "name its branch with --branch", code="prepare_required", state="operator_decision",
+                              next_action="Rerun merge with --branch BRANCH, or run sd-ship prepare for the item first.") from None
+            return self.checkout_branch
+
+    def merge_head(self) -> str:
+        """The head `merge` would ship: this checkout's HEAD, or the branch's tip on origin (sd:2037).
+
+        From another checkout the tip is fetched, never checked out, so
+        neither checkout moves and the author's local branch is not read.
+        """
+        if self.branch == self.checkout_branch:
+            return current_head(self.root)
+        git(self.root, "fetch", "--no-tags", "origin", f"refs/heads/{self.branch}")
+        return git(self.root, "rev-parse", "FETCH_HEAD")
 
     def acceptance(self) -> dict | None:
         if not self.args.deliver:
@@ -1671,13 +1720,15 @@ class Ship(SharedReview):
 
     def merge(self) -> dict:
         if not self.state.get("pull_request"):
-            raise Refusal("prepare this branch before merging", code="prepare_required", state="operator_decision",
-                          next_action="Run sd-ship prepare with the same identity.")
+            raise Refusal(f"prepare this branch before merging; {self.branch} has no prepared pull request, "
+                          "and from another checkout --branch names the item's prepared branch",
+                          code="prepare_required", state="operator_decision",
+                          next_action="Run sd-ship prepare with the same identity, or rerun merge with --branch BRANCH.")
         observed = self.api.pull(self.state["pull_request"]["number"])
         if observed.get("merged") is True:
             return self.reconcile()
         head = self.args.expected_head
-        if not head or current_head(self.root) != head:
+        if not head or self.merge_head() != head:
             raise Refusal("--expected-head must name the current exact reviewed commit")
         self.require_copilot_abandonment_authority()
         self.check_review(head)
@@ -1738,7 +1789,7 @@ class Ship(SharedReview):
                 "contiguously with the other trailers, or take it out of the body"
             )
         self.check_review(head)
-        if current_head(self.root) != head:
+        if self.merge_head() != head:
             raise Refusal("HEAD moved immediately before merge")
         self.merge_authority(head)
         self.still_gated(base, head, protection)
@@ -1936,6 +1987,37 @@ def identity_flags(action) -> None:
     action.add_argument("--database", type=pathlib.Path, help="owned runner database; defaults to the operator HOME")
 
 
+def merge_flags(action) -> None:
+    action.add_argument("--expected-head", required=True)
+    action.add_argument("--branch", help="the item's prepared branch, when this checkout has another open "
+                                         "and the item has more than one ship receipt (sd:2037)")
+    authority = action.add_mutually_exclusive_group()
+    authority.add_argument("--run")
+    authority.add_argument("--manual", action="store_true")
+    action.add_argument("--watch", action="store_true")
+    action.add_argument("--wait-seconds", type=int, default=900)
+    action.add_argument("--abandon-copilot-review", metavar="REASON",
+                        help="stop waiting for the locally requested Copilot review on this exact PR and head")
+
+
+def hold_commands(commands) -> None:
+    """`hold` and `release`: the merge lane reserved for one item (sd:2035)."""
+    for name, text in (("hold", "reserve this repository's merge lane for one item: other items' prepare and merge refuse"),
+                       ("release", "end the item's hold on this repository's merge lane")):
+        action = commands.add_parser(name, help=text)
+        action.add_argument("--item", type=int, required=True)
+        action.add_argument("--json", action="store_true")
+        action.add_argument("--database", type=pathlib.Path, help="owned runner database; defaults to the operator HOME")
+        action.set_defaults(no_item=False, review_id=None)
+        if name == "hold":
+            lock_wait_flag(action)
+            action.add_argument("--for", dest="hold_seconds", type=sd_ship_hold.seconds,
+                                default=sd_ship_hold.DEFAULT_SECONDS, metavar="SECONDS",
+                                help=f"how long the hold stands unless renewed or released; default "
+                                     f"{sd_ship_hold.DEFAULT_SECONDS}, at most {sd_ship_hold.MAXIMUM_SECONDS}")
+            action.add_argument("--holder", metavar="NAME", help="who holds the lane, named in every refusal")
+
+
 def validate_identity(args) -> None:
     if args.review_id and not args.no_item:
         raise Refusal("--review-id requires --no-item")
@@ -1998,14 +2080,8 @@ def parser():
                 help="auto uses repository high-value tiers; request and skip require explicit task direction",
             )
         if name == "merge":
-            action.add_argument("--expected-head", required=True)
-            authority = action.add_mutually_exclusive_group()
-            authority.add_argument("--run")
-            authority.add_argument("--manual", action="store_true")
-            action.add_argument("--watch", action="store_true")
-            action.add_argument("--wait-seconds", type=int, default=900)
-            action.add_argument("--abandon-copilot-review", metavar="REASON",
-                                help="stop waiting for the locally requested Copilot review on this exact PR and head")
+            merge_flags(action)
+    hold_commands(commands)
     for name in ("review", "verify-review", "adjudicate"):
         action = commands.add_parser(name)
         identity_flags(action)
@@ -2128,12 +2204,41 @@ def dispatch(root, connection, database, args, store, readonly):
     delivery = Ship(root, connection, database, args)
     if readonly:
         return getattr(delivery, args.command)()
+    # A hold for another item refuses before the lock, so a held lane's lock
+    # is not contended, and again under it, where the answer holds (sd:2035).
+    held = args.command in ("prepare", "merge")
+    if held:
+        sd_ship_hold.refuse_other(database, delivery.repository, args.item)
     with store.repository_lock(database, delivery.repository, **lock_options(args, store)):
+        if held:
+            sd_ship_hold.refuse_other(database, delivery.repository, args.item)
         delivery.revision, delivery.state = store.read(connection, delivery.key)
         if args.no_item and (delivery.state.get("branch") != delivery.branch or delivery.state.get("lifecycle") != "active"):
             raise Refusal("no-item record changed concurrently; select its current identity before publication")
         identity_unchanged(root, connection, args, store, delivery)
-        return getattr(delivery, args.command)()
+        result = getattr(delivery, args.command)()
+        if args.command in ("merge", "reconcile"):
+            sd_ship_hold.end_after_merge(database, delivery.repository, args.item, result)
+        return result
+
+
+def hold_command(root, connection, database, args, store) -> dict:
+    """`sd-ship hold` and `sd-ship release` for the item's repository (sd:2035).
+
+    The hold is written under the repository's ship lock, so it cannot land
+    while another item's operation runs; that operation's holder is named.
+    """
+    repository = slug(git(root, "config", "--get", "remote.origin.url"))
+    info = store.identity(connection, args.item)
+    if slug(info["repo"]["remote"] or "") != repository:
+        raise Refusal("item repository does not match this checkout's origin")
+    if args.command == "release":
+        record = sd_ship_hold.end_hold(database, repository, args.item)
+        return {"ok": True, "phase": "released", "repository": repository, "item": args.item, "released": record}
+    with store.repository_lock(database, repository, **lock_options(args, store)):
+        record = sd_ship_hold.take(database, repository, args.item, window=args.hold_seconds, holder=args.holder,
+                                   command=f"sd-ship hold --item {args.item}")
+    return {"ok": True, "phase": "held", "repository": repository, "item": args.item, "hold": record}
 
 
 def identity_unchanged(root, connection, args, store, delivery) -> None:
@@ -2144,9 +2249,11 @@ def identity_unchanged(root, connection, args, store, delivery) -> None:
     item would ship under its old repository or branch. One check for both
     modes: the live checkout, and for an item its row as it stands now.
     """
-    live = git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
-    if live != delivery.branch or slug(git(root, "config", "--get", "remote.origin.url")) != delivery.repository:
-        raise Refusal(f"the checkout left {delivery.branch} while this command waited for the ship lock; "
+    # An item merge may ship another branch than the checkout's (sd:2037); the checkout still may not move.
+    expected = delivery.branch if args.no_item else delivery.checkout_branch
+    live = sd_lib.git_output(["symbolic-ref", "--quiet", "--short", "HEAD"], root)
+    if live != expected or slug(git(root, "config", "--get", "remote.origin.url")) != delivery.repository:
+        raise Refusal(f"the checkout left {expected} while this command waited for the ship lock; "
                       "rerun it from the branch it ships")
     if args.no_item:
         return
@@ -2204,7 +2311,10 @@ def main(argv=None) -> int:
         try:
             if args.command in ("review", "verify-review") and not args.no_item:
                 raise Refusal("item-backed review and clearance run inside prepare and merge; --no-item selects the standalone record path")
-            result = dispatch(root, connection, database, args, ship, readonly)
+            if args.command in ("hold", "release"):
+                result = hold_command(root, connection, database, args, ship)
+            else:
+                result = dispatch(root, connection, database, args, ship, readonly)
         finally:
             connection.close()
     except (Refusal, WorkflowError, SdDbError, sd_lib.ConfigError, sd_lib.TrailerError, OSError, sqlite3.Error, ValueError, subprocess.SubprocessError) as error:
