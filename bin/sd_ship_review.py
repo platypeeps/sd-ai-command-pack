@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 import sd_lib
+import sd_review_request
+import sd_ship_bindings
 import sd_ship_dispositions
 from sd_ship_history import AUTOMATIC_CODE_REVIEW_PASSES, completed_depth, digest
 from sd_ship_remote import Refusal, completed_process
@@ -66,6 +68,9 @@ class ReviewRuntime:
     bin_dir: pathlib.Path
     setup_seconds: int
     diagnostic_bytes: int
+    # The per-file manifest stored beside `binding`, so a moved binding names
+    # what moved (sd:1834). None where a test seam supplies a bare digest.
+    manifest: Callable[[pathlib.Path], dict] | None = None
 
 
 def complete_report(last: dict, head: str, reviewed_head: str | None) -> dict:
@@ -139,7 +144,7 @@ class SharedReview:
         if not passes:
             raise Refusal("no completed local review receipt for this head")
         if self.state.get("binding") != self.runtime.binding(self.root):
-            raise Refusal("review tools or repository policy changed after review")
+            raise self.binding_refusal()
         report = complete_report(passes[-1], head, self.state.get("reviewed_head"))
         validate_provider_selection(report, passes[-1].get("requested_provider"), completed=True)
         self.history.validate_coverage(self.state, report)
@@ -187,6 +192,23 @@ class SharedReview:
             raise Refusal(f"renewal requires --review-history-digest {history_digest} for the complete current history; each digest is spent once")
         self.history.validate_requests(self.state)
         self.history.aggregate(self.state)
+
+    def binding_changes(self) -> list[tuple[str, str]]:
+        """What moved since the stored manifest, by entry and class (sd:1246).
+
+        Called only once the digests differ: the digest decides, and this
+        names. Gate and check entries ride along, marked, never decisive.
+        """
+        manifest = getattr(self.runtime, "manifest", None)
+        if manifest is None:
+            return []
+        return sd_ship_bindings.binding_change(self.state.get("binding_manifest"), manifest(self.root))
+
+    def binding_refusal(self) -> Refusal:
+        detail = sd_ship_bindings.describe_change(self.binding_changes())
+        return Refusal("review tools or repository policy changed after review" + (f": {detail}" if detail else ""),
+                       code="review_binding_moved", boundary="review", state="operator_decision",
+                       next_action="Run sd-ship prepare again; it re-reviews this head in full (sd:1390).")
 
     def binding_moved(self) -> bool:
         """The stored receipt was produced by review tools or policy now gone.
@@ -275,24 +297,15 @@ class SharedReview:
             return self.state["empty_diff"]["base"]
         return passes[-1]["report"].get("authorship_base") or passes[0]["report"]["subject"]["base"]
 
-    def review_argv(self, base: str | None) -> list[str]:
-        """The sd-review command both stages run: `--explain` first, then the pass."""
-        argv = [sys.executable, str(self.runtime.bin_dir / "sd-review"), "--scope", "branch", "--challenge", "--json", "--database", str(self.database)]
-        requested = getattr(self.args, "provider", None)
-        if requested is not None:
-            argv += ["--provider", requested]
-        if getattr(self.args, "reuse_check", False):
-            argv.append("--reuse-check")
-        # sd:2041. Under `repo.ci = local` the merge gate runs this same check
-        # again; run it as the gate does, so its receipt answers there.
+    def gate_check_base(self) -> str | None:
+        """The base sd-review runs the gate check against, or None (sd:2041).
+
+        Under `repo.ci = local` the merge gate runs this same check again; run
+        it as the gate does, so its receipt answers there.
+        """
         if self.state.get("base") and sd_lib.repo_ci(self.connection, self.root) == "local":
-            argv += ["--gate-check", self.state["base"]]
-        if getattr(self.args, "review_timeout", None):
-            # sd:1475. sd-review sizes its timing plan, and so this watchdog, from it.
-            argv += ["--timeout", str(self.args.review_timeout)]
-        if base:
-            argv += ["--base", base]
-        return argv
+            return self.state["base"]
+        return None
 
     def caught_up_pass(self, passes: list[dict], head: str, additional: bool) -> dict | None:
         """Where the base was merged in since the last pass, when it was (sd:2023).
@@ -340,7 +353,7 @@ class SharedReview:
         if full:
             prior = self.history.aggregate(self.state)
         base = passes[-1]["head"] if passes and not (retry or additional or full) else None
-        argv = self.review_argv(base)
+        argv = sd_review_request.review_argv(self.runtime.bin_dir, self.database, self.args, base, gate_check=self.gate_check_base())
         requested = getattr(self.args, "provider", None)
         passes.append({"head": head, "started_at": self.runtime.clock(), "base": base, "retry": retry,
                        "requested_provider": requested})
@@ -350,7 +363,8 @@ class SharedReview:
             passes[-1]["catch_up"] = caught_up
         if moved:
             passes[-1]["review_binding_change"] = {"head": head, "recorded_at": self.runtime.clock(),
-                                                   "superseded_binding": self.state.get("binding")}
+                                                   "superseded_binding": self.state.get("binding"),
+                                                   "changed": [list(row) for row in self.binding_changes()]}
         with tempfile.TemporaryDirectory(prefix="sd-ship-verify-") as directory:
             if prior:
                 prior_path = pathlib.Path(directory) / "prior-review.json"
@@ -382,7 +396,10 @@ class SharedReview:
                 raise
             # What dispatch overwrites, so a released gate failure can put it back.
             self.superseded = {key: self.state.get(key, ABSENT) for key in DISPATCH_FIELDS}
-            self.save(passes=passes, phase="reviewing", head=head, binding=self.runtime.binding(self.root), review_preflight_error=None, review_clearance=None)
+            bound: dict[str, Any] = {"binding": self.runtime.binding(self.root)}
+            if self.runtime.manifest is not None:
+                bound["binding_manifest"] = self.runtime.manifest(self.root)
+            self.save(passes=passes, phase="reviewing", head=head, **bound, review_preflight_error=None, review_clearance=None)
             stage = "execution"
             return self.runtime.process(self.root, argv + ["--expected-timing", digest(plan)], timeout=plan["execution_seconds"])
         except ReviewTimeout as error:
@@ -470,7 +487,7 @@ class SharedReview:
 
 
 #: The receipt fields `execute_review` overwrites when it dispatches a pass.
-DISPATCH_FIELDS = ("phase", "head", "binding", "review_clearance")
+DISPATCH_FIELDS = ("phase", "head", "binding", "binding_manifest", "review_clearance")
 ABSENT = object()
 
 
