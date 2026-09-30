@@ -74,6 +74,13 @@
 
 ### Fixed
 
+- **The writing skills name their Jev calls (sd:2133).** `sd-fact-check`,
+  `sd-publish`, `sd-prose-lint` and `sd-humanizer` probed with a bare `jev
+  enabled` and sent no `--caller` or `--stage`, so the judgment ledger could
+  not count them. They now pass `JEV_SD_FACT_CHECK`, `JEV_SD_PUBLISH` and
+  `JEV_SD_PROSE_SCORE` with the skill's name, and each stage variable set to
+  `0` switches that pass off.
+
 - **`sd-ship prepare` no longer titles a multi-commit branch after its newest
   commit (sd:2097).** With no `--title` and no stored title, prepare used the
   newest non-merge subject, so an 11-commit branch opened as a pull request
