@@ -65,9 +65,9 @@ def verified_index(passes: list[dict]) -> int | None:
     kept a finding or a timeout capture still has to be resumed, so a request
     behind it reviews the whole branch as before.
 
-    Nor is a full-branch reservation skipped. A moved binding dispatches one
-    and stores the new binding before it runs, so once it fails the binding no
-    longer reads as moved, and a skip would verify the fix against a report
+    Nor is a reservation dispatched under a moved review binding. Dispatch
+    stores the new binding before the pass runs, so once it fails the binding
+    no longer reads as moved, and a skip would verify the fix against a report
     written under the old policy. The whole branch it owed is still owed.
     """
     for index in range(len(passes) - 1, -1, -1):
@@ -75,7 +75,7 @@ def verified_index(passes: list[dict]) -> int | None:
         if not reservation(entry):
             return index
         if ((entry.get("report") or {}).get("findings") or timeout_evidence(entry) is not None
-                or full_branch_pass(entry)):
+                or entry.get("review_binding_change")):
             return None
     return None
 

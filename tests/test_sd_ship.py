@@ -3675,6 +3675,29 @@ roles:
         self.assertEqual(history.verified_index(passes), CAP - 1)
         self.assertIsNone(history.verified_index(kept))
 
+    def test_additional_review_under_a_moved_binding_records_the_move(self):
+        """sd:2192. A request dispatched under a moved binding carries the marker.
+
+        Dispatch stores the new binding before the pass runs. Without the
+        marker, a request that then failed would read as an ordinary
+        reservation, and the next request would verify past it against a
+        report written under the old policy.
+        """
+        provider, working, prior = self.spent_reviews()
+        provider.write_text(working)
+        operation = self.operation()
+        operation.state["binding"] = "a review tool file landed on the default branch"
+        operation.save()
+        self.additional()
+        state = self.operation().state
+        self.assertEqual(state["passes"][:CAP], prior)
+        last = state["passes"][CAP]
+        self.assertIsNone(last["base"])
+        self.assertEqual(last["review_binding_change"]["superseded_binding"],
+                         "a review tool file landed on the default branch")
+        self.assertEqual(state["binding"], ship.binding(self.root))
+        self.operation().check_review(last["head"])
+
     def test_additional_pass_that_reviewed_nothing_does_not_consume_the_request(self):
         """sd:2147. Every reviewer failed and none left a finding: the request stays unspent."""
         provider, working, prior = self.spent_reviews()

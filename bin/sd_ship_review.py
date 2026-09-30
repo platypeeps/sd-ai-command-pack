@@ -391,7 +391,9 @@ class SharedReview:
         # head and would review an empty range, which is a rubber stamp rather
         # than a review. It resumes the complete prior history so no earlier
         # blocker is dropped, exactly as a whole-branch post-cap request does.
-        moved = not additional and self.binding_moved()
+        # sd:2192. A request under a moved binding is marked too, so a later
+        # request cannot verify past it if it fails (`verified_index`).
+        moved = self.binding_moved()
         caught_up = self.caught_up_pass(passes, head, whole, additional)
         full = whole or moved or caught_up is not None
         prior = self.dispatch_prior(passes, prior, full, additional)
