@@ -807,11 +807,17 @@ class LineBudgetTests(unittest.TestCase):
         # 4036 -> 4042 is the one-handoff window (sd:2041 review): prepare's
         # gate check passes `reuse=False` and `sd_gate_run` takes `reuse` and
         # `record`, so a receipt spans prepare to merge and nothing else.
+        # 4042 -> 4055 is sd:2107: `bin/sd_jev.py` passes `jev --subject`, the
+        # judged change as `sd-review-tier:<owner>.<repo>:<sha12>`, so a later
+        # labeller can score the tier from the pull request's outcome. It grows
+        # +12 (`_jev_subject`, the optional argv pair, the `root` argument) and
+        # `bin/sd-review` +1 (passing `root`). Reading `origin` and `HEAD` is
+        # `sd_lib.github_head`, shared core, so none of that is spent here.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4042,
+            4055,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
