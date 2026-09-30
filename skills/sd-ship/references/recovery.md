@@ -77,7 +77,9 @@ its output, the trailer did not land.
 Under strict protection, another landing leaves an open branch BEHIND the base, and merge refuses it as `base_moved`.
 Run `sd-ship prepare --catch-up` with the same identity.
 It merges `origin/<base>` into the branch, never rebases, and pushes a fast-forward.
-A clean merge that leaves the branch's own patch-id unchanged carries the last clean or advisory review forward and spends no pass.
+A clean merge can carry the last clean or advisory review forward and spend no pass.
+It does so only when the base's new commits touch no file and no directory the branch touches, and the branch's own patch-id is unchanged.
+A `--provider` that did not write that review re-reviews instead.
 A Copilot review of the earlier head carries forward the same way; the receipt records `review_carry_forward` (sd:1485).
 Otherwise the new head gets a full-branch pass: the review covers the branch's own diff, not the code the base brought in.
 A conflict aborts the merge and leaves the branch unchanged; resolve it by hand, then prepare again.

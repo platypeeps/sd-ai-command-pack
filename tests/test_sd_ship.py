@@ -739,7 +739,7 @@ roles:
         # patch-id against the base is the one the review read.
         self.assertEqual(self.prepare()["phase"], "ready_to_send")
         before = _git(self.root, "rev-parse", "HEAD")
-        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"lib/other.txt": "main\n"})
         result = self.prepare("--catch-up")
         self.assertEqual(result["phase"], "ready_to_send")
         head = _git(self.root, "rev-parse", "HEAD")
@@ -761,7 +761,7 @@ roles:
         # ask for by hand, leaves the same history; the carry follows it.
         self.assertEqual(self.prepare()["phase"], "ready_to_send")
         before = _git(self.root, "rev-parse", "HEAD")
-        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"lib/other.txt": "main\n"})
         _git(self.root, "fetch", "-q", "origin", "main:refs/remotes/origin/main")
         _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge origin/main into topic\n\nAuthored-with: human", "origin/main")
         self.assertEqual(self.prepare()["phase"], "ready_to_send")
@@ -784,7 +784,7 @@ roles:
         # whitespace, and this one breaks the file.
         self.assertEqual(self.prepare()["phase"], "ready_to_send")
         before = _git(self.root, "rev-parse", "HEAD")
-        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"lib/other.txt": "main\n"})
         _git(self.root, "fetch", "-q", "origin", "main:refs/remotes/origin/main")
         _git(self.root, "merge", "-q", "--no-ff", "--no-commit", "origin/main")
         (self.root / "src.py").write_text("    value = 1\n")
@@ -801,7 +801,7 @@ roles:
 
     def test_a_commit_after_the_merge_is_not_carried(self):
         self.assertEqual(self.prepare()["phase"], "ready_to_send")
-        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"lib/other.txt": "main\n"})
         _git(self.root, "fetch", "-q", "origin", "main:refs/remotes/origin/main")
         _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge origin/main into topic\n\nAuthored-with: human", "origin/main")
         _git(self.root, "commit", "--allow-empty", "-qm", "more\n\nAuthored-with: human")
@@ -809,6 +809,50 @@ roles:
         state = self.operation().state
         self.assertNotIn("review_carry_forward", state)
         self.assertEqual(len(state["passes"]), 2)
+
+    def test_a_base_change_beside_the_branchs_files_is_not_carried(self):
+        # sd:1485 review: an unchanged patch-id does not show the branch still
+        # works on the new base -- main can change a callee the branch calls
+        # from another file. Main's commit here shares the branch's directory,
+        # so the branch is reviewed again although its patch-id is unchanged.
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        before = _git(self.root, "rev-parse", "HEAD")
+        self.remote.commit_on("main", "change the callee\n\nAuthored-with: human", files={"callee.py": "def value():\n    return 2\n"})
+        _git(self.root, "fetch", "-q", "origin", "main:refs/remotes/origin/main")
+        _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge origin/main into topic\n\nAuthored-with: human", "origin/main")
+        base = "refs/remotes/origin/main"
+        self.assertEqual(sd_ship_review.own_patch_id(self.root, before, base),
+                         sd_ship_review.own_patch_id(self.root, "HEAD", base),
+                         "the premise: the branch's own patch-id is unchanged")
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        state = self.operation().state
+        self.assertNotIn("review_carry_forward", state)
+        self.assertEqual(state["passes"][-1]["catch_up"]["from"], before)
+
+    def other_reviewer(self) -> str:
+        first = self.operation().state["passes"][0]["report"]["reviewed_by"]
+        return "reviewer" if first == ["reviewer2"] else "reviewer2"
+
+    def test_a_named_reviewer_the_receipt_lacks_is_not_carried(self):
+        # sd:1485 review: a catch-up naming another reviewer reused the
+        # receipt of the first; the selection is honoured instead.
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        other = self.other_reviewer()
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"lib/other.txt": "main\n"})
+        self.assertEqual(self.prepare("--catch-up", "--provider", other)["phase"], "ready_to_send")
+        state = self.operation().state
+        self.assertNotIn("review_carry_forward", state)
+        self.assertEqual(state["passes"][-1]["report"]["reviewed_by"], [other])
+
+    def test_a_carried_head_refuses_a_named_reviewer_the_receipt_lacks(self):
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        other = self.other_reviewer()
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"lib/other.txt": "main\n"})
+        self.assertEqual(self.prepare("--catch-up")["phase"], "ready_to_send")
+        self.assertIn("review_carry_forward", self.operation().state)
+        with self.assertRaisesRegex(ship.Refusal, "does not match the requested reviewer") as caught:
+            self.prepare("--provider", other)
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "review_provider_mismatch")
 
     def test_a_fix_after_a_review_stays_a_fix_verification(self):
         self.assertEqual(self.prepare()["phase"], "ready_to_send")
@@ -1368,7 +1412,7 @@ roles:
         self.prepare()
         reviewed = _git(self.root, "rev-parse", "HEAD")
         self.reviewed_at(reviewed)
-        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"lib/other.txt": "main\n"})
         self.assertEqual(self.prepare("--catch-up")["phase"], "ready_to_send")
         head = _git(self.root, "rev-parse", "HEAD")
         pull = self.remote.pull(1)

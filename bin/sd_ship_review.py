@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import pathlib
+import posixpath
 import subprocess
 import sys
 import tempfile
@@ -111,21 +112,48 @@ def clean_merges(root: pathlib.Path, reviewed: str, head: str, base_ref: str) ->
     return merges
 
 
+def paths_between(root: pathlib.Path, old: str, new: str) -> set[str] | None:
+    """Every path `old..new` changes, both sides of a rename, or None when git cannot answer."""
+    listed = sd_lib.git_output(["diff", "--name-only", "-z", "--no-renames", old, new], root)
+    return None if listed is None else {path for path in listed.split("\0") if path}
+
+
+def base_near_branch(root: pathlib.Path, reviewed: str, head: str, base_ref: str) -> bool:
+    """Whether the base's new commits touch a file, or a directory, the branch touches (sd:1485).
+
+    An unchanged patch-id does not show the branch still works on the new
+    base: main can change a callee's contract while the branch adds a
+    caller in another file. The operator's ruling narrows the carry to base
+    commits that stay out of every file the branch changes and every
+    directory holding one. A directory is a path's own parent, so a
+    top-level file shares the root with every other top-level file.
+    Unanswerable reads as near.
+    """
+    old = sd_lib.git_output(["merge-base", reviewed, base_ref], root)
+    new = sd_lib.git_output(["merge-base", head, base_ref], root)
+    brought = paths_between(root, old, new) if old and new else None
+    own = paths_between(root, new, head) if new else None
+    if brought is None or own is None:
+        return True
+    directories = {posixpath.dirname(path) for path in own}
+    return any(path in own or posixpath.dirname(path) in directories for path in brought)
+
+
 def carry_forward(root: pathlib.Path, reviewed: str, head: str, base_ref: str) -> dict | None:
     """sd:1485. Why a review of `reviewed` still covers `head`, or None.
 
     A catch-up merge moves the head, and a review of the old head used to
     count as stale. It still covers the branch when `reviewed` is an
     ancestor, every commit since is a clean merge-in of the base
-    (`clean_merges`), and the branch's own patch-id against the base is
-    unchanged. A base change inside the branch's diff context moves that
-    patch-id, so it is reviewed again. A rebase is not carried: no merge
-    commit shows that nothing else changed.
+    (`clean_merges`), the base's new commits stay out of the branch's files
+    and directories (`base_near_branch`), and the branch's own patch-id
+    against the base is unchanged. A rebase is not carried: no merge commit
+    shows that nothing else changed.
     """
     if reviewed == head or not is_ancestor(root, reviewed, head):
         return None
     merges = clean_merges(root, reviewed, head, base_ref)
-    if merges is None:
+    if merges is None or base_near_branch(root, reviewed, head, base_ref):
         return None
     before = own_patch_id(root, reviewed, base_ref)
     if before is None or before != own_patch_id(root, head, base_ref):
@@ -252,6 +280,10 @@ class SharedReview:
         report = passes[-1].get("report") or {}
         if report.get("status") not in ("clean", "advisory") or not completed_depth(report) or self.binding_moved():
             return False
+        # A named reviewer is a selection a receipt from another cannot replace.
+        requested = getattr(self.args, "provider", None)
+        if requested is not None and report.get("reviewed_by") != [requested]:
+            return False
         carried = carry_forward(self.root, passes[-1]["head"], head, f"refs/remotes/origin/{base}")
         if carried is None:
             return False
@@ -347,7 +379,10 @@ class SharedReview:
         if additional:
             return False
         requested = getattr(self.args, "provider", None)
-        if (requested is not None and prior.get("subject", {}).get("head") == head
+        # A carried head is covered by the receipt of the head it came from (sd:1485).
+        passes = self.history.native(self.state)
+        covered = self.carried_from(head, passes[-1]) if passes else head
+        if (requested is not None and prior.get("subject", {}).get("head") == covered
                 and completed_depth(prior) and prior.get("reviewed_by") != [requested]):
             raise Refusal("completed receipt does not match the requested reviewer; selection cannot replace review evidence",
                           code="review_provider_mismatch", boundary="provider", state="operator_decision",
