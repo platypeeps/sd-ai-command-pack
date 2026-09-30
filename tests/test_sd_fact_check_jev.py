@@ -47,7 +47,7 @@ UNSURE = "unsure"
 #: instruction that exits 2 and prints nothing for the reader who runs it.
 CHOICE_OPTIONS = frozenset({
     "--criteria", "--unsure-below", "--state", "--state-format",
-    "--model", "--id", "--json", "--fallback",
+    "--model", "--id", "--json", "--fallback", "--caller", "--stage",
 })
 
 FENCE = re.compile(r"```(\w*)\n(.*?)```", re.DOTALL)

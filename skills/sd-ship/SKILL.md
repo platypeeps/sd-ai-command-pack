@@ -24,6 +24,7 @@ Shared contributors do not revoke permission; existing ownership, protection, re
 A refusal stops execution.
 When another ship operation owns the repository, rerun `prepare` or `merge` with `--wait <seconds>`; do not write a retry loop.
 `reconcile` and `adjudicate` also take the lock but cannot wait for it; rerun them once the holder is gone.
+`sd runner status` names the holder under `ship_locks`; a file under `ship-locks/` is not a hold.
 Do not change gates to obtain a merge.
 An existing manual operator path needs separate authorization; a gate refusal does not grant it.
 Standing permission starts no background work and does not enable `runner_merge: auto` on the repository row.
@@ -128,7 +129,8 @@ Never allocate another review ID to reset spent passes or discard history.
 - `sd-ship prepare --item ID --deliver|--associate-only --json` reviews, pushes, and opens or reconciles the PR.
   It returns `ready_to_send` and never merges.
   `--title` and `--body-file` supply the PR description.
-  Without `--body-file`, an open PR's live body is the description; reprepare preserves the delivery claim.
+  Without `--title` or a stored title, a one-commit branch uses its subject; a longer branch is refused.
+  Without `--body-file`, an open PR's live body is the description, found by branch when no receipt names one; reprepare preserves the delivery claim.
   The sd-ai-command-pack checkout's `WORKFLOW.md`, section **The path for a change**, lists the body lines sd-ship owns.
 - `sd-ship body --item ID [--body-file FILE] [--pr N]` prints the body prepare would publish and its body lint.
   Its `scope` says whether the diff demands a scope line, such as `CI/review scope:` for `.github/**`, and whether the body has it.
@@ -151,7 +153,14 @@ Never allocate another review ID to reset spent passes or discard history.
   Every fact it pins must equal the live state, read as the status report reads it.
   An app, a team, a role or an admin bypass still refuses.
   The receipt's `protection.accepted_gaps` names the entries a merge honoured.
-  GitHub's merge rules must also pass.
+  GitHub's merge rules must also pass: `mergeable` true, and `mergeable_state` `clean` or `unstable`.
+  `unstable` means a check the protection does not require is pending or failed; the required ones are still read.
+  Under `repo.ci = local`, merge reads GitHub's answer up to five times over 30 seconds after posting `sd/local-gate`.
+  A pull request GitHub reports BEHIND refuses as `base_moved`, before the local gate runs.
+  Under `repo.ci = local`, prepare runs its check as the local gate does, and its pass leaves a gate receipt.
+  The merge gate at the same head and binding, within 30 minutes, reuses it, and the status says `(reused)`.
+  Inputs outside the repository (external makefiles, tool files, machine state) are not bound; that window is the accepted residual risk.
+  The gate's bound is 3600 s in both, unless `--review-timeout` names one for prepare.
   A refusal returns `manualRequired: true`; it changes no protection and requests no reviewer.
 - `--watch --wait-seconds 900` starts one bounded fail-fast CI watcher.
   Its persisted start prevents another automatic watch on rerun.
@@ -206,6 +215,10 @@ Blockers identify `code`, `boundary`, `retryable`, and `approval_required`.
 Existing result fields and exit meanings remain authoritative; the new object does not grant permission.
 
 Receipts bind repository, branch, item or review identity, exact head, tools, policy, and review history.
+The tools bound are the `verdict` class in `bin/sd_ship_bindings.py`: the code `sd-review` runs, compared without comments or docstrings.
+Gate and check code runs again on every `prepare` and `merge`, so a change there does not void a receipt.
+A moved binding refuses with "review tools or repository policy changed after review:" and names each changed file and its class.
+Run `prepare` again; it re-reviews the same head in full.
 `--expected-head` compares evidence; it does not replace evidence.
 There is no `--reviewed-head` override.
 An interrupted review retains its reserved pass.

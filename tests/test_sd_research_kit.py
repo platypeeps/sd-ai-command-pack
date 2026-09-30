@@ -1184,6 +1184,9 @@ class InitHookInstallTests(unittest.TestCase):
             # `c2b10b20`, sd:1376's second body, which read the render record
             # after a pull or a checkout and exempted post-commit.
             "4470626f28b31de26aa04dae1e88b02b780e3ba75f30197ecaaac8a741a93336",
+            # `e81f7fc0`, sd:1376's third body, which rendered a branch
+            # checkout behind its upstream and queued the stale tree (sd:1991).
+            "64d1cce850343632604289dcd70ba9cd7df4e94c7fcea688992b94fb1527cebb",
         }
         digests = {hashlib.sha256(body.encode("utf-8")).hexdigest()
                    for body in module.SUPERSEDED_HOOKS}
@@ -1234,7 +1237,9 @@ class HookTriggerTests(unittest.TestCase):
             "    handle.write(' '.join(sys.argv[1:]) + chr(10))\n"
             "with pathlib.Path(%r).open('a') as handle:\n"
             "    handle.write(os.environ.get('SD_RESEARCH_TRIGGER', '-') + chr(10))\n"
-            % (str(self.marker), str(self.root / "triggers")))
+            "with pathlib.Path(%r).open('a') as handle:\n"
+            "    handle.write(os.environ.get('SD_SKIP_MIRROR', '-') + chr(10))\n"
+            % (str(self.marker), str(self.root / "triggers"), str(self.root / "holds")))
         kit.chmod(0o755)
         # The stub records nothing, so the record a real render leaves is
         # written here: the config this repository started with has been
@@ -1326,6 +1331,60 @@ class HookTriggerTests(unittest.TestCase):
         result = self.fire("post-checkout", before, self.sha(), "1")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.renders(), ["render"])
+
+    def holds(self) -> list[str]:
+        """What each render was told about holding its mirrors, `-` for nothing."""
+        path = self.root / "holds"
+        return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+
+    def track(self, upstream: str) -> None:
+        """Make the current branch track the local branch `upstream`, so
+        `@{u}` resolves with no remote and no network."""
+        branch = self.git("branch", "--show-current").stdout.strip()
+        self.git("config", "branch.%s.remote" % branch, ".")
+        self.git("config", "branch.%s.merge" % branch, "refs/heads/%s" % upstream)
+
+    def test_post_checkout_behind_upstream_renders_and_holds_the_mirrors(self) -> None:
+        """sd:1991: switching onto a branch its upstream has moved past.
+
+        The reflog that found it: a checkout of `main` two seconds before
+        `pull --ff-only`. The checkout rendered the stale tree and queued it
+        for the shared mirror; a drain in those two seconds publishes it. The
+        dashboard still wants the render, the queue does not want the text.
+        """
+
+        before = self.sha()
+        self.a_second_commit()
+        here = self.sha()
+        self.git("branch", "ahead")
+        self.git("checkout", "-q", "ahead")
+        (self.repo / "doc.md").write_text("three\n")
+        self.git("commit", "-qam", "third")
+        self.git("checkout", "-q", "-")
+        self.track("ahead")
+        self.assertEqual(self.git("rev-list", "--count", "HEAD..@{u}").stdout.strip(), "1")
+        result = self.fire("post-checkout", before, here, "1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.renders(), ["render"])
+        self.assertEqual(len(self.holds()), 1, self.holds())
+        self.assertIn("behind", self.holds()[0])
+
+    def test_post_checkout_level_with_upstream_queues_as_before(self) -> None:
+        before = self.sha()
+        self.a_second_commit()
+        self.git("branch", "level")
+        self.track("level")
+        result = self.fire("post-checkout", before, self.sha(), "1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.renders(), ["render"])
+        self.assertEqual(self.holds(), ["-"])
+
+    def test_post_checkout_without_an_upstream_queues_as_before(self) -> None:
+        before = self.sha()
+        self.a_second_commit()
+        result = self.fire("post-checkout", before, self.sha(), "1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.holds(), ["-"])
 
     def test_post_checkout_renders_a_file_checkout(self) -> None:
         """A document can change without HEAD moving, and usually on purpose.

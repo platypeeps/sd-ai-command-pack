@@ -114,8 +114,8 @@ identify them before reading sources, profile content, or workspace artifacts.
     something different.
 11. Judge destination fit when `jev` is available, before the preview. This
     step is optional and off by default. Run it only when the user sets
-    `judge=jev` and `jev enabled` exits 0. That probe costs nothing and makes
-    no request. Exit 3 means the judgment is unavailable; continue unchanged
+    `judge=jev` and `jev enabled JEV_SD_PUBLISH --record --caller sd-publish`
+    exits 0. That probe costs nothing and makes no request. Exit 3 means the judgment is unavailable; continue unchanged
     and record it as not run. Leave the probe unrun when `judge` is off, and
     record availability as `not checked`. Ask both questions in one `ask` request, over
     the same state:
@@ -140,7 +140,8 @@ identify them before reading sources, profile content, or workspace artifacts.
     the question:
 
     ```sh
-    jev ask --questions q.json --state s.json --state-format json
+    jev ask --questions q.json --state s.json --state-format json \
+        --caller sd-publish --stage JEV_SD_PUBLISH
     ```
 
     State carries the exact draft, the source spans it was adapted from, the
@@ -165,7 +166,7 @@ identify them before reading sources, profile content, or workspace artifacts.
     - When a request fails, a fallback keeps the lane moving. The flag goes
       after the verb, and an empty answer set is the batch form:
       `jev ask --questions q.json --state s.json --state-format json
-      --fallback '{}'`. It prints that answer, exits 0, and writes the reason
+      --fallback '{}' --caller sd-publish --stage JEV_SD_PUBLISH`. It prints that answer, exits 0, and writes the reason
       to standard error. Read the reason. Record the answer as not run, and
       never as a pass.
     - Count the answers you got back, not the questions you sent, and report
