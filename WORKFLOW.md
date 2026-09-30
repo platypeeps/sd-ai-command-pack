@@ -252,7 +252,8 @@ In a shared repository:
   No permission covers a merge that skips the review lane. Existing ownership and
   protection gates still decide whether the pack can execute it; a refusal remains a stop.
 - No issue filed. `sd-suggest` writes a row everywhere; `sd suggest publish`
-  files one when you run it, to the destination you name with `--to`.
+  files it as an sd item when you run it, in the checkout you name with
+  `--belongs-to`. No pack surface files a GitHub issue.
 
 ## The path for a change
 

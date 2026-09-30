@@ -12,8 +12,8 @@ filed automatically, and **nothing is written to a vault at all** -- item A's
 criterion 28 removed that, because a proposal in somebody's vault is a record
 with no reader and no expiry. What survives review becomes a row instead:
 `sd suggest add "<the proposal>" --item <work item>` writes one, and
-`sd suggest publish --to owner/repo --note <id>` files it where it can be
-argued with.
+`sd suggest publish --belongs-to <checkout> --note <id>` files it as an sd item
+where it can be argued with.
 
 A proposal is expensive to read and cheap to skip, so the bar is high on purpose:
 most sessions should yield zero or one, not a list.

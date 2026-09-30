@@ -1,10 +1,11 @@
-"""Criterion 28: a suggestion is a row first, and an issue only when asked.
+"""Criterion 28: a suggestion is a row first, and an sd item only when asked.
 
 The criterion's own test is `TheCriterion` below: a proposal row written in
 each of `sd_lib.MODES` with `gh` never asked about an issue, a `publish` that
-refuses with no destination, a `publish` that files exactly one after the
-dedup read the skill requires, and a `sd shadow sync` that writes the
-tracker's open work as rows without closing anything.
+refuses with no destination, a `publish` that files exactly one sd item after
+the dedup read the skill requires and asks `gh` nothing (sd:2002), and a
+`sd shadow sync` that writes the tracker's open work as rows without closing
+anything.
 
 `gh` here is a recorder on `PATH` rather than `sd_db.testing`'s
 `GitHubDouble`: the double routes `/repos`, `/branches`, `/collaborators` and
@@ -141,6 +142,10 @@ class SuggestCase(unittest.TestCase):
         self._scratch = tempfile.TemporaryDirectory()
         self.addCleanup(self._scratch.cleanup)
         self.home = Path(self._scratch.name).resolve()
+        # `HOME` before any row is written: a row's `repo` is its `~/...` key
+        # (sd:1439), and a fixture written under the real home would hold a
+        # key that `publish`, reading under this one, can never match.
+        self.environment(HOME=str(self.home))
         sd_db.initialise(home=self.home)
 
         self.root = self.home / "checkout"
@@ -157,13 +162,14 @@ class SuggestCase(unittest.TestCase):
 
         self.connection = sd_db.connect(sd_db.default_path(self.home), write=True)
         self.addCleanup(self.connection.close)
-        sd_db.writes.upsert_repo(self.connection, str(self.root))
+        self.repo = sd_lib.stored_repo(self.root)
+        sd_db.writes.upsert_repo(self.connection, self.repo)
         self.item = sd_db.writes.create_item(
             self.connection,
             kind="work",
             title="an item",
             status="in_progress",
-            repo=str(self.root),
+            repo=self.repo,
             source=sd_lib.ITEM_ROW_SOURCE,
             external_id=sd_lib.external_id(self.root, self.item_dir),
         )
@@ -175,7 +181,6 @@ class SuggestCase(unittest.TestCase):
         gh.write_text(GH_RECORDER, encoding="utf-8")
         gh.chmod(0o755)
         self.environment(
-            HOME=str(self.home),
             GH_CALLS=str(self.calls),
             PATH=f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
         )
@@ -233,6 +238,10 @@ class SuggestCase(unittest.TestCase):
         )
         return [row["body"] for row in rows]
 
+    def items(self) -> list[dict]:
+        rows = self.connection.execute("SELECT id, kind, title, repo, body FROM item ORDER BY id")
+        return [dict(row) for row in rows]
+
     def note_id(self, body: str = "the installer leaves a stale lock") -> int:
         """One recorded proposal, written the way the verb writes it."""
         return sd_db.add_note(self.connection, self.item, sd_suggest.PROPOSAL, body)
@@ -272,26 +281,41 @@ class TheCriterion(SuggestCase):
         self.assertEqual([], self.issue_calls())
 
     def test_publish_refuses_without_a_destination(self):
-        """No `--to`, no filing -- and the refusal names the reason, not a default."""
+        """No `--belongs-to`, no filing -- and the refusal names the reason, not a default."""
         note = self.note_id()
+        before = self.items()
         with self.assertRaises(sd_handoff_rows.RowsRefusal) as raised:
-            self.run_verb(sd_suggest.suggest_publish, note=note, to="")
-        self.assertIn("--to owner/repo", str(raised.exception))
+            self.run_verb(sd_suggest.suggest_publish, note=note, belongs_to="", to="")
+        self.assertIn("--belongs-to PATH", str(raised.exception))
+        self.assertEqual(before, self.items())
         self.assertEqual([], self.gh_calls())
 
-    def test_publish_files_exactly_one_issue_after_the_dedup_read(self):
-        """One list call, then one POST, in that order and no more of either."""
+    def test_publish_files_exactly_one_sd_item_and_no_issue(self):
+        """One new item in the named checkout, and `gh` asked nothing (sd:2002)."""
         note = self.note_id()
-        code, out = self.run_verb(sd_suggest.suggest_publish, note=note, to="o/r")
+        before = self.items()
+        code, out = self.run_verb(
+            sd_suggest.suggest_publish, note=note, belongs_to=str(self.root), to="")
 
         self.assertEqual(0, code)
-        self.assertIn("https://github.com/o/r/issues/9", out)
-        calls = self.issue_calls()
-        self.assertEqual(2, len(calls), calls)
-        self.assertEqual(["api", "repos/o/r/issues?state=open&per_page=100"], calls[0])
-        self.assertEqual("--method", calls[1][1])
-        self.assertEqual("POST", calls[1][2])
-        self.assertEqual(1, sum(1 for call in calls if "--method" in call))
+        added = [row for row in self.items() if row not in before]
+        self.assertEqual(1, len(added), added)
+        self.assertEqual(("task", "the installer leaves a stale lock"),
+                         (added[0]["kind"], added[0]["title"]))
+        self.assertTrue(sd_lib.same_repo(self.root, added[0]["repo"]), added[0]["repo"])
+        self.assertIn(f"filed sd:{added[0]['id']}", out)
+        self.assertEqual([], self.gh_calls())
+
+    def test_the_retired_to_refuses_by_name_and_files_nothing(self):
+        """`--to owner/repo` named a GitHub issue tracker; it now only refuses."""
+        note = self.note_id()
+        before = self.items()
+        with self.assertRaises(sd_handoff_rows.RowsRefusal) as raised:
+            self.run_verb(sd_suggest.suggest_publish, note=note,
+                          belongs_to=str(self.root), to="o/r")
+        self.assertIn("never a GitHub issue", str(raised.exception))
+        self.assertEqual(before, self.items())
+        self.assertEqual([], self.gh_calls())
 
     def test_shadow_sync_writes_the_open_issues_and_closes_nothing(self):
         """Two open issues in, two rows out, and no call that would close one."""
@@ -373,53 +397,91 @@ class WhatItRefuses(SuggestCase):
         """A followup id is not a suggestion, and filing one would be a surprise."""
         followup = sd_db.add_note(self.connection, self.item, "followup", "not a proposal")
         with self.assertRaises(sd_handoff_rows.RowsRefusal) as raised:
-            self.run_verb(sd_suggest.suggest_publish, note=followup, to="o/r")
+            self.run_verb(sd_suggest.suggest_publish, note=followup,
+                          belongs_to=str(self.root), to="")
         self.assertIn(f"no proposal note with id {followup}", str(raised.exception))
         self.assertEqual([], self.issue_calls())
 
+    def test_publish_refuses_a_checkout_the_database_does_not_carry(self):
+        """`capture_task` would refuse it too; this names the flag that was wrong."""
+        note = self.note_id()
+        elsewhere = self.home / "elsewhere"
+        elsewhere.mkdir()
+        before = self.items()
+        with self.assertRaises(sd_handoff_rows.RowsRefusal) as raised:
+            self.run_verb(sd_suggest.suggest_publish, note=note,
+                          belongs_to=str(elsewhere), to="")
+        self.assertIn("is not a registered repository", str(raised.exception))
+        self.assertEqual(before, self.items())
+
 
 class TheDedupRead(SuggestCase):
-    """`skills/sd-suggest/SKILL.md:36` asks for the list call, actually made."""
+    """`skills/sd-suggest/SKILL.md` asks for the read, actually made, before filing."""
+
+    def publish(self, note: int) -> tuple[int, str]:
+        return self.run_verb(sd_suggest.suggest_publish, note=note,
+                             belongs_to=str(self.root), to="")
+
+    def open_item(self, title: str) -> int:
+        return sd_db.writes.create_item(
+            self.connection, kind="task", title=title, status="planning",
+            repo=self.repo)
 
     def test_a_title_already_open_files_nothing_and_says_where_it_is(self):
         note = self.note_id("the installer leaves a stale lock")
-        self.environment(GH_OPEN_ISSUES=json.dumps([
-            {"title": "the installer leaves a stale lock",
-             "html_url": "https://github.com/o/r/issues/4"}]))
+        existing = self.open_item("the installer leaves a stale lock")
+        before = self.items()
 
-        code, out = self.run_verb(sd_suggest.suggest_publish, note=note, to="o/r")
+        code, out = self.publish(note)
 
         self.assertEqual(0, code)
-        self.assertIn("already open at https://github.com/o/r/issues/4", out)
-        self.assertEqual([], [call for call in self.gh_calls() if "--method" in call])
+        self.assertIn(f"already open as sd:{existing}", out)
+        self.assertEqual(before, self.items())
 
     def test_the_match_ignores_case_and_surrounding_space(self):
         """Two people naming the same friction do not type the same capitals."""
         note = self.note_id("The Installer Leaves A Stale Lock")
-        self.environment(GH_OPEN_ISSUES=json.dumps([
-            {"title": "  the installer leaves a stale lock  ",
-             "html_url": "https://github.com/o/r/issues/4"}]))
-        code, out = self.run_verb(sd_suggest.suggest_publish, note=note, to="o/r")
+        self.open_item("  the installer leaves a stale lock  ")
+        before = self.items()
+        code, out = self.publish(note)
         self.assertEqual(0, code)
-        self.assertIn("already open at", out)
+        self.assertIn("already open as", out)
+        self.assertEqual(before, self.items())
 
-    def test_a_read_that_fails_refuses_rather_than_filing_blind(self):
-        """The read exists to prevent a duplicate, so its failure cannot be a
-        fall-through: filing anyway is the outcome the read is there to stop."""
-        note = self.note_id()
-        self.environment(GH_LIST_CODE="1")
-        with self.assertRaises(sd_handoff_rows.RowsRefusal) as raised:
-            self.run_verb(sd_suggest.suggest_publish, note=note, to="o/r")
-        self.assertIn("filing blind", str(raised.exception))
-        self.assertEqual([], [call for call in self.gh_calls() if "--method" in call])
+    def test_the_same_title_in_another_checkout_does_not_hold_it_back(self):
+        """The read is scoped to the checkout `--belongs-to` names."""
+        note = self.note_id("the installer leaves a stale lock")
+        other = sd_lib.stored_repo(self.home / "other")
+        sd_db.writes.upsert_repo(self.connection, other)
+        sd_db.writes.create_item(
+            self.connection, kind="task", title="the installer leaves a stale lock",
+            status="planning", repo=other)
+        before = self.items()
+        _, out = self.publish(note)
+        self.assertEqual(len(before) + 1, len(self.items()))
+        self.assertIn("filed sd:", out)
+
+    def test_a_done_item_with_the_title_does_not_hold_a_new_one_back(self):
+        """A closed item is history; the friction came back, so it files again."""
+        note = self.note_id("the installer leaves a stale lock")
+        done = self.open_item("the installer leaves a stale lock")
+        self.connection.execute("UPDATE item SET status = 'done' WHERE id = ?", (done,))
+        self.connection.commit()
+        before = self.items()
+        _, out = self.publish(note)
+        self.assertEqual(len(before) + 1, len(self.items()))
+        self.assertIn("filed sd:", out)
 
     def test_the_title_is_the_first_line_of_the_body(self):
-        """A body is a paragraph; an issue title is one line, and a bounded one."""
+        """A body is a paragraph; an item title is one line, and a bounded one."""
         note = self.note_id("a short first line\nand a second paragraph")
-        self.run_verb(sd_suggest.suggest_publish, note=note, to="o/r")
-        posted = [call for call in self.gh_calls() if "--method" in call][0]
-        self.assertIn("title=a short first line", posted)
-        self.assertIn("body=a short first line\nand a second paragraph", posted)
+        before = self.items()
+        self.publish(note)
+        added = [row for row in self.items() if row not in before][0]
+        self.assertEqual("a short first line", added["title"])
+        body = json.loads(added["body"])["text"]
+        self.assertTrue(body.startswith("a short first line\nand a second paragraph"), body)
+        self.assertIn(f"From proposal note {note}.", body)
 
 
 class TheShadowSync(SuggestCase):
@@ -898,8 +960,25 @@ class TheRefusalReachesTheOperator(SuggestCase):
         note = self.note_id()
         done = self.run_cli("suggest", "publish", "--note", str(note))
         self.assertEqual(1, done.returncode, done.stderr)
-        self.assertIn("--to owner/repo", done.stderr)
+        self.assertIn("--belongs-to PATH", done.stderr)
         self.assertNotIn("Traceback", done.stderr)
+
+    def test_publish_through_the_group_files_an_sd_item(self):
+        """`--belongs-to .` from inside the checkout, end to end, and no `gh` call."""
+        note = self.note_id()
+        before = len(self.items())
+        done = self.run_cli("suggest", "publish", "--note", str(note), "--belongs-to", ".")
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertIn("filed sd:", done.stdout)
+        self.assertEqual(before + 1, len(self.items()))
+        self.assertEqual([], self.gh_calls())
+
+    def test_the_retired_to_refuses_through_the_same_handler(self):
+        note = self.note_id()
+        done = self.run_cli("suggest", "publish", "--note", str(note), "--to", "o/r")
+        self.assertEqual(1, done.returncode, done.stderr)
+        self.assertIn("never a GitHub issue", done.stderr)
+        self.assertEqual([], self.gh_calls())
 
     def test_the_row_the_group_writes_is_the_row_the_library_writes(self):
         """The wiring end to end, so the group is not a parser with no verb."""
