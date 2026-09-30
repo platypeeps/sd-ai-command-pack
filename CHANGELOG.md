@@ -81,6 +81,20 @@
   the route reason names it. Answers at or above the routed tier are
   unchanged.
 
+- **A post-cap review verifies the fix, and a pass that reviewed nothing
+  spends no request (sd:2147).** `sd-ship prepare --additional-review-for`
+  reviewed the whole branch against its base on every request. The design
+  read an explicit request as a full-branch checkpoint that supersedes the
+  history before it, so the one pass the operator asked for was the largest
+  subject the item had. On ui-design #19 the branch was 2.1 MB over 85 files,
+  every reviewer refused the input past the 2,000,000-byte cap, and the
+  refused pass still spent the request. A request after a completed pass on
+  an earlier head now verifies the diff since that head, as an automatic pass
+  would; the whole branch is reviewed only where no such pass exists. A pass
+  in which no reviewer completed and no finding survived is released like a
+  gate failure, and every refusal of an additional pass says whether the
+  request was consumed.
+
 - **No test reaches the real Jev (sd:2136).** On a keyed machine, tests that
   ran `sd-review` or `sd-docs-lint` against the checkout sent live, metered
   calls: 141 on 2026-09-29. `run-tests.sh` now exports `JEV_ENABLED=0`; the
