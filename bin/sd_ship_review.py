@@ -18,7 +18,12 @@ from typing import Any, Callable
 
 import sd_lib
 import sd_ship_dispositions
-from sd_ship_history import AUTOMATIC_CODE_REVIEW_PASSES, completed_depth, digest
+from sd_ship_history import (
+    AUTOMATIC_CODE_REVIEW_PASSES,
+    completed_depth,
+    digest,
+    reservation,
+)
 from sd_ship_remote import Refusal, completed_process
 from sd_ship_workflow import success
 
@@ -294,7 +299,27 @@ class SharedReview:
             argv += ["--base", base]
         return argv
 
-    def caught_up_pass(self, passes: list[dict], head: str, additional: bool) -> dict | None:
+    def request_verifies_fix(self, passes: list[dict], head: str) -> bool:
+        """sd:2147. Whether a post-cap request reviews the diff since the last reviewed head.
+
+        That is the subject an automatic pass would take at this head. A
+        request used to review the whole branch unconditionally, so a branch
+        whose fix deltas each fit the review input cap outgrew it on the one
+        pass the operator asked for (ui-design #19: 2.1 MB over 85 files).
+        The whole branch is still reviewed where a fix verification has no
+        sound base: no completed pass to verify, the same head again (an
+        empty range), a moved review binding, or an imported history whose
+        every native pass is a full-branch continuation. A catch-up merge is
+        read after this, by `caught_up_pass`, as it is for an automatic pass.
+        """
+        if not passes or self.history.requires_continuation(self.state):
+            return False
+        last = passes[-1]
+        if last["head"] == head or reservation(last):
+            return False
+        return not self.binding_moved()
+
+    def caught_up_pass(self, passes: list[dict], head: str, whole: bool) -> dict | None:
         """Where the base was merged in since the last pass, when it was (sd:2023).
 
         From the previous head, the range then holds every commit the base
@@ -304,7 +329,7 @@ class SharedReview:
         done by hand, must be scoped the same way on the next run.
         """
         base = self.state.get("base")
-        if not passes or additional or not base:
+        if not passes or whole or not base:
             return None
         previous = passes[-1]["head"]
         fork = sd_lib.git_output(["merge-base", head, f"refs/remotes/origin/{base}"], self.root)
@@ -323,7 +348,11 @@ class SharedReview:
         retry = bool(self.args.retry_review)
         request = self.additional_request(head, passes)
         additional = request is not None
-        if additional:
+        # sd:2147. A request verifies the fix like the automatic pass it
+        # follows, where one would; only a request with no such pass reviews
+        # the whole branch again.
+        whole = additional and not self.request_verifies_fix(passes, head)
+        if whole:
             prior = self.history.aggregate(self.state)
         if self.reusable_review(head, prior, retry, additional):
             return
@@ -333,13 +362,13 @@ class SharedReview:
         # not a fix verification: `--base <previous head>` would be this same
         # head and would review an empty range, which is a rubber stamp rather
         # than a review. It resumes the complete prior history so no earlier
-        # blocker is dropped, exactly as a post-cap request does.
+        # blocker is dropped, exactly as a whole-branch post-cap request does.
         moved = not additional and self.binding_moved()
-        caught_up = self.caught_up_pass(passes, head, additional)
+        caught_up = self.caught_up_pass(passes, head, whole)
         full = moved or caught_up is not None
         if full:
             prior = self.history.aggregate(self.state)
-        base = passes[-1]["head"] if passes and not (retry or additional or full) else None
+        base = passes[-1]["head"] if passes and not (retry or whole or full) else None
         argv = self.review_argv(base)
         requested = getattr(self.args, "provider", None)
         passes.append({"head": head, "started_at": self.runtime.clock(), "base": base, "retry": retry,
@@ -355,7 +384,7 @@ class SharedReview:
             if prior:
                 prior_path = pathlib.Path(directory) / "prior-review.json"
                 prior_path.write_text(json.dumps(prior, sort_keys=True), encoding="utf-8")
-                argv += ["--resume-report" if retry or additional or full else "--verify-report", str(prior_path)]
+                argv += ["--resume-report" if retry or whole or full else "--verify-report", str(prior_path)]
             result = self.execute_review(argv, head, passes)
         self.record_review(result, head, passes)
 
@@ -393,7 +422,7 @@ class SharedReview:
                 passes[-1].update(execution_error=diagnostic, exit_code=124)
                 self.save(passes=passes, reviewed_head=None, phase="reviewed")
             raise Refusal(f"local review {stage} watchdog expired after {error.diagnostic['allowed_seconds']}s; "
-                          + ("no provider pass reserved; " if stage == "planning" else "reserved pass retained; ")
+                          + ("no provider pass reserved; " if stage == "planning" else f"reserved pass retained{consumed(passes)}; ")
                           + "bounded diagnostics remain in the item ship receipt") from None
 
     def release_gate_failure(self, report: dict, head: str, passes: list[dict]) -> None:
@@ -413,16 +442,11 @@ class SharedReview:
         stop re-reviewing (found by the local review of sd:1475). Every field dispatch overwrote
         goes back to what it was.
         """
-        passes.pop()
         check = report.get("check") or {}
         detail = str(check.get("detail") or "")[-self.runtime.diagnostic_bytes:]
         checks = gate_diagnostics(check, self.runtime.diagnostic_bytes)
-        for key, value in self.superseded.items():
-            if value is ABSENT:
-                self.state.pop(key, None)
-        self.save(passes=passes, **{key: value for key, value in self.superseded.items() if value is not ABSENT},
-                  review_preflight_error={"kind": "gate_failed", "stage": "check", "head": head,
-                                          "exit_code": check.get("exit_code"), "detail": detail, "checks": checks})
+        self.release_pass(passes, {"kind": "gate_failed", "stage": "check", "head": head,
+                                   "exit_code": check.get("exit_code"), "detail": detail, "checks": checks})
         failed = next((c for c in checks if c["status"] == "fail"), {})
         evidence = detail.strip() or (failed.get("stderr") or failed.get("stdout") or failed.get("reason") or "").strip()
         raise Refusal(f"the repository gate failed before any reviewer was asked; no review pass was spent: "
@@ -430,6 +454,35 @@ class SharedReview:
                       code="gate_failed", boundary="runtime", state="retryable_failure",
                       next_action="Fix the gate, or rerun prepare when the machine is less loaded "
                                   "(--review-timeout raises the limit); the next prepare reviews normally.")
+
+    def release_pass(self, passes: list[dict], diagnostic: dict) -> None:
+        """Drop the pass just reserved and put back every field its dispatch overwrote."""
+        passes.pop()
+        for key, value in self.superseded.items():
+            if value is ABSENT:
+                self.state.pop(key, None)
+        self.save(passes=passes, **{key: value for key, value in self.superseded.items() if value is not ABSENT},
+                  review_preflight_error=diagnostic)
+
+    def release_unreviewed_request(self, report: dict, head: str, passes: list[dict], exit_code: int) -> None:
+        """sd:2147. A post-cap pass that reviewed nothing does not spend the operator's request.
+
+        The request buys one review. A pass in which no reviewer completed
+        and none left a finding -- every reviewer refused the input, failed,
+        or answered without citing the subject -- bought none, and keeping it
+        made the operator renew with a history digest for a review that never
+        happened. It is released the way a gate failure is, and what the
+        reviewers said stays under `review_preflight_error`. A pass that kept
+        a finding, or a watchdog or unreadable receipt whose evidence cannot
+        say it reviewed nothing, stays spent.
+        """
+        self.release_pass(passes, {"kind": "additional_review_unreviewed", "stage": "execution", "head": head,
+                                   "exit_code": exit_code, "status": report.get("status"),
+                                   "detail": failed_outcomes(report)[-self.runtime.diagnostic_bytes:]})
+        raise Refusal(f"local review {report.get('status')}: 0/{report.get('requested_reviews', 0)} completed"
+                      f"{failed_outcomes(report)}; nothing was reviewed, so the operator request was not consumed",
+                      code="review_unreviewed", boundary="review", state="operator_decision",
+                      next_action="Resolve the reviewers' refusals, then repeat the same --additional-review-for request.")
 
     def record_review(self, result: subprocess.CompletedProcess, head: str, passes: list[dict]) -> None:
         try:
@@ -449,10 +502,14 @@ class SharedReview:
             passes[-1].update(execution_error=error, exit_code=result.returncode)
             self.save(passes=passes, reviewed_head=None, phase="reviewed")
             raise Refusal(f"local review emitted no valid receipt (sd-review exit {result.returncode}); "
-                          "its reserved pass remains recorded; bounded diagnostics remain in the item ship receipt")
+                          f"its reserved pass remains recorded{consumed(passes)}; "
+                          "bounded diagnostics remain in the item ship receipt")
         stash_raw_responses(report, head)
         if unreviewed_gate_failure(report, result.returncode):
             self.release_gate_failure(report, head, passes)
+        request = passes[-1].get("additional_review_request")
+        if request and unreviewed(report, result.returncode):
+            self.release_unreviewed_request(report, head, passes, result.returncode)
         passes[-1]["report"] = report
         passes[-1]["exit_code"] = result.returncode
         self.save(passes=passes, reviewed_head=head if result.returncode == 0 else None, phase="reviewed")
@@ -463,10 +520,34 @@ class SharedReview:
             raise
         if result.returncode:
             raise Refusal(f"local review {report.get('status')}: {report.get('completed_reviews', 0)}/{report.get('requested_reviews', 0)} completed"
-                          f"{failed_outcomes(report)}; see item ship receipt")
+                          f"{failed_outcomes(report)}{REQUEST_CONSUMED if request else ''}; see item ship receipt")
         self.check_review(head)
         if self.runtime.current_head(self.root) != head:
             raise Refusal("HEAD or checkout changed during local checks and review")
+
+
+#: What a refusal adds when the pass it kept was an explicit post-cap request (sd:2147).
+REQUEST_CONSUMED = "; the operator request was consumed"
+
+
+def consumed(passes: list[dict]) -> str:
+    return REQUEST_CONSUMED if passes and passes[-1].get("additional_review_request") else ""
+
+
+def unreviewed(report: dict, exit_code: int) -> bool:
+    """sd:2147. A failed pass in which no reviewer completed and no finding survived.
+
+    Read from a whole receipt only: one that names the reviewers it asked,
+    each with a failed outcome. A report missing those fields cannot say it
+    reviewed nothing, so its pass stays spent.
+    """
+    outcomes = report.get("outcomes")
+    requested = report.get("requested_reviews")
+    return (exit_code != 0 and report.get("status") in ("refused", "rate_limited", "unavailable")
+            and type(requested) is int and requested > 0 and report.get("completed_reviews") == 0
+            and report.get("reviewed_by") == [] and report.get("findings") == []
+            and isinstance(outcomes, list) and bool(outcomes)
+            and all(isinstance(row, dict) and row.get("status") not in ANSWERED for row in outcomes))
 
 
 #: The receipt fields `execute_review` overwrites when it dispatches a pass.

@@ -1071,7 +1071,7 @@ class NoItemContracts(unittest.TestCase):
 
         # The cap is spent, so the next head needs an explicit request, and
         # the renewal digest belongs to the pass after that one.
-        self.commit_fix("more.py", "value = 99\n")
+        reviewed = self.commit_fix("more.py", "value = 99\n")
         self.refused("review", "--review-id", review_id, pattern="spent|explicit new request")
         _key, (_revision, state) = self.record(review_id)
         self.refused(
@@ -1079,7 +1079,15 @@ class NoItemContracts(unittest.TestCase):
             "--request-reason", "fixture continuation assertion",
             "--review-history-digest", state["history_digest"], pattern="renews only after",
         )
-        reviewer, extra_calls = self.native_reviewer(review_id, resume=True)
+        # The request follows a completed pass on an earlier head, so it
+        # verifies that fix as an automatic pass would (sd:2147).
+        def extra_verification(report, state, argv):
+            self.assertIn("--verify-report", argv)
+            self.assertEqual(argv[argv.index("--base") + 1], reviewed)
+            report["subject"]["base"] = reviewed
+            report["verification_report_digest"] = ship.digest(state["passes"][CAP - 1]["report"])
+
+        reviewer, extra_calls = self.native_reviewer(review_id, shape=extra_verification)
         self.success(
             "review", "--review-id", review_id, "--additional-review-for", self.head,
             "--request-reason", "fixture continuation assertion", reviewer=reviewer,
