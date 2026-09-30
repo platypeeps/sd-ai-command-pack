@@ -13,7 +13,8 @@ import sys
 from typing import Any
 
 
-def review_argv(bin_dir: pathlib.Path, database: pathlib.Path, args: Any, base: str | None) -> list[str]:
+def review_argv(bin_dir: pathlib.Path, database: pathlib.Path, args: Any, base: str | None,
+                gate_check: str | None = None) -> list[str]:
     """The sd-review command both stages run: `--explain` first, then the pass."""
     argv = [sys.executable, str(bin_dir / "sd-review"), "--scope", "branch", "--challenge", "--json", "--database", str(database)]
     requested = getattr(args, "provider", None)
@@ -21,6 +22,9 @@ def review_argv(bin_dir: pathlib.Path, database: pathlib.Path, args: Any, base: 
         argv += ["--provider", requested]
     if getattr(args, "reuse_check", False):
         argv.append("--reuse-check")
+    if gate_check:
+        # sd:2041. Run the check as the merge gate does, so its receipt answers there.
+        argv += ["--gate-check", gate_check]
     if getattr(args, "review_timeout", None):
         # sd:1475. sd-review sizes its timing plan, and so this watchdog, from it.
         argv += ["--timeout", str(args.review_timeout)]

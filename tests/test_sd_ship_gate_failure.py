@@ -150,6 +150,50 @@ class TheRealGateFailureIsRecognised(review_tests.ReviewFixture):
         self.assertTrue(sd_ship_review.unreviewed_gate_failure(result, sd_review.EXIT_GATE))
 
 
+class PrepareRunsTheLocalGate(unittest.TestCase):
+    """sd:2041. Under `repo.ci = local`, prepare's check is the merge gate's, so its receipt serves the merge."""
+
+    def argv(self, ci: str, state: dict) -> list[str]:
+        review, process = provider_tests.ProviderSelection.context(self, state=state)
+        with unittest.mock.patch.object(sd_ship_review.sd_lib, "repo_ci", lambda connection, root: ci):
+            review.review(HEAD)
+        return process.call_args_list[-1].args[1]
+
+    def test_a_local_repository_asks_for_the_gate_check_against_its_base(self):
+        argv = self.argv("local", {"passes": [], "base": "main"})
+        self.assertEqual(argv[argv.index("--gate-check") + 1], "main")
+
+    def test_a_github_repository_runs_the_check_as_before(self):
+        self.assertNotIn("--gate-check", self.argv("github", {"passes": [], "base": "main"}))
+
+    def test_a_docs_only_failure_keeps_its_docs_row(self):
+        rows = [{"name": name, "status": "skipped"} for name in sd_ship_review.sd_lib.CHECK_NAMES]
+        rows.append({"name": "docs", "status": "fail", "exit_code": 1, "stdout": "broken link"})
+        kept = sd_ship_review.gate_diagnostics({"checks": rows}, 4096)
+        self.assertEqual([record["name"] for record in kept], [*sd_ship_review.sd_lib.CHECK_NAMES, "docs"])
+        self.assertEqual(kept[-1]["stdout"], "broken link")
+
+
+class TimingPlanCarriesTheGatesBound(unittest.TestCase):
+    """sd:2041. The watchdog counts the gate's own bound once, beside each reviewer's phase."""
+
+    TIMING = {"setup_seconds": 3600, "phase_seconds": 1800, "check_seconds": 3600, "execution_seconds": 10800,
+              "candidates": [{"name": "a", "recipient": "a@fixture"}, {"name": "b", "recipient": "b@fixture"}]}
+
+    def plan(self, timing: dict) -> dict:
+        report = {"status": "explained", "requested_reviews": 2, "timing": timing}
+        return ship.timing_plan(ship.subprocess.CompletedProcess([], 0, ship.json.dumps(report), ""))
+
+    def test_a_plan_with_a_gate_bound_is_accepted(self):
+        self.assertEqual(self.plan(self.TIMING)["execution_seconds"], 10800)
+
+    def test_a_total_that_does_not_count_the_gate_bound_is_refused(self):
+        for change in ({"execution_seconds": 9000}, {"check_seconds": 0}, {"check_seconds": True},
+                       {"check_seconds": 3600.0}):
+            with self.subTest(change=change), self.assertRaises(ship.Refusal):
+                self.plan({**self.TIMING, **change})
+
+
 class ReviewTimeoutReachesTheGate(unittest.TestCase):
     def test_sd_review_hands_its_phase_budget_to_sd_check(self):
         """The phase budget sd-review plans for the gate is the limit sd-check uses."""

@@ -297,6 +297,16 @@ class SharedReview:
             return self.state["empty_diff"]["base"]
         return passes[-1]["report"].get("authorship_base") or passes[0]["report"]["subject"]["base"]
 
+    def gate_check_base(self) -> str | None:
+        """The base sd-review runs the gate check against, or None (sd:2041).
+
+        Under `repo.ci = local` the merge gate runs this same check again; run
+        it as the gate does, so its receipt answers there.
+        """
+        if self.state.get("base") and sd_lib.repo_ci(self.connection, self.root) == "local":
+            return self.state["base"]
+        return None
+
     def caught_up_pass(self, passes: list[dict], head: str, additional: bool) -> dict | None:
         """Where the base was merged in since the last pass, when it was (sd:2023).
 
@@ -343,7 +353,7 @@ class SharedReview:
         if full:
             prior = self.history.aggregate(self.state)
         base = passes[-1]["head"] if passes and not (retry or additional or full) else None
-        argv = sd_review_request.review_argv(self.runtime.bin_dir, self.database, self.args, base)
+        argv = sd_review_request.review_argv(self.runtime.bin_dir, self.database, self.args, base, gate_check=self.gate_check_base())
         requested = getattr(self.args, "provider", None)
         passes.append({"head": head, "started_at": self.runtime.clock(), "base": base, "retry": retry,
                        "requested_provider": requested})
@@ -493,10 +503,13 @@ def gate_diagnostics(check: dict, limit: int) -> list[dict]:
     records = check.get("checks")
     if not isinstance(records, list):
         return []
+    # A docs-only run (sd:2072) adds one `docs` row after the three names; it is the one that ran.
+    docs = [record for record in records[len(sd_lib.CHECK_NAMES):] if isinstance(record, dict)
+            and record.get("name") == "docs"][:1]
     return [{"name": record.get("name"), "status": record.get("status"), "exit_code": record.get("exit_code"),
              "reason": str(record.get("reason") or "")[-limit:],
              "stdout": str(record.get("stdout") or "")[-limit:], "stderr": str(record.get("stderr") or "")[-limit:]}
-            for record in records[:len(sd_lib.CHECK_NAMES)] if isinstance(record, dict)]
+            for record in [*records[:len(sd_lib.CHECK_NAMES)], *docs] if isinstance(record, dict)]
 
 
 #: Statuses of a reviewer that answered usably; any other outcome names its cause.

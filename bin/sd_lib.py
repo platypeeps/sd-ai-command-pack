@@ -903,6 +903,11 @@ CI_MODES = ("github", "local")
 #: The commit status `sd-ship` posts for a `ci = local` head, and the one
 #: required context such a repository's protection names.
 LOCAL_GATE_CONTEXT = "sd/local-gate"
+#: The bound on one repository gate run, wherever it runs: the merge-time local
+#: gate and `sd-review`'s check both hand it to `sd-check --timeout` (sd:2041).
+#: `sd-check`'s own 900-second default is for an interactive run; a gate that
+#: builds its environment on a loaded machine ran past 900 s, and past 1800 s.
+GATE_CHECK_SECONDS = 3600
 
 
 def repo_ci(connection: Any, root: pathlib.Path | str) -> str:
@@ -2172,6 +2177,30 @@ ATTRIBUTES_TRAILER = "Attributes:"
 #: become reviewable by anthropic every time the trailer was forgotten.
 HUMAN_AUTHOR = "human"
 
+#: What a commit Dependabot wrote says, though it carries no trailer (sd:2065).
+#: A reserved value like `human` and not a registry entry: the registry lists
+#: what can be started, and nothing starts Dependabot. `github` is its vendor,
+#: which no reviewer carries, so it excludes nobody from reviewing a bump.
+DEPENDABOT_ENTRY = "dependabot"
+DEPENDABOT_AUTHOR = f"{DEPENDABOT_ENTRY}/github"
+
+#: The evidence that stands in for the trailer: author and committer exactly as
+#: GitHub writes them on a Dependabot commit (seen on pack PR #1257). The
+#: committer is GitHub's web-flow identity, so a local rewrite -- a rebase, an
+#: amend, a fix-up -- names somebody else and the commit says nothing again.
+#: This is a claim, not proof: anyone who can push the branch can set four
+#: environment variables, just as they can type any trailer. What it rules out
+#: is the failure the trailer exists for -- a forgotten one -- because no tool
+#: writes this pair by accident. GitHub also signs the commit; that is not
+#: checked here, since verifying it needs GitHub's key on every machine.
+DEPENDABOT_IDENTITY = (
+    ("dependabot[bot]", "49699333+dependabot[bot]@users.noreply.github.com"),
+    ("GitHub", "noreply@github.com"),
+)
+
+#: The values a trailer may carry that no registry entry resolves.
+RESERVED_AUTHORS = {HUMAN_AUTHOR: HUMAN_AUTHOR, DEPENDABOT_ENTRY: DEPENDABOT_AUTHOR}
+
 
 class TrailerError(Exception):
     """A commit that does not say, or says something unreadable."""
@@ -2198,11 +2227,27 @@ def commit_messages(root: pathlib.Path, base: str, head: str) -> list[tuple[str,
     return records
 
 
+def identity_authors(root: pathlib.Path, *revisions: str) -> dict[str, str]:
+    """`<sha> -> <entry>/<vendor>` for each commit whose identity says who wrote it.
+
+    Raw `%an`/`%ae`, never the mailmapped forms: a `.mailmap` is a file in the
+    branch under review, and it could map anybody onto the bot.
+    """
+    raw = git_output(["log", "--no-merges", "--format=%H%x1f%an%x1f%ae%x1f%cn%x1f%ce", *revisions], root)
+    found = {}
+    for line in (raw or "").splitlines():
+        sha, *fields = line.split("\x1f")
+        if len(fields) == 4 and ((fields[0], fields[1]), (fields[2], fields[3])) == DEPENDABOT_IDENTITY:
+            found[sha] = DEPENDABOT_AUTHOR
+    return found
+
+
 def attribution(root: pathlib.Path, base: str, head: str) -> dict[str, str]:
     """`<sha> -> <entry>/<vendor>` for every commit in the range that says.
 
     A commit says either by carrying its own `Authored-with:` or by being named
-    in a later commit's `Attributes:`. Nothing takes a flag for this: a branch
+    in a later commit's `Attributes:`, or, for Dependabot, by the identity
+    GitHub wrote on it (`identity_authors`). Nothing takes a flag for this: a branch
     is a set of commits and each one answers for itself, because a single
     `--author` for the whole range is a claim about work the person making the
     claim may not have done.
@@ -2230,8 +2275,9 @@ def attribution(root: pathlib.Path, base: str, head: str) -> dict[str, str]:
     # walk let a later `Attributes:` overwrite what a commit said about itself,
     # so relabelling an anthropic-authored commit as an openai one -- and
     # thereby buying it an anthropic reviewer -- took one line in a later
-    # message. `Attributes:` is for commits that said nothing.
-    return {**claimed, **own}
+    # message. `Attributes:` is for commits that said nothing, and a commit
+    # GitHub wrote as Dependabot said so itself.
+    return {**claimed, **identity_authors(root, f"{base}..{head}"), **own}
 
 
 def _in_range(named: str, shas: list[str]) -> str:
@@ -2331,14 +2377,14 @@ def attribution_value(name: str, registry: Any) -> str:
     """
     entry = name.strip()
     provider = registry.providers.get(entry)
-    if entry == HUMAN_AUTHOR:
+    if entry in RESERVED_AUTHORS:
         if provider is not None:
             raise TrailerError(
-                f"{HUMAN_AUTHOR!r} is what a commit a person wrote says, so it is "
+                f"{entry!r} is a reserved author, {RESERVED_AUTHORS[entry]!r}, so it is "
                 f"not a name a registry entry may take, and {registry.path} has "
-                f"one. Its trailer would read as the operator and hide its vendor."
+                f"one. Its trailer would read as that author and hide its vendor."
             )
-        return HUMAN_AUTHOR
+        return RESERVED_AUTHORS[entry]
     if provider is None:
         known = ", ".join(sorted(registry.providers)) or "nothing"
         raise TrailerError(
@@ -2362,12 +2408,13 @@ def attribution_value(name: str, registry: Any) -> str:
 def _own_trailer(root: pathlib.Path, sha: str) -> str:
     """Its own `Authored-with:` value, or "" -- last paragraph, unindented,
     `attribution`'s rule, so a commit that quotes a trailer stays repairable.
+    A commit its identity attributes says that, by the same rule.
     """
     message = git_output(["log", "-1", "--format=%B", sha], root) or ""
     for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines():
         if line.rstrip().startswith(AUTHORED_TRAILER):
             return line.rstrip()[len(AUTHORED_TRAILER) :].strip()
-    return ""
+    return identity_authors(root, "-1", sha).get(sha, "")
 
 
 def _on_this_branch(root: pathlib.Path, ref: str) -> str:

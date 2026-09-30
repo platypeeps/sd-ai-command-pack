@@ -156,6 +156,10 @@ Never allocate another review ID to reset spent passes or discard history.
   `unstable` means a check the protection does not require is pending or failed; the required ones are still read.
   Under `repo.ci = local`, merge reads GitHub's answer up to five times over 30 seconds after posting `sd/local-gate`.
   A pull request GitHub reports BEHIND refuses as `base_moved`, before the local gate runs.
+  Under `repo.ci = local`, prepare runs its check as the local gate does, and its pass leaves a gate receipt.
+  The merge gate at the same head and binding, within 30 minutes, reuses it, and the status says `(reused)`.
+  Inputs outside the repository (external makefiles, tool files, machine state) are not bound; that window is the accepted residual risk.
+  The gate's bound is 3600 s in both, unless `--review-timeout` names one for prepare.
   A refusal returns `manualRequired: true`; it changes no protection and requests no reviewer.
 - `--watch --wait-seconds 900` starts one bounded fail-fast CI watcher.
   Its persisted start prevents another automatic watch on rerun.

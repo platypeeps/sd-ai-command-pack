@@ -64,6 +64,7 @@ VARIANTS = {
     "bin/sd_install.py": "runs before any sibling is borrowed, and one call fetches",
     "bin/sd_research_render.py": "reads a --follow log for dates; wants the lines, not the strip",
     "bin/sd_fleet.py": "reads file blobs for a byte-exact diff; git_output strips the last newline",
+    "bin/sd_gate_run.py": "raises git's stderr as the gate's reason, and `worktree add` of a large tree outlasts 15 s",
 }
 
 

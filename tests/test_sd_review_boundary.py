@@ -191,6 +191,12 @@ class NeverPostsTests(unittest.TestCase):
             # this repository and is itself held to the never-posts assertions
             # below, so it widens the allow-list without widening the boundary.
             "sd_setup_github",
+            # The local gate's run (sd:2041), imported inside `--gate-check`
+            # only. It is the half of the gate that posts nothing: the status
+            # post stayed in `sd_local_gate`, which this lane does not import,
+            # so the gate check widens the allow-list by a worktree and a
+            # child process and not by a way out to GitHub.
+            "sd_gate_run",
         }
         self.assertEqual(sorted(imported_names() - allowed), [])
 
@@ -786,11 +792,26 @@ class LineBudgetTests(unittest.TestCase):
         # the guard lifted out of `dependabot.yml`, kept while another
         # workflow pins the action -- is `sd_setup_guard.removal` and
         # `unguarded`, outside the lane, so none of that is spent here.
+        # 3736 -> 4036 is sd:2041, `sd-review --gate-check`: `sd-ship
+        # prepare` runs the review's deterministic gate as the merge gate
+        # does, so a pass leaves a receipt the merge gate reuses instead of
+        # running the check a second time. `bin/sd_gate_run.py` joins the
+        # lane at 229 lines: the clean worktree, the scrubbed environment and
+        # the receipt lookup, split out of `sd_local_gate` so the lane imports
+        # the run and not the status post. It is the local gate's code moved,
+        # not new code; the merge gate runs the same lines. `bin/sd-review`
+        # grows +71: `run_gate_check`, the `--gate-check` flag and its
+        # refusals, and a `check_seconds` bound in the timing plan beside the
+        # reviewers' phase. The binding and its age limit are
+        # `sd_gate_receipts`, outside the lane, so none of that is spent here.
+        # 4036 -> 4042 is the one-handoff window (sd:2041 review): prepare's
+        # gate check passes `reuse=False` and `sd_gate_run` takes `reuse` and
+        # `record`, so a receipt spans prepare to merge and nothing else.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3736,
+            4042,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

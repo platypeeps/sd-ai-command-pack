@@ -41,7 +41,12 @@ GATE_FILES = (
     "sd_ship_evidence.py", "sd_ship_bindings.py", "sd_ship_workflow.py", "sd_ship_squash.py", "sd_ship_body.py",
     "sd_protection.py", "sd_local_gate.py",
 )
-CHECK_FILES = ("sd-check", "sd_check_receipts.py", "sd_gate_slots.py")
+CHECK_FILES = (
+    "sd-check", "sd_check_receipts.py", "sd_gate_slots.py",
+    # sd:2041, sd:2072. The gate check sd-review runs, its receipts and its docs-only scope;
+    # prepare and the merge gate run them again live.
+    "sd_gate_run.py", "sd_gate_receipts.py", "sd_check_scope.py",
+)
 #: Imported by a review tool but never on the review path.
 IMPORT_EXEMPT = {
     "sd_setup_github.py": "sd-review imports it only for the `setup-github` subcommand",
