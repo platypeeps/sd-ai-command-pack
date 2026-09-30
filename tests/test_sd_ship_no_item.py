@@ -899,7 +899,7 @@ class NoItemContracts(unittest.TestCase):
             pattern="bind|identity|item",
         )
 
-    def test_each_review_manifest_member_mutation_refuses_no_item_clearance(self):
+    def test_each_verdict_member_mutation_refuses_no_item_clearance(self):
         """The manifest guards both modes, so both modes are measured.
 
         Enumerated from the manifest rather than listed here, so a gate added
@@ -918,10 +918,14 @@ class NoItemContracts(unittest.TestCase):
                 return original(path) + (b"changed" if path == target else b"")
 
             with self.subTest(name=name), patch.object(pathlib.Path, "read_bytes", changed):
-                self.refused(
-                    "verify-review", "--review-id", review_id, "--expected-head", self.head,
-                    pattern="tools or repository policy changed",
-                )
+                if name in bindings.VERDICT_FILES:
+                    self.refused(
+                        "verify-review", "--review-id", review_id, "--expected-head", self.head,
+                        pattern=f"tools or repository policy changed after review: {name} \\(verdict\\)",
+                    )
+                else:
+                    # sd:1834: gate and check code runs live, so it binds no receipt.
+                    self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
         self.assertEqual(len(calls), 1)
         self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
 
