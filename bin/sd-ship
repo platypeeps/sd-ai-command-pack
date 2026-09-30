@@ -454,7 +454,8 @@ class Ship(SharedReview):
         The checkout's branch answers when it holds this item's receipt, as it
         always did. Otherwise the item's one receipt in this repository names
         the branch, so a lane merges from its own checkout while the branch
-        stays open in the author's; more than one receipt needs `--branch`.
+        stays open in the author's. With none or several, the checkout's
+        branch stands, and `merge` refuses it as unprepared, naming `--branch`.
         """
         if self.args.branch:
             return self.args.branch
@@ -465,9 +466,11 @@ class Ship(SharedReview):
         try:
             return self.store.for_item(self.connection, self.repository, self.args.item, self.item.get("branch"))[2]["branch"]
         except WorkflowError:
-            raise Refusal(f"sd:{self.args.item} has no single ship receipt in {self.repository} to merge from this "
-                          "checkout; name its branch with --branch", code="prepare_required", state="operator_decision",
-                          next_action="Rerun merge with --branch BRANCH, or run sd-ship prepare for the item first.") from None
+            if self.checkout_branch is None:
+                raise Refusal(f"this checkout has no branch open and sd:{self.args.item} has no single ship receipt; "
+                              "name its branch with --branch", code="prepare_required", state="operator_decision",
+                              next_action="Rerun merge with --branch BRANCH, or run sd-ship prepare for the item first.") from None
+            return self.checkout_branch
 
     def merge_head(self) -> str:
         """The head `merge` would ship: this checkout's HEAD, or the branch's tip on origin (sd:2037).
@@ -1717,8 +1720,10 @@ class Ship(SharedReview):
 
     def merge(self) -> dict:
         if not self.state.get("pull_request"):
-            raise Refusal("prepare this branch before merging", code="prepare_required", state="operator_decision",
-                          next_action="Run sd-ship prepare with the same identity.")
+            raise Refusal(f"prepare this branch before merging; {self.branch} has no prepared pull request, "
+                          "and from another checkout --branch names the item's prepared branch",
+                          code="prepare_required", state="operator_decision",
+                          next_action="Run sd-ship prepare with the same identity, or rerun merge with --branch BRANCH.")
         observed = self.api.pull(self.state["pull_request"]["number"])
         if observed.get("merged") is True:
             return self.reconcile()
