@@ -3475,14 +3475,14 @@ roles:
         not, as on ui-design #19 (2.1 MB over 85 files). The request used to
         review the whole branch and every reviewer refused the input.
         """
-        self.prepare()
+        self.prepare("--title", "fixture work")
         # Three commits of about 0.8 MB each: each fix verification fits, the branch does not.
         for index in range(1, CAP):
             if index < CAP - 1:
                 (self.root / f"bulk{index}.txt").write_text("".join(f"bulk {index} line {n:07d}\n" for n in range(40_000)))
                 _git(self.root, "add", f"bulk{index}.txt")
             _git(self.root, "commit", "--allow-empty", "-m", f"fix {index}\n\nAuthored-with: human")
-            self.prepare()
+            self.prepare("--title", "fixture work")
         prior = json.loads(json.dumps(self.operation().state["passes"]))
         self.assertEqual(len(prior), CAP)
         self.assertTrue(all(ship.completed_depth(entry["report"]) for entry in prior))
