@@ -38,6 +38,7 @@ This scope exception does not authorize unrelated work or remove specific approv
 External review uses the operator's standing machine policy, with local restrictions and existing spending limits.
 Read `sd config get sd.external_reviews` and `sd config get sd.assistant_merge`; these settings are never granted by installation.
 `sd.gate_slots` grants nothing: it caps how many repository gates run at once on the machine.
+`sd.gate_load_max` and `sd.gate_settle_seconds` grant nothing: they set the gate queue's load rule.
 `sd.copilot_review` is the one core setting with a default: unset reads `deep`, one Copilot review on deep-tier changes and none otherwise; a repository's `.github/sd-review.json` overrides `deep` and `always`, and `never` wins over the file.
 `sd.assistant_merge` is read by the assistant, not by `sd-ship`; the tool merges whatever the gates let through, and the setting decides whether to ask it to.
 With `sd.assistant_merge` at `controlled`, merge active in-scope PR work without asking, unless the user explicitly says wait.
