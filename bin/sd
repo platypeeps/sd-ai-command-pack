@@ -78,6 +78,7 @@ import sd_ci  # noqa: E402
 import sd_codex  # noqa: E402
 import sd_controls  # noqa: E402
 import sd_fleet  # noqa: E402
+import sd_gate_slots  # noqa: E402
 import sd_handoff_rows  # noqa: E402
 import sd_lib  # noqa: E402
 import sd_notes  # noqa: E402
@@ -2817,6 +2818,18 @@ def cmd_attribute(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_gate(args: argparse.Namespace) -> int:
+    """`sd gate run|status` -- the sd:2262 gate queue, with the machine's `sd.gate_*` settings."""
+    environ = dict(os.environ)
+    try:
+        slots, _ = sd_gate_slots.configured(environ, sd_lib.core_setting("gate_slots", environ))
+        rule = sd_gate_slots.load_rule(environ, sd_lib.core_setting("gate_load_max", environ),
+                                       sd_lib.core_setting("gate_settle_seconds", environ))
+    except ValueError as error:
+        raise UsageError(str(error)) from None
+    return sd_gate_slots.gate_verb(args, environ, slots, rule)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="sd", description=__doc__.splitlines()[0])
     groups = parser.add_subparsers(dest="group", required=True)
@@ -3080,6 +3093,11 @@ def build_parser() -> argparse.ArgumentParser:
         "entry", help=f"a registry entry, `{sd_lib.HUMAN_AUTHOR}` for the operator, "
                       f"or `{sd_lib.DEPENDABOT_ENTRY}` for a bump rewritten after GitHub made it")
     attributer.set_defaults(handler=cmd_attribute)
+
+    gate = groups.add_parser("gate", help="the machine-wide gate queue: run a command in it, or show it")
+    gating = gate.add_subparsers(dest="command_name", required=True)
+    sd_gate_slots.add_gate_verbs(gating)
+    gate.set_defaults(handler=cmd_gate)
 
     sd_work.register(groups, kept)
     sd_writing.register(groups)

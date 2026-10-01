@@ -668,7 +668,8 @@ class GateSlotTests(unittest.TestCase):
 
     def slot_env(self, root, **overrides):
         settings = dict(SD_GATE_SLOTS="1", SD_GATE_SLOTS_DIR=str(root / "slots"),
-                        SD_GATE_SLOT_POLL="0.2", CI="", GITHUB_ACTIONS="")
+                        SD_GATE_SLOT_POLL="0.2", SD_GATE_LOAD_MAX="0", SD_GATE_SETTLE_SECONDS="0",
+                        CI="", GITHUB_ACTIONS="")
         return _fixture_env(**dict(settings, **overrides))
 
     def test_a_second_run_waits_for_the_one_slot(self):
@@ -732,7 +733,8 @@ class GateSlotTests(unittest.TestCase):
                                     err.read_text())
                     time.sleep(1)
                     self.assertIsNone(waiter.poll(), "the waiter ran while a live process held the slot")
-                    self.assertEqual(sorted((root / "slots").iterdir()), [lock])
+                    # sd:2262 adds the queue's own files; no slot file is removed.
+                    self.assertEqual(sorted((root / "slots").glob("slot.*")), [lock])
                     self.assertEqual(lock.read_text(), f"{gone.pid}\n")
                     holder.kill()
                     holder.wait()
@@ -866,7 +868,9 @@ class GateSlotTests(unittest.TestCase):
                                  env=self.slot_env(root, SD_GATE_SLOTS="2", HARNESS_FIXTURE_SLEEP="0"), timeout=300)
             self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
             self.assertIn("run-tests: start ", run.stderr)
-            self.assertEqual(sorted(path.name for path in (root / "slots").iterdir()), ["slot.1.lock", "slot.2.lock"])
+            # sd:2262 adds the queue's files and a holder's `slot.N.info` beside the locks.
+            self.assertEqual(sorted(path.name for path in (root / "slots").glob("slot.*.lock")),
+                             ["slot.1.lock", "slot.2.lock"])
             self.assertTrue(all(_slot_free(root / "slots" / f"slot.{index}.lock") for index in (1, 2)))
 
     def test_without_a_cap_no_slot_is_taken(self):
