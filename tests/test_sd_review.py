@@ -242,8 +242,10 @@ class ReviewFixture(unittest.TestCase):
 
     def environment(self, **extra: str) -> dict[str, str]:
         """An environment whose HOME is the fixture's, so the run reads the
-        fixture's registry rather than the developer's."""
-        return {"HOME": str(self.registry_home), "PATH": str(self.tool_bin) + os.pathsep + os.defpath, **extra}
+        fixture's registry rather than the developer's. A gate it starts reads
+        no machine load (sd:2262): a test must not wait for a busy machine."""
+        return {"HOME": str(self.registry_home), "PATH": str(self.tool_bin) + os.pathsep + os.defpath,
+                "SD_GATE_LOAD_MAX": "0", "SD_GATE_SETTLE_SECONDS": "0", **extra}
 
     def local_block(self, root: pathlib.Path, *lines: str) -> None:
         body = "\n".join((f"{sd_review.sd_lib.CONSENT_KEY}: {FIXTURE_CONSENT}", *lines))

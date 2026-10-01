@@ -1,0 +1,403 @@
+"""sd:2262. One machine-wide queue in front of the gate slots: first in, first out, and a load rule.
+
+On 2026-10-01 about 14 gates from three sessions each ran a hand-written copy
+of one rule: start `make check` only when load1 is below 40 and no other runs,
+checked twice 45 s apart. When load fell to 31, several waiters read the same
+quiet moment and started together, and load went back to about 125. Nothing
+made the read and the start one step, and nothing ordered the waiters.
+
+`bin/sd_gate_slots.py` now admits only the head of one queue, under one lock,
+and only when the load rule holds. These tests run the real file.
+"""
+
+from __future__ import annotations
+
+import fcntl
+import io
+import json
+import os
+import pathlib
+import shlex
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+SLOTS = REPO_ROOT / "bin" / "sd_gate_slots.py"
+SD = REPO_ROOT / "bin" / "sd"
+SD_CHECK = REPO_ROOT / "bin" / "sd-check"
+if str(REPO_ROOT / "bin") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "bin"))
+
+import sd_gate_slots  # noqa: E402
+import sd_lib  # noqa: E402
+
+#: Counts itself in and out under a lock and keeps the highest count it saw.
+COUNTING = """
+import fcntl, sys, time
+counter = sys.argv[1]
+def step(delta):
+    with open(counter, "a+") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        handle.seek(0)
+        now, peak = (int(part) for part in (handle.read().split() or ["0", "0"]))
+        now += delta
+        handle.seek(0)
+        handle.truncate()
+        handle.write(f"{now} {max(now, peak)}")
+step(1)
+time.sleep(1.0)
+step(-1)
+"""
+
+
+def slot_free(lock: pathlib.Path) -> bool:
+    with open(lock, "a") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        fcntl.flock(handle, fcntl.LOCK_UN)
+    return True
+
+
+def wait_for(predicate, timeout: float = 60.0) -> bool:
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if predicate():
+            return True
+        time.sleep(0.05)
+    return predicate()
+
+
+class QueueFixture(unittest.TestCase):
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = pathlib.Path(tmp.name).resolve()
+        self.slots = self.tmp / "slots"
+        self.processes: list[subprocess.Popen] = []
+        self.addCleanup(self.reap)
+
+    def reap(self) -> None:
+        for process in self.processes:
+            if process.poll() is None:
+                process.kill()
+            process.wait()
+
+    def env(self, **overrides: str) -> dict[str, str]:
+        env = {key: value for key, value in os.environ.items()
+               if key not in ("CI", "GITHUB_ACTIONS") and not key.startswith("SD_GATE_")}
+        env.update(SD_GATE_SLOTS_DIR=str(self.slots), SD_GATE_SLOT_POLL="0.05", SD_GATE_LOAD_MAX="0",
+                   SD_GATE_SETTLE_SECONDS="0", XDG_CONFIG_HOME=str(self.tmp / "config"))
+        env.update(overrides)
+        return env
+
+    def run_gate(self, env: dict[str, str], *command: str, label: str | None = None,
+                 stderr=subprocess.PIPE) -> subprocess.Popen:
+        argv = [sys.executable, str(SLOTS), "run"]
+        if label is not None:
+            argv += ["--label", label]
+        process = subprocess.Popen([*argv, "--", *command], env=env, stdout=subprocess.PIPE, stderr=stderr,
+                                   text=True)
+        self.processes.append(process)
+        return process
+
+    def tickets(self) -> list[pathlib.Path]:
+        return sorted((self.slots / "queue").glob("*.ticket")) if (self.slots / "queue").is_dir() else []
+
+    def hold(self, index: int = 1) -> subprocess.Popen:
+        """A process that holds `slot.<index>.lock` until it is killed."""
+        self.slots.mkdir(parents=True, exist_ok=True)
+        holder = subprocess.Popen([sys.executable, "-c",
+                                   "import fcntl, sys, time\nh = open(sys.argv[1], 'a')\n"
+                                   "fcntl.flock(h, fcntl.LOCK_EX)\nprint('held', flush=True)\ntime.sleep(600)",
+                                   str(self.slots / f"slot.{index}.lock")], stdout=subprocess.PIPE, text=True)
+        self.processes.append(holder)
+        self.assertEqual(holder.stdout.readline(), "held\n")
+        return holder
+
+
+class FirstInFirstOut(QueueFixture):
+    def test_waiters_start_in_the_order_they_queued(self):
+        """Six `sd-check` gates queue one by one behind a held slot; they start in that order."""
+        order = self.tmp / "order"
+        root = self.tmp / "repo"
+        root.mkdir()
+        subprocess.run(["git", "init", "-q", "-b", "main"], cwd=root, check=True)
+        holder = self.hold()
+        gates = []
+        for name in "abcdef":
+            check = f"{shlex.quote(sys.executable)} -c " + shlex.quote(
+                f"open({str(order)!r}, 'a').write({name!r})")
+            (root / sd_lib.LOCAL_FILE_NAME).write_text(
+                f"{sd_lib.LOCAL_BLOCK_START}\ncheck: {check}\n{sd_lib.LOCAL_BLOCK_END}\n", encoding="utf-8")
+            gate = subprocess.Popen([sys.executable, str(SD_CHECK), "--json"], cwd=root,
+                                    env=self.env(SD_GATE_SLOTS="1"), stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, text=True)
+            self.processes.append(gate)
+            gates.append(gate)
+            # The gate read its check before it queued; the next one may now rewrite the file.
+            wait_for(lambda: len(self.tickets()) == len(gates), timeout=5)
+            time.sleep(0.3)
+        holder.kill()
+        holder.wait()
+        for gate in gates:
+            _, err = gate.communicate(timeout=120)
+            self.assertEqual(gate.returncode, 0, err)
+        self.assertEqual(order.read_text(), "abcdef")
+
+    def test_a_dead_waiter_leaves_the_queue_and_does_not_block_it(self):
+        holder = self.hold()
+        dead = self.run_gate(self.env(SD_GATE_SLOTS="1"), sys.executable, "-c", "pass")
+        self.assertTrue(wait_for(lambda: len(self.tickets()) == 1))
+        dead.kill()
+        dead.wait()
+        behind = self.run_gate(self.env(SD_GATE_SLOTS="1"), sys.executable, "-c", "pass")
+        self.assertTrue(wait_for(lambda: len(self.tickets()) == 1 and self.tickets()[0].name != "000000000001.ticket"),
+                        [path.name for path in self.tickets()])
+        holder.kill()
+        holder.wait()
+        _, err = behind.communicate(timeout=60)
+        self.assertEqual(behind.returncode, 0, err)
+        self.assertEqual(self.tickets(), [])
+
+
+class Concurrency(QueueFixture):
+    def test_n_waiters_at_once_never_run_more_than_the_slot_count(self):
+        counting = self.tmp / "count.py"
+        counting.write_text(COUNTING, encoding="utf-8")
+        for cap in (1, 2):
+            with self.subTest(slots=cap):
+                counter = self.tmp / f"counter-{cap}"
+                gates = [self.run_gate(self.env(SD_GATE_SLOTS=str(cap)), sys.executable, str(counting), str(counter))
+                         for _ in range(5)]
+                for gate in gates:
+                    _, err = gate.communicate(timeout=120)
+                    self.assertEqual(gate.returncode, 0, err)
+                now, peak = (int(part) for part in counter.read_text().split())
+                self.assertEqual((now, peak), (0, cap), f"{peak} commands ran at once under a cap of {cap}")
+                self.assertTrue(all(slot_free(self.slots / f"slot.{index}.lock") for index in range(1, cap + 1)))
+                self.assertEqual(self.tickets(), [])
+
+
+class Run(QueueFixture):
+    def test_run_exits_with_the_commands_code_and_frees_its_slot(self):
+        seen = self.tmp / "seen"
+        gate = self.run_gate(self.env(SD_GATE_SLOTS="1"), sys.executable, "-c",
+                             f"import os, sys; open({str(seen)!r}, 'w').write(os.environ['SD_GATE_SLOTS']); sys.exit(7)")
+        _, err = gate.communicate(timeout=60)
+        self.assertEqual(gate.returncode, 7, err)
+        self.assertEqual(seen.read_text(), "0", "the command must run with SD_GATE_SLOTS=0")
+        self.assertTrue(slot_free(self.slots / "slot.1.lock"))
+
+    def test_run_times_out_with_124_and_leaves_no_ticket(self):
+        self.hold()
+        argv = [sys.executable, str(SLOTS), "run", "--timeout", "1", "--", sys.executable, "-c", "pass"]
+        done = subprocess.run(argv, env=self.env(SD_GATE_SLOTS="1"), capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, sd_gate_slots.RUN_TIMED_OUT, done.stderr)
+        self.assertIn("waiting for a gate slot", done.stderr)
+        self.assertEqual(self.tickets(), [])
+
+    def test_a_sigkilled_holder_frees_its_slot_for_the_next_waiter(self):
+        holder = self.run_gate(self.env(SD_GATE_SLOTS="1"), sys.executable, "-c", "import time; time.sleep(600)")
+        lock = self.slots / "slot.1.lock"
+        self.assertTrue(wait_for(lambda: lock.exists() and not slot_free(lock)))
+        waiter = self.run_gate(self.env(SD_GATE_SLOTS="1"), sys.executable, "-c", "pass")
+        self.assertTrue(wait_for(lambda: len(self.tickets()) == 1))
+        holder.kill()
+        holder.wait()
+        _, err = waiter.communicate(timeout=60)
+        self.assertEqual(waiter.returncode, 0, err)
+
+    def test_a_signal_reaches_the_command_and_frees_the_slot(self):
+        started = self.tmp / "started"
+        got = self.tmp / "got"
+        body = (f"import signal, sys, time\n"
+                f"def on(signum, frame):\n    open({str(got)!r}, 'w').write(str(signum)); sys.exit(0)\n"
+                f"signal.signal(signal.SIGTERM, on)\nopen({str(started)!r}, 'w').close()\ntime.sleep(600)\n")
+        gate = self.run_gate(self.env(SD_GATE_SLOTS="1"), sys.executable, "-c", body)
+        self.assertTrue(wait_for(started.exists))
+        gate.send_signal(signal.SIGTERM)
+        _, err = gate.communicate(timeout=60)
+        self.assertEqual(got.read_text(), str(int(signal.SIGTERM)))
+        self.assertEqual(gate.returncode, 0, err)
+        self.assertTrue(slot_free(self.slots / "slot.1.lock"))
+
+    def test_sd_gate_run_reads_the_machine_settings(self):
+        config = self.tmp / "config" / "sd-ai-command-pack" / "config.json"
+        config.parent.mkdir(parents=True)
+        config.write_text(json.dumps({"config": {"sd": {"gate_slots": "1", "gate_load_max": "0",
+                                                        "gate_settle_seconds": "0"}}}))
+        env = self.env()
+        for name in ("SD_GATE_LOAD_MAX", "SD_GATE_SETTLE_SECONDS"):
+            env.pop(name)
+        done = subprocess.run([sys.executable, str(SD), "gate", "run", "--", sys.executable, "-c", "pass"],
+                              env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertTrue((self.slots / "slot.1.lock").exists())
+        self.assertFalse((self.slots / "slot.2.lock").exists())
+
+
+class Status(QueueFixture):
+    def test_status_names_holders_and_waiters_with_their_place(self):
+        holder = self.run_gate(self.env(SD_GATE_SLOTS="1"), sys.executable, "-c", "import time; time.sleep(600)",
+                               label="holder-gate")
+        lock = self.slots / "slot.1.lock"
+        self.assertTrue(wait_for(lambda: lock.exists() and not slot_free(lock)))
+        self.assertTrue(wait_for(lambda: (self.slots / "slot.1.info").exists()))
+        first = self.run_gate(self.env(SD_GATE_SLOTS="1"), sys.executable, "-c", "pass", label="first-waiter")
+        self.assertTrue(wait_for(lambda: len(self.tickets()) == 1))
+        second = self.run_gate(self.env(SD_GATE_SLOTS="1"), sys.executable, "-c", "pass", label="second-waiter")
+        self.assertTrue(wait_for(lambda: len(self.tickets()) == 2))
+        shown = subprocess.run([sys.executable, str(SLOTS), "status", "--json"], env=self.env(SD_GATE_SLOTS="1"),
+                               capture_output=True, text=True, timeout=60)
+        self.assertEqual(shown.returncode, 0, shown.stderr)
+        report = json.loads(shown.stdout)
+        self.assertEqual([(entry["slot"], entry["pid"], entry["label"]) for entry in report["holders"]],
+                         [(1, holder.pid, "holder-gate")])
+        self.assertEqual([(entry["place"], entry["pid"], entry["label"]) for entry in report["waiters"]],
+                         [(1, first.pid, "first-waiter"), (2, second.pid, "second-waiter")])
+        for entry in report["holders"] + report["waiters"]:
+            self.assertRegex(entry["since"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        text = subprocess.run([sys.executable, str(SLOTS), "status"], env=self.env(SD_GATE_SLOTS="1"),
+                              capture_output=True, text=True, timeout=60)
+        self.assertEqual(text.returncode, 0, text.stderr)
+        for word in ("holder-gate", "first-waiter", "second-waiter", str(holder.pid)):
+            self.assertIn(word, text.stdout)
+        holder.kill()
+        holder.wait()
+        for gate in (first, second):
+            gate.communicate(timeout=60)
+            self.assertEqual(gate.returncode, 0)
+
+
+class Clock:
+    def __init__(self, now: float = 1_000_000.0) -> None:
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class LoadRule(unittest.TestCase):
+    """The admission decision itself, with a fake clock and a fake load average."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.where = pathlib.Path(tmp.name)
+        self.lock = open(self.where / "slot.1.lock", "a")
+        self.addCleanup(self.lock.close)
+        self.queue = sd_gate_slots.Queue(self.where)
+        self.wall = Clock()
+        self.load = (1.0, 1.0, 1.0)
+
+    def admit(self, ticket, rule):
+        return self.queue.admit(ticket, [self.lock.fileno()], rule, loadavg=lambda: self.load, wall=self.wall)
+
+    def release(self) -> None:
+        fcntl.flock(self.lock, fcntl.LOCK_UN)
+
+    def test_load1_at_or_above_the_limit_admits_nobody(self):
+        rule = sd_gate_slots.LoadRule(limit=40.0, settle=0.0, source="test")
+        ticket = self.queue.enter("gate", "/", wall=self.wall)
+        self.load = (40.0, 10.0, 10.0)
+        taken, reason = self.admit(ticket, rule)
+        self.assertIsNone(taken)
+        self.assertIn("load 40.0", reason)
+        self.load = (39.9, 10.0, 10.0)
+        self.assertEqual(self.admit(ticket, rule)[0], 0)
+
+    def test_a_falling_load1_must_stay_low_for_the_settle_time_while_load5_is_high(self):
+        """The 2026-10-01 case: load1 at 31 while load5 was still far above 40."""
+        rule = sd_gate_slots.LoadRule(limit=40.0, settle=45.0, source="test")
+        ticket = self.queue.enter("gate", "/", wall=self.wall)
+        self.load = (31.0, 90.0, 110.0)
+        self.assertIsNone(self.admit(ticket, rule)[0])
+        self.wall.now += 30
+        self.assertIsNone(self.admit(ticket, rule)[0])
+        self.load = (41.0, 85.0, 110.0)
+        self.wall.now += 10
+        self.assertIsNone(self.admit(ticket, rule)[0], "a sample at the limit restarts the settle time")
+        self.load = (31.0, 80.0, 110.0)
+        self.wall.now += 10
+        self.assertIsNone(self.admit(ticket, rule)[0])
+        self.wall.now += 44
+        self.assertIsNone(self.admit(ticket, rule)[0])
+        self.wall.now += 1
+        self.assertEqual(self.admit(ticket, rule)[0], 0)
+
+    def test_an_idle_machine_admits_the_head_at_once(self):
+        rule = sd_gate_slots.LoadRule(limit=40.0, settle=45.0, source="test")
+        ticket = self.queue.enter("gate", "/", wall=self.wall)
+        self.assertEqual(self.admit(ticket, rule)[0], 0)
+
+    def test_two_admissions_are_at_least_the_settle_time_apart(self):
+        rule = sd_gate_slots.LoadRule(limit=40.0, settle=45.0, source="test")
+        first = self.queue.enter("first", "/", wall=self.wall)
+        self.assertEqual(self.admit(first, rule)[0], 0)
+        self.release()
+        second = self.queue.enter("second", "/", wall=self.wall)
+        self.wall.now += 44
+        taken, reason = self.admit(second, rule)
+        self.assertIsNone(taken)
+        self.assertIn("apart", reason)
+        self.wall.now += 1
+        self.assertEqual(self.admit(second, rule)[0], 0)
+
+    def test_only_the_head_is_admitted_even_with_a_free_slot(self):
+        rule = sd_gate_slots.LoadRule(limit=0.0, settle=0.0, source="test")
+        head = self.queue.enter("head", "/", wall=self.wall)
+        behind = self.queue.enter("behind", "/", wall=self.wall)
+        taken, reason = self.admit(behind, rule)
+        self.assertIsNone(taken)
+        self.assertIn("place 2 of 2", reason)
+        self.assertEqual(self.admit(head, rule)[0], 0)
+        self.release()
+        self.assertEqual(self.admit(behind, rule)[0], 0)
+
+    def test_an_old_low_sample_counts_for_nothing(self):
+        rule = sd_gate_slots.LoadRule(limit=40.0, settle=45.0, source="test")
+        ticket = self.queue.enter("gate", "/", wall=self.wall)
+        self.load = (31.0, 90.0, 110.0)
+        self.assertIsNone(self.admit(ticket, rule)[0])
+        self.wall.now += 3600
+        self.assertIsNone(self.admit(ticket, rule)[0], "an hour without a sample restarts the settle time")
+
+
+class Settings(unittest.TestCase):
+    def test_the_variable_then_the_machine_setting_then_the_default(self):
+        rule = sd_gate_slots.load_rule
+        self.assertEqual(rule({"SD_GATE_LOAD_MAX": "12", "SD_GATE_SETTLE_SECONDS": "5"}, "30", "60")[:2], (12.0, 5.0))
+        self.assertEqual(rule({}, "30", "60")[:2], (30.0, 60.0))
+        self.assertEqual(rule({}, None, None, cores=16)[:2], (40.0, 45.0))
+        for bad in ("", "-1", "lots"):
+            with self.subTest(value=bad), self.assertRaises(ValueError):
+                rule({"SD_GATE_LOAD_MAX": bad}, None, None)
+
+    def test_the_machine_settings_are_declared_core_settings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = pathlib.Path(tmp) / "sd-ai-command-pack" / "config.json"
+            config.parent.mkdir()
+            config.write_text(json.dumps({"config": {"sd": {"gate_load_max": "32.5", "gate_settle_seconds": "30"}}}))
+            self.assertEqual(sd_lib.core_setting("gate_load_max", {"XDG_CONFIG_HOME": tmp}), "32.5")
+            self.assertEqual(sd_lib.core_setting("gate_settle_seconds", {"XDG_CONFIG_HOME": tmp}), "30")
+
+    def test_a_waiter_says_why_it_waits(self):
+        with tempfile.TemporaryDirectory() as tmp, open(pathlib.Path(tmp) / "slot.1.lock", "a") as mine:
+            stream = io.StringIO()
+            ticks = iter(range(0, 1000, 30))
+            taken = sd_gate_slots.wait_for_slot(
+                [mine.fileno()], pathlib.Path(tmp), poll=0.001, stream=stream, deadline=90,
+                clock=lambda: float(next(ticks)), rule=sd_gate_slots.LoadRule(40.0, 0.0, "test"),
+                loadavg=lambda: (55.0, 50.0, 50.0))
+        self.assertIsNone(taken)
+        self.assertIn("load 55.0 is at or above 40", stream.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()
