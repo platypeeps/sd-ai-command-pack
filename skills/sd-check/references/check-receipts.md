@@ -22,6 +22,7 @@ The declaration requires exactly these keys and values:
 ```
 
 This example shows the schema, not an approved dependency inventory for this repository.
+One optional key, `secret_name_exceptions`, may join them; the next section describes it.
 Audit the actual command before asserting `complete: true`.
 Each list contains unique, nonempty strings.
 Use existing repository-relative files or directories as dependency roots.
@@ -29,6 +30,10 @@ Declared directories are fingerprinted recursively.
 Explicitly declared dependencies may include ignored or local files; undeclared ignored inputs are not covered.
 Declared roots cannot be absolute or contain `..`.
 Dependency roots and descendants reject `.git` and secret-looking names before fingerprinting.
+List a source file whose name only looks secret, such as `src/token.rs`, in `secret_name_exceptions`.
+Each exception is an exact repository-relative path to a tracked regular file inside a declared root.
+Patterns, directories, untracked or ignored files, and unused entries make the declaration unsupported.
+Every other secret-looking name stays rejected.
 Symlinks and nonregular dependency entries are unsupported.
 Name checks do not prove that file contents contain no credentials.
 Do not declare secret material.
@@ -38,7 +43,9 @@ Detected command executables also contribute to the binding.
 Recording runs with only `PATH`, `HOME`, `LANG`, `LC_ALL`, `TMPDIR`, and declared environment variables.
 Declared names must be valid variable identifiers.
 Names containing `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`, `COOKIE`, or `AUTH` are rejected, ignoring case.
-The controlled environment is fingerprinted; its values are not stored in the binding.
+The binding fingerprints the declared variables only; their values are not stored in the binding.
+`PATH`, `HOME`, `LANG`, `LC_ALL`, and `TMPDIR` are not fingerprinted unless the declaration lists them.
+The tools and toolchains that `PATH` selects are bound by path and bytes instead.
 The receipt includes typed check output; do not run a command that prints secrets.
 
 This declaration is an operator assertion, not enforced hermeticity or OS read confinement.
@@ -68,7 +75,9 @@ Legacy runner receipts always rerun because they lack complete identity evidence
 ## Identity boundaries
 
 Bindings include canonical checkout, HEAD, tree, full check invocation, detected commands, and detection source.
-They also include checker implementation, relevant policy/configuration, runtime/tool identity, declared dependency bytes, and controlled environment identity.
+They also include checker implementation, relevant policy/configuration, runtime/tool identity, declared dependency bytes, and declared environment identity.
+When `rustup` is on the controlled `PATH`, each tool that `rustup which` names binds its whole toolchain directory by content.
+A toolchain name or version alone never binds it.
 Reuse rechecks the binding before accepting the saved result.
 Changing any bound input invalidates reuse.
 The same Git tree alone is insufficient.

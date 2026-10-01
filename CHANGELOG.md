@@ -87,6 +87,17 @@
 
 ### Fixed
 
+- **A Rust repository can declare complete check receipts (sd:2325, sd:2326,
+  sd:2328).** Three rulings on sd:1912 change `.github/sd-check-reuse.json`
+  receipts. An optional `secret_name_exceptions` key lists exact tracked
+  files under a declared root, such as `src/token.rs`, that the secret-name
+  filter admits; every other secret-looking name stays refused. The
+  environment digest covers the declared variables only: `PATH`, `HOME`,
+  `LANG`, `LC_ALL` and `TMPDIR` drifted inside one session and voided
+  receipts, and the check still runs with them. When `rustup` is on the
+  controlled `PATH`, each toolchain a tool runs from binds by the content of
+  its whole directory, not by its name or version.
+
 - **A blocking local review names its findings (sd:2102).** `sd-ship
   prepare` refused with `local review blocking: 1/1 completed; see item ship
   receipt`, and no command printed that receipt: the operator read each
