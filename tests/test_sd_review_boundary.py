@@ -828,11 +828,15 @@ class LineBudgetTests(unittest.TestCase):
         # toward depth (`partial` in `bin/sd-review`, `coverage` in the manifest),
         # and a text diff names a UTF-16 or BOM encoding, sending an
         # encoding-only change in binary form (`encoding`, `text_diff`).
+        # 4196 -> 4202 is sd:1397: `bin/sd-review` grows +6 for
+        # `request_sha256`, the digest of what the reviewers are asked, which
+        # `sd-ship` replays at a moved binding to keep an unchanged receipt.
+        # The replay itself is `bin/sd_ship_review.py`, outside the lane.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4196,
+            4202,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

@@ -29,6 +29,10 @@ other two close with it or narrow to what this plan leaves out.
 - Slices 1 to 3 ship in one pull request. Slice 4 waits for 14 days of data.
   sd:1397 narrows to option E.
 
+2026-09-30: option E built under sd:1397. A moved `verdict`-only binding
+replays `sd-review --explain` and keeps a receipt whose `request_sha256`
+is unchanged; policy and legacy entries still refuse.
+
 Slices 1 to 3 built on `feat/review-binding-1834`. The class map as built is
 the four tuples in `bin/sd_ship_bindings.py`, exactly as the design's class
 table lists them. Replayed over the 30 days before 2026-09-29 with the built

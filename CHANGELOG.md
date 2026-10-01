@@ -74,6 +74,16 @@
 
 ### Fixed
 
+- **A pack landing no longer voids a receipt whose review request is unchanged (sd:1397).**
+  `sd-review --explain` now reports `request_sha256`, a digest of the prompt,
+  the review material, the route and the chosen providers. `sd-ship` stores
+  it on each pass. When only review code moved the binding, `prepare` and
+  `merge` replay `--explain` for the stored pass, with the prior report it
+  was handed, and keep the receipt when the digest is unchanged: no pass is
+  spent, the binding is rebound, and `review_binding_kept` records what
+  moved. A policy change, a legacy receipt, a failed replay or a changed
+  digest still refuses and re-reviews as before.
+
 - **A catch-up keeps both CHANGELOG.md entries (sd:2174).** `sd-ship prepare
   --catch-up` aborted on any conflict, and in the pack it stopped almost every
   time on `CHANGELOG.md`: the branch and the base had each added an entry at

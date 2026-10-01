@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any, Callable
 
 import sd_lib
@@ -148,7 +149,7 @@ class SharedReview:
             return {"status": "clean", "findings": [], "subject": {"base": waived["base"], "head": head, "paths": []}}
         if not passes:
             raise Refusal("no completed local review receipt for this head")
-        if self.state.get("binding") != self.runtime.binding(self.root):
+        if not self.binding_holds():
             raise self.binding_refusal()
         report = complete_report(passes[-1], head, self.state.get("reviewed_head"))
         validate_provider_selection(report, passes[-1].get("requested_provider"), completed=True)
@@ -234,8 +235,60 @@ class SharedReview:
         pins by making the binding read itself raise, not every subprocess.
         """
         if not hasattr(self, "_binding_moved"):
-            self._binding_moved = bool(self.history.native(self.state)) and self.state.get("binding") != self.runtime.binding(self.root)
+            self._binding_moved = bool(self.history.native(self.state)) and not self.binding_holds()
         return self._binding_moved
+
+    def binding_holds(self) -> bool:
+        return self.state.get("binding") == self.runtime.binding(self.root) or self.request_unchanged()
+
+    def request_unchanged(self) -> bool:
+        """sd:1397, option E: only review code moved, and the reviewers would be asked the same.
+
+        `sd-review --explain` is replayed for the stored pass, with the prior
+        report it was handed, and its `request_sha256` compared with the one
+        the pass recorded. Equal, the receipt is rebound and the record says
+        so; no pass is spent. Policy stays byte-exact, a legacy receipt has no
+        request to replay, and any doubt re-reviews.
+        """
+        passes = self.history.native(self.state)
+        request = (passes[-1].get("review_request") if passes else None) or {}
+        changed = self.binding_changes()
+        if (not request.get("sha256") or not changed
+                or any(kind not in ("verdict", "gate", "check") for _, kind in changed)
+                or self.replayed_request(passes, request) != request["sha256"]):
+            return False
+        kept = {"head": passes[-1].get("head"), "recorded_at": self.runtime.clock(), "superseded_binding": self.state.get("binding"),
+                "changed": [list(row) for row in changed], "request_sha256": request["sha256"]}
+        self.save(binding=self.runtime.binding(self.root), binding_manifest=self.runtime.manifest(self.root),
+                  review_binding_kept=[*(self.state.get("review_binding_kept") or []), kept])
+        return True
+
+    def replayed_request(self, passes: list[dict], request: dict) -> str | None:
+        """The request digest `--explain` gives now for the last pass; None when it cannot be rebuilt."""
+        last = passes[-1]
+        argv = sd_review_request.review_argv(self.runtime.bin_dir, self.database,
+                                             SimpleNamespace(provider=last.get("requested_provider")), last.get("base"))
+        wanted = request.get("verify") or request.get("resume")
+        with tempfile.TemporaryDirectory(prefix="sd-ship-replay-") as directory:
+            if wanted:
+                # The prior is rebuilt the two ways `review` builds it, and used only if it is the one handed over.
+                earlier = dict(self.state, passes=passes[:-1])
+                candidates = [self.history.prior(earlier)]
+                try:
+                    candidates.append(self.history.aggregate(earlier))
+                except Refusal:
+                    pass
+                prior = next((row for row in candidates if digest(row) == wanted), None)
+                if prior is None:
+                    return None
+                path = pathlib.Path(directory) / "prior-review.json"
+                path.write_text(json.dumps(prior, sort_keys=True), encoding="utf-8")
+                argv += ["--verify-report" if request.get("verify") else "--resume-report", str(path)]
+            try:
+                planned = self.runtime.process(self.root, argv + ["--explain"], timeout=self.runtime.setup_seconds)
+                return json.loads(planned.stdout).get("request_sha256") if planned.returncode == 0 else None
+            except (ReviewTimeout, ValueError, AttributeError):
+                return None
 
     def reusable_review(self, head: str, prior: dict, retry: bool, additional: bool) -> bool:
         if additional:
@@ -421,6 +474,11 @@ class SharedReview:
             except Refusal:
                 self.save(review_preflight_error=self.preflight_diagnostic(planned))
                 raise
+            # sd:1397. What the reviewers are asked, so a moved binding can replay it.
+            explained = json.loads(planned.stdout)
+            passes[-1]["review_request"] = {"sha256": explained.get("request_sha256"),
+                                            "verify": explained.get("verification_report_digest"),
+                                            "resume": explained.get("resume_report_digest")}
             # What dispatch overwrites, so a released gate failure can put it back.
             self.superseded = {key: self.state.get(key, ABSENT) for key in DISPATCH_FIELDS}
             bound: dict[str, Any] = {"binding": self.runtime.binding(self.root)}

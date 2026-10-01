@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import importlib
 import json
 import pathlib
+import subprocess
 import tempfile
 import types
 import unittest
@@ -245,6 +247,78 @@ class SharedBindingTests(unittest.TestCase):
         for name in bindings.VERDICT_FILES:
             with self.subTest(comment=name), self.edited(bindings.BIN / name, b"\n# a comment moves no verdict\n"):
                 self.assertEqual(dispositions.validate(self.operation, self.head, proposal), dispositions.digest(proposal))
+
+    def replaying(self, answer: str, exit_code: int = 0) -> list[list[str]]:
+        """sd:1397. The `--explain` replay answers `answer`; each argv is kept, with its prior report's digest."""
+        calls: list[list[str]] = []
+
+        def process(root, argv, timeout):
+            calls.append(list(argv))
+            for flag in ("--verify-report", "--resume-report"):
+                if flag in argv:
+                    calls[-1].append(hashlib.sha256(pathlib.Path(argv[argv.index(flag) + 1]).read_bytes()).hexdigest())
+            return subprocess.CompletedProcess(argv, exit_code, json.dumps({"request_sha256": answer}), "")
+
+        self.operation.runtime = dataclasses.replace(self.operation.runtime, process=process)
+        self.operation.save = lambda **updates: self.operation.state.update(updates)
+        return calls
+
+    def test_a_moved_verdict_binding_keeps_a_receipt_whose_request_replays_unchanged(self):
+        """sd:1397, option E. A pack landing that leaves the reviewers' question unchanged spends no pass."""
+        self.operation.state["passes"][-1]["review_request"] = {"sha256": "asked", "verify": None, "resume": None}
+        calls = self.replaying("asked")
+        with self.edited(bindings.BIN / "sd-review"):
+            self.assertEqual(self.operation.review_inputs(self.head), self.report)
+            self.assertEqual(self.operation.state["binding"], ship.binding(self.root))
+            self.assertEqual(self.operation.review_inputs(self.head), self.report)
+        self.assertEqual(len(calls), 1, "a kept receipt is rebound, so the replay runs once")
+        self.assertIn("--explain", calls[0])
+        self.assertNotIn("--base", calls[0])
+        kept = self.operation.state["review_binding_kept"]
+        self.assertEqual([row["changed"] for row in kept], [[["sd-review", "verdict"]]])
+        self.assertEqual(kept[0]["request_sha256"], "asked")
+
+    def test_a_moved_binding_whose_request_replays_differently_still_refuses(self):
+        self.operation.state["passes"][-1]["review_request"] = {"sha256": "asked", "verify": None, "resume": None}
+        for answer, exit_code in (("asked differently", 0), ("asked", 1)):
+            calls = self.replaying(answer, exit_code)
+            with self.subTest(answer=answer, exit_code=exit_code), self.edited(bindings.BIN / "sd-review"):
+                with self.assertRaisesRegex(ship.Refusal, "changed after review: sd-review \\(verdict\\)$"):
+                    self.operation.review_inputs(self.head)
+                self.assertEqual(len(calls), 1)
+        self.assertNotIn("review_binding_kept", self.operation.state)
+
+    def test_a_policy_change_is_never_kept_by_a_replay(self):
+        """Policy stays byte-exact (sd:1834 operator decision); no replay is even asked."""
+        self.operation.state["passes"][-1]["review_request"] = {"sha256": "asked", "verify": None, "resume": None}
+        calls = self.replaying("asked")
+        (self.root / ".github").mkdir()
+        (self.root / ".github" / "sd-review.json").write_text("{}")
+        with self.assertRaisesRegex(ship.Refusal, "\\.github/sd-review.json \\(policy\\)$"):
+            self.operation.review_inputs(self.head)
+        self.assertEqual(calls, [])
+
+    def test_a_fix_verification_replays_with_the_prior_report_it_verified(self):
+        first = dict(self.report, subject={"head": "b" * 40})
+        verified = {"head": self.head, "base": "b" * 40, "report": self.report, "exit_code": 1, "requested_provider": "fixture",
+                    "review_request": {"sha256": "asked", "verify": digest(first), "resume": None}}
+        self.operation.state["passes"] = [{"head": "b" * 40, "report": first, "exit_code": 1}, verified]
+        stored = {name: self.operation.state[name] for name in ("binding", "binding_manifest")}
+        calls = self.replaying("asked")
+        with self.edited(bindings.BIN / "sd-review"):
+            self.assertFalse(self.operation.binding_moved())
+        argv = calls[0]
+        self.assertEqual(argv[argv.index("--base") + 1], "b" * 40)
+        self.assertEqual(argv[argv.index("--provider") + 1], "fixture")
+        self.assertEqual(argv[-1], digest(first), "the replay hands over the very report the pass verified")
+        # A prior that no longer reproduces from the stored history is not guessed at.
+        verified["review_request"]["verify"] = "a report nobody stored"
+        self.operation.state.update(stored)
+        del self.operation._binding_moved
+        calls.clear()
+        with self.edited(bindings.BIN / "sd-review"):
+            self.assertTrue(self.operation.binding_moved())
+        self.assertEqual(calls, [])
 
     def test_missing_manifest_members_never_fall_back_to_partial_binding(self):
         original = pathlib.Path.read_bytes

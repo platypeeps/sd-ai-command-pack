@@ -217,6 +217,8 @@ Existing result fields and exit meanings remain authoritative; the new object do
 Receipts bind repository, branch, item or review identity, exact head, tools, policy, and review history.
 The tools bound are the `verdict` class in `bin/sd_ship_bindings.py`: the code `sd-review` runs, compared without comments or docstrings.
 Gate and check code runs again on every `prepare` and `merge`, so a change there does not void a receipt.
+When only review code moved, `sd-ship` replays `sd-review --explain` for the stored pass first.
+An unchanged `request_sha256` keeps the receipt, spends no pass, and appends to `review_binding_kept`.
 A moved binding refuses with "review tools or repository policy changed after review:" and names each changed file and its class.
 Run `prepare` again; it re-reviews the same head in full.
 `--expected-head` compares evidence; it does not replace evidence.
