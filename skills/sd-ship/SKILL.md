@@ -25,6 +25,10 @@ A refusal stops execution.
 When another ship operation owns the repository, rerun `prepare` or `merge` with `--wait <seconds>`; do not write a retry loop.
 `reconcile` and `adjudicate` also take the lock but cannot wait for it; rerun them once the holder is gone.
 `sd runner status` names the holder under `ship_locks`; a file under `ship-locks/` is not a hold.
+A merge lane that ships one item across several commands holds the lane: `sd-ship hold --item ID --holder NAME [--for SECONDS]`.
+The hold is taken under the ship lock and lasts `--for` seconds, 3600 by default and 86400 at most; rerun it to renew.
+While it stands, `prepare` and `merge` for any other item refuse as `lane_held`, naming the item, holder and expiry.
+The held item's merge ends it; `sd-ship release --item ID` ends it sooner, and only for the held item.
 Do not change gates to obtain a merge.
 An existing manual operator path needs separate authorization; a gate refusal does not grant it.
 Standing permission starts no background work and does not enable `runner_merge: auto` on the repository row.
@@ -141,6 +145,10 @@ Never allocate another review ID to reset spent passes or discard history.
   Actual provider/vendor attribution belongs on the commit.
 - `sd-ship merge --item ID --expected-head SHA --manual --json` performs an explicit operator merge.
 - `sd-ship merge --item ID --expected-head SHA --run RUN-ID --json` requires its exclusive runner lease and matching clone.
+- Merge may run from any checkout of the repository, such as a lane's checkout on the default branch.
+  When the checkout's own branch holds no receipt for the item, the item's one receipt names the branch.
+  `--branch BRANCH` names it when the item has more than one receipt.
+  From another checkout, `--expected-head` must equal the branch's tip fetched from origin; no checkout moves.
   Matching item/head and `runner_merge: auto` on the repository row are also required.
   An author assignment cannot use this authority.
 - Both merge forms require fresh ownership, enforcing protection, current default branch, exact reviewed head, and passing required checks.
@@ -234,6 +242,8 @@ Read its review-retry section only when a review stopped or exhausted its automa
 
 ## Evidence-backed disposition acceptance
 
+A blocking local review refuses with code `review_blocking`, naming each blocking finding in the error and in `findings`.
+Its `next_action` names the `sd-ship adjudicate` command that prints each finding in full.
 Use acceptance only for a complete review of the exact clean head with passing deterministic checks.
 It cannot waive missing depth, incomplete transport, failed checks, or changed source.
 Fixes still require verification on their new head.

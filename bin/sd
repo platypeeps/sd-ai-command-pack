@@ -2974,10 +2974,15 @@ def build_parser() -> argparse.ArgumentParser:
     adder.add_argument("--item", required=True, help="work-item directory name")
     adder.set_defaults(handler=sd_suggest.suggest_add)
 
+    # `--belongs-to` and not `--repo`, for the reason `sd task edit` gives in
+    # `sd_work._belongs_to`. `--to` filed a GitHub issue and now only refuses
+    # (sd:2002), so it stays out of the help.
     publisher = suggesting.add_parser(
-        "publish", help="file one recorded proposal as an issue, after a dedup read")
+        "publish", help="file one recorded proposal as an sd item, after a dedup read")
     publisher.add_argument("--note", type=int, required=True, help="the id the write printed")
-    publisher.add_argument("--to", default="", help="owner/repo the issue is filed at")
+    publisher.add_argument("--belongs-to", default="", metavar="PATH",
+                           help="the registered checkout the item belongs to")
+    publisher.add_argument("--to", default="", help=argparse.SUPPRESS)
     publisher.set_defaults(handler=sd_suggest.suggest_publish)
 
     shadow = groups.add_parser(
