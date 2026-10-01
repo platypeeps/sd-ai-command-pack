@@ -267,7 +267,7 @@ RULES: tuple[Rule, ...] = (
         proof="add `compact` to the `SessionStart` matchers of the "
               "`bin/sd-handoff-restore` row of `HOOK_SPECS` in "
               "`bin/sd_install.py`; the table is pinned whole and "
-              "`test_the_hook_table_is_exactly_these_three_registrations` "
+              "`test_the_hook_table_is_exactly_these_registrations` "
               "goes red",
         scope="code",
         teaches="skills/sd-handoff/SKILL.md#The restore side",

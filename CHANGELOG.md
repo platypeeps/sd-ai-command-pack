@@ -4,6 +4,16 @@
 
 ### Added
 
+- **No GitHub issues from a managed repository (sd:2256).** A new
+  `PreToolUse` hook, `bin/sd-issue-guard`, denies `gh issue create` (and its
+  alias `gh issue new`) and `mcp__github__issue_write` when the session's
+  checkout is a repository whose `repo.managed` row is set. The denial tells
+  the agent to record the work with `sd task add`. Anywhere else -- an
+  unmanaged or unregistered repository, no workflow database, a payload it
+  cannot read -- it prints nothing and the call proceeds. `--user` registers
+  it with the other hooks; `SD_ISSUE_GUARD=0` switches it off. The pack's
+  own `.claude/settings.json` also denies both tools outright.
+
 - **One machine-wide queue for local gates (sd:2262).** Every gate that waits
   for a slot -- `sd-check`, so every `sd-ship` gate, and the pack's own
   `run-tests.sh` -- now takes a place in one queue under the slot directory,
