@@ -117,13 +117,15 @@ def load_tests(loader, standard_tests, pattern):
 """
 
 # Prints the niceness the shard runs at, so a test can compare it with its own.
+# `getpriority` reads it; `os.nice(0)` raises EPERM on macOS at niceness 20,
+# which a nested run reaches under an outer gate's `nice -n 10`.
 NICENESS_PROBE = """import os
 import unittest
 
 
 class Probe(unittest.TestCase):
     def test_niceness(self):
-        print(f"shard niceness={os.nice(0)}")
+        print(f"shard niceness={os.getpriority(os.PRIO_PROCESS, 0)}")
 """
 
 SPLIT_NAMES =("test_sd_ship", "test_sd_ship_dispositions", "test_sd_ship_disposition_guards")
@@ -175,7 +177,7 @@ class SplitModuleFixtures(unittest.TestCase):
 
     def test_local_shards_run_below_the_launcher_priority_and_ci_shards_do_not(self) -> None:
         """sd:1955. A local gate yields the CPU to the runner daemon and the sessions."""
-        launcher = os.nice(0)
+        launcher = os.getpriority(os.PRIO_PROCESS, 0)
         for environment, lowered in (({}, True), ({"CI": "1"}, False)):
             with self.subTest(environment=environment):
                 result = self.run_harness(environment=environment, test_sd_ship=NICENESS_PROBE)
