@@ -112,6 +112,18 @@
 
 ### Fixed
 
+- **A Rust repository can declare complete check receipts (sd:2325, sd:2326,
+  sd:2328).** Three rulings on sd:1912 change `.github/sd-check-reuse.json`
+  receipts. An optional `secret_name_exceptions` key lists exact tracked
+  files under a declared root, such as `src/token.rs`, that the secret-name
+  filter admits; every other secret-looking name stays refused. The
+  environment digest covers the declared variables only: `PATH`, `HOME`,
+  `LANG`, `LC_ALL` and `TMPDIR` drifted inside one session and voided
+  receipts, and the check still runs with them. When `rustup` is on the
+  controlled `PATH`, each toolchain a tool runs from binds by the content of
+  its whole directory, not by its name or version. An explicit `cargo
+  +nightly` or `rustup run nightly`, or a declared `+nightly` tool, binds the
+  toolchain it selects, and a selection rustup cannot answer refuses reuse.
 - **The local test gate leaves the machine room (sd:1955).**
   `.github/scripts/run-tests.sh` ran CPUs minus one workers locally, so two
   gates in the two machine-wide slots put 30 workers on 16 cores; the load

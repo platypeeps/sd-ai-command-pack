@@ -828,11 +828,17 @@ class LineBudgetTests(unittest.TestCase):
         # toward depth (`partial` in `bin/sd-review`, `coverage` in the manifest),
         # and a text diff names a UTF-16 or BOM encoding, sending an
         # encoding-only change in binary form (`encoding`, `text_diff`).
+        # 4196 -> 4264 is sd:2325, sd:2326 and sd:2328 in `sd_check_receipts.py`:
+        # exact tracked paths the secret-name filter admits, a digest of the
+        # declared environment alone, and each rustup toolchain bound by its
+        # contents. They let a Rust repository declare `complete: true`.
+        # 4264 -> 4286 is sd:2325 review: an explicit `+toolchain`, `rustup run`
+        # or declared `+<toolchain>` binds the toolchain it selects, or refuses.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4196,
+            4286,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
