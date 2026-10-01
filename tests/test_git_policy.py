@@ -66,6 +66,7 @@ VARIANTS = {
     "bin/sd_fleet.py": "reads file blobs for a byte-exact diff; git_output strips the last newline",
     "bin/sd_gate_run.py": "raises git's stderr as the gate's reason, and `worktree add` of a large tree outlasts 15 s",
     "bin/sd_changelog_merge.py": "reads blobs byte-exact, and `merge-file` answers a conflict with a nonzero exit (sd:2174)",
+    "bin/sd_ship_review.py": "pipes a byte-exact `git diff --binary` into `git patch-id` on stdin (sd:1485)",
 }
 
 

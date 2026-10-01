@@ -29,8 +29,10 @@ class Refusal(Exception):
 
     def __init__(self, message: str, *, code: str = "prerequisite_failed", boundary: str = "policy",
                  next_action: str = "Inspect the error and resolve the failed prerequisite.",
-                 state: str = "policy_block", approval_required: bool = False):
+                 state: str = "policy_block", approval_required: bool = False, details: dict | None = None):
         self.workflow = blocked(code, boundary, next_action, state=state, approval_required=approval_required)
+        # Structured fields the JSON result carries beside `error`, such as `findings` (sd:2102).
+        self.details = details or {}
         super().__init__(message)
 
 

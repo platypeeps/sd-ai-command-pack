@@ -172,8 +172,8 @@ full commit, delivery trailer and current default branch before recording its
 receipt and shipment time together. An outdated external issue or branch name
 cannot authorize completion or hold ordinary tasks open.
 
-Suggestions default to local database rows. Publishing one as a GitHub issue
-is an explicit action. External tracker snapshots carry their sync freshness
+Suggestions default to local database rows. Publishing one as an sd item of
+its own is an explicit action; no pack surface files a GitHub issue. External tracker snapshots carry their sync freshness
 and remain context; they do not become the local progress authority.
 
 Planning artifacts remain optional for small changes. Local code review stays

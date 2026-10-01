@@ -203,7 +203,7 @@ header discusses at length; `dashboard/jira.py` was 363 lines of it until sd:719
 
 ## References
 
-- GitHub issue: <https://github.com/platypeeps/sd-ai-command-pack/issues/805>
+- GitHub issue 805, retired with the pack's issues; sd:361 holds the record.
 - `platypeeps/system@b5e28bb`, 2026-09-06, "docs(work): B: Jira is not
   collected, and sd-trackers is not a collector", ledger C-159 — the rationale
   the `shadow_sync` docstring does not carry.
