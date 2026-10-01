@@ -391,7 +391,7 @@ class SharedReview:
         """
         passes = self.history.native(self.state)
         request = (passes[-1].get("review_request") if passes else None) or {}
-        changed, manifest = self.binding_changes(), self.runtime.manifest
+        changed, manifest = self.binding_changes(), getattr(self.runtime, "manifest", None)
         if (manifest is None or not request.get("sha256") or not changed
                 or any(kind not in ("verdict", "gate", "check") for _, kind in changed)
                 or self.replayed_request(passes, request) != request["sha256"]):
