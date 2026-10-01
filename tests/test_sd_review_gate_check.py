@@ -118,7 +118,8 @@ class GateCheck(ReviewFixture):
 
         root, database = self.repo()
         slots = self.tmp / "slots"
-        env = self.environment(SD_GATE_SLOTS="1", SD_GATE_SLOTS_DIR=str(slots))
+        env = self.environment(SD_GATE_SLOTS="1", SD_GATE_SLOTS_DIR=str(slots), SD_GATE_LOAD_MAX="0",
+                               SD_GATE_SETTLE_SECONDS="0")
         gate = sd_gate_run.check_in_worktree(root, git(root, "rev-parse", "HEAD"), base=sd_gate_run.base_ref("main"),
                                              database=database, environ=env)
         taken = gate["report"]["gate_slot"]
