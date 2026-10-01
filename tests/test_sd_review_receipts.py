@@ -449,3 +449,44 @@ class ReceiptTests(ReviewFixture):
     def test_no_rustup_binds_no_toolchain(self):
         identity = receipts.check_binding(self.root, self.env)
         self.assertEqual(identity["toolchains"], [])
+
+    def two_toolchains(self):
+        """A rustup with a default and a nightly toolchain; `which` honours `--toolchain` as rustup does."""
+        toolchains = self.tmp / "rustup-home" / "toolchains"
+        for name in ("stable-synthetic", "nightly-synthetic"):
+            (toolchains / name / "bin").mkdir(parents=True)
+            (toolchains / name / "lib").mkdir()
+            (toolchains / name / "lib" / "libstd.rlib").write_text(f"{name} v1")
+        rustup = self.tool_bin / "rustup"
+        rustup.write_text("#!/bin/sh\n"
+                          '[ "$1" = which ] || exit 1\nshift\nchain=stable-synthetic\n'
+                          'if [ "$1" = --toolchain ]; then chain="$2-synthetic"; shift 2; fi\n'
+                          f'[ -d "{toolchains}/$chain" ] || {{ echo "error: toolchain $chain is not installed" >&2; exit 1; }}\n'
+                          f'[ "$1" = cargo ] && {{ echo "{toolchains}/$chain/bin/$1"; exit 0; }}\n'
+                          "exit 1\n")
+        rustup.chmod(0o700)
+        cargo = self.tool_bin / "cargo"
+        cargo.write_text("#!/bin/sh\nexit 0\n")
+        cargo.chmod(0o700)
+        return toolchains
+
+    def test_an_explicit_plus_toolchain_binds_that_toolchain(self):
+        # A `cargo +nightly` entrypoint runs nightly; binding the default would let a nightly update reuse a pass.
+        toolchains = self.two_toolchains()
+        self.configure_cache_check("cargo +nightly check", ["dependency.txt"], "dependency.txt\n")
+        identity = receipts.check_binding(self.root, self.env)
+        self.assertIn(str((toolchains / "nightly-synthetic").resolve()), [entry["path"] for entry in identity["toolchains"]])
+        self.record()
+        (toolchains / "nightly-synthetic" / "lib" / "libstd.rlib").write_text("nightly v2")
+        self.assertIsNone(receipts.reuse_checked_result(self.root, self.env, self.database))
+
+    def test_a_declared_plus_toolchain_binds_and_an_unknown_one_refuses(self):
+        # A Makefile's `cargo +nightly` is invisible to detection; the declaration names the toolchain instead.
+        toolchains = self.two_toolchains()
+        self.commit_contract(tools=["cargo", "+nightly"])
+        self.record()
+        (toolchains / "nightly-synthetic" / "lib" / "libstd.rlib").write_text("nightly v2")
+        self.assertIsNone(receipts.reuse_checked_result(self.root, self.env, self.database))
+        self.commit_contract(tools=["cargo", "+beta"])
+        with self.assertRaisesRegex(receipts.Unavailable, "beta"):
+            receipts.check_binding(self.root, self.env)

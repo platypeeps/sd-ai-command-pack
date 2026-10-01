@@ -132,19 +132,41 @@ def tree_digest(root: pathlib.Path) -> str:
     return receipt_digest(entries)
 
 
-def toolchain_identities(tools: list[str], env: Mapping[str, str], root: pathlib.Path) -> list[dict[str, str]]:
+def toolchain_selections(tools: list[str], commands: list[list[str]]) -> list[tuple[str, str | None]]:
+    """Each (tool, explicit toolchain or None) the binding can see: `cargo +nightly`, `rustup run nightly`, a declared `+nightly`.
+
+    A Makefile's own `+toolchain` is invisible here, so the declaration names it as a `+<toolchain>` tool.
+    """
+    selections: list[tuple[str, str | None]] = [(name, None) for name in tools if not name.startswith("+")]
+    selections += [("cargo", name[1:]) for name in tools if name.startswith("+")]
+    for argv in commands:
+        if len(argv) > 1 and argv[1].startswith("+"):
+            selections.append((argv[0], argv[1][1:]))
+        elif len(argv) > 2 and os.path.basename(argv[0]) == "rustup" and argv[1] == "run":
+            selections.append(("cargo", argv[2]))
+    return selections
+
+
+def toolchain_identities(selections: list[tuple[str, str | None]], env: Mapping[str, str],
+                         root: pathlib.Path) -> list[dict[str, str]]:
     """Each rustup toolchain a tool runs from, by contents: a proxy's bytes and a toolchain's name bind nothing (sd:2328).
 
-    `rustup which` runs in the check's cwd and environment, so it picks the toolchain the check will; it never installs.
+    `rustup which` runs in the check's cwd and environment, so it honours `rust-toolchain.toml` and
+    `RUSTUP_TOOLCHAIN` as the check will; it never installs. An explicit selection it cannot answer refuses.
     """
     search_path = os.pathsep.join(str(root / component) for component in os.get_exec_path(env))
     rustup = shutil.which("rustup", path=search_path)
-    if not rustup:
-        return []
     found = {}
-    for name in tools:
-        answer = subprocess.run([rustup, "which", os.path.basename(name)], cwd=root, env={**env, "RUSTUP_AUTO_INSTALL": "0"},
-                                capture_output=True, text=True, timeout=30, check=False)
+    for name, chosen in selections:
+        if not rustup:
+            if chosen is not None:
+                raise Unavailable(f"cannot bind toolchain +{chosen} for {name}: no rustup")
+            continue
+        selector = ["--toolchain", chosen] if chosen is not None else []
+        answer = subprocess.run([rustup, "which", *selector, os.path.basename(name)], cwd=root,
+                                env={**env, "RUSTUP_AUTO_INSTALL": "0"}, capture_output=True, text=True, timeout=30, check=False)
+        if answer.returncode != 0 and chosen is not None:
+            raise Unavailable(f"cannot bind toolchain +{chosen} for {name}: {answer.stderr.strip()[:200]}")
         if answer.returncode != 0:
             continue  # not a toolchain binary; its own bytes are already bound
         binary = pathlib.Path(answer.stdout.strip())
@@ -178,8 +200,8 @@ def check_binding(root: pathlib.Path, env: Mapping[str, str]) -> dict[str, Any]:
             "tree": sd_lib.git_output(["rev-parse", "HEAD^{tree}"], root),
             "argv": [sys.executable, str(BIN / "sd-check"), "--json"],
             "detection": {"source": detection.source, "commands": detection.commands, "origin": str(detection.origin)},
-            "files": files, "tools": [tool_identity(name, controlled, root) for name in tools],
-            "toolchains": toolchain_identities(tools, controlled, root),
+            "files": files, "tools": [tool_identity(name, controlled, root) for name in tools if not name.startswith("+")],
+            "toolchains": toolchain_identities(toolchain_selections(tools, list(detection.commands.values())), controlled, root),
             "python": {"executable": str(pathlib.Path(sys.executable).resolve()), "sha256": file_digest(pathlib.Path(sys.executable)),
                        "version": sys.version, "prefix": sys.prefix},
             "environment_sha256": environment_digest(value, controlled)}
