@@ -296,14 +296,17 @@ def take_slot(environ: Mapping[str, str], timeout: int) -> tuple[sd_gate_slots.S
 
     The cap is `SD_GATE_SLOTS`, then the machine's `sd.gate_slots`, then a
     quarter of the cores; CI and a holder's children (`SD_GATE_SLOTS=0`) take
-    none.
+    none. The wait is a place in the sd:2262 queue, under its load rule.
     """
     try:
         slots, source = sd_gate_slots.configured(environ, sd_lib.core_setting("gate_slots", dict(environ)))
+        rule = sd_gate_slots.load_rule(environ, sd_lib.core_setting("gate_load_max", dict(environ)),
+                                       sd_lib.core_setting("gate_settle_seconds", dict(environ)))
     except ValueError as error:
         raise UsageError(str(error)) from None
     try:
-        slot = sd_gate_slots.acquire(slots, environ, stream=sys.stderr, timeout=timeout)
+        slot = sd_gate_slots.acquire(slots, environ, stream=sys.stderr, timeout=timeout, rule=rule,
+                                     label=f"sd-check {pathlib.Path.cwd().name}")
     except sd_gate_slots.LauncherExited:
         raise UsageError("the process that started this gate exited while it waited for a slot") from None
     report: dict[str, object] = {"slots": slots, "source": source, "waited_seconds": float(timeout),

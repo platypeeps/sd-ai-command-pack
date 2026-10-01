@@ -243,16 +243,17 @@ class IdempotencyTests(InstallerHarness):
         ]
         self.assertEqual(lines, [sd_install.EXCLUDES_LINE])
 
-    def test_the_hook_table_is_exactly_these_three_registrations(self):
+    def test_the_hook_table_is_exactly_these_registrations(self):
         """R10-D3 names the two SessionStart omissions as design.
 
         `compact` would consume the packet into the dying session and the
         `/clear` that follows -- the entire gesture -- would find nothing.
 
-        The other two rows are one file on two events, and that is also
+        The next two rows are one file on two events, and that is also
         design: `PreToolUse` sees a skill invoked or its `SKILL.md` read,
         `UserPromptSubmit` sees the bare slash form, which reaches no tool
-        call at all. Pinned whole, because what the pack registers in
+        call at all. The last names the two tools that file a GitHub issue,
+        and nothing wider (sd:2256). Pinned whole, because what the pack registers in
         somebody else's settings file is not a detail to drift.
         """
         self.assertEqual(
@@ -261,6 +262,8 @@ class IdempotencyTests(InstallerHarness):
                 ("bin/sd-handoff-restore", "SessionStart", ("startup", "clear")),
                 ("bin/sd-skill-use", "PreToolUse", ("Skill|Read",)),
                 ("bin/sd-skill-use", "UserPromptSubmit", ("",)),
+                ("bin/sd-issue-guard", "PreToolUse",
+                 ("Bash|mcp__github__issue_write",)),
             ),
         )
 

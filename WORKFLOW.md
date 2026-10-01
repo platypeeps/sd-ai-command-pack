@@ -366,6 +366,16 @@ which the installer places in `~/.claude/agents`.
   pack's own `make test` inside a gate takes no second slot; run directly,
   `make test` takes one of 2. Slots are kernel locks under
   `$XDG_STATE_HOME/sd/gate-slots`, so a dead holder's slot is free at once.
+- **Gates wait in one queue (sd:2262).** Every waiter takes a place in one
+  machine-wide queue, and only the head starts: first to wait, first to
+  start. The head starts only while load1 is below `sd.gate_load_max`
+  (unset: 2.5 per core, 40 on 16). While load5 is still above it, load1 must
+  stay below it for `sd.gate_settle_seconds` (unset: 45), and two starts are
+  that far apart. `SD_GATE_LOAD_MAX` and `SD_GATE_SETTLE_SECONDS` override them
+  for one run; `0` turns either off. To gate any other command, such as
+  another repository's `make check`, run `sd gate run -- make check`; it waits,
+  runs the command, and frees the slot when the command ends.
+  `sd gate status` shows who holds a slot and who waits, and since when.
 - **Test one version per language, the latest stable (Python 3.14, Node
   26), in CI and locally; no version matrices.**
 
@@ -650,6 +660,10 @@ The reserved `sd` namespace declares four settings:
 - `sd.gate_slots`: how many repository gates (`sd-check` runs) may run at once on this machine; `0` is no cap.
   Absence reads a quarter of the cores. `SD_GATE_SLOTS` overrides it for one run. It grants nothing;
   see [Parallel work](#parallel-work).
+- `sd.gate_load_max`: the gate queue starts a gate only while load1 is below this; `0` is no load condition.
+  Absence reads 2.5 per core. `SD_GATE_LOAD_MAX` overrides it for one run. It grants nothing.
+- `sd.gate_settle_seconds`: seconds between two gate starts, and of low load1 while load5 is high; `0` is none.
+  Absence reads 45. `SD_GATE_SETTLE_SECONDS` overrides it for one run. It grants nothing.
 
 Installation supplies neither grant. A new operator must state their own policy; never copy another user's personal permission.
 These settings start no background work, enable no runner policy, and bypass no ownership, review, CI, or protection gate.

@@ -53,9 +53,11 @@ other halves are, is in [domain packs](docs/domain-packs.md).
   `bin/`, so the commands resolve from any directory; `--bin-dir DIR` puts them
   elsewhere. The installer never edits `PATH`: `--user` warns when the link
   directory is not on it, and `--status` says how many commands resolve.
-- three hook entries in `~/.claude/settings.json` — `SessionStart` for
-  `sd-handoff-restore`, and `PreToolUse` and `UserPromptSubmit` for
-  `sd-skill-use`. `bin/sd_install.py`'s `HOOK_SPECS` is the one list; this
+- four hook entries in `~/.claude/settings.json` — `SessionStart` for
+  `sd-handoff-restore`, `PreToolUse` and `UserPromptSubmit` for
+  `sd-skill-use`, and `PreToolUse` on `Bash` and `mcp__github__issue_write`
+  for `sd-issue-guard`, which denies filing a GitHub issue from a managed
+  repository and points to `sd task add`. `bin/sd_install.py`'s `HOOK_SPECS` is the one list; this
   line describes it and does not govern it.
 - one line — `CLAUDE.local.md` — in the global git excludes
 
@@ -158,6 +160,8 @@ sd config set sd.assistant_merge controlled
 These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOME` overrides the configuration root.
 `sd config get`, `list`, and `unset` inspect or remove settings. No personal grant ships in this repository.
 `sd.gate_slots` is load control, not a grant: how many repository gates may run at once on the machine (unset: a quarter of the cores).
+`sd.gate_load_max` and `sd.gate_settle_seconds` are load control too: the gate queue starts its head only while load1 is below the limit (unset: 2.5 per core), with starts 45 s apart by default.
+`sd gate run -- make check` queues any command the same way; `sd gate status` shows the queue.
 
 `configured` allows private code and scoped review context to the operator's eligible configured providers, including future entries.
 A local `reviewers` list restricts recipients; an explicit empty value denies review.

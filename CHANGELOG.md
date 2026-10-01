@@ -4,6 +4,31 @@
 
 ### Added
 
+- **No GitHub issues from a managed repository (sd:2256).** A new
+  `PreToolUse` hook, `bin/sd-issue-guard`, denies `gh issue create` (and its
+  alias `gh issue new`) and `mcp__github__issue_write` when the session's
+  checkout is a repository whose `repo.managed` row is set. The denial tells
+  the agent to record the work with `sd task add`. Anywhere else -- an
+  unmanaged or unregistered repository, no workflow database, a payload it
+  cannot read -- it prints nothing and the call proceeds. `--user` registers
+  it with the other hooks; `SD_ISSUE_GUARD=0` switches it off. The pack's
+  own `.claude/settings.json` also denies both tools outright.
+
+- **One machine-wide queue for local gates (sd:2262).** Every gate that waits
+  for a slot -- `sd-check`, so every `sd-ship` gate, and the pack's own
+  `run-tests.sh` -- now takes a place in one queue under the slot directory,
+  and only the head starts: first to wait, first to start. Admission is one
+  step under `queue.lock`, so two waiters never share a free slot or a load
+  reading. The head starts only while load1 is below `sd.gate_load_max`
+  (unset: 2.5 per core, 40 on 16); while load5 is still above it, load1 must
+  stay below for `sd.gate_settle_seconds` (unset: 45), and two starts are that
+  far apart. `SD_GATE_LOAD_MAX` and `SD_GATE_SETTLE_SECONDS` override them for
+  one run. `sd gate run -- CMD` waits, runs any command, and frees its slot
+  when the command ends, also on a signal or a crash; it exits with the
+  command's code, 124 when `--timeout` passed first. `sd gate status [--json]`
+  shows who holds a slot and who waits, with their place and since when. A
+  dead waiter's ticket is removed by the next poll, as its `flock` is free.
+
 - **A held merge lane, and merge from the lane's checkout (sd:2035, sd:2037).**
   `sd-ship hold --item N --holder NAME [--for SECONDS]` reserves the
   repository's merge lane for one item. It is written under the ship lock,
