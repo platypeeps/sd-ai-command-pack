@@ -832,14 +832,14 @@ class LineBudgetTests(unittest.TestCase):
         # exact tracked paths the secret-name filter admits, a digest of the
         # declared environment alone, and each rustup toolchain bound by its
         # contents. They let a Rust repository declare `complete: true`.
-        # 4264 -> 4319 is sd:2327: declared build outputs, which a recorded run
+        # 4264 -> 4316 is sd:2327: declared build outputs, which a recorded run
         # builds into fresh temporary folders through each output's variable,
         # removed after the run; the operator's folder is never touched.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4319,
+            4316,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

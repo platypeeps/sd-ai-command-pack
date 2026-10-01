@@ -112,6 +112,7 @@ def build_outputs(root: pathlib.Path, value: Mapping[str, Any]) -> dict[str, str
     for name in outputs:
         if (not plain_path(name) or (root / name).is_symlink()
                 or any(other == name or other.startswith(name + "/") or name.startswith(other + "/") for other in declared)
+                # ls-files-form: plain -- empty output is the claim: no tracked file under the build output
                 or sd_lib.git_output(["ls-files", "--", name], root) != ""):
             raise Unavailable(f"unsupported build output: {name}")
     return outputs
@@ -128,14 +129,10 @@ def build_output_environment(root: pathlib.Path, value: Mapping[str, Any], env: 
     for name, variable in outputs.items():
         if variable is None and os.path.lexists(root / name):
             raise Unavailable(f"build output {name} exists and names no variable; remove it before recording")
-    folders: dict[str, str] = {}
-    try:
-        for variable in filter(None, outputs.values()):
-            folders[variable] = tempfile.mkdtemp(prefix="sd-check-build-", dir=env.get("TMPDIR") or None)
-        yield {**env, **folders}
-    finally:
-        for folder in folders.values():
-            shutil.rmtree(folder, ignore_errors=True)
+    with contextlib.ExitStack() as folders:
+        yield {**env, **{variable: folders.enter_context(tempfile.TemporaryDirectory(
+            prefix="sd-check-build-", dir=env.get("TMPDIR") or None, ignore_cleanup_errors=True))
+            for variable in filter(None, outputs.values())}}
 
 
 def dependency_files(root: pathlib.Path, names: list[str], allowed: Collection[str] = ()) -> dict[str, str]:
