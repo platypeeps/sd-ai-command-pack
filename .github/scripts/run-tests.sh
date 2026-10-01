@@ -13,7 +13,17 @@
 #
 # Env:
 #   PYTHON_BIN     interpreter to run (default: python3)
-#   TEST_WORKERS   workers (default: all CPUs in CI; CPUs minus one locally, min 1)
+#   TEST_WORKERS   workers (default: all CPUs in CI; half the CPUs locally, min 1)
+#
+# sd:1955. Locally the shards also run at `nice -n 10`. Two gates may hold the
+# two machine-wide slots at once (sd.gate_slots), and CPUs minus one each let
+# two gates put 30 workers on 16 cores: on 2026-09-28 the load average read
+# 65-73, and the runner daemon's heartbeat missed during such a run (sd:1941,
+# sd:1950). Half the CPUs puts two gates at one worker per core, and the lower
+# priority lets the daemon, the dashboard and the sessions run first.
+# Measured on the 16-core machine before the change, 15 workers, other gates
+# sharing it: 473 s of tests, 1-minute load peak 100 and mean 63.
+# CI gets every CPU at normal priority: nothing else runs on a CI runner.
 set -uo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -60,7 +70,7 @@ else
   if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
     TEST_WORKERS="$cores"
   elif [ "$cores" -gt 1 ]; then
-    TEST_WORKERS=$((cores - 1))
+    TEST_WORKERS=$((cores / 2))
   else
     TEST_WORKERS=1
   fi
@@ -526,8 +536,13 @@ watchdog() {
 # runs the whole tree.
 printf 'test runner: workers=%s shards=%s\n' "$TEST_WORKERS" "${#shards[@]}" >> "$run_log" || exit 1
 run_status=0
+# sd:1955: below the daemon and the sessions locally; see the header.
+shard_priority=(nice -n 10)
+if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
+  shard_priority=()
+fi
 set -m
-xargs -P "$TEST_WORKERS" -I {} bash -c '
+"${shard_priority[@]+"${shard_priority[@]}"}" xargs -P "$TEST_WORKERS" -I {} bash -c '
   set -f
   ids="$(cat "$2/$3.ids")" && [ -n "$ids" ] || {
     printf "%s\n" "error: shard $3 has no test names" > "$2/$3.log"
