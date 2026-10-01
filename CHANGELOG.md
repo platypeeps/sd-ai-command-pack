@@ -119,7 +119,9 @@
   variable at a fresh, empty temporary folder and removes it after the run,
   also when the run fails, so a receipt never vouches for an earlier build.
   The operator's own folder is never deleted, moved or hashed. An output with
-  no variable (`null`) refuses recording while it exists.
+  no variable (`null`) refuses recording while it exists. A rustup toolchain
+  link that leaves the toolchain, dangles or loops now refuses the binding:
+  its text stays equal when the file it names changes.
 
 - **A Rust repository can declare complete check receipts (sd:2325, sd:2326,
   sd:2328).** Three rulings on sd:1912 change `.github/sd-check-reuse.json`

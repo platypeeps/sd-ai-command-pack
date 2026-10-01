@@ -170,11 +170,21 @@ def tool_identity(name: str, env: Mapping[str, str], root: pathlib.Path) -> dict
 
 
 def tree_digest(root: pathlib.Path) -> str:
-    """Every entry under `root` by relative path: a file by mode and bytes, a link by target, a folder by mode."""
+    """Every entry under `root` by relative path: a file by mode and bytes, a link by target, a folder by mode.
+
+    A link's text does not change when the file it names does, so a link must resolve inside `root`, whose
+    entries are all hashed here; one that leaves the tree, dangles or loops refuses the binding.
+    """
     entries = {}
     for entry in sorted(root.rglob("*")):
         key = str(entry.relative_to(root))
         if entry.is_symlink():
+            try:
+                target = entry.resolve(strict=True)
+            except (OSError, RuntimeError):
+                raise Unavailable(f"toolchain link {entry} dangles or loops") from None
+            if not target.is_relative_to(root):
+                raise Unavailable(f"toolchain link {entry} resolves outside its toolchain: {target}")
             entries[key] = "link:" + os.readlink(entry)
         elif entry.is_file():
             entries[key] = file_digest(entry)

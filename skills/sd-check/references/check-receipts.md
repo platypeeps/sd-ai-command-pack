@@ -86,6 +86,7 @@ Bindings include canonical checkout, HEAD, tree, full check invocation, detected
 They also include checker implementation, relevant policy/configuration, runtime/tool identity, declared dependency bytes, and declared environment identity.
 When `rustup` is on the controlled `PATH`, each tool that `rustup which` names binds its whole toolchain directory by content.
 A toolchain name or version alone never binds it.
+A link inside the toolchain must resolve inside it; a link that leaves the toolchain, dangles, or loops refuses reuse.
 An explicit selection binds the toolchain it names: `cargo +nightly` or `rustup run nightly` in a detected command.
 List a toolchain that a Makefile selects with `+<toolchain>` as a tool, such as `"+nightly"`.
 A selection that `rustup` cannot answer refuses reuse.

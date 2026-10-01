@@ -837,11 +837,13 @@ class LineBudgetTests(unittest.TestCase):
         # 4286 -> 4338 is sd:2327: declared build outputs, which a recorded run
         # builds into fresh temporary folders through each output's variable,
         # removed after the run; the operator's folder is never touched.
+        # 4338 -> 4348 is sd:2327 review: a toolchain link that dangles, loops or
+        # resolves outside the toolchain refuses the binding.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4338,
+            4348,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

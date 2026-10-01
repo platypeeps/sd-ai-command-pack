@@ -578,3 +578,50 @@ class ReceiptTests(ReviewFixture):
         self.commit_contract(tools=["cargo", "+beta"])
         with self.assertRaisesRegex(receipts.Unavailable, "beta"):
             receipts.check_binding(self.root, self.env)
+
+    def linked_toolchain(self):
+        toolchain = self.tmp / "rustup-home" / "toolchains" / "custom-synthetic"
+        (toolchain / "bin").mkdir(parents=True)
+        (toolchain / "lib").mkdir()
+        (toolchain / "bin" / "cargo").write_text("synthetic cargo")
+        self.fake_rustup(toolchain)
+        self.commit_contract(tools=["cargo"])
+        return toolchain
+
+    def test_a_toolchain_link_outside_its_tree_refuses_the_binding(self):
+        # A custom toolchain's lib/ link to a library elsewhere: the link text stays equal when that library changes.
+        toolchain = self.linked_toolchain()
+        outside = self.tmp / "elsewhere" / "librustc_driver.dylib"
+        outside.parent.mkdir()
+        outside.write_text("compiler v1")
+        (toolchain / "lib" / "librustc_driver.dylib").symlink_to(outside)
+        self.assertIsNone(self.reuse_after(lambda: outside.write_text("compiler v2")))
+        with self.assertRaisesRegex(receipts.Unavailable, "outside"):
+            receipts.check_binding(self.root, self.env)
+
+    def test_a_toolchain_link_inside_its_tree_binds_the_bytes_it_names(self):
+        toolchain = self.linked_toolchain()
+        real = toolchain / "lib" / "libstd-real.rlib"
+        real.write_text("std v1")
+        (toolchain / "lib" / "libstd.rlib").symlink_to("libstd-real.rlib")
+        self.assertIsNone(self.reuse_after(lambda: real.write_text("std v2")))
+
+    def test_dangling_and_looping_toolchain_links_refuse(self):
+        toolchain = self.linked_toolchain()
+        for make in (lambda: (toolchain / "lib" / "gone.rlib").symlink_to(toolchain / "lib" / "absent"),
+                     lambda: ((toolchain / "lib" / "a").symlink_to("b"), (toolchain / "lib" / "b").symlink_to("a"))):
+            with self.subTest(make=make):
+                for link in (toolchain / "lib").iterdir():
+                    link.unlink()
+                make()
+                with self.assertRaises(receipts.Unavailable):
+                    receipts.check_binding(self.root, self.env)
+
+    def reuse_after(self, change):
+        """Record, apply `change`, and answer what reuse says; a refused binding records nothing and reuses nothing."""
+        try:
+            self.record()
+        except receipts.Unavailable:
+            return None
+        change()
+        return receipts.reuse_checked_result(self.root, self.env, self.database)
