@@ -96,6 +96,12 @@
   spent, the binding is rebound, and `review_binding_kept` records what
   moved. A policy change, a legacy receipt, a failed replay or a changed
   digest still refuses and re-reviews as before.
+- **The local test gate leaves the machine room (sd:1955).**
+  `.github/scripts/run-tests.sh` ran CPUs minus one workers locally, so two
+  gates in the two machine-wide slots put 30 workers on 16 cores; the load
+  average read 65-73 and the runner heartbeat missed during such runs. A local
+  run now takes half the CPUs and runs its shards at `nice -n 10`. CI keeps
+  every CPU at normal priority, and `TEST_WORKERS` still overrides the count.
 
 - **A blocking local review names its findings (sd:2102).** `sd-ship
   prepare` refused with `local review blocking: 1/1 completed; see item ship
