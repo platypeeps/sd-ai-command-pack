@@ -236,7 +236,7 @@ class Queue:
 
     def waiters(self, *, prune: bool) -> list[dict]:
         """The live tickets in order. Call under `admission_lock`; `prune` removes the dead ones."""
-        live = []
+        live: list[dict] = []
         try:
             paths = sorted(self.tickets.glob("*.ticket"))
         except OSError:
@@ -567,16 +567,17 @@ def snapshot(where: pathlib.Path, slots: int, rule: LoadRule, *,
                         info = {}
                     if not isinstance(info, dict) or info.get("pid") != pid:
                         info = {}
-                    since = info.get("since") if isinstance(info.get("since"), (int, float)) else lock.stat().st_mtime
+                    recorded = info.get("since")
+                    since = float(recorded) if isinstance(recorded, (int, float)) else lock.stat().st_mtime
                     holders.append({"slot": number, "pid": pid, "label": info.get("label", ""),
                                     "cwd": info.get("cwd", ""), "since": utc_stamp(since)})
                 finally:
                     os.close(fd)
             for place, entry in enumerate(queue.waiters(prune=False), start=1):
-                since = entry.get("since")
+                queued = entry.get("since")
                 waiters.append({"place": place, "pid": entry.get("pid"), "label": entry.get("label", ""),
                                 "cwd": entry.get("cwd", ""),
-                                "since": utc_stamp(since) if isinstance(since, (int, float)) else ""})
+                                "since": utc_stamp(float(queued)) if isinstance(queued, (int, float)) else ""})
     try:
         load = [round(float(value), 2) for value in tuple(loadavg())[:3]]
     except OSError:
