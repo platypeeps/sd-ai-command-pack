@@ -41,6 +41,25 @@ tell a judgment from a shrug. The fallback here is `FALLBACK`, a token no tier
 can be, and getting it back is read as "nothing was judged". `--unsure-below`
 is the same shape for a judgment Jev made but does not stand behind.
 
+**The routed tier is the baseline** (sd:2359). `jev` used to compute a row's
+`changed` by comparing its answer with `--fallback`, and the fallback here is a
+token no answer can equal, so every sd-review row in the judgment ledger said
+`changed=yes` whatever Jev chose. `--baseline` hands over the tier `sd_route`
+picked: `jev` records it as a second row under the same pair id and compares
+its answer with that instead, so `changed` says whether Jev disagreed with the
+routing and the ledger holds a paired sample. `--baseline-ms` is how long
+`sd_route.route` took, when the caller timed it. Neither flag changes what Jev
+prints or what this module does with it; the floor and every decline rule
+below hold as they did.
+
+A `jev` older than sd:2357 has no `--baseline` and its argparse refuses the
+flag with exit 2 before anything is sent or recorded. That one refusal is asked
+once more without the two baseline flags, and the answer is read as before.
+Treated as a failure instead, it would have made every reading on such a machine
+a loud decline. A refusal naming any other flag is a real fault and stays loud.
+`jev choice` has no `--help` and `jev` no version verb to ask in advance, so the
+refusal itself is the cheapest probe: a current `jev` never pays for it.
+
 **Failure is never quiet and never looks like an answer.** A missing command, a
 `jev` that declines, a non-zero exit, a timeout, the fallback token, `unsure`
 and an answer outside the policy's tiers all land on the same line: keep the
@@ -112,6 +131,7 @@ def jev_tier(
     env: Mapping[str, str],
     stream: TextIO | None = None,
     root: str | None = None,
+    baseline_ms: int | None = None,
 ) -> tuple[str, dict[str, Any] | None]:
     """The tier to review at, and the record of the reading that moved it.
 
@@ -119,7 +139,8 @@ def jev_tier(
     taken, which is every case but one. The record is `None` rather than a row
     saying "declined" on purpose: the caller puts it in its result object only
     when it exists, so a run that did not take a reading emits the same bytes
-    it emitted before this module existed.
+    it emitted before this module existed. `baseline_ms` is how long the
+    routing that chose `tier` took, for the paired ledger row only.
     """
 
     note = sys.stderr if stream is None else stream
@@ -139,8 +160,11 @@ def jev_tier(
         return _jev_declined(tier, note, f"`{COMMAND} enabled` exited {gate.returncode}")
     options = [str(name) for name in order]
     fallback = _jev_fallback(options)
-    answer = _jev_run(_jev_argv(binary, fallback, options, _jev_subject(root)), env,
-                      _jev_state(paths, lines, reason))
+    argv = _jev_argv(binary, fallback, options, _jev_subject(root), tier, baseline_ms)
+    state = _jev_state(paths, lines, reason)
+    answer = _jev_run(argv, env, state)
+    if _jev_lacks_baseline(answer):
+        answer = _jev_run(_jev_without_baseline(argv), env, state)
     chosen = (answer.stdout or "").strip()
     if answer.returncode != 0:
         return _jev_declined(tier, note, f"`{COMMAND}` exited {answer.returncode}")
@@ -184,13 +208,16 @@ def _jev_subject(root: str | None) -> str | None:
 
 
 def _jev_argv(binary: str, fallback: str, options: Sequence[str],
-              subject: str | None = None) -> list[str]:
+              subject: str | None = None, baseline: str | None = None,
+              baseline_ms: int | None = None) -> list[str]:
     """The one place the `jev` command line is written, and it is checked.
 
     `choice` takes its instructions positionally and its named set in
     `--criteria`; the state it judges over arrives on stdin, which is where
     `--state -` reads it. `--fallback` exits 0 with `fallback` on stdout rather
     than failing, so the caller above reads that token and not the exit code.
+    `--baseline` is the routed tier, for the ledger's paired row (sd:2359); it
+    comes last with its timing so `_jev_without_baseline` can drop both.
     """
 
     return [binary, "choice", "How deeply should this code change be reviewed?",
@@ -198,7 +225,49 @@ def _jev_argv(binary: str, fallback: str, options: Sequence[str],
             "--unsure-below", UNSURE_BELOW,
             "--state", "-", "--state-format", "json", "--caller", CALLER,
             "--id", "sd-review-tier", "--stage", STAGE, "--fallback", fallback,
-            *(["--subject", subject] if subject else [])]
+            *(["--subject", subject] if subject else []),
+            *(["--baseline", baseline] if baseline is not None else []),
+            *(["--baseline-ms", str(baseline_ms)]
+              if baseline is not None and baseline_ms is not None else [])]
+
+
+#: The flags a `jev` from before sd:2357 does not know, each taking one value.
+BASELINE_FLAGS = ("--baseline", "--baseline-ms")
+
+
+def _jev_lacks_baseline(answer: subprocess.CompletedProcess[str]) -> bool:
+    """Whether `jev` refused the baseline flags and nothing else.
+
+    Exit 2 with argparse's `unrecognized arguments:` line is a refusal made
+    before any request or ledger row, so asking again cannot double-count.
+    Every word it lists must be a baseline flag or a value that came with one;
+    an older `jev` that also lacks some other flag is a fault, and stays loud.
+    """
+
+    if answer.returncode != 2:
+        return False
+    lines = [line for line in (answer.stderr or "").splitlines()
+             if "unrecognized arguments:" in line]
+    if not lines:
+        return False
+    words = lines[-1].split("unrecognized arguments:", 1)[1].split()
+    flags = [word for word in words if word.startswith("--")]
+    return bool(flags) and all(flag in BASELINE_FLAGS for flag in flags)
+
+
+def _jev_without_baseline(argv: Sequence[str]) -> list[str]:
+    """`argv` less each baseline flag and the value that follows it."""
+
+    kept: list[str] = []
+    skip = False
+    for word in argv:
+        if skip:
+            skip = False
+        elif word in BASELINE_FLAGS:
+            skip = True
+        else:
+            kept.append(word)
+    return kept
 
 
 def _jev_criteria(options: Sequence[str]) -> str:

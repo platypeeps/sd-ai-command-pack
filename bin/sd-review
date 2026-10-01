@@ -19,6 +19,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Any, Callable, Mapping, NamedTuple, Protocol, Sequence, TextIO
 
 _BIN = str(pathlib.Path(__file__).resolve().parent)
@@ -1839,7 +1840,11 @@ def review(
     # lane, so this is where a `mode: guest` checkout finds out; `sd_lib` owns the rule.
     if subject.scope == "planning" and (refusal := sd_lib.guest_artifact_refusal(root, subject.paths)):
         raise UsageError(refusal)
+    # Timed for the Jev ledger's paired row only (sd:2359): the routing is the
+    # baseline Jev's tier is compared with, and this is what that baseline cost.
+    routing_started = time.monotonic()
     plan = sd_route.route(subject.paths, subject.lines, args.draft, policy)
+    routing_ms = int((time.monotonic() - routing_started) * 1000)
     # Optional and experimental, and on wherever a `jev` on PATH says it can
     # answer -- `JEV_SD_REVIEW=0` switches it off. Without one this returns the
     # routed tier untouched and no record, silently, and the result below is
@@ -1847,7 +1852,7 @@ def review(
     # exactly what leaves the machine, and which failures are loud.
     jev_choice, jev_reading = sd_jev.jev_tier(
         plan.tier, policy["tier_order"], subject.paths, subject.lines, plan.reason, env,
-        root=str(root))
+        root=str(root), baseline_ms=routing_ms)
     if jev_reading is not None:
         plan = plan._replace(
             tier=jev_choice,

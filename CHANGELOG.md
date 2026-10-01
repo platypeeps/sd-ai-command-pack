@@ -102,6 +102,16 @@
 
 ### Fixed
 
+- **`sd-review`'s Jev rows compare Jev with the routing (sd:2359).** `jev`
+  computed `changed` against `--fallback`, which here is a token no tier can
+  be, so every sd-review row in the judgment ledger said `changed=yes`. The
+  reading now passes the routed tier as `--baseline` and the routing's time as
+  `--baseline-ms`, so `jev` records a paired baseline row and `changed` says
+  whether Jev disagreed. The tier, the floor and the decline rules are
+  unchanged. A `jev` without `--baseline` (before system sd:2357) refuses it at
+  argparse; that refusal is asked once more without the two flags, silently,
+  and a refusal of any other flag stays loud.
+
 - **The local test gate leaves the machine room (sd:1955).**
   `.github/scripts/run-tests.sh` ran CPUs minus one workers locally, so two
   gates in the two machine-wide slots put 30 workers on 16 cores; the load
