@@ -391,14 +391,14 @@ class SharedReview:
         """
         passes = self.history.native(self.state)
         request = (passes[-1].get("review_request") if passes else None) or {}
-        changed = self.binding_changes()
-        if (not request.get("sha256") or not changed
+        changed, manifest = self.binding_changes(), self.runtime.manifest
+        if (manifest is None or not request.get("sha256") or not changed
                 or any(kind not in ("verdict", "gate", "check") for _, kind in changed)
                 or self.replayed_request(passes, request) != request["sha256"]):
             return False
         kept = {"head": passes[-1].get("head"), "recorded_at": self.runtime.clock(), "superseded_binding": self.state.get("binding"),
                 "changed": [list(row) for row in changed], "request_sha256": request["sha256"]}
-        self.save(binding=self.runtime.binding(self.root), binding_manifest=self.runtime.manifest(self.root),
+        self.save(binding=self.runtime.binding(self.root), binding_manifest=manifest(self.root),
                   review_binding_kept=[*(self.state.get("review_binding_kept") or []), kept])
         return True
 
