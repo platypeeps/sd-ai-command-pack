@@ -368,6 +368,54 @@ class LoadRule(unittest.TestCase):
         (self.where / sd_gate_slots.QUEUE_STATE).write_text("not json")
         self.assertEqual(self.queue.enter("third", "/", wall=self.wall).seq, second.seq + 1)
 
+    def other(self, ticket, rule):
+        """A second waiter's poll, with its own rule, while `ticket` heads the queue."""
+        return self.queue.admit(ticket, [self.lock.fileno()], rule, loadavg=lambda: self.load, wall=self.wall)
+
+    def test_a_stricter_waiter_behind_the_head_cannot_hold_it_back(self):
+        """Review finding: a waiter with limit 20 kept clearing the head's low-load record at load1 30."""
+        head_rule = sd_gate_slots.LoadRule(limit=40.0, settle=45.0, source="test")
+        strict = sd_gate_slots.LoadRule(limit=20.0, settle=45.0, source="test")
+        head = self.queue.enter("head", "/", wall=self.wall)
+        behind = self.queue.enter("behind", "/", wall=self.wall)
+        self.load = (30.0, 90.0, 90.0)
+        self.assertIsNone(self.admit(head, head_rule)[0])
+        for _ in range(9):
+            self.wall.now += 5
+            self.assertIsNone(self.other(behind, strict)[0])
+            if self.wall.now < 1_000_045.0:
+                self.assertIsNone(self.admit(head, head_rule)[0])
+        self.assertEqual(self.admit(head, head_rule)[0], 0, "the head waited past its settle time")
+
+    def test_a_waiter_with_no_load_rule_cannot_shorten_the_heads_settle_time(self):
+        """Review finding: a waiter with the load rule off kept a low-load record alive through high load."""
+        head_rule = sd_gate_slots.LoadRule(limit=40.0, settle=45.0, source="test")
+        off = sd_gate_slots.LoadRule(limit=0.0, settle=0.0, source="test")
+        head = self.queue.enter("head", "/", wall=self.wall)
+        behind = self.queue.enter("behind", "/", wall=self.wall)
+        self.load = (50.0, 90.0, 90.0)
+        self.assertIsNone(self.admit(head, head_rule)[0])
+        for _ in range(9):
+            self.wall.now += 5
+            self.assertIsNone(self.other(behind, off)[0])
+        self.load = (30.0, 90.0, 90.0)
+        self.assertIsNone(self.admit(head, head_rule)[0])
+        self.wall.now += 10
+        self.assertIsNone(self.admit(head, head_rule)[0], "load1 fell 10 s ago; the head must settle 45 s")
+
+    def test_a_new_rule_at_the_head_starts_its_own_settle_time(self):
+        first = sd_gate_slots.LoadRule(limit=40.0, settle=45.0, source="test")
+        second = sd_gate_slots.LoadRule(limit=35.0, settle=45.0, source="test")
+        ticket = self.queue.enter("gate", "/", wall=self.wall)
+        self.load = (30.0, 90.0, 90.0)
+        self.assertIsNone(self.admit(ticket, first)[0])
+        self.wall.now += 40
+        self.assertIsNone(self.admit(ticket, first)[0])
+        self.wall.now += 10
+        self.assertIsNone(self.admit(ticket, second)[0], "the record was kept under another rule")
+        self.wall.now += 45
+        self.assertEqual(self.admit(ticket, second)[0], 0)
+
     def test_an_old_low_sample_counts_for_nothing(self):
         rule = sd_gate_slots.LoadRule(limit=40.0, settle=45.0, source="test")
         ticket = self.queue.enter("gate", "/", wall=self.wall)
@@ -378,6 +426,21 @@ class LoadRule(unittest.TestCase):
 
 
 class Settings(unittest.TestCase):
+    def test_the_shell_helper_reads_the_machine_settings(self):
+        """The `wait` helper `run-tests.sh` uses reads `sd.gate_*` from the machine config, stdlib only."""
+        with tempfile.TemporaryDirectory() as tmp:
+            config = pathlib.Path(tmp) / "sd-ai-command-pack" / "config.json"
+            config.parent.mkdir()
+            config.write_text(json.dumps({"config": {"sd": {"gate_load_max": "12.5", "gate_settle_seconds": "7"}}}))
+            environ = {"XDG_CONFIG_HOME": tmp}
+            self.assertEqual(sd_gate_slots.machine_rule(environ)[:2], (12.5, 7.0))
+            self.assertEqual(sd_gate_slots.machine_rule({**environ, "SD_GATE_LOAD_MAX": "3"})[:2], (3.0, 7.0))
+            config.write_text("not json")
+            stream = io.StringIO()
+            self.assertEqual(sd_gate_slots.machine_rule(environ, stream=stream, cores=16)[:2], (40.0, 45.0))
+            self.assertIn("warning", stream.getvalue())
+
+
     def test_the_variable_then_the_machine_setting_then_the_default(self):
         rule = sd_gate_slots.load_rule
         self.assertEqual(rule({"SD_GATE_LOAD_MAX": "12", "SD_GATE_SETTLE_SECONDS": "5"}, "30", "60")[:2], (12.0, 5.0))

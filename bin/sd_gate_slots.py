@@ -160,6 +160,37 @@ def load_rule(environ: Mapping[str, str], limit_setting: str | None = None, sett
     return LoadRule(limit, settle, ", ".join(sources) or "default")
 
 
+def machine_rule(environ: Mapping[str, str], *, stream: TextIO | None = None,
+                 cores: int | None = None) -> LoadRule:
+    """`load_rule` with `sd.gate_load_max` and `sd.gate_settle_seconds` read from the machine config.
+
+    For the stdlib-only entry points (`wait`, which `run-tests.sh` runs, and
+    `run`/`status` here), so they read the rule `sd-check` and `sd gate` read.
+    The path is `sd_lib.machine_config_path`'s. A file that cannot be read or
+    holds a bad value gives the defaults with a warning: load control never
+    fails a gate.
+    """
+    home = environ.get("XDG_CONFIG_HOME") or str(pathlib.Path(environ.get("HOME") or pathlib.Path.home()) / ".config")
+    path = pathlib.Path(home) / "sd-ai-command-pack" / "config.json"
+    values: list[str | None] = [None, None]
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        mine = loaded.get("config", {}).get("sd", {}) if isinstance(loaded, dict) else {}
+        for index, (key, name) in enumerate((("gate_load_max", "sd.gate_load_max"),
+                                             ("gate_settle_seconds", "sd.gate_settle_seconds"))):
+            value = mine.get(key) if isinstance(mine, dict) else None
+            if value is not None:
+                parse_number(value if isinstance(value, str) else repr(value), name)
+                values[index] = value
+    except FileNotFoundError:
+        values = [None, None]
+    except (OSError, ValueError, AttributeError) as error:
+        if stream is not None:
+            stream.write(f"warning: cannot read the gate settings in {path} ({error}); using the defaults\n")
+        values = [None, None]
+    return load_rule(environ, values[0], values[1], cores=cores)
+
+
 def utc_stamp(seconds: float) -> str:
     return datetime.datetime.fromtimestamp(seconds, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -272,8 +303,6 @@ class Queue:
         with self.admission_lock():
             state = self.state()
             now = wall()
-            load1, load5 = (float(value) for value in tuple(loadavg())[:2])
-            record_sample(state, rule, load1, now)
             try:
                 live = self.waiters(prune=True)
                 order = [entry["seq"] for entry in live]
@@ -281,6 +310,10 @@ class Queue:
                     order.append(ticket.seq)
                 if order[0] != ticket.seq:
                     return None, f"place {order.index(ticket.seq) + 1} of {len(order)} in the queue"
+                # Only the head samples, under its own rule: callers may run
+                # different rules, and one waiter's sample must not count for another's.
+                load1, load5 = (float(value) for value in tuple(loadavg())[:2])
+                record_sample(state, rule, load1, now)
                 held = load_hold(state, rule, load1, load5, now)
                 if held:
                     return None, held
@@ -296,14 +329,21 @@ class Queue:
 
 
 def record_sample(state: dict, rule: LoadRule, load1: float, now: float) -> None:
-    """Keep `low_since`: when load1 last went below the limit, in an unbroken run of samples."""
+    """Keep `low_since`: when load1 last went below the limit, in an unbroken run of samples.
+
+    The record names the rule it was kept under; a sample under another rule
+    starts it again, so no rule inherits low load another rule judged.
+    """
     sampled = state.get("sampled_at")
+    measured = [rule.limit, rule.settle]
     if rule.limit > 0 and load1 >= rule.limit:
         state["low_since"] = None
-    elif (state.get("low_since") is None or not isinstance(sampled, (int, float))
+    elif (state.get("low_since") is None or state.get("sampled_rule") != measured
+          or not isinstance(sampled, (int, float))
           or not 0 <= now - sampled <= max(rule.settle, STALE_SAMPLE_SECONDS)):
         state["low_since"] = now
     state["sampled_at"] = now
+    state["sampled_rule"] = measured
 
 
 def load_hold(state: dict, rule: LoadRule, load1: float, load5: float, now: float) -> str:
@@ -630,7 +670,9 @@ def gate_verb(args: argparse.Namespace, environ: Mapping[str, str], slots: int, 
 def slot_command(argv: list[str] | None = None) -> int:
     """`directory` prints where the slots live; `wait --pid P --ppid Q --dir D FD...`
     queues, locks one inherited descriptor and prints its index; `run` and
-    `status` are `sd gate run` and `sd gate status` without the machine settings.
+    `status` are `sd gate run` and `sd gate status`; all three read the machine's
+    load rule through `machine_rule`, and `run` and `status` take the slot
+    count from `SD_GATE_SLOTS` or the default.
 
     The shell that opened the descriptors keeps the lock after `wait` exits.
     Exit 3 when P's launcher exited, or when this process's own parent did.
@@ -649,7 +691,7 @@ def slot_command(argv: list[str] | None = None) -> int:
         print(directory(os.environ))
         return 0
     try:
-        rule = load_rule(os.environ)
+        rule = machine_rule(os.environ, stream=sys.stderr)
         if args.command_name in ("run", "status"):
             slots, _ = configured(os.environ, None)
             return gate_verb(args, os.environ, slots, rule)

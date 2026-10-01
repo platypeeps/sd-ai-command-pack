@@ -21,11 +21,12 @@ kernel drops that lock when the waiter dies.
 A waiter polls. Each poll takes `queue.lock`, then does all of this before it
 lets go:
 
-1. Read `queue.state`, and sample the load (`os.getloadavg`).
+1. Read `queue.state`.
 2. Remove each ticket whose `flock` this process can take: its waiter is dead.
 3. Stop here unless this waiter holds the lowest live sequence number.
-4. Stop here unless the load condition holds (below).
-5. Try each slot lock. On a taken slot, write the admission time, remove the
+4. Sample the load (`os.getloadavg`) under this waiter's own rule.
+5. Stop here unless the load condition holds (below).
+6. Try each slot lock. On a taken slot, write the admission time, remove the
    own ticket, and return the slot.
 
 Every admission runs under `queue.lock`, so two waiters never see the same
@@ -56,9 +57,13 @@ The head is admitted when all of these hold:
 - load5 is below the limit, or load1 stayed below it for the settle time;
 - the last admission on the machine was at least the settle time ago.
 
-"Stayed below" uses `queue.state`. Each poll by any waiter records a sample. A
-sample at or above the limit clears the record. A gap between samples longer
-than the settle time starts the record again, so an old sample counts for
+"Stayed below" uses `queue.state`. Only the head's poll records a sample, and
+the record names the limit and settle time it was kept under. Callers can run
+different rules (a variable overrides the setting for one run), so a waiter
+behind the head must not clear or keep the head's record; the review of
+2026-10-01 found both cases. A sample under another rule starts the record
+again. A sample at or above the limit clears it. A gap between samples longer
+than the settle time, or 15 s, starts it again, so an old sample counts for
 nothing.
 
 Why load5: load1 is a one-minute average that falls fast. On 2026-10-01 load1
@@ -98,8 +103,10 @@ info file (the shell helper) never shows an older holder's label.
 | `.github/scripts/run-tests.sh` | the `wait` helper, now through the queue |
 | a hand-written waiter, any repository | `sd gate run -- make check` |
 
-The shell helper reads the load settings from the variables and the defaults
-only. The file stays stdlib-only, and it does not read the machine config.
+The shell helper reads the same rule as `sd-check`: `machine_rule` reads
+`sd.gate_load_max` and `sd.gate_settle_seconds` from the machine config with
+stdlib only, at the path `sd_lib.machine_config_path` names. A config it cannot
+read gives the defaults with a warning, since load control never fails a gate.
 
 ## Decisions (operator, 2026-10-01)
 
