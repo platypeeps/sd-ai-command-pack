@@ -627,7 +627,7 @@ class LocalOverrideTests(unittest.TestCase):
     def setUp(self) -> None:
         self.module = load_kit().load("sd_research_review")
         self.template = TEMPLATE.read_text(encoding="utf-8")
-        # A real replacement, in the shape mcp-research and aura-research use:
+        # A real replacement, in the shape the research repositories use:
         # the section is still there, one of its blocks says something else.
         self.replaced = self.template.replace(
             "- Absolute paths when pointing at a local file: `file:///Users/...`, "
