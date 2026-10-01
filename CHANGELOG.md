@@ -4,6 +4,16 @@
 
 ### Added
 
+- **No GitHub issues from a managed repository (sd:2256).** A new
+  `PreToolUse` hook, `bin/sd-issue-guard`, denies `gh issue create` (and its
+  alias `gh issue new`) and `mcp__github__issue_write` when the session's
+  checkout is a repository whose `repo.managed` row is set. The denial tells
+  the agent to record the work with `sd task add`. Anywhere else -- an
+  unmanaged or unregistered repository, no workflow database, a payload it
+  cannot read -- it prints nothing and the call proceeds. `--user` registers
+  it with the other hooks; `SD_ISSUE_GUARD=0` switches it off. The pack's
+  own `.claude/settings.json` also denies both tools outright.
+
 - **A held merge lane, and merge from the lane's checkout (sd:2035, sd:2037).**
   `sd-ship hold --item N --holder NAME [--for SECONDS]` reserves the
   repository's merge lane for one item. It is written under the ship lock,

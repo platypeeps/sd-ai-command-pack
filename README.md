@@ -53,9 +53,11 @@ other halves are, is in [domain packs](docs/domain-packs.md).
   `bin/`, so the commands resolve from any directory; `--bin-dir DIR` puts them
   elsewhere. The installer never edits `PATH`: `--user` warns when the link
   directory is not on it, and `--status` says how many commands resolve.
-- three hook entries in `~/.claude/settings.json` — `SessionStart` for
-  `sd-handoff-restore`, and `PreToolUse` and `UserPromptSubmit` for
-  `sd-skill-use`. `bin/sd_install.py`'s `HOOK_SPECS` is the one list; this
+- four hook entries in `~/.claude/settings.json` — `SessionStart` for
+  `sd-handoff-restore`, `PreToolUse` and `UserPromptSubmit` for
+  `sd-skill-use`, and `PreToolUse` on `Bash` and `mcp__github__issue_write`
+  for `sd-issue-guard`, which denies filing a GitHub issue from a managed
+  repository and points to `sd task add`. `bin/sd_install.py`'s `HOOK_SPECS` is the one list; this
   line describes it and does not govern it.
 - one line — `CLAUDE.local.md` — in the global git excludes
 
