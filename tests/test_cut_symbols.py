@@ -393,7 +393,7 @@ class ProseSymbolsAndFlags(unittest.TestCase):
             '        "authors": list(policy["authors"]),',
             '    authors = ", ".join(result["authors"])',
             '    "authors": {',
-            '  "authors": ["sdelmas"],',
+            '  "authors": ["example-user"],',
             '        self.assertIn("authors", policy)',
             '    for key in ("authors", "sensitive"):',
         )
