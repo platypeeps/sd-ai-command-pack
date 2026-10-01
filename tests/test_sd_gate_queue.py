@@ -360,6 +360,14 @@ class LoadRule(unittest.TestCase):
         self.release()
         self.assertEqual(self.admit(behind, rule)[0], 0)
 
+    def test_a_damaged_state_file_does_not_stop_the_queue(self):
+        first = self.queue.enter("first", "/", wall=self.wall)
+        (self.where / sd_gate_slots.QUEUE_STATE).write_text('{"next": "x"}')
+        second = self.queue.enter("second", "/", wall=self.wall)
+        self.assertEqual(second.seq, first.seq + 1)
+        (self.where / sd_gate_slots.QUEUE_STATE).write_text("not json")
+        self.assertEqual(self.queue.enter("third", "/", wall=self.wall).seq, second.seq + 1)
+
     def test_an_old_low_sample_counts_for_nothing(self):
         rule = sd_gate_slots.LoadRule(limit=40.0, settle=45.0, source="test")
         ticket = self.queue.enter("gate", "/", wall=self.wall)

@@ -215,7 +215,9 @@ class Queue:
         self.tickets.mkdir(parents=True, exist_ok=True)
         with self.admission_lock():
             state = self.state()
-            seq = max(int(state.get("next", 1)), 1)
+            stored = state.get("next")
+            seq = stored if isinstance(stored, int) and stored > 0 else 1 + max(
+                (int(path.stem) for path in self.tickets.glob("*.ticket") if path.stem.isdigit()), default=0)
             state["next"] = seq + 1
             self.write_state(state)
             path = self.tickets / f"{seq:012d}.ticket"
