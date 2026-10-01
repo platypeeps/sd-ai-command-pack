@@ -99,8 +99,9 @@ class GateSlotFixture(unittest.TestCase):
     def env(self, **overrides: str) -> dict[str, str]:
         env = {key: value for key, value in os.environ.items()
                if key not in ("CI", "GITHUB_ACTIONS", sd_gate_slots.SLOTS_VARIABLE)}
-        env.update(SD_GATE_SLOTS_DIR=str(self.slots), SD_GATE_SLOT_POLL="0.1",
-                   XDG_CONFIG_HOME=str(self.tmp / "config"))
+        # The sd:2262 load rule is off: these tests measure the cap, not the machine's load.
+        env.update(SD_GATE_SLOTS_DIR=str(self.slots), SD_GATE_SLOT_POLL="0.1", SD_GATE_LOAD_MAX="0",
+                   SD_GATE_SETTLE_SECONDS="0", XDG_CONFIG_HOME=str(self.tmp / "config"))
         env.update(overrides)
         return env
 
