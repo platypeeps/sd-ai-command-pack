@@ -101,6 +101,16 @@ info file (the shell helper) never shows an older holder's label.
 The shell helper reads the load settings from the variables and the defaults
 only. The file stays stdlib-only, and it does not read the machine config.
 
+## Decisions (operator, 2026-10-01)
+
+- The default slot count stays a quarter of the cores. The load rule spaces
+  heavy gates; one gate at a time is `sd.gate_slots=1`.
+- The queue has one class. A ticket's order is its sequence number alone.
+  A class would order by class first and by sequence second; add one only if
+  the queue shows merge gates waiting behind long ones.
+- A checkout that pins an older pack takes slots without queueing until its
+  pin moves. That window is accepted; the pin bump follows this item.
+
 ## Rejected
 
 - **A second, parallel mechanism** (a queue daemon, a socket). It would need a

@@ -80,18 +80,17 @@ of these two gaps.
 - **A gate inside a gate does not queue.** A holder runs its command with
   `SD_GATE_SLOTS=0`, as sd:1996 does.
 
-## Open questions for the operator
+## Log
 
-1. **Default slot count.** The hand rule is one gate at a time. The sd:1996
-   default is a quarter of the cores, 4 on 16. The load condition and the
-   settle time now space the starts. Keep 4, or make 1 the default?
-2. **Priority classes.** Should a merge-lane gate (`sd-ship`) go ahead of an
-   interactive `sd-check` or another repository's `make check`? This build
-   has one class. A class would order by class first, then by arrival.
-3. **Older pack copies.** A checkout that pins an older pack (for example
-   through `.sd-pack-rev`) takes slots directly and does not queue. It can
-   pass the queue until it moves to this version. Is that window acceptable,
-   or must this wait for a coordinated pin bump?
+- 2026-10-01: three questions went to the operator; the rulings follow.
+  - **Default slot count stays a quarter of the cores (4).** The load limit
+    and the settle time throttle heavy gates; `sd.gate_slots=1` stays
+    available for one gate at a time.
+  - **One class, plain first-in, first-out.** Priority classes come only if
+    the queue later shows merge gates waiting behind long ones.
+  - **The window for older pack copies is accepted.** A checkout that pins an
+    older pack (for example through `.sd-pack-rev`) takes slots without
+    queueing until its pin moves; the pin bump in system follows this item.
 
 The mechanism and its reasons are in [design.md](design.md). The steps are in
 [implement.md](implement.md).
