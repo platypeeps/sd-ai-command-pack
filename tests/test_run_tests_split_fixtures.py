@@ -116,6 +116,18 @@ def load_tests(loader, standard_tests, pattern):
     return loader.loadTestsFromTestCase(Plain)
 """
 
+# Prints the niceness the shard runs at, so a test can compare it with its own.
+# `getpriority` reads it; `os.nice(0)` raises EPERM on macOS at niceness 20,
+# which a nested run reaches under an outer gate's `nice -n 10`.
+NICENESS_PROBE = """import os
+import unittest
+
+
+class Probe(unittest.TestCase):
+    def test_niceness(self):
+        print(f"shard niceness={os.getpriority(os.PRIO_PROCESS, 0)}")
+"""
+
 SPLIT_NAMES =("test_sd_ship", "test_sd_ship_dispositions", "test_sd_ship_disposition_guards")
 
 
@@ -154,14 +166,27 @@ class SplitModuleFixtures(unittest.TestCase):
         return subprocess.run(["bash", str(self.root / ".github/scripts/run-tests.sh")], cwd=self.root,
                               env=env, text=True, capture_output=True, timeout=300)
 
-    def test_ci_uses_all_cores_and_local_reserves_one(self) -> None:
-        for environment, single_test_shards in (({}, 6), ({"CI": "1"}, 12), ({"GITHUB_ACTIONS": "true"}, 12)):
+    def test_ci_uses_all_cores_and_local_uses_half(self) -> None:
+        """sd:1955. Two gate slots at half the cores each fill the machine and no more."""
+        for environment, workers in (({}, 2), ({"FIXTURE_CORES": "5"}, 2), ({"FIXTURE_CORES": "16"}, 8),
+                                     ({"CI": "1"}, 4), ({"GITHUB_ACTIONS": "true"}, 4)):
             with self.subTest(environment=environment):
-                result = self.run_harness(workers=None, environment=environment,
-                                          **dict.fromkeys(SPLIT_NAMES, FOUR_TESTS))
+                result = self.run_harness(workers=None, environment=environment)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertEqual(len(re.findall(r"^Ran 1 test", result.stdout, re.MULTILINE)),
-                                 single_test_shards, result.stdout)
+                self.assertIn(f"test runner: workers={workers} ", result.stdout)
+
+    def test_local_shards_run_below_the_launcher_priority_and_ci_shards_do_not(self) -> None:
+        """sd:1955. A local gate yields the CPU to the runner daemon and the sessions."""
+        launcher = os.getpriority(os.PRIO_PROCESS, 0)
+        for environment, lowered in (({}, True), ({"CI": "1"}, False)):
+            with self.subTest(environment=environment):
+                result = self.run_harness(environment=environment, test_sd_ship=NICENESS_PROBE)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                shard = int(re.search(r"^shard niceness=(-?\d+)$", result.stdout, re.MULTILINE).group(1))
+                if lowered:
+                    self.assertGreater(shard, launcher, result.stdout)
+                else:
+                    self.assertEqual(shard, launcher, result.stdout)
 
     def test_explicit_worker_limit_is_preserved_in_ci(self) -> None:
         result = self.run_harness(workers="2", environment={"CI": "true"},
@@ -170,9 +195,9 @@ class SplitModuleFixtures(unittest.TestCase):
         self.assertEqual(len(re.findall(r"^Ran 2 tests", result.stdout, re.MULTILINE)), 6, result.stdout)
 
     def test_single_or_zero_reported_cores_still_get_one_worker(self) -> None:
-        for cores in ("0", "1"):
-            with self.subTest(cores=cores):
-                result = self.run_harness(workers=None, environment={"CI": "1", "FIXTURE_CORES": cores})
+        for cores, ci in (("0", "1"), ("1", "1"), ("0", ""), ("1", "")):
+            with self.subTest(cores=cores, ci=ci):
+                result = self.run_harness(workers=None, environment={"CI": ci, "FIXTURE_CORES": cores})
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(len(re.findall(r"^Ran 2 tests", result.stdout, re.MULTILINE)), 3, result.stdout)
 

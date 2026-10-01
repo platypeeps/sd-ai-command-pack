@@ -105,7 +105,15 @@
   `LANG`, `LC_ALL` and `TMPDIR` drifted inside one session and voided
   receipts, and the check still runs with them. When `rustup` is on the
   controlled `PATH`, each toolchain a tool runs from binds by the content of
-  its whole directory, not by its name or version.
+  its whole directory, not by its name or version. An explicit `cargo
+  +nightly` or `rustup run nightly`, or a declared `+nightly` tool, binds the
+  toolchain it selects, and a selection rustup cannot answer refuses reuse.
+- **The local test gate leaves the machine room (sd:1955).**
+  `.github/scripts/run-tests.sh` ran CPUs minus one workers locally, so two
+  gates in the two machine-wide slots put 30 workers on 16 cores; the load
+  average read 65-73 and the runner heartbeat missed during such runs. A local
+  run now takes half the CPUs and runs its shards at `nice -n 10`. CI keeps
+  every CPU at normal priority, and `TEST_WORKERS` still overrides the count.
 
 - **A blocking local review names its findings (sd:2102).** `sd-ship
   prepare` refused with `local review blocking: 1/1 completed; see item ship
