@@ -22,7 +22,7 @@ The declaration requires exactly these keys and values:
 ```
 
 This example shows the schema, not an approved dependency inventory for this repository.
-One optional key, `secret_name_exceptions`, may join them; the next section describes it.
+Two optional keys, `secret_name_exceptions` and `build_outputs`, may join them; the next section describes them.
 Audit the actual command before asserting `complete: true`.
 Each list contains unique, nonempty strings.
 Use existing repository-relative files or directories as dependency roots.
@@ -34,6 +34,14 @@ List a source file whose name only looks secret, such as `src/token.rs`, in `sec
 Each exception is an exact repository-relative path to a tracked regular file inside a declared root.
 Patterns, directories, untracked or ignored files, and unused entries make the declaration unsupported.
 Every other secret-looking name stays rejected.
+
+Declare each ignored folder the check builds, such as `target`, in `build_outputs`.
+Map it to the variable that redirects the build, such as `"target": "CARGO_TARGET_DIR"`, or to `null`.
+A recorded run gets a fresh, empty temporary folder in that variable, removed after the run.
+The operator's own folder is never deleted, moved, hashed, or reused.
+For an output mapped to `null`, recording refuses while the folder exists.
+A build output cannot hold a tracked file or overlap a dependency root or exception.
+Its variable cannot be a declared or base variable, or a secret-looking name.
 Symlinks and nonregular dependency entries are unsupported.
 Name checks do not prove that file contents contain no credentials.
 Do not declare secret material.

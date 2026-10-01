@@ -87,6 +87,15 @@
 
 ### Fixed
 
+- **A recorded check builds into a fresh folder (sd:2327).** An optional
+  `build_outputs` key in `.github/sd-check-reuse.json` names each ignored
+  folder the check builds and the variable that redirects it, such as
+  `"target": "CARGO_TARGET_DIR"`. `sd-check --record-receipt` points that
+  variable at a fresh, empty temporary folder and removes it after the run,
+  also when the run fails, so a receipt never vouches for an earlier build.
+  The operator's own folder is never deleted, moved or hashed. An output with
+  no variable (`null`) refuses recording while it exists.
+
 - **A Rust repository can declare complete check receipts (sd:2325, sd:2326,
   sd:2328).** Three rulings on sd:1912 change `.github/sd-check-reuse.json`
   receipts. An optional `secret_name_exceptions` key lists exact tracked
