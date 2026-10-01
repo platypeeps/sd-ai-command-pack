@@ -61,11 +61,14 @@ RECEIPT_SCHEMA = 1
 # the only two tools `bin/sd-skill-use` can act on rather than `*`: a hook that
 # fires on every tool call to decide it has nothing to do is a cost paid on
 # every tool call. UserPromptSubmit has nothing to match on, and the empty
-# matcher is how that is spelled.
+# matcher is how that is spelled. `bin/sd-issue-guard` names the two tools
+# that file a GitHub issue; it reads a `Bash` command before anything else and
+# is silent outside a managed repository (sd:2256).
 HOOK_SPECS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("bin/sd-handoff-restore", "SessionStart", ("startup", "clear")),
     ("bin/sd-skill-use", "PreToolUse", ("Skill|Read",)),
     ("bin/sd-skill-use", "UserPromptSubmit", ("",)),
+    ("bin/sd-issue-guard", "PreToolUse", ("Bash|mcp__github__issue_write",)),
 )
 
 EXCLUDES_LINE = "CLAUDE.local.md"
