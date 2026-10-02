@@ -229,6 +229,15 @@ class OversizeTests(ReviewFixture):
         self.assertNotIn("\ndiff --git forged", material)
         self.assertIn('diff --git "a/x\\ndiff --git forged forged" "b/x\\ndiff --git forged forged"\n', material)
 
+    def test_a_marker_line_in_raw_content_is_not_a_summary(self):
+        """sd:2400: only a marker the material writes summarizes a path; file text that looks like one does not."""
+        root = self.make_repo()
+        (root / "notes.md").write_text('# Notes\n[renamed] "a" -> "b"; unchanged lines not sent\n[binary, not sent] x\n')
+        (root / "z.png").write_bytes(b"\x89PNG\r\n\x1a\n" + bytes(64))
+        material, entries = sd_review.sd_review_material.collect_review_material(root, sd_review.resolve_subject(root, "worktree"))
+        self.assertIn('[renamed] "a" -> "b"', material)
+        self.assertEqual([entry["path"] for entry in entries if entry.get("summarized")], ["z.png"])
+
     def test_prompt_overhead_is_counted_even_when_material_fits(self):
         root = self.make_repo()
         (root / "small.py").write_text("x = 1")
