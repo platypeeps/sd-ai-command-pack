@@ -112,6 +112,20 @@
 
 ### Fixed
 
+- **opencode reviews run again on opencode 2.x, and refuse 1.x (sd:2445).**
+  opencode 2.0.20 removed `debug agent` and `--pure`, so every opencode
+  review was refused and the live confinement tests failed `make check`.
+  The confinement probe now starts a private `opencode serve` in the review's
+  environment and launch dir and reads the resolved `sd-review` agent and the
+  loaded plugins. A run is refused when the version is not 2.x, when any
+  plugin is not built in (2.x cannot drop plugins as `--pure` did), or when
+  anything after `*: deny` differs from the map. The run gets its own empty
+  `OPENCODE_CONFIG_DIR`, which keeps the operator's plugins out; `PWD` and
+  `OPENCODE_CONFIG` are dropped, and project config is switched off. Each was
+  measured on 2.0.20: an inherited `PWD` naming the checkout had started its
+  MCP server from the neutral dir. The review runs `--standalone`, as the
+  shared background service never sees the inline config.
+
 - **A pack landing no longer voids a receipt whose review request is unchanged (sd:1397).**
   `sd-review --explain` now reports `request_sha256`, a digest of the prompt,
   the review material and its input manifest (whose `omitted_paths` decide a

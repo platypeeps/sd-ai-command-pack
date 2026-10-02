@@ -70,8 +70,11 @@ class FakeRunner:
         self.calls.append(
             {"argv": list(argv), "env": dict(env), "cwd": pathlib.Path(cwd), "timeout": timeout, "stdin": input_text}
         )
-        program = pathlib.Path(argv[0]).name
-        if program.startswith("python") or argv[-1] == "--json" and "sd-check" in " ".join(argv):
+        # The opencode confinement probe runs as `python sd_opencode.py probe
+        # ... opencode`, so it answers as the opencode program it asks about.
+        probe = sd_review.sd_opencode.probe_program(list(argv))
+        program = pathlib.Path((probe or argv)[0]).name
+        if not probe and (program.startswith("python") or argv[-1] == "--json" and "sd-check" in " ".join(argv)):
             program = "sd-check"
         answer = self.answers.get(program, self.default)
         if callable(answer):
@@ -84,26 +87,36 @@ class FakeRunner:
             return sd_review.Completed(0, PROMPT_INPUT_SUPPRESSED, "")
         # The opencode confinement probe (sd:1375) reads a resolved agent, so
         # an unscripted one gets the agent a clean launch resolves.
-        if program not in self.answers and list(argv[1:3]) == OPENCODE_PROBE_WORDS:
-            return sd_review.Completed(0, resolved_agent(env), "")
+        if program not in self.answers and probe:
+            return sd_review.Completed(0, resolved_agent(), "")
         return answer
 
 
 #: The skill-suppression probe's argv, by the two words that identify it.
 SKILL_PROBE_WORDS = ["debug", "prompt-input"]
 
-#: The opencode confinement probe's argv, by the two words that identify it.
-OPENCODE_PROBE_WORDS = ["debug", "agent"]
+#: Built-in plugins as `plugin.list` lists them on 2.0.20 (two of seventy).
+BUILTIN_PLUGINS = [{"id": "opencode.agent", "source": {"type": "builtin"}, "features": {"server": True},
+                    "state": {"status": "active"}},
+                   {"id": "opencode.config.agent", "source": {"type": "builtin"}, "features": {"server": True},
+                    "state": {"status": "active"}}]
 
 
-def resolved_agent(env: Mapping[str, str], *extra: dict[str, str]) -> str:
-    """`opencode debug agent sd-review` in the measured 1.18.30 shape: the
-    defaults, then the map's `*: deny` and its rules; `extra` lands right after
-    the deny, where a merged checkout config put its allowances."""
+def resolved_agent(*extra: dict[str, str], version: str = "opencode v2.0.20",
+                   plugins: list[dict[str, Any]] | None = None) -> str:
+    """The probe's report in the shape measured on 2.0.20: opencode's defaults,
+    its tool-output allowance among them, then the map's `*: deny` and its
+    rules. `extra` lands right after the deny, where a widening would."""
 
-    deny, *confined = sd_review.sd_opencode.confined_rules(env)
-    rules = [{"permission": "*", "action": "allow", "pattern": "*"}, deny, *extra, *confined]
-    return json.dumps({"name": "sd-review", "mode": "primary", "permission": rules})
+    deny, *confined = sd_review.sd_opencode.confined_rules()
+    defaults = [{"action": "*", "resource": "*", "effect": "allow"},
+                {"action": "external_directory", "resource": "*", "effect": "ask"},
+                {"action": "external_directory", "resource": "/h/.local/share/opencode/tool-output/*",
+                 "effect": "allow"}]
+    agent = {"id": "sd-review", "name": "sd-review", "mode": "primary",
+             "permissions": [*defaults, deny, *extra, *confined]}
+    return json.dumps({"version": version, "agent": agent,
+                       "plugins": BUILTIN_PLUGINS if plugins is None else plugins})
 
 
 def prompt_input(*texts: str) -> str:

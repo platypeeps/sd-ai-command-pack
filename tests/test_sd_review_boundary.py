@@ -843,11 +843,19 @@ class LineBudgetTests(unittest.TestCase):
         # `request_sha256`, the digest of what the reviewers are asked, which
         # `sd-ship` replays at a moved binding to keep an unchanged receipt.
         # The replay itself is `bin/sd_ship_review.py`, outside the lane.
+        # 4354 -> 4520 is sd:2445: opencode 2.x dropped `debug agent` and
+        # `--pure`. `bin/sd_opencode.py` grows +163: the probe that replaces
+        # `debug agent`, a private `opencode serve` polled for the lazily
+        # loaded agent and its plugins (+67 with `__main__`); the report,
+        # version, plugin and tail checks (+42); the 2.x permission list and
+        # environment (+32); the docstring's 2.x measurements (+22).
+        # `bin/sd-review` grows +3 for the run's own config dir. Measured, not
+        # carried: `sd_opencode.py` is 467 on this tree.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4354,
+            4520,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

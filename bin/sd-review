@@ -1386,7 +1386,10 @@ def run_provider(
         argv = provider_argv(provider, root, workdir)
         launch_cwd = root
         if provider.reader == "opencode-json":
-            child = sd_opencode.opencode_environment(child)
+            # An empty config dir of the run's own: on 2.x no switch drops the
+            # operator's plugins and keeps the rest of its config (sd:2445).
+            (workdir / "opencode-config").mkdir()
+            child = sd_opencode.opencode_environment(child, workdir / "opencode-config")
             # opencode's project root is its launch directory: it merges that
             # root's opencode.json over our inline config and injects the root's
             # AGENTS.md as instructions. Launched inside the reviewed checkout
