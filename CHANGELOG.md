@@ -124,6 +124,29 @@
   `sd_opencode.py`, `sd_registry.py`, listed as `FINDING_FILES`) still
   refuses and re-reviews as before.
 
+- **A recorded check builds into a fresh folder (sd:2327).** An optional
+  `build_outputs` key in `.github/sd-check-reuse.json` names each ignored
+  folder the check builds and the variable that redirects it, such as
+  `"target": "CARGO_TARGET_DIR"`. `sd-check --record-receipt` points that
+  variable at a fresh, empty temporary folder and removes it after the run,
+  also when the run fails, so a receipt never vouches for an earlier build.
+  The operator's own folder is never deleted, moved or hashed. An output with
+  no variable (`null`) refuses recording while it exists. A rustup toolchain
+  link that leaves the toolchain, dangles or loops now refuses the binding:
+  its text stays equal when the file it names changes.
+
+- **A Rust repository can declare complete check receipts (sd:2325, sd:2326,
+  sd:2328).** Three rulings on sd:1912 change `.github/sd-check-reuse.json`
+  receipts. An optional `secret_name_exceptions` key lists exact tracked
+  files under a declared root, such as `src/token.rs`, that the secret-name
+  filter admits; every other secret-looking name stays refused. The
+  environment digest covers the declared variables only: `PATH`, `HOME`,
+  `LANG`, `LC_ALL` and `TMPDIR` drifted inside one session and voided
+  receipts, and the check still runs with them. When `rustup` is on the
+  controlled `PATH`, each toolchain a tool runs from binds by the content of
+  its whole directory, not by its name or version. An explicit `cargo
+  +nightly` or `rustup run nightly`, or a declared `+nightly` tool, binds the
+  toolchain it selects, and a selection rustup cannot answer refuses reuse.
 - **The local test gate leaves the machine room (sd:1955).**
   `.github/scripts/run-tests.sh` ran CPUs minus one workers locally, so two
   gates in the two machine-wide slots put 30 workers on 16 cores; the load

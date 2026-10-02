@@ -37,6 +37,7 @@ with `SD_GATE_SLOTS=0`, so a gate inside them never waits on this one's slot.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import pathlib
@@ -374,18 +375,21 @@ def main(argv: list[str] | None = None) -> int:
             raise UsageError("--record-receipt requires an actual full check")
         args.scope = run_scope(args, root, detection)
         before, controlled = None, None
-        if args.record_receipt:
-            try:
-                before = sd_check_receipts.prepare_check_receipt(root, os.environ, args.database)
-                controlled = sd_check_receipts.receipt_environment(sd_check_receipts.reuse_contract(root), os.environ)
-            except Exception as error:
-                raise UsageError(f"receipt unavailable: {error}") from None
-        result = gated_execute(root, detection, args, controlled)
-        if before is not None:
-            try:
-                result["receipt_revision"] = sd_check_receipts.store_check_receipt(root, os.environ, args.database, before, result)
-            except Exception as error:
-                result["receipt_error"] = str(error)
+        with contextlib.ExitStack() as outputs:  # a recorded run's build folders go when it ends (sd:2327)
+            if args.record_receipt:
+                try:
+                    contract = sd_check_receipts.reuse_contract(root)
+                    controlled = outputs.enter_context(sd_check_receipts.build_output_environment(
+                        root, contract, sd_check_receipts.receipt_environment(contract, os.environ)))
+                    before = sd_check_receipts.prepare_check_receipt(root, os.environ, args.database)
+                except Exception as error:
+                    raise UsageError(f"receipt unavailable: {error}") from None
+            result = gated_execute(root, detection, args, controlled)
+            if before is not None:
+                try:
+                    result["receipt_revision"] = sd_check_receipts.store_check_receipt(root, os.environ, args.database, before, result)
+                except Exception as error:
+                    result["receipt_error"] = str(error)
     except sd_lib.ConfigError as error:
         print(f"sd-check: error: {error}", file=sys.stderr)
         return 2
