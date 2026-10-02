@@ -8,6 +8,7 @@ import copy
 import io
 import json
 import os
+import pathlib
 import re
 import subprocess
 import sys
@@ -450,6 +451,93 @@ class ReceiptTests(ReviewFixture):
         identity = receipts.check_binding(self.root, self.env)
         self.assertEqual(identity["toolchains"], [])
 
+    def build_output_check(self, outputs, script):
+        """Commit a declaration with `outputs` and a check that runs `script` in Python."""
+        probe = self.tmp / "probe.py"
+        probe.write_text(script)
+        (self.root / ".gitignore").write_text("dependency.txt\ntarget/\ndist/\n")
+        self.local_block(self.root, f"check: {sys.executable} {probe}")
+        self.git("add", "-A")
+        self.git("add", "--force", "CLAUDE.local.md")
+        self.commit_contract(build_outputs=outputs)
+
+    def test_recorded_run_builds_into_a_fresh_folder_and_leaves_target_alone(self):
+        # sd:2327: the operator's target/ holds old binaries; a receipt never vouches for them.
+        stale = self.root / "target" / "debug" / "stale-binary"
+        stale.parent.mkdir(parents=True)
+        stale.write_text("old build")
+        seen = self.tmp / "seen-folder"
+        script = (
+            "import os, pathlib\n"
+            "folder = pathlib.Path(os.environ['CARGO_TARGET_DIR'])\n"
+            f"pathlib.Path({str(seen)!r}).write_text(str(folder))\n"
+            "assert folder.is_dir() and not any(folder.iterdir()), 'not a fresh, empty folder'\n"
+            "assert not folder.resolve().is_relative_to(pathlib.Path.cwd().resolve())\n"
+            "(folder / 'built').write_text('new build')\n"
+            f"raise SystemExit(int(pathlib.Path({str(self.tmp / 'fail')!r}).exists()))\n")
+        self.build_output_check({"target": "CARGO_TARGET_DIR"}, script)
+        code, out, err = self.cli("--json", "--record-receipt", "--database", str(self.database))
+        self.assertEqual((code, err), (0, ""), out)
+        self.assertGreater(json.loads(out)["receipt_revision"], 0)
+        self.assertFalse(pathlib.Path(seen.read_text()).exists(), "the temporary folder outlived the run")
+        self.assertEqual(stale.read_text(), "old build")
+        stale.write_text("another old build")
+        (self.root / "target" / "added").write_text("never hashed")
+        self.assertIsNotNone(receipts.reuse_checked_result(self.root, self.env, self.database))
+        (self.tmp / "fail").write_text("")
+        code, out, _ = self.cli("--json", "--record-receipt", "--database", str(self.database))
+        self.assertEqual(code, 1)
+        self.assertFalse(pathlib.Path(seen.read_text()).exists(), "a failed run left its temporary folder")
+        self.assertTrue(stale.exists())
+
+    def test_operator_build_variable_never_reaches_a_recorded_run(self):
+        own = self.tmp / "operator-target"
+        own.mkdir()
+        script = ("import os, pathlib\n"
+                  f"assert pathlib.Path(os.environ['CARGO_TARGET_DIR']) != pathlib.Path({str(own)!r})\n")
+        self.build_output_check({"target": "CARGO_TARGET_DIR"}, script)
+        self.env["CARGO_TARGET_DIR"] = str(own)
+        code, out, err = self.cli("--json", "--record-receipt", "--database", str(self.database))
+        self.assertEqual((code, err), (0, ""), out)
+
+    def test_an_output_without_a_variable_refuses_recording_while_it_exists(self):
+        script = "import pathlib\npathlib.Path('dist').mkdir(exist_ok=True)\n(pathlib.Path('dist') / 'built').write_text('x')\n"
+        self.build_output_check({"dist": None}, script)
+        (self.root / "dist").mkdir()
+        code, _, err = self.cli("--json", "--record-receipt", "--database", str(self.database))
+        self.assertEqual(code, 2)
+        self.assertIn("build output dist exists", err)
+        (self.root / "dist").rmdir()
+        code, out, err = self.cli("--json", "--record-receipt", "--database", str(self.database))
+        self.assertEqual((code, err), (0, ""), out)
+        self.assertTrue((self.root / "dist" / "built").exists())
+        self.assertIsNotNone(receipts.reuse_checked_result(self.root, self.env, self.database))
+
+    def test_build_output_declarations_stay_narrow(self):
+        (self.root / "tracked").mkdir()
+        (self.root / "tracked" / "file.txt").write_text("tracked")
+        self.git("add", "tracked")
+        self.git("commit", "--quiet", "-m", "tracked folder")
+        refused = (
+            {"dependency.txt": "OUT_DIR"},  # a declared dependency
+            {".": "OUT_DIR"}, {"../target": "OUT_DIR"}, {"/target": "OUT_DIR"}, {"target/": "OUT_DIR"},
+            {"tracked": "OUT_DIR"},  # holds a tracked file
+            {"target": "TEST_MODE"},  # a declared variable
+            {"target": "PATH"},  # a base variable
+            {"target": "BUILD_TOKEN"},  # a secret-looking name
+            {"target": "not a name"},
+            {"target": "OUT_DIR", "dist": "OUT_DIR"},  # one variable twice
+            {"target": 3},
+            ["target"],
+        )
+        for outputs in refused:
+            with self.subTest(outputs=outputs):
+                self.commit_contract(build_outputs=outputs)
+                with self.assertRaises(receipts.Unavailable):
+                    receipts.check_binding(self.root, self.env)
+        self.commit_contract(dependencies=["dependency.txt"], build_outputs={"target": "CARGO_TARGET_DIR", "dist": None})
+        self.assertNotIn("target", json.dumps(receipts.check_binding(self.root, self.env)["files"]))
+
     def two_toolchains(self):
         """A rustup with a default and a nightly toolchain; `which` honours `--toolchain` as rustup does."""
         toolchains = self.tmp / "rustup-home" / "toolchains"
@@ -490,3 +578,50 @@ class ReceiptTests(ReviewFixture):
         self.commit_contract(tools=["cargo", "+beta"])
         with self.assertRaisesRegex(receipts.Unavailable, "beta"):
             receipts.check_binding(self.root, self.env)
+
+    def linked_toolchain(self):
+        toolchain = self.tmp / "rustup-home" / "toolchains" / "custom-synthetic"
+        (toolchain / "bin").mkdir(parents=True)
+        (toolchain / "lib").mkdir()
+        (toolchain / "bin" / "cargo").write_text("synthetic cargo")
+        self.fake_rustup(toolchain)
+        self.commit_contract(tools=["cargo"])
+        return toolchain
+
+    def test_a_toolchain_link_outside_its_tree_refuses_the_binding(self):
+        # A custom toolchain's lib/ link to a library elsewhere: the link text stays equal when that library changes.
+        toolchain = self.linked_toolchain()
+        outside = self.tmp / "elsewhere" / "librustc_driver.dylib"
+        outside.parent.mkdir()
+        outside.write_text("compiler v1")
+        (toolchain / "lib" / "librustc_driver.dylib").symlink_to(outside)
+        self.assertIsNone(self.reuse_after(lambda: outside.write_text("compiler v2")))
+        with self.assertRaisesRegex(receipts.Unavailable, "outside"):
+            receipts.check_binding(self.root, self.env)
+
+    def test_a_toolchain_link_inside_its_tree_binds_the_bytes_it_names(self):
+        toolchain = self.linked_toolchain()
+        real = toolchain / "lib" / "libstd-real.rlib"
+        real.write_text("std v1")
+        (toolchain / "lib" / "libstd.rlib").symlink_to("libstd-real.rlib")
+        self.assertIsNone(self.reuse_after(lambda: real.write_text("std v2")))
+
+    def test_dangling_and_looping_toolchain_links_refuse(self):
+        toolchain = self.linked_toolchain()
+        for make in (lambda: (toolchain / "lib" / "gone.rlib").symlink_to(toolchain / "lib" / "absent"),
+                     lambda: ((toolchain / "lib" / "a").symlink_to("b"), (toolchain / "lib" / "b").symlink_to("a"))):
+            with self.subTest(make=make):
+                for link in (toolchain / "lib").iterdir():
+                    link.unlink()
+                make()
+                with self.assertRaises(receipts.Unavailable):
+                    receipts.check_binding(self.root, self.env)
+
+    def reuse_after(self, change):
+        """Record, apply `change`, and answer what reuse says; a refused binding records nothing and reuses nothing."""
+        try:
+            self.record()
+        except receipts.Unavailable:
+            return None
+        change()
+        return receipts.reuse_checked_result(self.root, self.env, self.database)
