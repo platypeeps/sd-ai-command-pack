@@ -112,6 +112,19 @@
 
 ### Fixed
 
+- **A pack landing no longer voids a receipt whose review request is unchanged (sd:1397).**
+  `sd-review --explain` now reports `request_sha256`, a digest of the prompt,
+  the review material and its input manifest (whose `omitted_paths` decide a
+  partial review), the route and the chosen providers. `sd-ship` stores
+  it on each pass. When only review code moved the binding, `prepare` and
+  `merge` replay `--explain` for the stored pass, with the prior report it
+  was handed, and keep the receipt when the digest is unchanged: no pass is
+  spent, the binding is rebound, and `review_binding_kept` records what
+  moved. A policy change, a legacy receipt, a failed replay, a changed
+  digest, or a move in code that parses or disposes findings (`sd-review`,
+  `sd_opencode.py`, `sd_registry.py`, listed as `FINDING_FILES`) still
+  refuses and re-reviews as before.
+
 - **A recorded check builds into a fresh folder (sd:2327).** An optional
   `build_outputs` key in `.github/sd-check-reuse.json` names each ignored
   folder the check builds and the variable that redirects it, such as

@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from typing import Any, Mapping, Sequence
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -1028,6 +1029,34 @@ class PipelineTests(ReviewFixture):
         self.assert_no_session_started(runner)
         self.assertEqual([call["argv"][1:3] for call in runner.calls], [SKILL_PROBE_WORDS])
         self.assertTrue(result["route"]["reason"])
+
+    def test_explain_digests_what_the_reviewers_would_be_asked(self) -> None:
+        """sd:1397. sd-ship replays `--explain` at a moved binding and keeps the receipt on an equal digest."""
+        root = self.make_repo()
+        self.prepare(root)
+        first = self.run_review(root, FakeRunner(), explain=True)["request_sha256"]
+        self.assertRegex(first, r"^[0-9a-f]{64}$")
+        self.assertEqual(self.run_review(root, FakeRunner(), explain=True)["request_sha256"], first)
+        self.assertNotEqual(self.run_review(root, FakeRunner(), explain=True, challenge=True)["request_sha256"], first)
+        (root / "src.py").write_text("x = 2\n", encoding="utf-8")
+        self.assertNotEqual(self.run_review(root, FakeRunner(), explain=True)["request_sha256"], first)
+
+    def test_a_coverage_change_moves_the_request_digest_though_the_material_does_not(self) -> None:
+        """sd:1397 review: `partial` marks a review incomplete from the manifest's `omitted_paths`.
+        A change to `sd_review_material` coverage that leaves material, prompt and route alone must
+        still move the digest, or a replay would keep a receipt the new code calls incomplete."""
+        root = self.make_repo()
+        self.prepare(root)
+        first = self.run_review(root, FakeRunner(), explain=True)
+        original = sd_review.sd_review_material.coverage
+
+        def summarizing(inventory, overheads):
+            return original([dict(row, summarized=True) for row in inventory], overheads)
+
+        with unittest.mock.patch.object(sd_review.sd_review_material, "coverage", summarizing):
+            moved = self.run_review(root, FakeRunner(), explain=True)
+        self.assertNotEqual(moved["input_manifest"]["omitted_paths"], first["input_manifest"]["omitted_paths"])
+        self.assertNotEqual(moved["request_sha256"], first["request_sha256"])
 
     def test_dry_run_prints_argv_and_runs_nothing(self) -> None:
         root = self.make_repo()

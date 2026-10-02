@@ -2046,6 +2046,12 @@ def review(
         "codex_preflight": auth,
         "codex_skill_suppression": skills,
         "input_manifest": input_manifest,
+        # sd:1397. What the reviewers are asked, by digest, and the manifest whose
+        # `omitted_paths` decides a partial review. When a pack landing moves the
+        # binding, sd-ship replays `--explain` and keeps the receipt only while this is unchanged.
+        "request_sha256": hashlib.sha256(json.dumps(
+            {"scope": args.scope, "prompt": prompt, "material": _material, "route": plan._asdict(),
+             "providers": providers, "requested_reviews": depth, "input_manifest": input_manifest}, sort_keys=True).encode()).hexdigest(),
         "local_block_prepended": prepended,
         "scrubbed_env_names": list(scrubbed_names(env)),
         "check": None,
