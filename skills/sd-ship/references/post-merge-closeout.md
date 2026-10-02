@@ -1,7 +1,7 @@
 # Post-merge closeout
 
 Run this after every confirmed in-scope merge.
-Routine closeout includes review findings and local inventory, even when the user requested no deletion.
+Routine closeout includes review findings, local inventory and automatic cleanup of safe targets.
 Confirm the exact PR, reviewed head, and remote merge evidence first.
 A closed PR is not necessarily merged.
 
@@ -47,34 +47,61 @@ Fetch and prune remote-tracking refs before comparing local state.
 Inventory exact branch names and tips, worktree paths and HEADs, dirty state, locks, and stash selectors with full object IDs.
 Inspect tracked and untracked stash contents locally; do not dump sensitive contents into reports.
 Check active processes, ownership, installed command links, and shared runtime dependencies.
-Report retained work and cleanup candidates separately.
+Report retained work and cleanup targets separately.
 Stash selectors share the repository's common state across worktrees.
 If ownership is uncertain or concurrent stash activity occurs, retain the stash.
 
-Retain dirty, active, locked, unrelated, primary, and serving worktrees.
+Retain dirty, active, locked, unrelated, primary, and serving worktrees; remove only stale ones, as below.
 Retain shared virtualenv/cache targets and any work whose ownership is uncertain.
 Retain branches or stashes with unique or unverified contents.
 Neither age nor `git branch --merged` alone proves that a branch is redundant after a squash merge.
 Compare the actual delivered content and record recovery evidence.
 
-## Approved cleanup only
+## Automatic cleanup
 
-Preserve each selected stash by its full object ID, including index and untracked parents, before proposing its deletion.
-A bundle of `refs/stash` alone can omit older reflog entries.
-Verify recovery of each selected object and its required parents.
-If recovery is uncertain, retain the stash.
-Git bundles do not preserve uncommitted files; preserve those separately when needed.
+The operator authorized this cleanup on 2026-10-02; it needs no further approval.
+After a confirmed merge, remove the merged PR's local branch, remote branch, stashes, refs and stale worktrees when each one is safe.
+Confirm the merge from the `sd-ship merge` receipt or GitHub's merged state, never from a closed PR.
 
-Propose one consolidated exact target list with each target's reason, current identity, and verified recovery path.
-Obtain explicit approval for that list before deleting branches, worktrees, or stashes.
-Without approval, retain them and report that state; retention is not a failure.
+A target is safe only when every condition holds:
 
-Verify backups by read-back before any approved irreversible action.
-Re-read each target's identity, HEAD, dirty state, and ownership immediately before the approved action.
-Drift or new activity stops that action.
-Identify a stash by its full object ID and confirm its current selector before any approved drop.
+- It belongs to this PR: its branch is the PR's head branch, or a stash was made on that branch.
+- It holds nothing the merge did not deliver.
+  A branch tip is the merged PR head or an ancestor of it.
+  A stash's tracked and untracked files already match the merge commit, path by path.
+- No worktree has it checked out, no process uses it, and no lock holds it.
+- It is not a default branch, a protected branch, or the head or base of another open PR.
+- Its identity did not change since the inventory; re-read it immediately before removal.
 
-Never use `git stash clear`, broad deletion patterns, or forced worktree removal to finish closeout.
+Keep the target and report it when any condition fails or cannot be checked.
+Retention is not a failure.
+
+Write a recovery record before each removal: an `sd task note` on the item.
+Name the target and its full object ID; for a stash, also name its index and untracked parents.
+A removed branch or stash stays recoverable from that ID until garbage collection: `git branch <name> <id>` or `git stash store <id>`.
+Then remove the targets one by one:
+
+- Local branch: `git branch -d`, or `git branch -D` only for a tip the PR head contains.
+- Remote branch: `git push origin --delete <branch>`, only when `delete_branch_on_merge` left it.
+- Stash: confirm the selector still names the recorded object ID, then `git stash drop <selector>`.
+- Other refs that point only at the PR's delivered commits: `git update-ref -d <ref> <recorded id>`.
+
+Never use `git stash clear`, broad deletion patterns, force pushes, or `git worktree remove --force`.
 Do not rename or reset shared stash state to stabilize a selector.
-Do not infer deletion permission from a clean checkout or successful merge.
-After approved cleanup, verify the exact targets and report what was removed, retained, and recoverable.
+Report what was removed with its recovery ID, and what was kept and why.
+
+## Stale worktrees
+
+The same authorization covers the merged PR's stale worktrees.
+A worktree is stale and safe to remove only when every condition holds:
+
+- Its HEAD is the merged PR's branch or a detached commit that the PR head contains.
+- `git status --porcelain` is empty: no tracked change and no untracked file.
+- Its ignored files are only build output or caches, such as `target/`, `node_modules/`, `.venv/` or `__pycache__/`.
+- No process runs in it or holds a file in it, and `git worktree list` shows no lock.
+- It is not a primary checkout, not under `~/repos`, and no service, LaunchAgent or installed link points into it.
+
+Record its path and HEAD in an `sd task note` first.
+Remove it with `git worktree remove <path>`, never with `--force`; then remove its branch as above.
+Run `git worktree prune` for entries whose folder is already gone; it changes only Git's metadata.
+Keep a worktree that fails any condition, and report the reason.

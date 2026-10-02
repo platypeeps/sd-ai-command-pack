@@ -78,8 +78,9 @@ class WorkflowState(unittest.TestCase):
         self.assertEqual(result["state"], "success")
         self.assertIsNone(result["blocker"])
         self.assertEqual(result["next_action"],
-                         "Triage review findings and complete approved post-merge closeout. "
-                         "Confirm exact deletion targets and obtain explicit approval before deleting anything.")
+                         "Triage review findings and complete post-merge closeout. "
+                         "Remove this PR's safe branches, stashes, refs and stale worktrees "
+                         "after recording their object IDs.")
 
     def test_check_reuse_requires_an_explicit_flag_in_both_review_entrypoints(self):
         for command in ("prepare", "review"):

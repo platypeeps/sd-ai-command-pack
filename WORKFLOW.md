@@ -66,7 +66,8 @@ These run without being asked.
   the remote branch.
   After each confirmed in-scope merge, the agent follows the ship skill's post-merge closeout procedure.
   It dispositions remaining findings and inventories refs, branches, stashes, and worktrees.
-  Local deletion needs separate, consolidated approval for exact targets with verified recovery evidence.
+  It removes the merged PR's local and remote branches, stashes, refs and stale worktrees when they are safe, without asking.
+  It records each removed target's object ID or path first, and keeps anything that fails a safety condition.
 - Expected branch protection requires pull requests, current CI, and up-to-date branches, with no required approvals.
   Configure it deliberately in GitHub; installation does not grant a protection exception.
   `sd-status` reports gaps; executable merge stops when required protection is absent.
