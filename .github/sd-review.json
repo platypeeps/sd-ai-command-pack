@@ -21,5 +21,5 @@
   ],
   "large_change_lines": 800,
   "severity_floor": "high",
-  "copilot_review": {"automatic_deep": true}
+  "copilot_review": {"automatic_deep": false}
 }
