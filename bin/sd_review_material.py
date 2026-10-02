@@ -138,7 +138,8 @@ def renamed_material(root: pathlib.Path, common: list[str], material: dict[str, 
         if status.startswith("R"):
             old, new = paths
             record = f"[renamed] {json.dumps(old)} -> {json.dumps(new)}; unchanged lines not sent"
-            renamed[old], (head, _, rest) = f"diff --git a/{old} b/{old}\n{record}\n", piece.partition("\n")
+            side = [json.dumps(f) if re.search(r'[\x00-\x1f"\\\x7f]', f) else f for f in (f"a/{old}", f"b/{old}")]
+            renamed[old], (head, _, rest) = f"diff --git {side[0]} {side[1]}\n{record}\n", piece.partition("\n")
             renamed[new] = f"{head}\n{record}\n{rest}"
     return renamed
 

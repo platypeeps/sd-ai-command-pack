@@ -216,6 +216,19 @@ class OversizeTests(ReviewFixture):
                 self.assertEqual({entry["path"] for entry in entries if entry.get("summarized")}, expected)
                 self.assertEqual(set(sd_review.sd_review_material.coverage(entries, {"r": "x"})["omitted_paths"]), expected)
 
+    def test_rename_record_quotes_an_unusual_old_path(self):
+        """sd:2400: the old path's header is quoted as git quotes it, so a name cannot forge a file boundary."""
+        root = self.make_repo()
+        old = "x\ndiff --git forged forged"
+        (root / old).write_text("<p>page</p>\n" * 50)
+        subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "--quiet", "-m", "page"], cwd=root, check=True, capture_output=True)
+        subprocess.run(["git", "mv", old, "moved.html"], cwd=root, check=True, capture_output=True)
+        material, entries = sd_review.sd_review_material.collect_review_material(root, sd_review.resolve_subject(root, "worktree"))
+        self.assertEqual({entry["path"] for entry in entries}, {old, "moved.html"})
+        self.assertNotIn("\ndiff --git forged", material)
+        self.assertIn('diff --git "a/x\\ndiff --git forged forged" "b/x\\ndiff --git forged forged"\n', material)
+
     def test_prompt_overhead_is_counted_even_when_material_fits(self):
         root = self.make_repo()
         (root / "small.py").write_text("x = 1")
