@@ -103,16 +103,46 @@ def collect_review_material(root: pathlib.Path, subject: Any) -> tuple[str, list
 
 
 def tracked_material(root: pathlib.Path, subject: Any) -> dict[str, str]:
-    args = ["--no-renames", "--no-ext-diff", "--no-textconv", "--no-color", "--submodule=short", subject.base,
-            *([] if subject.head == "worktree" else [subject.head]), "--"]
+    common = ["--no-ext-diff", "--no-textconv", "--no-color", "--submodule=short", subject.base,
+              *([] if subject.head == "worktree" else [subject.head]), "--"]
+    args = ["--no-renames", *common]
     names = list(filter(None, read_git_material(root, ["diff", "--name-only", "-z", *args]).split("\0")))
     patch = read_git_material(root, ["diff", *args])
     pieces = list(filter(None, re.split(r"(?m)(?=^diff --git )", patch)))
     if len(names) != len(pieces):
         raise ValueError("review patch and path inventory disagree; no partial subject sent")
     material = dict(zip(names, pieces, strict=True))
+    if any("\ndeleted file mode " in piece for piece in pieces) and any("\nnew file mode " in piece for piece in pieces):
+        material.update(renamed_material(root, common, material))
     binary = {name: piece for name, piece in material.items() if BINARY_MARKER.search(piece)}
     return {**material, **binary_material(root, subject, args, binary)} if binary else material
+
+
+def renamed_material(root: pathlib.Path, common: list[str], material: dict[str, str]) -> dict[str, str]:
+    """sd:2400: a detected rename sends git's rename patch under the new path and a record under the old.
+
+    The inventory stays one entry per literal path, so both sides are still listed and citable;
+    only the bytes change, from a full deletion plus a full addition to the rename and its hunks.
+    """
+    rows = read_git_material(root, ["diff", "--name-status", "-z", "-M", *common]).split("\0")
+    entries, index = [], 0
+    while index < len(rows) and rows[index]:
+        width = 2 if rows[index][:1] in ("R", "C") else 1
+        entries.append((rows[index], rows[index + 1:index + 1 + width]))
+        index += 1 + width
+    if not any(status.startswith("R") for status, _paths in entries):
+        return {}
+    patch = read_git_material(root, ["diff", "-M", *common])
+    pieces = list(filter(None, re.split(r"(?m)(?=^diff --git )", patch)))
+    if len(entries) != len(pieces) or any(path not in material for _status, paths in entries for path in paths):
+        raise ValueError("review patch and path inventory disagree; no partial subject sent")
+    renamed = {}
+    for (status, paths), piece in zip(entries, pieces, strict=True):
+        if status.startswith("R"):
+            old, new = paths
+            renamed[old] = f"diff --git a/{old} b/{old}\n[renamed] {json.dumps(old)} -> {json.dumps(new)}; the change is under the new path\n"
+            renamed[new] = piece
+    return renamed
 
 
 def read_blobs(root: pathlib.Path, oids: list[str]) -> dict[str, tuple[str, bytes]]:
