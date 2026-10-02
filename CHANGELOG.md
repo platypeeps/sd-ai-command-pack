@@ -114,7 +114,8 @@
 
 - **A pack landing no longer voids a receipt whose review request is unchanged (sd:1397).**
   `sd-review --explain` now reports `request_sha256`, a digest of the prompt,
-  the review material, the route and the chosen providers. `sd-ship` stores
+  the review material and its input manifest (whose `omitted_paths` decide a
+  partial review), the route and the chosen providers. `sd-ship` stores
   it on each pass. When only review code moved the binding, `prepare` and
   `merge` replay `--explain` for the stored pass, with the prior report it
   was handed, and keep the receipt when the digest is unchanged: no pass is
