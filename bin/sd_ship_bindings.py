@@ -47,6 +47,12 @@ CHECK_FILES = (
     # prepare and the merge gate run them again live.
     "sd_gate_run.py", "sd_gate_receipts.py", "sd_check_scope.py",
 )
+#: The `verdict` files that parse reviewer output or dispose findings
+#: (`parse_findings`, `dispose` and `finish_review` in `sd-review`,
+#: `opencode_answer`, `url_response`). An unchanged review request does not
+#: make an unchanged verdict when one of these moved, so a moved binding that
+#: names one re-reviews instead of replaying `--explain` (sd:1397, option A).
+FINDING_FILES = ("sd-review", "sd_opencode.py", "sd_registry.py")
 #: Imported by a review tool but never on the review path.
 IMPORT_EXEMPT = {
     "sd_setup_github.py": "sd-review imports it only for the `setup-github` subcommand",

@@ -267,7 +267,7 @@ class SharedBindingTests(unittest.TestCase):
         """sd:1397, option E. A pack landing that leaves the reviewers' question unchanged spends no pass."""
         self.operation.state["passes"][-1]["review_request"] = {"sha256": "asked", "verify": None, "resume": None}
         calls = self.replaying("asked")
-        with self.edited(bindings.BIN / "sd-review"):
+        with self.edited(bindings.BIN / "sd_route.py"):
             self.assertEqual(self.operation.review_inputs(self.head), self.report)
             self.assertEqual(self.operation.state["binding"], ship.binding(self.root))
             self.assertEqual(self.operation.review_inputs(self.head), self.report)
@@ -275,18 +275,34 @@ class SharedBindingTests(unittest.TestCase):
         self.assertIn("--explain", calls[0])
         self.assertNotIn("--base", calls[0])
         kept = self.operation.state["review_binding_kept"]
-        self.assertEqual([row["changed"] for row in kept], [[["sd-review", "verdict"]]])
+        self.assertEqual([row["changed"] for row in kept], [[["sd_route.py", "verdict"]]])
         self.assertEqual(kept[0]["request_sha256"], "asked")
 
     def test_a_moved_binding_whose_request_replays_differently_still_refuses(self):
         self.operation.state["passes"][-1]["review_request"] = {"sha256": "asked", "verify": None, "resume": None}
         for answer, exit_code in (("asked differently", 0), ("asked", 1)):
             calls = self.replaying(answer, exit_code)
-            with self.subTest(answer=answer, exit_code=exit_code), self.edited(bindings.BIN / "sd-review"):
-                with self.assertRaisesRegex(ship.Refusal, "changed after review: sd-review \\(verdict\\)$"):
+            with self.subTest(answer=answer, exit_code=exit_code), self.edited(bindings.BIN / "sd_route.py"):
+                with self.assertRaisesRegex(ship.Refusal, "changed after review: sd_route.py \\(verdict\\)$"):
                     self.operation.review_inputs(self.head)
                 self.assertEqual(len(calls), 1)
         self.assertNotIn("review_binding_kept", self.operation.state)
+
+    def test_a_moved_finding_parser_re_reviews_even_with_an_unchanged_request(self):
+        """sd:1397, operator ruling (option A). An equal request does not make an equal verdict
+        when the code that parses reviewer output or disposes findings moved; no replay is asked."""
+        self.operation.state["passes"][-1]["review_request"] = {"sha256": "asked", "verify": None, "resume": None}
+        stored = {key: self.operation.state[key] for key in ("binding", "binding_manifest")}
+        for name in ("sd-review", "sd_opencode.py", "sd_registry.py"):
+            self.operation.state.update(stored)
+            calls = self.replaying("asked")
+            with self.subTest(name=name), self.edited(bindings.BIN / name):
+                with self.assertRaisesRegex(ship.Refusal, f"changed after review: {name} \\(verdict\\)$"):
+                    self.operation.review_inputs(self.head)
+            self.assertEqual(calls, [], name)
+        self.assertNotIn("review_binding_kept", self.operation.state)
+        self.assertEqual(set(getattr(bindings, "FINDING_FILES", ())), {"sd-review", "sd_opencode.py", "sd_registry.py"})
+        self.assertLessEqual(set(bindings.FINDING_FILES), set(bindings.VERDICT_FILES))
 
     def test_a_policy_change_is_never_kept_by_a_replay(self):
         """Policy stays byte-exact (sd:1834 operator decision); no replay is even asked."""
@@ -305,7 +321,7 @@ class SharedBindingTests(unittest.TestCase):
         self.operation.state["passes"] = [{"head": "b" * 40, "report": first, "exit_code": 1}, verified]
         stored = {name: self.operation.state[name] for name in ("binding", "binding_manifest")}
         calls = self.replaying("asked")
-        with self.edited(bindings.BIN / "sd-review"):
+        with self.edited(bindings.BIN / "sd_route.py"):
             self.assertFalse(self.operation.binding_moved())
         argv = calls[0]
         self.assertEqual(argv[argv.index("--base") + 1], "b" * 40)
@@ -316,7 +332,7 @@ class SharedBindingTests(unittest.TestCase):
         self.operation.state.update(stored)
         del self.operation._binding_moved
         calls.clear()
-        with self.edited(bindings.BIN / "sd-review"):
+        with self.edited(bindings.BIN / "sd_route.py"):
             self.assertTrue(self.operation.binding_moved())
         self.assertEqual(calls, [])
 

@@ -31,7 +31,9 @@ other two close with it or narrow to what this plan leaves out.
 
 2026-09-30: option E built under sd:1397. A moved `verdict`-only binding
 replays `sd-review --explain` and keeps a receipt whose `request_sha256`
-is unchanged; policy and legacy entries still refuse.
+is unchanged; policy and legacy entries still refuse. Operator ruling
+(option A): a move in `FINDING_FILES`, the code that parses or disposes
+findings, re-reviews even when the request is unchanged.
 
 Slices 1 to 3 built on `feat/review-binding-1834`. The class map as built is
 the four tuples in `bin/sd_ship_bindings.py`, exactly as the design's class

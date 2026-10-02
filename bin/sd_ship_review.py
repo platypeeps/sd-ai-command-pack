@@ -387,13 +387,15 @@ class SharedReview:
         report it was handed, and its `request_sha256` compared with the one
         the pass recorded. Equal, the receipt is rebound and the record says
         so; no pass is spent. Policy stays byte-exact, a legacy receipt has no
-        request to replay, and any doubt re-reviews.
+        request to replay, a moved `FINDING_FILES` member could judge the same
+        request differently, and any doubt re-reviews.
         """
         passes = self.history.native(self.state)
         request = (passes[-1].get("review_request") if passes else None) or {}
         changed, manifest = self.binding_changes(), getattr(self.runtime, "manifest", None)
         if (manifest is None or not request.get("sha256") or not changed
-                or any(kind not in ("verdict", "gate", "check") for _, kind in changed)
+                or any(kind not in ("verdict", "gate", "check") or name in sd_ship_bindings.FINDING_FILES
+                       for name, kind in changed)
                 or self.replayed_request(passes, request) != request["sha256"]):
             return False
         kept = {"head": passes[-1].get("head"), "recorded_at": self.runtime.clock(), "superseded_binding": self.state.get("binding"),

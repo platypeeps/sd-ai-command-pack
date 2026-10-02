@@ -119,8 +119,11 @@
   `merge` replay `--explain` for the stored pass, with the prior report it
   was handed, and keep the receipt when the digest is unchanged: no pass is
   spent, the binding is rebound, and `review_binding_kept` records what
-  moved. A policy change, a legacy receipt, a failed replay or a changed
-  digest still refuses and re-reviews as before.
+  moved. A policy change, a legacy receipt, a failed replay, a changed
+  digest, or a move in code that parses or disposes findings (`sd-review`,
+  `sd_opencode.py`, `sd_registry.py`, listed as `FINDING_FILES`) still
+  refuses and re-reviews as before.
+
 - **The local test gate leaves the machine room (sd:1955).**
   `.github/scripts/run-tests.sh` ran CPUs minus one workers locally, so two
   gates in the two machine-wide slots put 30 workers on 16 cores; the load
