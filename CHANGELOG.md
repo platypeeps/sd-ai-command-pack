@@ -131,7 +131,10 @@
   detects now sends git's rename patch, with any content hunks, under the new
   path, and a one-line record naming the new path under the old one. The
   inventory still lists both paths, so each stays visible and citable; the
-  same move measures 127 KB.
+  same move measures 127 KB. The unchanged lines are not sent, so both paths
+  count as summarized: a reviewer that reads only the material reports
+  partial coverage, and the chain falls through to one that reads the
+  repository.
 
 - **A recorded check builds into a fresh folder (sd:2327).** An optional
   `build_outputs` key in `.github/sd-check-reuse.json` names each ignored

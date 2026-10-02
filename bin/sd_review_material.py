@@ -43,7 +43,7 @@ def untracked(root: pathlib.Path) -> list[str]:
 # screenshot overruns the limit. UTF-8 (a `-diff` file) and BOM-marked UTF-16 go as text; anything else
 # stays base64, so the size check refuses honestly. Not media: zip, gzip (can carry source), ICO (weak magic).
 BINARY_MARKER = re.compile(r"(?m)^Binary files .* differ\n?")
-SUMMARY = re.compile(r"(?m)^\[binary, not sent\] ")
+SUMMARY = re.compile(r"(?m)^\[(?:binary, not sent|renamed)\] ")
 MEDIA_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"wOFF", b"wOF2", b"%PDF-")
 
 
@@ -119,11 +119,8 @@ def tracked_material(root: pathlib.Path, subject: Any) -> dict[str, str]:
 
 
 def renamed_material(root: pathlib.Path, common: list[str], material: dict[str, str]) -> dict[str, str]:
-    """sd:2400: a detected rename sends git's rename patch under the new path and a record under the old.
-
-    The inventory stays one entry per literal path, so both sides are still listed and citable;
-    only the bytes change, from a full deletion plus a full addition to the rename and its hunks.
-    """
+    """sd:2400: a rename sends git's rename patch under the new path and a record under the old.
+    Both sides stay listed, but unchanged lines are not sent, so both are summarized: partial coverage (sd:2181)."""
     rows = read_git_material(root, ["diff", "--name-status", "-z", "-M", *common]).split("\0")
     entries, index = [], 0
     while index < len(rows) and rows[index]:
@@ -140,8 +137,9 @@ def renamed_material(root: pathlib.Path, common: list[str], material: dict[str, 
     for (status, paths), piece in zip(entries, pieces, strict=True):
         if status.startswith("R"):
             old, new = paths
-            renamed[old] = f"diff --git a/{old} b/{old}\n[renamed] {json.dumps(old)} -> {json.dumps(new)}; the change is under the new path\n"
-            renamed[new] = piece
+            record = f"[renamed] {json.dumps(old)} -> {json.dumps(new)}; unchanged lines not sent"
+            renamed[old], (head, _, rest) = f"diff --git a/{old} b/{old}\n{record}\n", piece.partition("\n")
+            renamed[new] = f"{head}\n{record}\n{rest}"
     return renamed
 
 

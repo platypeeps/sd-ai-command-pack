@@ -212,7 +212,9 @@ class OversizeTests(ReviewFixture):
                     self.assertIn(f"rename to new/{name}\n", material)
                     self.assertIn(f'[renamed] "old/{name}" -> "new/{name}"', material)
                 self.assertIn("+<p>edited</p>\n", material)
-                self.assertNotIn("summarized", json.dumps(entries))
+                # The unchanged lines are not sent, so both sides are summarized and coverage is partial (sd:2181).
+                self.assertEqual({entry["path"] for entry in entries if entry.get("summarized")}, expected)
+                self.assertEqual(set(sd_review.sd_review_material.coverage(entries, {"r": "x"})["omitted_paths"]), expected)
 
     def test_prompt_overhead_is_counted_even_when_material_fits(self):
         root = self.make_repo()
