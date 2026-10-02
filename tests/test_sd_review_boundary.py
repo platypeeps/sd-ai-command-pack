@@ -851,11 +851,15 @@ class LineBudgetTests(unittest.TestCase):
         # environment (+32); the docstring's 2.x measurements (+22).
         # `bin/sd-review` grows +3 for the run's own config dir. Measured, not
         # carried: `sd_opencode.py` is 467 on this tree.
+        # 4520 -> 4550 is sd:2400: `bin/sd_review_material.py` grows +30 for
+        # `renamed_material`, which sends a rename git detects as its rename
+        # patch under the new path and a one-line record under the old one, so
+        # a folder move fits the input limit and both paths stay listed.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4520,
+            4550,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

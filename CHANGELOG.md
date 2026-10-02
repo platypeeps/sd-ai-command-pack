@@ -139,6 +139,17 @@
   `sd_opencode.py`, `sd_registry.py`, listed as `FINDING_FILES`) still
   refuses and re-reviews as before.
 
+- **A folder rename fits the review input (sd:2400).** `sd-review` sent a
+  moved file as a full deletion plus a full addition, so a pure folder move
+  of 111 files measured 5 MB and was refused at the 2 MB limit. A rename git
+  detects now sends git's rename patch, with any content hunks, under the new
+  path, and a one-line record naming the new path under the old one. The
+  inventory still lists both paths, so each stays visible and citable; the
+  same move measures 127 KB. The unchanged lines are not sent, so both paths
+  count as summarized: a reviewer that reads only the material reports
+  partial coverage, and the chain falls through to one that reads the
+  repository.
+
 - **A recorded check builds into a fresh folder (sd:2327).** An optional
   `build_outputs` key in `.github/sd-check-reuse.json` names each ignored
   folder the check builds and the variable that redirects it, such as
