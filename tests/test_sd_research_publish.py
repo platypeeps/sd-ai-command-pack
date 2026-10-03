@@ -1434,6 +1434,9 @@ class SourceUrlTests(Fixture):
         if git(self.repo, "remote"):
             git(self.repo, "remote", "remove", "origin")
         git(self.repo, "remote", "add", "origin", url)
+        # As a fetch leaves it: with an origin, only origin's refs name the
+        # default branch the mirror publishes from (sd:2019).
+        git(self.repo, "update-ref", "refs/remotes/origin/main", "HEAD")
 
     def queued(self, docs: list[dict] | None = None, name: str = NAME) -> dict:
         with unittest.mock.patch.dict(PUBLISH.ENVIRON, SD_MIRROR_REQUEUE="1"):
@@ -1672,6 +1675,15 @@ class BranchCheckoutTests(Fixture):
         refusal = PUBLISH.publish_refusal(self.repo, "mirror")
         self.assertIn("not queued from branch feature", refusal)
         self.assertIn("queues from main only", refusal)
+
+    def test_with_an_origin_a_local_main_does_not_name_the_default(self) -> None:
+        """origin's default is `trunk`, with no `origin/HEAD`: a local `main` is a feature branch."""
+        git(self.repo, "remote", "add", "origin", "https://example.test/canon.git")
+        git(self.repo, "update-ref", "refs/remotes/origin/trunk", "HEAD")
+        self.assertEqual(git(self.repo, "branch", "--show-current").strip(), "main")
+        (self.repo / "10-x" / "a.md").write_text("# A\n\nbranch text\n", encoding="utf-8")
+        self.assertIsNone(PUBLISH.canonical_branch(self.repo))
+        self.assertNotEqual(PUBLISH.publish_refusal(self.repo, "mirror"), "")
 
 
 class HookTests(unittest.TestCase):

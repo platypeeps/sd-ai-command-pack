@@ -363,16 +363,19 @@ def canonical_branch(repo: Path) -> str | None:
     that tracks a fork whose default is that branch would otherwise name
     itself canonical and publish unmerged content. The order is
     `origin/HEAD`, then the first of `origin/main` and `origin/master` this
-    checkout has, then the first local `main` or `master` for a checkout with
-    no `origin`. None holds the mirror: no branch then matches.
+    checkout has. Only a checkout with no `origin` falls back to a local
+    `main` or `master`: with an `origin`, a local branch of that name can be a
+    feature branch and says nothing about the remote default. None holds the
+    mirror: no branch then matches.
     """
     named = git_output(["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], repo)
     if named and named.startswith("origin/"):
         return named[len("origin/"):]
-    for prefix in ("refs/remotes/origin/", "refs/heads/"):
-        for name in ("main", "master"):
-            if git_output(["rev-parse", "--verify", "--quiet", prefix + name], repo) is not None:
-                return name
+    has_origin = git_output(["remote", "get-url", "origin"], repo) is not None
+    prefix = "refs/remotes/origin/" if has_origin else "refs/heads/"
+    for name in ("main", "master"):
+        if git_output(["rev-parse", "--verify", "--quiet", prefix + name], repo) is not None:
+            return name
     return None
 
 
