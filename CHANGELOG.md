@@ -4,6 +4,24 @@
 
 ### Added
 
+- **`sd fleet stamp` honours a per-repository exemption list (sd:1797).** A
+  tracked `.github/sd-fleet.json` holding `{"exempt": ["<path>", ...]}`
+  declines stamped files once. The stamp names each exempt path as an adapted
+  line and never proposes it, so a declined file stops coming back on every
+  run. A file that does not read, or that exempts a path the stamp does not
+  write, refuses the repository. The fleet audit runs the dry run, so it
+  honours the same list.
+
+- **A test holds the system's gap ids to the pack's (sd:1372).** The pack owns
+  the gap vocabulary. `GapVocabularyTests` reads `sd_db.protection` at the
+  `.sd-system-rev` pin and fails naming each gap id or merge flag that one
+  side has and the other lacks.
+
+- **WORKFLOW.md states how to run a Python mutation check (sd:1790).** A new
+  Mutation checks section says to run with `PYTHONDONTWRITEBYTECODE=1` and to
+  delete `__pycache__` first: a same-size edit restored within a second
+  otherwise runs stale bytecode.
+
 - **No GitHub issues from a managed repository (sd:2256).** A new
   `PreToolUse` hook, `bin/sd-issue-guard`, denies `gh issue create` (and its
   alias `gh issue new`) and `mcp__github__issue_write` when the session's
