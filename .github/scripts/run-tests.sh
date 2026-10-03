@@ -359,7 +359,9 @@ reap_shards() {
 # included and ignored ones not, written through a scratch copy of the index so
 # the real one is untouched. A count of dirty paths cannot tell two edits of one
 # dirty file apart; a content id can. The footer reads it when the run ends, so
-# an edit made while the shards ran shows as two different ids.
+# an edit made while the shards ran shows as two different ids. The copy's
+# assume-unchanged and skip-worktree flags are cleared first: with them, `add`
+# skips a file the tests still read from disk.
 run_head=""
 footer_printed=""
 tree_content() {
@@ -367,7 +369,12 @@ tree_content() {
   if [ "$run_head" != "unknown" ] && index="$(mktemp)"; then
     rm -f "$index"
     cp "$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-path index 2>/dev/null)" "$index" 2>/dev/null
-    content="$(GIT_INDEX_FILE="$index" git -C "$REPO_ROOT" add -A 2>/dev/null &&
+    # One flag per call: given both, `update-index` cleared only one (git 2.54).
+    content="$(for flag in --no-assume-unchanged --no-skip-worktree; do
+        GIT_INDEX_FILE="$index" git -C "$REPO_ROOT" ls-files -z 2>/dev/null |
+          GIT_INDEX_FILE="$index" git -C "$REPO_ROOT" update-index -z "$flag" --stdin 2>/dev/null || exit 1
+      done &&
+      GIT_INDEX_FILE="$index" git -C "$REPO_ROOT" add -A 2>/dev/null &&
       GIT_INDEX_FILE="$index" git -C "$REPO_ROOT" write-tree 2>/dev/null)" || content=""
     rm -f "$index"
   fi

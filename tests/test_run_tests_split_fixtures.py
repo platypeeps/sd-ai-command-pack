@@ -302,6 +302,24 @@ class SplitModuleFixtures(unittest.TestCase):
         self.assertEqual(after.returncode, 0, after.stdout + after.stderr)
         self.assertEqual(self.ends(after)[0].group(2), end.group(2))
 
+    def test_an_index_flag_does_not_hide_an_edit_from_the_fingerprint(self) -> None:
+        """sd:2080 review. The scratch index starts as a copy of the real one,
+        whose assume-unchanged and skip-worktree flags make `git add -A` skip
+        a file the tests still read from disk. The fingerprint clears them."""
+        self.commit_fixture()
+        contents = []
+        for flag in ("--assume-unchanged", "--skip-worktree"):
+            subprocess.run(["git", "update-index", flag, "notes.txt"], cwd=self.root, check=True)
+            for text in (f"{flag} one\n", f"{flag} two\n"):
+                (self.root / "notes.txt").write_text(text)
+                result = self.run_harness()
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                contents.append(self.ends(result)[0].group(2))
+            subprocess.run(["git", "update-index", flag.replace("--", "--no-", 1), "notes.txt"],
+                           cwd=self.root, check=True)
+        self.assertNotIn("unknown", contents)
+        self.assertEqual(len(set(contents)), 4, contents)
+
     def test_shard_timing_does_not_hide_a_failed_test(self) -> None:
         failing = PLAIN.replace("self.assertTrue(self.ready)", "self.assertFalse(self.ready)")
         result = self.run_harness(test_sd_ship=failing)
