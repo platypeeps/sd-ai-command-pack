@@ -1760,6 +1760,19 @@ class TheWorkstationLaneIsNotPrintedWhereItCannotBeReached(ReviewFixture):
         self.assertIn("no provider registry", text)
         self.assertIn("the provider lines are not reported", text)
 
+    def test_the_suppression_prints_the_registry_refusal_itself(self) -> None:
+        """A registry that is present but unreadable must not be called absent (sd:1000)."""
+
+        home = self.tmp / "broken-home"
+        (home / ".local" / "share" / "sd").mkdir(parents=True)
+        (home / ".local" / "share" / "sd" / "providers.yaml").write_text("providers: [\n", encoding="utf-8")
+        result, text = self.explained({"HOME": str(home)})
+        self.assertTrue(result["registry_refusal"])
+        self.assertNotIn("no provider registry", result["registry_refusal"])
+        self.assertIn(result["registry_refusal"], text)
+        self.assertNotIn("no provider registry", text)
+        self.assertIn("the provider lines are not reported", text)
+
     def test_what_the_lane_is_kept_for_still_prints(self) -> None:
         """The gate is five lines wide, not the whole report."""
 
