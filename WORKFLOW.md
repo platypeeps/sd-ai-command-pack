@@ -123,6 +123,7 @@ A repository whose `repo.ci` row says `local` runs no GitHub Actions (sd:1843).
 
 Switch a repository with `sd ci local`, run from its checkout (sd:1914).
 It is a dry run; `--apply` makes the changes, and a second run finds none.
+It refuses a repository the sd database does not mark managed (`repo.managed = no`, sd:1620).
 It needs `admin` on the repository and makes three changes, each only where it does not hold yet:
 
 - It sets `repo.ci` to `local`, as `sd-db.sh repo ci <path> local` does.

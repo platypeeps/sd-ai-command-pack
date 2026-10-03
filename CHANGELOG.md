@@ -218,6 +218,15 @@
 
 ### Fixed
 
+- **Pack tools stay out of repositories the sd database does not mark managed (sd:1620).**
+  The operator sets `repo.managed` by hand on their own repositories (sd:1619),
+  and the rest must not use any pack capability. `sd fleet stamp` now walks
+  managed `runner_merge=auto` rows only. A write in an unmanaged checkout
+  refuses, and so does `sd ci local`; each refusal names `repo.managed = no`
+  and the `sd-db.sh repo managed <path> yes` remedy. `sd_lib.managed_rows`
+  and `sd_lib.unmanaged` are the shared helpers. Not knowing proceeds: no
+  library, no database, no row and no column all behave as before.
+
 - **`sd-review`'s Jev rows compare Jev with the routing (sd:2359).** `jev`
   computed `changed` against `--fallback`, which here is a token no tier can
   be, so every sd-review row in the judgment ledger said `changed=yes`. The

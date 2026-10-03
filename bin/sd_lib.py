@@ -20,7 +20,7 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, NamedTuple
+from typing import Any, Callable, Iterable, NamedTuple
 
 LOCAL_FILE_NAME = "CLAUDE.local.md"
 LOCAL_BLOCK_START = "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->"
@@ -983,6 +983,55 @@ def ci_mode(root: pathlib.Path | str) -> str:
         return repo_ci(connection, root)
     finally:
         connection.close()
+
+
+
+
+def is_managed(row: Any) -> bool:
+    """Whether a `repo` row may be walked by a pack tool: `managed` set, or no such column.
+
+    sd:1619 added `repo.managed`; the operator sets it by hand on their own
+    repositories, and the rest must not use any pack capability (sd:1620). A
+    database older than the column says nothing, so its rows stay in: an old
+    library must not empty every fleet verb.
+    """
+    return "managed" not in row.keys() or bool(row["managed"])
+
+
+def unmanaged_text(path: str) -> str:
+    """How a pack tool refuses a repository outside its reach, naming the flag and its remedy."""
+    return (f"{path} is not managed in the sd database (repo.managed = no), so pack tools do not run there; "
+            f"set it with `sd-db.sh repo managed {path} yes` if they should")
+
+
+def managed_rows(rows: Iterable[Any]) -> list[Any]:
+    """The `repo` rows a fleet walk may visit: see `is_managed`."""
+    return [row for row in rows if is_managed(row)]
+
+
+def unmanaged(root: pathlib.Path | str) -> str | None:
+    """The refusal for a direct call in an unmanaged repository, or None to proceed.
+
+    Only a row that exists and says `managed = 0` refuses. No library, no
+    database, no row, no column and any read fault all proceed: a public user
+    of the pack has no sd database, and not knowing is no reason to deny.
+    """
+    if import_sd_db().module is None:
+        return None
+    try:
+        from sd_db import repos  # noqa: PLC0415
+        from sd_db.database import connect, default_path  # noqa: PLC0415
+
+        connection = connect(default_path(), write=False)
+        try:
+            origin = git_output(["config", "--get", "remote.origin.url"], pathlib.Path(root))
+            path = repos.registered_for(connection, str(pathlib.Path(root).resolve()), origin)
+            row = repo_row(connection, path)
+        finally:
+            connection.close()
+    except Exception:  # every fault is "not said"; see the docstring
+        return None
+    return None if row is None or is_managed(row) else unmanaged_text(row["path"])
 
 
 def repo_disk(value: pathlib.Path | str) -> pathlib.Path:

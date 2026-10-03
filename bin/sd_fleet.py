@@ -663,7 +663,7 @@ def apply_exemptions(plan: Plan, tree: Tree) -> None:
 
 
 def auto_rows() -> list[tuple[pathlib.Path, str | None]]:
-    """`(checkout, remote)` for every repository row whose `runner_merge` is `auto`."""
+    """`(checkout, remote)` for every managed repository row whose `runner_merge` is `auto` (sd:1620)."""
     import sd_handoff_rows  # noqa: PLC0415 - the library is optional until this verb runs
 
     sd_db = sd_handoff_rows.library()
@@ -674,7 +674,8 @@ def auto_rows() -> list[tuple[pathlib.Path, str | None]]:
         rows = registered(connection)
     finally:
         connection.close()
-    return [(sd_lib.repo_disk(row["path"]), row["remote"]) for row in rows if row["runner_merge"] == "auto"]
+    return [(sd_lib.repo_disk(row["path"]), row["remote"]) for row in sd_lib.managed_rows(rows)
+            if row["runner_merge"] == "auto"]
 
 
 def _installer() -> Any:
@@ -691,7 +692,7 @@ def selected(rows: list[tuple[pathlib.Path, str | None]], wanted: list[str]) -> 
     for name in wanted:
         match = [row for row in rows if owner_slug(row[1]) == name.lower()]
         if not match:
-            raise FleetRefusal(f"{name} is not a runner_merge=auto repository row; the stamp covers only those")
+            raise FleetRefusal(f"{name} is not a managed runner_merge=auto repository row; the stamp covers only those")
         chosen += match
     return chosen
 
@@ -709,7 +710,8 @@ def here(rows: list[tuple[pathlib.Path, str | None]], cwd: pathlib.Path) -> tupl
     slug = owner_slug(sd_lib.git_output(["config", "--get", "remote.origin.url"], top))
     match = [row for row in rows if slug and owner_slug(row[1]) == slug]
     if not match:
-        raise FleetRefusal(f"{top} is not a checkout of a runner_merge=auto repository; the stamp covers only those")
+        raise FleetRefusal(sd_lib.unmanaged(top)
+                           or f"{top} is not a checkout of a runner_merge=auto repository; the stamp covers only those")
     branch = sd_lib.git_output(["symbolic-ref", "--quiet", "--short", "HEAD"], top)
     # An unknown default is treated as both names `default_ref` falls back to,
     # so a `master` repository without `origin/HEAD` is not a feature branch.
