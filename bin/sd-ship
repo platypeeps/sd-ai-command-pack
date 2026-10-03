@@ -443,7 +443,10 @@ class Ship(SharedReview):
             from sd_ship_no_item import publication_review
             review = publication_review(root, connection, database, args, ship, review_runtime())
             self.__dict__.update(review.__dict__)
-            self.checkout_branch = self.branch
+            # The branch `publication_review` validated: the record's, or the
+            # default branch a merged record reconciles from (sd:1932). Never a
+            # second read, which would follow a switch made after validation.
+            self.checkout_branch = review.checkout_branch
             self.api = GitHub(root, self.repository)
             return
         self.store, self.root, self.connection, self.args = ship, root, connection, args
@@ -2088,7 +2091,7 @@ def no_item_record_flags(action) -> None:
     action.add_argument("--provider", metavar="NAME", help="select one guarded reviewer for this invocation; never changes automatic order")
     action.add_argument("--reuse-check", action="store_true", help="opt into exact-input successful check-receipt reuse")
     review_timeout_flag(action)
-    action.add_argument("--create-record", action="store_true", help="allocate a record without provider dispatch or a spent pass")
+    action.add_argument("--create-record", action="store_true", help="allocate a record without provider dispatch or a spent pass; needs --assert-new-work, takes no --review-id, and prints the allocated review_id")
     action.add_argument("--assert-new-work", action="store_true", help="explicit assertion of new work, not a renamed or rewritten continuation")
     action.add_argument("--import-history", type=pathlib.Path, metavar="FILE", help="import an ordered manifest of historical reports as untrusted evidence")
     action.add_argument("--assert-history-complete", action="store_true", help="explicit operator assertion that the supplied history is complete")
@@ -2098,7 +2101,7 @@ def no_item_record_flags(action) -> None:
     action.add_argument("--retry-review", action="store_true", help="spend one automatic pass on a full-branch retry of an incomplete review")
     action.add_argument("--additional-review-for", metavar="SHA", help="record one explicit post-cap operator request for this exact committed head")
     action.add_argument("--review-history-digest", metavar="SHA256", help="one-use digest of the complete combined history; required to continue after any import")
-    action.add_argument("--request-reason", help="nonempty operator context; this assertion is not proof of user approval")
+    action.add_argument("--request-reason", help="nonempty operator context, valid only with --additional-review-for; this assertion is not proof of user approval")
     # No-item review takes no commit, runner or delivery flags at all.
     action.set_defaults(path=[], message_file=None, author=None)
 
@@ -2128,7 +2131,7 @@ def identity_flags(action) -> None:
     identity = action.add_mutually_exclusive_group(required=True)
     identity.add_argument("--item", type=int)
     identity.add_argument("--no-item", action="store_true", help="a standalone review record, never a placeholder work item")
-    action.add_argument("--review-id", metavar="ID", help="the stable record identity every later no-item command requires")
+    action.add_argument("--review-id", metavar="ID", help="the stable record identity every later no-item command requires; --create-record allocates it and prints it as review_id, it is never chosen")
     action.add_argument("--json", action="store_true")
     action.add_argument("--database", type=pathlib.Path, help="owned runner database; defaults to the operator HOME")
 
@@ -2180,9 +2183,8 @@ def validate_identity(args) -> None:
                       code="no_item_flags_refused", boundary="input", state="operator_decision",
                       next_action="Commit separately and use --review-id without item, runner, or delivery flags.")
     if not args.review_id and not getattr(args, "create_record", False):
-        raise Refusal("no-item commands require --review-id ID; missing record identity never allocates a fresh review budget",
-                      code="review_identity_required", boundary="input", state="operator_decision",
-                      next_action="Use the existing review ID, or explicitly allocate a record for genuinely new work.")
+        from sd_ship_no_item import review_identity_required
+        raise review_identity_required()
 
 
 def parser():
@@ -2210,7 +2212,7 @@ def parser():
             action.add_argument("--retry-review", action="store_true", help="spend one automatic pass on a full-branch retry of an incomplete review")
             action.add_argument("--additional-review-for", metavar="SHA", help="record one explicit post-cap operator request for this exact committed head")
             action.add_argument("--review-history-digest", metavar="SHA256", help="one-use digest of every existing pass; required to renew after three reservations")
-            action.add_argument("--request-reason", help="nonempty operator context; this assertion is not proof of user approval")
+            action.add_argument("--request-reason", help="nonempty operator context, valid only with --additional-review-for; this assertion is not proof of user approval")
             action.add_argument("--path", action="append", default=[])
             action.add_argument("--message-file", type=pathlib.Path)
             action.add_argument("--author")
@@ -2281,12 +2283,17 @@ def body_diff(root: pathlib.Path, api: GitHub | None, number: int | None) -> tup
     return changed, (f"{base}...HEAD" if changed is not None else base)
 
 
+def outside_repository() -> Refusal:
+    """Name the directory, as the other lane commands do: under `-C` it is the -C one (sd:2499)."""
+    return Refusal(f"{pathlib.Path.cwd()} is not inside a Git repository")
+
+
 def body_command(args) -> int:
     """`sd-ship body`: normalize, append `Work:`, lint; no database (sd:1870, sd:1877)."""
     try:
         root = sd_lib.repo_root(None)
         if root is None:
-            raise Refusal("cwd is not inside a Git repository")
+            raise outside_repository()
         api = None if args.pr is None else GitHub(root, slug(git(root, "config", "--get", "remote.origin.url")))
         text, source = body_text(args, root, api)
         normalized, stripped = sd_ship_body.normalize(text, args.item, deliver=args.deliver)
@@ -2396,7 +2403,7 @@ def identity_unchanged(root, connection, args, store, delivery) -> None:
     modes: the live checkout, and for an item its row as it stands now.
     """
     # An item merge may ship another branch than the checkout's (sd:2037); the checkout still may not move.
-    expected = delivery.branch if args.no_item else delivery.checkout_branch
+    expected = delivery.checkout_branch
     live = sd_lib.git_output(["symbolic-ref", "--quiet", "--short", "HEAD"], root)
     if live != expected or slug(git(root, "config", "--get", "remote.origin.url")) != delivery.repository:
         raise Refusal(f"the checkout left {expected} while this command waited for the ship lock; "
@@ -2450,7 +2457,7 @@ def main(argv=None) -> int:
         validate_identity(args)
         root = sd_lib.repo_root(None)
         if root is None:
-            raise Refusal("cwd is not inside a Git repository")
+            raise outside_repository()
         database = args.database or default_path()
         readonly = args.command in ("observe", "verify-review") or (args.command == "adjudicate" and args.accept_dispositions is None)
         connection = connect(database, write=not readonly)

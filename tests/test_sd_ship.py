@@ -3227,7 +3227,7 @@ roles:
 
     def test_a_no_item_record_refuses_a_live_branch_switch(self):
         """sd:1937 review. `--no-item` compares the live checkout too, not only its stored record."""
-        delivery = SimpleNamespace(branch="topic", repository=ship.slug(REMOTE_URL))
+        delivery = SimpleNamespace(branch="topic", checkout_branch="topic", repository=ship.slug(REMOTE_URL))
         _git(self.root, "checkout", "-q", "-b", "elsewhere")
         with self.assertRaisesRegex(ship.Refusal, "the checkout left topic"):
             ship.identity_unchanged(self.root, self.connection, SimpleNamespace(no_item=True), receipts, delivery)
@@ -3236,7 +3236,7 @@ roles:
 
     def test_a_remote_change_alone_refuses(self):
         """sd:1937 PR review. The branch is unchanged, so only the remote comparison can refuse."""
-        delivery = SimpleNamespace(branch="topic", repository=ship.slug(REMOTE_URL))
+        delivery = SimpleNamespace(branch="topic", checkout_branch="topic", repository=ship.slug(REMOTE_URL))
         _git(self.root, "checkout", "-q", "topic")
         _git(self.root, "remote", "set-url", "origin", "https://github.com/example/elsewhere.git")
         with self.assertRaisesRegex(ship.Refusal, "the checkout left topic"):
@@ -4076,14 +4076,18 @@ roles:
             self.additional(head)
         self.spent_reviews()
         prior = self.operation().state["passes"]
-        for flags in (["--additional-review-for", head], ["--request-reason", "reason"],
-                      ["--additional-review-for", head, "--request-reason", "  "],
-                      ["--additional-review-for", head[:12], "--request-reason", "reason"],
-                      ["--additional-review-for", "0" * 40, "--request-reason", "reason"],
-                      ["--additional-review-for", head, "--request-reason", "reason", "--retry-review"]):
+        # Each refusal names the flag that fixes it (sd:2026): a nonempty
+        # `--request-reason` alone used to be told its reason was empty.
+        for flags, names in ((["--additional-review-for", head], "needs a nonempty --request-reason"),
+                             (["--request-reason", "reason"], "valid only with --additional-review-for"),
+                             (["--additional-review-for", head, "--request-reason", "  "], "needs a nonempty --request-reason"),
+                             (["--additional-review-for", head[:12], "--request-reason", "reason"], "is not the clean current HEAD"),
+                             (["--additional-review-for", "0" * 40, "--request-reason", "reason"], "is not the clean current HEAD"),
+                             (["--additional-review-for", head, "--request-reason", "reason", "--retry-review"],
+                              "--retry-review and --additional-review-for do not combine")):
             operation = self.operation("prepare", *flags)
             with self.subTest(flags=flags), patch.object(ship, "review_process", side_effect=AssertionError("review dispatched")):
-                with self.assertRaises(ship.Refusal):
+                with self.assertRaisesRegex(ship.Refusal, re.escape(names)):
                     operation.review(head)
             self.assertEqual(self.operation().state["passes"], prior)
 
