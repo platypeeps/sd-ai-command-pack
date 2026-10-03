@@ -23,6 +23,19 @@ if str(REPO_ROOT / "bin") not in sys.path:
 import sd_db  # noqa: E402 - `make setup` provisions it; `RowActivity` needs one
 import sd_lib  # noqa: E402
 
+#: What a parent make exports to its children (sd:1641). Under `make check
+#: VENV=.venv` the command-line VENV reaches every child make through
+#: MAKEFLAGS and overrides the fixture Makefile's own choice of environment.
+PARENT_MAKE_VARIABLES = ("MAKEFLAGS", "MFLAGS", "MAKELEVEL")
+
+
+def child_make_env(**extra: str) -> dict[str, str]:
+    """The environment for a fixture's `make`, free of the make running this suite."""
+
+    env = {key: value for key, value in os.environ.items() if key not in PARENT_MAKE_VARIABLES}
+    env.update(extra)
+    return env
+
 PRD = """---
 title: {title}
 status: {status}
@@ -994,7 +1007,8 @@ class SetupStaysLocalTests(unittest.TestCase):
 
     def make(self, target: str, *extra: str) -> str:
         done = subprocess.run(["make", "-s", "-n", target, *extra],
-                              cwd=self.linked, capture_output=True, text=True)
+                              cwd=self.linked, capture_output=True, text=True,
+                              env=child_make_env())
         return done.stdout
 
     def test_setup_in_a_worktree_does_not_touch_the_main_virtualenv(self) -> None:
@@ -1071,7 +1085,8 @@ class BorrowedEnvironmentTests(unittest.TestCase):
              ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(["make", "-s", "-n", *argv],
                               cwd=cwd or self.linked,
-                              capture_output=True, text=True)
+                              capture_output=True, text=True,
+                              env=child_make_env())
 
     def move_a_pin(self, name: str = "requirements-dev.txt") -> None:
         (self.linked / name).write_text(f"# {name}\nmoved==2\n", encoding="utf-8")
@@ -1377,11 +1392,11 @@ exit 0
         return subprocess.run(
             ["make", "-s", "setup", f"PYTHON={self.stub}", f"VENV={venv}"],
             cwd=self.linked, capture_output=True, text=True,
-            env={**os.environ, **env})
+            env=child_make_env(**env))
 
     def dry_run(self, target: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(["make", "-s", "-n", target], cwd=self.linked,
-                              capture_output=True, text=True)
+                              capture_output=True, text=True, env=child_make_env())
 
     def move_a_pin(self) -> None:
         (self.linked / "requirements-dev.txt").write_text(

@@ -19,6 +19,8 @@ import sd_lib
 
 CONTRACT = ".github/sd-check-reuse.json"
 FIELDS = {"schema_version", "complete", "network", "dependencies", "tools", "environment"}
+#: A refusal shows the smallest valid declaration (sd:1560); the sd-check skill's receipts reference explains each key.
+EXAMPLE = '{"schema_version": 1, "complete": true, "network": "none", "dependencies": ["src"], "tools": ["make"], "environment": []}'
 #: Optional: exact tracked files under a declared root that the secret-name filter admits (sd:2325).
 EXCEPTIONS = "secret_name_exceptions"
 #: Optional: ignored folders the check builds, each to its variable or null; never bound, never reused (sd:2327).
@@ -26,6 +28,8 @@ OUTPUTS = "build_outputs"
 #: The check runs with these, but they are not digested: they drift inside one
 #: session, and the tools and toolchains they select are bound by bytes (sd:2326).
 BASE_ENV = ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR")
+#: An undeclared LANG or LC_ALL is set to this, so the locale cannot vary between runs; the binding records it (sd:2386).
+LOCALE = "C.UTF-8"
 SECRET = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|COOKIE|AUTH", re.I)
 BIN = pathlib.Path(__file__).resolve().parent
 
@@ -47,11 +51,17 @@ def file_digest(path: pathlib.Path) -> str:
     return hasher.hexdigest()
 
 
+def declaration_needed(why: str) -> Unavailable:
+    return Unavailable(f"{why}: track {CONTRACT}, for example {EXAMPLE}")
+
+
 def reuse_contract(root: pathlib.Path) -> dict[str, Any]:
+    if not (root / CONTRACT).is_file():
+        raise declaration_needed("reuse requires a dependency declaration")
     value = json.loads((root / CONTRACT).read_text(encoding="utf-8"))
     if (not isinstance(value, dict) or set(value) - {EXCEPTIONS, OUTPUTS} != FIELDS or type(value["schema_version"]) is not int
             or value["schema_version"] != 1 or value["complete"] is not True or value["network"] != "none"):
-        raise Unavailable("reuse requires a complete local-only dependency declaration")
+        raise declaration_needed("reuse requires a complete local-only dependency declaration")
     value.setdefault(EXCEPTIONS, [])
     for name in ("dependencies", "tools", "environment", EXCEPTIONS):
         entries = value[name]
@@ -64,8 +74,9 @@ def reuse_contract(root: pathlib.Path) -> dict[str, Any]:
 
 
 def receipt_environment(value: Mapping[str, Any], env: Mapping[str, str]) -> dict[str, str]:
-    """Checks recorded for reuse run only with this declared environment."""
-    return {key: env[key] for key in (*BASE_ENV, *value["environment"]) if key in env}
+    """Checks recorded for reuse run only with this declared environment, under `LOCALE` unless it declares its own."""
+    controlled = {key: env[key] for key in (*BASE_ENV, *value["environment"]) if key in env}
+    return {**controlled, **{key: LOCALE for key in ("LANG", "LC_ALL") if key not in value["environment"]}}
 
 
 def environment_digest(value: Mapping[str, Any], env: Mapping[str, str]) -> str:
@@ -244,7 +255,7 @@ def check_binding(root: pathlib.Path, env: Mapping[str, str]) -> dict[str, Any]:
     if sd_lib.git_output(["status", "--porcelain", "--untracked-files=all"], root) != "":
         raise Unavailable("reuse requires a clean committed checkout")
     if sd_lib.git_output(["ls-files", "--error-unmatch", "--", CONTRACT], root) != CONTRACT:
-        raise Unavailable("reuse requires a tracked dependency declaration")
+        raise declaration_needed("reuse requires a tracked dependency declaration")
     value = reuse_contract(root)
     controlled = receipt_environment(value, env)
     detection = sd_lib.detect_entrypoints(root)
@@ -266,6 +277,7 @@ def check_binding(root: pathlib.Path, env: Mapping[str, str]) -> dict[str, Any]:
             "toolchains": toolchain_identities(toolchain_selections(tools, list(detection.commands.values())), controlled, root),
             "python": {"executable": str(pathlib.Path(sys.executable).resolve()), "sha256": file_digest(pathlib.Path(sys.executable)),
                        "version": sys.version, "prefix": sys.prefix},
+            "locale": {key: controlled.get(key) for key in ("LANG", "LC_ALL")},
             "environment_sha256": environment_digest(value, controlled)}
 
 

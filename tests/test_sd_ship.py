@@ -670,6 +670,20 @@ roles:
         self.assertEqual(self.merge()["phase"], "merged")
         self.assertEqual(self.remote.pull(number).title.split("\n")[0], f"Switch the widget to local CI (#{number})")
 
+    def test_a_title_matching_the_retitled_pull_request_is_accepted_and_stored(self):
+        # sd:1378: the guard compared a new --title with the stale stored one
+        # and refused the very title the pull request carried on GitHub.
+        number = self.prepare()["pull_request"]["number"]
+        self.remote.pull(number).title = "Retitled on GitHub"
+        (self.root / "src.py").write_text("value = 2\n")
+        _git(self.root, "commit", "-qam", "follow-up\n\nAuthored-with: human")
+        with patch.object(ship.Ship, "review"), patch.object(ship.Ship, "check_review"):
+            with self.assertRaisesRegex(ship.Refusal, r'the title "Elsewhere" differs from the stored "change" '
+                                                      r'and the pull request\'s "Retitled on GitHub"'):
+                self.prepare("--title", "Elsewhere")
+            self.assertEqual(self.prepare("--title", "Retitled on GitHub")["phase"], "ready_to_send")
+        self.assertEqual(self.operation().state["title"], "Retitled on GitHub")
+
     def test_a_wip_pull_request_title_never_reaches_the_default_branch(self):
         number = self.prepare()["pull_request"]["number"]
         self.remote.pull(number).title = "WIP switch the widget"
@@ -1594,6 +1608,23 @@ roles:
         self.assertEqual(operation.planning_artifacts(base, head),
                          ["docs/spec/naïve.md", "docs/work/é.md"])
 
+    def test_a_guest_opt_out_takes_decision_records_out_of_the_push_check(self):
+        """`guest_allow: docs/decisions` in the local block, and only that tree
+        leaves the planning paths a guest push refuses (sd:2168)."""
+        base = _git(self.root, "rev-parse", "HEAD")
+        for name in ("docs/decisions/0001-a-choice.md", "docs/work/plan.md", "docs/spec/a.md"):
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("body\n")
+        _git(self.root, "add", "-A")
+        _git(self.root, "commit", "-m", "plan and decide\n\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        everything = ["docs/decisions/0001-a-choice.md", "docs/spec/a.md", "docs/work/plan.md"]
+        self.assertEqual(self.operation().planning_artifacts(base, head), everything)
+        local = self.root / "CLAUDE.local.md"
+        local.write_text(local.read_text().replace("mode: full\n", "mode: full\nguest_allow: docs/decisions\n"))
+        self.assertEqual(self.operation().planning_artifacts(base, head), everything[1:])
+
     def test_a_move_out_of_the_shipped_surface_still_names_its_source(self):
         """A rename reports its destination only, and the source vanished.
 
@@ -2513,6 +2544,44 @@ roles:
         self.assertEqual(self.merge()["phase"], "merged")
         self.assertEqual(len([call for call in self.remote.calls if call.method == "PUT"]), 1)
 
+    def test_prepare_and_merge_receipts_name_their_invoker(self):
+        """sd:2078. A merge nobody claimed could not be traced: its receipt
+        named no pid, checkout, authority or lock holder."""
+        prepared = self.prepare()
+        self.assertEqual((prepared["invoker"]["pid"], prepared["invoker"]["checkout"]), (os.getpid(), str(self.root)))
+        self.assertEqual(prepared["invoker"]["lock_holder"]["command"], f"sd-ship prepare --item {self.item}")
+        merged = self.merge()
+        invoker = merged["invoker"]
+        self.assertEqual((invoker["pid"], invoker["ppid"], invoker["authority"]), (os.getpid(), os.getppid(), "--manual"))
+        self.assertEqual(invoker["lock_holder"]["command"], f"sd-ship merge --item {self.item}")
+        self.assertEqual(invoker["started_at"], ship.PROCESS_STARTED)
+        [note] = self.connection.execute("SELECT body FROM note WHERE item=? AND body LIKE 'Code delivery %'",
+                                         (self.item,)).fetchall()
+        self.assertEqual(json.loads(note[0].split("\n", 1)[1])["invoker"], invoker)
+
+    def test_a_merge_commit_outside_the_default_branch_names_both_commits(self):
+        """`--is-ancestor` says "no" by exit status alone; the reconcile check
+        read that as an empty, retryable "git failed" (sd:1461)."""
+        self.prepare()
+        saved = self.double._route
+
+        def route(method, path, body):
+            answer = saved(method, path, body)
+            if method == "PUT" and path.endswith("/merge"):
+                # The clone holds the merge commit; origin's main no longer does.
+                _git(self.root, "fetch", "-q", str(self.remote.path), "main")
+                _git(self.remote.path, "update-ref", "refs/heads/main", f"{answer[1]['sha']}^")
+            return answer
+        self.double._route = route
+        with self.assertRaises(ship.Refusal) as caught:
+            self.merge()
+        commit = self.remote.pull(1).merge_commit_sha
+        tip = _git(self.remote.path, "rev-parse", "refs/heads/main")
+        self.assertIn(f"merge commit {commit} is not an ancestor of origin/main at {tip}", str(caught.exception))
+        blocker = caught.exception.workflow["blocker"]
+        self.assertEqual((blocker["code"], blocker["retryable"]), ("merge_commit_unreachable", False))
+        self.assertIn(f"restore {commit}", caught.exception.workflow["next_action"])
+
     def test_a_base_that_advanced_under_the_put_holds_delivery(self):
         """GitHub squashes onto the base it holds at the `PUT`, not the one the
         freshness reads saw. A same-file advance between them lands a combined
@@ -2833,6 +2902,23 @@ roles:
         self.assertEqual(list(self.connection.iterdump()), before)
         self.assertEqual(_git(self.root, "show-ref"), refs)
         self.assertEqual(len(self.remote.calls), calls)
+
+    def test_observe_reads_the_checkpoint_of_a_prepare_that_stopped_before_a_pull_request(self):
+        """sd:2021. A blocked prepare stores no pull-request reference, and observe
+        answered "there is no durable pull-request receipt to observe"."""
+        program = self.programs / "review-fixture"
+        payload = {"type": "result", "subtype": "success", "structured_output": {"findings": [
+            {"path": "src.py", "line": 1, "severity": "high", "family": "correctness", "summary": "sd2021 finding"}]}}
+        program.write_text("#!/usr/bin/env python3\nimport json\nprint(" + repr(json.dumps(payload)) + ")\n")
+        with self.assertRaises(ship.Refusal):
+            self.prepare()
+        result = self.cli("observe")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        observed = json.loads(result.stdout)
+        self.assertIsNone(observed["pull_request"])
+        self.assertEqual((observed["phase"], observed["receipt"]["phase"]), ("reviewed", "reviewed"))
+        self.assertEqual(observed["receipt"]["review"]["status"], "blocking")
+        self.assertEqual([row["summary"] for row in observed["receipt"]["review"]["findings"]], ["sd2021 finding"])
 
     def unsited(self, command, *extra, library="provisioned"):
         """`bin/sd-ship` under an interpreter that can see no site-packages at all.
@@ -4968,12 +5054,13 @@ class DeclaredGapCase(unittest.TestCase):
     def puts(self) -> int:
         return len([call for call in self.remote.calls if call.method == "PUT"])
 
-    def refuse(self, pattern: str, code: str | None = None) -> None:
+    def refuse(self, pattern: str, code: str | None = None) -> ship.Refusal:
         with self.assertRaisesRegex(ship.Refusal, pattern) as caught:
             self.merge()
         if code is not None:
             self.assertEqual(caught.exception.workflow["blocker"]["code"], code)
         self.assertEqual(self.puts(), 0)
+        return caught.exception
 
     def test_a_declared_gap_with_every_check_green_merges_once_and_the_receipt_says_so(self):
         self.declare()
@@ -5131,6 +5218,23 @@ class DeclaredGapCase(unittest.TestCase):
         self.local_ci()
         self.refuse(r"sd/local-gate is failure", "ci_not_passing")
         self.assertEqual([call.body["state"] for call in self.gate_posts()], ["failure"])
+
+    def test_ci_local_failure_names_the_failing_check_its_tail_and_the_receipt(self):
+        """sd:2066. The merge said only `sd-check fail (check fail)`, the status
+        description; finding the failing step meant running the gate again."""
+        self.commit({"Makefile": "check:\n\t@test -d .git || { echo sd2066-out; echo sd2066-err >&2; exit 1; }\n"})
+        self.declare()
+        self.local_green()
+        self.local_ci()
+        with self.assertRaises(ship.Refusal) as caught:
+            self.merge()
+        message = str(caught.exception)
+        self.assertIn("sd/local-gate is failure", message)
+        self.assertRegex(message, r"check \(exit 2\): stderr: sd2066-err\n.*\nstdout: sd2066-out")
+        self.assertIn(f"`sd-ship observe --item {self.item} --json` prints it", message)
+        self.assertEqual(self.puts(), 0)
+        observed = self.operation("observe").observe()
+        self.assertEqual(observed["receipt"]["local_gate"]["status"], "failure")
 
     def test_ci_local_prepare_runs_its_check_in_the_gates_worktree(self):
         """sd:2041. Under `repo.ci = local` prepare's check is the gate's, so the
@@ -5626,7 +5730,14 @@ class DeclaredGapCase(unittest.TestCase):
                     return 200, {"behind_by": 3, "ahead_by": 1, "status": "diverged"}
             return saved(method, path, body)
         double._route = route
-        self.refuse("default branch advanced after the readiness check", "base_moved")
+        refusal = self.refuse("default branch advanced after the readiness check", "base_moved")
+        # A reviewed branch takes the newer base by a merge, never a rebase,
+        # as WORKFLOW.md says (sd:2034).
+        said = f"{refusal}\n{refusal.workflow['next_action']}"
+        self.assertIn("git merge origin/main", said)
+        self.assertNotIn("rebase", said)
+        self.assertIn("take a newer default branch with `git merge origin/<base>`, never a rebase",
+                      " ".join((ROOT / "WORKFLOW.md").read_text().split()))
 
     def test_the_single_event_form_is_read(self):
         """Codex on the verification pass: `on: pull_request` returned no

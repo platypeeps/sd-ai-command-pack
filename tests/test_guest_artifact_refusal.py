@@ -204,6 +204,45 @@ class TheRule(Fixture):
                 )
 
 
+class TheDecisionsOptOut(Fixture):
+    """`guest_allow: docs/decisions` lets one guest repository take decision records (sd:2168).
+
+    The operator ruled it per repository, opt-in: `docs/decisions/` stays
+    refused by default, and `docs/work/` and `docs/spec/` stay refused always.
+    """
+
+    PATHS = ["docs/decisions/0001-a-choice.md", "docs/work/2026-01-01-a-thing/prd.md"]
+
+    def guest(self, allow: str | None) -> pathlib.Path:
+        root = self.make_repo()
+        line = "" if allow is None else f"guest_allow: {allow}\n"
+        (root / sd_lib.LOCAL_FILE_NAME).write_text(
+            f"{sd_lib.LOCAL_BLOCK_START}\nmode: guest\n{line}{sd_lib.LOCAL_BLOCK_END}\n", encoding="utf-8")
+        return root
+
+    def test_by_default_a_decision_record_is_refused(self) -> None:
+        root = self.guest(None)
+        self.assertEqual(sd_lib.guest_refused_dirs(root), sd_lib.GUEST_REFUSED_DIRS)
+        sentence = sd_lib.guest_artifact_refusal(root, self.PATHS[:1], ask=Asker(answers(full=True)))
+        self.assertIn("docs/decisions/0001-a-choice.md", sentence)
+
+    def test_the_opt_out_admits_decision_records_and_nothing_else(self) -> None:
+        root = self.guest("docs/decisions")
+        self.assertEqual(sd_lib.guest_refused_dirs(root), ("docs/work", "docs/spec"))
+        sentence = sd_lib.guest_artifact_refusal(root, self.PATHS, ask=Asker(answers(full=True)))
+        self.assertNotIn("docs/decisions", sentence)
+        self.assertIn("docs/work/2026-01-01-a-thing/prd.md", sentence)
+        self.assertEqual(sd_lib.guest_artifact_refusal(root, self.PATHS[:1], ask=Asker(answers(full=True))), "")
+
+    def test_a_tree_that_stays_refused_cannot_be_opted_out(self) -> None:
+        for tree in ("docs/work", "docs/spec/", "docs/decisions, docs/work", "docs"):
+            with self.subTest(tree=tree):
+                root = self.guest(tree)
+                with self.assertRaisesRegex(sd_lib.ConfigError, r"guest_allow: only docs/decisions"):
+                    sd_lib.guest_refused_dirs(root)
+                shutil.rmtree(root)
+
+
 class TheReviewGate(Fixture):
     """End to end: the write path `sd-plan` mandates, refused as a process.
 

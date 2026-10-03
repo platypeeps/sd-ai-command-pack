@@ -561,7 +561,8 @@ def run_gated(command: Sequence[str], environ: Mapping[str, str], *, slots: int,
         def forward(signum: int, _frame: object) -> None:
             try:
                 os.killpg(child.pid, signum)
-            except ProcessLookupError:
+            except (ProcessLookupError, PermissionError):
+                # A group that already exited: macOS answers EPERM, not only ESRCH (sd:2402).
                 pass
 
         for signum in forwarded:

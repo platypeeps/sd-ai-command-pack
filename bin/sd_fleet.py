@@ -43,6 +43,13 @@ place, and the plan says so as an adapted line rather than going quiet.
 A route workflow still tracked there is named with `sd-review setup-github
 --remove`; the stamp lays files and deletes none.
 
+A repository declines a stamped file once, in a tracked `.github/sd-fleet.json`
+holding `{"exempt": [<path>, ...]}` (sd:1797). The stamp proposes no exempt
+path and says so as an adapted line, so a declined file is not proposed on
+every run. A path must be one the stamp writes, and a file that does not read
+refuses the repository rather than guessing which files were declined. The
+fleet audit is `--dry-run`, so it honours the same list.
+
 An owned repository gets the declaration only where GitHub says, live, that
 its default branch has no protection (sd:1655). Before, every owned auto repo
 was assumed unprotected, and the dry run proposed the declaration in
@@ -87,6 +94,10 @@ STATUS_PATH = ".github/sd-status.json"
 GITIGNORE_PATH = ".gitignore"
 LOCAL_BLOCK_PATH = "CLAUDE.local.md"
 DASHBOARD_DIR = "docs/dashboard"
+FLEET_PATH = ".github/sd-fleet.json"
+#: Every path the stamp writes, so every path `.github/sd-fleet.json` may exempt.
+EXEMPTABLE = (ROUTE_PATH, DEPENDABOT_PATH, CHECK_PATH, STATUS_PATH, GITIGNORE_PATH, LOCAL_BLOCK_PATH,
+              DASHBOARD_DIR)
 DASHBOARD_IGNORES = frozenset({
     "docs/dashboard", "docs/dashboard/", "/docs/dashboard", "/docs/dashboard/",
     "docs/dashboard/*", "/docs/dashboard/*",
@@ -321,6 +332,26 @@ def _git_show(root: pathlib.Path, spec: str) -> str | None:
     except (OSError, subprocess.SubprocessError):
         return None
     return done.stdout if done.returncode == 0 else None
+
+
+def exemptions(tree: "Tree") -> tuple[frozenset[str], str]:
+    """The paths `.github/sd-fleet.json` exempts, and `""`; or nothing and the reason it does not read."""
+    text = tree.text_at(FLEET_PATH)
+    if text is None:
+        return frozenset(), ""
+    try:
+        loaded = json.loads(text)
+    except json.JSONDecodeError as error:
+        return frozenset(), f"not valid JSON ({error})"
+    if not isinstance(loaded, dict) or set(loaded) - {"exempt"}:
+        return frozenset(), 'must be an object whose one key is "exempt"'
+    listed = loaded.get("exempt", [])
+    if not isinstance(listed, list) or not all(isinstance(path, str) for path in listed):
+        return frozenset(), '"exempt" must be a list of paths'
+    unknown = [path for path in listed if path not in EXEMPTABLE]
+    if unknown:
+        return frozenset(), f"exempts {', '.join(unknown)}, which the stamp does not write ({', '.join(EXEMPTABLE)})"
+    return frozenset(listed), ""
 
 
 def owner_slug(remote: str | None) -> str:
@@ -589,7 +620,19 @@ def plan_repo(root: pathlib.Path, remote: str | None, *, pin: str, tree: Tree,
             plan.refused.append(f"{LOCAL_BLOCK_PATH}: {str(error.code).removeprefix('error: ')}")
     if not (root / DASHBOARD_DIR).is_dir():
         plan.changes.append(Change(DASHBOARD_DIR, "local", None, "", directory=True))
+    apply_exemptions(plan, tree)
     return plan
+
+
+def apply_exemptions(plan: Plan, tree: Tree) -> None:
+    """Drop what `.github/sd-fleet.json` exempts from `plan`, naming each path; refuse it when it does not read."""
+    exempt, unreadable = exemptions(tree)
+    if unreadable:
+        plan.refused.append(f"{FLEET_PATH}: {unreadable}; nothing is written until it reads")
+    for path in sorted(exempt):
+        plan.changes = [change for change in plan.changes if change.path != path]
+        plan.refused = [line for line in plan.refused if not line.startswith(f"{path}:")]
+        plan.adapted.append(f"{path}: exempt by {FLEET_PATH}; not proposed")
 
 
 def auto_rows() -> list[tuple[pathlib.Path, str | None]]:
