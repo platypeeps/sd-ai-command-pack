@@ -92,7 +92,10 @@ else is. Its executables write these paths, and no others:
   refuses the repository.
   It also adds the template's new lines to that checkout's `CLAUDE.local.md`
   block, removing none, and creates its untracked `docs/dashboard/`. `--dry-run` prints every auto repository's diff against
-  its `origin/HEAD` and writes nothing.
+  its `origin/HEAD` and writes nothing. A repository is the operator's own
+  when its owner is in `fleet.owners` of the machine config, a JSON list of
+  GitHub logins (unset: `DEFAULT_OWNERS` in `bin/sd_fleet.py`); any other
+  owner's protection stands.
 - `docs/work/<item>/.citations.tsv` — the citation baseline, one per active work
   item, from `sd-docs-lint --update-citations`. **Tracked.**
 - `build/` — HTML from `sd-research-kit render`, into the research repository you
@@ -166,6 +169,7 @@ These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOM
 `sd.gate_slots` is load control, not a grant: how many repository gates may run at once on the machine (unset: a quarter of the cores).
 `sd.gate_load_max` and `sd.gate_settle_seconds` are load control too: the gate queue starts its head only while load1 is below the limit (unset: 2.5 per core), with starts 45 s apart by default.
 `sd gate run -- make check` queues any command the same way; `sd gate status` shows the queue.
+`sd gate post --head SHA` runs the merge gate at SHA and posts `sd/local-gate`, for a merge path that is not `sd-ship merge`.
 
 `configured` allows private code and scoped review context to the operator's eligible configured providers, including future entries.
 A local `reviewers` list restricts recipients; an explicit empty value denies review.
@@ -257,7 +261,8 @@ every worker.
 
 From the writing checkout, `sd writing list`, `sd writing readiness --piece
 YEAR/slug`, and `sd writing stage` share the dashboard's writing controls.
-Import and cutover have separate preview and verification commands. Once the
+Import and cutover have separate preview and verification commands. `list`,
+`import` and `verify` refuse a checkout with no `content/` folder. Once the
 repository uses rows, routine stage, parking and metadata changes leave content
 files untouched. See the writing pack's `.claude/reference/database-workflow.md`
 for review evidence and recovery commands.
@@ -332,7 +337,13 @@ links `.git/hooks/pre-commit` to the tracked `hooks/pre-commit`, which runs
 Ruff over the staged Python and the two whole-tree test passes
 (`tests.test_code_health`, `tests.test_doc_citations`) in about five seconds
 and prints its own wall time against the budget its header states.
-`SD_SKIP_HOOKS=1 git commit` skips it with a notice. The hook is one per
+`SD_SKIP_HOOKS=1 git commit` skips it with a notice. The same target links
+`.git/hooks/commit-msg` to `hooks/commit-msg`, which refuses a message whose
+`Authored-with:`, `Needed-by:` or other checked trailer sits outside the final
+paragraph, where git does not read it; it names the line, and
+`SD_SKIP_HOOKS` does not skip it. With `SD_AUTHOR=<entry>` set (`claude`,
+`codex`, `human`, `script`), it first writes `Authored-with:` into a message
+that has none, so no `sd attribute` commit follows. The hook is one per
 clone: the link sits in the clone's common `.git/hooks`, its target is the
 relative `../../hooks/pre-commit`, so it reads the main checkout's tracked
 file and every linked worktree shares it, whichever worktree ran `make

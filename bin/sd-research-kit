@@ -52,7 +52,8 @@ USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pi
                 for the documents that changed since they were last queued
                 (SD_MIRROR_REQUEUE=1 queues every designated document). From
                 a linked worktree: docs/dashboard/ only, no vault copy and no
-                mirror, unless SD_PUBLISH_FROM_WORKTREE=1 is set
+                mirror, unless SD_PUBLISH_FROM_WORKTREE=1 is set; off the
+                default branch, no mirror under the same switch
   publish       the registration and queueing half on its own, without
                 re-rendering
   init-hook     install the hook that re-renders this repo, under all three

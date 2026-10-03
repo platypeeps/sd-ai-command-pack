@@ -1352,6 +1352,7 @@ DEFAULT_BLOCK_BODY = """\
     test: <optional, when this repo spells its tests separately>
     lint: <optional, same>
     reviewers: <registry entries allowed to receive this repo's diff>
+    guest_allow: <docs/decisions, in guest mode, to commit decision records>
 """
 
 

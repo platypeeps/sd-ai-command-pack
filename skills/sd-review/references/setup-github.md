@@ -10,7 +10,7 @@ It requests no reviewer, posts no comment, and cannot approve a merge.
 
 ## Refusals
 
-- Modes `minimal` and `guest` cannot install this workflow (R10-D5).
+- Mode `guest` cannot install this workflow (R10-D5); `full` and `minimal` can.
   Do not create it manually to bypass that restriction.
 - A legacy sd-github-review footprint requires `--remove-legacy`.
   Avoid running two routers for the same change.
@@ -26,7 +26,7 @@ Updating that pin changes behavior, not merely a version label.
 Run the installer; do not reproduce the guard manually.
 Its maintained template is `GUARD_LINES` in `bin/sd_setup_guard.py`.
 
-For eligible full-mode consumers, an absent Dependabot file gains a minimal weekly github-actions configuration.
+For eligible consumers, an absent Dependabot file gains a minimal weekly github-actions configuration.
 Its open-pull-request limit is five.
 For existing configuration, the installer updates only the relevant guard.
 The line transformation preserves unrelated comments and entries.

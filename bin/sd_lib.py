@@ -140,6 +140,10 @@ COLLABORATOR_QUERY = "repos/{owner}/{repo}/collaborators"
 Asker = Callable[[str, pathlib.Path], tuple[Any, str]]
 
 _DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
+#: A leading ISO day. `item_date` here and `_item_date` in `bin/sd-status` read
+#: `created:` and the directory name with this one pattern, so the two reports
+#: cannot date one item differently (sd:1000).
+ITEM_DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
 _MAKE_TARGET_RE = re.compile(r"^(?P<names>[^\t#=:]+):(?!=)")
 _TASKFILE_TASKS_RE = re.compile(r"^tasks:\s*$")
 _TASKFILE_ENTRY_RE = re.compile(r"^(?P<indent>\s+)(?P<name>[A-Za-z0-9_][A-Za-z0-9_:.\-]*):")
@@ -1702,17 +1706,14 @@ def item_date(item: WorkItem) -> datetime.date | None:
     Ages are measured from `last_active`, because a birth date says when an
     item began and the check that reads it says the item has been neglected.
     """
-    raw = (item.created or "").strip()
-    if raw:
+    for text in ((item.created or "").strip(), item.path.name):
+        found = ITEM_DATE_RE.match(text)
+        if not found:
+            continue
         try:
-            return datetime.date.fromisoformat(raw[:10])
+            return datetime.date.fromisoformat(found.group(1))
         except ValueError:
-            pass
-    if _DATE_PREFIX_RE.match(item.path.name):
-        try:
-            return datetime.date.fromisoformat(item.path.name[:10])
-        except ValueError:
-            return None
+            continue
     return None
 
 
@@ -2198,6 +2199,12 @@ ATTRIBUTES_TRAILER = "Attributes:"
 #: become reviewable by anthropic every time the trailer was forgotten.
 HUMAN_AUTHOR = "human"
 
+#: What a commit a deterministic job wrote says: no model and no person in the
+#: loop (sd:1637). A peer of `human`: reserved, no vendor, so any provider may
+#: review it; and not `human`, so an unattended job's commits do not count as
+#: the operator's own in authorship figures.
+SCRIPT_AUTHOR = "script"
+
 #: What a commit Dependabot wrote says, though it carries no trailer (sd:2065).
 #: A reserved value like `human` and not a registry entry: the registry lists
 #: what can be started, and nothing starts Dependabot. `github` is its vendor,
@@ -2220,7 +2227,9 @@ DEPENDABOT_IDENTITY = (
 )
 
 #: The values a trailer may carry that no registry entry resolves.
-RESERVED_AUTHORS = {HUMAN_AUTHOR: HUMAN_AUTHOR, DEPENDABOT_ENTRY: DEPENDABOT_AUTHOR}
+RESERVED_AUTHORS = {HUMAN_AUTHOR: HUMAN_AUTHOR, SCRIPT_AUTHOR: SCRIPT_AUTHOR, DEPENDABOT_ENTRY: DEPENDABOT_AUTHOR}
+#: The reserved values that carry no vendor, so they exclude no reviewer.
+VENDORLESS_AUTHORS = (HUMAN_AUTHOR, SCRIPT_AUTHOR)
 
 
 class TrailerError(Exception):
@@ -2363,7 +2372,7 @@ def author_vendors(root: pathlib.Path, base: str, head: str) -> tuple[str, ...]:
                       for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines()
                       if line.startswith(AUTHORED_TRAILER))
     for sha, value in claims:
-        if value == HUMAN_AUTHOR:
+        if value in VENDORLESS_AUTHORS:
             continue
         entry, separator, vendor = value.partition("/")
         # Stripped and folded, because the comparison this feeds is an exact
@@ -2375,7 +2384,7 @@ def author_vendors(root: pathlib.Path, base: str, head: str) -> tuple[str, ...]:
         if not separator or not entry or not vendor:
             raise TrailerError(
                 f"{sha[:12]} says {AUTHORED_TRAILER} {value!r}, which is neither "
-                f"{HUMAN_AUTHOR!r} nor an '<entry>/<vendor>' pair. A trailer that "
+                f"{HUMAN_AUTHOR!r}, {SCRIPT_AUTHOR!r} nor an '<entry>/<vendor>' pair. A trailer that "
                 f"cannot be read is not a weaker claim than one that is missing."
             )
         if vendor not in vendors:
@@ -2410,7 +2419,7 @@ def attribution_value(name: str, registry: Any) -> str:
         known = ", ".join(sorted(registry.providers)) or "nothing"
         raise TrailerError(
             f"no registry entry named {entry!r} in {registry.path}, which holds "
-            f"{known}. Name an entry the registry has, or {HUMAN_AUTHOR!r} bare: a "
+            f"{known}. Name an entry the registry has, or {HUMAN_AUTHOR!r} or {SCRIPT_AUTHOR!r} bare: a "
             f"trailer nothing resolves records no vendor, and a range with no "
             f"vendor is one its own author may review."
         )
@@ -2424,6 +2433,42 @@ def attribution_value(name: str, registry: Any) -> str:
             f"claim is dropped rather than questioned. Fix the registry."
         )
     return value
+
+
+#: Names who is committing, for `hooks/commit-msg` to write as `Authored-with:`
+#: on a message that states none (sd:1295): a registry entry, `human` or
+#: `script`. A harness sets it for its session and a job for its run, so the
+#: trailer lands at commit time and no `sd attribute` commit follows.
+AUTHOR_VARIABLE = "SD_AUTHOR"
+
+
+def states_author(message: str) -> bool:
+    """Whether any unindented line of `message` begins `Authored-with:`."""
+    return any(line.startswith(AUTHORED_TRAILER) for line in message.splitlines())
+
+
+def commit_author(name: str, read_registry: Callable[[], tuple[Any, str]]) -> str:
+    """The `Authored-with:` value `SD_AUTHOR=<name>` stands for; `TrailerError` when none.
+
+    `attribution_value`'s answer, so the hook writes what `sd attribute`
+    writes for the same name. `human` and `script` read no registry.
+    `dependabot` refuses: that claim rests on the identity GitHub writes, and a
+    local commit does not carry it.
+    """
+    entry = name.strip()
+    if entry == DEPENDABOT_ENTRY:
+        raise TrailerError(f"{AUTHOR_VARIABLE}={entry!r}: a local commit is never "
+                           f"Dependabot's; GitHub's identity on its own commits says that")
+    if entry in VENDORLESS_AUTHORS:
+        return entry
+    registry, reason = read_registry()
+    if reason:
+        raise TrailerError(f"{AUTHOR_VARIABLE}={entry!r} names no reserved author, and the "
+                           f"provider registry does not read: {reason}")
+    try:
+        return attribution_value(entry, registry)
+    except TrailerError as error:
+        raise TrailerError(f"{AUTHOR_VARIABLE}={entry!r}: {error}") from None
 
 
 def _own_trailer(root: pathlib.Path, sha: str) -> str:
@@ -2526,15 +2571,16 @@ def _attribution_environment(root: pathlib.Path) -> dict[str, str] | None:
 
 
 def attribute(
-    root: pathlib.Path, target: str, name: str, registry: Any
+    root: pathlib.Path, target: str, name: str, registry: Any, writer: str = HUMAN_AUTHOR
 ) -> tuple[str, str, list[str]]:
     """Record `name` as the author of `target`, as one empty commit on `HEAD`.
 
     `target` is one commit or a `<from>..<to>` range. What lands is a single
     empty commit carrying an `Attributes:` line per repaired commit and its own
-    `Authored-with: human`, because the operator made it and a repair that
-    needs repairing is not one (C-40). Returns the new sha, the value written
-    and the commits covered.
+    `Authored-with: <writer>`, the resolved value of whoever ran it: `human`
+    for the operator, an agent's own entry for an agent (sd:2009), because a
+    repair that needs repairing is not one (C-40). Returns the new sha, the
+    value written and the commits covered.
 
     A commit rather than a note: a notes ref is one mutable ref a repository
     shares, and two clones attributing different commits of one branch diverge
@@ -2548,12 +2594,12 @@ def attribute(
     value = attribution_value(name, registry)
     covered = _covered(root, target)
     trailers = [f"{ATTRIBUTES_TRAILER} {sha} {value}" for sha in covered]
-    trailers.append(f"{AUTHORED_TRAILER} {HUMAN_AUTHOR}")
+    trailers.append(f"{AUTHORED_TRAILER} {writer}")
     written = subprocess.run(  # fixed argv, no shell
         ["git", "commit", "--allow-empty", "--quiet",
          "-m", f"chore(attribution): {len(covered)} commit(s) written with {value}",
-         "-m", "Recorded by the operator, after the fact, for commits that predate "
-               "the trailer or lost it to a rewrite.",
+         "-m", f"Recorded by {'the operator' if writer == HUMAN_AUTHOR else writer}, after the "
+               "fact, for commits that predate the trailer or lost it to a rewrite.",
          "-m", "\n".join(trailers)],
         cwd=str(root), capture_output=True, text=True,
         env=_attribution_environment(root),
@@ -2752,18 +2798,37 @@ def delivered(root: pathlib.Path, item: "str | tuple[str, ...]") -> Answer:
 #: push time, and two lists is how one of them gains a fourth entry alone.
 GUEST_REFUSED_DIRS = ("docs/work", "docs/spec", "docs/decisions")
 
+#: The local-block key that takes a tree out of the guest refusal, and the one
+#: tree it may name (sd:2168). The operator ruled it per repository and opt-in:
+#: `docs/decisions` stays refused by default, and `docs/work` and `docs/spec`
+#: stay refused always, so naming either refuses rather than being ignored.
+GUEST_ALLOW_KEY = "guest_allow"
+GUEST_ALLOWABLE_DIRS = ("docs/decisions",)
 
-def guest_artifacts(paths: Any) -> tuple[str, ...]:
+
+def guest_refused_dirs(root: pathlib.Path) -> tuple[str, ...]:
+    """`GUEST_REFUSED_DIRS` less the trees this repository's local block allows."""
+    raw = local_block(root).get(GUEST_ALLOW_KEY, "")
+    allowed = {entry.strip().rstrip("/") for entry in raw.split(",") if entry.strip()}
+    wrong = sorted(allowed - set(GUEST_ALLOWABLE_DIRS))
+    if wrong:
+        raise ConfigError(f"{local_block_path(root)}: {GUEST_ALLOW_KEY}: only {', '.join(GUEST_ALLOWABLE_DIRS)} "
+                          f"can be allowed, not {', '.join(wrong)}; docs/work and docs/spec stay refused in guest mode")
+    return tuple(directory for directory in GUEST_REFUSED_DIRS if directory not in allowed)
+
+
+def guest_artifacts(paths: Any, refused: tuple[str, ...] = GUEST_REFUSED_DIRS) -> tuple[str, ...]:
     """The repo-relative `paths` that live under a guest-refused tree.
 
     Separate from the mode question on purpose: this half is pure, so a caller
     with nothing to refuse never reaches the network to find that out.
+    `refused` is `guest_refused_dirs` of the repository, when it has one.
     """
 
     found = set()
     for entry in paths:
         text = re.sub(r"^(?:\./)+", "", str(entry).replace(os.sep, "/"))
-        for directory in GUEST_REFUSED_DIRS:
+        for directory in refused:
             if text == directory or text.startswith(directory + "/"):
                 found.add(text)
     return tuple(sorted(found))
@@ -2787,7 +2852,7 @@ def guest_artifact_refusal(root: pathlib.Path, paths: Any, *, ask: Asker = gh_ap
     code, because this module raises nothing.
     """
 
-    refused = guest_artifacts(paths)
+    refused = guest_artifacts(paths, guest_refused_dirs(root))
     if not refused:
         return ""
     if mode(root, ask=ask) != "guest":
@@ -2821,8 +2886,13 @@ def shared_tree_artifacts(root: pathlib.Path) -> tuple[str, ...]:
     remote, default = upstream(root)
     if not remote:
         return ()
+    try:
+        trees = guest_refused_dirs(root)
+    except ConfigError:
+        # A report names more, never fewer; the push check refuses the line itself.
+        trees = GUEST_REFUSED_DIRS
     listed = git_output(["ls-tree", "-r", "--name-only", "-z", f"refs/remotes/{remote}/{default}",
-                         "--", *GUEST_REFUSED_DIRS], root)
+                         "--", *trees], root)
     if listed is None:
         return ()
     return tuple(sorted(name for name in listed.split("\0") if name))
@@ -2884,6 +2954,70 @@ def demoted_trailers(message: str) -> tuple[str, ...]:
         line for line in message.splitlines()
         if _STATED_RE.match(line) and line not in block
     )
+
+
+#: The trailer names `hooks/commit-msg` holds to the block git reads (sd:1931).
+#: Wider than `STATED_TRAILERS`: a stray `Needed-by:` or `Authored-with:`
+#: closes nothing, but `sd-ship` and `sd-review` read both, and a line they
+#: cannot see reads as a line nobody wrote. `Work:` is not here; `sd-ship`
+#: writes it into a pull-request body, above the squash's own block.
+CHECKED_TRAILERS = ("Needed-by:", AUTHORED_TRAILER, "Co-Authored-By:", "Claude-Session:",
+                    ITEM_TRAILER, DELIVERS_TRAILER, CLOSES_TRAILER, ATTRIBUTES_TRAILER)
+
+#: A checked trailer at column zero, the same anchor `_STATED_RE` uses.
+_CHECKED_RE = re.compile(
+    r"^(?P<key>" + "|".join(re.escape(name.rstrip(":")) for name in CHECKED_TRAILERS)
+    + r"):[ \t]*(?P<value>\S.*)$"
+)
+
+
+def _trailer_pair(key: str, value: str) -> tuple[str, str]:
+    """A trailer as a comparable pair: git matches keys without case and unfolds values."""
+    return key.lower(), " ".join(value.split())
+
+
+def unread_trailers(message: str, parsed: str) -> tuple[str, ...]:
+    """The checked trailer lines in `message` that git's own parse did not return.
+
+    `parsed` is `git interpret-trailers --parse --no-divider` over the same
+    message, which is the reader of record: `git log --format=%(trailers)`
+    reads the same block and, like `--no-divider`, does not stop at a `---`
+    line. `trailer_block` is not used here, because git's paragraph is not
+    always Python's: a whitespace-only line also ends one, and a final
+    paragraph that is mostly prose is not a trailer block at all. Asking git
+    covers both. A line counts once per time git returned it, so a trailer
+    written above the block and again inside it still names the stray copy.
+
+    A continuation line (indented, straight after a trailer) is folded into
+    its trailer before comparing, as `--parse` unfolds it.
+    """
+    returned: dict[tuple[str, str], int] = {}
+    for line in parsed.splitlines():
+        key, colon, value = line.partition(":")
+        if colon:
+            pair = _trailer_pair(key, value)
+            returned[pair] = returned.get(pair, 0) + 1
+    stated: list[tuple[str, tuple[str, str]]] = []
+    folding = False
+    for line in message.splitlines():
+        match = _CHECKED_RE.match(line)
+        if match:
+            stated.append((line, _trailer_pair(match["key"], match["value"])))
+            folding = True
+        elif folding and line[:1] in (" ", "\t") and line.strip():
+            first, (key, value) = stated[-1]
+            stated[-1] = (first, _trailer_pair(key, f"{value} {line}"))
+        else:
+            folding = False
+    # Last first, so a line git did read uses up its own return and a copy
+    # of it higher up is the one named.
+    stray = []
+    for line, pair in reversed(stated):
+        if returned.get(pair, 0) > 0:
+            returned[pair] -= 1
+        else:
+            stray.append(line)
+    return tuple(reversed(stray))
 
 
 def display_fields(

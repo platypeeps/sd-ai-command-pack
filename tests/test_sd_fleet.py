@@ -11,11 +11,13 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import pathlib
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "bin") not in sys.path:
@@ -470,6 +472,40 @@ class ProtectionProbe(unittest.TestCase):
         self.assertEqual(sd_fleet.branch_protection(self.ROOT, ask=remote(classic=limited)).state, "unprotected")
         blind = remote(classic=limited, rules=(None, limited[1]))
         self.assertEqual(sd_fleet.branch_protection(self.ROOT, ask=blind).state, "unknown")
+
+
+class Owners(Fleet):
+    """sd:2324: the owner logins come from the machine config, not from the pack."""
+
+    def config(self, body: dict) -> None:
+        home = self.tmp / "xdg"
+        (home / "sd-ai-command-pack").mkdir(parents=True, exist_ok=True)
+        (home / "sd-ai-command-pack" / "config.json").write_text(json.dumps(body), encoding="utf-8")
+        patcher = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(home)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_configured_owner_is_owned_and_the_default_pair_is_not(self) -> None:
+        self.config({"fleet": {"owners": ["Example-Org"]}})
+        mine, mine_url = self.repo("mine", owner="example-org")
+        theirs, theirs_url = self.repo("theirs", owner="platypeeps")
+        first, second = self.plan([(mine, mine_url), (theirs, theirs_url)])
+        self.assertIn(sd_fleet.STATUS_PATH, [change["path"] for change in first["changes"]])
+        self.assertNotIn(sd_fleet.STATUS_PATH, [change["path"] for change in second["changes"]])
+        self.assertTrue(any("protection stands" in line for line in second["adapted"]))
+
+    def test_no_setting_reads_the_default_pair(self) -> None:
+        self.config({"fleet": {}})
+        self.assertEqual(sd_fleet.configured_owners(), sd_fleet.DEFAULT_OWNERS)
+        self.config({})
+        self.assertEqual(sd_fleet.configured_owners(), sd_fleet.DEFAULT_OWNERS)
+
+    def test_a_malformed_setting_refuses_rather_than_guessing(self) -> None:
+        for bad in ([], "example-org", [""], [1], ["example org"], {"owners": 1}):
+            with self.subTest(bad=bad):
+                self.config({"fleet": bad if isinstance(bad, dict) else {"owners": bad}})
+                with self.assertRaisesRegex(sd_fleet.FleetRefusal, "fleet.owners"):
+                    sd_fleet.configured_owners()
 
 
 class Exemptions(Fleet):

@@ -108,6 +108,46 @@ class TaskCLI(unittest.TestCase):
         self.assertEqual(readback["notes"], result["notes"])
         with sd_db.connect(sd_db.default_path(self.home), write=False) as connection:
             self.assertEqual(sd_db.reads.open_followups(connection), [])
+        self.assertNotIn("advisory", self.call("task", "note", item, "--body", "Again").stderr)
+
+    def done_item(self, *merge_note):
+        """A task closed by hand, optionally carrying a merge comment first."""
+        item = json.loads(self.call("task", "add", "Delivered twice", "--json").stdout)["item"]["id"]
+        if merge_note:
+            self.call("task", "note", item, "--body", merge_note[0])
+        self.call("task", "status", item, "done")
+        return item
+
+    def test_a_note_on_a_done_item_names_its_delivery_and_still_lands(self):
+        """sd:1317: two lanes worked one item, and the second lane's note on the
+        already-done row went in without remark. The note still lands."""
+        sha = "a" * 40
+        item = self.done_item(
+            f"Code delivery https://github.com/example/repo/pull/336 at {sha}\n{{}}")
+        since = json.loads(self.call("store", "item", item, "--json").stdout)["item"]["status_since"]
+        result = self.call("task", "note", item, "--kind", "decision",
+                           "--body", "Late decision", "--json")
+        self.assertIn(f"sd:{item} is done since {since[:10]}, delivered by #336",
+                      result.stderr)
+        self.assertEqual("Late decision", json.loads(result.stdout)["note"]["body"])
+
+    def test_a_done_item_without_a_merge_comment_says_none_is_recorded(self):
+        item = self.done_item()
+        result = self.call("task", "note", item, "--body", "Late note")
+        self.assertIn(f"sd:{item} is done since", result.stderr)
+        self.assertIn("no delivery is recorded", result.stderr)
+        notes = json.loads(self.call("store", "item", item, "--json").stdout)["notes"]
+        self.assertEqual("Late note", notes[-1]["body"])
+
+    def test_a_delivery_with_no_pull_request_names_its_commit(self):
+        """The transition sentence `--delivered-by` and `sd work deliver` write."""
+        sha = "b" * 40
+        item = json.loads(self.call("task", "add", "Delivered", "--json").stdout)["item"]["id"]
+        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+            workflow.change_status(connection, item, "done", who="fixture",
+                                   reason=f"delivered at {sha} on origin/main")
+        result = self.call("task", "note", item, "--body", "Late note")
+        self.assertIn(f"delivered by commit {sha[:12]}", result.stderr)
 
     def test_all_public_note_kinds_parse_and_persist_without_internal_kinds(self):
         self.assertEqual(set(NOTE_KINDS), {"comment", "followup", "question", "decision", "proposal"})
