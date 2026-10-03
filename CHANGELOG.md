@@ -126,6 +126,12 @@
 
 ### Fixed
 
+- **`sd writing list` and `import` refuse a checkout with no `content/`
+  folder (sd:1803).** They printed empty results and exited 0 in another
+  checkout, which reads as "no pieces" rather than "wrong checkout". The
+  refusal `verify` gained in sd:1660 now covers `list` and both forms of
+  `import`, and names the verb.
+
 - **opencode reviews run again on opencode 2.x, and refuse 1.x (sd:2445).**
   opencode 2.0.20 removed `debug agent` and `--pure`, so every opencode
   review was refused and the live confinement tests failed `make check`.
