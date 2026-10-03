@@ -112,6 +112,33 @@
 
 ### Fixed
 
+- **The local gate ignores the terminal's colour settings (sd:2076).** The
+  gate's child no longer inherits `FORCE_COLOR`, `CLICOLOR_FORCE` or
+  `PY_COLORS`, and gets `NO_COLOR=1` and `PYTHON_COLORS=0`. An inherited
+  `FORCE_COLOR=3` had coloured Python 3.14 `--help` output and failed a
+  repository's CLI tests in its merge gate.
+
+- **A branch switch in the main checkout queues no mirror (sd:2019).** The
+  re-render hook fires on post-checkout, so a feature branch or a detached
+  HEAD replaced the pending request with unmerged text. The main checkout
+  now queues a mirror from its default branch only; the vault copy and
+  `docs/dashboard/` are still written. `SD_PUBLISH_FROM_WORKTREE=1` lifts
+  the hold, as it does for a linked worktree.
+
+- **`sd fleet stamp` reads the operator's owner logins from the machine
+  config (sd:2324).** `fleet.owners` in `config.json`, a list of GitHub
+  logins, decides which repositories are the operator's own; unset, the
+  pack's previous pair applies. A malformed value refuses the stamp.
+
+- **Small read and report defects (sd:1000).** `sd-status` marks
+  `undisclosed-tool` unchecked when a skill root cannot be listed, where it
+  raised out of the whole report. `sd-review --explain` prints the registry
+  refusal itself on a machine with no reachable reviewer, where it called a
+  present but unreadable registry absent. `sd-status` and `sd_lib` date a
+  work item with one shared pattern, pinned by a parity test. The
+  `accepted_gaps` id in `.github/sd-status.schema.json` is an enum of the
+  ids the loader accepts.
+
 - **opencode reviews run again on opencode 2.x, and refuse 1.x (sd:2445).**
   opencode 2.0.20 removed `debug agent` and `--pure`, so every opencode
   review was refused and the live confinement tests failed `make check`.
@@ -331,6 +358,11 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **The publication contract says how a drain renders a relative link
+  (sd:2243).** A link to a target mirrored to the same destination uses its
+  recorded page URL; a link to an unmirrored target becomes its repo-relative
+  path in plain text, never a `file:///` URL or an absolute path.
 
 - **A review carries forward across a clean merge-in of the base (sd:1485).**
   Every catch-up merge moved the head, so the local review spent a
