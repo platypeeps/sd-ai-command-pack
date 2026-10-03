@@ -169,6 +169,7 @@ These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOM
 `sd.gate_slots` is load control, not a grant: how many repository gates may run at once on the machine (unset: a quarter of the cores).
 `sd.gate_load_max` and `sd.gate_settle_seconds` are load control too: the gate queue starts its head only while load1 is below the limit (unset: 2.5 per core), with starts 45 s apart by default.
 `sd gate run -- make check` queues any command the same way; `sd gate status` shows the queue.
+`sd gate post --head SHA` runs the merge gate at SHA and posts `sd/local-gate`, for a merge path that is not `sd-ship merge`.
 
 `configured` allows private code and scoped review context to the operator's eligible configured providers, including future entries.
 A local `reviewers` list restricts recipients; an explicit empty value denies review.
@@ -342,7 +343,9 @@ and prints its own wall time against the budget its header states.
 `.git/hooks/commit-msg` to `hooks/commit-msg`, which refuses a message whose
 `Authored-with:`, `Needed-by:` or other checked trailer sits outside the final
 paragraph, where git does not read it; it names the line, and
-`SD_SKIP_HOOKS` does not skip it. The hook is one per
+`SD_SKIP_HOOKS` does not skip it. With `SD_AUTHOR=<entry>` set (`claude`,
+`codex`, `human`, `script`), it first writes `Authored-with:` into a message
+that has none, so no `sd attribute` commit follows. The hook is one per
 clone: the link sits in the clone's common `.git/hooks`, its target is the
 relative `../../hooks/pre-commit`, so it reads the main checkout's tracked
 file and every linked worktree shares it, whichever worktree ran `make

@@ -26,7 +26,7 @@ progress belongs to the database.
 | Relink a moved work artifact | Item screen, or `sd work relink ID PATH` |
 | Cancel repository work | Item screen, or `sd work cancel ID --reason TEXT` |
 | Record verified code delivery | `sd work deliver ID FULL_COMMIT_SHA` |
-| Close a work item whose merge carried `Item:` without `Delivers:` | `sd work deliver ID FULL_COMMIT_SHA --associated --reason TEXT` |
+| Close a work item, task or followup whose merge carried `Item:` without `Delivers:` | `sd work deliver ID FULL_COMMIT_SHA --associated --reason TEXT` |
 | Move a writing piece through its stages | Writing screen, or `sd writing stage --piece YEAR/slug --stage STAGE` |
 | Inspect current writing evidence | Item screen, or `sd writing readiness --piece YEAR/slug` |
 | Park or revive a piece | Item screen, or `sd writing park --piece YEAR/slug [--revive]` |
