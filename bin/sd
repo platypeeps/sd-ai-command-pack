@@ -2811,7 +2811,10 @@ def cmd_attribute(args: argparse.Namespace) -> int:
     registry, reason = sd_registry.read_or_report()
     if reason and args.entry.strip() not in sd_lib.RESERVED_AUTHORS:
         raise Refusal(f"{reason}; an attribution names an entry the registry has")
-    sha, value, covered = sd_lib.attribute(root, args.commits, args.entry, registry)
+    # The repair commit says who made it: `SD_AUTHOR`'s entry, else `human` (sd:2009).
+    invoker = os.environ.get(sd_lib.AUTHOR_VARIABLE, "").strip()
+    writer = sd_lib.commit_author(invoker, lambda: (registry, reason)) if invoker else sd_lib.HUMAN_AUTHOR
+    sha, value, covered = sd_lib.attribute(root, args.commits, args.entry, registry, writer)
     print(f"{sha[:12]} attributes {len(covered)} commit(s) to {value}")
     for target in covered:
         print(f"  {target[:12]}")
@@ -3117,8 +3120,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="record who wrote commits that did not say, as one empty commit")
     attributer.add_argument("commits", help="a commit, or a `<from>..<to>` range, on this branch")
     attributer.add_argument(
-        "entry", help=f"a registry entry, `{sd_lib.HUMAN_AUTHOR}` for the operator, "
-                      f"or `{sd_lib.DEPENDABOT_ENTRY}` for a bump rewritten after GitHub made it")
+        "entry", help=f"a registry entry, `{sd_lib.HUMAN_AUTHOR}` for the operator, `{sd_lib.SCRIPT_AUTHOR}` "
+                      f"for an unattended job, or `{sd_lib.DEPENDABOT_ENTRY}` for a bump rewritten after GitHub made it")
     attributer.set_defaults(handler=cmd_attribute)
 
     gate = groups.add_parser("gate", help="the machine-wide gate queue: run a command in it, or show it; "

@@ -4,6 +4,29 @@
 
 ### Added
 
+- **The commit-msg hook writes `Authored-with:` at commit time (sd:1295).**
+  A branch whose commits said nothing took one empty `sd attribute` commit
+  per review round. With `SD_AUTHOR=<entry>` set and no `Authored-with:` line
+  in the message, `hooks/commit-msg` now adds `Authored-with: <value>` first
+  in the final trailer paragraph, the value `sd attribute` writes for that
+  name. `human` and `script` read no registry. A name nothing resolves, or
+  `dependabot`, refuses the commit. Unset, the hook writes nothing.
+  `sd attribute` never amends. A harness sets the variable for its session,
+  and a job for its run.
+
+- **`sd attribute`'s repair commit names who ran it (sd:2009, gap 1).** It
+  always wrote `Authored-with: human`, so an agent's repair had to be amended
+  by hand. It now writes the entry `SD_AUTHOR` names, resolved as the
+  commit-msg hook resolves it, and `human` when the variable is unset. A name
+  nothing resolves refuses and writes nothing.
+
+- **`Authored-with: script` for unattended job commits (sd:1637).** A
+  scheduled job that commits generated data had no fitting value, so it
+  wrote `human` and counted as the operator. `script` is a reserved peer of
+  `human` with no vendor, so any provider may review it. `sd attribute`, a
+  squash body and the trailer reader accept it, and `sd-review --explain`
+  names it.
+
 - **`sd gate post --head SHA` posts the local gate outside `sd-ship merge`
   (sd:1989).** A repository under `repo.ci = local` that merges by its own
   automation -- a Dependabot merge, a daily merge script -- got no
@@ -165,6 +188,16 @@
   the remedy, a fresh commit.
 
 ### Fixed
+
+- **`sd-review`'s Jev rows compare Jev with the routing (sd:2359).** `jev`
+  computed `changed` against `--fallback`, which here is a token no tier can
+  be, so every sd-review row in the judgment ledger said `changed=yes`. The
+  reading now passes the routed tier as `--baseline` and the routing's time as
+  `--baseline-ms`, so `jev` records a paired baseline row and `changed` says
+  whether Jev disagreed. The tier, the floor and the decline rules are
+  unchanged. A `jev` without `--baseline` (before system sd:2357) refuses it at
+  argparse; that refusal is asked once more without the two flags, silently,
+  and a refusal of any other flag stays loud.
 
 - **`sd writing list` and `import` refuse a checkout with no `content/`
   folder (sd:1803).** They printed empty results and exited 0 in another

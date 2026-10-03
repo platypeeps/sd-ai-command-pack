@@ -100,7 +100,7 @@ def problem(line: OwnedLine, item: int, deliver: bool, readers: list | None) -> 
     if line.key == sd_lib.AUTHORED_TRAILER:
         if known_author(line.value, registries() if readers is None else readers):
             return None
-        return (f"expected `{line.key} {sd_lib.HUMAN_AUTHOR}` or an `<entry>/<vendor>` the provider "
+        return (f"expected `{line.key} {sd_lib.HUMAN_AUTHOR}`, `{sd_lib.SCRIPT_AUTHOR}` or an `<entry>/<vendor>` the provider "
                 f"registry resolves; the commits decide authorship")
     if line.key == sd_lib.ATTRIBUTES_TRAILER:
         return "expected no line: it names a pre-squash sha, and the squash carries authorship from the commits"
