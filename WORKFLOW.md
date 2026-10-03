@@ -150,7 +150,8 @@ After the switch:
 - The description carries `inputs <digest>` as provenance: the head, the copied `CLAUDE.local.md` and the pack's `bin/` files.
 - Every merge attempt posts a fresh status. `sd-ship prepare` runs this same gate, through `sd-review --gate-check`.
   Prepare's pass leaves a receipt; the merge gate at the same head and binding, within 30 minutes, reads it instead of running `sd-check` again.
-  The status then says `(reused)`. Prepare never reads a receipt and the merge gate never writes one.
+  The status then says `(reused)`. The merge gate never writes a receipt.
+  Prepare reads one too: a pass that `sd gate check` or an earlier prepare left at the same head and binding (sd:1912).
   Inputs outside the repository are not bound; `bin/sd_gate_receipts.py` names the binding and this trust boundary.
 - Given the base branch, the gate passes `sd-check --base`: a repository's declared docs-only scope applies (sd:2072).
 - `sd-ship merge --watch` starts no remote watch: no remote check is coming, and the gate runs to completion in the merge (sd:1875).

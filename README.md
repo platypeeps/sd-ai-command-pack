@@ -170,6 +170,7 @@ These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOM
 `sd.gate_load_max` and `sd.gate_settle_seconds` are load control too: the gate queue starts its head only while load1 is below the limit (unset: 2.5 per core), with starts 45 s apart by default.
 `sd gate run -- make check` queues any command the same way; `sd gate status` shows the queue.
 `sd gate post --head SHA` runs the merge gate at SHA and posts `sd/local-gate`, for a merge path that is not `sd-ship merge`.
+`sd gate check` runs the same check at `HEAD` and records a pass that `sd-ship prepare` and the merge gate reuse at that head; it posts nothing.
 
 `configured` allows private code and scoped review context to the operator's eligible configured providers, including future entries.
 A local `reviewers` list restricts recipients; an explicit empty value denies review.
