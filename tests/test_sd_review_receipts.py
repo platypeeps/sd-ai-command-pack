@@ -320,6 +320,60 @@ class ReceiptTests(ReviewFixture):
         self.assertNotIn("receipt_revision", json.loads(out))
         self.assertIsNone(receipts.reuse_checked_result(self.root, self.env, self.database))
 
+    def test_a_missing_or_untracked_declaration_names_the_file_and_an_example(self):
+        # sd:1560: the refusal says which file to track and what it holds.
+        self.git("rm", "--quiet", receipts.CONTRACT)
+        self.git("commit", "--quiet", "-m", "no declaration")
+        code, _out, err = self.cli("--json", "--record-receipt", "--database", str(self.database))
+        self.assertEqual(code, 2)
+        self.assertIn(f"track {receipts.CONTRACT}, for example {receipts.EXAMPLE}", err)
+        (self.root / ".gitignore").write_text("dependency.txt\n.github/\n")
+        (self.root / ".github").mkdir(exist_ok=True)  # `git rm` took the folder with its one file
+        (self.root / receipts.CONTRACT).write_text(json.dumps(self.contract))
+        self.git("commit", "--quiet", "-am", "ignored declaration")
+        with self.assertRaisesRegex(receipts.Unavailable, "tracked dependency declaration: track " + re.escape(receipts.CONTRACT)):
+            receipts.check_binding(self.root, self.env)
+        (self.root / receipts.CONTRACT).write_text(json.dumps(dict(self.contract, complete=False)))
+        with self.assertRaisesRegex(receipts.Unavailable, "local-only dependency declaration: track .*, for example "):
+            receipts.reuse_contract(self.root)
+        # The example is itself a declaration the parser accepts.
+        (self.root / receipts.CONTRACT).write_text(receipts.EXAMPLE)
+        self.assertEqual(receipts.reuse_contract(self.root)["schema_version"], 1)
+
+    def test_recorded_checks_run_under_one_locale_whatever_the_caller_sets(self):
+        # sd:2386: an undeclared LANG/LC_ALL is fixed, so the locale cannot vary between runs.
+        fixed = {"LANG": receipts.LOCALE, "LC_ALL": receipts.LOCALE}
+        bindings = []
+        for caller in ({"LANG": "de_DE.UTF-8", "LC_ALL": "de_DE.UTF-8"}, {"LANG": "C"}, {}):
+            env = {key: value for key, value in self.env.items() if key not in fixed} | caller
+            with self.subTest(caller=caller):
+                self.assertEqual({key: receipts.receipt_environment(self.contract, env)[key] for key in fixed}, fixed)
+                bindings.append(receipts.check_binding(self.root, env))
+                self.assertEqual(bindings[-1]["locale"], fixed)
+        self.assertEqual(bindings[0], bindings[-1])
+        self.local_block(self.root, f"check: {sys.executable} -c \"import os, sys; sys.exit(os.environ.get('LC_ALL') != 'C.UTF-8')\"")
+        self.git("add", "--force", "CLAUDE.local.md")
+        self.git("commit", "--quiet", "-m", "locale check")
+        self.env.update(LANG="de_DE.UTF-8", LC_ALL="de_DE.UTF-8")
+        code, out, err = self.cli("--json", "--record-receipt", "--database", str(self.database))
+        self.assertEqual((code, err), (0, ""), out)
+        # A declaration that names a locale variable keeps the caller's value, and binds it.
+        self.commit_contract(environment=["TEST_MODE", "LANG"])
+        self.assertEqual(receipts.receipt_environment(self.contract, self.env)["LANG"], "de_DE.UTF-8")
+        self.assertEqual(receipts.check_binding(self.root, self.env)["locale"], {"LANG": "de_DE.UTF-8", "LC_ALL": receipts.LOCALE})
+
+    def test_reuse_check_help_says_the_pack_itself_never_reuses(self):
+        # sd:1296: the flag's own help says it, not only a reference file. The
+        # pack's tree is the evidence: once it tracks a declaration, this fails
+        # and the help, sd-review and sd-ship skills need the sentence removed.
+        pack = pathlib.Path(sd_review._BIN).parent
+        # ls-files-form: plain -- empty output is the claim: the pack tracks no declaration
+        self.assertNotIn(receipts.CONTRACT, subprocess.run(["git", "ls-files", "--", receipts.CONTRACT], cwd=pack,
+                                                           capture_output=True, text=True, check=True).stdout)
+        help_text = next(action.help for action in sd_review.build_parser()._actions if "--reuse-check" in action.option_strings)
+        self.assertIn(f"Never reuses in sd-ai-command-pack itself, which tracks no reuse declaration ({receipts.CONTRACT})",
+                      help_text)
+
     def commit_contract(self, **fields):
         self.contract.update(fields)
         (self.root / receipts.CONTRACT).write_text(json.dumps(self.contract))

@@ -185,6 +185,7 @@ Never allocate another review ID to reset spent passes or discard history.
 Add `--reuse-check` to prepare or standalone review only when explicitly reusing eligible deterministic-check evidence.
 Before opting in, read `skills/sd-check/references/check-receipts.md` in the sd-ai-command-pack checkout.
 Reuse requires complete local-only dependencies and unchanged before-and-after identity; legacy receipts rerun.
+The flag never reuses in sd-ai-command-pack itself: the pack tracks no reuse declaration (`.github/sd-check-reuse.json`), so its gate runs.
 This flag does not reuse incomplete reviews or bypass source, policy, or receipt validation.
 
 Add `--provider NAME` to prepare or standalone review only for an explicitly requested reviewer.
@@ -253,6 +254,7 @@ Its `next_action` names the `sd-ship adjudicate` command that prints each findin
 Use acceptance only for a complete review of the exact clean head with passing deterministic checks.
 It cannot waive missing depth, incomplete transport, failed checks, or changed source.
 Fixes still require verification on their new head.
+A rejection that still stands after one review pass is recorded with `sd-ship adjudicate` before the next fix is pushed.
 Before proposing or accepting dispositions, read `skills/sd-ship/references/adjudication.md` in the sd-ai-command-pack checkout.
 Standing merge permission does not approve individual findings.
 Do not invent acceptance for the operator.

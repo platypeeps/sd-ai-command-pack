@@ -966,6 +966,48 @@ class PipelineTests(ReviewFixture):
         self.assertNotIn("no check ran", stream.getvalue())
         self.assertIn("test ran", stream.getvalue())
 
+    def test_a_gate_that_timed_out_names_the_timeout_flag(self) -> None:
+        """sd:1560: a gate stopped at its bound says so and names the flag that
+        gives it longer, whether sd-check killed one entrypoint, no gate slot
+        came free, or the runner killed sd-check itself and left no record."""
+        root = self.make_repo()
+        self.prepare(root)
+        killed = [{"name": "check", "command": ["make", "check"], "status": "fail", "exit_code": None,
+                   "reason": "timed out after 3600s", "stderr": ""}]
+        no_slot = [dict(killed[0], reason="no gate slot came free within 3600s")]
+        for label, answer, evidence in (
+                ("record", sd_review.Completed(1, json.dumps({"checks": killed}), ""), "timed out after 3600s"),
+                ("slot", sd_review.Completed(1, json.dumps({"checks": no_slot}), ""), "no gate slot came free within 3600s"),
+                ("runner", sd_review.Completed(124, "", "python3: timed out after 3600s", False), "timed out after 3600s")):
+            with self.subTest(label=label):
+                result = self.run_review(root, FakeRunner({"sd-check": answer}))
+                self.assertEqual(result["status"], "gate_failed")
+                self.assertEqual((result["check"]["reason"], result["check"]["evidence"]), ("timed_out", evidence))
+                line = sd_review.gate_failed_line(result["check"])
+                self.assertIn("--timeout SECONDS", line)
+                self.assertIn("--review-timeout", line)
+                self.assertIn("no provider was asked", line)
+        # A spawn failure beside a timeout is still the stronger evidence.
+        spawn = [killed[0], {"name": "lint", "command": ["/no/python"], "status": "fail", "exit_code": None,
+                             "reason": "cannot run /no/python: [Errno 2] No such file or directory"}]
+        self.assertEqual(sd_review.classify_gate(spawn)["reason"], "toolchain_missing")
+
+    def test_the_code_prompt_names_the_six_operator_listed_defect_classes(self) -> None:
+        """sd:1635: the classes a retired manual checklist held, named in the lane's own prompt."""
+        root = self.make_repo()
+        self.prepare(root)
+        code = sd_review.build_prompt(sd_review.resolve_subject(root, "worktree"), False, "")
+        for phrase in ("external JSON used before its type is narrowed",
+                       "an error that reports a stage other than the one that failed",
+                       "identifiers matched by substring rather than at token boundaries",
+                       "tests that touch files, network or environment without isolating them",
+                       "empty, very long, non-ASCII or markup-bearing input",
+                       "check every sibling site of the same shape, not only the reported line"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, code)
+        planning = sd_review.Subject("planning", "", "", ("docs/work/x/prd.md",), 0, "")
+        self.assertNotIn("external JSON", sd_review.build_prompt(planning, False, ""))
+
     def test_a_blocking_finding_blocks(self) -> None:
         root = self.make_repo()
         self.prepare(root)
