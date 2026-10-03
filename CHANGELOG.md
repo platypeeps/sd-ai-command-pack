@@ -112,6 +112,26 @@
 
 ### Fixed
 
+- **A failed gate names each failing check and its tail (sd:2021, sd:2066).**
+  `sd-ship merge` under `repo.ci = local` said only the status description,
+  such as `sd-check fail (check fail)`, and finding the failing step meant
+  running the gate again. It now refuses right after the gate, naming each
+  failing check, its exit code, and the last 1200 characters of its stderr
+  and its stdout, from the saved `local_gate` report. The refusal says the
+  whole report is kept in the ship receipt and names the `sd-ship observe`
+  command that prints it. Prepare's `gate_failed` refusal names the failing
+  checks the same way; it kept the last 500 characters of one stream, which
+  dropped the failing test's assertion. `sd_gate_run.failing_check_tails`
+  renders both.
+
+- **`sd-ship observe` reads the ship receipt before a pull request exists
+  (sd:2021).** A prepare refused before its first push stores no pull-request
+  reference, and `observe` answered `there is no durable pull-request receipt
+  to observe`. It now returns the stored phase, with no pull request, and every
+  `observe` result carries `receipt`: the stored phase, the pass count, the
+  last review's status and findings, `review_preflight_error` and
+  `local_gate`.
+
 - **`sd-ship reconcile` names a merge commit the default branch lacks (sd:1461).**
   The reconcile check ran `git merge-base --is-ancestor` through the raising
   `git` helper, which reads the "no" exit as an empty, retryable

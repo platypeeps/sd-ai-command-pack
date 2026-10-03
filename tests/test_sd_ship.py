@@ -2857,6 +2857,23 @@ roles:
         self.assertEqual(_git(self.root, "show-ref"), refs)
         self.assertEqual(len(self.remote.calls), calls)
 
+    def test_observe_reads_the_checkpoint_of_a_prepare_that_stopped_before_a_pull_request(self):
+        """sd:2021. A blocked prepare stores no pull-request reference, and observe
+        answered "there is no durable pull-request receipt to observe"."""
+        program = self.programs / "review-fixture"
+        payload = {"type": "result", "subtype": "success", "structured_output": {"findings": [
+            {"path": "src.py", "line": 1, "severity": "high", "family": "correctness", "summary": "sd2021 finding"}]}}
+        program.write_text("#!/usr/bin/env python3\nimport json\nprint(" + repr(json.dumps(payload)) + ")\n")
+        with self.assertRaises(ship.Refusal):
+            self.prepare()
+        result = self.cli("observe")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        observed = json.loads(result.stdout)
+        self.assertIsNone(observed["pull_request"])
+        self.assertEqual((observed["phase"], observed["receipt"]["phase"]), ("reviewed", "reviewed"))
+        self.assertEqual(observed["receipt"]["review"]["status"], "blocking")
+        self.assertEqual([row["summary"] for row in observed["receipt"]["review"]["findings"]], ["sd2021 finding"])
+
     def unsited(self, command, *extra, library="provisioned"):
         """`bin/sd-ship` under an interpreter that can see no site-packages at all.
 
@@ -5154,6 +5171,23 @@ class DeclaredGapCase(unittest.TestCase):
         self.local_ci()
         self.refuse(r"sd/local-gate is failure", "ci_not_passing")
         self.assertEqual([call.body["state"] for call in self.gate_posts()], ["failure"])
+
+    def test_ci_local_failure_names_the_failing_check_its_tail_and_the_receipt(self):
+        """sd:2066. The merge said only `sd-check fail (check fail)`, the status
+        description; finding the failing step meant running the gate again."""
+        self.commit({"Makefile": "check:\n\t@test -d .git || { echo sd2066-out; echo sd2066-err >&2; exit 1; }\n"})
+        self.declare()
+        self.local_green()
+        self.local_ci()
+        with self.assertRaises(ship.Refusal) as caught:
+            self.merge()
+        message = str(caught.exception)
+        self.assertIn("sd/local-gate is failure", message)
+        self.assertRegex(message, r"check \(exit 2\): stderr: sd2066-err\n.*\nstdout: sd2066-out")
+        self.assertIn(f"`sd-ship observe --item {self.item} --json` prints it", message)
+        self.assertEqual(self.puts(), 0)
+        observed = self.operation("observe").observe()
+        self.assertEqual(observed["receipt"]["local_gate"]["status"], "failure")
 
     def test_ci_local_prepare_runs_its_check_in_the_gates_worktree(self):
         """sd:2041. Under `repo.ci = local` prepare's check is the gate's, so the

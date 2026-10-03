@@ -22,6 +22,7 @@ import sd_lib
 import sd_review_request
 import sd_ship_bindings
 import sd_ship_dispositions
+from sd_gate_run import failing_check_tails
 from sd_ship_history import (
     AUTOMATIC_CODE_REVIEW_PASSES,
     completed_depth,
@@ -681,10 +682,11 @@ class SharedReview:
         checks = gate_diagnostics(check, self.runtime.diagnostic_bytes)
         self.release_pass(passes, {"kind": "gate_failed", "stage": "check", "head": head,
                                    "exit_code": check.get("exit_code"), "detail": detail, "checks": checks})
-        failed = next((c for c in checks if c["status"] == "fail"), {})
-        evidence = detail.strip() or (failed.get("stderr") or failed.get("stdout") or failed.get("reason") or "").strip()
+        # Each failing check by name with its own tail; the last 500 characters
+        # of one stream dropped the failing test's assertion (sd:2021).
+        evidence = "\n".join([detail.strip()] * bool(detail.strip()) + failing_check_tails(checks))
         raise Refusal(f"the repository gate failed before any reviewer was asked; no review pass was spent: "
-                      f"{evidence[-500:] or 'see the item ship receipt'}",
+                      f"{evidence or 'no check output; sd-ship observe prints the ship receipt'}",
                       code="gate_failed", boundary="runtime", state="retryable_failure",
                       next_action="Fix the gate, or rerun prepare when the machine is less loaded "
                                   "(--review-timeout raises the limit); the next prepare reviews normally.")

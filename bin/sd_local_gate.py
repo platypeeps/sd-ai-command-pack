@@ -42,6 +42,7 @@ from sd_gate_run import (
     GateError,
     base_ref,
     check_in_worktree,
+    failing_check_tails,
     gate_inputs,
 )
 from sd_ship_remote import Refusal
@@ -74,3 +75,21 @@ def local_gate(api: Any, root: pathlib.Path, head: str, *, base: str | None = No
                       next_action="Inspect the command error, resolve its cause, then retry.") from None
     post_gate_status(api, head, result, inputs)
     return {**result, "inputs": inputs}
+
+
+def refuse_failure(result: dict[str, Any], head: str, kept: str) -> None:
+    """Refuse a failed gate naming each failing check and its own tail, and where the report is kept (sd:2066).
+
+    The status description is cut to 140 characters, so `sd-check fail
+    (check fail)` was all a merge said, and finding the failing step meant
+    running the gate again. `kept` names the record that holds the whole report.
+    """
+    if result.get("status") != "failure":
+        return
+    named = failing_check_tails((result.get("report") or {}).get("checks"))
+    stderr = str(result.get("stderr") or "").strip()
+    said = "\n".join(named or [f"sd-check: {stderr[-1200:]}"] * bool(stderr))
+    raise Refusal(f"repo.ci is local and {CONTEXT} is failure on {head}: {result.get('summary') or 'sd-check failed'}"
+                  + (f"\n{said}" if said else "") + f"\nThe whole sd-check report is kept in {kept}.",
+                  code="ci_not_passing", boundary="ci", state="retryable_failure",
+                  next_action="Fix the failing check, push, then retry merge.")

@@ -1776,7 +1776,9 @@ class Ship(SharedReview):
             refuse_behind(observed, base)
             # Prepare ran this same gate and left a receipt at this head; a
             # matching one answers instead of a second run (sd:2041).
-            self.save(local_gate=sd_local_gate.local_gate(self.api, self.root, head, base=base, database=self.database))
+            gate = sd_local_gate.local_gate(self.api, self.root, head, base=base, database=self.database)
+            self.save(local_gate=gate)
+            sd_local_gate.refuse_failure(gate, head, f"the ship receipt's local_gate; `{self.observe_command()}` prints it")
         observed = self.settled_ready(observed["number"], head, base, protection)
         self.abandon_copilot_review(observed["number"], head)
         self.require_copilot_clearance(observed["number"], observed, head)
@@ -1831,16 +1833,34 @@ class Ship(SharedReview):
     def observe(self) -> dict:
         reference = self.state.get("pull_request")
         if not reference:
-            raise Refusal("there is no durable pull-request receipt to observe")
+            # Before a push stores a reference the checkpoint is the only
+            # record, and a refusal's "see the receipt" points at it (sd:2021).
+            return self.result(str(self.state.get("phase") or "new"), merged=False, observed_only=True,
+                               verified=False, receipt=self.receipt_view())
         pull = self.api.pull(reference["number"])
         if (str(pull.get("html_url", "")).lower() != reference["url"] or pull.get("base", {}).get("ref") != reference["base"]
                 or pull.get("head", {}).get("sha") != self.state.get("reviewed_head")):
             raise Refusal("remote PR differs from the prepared receipt")
         if pull.get("merged") is True:
             return self.result("merged", merged=True, observed_only=True, verified=False,
-                               merge_commit=pull.get("merge_commit_sha"))
+                               merge_commit=pull.get("merge_commit_sha"), receipt=self.receipt_view())
         return self.result("ready_to_send", merged=False, observed_only=True, verified=False,
-                           remote_state=pull.get("state"))
+                           remote_state=pull.get("state"), receipt=self.receipt_view())
+
+    def observe_command(self) -> str:
+        """The command that prints this identity's ship receipt."""
+        selector = f"--no-item --review-id {self.args.review_id}" if self.args.no_item else f"--item {self.args.item}"
+        return f"sd-ship observe {selector} --json"
+
+    def receipt_view(self) -> dict:
+        """The ship checkpoint's parts a refusal points at: the last review, a gate failure, the local gate."""
+        passes = list(self.state.get("passes") or [])
+        report = (passes[-1].get("report") or {}) if passes else {}
+        return {"phase": self.state.get("phase"), "passes": len(passes),
+                "review": {"head": passes[-1].get("head"), "status": report.get("status"),
+                           "findings": report.get("findings") or []} if passes else None,
+                "review_preflight_error": self.state.get("review_preflight_error"),
+                "local_gate": self.state.get("local_gate")}
 
     def reconcile(self) -> dict:
         reference = self.state.get("pull_request")
