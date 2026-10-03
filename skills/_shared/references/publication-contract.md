@@ -269,6 +269,16 @@ The refusal names the checkout to run in. `SD_PUBLISH_FROM_WORKTREE=1` on the
 invocation is the operator saying, in words, that this branch's content is the
 canonical copy.
 
+The main checkout queues a mirror from its default branch only (sd:2019). The
+re-render hook fires on a branch switch, so a feature branch or a detached HEAD
+would otherwise replace the pending request with unmerged text. Its vault copy
+and `docs/dashboard/` are still written, since the next render replaces both.
+The default branch is `origin`'s (`origin/HEAD`, then `origin/main` or
+`origin/master`; local `main` or `master` without `origin`), never the one
+HEAD's tracking remote names, so a branch that tracks a fork is held too.
+When no default branch resolves, nothing is queued.
+`SD_PUBLISH_FROM_WORKTREE=1` lifts this hold too.
+
 A render with `SD_SKIP_MIRROR` set queues nothing and leaves a pending request
 as it was; the value is the reason, and the render reports it. The re-render
 hook sets it for a branch checkout that lands behind its upstream, read off the
@@ -348,6 +358,12 @@ Draining is six steps per request, and the order matters:
    existed names only its paths; the next render rewrites it with the field,
    and a drain that reaches one first mirrors the file at `source`, as the
    contract then said.
+
+   **A relative link has one rendering (sd:2243).** A link to a target that
+   is mirrored to the same destination uses that target's recorded page URL.
+   A link to an unmirrored target becomes its repo-relative path in plain
+   text. Never write a `file:///` URL or an absolute path: no other reader
+   can open one, and drains that improvised gave one page set two link shapes.
 
    **Look before creating.** Where the request names no page or file, search
    the named container for one already carrying this document's title, and

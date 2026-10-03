@@ -1621,7 +1621,7 @@ def actionable_inventory(
     rows += _issue_rows(sections.get("issues") or {})
     rows += _branch_rows(root, pulls, protection)
     rows += _marker_rows(root)
-    rows += _tool_rows(root)
+    rows += _tool_rows(root, unchecked)
     rows += _mirror_rows(root, day, env)
     rows += _concern_rows(root)
     rows += _accepted_rows(protection)
@@ -1714,7 +1714,8 @@ def _s(count: int) -> str:
 #: so "idle in planning" cannot come to mean two different numbers of days.
 IDLE_DAYS = sd_lib.DEFAULT_DAYS
 
-_ITEM_DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
+#: The library's pattern, not a copy: `tests/test_sd_status.py` pins the parity.
+_ITEM_DATE_RE = sd_lib.ITEM_DATE_RE
 
 
 def _item_date(entry: dict[str, Any]) -> datetime.date | None:
@@ -1729,7 +1730,7 @@ def _item_date(entry: dict[str, Any]) -> datetime.date | None:
     `idle-planning` too, and that is the defect: it answers when an item began,
     while the check that read it says the item has been neglected since.
     """
-    stamps = (entry.get("created") or "", pathlib.PurePosixPath(entry["path"]).name)
+    stamps = (str(entry.get("created") or "").strip(), pathlib.PurePosixPath(entry["path"]).name)
     for text in stamps:
         found = _ITEM_DATE_RE.match(str(text))
         if not found:
@@ -3210,7 +3211,7 @@ _DISCLOSED_RE = re.compile(r"bin/(?P<tool>[A-Za-z0-9][A-Za-z0-9_-]*)")
 _MODULE_SUFFIX = ".py"
 
 
-def skill_surfaces(root: pathlib.Path) -> list[pathlib.Path]:
+def skill_surfaces(root: pathlib.Path, unread: list[str] | None = None) -> list[pathlib.Path]:
     """Every `SKILL.md` on disk, under either root in `SKILL_ROOTS`.
 
     This is the producer's answer to "what is a skill surface", and it exists
@@ -3230,18 +3231,27 @@ def skill_surfaces(root: pathlib.Path) -> list[pathlib.Path]:
     `tests/test_sd_status.py`, which asserts the two enumerations return the
     same set and fails the moment either widens or narrows alone.
 
-    Shaped to match the suite exactly -- directories under each root that hold
-    a `SKILL.md`, sorted by directory name -- rather than by a glob, because a
-    glob and an `iterdir()` walk disagree about a dotted directory, and a
-    difference that small is precisely the kind that drifts back.
+    Shaped to match the suite exactly: directories under each root that hold
+    a `SKILL.md`, sorted by directory name.
+
+    A root that exists but cannot be listed is appended to `unread` as
+    `<root>: <error>` and skipped, so the caller can mark its class unchecked
+    rather than report health over a tree it did not read. With no `unread`
+    list the error propagates: a partial list nobody is told about is worse.
     """
-    found = [
-        entry / "SKILL.md"
-        for name in SKILL_ROOTS
-        if (root / name).is_dir()
-        for entry in (root / name).iterdir()
-        if entry.is_dir() and (entry / "SKILL.md").is_file()
-    ]
+    found: list[pathlib.Path] = []
+    for name in SKILL_ROOTS:
+        if not (root / name).is_dir():
+            continue
+        try:
+            entries = list((root / name).iterdir())
+        except OSError as error:
+            if unread is None:
+                raise
+            unread.append(f"{name}/: {error.strerror or error}")
+            continue
+        found += [entry / "SKILL.md" for entry in entries
+                  if entry.is_dir() and (entry / "SKILL.md").is_file()]
     return sorted(found, key=lambda path: path.parent.name)
 
 
@@ -3284,7 +3294,7 @@ def _tool_candidates(tool: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys((tool, tool + _MODULE_SUFFIX)))
 
 
-def _tool_rows(root: pathlib.Path) -> list[dict[str, Any]]:
+def _tool_rows(root: pathlib.Path, unchecked: dict[str, str]) -> list[dict[str, Any]]:
     """Skills disclosing a tool under `bin/` that is not built.
 
     Exact and low-yield: a known roadmap that would print the same lines every
@@ -3310,7 +3320,11 @@ def _tool_rows(root: pathlib.Path) -> list[dict[str, Any]]:
     question to keep its own count at zero was answering a different one.
     """
     rows: list[dict[str, Any]] = []
-    for path in skill_surfaces(root):
+    unread: list[str] = []
+    surfaces = skill_surfaces(root, unread)
+    if unread:
+        unchecked.setdefault("undisclosed-tool", "cannot list " + "; ".join(unread))
+    for path in surfaces:
         try:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
