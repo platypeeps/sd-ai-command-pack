@@ -107,3 +107,16 @@ indirectly is not detected; a repository whose docs globs could match such a
 script must keep its globs narrow. The pack does not declare a scope in this
 change: its `skills/**` Markdown is tested payload, and a narrow enough glob
 set saves little.
+
+## Log
+
+- 2026-10-03, sd:1912: operator ruling D1 (relayed by the lead) drops the agent
+  harness's session variables (`CLAUDE*`, `HERDR_*`, `ITERM_*`,
+  `TERM_SESSION_ID`, `PWD`, `OLDPWD`, `SHLVL`, `_`) from the gate child's
+  environment. The binding is still the whole environment the child sees. With
+  D1 a builder's pass and the lead's prepare bind equal, so prepare now reads a
+  receipt at the same head and binding. That read is no weaker than the merge
+  gate's read of the same receipt. The 30-minute window is unchanged (ruling
+  D2), and it counts from the run that passed. "Prepare never reads a receipt"
+  above no longer holds. `sd gate check` records a builder's pass; using it is
+  optional (ruling D3).

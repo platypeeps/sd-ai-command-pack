@@ -82,3 +82,8 @@ commit and its inputs; a fix commit is a new head and a new run, by design.
 
 - 2026-09-28 created, from the operator's question during sd:1910: "we seem
   to run make check multiple times on the same code".
+- 2026-10-03 rulings D1-D3 (operator, via the lead): drop harness session
+  variables from the gate child (yes), widen the 30-minute window (no), make
+  builders use `sd gate check` (no, optional). Prepare's gate now reads a
+  same-head receipt; requirements 1-6 above (the pack's declared contract and
+  the measurements) remain open.
