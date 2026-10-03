@@ -25,6 +25,7 @@ import re
 import sqlite3
 import subprocess
 from pathlib import Path
+from typing import Callable
 
 import sd_lib
 import sd_review_material
@@ -49,6 +50,33 @@ def merged_receipts(connection: sqlite3.Connection, repository: str) -> list[dic
                 and SHA.fullmatch(str(value.get("merge_commit") or ""))):
             found.append(value)
     return found
+
+
+#: How many owed closes one carrier squash pays; the rest wait for the next (sd:1600).
+OWED_CLOSES_CAP = 10
+
+
+def owed_closes(connection: sqlite3.Connection, repository: str, body: str,
+                repository_of: Callable[[int], str]) -> tuple[list[dict], list[dict]]:
+    """The `Closes:` lines held squashes delivered by hand still owe, split at the cap.
+
+    A held squash's `Delivers:` closes nothing in git, and reconcile cannot push
+    to the default branch, so the hand delivery is owed a `Closes:` on the next
+    squash `sd-ship` lands in the same repository (sd:1600). A receipt pays only
+    into a carrier of its own repository, and only for an item whose row names
+    that repository; a line the body already holds is not written twice.
+    """
+    said = {line.strip() for line in body.splitlines()}
+    owed = []
+    for receipt in merged_receipts(connection, repository):
+        debt = receipt.get("closing_owed")
+        if not isinstance(debt, dict) or receipt.get("closing_paid") or not isinstance(debt.get("item"), int):
+            continue
+        if f"{sd_lib.CLOSES_TRAILER} sd:{debt['item']}" in said or repository_of(debt["item"]) != repository:
+            continue
+        owed.append(debt)
+    owed.sort(key=lambda debt: debt["item"])
+    return owed[:OWED_CLOSES_CAP], owed[OWED_CLOSES_CAP:]
 
 
 def reaches(root: Path, ancestor: str, descendant: str) -> bool:
