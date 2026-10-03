@@ -260,6 +260,9 @@ In a shared repository:
 
 Small change: branch, commit, local review, push, pull request, CI, merge.
 Use the ship workflow without inventing a planning artifact.
+After review, take a newer default branch with `git merge origin/<base>`, never a rebase:
+a rebase rewrites the reviewed commits, and the next push no longer fast-forwards
+the branch `sd-ship` pushed. `sd-ship prepare --catch-up` makes that merge.
 
 Change that earns a work item: `sd-plan` writes `prd.md` using the requirements
 already available and asks only for missing decisions. Then the small-change

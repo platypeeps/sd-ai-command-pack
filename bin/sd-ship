@@ -1750,11 +1750,15 @@ class Ship(SharedReview):
         # so the freshness `ready` read is read again here:
         # another lane on this account can advance the base between the two,
         # and the merge would land against a base nobody validated (sd:1110).
+        # The remedy is a merge, not a rebase, as in `assert_current_base`:
+        # a rebase rewrites the reviewed commits (sd:2034).
         unstrict = any(gap.get("id") == "strict" for gap in protection.get("accepted_gaps") or [])
         if ("declared_gap" in protection or unstrict) and self.api.commits_behind(base, head) != 0:
-            raise Refusal("the default branch advanced after the readiness check; rebase and re-review",
-                          code="base_moved", boundary="ci", state="retryable_failure",
-                          next_action="Update the branch onto the current default branch, then retry.")
+            raise Refusal(f"the default branch advanced after the readiness check; merge origin/{base} "
+                          "into the branch and re-review", code="base_moved", boundary="ci",
+                          state="retryable_failure",
+                          next_action=f"Run sd-ship prepare --catch-up, or git merge origin/{base} on the branch "
+                                      "and then prepare again.")
 
     def settled_ready(self, number: int, head: str, base: str, protection: dict) -> dict:
         """The pull request once `ready` accepts it, read again while GitHub settles (sd:2050).

@@ -112,6 +112,8 @@
 
 ### Fixed
 
+- `sd-ship merge`: the second `base_moved` refusal, read again just before the merge under a declared or accepted `strict` gap, now names `git merge origin/<base>` or `sd-ship prepare --catch-up` instead of a rebase. `WORKFLOW.md` states the rule: after review, take a newer default branch by a merge, never a rebase (sd:2034).
+
 - **A no-item `prepare` warns about a branch `Delivers:` trailer (sd:2171).**
   The no-item squash message carries no branch commit's `Delivers: sd:N`, so
   `sd task status N done --delivered-by <squash>` later found no trailer.

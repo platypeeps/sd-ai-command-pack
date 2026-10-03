@@ -5037,12 +5037,13 @@ class DeclaredGapCase(unittest.TestCase):
     def puts(self) -> int:
         return len([call for call in self.remote.calls if call.method == "PUT"])
 
-    def refuse(self, pattern: str, code: str | None = None) -> None:
+    def refuse(self, pattern: str, code: str | None = None) -> ship.Refusal:
         with self.assertRaisesRegex(ship.Refusal, pattern) as caught:
             self.merge()
         if code is not None:
             self.assertEqual(caught.exception.workflow["blocker"]["code"], code)
         self.assertEqual(self.puts(), 0)
+        return caught.exception
 
     def test_a_declared_gap_with_every_check_green_merges_once_and_the_receipt_says_so(self):
         self.declare()
@@ -5712,7 +5713,14 @@ class DeclaredGapCase(unittest.TestCase):
                     return 200, {"behind_by": 3, "ahead_by": 1, "status": "diverged"}
             return saved(method, path, body)
         double._route = route
-        self.refuse("default branch advanced after the readiness check", "base_moved")
+        refusal = self.refuse("default branch advanced after the readiness check", "base_moved")
+        # A reviewed branch takes the newer base by a merge, never a rebase,
+        # as WORKFLOW.md says (sd:2034).
+        said = f"{refusal}\n{refusal.workflow['next_action']}"
+        self.assertIn("git merge origin/main", said)
+        self.assertNotIn("rebase", said)
+        self.assertIn("take a newer default branch with `git merge origin/<base>`, never a rebase",
+                      " ".join((ROOT / "WORKFLOW.md").read_text().split()))
 
     def test_the_single_event_form_is_read(self):
         """Codex on the verification pass: `on: pull_request` returned no
