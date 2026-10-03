@@ -557,6 +557,16 @@
 
 ### Changed
 
+- **A task or followup merged associate-only can be delivered afterwards
+  (sd:1913).** `sd work deliver N SHA --associated --reason TEXT` (sd:1590)
+  closed only a work item and refused a task. On a task or followup it now
+  verifies reachability and `Item: sd:N` as `--delivered-by` verifies
+  `Delivers:`, and the move to done records the delivery sentence with the
+  reason. `sd-ship prepare --deliver` on a record that merged associate-only
+  refuses as `delivery_after_merge` and names that command with the merge
+  commit, where it used to reconcile in silence. `sd task status N done
+  --delivered-by` on an `Item:`-only commit names it too.
+
 - **An operator-observed criterion goes in the item's Log (sd:1933).**
   `WORKFLOW.md` records the operator's 2026-09-30 ruling: a criterion only
   the operator can observe is written in the item's `## Log`, dated, when it
