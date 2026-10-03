@@ -232,6 +232,17 @@
 
 ### Fixed
 
+- **The Dependabot guard keeps a consumer's trailing comment, and `guard same`
+  means unchanged (sd:1000).** A comment the consumer wrote below the last
+  `ignore:` item read as part of that item. A guard above it read `differs`,
+  and `--force` deleted the comment with the old guard. A guard appended to
+  such a list went below the comment and took it as its own, so the next
+  `setup-github` run refused without `--force`, and `--remove` deleted the
+  comment. A comment at an item's indentation below it now belongs to the
+  list, not the item. A file whose guard reads `same` now comes back from the
+  render byte for byte. Before, a file with no final newline read `guard same`,
+  was rewritten anyway, and `--check` then called it `DIFFERS`.
+
 - **A failed rules read leaves protection unknown, not unprotected
   (sd:1000).** An admin's 404 on classic protection says only that classic
   protection is absent; a ruleset may still gate the merge. When the rules
