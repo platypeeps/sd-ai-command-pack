@@ -218,6 +218,13 @@
 
 ### Fixed
 
+- **A held squash delivered by hand closes in git too (sd:1600).** Reconcile
+  records `closing_owed` on the receipt. The next `sd-ship merge` in the same
+  repository writes `Closes: <item>` into its squash's trailer block, at most
+  10 per squash, and names them in `carried_closes`; `closes_left` names the
+  rest. Its reconcile marks them paid only when that squash is not held. A
+  reader with no database sees the item open until that merge lands.
+
 - **`sd-review`'s Jev rows compare Jev with the routing (sd:2359).** `jev`
   computed `changed` against `--fallback`, which here is a token no tier can
   be, so every sd-review row in the judgment ledger said `changed=yes`. The
