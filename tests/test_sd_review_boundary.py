@@ -855,11 +855,15 @@ class LineBudgetTests(unittest.TestCase):
         # `renamed_material`, which sends a rename git detects as its rename
         # patch under the new path and a one-line record under the old one, so
         # a folder move fits the input limit and both paths stay listed.
+        # 4550 -> 4553 is sd:2076: `bin/sd_gate_run.py` grows +3 so the gate's
+        # child drops `FORCE_COLOR`, `CLICOLOR_FORCE` and `PY_COLORS` and gets
+        # `NO_COLOR=1` and `PYTHON_COLORS=0`: the wrapped tuple and the
+        # commented constant. A terminal's colour failed another repo's gate.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4550,
+            4553,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
