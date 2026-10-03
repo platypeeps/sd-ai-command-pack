@@ -987,7 +987,7 @@ class StalledRootTests(PluginFixture):
 
         def scan() -> None:
             with contextlib.redirect_stderr(said):
-                found.update(sd.registered([stalled, owner]))
+                found.update({prefix: path for prefix, (path, _) in sd.scan([stalled, owner]).items()})
 
         worker = threading.Thread(target=scan, daemon=True)
         worker.start()
@@ -996,6 +996,18 @@ class StalledRootTests(PluginFixture):
         self.assertEqual(list(found), ["pp"])
         self.assertIn(f"warning: skipped plugin root {stalled}: its sd-plugin.json did not answer within 0.3s",
                       said.getvalue())
+
+
+    def test_registration_refuses_while_a_root_is_silent(self) -> None:
+        """A silent root may own the prefix being registered; a uniqueness check cannot skip it."""
+
+        stalled = str(self.stalled())
+        self.write_config({"plugins": [stalled]})
+        newcomer = self.plugin("newcomer")
+        added = self.run_sd("plugin", "add", str(newcomer), timeout=60)
+        self.assertNotEqual(added.returncode, 0, "a plugin registered while another root was silent")
+        self.assertIn(f"plugin root(s) {stalled} did not answer within", added.stderr)
+        self.assertEqual(self.config()["plugins"], [stalled])
 
 
 class CorePolicyConfigTests(PluginFixture):

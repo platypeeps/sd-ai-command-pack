@@ -783,7 +783,8 @@ def registry(config: dict[str, object]) -> list[str]:
 ROOT_READ_SECONDS = 5.0
 
 
-def scan(roots: list[str], wanted: str | None = None) -> dict[str, tuple[pathlib.Path, dict[str, object]]]:
+def scan(roots: list[str], wanted: str | None = None, *,
+         complete: bool = False) -> dict[str, tuple[pathlib.Path, dict[str, object]]]:
     """Prefix -> (manifest path, manifest), for every root that answered in time.
 
     A prefix lives in its manifest, not in the root's path, so no lookup knows
@@ -823,6 +824,10 @@ def scan(roots: list[str], wanted: str | None = None) -> dict[str, tuple[pathlib
             answered[root] = (path, manifest)
             if wanted is not None and manifest.get("prefix") == wanted:
                 return {wanted: (path, manifest)}
+    if pending and complete:
+        raise Refusal(f"plugin root(s) {', '.join(pending)} did not answer within {ROOT_READ_SECONDS:g}s, "
+                      f"so no prefix can be shown unclaimed; make each readable or remove it from the "
+                      f"machine config, then run this again")
     for root in pending:
         print(f"warning: skipped plugin root {root}: its {MANIFEST_NAME} did not answer within "
               f"{ROOT_READ_SECONDS:g}s", file=sys.stderr)
@@ -834,9 +839,16 @@ def scan(roots: list[str], wanted: str | None = None) -> dict[str, tuple[pathlib
 
 
 def registered(roots: list[str]) -> dict[str, pathlib.Path]:
-    """Prefix -> manifest path, for every root whose manifest still reads; see `scan`."""
+    """Prefix -> manifest path, for every root whose manifest still reads; see `scan`.
 
-    return {prefix: path for prefix, (path, _) in scan(roots).items()}
+    Registration asks this to keep prefixes unique, so a root that does not
+    answer refuses instead of being skipped: a silent root may own the very
+    prefix being registered, and two owners would make every later lookup
+    pick whichever answers first. A lookup may skip a stalled root; a
+    uniqueness check may not.
+    """
+
+    return {prefix: path for prefix, (path, _) in scan(roots, complete=True).items()}
 
 
 def write_config(config: dict[str, object], path: pathlib.Path) -> None:

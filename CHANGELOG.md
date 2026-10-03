@@ -228,7 +228,9 @@
   each root reads in its own daemon thread. A lookup (`sd config get`, `set`,
   `unset`, and a plugin kind) returns as soon as its owner answers. A root
   silent after 5 s is skipped with a `warning: skipped plugin root` line.
-  Core `sd.*` keys still read no plugin root.
+  `sd plugin add` does not skip one: it refuses, naming the silent root,
+  because that root may own the prefix being registered. Core `sd.*` keys
+  still read no plugin root.
 
 - **`sd-review`'s Jev rows compare Jev with the routing (sd:2359).** `jev`
   computed `changed` against `--fallback`, which here is a token no tier can
