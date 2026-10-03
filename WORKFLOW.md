@@ -280,6 +280,11 @@ and GitHub's appended `Co-authored-by:` joins a trailer block that ends the
 message but opens a new paragraph after anything else.
 `.github/PULL_REQUEST_TEMPLATE.md` ends in that order, with `Refs:` only.
 
+A criterion only the operator can observe, such as a command running unprompted
+on their machine, is not a checklist box. Record it in the item's `## Log` with
+its date when it is observed; the delivering pull request never ticks it in
+advance (operator ruling 2026-09-30, sd:1933).
+
 `sd-ship` owns the lines `sd_lib.OWNED_TRAILERS` names: `Item:`, `Work:`,
 `Delivers:`, `Closes:`, `Authored-with:` and `Attributes:`. `prepare` appends
 `Work:` to the body it publishes, and `merge` appends `Item:`, `Delivers:` and
@@ -307,6 +312,13 @@ records completion and the shipment time together. Repeating that operation
 preserves the original receipt. A missing trailer or unavailable remote leaves
 the claim unverified and reports the missing evidence; a bare merged branch or
 stale issue status cannot close the item.
+
+A whole-item merge prepared without `--deliver` carries `Item:` and no
+`Delivers:`, so `sd work deliver` refuses it. `sd work deliver <row-id>
+<full-commit-sha> --associated --reason TEXT` closes that row. It runs the same
+reachability check, accepts the `Item:` trailer for the row instead, and records
+the trailer and the reason on the receipt. It refuses an ordinary task and a
+missing reason.
 
 `sd work cancel <row-id> --reason TEXT` records cancellation immediately,
 without a status-file change or another pull request. It does not claim the
@@ -429,8 +441,10 @@ the block; the file is untracked by construction.
 `sd_lib.guest_artifact_refusal` and `sd-ship`'s push check refuse
 `docs/work/`, `docs/spec/` and `docs/decisions/` in `guest` only, so a
 `minimal` repository can commit and push them unrefused. `sd-ship` also adds
-the `Work: sd:<id>` line in `minimal`, as it does in `full`. What `minimal`
-refuses is the review routing lane (R10-D5), as `guest` does.
+the `Work: sd:<id>` line in `minimal`, as it does in `full`. Only `guest`
+refuses the review routing lane (R10-D5): `minimal` is written by hand and
+never detected, so it names the operator's own quiet repository, and may
+install the lane (operator ruling 2026-09-30, sd:1292).
 
 Access decides where artifacts go, whichever namespace holds the
 repository. Without a `mode:` line, the pack asks three questions of the

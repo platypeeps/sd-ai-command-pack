@@ -4,6 +4,28 @@
 
 ### Added
 
+- **`sd work deliver --associated --reason` closes an item merged without
+  `--deliver` (sd:1590).** A whole-item merge prepared without `--deliver`
+  carried `Item: sd:<id>` and no `Delivers:`, and every verb that could close
+  the row refused it. `--associated` calls the library's
+  `deliver_associated_work`: the commit must be on the verified default branch
+  and name the item in an `Item:` trailer. The receipt records the trailer and
+  the reason. It needs a nonblank `--reason`, refuses an ordinary task, and
+  `--reason` without `--associated` is refused rather than dropped.
+
+- **A registry rule for sd-ship's protection-gap policy (sd:1460).** `R14-D1`
+  in `bin/sd_rules.py`: the merge gate honours a declared gap only for
+  `bypass` and `strict`, only on its exact live state, and never for a
+  missing `pull_request` rule. Its checker is
+  `bin/sd_ship_remote.py::validate_protection`, and leg d proves it by
+  replacing the exact-state match. `skills/sd-ship/SKILL.md` now states the
+  claim #1167 had reworded away, and cites the rule.
+
+- **A note on a done item prints an advisory (sd:1317).** `sd task note` on a
+  row whose status is `done` prints `sd: advisory: sd:N is done since <date>,
+  delivered by #<PR>` to stderr, from the item's latest merge comment, or the
+  delivering commit, or "no delivery is recorded". The note is still written.
+
 - **A guest repository can take decision records (sd:2168).** A `guest_allow: docs/decisions` line in the repository's `CLAUDE.local.md` block takes `docs/decisions/` out of the guest planning-artifact refusal: the `sd-ship` push check, the `sd-review --scope planning` gate and the `sd-status` shared-tree list. `docs/decisions/` stays refused by default, and `docs/work/` and `docs/spec/` stay refused always; naming either is a configuration error. The push check now reads `sd_lib.guest_refused_dirs` instead of its own copy of the three trees, and the installer's block template lists the key commented out.
 
 - **`sd fleet stamp` honours a per-repository exemption list (sd:1797).** A
@@ -131,6 +153,12 @@
   the remedy, a fresh commit.
 
 ### Fixed
+
+- **`sd writing list` and `import` refuse a checkout with no `content/`
+  folder (sd:1803).** They printed empty results and exited 0 in another
+  checkout, which reads as "no pieces" rather than "wrong checkout". The
+  refusal `verify` gained in sd:1660 now covers `list` and both forms of
+  `import`, and names the verb.
 
 - **The local gate ignores the terminal's colour settings (sd:2076).** The
   gate's child no longer inherits `FORCE_COLOR`, `CLICOLOR_FORCE` or
@@ -483,6 +511,21 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **An operator-observed criterion goes in the item's Log (sd:1933).**
+  `WORKFLOW.md` records the operator's 2026-09-30 ruling: a criterion only
+  the operator can observe is written in the item's `## Log`, dated, when it
+  is observed. The delivering pull request never ticks it in advance, so no
+  second pull request is needed for one checkbox.
+
+- **A `minimal` repository may install the review routing lane (sd:1292).**
+  R10-D5 refused the lane in `minimal` and `guest` alike, but `minimal` is
+  written by hand and never produced by detection: it names the operator's
+  own quiet repository, while `guest` means control was not established. By
+  the operator's 2026-09-30 ruling, `sd-review setup-github` now installs in
+  `full` and `minimal` and refuses `guest`. `--check` reads the same mode set
+  (`sd_setup_guard.LANE_MODES`), so a tracked lane in `minimal` is compared
+  against the template rather than marked `REMOVE` (sd:1285).
 
 - **The publication contract says how a drain renders a relative link
   (sd:2243).** A link to a target mirrored to the same destination uses its
