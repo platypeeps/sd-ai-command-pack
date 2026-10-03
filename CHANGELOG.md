@@ -112,6 +112,16 @@
 
 ### Fixed
 
+- **Stopping `sd gate run` no longer raises `PermissionError` (sd:2402).**
+  The signal it forwards to the command's process group now treats EPERM
+  like ESRCH: macOS answers `killpg` on a group that already exited with
+  either, and both mean the command is gone.
+
+- **`make check VENV=.venv` passes `tests.test_sd_lib` again (sd:1641).**
+  The tests' own `make` calls drop `MAKEFLAGS`, `MFLAGS` and `MAKELEVEL`, so
+  a VENV on the outer command line no longer reaches the fixture Makefile
+  and overrides its choice of environment.
+
 - **A receipt refusal names the declaration file; a timed-out gate names
   `--timeout` (sd:1560).** A missing, untracked or incomplete declaration now
   refuses with "track .github/sd-check-reuse.json, for example {...}", the
@@ -358,6 +368,14 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **The test run names its tree by content, and each shard by name (sd:2080).**
+  `run-tests.sh` adds `content=<tree-id>` to its `run-tests: start` and
+  `run-tests: end` lines on stderr. It is the tree id of the working tree,
+  untracked files included, so two edits of one dirty file read as two trees.
+  The end line reads it when the run ends, so an edit made during the run
+  shows as two ids. Each shard log now opens with `shard <name>: start`, so a
+  `Ran` line sits inside its own shard's labels instead of above them.
 
 - **The review prompt names six generic defect classes (sd:1635).** For a
   code subject, `sd-review` asks for external JSON used before narrowing, an
