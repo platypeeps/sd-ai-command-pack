@@ -220,6 +220,17 @@
 
 ### Fixed
 
+- **The Dependabot guard keeps a consumer's trailing comment, and `guard same`
+  means unchanged (sd:1000).** A comment the consumer wrote below the last
+  `ignore:` item read as part of that item. A guard above it read `differs`,
+  and `--force` deleted the comment with the old guard. A guard appended to
+  such a list went below the comment and took it as its own, so the next
+  `setup-github` run refused without `--force`, and `--remove` deleted the
+  comment. A comment at an item's indentation below it now belongs to the
+  list, not the item. A file whose guard reads `same` now comes back from the
+  render byte for byte. Before, a file with no final newline read `guard same`,
+  was rewritten anyway, and `--check` then called it `DIFFERS`.
+
 - **`sd-review`'s Jev rows compare Jev with the routing (sd:2359).** `jev`
   computed `changed` against `--fallback`, which here is a token no tier can
   be, so every sd-review row in the judgment ledger said `changed=yes`. The
