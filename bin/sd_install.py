@@ -2271,9 +2271,9 @@ def cmd_user(ctx: Context, out) -> int:
             "binDir": str(bin_dir),
             "owned": owned,
         }
-        previous = previous_commit(recorded, source["commit"])
-        if previous:
-            payload["previousCommit"] = previous
+        replaced = previous_commit(recorded, source["commit"])
+        if replaced:
+            payload["previousCommit"] = replaced
         if not ctx.dry_run:
             write_receipt(ctx.receipt, payload)
         recovery.pop_all()
