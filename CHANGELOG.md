@@ -245,6 +245,10 @@
   (`closes_item_unknown`) or belongs to another repository
   (`closes_item_foreign`). One the merge could not close returns
   `delivery_pending: true` with `closes_failed`, and `reconcile` retries it.
+  Each item is verified against the landed message, as the claimed item is,
+  so a pull request merged on GitHub without its `Delivers:` lines leaves
+  those items open, and one already done by hand needs evidence for this
+  commit.
   `Refs:` still names related items, which stay open.
 
 - **The merge gate reads every reviewer's findings, not only Copilot's

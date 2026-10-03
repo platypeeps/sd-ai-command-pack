@@ -2818,6 +2818,47 @@ roles:
         again = self.operation("reconcile").reconcile()
         self.assertFalse(again["delivery_pending"], again)
 
+    def test_a_web_merge_without_the_closes_trailers_leaves_those_items_open(self):
+        """A pull request merged on GitHub lands whatever message the web form
+        held. Each `Closes:` item is verified against the landed message, as
+        the claimed item is: one whose `Delivers:` did not land stays open,
+        and one already done by hand needs delivery evidence for this commit."""
+        from sd_db.workflow import change_status
+        self.task_item("task")
+        closes = self.closes_items()
+        by_hand = create_item(self.connection, kind="task", title="closed by hand", status="planning",
+                              repo=str(self.operator))
+        named = (*closes, by_hand)
+        body = self.directory / "body.md"
+        body.write_text("Fixes in one change.\n\nCloses: " + ", ".join(f"sd:{number}" for number in named) + "\n")
+        self.unanswered("--deliver", "--body-file", str(body)).prepare()
+        change_status(self.connection, by_hand, "done", who="operator")
+        saved = self.double._route
+
+        def route(method, path, body):
+            if method == "PUT" and path.endswith("/merge"):
+                # The web form kept the claimed item's trailer and dropped the rest.
+                body = {**body, "commit_message": "\n".join(
+                    line for line in body["commit_message"].splitlines()
+                    if not any(line == f"Delivers: sd:{number}" for number in named))}
+            return saved(method, path, body)
+        self.double._route = route
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        commit = result["merge_commit"]
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "done")
+        self.assertTrue(result["delivery_pending"], result)
+        self.assertEqual(result["workflow"]["blocker"]["code"], "closes_delivery_pending")
+        self.assertEqual(result["closed_items"], [])
+        failed = result["closes_failed"]
+        for number in closes[:2]:
+            with self.subTest(item=number):
+                self.assertEqual(failed[f"sd:{number}"], f"{commit} carries no `Delivers: sd:{number}` trailer")
+                self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (number,)).fetchone()[0], "planning")
+        self.assertIn("Delivers", failed[f"sd:{closes[2]}"])
+        self.assertNotEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (closes[2],)).fetchone()[0], "done")
+        self.assertIn(f"item {by_hand} is done without delivery evidence for {commit}", failed[f"sd:{by_hand}"])
+
     def test_an_associate_only_merge_still_closes_its_closes_items(self):
         self.task_item("task")
         closes = self.closes_items()[:1]

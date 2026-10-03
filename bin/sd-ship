@@ -1732,23 +1732,29 @@ class Ship(SharedReview):
         return None if row is None else row["status"]
 
     def close_items(self, commit: str, ref: str) -> tuple[list[int], dict[str, str]]:
-        """Close each open `Closes:` item at the verified merge, as the claimed item closes."""
+        """Close each `Closes:` item at the verified merge, verified as the claimed item is.
+
+        The landed message is read, never assumed: a pull request merged on
+        GitHub carries whatever message the web form held, so an item whose
+        `Delivers:` did not land stays open, with the reason in `failed`.
+        """
         sd_lib.import_sd_db()  # main() resolved it already; this keeps the gateway's order visible here
         from sd_db.errors import SdDbError
         from sd_db.progress import deliver_work
-        from sd_db.workflow import WorkflowError, change_status
+        from sd_db.workflow import WorkflowError
         closed, failed = [], {}
         for number in self.co_delivered():
             row = self.connection.execute("SELECT kind, status FROM item WHERE id = ?", (number,)).fetchone()
             try:
                 if row is None:
                     raise ValueError("the item no longer exists")
-                if row["status"] != "done":
-                    if row["kind"] == "work":
-                        deliver_work(self.connection, number, commit, who="sd-ship", verification_root=self.root)
-                    else:
-                        # The sentence `close_task` writes, so one query finds every delivering commit.
-                        change_status(self.connection, number, "done", who="sd-ship", reason=f"delivered at {commit} on {ref}")
+                if row["kind"] != "work":
+                    self.close_task(commit, ref, number)
+                elif not self.delivered_at(commit, number):
+                    if row["status"] == "done":
+                        raise ValueError(f"item {number} is done without delivery evidence for {commit}; "
+                                         "reopen it, then run sd-ship reconcile")
+                    deliver_work(self.connection, number, commit, who="sd-ship", verification_root=self.root)
                 closed.append(number)
             except (SdDbError, WorkflowError, sqlite3.Error, ValueError) as error:
                 failed[f"sd:{number}"] = str(error)
@@ -1775,17 +1781,18 @@ class Ship(SharedReview):
         git(self.root, "fetch", "--no-tags", "origin", f"refs/heads/{base}")
         return git(self.root, "merge-base", head, "FETCH_HEAD")
 
-    def delivered_at(self, commit: str) -> bool:
-        """Whether the row already records delivery at `commit`, by hand or earlier."""
+    def delivered_at(self, commit: str, number: int | None = None) -> bool:
+        """Whether the row (the claimed item by default) already records delivery at `commit`."""
         from sd_db.progress import completion_record
-        row = self.connection.execute("SELECT * FROM item WHERE id = ?", (self.args.item,)).fetchone()
+        number = self.args.item if number is None else number
+        row = self.connection.execute("SELECT * FROM item WHERE id = ?", (number,)).fetchone()
         if row is not None and row["kind"] != "work":
             # A task keeps no completion receipt. Its record is the move to
             # done, and only one that names this commit counts: a plain close
             # says nothing about the tree this merge landed.
             last = self.connection.execute(
                 "SELECT body FROM note WHERE item = ? AND kind = 'status_change' ORDER BY id DESC LIMIT 1",
-                (self.args.item,)).fetchone()
+                (number,)).fetchone()
             return row["status"] == "done" and last is not None and f"delivered at {commit} on " in last["body"]
         record = completion_record(row) if row is not None else None
         return record is not None and record.get("outcome") == "delivered" and record.get("commit") == commit
@@ -1812,8 +1819,8 @@ class Ship(SharedReview):
         base = self.state["pull_request"]["base"]
         return f"close it with `sd task status {self.args.item} done --reason 'delivered at {commit} on origin/{base}'`"
 
-    def close_task(self, commit: str, ref: str) -> None:
-        """Move a delivering task or followup to done once, with the delivery sentence.
+    def close_task(self, commit: str, ref: str, number: int | None = None) -> None:
+        """Move a delivering task or followup (the claimed item by default) to done once.
 
         `reconcile` has already verified `commit` on the fetched tip of `ref`.
         The squash must still carry the `Delivers:` this receipt wrote, the
@@ -1822,17 +1829,18 @@ class Ship(SharedReview):
         `sd_db.progress` write, so one query finds every delivering commit.
         """
         from sd_db.workflow import change_status, item_state
-        row = item_state(self.connection, self.args.item)["item"]
-        if self.delivered_at(commit):
+        number = self.args.item if number is None else number
+        row = item_state(self.connection, number)["item"]
+        if self.delivered_at(commit, number):
             return
         if row["status"] == "done":
-            raise ValueError(f"item {self.args.item} is done without delivery evidence for {commit}; "
+            raise ValueError(f"item {number} is done without delivery evidence for {commit}; "
                              f"reopen it, then run sd-ship reconcile")
-        wanted = f"sd:{self.args.item}"
+        wanted = f"sd:{number}"
         block = sd_lib.trailer_block(git(self.root, "show", "-s", "--format=%B", commit)).splitlines()
         if not any(line.partition(":")[0] == "Delivers" and line.partition(":")[2].strip() == wanted for line in block):
             raise ValueError(f"{commit} carries no `Delivers: {wanted}` trailer")
-        change_status(self.connection, self.args.item, "done", who="sd-ship",
+        change_status(self.connection, number, "done", who="sd-ship",
                       reason=f"delivered at {commit} on {ref}")
 
     def require_copilot_abandonment_authority(self) -> None:
