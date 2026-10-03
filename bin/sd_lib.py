@@ -2570,15 +2570,16 @@ def _attribution_environment(root: pathlib.Path) -> dict[str, str] | None:
 
 
 def attribute(
-    root: pathlib.Path, target: str, name: str, registry: Any
+    root: pathlib.Path, target: str, name: str, registry: Any, writer: str = HUMAN_AUTHOR
 ) -> tuple[str, str, list[str]]:
     """Record `name` as the author of `target`, as one empty commit on `HEAD`.
 
     `target` is one commit or a `<from>..<to>` range. What lands is a single
     empty commit carrying an `Attributes:` line per repaired commit and its own
-    `Authored-with: human`, because the operator made it and a repair that
-    needs repairing is not one (C-40). Returns the new sha, the value written
-    and the commits covered.
+    `Authored-with: <writer>`, the resolved value of whoever ran it: `human`
+    for the operator, an agent's own entry for an agent (sd:2009), because a
+    repair that needs repairing is not one (C-40). Returns the new sha, the
+    value written and the commits covered.
 
     A commit rather than a note: a notes ref is one mutable ref a repository
     shares, and two clones attributing different commits of one branch diverge
@@ -2592,12 +2593,12 @@ def attribute(
     value = attribution_value(name, registry)
     covered = _covered(root, target)
     trailers = [f"{ATTRIBUTES_TRAILER} {sha} {value}" for sha in covered]
-    trailers.append(f"{AUTHORED_TRAILER} {HUMAN_AUTHOR}")
+    trailers.append(f"{AUTHORED_TRAILER} {writer}")
     written = subprocess.run(  # fixed argv, no shell
         ["git", "commit", "--allow-empty", "--quiet",
          "-m", f"chore(attribution): {len(covered)} commit(s) written with {value}",
-         "-m", "Recorded by the operator, after the fact, for commits that predate "
-               "the trailer or lost it to a rewrite.",
+         "-m", f"Recorded by {'the operator' if writer == HUMAN_AUTHOR else writer}, after the "
+               "fact, for commits that predate the trailer or lost it to a rewrite.",
          "-m", "\n".join(trailers)],
         cwd=str(root), capture_output=True, text=True,
         env=_attribution_environment(root),

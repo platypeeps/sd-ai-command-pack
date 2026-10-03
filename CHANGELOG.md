@@ -14,6 +14,12 @@
   `sd attribute` never amends. A harness sets the variable for its session,
   and a job for its run.
 
+- **`sd attribute`'s repair commit names who ran it (sd:2009, gap 1).** It
+  always wrote `Authored-with: human`, so an agent's repair had to be amended
+  by hand. It now writes the entry `SD_AUTHOR` names, resolved as the
+  commit-msg hook resolves it, and `human` when the variable is unset. A name
+  nothing resolves refuses and writes nothing.
+
 - **`Authored-with: script` for unattended job commits (sd:1637).** A
   scheduled job that commits generated data had no fitting value, so it
   wrote `human` and counted as the operator. `script` is a reserved peer of
