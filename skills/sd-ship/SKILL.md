@@ -252,6 +252,7 @@ Its `next_action` names the `sd-ship adjudicate` command that prints each findin
 Use acceptance only for a complete review of the exact clean head with passing deterministic checks.
 It cannot waive missing depth, incomplete transport, failed checks, or changed source.
 Fixes still require verification on their new head.
+A rejection that still stands after one review pass is recorded with `sd-ship adjudicate` before the next fix is pushed.
 Before proposing or accepting dispositions, read `skills/sd-ship/references/adjudication.md` in the sd-ai-command-pack checkout.
 Standing merge permission does not approve individual findings.
 Do not invent acceptance for the operator.

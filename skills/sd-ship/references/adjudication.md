@@ -5,6 +5,7 @@ Use it only for a complete review of the exact clean head with passing determini
 It permits supported rebuttals or explicitly accepted risks.
 It waives no missing depth, incomplete transport, failed check, or source change.
 A fix needs verification on its new head.
+Record a rejection that survives one review pass here before the next fix is pushed (`skills/sd-ship/SKILL.md`, Evidence-backed disposition acceptance).
 For itemless records, replace `--item ID` below with `--no-item --review-id ID`.
 
 1. Run `sd-ship adjudicate --item ID --expected-head SHA --json`.
