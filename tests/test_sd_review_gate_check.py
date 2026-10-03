@@ -49,7 +49,9 @@ class GateBound(ReviewFixture):
         self.assertEqual(call["argv"][call["argv"].index("--timeout") + 1], str(sd_review.sd_lib.GATE_CHECK_SECONDS))
 
 
-class GateCheck(ReviewFixture):
+class GateRepo(ReviewFixture):
+    """A branch one commit ahead of `origin/main`, whose check counts its runs."""
+
     def repo(self) -> tuple[pathlib.Path, pathlib.Path]:
         from sd_db import initialise
 
@@ -71,13 +73,16 @@ class GateCheck(ReviewFixture):
         return sd_review.run_gate_check(root, sd_review.subprocess_runner, self.environment(), 120, "main",
                                         namespace(database=database))
 
-    def test_prepare_records_a_receipt_and_never_reads_one(self) -> None:
-        """Reuse spans only prepare to merge: a second prepare at the head runs the check again."""
+
+class GateCheck(GateRepo):
+    def test_a_second_prepare_at_the_head_reuses_the_first_ones_pass(self) -> None:
+        """sd:1912: one passing check per head. A second prepare at the same head
+        and binding reads the first one's receipt instead of running again."""
         root, database = self.repo()
         first, second = self.gate(root, database), self.gate(root, database)
         self.assertEqual((first["status"], first["source"]), ("pass", "gate"), json.dumps(first)[:2000])
-        self.assertEqual((second["status"], second["source"]), ("pass", "gate"))
-        self.assertEqual(len((self.tmp / "runs").read_text().splitlines()), 2)
+        self.assertEqual((second["status"], second["source"]), ("pass", "gate-receipt"))
+        self.assertEqual(len((self.tmp / "runs").read_text().splitlines()), 1)
 
     def test_the_merge_gate_reads_prepares_receipt(self) -> None:
         import sd_gate_run
@@ -125,3 +130,108 @@ class GateCheck(ReviewFixture):
         taken = gate["report"]["gate_slot"]
         self.assertEqual((taken["slots"], taken["source"]), (1, "SD_GATE_SLOTS"))
         self.assertEqual(pathlib.Path(taken["path"]).parent, slots)
+
+
+class BuilderReceipt(GateRepo):
+    """`sd gate check` (sd:1912): a builder's passing gate at a head is the one prepare's gate reuses.
+
+    A plain `make check` leaves nothing a gate can trust; this verb runs the
+    gate's own check, in a clean worktree at HEAD, and records its receipt.
+    """
+
+    def environment(self, **extra: str) -> dict[str, str]:
+        """The fixture's environment as a Python child holds it.
+
+        The interpreter adds variables at start (`LC_CTYPE` by locale
+        coercion; `__CF_USER_TEXT_ENCODING` on macOS), and the gate binds the
+        environment whole. Both sides here start from what a child holds, as a
+        builder's `sd gate check` and a lead's `sd-ship prepare` both do.
+        """
+        shown = subprocess.run([sys.executable, "-c", "import json, os; print(json.dumps(dict(os.environ)))"],
+                               env=super().environment(**extra), capture_output=True, text=True, check=True)
+        return json.loads(shown.stdout)
+
+    def builder(self, root: pathlib.Path, database: pathlib.Path, **extra: str) -> subprocess.CompletedProcess:
+        return subprocess.run([sys.executable, str(pathlib.Path(sd_review._BIN) / "sd"), "gate", "check",
+                               "--base", "main", "--database", str(database)],
+                              cwd=root, capture_output=True, text=True, env=self.environment(**extra), timeout=600)
+
+    def runs(self) -> int:
+        counter = self.tmp / "runs"
+        return len(counter.read_text().splitlines()) if counter.exists() else 0
+
+    def test_prepare_reuses_the_builders_pass_at_the_same_head(self) -> None:
+        root, database = self.repo()
+        done = self.builder(root, database)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        built = json.loads(done.stdout)
+        self.assertEqual((built["status"], built["head"]), ("success", git(root, "rev-parse", "HEAD")))
+        self.assertIn("receipt_revision", built)
+        gate = self.gate(root, database)
+        self.assertEqual((gate["status"], gate["source"]), ("pass", "gate-receipt"), json.dumps(gate)[:2000])
+        self.assertEqual(self.runs(), 1)
+
+    def test_a_builder_in_another_agent_session_is_reused(self) -> None:
+        """sd:1912, D1: a builder's session and the lead's differ in the agent
+        harness's own variables; the gate drops those, so the pass binds equal."""
+        root, database = self.repo()
+        done = self.builder(root, database, CLAUDE_CODE_SESSION_ID="builder", HERDR_PANE_ID="p1", SHLVL="2",
+                            PWD=str(root), TERM_SESSION_ID="t1")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        gate = sd_review.run_gate_check(root, sd_review.subprocess_runner,
+                                        self.environment(CLAUDE_CODE_SESSION_ID="lead", CLAUDE_EFFORT="low"),
+                                        120, "main", namespace(database=database))
+        self.assertEqual(gate["source"], "gate-receipt", json.dumps(gate)[:2000])
+        self.assertEqual(self.runs(), 1)
+
+    def test_a_merge_of_main_is_a_new_head_and_runs_again(self) -> None:
+        root, database = self.repo()
+        self.assertEqual(self.builder(root, database).returncode, 0)
+        git(root, "checkout", "-q", "main")
+        (root / "other.py").write_text("y = 2\n", encoding="utf-8")
+        git(root, "add", "other.py")
+        git(root, "commit", "-q", "-m", "main moved")
+        git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        git(root, "checkout", "-q", "topic")
+        git(root, "merge", "-q", "--no-edit", "main")
+        gate = self.gate(root, database)
+        self.assertEqual((gate["status"], gate["source"]), ("pass", "gate"))
+        self.assertEqual(self.runs(), 2)
+
+    def test_a_failed_builder_run_leaves_nothing_to_reuse(self) -> None:
+        root, database = self.repo()
+        flag = self.tmp / "fail"
+        self.local_block(root, f"check: sh -c 'echo run >> {self.tmp / 'runs'}; test ! -e {flag}'")
+        git(root, "add", "-A")
+        git(root, "commit", "-q", "--allow-empty", "-m", "check can fail")
+        flag.write_text("", encoding="utf-8")
+        done = self.builder(root, database)
+        self.assertEqual((done.returncode, json.loads(done.stdout)["status"]), (1, "failure"))
+        flag.unlink()
+        gate = self.gate(root, database)
+        self.assertEqual((gate["status"], gate["source"]), ("pass", "gate"))
+        self.assertEqual(self.runs(), 2)
+
+    def test_a_run_that_did_not_finish_leaves_nothing_to_reuse(self) -> None:
+        """A timed-out check is partial: `sd-check` reports no pass, and nothing is recorded."""
+        import sd_gate_run
+
+        root, database = self.repo()
+        head = git(root, "rev-parse", "HEAD")
+        partial = sd_gate_run.check_in_worktree(root, head, base=sd_gate_run.base_ref("main"), database=database,
+                                                environ=self.environment(),
+                                                run=lambda argv, env, cwd, limit: (None, "sd-check timed out", ""))
+        self.assertEqual(partial["status"], "failure")
+        self.assertNotIn("receipt_revision", partial)
+        gate = self.gate(root, database)
+        self.assertEqual((gate["status"], gate["source"]), ("pass", "gate"))
+
+    def test_a_builder_run_under_another_environment_is_not_reused(self) -> None:
+        """The binding holds the gate child's whole environment, so a shell that
+        differs in a variable that may choose what runs gets its own check."""
+        root, database = self.repo()
+        done = self.builder(root, database, MAKEFLAGS="-k")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        gate = self.gate(root, database)
+        self.assertEqual(gate["source"], "gate")
+        self.assertEqual(self.runs(), 2)
