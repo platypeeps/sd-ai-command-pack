@@ -44,8 +44,8 @@ GATE_FILES = (
 CHECK_FILES = (
     "sd-check", "sd_check_receipts.py", "sd_gate_slots.py",
     # sd:2041, sd:2072. The gate check sd-review runs, its receipts and its docs-only scope;
-    # prepare and the merge gate run them again live.
-    "sd_gate_run.py", "sd_gate_receipts.py", "sd_check_scope.py",
+    # prepare and the merge gate run them again live. sd:2493: its Rust build cache.
+    "sd_gate_run.py", "sd_gate_receipts.py", "sd_check_scope.py", "sd_gate_cache.py",
 )
 #: The `verdict` files that parse reviewer output or dispose findings
 #: (`parse_findings`, `dispose` and `finish_review` in `sd-review`,

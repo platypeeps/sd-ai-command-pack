@@ -47,6 +47,7 @@ import sys
 import tempfile
 from typing import Any, Callable, Mapping
 
+import sd_gate_cache
 import sd_gate_receipts
 import sd_lib
 
@@ -63,9 +64,10 @@ REPORT_GRACE_SECONDS = 60
 #: The tail of `sd-check`'s own stderr the receipt keeps, as `sd-check` tails each check's.
 STDERR_TAIL_CHARS = 4000
 LOCAL_BLOCK = "CLAUDE.local.md"
-#: Variables that pick Python packages; the child must not inherit the caller's.
+#: Variables the child must not inherit from the caller: Python package selectors, forced colour,
+#: and the operator's Rust build folder, which `sd_gate_cache.cargo_target` replaces with the gate's own (sd:2493).
 DROPPED_ENVIRONMENT = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX", "__PYVENV_LAUNCHER__",
-                       "FORCE_COLOR", "CLICOLOR_FORCE", "PY_COLORS")
+                       "FORCE_COLOR", "CLICOLOR_FORCE", "PY_COLORS", "CARGO_TARGET_DIR")
 #: Session variables, by name or prefix: dropped so two sessions' passes at one head bind equal (sd:1912, D1).
 SESSION_ENVIRONMENT = ("CLAUDECODE", "TERM_SESSION_ID", "PWD", "OLDPWD", "SHLVL", "_")
 SESSION_PREFIXES = ("CLAUDE_", "HERDR_", "ITERM_")
@@ -110,7 +112,8 @@ def gate_inputs(root: pathlib.Path, head: str) -> str:
 
 
 def gate_environment(root: pathlib.Path, environ: dict[str, str] | None = None) -> dict[str, str]:
-    """The caller's environment without package selectors, forced colour, session variables, `PATH` entries in `root`, or venv `bin`s.
+    """The caller's environment without package selectors, forced colour, the operator's `CARGO_TARGET_DIR`,
+    session variables, `PATH` entries in `root`, or venv `bin`s.
 
     Plus `SD_LOCAL_GATE=1`, `NO_COLOR=1` and `PYTHON_COLORS=0`, whatever the caller had them set to.
     """
@@ -179,7 +182,8 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
                 return {"head": gate_git(tree, "rev-parse", "HEAD"), **reading}
             argv = [sys.executable, str(BIN / "sd-check"), "--json", "--timeout", str(timeout),
                     *(["--base", base] if base else [])]
-            code, output, errors = (run or run_child)(argv, env, tree, timeout + REPORT_GRACE_SECONDS)
+            with sd_gate_cache.cargo_environment(root, tree, env) as child:
+                code, output, errors = (run or run_child)(argv, child, tree, timeout + REPORT_GRACE_SECONDS)
             checked = gate_git(tree, "rev-parse", "HEAD")
             reading = check_reading(code, output, errors)
             if record and database and identity and reading["status"] == "success" and checked == head:

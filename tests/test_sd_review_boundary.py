@@ -879,11 +879,17 @@ class LineBudgetTests(unittest.TestCase):
         # as `--baseline` and the routing time as `--baseline-ms`, retries once
         # without them when an older `jev` refuses the flag, and says why in the
         # module docstring (+19); `bin/sd-review` +5 times `sd_route.route`.
+        # 4682 -> 4686 is sd:2493: `bin/sd_gate_run.py` +4 to run the check
+        # inside `sd_gate_cache.cargo_environment` (+1), drop the operator's
+        # `CARGO_TARGET_DIR` (+1 comment line), import the module (+1) and
+        # say so in `gate_environment` (+1). The cache itself is
+        # `bin/sd_gate_cache.py`, gate code outside the lane as
+        # `sd_gate_receipts` is: `sd-review` does not import it.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4682,
+            4686,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

@@ -142,6 +142,11 @@ After the switch:
   It runs `sd-check` there, not in your checkout, and removes the worktree after.
 - The child drops `PYTHONPATH`, `PYTHONHOME`, `VIRTUAL_ENV`, `CONDA_PREFIX` and `PATH` entries inside your checkout.
   It also drops any `PATH` entry whose parent holds `pyvenv.cfg`: a virtualenv's `bin`, wherever it lives.
+- A Rust repository (any tracked `Cargo.toml`) builds into a warm folder the gate owns, not the worktree's `target/` (sd:2493).
+  Each repository keeps two under `${XDG_CACHE_HOME:-~/.cache}/sd/gate/`, one gate at a time in each; `CARGO_TARGET_DIR` names it.
+  When both are held, the run builds cold in its worktree. Your own `CARGO_TARGET_DIR` never reaches the check.
+  `SD_GATE_CARGO_TARGETS` sets the count, `0` switches the cache off, and `SD_GATE_CACHE_DIR` moves it.
+  Cargo prunes nothing there; delete a folder to reclaim its space.
 - This is a self-hosted runner, not a hermetic build.
   The gate guarantees a clean tree at the exact head, a scrubbed Python environment and no virtualenv on `PATH`.
   The rest of `PATH` and the system tools are this machine's image.
