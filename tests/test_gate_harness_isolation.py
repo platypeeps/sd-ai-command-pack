@@ -886,7 +886,7 @@ class GateSlotTests(unittest.TestCase):
 
     def test_make_test_sets_the_cap_and_a_holder_lifts_it_for_its_children(self):
         makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
-        self.assertIn("SD_GATE_SLOTS ?= 2", makefile)
+        self.assertIn('SD_GATE_SLOTS ?= $(shell "$(PYTHON)" bin/sd_gate_slots.py count', makefile)
         self.assertIn('SD_GATE_SLOTS="$(SD_GATE_SLOTS)"', makefile)
         self.assertIn("export SD_GATE_SLOTS=0", HARNESS.read_text(encoding="utf-8"))
 

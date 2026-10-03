@@ -4,6 +4,17 @@
 
 ### Added
 
+- **One gate-slot pool for every gate, and a waiting gate names its holders
+  (sd:2522).** The slots were already machine-wide, but the callers counted
+  them differently. `sd-check` read `sd.gate_slots`, the pack's own
+  `make test` read 2 from its Makefile, and the stdlib
+  `sd_gate_slots.py run|status` ignored the setting. Every entry point now
+  takes its count from `sd.gate_slots`. `sd_gate_slots.py count` prints it for
+  the Makefile. The waiting line names each holder's label, pid, directory and
+  start time. The default stays a quarter of the cores. Wrap a plain
+  `make check` as `sd gate run -- make check`; a per-repository `lockf` in a
+  lane script is no longer needed.
+
 - **`sd-slice-builder` holds `Skill` and `Monitor` (sd:2526).** A builder
   waited on a gate longer than one Bash call with a `sleep` loop or a
   background task, and could not run a skill its brief named. The agent now
