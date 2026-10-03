@@ -5207,13 +5207,21 @@ class DeclaredGapCase(unittest.TestCase):
         self.assertEqual(pull_head_waits(sleep), [])
         self.assertEqual(self.puts(), 0)
 
+    def merge_gate_fails(self, failing: str) -> None:
+        """Commit a check that passes in the operator's clone, where `.git` is a
+        directory, and fails in a worktree, where it is a file. Prepare's branch
+        review also checks in a worktree (sd:2077), so a marker outside both
+        lets that first worktree run pass and every later one run `failing`."""
+        marker = pathlib.Path(tempfile.mkdtemp()) / "prepared"
+        self.addCleanup(shutil.rmtree, marker.parent, True)
+        self.commit({"Makefile": f"check:\n\t@test -d .git || if [ -e {marker} ]; then {failing}; else touch {marker}; fi\n"})
+
     def test_ci_local_with_a_failing_check_posts_failure_and_refuses(self):
-        """The check passes in the operator's clone, where `.git` is a directory,
-        and fails in the gate's worktree, where it is a file: the real run, and
-        proof it ran in the worktree rather than the checkout."""
-        self.commit({"Makefile": "check:\n\t@test -d .git\n"})
+        """The merge gate's check fails in its worktree: the real run, and proof
+        it ran in the worktree rather than the checkout."""
+        self.merge_gate_fails("exit 1")
         self.declare()
-        # Prepared before the switch, so prepare's check ran in the clone and passed.
+        # Prepared before the switch, so prepare's check ran first and passed.
         self.local_green()
         self.local_ci()
         self.refuse(r"sd/local-gate is failure", "ci_not_passing")
@@ -5222,7 +5230,7 @@ class DeclaredGapCase(unittest.TestCase):
     def test_ci_local_failure_names_the_failing_check_its_tail_and_the_receipt(self):
         """sd:2066. The merge said only `sd-check fail (check fail)`, the status
         description; finding the failing step meant running the gate again."""
-        self.commit({"Makefile": "check:\n\t@test -d .git || { echo sd2066-out; echo sd2066-err >&2; exit 1; }\n"})
+        self.merge_gate_fails("echo sd2066-out; echo sd2066-err >&2; exit 1")
         self.declare()
         self.local_green()
         self.local_ci()
