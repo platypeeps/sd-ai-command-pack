@@ -4,6 +4,8 @@
 
 ### Added
 
+- **`sd-ship lane`: a serial ship queue per repository that outlives its session (sd:2524).** `enqueue`, `list` and `cancel` edit a queue file under `sd.lane_root` (new setting; unset reads `$XDG_STATE_HOME/sd/lanes`, `SD_LANE_ROOT` overrides it). `run` drains it in order under one lock per repository: head check, `prepare --catch-up`, then `merge` for an entry queued with `--manual`; a failed entry is marked and the next runs, a second runner exits at once, and each step's whole output is kept. `watch` prints each gate end a lane or builder log records, once.
+
 - **`sd-slice-builder` holds `Skill` and `Monitor` (sd:2526).** A builder
   waited on a gate longer than one Bash call with a `sleep` loop or a
   background task, and could not run a skill its brief named. The agent now
