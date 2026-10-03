@@ -166,10 +166,13 @@ sd config set sd.assistant_merge controlled
 
 These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOME` overrides the configuration root.
 `sd config get`, `list`, and `unset` inspect or remove settings. No personal grant ships in this repository.
-`sd.gate_slots` is load control, not a grant: how many repository gates may run at once on the machine (unset: a quarter of the cores).
+`sd.gate_slots` is load control, not a grant: how many gates may run at once on the machine, across every repository (unset: a quarter of the cores).
 `sd.gate_load_max` and `sd.gate_settle_seconds` are load control too: the gate queue starts its head only while load1 is below the limit (unset: 2.5 per core), with starts 45 s apart by default.
 `sd gate run -- make check` queues any command the same way; `sd gate status` shows the queue.
+Wrap a plain `make check` in any repository that way, and drop a per-repository `lockf` from lane scripts: the pool orders gates across every repository.
+A waiting gate names who holds each slot and since when.
 `sd gate post --head SHA` runs the merge gate at SHA and posts `sd/local-gate`, for a merge path that is not `sd-ship merge`.
+`sd gate check` runs the same check at `HEAD` and records a pass that `sd-ship prepare` and the merge gate reuse at that head; it posts nothing.
 
 `configured` allows private code and scoped review context to the operator's eligible configured providers, including future entries.
 A local `reviewers` list restricts recipients; an explicit empty value denies review.
@@ -222,6 +225,11 @@ that reason and the item closes without it. A `followup` filed in a
 registered checkout carries that checkout since sd:809, but only a task's
 move to done records a delivering commit, so the flag is refused there too,
 on that second reason, and the item closes without it just the same.
+A row worked on its own branch, as `sd runner prepare --branch` records it,
+does not close plainly while no merge of that branch is recorded (sd:1990).
+Name the merge with `--delivered-by`, or say why no pull request is needed
+with `--reason`, which the transition records. A merge `sd-ship` recorded,
+or a row on `main` or `master`, closes as before.
 
 A task that repeats carries a rule:
 `sd task add "File the weekly report" --due 2026-01-01 --recur FREQ=WEEKLY`.
@@ -236,7 +244,9 @@ refusal: the grammar, the anchor, the due date and the kinds that may recur.
 
 `sd store items --open` lists the backlog; `sd store item 42 --json` includes
 history and a revision that edits can require with `--if-revision`.
-`sd task show 42` is an alias that prints the same thing. Notes,
+`sd task show 42` is an alias that prints the same thing.
+`sd task cancel 42 --reason TEXT` closes a task or followup nobody will do,
+with the `cancelled` receipt `sd work cancel` writes. Notes,
 priorities, due dates and task status save directly to the database. GitHub
 issues are optional external references, with their last successful sync shown
 separately from local progress.

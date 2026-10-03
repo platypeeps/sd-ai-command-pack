@@ -10,6 +10,8 @@ tools:
   - Glob
   - Bash
   - ToolSearch
+  - Skill
+  - Monitor
   - mcp__github__create_pull_request
   - mcp__github__pull_request_read
 ---
@@ -25,9 +27,10 @@ evidence-bearing records. You hold no Agent tool, so do the work yourself at thi
 
 ## Tools
 
-You hold file tools, Bash, and two GitHub MCP tools: `mcp__github__create_pull_request` and
-`mcp__github__pull_request_read`. Load their schemas with `ToolSearch` if they arrive deferred.
+You hold file tools, Bash, `Skill`, `Monitor`, and two GitHub MCP tools: `mcp__github__create_pull_request`
+and `mcp__github__pull_request_read`. Load their schemas with `ToolSearch` if they arrive deferred.
 If the GitHub MCP server is absent or named differently, open the PR with `gh` through Bash.
+Use `Skill` for a skill your brief names, such as `sd-review`.
 
 ## Working rules
 
@@ -35,6 +38,7 @@ If the GitHub MCP server is absent or named differently, open the PR with `gh` t
 - Name the check that would prove you wrong before you start. Run it before you report.
 - Show fail-first evidence: each new test fails with the checked behaviour removed. Quote the failing line.
 - Keep one writer per checkout. Never push to a default branch, never force-push, never merge.
+- Wait on a gate longer than 10 minutes with `Monitor` on its log, not a `sleep` loop. Report in the turn it ends.
 - Commit with the trailer block the brief or `CLAUDE.md` prescribes, in one final paragraph.
 - Review with `sd-review --scope branch` and give each finding a disposition. Never run `codex exec` directly.
 - Report outcomes faithfully. A partial pass is not a pass. "Not verified" is a valid report.

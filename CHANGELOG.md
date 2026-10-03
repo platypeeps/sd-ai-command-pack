@@ -4,6 +4,37 @@
 
 ### Added
 
+- **One passing gate check per head (sd:1912).** `sd-ship prepare`'s gate now reads a gate receipt at the same head and binding, so a second prepare at an unchanged head runs no second check. The new `sd gate check` runs the local gate's check at `HEAD`, in a clean worktree with the gate's environment, and records a pass that prepare and then the merge gate reuse. A plain `make check` leaves no receipt. The gate child no longer gets the agent harness's session variables (`CLAUDE*`, `HERDR_*`, `ITERM_*`, `TERM_SESSION_ID`, `PWD`, `OLDPWD`, `SHLVL`, `_`), so two sessions' passes bind equal; every other variable, `MAKEFLAGS` included, still binds. A failed or unfinished run records nothing, a new head (a merge of `main` included) runs again, and the 30-minute window counts from the run that passed.
+
+- **One gate-slot pool for every gate, and a waiting gate names its holders
+  (sd:2522).** The slots were already machine-wide, but the callers counted
+  them differently. `sd-check` read `sd.gate_slots`, the pack's own
+  `make test` read 2 from its Makefile, and the stdlib
+  `sd_gate_slots.py run|status` ignored the setting. Every entry point now
+  takes its count from `sd.gate_slots`. `sd_gate_slots.py count` prints it for
+  the Makefile. The waiting line names each holder's label, pid, directory and
+  start time. The default stays a quarter of the cores. Wrap a plain
+  `make check` as `sd gate run -- make check`; a per-repository `lockf` in a
+  lane script is no longer needed.
+
+- **`sd-slice-builder` holds `Skill` and `Monitor` (sd:2526).** A builder
+  waited on a gate longer than one Bash call with a `sleep` loop or a
+  background task, and could not run a skill its brief named. The agent now
+  declares both tools, and its working rules say to wait on a gate longer
+  than 10 minutes with `Monitor` on its log and to report in the turn it
+  ends. The installer copies agents into `~/.claude/agents`, so the change
+  reaches a machine at the next `sd_install.py --user`.
+
+- **`sd task cancel N --reason TEXT` cancels a task or followup (sd:1005).**
+  `sd task status N done` was the only way to close one, and it wrote no
+  completion mark, so a dropped followup read as finished work and a finding
+  carried to it never reopened. The verb calls `sd_db.progress.cancel_work`
+  with `guard=progress.task_guard`: the row reads `done` with the `cancelled`
+  receipt a cancelled work item carries, and `sd-review-ack` reads a finding
+  carried to it as `carry-dropped`. An `sd_db` without `task_guard` refuses
+  the verb by name and points at `sd-install`; the verb works once the
+  system pin carries the guard.
+
 - **The commit-msg hook writes `Authored-with:` at commit time (sd:1295).**
   A branch whose commits said nothing took one empty `sd attribute` commit
   per review round. With `SD_AUTHOR=<entry>` set and no `Authored-with:` line
@@ -187,6 +218,18 @@
   (billing-blocked) check run still refuses; WORKFLOW.md § No-CI mode names
   the remedy, a fresh commit.
 
+- **A `url` entry can opt in to the strict findings schema (sd:1827, pack
+  half).** With `response_format: json_schema` on its registry entry,
+  `sd-review` sends the findings schema as a strict `response_format`, on the
+  ledger road through `sd_db.calls.call` and on the no-ledger road through
+  `sd_registry.chat_completion` alike. The copy is the one Moonshot's strict
+  mode takes: every property typed, `line` as `anyOf` integer or null, and no
+  `minLength` or `maxItems`; the answer is still parsed against the full
+  schema. Every other entry sends the request it sent before. The shipped
+  registry opts no entry in: kimi-k3 waits for a paid strict-mode test, and
+  MiniMax-M3 ignores the field. An `sd_db` without the field refuses a
+  registry that sets it.
+
 ### Fixed
 
 - **Itemless refusals name the command that allocates a review ID (sd:2008,
@@ -211,6 +254,23 @@
 - **`sd-ship -C <dir>` outside a repository names the directory (sd:2499).**
   The refusal read "cwd is not inside a Git repository"; it now names the
   directory, as the other lane commands do.
+
+- **`--delivered-by` names the way out for a commit with no item trailer
+  (sd:2565).** `sd task status N done --delivered-by` refused a commit naming
+  neither `Delivers: sd:N` nor `Item: sd:N`, such as a no-item squash
+  (sd:2171), with only "carries no `Delivers:` trailer". The refusal now
+  names three ways out: ship the work with `sd-ship prepare --item N
+  --deliver`, name `Closes: sd:N` in a later item merge's body, or close the
+  task by hand with `--reason TEXT`.
+
+- **A row worked on its own branch no longer closes with no merge (sd:1990).**
+  Three runner items (sd:1686, sd:1688, sd:1703) were closed with a plain
+  `sd task status N done` while their `fleet/*` branch had no pull request.
+  The move to done now refuses a row whose `branch` is not `main` or
+  `master` unless a merge is recorded (`sd-ship`'s `Code delivery` comment or
+  a delivering transition), `--delivered-by` names one, or `--reason` says
+  why no pull request is needed. The refusal leaves the row open and names
+  both flags. A work item still goes to `sd work deliver`.
 
 - **`sd-review`'s Jev rows compare Jev with the routing (sd:2359).** `jev`
   computed `changed` against `--fallback`, which here is a token no tier can
@@ -579,6 +639,16 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **A task or followup merged associate-only can be delivered afterwards
+  (sd:1913).** `sd work deliver N SHA --associated --reason TEXT` (sd:1590)
+  closed only a work item and refused a task. On a task or followup it now
+  verifies reachability and `Item: sd:N` as `--delivered-by` verifies
+  `Delivers:`, and the move to done records the delivery sentence with the
+  reason. `sd-ship prepare --deliver` on a record that merged associate-only
+  refuses as `delivery_after_merge` and names that command with the merge
+  commit, where it used to reconcile in silence. `sd task status N done
+  --delivered-by` on an `Item:`-only commit names it too.
 
 - **An operator-observed criterion goes in the item's Log (sd:1933).**
   `WORKFLOW.md` records the operator's 2026-09-30 ruling: a criterion only

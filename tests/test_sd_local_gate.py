@@ -120,6 +120,20 @@ class RunCheck(Repository):
         self.assertFalse({"FORCE_COLOR", "CLICOLOR_FORCE", "PY_COLORS"} & env.keys())
         self.assertEqual((env["NO_COLOR"], env["PYTHON_COLORS"]), ("1", "0"))
 
+    def test_the_agent_harness_session_variables_do_not_reach_the_check(self) -> None:
+        """sd:1912, operator ruling D1 (2026-10-03). Two sessions differ in these
+        and nothing else, so their passes must bind equal; MAKEFLAGS still binds."""
+        session = {"CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "a", "CLAUDE_PID": "1", "HERDR_PANE_ID": "p1",
+                   "ITERM_SESSION_ID": "i1", "TERM_SESSION_ID": "t1", "PWD": "/one", "OLDPWD": "/x",
+                   "SHLVL": "1", "_": "/usr/bin/env"}
+        other = {"CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "b", "CLAUDE_EFFORT": "high", "HERDR_TAB_ID": "t2",
+                 "ITERM_PROFILE": "x", "TERM_SESSION_ID": "t2", "PWD": "/two", "SHLVL": "3", "_": "/bin/sh"}
+        base = {"PATH": "/usr/bin", "HOME": "/h"}
+        first = sd_gate_run.gate_environment(self.root, {**base, **session})
+        self.assertEqual(first, sd_gate_run.gate_environment(self.root, {**base, **other}))
+        self.assertEqual(first, sd_gate_run.gate_environment(self.root, base))
+        self.assertNotEqual(first, sd_gate_run.gate_environment(self.root, {**base, **session, "MAKEFLAGS": "-k"}))
+
     def test_the_check_is_told_it_is_the_gate(self) -> None:
         """`SD_LOCAL_GATE=1` is the contract a repository reads to provision instead of borrow (sd:1918)."""
         head = self.commit('check:\n\t@test "$$SD_LOCAL_GATE" = 1\n')

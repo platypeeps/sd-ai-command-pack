@@ -577,7 +577,8 @@ def _verified_tip(root: pathlib.Path) -> tuple[str, str]:
     return tip, f"{remote}/{default}"
 
 
-def _delivery_reason(row: Any, commit: str, checkout: str | None = None) -> str:
+def _delivery_reason(row: Any, commit: str, checkout: str | None = None,
+                     trailer: str = "Delivers") -> str:
     """The delivery sentence for `commit`, or a refusal naming what failed.
 
     `sd work deliver` is the only writer of delivery evidence and it refuses a
@@ -595,6 +596,10 @@ def _delivery_reason(row: Any, commit: str, checkout: str | None = None) -> str:
     repository (sd:1569): an item filed in one checkout and fixed in another.
     The row keeps the checkout it was filed in, and the sentence names the
     other one, since `origin/main` alone would read as the row's branch.
+
+    `trailer` is `Item` only for `sd work deliver --associated` on a task or
+    followup (sd:1913): a merge prepared associate-only names the item and
+    delivers nothing, and the operator's reason says it was the whole item.
     """
     if not _is_commit(commit):
         raise WorkRefusal("--delivered-by takes the full lowercase commit ID")
@@ -616,17 +621,36 @@ def _delivery_reason(row: Any, commit: str, checkout: str | None = None) -> str:
     message = sd_lib.git_output(["show", "-s", "--format=%B", commit], root) or ""
     wanted = f"sd:{row['id']}"
     demoted = [line for line in sd_lib.demoted_trailers(message)
-               if line.partition(":")[0] == "Delivers" and line.partition(":")[2].strip() == wanted]
+               if line.partition(":")[0] == trailer and line.partition(":")[2].strip() == wanted]
     if demoted:
         raise WorkRefusal(
             f"{commit} states {demoted[0]!r} outside the trailer block git reads, so "
             "nothing can see it; re-record it contiguously with the other trailers")
     block = sd_lib.trailer_block(message).splitlines()
-    if not any(line.partition(":")[0] == "Delivers" and line.partition(":")[2].strip() == wanted
+    if not any(line.partition(":")[0] == trailer and line.partition(":")[2].strip() == wanted
                for line in block):
-        raise WorkRefusal(f"{commit} carries no `Delivers: {wanted}` trailer")
+        raise WorkRefusal(f"{commit} carries no `{trailer}: {wanted}` trailer"
+                          f"{_repair(row['id'], commit, block, trailer)}")
     reason = DELIVERY_REASON.format(commit=commit, ref=ref)
     return f"{reason} in {elsewhere}" if elsewhere else reason
+
+
+def _repair(item: int, commit: str, block: list[str], trailer: str) -> str:
+    """The way out for `Item:` alone: a merge prepared associate-only (sd:1913).
+
+    A merge naming neither trailer, such as a no-item squash (sd:2171), can
+    never verify for the item, so the refusal names the three ways out
+    (sd:2565).
+    """
+    if trailer != "Delivers":
+        return ""
+    if f"Item: sd:{item}" not in block:
+        return (f"; it names neither `Delivers: sd:{item}` nor `Item: sd:{item}`, so ship "
+                f"the work with `sd-ship prepare --item {item} --deliver`, name `Closes: sd:{item}` "
+                f"in a later item merge's body, or close it by hand with `--reason TEXT` and no "
+                f"`--delivered-by`")
+    return (f"; it carries `Item: sd:{item}`, so `sd work deliver {item} {commit} "
+            "--associated --reason TEXT` delivers it")
 
 
 def _delivered_in(connection: Any, value: str) -> str:
@@ -654,6 +678,7 @@ def _status_reason(workflow: Any, connection: Any, args: argparse.Namespace) -> 
         if delivered_in:
             raise WorkRefusal("--delivered-in names where --delivered-by is verified; "
                               "it takes no effect alone")
+        _refuse_unlanded_branch(workflow, connection, args)
         return args.reason
     if args.status != "done":
         raise WorkRefusal("--delivered-by belongs on the move to done")
@@ -680,6 +705,37 @@ def _status_reason(workflow: Any, connection: Any, args: argparse.Namespace) -> 
             "move to done records one")
     checkout = _delivered_in(connection, delivered_in) if delivered_in else None
     return _delivery_reason(row, args.delivered_by, checkout)
+
+
+#: The names a default branch goes by; a row on one has no branch of its own
+#: to land, so a close needs no merge of it (see `_working_branch`).
+DEFAULT_BRANCHES = ("main", "master")
+
+
+def _refuse_unlanded_branch(workflow: Any, connection: Any, args: argparse.Namespace) -> None:
+    """Refuse a plain close of a row worked on its own branch (sd:1990).
+
+    `sd runner prepare --branch` records the branch an item is worked on.
+    Three such items were closed with a plain `sd task status done` while
+    their branches had no pull request, and one never reached main. A close
+    now needs a recorded merge (the `Code delivery` comment `sd-ship` writes,
+    or a delivering transition), `--delivered-by` naming the merge, or
+    `--reason` saying why no pull request is needed, which goes on the
+    transition. A work item is left to the library, which sends it to
+    `sd work deliver`.
+    """
+    if args.status != "done" or (args.reason or "").strip():
+        return
+    state = workflow.item_state(connection, args.item)
+    row = state["item"]
+    branch = row.get("branch") or ""
+    if (row["kind"] == "work" or row["status"] == "done" or not branch
+            or branch.removeprefix("origin/") in DEFAULT_BRANCHES or _delivered_by(state)):
+        return
+    raise WorkRefusal(
+        f"item {args.item} was worked on branch {branch}, and no merge of it is recorded; "
+        f"close it with --delivered-by <commit> naming the merge that landed it, "
+        f"or with --reason saying why no pull request is needed")
 
 
 def _change_status(workflow: Any, connection: Any, args: argparse.Namespace,
@@ -758,6 +814,11 @@ def _done_advisory(workflow: Any, connection: Any, item: int) -> None:
     print(f"sd: advisory: {head}{tail}; the note is recorded anyway", file=sys.stderr)
 
 
+#: The kinds `sd work deliver --associated` closes by status rather than by a
+#: work receipt: the two `sd-ship prepare --deliver` closes the same way.
+ASSOCIATED_STATUS_KINDS = ("task", "followup")
+
+
 def _deliver(progress: Any, workflow: Any, connection: Any, args: argparse.Namespace,
              who: str) -> Any:
     """`sd work deliver`, ordinary or after the fact (sd:1590).
@@ -769,6 +830,10 @@ def _deliver(progress: Any, workflow: Any, connection: Any, args: argparse.Names
     library's named way out. It is reached only through `--associated` with
     a reason, so an ordinary delivery never falls through to it, and the
     receipt records the trailer and the reason.
+
+    A task or followup has no receipt for the library to write (sd:1913). Its
+    `Item:` merge is verified as `--delivered-by` verifies a `Delivers:` one,
+    and the move to done records the delivery sentence with the reason.
     """
     if not args.associated:
         if args.reason is not None:
@@ -778,10 +843,12 @@ def _deliver(progress: Any, workflow: Any, connection: Any, args: argparse.Names
             connection, args.item, args.commit, who=who, expected_revision=args.if_revision)
     if not (args.reason or "").strip():
         raise WorkRefusal("--associated needs --reason: say why the merge carried Item: and not Delivers:")
-    if workflow.item_state(connection, args.item)["item"]["kind"] == "task":
-        raise WorkRefusal(
-            f"item {args.item} is an ordinary task; --associated delivers a work item "
-            "whose merge carried `Item:`")
+    row = workflow.item_state(connection, args.item)["item"]
+    if row["kind"] in ASSOCIATED_STATUS_KINDS:
+        sentence = _delivery_reason(row, args.commit, trailer="Item")
+        return workflow.change_status(
+            connection, args.item, "done", who=who, expected_revision=args.if_revision,
+            reason=f"{sentence} (after the fact: {args.reason.strip()})")
     deliver = getattr(progress, "deliver_associated_work", None)
     if deliver is None:
         raise WorkRefusal(
@@ -789,6 +856,27 @@ def _deliver(progress: Any, workflow: Any, connection: Any, args: argparse.Names
             "system/local-sd-db build")
     return deliver(connection, args.item, args.commit, who=who, reason=args.reason,
                    expected_revision=args.if_revision)
+
+
+def _cancel_guard(progress: Any, action: str) -> dict[str, Any]:
+    """The guard `sd task cancel` hands `cancel_work` (sd:1005); none for work.
+
+    `cancel_work` is the one cancellation the library has, and its default
+    guard admits work rows only. A task or followup passes `task_guard`
+    instead, so the row reads `done` with the same `cancelled` receipt a
+    cancelled work item carries, and `sd-review-ack` reopens a finding
+    carried to it. A library from before the guard has neither the guard nor
+    the keyword, so it is refused by name rather than reaching a TypeError.
+    """
+    if action == "cancel":
+        return {}
+    guard = getattr(progress, "task_guard", None)
+    if guard is None:
+        raise WorkRefusal(
+            "the installed sd_db cannot cancel a task or followup; it is missing "
+            "sd_db.progress.task_guard. Install the current system/local-sd-db build "
+            "with the pack's installer (`sd-install`), then run this again.")
+    return {"guard": guard}
 
 
 def _capture(sd_db: Any, workflow: Any, args: argparse.Namespace,
@@ -879,16 +967,16 @@ def run(args: argparse.Namespace) -> int:
                 connection, args.note, who=who, expected_revision=revision)
         elif action == "register":
             result = _register(sd_db, connection, args, who)
-        elif action in {"relink", "cancel", "deliver"}:
+        elif action in {"relink", "cancel", "cancel-task", "deliver"}:
             import sd_db.progress as progress
 
             if action == "relink":
                 result = progress.relink_artifact(
                     connection, args.item, args.path, who=who, expected_revision=revision)
-            elif action == "cancel":
+            elif action in {"cancel", "cancel-task"}:
                 result = progress.cancel_work(
                     connection, args.item, reason=args.reason, who=who,
-                    expected_revision=revision)
+                    expected_revision=revision, **_cancel_guard(progress, action))
             else:
                 result = _deliver(progress, workflow, connection, args, who)
         else:
@@ -1158,7 +1246,8 @@ def register(groups: Any, store: Any) -> None:
     status.add_argument("item", type=int)
     status.add_argument("status")
     reason = status.add_mutually_exclusive_group()
-    reason.add_argument("--reason")
+    reason.add_argument("--reason", help="recorded on the transition; on a row worked on "
+                                           "its own branch, why no pull request is needed")
     # `--delivered-by` and not `--commit`: the row records what delivered the
     # task, and the word says so where `--commit` would only say which one.
     # Exclusive with `--reason` because both write the same field and a caller
@@ -1172,6 +1261,12 @@ def register(groups: Any, store: Any) -> None:
                         help="registered checkout the --delivered-by commit landed in, "
                              "when it is not the item's own; the item keeps its checkout")
     _output(status, "status", revision=True)
+
+    cancel = verbs.add_parser(
+        "cancel", help="close a task or followup nobody will do: done, with a cancelled receipt")
+    cancel.add_argument("item", type=int)
+    cancel.add_argument("--reason", required=True)
+    _output(cancel, "cancel-task", revision=True)
 
     note = verbs.add_parser("note", help="add an item note or follow-up")
     note.add_argument("item", type=int)

@@ -254,6 +254,28 @@ class DeliveryReasonTests(unittest.TestCase):
         with self.assertRaisesRegex(sd_work.WorkRefusal, "outside the trailer block"):
             sd_work._delivery_reason(self.row, commit)
 
+    def test_an_item_only_merge_is_sent_to_the_after_the_fact_repair(self) -> None:
+        """sd:1913. `Item:` where `Delivers:` was meant is an associate-only
+        merge; the refusal names the one verb that can deliver it."""
+        (self.root / "file.txt").write_text("four\n", encoding="utf-8")
+        self.git("commit", "-q", "-a", "-m", "feat: the whole item\n\nItem: sd:7\n")
+        commit = self.git("rev-parse", "HEAD")
+        with self.assertRaisesRegex(sd_work.WorkRefusal,
+                                    rf"carries no `Delivers: sd:7`.*sd work deliver 7 {commit} --associated --reason"):
+            sd_work._delivery_reason(self.row, commit)
+
+    def test_a_commit_naming_neither_trailer_is_sent_to_the_ways_out(self) -> None:
+        """sd:2565. A no-item squash carries neither `Delivers:` nor `Item:`
+        (sd:2171), and the refusal named no way out of it."""
+        (self.root / "file.txt").write_text("six\n", encoding="utf-8")
+        self.git("commit", "-q", "-a", "-m", "feat: shipped with no item\n\nAuthored-with: human\n")
+        commit = self.git("rev-parse", "HEAD")
+        with self.assertRaises(sd_work.WorkRefusal) as caught:
+            sd_work._delivery_reason(self.row, commit)
+        for way_out in ("--item 7 --deliver", "`Closes: sd:7`", "--reason TEXT"):
+            with self.subTest(way_out=way_out):
+                self.assertIn(way_out, str(caught.exception))
+
     def test_a_commit_with_no_delivers_trailer_is_refused(self) -> None:
         (self.root / "file.txt").write_text("three\n", encoding="utf-8")
         self.git("commit", "-q", "-a", "-m", "chore: no trailer at all\n")
@@ -432,6 +454,60 @@ class TaskDeliveryCLITests(unittest.TestCase):
         item = state["item"]["id"]
         case.call("task", "status", item, "done", cwd=root)
         self.assertNotIn("delivered at", self.statuses(case, item)[-1])
+
+    def on_branch(self, case, root: pathlib.Path, branch: str) -> int:
+        """A task worked on `branch`, as `sd runner prepare --branch` records it."""
+        import sd_db
+
+        item = json.loads(case.call("task", "add", "Fix the thing", "--json", cwd=root).stdout)["item"]["id"]
+        with sd_db.connect(sd_db.default_path(case.home), write=True) as connection:
+            connection.execute("UPDATE item SET branch = ? WHERE id = ?", (branch, item))
+        return item
+
+    def status(self, case, root: pathlib.Path, item: int) -> str:
+        return json.loads(case.call("store", "item", item, "--json", cwd=root).stdout)["item"]["status"]
+
+    def test_a_row_on_its_own_branch_with_no_merge_recorded_stays_open(self) -> None:
+        """sd:1990: three fleet items closed this way while their branch had no
+        pull request, and one never reached main."""
+        case = self.host()
+        root = self.repository(case)
+        item = self.on_branch(case, root, "fleet/fixture-sd1")
+        refused = case.call("task", "status", item, "done", code=1, cwd=root)
+        self.assertIn("worked on branch fleet/fixture-sd1, and no merge of it is recorded", refused.stderr)
+        self.assertEqual("planning", self.status(case, root, item))
+
+    def test_a_row_on_its_own_branch_closes_with_a_reason_and_records_it(self) -> None:
+        case = self.host()
+        root = self.repository(case)
+        item = self.on_branch(case, root, "fleet/fixture-sd1")
+        case.call("task", "status", item, "done", "--reason", "superseded by another merge", cwd=root)
+        self.assertEqual("done", self.status(case, root, item))
+        self.assertIn("superseded by another merge", self.statuses(case, item)[-1])
+
+    def test_a_row_on_its_own_branch_closes_with_its_merge(self) -> None:
+        """Named on the close, or already recorded by `sd-ship`'s comment."""
+        case = self.host()
+        root = self.repository(case)
+        item = self.on_branch(case, root, "fleet/fixture-sd1")
+        sha = self.commit(root, f"fix: the thing\n\nDelivers: sd:{item}\n", "one\n")
+        case.call("task", "status", item, "done", "--delivered-by", sha, cwd=root)
+        self.assertEqual("done", self.status(case, root, item))
+        merged = self.on_branch(case, root, "fleet/fixture-sd2")
+        case.call("task", "note", merged, "--body",
+                  f"Code delivery https://github.example.test/o/r/pull/7 at {sha}", cwd=root)
+        case.call("task", "status", merged, "done", cwd=root)
+        self.assertEqual("done", self.status(case, root, merged))
+
+    def test_a_row_on_the_default_branch_still_closes_plainly(self) -> None:
+        """The control: a row with no branch of its own has nothing to land."""
+        case = self.host()
+        root = self.repository(case)
+        for branch in ("main", "origin/master"):
+            with self.subTest(branch=branch):
+                item = self.on_branch(case, root, branch)
+                case.call("task", "status", item, "done", cwd=root)
+                self.assertEqual("done", self.status(case, root, item))
 
     def test_an_unverifiable_commit_leaves_the_task_open(self) -> None:
         """Refused before the status moves, not after: a task closed and then
@@ -801,15 +877,47 @@ class AssociatedDeliveryCLITests(unittest.TestCase):
         self.assertIn(f"no Item trailer for sd:{item}", refused.stderr)
         self.assertEqual("planning", self.status(case, root, item))
 
-    def test_associated_on_an_ordinary_task_is_refused_by_name(self) -> None:
+    def test_associated_closes_a_task_with_the_delivery_sentence_and_reason(self) -> None:
+        """sd:1913. A task has no work receipt; its `Item:` merge is verified and
+        the move to done records the delivery sentence and the reason."""
         case = self.host()
         root = self.repository(case)
         item = json.loads(case.call("task", "add", "Fix the thing", "--json",
                                     cwd=root).stdout)["item"]["id"]
         sha = self.commit(root, f"fix: the thing\n\nItem: sd:{item}\n", "one\n")
+        done = json.loads(case.call("work", "deliver", item, sha, "--associated",
+                                    "--reason", self.REASON, "--json", cwd=root).stdout)
+        self.assertEqual("done", done["item"]["status"])
+        self.assertIn(f"delivered at {sha} on refs/heads/main (after the fact: {self.REASON})",
+                      self.statuses(case, item)[-1])
+
+    def test_associated_closes_a_followup_the_same_way(self) -> None:
+        import sd_db
+        import sd_db.writes
+
+        case = self.host()
+        root = self.repository(case)
+        item = json.loads(case.call("task", "add", "Follow the thing up", "--json",
+                                    cwd=root).stdout)["item"]["id"]
+        with sd_db.connect(sd_db.default_path(case.home), write=True) as connection:
+            sd_db.writes.set_item_fields(connection, item, kind="followup")
+            connection.commit()
+        sha = self.commit(root, f"fix: the follow-up\n\nItem: sd:{item}\n", "one\n")
+        case.call("work", "deliver", item, sha, "--associated", "--reason", self.REASON, cwd=root)
+        self.assertEqual("done", self.status(case, root, item))
+        self.assertIn(f"delivered at {sha} on refs/heads/main (after the fact: {self.REASON})",
+                      self.statuses(case, item)[-1])
+
+    def test_associated_on_a_task_still_needs_the_item_trailer(self) -> None:
+        case = self.host()
+        root = self.repository(case)
+        item = json.loads(case.call("task", "add", "Fix the thing", "--json",
+                                    cwd=root).stdout)["item"]["id"]
+        sha = self.commit(root, f"fix: the thing\n\nRefs: sd:{item}\n", "one\n")
         refused = case.call("work", "deliver", item, sha, "--associated",
                             "--reason", self.REASON, code=1, cwd=root)
-        self.assertIn(f"item {item} is an ordinary task; --associated", refused.stderr)
+        self.assertIn(f"carries no `Item: sd:{item}` trailer", refused.stderr)
+        self.assertEqual("planning", self.status(case, root, item))
 
 
 class ShipMergeGuardTests(unittest.TestCase):
