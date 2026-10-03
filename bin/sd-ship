@@ -303,8 +303,26 @@ def timing_plan(result: subprocess.CompletedProcess) -> dict:
     except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
         valid = False
     if not valid:
+        refuse_authorship(result.stdout)
         raise Refusal("local review emitted no valid timing plan; no provider pass was reserved")
     return plan
+
+
+def refuse_authorship(output: str) -> None:
+    """Refuse with `sd-review`'s own authorship refusal, when its plan carries one (sd:2067).
+
+    "No valid timing plan" hid it: the cause, a commit with no `Authored-with:`
+    trailer, was readable only from `sd-review --scope branch`.
+    """
+    try:
+        said = json.loads(output).get("authorship_refusal")
+    except (ValueError, AttributeError, RecursionError):
+        return
+    if isinstance(said, str) and said.strip():
+        raise Refusal(f"local review refused: unknown authorship: {said.strip()}; no provider pass was reserved",
+                      code="authorship_unknown", boundary="policy", state="operator_decision",
+                      next_action="Give each named commit an Authored-with: trailer (sd attribute <sha> <entry> "
+                                  "repairs one without a rewrite), then prepare again.")
 
 
 def moment() -> str:

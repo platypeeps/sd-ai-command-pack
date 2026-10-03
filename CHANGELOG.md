@@ -112,6 +112,14 @@
 
 ### Fixed
 
+- **`sd-ship` reports `sd-review`'s authorship refusal (sd:2067).** A
+  branch commit with no `Authored-with:` trailer made `sd-ship review` and
+  `prepare` refuse with `local review emitted no valid timing plan`, and the
+  cause was readable only from `sd-review --scope branch`. When the plan
+  carries an `authorship_refusal`, the refusal now quotes it, with code
+  `authorship_unknown`, `operator_decision`, and a `next_action` naming
+  `sd attribute`. No provider pass is reserved, as before.
+
 - **A failed gate names each failing check and its tail (sd:2021, sd:2066).**
   `sd-ship merge` under `repo.ci = local` said only the status description,
   such as `sd-check fail (check fail)`, and finding the failing step meant
