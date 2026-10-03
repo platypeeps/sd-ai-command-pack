@@ -19,13 +19,14 @@ progress belongs to the database.
 | Move a task or followup to the right checkout | `sd task edit ID --belongs-to PATH` — `.` names the checkout enclosing cwd; `--no-repo` leaves it belonging to none, as it does on `add`. An unregistered path is refused, and the move is recorded as an item note. The move prints the checkout it landed in; ordinary output names a row's checkout only when it is not the one you are standing in |
 | Reclassify an item filed as the wrong kind | A task's item screen, or `sd task edit ID --kind KIND` — the kinds are `sd_db.workflow.HAND_KINDS`, the same five `sd task add --kind` offers. A move to `personal`, `work-idea` or `personal-idea` carries no repository, so a row that has one needs `--no-repo` in the same command. A `followup` keeps its repository (sd:809). `edit_item` refuses a produced row (a contribution or skill-review task), an `idea` that is a writing piece, and a row with a queued, running or ending assignment, and records every change as a "Changed kind" note naming who made it |
 | Change task status | Item screen, or `sd task status ID STATUS` |
+| Close a task or followup nobody will do | `sd task cancel ID --reason TEXT` — `done` with a `cancelled` receipt, as `sd work cancel` writes; a finding carried to the row reopens |
 | Record and resolve a followup | Item notes, or `sd task note ID --kind followup --body TEXT` / `sd task resolve NOTE_ID` — a note on a done item prints an advisory naming its delivery, and still lands |
 | See the same inventory as the dashboard | `sd today --json`, `sd store items --json` |
 | Register a planning folder as a row (row-status repositories only) | `sd work register docs/work/<item>/prd.md` — the row's branch is the local branch the checkout is on when it is not the default, and otherwise nothing; `sd runner prepare --branch` fills it in later |
 | Relink a moved work artifact | Item screen, or `sd work relink ID PATH` |
 | Cancel repository work | Item screen, or `sd work cancel ID --reason TEXT` |
 | Record verified code delivery | `sd work deliver ID FULL_COMMIT_SHA` |
-| Close a work item whose merge carried `Item:` without `Delivers:` | `sd work deliver ID FULL_COMMIT_SHA --associated --reason TEXT` |
+| Close a work item, task or followup whose merge carried `Item:` without `Delivers:` | `sd work deliver ID FULL_COMMIT_SHA --associated --reason TEXT` |
 | Move a writing piece through its stages | Writing screen, or `sd writing stage --piece YEAR/slug --stage STAGE` |
 | Inspect current writing evidence | Item screen, or `sd writing readiness --piece YEAR/slug` |
 | Park or revive a piece | Item screen, or `sd writing park --piece YEAR/slug [--revive]` |
