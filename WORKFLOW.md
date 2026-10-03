@@ -392,7 +392,7 @@ which the installer places in `~/.claude/agents`.
 - **Gates share the machine through slots.** Every `sd-check` run, and so
   every gate `sd-ship prepare` or `merge` runs in any repository, first takes
   one of `sd.gate_slots` machine-wide slots (unset: a quarter of the cores,
-  at most 2). `SD_GATE_SLOTS` overrides it for one run, `0` lifts the cap, and
+  4 on 16). `SD_GATE_SLOTS` overrides it for one run, `0` lifts the cap, and
   CI takes none. A queued gate prints `waiting for a gate slot` on stderr and
   again each minute, naming each holder's label, pid, directory and start
   time. The wait counts against `sd-check --timeout`, and each check gets the
@@ -700,7 +700,7 @@ The reserved `sd` namespace declares four settings:
   `sd-ship` resolves the decision again at dispatch, from the setting as it stands then and the tiers the
   retained passes recorded, so a setting changed after the review takes effect without another review.
 - `sd.gate_slots`: how many gates (`sd-check` runs, `sd gate run`, the pack's `make test`) may run at once on
-  this machine; `0` is no cap. Absence reads a quarter of the cores, at most 2. `SD_GATE_SLOTS` overrides it
+  this machine; `0` is no cap. Absence reads a quarter of the cores. `SD_GATE_SLOTS` overrides it
   for one run. It grants nothing;
   see [Parallel work](#parallel-work).
 - `sd.gate_load_max`: the gate queue starts a gate only while load1 is below this; `0` is no load condition.

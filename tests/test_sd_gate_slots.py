@@ -299,14 +299,13 @@ class OnePool(GateSlotFixture):
 
 
 class SlotCount(unittest.TestCase):
-    def test_the_variable_then_ci_then_the_machine_setting_then_the_default(self):
+    def test_the_variable_then_ci_then_the_machine_setting_then_a_quarter_of_the_cores(self):
         configured = sd_gate_slots.configured
         self.assertEqual(configured({"SD_GATE_SLOTS": "3", "CI": "1"}, "7"), (3, "SD_GATE_SLOTS"))
         self.assertEqual(configured({"CI": "1"}, "7"), (0, "CI"))
         self.assertEqual(configured({}, "7"), (7, "sd.gate_slots"))
         self.assertEqual(configured({}, None), (sd_gate_slots.default_slots(), "default"))
-        # sd:2522: a quarter of the cores, at most two.
-        self.assertEqual([sd_gate_slots.default_slots(cores) for cores in (1, 4, 8, 16, 32)], [1, 1, 2, 2, 2])
+        self.assertEqual([sd_gate_slots.default_slots(cores) for cores in (1, 4, 8, 16, 32)], [1, 1, 2, 4, 8])
         for bad in ("", "-1", "two", "٣"):
             with self.subTest(value=bad), self.assertRaises(ValueError):
                 configured({"SD_GATE_SLOTS": bad}, None)

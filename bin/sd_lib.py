@@ -77,8 +77,8 @@ CORE_CONFIG = {
                                       ".github/sd-review.json copilot_review overrides deep and always, and never wins over it."},
     "gate_slots": {"pattern": "[0-9]+",
                    "description": "How many gates (sd-check runs, sd gate run, the pack's make test) may run at once on this "
-                                  "machine; 0 is no cap. Unset reads a quarter of the cores, at most 2; SD_GATE_SLOTS "
-                                  "overrides it for one run."},
+                                  "machine; 0 is no cap. Unset reads a quarter of the cores; SD_GATE_SLOTS overrides it "
+                                  "for one run."},
     "gate_load_max": {"pattern": r"[0-9]+(\.[0-9]+)?",
                       "description": "The gate queue starts a gate only while load1 is below this; 0 is no load "
                                      "condition. Unset reads 2.5 per core; SD_GATE_LOAD_MAX overrides it for one run."},

@@ -63,13 +63,9 @@ POLL_VARIABLE = "SD_GATE_SLOT_POLL"
 DEFAULT_POLL_SECONDS = 5.0
 #: How often a queued gate says it is still queued, so it does not look hung.
 REPORT_EVERY_SECONDS = 60.0
-#: Cores per default slot, and the most slots the default gives (sd:2522). The
-#: pack's own gate runs half the cores as workers (sd:1955), and another
-#: repository's `make check` often runs one per core, so two gates already put
-#: one worker or more on every core. A quarter of the cores gave 4 on 16, and on
-#: 2026-10-03 gates from four repositories took the load to 116 and 128.
+#: Cores per default slot. A repository gate runs a test worker on nearly every
+#: core, so a quarter of the cores in gates keeps the load near four per core.
 CORES_PER_SLOT = 4
-DEFAULT_SLOT_CEILING = 2
 #: Exit codes of the `wait` command.
 LAUNCHER_EXITED = 3
 TIMED_OUT = 4
@@ -107,9 +103,9 @@ def directory(environ: Mapping[str, str]) -> pathlib.Path:
 
 
 def default_slots(cores: int | None = None) -> int:
-    """A quarter of the cores, at least one and at most `DEFAULT_SLOT_CEILING`: 2 on a 16-core machine."""
+    """A quarter of the cores, and at least one: 4 on a 16-core machine."""
     count = cores if cores is not None else (os.cpu_count() or CORES_PER_SLOT)
-    return max(1, min(DEFAULT_SLOT_CEILING, count // CORES_PER_SLOT))
+    return max(1, count // CORES_PER_SLOT)
 
 
 def parse_count(text: str, source: str) -> int:

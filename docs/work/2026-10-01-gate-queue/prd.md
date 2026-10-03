@@ -88,8 +88,7 @@ of these two gaps.
     available for one gate at a time.
   - **One class, plain first-in, first-out.** Priority classes come only if
     the queue later shows merge gates waiting behind long ones.
-    2026-10-03: sd:2522 lowers the default to a quarter of the cores, at most
-    2, after gates from four repositories took the load to 116 and 128.
+    2026-10-03: default kept at 4 (operator).
   - **The window for older pack copies is accepted.** A checkout that pins an
     older pack (for example through `.sd-pack-rev`) takes slots without
     queueing until its pin moves; the pin bump in system follows this item.

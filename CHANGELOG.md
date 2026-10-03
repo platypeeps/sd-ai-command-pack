@@ -11,8 +11,7 @@
   `sd_gate_slots.py run|status` ignored the setting. Every entry point now
   takes its count from `sd.gate_slots`. `sd_gate_slots.py count` prints it for
   the Makefile. The waiting line names each holder's label, pid, directory and
-  start time. The default is a quarter of the cores, at most 2: on 2026-10-03
-  gates from four repositories took the load to 116 and 128. Wrap a plain
+  start time. The default stays a quarter of the cores. Wrap a plain
   `make check` as `sd gate run -- make check`; a per-repository `lockf` in a
   lane script is no longer needed.
 
