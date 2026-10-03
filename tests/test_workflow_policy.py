@@ -36,6 +36,7 @@ skills are enumerated from what their pages invoke, not from a list kept here.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import re
 import subprocess
@@ -234,6 +235,44 @@ class WorkflowPage(unittest.TestCase):
     def test_sd_help_names_the_page(self):
         skill = (REPO_ROOT / "skills/sd-help/SKILL.md").read_text(encoding="utf-8")
         self.assertIn("WORKFLOW.md", skill)
+
+
+class MutationChecks(unittest.TestCase):
+    """sd:1790: a same-size edit restored within a second reuses a stale `.pyc`."""
+
+    def test_the_section_states_the_bytecode_rule(self):
+        text = section(WORKFLOW.read_text(encoding="utf-8"), "## Mutation checks")
+        self.assertIn("PYTHONDONTWRITEBYTECODE=1", text)
+        self.assertIn("__pycache__", text)
+
+    def test_the_trap_is_real_and_the_rule_avoids_it(self):
+        """The rule's premise, made deterministic by pinning the source mtime."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            module = root / "mutated.py"
+            env = {k: v for k, v in os.environ.items()
+                   if k not in ("PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX")}
+
+            def write(text: str) -> None:
+                module.write_text(text, encoding="utf-8")
+                os.utime(module, (1_700_000_000, 1_700_000_000))
+
+            def value(**extra: str) -> str:
+                return subprocess.run(
+                    [sys.executable, "-c", "import mutated; print(mutated.X)"], cwd=root,
+                    env={**env, **extra}, capture_output=True, text=True, check=True, timeout=60,
+                ).stdout.strip()
+
+            write("X = 1\n")
+            self.assertEqual(value(), "1")
+            write("X = 2\n")
+            self.assertEqual(value(), "1", "same size and second: the stale .pyc answers")
+            for cached in (root / "__pycache__").iterdir():
+                cached.unlink()
+            write("X = 1\n")
+            self.assertEqual(value(PYTHONDONTWRITEBYTECODE="1"), "1")
+            write("X = 2\n")
+            self.assertEqual(value(PYTHONDONTWRITEBYTECODE="1"), "2")
 
 
 class OverrideKeys(unittest.TestCase):

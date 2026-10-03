@@ -320,6 +320,17 @@ The item directory stays in place. Use `sd work relink <row-id> <path>` when an
 artifact moves: it preserves the row, notes and original source identity. No
 command automatically deletes or archives a completed item directory.
 
+## Mutation checks
+
+A mutation check edits the code a test covers, runs the test, and restores the
+edit; a test that passes on the mutation has not earned its place.
+Run a Python mutation check with `PYTHONDONTWRITEBYTECODE=1`, and delete the
+`__pycache__` folders first (sd:1790). Python reuses a `.pyc` whose recorded
+source size and whole-second mtime still match, so a same-size edit restored
+within a second runs stale bytecode: a mutation reads as killed or survived by
+timing, and a restored file can fail its own test. The variable stops writes,
+not reads, so a cache left from an earlier run still answers.
+
 ## Parallel work
 
 The harness fans work out only when a `CLAUDE.md` or a skill asks for it.
