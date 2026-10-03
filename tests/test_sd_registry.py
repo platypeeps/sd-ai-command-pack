@@ -170,9 +170,11 @@ class TheShippedRegistry(unittest.TestCase):
     def test_the_registry_names_no_backend_the_review_lane_used_to_carry(self) -> None:
         """`prism` and `gito` pointed at the same endpoint and added limits of
         their own. The registry is the only list of providers, so their absence
-        here is what removes them."""
+        here is what removes them. `exo` was removed too (#1025); a re-added
+        `enabled: false` row would leave the reviewer chain unchanged, so its
+        absence is asserted here and not read off the chain (sd:1002)."""
         self.assertEqual(
-            {"prism", "gito"} & set(self.registry.providers), set()
+            {"prism", "gito", "exo"} & set(self.registry.providers), set()
         )
 
 

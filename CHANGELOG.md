@@ -132,6 +132,17 @@
 
 ### Fixed
 
+- **Suite fixtures that did not do what they are named (sd:1002).** Two
+  `HOME` restores in `tests/test_sd_handoff_rows.py` and the `environment`
+  helper in `tests/test_sd_suggest.py` now put back an unset or empty value as
+  it was. Tests that passed when their subject broke now fail: the
+  repository's own acceptance file must load entries, `fleet-pins` is in the
+  research kit's verb list, the step-6 query pins `--base <this branch>`, the
+  guest-refusal control reads the explain scope row, every planned reviewer
+  gets the local block (and none without the file), the shipped registry
+  carries no `exo`, and the skill-promotion reader counts `publish` as a
+  forge claim, a contraction as a denial, and the tree a move starts from.
+
 - **A branch review checks the reviewed head in a clean worktree (sd:2077).**
   `sd-review --scope branch` and `--scope pr`, and so `sd-ship review`, ran
   `sd-check` in the operator's checkout unless `repo.ci` was `local`. An edit
