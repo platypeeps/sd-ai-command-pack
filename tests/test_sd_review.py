@@ -992,6 +992,22 @@ class PipelineTests(ReviewFixture):
                              "reason": "cannot run /no/python: [Errno 2] No such file or directory"}]
         self.assertEqual(sd_review.classify_gate(spawn)["reason"], "toolchain_missing")
 
+    def test_the_code_prompt_names_the_six_operator_listed_defect_classes(self) -> None:
+        """sd:1635: the classes a retired manual checklist held, named in the lane's own prompt."""
+        root = self.make_repo()
+        self.prepare(root)
+        code = sd_review.build_prompt(sd_review.resolve_subject(root, "worktree"), False, "")
+        for phrase in ("external JSON used before its type is narrowed",
+                       "an error that reports a stage other than the one that failed",
+                       "identifiers matched by substring rather than at token boundaries",
+                       "tests that touch files, network or environment without isolating them",
+                       "empty, very long, non-ASCII or markup-bearing input",
+                       "check every sibling site of the same shape, not only the reported line"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, code)
+        planning = sd_review.Subject("planning", "", "", ("docs/work/x/prd.md",), 0, "")
+        self.assertNotIn("external JSON", sd_review.build_prompt(planning, False, ""))
+
     def test_a_blocking_finding_blocks(self) -> None:
         root = self.make_repo()
         self.prepare(root)

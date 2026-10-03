@@ -667,6 +667,14 @@ def local_conventions(root: pathlib.Path) -> str:
     )
 
 
+#: Generic defect classes for a code subject, from a manual pre-PR checklist this lane replaced (sd:1635).
+DEFECT_CLASSES = (
+    "external JSON used before its type is narrowed", "an error that reports a stage other than the one that failed",
+    "identifiers matched by substring rather than at token boundaries",
+    "tests that touch files, network or environment without isolating them",
+    "output that breaks on empty, very long, non-ASCII or markup-bearing input")
+
+
 def build_prompt(subject: Subject, challenge: bool, conventions: str) -> str:
     """The review instruction, pinned to the endpoints `resolve_subject` chose."""
 
@@ -698,10 +706,13 @@ def build_prompt(subject: Subject, challenge: bool, conventions: str) -> str:
             "adversarial stance: find the strongest reasons this change should not "
             "ship yet."
         )
+    classes = "" if subject.scope == "planning" else (
+        f" Check in particular for {'; '.join(DEFECT_CLASSES)}. When you find a defect, check every "
+        "sibling site of the same shape, not only the reported line.")
     return (
         f"{conventions}{stance} Review {target}. Report defects the change "
         "introduces: correctness bugs, security issues, data-integrity risks, and "
-        "maintainability problems that would cost real time later. Judge severity "
+        f"maintainability problems that would cost real time later.{classes} Judge severity "
         "per finding; high means it should block a merge. Do not report style, "
         "wording, or observations that are not defects. Do not report cosmetic "
         "findings, whose fix changes no behaviour or reader action (wording, "

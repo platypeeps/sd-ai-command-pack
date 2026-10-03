@@ -11,6 +11,8 @@ For itemless records, replace `--item ID` below with `--no-item --review-id ID`.
    Save the returned `proposal` outside the checkout at a canonical absolute path.
    Preserve its bindings and every indexed raw finding.
 2. Fill each blocking finding's `response_disposition`, `reason`, and `evidence`.
+   A finding names a defect class, not only a line: before you fix or rebut it, check every sibling site of the same shape.
+   A fix at the reported line alone leaves the class live at its siblings.
    Use `rebutted` for a supported rejection.
    Use `parked` for accepted risk, with an `owner` and `trigger`.
    A cosmetic finding is `rebutted` with a reason that starts `cosmetic:` and says why no behaviour changes.
