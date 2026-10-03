@@ -108,7 +108,16 @@ class RunCheck(Repository):
         env = sd_gate_run.gate_environment(self.root, {
             "PATH": os.pathsep.join([inside, outside, "relative/bin"]), "PYTHONPATH": str(self.root),
             "PYTHONHOME": "/x", "VIRTUAL_ENV": inside, "CONDA_PREFIX": "/c", "__PYVENV_LAUNCHER__": "/l", "HOME": "/h"})
-        self.assertEqual(env, {"PATH": outside, "HOME": "/h", "SD_LOCAL_GATE": "1"})
+        self.assertEqual(env, {"PATH": outside, "HOME": "/h", "SD_LOCAL_GATE": "1", "NO_COLOR": "1",
+                               "PYTHON_COLORS": "0"})
+
+    def test_the_operators_colour_settings_do_not_reach_the_check(self) -> None:
+        """`FORCE_COLOR=3` in a terminal failed a repository's gate on ANSI-coloured output (sd:2076)."""
+        env = sd_gate_run.gate_environment(self.root, {
+            "PATH": "/usr/bin", "FORCE_COLOR": "3", "CLICOLOR_FORCE": "1", "PY_COLORS": "1",
+            "NO_COLOR": "", "PYTHON_COLORS": "1"})
+        self.assertFalse({"FORCE_COLOR", "CLICOLOR_FORCE", "PY_COLORS"} & env.keys())
+        self.assertEqual((env["NO_COLOR"], env["PYTHON_COLORS"]), ("1", "0"))
 
     def test_the_check_is_told_it_is_the_gate(self) -> None:
         """`SD_LOCAL_GATE=1` is the contract a repository reads to provision instead of borrow (sd:1918)."""

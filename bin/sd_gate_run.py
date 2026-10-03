@@ -64,7 +64,10 @@ REPORT_GRACE_SECONDS = 60
 STDERR_TAIL_CHARS = 4000
 LOCAL_BLOCK = "CLAUDE.local.md"
 #: Variables that pick Python packages; the child must not inherit the caller's.
-DROPPED_ENVIRONMENT = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX", "__PYVENV_LAUNCHER__")
+DROPPED_ENVIRONMENT = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX", "__PYVENV_LAUNCHER__",
+                       "FORCE_COLOR", "CLICOLOR_FORCE", "PY_COLORS")
+#: Set in the child: the gate captures output, and the caller's terminal colour must not change a result (sd:2076).
+NO_COLOUR_ENVIRONMENT = {"NO_COLOR": "1", "PYTHON_COLORS": "0"}
 #: Set to "1" in the child: the run is the gate, so the check provisions rather than borrows.
 GATE_VARIABLE = "SD_LOCAL_GATE"
 
@@ -104,9 +107,9 @@ def gate_inputs(root: pathlib.Path, head: str) -> str:
 
 
 def gate_environment(root: pathlib.Path, environ: dict[str, str] | None = None) -> dict[str, str]:
-    """The caller's environment without package selectors, `PATH` entries inside `root`, or virtualenv `bin`s.
+    """The caller's environment without package selectors, forced colour, `PATH` entries in `root`, or venv `bin`s.
 
-    Plus `SD_LOCAL_GATE=1`, whatever the caller had it set to.
+    Plus `SD_LOCAL_GATE=1`, `NO_COLOR=1` and `PYTHON_COLORS=0`, whatever the caller had them set to.
     """
     source = os.environ if environ is None else environ
     env = {key: value for key, value in source.items() if key not in DROPPED_ENVIRONMENT}
@@ -116,6 +119,7 @@ def gate_environment(root: pathlib.Path, environ: dict[str, str] | None = None) 
             and not (pathlib.Path(entry).resolve().parent / "pyvenv.cfg").is_file()]
     env["PATH"] = os.pathsep.join(kept)
     env[GATE_VARIABLE] = "1"
+    env.update(NO_COLOUR_ENVIRONMENT)
     return env
 
 
