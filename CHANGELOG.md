@@ -189,6 +189,16 @@
 
 ### Fixed
 
+- **One stalled plugin root no longer blocks every plugin lookup (sd:2540).**
+  A prefix lives in its plugin's manifest, so `sd config get <prefix>.<key>`
+  read every registered root in turn until it found the owner. On 2026-10-01
+  one root on an external volume waited on an open() under launchd for 16
+  hours, and every plugin `sd config get` timed out behind it (sd:2537). Now
+  each root reads in its own daemon thread. A lookup (`sd config get`, `set`,
+  `unset`, and a plugin kind) returns as soon as its owner answers. A root
+  silent after 5 s is skipped with a `warning: skipped plugin root` line.
+  Core `sd.*` keys still read no plugin root.
+
 - **`sd-review`'s Jev rows compare Jev with the routing (sd:2359).** `jev`
   computed `changed` against `--fallback`, which here is a token no tier can
   be, so every sd-review row in the judgment ledger said `changed=yes`. The

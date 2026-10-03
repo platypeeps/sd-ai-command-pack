@@ -21,14 +21,19 @@ goes on seeing the values captured at registration.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.machinery
 import importlib.util
+import io
 import json
+import os
 import pathlib
 import re
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -81,11 +86,12 @@ class PluginFixture(unittest.TestCase):
         self.config_home = self.tmp / "config"
         self.config_path = self.config_home / "sd-ai-command-pack" / "config.json"
 
-    def run_sd(self, *args: str) -> subprocess.CompletedProcess[str]:
+    def run_sd(self, *args: str, timeout: float | None = None) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, str(SD), *args],
             capture_output=True,
             text=True,
+            timeout=timeout,
             env={
                 "PATH": "/usr/bin:/bin",
                 "HOME": str(self.tmp / "home"),
@@ -930,6 +936,66 @@ class ListTests(PluginFixture):
         for args in (("plugin",), ("plugin", "sync"), ("nonesuch",)):
             with self.subTest(args=args):
                 self.assertEqual(self.run_sd(*args).returncode, 2)
+
+
+class StalledRootTests(PluginFixture):
+    """sd:2540. One plugin root that never answers must not block a lookup it does not own.
+
+    The stalled root is a FIFO named `sd-plugin.json`: opening it for reading
+    waits for a writer, the way an open() under an ungranted volume waited for
+    16 hours on 2026-10-01 (sd:2537). It is listed first, so a serial scan
+    reaches it before the root that owns the key.
+    """
+
+    def stalled(self) -> pathlib.Path:
+        root = self.tmp / "stalled"
+        root.mkdir()
+        fifo = root / "sd-plugin.json"
+        os.mkfifo(fifo)
+        self.addCleanup(self.release, fifo)
+        return root
+
+    @staticmethod
+    def release(fifo: pathlib.Path) -> None:
+        """Give a reader still waiting in this process its writer, so its thread ends."""
+
+        with contextlib.suppress(OSError):
+            os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+
+    def owner(self) -> pathlib.Path:
+        return self.plugin("owner", config=ConfigTests.DECLARED)
+
+    def test_the_owner_s_key_answers_while_another_root_hangs(self) -> None:
+        self.write_config({"plugins": [str(self.stalled()), str(self.owner())],
+                           "config": {"pp": {"google_account": "personal"}}})
+        started = time.monotonic()
+        got = self.run_sd("config", "get", "pp.google_account", timeout=30)
+        self.assertEqual((got.returncode, got.stdout.strip()), (0, "personal"), got.stderr)
+        self.assertLess(time.monotonic() - started, load_sd().ROOT_READ_SECONDS,
+                        "the lookup waited for the stalled root instead of returning on its owner")
+
+    def test_a_core_key_reads_no_plugin_root(self) -> None:
+        self.write_config({"plugins": [str(self.stalled())], "config": {"sd": {"gate_slots": "3"}}})
+        got = self.run_sd("config", "get", "sd.gate_slots", timeout=30)
+        self.assertEqual((got.returncode, got.stdout.strip(), got.stderr), (0, "3", ""))
+
+    def test_a_root_silent_past_the_bound_is_skipped_with_a_warning(self) -> None:
+        sd = load_sd()
+        sd.ROOT_READ_SECONDS = 0.3
+        stalled, owner = str(self.stalled()), str(self.owner())
+        said, found = io.StringIO(), {}
+
+        def scan() -> None:
+            with contextlib.redirect_stderr(said):
+                found.update(sd.registered([stalled, owner]))
+
+        worker = threading.Thread(target=scan, daemon=True)
+        worker.start()
+        worker.join(10)
+        self.assertFalse(worker.is_alive(), "the scan waited on the stalled root past its bound")
+        self.assertEqual(list(found), ["pp"])
+        self.assertIn(f"warning: skipped plugin root {stalled}: its sd-plugin.json did not answer within 0.3s",
+                      said.getvalue())
 
 
 class CorePolicyConfigTests(PluginFixture):
