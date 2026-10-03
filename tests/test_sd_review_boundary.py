@@ -855,7 +855,22 @@ class LineBudgetTests(unittest.TestCase):
         # `renamed_material`, which sends a rename git detects as its rename
         # patch under the new path and a one-line record under the old one, so
         # a folder move fits the input limit and both paths stay listed.
-        # 4550 -> 4553 is sd:2076: `bin/sd_gate_run.py` grows +3 so the gate's
+        # 4550 -> 4594 is six receipt-friction items, raised in its own commit
+        # before the commits that spend it. sd:2431: `bin/sd_review_material.py`
+        # +2, `file_material` returns its `is_media` verdict so a text file that
+        # starts with the media marker is not summarized. sd:1560: `bin/sd-review`
+        # +17 for `timed_out` in `classify_gate`, `gate_failure` for the runner's
+        # own timeout line, and the `--timeout` sentence in `gate_failed_line`;
+        # `bin/sd_check_receipts.py` +8 for `EXAMPLE` and `declaration_needed`,
+        # so a refusal names the declaration file. sd:2386: receipts +4, one
+        # fixed `LOCALE` recorded in the binding. sd:1296: `bin/sd-review` +2,
+        # the `--reuse-check` help says the pack never reuses. sd:1635:
+        # `bin/sd-review` +11, `DEFECT_CLASSES` in the code review prompt.
+        # 4594 -> 4605 is sd:2432, raised in its own commit before the one that
+        # spends it: `bin/sd_review_material.py` +11 for `RENAMED` and the
+        # `--binary -M` fallback in `binary_material`, so a renamed and edited
+        # non-media binary is sent as its rename delta, not a full literal.
+        # 4605 -> 4608 is sd:2076: `bin/sd_gate_run.py` grows +3 so the gate's
         # child drops `FORCE_COLOR`, `CLICOLOR_FORCE` and `PY_COLORS` and gets
         # `NO_COLOR=1` and `PYTHON_COLORS=0`: the wrapped tuple and the
         # commented constant. A terminal's colour failed another repo's gate.
@@ -863,7 +878,7 @@ class LineBudgetTests(unittest.TestCase):
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4553,
+            4608,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
