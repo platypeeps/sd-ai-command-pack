@@ -2198,6 +2198,232 @@ class PullBehaviourTests(InstallerHarness):
         self.assertIn("rendered", out.getvalue())
 
 
+class ServingTreeTests(InstallerHarness):
+    """A detached clone of origin that nobody works in: `--pull` moves it by commit, `--rollback` back (sd:1118).
+
+    `cmd_user` is replaced by a recorder for the git half; the receipt half
+    runs the real `cmd_user` against this checkout, as
+    `test_a_successful_pull_re_renders` does.
+    """
+
+    def context(self, checkout: Path, **kwargs) -> "sd_install.Context":
+        return sd_install.Context(
+            checkout=checkout,
+            home=self.home,
+            environ={
+                "XDG_STATE_HOME": str(self.home / ".local" / "state"),
+                "XDG_CONFIG_HOME": str(self.home / ".config"),
+            },
+            **kwargs,
+        )
+
+    def git(self, repo: Path, *args: str) -> str:
+        return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout.strip()
+
+    def commit(self, repo: Path, body: str) -> str:
+        (repo / "file.txt").write_text(body, encoding="utf-8")
+        self.git(repo, "add", "file.txt")
+        self.git(repo, "commit", "-qm", body.strip())
+        return self.git(repo, "rev-parse", "HEAD")
+
+    def setUp(self):
+        super().setUp()
+        self.origin = self.home / "origin"
+        self.origin.mkdir()
+        self.git(self.origin, "init", "-q", "-b", "main")
+        self.git(self.origin, "config", "user.email", "t@example.test")
+        self.git(self.origin, "config", "user.name", "Test")
+        self.first = self.commit(self.origin, "one\n")
+        self.serving = self.home / "serving"
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(self.serving)], check=True, capture_output=True)
+        self.git(self.serving, "checkout", "-q", "--detach", self.first)
+        self.rendered = []
+
+    def head(self) -> str:
+        return self.git(self.serving, "rev-parse", "HEAD")
+
+    def recording(self):
+        def render(ctx, out):
+            self.rendered.append(self.git(ctx.checkout, "rev-parse", "HEAD"))
+            return 0
+        return unittest.mock.patch.object(sd_install, "cmd_user", side_effect=render)
+
+    def write_receipt(self, **fields):
+        sd_install.write_receipt(self.context(self.serving).receipt, {"schema": sd_install.RECEIPT_SCHEMA, **fields})
+
+    def test_pull_detaches_the_serving_tree_at_the_exact_origin_main_commit_and_renders_it(self):
+        merged = self.commit(self.origin, "two\n")
+        self.commit(self.origin, "three\n")
+        self.git(self.origin, "checkout", "-q", "-b", "side")
+        self.commit(self.origin, "side work\n")
+        self.git(self.origin, "checkout", "-q", "main")
+        self.git(self.origin, "reset", "-q", "--hard", merged)
+        out = io.StringIO()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 0, out.getvalue())
+        self.assertEqual(self.head(), merged)
+        self.assertEqual(self.git(self.serving, "rev-parse", "--abbrev-ref", "HEAD"), "HEAD", "the tree stays detached")
+        self.assertEqual(self.rendered, [merged])
+        self.assertIn(f"serving {merged}", out.getvalue())
+
+    def test_pull_refuses_a_dirty_serving_tree_and_moves_nothing(self):
+        self.commit(self.origin, "two\n")
+        for dirt in ("tracked", "untracked"):
+            with self.subTest(dirt=dirt):
+                if dirt == "tracked":
+                    (self.serving / "file.txt").write_text("edited\n", encoding="utf-8")
+                else:
+                    self.git(self.serving, "checkout", "-q", "--", "file.txt")
+                    (self.serving / "draft.md").write_text("planning\n", encoding="utf-8")
+                out = io.StringIO()
+                with self.recording():
+                    self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
+                self.assertIn("uncommitted changes", out.getvalue())
+                self.assertEqual((self.head(), self.rendered), (self.first, []))
+
+    def test_pull_still_refuses_a_checkout_on_another_branch(self):
+        self.git(self.serving, "checkout", "-q", "-b", "work")
+        out = io.StringIO()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
+        self.assertIn("not main or a detached serving tree", out.getvalue())
+        self.assertEqual(self.rendered, [])
+
+    def test_a_dry_run_pull_of_a_serving_tree_fetches_nothing(self):
+        merged = self.commit(self.origin, "two\n")
+        out = io.StringIO()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving, dry_run=True), out), 0)
+        self.assertIn("would detach", out.getvalue())
+        self.assertEqual(self.head(), self.first)
+        self.assertNotEqual(self.git(self.serving, "rev-parse", "refs/remotes/origin/main"), merged)
+
+    def test_a_serving_pull_that_cannot_fetch_or_find_origin_main_moves_nothing(self):
+        self.git(self.serving, "remote", "set-url", "origin", str(self.home / "gone"))
+        out = io.StringIO()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
+        self.assertIn("git fetch origin failed", out.getvalue())
+        self.git(self.serving, "remote", "set-url", "origin", str(self.origin))
+        self.git(self.origin, "branch", "-q", "-m", "main", "trunk")
+        self.git(self.serving, "update-ref", "-d", "refs/remotes/origin/main")
+        out = io.StringIO()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
+        self.assertIn("origin/main does not name a commit after the fetch", out.getvalue())
+        self.assertEqual((self.head(), self.rendered), (self.first, []))
+
+    def test_a_fetch_that_will_not_finish_is_reported_and_not_raised(self):
+        real = subprocess.run
+
+        def fake(args, **kwargs):
+            if "fetch" in args:
+                raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+            return real(args, **kwargs)
+
+        out = io.StringIO()
+        with self.recording(), unittest.mock.patch("subprocess.run", side_effect=fake):
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
+        self.assertIn("could not finish", out.getvalue())
+
+    def test_a_checkout_git_refuses_is_reported_and_nothing_renders(self):
+        merged = self.commit(self.origin, "two\n")
+        real = sd_install._git
+
+        def refuse(ctx, args, timeout=sd_install.GIT_TIMEOUT):
+            return (1, "", "boom") if args[0] == "checkout" else real(ctx, args, timeout)
+
+        out = io.StringIO()
+        with self.recording(), unittest.mock.patch.object(sd_install, "_git", side_effect=refuse):
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
+        self.assertIn(f"git checkout --detach {merged} failed:\nboom", out.getvalue())
+        self.assertEqual(self.rendered, [])
+
+    def test_a_dry_run_rollback_moves_nothing(self):
+        merged = self.commit(self.origin, "two\n")
+        self.git(self.serving, "fetch", "-q", "origin")
+        self.write_receipt(commit=self.first, previousCommit=merged)
+        out = io.StringIO()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_rollback(self.context(self.serving, dry_run=True), out), 0)
+        self.assertIn(f"would detach {self.serving} at {merged}", out.getvalue())
+        self.assertEqual((self.head(), self.rendered), (self.first, []))
+
+    def test_rollback_returns_to_the_previous_commit_and_a_second_rollback_undoes_it(self):
+        merged = self.commit(self.origin, "two\n")
+        self.git(self.serving, "fetch", "-q", "origin")
+        self.git(self.serving, "checkout", "-q", "--detach", merged)
+        self.write_receipt(commit=merged, previousCommit=self.first)
+        out = io.StringIO()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_rollback(self.context(self.serving), out), 0, out.getvalue())
+        self.assertEqual((self.head(), self.rendered), (self.first, [self.first]))
+        # The real cmd_user would write this receipt; previous_commit is what it records.
+        self.write_receipt(commit=self.first, previousCommit=sd_install.previous_commit({"commit": merged, "previousCommit": self.first}, self.first))
+        with self.recording():
+            self.assertEqual(sd_install.cmd_rollback(self.context(self.serving), io.StringIO()), 0)
+        self.assertEqual(self.head(), merged)
+
+    def test_rollback_refuses_without_a_previous_commit_off_a_serving_tree_dirty_or_unknown(self):
+        cases = {
+            "no previousCommit": ({"commit": self.first}, None, "records no previousCommit"),
+            "unknown commit": ({"commit": self.first, "previousCommit": "0" * 40}, None, "is not a commit"),
+            "on a branch": ({"commit": self.first, "previousCommit": self.first}, "branch", "not a detached serving tree"),
+            "dirty": ({"commit": self.first, "previousCommit": self.first}, "dirty", "uncommitted changes"),
+        }
+        for name, (receipt, setup, said) in cases.items():
+            with self.subTest(name):
+                self.git(self.serving, "checkout", "-q", "--detach", self.first)
+                self.git(self.serving, "clean", "-qfd")
+                if setup == "branch":
+                    self.git(self.serving, "checkout", "-q", "-B", "work")
+                if setup == "dirty":
+                    (self.serving / "draft.md").write_text("planning\n", encoding="utf-8")
+                self.write_receipt(**receipt)
+                out = io.StringIO()
+                with self.recording():
+                    self.assertEqual(sd_install.cmd_rollback(self.context(self.serving), out), 1)
+                self.assertIn(said, out.getvalue())
+                self.assertEqual(self.rendered, [])
+
+    def test_rollback_is_reachable_from_the_command_line(self):
+        out = io.StringIO()
+        with unittest.mock.patch.object(sd_install, "cmd_rollback", return_value=0) as rollback:
+            self.assertEqual(sd_install.main(["--rollback", "--home", str(self.home)], out=out), 0)
+        rollback.assert_called_once()
+        self.assertIn("--rollback", sd_install.USAGE)
+
+    def test_verify_stays_strict_in_a_serving_tree(self):
+        """Drift: an untracked draft, or a HEAD moved without a render, fails the source check."""
+        self.write_receipt(commit=self.first, dirty=False)
+        ctx = self.context(self.serving)
+        receipt = sd_install.read_receipt(ctx.receipt)
+        self.assertEqual(sd_install.verify_source(ctx, receipt)["code"], "ok")
+        (self.serving / "draft.md").write_text("planning\n", encoding="utf-8")
+        self.assertEqual(sd_install.verify_source(ctx, receipt)["code"], "source_not_clean")
+        (self.serving / "draft.md").unlink()
+        moved = self.commit(self.origin, "two\n")
+        self.git(self.serving, "fetch", "-q", "origin")
+        self.git(self.serving, "checkout", "-q", "--detach", moved)
+        self.assertEqual(sd_install.verify_source(ctx, receipt)["code"], "source_commit_changed")
+
+    def test_previous_commit_records_the_replaced_commit_and_keeps_it_across_a_re_render(self):
+        self.assertEqual(sd_install.previous_commit({}, "b"), "")
+        self.assertEqual(sd_install.previous_commit({"commit": "a"}, "b"), "a")
+        self.assertEqual(sd_install.previous_commit({"commit": "b", "previousCommit": "a"}, "b"), "a")
+        self.assertEqual(sd_install.previous_commit({"commit": "b", "previousCommit": "b"}, "b"), "")
+
+    def test_the_receipt_a_render_writes_carries_the_previous_commit(self):
+        ctx = self.context(REPO_ROOT)
+        for commit in ("a", "b", "b"):
+            with unittest.mock.patch.object(
+                sd_install, "git_context", return_value={"branch": "HEAD", "commit": commit, "dirty": False}
+            ):
+                self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+        receipt = sd_install.read_receipt(ctx.receipt)
+        self.assertEqual((receipt["commit"], receipt["previousCommit"]), ("b", "a"))
+
+
 class RepoCommandTests(InstallerHarness):
     def test_repo_defaults_to_the_working_directory(self):
         repo = self.home / "here"

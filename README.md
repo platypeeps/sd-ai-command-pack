@@ -303,12 +303,32 @@ a copy of what is in it at that moment. Keep it on a clean `main` and update
 with `--pull`, which fast-forwards and re-renders in one step and refuses to run
 off `main` or over uncommitted changes.
 
+### A dedicated serving tree
+
+Work in one checkout and serve from another (sd:1118). A serving tree is a
+clean clone on a detached `HEAD` that nobody works in, for example
+`~/.local/share/sd-ai-command-pack/serving`. Install from it once with
+`--user`. After that:
+
+- **Refresh:** `python3 bin/sd_install.py --pull`, run from the serving tree.
+  It fetches `origin`, detaches at the exact commit `origin/main` names and
+  re-renders. It refuses a tree with tracked or untracked changes.
+- **Roll back:** `python3 bin/sd_install.py --rollback`. Each render that
+  activates a new commit records the replaced one as `previousCommit` in the
+  receipt. `--rollback` detaches at that commit and re-renders, so a second
+  `--rollback` undoes the first. It refuses a checkout on a branch, a dirty
+  tree, a receipt with no `previousCommit`, and a commit the tree does not have.
+- **Verify:** `--verify --json` is as strict as in any checkout. Planning
+  drafts or a `HEAD` moved without a render fail the source check, which is why
+  nobody works in the serving tree.
+
 | Command | What it does |
 |---|---|
 | `python3 bin/sd_install.py --user` | Render skills and link commands into `~/.local/bin`; use `--bin-dir DIR` for another directory |
 | `python3 bin/sd_install.py --status` | Report installed source, drift, legacy residue, and remaining predecessor agents without failing on drift |
 | `python3 bin/sd_install.py --verify --json` | Read-only: fail on receipt, source, rendered-file, command-resolution, or bounded help-probe errors |
-| `python3 bin/sd_install.py --pull` | Fast-forward the clean serving checkout on `main`, then render |
+| `python3 bin/sd_install.py --pull` | Fast-forward the clean serving checkout on `main`, or detach a clean serving tree at the exact `origin/main` commit, then render |
+| `python3 bin/sd_install.py --rollback` | Detach a clean serving tree at the receipt's `previousCommit`, then render |
 | `python3 bin/sd_install.py --uninstall` | Remove receipt-owned renders, hooks, and command links; preserve modified files and retargeted links |
 | `python3 bin/sd_install.py --adopt-legacy` | Delete the pre-3e fleet installer's successor-less renders |
 | `python3 bin/sd_install.py --repo [PATH]` | Write the marked block into `PATH/CLAUDE.local.md` |
@@ -342,7 +362,7 @@ Claude agents and OpenCode rendering remain unchanged.
 installs into a scratch directory instead of `$HOME`, which is how the tests
 drive it. `--bin-dir DIR` links the commands somewhere other than
 `~/.local/bin`, and the receipt remembers the directory, so a later `--user`
-or `--pull` without the flag links there again; a link already pointing into
+or `--pull` or `--rollback` without the flag links there again; a link already pointing into
 this checkout is kept as it is, and anything at a link's path that is not such
 a link makes `--user` refuse by name and write nothing.
 

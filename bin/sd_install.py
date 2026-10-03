@@ -596,6 +596,20 @@ def git_context(checkout: Path) -> dict:
     }
 
 
+def previous_commit(recorded: dict, commit: str) -> str:
+    """The commit `--rollback` returns to, after an activation of `commit` (sd:1118).
+
+    A run that activates a new commit records the one the receipt held; a run
+    at the same commit keeps what the receipt already recorded, so re-rendering
+    in place does not forget the way back. Empty when there is none.
+    """
+    held = recorded.get("commit")
+    if isinstance(held, str) and held and held != commit:
+        return held
+    kept = recorded.get("previousCommit")
+    return kept if isinstance(kept, str) and kept != commit else ""
+
+
 # --------------------------------------------------------------------- render
 
 
@@ -2248,14 +2262,18 @@ def cmd_user(ctx: Context, out) -> int:
         # way would churn every row without changing a single installed file, and a
         # diff that noisy is a diff nobody reads.
         owned.sort(key=lambda row: (row["path"], row.get("kind", "")))
+        source = git_context(ctx.checkout)
         payload = {
             "schema": RECEIPT_SCHEMA,
             "checkout": str(ctx.checkout),
-            **git_context(ctx.checkout),
+            **source,
             "platformHomes": {home.key: str(home.root) for home in ctx.homes},
             "binDir": str(bin_dir),
             "owned": owned,
         }
+        previous = previous_commit(recorded, source["commit"])
+        if previous:
+            payload["previousCommit"] = previous
         if not ctx.dry_run:
             write_receipt(ctx.receipt, payload)
         recovery.pop_all()
@@ -2649,28 +2667,78 @@ def cmd_status(ctx: Context, out) -> int:
     return 0
 
 
+def _git(ctx: Context, args: list[str], timeout: float = GIT_TIMEOUT) -> tuple[int, str, str]:
+    """`git -C <checkout> <args>`: exit, stdout, stderr; a git that cannot run or finish is exit 1 with the reason."""
+    try:
+        done = subprocess.run(  # nosec B603 - fixed argv, no shell
+            ["git", "-C", str(ctx.checkout), *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        return 1, "", f"could not finish: {error}"
+    return done.returncode, done.stdout.strip(), done.stderr.strip()
+
+
+def _activate(ctx: Context, commit: str, out) -> int:
+    """Detach the serving tree at exactly `commit`, then re-render."""
+    code, _, err = _git(ctx, ["checkout", "--quiet", "--detach", commit])
+    if code:
+        print(f"error: git checkout --detach {commit} failed:\n{err}", file=out)
+        return 1
+    print(f"serving {commit}", file=out)
+    return cmd_user(ctx, out)
+
+
+def cmd_pull_serving(ctx: Context, out) -> int:
+    """`--pull` in a serving tree: detach at the exact commit `origin/main` names, then re-render (sd:1118).
+
+    A serving tree is a clean checkout on a detached HEAD that nobody works in.
+    It moves by commit, not by branch, so the receipt names an exact merged
+    commit and `--verify` keeps comparing against it. `cmd_user` records the
+    commit it replaced as `previousCommit`, which `--rollback` returns to.
+    """
+    code, _, err = _git(ctx, ["fetch", "--quiet", "origin"], timeout=PULL_TIMEOUT)
+    if code:
+        print(f"error: git fetch origin failed:\n{err}", file=out)
+        return 1
+    code, target, err = _git(ctx, ["rev-parse", "--verify", "--quiet", "refs/remotes/origin/main^{commit}"])
+    if code or not target:
+        print(f"error: origin/main does not name a commit after the fetch{': ' + err if err else ''}", file=out)
+        return 1
+    return _activate(ctx, target, out)
+
+
 def cmd_pull(ctx: Context, out) -> int:
     """Fast-forward the serving checkout, then re-render.
 
     Refuses off main and refuses dirty, because the serving checkout is what
     every rendered surface points at: fast-forwarding a branch someone is
     working on, or one with uncommitted edits, would change what is installed
-    on the machine as a side effect of an update.
+    on the machine as a side effect of an update. A detached checkout is a
+    serving tree (sd:1118) and moves to the exact commit `origin/main` names
+    instead (`cmd_pull_serving`).
     """
     live = git_context(ctx.checkout)
-    if live["branch"] != "main":
+    if live["branch"] not in ("main", "HEAD"):
         print(
-            f"error: serving checkout is on {live['branch'] or '(detached)'}, not main; "
-            "--pull refuses to move it.",
+            f"error: serving checkout is on {live['branch'] or '(unknown)'}, not main or a "
+            "detached serving tree; --pull refuses to move it.",
             file=out,
         )
         return 1
     if live["dirty"]:
         print("error: serving checkout has uncommitted changes; --pull refuses.", file=out)
         return 1
+    serving = live["branch"] == "HEAD"
     if ctx.dry_run:
-        print(f"would fast-forward {ctx.checkout} and re-render", file=out)
+        print(f"would {'detach' if serving else 'fast-forward'} {ctx.checkout} "
+              f"{'at origin/main ' if serving else ''}and re-render", file=out)
         return 0
+    if serving:
+        return cmd_pull_serving(ctx, out)
     try:
         done = subprocess.run(  # nosec B603 - fixed argv, no shell
             ["git", "-C", str(ctx.checkout), "pull", "--ff-only"],
@@ -2687,6 +2755,39 @@ def cmd_pull(ctx: Context, out) -> int:
         return 1
     print(done.stdout.strip(), file=out)
     return cmd_user(ctx, out)
+
+
+def cmd_rollback(ctx: Context, out) -> int:
+    """Return a serving tree to the receipt's `previousCommit`, then re-render (sd:1118).
+
+    Only a clean, detached serving tree rolls back: detaching a checkout on a
+    branch would take it off the branch someone works on. The rollback is an
+    activation like any other, so the commit it leaves becomes the new
+    `previousCommit`, and a second `--rollback` undoes the first.
+    """
+    live = git_context(ctx.checkout)
+    if live["branch"] != "HEAD":
+        print(
+            f"error: {ctx.checkout} is on {live['branch'] or '(unknown)'}, not a detached serving "
+            "tree; --rollback refuses to move it.",
+            file=out,
+        )
+        return 1
+    if live["dirty"]:
+        print("error: serving tree has uncommitted changes; --rollback refuses.", file=out)
+        return 1
+    target = read_receipt(ctx.receipt).get("previousCommit")
+    if not isinstance(target, str) or not target:
+        print(f"error: the receipt at {ctx.receipt} records no previousCommit; nothing to roll back to.", file=out)
+        return 1
+    code, _, _ = _git(ctx, ["cat-file", "-e", f"{target}^{{commit}}"])
+    if code:
+        print(f"error: previousCommit {target} is not a commit in {ctx.checkout}; fetch it or pull instead.", file=out)
+        return 1
+    if ctx.dry_run:
+        print(f"would detach {ctx.checkout} at {target} and re-render", file=out)
+        return 0
+    return _activate(ctx, target, out)
 
 
 def cmd_uninstall(ctx: Context, out) -> int:
@@ -2799,15 +2900,18 @@ def cmd_repo(ctx: Context, repo: Path, out, reviewers: str | None = None) -> int
 # ------------------------------------------------------------------------ CLI
 
 USAGE = """\
-usage: python3 bin/sd_install.py (--user | --status | --verify | --pull | --uninstall | --adopt-legacy
-                   | --repo [PATH]) [--dry-run] [--home DIR] [--bin-dir DIR]
+usage: python3 bin/sd_install.py (--user | --status | --verify | --pull | --rollback | --uninstall
+                   | --adopt-legacy | --repo [PATH]) [--dry-run] [--home DIR] [--bin-dir DIR]
 
   --user           render every sd-* surface into this machine's platform homes
                    and link the bin/ commands into the link directory
   --status         report what is installed, what drifted, what legacy remains
   --verify         read-only strict receipt, source, render, PATH and help checks
   --json           with --verify, emit typed verification results
-  --pull           fast-forward the serving checkout (main, clean) and re-render
+  --pull           fast-forward the serving checkout (main, clean) and re-render;
+                   a detached serving tree moves to the exact origin/main commit
+  --rollback       return a detached serving tree to the receipt's previousCommit
+                   and re-render
   --uninstall      remove exactly what the receipt records having written
   --adopt-legacy   delete the old fleet installer's successor-less renders (M1)
   --repo [PATH]    write the marked block into PATH/CLAUDE.local.md (default: .)
@@ -2820,12 +2924,12 @@ usage: python3 bin/sd_install.py (--user | --status | --verify | --pull | --unin
 
   --dry-run        print what would happen; write nothing
   --home DIR       treat DIR as the home directory (tests and scratch installs)
-  --bin-dir DIR    with --user or --pull, link the bin/ commands into DIR
+  --bin-dir DIR    with --user, --pull or --rollback, link the bin/ commands into DIR
                    (default: the directory the last run linked into, else
                    ~/.local/bin); the installer never edits PATH
 """
 
-MODES = ("user", "status", "verify", "pull", "uninstall", "adopt-legacy", "repo",
+MODES = ("user", "status", "verify", "pull", "rollback", "uninstall", "adopt-legacy", "repo",
          "provision-library")
 
 
@@ -2922,7 +3026,7 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
     # (C-30): a receipt is a file anyone can edit, and a stale or tampered
     # `binDir` would otherwise be written to unchecked. Refused by name, and
     # `--bin-dir` is the way past it (review 1, finding 2).
-    if bin_dir is None and mode in ("user", "pull") and ctx.sandboxed:
+    if bin_dir is None and mode in ("user", "pull", "rollback") and ctx.sandboxed:
         recorded_dir = link_directory(ctx, read_receipt(ctx.receipt))
         if not _is_within(recorded_dir.resolve(), home.resolve()):
             print(
@@ -2948,6 +3052,8 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
         return cmd_verify(ctx, out, as_json=as_json)
     if mode == "pull":
         return cmd_pull(ctx, out)
+    if mode == "rollback":
+        return cmd_rollback(ctx, out)
     if mode == "uninstall":
         return cmd_uninstall(ctx, out)
     if mode == "adopt-legacy":
