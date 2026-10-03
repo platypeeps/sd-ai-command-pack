@@ -19,8 +19,8 @@ replaced; the rest of that file stays the consumer's.
 
 Three refusals, each with a decision behind it:
 
-  * `minimal` and `guest` repositories cannot install it (R10-D5), so a shared
-    or upstream repository can never grow the framework's workflow.
+  * A `guest` repository, whose control was never established, cannot install
+    it (R10-D5); `minimal`, the operator's own quiet repository, may (sd:1292).
   * A repository still carrying the sd-github-review footprint refuses without
     `--remove-legacy`: two routers in one repository is how a change gets
     reviewed twice and read once.
@@ -216,8 +216,8 @@ def setup_github(
     # R10-D5 is a registry row now, cited here and not in the message: an id in
     # a string reads as a copy of the table, and no check can tell the two apart.
     repo_mode = sd_lib.mode(root)
-    if repo_mode != "full":
-        raise Refusal(f"this repository is in {repo_mode} mode; only a full-mode "
+    if repo_mode not in sd_setup_guard.LANE_MODES:
+        raise Refusal(f"this repository is in {repo_mode} mode; only a full- or minimal-mode "
                       "repository installs the routing lane")
 
     legacy = [rel for rel in LEGACY_ROUTER_PATHS if (root / rel).exists()]

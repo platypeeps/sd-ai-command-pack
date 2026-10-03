@@ -330,12 +330,58 @@ def publish_refusal(repo: Path, copy: str) -> str:
     branch content into the shared vault folder as the canonical document.
     Publication is the main checkout's, and a worktree that wants it says so
     with `SD_PUBLISH_FROM_WORKTREE=1` on the invocation.
+
+    The main checkout queues a mirror from its default branch only (sd:2019).
+    The hook renders on post-checkout, so a branch switch there rewrote the
+    pending request with that branch's text, and a drain in that window
+    published unmerged content. A detached HEAD is off the branch too. The
+    vault copy is local and the next render replaces it, so it is not held.
+    The default branch is `canonical_branch`'s, whatever HEAD tracks.
     """
-    if not linked_worktree(repo) or ENVIRON.get(PUBLISH_FROM_WORKTREE):
+    if ENVIRON.get(PUBLISH_FROM_WORKTREE):
         return ""
-    return ("%s: not written from a linked worktree; run `sd-research-kit "
-            "render` in %s, or set %s=1 to publish this branch's content"
-            % (copy, repo_home(repo), PUBLISH_FROM_WORKTREE))
+    if linked_worktree(repo):
+        return ("%s: not written from a linked worktree; run `sd-research-kit "
+                "render` in %s, or set %s=1 to publish this branch's content"
+                % (copy, repo_home(repo), PUBLISH_FROM_WORKTREE))
+    if copy != "mirror" or git_output(["rev-parse", "--git-dir"], repo) is None:
+        return ""
+    branch = git_output(["symbolic-ref", "--quiet", "--short", "HEAD"], repo)
+    default = canonical_branch(repo)
+    if branch and branch == default:
+        return ""
+    where = "branch %s" % branch if branch else "a detached HEAD"
+    if default is None:
+        return ("%s: not queued from %s; no default branch resolves (origin/HEAD "
+                "is unset): run `git remote set-head origin --auto`, or set %s=1 "
+                "to publish this branch's content"
+                % (copy, where, PUBLISH_FROM_WORKTREE))
+    return ("%s: not queued from %s; the main checkout queues from %s only, "
+            "or set %s=1 to publish this branch's content"
+            % (copy, where, default, PUBLISH_FROM_WORKTREE))
+
+
+def canonical_branch(repo: Path) -> str | None:
+    """The branch the main checkout publishes from, or None when none resolves.
+
+    Read from `origin` and never from HEAD's tracking remote: a feature branch
+    that tracks a fork whose default is that branch would otherwise name
+    itself canonical and publish unmerged content. With an `origin`, only
+    `origin/HEAD` names it: an `origin/main` or a local `main` can exist
+    beside a different default, so a conventional name proves nothing. Only a
+    checkout with no `origin` falls back to a local `main` or `master`. None
+    holds the mirror: no branch then matches, and the refusal names
+    `git remote set-head origin --auto`.
+    """
+    named = git_output(["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], repo)
+    if named and named.startswith("origin/"):
+        return named[len("origin/"):]
+    if git_output(["remote", "get-url", "origin"], repo) is not None:
+        return None
+    for name in ("main", "master"):
+        if git_output(["rev-parse", "--verify", "--quiet", "refs/heads/" + name], repo) is not None:
+            return name
+    return None
 
 
 def repo_key(repo: Path) -> str:

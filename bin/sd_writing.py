@@ -18,6 +18,9 @@ REGISTERED_ONLY = frozenset({"import", "register", "cutover", "recover", "public
                              "publication-claim", "publication-status", "publication-dispatch",
                              "publication-receipt", "publication-reconcile", "publication-abandon"})
 
+#: Verbs that read the checkout's pieces, so a checkout with none is refused (sd:1660, sd:1803).
+CONTENT_ONLY = frozenset({"list", "import", "verify"})
+
 
 def run(args: argparse.Namespace) -> int:
     sd_db = sd_handoff_rows.library()
@@ -40,10 +43,10 @@ def run(args: argparse.Namespace) -> int:
     checkout: Any = getattr(writing, "checkout", None)
     if linked and checkout is None:
         raise WorkRefusal("install the current system/local-sd-db build to run writing controls from a worktree")
-    if action == "verify" and not any((root / name).is_dir() for name in ("content", "content-parked")):
-        # Another checkout has no pieces, so verify would pass on zero files and zero rows (sd:1660).
-        raise WorkRefusal(f"{root} holds no content/ folder, so there is nothing to verify; "
-                          "run sd writing verify from the writing Git checkout")
+    if action in CONTENT_ONLY and not any((root / name).is_dir() for name in ("content", "content-parked")):
+        # Another checkout has no pieces, so these would answer on zero files and zero rows (sd:1660, sd:1803).
+        raise WorkRefusal(f"{root} holds no content/ folder, so there is nothing to {action}; "
+                          f"run sd writing {action} from the writing Git checkout")
     write = action in {"cutover", "recover", "register", "stage", "metadata", "gate", "park",
                        "publication-claim", "publication-dispatch", "publication-receipt", "publication-reconcile", "publication-abandon", "publication-recover"} or (
         action == "import" and args.apply)
