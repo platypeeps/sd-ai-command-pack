@@ -11,6 +11,7 @@ it with a recorder, so nothing reaches pip.
 """
 from __future__ import annotations
 
+import json
 import pathlib
 import subprocess
 import sys
@@ -39,6 +40,8 @@ class ReprovisionAfterMerge(unittest.TestCase):
         git(self.system, "config", "user.name", "Test")
         self.commit("README.md")
         self.environ = {sd_install.SYSTEM_CHECKOUT_ENV: str(self.system)}
+        # A pack of the test's own, so the developer's virtualenv is never read.
+        self.pack = self.system.parent / "pack"
         self.calls: list[str | None] = []
 
         def provision(ctx, out, ref=None):
@@ -58,27 +61,67 @@ class ReprovisionAfterMerge(unittest.TestCase):
 
     def test_a_merge_touching_the_library_installs_the_merge_commit(self) -> None:
         merged = self.commit("local-sd-db/sd_db/writing.py")
-        result = sd_install.reprovision_after_merge(self.system, merged, self.environ)
+        result = sd_install.reprovision_after_merge(self.system, merged, self.environ, pack=self.pack)
         self.assertEqual(self.calls, [merged])
         self.assertEqual(result, {"ref": merged, "installed": True, "report": f"sd_db installed at {merged}"})
 
     def test_a_merge_elsewhere_in_the_system_repository_installs_nothing(self) -> None:
         merged = self.commit("local-redis/redis.sh")
-        self.assertIsNone(sd_install.reprovision_after_merge(self.system, merged, self.environ))
+        self.assertIsNone(sd_install.reprovision_after_merge(self.system, merged, self.environ, pack=self.pack))
         self.assertEqual(self.calls, [])
 
     def test_another_repository_installs_nothing(self) -> None:
         merged = self.commit("local-sd-db/sd_db/writing.py")
         other = {sd_install.SYSTEM_CHECKOUT_ENV: str(self.system.parent / "elsewhere")}
-        self.assertIsNone(sd_install.reprovision_after_merge(self.system, merged, other))
+        self.assertIsNone(sd_install.reprovision_after_merge(self.system, merged, other, pack=self.pack))
         self.assertEqual(self.calls, [])
 
     def test_a_worktree_of_the_system_checkout_counts_as_the_system_repository(self) -> None:
         worktree = self.system.parent / "system-topic"
         git(self.system, "worktree", "add", "-q", "-b", "topic", str(worktree))
         merged = self.commit("local-sd-db/pyproject.toml")
-        sd_install.reprovision_after_merge(worktree, merged, self.environ)
+        sd_install.reprovision_after_merge(worktree, merged, self.environ, pack=self.pack)
         self.assertEqual(self.calls, [merged])
+
+
+class NoAncestryDowngrade(ReprovisionAfterMerge):
+    """A late reconcile must not replace a newer installed `sd_db` (sd:2108 review).
+
+    The downgrade guard compares schema numbers only, so two library merges
+    under one schema pass it in either order. Reconciling the older merge after
+    the newer one was installed would put the older code back.
+    """
+
+    def install_record(self, commit: str) -> pathlib.Path:
+        """A pack whose virtualenv holds `sd_db` installed from `commit`, as pip records a VCS install."""
+        pack = self.pack
+        info = pack / ".venv/lib/python3.14/site-packages/sd_db-0.1.dist-info"
+        info.mkdir(parents=True, exist_ok=True)
+        (info / "direct_url.json").write_text(
+            json.dumps({"url": f"file://{self.system}", "vcs_info": {"vcs": "git", "commit_id": commit}}),
+            encoding="utf-8")
+        return pack
+
+    def test_an_older_merge_after_a_newer_install_is_skipped(self) -> None:
+        older = self.commit("local-sd-db/sd_db/a.py")
+        newer = self.commit("local-sd-db/sd_db/b.py")
+        pack = self.install_record(newer)
+        result = sd_install.reprovision_after_merge(self.system, older, self.environ, pack=pack)
+        self.assertEqual(self.calls, [])
+        self.assertFalse(result["installed"])
+        self.assertIn(f"installed sd_db {newer} is not an ancestor of {older}", result["report"])
+
+    def test_the_commit_already_installed_is_not_installed_again(self) -> None:
+        merged = self.commit("local-sd-db/sd_db/a.py")
+        result = sd_install.reprovision_after_merge(self.system, merged, self.environ, pack=self.install_record(merged))
+        self.assertEqual((self.calls, result["installed"]), ([], False))
+        self.assertIn("already installed", result["report"])
+
+    def test_a_newer_merge_over_an_older_install_installs(self) -> None:
+        older = self.commit("local-sd-db/sd_db/a.py")
+        newer = self.commit("local-sd-db/sd_db/b.py")
+        sd_install.reprovision_after_merge(self.system, newer, self.environ, pack=self.install_record(older))
+        self.assertEqual(self.calls, [newer])
 
 
 class ProvisionAtARef(unittest.TestCase):

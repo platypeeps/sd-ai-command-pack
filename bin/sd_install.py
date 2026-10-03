@@ -1847,7 +1847,24 @@ def provision_library(ctx: Context, out, ref: str | None = None) -> tuple[bool, 
     return True, f"sd_db installed from {source} at {ref}{dirty}"
 
 
-def reprovision_after_merge(root: Path, commit: str, environ: dict[str, str]) -> dict | None:
+def installed_library_commit(pack: Path) -> str | None:
+    """The commit pip installed `sd_db` from into `pack`'s virtualenv, or None.
+
+    A VCS install records `vcs_info.commit_id` in `direct_url.json`; a path
+    install records none, and neither does a virtualenv without `sd_db`.
+    """
+    for record in sorted((pack / ".venv/lib").glob("python*/site-packages/sd_db-*.dist-info/direct_url.json")):
+        try:
+            vcs = json.loads(record.read_text(encoding="utf-8")).get("vcs_info")
+        except (OSError, ValueError, AttributeError):
+            continue
+        commit = vcs.get("commit_id") if isinstance(vcs, dict) else None
+        if isinstance(commit, str) and commit:
+            return commit
+    return None
+
+
+def reprovision_after_merge(root: Path, commit: str, environ: dict[str, str], pack: Path | None = None) -> dict | None:
     """Install `sd_db` at `commit` when it merged a change to the library (sd:2108).
 
     The dashboard refuses an installed `sd_db` that lacks the system
@@ -1856,7 +1873,9 @@ def reprovision_after_merge(root: Path, commit: str, environ: dict[str, str]) ->
     is not the system checkout or one of its worktrees, or when `commit`
     leaves `local-sd-db` alone. The pack whose virtualenv receives the copy is
     this file's main checkout, the one the dashboard runs under. A failed
-    install is reported, not raised: the merge it follows has happened.
+    install is reported, not raised: the merge it follows has happened. An
+    installed copy that is not an ancestor of `commit` is kept, and the
+    report says why: reconciles need not run in merge order.
     """
     lib = sibling("sd_lib")
     system = system_checkout(environ)
@@ -1865,7 +1884,17 @@ def reprovision_after_merge(root: Path, commit: str, environ: dict[str, str]) ->
     touched = lib.git_output(["diff", "--name-only", f"{commit}^1", commit, "--", str(LIBRARY_RELATIVE)], root)
     if not touched:
         return None
-    pack = lib.main_worktree_root(Path(__file__).resolve().parent.parent)
+    pack = pack or lib.main_worktree_root(Path(__file__).resolve().parent.parent)
+    # The downgrade guard compares schema numbers, so two library merges under
+    # one schema pass it in either order. A late reconcile of an older merge
+    # must not replace a newer copy: install only over an ancestor of `commit`.
+    present = installed_library_commit(pack)
+    if present == commit:
+        return {"ref": commit, "installed": False, "report": f"sd_db {commit} is already installed"}
+    if present and lib.git_output(["merge-base", "--is-ancestor", present, commit], root) is None:
+        return {"ref": commit, "installed": False,
+                "report": f"kept installed sd_db {present}: installed sd_db {present} is not an ancestor of "
+                          f"{commit}, so installing would replace newer or unrelated library code"}
     ctx = Context(checkout=pack, home=Path(os.path.expanduser("~")), environ=dict(environ))
     installed, report = provision_library(ctx, None, ref=commit)
     return {"ref": commit, "installed": installed, "report": report}

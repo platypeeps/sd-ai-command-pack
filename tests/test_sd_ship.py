@@ -2599,6 +2599,7 @@ roles:
             installs.append(ref)
             return True, f"sd_db installed at {ref}"
         with patch.dict(os.environ, {sd_install.SYSTEM_CHECKOUT_ENV: str(self.root)}), \
+                patch.object(sd_install, "installed_library_commit", return_value=None), \
                 patch.object(sd_install, "provision_library", provision):
             merged = self.merge()
         commit = self.remote.pull(1).merge_commit_sha
