@@ -317,8 +317,9 @@ A whole-item merge prepared without `--deliver` carries `Item:` and no
 `Delivers:`, so `sd work deliver` refuses it. `sd work deliver <row-id>
 <full-commit-sha> --associated --reason TEXT` closes that row. It runs the same
 reachability check, accepts the `Item:` trailer for the row instead, and records
-the trailer and the reason on the receipt. It refuses an ordinary task and a
-missing reason.
+the trailer and the reason on the receipt. A task or followup has no receipt:
+its move to done records the delivery sentence and the reason. It refuses a
+missing reason, and `sd-ship prepare --deliver` on such a record names it.
 
 `sd work cancel <row-id> --reason TEXT` records cancellation immediately,
 without a status-file change or another pull request. It does not claim the

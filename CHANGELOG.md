@@ -512,16 +512,15 @@
 
 ### Changed
 
-- **An associate-only merge can be delivered afterwards (sd:1913).**
-  `sd-ship reconcile --item N --deliver --reason TEXT` delivers an item whose
-  whole-item merge carried `Item:` where `Delivers:` was meant. It finds the
-  record by item from any branch, reverifies the merge, and requires
-  `Item: sd:N` on the squash. A work item goes through
-  `sd_db.progress.deliver_associated_work`, which records `trailer: Item` and
-  the reason; an older library refuses as `library_incompatible`. A task or
-  followup closes with the delivery sentence and the reason. `prepare
-  --deliver` on such a record, and `sd task status N done --delivered-by` on
-  an `Item:`-only commit, now name this repair.
+- **A task or followup merged associate-only can be delivered afterwards
+  (sd:1913).** `sd work deliver N SHA --associated --reason TEXT` (sd:1590)
+  closed only a work item and refused a task. On a task or followup it now
+  verifies reachability and `Item: sd:N` as `--delivered-by` verifies
+  `Delivers:`, and the move to done records the delivery sentence with the
+  reason. `sd-ship prepare --deliver` on a record that merged associate-only
+  refuses as `delivery_after_merge` and names that command with the merge
+  commit, where it used to reconcile in silence. `sd task status N done
+  --delivered-by` on an `Item:`-only commit names it too.
 
 - **An operator-observed criterion goes in the item's Log (sd:1933).**
   `WORKFLOW.md` records the operator's 2026-09-30 ruling: a criterion only

@@ -463,10 +463,7 @@ class Ship(SharedReview):
         else:
             self.branch = git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
             self.checkout_branch = self.branch
-        # An after-the-fact delivery (sd:1913) runs long after the merge, from
-        # whatever the checkout holds, so it finds the receipt by item as
-        # `observe` does rather than by the current branch.
-        if args.command == "observe" or (args.command == "reconcile" and getattr(args, "deliver", None)):
+        if args.command == "observe":
             self.key, self.revision, self.state = ship.for_item(connection, self.repository, args.item, self.item.get("branch"))
             self.branch = self.state["branch"]
         if self.item.get("branch") and self.item["branch"] != self.branch:
@@ -1195,9 +1192,14 @@ class Ship(SharedReview):
     def prepare(self) -> dict:
         if self.state.get("phase") in ("merged", "merge_dispatch"):
             if self.args.deliver and not self.state.get("deliver"):
-                raise Refusal(f"this record merged associate-only; deliver it with `sd-ship reconcile --item {self.args.item} "
-                              "--deliver --reason TEXT`", code="delivery_after_merge", boundary="input",
-                              state="operator_decision", next_action="Run sd-ship reconcile with --deliver and --reason.")
+                # A merge prepared associate-only carries `Item:` and no
+                # `Delivers:`; a reprepare cannot change a squash that landed
+                # (sd:1913). `sd work deliver --associated` is the one repair.
+                commit = self.state.get("merge_commit") or "MERGE_SHA"
+                raise Refusal(f"this record merged associate-only; deliver it with `sd work deliver {self.args.item} "
+                              f"{commit} --associated --reason TEXT`", code="delivery_after_merge", boundary="input",
+                              state="operator_decision",
+                              next_action="Run sd work deliver with --associated and --reason.")
             return self.reconcile()
         self.require_claim()
         if (any(value is not None for value in (self.args.additional_review_for, self.args.request_reason, self.args.review_history_digest))
@@ -1708,52 +1710,6 @@ class Ship(SharedReview):
         else:
             self.close_task(commit, ref)
 
-    def merge_hold(self, commit: str) -> tuple[str, bool]:
-        """The squash parent, and whether the base advanced past the review under the `PUT`."""
-        parent = git(self.root, "rev-parse", f"{commit}^1")
-        # The squash's own `Reviewed-base:` decides, as it does for every git
-        # reader of `Delivers:`. A message composed before that trailer falls
-        # back to ancestry, where None is "no" and "cannot tell" alike.
-        held = sd_lib.held_at_merge(git(self.root, "show", "-s", "--format=%B", commit), parent)
-        if held is None:
-            held = sd_lib.git_output(["merge-base", "--is-ancestor", parent, self.state["reviewed_head"]], self.root) is None
-        return parent, held
-
-    def after_the_fact(self) -> bool:
-        """Whether this reconcile delivers a merge that was prepared associate-only (sd:1913)."""
-        return (self.args.command == "reconcile" and not self.args.no_item
-                and bool(getattr(self.args, "deliver", None)) and not self.state.get("deliver"))
-
-    def deliver_after_merge(self, commit: str, ref: str, evidence: dict) -> dict:
-        """Deliver an item whose merge carried `Item:` where `Delivers:` was meant.
-
-        The operator says why in `--reason`, and the evidence is the merge
-        itself: on the verified default branch and naming this item in its
-        trailer block. A work item needs `sd_db.progress.deliver_associated_work`,
-        and an older library is refused by that name rather than delivered
-        another way. A task or followup closes with the delivery sentence,
-        the reason appended.
-        """
-        reason = (getattr(self.args, "reason", None) or "").strip()
-        if not reason:
-            raise Refusal("an after-the-fact delivery takes --reason TEXT: why this associate-only merge is the whole item",
-                          code="delivery_reason_required", boundary="input", state="operator_decision",
-                          next_action="Rerun reconcile with --deliver --reason TEXT.")
-        if self.item["kind"] not in DELIVERING_KINDS:
-            raise Refusal(f"--deliver closes work, task and followup items; a {self.item['kind']} item ships associated slices")
-        if self.item["kind"] == "work":
-            from sd_db import progress
-            deliver = getattr(progress, "deliver_associated_work", None)
-            if deliver is None:
-                raise Refusal("install matching sd_db: sd_db.progress.deliver_associated_work is unavailable",
-                              code="library_incompatible", boundary="runtime", state="operator_decision",
-                              next_action="Install the matching sd_db library, then retry reconcile.")
-            deliver(self.connection, self.args.item, commit, who="sd-ship", reason=reason, verification_root=self.root)
-        elif not self.delivered_at(commit):
-            self.close_task(commit, ref, trailer="Item", reason=reason)
-        self.save(delivered_after_merge={"commit": commit, "reason": reason})
-        return {**evidence, "delivery_pending": False, "delivered_after_merge": True, "retained_branch": self.branch}
-
     def by_hand(self, commit: str) -> str:
         """The hand close for a held delivery: `sd work deliver`'s, or a task's.
 
@@ -1767,7 +1723,7 @@ class Ship(SharedReview):
         base = self.state["pull_request"]["base"]
         return f"close it with `sd task status {self.args.item} done --reason 'delivered at {commit} on origin/{base}'`"
 
-    def close_task(self, commit: str, ref: str, *, trailer: str = "Delivers", reason: str = "") -> None:
+    def close_task(self, commit: str, ref: str) -> None:
         """Move a delivering task or followup to done once, with the delivery sentence.
 
         `reconcile` has already verified `commit` on the fetched tip of `ref`.
@@ -1785,11 +1741,10 @@ class Ship(SharedReview):
                              f"reopen it, then run sd-ship reconcile")
         wanted = f"sd:{self.args.item}"
         block = sd_lib.trailer_block(git(self.root, "show", "-s", "--format=%B", commit)).splitlines()
-        if not any(line.partition(":")[0] == trailer and line.partition(":")[2].strip() == wanted for line in block):
-            raise ValueError(f"{commit} carries no `{trailer}: {wanted}` trailer")
-        sentence = f"delivered at {commit} on {ref}"
+        if not any(line.partition(":")[0] == "Delivers" and line.partition(":")[2].strip() == wanted for line in block):
+            raise ValueError(f"{commit} carries no `Delivers: {wanted}` trailer")
         change_status(self.connection, self.args.item, "done", who="sd-ship",
-                      reason=f"{sentence} (after the fact: {reason})" if reason else sentence)
+                      reason=f"delivered at {commit} on {ref}")
 
     def require_copilot_abandonment_authority(self) -> None:
         if self.args.abandon_copilot_review is not None and not self.args.manual:
@@ -2029,14 +1984,18 @@ class Ship(SharedReview):
         self.save(phase="merged", merge_commit=commit, evidence=evidence)
         if not self.args.no_item:
             self.store.note_merge(self.connection, self.args.item, evidence)
-        if self.after_the_fact():
-            return self.deliver_after_merge(commit, f"origin/{reference['base']}", evidence)
         # GitHub squashes onto the base it holds at the `PUT`, and no request
         # field pins that base. `ready` and `still_gated` saw the reviewed head
         # contain the base; a squash parent outside it means the base advanced
         # in between, and the landed tree is a combination nobody reviewed or
         # checked. The merge is a fact to record; delivery is not (sd:1089).
-        parent, held = self.merge_hold(commit)
+        parent = git(self.root, "rev-parse", f"{commit}^1")
+        # The squash's own `Reviewed-base:` decides, as it does for every git
+        # reader of `Delivers:`. A message composed before that trailer falls
+        # back to ancestry, where None is "no" and "cannot tell" alike.
+        held = sd_lib.held_at_merge(git(self.root, "show", "-s", "--format=%B", commit), parent)
+        if held is None:
+            held = sd_lib.git_output(["merge-base", "--is-ancestor", parent, self.state["reviewed_head"]], self.root) is None
         # A hand delivery after the combined tree passed is the resolution;
         # reissuing the hold over it would never clear (#1179).
         if held and not self.args.no_item and self.state.get("deliver") and not self.delivered_at(commit):
@@ -2213,7 +2172,7 @@ def validate_identity(args) -> None:
     if getattr(args, "provider", None) is not None and any(getattr(args, name, None) for name in
             ("create_record", "import_history", "rebind_branch", "close_record", "reopen_record")):
         raise Refusal("--provider cannot combine with metadata-only record operations")
-    forbidden = [name for name in ("path", "message_file", "author", "run", "deliver", "associate_only", "acceptance_file", "reason")
+    forbidden = [name for name in ("path", "message_file", "author", "run", "deliver", "associate_only", "acceptance_file")
                  if getattr(args, name, None)]
     if forbidden:
         raise Refusal("no-item publication does not accept commit, runner, or delivery flags: "
@@ -2266,10 +2225,6 @@ def parser():
                 "--copilot-review", choices=("auto", "request", "skip"), default="auto",
                 help="auto uses repository high-value tiers; request and skip require explicit task direction",
             )
-        if name == "reconcile":
-            action.add_argument("--deliver", action="store_true", default=None,
-                                help="deliver an item whose merge was prepared associate-only; needs --reason")
-            action.add_argument("--reason", help="why the associate-only merge is the whole item")
         if name == "merge":
             merge_flags(action)
     hold_commands(commands)

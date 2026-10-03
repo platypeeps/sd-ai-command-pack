@@ -261,7 +261,7 @@ class DeliveryReasonTests(unittest.TestCase):
         self.git("commit", "-q", "-a", "-m", "feat: the whole item\n\nItem: sd:7\n")
         commit = self.git("rev-parse", "HEAD")
         with self.assertRaisesRegex(sd_work.WorkRefusal,
-                                    r"carries no `Delivers: sd:7`.*sd-ship reconcile --item 7 --deliver --reason"):
+                                    rf"carries no `Delivers: sd:7`.*sd work deliver 7 {commit} --associated --reason"):
             sd_work._delivery_reason(self.row, commit)
 
     def test_a_commit_with_no_delivers_trailer_is_refused(self) -> None:
@@ -811,15 +811,47 @@ class AssociatedDeliveryCLITests(unittest.TestCase):
         self.assertIn(f"no Item trailer for sd:{item}", refused.stderr)
         self.assertEqual("planning", self.status(case, root, item))
 
-    def test_associated_on_an_ordinary_task_is_refused_by_name(self) -> None:
+    def test_associated_closes_a_task_with_the_delivery_sentence_and_reason(self) -> None:
+        """sd:1913. A task has no work receipt; its `Item:` merge is verified and
+        the move to done records the delivery sentence and the reason."""
         case = self.host()
         root = self.repository(case)
         item = json.loads(case.call("task", "add", "Fix the thing", "--json",
                                     cwd=root).stdout)["item"]["id"]
         sha = self.commit(root, f"fix: the thing\n\nItem: sd:{item}\n", "one\n")
+        done = json.loads(case.call("work", "deliver", item, sha, "--associated",
+                                    "--reason", self.REASON, "--json", cwd=root).stdout)
+        self.assertEqual("done", done["item"]["status"])
+        self.assertIn(f"delivered at {sha} on refs/heads/main (after the fact: {self.REASON})",
+                      self.statuses(case, item)[-1])
+
+    def test_associated_closes_a_followup_the_same_way(self) -> None:
+        import sd_db
+        import sd_db.writes
+
+        case = self.host()
+        root = self.repository(case)
+        item = json.loads(case.call("task", "add", "Follow the thing up", "--json",
+                                    cwd=root).stdout)["item"]["id"]
+        with sd_db.connect(sd_db.default_path(case.home), write=True) as connection:
+            sd_db.writes.set_item_fields(connection, item, kind="followup")
+            connection.commit()
+        sha = self.commit(root, f"fix: the follow-up\n\nItem: sd:{item}\n", "one\n")
+        case.call("work", "deliver", item, sha, "--associated", "--reason", self.REASON, cwd=root)
+        self.assertEqual("done", self.status(case, root, item))
+        self.assertIn(f"delivered at {sha} on refs/heads/main (after the fact: {self.REASON})",
+                      self.statuses(case, item)[-1])
+
+    def test_associated_on_a_task_still_needs_the_item_trailer(self) -> None:
+        case = self.host()
+        root = self.repository(case)
+        item = json.loads(case.call("task", "add", "Fix the thing", "--json",
+                                    cwd=root).stdout)["item"]["id"]
+        sha = self.commit(root, f"fix: the thing\n\nRefs: sd:{item}\n", "one\n")
         refused = case.call("work", "deliver", item, sha, "--associated",
                             "--reason", self.REASON, code=1, cwd=root)
-        self.assertIn(f"item {item} is an ordinary task; --associated", refused.stderr)
+        self.assertIn(f"carries no `Item: sd:{item}` trailer", refused.stderr)
+        self.assertEqual("planning", self.status(case, root, item))
 
 
 class ShipMergeGuardTests(unittest.TestCase):

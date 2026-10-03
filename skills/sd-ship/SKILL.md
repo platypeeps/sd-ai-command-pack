@@ -179,7 +179,6 @@ Never allocate another review ID to reset spent passes or discard history.
 - `sd-ship observe --item ID --json` reads receipt and remote state without changing files, refs, or database.
   Its `receipt` field holds the last review, a gate failure, and the local gate report; before a PR exists it reads the receipt alone.
 - `sd-ship reconcile --item ID --json` fetches merge evidence in an owned clone.
-  `--deliver --reason TEXT` delivers an item whose merge was associate-only; see `references/recovery.md`.
   Observation alone does not establish ancestry.
   Reconciliation removes no branch, worktree, or clone.
 
