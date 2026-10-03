@@ -14,8 +14,9 @@ the run builds cold in its worktree, as before. The operator's own
 `CARGO_TARGET_DIR` never reaches the check, and which folder a run took does
 not bind its receipt: the folder is a cache, not an input.
 
-Cargo prunes nothing in these folders; deleting one reclaims its space and
-costs the next gate that takes it one cold build.
+A warm run also gets `CARGO_INCREMENTAL=0` (`WARM_ENVIRONMENT`). Cargo
+prunes nothing in these folders; deleting one reclaims its space and costs
+the next gate that takes it one cold build.
 """
 
 from __future__ import annotations
@@ -34,6 +35,9 @@ CACHE_VARIABLE = "SD_GATE_CACHE_DIR"
 CARGO_TARGETS_VARIABLE = "SD_GATE_CARGO_TARGETS"
 #: Two: one merge lane per repository, plus one review gate beside it.
 DEFAULT_CARGO_TARGETS = 2
+#: Set with a warm folder. Each gate's worktree is new, so rustc's incremental sessions never pay off, and on
+#: macOS they and their session-named object files grew a folder by about 4 GB a gate; 0.26 GB without.
+WARM_ENVIRONMENT = {"CARGO_INCREMENTAL": "0"}
 
 
 def cache_root(environ: Mapping[str, str]) -> pathlib.Path:
@@ -103,4 +107,4 @@ def cargo_target(root: pathlib.Path, tree: pathlib.Path, environ: Mapping[str, s
 def cargo_environment(root: pathlib.Path, tree: pathlib.Path, env: Mapping[str, str]) -> Iterator[dict[str, str]]:
     """`env`, plus `CARGO_TARGET_DIR` naming the folder `cargo_target` holds for the block, when it holds one."""
     with cargo_target(root, tree, env) as target:
-        yield {**env, "CARGO_TARGET_DIR": target} if target else dict(env)
+        yield {**env, "CARGO_TARGET_DIR": target, **WARM_ENVIRONMENT} if target else dict(env)

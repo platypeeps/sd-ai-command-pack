@@ -444,6 +444,16 @@ class CargoBuildCache(Repository):
         with sd_gate_cache.cargo_target(self.root, self.root, env) as again:
             self.assertEqual(again, first, "a released folder is the first one taken again")
 
+    def test_a_warm_folder_builds_without_incremental_state(self) -> None:
+        """Each gate's worktree is new, so incremental sessions never pay off; measured on a Rust repository
+        on macOS, they and their object files grew a warm folder by about 4 GB a gate, against 0.26 GB without."""
+        self.rust()
+        with sd_gate_cache.cargo_environment(self.root, self.root, self.environ(CARGO_INCREMENTAL="1")) as warm:
+            self.assertEqual(warm["CARGO_INCREMENTAL"], "0")
+        cold = self.environ(CARGO_INCREMENTAL="1", **{sd_gate_cache.CARGO_TARGETS_VARIABLE: "0"})
+        with sd_gate_cache.cargo_environment(self.root, self.root, cold) as child:
+            self.assertEqual(child["CARGO_INCREMENTAL"], "1", "a cold build in the worktree runs as it always did")
+
     def test_another_repository_gets_its_own_folder(self) -> None:
         self.rust()
         other = self.root.parent / "other"
