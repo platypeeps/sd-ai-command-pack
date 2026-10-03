@@ -153,7 +153,7 @@ After the switch:
   Prepare's pass leaves a receipt; the merge gate at the same head and binding, within 30 minutes, reads it instead of running `sd-check` again.
   The status then says `(reused)`. The merge gate never writes a receipt.
   Prepare reads one too: a pass that `sd gate check` or an earlier prepare left at the same head and binding (sd:1912).
-  A repository that tracks `.github/sd-gate-reuse.json` keys receipts by tree and merge base instead of head (sd:1912).
+  A repository that tracks `.github/sd-gate-reuse.json` keys receipts by tree and merge base instead of head, for 6 hours (sd:1912).
   Inputs outside the repository are not bound; `bin/sd_gate_receipts.py` names the binding and this trust boundary.
 - Given the base branch, the gate passes `sd-check --base`: a repository's declared docs-only scope applies (sd:2072).
 - `sd-ship merge --watch` starts no remote watch: no remote check is coming, and the gate runs to completion in the merge (sd:1875).

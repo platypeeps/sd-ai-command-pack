@@ -334,3 +334,35 @@ class TreeReceipt(BuilderFixture):
             self.assertEqual((ran["status"], "reused" in ran), ("success", False))
             git(root, "commit", "-q", "--allow-empty", "-m", "attribute")
         self.assertEqual(self.runs(), 2)
+
+    def later(self, seconds: int):
+        """The receipt module's clock, `seconds` after now: the window counts from the run that passed."""
+        import time
+        from unittest import mock
+
+        import sd_gate_receipts
+
+        return mock.patch.object(sd_gate_receipts.time, "time", return_value=time.time() + seconds)
+
+    def test_a_tree_receipt_stands_for_six_hours(self) -> None:
+        """Ruling D2' (sd:1912): a tree-keyed receipt counts for 6 h; at 5 h it reuses, at 7 h it runs."""
+        import sd_gate_receipts
+
+        root, database = self.declared()
+        self.assertEqual(self.builder(root, database).returncode, 0)
+        git(root, "commit", "-q", "--allow-empty", "-m", "attribute")
+        with self.later(5 * 3600):
+            self.assertEqual(self.gate(root, database)["source"], "gate-receipt")
+        with self.later(7 * 3600):
+            self.assertEqual(self.gate(root, database)["source"], "gate")
+        self.assertEqual(self.runs(), 2)
+        self.assertEqual(sd_gate_receipts.TREE_REUSE_WINDOW_SECONDS, 6 * 3600)
+
+    def test_a_head_receipt_still_stands_for_thirty_minutes(self) -> None:
+        """The head key keeps D2's 30 minutes: 31 minutes after the pass, the check runs."""
+        root, database = self.repo()
+        self.assertEqual(self.builder(root, database).returncode, 0)
+        with self.later(31 * 60):
+            self.assertEqual(self.gate(root, database)["source"], "gate")
+        self.assertEqual(self.runs(), 2)
+

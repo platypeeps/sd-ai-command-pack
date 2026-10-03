@@ -86,6 +86,7 @@ A new head with the same tree and the same merge base with the base branch then 
 That covers an `sd attribute` commit, a reworded message, or a rebase that changed nothing (sd:1912).
 Without the declaration a new head runs again, since a commit-message lint can pass at one head and fail at the next.
 A run with no base branch, a declaration that does not parse, or another `key` keeps the head key.
+A tree-keyed receipt stands for 6 hours (`TREE_REUSE_WINDOW_SECONDS`); a head-keyed one stays at 30 minutes.
 
 ## Optional check receipts
 

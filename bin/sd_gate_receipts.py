@@ -57,7 +57,10 @@ base is what binds the history below the branch. Without the
 declaration a new head runs again, because a commit-message lint or a version
 stamp from `git describe` can pass at one head and fail at the next. A
 declaration that does not parse, or names another key, keeps the head key; the
-file is in the tree, so changing it is a new tree and runs the check.
+file is in the tree, so changing it is a new tree and runs the check. A
+tree-keyed receipt stands for `TREE_REUSE_WINDOW_SECONDS` (6 hours, ruling
+D2'), long enough for a builder's pass to serve the lane's prepare and merge;
+the head key keeps `REUSE_WINDOW_SECONDS`.
 
 Every fault here -- no library, no database, an unreadable row, a tool that
 does not resolve -- means "no receipt", and the check runs. Evidence that
@@ -85,6 +88,9 @@ KEY_PREFIX = "sd-gate-receipt:v1:"
 #: window is the accepted residual risk; a repository that needs more declares
 #: the explicit `sd-check --record-receipt` contract instead (sd:1912).
 REUSE_WINDOW_SECONDS = 30 * 60
+#: How long a tree-keyed receipt stands (ruling D2', sd:1912): a builder's pass
+#: serves the lane's later prepare and merge of the same tree and merge base.
+TREE_REUSE_WINDOW_SECONDS = 6 * 60 * 60
 WRITER = "sd-local-gate"
 #: The reviewed file that keys a repository's receipts by tree instead of head.
 REUSE_DECLARATION = ".github/sd-gate-reuse.json"
@@ -176,7 +182,8 @@ def lookup(database: pathlib.Path, key: str, identity: Mapping[str, Any], now: f
             revision, row = ship.read(connection, key)
         age = (time.time() if now is None else now) - float(row.get("recorded_at", "nan"))
         reading = row.get("reading")
-        if (row.get("writer") != WRITER or row.get("binding") != identity or not 0 <= age <= REUSE_WINDOW_SECONDS
+        window = TREE_REUSE_WINDOW_SECONDS if identity.get("reuse") == "tree" else REUSE_WINDOW_SECONDS
+        if (row.get("writer") != WRITER or row.get("binding") != identity or not 0 <= age <= window
                 or not isinstance(reading, dict) or reading.get("status") != "success"):
             return None
         return {"reading": reading, "revision": revision, "recorded_at": row["recorded_at"], "age_seconds": round(age),
