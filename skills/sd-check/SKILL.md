@@ -66,7 +66,10 @@ The local gate and the review lane's gate check pass the pull request's base bra
 
 Under `repo.ci = local`, `sd-ship prepare` runs the check as the merge gate does, and a pass leaves a gate receipt.
 The merge gate at the same head and binding, within 30 minutes, reads it instead of running the check again; its status says `(reused)`.
-Only that handoff reuses: prepare never reads a receipt, and the merge gate never writes one.
+Prepare reads one too: a pass that `sd gate check` or an earlier prepare left at the same head and binding stands (sd:1912).
+`sd gate check` runs the gate's check at the committed `HEAD` and records a pass; a plain `make check` leaves no receipt.
+The merge gate never writes one, and the window counts from the run that passed.
+The gate child drops the agent harness's session variables, so two sessions' passes at one head bind equal.
 Inputs outside the repository are not bound: external makefiles, files a tool reads, machine state.
 The short same-head window is the accepted residual risk; a repository that needs more uses the explicit contract below.
 `bin/sd_gate_receipts.py` names the binding and `REUSE_WINDOW_SECONDS`.
