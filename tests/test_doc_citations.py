@@ -3035,11 +3035,12 @@ BACKTICKED_PATH = re.compile(r"`(\.?[A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:md|py|json|
 #: whose preceding `-` is a non-word character.
 QUALIFIER = re.compile(r"\bpack\b", re.IGNORECASE)
 
-#: Where a sentence ends: a terminator before whitespace and a capital, or
-#: before the end of the text. A dot inside a backticked path is followed by a
-#: letter, so it ends nothing. Neither does the dot of `e.g.`, `i.e.` or
-#: `etc.`: "the pack's rules (e.g. `<path>`)" is one sentence (review round 1
-#: on sd:999), and the capital alone does not settle "e.g. Makefile".
+#: A sentence-end candidate: a terminator before whitespace or the end of the
+#: text. A dot inside a backticked path is followed by a letter, so it ends
+#: nothing. Neither does the dot of `e.g.`, `i.e.` or `etc.`: "the pack's
+#: rules (e.g. `<path>`)" is one sentence (review round 1 on sd:999), and the
+#: capital alone does not settle "e.g. Makefile". `sentence_ends` keeps a
+#: candidate only when the next sentence opens like one.
 #:
 #: The qualifier is read in the citation's own sentence, on *both* sides of
 #: the citation, which the first version did not. English puts the
@@ -3052,7 +3053,30 @@ QUALIFIER = re.compile(r"\bpack\b", re.IGNORECASE)
 #: A sentence, not a character window (sd:999, review-836). The 100-character
 #: window that came before let a neighbouring sentence vouch for the path:
 #: "`<path>`. See the pack's release notes." read as qualified.
-SENTENCE_END = re.compile(r"(?<!\be\.g)(?<!\bi\.e)(?<!\betc)[.!?](?=\s+[A-Z]|\s*$)")
+SENTENCE_END = re.compile(r"(?<!\be\.g)(?<!\bi\.e)(?<!\betc)[.!?](?=\s|$)")
+
+#: Markup a sentence may open on before its first word: emphasis, a link, a
+#: parenthesis or a quote.
+SENTENCE_OPENER_MARKUP = "*_[(\"'\u201c\u2018"
+
+
+def sentence_ends(flat: str) -> list[int]:
+    """Where each sentence of `flat` ends, as offsets just past the terminator.
+
+    The next sentence opens on a capital in any script, a digit or a code
+    span, after any opening markup. "**Read** `<path>`", "`<path>` holds"
+    and "Über" each open one (review round 3 on sd:999). An ASCII-capital
+    test merged those into the sentence before, so a pack mention there
+    vouched for an unrelated citation. A lower-case word after the dot does
+    not open a sentence: that is an abbreviation the lookbehinds missed.
+    """
+
+    ends = []
+    for end in SENTENCE_END.finditer(flat):
+        opener = flat[end.end():end.end() + 40].lstrip().lstrip(SENTENCE_OPENER_MARKUP)
+        if not opener or opener[0].isupper() or opener[0].isdigit() or opener[0] == "`":
+            ends.append(end.end())
+    return ends
 
 #: The one way the next sentence may carry the qualifier: by opening on the
 #: file just cited. "`<path>` gives the cap. That file lives only in the
@@ -3121,7 +3145,7 @@ def citation_is_qualified(flat: str, match: re.Match[str]) -> bool:
     its own resolution.
     """
 
-    ends = [end.end() for end in SENTENCE_END.finditer(flat)]
+    ends = sentence_ends(flat)
     start = max((end for end in ends if end <= match.start()), default=0)
     stop = min((end for end in ends if end > match.end()), default=len(flat))
     if QUALIFIER.search(flat[start:match.start()]) or QUALIFIER.search(flat[match.end():stop]):
@@ -3320,6 +3344,10 @@ class ForeignCheckoutCitationTests(unittest.TestCase):
             "the cap is in\n`.claude/rules/caps.md`. See the pack's release notes.\n",
             "The pack is large. The cap is in\n`.claude/rules/caps.md`.\n",
             "the cap is in\n`.claude/rules/caps.md`.\n\nThat file lives only in the pack.\n",
+            # A sentence may open on markup or a non-ASCII capital (review round 3).
+            "See the pack's notes. **Read** `.claude/rules/caps.md` for the cap.\n",
+            "See the pack's notes. `.claude/rules/caps.md` holds the cap.\n",
+            "See the pack's notes. Über-caps live in `.claude/rules/caps.md`.\n",
         ):
             with self.subTest(decoy=decoy):
                 document.write_text(decoy, encoding="utf-8")
