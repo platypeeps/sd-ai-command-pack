@@ -344,6 +344,36 @@ class TheRefusalTests(AttributeFixture):
         self.assertIn("range", self.refuses("..HEAD", "claude", claude="anthropic"))
 
 
+class TheScriptTests(AttributeFixture):
+    """`Authored-with: script`: a deterministic job wrote it, no model and no person (sd:1637).
+
+    A peer of `human`: reserved, no vendor, so any provider may review it. It
+    is not `human`, so an unattended job's commits stop counting as the
+    operator's own.
+    """
+
+    refuses = TheRefusalTests.refuses
+
+    def test_a_script_trailer_reads_back_and_contributes_no_vendor(self) -> None:
+        landed = self.commit("chore: data\n\nAuthored-with: script")
+        self.assertEqual(self.said()[landed], sd_lib.SCRIPT_AUTHOR)
+        self.assertEqual(self.vendors(), ())
+
+    def test_sd_attribute_writes_script_bare(self) -> None:
+        silent = self.commit("chore: data")
+        _, value, _ = sd_lib.attribute(self.root, silent, "script", registry(claude="anthropic"))
+        self.assertEqual((value, self.said()[silent]), ("script", "script"))
+        self.assertEqual(self.vendors(), ())
+
+    def test_a_registry_entry_may_not_be_called_script(self) -> None:
+        silent = self.commit("chore: data")
+        self.assertIn("hide its vendor", self.refuses(silent, "script", script="anthropic"))
+
+    def test_a_squash_body_may_carry_script(self) -> None:
+        import sd_ship_body
+        self.assertTrue(sd_ship_body.known_author("script", []))
+
+
 class TheRangeTests(AttributeFixture):
     """The form the rebase repair needs: a mixture, repaired in one commit."""
 

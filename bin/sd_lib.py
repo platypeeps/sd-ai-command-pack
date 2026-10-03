@@ -2198,6 +2198,12 @@ ATTRIBUTES_TRAILER = "Attributes:"
 #: become reviewable by anthropic every time the trailer was forgotten.
 HUMAN_AUTHOR = "human"
 
+#: What a commit a deterministic job wrote says: no model and no person in the
+#: loop (sd:1637). A peer of `human`: reserved, no vendor, so any provider may
+#: review it; and not `human`, so an unattended job's commits do not count as
+#: the operator's own in authorship figures.
+SCRIPT_AUTHOR = "script"
+
 #: What a commit Dependabot wrote says, though it carries no trailer (sd:2065).
 #: A reserved value like `human` and not a registry entry: the registry lists
 #: what can be started, and nothing starts Dependabot. `github` is its vendor,
@@ -2220,7 +2226,9 @@ DEPENDABOT_IDENTITY = (
 )
 
 #: The values a trailer may carry that no registry entry resolves.
-RESERVED_AUTHORS = {HUMAN_AUTHOR: HUMAN_AUTHOR, DEPENDABOT_ENTRY: DEPENDABOT_AUTHOR}
+RESERVED_AUTHORS = {HUMAN_AUTHOR: HUMAN_AUTHOR, SCRIPT_AUTHOR: SCRIPT_AUTHOR, DEPENDABOT_ENTRY: DEPENDABOT_AUTHOR}
+#: The reserved values that carry no vendor, so they exclude no reviewer.
+VENDORLESS_AUTHORS = (HUMAN_AUTHOR, SCRIPT_AUTHOR)
 
 
 class TrailerError(Exception):
@@ -2363,7 +2371,7 @@ def author_vendors(root: pathlib.Path, base: str, head: str) -> tuple[str, ...]:
                       for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines()
                       if line.startswith(AUTHORED_TRAILER))
     for sha, value in claims:
-        if value == HUMAN_AUTHOR:
+        if value in VENDORLESS_AUTHORS:
             continue
         entry, separator, vendor = value.partition("/")
         # Stripped and folded, because the comparison this feeds is an exact
@@ -2375,7 +2383,7 @@ def author_vendors(root: pathlib.Path, base: str, head: str) -> tuple[str, ...]:
         if not separator or not entry or not vendor:
             raise TrailerError(
                 f"{sha[:12]} says {AUTHORED_TRAILER} {value!r}, which is neither "
-                f"{HUMAN_AUTHOR!r} nor an '<entry>/<vendor>' pair. A trailer that "
+                f"{HUMAN_AUTHOR!r}, {SCRIPT_AUTHOR!r} nor an '<entry>/<vendor>' pair. A trailer that "
                 f"cannot be read is not a weaker claim than one that is missing."
             )
         if vendor not in vendors:
@@ -2410,7 +2418,7 @@ def attribution_value(name: str, registry: Any) -> str:
         known = ", ".join(sorted(registry.providers)) or "nothing"
         raise TrailerError(
             f"no registry entry named {entry!r} in {registry.path}, which holds "
-            f"{known}. Name an entry the registry has, or {HUMAN_AUTHOR!r} bare: a "
+            f"{known}. Name an entry the registry has, or {HUMAN_AUTHOR!r} or {SCRIPT_AUTHOR!r} bare: a "
             f"trailer nothing resolves records no vendor, and a range with no "
             f"vendor is one its own author may review."
         )
