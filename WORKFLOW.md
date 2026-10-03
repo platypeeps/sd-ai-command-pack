@@ -596,6 +596,12 @@ retains the endpoint default. These values require support from the selected
 model: MiniMax-M3 supports disabled thinking, and Baseten's DeepSeek-V4-Pro-0813
 supports effort `none`. Lower reasoning can change finding quality; full
 subject coverage and the required reviewer count remain mandatory.
+A URL entry can also declare `response_format: json_schema`. `sd-review`
+then sends the findings schema as a strict `response_format`, in the copy
+Moonshot's strict mode takes: every property typed, `line` as `anyOf`
+integer or null, and no `minLength` or `maxItems`. The answer is still parsed
+against the full schema. Only an entry that declares the field sends it; an
+endpoint that accepts it may ignore it, as MiniMax-M3 does (sd:1827).
 Incomplete output still fails the review. A pin is changed by editing the
 registry file, never by a page.
 A `url` answer that fails the findings schema is retried once on the same
