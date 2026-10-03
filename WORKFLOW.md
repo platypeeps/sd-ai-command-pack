@@ -428,10 +428,13 @@ which the installer places in `~/.claude/agents`.
   runs the command, and frees the slot when the command ends.
   `sd gate status` shows who holds a slot and who waits, and since when.
 - **Ship a run of items through one lane queue (sd:2524).** `sd-ship lane
-  enqueue --item N --title T --body-file F [--manual]` adds a worktree's item
+  enqueue --item N --title T --body-file F --deliver|--associate-only
+  [--acceptance-file A] [--manual]` adds a worktree's item
   to its repository's queue file, which outlives the session. `sd-ship lane
   run` drains it in order under one lock per repository: head check,
-  `prepare --catch-up`, then `merge` for an entry queued with `--manual`. A
+  `prepare --catch-up` with the entry's delivery claim and acceptance file,
+  then `merge` for an entry queued with `--manual`. An entry with no claim is
+  refused at enqueue, as prepare refuses it. A
   failed entry is marked and the next one runs. A second runner exits at once
   rather than wait. Each prepare and merge keeps its whole output under
   `<lane>/logs/`. `list` and `cancel` read and edit the queue; `watch` prints

@@ -58,6 +58,8 @@ MERGE_WAIT_SECONDS = 2100
 #: failure, and the system repository's check script.
 GATE_END = re.compile(r"run-tests: end head=|check\.sh: every suite passed|make: \*\*\*")
 WATCH_MINUTES = 3
+#: Prepare's delivery choices; an entry carries one and forwards it unchanged.
+CLAIMS = ("deliver", "associate-only")
 #: `(argv, log) -> sd-ship's JSON answer`; the log receives the step's whole output.
 Ship = Callable[[list[str], pathlib.Path], dict[str, Any]]
 
@@ -130,16 +132,28 @@ def stamp_now() -> str:
 
 
 def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: pathlib.Path, environ: dict[str, str], *,
-            expected_head: str | None = None, manual: bool = False) -> dict[str, Any]:
-    """Add one entry; the head defaults to the worktree's, and must name a commit there."""
+                  expected_head: str | None = None, manual: bool = False, claim: str | None = None,
+                  acceptance_file: pathlib.Path | None = None) -> dict[str, Any]:
+    """Add one entry; the head defaults to the worktree's, and must name a commit there.
+
+    `claim` is prepare's delivery choice, `deliver` or `associate-only`, and
+    is refused when absent as prepare refuses it; it and `acceptance_file`
+    reach prepare unchanged.
+    """
     worktree = worktree.resolve()
+    if claim not in CLAIMS:
+        raise LaneError("name the delivery claim prepare needs: --deliver for the item's last pull request, "
+                        "or --associate-only for an earlier one")
+    if acceptance_file is not None and not acceptance_file.is_file():
+        raise LaneError(f"the acceptance file {acceptance_file} does not exist")
     head = lane_git(worktree, "rev-parse", "--verify", "--quiet", f"{expected_head or 'HEAD'}^{{commit}}")
     if not head:
         raise LaneError(f"{expected_head or 'HEAD'} names no commit in {worktree}")
     if not body_file.is_file():
         raise LaneError(f"the body file {body_file} does not exist")
     entry = {"worktree": str(worktree), "item": item, "expected_head": head, "title": title,
-             "body_file": str(body_file.resolve()), "authority": "manual" if manual else None,
+             "body_file": str(body_file.resolve()), "authority": "manual" if manual else None, "claim": claim,
+             "acceptance_file": str(acceptance_file.resolve()) if acceptance_file else None,
              "status": "pending", "enqueued_at": stamp_now()}
 
     def add_entry(entries: list[dict[str, Any]]) -> dict[str, Any]:
@@ -190,7 +204,8 @@ def process(entry: dict[str, Any], logs: pathlib.Path, ship: Ship) -> dict[str, 
         return {"status": "skipped", "reason": "the worktree's HEAD moved from the queued head"}
     stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
     prepare_log = logs / f"prepare-{item}-{stamp}.log"
-    prepared = ship(["-C", str(worktree), "prepare", "--item", str(item), "--deliver", "--catch-up",
+    claim = [f"--{entry['claim']}"] + (["--acceptance-file", entry["acceptance_file"]] if entry.get("acceptance_file") else [])
+    prepared = ship(["-C", str(worktree), "prepare", "--item", str(item), *claim, "--catch-up",
                      "--title", entry["title"], "--body-file", entry["body_file"], "--json"], prepare_log)
     fields: dict[str, Any] = {"prepare_log": str(prepare_log), "head": prepared.get("head")}
     if not (prepared.get("ok") and prepared.get("phase") == "ready_to_send"):
@@ -278,6 +293,11 @@ def add_lane_verbs(commands: Any) -> None:
     adder.add_argument("--body-file", type=pathlib.Path, required=True)
     adder.add_argument("--expected-head", help="the head the worktree must still be at (default: HEAD now)")
     adder.add_argument("--manual", action="store_true", help="authorize the runner to merge with sd-ship merge --manual")
+    choice = adder.add_mutually_exclusive_group()
+    for claim, text in zip(CLAIMS, ("the item's last pull request, as prepare --deliver",
+                                    "an earlier pull request of the item, as prepare --associate-only"), strict=True):
+        choice.add_argument(f"--{claim}", dest="claim", action="store_const", const=claim, help=text)
+    adder.add_argument("--acceptance-file", type=pathlib.Path, help="forwarded to prepare unchanged")
     verbs.add_parser("list", help="print this repository's queue")
     canceller = verbs.add_parser("cancel", help="mark a pending entry cancelled")
     canceller.add_argument("item", type=int)
@@ -297,7 +317,8 @@ def lane_main(args: Any) -> int:
             raise LaneError("cwd is not inside a Git repository")
         if args.lane_command == "enqueue":
             result: Any = enqueue_entry(root, args.item, args.title, args.body_file, environ,
-                                  expected_head=args.expected_head, manual=args.manual)
+                                        expected_head=args.expected_head, manual=args.manual, claim=args.claim,
+                                        acceptance_file=args.acceptance_file)
         elif args.lane_command == "list":
             path = queue_path(root, environ)
             result = {"queue": str(path), "entries": read_queue(path)}
