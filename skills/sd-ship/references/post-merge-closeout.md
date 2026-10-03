@@ -61,7 +61,7 @@ Compare the actual delivered content and record recovery evidence.
 
 The operator authorized this cleanup on 2026-10-02; it needs no further approval.
 After a confirmed merge, remove the merged PR's local branch, remote branch, stashes, refs and stale worktrees when each one is safe.
-Confirm the merge from the `sd-ship merge` receipt or GitHub's merged state, never from a closed PR.
+Confirm the merge from the `sd-ship merge` receipt or GitHub's merged state.
 
 A target is safe only when every condition holds:
 
@@ -86,7 +86,7 @@ Then remove the targets one by one:
 - Stash: confirm the selector still names the recorded object ID, then `git stash drop <selector>`.
 - Other refs that point only at the PR's delivered commits: `git update-ref -d <ref> <recorded id>`.
 
-Never use `git stash clear`, broad deletion patterns, force pushes, or `git worktree remove --force`.
+Never use `git stash clear`, broad deletion patterns, force pushes, or forced worktree removal.
 Do not rename or reset shared stash state to stabilize a selector.
 Report what was removed with its recovery ID, and what was kept and why.
 
@@ -102,6 +102,6 @@ A worktree is stale and safe to remove only when every condition holds:
 - It is not a primary checkout, not under `~/repos`, and no service, LaunchAgent or installed link points into it.
 
 Record its path and HEAD in an `sd task note` first.
-Remove it with `git worktree remove <path>`, never with `--force`; then remove its branch as above.
+Remove it with `git worktree remove <path>`, never forced; then remove its branch as above.
 Run `git worktree prune` for entries whose folder is already gone; it changes only Git's metadata.
 Keep a worktree that fails any condition, and report the reason.

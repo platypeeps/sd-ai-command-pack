@@ -274,7 +274,7 @@ Acknowledgement failures produce warnings, not review clearance.
 - Never weaken checks, permissions, review depth, or ownership/protection gates to reach green.
 - Never treat a written reason as executable clearance.
 - Never delete a checkout, or a worktree, branch, stash or ref that fails a closeout safety condition or belongs to another PR.
-- Never remove a worktree with `--force`.
+- Never force a worktree removal.
 - Never accept a repository path; cwd determines the checkout, and `-C <dir>` only changes cwd first (R10-D6).
 - Never post reviews or labels in a guest upstream repository.
 - Make no further change after settled-green.
