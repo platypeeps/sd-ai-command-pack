@@ -151,7 +151,8 @@ After the switch:
 - The description carries `inputs <digest>` as provenance: the head, the copied `CLAUDE.local.md` and the pack's `bin/` files.
 - Every merge attempt posts a fresh status. `sd-ship prepare` runs this same gate, through `sd-review --gate-check`.
   Prepare's pass leaves a receipt; the merge gate at the same head and binding, within 30 minutes, reads it instead of running `sd-check` again.
-  The status then says `(reused)`. Prepare never reads a receipt and the merge gate never writes one.
+  The status then says `(reused)`. The merge gate never writes a receipt.
+  Prepare reads one too: a pass that `sd gate check` or an earlier prepare left at the same head and binding (sd:1912).
   Inputs outside the repository are not bound; `bin/sd_gate_receipts.py` names the binding and this trust boundary.
 - Given the base branch, the gate passes `sd-check --base`: a repository's declared docs-only scope applies (sd:2072).
 - `sd-ship merge --watch` starts no remote watch: no remote check is coming, and the gate runs to completion in the merge (sd:1875).
@@ -404,11 +405,18 @@ which the installer places in `~/.claude/agents`.
   one of `sd.gate_slots` machine-wide slots (unset: a quarter of the cores,
   4 on 16). `SD_GATE_SLOTS` overrides it for one run, `0` lifts the cap, and
   CI takes none. A queued gate prints `waiting for a gate slot` on stderr and
-  again each minute. The wait counts against `sd-check --timeout`, and each
-  check gets the rest. A holder runs its checks with `SD_GATE_SLOTS=0`, so the
-  pack's own `make test` inside a gate takes no second slot; run directly,
-  `make test` takes one of 2. Slots are kernel locks under
+  again each minute, naming each holder's label, pid, directory and start
+  time. The wait counts against `sd-check --timeout`, and each check gets the
+  rest. A holder runs its checks with `SD_GATE_SLOTS=0`, so the pack's own
+  `make test` inside a gate takes no second slot; run directly, `make test`
+  takes one of the same slots. Slots are kernel locks under
   `$XDG_STATE_HOME/sd/gate-slots`, so a dead holder's slot is free at once.
+- **Wrap every other gate in the pool (sd:2522).** The pool is one per
+  machine, not one per repository. A plain `make check` in a repository whose
+  Makefile takes no slot runs as `sd gate run -- make check`, so it queues with
+  every `sd-check` and `sd-ship` gate. A per-repository `lockf` around a lane's
+  gate is then unnecessary: the pool already orders gates across every
+  repository, and a `lockf` only orders the gates of one.
 - **Gates wait in one queue (sd:2262).** Every waiter takes a place in one
   machine-wide queue, and only the head starts: first to wait, first to
   start. The head starts only while load1 is below `sd.gate_load_max`
@@ -715,8 +723,9 @@ The reserved `sd` namespace declares four settings:
   `sd-review` reports the effective policy, its source and the repository's say under `remote_reviews.copilot`.
   `sd-ship` resolves the decision again at dispatch, from the setting as it stands then and the tiers the
   retained passes recorded, so a setting changed after the review takes effect without another review.
-- `sd.gate_slots`: how many repository gates (`sd-check` runs) may run at once on this machine; `0` is no cap.
-  Absence reads a quarter of the cores. `SD_GATE_SLOTS` overrides it for one run. It grants nothing;
+- `sd.gate_slots`: how many gates (`sd-check` runs, `sd gate run`, the pack's `make test`) may run at once on
+  this machine; `0` is no cap. Absence reads a quarter of the cores. `SD_GATE_SLOTS` overrides it
+  for one run. It grants nothing;
   see [Parallel work](#parallel-work).
 - `sd.gate_load_max`: the gate queue starts a gate only while load1 is below this; `0` is no load condition.
   Absence reads 2.5 per core. `SD_GATE_LOAD_MAX` overrides it for one run. It grants nothing.

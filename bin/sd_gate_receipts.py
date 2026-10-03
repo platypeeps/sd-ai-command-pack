@@ -6,8 +6,10 @@ run it the same way -- `sd_gate_run.check_in_worktree`, a clean detached
 worktree at the exact head with the gate's environment. Prepare's pass leaves a
 receipt in this machine's workflow database, and the merge gate at the same
 head, with an equal binding, within `REUSE_WINDOW_SECONDS`, reads it instead of
-running the check again. Only that one handoff reuses: prepare never reads a
-receipt and the merge gate never writes one.
+running the check again. Prepare reads one as well (sd:1912): a pass that
+`sd gate check` or an earlier prepare left at the head stands, so a head that
+passed once runs no second check. The merge gate never writes one, and the
+window counts from the run that passed, never from a reuse.
 
 The binding is what this module can name about a run, and nothing weaker:
 
