@@ -16,6 +16,11 @@ A body with no item owns nothing: every owned line refuses there, indented
 or not, and nothing is stripped. With an item, only a line at column zero is
 read, because that is the only form git or rule 5 reads; an indented line is
 prose about a trailer, and the body keeps it.
+
+`Closes: sd:N[, sd:M]` is the one owned line a body keeps: it names the items
+the pull request co-delivers, and the merge closes each with a `Delivers:`
+trailer beside the claimed item's (sd:1481, operator ruling 2026-10-03).
+`Refs:` is not owned: it names related items, which stay open.
 """
 
 from __future__ import annotations
@@ -28,6 +33,9 @@ import tempfile
 
 import sd_lib
 from sd_ship_remote import Refusal, completed_process
+
+#: A `Closes:` value: one or more `sd:<n>`, comma-separated.
+_CLOSES_VALUE = re.compile(r"sd:[1-9][0-9]*(?:[ \t]*,[ \t]*sd:[1-9][0-9]*)*")
 
 #: The canonical spelling of each owned key, by its case-folded name.
 _CANONICAL = {key.rstrip(":").lower(): key for key in sd_lib.OWNED_TRAILERS}
@@ -102,6 +110,11 @@ def problem(line: OwnedLine, item: int, deliver: bool, readers: list | None) -> 
             return None
         return (f"expected `{line.key} {sd_lib.HUMAN_AUTHOR}` or an `<entry>/<vendor>` the provider "
                 f"registry resolves; the commits decide authorship")
+    if line.key == sd_lib.CLOSES_TRAILER:
+        if _CLOSES_VALUE.fullmatch(line.value) and expected not in _ids(line.value):
+            return None
+        return (f"expected `{line.key} sd:<n>[, sd:<m>]` naming co-delivered items other than {expected}, "
+                "which closes with --deliver")
     if line.key == sd_lib.ATTRIBUTES_TRAILER:
         return "expected no line: it names a pre-squash sha, and the squash carries authorship from the commits"
     return f"expected no line: `{line.key}` rides a later merge or an empty commit, never this body"
@@ -130,6 +143,8 @@ def normalize(body: str, item: int | None, *, deliver: bool = False,
                       + "; ".join(f"line {line.number}: `{line.text}`; {reason}" for line, reason in problems),
                       code="body_trailer_refused", boundary="input", state="operator_decision",
                       next_action="Remove or correct the named lines; sd-ship writes them itself.")
+    # A `Closes:` line stays: it is the body's own claim, and the merge reads it there.
+    read = [line for line in read if line.key != sd_lib.CLOSES_TRAILER]
     stripped = {line.number for line in read}
     lines = body.split("\n")
     kept: list[str] = []
@@ -140,6 +155,37 @@ def normalize(body: str, item: int | None, *, deliver: bool = False,
             continue
         kept.append(text)
     return "\n".join(kept).rstrip(), tuple(line.text for line in read)
+
+
+def _ids(value: str) -> list[str]:
+    return re.findall(r"sd:[0-9]+", value)
+
+
+def closes_named(body: str, item: int | None) -> tuple[int, ...]:
+    """The items the body's column-zero `Closes:` lines name, in order, without repeats.
+
+    No item, no closing: a no-item body refuses the line in `normalize`.
+    """
+    if item is None:
+        return ()
+    found: list[int] = []
+    for line in owned_lines(body):
+        if line.key == sd_lib.CLOSES_TRAILER and not line.indented:
+            for number in (int(name[3:]) for name in _ids(line.value)):
+                if number not in found:
+                    found.append(number)
+    return tuple(found)
+
+
+def strip_closes(body: str) -> str:
+    """`body` without its column-zero `Closes:` lines, for the squash message.
+
+    The squash states each as a `Delivers:` trailer; a `Closes:` line left in
+    the prose is a trailer outside the block git reads, and the merge refuses
+    such a message (`sd_lib.demoted_trailers`).
+    """
+    kept = {line.number for line in owned_lines(body) if line.key == sd_lib.CLOSES_TRAILER and not line.indented}
+    return "\n".join(text for number, text in enumerate(body.split("\n"), start=1) if number not in kept)
 
 
 def published(body: str, item: int) -> str:

@@ -3045,11 +3045,10 @@ def expired_reviews(root: pathlib.Path, merged: dict[str, Any], day: datetime.da
     so a short count is never read as a complete one.
     """
     first, last = MERGED_REVIEW_DAYS + 1, MERGED_REVIEW_DAYS + MERGED_AGED_DAYS
-    found = {"days": [first, last], "findings": 0, "pull_requests": [], "unchecked": ""}
-    reasons: list[str] = []
+    findings, numbers, reasons = 0, [], []
     if not merged.get("available", True):
-        found["unchecked"] = str(merged.get("reason") or "the merged pull requests could not be read")
-        return found
+        reasons.append(str(merged.get("reason") or "the merged pull requests could not be read"))
+        return {"days": [first, last], "findings": 0, "pull_requests": [], "unchecked": reasons[0]}
     if merged.get("truncated"):
         reasons.append(f"the merged list stopped at its limit of {merged.get('limit')}")
     ack = sd_lib.sibling("sd_review_ack", "sd-review-ack")
@@ -3069,10 +3068,9 @@ def expired_reviews(root: pathlib.Path, merged: dict[str, Any], day: datetime.da
         standing = ack.unacknowledged(root, list(stated.get("ids") or []), ref,
                                       stated.get("stated") or {}, merge)
         if standing:
-            found["findings"] += len(standing)
-            found["pull_requests"].append(pull.get("number"))
-    found["unchecked"] = "; ".join(reasons)
-    return found
+            findings += len(standing)
+            numbers.append(pull.get("number"))
+    return {"days": [first, last], "findings": findings, "pull_requests": numbers, "unchecked": "; ".join(reasons)}
 
 
 def _protection_rows(protection: dict[str, Any]) -> list[dict[str, Any]]:

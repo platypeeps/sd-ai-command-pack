@@ -2591,8 +2591,9 @@ ITEM_TRAILER = "Item:"
 WORK_TRAILER = "Work:"
 #: The trailer lines `sd-ship` owns in a pull-request body (sd:1870). It
 #: writes `Work:` into the body it publishes and `Item:`, `Delivers:` and the
-#: authorship lines into the squash message; `Closes:` rides a later merge or
-#: an empty commit, never a body `sd-ship` publishes. `sd_ship_body` reads a
+#: authorship lines into the squash message. `Closes:` rides a later merge or
+#: an empty commit, and in a body names the items a pull request co-delivers,
+#: which the merge closes with a `Delivers:` each (sd:1481). `sd_ship_body` reads a
 #: supplied body against this tuple, and the template test holds the
 #: template's closing block to it.
 OWNED_TRAILERS = (ITEM_TRAILER, WORK_TRAILER, DELIVERS_TRAILER, CLOSES_TRAILER,

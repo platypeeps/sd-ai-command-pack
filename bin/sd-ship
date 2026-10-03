@@ -1246,6 +1246,8 @@ class Ship(SharedReview):
             if not self.args.no_item and self.state.get("deliver") != deliver:
                 raise Refusal("existing PR delivery claim differs; reconcile the prepared scope first")
         self.assert_scope()
+        if not self.args.no_item:
+            self.check_closes(body)
         if not self.state:
             self.save(repository=self.repository, branch=self.branch, item=self.args.item, phase="new")
         self.persist_copilot_direction()
@@ -1677,17 +1679,70 @@ class Ship(SharedReview):
             self.store.manual_merge_guard(self.connection, self.repo["path"])
 
     def squash_body(self, reviewed_base: str = "") -> str:
-        body = self.state["body"].rstrip() + "\n\n"
+        # `Closes:` lines become the `Delivers:` trailers below (sd:1481).
+        body = sd_ship_body.strip_closes(self.state["body"]).rstrip() + "\n\n"
         if not self.args.no_item:
             body += f"{sd_lib.ITEM_TRAILER} sd:{self.args.item}\n"
-            if self.state.get("deliver"):
-                body += f"{sd_lib.DELIVERS_TRAILER} sd:{self.args.item}\n"
-                # The message is fixed before GitHub picks the squash parent,
-                # so it names the parent the review covered; a git reader
-                # holds `Delivers:` when the landed parent differs (#1179).
-                if reviewed_base:
-                    body += f"{sd_lib.REVIEWED_BASE_TRAILER} {reviewed_base}\n"
+            delivered = ([self.args.item] if self.state.get("deliver") else []) + list(self.co_delivered())
+            # Each `Closes:` item is co-delivered, so it gets the `Delivers:` its
+            # close and every git reader require (sd:1481).
+            for number in delivered:
+                body += f"{sd_lib.DELIVERS_TRAILER} sd:{number}\n"
+            # The message is fixed before GitHub picks the squash parent,
+            # so it names the parent the review covered; a git reader
+            # holds `Delivers:` when the landed parent differs (#1179).
+            if delivered and reviewed_base:
+                body += f"{sd_lib.REVIEWED_BASE_TRAILER} {reviewed_base}\n"
         return body
+
+    def co_delivered(self) -> tuple[int, ...]:
+        """The items the prepared body's `Closes:` lines co-deliver (sd:1481)."""
+        return () if self.args.no_item else sd_ship_body.closes_named(self.state.get("body") or "", self.args.item)
+
+    def check_closes(self, body: str) -> None:
+        """Refuse a `Closes:` item the merge could not close, before anything is published.
+
+        One pull request claims one item; `Closes:` names the others it
+        delivers, and the merge closes them (operator ruling 2026-10-03).
+        `Refs:` names related items and is not read here: they stay open.
+        """
+        for number in sd_ship_body.closes_named(body, self.args.item):
+            row = self.connection.execute("SELECT repo FROM item WHERE id = ?", (number,)).fetchone()
+            if row is None:
+                raise Refusal(f"Closes: names sd:{number}, which is no item; the merge closes every Closes: item",
+                              code="closes_item_unknown", boundary="input", state="operator_decision",
+                              next_action="Correct the Closes: line, or move a related item to Refs:.")
+            if row["repo"] != self.item["repo"]:
+                raise Refusal(f"Closes: names sd:{number}, which belongs to another repository; "
+                              "a merge closes only this repository's items",
+                              code="closes_item_foreign", boundary="input", state="operator_decision",
+                              next_action="Close that item from its own repository, or move it to Refs:.")
+
+    def item_status(self, number: int) -> str | None:
+        row = self.connection.execute("SELECT status FROM item WHERE id = ?", (number,)).fetchone()
+        return None if row is None else row["status"]
+
+    def close_items(self, commit: str, ref: str) -> tuple[list[int], dict[str, str]]:
+        """Close each open `Closes:` item at the verified merge, as the claimed item closes."""
+        from sd_db.errors import SdDbError
+        from sd_db.progress import deliver_work
+        from sd_db.workflow import WorkflowError, change_status
+        closed, failed = [], {}
+        for number in self.co_delivered():
+            row = self.connection.execute("SELECT kind, status FROM item WHERE id = ?", (number,)).fetchone()
+            try:
+                if row is None:
+                    raise ValueError("the item no longer exists")
+                if row["status"] != "done":
+                    if row["kind"] == "work":
+                        deliver_work(self.connection, number, commit, who="sd-ship", verification_root=self.root)
+                    else:
+                        # The sentence `close_task` writes, so one query finds every delivering commit.
+                        change_status(self.connection, number, "done", who="sd-ship", reason=f"delivered at {commit} on {ref}")
+                closed.append(number)
+            except (SdDbError, WorkflowError, sqlite3.Error, ValueError) as error:
+                failed[f"sd:{number}"] = str(error)
+        return closed, failed
 
     def squash_authorship(self, head: str, reviewed_base: str) -> str:
         """The squash's `Attributes:` and `Authored-with:` trailers, in that order."""
@@ -2020,14 +2075,10 @@ class Ship(SharedReview):
         held = sd_lib.held_at_merge(git(self.root, "show", "-s", "--format=%B", commit), parent)
         if held is None:
             held = sd_lib.git_output(["merge-base", "--is-ancestor", parent, self.state["reviewed_head"]], self.root) is None
-        # A hand delivery after the combined tree passed is the resolution;
-        # reissuing the hold over it would never clear (#1179).
-        if held and not self.args.no_item and self.state.get("deliver") and not self.delivered_at(commit):
-            pending = blocked("base_advanced_at_merge", "ci",
-                              f"Verify the combined tree at {commit} (default-branch CI), then {self.by_hand(commit)}.",
-                              state="operator_decision")
-            return {**evidence, "delivery_pending": True, "merged_parent": parent,
-                    "workflow": {**evidence["workflow"], **pending}}
+        if held and not self.args.no_item:
+            answer = self.hold_at_merge(commit, parent, evidence)
+            if answer is not None:
+                return answer
         if not self.args.no_item and self.state.get("deliver"):
             from sd_db.errors import SdDbError
             self.assert_scope()
@@ -2038,9 +2089,45 @@ class Ship(SharedReview):
                                   state="operator_decision")
                 return {**evidence, "delivery_pending": True, "delivery_error": str(error),
                         "workflow": {**evidence["workflow"], **pending}}
+        evidence = self.deliver_closes(commit, f"origin/{reference['base']}", evidence)
+        if "closes_failed" in evidence:
+            return evidence
         git(self.root, "fetch", "--prune", "origin")
         return {**evidence, "delivery_pending": False, "retained_branch": self.branch,
                 "retained_worktrees": git(self.root, "worktree", "list", "--porcelain")}
+
+    def hold_at_merge(self, commit: str, parent: str, evidence: dict) -> dict | None:
+        """The held answer when the base advanced at the merge and a close is still owed, else None.
+
+        A hand delivery after the combined tree passed is the resolution;
+        reissuing the hold over it would never clear (#1179). A hand close of
+        a held `Closes:` item is its resolution in the same way (sd:1481).
+        """
+        hand = bool(self.state.get("deliver")) and not self.delivered_at(commit)
+        held = [number for number in self.co_delivered() if self.item_status(number) != "done"]
+        if not hand and not held:
+            return None
+        steps = [self.by_hand(commit)] if hand else []
+        if held:
+            steps.append(f"close the Closes: items {', '.join(f'sd:{number}' for number in held)} the same way")
+        pending = blocked("base_advanced_at_merge", "ci",
+                          f"Verify the combined tree at {commit} (default-branch CI), then {'; '.join(steps)}.",
+                          state="operator_decision")
+        return {**evidence, "delivery_pending": True, "merged_parent": parent,
+                "workflow": {**evidence["workflow"], **pending}}
+
+    def deliver_closes(self, commit: str, ref: str, evidence: dict) -> dict:
+        """`evidence` with the `Closes:` items closed, or the pending answer naming those that failed."""
+        if not self.co_delivered():
+            return evidence
+        closed, failed = self.close_items(commit, ref)
+        evidence = {**evidence, "closed_items": [f"sd:{number}" for number in closed]}
+        if not failed:
+            return evidence
+        pending = blocked("closes_delivery_pending", "database",
+                          "Resolve each Closes: item's error, then run sd-ship reconcile.", state="operator_decision")
+        return {**evidence, "delivery_pending": True, "closes_failed": failed,
+                "workflow": {**evidence["workflow"], **pending}}
 
 
 

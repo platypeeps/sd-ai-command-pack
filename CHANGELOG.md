@@ -182,6 +182,17 @@
 
 ### Fixed
 
+- **A body `Closes:` line closes co-delivered items on merge (sd:1481).** One
+  pull request claims one item, and #1150 fixed three rows while closing none:
+  it named two of them only in prose. Operator ruling 2026-10-03: a body line
+  `Closes: sd:N[, sd:M]` names co-delivered items. The squash message carries
+  `Delivers:` for each, and the merge closes them with the claimed item, with
+  or without `--deliver`. Prepare refuses a `Closes:` id that is no item
+  (`closes_item_unknown`) or belongs to another repository
+  (`closes_item_foreign`). One the merge could not close returns
+  `delivery_pending: true` with `closes_failed`, and `reconcile` retries it.
+  `Refs:` still names related items, which stay open.
+
 - **The merge gate reads every reviewer's findings, not only Copilot's
   (sd:998).** The ack gate ran at the merge step but read Copilot's material
   alone, and returned early on a pull request Copilot never reviewed. Another
