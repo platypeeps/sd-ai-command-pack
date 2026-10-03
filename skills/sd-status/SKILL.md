@@ -192,6 +192,11 @@ the reason when its read failed or stopped at its limit. It is a count, not
 rows: it never reaches `pending` or the banner. `--json` carries it as
 `expired_reviews`.
 
+A review posted after the merge reaches no merge gate (sd:1178).
+Above `expired:`, a `late:` line counts the unread findings on pull requests merged in the last 14 days.
+It reads the window's own list, so it costs no extra `gh` call, and `sd-review-ack` clears a finding there as it clears the row.
+It warns only; `--json` carries it as `late_reviews`.
+
 The days are counted from the UTC calendar day GitHub records the merge on to
 the local date `sd-status` runs on. So the edge can move by the local offset
 from UTC: in California a pull request merged in the evening falls on the next
@@ -376,7 +381,7 @@ so capping it would make the cap the interface.
 The `--json` schema is version **3**. Beyond the section keys it carries
 `merged_pull_requests` (the pull requests merged inside the review window, with
 the findings each carries), `expired_reviews` (the `expired:` count, its
-days, its pull requests and why it is short, if it is), `inventory` (`rows` plus the `unchecked` map),
+days, its pull requests and why it is short, if it is), `late_reviews` (the `late:` count, in the same shape), `inventory` (`rows` plus the `unchecked` map),
 `abnormalities`, `actions` — the uncapped inventory, of which `pending` is the
 first ten after each class's `pending_cap` (`pending_rows`) — and `next`. It
 has no top-level `pending` key, and the two nested ones are something else

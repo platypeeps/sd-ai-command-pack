@@ -3040,12 +3040,32 @@ def expired_reviews(root: pathlib.Path, merged: dict[str, Any], day: datetime.da
     answered or not, so its findings stopped reading as anything: expiry looked
     like resolution (sd:998). This counts each unanswered finding on a pull
     request merged `MERGED_REVIEW_DAYS + 1` to `MERGED_REVIEW_DAYS +
-    MERGED_AGED_DAYS` days before `day`, with the verdict the window's rows
-    use. A read that failed or stopped at its limit is named in `unchecked`,
-    so a short count is never read as a complete one.
+    MERGED_AGED_DAYS` days before `day`.
     """
-    first, last = MERGED_REVIEW_DAYS + 1, MERGED_REVIEW_DAYS + MERGED_AGED_DAYS
-    findings, numbers, reasons = 0, [], []
+    return _unread_between(root, merged, day, MERGED_REVIEW_DAYS + 1, MERGED_REVIEW_DAYS + MERGED_AGED_DAYS)
+
+
+def late_reviews(root: pathlib.Path, merged: dict[str, Any], day: datetime.date) -> dict[str, Any]:
+    """The unread findings on pull requests merged inside the window, counted (sd:1178).
+
+    A review posted after the merge reaches no merge gate, and the window's
+    rows are capped in `pending`, so nothing totalled them. Stateless by the
+    operator's ruling (2026-10-03, go D): `sd-review-ack` clears a finding
+    here as it clears its row.
+    """
+    return _unread_between(root, merged, day, 0, MERGED_REVIEW_DAYS)
+
+
+def _unread_between(root: pathlib.Path, merged: dict[str, Any], day: datetime.date,
+                    first: int, last: int) -> dict[str, Any]:
+    """Unanswered findings on pull requests merged `first` to `last` days before `day`.
+
+    The verdict is the window rows'. A read that failed or stopped at its
+    limit is named in `unchecked`, so a short count is never read as a
+    complete one. Unreadable pull requests are counted with the first reason,
+    not listed: under a `gh` timeout every one of them fails the same way.
+    """
+    findings, numbers, reasons, unreadable = 0, [], [], []
     if not merged.get("available", True):
         reasons.append(str(merged.get("reason") or "the merged pull requests could not be read"))
         return {"days": [first, last], "findings": 0, "pull_requests": [], "unchecked": reasons[0]}
@@ -3062,7 +3082,7 @@ def expired_reviews(root: pathlib.Path, merged: dict[str, Any], day: datetime.da
             continue
         stated = pull.get("review_findings") or {}
         if stated.get("unreadable"):
-            reasons.append(f"#{pull.get('number')}: {stated['unreadable']}")
+            unreadable.append(f"#{pull.get('number')}: {stated['unreadable']}")
             continue
         merge = {"head": str(pull.get("head_oid") or ""), "merge": str(pull.get("merge_oid") or "")}
         standing = ack.unacknowledged(root, list(stated.get("ids") or []), ref,
@@ -3070,6 +3090,8 @@ def expired_reviews(root: pathlib.Path, merged: dict[str, Any], day: datetime.da
         if standing:
             findings += len(standing)
             numbers.append(pull.get("number"))
+    if unreadable:
+        reasons.append(f"{len(unreadable)} pull request(s) unreadable, first {unreadable[0]}")
     return {"days": [first, last], "findings": findings, "pull_requests": numbers, "unchecked": "; ".join(reasons)}
 
 
@@ -3532,6 +3554,7 @@ def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str
         "jira": jira_section(),
         "contributions": contributions_section(root),
     }
+    result["late_reviews"] = late_reviews(root, result["merged_pull_requests"], datetime.date.today())
     inventory = actionable_inventory(root, result, environ=environ)
     result["inventory"] = {"rows": inventory.rows, "unchecked": inventory.unchecked}
     result["abnormalities"] = banner(inventory)
@@ -3803,7 +3826,7 @@ def _render_next(rows: list[dict[str, Any]], write: Any) -> None:
 
 
 def _render_threads(rows: list[dict[str, Any]], write: Any,
-                    expired: dict[str, Any] | None = None) -> None:
+                    expired: dict[str, Any] | None = None, late: dict[str, Any] | None = None) -> None:
     """Per-source counts over the same list, and what was not swept.
 
     The counts give `pending`'s cap a denominator per source. The exclusions
@@ -3822,16 +3845,22 @@ def _render_threads(rows: list[dict[str, Any]], write: Any,
     write("  not swept, and named so the counts above are not read as total:\n")
     for reason in EXCLUDED:
         write(f"    - {reason}\n")
+    if late:
+        _render_unread("late", late, f"merged in the last {late['days'][1]} days are unread", write)
     if expired:
         first, last = expired["days"]
-        pulls = expired["pull_requests"]
-        line = (f"{expired['findings']} review finding(s) on {len(pulls)} pull request(s) merged "
-                f"{first}-{last} days ago expired unanswered")
-        if pulls:
-            line += f": {', '.join(f'#{n}' for n in pulls[:5])}" + (f" and {len(pulls) - 5} more" if len(pulls) > 5 else "")
-        if expired.get("unchecked"):
-            line += f" (at least; {expired['unchecked']})"
-        write(f"  expired: {line}\n")
+        _render_unread("expired", expired, f"merged {first}-{last} days ago expired unanswered", write)
+
+
+def _render_unread(label: str, counted: dict[str, Any], said: str, write: Any) -> None:
+    """One `late:` or `expired:` line: the count, the first pull requests, the hedge."""
+    pulls = counted["pull_requests"]
+    line = f"{counted['findings']} review finding(s) on {len(pulls)} pull request(s) {said}"
+    if pulls:
+        line += f": {', '.join(f'#{n}' for n in pulls[:5])}" + (f" and {len(pulls) - 5} more" if len(pulls) > 5 else "")
+    if counted.get("unchecked"):
+        line += f" (at least; {counted['unchecked']})"
+    write(f"  {label}: {line}\n")
 
 
 def render(result: dict[str, Any], stream: TextIO) -> None:
@@ -3841,7 +3870,7 @@ def render(result: dict[str, Any], stream: TextIO) -> None:
     _render_banner(result["abnormalities"], write)
     _render_pending(rows, write)
     _render_next(rows, write)
-    _render_threads(rows, write, result.get("expired_reviews"))
+    _render_threads(rows, write, result.get("expired_reviews"), result.get("late_reviews"))
     _render_work(result["work"], write)
     _render_contributions(result.get("contributions"), write)
 

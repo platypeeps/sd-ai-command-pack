@@ -12,6 +12,14 @@
   open pull request. The lines go to stderr and the receipt's `warnings`. It
   refuses nothing, and a read that fails is a warning of its own.
 
+- **`sd-status` counts late review findings (sd:1178).** A review posted
+  after the merge reaches no merge gate: 19 of 219 merged pull requests got
+  their review that way. `open threads` now prints a `late:` line counting
+  the unread findings on pull requests merged in the last 14 days, above
+  `expired:`, and `--json` carries it as `late_reviews`. It is stateless and
+  warns only (operator ruling 2026-10-03); `sd-review-ack` clears a finding
+  there as it clears the row.
+
 - **`sd-status` counts expired review findings (sd:998).** A merged pull
   request's unanswered findings left the report on day fifteen and read as
   nothing, so expiry looked like resolution. `open threads` now ends with an
