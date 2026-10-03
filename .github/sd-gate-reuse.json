@@ -1,0 +1,1 @@
+{"schema_version": 1, "key": "tree", "reason": "make check reads commit history only through fixed old commits below any merge base with main (tests/test_archive_untouched.py, tests/test_sd_size_report.py); no check reads a commit message, a trailer, a branch range or a tag"}
