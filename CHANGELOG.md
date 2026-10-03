@@ -176,6 +176,16 @@
 
 ### Fixed
 
+- **`sd-review`'s Jev rows compare Jev with the routing (sd:2359).** `jev`
+  computed `changed` against `--fallback`, which here is a token no tier can
+  be, so every sd-review row in the judgment ledger said `changed=yes`. The
+  reading now passes the routed tier as `--baseline` and the routing's time as
+  `--baseline-ms`, so `jev` records a paired baseline row and `changed` says
+  whether Jev disagreed. The tier, the floor and the decline rules are
+  unchanged. A `jev` without `--baseline` (before system sd:2357) refuses it at
+  argparse; that refusal is asked once more without the two flags, silently,
+  and a refusal of any other flag stays loud.
+
 - **`sd writing list` and `import` refuse a checkout with no `content/`
   folder (sd:1803).** They printed empty results and exited 0 in another
   checkout, which reads as "no pieces" rather than "wrong checkout". The
