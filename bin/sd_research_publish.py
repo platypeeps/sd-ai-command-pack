@@ -46,7 +46,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 from urllib.parse import quote, urlsplit
 
-from sd_lib import git_output, main_worktree_root
+from sd_lib import git_output, main_worktree_root, upstream
 
 
 def dashboard_config(environ: Mapping[str, str]) -> Path:
@@ -330,12 +330,29 @@ def publish_refusal(repo: Path, copy: str) -> str:
     branch content into the shared vault folder as the canonical document.
     Publication is the main checkout's, and a worktree that wants it says so
     with `SD_PUBLISH_FROM_WORKTREE=1` on the invocation.
+
+    The main checkout queues a mirror from its default branch only (sd:2019).
+    The hook renders on post-checkout, so a branch switch there rewrote the
+    pending request with that branch's text, and a drain in that window
+    published unmerged content. A detached HEAD is off the branch too. The
+    vault copy is local and the next render replaces it, so it is not held.
     """
-    if not linked_worktree(repo) or ENVIRON.get(PUBLISH_FROM_WORKTREE):
+    if ENVIRON.get(PUBLISH_FROM_WORKTREE):
         return ""
-    return ("%s: not written from a linked worktree; run `sd-research-kit "
-            "render` in %s, or set %s=1 to publish this branch's content"
-            % (copy, repo_home(repo), PUBLISH_FROM_WORKTREE))
+    if linked_worktree(repo):
+        return ("%s: not written from a linked worktree; run `sd-research-kit "
+                "render` in %s, or set %s=1 to publish this branch's content"
+                % (copy, repo_home(repo), PUBLISH_FROM_WORKTREE))
+    if copy != "mirror" or git_output(["rev-parse", "--git-dir"], repo) is None:
+        return ""
+    branch = git_output(["symbolic-ref", "--quiet", "--short", "HEAD"], repo)
+    default = upstream(repo)[1]
+    if branch == default:
+        return ""
+    return ("%s: not queued from %s; the main checkout queues from %s only, "
+            "or set %s=1 to publish this branch's content"
+            % (copy, "branch %s" % branch if branch else "a detached HEAD",
+               default, PUBLISH_FROM_WORKTREE))
 
 
 def repo_key(repo: Path) -> str:

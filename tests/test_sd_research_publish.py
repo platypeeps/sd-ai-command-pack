@@ -1592,6 +1592,57 @@ class WorktreeIdentityTests(Fixture):
         self.assertEqual(PUBLISH.repo_home(plain), plain)
 
 
+class BranchCheckoutTests(Fixture):
+    """The main checkout queues a mirror from its default branch only (sd:2019).
+
+    The init-hook render fires on post-checkout, so a branch switch in the
+    main checkout rewrote the pending request with that branch's text: a
+    drain in that window published unmerged content as the canonical mirror.
+    """
+
+    NAME = "my-research.a.notion.json"
+    DOC = [dict(src="10-x/a.md", out="a", title="A", notion=dict())]
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.repo / "build").rmdir()
+        self.repo.rmdir()
+        self.repo = research_repo(self.root)
+        PUBLISH.enqueue(self.repo, self.DOC)
+        self.pending = (PUBLISH.QUEUE / self.NAME).read_text()
+
+    def switch(self, *args: str) -> None:
+        git(self.repo, "checkout", "-q", *args)
+        (self.repo / "10-x" / "a.md").write_text("# A\n\nbranch text\n", encoding="utf-8")
+
+    def test_a_feature_branch_switch_queues_nothing(self) -> None:
+        self.switch("-b", "feature")
+        said = PUBLISH.enqueue(self.repo, self.DOC)
+        self.assertFalse(any("queued" in line and "not queued" not in line for line in said), said)
+        self.assertEqual((PUBLISH.QUEUE / self.NAME).read_text(), self.pending)
+        self.assertEqual(len(said), 1, said)
+        self.assertIn("feature", said[0])
+        self.assertIn("SD_PUBLISH_FROM_WORKTREE", said[0])
+
+    def test_a_detached_head_queues_nothing(self) -> None:
+        self.switch("--detach")
+        said = PUBLISH.enqueue(self.repo, self.DOC)
+        self.assertEqual((PUBLISH.QUEUE / self.NAME).read_text(), self.pending)
+        self.assertIn("SD_PUBLISH_FROM_WORKTREE", said[0])
+
+    def test_with_the_opt_in_a_feature_branch_queues(self) -> None:
+        self.switch("-b", "feature")
+        PUBLISH.ENVIRON = dict(PUBLISH.ENVIRON, SD_PUBLISH_FROM_WORKTREE="1")
+        said = PUBLISH.enqueue(self.repo, self.DOC)
+        self.assertTrue(any("queued a" in line for line in said), said)
+        self.assertNotEqual((PUBLISH.QUEUE / self.NAME).read_text(), self.pending)
+
+    def test_the_vault_copy_is_still_written_on_a_branch(self) -> None:
+        """Only the mirror is held: the vault copy is local and the next render replaces it."""
+        self.switch("-b", "feature")
+        self.assertEqual(PUBLISH.publish_refusal(self.repo, "obsidian"), "")
+
+
 class HookTests(unittest.TestCase):
     """`init-hook` installs one script under three names, and git runs it.
 

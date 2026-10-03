@@ -485,7 +485,8 @@ delivered: `render` keeps a receipt beside the queue, the drain's last step
 `SD_MIRROR_REQUEUE=1` queues every designated document regardless. A render
 from a linked worktree writes that worktree's `docs/dashboard/` and nothing
 else -- no vault copy, no request -- unless `SD_PUBLISH_FROM_WORKTREE=1` is on
-the invocation; the refusal names the main checkout to run in.
+the invocation; the refusal names the main checkout to run in. The main
+checkout queues no request off its default branch, under the same switch.
 `SD_SKIP_MIRROR=<reason>` renders and queues nothing; the hook sets it for a
 branch checkout behind its upstream, so the pull that follows queues instead.
 `references/publication-contract.md` says how the status report surfaces one.
