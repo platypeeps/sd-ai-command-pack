@@ -4,6 +4,14 @@
 
 ### Added
 
+- **`sd-slice-builder` holds `Skill` and `Monitor` (sd:2526).** A builder
+  waited on a gate longer than one Bash call with a `sleep` loop or a
+  background task, and could not run a skill its brief named. The agent now
+  declares both tools, and its working rules say to wait on a gate longer
+  than 10 minutes with `Monitor` on its log and to report in the turn it
+  ends. The installer copies agents into `~/.claude/agents`, so the change
+  reaches a machine at the next `sd_install.py --user`.
+
 - **`sd task cancel N --reason TEXT` cancels a task or followup (sd:1005).**
   `sd task status N done` was the only way to close one, and it wrote no
   completion mark, so a dropped followup read as finished work and a finding
