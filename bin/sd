@@ -3129,7 +3129,7 @@ def build_parser() -> argparse.ArgumentParser:
                                "for a merge path that is not sd-ship merge")
     poster.add_argument("--head", required=True, metavar="SHA", help="the commit to check and post to")
     poster.add_argument("--base", metavar="BRANCH",
-                        help="the base branch, for a docs-only scope (default: the branch origin/HEAD names)")
+                        help="the PR's target branch, for a docs-only scope (default: none, so every check runs)")
     gate.set_defaults(handler=cmd_gate)
 
     sd_work.register(groups, kept)

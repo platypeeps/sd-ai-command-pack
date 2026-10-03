@@ -86,9 +86,11 @@ def post_head(root: pathlib.Path, head: str, *, base: str | None = None, api: An
     """Run the gate at `head` and post `sd/local-gate` there: `sd gate post` (sd:1989).
 
     `head` is any name for a commit this checkout has; the status goes to its
-    full SHA. `base` defaults to the branch `origin/HEAD` names, as `sd-ship
-    merge` passes the default branch, and to none when `origin/HEAD` is unset:
-    then no docs-only scope applies and every check runs. A base whose
+    full SHA. `base` narrows the run to a declared docs-only scope against
+    that branch, as `sd-ship merge` passes the PR's target. With no `base`
+    every check runs: this verb does not know the PR's target, and a head
+    bound for a release branch can read as docs-only against the default
+    branch while carrying unchecked code. A base whose
     remote-tracking ref is missing refuses, since `sd-check --base` would fail
     and that failure would be posted as the gate's. `api` is the GitHub
     client, `origin`'s by default.
@@ -98,9 +100,6 @@ def post_head(root: pathlib.Path, head: str, *, base: str | None = None, api: An
         raise Refusal(f"{head} names no commit in this checkout; nothing is posted",
                       code="invalid_input", boundary="input", state="retryable_failure",
                       next_action="Fetch the commit, then retry with its SHA.")
-    if base is None:
-        named = sd_lib.git_output(["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], root)
-        base = named.partition("/")[2] if named and named.startswith("origin/") else None
     ref = base_ref(base)
     if ref and sd_lib.git_output(["rev-parse", "--verify", "--quiet", ref], root) is None:
         raise Refusal(f"the base {ref} is not in this checkout; nothing is posted",

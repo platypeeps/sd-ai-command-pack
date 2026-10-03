@@ -437,8 +437,8 @@ class PostHead(Repository):
             sd_local_gate.post_head(self.root, "f" * 40, api=api)
         self.assertEqual(api.posts, [])
 
-    def test_the_base_defaults_to_origin_head(self) -> None:
-        """A declared docs-only scope applies as it does in the merge gate, against origin's default branch."""
+    def docs_only_head(self) -> str:
+        """A docs commit on top of a head whose full check fails, under a declared docs-only scope."""
         (self.root / ".github").mkdir()
         (self.root / ".github" / "sd-check-scope.json").write_text(
             '{"schema_version": 1, "docs_paths": ["docs/**"], "docs_command": ["true"]}', encoding="utf-8")
@@ -449,7 +449,21 @@ class PostHead(Repository):
         (self.root / "docs" / "a.md").write_text("a\n", encoding="utf-8")
         git(self.root, "add", "docs")
         git(self.root, "commit", "-q", "-m", "docs")
-        result = sd_local_gate.post_head(self.root, git(self.root, "rev-parse", "HEAD"), api=Recorder())
+        return git(self.root, "rev-parse", "HEAD")
+
+    def test_without_a_base_every_check_runs(self) -> None:
+        """No --base: the PR's target is unknown, so no docs-only scope is guessed from origin/HEAD.
+
+        A head bound for a release branch can carry code main already has plus
+        a docs commit; against main it reads as docs-only, and its success
+        would satisfy the release branch's required check unchecked.
+        """
+        result = sd_local_gate.post_head(self.root, self.docs_only_head(), api=Recorder())
+        self.assertEqual(result["status"], "failure")
+
+    def test_a_named_base_applies_the_docs_only_scope(self) -> None:
+        """A declared docs-only scope applies as it does in the merge gate, against the named base."""
+        result = sd_local_gate.post_head(self.root, self.docs_only_head(), base="main", api=Recorder())
         self.assertEqual((result["status"], result["summary"]), ("success", "sd-check pass (docs-only)"))
 
     def test_a_base_the_checkout_has_not_fetched_is_refused_and_nothing_is_posted(self) -> None:

@@ -12,7 +12,8 @@
   and posts the result there, with `sd-ship merge`'s own run and post. It
   prints the result as JSON and exits 0 on `success`, 1 on `failure`. A name
   that is no commit, or a `--base` this checkout has not fetched, refuses
-  and posts nothing. `--base` defaults to the branch `origin/HEAD` names. It
+  and posts nothing. `--base` names the PR's target for a docs-only scope;
+  without it every check runs, since the verb cannot know the target. It
   reads and writes no gate receipt, so it always runs.
 
 - **A guest repository can take decision records (sd:2168).** A `guest_allow: docs/decisions` line in the repository's `CLAUDE.local.md` block takes `docs/decisions/` out of the guest planning-artifact refusal: the `sd-ship` push check, the `sd-review --scope planning` gate and the `sd-status` shared-tree list. `docs/decisions/` stays refused by default, and `docs/work/` and `docs/spec/` stay refused always; naming either is a configuration error. The push check now reads `sd_lib.guest_refused_dirs` instead of its own copy of the three trees, and the installer's block template lists the key commented out.
