@@ -154,7 +154,12 @@ def docs_lint():
 
 
 def lint_failures(tree: pathlib.Path, argv: list[str]) -> list[str]:
-    """The `FAIL` lines `argv` prints in `tree`, each path made relative to `tree`."""
+    """The `FAIL` lines `argv` prints in `tree`, each path made relative to `tree`.
+
+    A non-zero exit that printed no `FAIL` line is refused with its raw output:
+    the lint also exits 1 on an uncaught exception, and a traceback read as
+    zero failures would let a lint that never finished pass.
+    """
     result = completed_process(tree, argv, timeout=300, answers=frozenset({0, 1}))
     # Longest first: a resolved `/private/var/...` contains the `/var/...` form.
     prefixes = sorted({f"{tree}/", f"{tree.resolve()}/"}, key=len, reverse=True)
@@ -165,11 +170,15 @@ def lint_failures(tree: pathlib.Path, argv: list[str]) -> list[str]:
             for prefix in prefixes:
                 failure = failure.replace(prefix, "")
             failures.append(failure)
+    if result.returncode and not failures:
+        raise Refusal((result.stderr or result.stdout or f"{argv[0]} failed").strip()[-2000:],
+                      code="docs_lint_failed", state="retryable_failure",
+                      next_action="Inspect the lint error, resolve its cause, then prepare again.")
     return failures
 
 
 def base_lint_failures(root: pathlib.Path, argv: list[str], base: str) -> set[str]:
-    """`lint_failures` in a scratch checkout of `origin/<base>`; empty if it cannot be checked out.
+    """`lint_failures` in a scratch checkout of `origin/<base>`; empty if it cannot be checked out or linted.
 
     Hooks are off for the checkout: a consumer's `post-checkout` is no part of a lint.
     Git runs through `completed_process`, whose timeout a large tree's checkout fits.
@@ -183,6 +192,9 @@ def base_lint_failures(root: pathlib.Path, argv: list[str], base: str) -> set[st
             return set()
         try:
             return set(lint_failures(tree, argv))
+        except Refusal:
+            # A base run that did not finish excuses nothing.
+            return set()
         finally:
             completed_process(root, ["git", "worktree", "remove", "--force", str(tree)], timeout=300,
                               answers=frozenset(range(256)))

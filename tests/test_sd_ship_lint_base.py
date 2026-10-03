@@ -11,7 +11,11 @@ date is the tree failure: rule 1 reports it with no database row needed.
 """
 from __future__ import annotations
 
+import pathlib
+import subprocess
+import tempfile
 import unittest
+from unittest.mock import patch
 
 from sd_db.testing.remote import _git
 
@@ -66,6 +70,50 @@ class LintBaseCase(unittest.TestCase):
         self.assertIn("1 more failure(s) already on origin/main", said)
         self.assertEqual(caught.exception.workflow["blocker"]["code"], "docs_lint_failed")
         self.assertEqual(self.remote.pull_requests, {}, "nothing was pushed or opened")
+
+
+TRACEBACK = ("Traceback (most recent call last):\n  File \"sd-docs-lint\", line 1, in <module>\n"
+             "UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte\n")
+
+
+class UnparsedLintExit(unittest.TestCase):
+    """A non-zero lint exit with no `FAIL` line is not a clean answer (sd:1646 review).
+
+    `sd-docs-lint` also exits 1 on an uncaught exception, such as a
+    `UnicodeDecodeError` reading tracked markdown, and prints only the
+    traceback. Read as zero failures, that let prepare go on through review
+    with the lint never finished. Only two runs that both parsed may excuse
+    anything; otherwise the refusal stands, with the raw output.
+    """
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = pathlib.Path(self.temp.name)
+
+    def answering(self, *lint_answers: tuple[int, str]):
+        """`completed_process` with git succeeding and each lint run answering in turn."""
+        answers = list(lint_answers)
+
+        def fake(cwd, argv, **kwargs):
+            if argv[0] == "git":
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            code, stderr = answers.pop(0)
+            return subprocess.CompletedProcess(argv, code, "", stderr)
+        return patch.object(ship.sd_ship_body, "completed_process", fake)
+
+    def test_a_branch_run_that_printed_only_a_traceback_refuses_with_it(self) -> None:
+        with self.answering((1, TRACEBACK)), self.assertRaises(ship.Refusal) as caught:
+            ship.sd_ship_body.lint_against_base(self.root, ["sd-docs-lint"], "main")
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "docs_lint_failed")
+        self.assertIn("UnicodeDecodeError", str(caught.exception))
+
+    def test_a_base_run_that_printed_only_a_traceback_excuses_nothing(self) -> None:
+        failure = f"FAIL {self.root}/docs/work/old-item: {BAD_NAME}\n"
+        with self.answering((1, failure), (1, TRACEBACK)), self.assertRaises(ship.Refusal) as caught:
+            ship.sd_ship_body.lint_against_base(self.root, ["sd-docs-lint"], "main")
+        self.assertIn(f"docs/work/old-item: {BAD_NAME}", str(caught.exception))
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "docs_lint_failed")
 
 
 if __name__ == "__main__":
