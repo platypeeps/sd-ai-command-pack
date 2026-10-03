@@ -1237,11 +1237,11 @@ def charged_call(
     with contextlib.closing(connection):
         try:
             result = calls.call(
-                connection, entry=ledger.library.Provider(**vars(provider)), prompt=prompt, environ=environ,
-                timeout=timeout, role="reviewer", repo=sd_lib.stored_repo(root),
+                connection, entry=sd_registry.library_entry(ledger.library.Provider, provider), prompt=prompt, environ=environ,
+                timeout=timeout, role="reviewer", repo=sd_lib.stored_repo(root), **sd_registry.strict_fields(provider, CODEX_OUTPUT_SCHEMA, "findings"),
                 transport=None if client is None else _wire(client, provider, prompt, environ),
             )
-        except (calls.CallRefused, ledger.library.LedgerRefused) as error:
+        except (calls.CallRefused, ledger.library.LedgerRefused, sd_registry.RegistryError) as error:
             return _outcome(provider.name, REFUSED, str(error))
     receipt = {"call_id": result.call_id, "outcome": result.outcome, "bound_usd": result.bound,
                "usd": result.usd, "reason": result.reason}
@@ -1298,7 +1298,7 @@ def _url_attempt(provider: sd_registry.Provider, subject: Subject, request_promp
     if isinstance(charged, Outcome):
         return charged
     # `None` is the road's own wire: the library's above, this seam's here.
-    response, receipt = charged or ((client or sd_registry.chat_completion)(provider, request_prompt, provider_env, timeout), None)
+    response, receipt = charged or ((client or sd_registry.strict_completion(CODEX_OUTPUT_SCHEMA, "findings"))(provider, request_prompt, provider_env, timeout), None)
     result = Completed(*response[:4])
     text, diagnostic = sd_registry.url_response(result.stdout)
     diagnostic["transport_exit_code"] = result.exit_code
@@ -1607,11 +1607,11 @@ def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], t
                    args: argparse.Namespace, head: str | None = None) -> dict[str, Any]:
     """Step 1 in a clean worktree at `head`, HEAD by default, never the live checkout (sd:2041, sd:2077).
 
-    With a `branch` it runs as the local gate does, against `origin/<branch>`,
-    and leaves a receipt the merge gate reads (`sd-ship prepare` under
-    `repo.ci = local`); it never reads one. Without one it reviews a committed head:
-    no receipt, and exit 0 passes as in `run_check`. An edit in the
-    checkout mid-run killed a bash check script there (sd:2077).
+    With a `branch` it runs as the local gate does, against `origin/<branch>`, for
+    `sd-ship prepare` under `repo.ci = local`; its receipt spares the merge gate and
+    a later prepare a second run (sd:1912). Without one it reviews a committed head
+    (an edit in the checkout mid-run killed a check script there, sd:2077): no
+    receipt is read or left, and exit 0 passes as in `run_check`.
     The child runs through `runner`, so the deadline ends its process group (sd:1482).
     """
     import sd_gate_run  # noqa: PLC0415 -- the gate's run, which posts nothing; needed only here
@@ -1629,8 +1629,7 @@ def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], t
 
     try:
         gate = sd_gate_run.check_in_worktree(root, head, timeout=timeout, base=sd_gate_run.base_ref(branch),
-                                             database=database, run=through_runner, environ=env,
-                                             reuse=False)
+                                             database=database, run=through_runner, environ=env)
     except sd_gate_run.GateError as error:
         gate = {"status": "failure", "exit_code": None, "stderr": str(error), "head": head}
     checks = (gate.get("report") or {}).get("checks")

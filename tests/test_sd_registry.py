@@ -359,6 +359,73 @@ class TheReasoningControls(unittest.TestCase):
             self.assertEqual(request.get_header("Authorization"), "Bearer fixture")
 
 
+class TheStrictResponseFormat(unittest.TestCase):
+    """sd:1827: `response_format: json_schema` is a per-entry opt-in; the file
+    reader holds it, and only an entry that opted in sends a schema."""
+
+    setUp = TheReasoningControls.setUp
+    write = TheReasoningControls.write
+    SCHEMA = {"type": "object", "required": ["items"], "properties": {
+        "items": {"type": "array", "maxItems": 3, "items": {"type": "object", "properties": {
+            "line": {"type": ["integer", "null"]}, "level": {"enum": ["high", "low"]},
+            "minLength": {"type": "string", "minLength": 1}}}}}}
+
+    def provider(self, **fields: Any) -> sd_registry.Provider:
+        provider = sd_registry.read(self.write(**fields), prefer_library=False).providers["two"]
+        return sd_registry.Provider(**{**vars(provider), "env": ("OWN_KEY",)})
+
+    def sent(self, provider: sd_registry.Provider, **options: Any) -> dict[str, Any]:
+        with unittest.mock.patch.object(sd_registry._DIRECT_OPENER, "open", return_value=_Answer("{}")) as opened:
+            sd_registry.chat_completion(provider, "prompt", {"OWN_KEY": "fixture"}, 30, **options)
+        return json.loads(opened.call_args.args[0].data)
+
+    def test_the_file_reader_preserves_the_opt_in(self) -> None:
+        self.assertEqual(self.provider(response_format="json_schema").response_format, "json_schema")
+        self.assertIsNone(self.provider().response_format)
+
+    def test_a_value_other_than_json_schema_or_a_process_entry_refuses(self) -> None:
+        for value in ("json_object", True, 1, [], {}):
+            with self.subTest(value=value), self.assertRaisesRegex(sd_registry.RegistryError, "response_format in"):
+                sd_registry.read(self.write(response_format=value), prefer_library=False)
+        self.text = self.text.replace('url: "http://localhost:2/v1"', 'start: "two -p", reader: claude-json')
+        with self.assertRaisesRegex(sd_registry.RegistryError, "needs a URL"):
+            sd_registry.read(self.write(response_format="json_schema"), prefer_library=False)
+
+    def test_a_library_without_the_field_cannot_drop_the_opt_in(self) -> None:
+        source = sd_registry.read_file(self.write())
+        old = types.SimpleNamespace(**{**vars(source), "providers": {
+            name: types.SimpleNamespace(**{key: value for key, value in vars(provider).items() if key != "response_format"})
+            for name, provider in source.providers.items()}})
+        module = types.SimpleNamespace(read=lambda *args, **kwargs: old, RegistryError=sd_registry.RegistryError)
+        with unittest.mock.patch.object(sd_registry, "library", return_value=module):
+            self.assertEqual(sd_registry.read(self.path).providers, source.providers)
+            with self.assertRaisesRegex(sd_registry.RegistryError, "cannot preserve response_format"):
+                sd_registry.read(self.write(response_format="json_schema"))
+
+    def test_the_strict_copy_is_typed_has_no_type_arrays_and_drops_what_strict_mode_rejects(self) -> None:
+        before = json.dumps(self.SCHEMA)
+        strict = sd_registry.strict_schema(self.SCHEMA)
+        self.assertEqual(json.dumps(self.SCHEMA), before)
+        self.assertEqual(sd_registry.strict_schema(strict), strict)
+        items = strict["properties"]["items"]
+        self.assertNotIn("maxItems", items)
+        self.assertEqual(items["items"]["properties"], {
+            "line": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+            "level": {"type": "string", "enum": ["high", "low"]},
+            "minLength": {"type": "string"}})
+
+    def test_an_opted_in_entry_sends_the_strict_body(self) -> None:
+        body = self.sent(self.provider(response_format="json_schema"), response_schema=self.SCHEMA, schema_name="items")
+        self.assertEqual(body.pop("response_format"), {"type": "json_schema", "json_schema": {
+            "name": "items", "strict": True, "schema": sd_registry.strict_schema(self.SCHEMA)}})
+        self.assertEqual(set(body), {"model", "max_tokens", "messages"})
+
+    def test_any_other_entry_sends_exactly_todays_body(self) -> None:
+        today = {"model": "exact-model", "max_tokens": 16384, "messages": [{"role": "user", "content": "prompt"}]}
+        self.assertEqual(self.sent(self.provider(), response_schema=self.SCHEMA), today)
+        self.assertEqual(self.sent(self.provider(response_format="json_schema")), today)
+
+
 class TheRefusals(unittest.TestCase):
     """A registry that cannot mean anything never reaches a caller."""
 
