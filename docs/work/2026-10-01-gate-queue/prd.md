@@ -88,6 +88,7 @@ of these two gaps.
     available for one gate at a time.
   - **One class, plain first-in, first-out.** Priority classes come only if
     the queue later shows merge gates waiting behind long ones.
+    2026-10-03: default kept at 4 (operator).
   - **The window for older pack copies is accepted.** A checkout that pins an
     older pack (for example through `.sd-pack-rev`) takes slots without
     queueing until its pin moves; the pin bump in system follows this item.

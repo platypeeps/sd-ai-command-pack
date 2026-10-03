@@ -6,6 +6,19 @@
 
 - **`sd-ship lane`: a serial ship queue per repository that outlives its session (sd:2524).** `enqueue`, `list` and `cancel` edit a queue file under `sd.lane_root` (new setting; unset reads `$XDG_STATE_HOME/sd/lanes`, `SD_LANE_ROOT` overrides it). `run` drains it in order under one lock per repository: head check, `prepare --catch-up`, then `merge` for an entry queued with `--manual`; a failed entry is marked and the next runs, a second runner exits at once, and each step's whole output is kept. `watch` prints each gate end a lane or builder log records, once.
 
+- **One passing gate check per head (sd:1912).** `sd-ship prepare`'s gate now reads a gate receipt at the same head and binding, so a second prepare at an unchanged head runs no second check. The new `sd gate check` runs the local gate's check at `HEAD`, in a clean worktree with the gate's environment, and records a pass that prepare and then the merge gate reuse. A plain `make check` leaves no receipt. The gate child no longer gets the agent harness's session variables (`CLAUDE*`, `HERDR_*`, `ITERM_*`, `TERM_SESSION_ID`, `PWD`, `OLDPWD`, `SHLVL`, `_`), so two sessions' passes bind equal; every other variable, `MAKEFLAGS` included, still binds. A failed or unfinished run records nothing, a new head (a merge of `main` included) runs again, and the 30-minute window counts from the run that passed.
+
+- **One gate-slot pool for every gate, and a waiting gate names its holders
+  (sd:2522).** The slots were already machine-wide, but the callers counted
+  them differently. `sd-check` read `sd.gate_slots`, the pack's own
+  `make test` read 2 from its Makefile, and the stdlib
+  `sd_gate_slots.py run|status` ignored the setting. Every entry point now
+  takes its count from `sd.gate_slots`. `sd_gate_slots.py count` prints it for
+  the Makefile. The waiting line names each holder's label, pid, directory and
+  start time. The default stays a quarter of the cores. Wrap a plain
+  `make check` as `sd gate run -- make check`; a per-repository `lockf` in a
+  lane script is no longer needed.
+
 - **`sd-slice-builder` holds `Skill` and `Monitor` (sd:2526).** A builder
   waited on a gate longer than one Bash call with a `sleep` loop or a
   background task, and could not run a skill its brief named. The agent now
@@ -206,6 +219,18 @@
   The contexts it drops are named. A head that already carries a failed
   (billing-blocked) check run still refuses; WORKFLOW.md § No-CI mode names
   the remedy, a fresh commit.
+
+- **A `url` entry can opt in to the strict findings schema (sd:1827, pack
+  half).** With `response_format: json_schema` on its registry entry,
+  `sd-review` sends the findings schema as a strict `response_format`, on the
+  ledger road through `sd_db.calls.call` and on the no-ledger road through
+  `sd_registry.chat_completion` alike. The copy is the one Moonshot's strict
+  mode takes: every property typed, `line` as `anyOf` integer or null, and no
+  `minLength` or `maxItems`; the answer is still parsed against the full
+  schema. Every other entry sends the request it sent before. The shipped
+  registry opts no entry in: kimi-k3 waits for a paid strict-mode test, and
+  MiniMax-M3 ignores the field. An `sd_db` without the field refuses a
+  registry that sets it.
 
 ### Fixed
 
