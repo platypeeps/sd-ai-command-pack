@@ -866,11 +866,15 @@ class LineBudgetTests(unittest.TestCase):
         # fixed `LOCALE` recorded in the binding. sd:1296: `bin/sd-review` +2,
         # the `--reuse-check` help says the pack never reuses. sd:1635:
         # `bin/sd-review` +11, `DEFECT_CLASSES` in the code review prompt.
+        # 4594 -> 4605 is sd:2432, raised in its own commit before the one that
+        # spends it: `bin/sd_review_material.py` +11 for `RENAMED` and the
+        # `--binary -M` fallback in `binary_material`, so a renamed and edited
+        # non-media binary is sent as its rename delta, not a full literal.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4594,
+            4605,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
