@@ -232,6 +232,14 @@
 
 ### Fixed
 
+- **`--delivered-by` names the way out for a commit with no item trailer
+  (sd:2565).** `sd task status N done --delivered-by` refused a commit naming
+  neither `Delivers: sd:N` nor `Item: sd:N`, such as a no-item squash
+  (sd:2171), with only "carries no `Delivers:` trailer". The refusal now
+  names three ways out: ship the work with `sd-ship prepare --item N
+  --deliver`, name `Closes: sd:N` in a later item merge's body, or close the
+  task by hand with `--reason TEXT`.
+
 - **A row worked on its own branch no longer closes with no merge (sd:1990).**
   Three runner items (sd:1686, sd:1688, sd:1703) were closed with a plain
   `sd task status N done` while their `fleet/*` branch had no pull request.
