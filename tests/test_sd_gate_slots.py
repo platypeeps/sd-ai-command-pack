@@ -25,6 +25,7 @@ from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SD_CHECK = REPO_ROOT / "bin" / "sd-check"
+SLOTS = REPO_ROOT / "bin" / "sd_gate_slots.py"
 if str(REPO_ROOT / "bin") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "bin"))
 
@@ -66,6 +67,25 @@ with open(lock, "a") as handle:
 if open(lock).read().split() != [str(os.getppid())]:
     sys.exit("the slot does not name the sd-check that holds it")
 """
+
+
+#: A command that says it started, then holds until a release file appears.
+BLOCKING = """
+import pathlib, sys, time
+pathlib.Path(sys.argv[1]).touch()
+end = time.time() + 120
+while not pathlib.Path(sys.argv[2]).exists() and time.time() < end:
+    time.sleep(0.05)
+"""
+
+
+def wait_until(predicate, seconds: float = 60.0) -> bool:
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if predicate():
+            return True
+        time.sleep(0.05)
+    return predicate()
 
 
 def slot_free(lock: pathlib.Path) -> bool:
@@ -189,14 +209,104 @@ class SlotOwnership(GateSlotFixture):
         self.assertFalse(self.slots.exists())
 
 
+class OnePool(GateSlotFixture):
+    """sd:2522. Gates from two repositories, started together, queue on one pool.
+
+    The count is the machine's `sd.gate_slots` for every entry point: `sd-check`
+    (and so every `sd-ship` gate) and the plain `run` a lane wraps around
+    `make check`. No `SD_GATE_SLOTS` is set, so each reads the setting.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        config = self.tmp / "config" / "sd-ai-command-pack" / "config.json"
+        config.parent.mkdir(parents=True)
+        config.write_text(json.dumps({"config": {"sd": {"gate_slots": "1"}}}))
+        self.started, self.release = self.tmp / "started", self.tmp / "release"
+        self.blocking = self.script("blocking.py", BLOCKING)
+        self.processes: list[subprocess.Popen[str]] = []
+        self.addCleanup(self.reap)
+
+    def reap(self) -> None:
+        self.release.touch()
+        for process in self.processes:
+            if process.poll() is None:
+                process.kill()
+            process.communicate()
+
+    def plain_run(self, root: pathlib.Path, *command: str) -> subprocess.Popen[str]:
+        process = subprocess.Popen([sys.executable, str(SLOTS), "run", "--label", "make check", "--", *command],
+                                   cwd=root, env=self.env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   text=True)
+        self.processes.append(process)
+        return process
+
+    def queued(self) -> bool:
+        return any((self.slots / "queue").glob("*.ticket"))
+
+    def test_a_gate_in_one_repository_waits_for_a_plain_run_in_another_and_names_it(self):
+        first = self.repo("first", f"{PY} -c pass")
+        ran = self.tmp / "second-ran"
+        second = self.repo("second", f"{PY} -c " + shlex.quote(f"open({str(ran)!r}, 'w').close()"))
+        holder = self.plain_run(first, sys.executable, str(self.blocking), str(self.started), str(self.release))
+        self.assertTrue(wait_until(self.started.exists), holder.stderr)
+        gate = self.start(second, self.env())
+        self.processes.append(gate)
+        self.assertTrue(wait_until(self.queued), "the second repository's gate never queued")
+        self.assertFalse(ran.exists(), "the second gate ran while the first repository held the one slot")
+        self.release.touch()
+        code, report, err = self.finish(gate)
+        self.assertEqual(code, 0, f"{err}\n{report}")
+        self.assertEqual(report["gate_slot"]["slots"], 1)
+        waiting = next(line for line in err.splitlines() if line.startswith("waiting for a gate slot"))
+        self.assertIn(f"slot 1 held by make check (pid {holder.pid}) since ", waiting)
+        self.assertIn(f" in {first}", waiting)
+        self.assertRegex(waiting, r"since \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
+
+    def test_a_plain_run_in_one_repository_waits_for_a_gate_in_another(self):
+        first = self.repo("first", f"{PY} {shlex.quote(str(self.blocking))} "
+                                   f"{shlex.quote(str(self.started))} {shlex.quote(str(self.release))}")
+        second = self.repo("second", f"{PY} -c pass")
+        ran = self.tmp / "second-ran"
+        gate = self.start(first, self.env())
+        self.processes.append(gate)
+        self.assertTrue(wait_until(self.started.exists), "the first repository's gate never started its check")
+        plain = self.plain_run(second, sys.executable, "-c", f"open({str(ran)!r}, 'w').close()")
+        self.assertTrue(wait_until(self.queued), "the plain run never queued: it did not read sd.gate_slots")
+        self.assertFalse(ran.exists())
+        self.release.touch()
+        _, err = plain.communicate(timeout=120)
+        self.assertEqual(plain.returncode, 0, err)
+        self.assertTrue(ran.exists())
+        self.assertIn("held by sd-check first", err)
+        code, report, err = self.finish(gate)
+        self.assertEqual(code, 0, f"{err}\n{report}")
+
+    def test_the_shell_reads_the_count_the_gates_read(self):
+        """`count` is what the Makefile hands `run-tests.sh`, so a plain `make test` joins the pool."""
+        def count(**overrides: str) -> str:
+            env = {**self.env(), **overrides}
+            done = subprocess.run([sys.executable, str(SLOTS), "count"], env=env, capture_output=True,
+                                  text=True, timeout=60)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            return done.stdout.strip()
+        self.assertEqual(count(), "1")
+        self.assertEqual(count(SD_GATE_SLOTS="0"), "0")
+        self.assertEqual(count(CI="true"), "0")
+        self.assertEqual(count(XDG_CONFIG_HOME=str(self.tmp / "none")), str(sd_gate_slots.default_slots()))
+        makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+        self.assertIn('SD_GATE_SLOTS ?= $(shell "$(PYTHON)" bin/sd_gate_slots.py count', makefile)
+
+
 class SlotCount(unittest.TestCase):
-    def test_the_variable_then_ci_then_the_machine_setting_then_a_quarter_of_the_cores(self):
+    def test_the_variable_then_ci_then_the_machine_setting_then_the_default(self):
         configured = sd_gate_slots.configured
         self.assertEqual(configured({"SD_GATE_SLOTS": "3", "CI": "1"}, "7"), (3, "SD_GATE_SLOTS"))
         self.assertEqual(configured({"CI": "1"}, "7"), (0, "CI"))
         self.assertEqual(configured({}, "7"), (7, "sd.gate_slots"))
         self.assertEqual(configured({}, None), (sd_gate_slots.default_slots(), "default"))
-        self.assertEqual([sd_gate_slots.default_slots(cores) for cores in (1, 4, 8, 16, 32)], [1, 1, 2, 4, 8])
+        # sd:2522: a quarter of the cores, at most two.
+        self.assertEqual([sd_gate_slots.default_slots(cores) for cores in (1, 4, 8, 16, 32)], [1, 1, 2, 2, 2])
         for bad in ("", "-1", "two", "٣"):
             with self.subTest(value=bad), self.assertRaises(ValueError):
                 configured({"SD_GATE_SLOTS": bad}, None)

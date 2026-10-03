@@ -4,6 +4,18 @@
 
 ### Added
 
+- **One gate-slot pool for every gate, and a waiting gate names its holders
+  (sd:2522).** The slots were already machine-wide, but the callers counted
+  them differently. `sd-check` read `sd.gate_slots`, the pack's own
+  `make test` read 2 from its Makefile, and the stdlib
+  `sd_gate_slots.py run|status` ignored the setting. Every entry point now
+  takes its count from `sd.gate_slots`. `sd_gate_slots.py count` prints it for
+  the Makefile. The waiting line names each holder's label, pid, directory and
+  start time. The default is a quarter of the cores, at most 2: on 2026-10-03
+  gates from four repositories took the load to 116 and 128. Wrap a plain
+  `make check` as `sd gate run -- make check`; a per-repository `lockf` in a
+  lane script is no longer needed.
+
 - **`sd gate post --head SHA` posts the local gate outside `sd-ship merge`
   (sd:1989).** A repository under `repo.ci = local` that merges by its own
   automation -- a Dependabot merge, a daily merge script -- got no
