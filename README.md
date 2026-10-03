@@ -236,7 +236,9 @@ refusal: the grammar, the anchor, the due date and the kinds that may recur.
 
 `sd store items --open` lists the backlog; `sd store item 42 --json` includes
 history and a revision that edits can require with `--if-revision`.
-`sd task show 42` is an alias that prints the same thing. Notes,
+`sd task show 42` is an alias that prints the same thing.
+`sd task cancel 42 --reason TEXT` closes a task or followup nobody will do,
+with the `cancelled` receipt `sd work cancel` writes. Notes,
 priorities, due dates and task status save directly to the database. GitHub
 issues are optional external references, with their last successful sync shown
 separately from local progress.
