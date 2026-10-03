@@ -521,6 +521,36 @@ class ProtectionGapTests(unittest.TestCase):
         self.assertIn("no pull-request review is required on main", found[0]["gap"])
 
 
+class GapVocabularyTests(unittest.TestCase):
+    """The pack owns the gap vocabulary, and the system's collector must agree (sd:1372).
+
+    `sd_db.protection` writes the fleet's gap ids and the dashboard reads them;
+    `sd-status` emits them here and `ACKNOWLEDGEABLE_GAPS` accepts them. Both
+    sides were checked alone, and nothing held them together: an id added on
+    one side only failed nothing. This reads the system library at the pin in
+    `.sd-system-rev`, the one `make setup` installs, and names each id on one
+    side only. `unprotected` is the system's status column, not a gap cell.
+    """
+
+    def test_the_systems_gap_ids_are_the_packs(self) -> None:
+        import sd_db.protection as system  # noqa: PLC0415 - provisioned by `make setup`
+
+        pack = set(status.ACKNOWLEDGEABLE_GAPS) - {"unprotected"}
+        self.assertEqual(
+            (sorted(pack - set(system.GAP_IDS)), sorted(set(system.GAP_IDS) - pack)), ([], []),
+            "(pack only, system only) gap ids",
+        )
+
+    def test_the_systems_merge_flags_are_the_ones_sd_status_reports(self) -> None:
+        import sd_db.protection as system  # noqa: PLC0415 - provisioned by `make setup`
+
+        pack = {flag["id"] for flag in status._merge_settings({})}
+        self.assertEqual(
+            (sorted(pack - set(system.MERGE_FLAG_IDS)), sorted(set(system.MERGE_FLAG_IDS) - pack)), ([], []),
+            "(pack only, system only) merge flag ids",
+        )
+
+
 class AcknowledgementTests(unittest.TestCase):
     """`.github/sd-status.json`: what it accepts, and when it stops accepting.
 
