@@ -521,6 +521,36 @@ class ProtectionGapTests(unittest.TestCase):
         self.assertIn("no pull-request review is required on main", found[0]["gap"])
 
 
+class GapVocabularyTests(unittest.TestCase):
+    """The pack owns the gap vocabulary, and the system's collector must agree (sd:1372).
+
+    `sd_db.protection` writes the fleet's gap ids and the dashboard reads them;
+    `sd-status` emits them here and `ACKNOWLEDGEABLE_GAPS` accepts them. Both
+    sides were checked alone, and nothing held them together: an id added on
+    one side only failed nothing. This reads the system library at the pin in
+    `.sd-system-rev`, the one `make setup` installs, and names each id on one
+    side only. `unprotected` is the system's status column, not a gap cell.
+    """
+
+    def test_the_systems_gap_ids_are_the_packs(self) -> None:
+        import sd_db.protection as system  # noqa: PLC0415 - provisioned by `make setup`
+
+        pack = set(status.ACKNOWLEDGEABLE_GAPS) - {"unprotected"}
+        self.assertEqual(
+            (sorted(pack - set(system.GAP_IDS)), sorted(set(system.GAP_IDS) - pack)), ([], []),
+            "(pack only, system only) gap ids",
+        )
+
+    def test_the_systems_merge_flags_are_the_ones_sd_status_reports(self) -> None:
+        import sd_db.protection as system  # noqa: PLC0415 - provisioned by `make setup`
+
+        pack = {flag["id"] for flag in status._merge_settings({})}
+        self.assertEqual(
+            (sorted(pack - set(system.MERGE_FLAG_IDS)), sorted(set(system.MERGE_FLAG_IDS) - pack)), ([], []),
+            "(pack only, system only) merge flag ids",
+        )
+
+
 class AcknowledgementTests(unittest.TestCase):
     """`.github/sd-status.json`: what it accepts, and when it stops accepting.
 
@@ -587,6 +617,14 @@ class AcknowledgementTests(unittest.TestCase):
         # agreement binding; without it the schema would accept anything and
         # only the loader would object, one commit later.
         self.assertIs(state["additionalProperties"], False)
+
+    def test_the_schema_offers_exactly_the_ids_the_reader_accepts(self) -> None:
+        """An editor is told the ids `ACKNOWLEDGEABLE_GAPS` allows, not any string (sd:1000)."""
+        schema = json.loads(
+            (BIN.parent / ".github" / "sd-status.schema.json").read_text(encoding="utf-8")
+        )
+        gap_id = schema["properties"]["accepted_gaps"]["items"]["properties"]["id"]
+        self.assertEqual(gap_id.get("enum"), sorted(status.ACKNOWLEDGEABLE_GAPS))
 
     def test_absent_protection_is_a_distinct_observed_state_from_empty_protection(self) -> None:
         """The fact that separates "no object" from "an object enforcing nothing".
@@ -2581,6 +2619,28 @@ class WorkItemInventoryTests(InventoryFixture):
         )
 
 
+class ItemDateParityTests(unittest.TestCase):
+    """`_item_date` here and `sd_lib.item_date` read one date the same way (sd:1000).
+
+    Each held its own pattern: the library accepted `created: 20260701` and
+    a padded value, and this file did not, so one item could be undated in
+    one report and dated in the other.
+    """
+
+    CREATED = ("2026-07-01", " 2026-07-01", "2026-07-01T10:00", "20260701", "soon", "", "2026-13-45")
+    NAMES = ("2026-01-01-x", "2026-01-01", "untitled", "2026-13-45-x", "20260101-x")
+
+    def test_both_readers_give_the_same_date(self) -> None:
+        for created, name in itertools.product(self.CREATED, self.NAMES):
+            with self.subTest(created=created, name=name):
+                item = SimpleNamespace(created=created, path=pathlib.Path("docs/work") / name)
+                entry = {"created": created, "path": f"docs/work/{name}"}
+                self.assertEqual(status._item_date(entry), status.sd_lib.item_date(item))
+
+    def test_one_pattern_is_shared(self) -> None:
+        self.assertIs(status._ITEM_DATE_RE, status.sd_lib.ITEM_DATE_RE)
+
+
 class OpenStepTests(InventoryFixture):
     def test_two_identical_boxes_under_one_heading_get_two_ids(self) -> None:
         """C-13: the ordinal is what stops one id naming two tasks."""
@@ -2790,6 +2850,17 @@ class LowYieldProducerTests(InventoryFixture):
         self.assertEqual([row["title"] for row in found], ["bin/sd-thing"])
         self.assertFalse(found[0]["abnormal"])
         self.assertEqual(found[0]["key"], "skills/sd-thing/SKILL.md#bin/sd-thing")
+
+    def test_an_unreadable_skill_root_marks_the_class_unchecked(self) -> None:
+        """An unreadable root is reported, not raised out of the whole report (sd:1000)."""
+        skills = self.repo / "skills"
+        (skills / "sd-thing").mkdir(parents=True)
+        (skills / "sd-thing" / "SKILL.md").write_text("Run `bin/sd-thing`.\n", encoding="utf-8")
+        skills.chmod(0)
+        self.addCleanup(skills.chmod, 0o755)
+        inventory = status.actionable_inventory(self.repo, self.sections(), self.TODAY)
+        self.assertEqual([], self.by_check(inventory.rows, "undisclosed-tool"))
+        self.assertIn("skills", inventory.unchecked["undisclosed-tool"])
 
     def test_a_contrib_skill_discloses_on_the_same_terms_as_a_shipped_one(
         self,

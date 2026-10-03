@@ -20,8 +20,8 @@
         "properties": {
           "id": {
             "type": "string",
-            "minLength": 1,
-            "description": "The gap id from the protection section. Necessary but never sufficient: `reviews` is emitted for two opposite states of the branch -- the review object being absent, so no pull request is required at all, and the object existing while asking for 0 approvals -- so `state` is what actually decides whether an entry applies."
+            "enum": ["bypass", "enforce_admins", "produced_not_required", "required_checks", "required_not_produced", "reviews", "strict", "unprotected"],
+            "description": "The gap id from the protection section, one of `ACKNOWLEDGEABLE_GAPS` in `bin/sd_lib.py`; the loader rejects any other. Necessary but never sufficient: `reviews` is emitted for two opposite states of the branch -- the review object being absent, so no pull request is required at all, and the object existing while asking for 0 approvals -- so `state` is what actually decides whether an entry applies."
           },
           "state": {
             "type": "object",

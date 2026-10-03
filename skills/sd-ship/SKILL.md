@@ -131,6 +131,7 @@ Itemless merge requires `--manual` and `--expected-head SHA`.
 After the merge, run itemless `reconcile` and `review --close-record REASON` from the default branch; the deleted feature branch needs no recreation.
 Itemless publication rejects commit flags, runner authority, and whole-item delivery flags.
 It creates no task row, `Work:` line, `Item:`, or `Delivers:` trailer.
+A branch commit's `Delivers:` does not reach the squash; prepare warns and suggests `--item N`.
 Never allocate another review ID to reset spent passes or discard history.
 
 - `sd-ship prepare --item ID --deliver|--associate-only --json` reviews, pushes, and opens or reconciles the PR.
@@ -162,7 +163,7 @@ Never allocate another review ID to reset spent passes or discard history.
   Checks that are not strict refuse unless the reviewed head declares that exact state.
   Each declaration is an `accepted_gaps` entry in `.github/sd-status.json`, id `bypass` or `strict`, pinning its own fact; a `strict` entry also pins `bypass`.
   Every fact it pins must equal the live state, read as the status report reads it.
-  An app, a team, a role or an admin bypass still refuses.
+  An app, a team, a role or an admin bypass still refuses, and `sd-ship` never accepts a declaration for a missing `pull_request` rule (R14-D1).
   The receipt's `protection.accepted_gaps` names the entries a merge honoured.
   GitHub's merge rules must also pass: `mergeable` true, and `mergeable_state` `clean` or `unstable`.
   `unstable` means a check the protection does not require is pending or failed; the required ones are still read.
@@ -177,6 +178,7 @@ Never allocate another review ID to reset spent passes or discard history.
   Its persisted start prevents another automatic watch on rerun.
   Under `repo.ci = local` it starts none: the local gate runs inside the merge and is the wait.
 - `sd-ship observe --item ID --json` reads receipt and remote state without changing files, refs, or database.
+  Its `receipt` field holds the last review, a gate failure, and the local gate report; before a PR exists it reads the receipt alone.
 - `sd-ship reconcile --item ID --json` fetches merge evidence in an owned clone.
   Observation alone does not establish ancestry.
   Reconciliation removes no branch, worktree, or clone.

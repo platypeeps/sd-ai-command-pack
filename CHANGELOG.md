@@ -4,6 +4,83 @@
 
 ### Added
 
+- **The commit-msg hook writes `Authored-with:` at commit time (sd:1295).**
+  A branch whose commits said nothing took one empty `sd attribute` commit
+  per review round. With `SD_AUTHOR=<entry>` set and no `Authored-with:` line
+  in the message, `hooks/commit-msg` now adds `Authored-with: <value>` first
+  in the final trailer paragraph, the value `sd attribute` writes for that
+  name. `human` and `script` read no registry. A name nothing resolves, or
+  `dependabot`, refuses the commit. Unset, the hook writes nothing.
+  `sd attribute` never amends. A harness sets the variable for its session,
+  and a job for its run.
+
+- **`sd attribute`'s repair commit names who ran it (sd:2009, gap 1).** It
+  always wrote `Authored-with: human`, so an agent's repair had to be amended
+  by hand. It now writes the entry `SD_AUTHOR` names, resolved as the
+  commit-msg hook resolves it, and `human` when the variable is unset. A name
+  nothing resolves refuses and writes nothing.
+
+- **`Authored-with: script` for unattended job commits (sd:1637).** A
+  scheduled job that commits generated data had no fitting value, so it
+  wrote `human` and counted as the operator. `script` is a reserved peer of
+  `human` with no vendor, so any provider may review it. `sd attribute`, a
+  squash body and the trailer reader accept it, and `sd-review --explain`
+  names it.
+
+- **`sd gate post --head SHA` posts the local gate outside `sd-ship merge`
+  (sd:1989).** A repository under `repo.ci = local` that merges by its own
+  automation -- a Dependabot merge, a daily merge script -- got no
+  `sd/local-gate` status, so its required check never reported and every
+  merge waited. The verb runs `sd-check` at that commit in a clean worktree
+  and posts the result there, with `sd-ship merge`'s own run and post. It
+  prints the result as JSON and exits 0 on `success`, 1 on `failure`. A name
+  that is no commit, or a `--base` this checkout has not fetched, refuses
+  and posts nothing. `--base` names the PR's target for a docs-only scope;
+  without it every check runs, since the verb cannot know the target. It
+  reads and writes no gate receipt, so it always runs.
+
+- **`sd work deliver --associated --reason` closes an item merged without
+  `--deliver` (sd:1590).** A whole-item merge prepared without `--deliver`
+  carried `Item: sd:<id>` and no `Delivers:`, and every verb that could close
+  the row refused it. `--associated` calls the library's
+  `deliver_associated_work`: the commit must be on the verified default branch
+  and name the item in an `Item:` trailer. The receipt records the trailer and
+  the reason. It needs a nonblank `--reason`, refuses an ordinary task, and
+  `--reason` without `--associated` is refused rather than dropped.
+
+- **A registry rule for sd-ship's protection-gap policy (sd:1460).** `R14-D1`
+  in `bin/sd_rules.py`: the merge gate honours a declared gap only for
+  `bypass` and `strict`, only on its exact live state, and never for a
+  missing `pull_request` rule. Its checker is
+  `bin/sd_ship_remote.py::validate_protection`, and leg d proves it by
+  replacing the exact-state match. `skills/sd-ship/SKILL.md` now states the
+  claim #1167 had reworded away, and cites the rule.
+
+- **A note on a done item prints an advisory (sd:1317).** `sd task note` on a
+  row whose status is `done` prints `sd: advisory: sd:N is done since <date>,
+  delivered by #<PR>` to stderr, from the item's latest merge comment, or the
+  delivering commit, or "no delivery is recorded". The note is still written.
+
+- **A guest repository can take decision records (sd:2168).** A `guest_allow: docs/decisions` line in the repository's `CLAUDE.local.md` block takes `docs/decisions/` out of the guest planning-artifact refusal: the `sd-ship` push check, the `sd-review --scope planning` gate and the `sd-status` shared-tree list. `docs/decisions/` stays refused by default, and `docs/work/` and `docs/spec/` stay refused always; naming either is a configuration error. The push check now reads `sd_lib.guest_refused_dirs` instead of its own copy of the three trees, and the installer's block template lists the key commented out.
+
+- **`sd fleet stamp` honours a per-repository exemption list (sd:1797).** A
+  tracked `.github/sd-fleet.json` holding `{"exempt": ["<path>", ...]}`
+  declines stamped files once. The stamp names each exempt path as an adapted
+  line and never proposes it, so a declined file stops coming back on every
+  run. A file that does not read, or that exempts a path the stamp does not
+  write, refuses the repository. The fleet audit runs the dry run, so it
+  honours the same list.
+
+- **A test holds the system's gap ids to the pack's (sd:1372).** The pack owns
+  the gap vocabulary. `GapVocabularyTests` reads `sd_db.protection` at the
+  `.sd-system-rev` pin and fails naming each gap id or merge flag that one
+  side has and the other lacks.
+
+- **WORKFLOW.md states how to run a Python mutation check (sd:1790).** A new
+  Mutation checks section says to run with `PYTHONDONTWRITEBYTECODE=1` and to
+  delete `__pycache__` first: a same-size edit restored within a second
+  otherwise runs stale bytecode.
+
 - **No GitHub issues from a managed repository (sd:2256).** A new
   `PreToolUse` hook, `bin/sd-issue-guard`, denies `gh issue create` (and its
   alias `gh issue new`) and `mcp__github__issue_write` when the session's
@@ -134,6 +211,117 @@
 - **`sd-ship -C <dir>` outside a repository names the directory (sd:2499).**
   The refusal read "cwd is not inside a Git repository"; it now names the
   directory, as the other lane commands do.
+
+- **`sd-review`'s Jev rows compare Jev with the routing (sd:2359).** `jev`
+  computed `changed` against `--fallback`, which here is a token no tier can
+  be, so every sd-review row in the judgment ledger said `changed=yes`. The
+  reading now passes the routed tier as `--baseline` and the routing's time as
+  `--baseline-ms`, so `jev` records a paired baseline row and `changed` says
+  whether Jev disagreed. The tier, the floor and the decline rules are
+  unchanged. A `jev` without `--baseline` (before system sd:2357) refuses it at
+  argparse; that refusal is asked once more without the two flags, silently,
+  and a refusal of any other flag stays loud.
+
+- **`sd writing list` and `import` refuse a checkout with no `content/`
+  folder (sd:1803).** They printed empty results and exited 0 in another
+  checkout, which reads as "no pieces" rather than "wrong checkout". The
+  refusal `verify` gained in sd:1660 now covers `list` and both forms of
+  `import`, and names the verb.
+
+- **The local gate ignores the terminal's colour settings (sd:2076).** The
+  gate's child no longer inherits `FORCE_COLOR`, `CLICOLOR_FORCE` or
+  `PY_COLORS`, and gets `NO_COLOR=1` and `PYTHON_COLORS=0`. An inherited
+  `FORCE_COLOR=3` had coloured Python 3.14 `--help` output and failed a
+  repository's CLI tests in its merge gate.
+
+- **A branch switch in the main checkout queues no mirror (sd:2019).** The
+  re-render hook fires on post-checkout, so a feature branch or a detached
+  HEAD replaced the pending request with unmerged text. The main checkout
+  now queues a mirror from its default branch only; the vault copy and
+  `docs/dashboard/` are still written. The default branch is `origin`'s,
+  not the one HEAD's tracking remote names, so a branch tracking a fork is
+  held too. With an `origin`, only `origin/HEAD` names it; when that is
+  unset, the mirror is held and the message names
+  `git remote set-head origin --auto`. `SD_PUBLISH_FROM_WORKTREE=1` lifts
+  the hold, as it does for a linked worktree.
+
+- **`sd fleet stamp` reads the operator's owner logins from the machine
+  config (sd:2324).** `fleet.owners` in `config.json`, a list of GitHub
+  logins, decides which repositories are the operator's own; unset, the
+  pack's previous pair applies. A malformed value refuses the stamp.
+
+- **Small read and report defects (sd:1000).** `sd-status` marks
+  `undisclosed-tool` unchecked when a skill root cannot be listed, where it
+  raised out of the whole report. `sd-review --explain` prints the registry
+  refusal itself on a machine with no reachable reviewer, where it called a
+  present but unreadable registry absent. `sd-status` and `sd_lib` date a
+  work item with one shared pattern, pinned by a parity test. The
+  `accepted_gaps` id in `.github/sd-status.schema.json` is an enum of the
+  ids the loader accepts.
+- `sd-ship prepare`: a docs-lint failure already on the default branch no longer blocks a pull request that did not introduce it. A failed lint runs again in a scratch checkout of `origin/<base>`, without the body. A tree failure found there returns as a warning, and the refusal names only the failures the branch introduces, as `docs_lint_failed` (sd:1646). A non-zero lint exit that printed no `FAIL` line, such as an uncaught exception, refuses with its raw output, and a base run that did not finish excuses nothing.
+
+- `sd-ship merge`: the second `base_moved` refusal, read again just before the merge under a declared or accepted `strict` gap, now names `git merge origin/<base>` or `sd-ship prepare --catch-up` instead of a rebase. `WORKFLOW.md` states the rule: after review, take a newer default branch by a merge, never a rebase (sd:2034).
+
+- **A no-item `prepare` warns about a branch `Delivers:` trailer (sd:2171).**
+  The no-item squash message carries no branch commit's `Delivers: sd:N`, so
+  `sd task status N done --delivered-by <squash>` later found no trailer.
+  `prepare --no-item` now adds one advisory warning per such trailer, naming
+  the commit and suggesting `--item N`. It refuses nothing, and the squash
+  still does not copy the trailer; whether it should is an open question.
+
+- **`prepare` accepts a `--title` the live pull request carries (sd:1378).**
+  Once a pull request was stored, `prepare` refused any `--title` that
+  differed from the stored title with `existing PR delivery claim or title
+  differs`, even when the pull request had been retitled to it on GitHub. The
+  guard now reads the live title when the two differ and accepts and stores a
+  title that matches it. Any other title still refuses, naming the given, the
+  stored and the live title; a changed delivery claim refuses on its own.
+
+- **Prepare and merge receipts name their invoker (sd:2078).** A merge
+  nobody claimed could not be traced: its `Code delivery` note named the head
+  and the review, and no process. `prepare` now stores `invoker` in the ship
+  receipt and returns it; the merge that dispatches the `PUT` stores
+  `merge_invoker`, and the merge result and its `Code delivery` note carry it
+  as `invoker`. The block holds the pid and parent pid, the process start
+  time, the checkout and the `-C` value, `--run ID` or `--manual`, and the
+  lock-holder record the ship lock writes. A later `sd-ship reconcile`
+  reports the invoker of the merge, not its own.
+
+- **`sd-ship` reports `sd-review`'s authorship refusal (sd:2067).** A
+  branch commit with no `Authored-with:` trailer made `sd-ship review` and
+  `prepare` refuse with `local review emitted no valid timing plan`, and the
+  cause was readable only from `sd-review --scope branch`. When the plan
+  carries an `authorship_refusal`, the refusal now quotes it, with code
+  `authorship_unknown`, `operator_decision`, and a `next_action` naming
+  `sd attribute`. No provider pass is reserved, as before.
+
+- **A failed gate names each failing check and its tail (sd:2021, sd:2066).**
+  `sd-ship merge` under `repo.ci = local` said only the status description,
+  such as `sd-check fail (check fail)`, and finding the failing step meant
+  running the gate again. It now refuses right after the gate, naming each
+  failing check, its exit code, and the last 1200 characters of its stderr
+  and its stdout, from the saved `local_gate` report. The refusal says the
+  whole report is kept in the ship receipt and names the `sd-ship observe`
+  command that prints it. Prepare's `gate_failed` refusal names the failing
+  checks the same way; it kept the last 500 characters of one stream, which
+  dropped the failing test's assertion. `sd_ship_review.failing_check_tails`
+  renders both.
+
+- **`sd-ship observe` reads the ship receipt before a pull request exists
+  (sd:2021).** A prepare refused before its first push stores no pull-request
+  reference, and `observe` answered `there is no durable pull-request receipt
+  to observe`. It now returns the stored phase, with no pull request, and every
+  `observe` result carries `receipt`: the stored phase, the pass count, the
+  last review's status and findings, `review_preflight_error` and
+  `local_gate`.
+
+- **`sd-ship reconcile` names a merge commit the default branch lacks (sd:1461).**
+  The reconcile check ran `git merge-base --is-ancestor` through the raising
+  `git` helper, which reads the "no" exit as an empty, retryable
+  `git failed`. It now runs through `sd_ship_review.is_ancestor`, the sd:1348
+  shape. A merge commit outside the fetched default branch refuses as
+  `merge_commit_unreachable`, `operator_decision`, not retryable, and the
+  refusal names both commits and how to restore the merge.
 
 - **Stopping `sd gate run` no longer raises `PermissionError` (sd:2402).**
   The signal it forwards to the command's process group now treats EPERM
@@ -391,6 +579,26 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **An operator-observed criterion goes in the item's Log (sd:1933).**
+  `WORKFLOW.md` records the operator's 2026-09-30 ruling: a criterion only
+  the operator can observe is written in the item's `## Log`, dated, when it
+  is observed. The delivering pull request never ticks it in advance, so no
+  second pull request is needed for one checkbox.
+
+- **A `minimal` repository may install the review routing lane (sd:1292).**
+  R10-D5 refused the lane in `minimal` and `guest` alike, but `minimal` is
+  written by hand and never produced by detection: it names the operator's
+  own quiet repository, while `guest` means control was not established. By
+  the operator's 2026-09-30 ruling, `sd-review setup-github` now installs in
+  `full` and `minimal` and refuses `guest`. `--check` reads the same mode set
+  (`sd_setup_guard.LANE_MODES`), so a tracked lane in `minimal` is compared
+  against the template rather than marked `REMOVE` (sd:1285).
+
+- **The publication contract says how a drain renders a relative link
+  (sd:2243).** A link to a target mirrored to the same destination uses its
+  recorded page URL; a link to an unmirrored target becomes its repo-relative
+  path in plain text, never a `file:///` URL or an absolute path.
 
 - **The test run names its tree by content, and each shard by name (sd:2080).**
   `run-tests.sh` adds `content=<tree-id>` to its `run-tests: start` and

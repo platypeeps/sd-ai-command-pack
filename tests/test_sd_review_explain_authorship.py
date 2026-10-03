@@ -56,6 +56,12 @@ class AdvisoryAuthorshipTests(ReviewFixture):
         self.assertIn(result["authorship_refusal"], output.getvalue())
         self.assertIn("explain only, nothing ran", output.getvalue())
 
+    def test_a_script_branch_is_named_and_excludes_no_vendor(self):
+        """sd:1637: `--explain` names `script`, and as with `human` no reviewer is excluded."""
+        result = self.explained(self.branch("change\n\nAuthored-with: script"))
+        self.assertEqual(result["authorship_refusal"], "")
+        self.assertEqual((result["authored_with"], result["authored_with_report"]), ([], "script"))
+
     def test_invalid_trailer_is_unknown_not_a_human_claim(self):
         self.assert_unknown(self.explained(self.branch("change\n\nAuthored-with: openai")))
 
@@ -116,8 +122,11 @@ class AdvisoryAuthorshipTests(ReviewFixture):
                                 runner, self.environment(), self.chatgpt_home(), client=client)
         self.assert_unknown(plan)
         completed = subprocess.CompletedProcess([], 0, json.dumps(plan), "")
-        with self.assertRaisesRegex(ship.Refusal, "no provider pass was reserved"):
+        # sd:2067. The refusal is sd-review's own, not "no valid timing plan".
+        with self.assertRaisesRegex(ship.Refusal, "no provider pass was reserved") as caught:
             ship.timing_plan(completed)
+        self.assertIn(f"unknown authorship: {plan['authorship_refusal']}", str(caught.exception))
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "authorship_unknown")
         args = ship.parser().parse_args(["prepare", "--item", str(item), "--database", str(database), "--json"])
         operation = ship.Ship(root, connection, database, args)
         self.assertFalse(operation.state.get("passes"))
@@ -127,7 +136,7 @@ class AdvisoryAuthorshipTests(ReviewFixture):
             return completed
 
         with patch.object(ship, "review_process", side_effect=explain_only) as process:
-            with self.assertRaisesRegex(ship.Refusal, "no valid timing plan"):
+            with self.assertRaisesRegex(ship.Refusal, "unknown authorship"):
                 operation.review(subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip())
         self.assertEqual(process.call_count, 1)
         saved = ship.Ship(root, connection, database, args).state

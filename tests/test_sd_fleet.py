@@ -11,11 +11,13 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import pathlib
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "bin") not in sys.path:
@@ -470,6 +472,81 @@ class ProtectionProbe(unittest.TestCase):
         self.assertEqual(sd_fleet.branch_protection(self.ROOT, ask=remote(classic=limited)).state, "unprotected")
         blind = remote(classic=limited, rules=(None, limited[1]))
         self.assertEqual(sd_fleet.branch_protection(self.ROOT, ask=blind).state, "unknown")
+
+
+class Owners(Fleet):
+    """sd:2324: the owner logins come from the machine config, not from the pack."""
+
+    def config(self, body: dict) -> None:
+        home = self.tmp / "xdg"
+        (home / "sd-ai-command-pack").mkdir(parents=True, exist_ok=True)
+        (home / "sd-ai-command-pack" / "config.json").write_text(json.dumps(body), encoding="utf-8")
+        patcher = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(home)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_configured_owner_is_owned_and_the_default_pair_is_not(self) -> None:
+        self.config({"fleet": {"owners": ["Example-Org"]}})
+        mine, mine_url = self.repo("mine", owner="example-org")
+        theirs, theirs_url = self.repo("theirs", owner="platypeeps")
+        first, second = self.plan([(mine, mine_url), (theirs, theirs_url)])
+        self.assertIn(sd_fleet.STATUS_PATH, [change["path"] for change in first["changes"]])
+        self.assertNotIn(sd_fleet.STATUS_PATH, [change["path"] for change in second["changes"]])
+        self.assertTrue(any("protection stands" in line for line in second["adapted"]))
+
+    def test_no_setting_reads_the_default_pair(self) -> None:
+        self.config({"fleet": {}})
+        self.assertEqual(sd_fleet.configured_owners(), sd_fleet.DEFAULT_OWNERS)
+        self.config({})
+        self.assertEqual(sd_fleet.configured_owners(), sd_fleet.DEFAULT_OWNERS)
+
+    def test_a_malformed_setting_refuses_rather_than_guessing(self) -> None:
+        for bad in ([], "example-org", [""], [1], ["example org"], {"owners": 1}):
+            with self.subTest(bad=bad):
+                self.config({"fleet": bad if isinstance(bad, dict) else {"owners": bad}})
+                with self.assertRaisesRegex(sd_fleet.FleetRefusal, "fleet.owners"):
+                    sd_fleet.configured_owners()
+
+
+class Exemptions(Fleet):
+    """sd:1797: a repository declines a stamped file once, in `.github/sd-fleet.json`."""
+
+    def declared(self, body: object) -> str:
+        return json.dumps(body, indent=2) + "\n"
+
+    def test_an_exempt_file_is_not_proposed_and_the_plan_says_why(self) -> None:
+        root, remote = self.repo("vault", {".github/sd-fleet.json": self.declared(
+            {"exempt": [sd_fleet.ROUTE_PATH, sd_fleet.LOCAL_BLOCK_PATH]})})
+        [plan] = self.plan([(root, remote)])
+        paths = [change["path"] for change in plan["changes"]]
+        self.assertNotIn(sd_fleet.ROUTE_PATH, paths)
+        self.assertNotIn(sd_fleet.LOCAL_BLOCK_PATH, paths)
+        self.assertIn(sd_fleet.DEPENDABOT_PATH, paths)
+        self.assertEqual(plan["refused"], [])
+        exempt = [line for line in plan["adapted"] if "exempt" in line]
+        self.assertEqual(len(exempt), 2, plan["adapted"])
+        self.assertTrue(all(sd_fleet.FLEET_PATH in line for line in exempt))
+
+    def test_a_write_honours_the_exemption(self) -> None:
+        root, remote = self.repo("vault-write", {".github/sd-fleet.json": self.declared(
+            {"exempt": [sd_fleet.ROUTE_PATH]})})
+        into = self.tmp / "vault-write-wt"
+        git(root, "worktree", "add", "-q", "-b", "chore/stamp", str(into), "origin/main")
+        code, _ = self.run_stamp([(root, remote)], cwd=into, dry_run=False)
+        self.assertEqual(code, sd_fleet.EXIT_OK)
+        self.assertFalse((into / sd_fleet.ROUTE_PATH).exists())
+        self.assertTrue((into / sd_fleet.DEPENDABOT_PATH).is_file())
+
+    def test_a_declaration_that_does_not_read_refuses_the_repository(self) -> None:
+        for name, text in (("not-json", "{\n"), ("not-object", "[]\n"),
+                           ("not-list", self.declared({"exempt": sd_fleet.ROUTE_PATH})),
+                           ("unknown-path", self.declared({"exempt": [".github/workflows/ci.yml"]})),
+                           ("unknown-key", self.declared({"exempt": [], "skip": []}))):
+            with self.subTest(name=name):
+                root, remote = self.repo(name, {".github/sd-fleet.json": text})
+                [plan] = self.plan([(root, remote)])
+                self.assertTrue(any(line.startswith(sd_fleet.FLEET_PATH) for line in plan["refused"]),
+                                plan["refused"])
 
 
 class Wiring(unittest.TestCase):

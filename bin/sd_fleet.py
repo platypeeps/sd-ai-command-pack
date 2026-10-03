@@ -32,7 +32,7 @@ which must be a checkout of an auto repository. Tracked files are written only
 on a feature branch; on the default branch the write lays the untracked files
 and says the rest needs a worktree.
 
-Employer repositories -- any owner not in `OWNERS` -- are adapted, never
+Employer repositories -- any owner not in `configured_owners` -- are adapted, never
 changed in their settings: they keep their protection, so they get no
 `unprotected` declaration, and the dry run says so rather than going quiet.
 
@@ -42,6 +42,13 @@ A repository whose `repo.ci` row says `local` gets no workflow at all
 place, and the plan says so as an adapted line rather than going quiet.
 A route workflow still tracked there is named with `sd-review setup-github
 --remove`; the stamp lays files and deletes none.
+
+A repository declines a stamped file once, in a tracked `.github/sd-fleet.json`
+holding `{"exempt": [<path>, ...]}` (sd:1797). The stamp proposes no exempt
+path and says so as an adapted line, so a declined file is not proposed on
+every run. A path must be one the stamp writes, and a file that does not read
+refuses the repository rather than guessing which files were declined. The
+fleet audit is `--dry-run`, so it honours the same list.
 
 An owned repository gets the declaration only where GitHub says, live, that
 its default branch has no protection (sd:1655). Before, every owned auto repo
@@ -75,9 +82,13 @@ EXIT_OK = 0
 EXIT_USAGE = 2
 EXIT_REFUSED = 3
 
-#: The owners whose repositories the operator owns outright. Any other owner
-#: is an employer's, and its protection stands (sd:1334, D2 kept those).
-OWNERS = ("platypeeps", "sdelmas")
+#: The owners whose repositories the operator owns outright, when the machine
+#: config's `fleet.owners` names none. Any other owner is an employer's, and
+#: its protection stands (sd:1334, D2 kept those). Read through
+#: `configured_owners`, so another operator lists their own logins (sd:2324).
+DEFAULT_OWNERS = ("platypeeps", "sdelmas")
+#: A GitHub login: letters, digits and single inner hyphens.
+LOGIN = re.compile(r"[A-Za-z0-9](?:-?[A-Za-z0-9])*")
 PACK_SLUG = sd_setup_github.ACTION_REPOSITORY
 
 ROUTE_PATH = str(sd_setup_github.WORKFLOW_RELATIVE_PATH)
@@ -87,6 +98,10 @@ STATUS_PATH = ".github/sd-status.json"
 GITIGNORE_PATH = ".gitignore"
 LOCAL_BLOCK_PATH = "CLAUDE.local.md"
 DASHBOARD_DIR = "docs/dashboard"
+FLEET_PATH = ".github/sd-fleet.json"
+#: Every path the stamp writes, so every path `.github/sd-fleet.json` may exempt.
+EXEMPTABLE = (ROUTE_PATH, DEPENDABOT_PATH, CHECK_PATH, STATUS_PATH, GITIGNORE_PATH, LOCAL_BLOCK_PATH,
+              DASHBOARD_DIR)
 DASHBOARD_IGNORES = frozenset({
     "docs/dashboard", "docs/dashboard/", "/docs/dashboard", "/docs/dashboard/",
     "docs/dashboard/*", "/docs/dashboard/*",
@@ -323,6 +338,47 @@ def _git_show(root: pathlib.Path, spec: str) -> str | None:
     return done.stdout if done.returncode == 0 else None
 
 
+def configured_owners() -> tuple[str, ...]:
+    """The owner logins in the machine config's `fleet.owners`, lower-cased.
+
+    Absent, the key reads `DEFAULT_OWNERS`. A value that is not a non-empty
+    list of logins refuses: ownership decides the `unprotected` declaration,
+    so a guess in either direction is the wrong answer.
+    """
+    path = sd_lib.machine_config_path()
+    try:
+        fleet = sd_lib.machine_config(path).get("fleet")
+    except sd_lib.ConfigError as error:
+        raise FleetRefusal(f"cannot read fleet.owners: {error}") from None
+    if fleet is None or (isinstance(fleet, dict) and "owners" not in fleet):
+        return DEFAULT_OWNERS
+    owners = fleet.get("owners") if isinstance(fleet, dict) else None
+    if (not isinstance(owners, list) or not owners
+            or not all(isinstance(login, str) and LOGIN.fullmatch(login) for login in owners)):
+        raise FleetRefusal(f"fleet.owners in {path} must be a non-empty list of GitHub logins")
+    return tuple(login.lower() for login in owners)
+
+
+def exemptions(tree: "Tree") -> tuple[frozenset[str], str]:
+    """The paths `.github/sd-fleet.json` exempts, and `""`; or nothing and the reason it does not read."""
+    text = tree.text_at(FLEET_PATH)
+    if text is None:
+        return frozenset(), ""
+    try:
+        loaded = json.loads(text)
+    except json.JSONDecodeError as error:
+        return frozenset(), f"not valid JSON ({error})"
+    if not isinstance(loaded, dict) or set(loaded) - {"exempt"}:
+        return frozenset(), 'must be an object whose one key is "exempt"'
+    listed = loaded.get("exempt", [])
+    if not isinstance(listed, list) or not all(isinstance(path, str) for path in listed):
+        return frozenset(), '"exempt" must be a list of paths'
+    unknown = [path for path in listed if path not in EXEMPTABLE]
+    if unknown:
+        return frozenset(), f"exempts {', '.join(unknown)}, which the stamp does not write ({', '.join(EXEMPTABLE)})"
+    return frozenset(listed), ""
+
+
 def owner_slug(remote: str | None) -> str:
     """`owner/name` for a github.com origin, lower-cased; "" for anything else."""
     value = (remote or "").strip()
@@ -530,7 +586,8 @@ def workflow_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None]
 
 def plan_repo(root: pathlib.Path, remote: str | None, *, pin: str, tree: Tree,
               local_block: Callable[[str], str], tracked: Callable[[pathlib.Path, str], bool],
-              ask: sd_lib.Asker = sd_lib.gh_api, ci: str = "github") -> Plan:
+              ask: sd_lib.Asker = sd_lib.gh_api, ci: str = "github",
+              owners: tuple[str, ...] = DEFAULT_OWNERS) -> Plan:
     """What stamping `root` would change, rendered and diffed; writes nothing.
 
     `local_block` renders the `CLAUDE.local.md` text from the current text,
@@ -539,7 +596,7 @@ def plan_repo(root: pathlib.Path, remote: str | None, *, pin: str, tree: Tree,
     """
     slug = owner_slug(remote)
     plan = Plan(root=str(root), slug=slug or (remote or ""), base=tree.commit or f"worktree {tree.root}")
-    owned = slug.split("/", 1)[0] in OWNERS if slug else False
+    owned = slug.split("/", 1)[0] in owners if slug else False
     self_install = slug == PACK_SLUG
 
     def propose(path: str, after: str, where: str = "tracked", before: str | None = None) -> None:
@@ -547,8 +604,9 @@ def plan_repo(root: pathlib.Path, remote: str | None, *, pin: str, tree: Tree,
         if current != after:
             plan.changes.append(Change(path, where, current, after))
 
-    # A guest or minimal repository carries none of the framework's tracked
-    # files (R10-D5), so nothing tracked is proposed there at all; its
+    # A guest or minimal repository is stamped with none of the framework's
+    # tracked files, so nothing tracked is proposed there at all (a minimal
+    # one may still install the routing lane by hand, R10-D5); its
     # untracked block is still the operator's to keep current. Otherwise the
     # remote is asked the three questions, as `setup-github` asks them, and
     # the one no a row can override is sd-ship's: co-ownership (sd:1347).
@@ -589,7 +647,19 @@ def plan_repo(root: pathlib.Path, remote: str | None, *, pin: str, tree: Tree,
             plan.refused.append(f"{LOCAL_BLOCK_PATH}: {str(error.code).removeprefix('error: ')}")
     if not (root / DASHBOARD_DIR).is_dir():
         plan.changes.append(Change(DASHBOARD_DIR, "local", None, "", directory=True))
+    apply_exemptions(plan, tree)
     return plan
+
+
+def apply_exemptions(plan: Plan, tree: Tree) -> None:
+    """Drop what `.github/sd-fleet.json` exempts from `plan`, naming each path; refuse it when it does not read."""
+    exempt, unreadable = exemptions(tree)
+    if unreadable:
+        plan.refused.append(f"{FLEET_PATH}: {unreadable}; nothing is written until it reads")
+    for path in sorted(exempt):
+        plan.changes = [change for change in plan.changes if change.path != path]
+        plan.refused = [line for line in plan.refused if not line.startswith(f"{path}:")]
+        plan.adapted.append(f"{path}: exempt by {FLEET_PATH}; not proposed")
 
 
 def auto_rows() -> list[tuple[pathlib.Path, str | None]]:
@@ -735,11 +805,12 @@ def fleet_stamp(args: argparse.Namespace, *, rows: Rows = auto_rows, stream: Any
         raise FleetRefusal("--only selects for a dry run; a write stamps the checkout you stand in")
     pin = pack_pin(args.pin)
     installer = _installer()
+    owners = configured_owners()
 
     def planned(root: pathlib.Path, remote: str | None, tree: Tree) -> Plan:
         return plan_repo(root, remote, pin=pin, tree=tree,
                          local_block=lambda text: installer.local_block_text(text)[0],
-                         tracked=installer.path_is_tracked, ask=ask, ci=ci(root))
+                         tracked=installer.path_is_tracked, ask=ask, ci=ci(root), owners=owners)
 
     if args.dry_run:
         plans = dry_run_plans(selected(rows(), args.only), planned)

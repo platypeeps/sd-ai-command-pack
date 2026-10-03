@@ -14,6 +14,7 @@ Reconciliation inspects that remote result; no merge is called.
 
 For `Delivers:`, run `sd work deliver <row-id> <full-merge-commit-sha>` to verify and record completion.
 A merge carrying `Item:` alone records the squash commit; its item stays open.
+If that merge was the whole item, run `sd work deliver <row-id> <full-merge-commit-sha> --associated --reason TEXT`.
 An open PR has not merged yet; leave it standing.
 A repeated reconciliation writes nothing: no `status_change`, unchanged `shipped_at`, and no merge call.
 

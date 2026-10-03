@@ -690,10 +690,12 @@ class SharedReview:
         checks = gate_diagnostics(check, self.runtime.diagnostic_bytes)
         self.release_pass(passes, {"kind": "gate_failed", "stage": "check", "head": head,
                                    "exit_code": check.get("exit_code"), "detail": detail, "checks": checks})
-        failed = next((c for c in checks if c["status"] == "fail"), {})
-        evidence = detail.strip() or (failed.get("stderr") or failed.get("stdout") or failed.get("reason") or "").strip()
+        # Each failing check by name with its own tail; the last 500 characters
+        # of one stream dropped the failing test's assertion (sd:2021).
+        said = detail.strip()[-FAILING_TAIL_CHARS:]
+        evidence = "\n".join([said] * bool(said) + failing_check_tails(checks))
         raise Refusal(f"the repository gate failed before any reviewer was asked; no review pass was spent: "
-                      f"{evidence[-500:] or 'see the item ship receipt'}",
+                      f"{evidence or 'no check output; sd-ship observe prints the ship receipt'}",
                       code="gate_failed", boundary="runtime", state="retryable_failure",
                       next_action="Fix the gate, or rerun prepare when the machine is less loaded "
                                   "(--review-timeout raises the limit); the next prepare reviews normally.")
@@ -820,6 +822,30 @@ def gate_diagnostics(check: dict, limit: int) -> list[dict]:
              "reason": str(record.get("reason") or "")[-limit:],
              "stdout": str(record.get("stdout") or "")[-limit:], "stderr": str(record.get("stderr") or "")[-limit:]}
             for record in [*records[:len(sd_lib.CHECK_NAMES)], *docs] if isinstance(record, dict)]
+
+
+#: How much of each stream of one failing check a refusal repeats; the receipt keeps `sd-check`'s whole tail.
+FAILING_TAIL_CHARS = 1200
+
+
+def failing_check_tails(rows: Any, limit: int = FAILING_TAIL_CHARS) -> list[str]:
+    """Each failing `sd-check` row as a refusal names it: name, exit code, and the tail of its own output.
+
+    Both streams, each cut to its last `limit` characters: a test runner
+    reports on stderr and a linter on stdout, and `make` adds its own
+    `Error 1` line to stderr whichever one failed. A row with no output names
+    `sd-check`'s reason instead, such as a timeout (sd:2066, sd:2021).
+    """
+    named = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict) or row.get("status") != "fail":
+            continue
+        streams = [(stream, str(row.get(stream) or "").strip()) for stream in ("stderr", "stdout")]
+        said = [f"{stream}: {'...' if len(text) > limit else ''}{text[-limit:]}" for stream, text in streams if text]
+        reason = str(row.get("reason") or "").strip()
+        named.append(f"{row.get('name')} (exit {row.get('exit_code')}): "
+                     + ("\n".join(said) if said else reason or "no output"))
+    return named
 
 
 #: Statuses of a reviewer that answered usably; any other outcome names its cause.
