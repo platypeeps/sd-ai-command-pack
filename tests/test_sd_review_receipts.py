@@ -320,6 +320,26 @@ class ReceiptTests(ReviewFixture):
         self.assertNotIn("receipt_revision", json.loads(out))
         self.assertIsNone(receipts.reuse_checked_result(self.root, self.env, self.database))
 
+    def test_a_missing_or_untracked_declaration_names_the_file_and_an_example(self):
+        # sd:1560: the refusal says which file to track and what it holds.
+        self.git("rm", "--quiet", receipts.CONTRACT)
+        self.git("commit", "--quiet", "-m", "no declaration")
+        code, _out, err = self.cli("--json", "--record-receipt", "--database", str(self.database))
+        self.assertEqual(code, 2)
+        self.assertIn(f"track {receipts.CONTRACT}, for example {receipts.EXAMPLE}", err)
+        (self.root / ".gitignore").write_text("dependency.txt\n.github/\n")
+        (self.root / ".github").mkdir(exist_ok=True)  # `git rm` took the folder with its one file
+        (self.root / receipts.CONTRACT).write_text(json.dumps(self.contract))
+        self.git("commit", "--quiet", "-am", "ignored declaration")
+        with self.assertRaisesRegex(receipts.Unavailable, "tracked dependency declaration: track " + re.escape(receipts.CONTRACT)):
+            receipts.check_binding(self.root, self.env)
+        (self.root / receipts.CONTRACT).write_text(json.dumps(dict(self.contract, complete=False)))
+        with self.assertRaisesRegex(receipts.Unavailable, "local-only dependency declaration: track .*, for example "):
+            receipts.reuse_contract(self.root)
+        # The example is itself a declaration the parser accepts.
+        (self.root / receipts.CONTRACT).write_text(receipts.EXAMPLE)
+        self.assertEqual(receipts.reuse_contract(self.root)["schema_version"], 1)
+
     def commit_contract(self, **fields):
         self.contract.update(fields)
         (self.root / receipts.CONTRACT).write_text(json.dumps(self.contract))

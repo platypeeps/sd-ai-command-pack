@@ -19,6 +19,8 @@ import sd_lib
 
 CONTRACT = ".github/sd-check-reuse.json"
 FIELDS = {"schema_version", "complete", "network", "dependencies", "tools", "environment"}
+#: A refusal shows the smallest valid declaration (sd:1560); the sd-check skill's receipts reference explains each key.
+EXAMPLE = '{"schema_version": 1, "complete": true, "network": "none", "dependencies": ["src"], "tools": ["make"], "environment": []}'
 #: Optional: exact tracked files under a declared root that the secret-name filter admits (sd:2325).
 EXCEPTIONS = "secret_name_exceptions"
 #: Optional: ignored folders the check builds, each to its variable or null; never bound, never reused (sd:2327).
@@ -47,11 +49,17 @@ def file_digest(path: pathlib.Path) -> str:
     return hasher.hexdigest()
 
 
+def declaration_needed(why: str) -> Unavailable:
+    return Unavailable(f"{why}: track {CONTRACT}, for example {EXAMPLE}")
+
+
 def reuse_contract(root: pathlib.Path) -> dict[str, Any]:
+    if not (root / CONTRACT).is_file():
+        raise declaration_needed("reuse requires a dependency declaration")
     value = json.loads((root / CONTRACT).read_text(encoding="utf-8"))
     if (not isinstance(value, dict) or set(value) - {EXCEPTIONS, OUTPUTS} != FIELDS or type(value["schema_version"]) is not int
             or value["schema_version"] != 1 or value["complete"] is not True or value["network"] != "none"):
-        raise Unavailable("reuse requires a complete local-only dependency declaration")
+        raise declaration_needed("reuse requires a complete local-only dependency declaration")
     value.setdefault(EXCEPTIONS, [])
     for name in ("dependencies", "tools", "environment", EXCEPTIONS):
         entries = value[name]
@@ -244,7 +252,7 @@ def check_binding(root: pathlib.Path, env: Mapping[str, str]) -> dict[str, Any]:
     if sd_lib.git_output(["status", "--porcelain", "--untracked-files=all"], root) != "":
         raise Unavailable("reuse requires a clean committed checkout")
     if sd_lib.git_output(["ls-files", "--error-unmatch", "--", CONTRACT], root) != CONTRACT:
-        raise Unavailable("reuse requires a tracked dependency declaration")
+        raise declaration_needed("reuse requires a tracked dependency declaration")
     value = reuse_contract(root)
     controlled = receipt_environment(value, env)
     detection = sd_lib.detect_entrypoints(root)

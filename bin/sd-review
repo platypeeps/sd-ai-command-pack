@@ -1480,6 +1480,10 @@ _NOT_FOUND = re.compile(
     r"(?m)^(?P<source>\S+?): (?:(?:line )?(?P<line>\d+): )?(?P<command>\S+): "
     r"(?:command not found|not found|No such file or directory)\s*$")
 _RECIPE_EXIT_127 = re.compile(r"\bError 127\b")
+#: sd-check's reason for a check it killed at `--timeout` or no gate slot admitted, and the runner's line
+#: for sd-check itself (sd:1560). Weaker than a missing program, so it is read last.
+GATE_TIMED_OUT = "timed_out"
+_TIMED_OUT = re.compile(r"\b(?:timed out after|no gate slot came free within) \d+s")
 
 
 def _spawn_failed(check: Mapping[str, Any]) -> bool:
@@ -1538,7 +1542,17 @@ def classify_gate(checks: Any) -> dict[str, Any] | None:
             found = _not_found_report(check)
         if found is not None:
             return {**found, "entrypoint": str(check.get("name", "?")), "started": started}
-    return None
+    timed = next(((check, hit) for check in records if (hit := _TIMED_OUT.search(str(check.get("reason") or "")))), None)
+    return {"reason": GATE_TIMED_OUT, "evidence": timed[1].group(0), "entrypoint": str(timed[0].get("name", "?")),
+            "started": started} if timed else None
+
+
+def gate_failure(checks: Any, detail: str) -> dict[str, Any]:
+    """`classify_gate`, or, with no record to read, the runner's own timeout line for sd-check."""
+    found = classify_gate(checks)
+    if found is None and not checks and (line := _TIMED_OUT.search(detail)):
+        found = {"reason": GATE_TIMED_OUT, "evidence": line.group(0), "entrypoint": "sd-check", "started": []}
+    return found or {}
 
 
 def gate_failed_line(check: Mapping[str, Any] | None) -> str:
@@ -1556,6 +1570,9 @@ def gate_failed_line(check: Mapping[str, Any] | None) -> str:
         where = f" at line {check['missing_line']}" if check.get("missing_line") else ""
         return (f"sd-review: the gate's {check['entrypoint']} failed: {what}{where} ({check['evidence']}); "
                 "it ran up to that point, so a check may have run; no provider was asked")
+    if check and check.get("reason") == GATE_TIMED_OUT:
+        return (f"sd-review: the gate's {check['entrypoint']} stopped at its bound ({check['evidence']}); no provider "
+                "was asked; give it longer with --timeout SECONDS (sd-ship prepare: --review-timeout SECONDS)")
     return "sd-review: the repository's own gate failed; no provider was asked"
 
 
@@ -1618,7 +1635,7 @@ def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], t
     if gate.get("reused"):
         report["reused"] = gate["reused"]
     if report["status"] == "fail":
-        report.update(classify_gate(checks) or {})
+        report.update(gate_failure(checks, report["detail"]))
     return report
 
 
@@ -1638,7 +1655,7 @@ def run_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeou
         "checks": checks,
     }
     if result.exit_code != 0:
-        report.update(classify_gate(checks) or {})
+        report.update(gate_failure(checks, report["detail"]))
     return report
 
 
