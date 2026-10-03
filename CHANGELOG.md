@@ -4,6 +4,8 @@
 
 ### Added
 
+- **`sd-ship` re-provisions `sd_db` after a library merge (sd:2108).** A verified merge into the system checkout, or one of its worktrees, whose squash changes `local-sd-db` now installs `sd_db` at the merge commit into the pack's main-checkout virtualenv. Before, the installed copy lagged the merge, and the next dashboard restart refused until `make setup` ran in the pack. `provision_library` takes the commit as `ref`, and keeps its downgrade guard. A failed install is reported in the receipt's `library` field and does not undo the merge.
+
 - **`sd fleet stamp` honours a per-repository exemption list (sd:1797).** A
   tracked `.github/sd-fleet.json` holding `{"exempt": ["<path>", ...]}`
   declines stamped files once. The stamp names each exempt path as an adapted

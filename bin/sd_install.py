@@ -1789,8 +1789,11 @@ def library_pin(checkout: Path) -> tuple[str, str]:
     return ref, ""
 
 
-def provision_library(ctx: Context, out) -> tuple[bool, str]:
+def provision_library(ctx: Context, out, ref: str | None = None) -> tuple[bool, str]:
     """Install `sd_db` into this pack's virtualenv, as a copy.
+
+    `ref` installs that commit instead of the system checkout's pin: a merge
+    the checkout has fetched but not checked out (`reprovision_after_merge`).
 
     Returns whether it worked and a one-line report, rather than raising. A
     machine with no system checkout still gets its skills: the paths render
@@ -1812,15 +1815,17 @@ def provision_library(ctx: Context, out) -> tuple[bool, str]:
     if not (source / "pyproject.toml").is_file():
         return False, f"no library at {source}; sd_db is absent, trials unavailable"
     checkout = system_checkout(ctx.environ)
-    ref, why = library_pin(checkout)
-    if not ref:
-        return False, f"sd_db not installed, trials unavailable: {why}"
+    pinned = ref is None
+    if pinned:
+        ref, why = library_pin(checkout)
+        if not ref:
+            return False, f"sd_db not installed, trials unavailable: {why}"
     refusal = sibling("sd_library_guard").downgrade_refusal(
         ctx.checkout, checkout, ref, sibling("sd_lib").git_output)
     if refusal:
         return False, refusal
     target = f"git+file://{checkout}@{ref}#subdirectory={LIBRARY_RELATIVE}"
-    dirty = " (uncommitted work in that checkout is not installed)" if sibling(
+    dirty = " (uncommitted work in that checkout is not installed)" if pinned and sibling(
         "sd_lib"
     ).git_output(["status", "--porcelain"], checkout) else ""
     if ctx.dry_run:
@@ -1839,6 +1844,30 @@ def provision_library(ctx: Context, out) -> tuple[bool, str]:
         last = done.stderr.strip().splitlines()[-1:] or ["no output"]
         return False, f"sd_db install failed: {last[0]}"
     return True, f"sd_db installed from {source} at {ref}{dirty}"
+
+
+def reprovision_after_merge(root: Path, commit: str, environ: dict[str, str]) -> dict | None:
+    """Install `sd_db` at `commit` when it merged a change to the library (sd:2108).
+
+    The dashboard refuses an installed `sd_db` that lacks the system
+    checkout's last library commit, and until this nothing installed one
+    between a merge and the next restart, which then failed. None when `root`
+    is not the system checkout or one of its worktrees, or when `commit`
+    leaves `local-sd-db` alone. The pack whose virtualenv receives the copy is
+    this file's main checkout, the one the dashboard runs under. A failed
+    install is reported, not raised: the merge it follows has happened.
+    """
+    lib = sibling("sd_lib")
+    system = system_checkout(environ)
+    if not system.is_dir() or lib.main_worktree_root(root).resolve() != system.resolve():
+        return None
+    touched = lib.git_output(["diff", "--name-only", f"{commit}^1", commit, "--", str(LIBRARY_RELATIVE)], root)
+    if not touched:
+        return None
+    pack = lib.main_worktree_root(Path(__file__).resolve().parent.parent)
+    ctx = Context(checkout=pack, home=Path(os.path.expanduser("~")), environ=dict(environ))
+    installed, report = provision_library(ctx, None, ref=commit)
+    return {"ref": commit, "installed": installed, "report": report}
 
 
 def open_library(ctx: Context):

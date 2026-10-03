@@ -64,6 +64,10 @@ These run without being asked.
   whose trailer names the item, and runs `git fetch -p`. The repository
   setting `delete_branch_on_merge` removes
   the remote branch.
+  A merge into the system checkout that changes `local-sd-db` also installs
+  `sd_db` at the merge commit into the pack's virtualenv, so the dashboard's
+  next restart finds the library it expects (sd:2108). The receipt's
+  `library` says whether the install worked.
   After each confirmed in-scope merge, the agent follows the ship skill's post-merge closeout procedure.
   It dispositions remaining findings and inventories refs, branches, stashes, and worktrees.
   It removes the merged PR's local and remote branches, stashes, refs and stale worktrees when they are safe, without asking.

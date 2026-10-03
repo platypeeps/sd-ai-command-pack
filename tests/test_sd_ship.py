@@ -2565,6 +2565,29 @@ roles:
         self.assertEqual((blocker["code"], blocker["retryable"]), ("merge_commit_unreachable", False))
         self.assertIn(f"restore {commit}", caught.exception.workflow["next_action"])
 
+    def test_a_merge_touching_the_library_reprovisions_sd_db_at_the_merge_commit(self):
+        """sd:2108. The dashboard refuses an installed sd_db older than the
+        system checkout's last library commit, and the restart after a
+        library merge failed until somebody ran `make setup` in the pack."""
+        import sd_install
+        library = self.root / "local-sd-db/sd_db/writing.py"
+        library.parent.mkdir(parents=True)
+        library.write_text("STAGES = ()\n")
+        _git(self.root, "add", "-A")
+        _git(self.root, "commit", "-m", "touch the library\n\nAuthored-with: human")
+        self.prepare()
+        installs = []
+
+        def provision(ctx, out, ref=None):
+            installs.append(ref)
+            return True, f"sd_db installed at {ref}"
+        with patch.dict(os.environ, {sd_install.SYSTEM_CHECKOUT_ENV: str(self.root)}), \
+                patch.object(sd_install, "provision_library", provision):
+            merged = self.merge()
+        commit = self.remote.pull(1).merge_commit_sha
+        self.assertEqual(installs, [commit])
+        self.assertEqual(merged["library"], {"ref": commit, "installed": True, "report": f"sd_db installed at {commit}"})
+
     def test_a_base_that_advanced_under_the_put_holds_delivery(self):
         """GitHub squashes onto the base it holds at the `PUT`, not the one the
         freshness reads saw. A same-file advance between them lands a combined
