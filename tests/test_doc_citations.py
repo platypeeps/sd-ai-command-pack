@@ -3058,7 +3058,7 @@ SENTENCE_END = re.compile(r"(?<!\be\.g)(?<!\bi\.e)(?<!\betc)[.!?](?=\s+[A-Z]|\s*
 #: file just cited. "`<path>` gives the cap. That file lives only in the
 #: sd-ai-command-pack checkout" is one claim in two sentences, and
 #: `skills/sd-plan` writes it that way.
-BACK_REFERENCE = re.compile(r"\s*(?:(?:that|this|the) (?:rule )?file|it)\b", re.IGNORECASE)
+BACK_REFERENCE = re.compile(r"\s*(?:(?:that|this|the)\s+(?:rule\s+)?file|it)\b", re.IGNORECASE)
 
 #: A blank line ends a paragraph, and nothing in the next one is about this
 #: citation.
@@ -3103,8 +3103,9 @@ def rule_path_citations(root: pathlib.Path) -> list[tuple[pathlib.Path, str, boo
     found: list[tuple[pathlib.Path, str, bool]] = []
     for doc in skill_documents(root):
         for paragraph in PARAGRAPH_BREAK.split(doc.read_text(encoding="utf-8")):
-            # Newlines flattened: the qualifier routinely wraps away from the path.
-            flat = paragraph.replace("\n", " ")
+            # Whitespace collapsed: the qualifier routinely wraps away from the
+            # path, and an indented continuation line is still one space.
+            flat = " ".join(paragraph.split())
             for match in BACKTICKED_PATH.finditer(flat):
                 cited = match.group(1)
                 if cited in rule_paths:
@@ -3333,6 +3334,9 @@ class ForeignCheckoutCitationTests(unittest.TestCase):
             "Read the sd-ai-command-pack checkout's rules (e.g.\n`.claude/rules/caps.md`).\n",
             "Read the rules (e.g. `.claude/rules/caps.md`, i.e. the caps) in the pack.\n",
             "From the pack, read the caps, notes, etc. in `.claude/rules/caps.md`.\n",
+            # A wrap inside the back-reference is still one (review round 2).
+            "the cap is in\n`.claude/rules/caps.md`. That\n  file lives only in the pack.\n",
+            "the cap is in\n`.claude/rules/caps.md`. This rule\n   file ships with the pack.\n",
         ):
             with self.subTest(real=real):
                 document.write_text(real, encoding="utf-8")
