@@ -50,6 +50,26 @@ sys.stdout.write({answer!r} + "\\n")
 raise SystemExit({code})
 """
 
+#: A `jev` from before sd:2357, which has no `--baseline`. Its argparse refuses
+#: the flag the way the real one does, with exit 2 and a usage line, before it
+#: opens a ledger row; without the flag it answers like `STUB`.
+OLD_STUB = """#!/usr/bin/env python3
+import json, pathlib, sys
+
+argv = sys.argv[1:]
+if argv[:1] == ["enabled"]:
+    raise SystemExit(0)
+calls = pathlib.Path({record!r} + ".calls")
+calls.write_text(calls.read_text() + json.dumps(argv) + "\\n" if calls.exists() else json.dumps(argv) + "\\n")
+unknown = [word for word in argv if word in {unknown!r}]
+if unknown:
+    sys.stderr.write("usage: jev.sh {{ask,noul,choice}} ...\\n")
+    sys.stderr.write("jev.sh: error: unrecognized arguments: " + " ".join(unknown) + "\\n")
+    raise SystemExit(2)
+pathlib.Path({record!r}).write_text(json.dumps({{"argv": argv, "state": sys.stdin.read()}}))
+sys.stdout.write({answer!r} + "\\n")
+"""
+
 
 class JevTierTests(ReviewFixture):
     def prepare(self) -> pathlib.Path:
@@ -71,6 +91,16 @@ class JevTierTests(ReviewFixture):
         record = self.tmp / "jev-argv.json"
         stub = self.tool_bin / sd_jev.COMMAND
         stub.write_text(STUB.format(gate=gate, answer=answer, code=code, record=str(record)))
+        stub.chmod(0o700)
+        return record
+
+    def install_old_stub(self, *, answer: str = "deep",
+                         unknown: tuple[str, ...] = ("--baseline", "--baseline-ms"),
+                         ) -> pathlib.Path:
+        record = self.tmp / "jev-argv.json"
+        stub = self.tool_bin / sd_jev.COMMAND
+        stub.write_text(OLD_STUB.format(answer=answer, unknown=list(unknown),
+                                        record=str(record)))
         stub.chmod(0o700)
         return record
 
@@ -267,7 +297,10 @@ class JevTierTests(ReviewFixture):
         self.assertEqual(argv[4:], ["--unsure-below", sd_jev.UNSURE_BELOW, "--state", "-",
                                     "--state-format", "json", "--caller", "sd-review",
                                     "--id", "sd-review-tier", "--stage", sd_jev.STAGE,
-                                    "--fallback", sd_jev.FALLBACK])
+                                    "--fallback", sd_jev.FALLBACK,
+                                    "--baseline", "standard",
+                                    "--baseline-ms", argv[-1]])
+        self.assertTrue(argv[-1].isdigit(), f"--baseline-ms {argv[-1]!r} is not a count")
         self.assertEqual(json.loads(state), {
             "changed_paths": ["src.py"], "changed_paths_omitted": 0, "path_count": 1,
             "lines_moved": 20,
@@ -349,3 +382,63 @@ class JevTierTests(ReviewFixture):
         tier, record = sd_jev.jev_tier("cheap", ["cheap", "deep"], ["a.py"], 3, "why", env, note)
         self.assertEqual((tier, record), ("cheap", None))
         self.assertIn("keeping the routed tier cheap", note.getvalue())
+
+    def test_the_judgment_carries_the_routed_tier_as_its_baseline(self):
+        """sd:2359. The routed tier is the caller's own answer, so it goes to
+        `jev --baseline` and the ledger gets a paired sample. `--fallback`
+        stays the token no tier can be: comparing the answer with that token
+        made every row say `changed=yes`, which is what this replaces."""
+
+        root = self.prepare()
+        for answer in ("deep", "standard", "skip"):
+            with self.subTest(answer=answer):
+                record = self.install_stub(answer=answer)
+                self.run_review(root)
+                argv = json.loads(record.read_text())["argv"]
+                self.assertEqual(argv[argv.index("--baseline") + 1], "standard")
+                self.assertTrue(argv[argv.index("--baseline-ms") + 1].isdigit())
+                self.assertEqual(argv[argv.index("--fallback") + 1], sd_jev.FALLBACK)
+
+    def test_no_routing_time_sends_no_baseline_ms(self):
+        note = io.StringIO()
+        record = self.install_stub(answer="deep")
+        tier, _ = sd_jev.jev_tier("cheap", ["cheap", "deep"], ["a.py"], 3, "why",
+                                  self.environment(), note)
+        argv = json.loads(record.read_text())["argv"]
+        self.assertEqual(tier, "deep")
+        self.assertEqual(argv[argv.index("--baseline") + 1], "cheap")
+        self.assertNotIn("--baseline-ms", argv)
+
+    def test_a_jev_without_baseline_is_asked_once_more_without_it(self):
+        """A `jev` older than sd:2357 refuses `--baseline` at argparse, before
+        it sends or records anything. Read as a failure, that would turn every
+        reading on such a machine into a loud decline; asked again without the
+        two flags, it answers exactly as it did before them."""
+
+        root = self.prepare()
+        baseline = json.loads(self.run_review(root)[0])
+        record = self.install_old_stub(answer="deep")
+        moved, said = self.run_review(root)
+        moved = json.loads(moved)
+        self.assertEqual(said, "")
+        self.assertEqual(moved["route"]["tier"], "deep")
+        self.assertEqual(moved["jev"], {"routed_tier": "standard", "tier": "deep",
+                                        "moved": True, "source": "judged"})
+        self.assertEqual(moved["status"], baseline["status"])
+        calls = [json.loads(line) for line in
+                 pathlib.Path(str(record) + ".calls").read_text().splitlines()]
+        self.assertEqual(len(calls), 2)
+        self.assertIn("--baseline", calls[0])
+        self.assertEqual(calls[1], [word for index, word in enumerate(calls[0])
+                                    if word not in ("--baseline", "--baseline-ms")
+                                    and calls[0][index - 1] not in ("--baseline",
+                                                                    "--baseline-ms")])
+
+    def test_a_refusal_of_some_other_flag_is_still_loud_and_not_retried(self):
+        root = self.prepare()
+        baseline, _ = self.run_review(root)
+        record = self.install_old_stub(unknown=("--subject", "--unsure-below"))
+        same, said = self.run_review(root)
+        self.assertEqual(same, baseline)
+        self.assertIn("exited 2", said)
+        self.assertEqual(len(pathlib.Path(str(record) + ".calls").read_text().splitlines()), 1)

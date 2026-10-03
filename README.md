@@ -236,7 +236,9 @@ refusal: the grammar, the anchor, the due date and the kinds that may recur.
 
 `sd store items --open` lists the backlog; `sd store item 42 --json` includes
 history and a revision that edits can require with `--if-revision`.
-`sd task show 42` is an alias that prints the same thing. Notes,
+`sd task show 42` is an alias that prints the same thing.
+`sd task cancel 42 --reason TEXT` closes a task or followup nobody will do,
+with the `cancelled` receipt `sd work cancel` writes. Notes,
 priorities, due dates and task status save directly to the database. GitHub
 issues are optional external references, with their last successful sync shown
 separately from local progress.
@@ -341,7 +343,9 @@ and prints its own wall time against the budget its header states.
 `.git/hooks/commit-msg` to `hooks/commit-msg`, which refuses a message whose
 `Authored-with:`, `Needed-by:` or other checked trailer sits outside the final
 paragraph, where git does not read it; it names the line, and
-`SD_SKIP_HOOKS` does not skip it. The hook is one per
+`SD_SKIP_HOOKS` does not skip it. With `SD_AUTHOR=<entry>` set (`claude`,
+`codex`, `human`, `script`), it first writes `Authored-with:` into a message
+that has none, so no `sd attribute` commit follows. The hook is one per
 clone: the link sits in the clone's common `.git/hooks`, its target is the
 relative `../../hooks/pre-commit`, so it reads the main checkout's tracked
 file and every linked worktree shares it, whichever worktree ran `make

@@ -12,6 +12,39 @@
   ends. The installer copies agents into `~/.claude/agents`, so the change
   reaches a machine at the next `sd_install.py --user`.
 
+- **`sd task cancel N --reason TEXT` cancels a task or followup (sd:1005).**
+  `sd task status N done` was the only way to close one, and it wrote no
+  completion mark, so a dropped followup read as finished work and a finding
+  carried to it never reopened. The verb calls `sd_db.progress.cancel_work`
+  with `guard=progress.task_guard`: the row reads `done` with the `cancelled`
+  receipt a cancelled work item carries, and `sd-review-ack` reads a finding
+  carried to it as `carry-dropped`. An `sd_db` without `task_guard` refuses
+  the verb by name and points at `sd-install`; the verb works once the
+  system pin carries the guard.
+
+- **The commit-msg hook writes `Authored-with:` at commit time (sd:1295).**
+  A branch whose commits said nothing took one empty `sd attribute` commit
+  per review round. With `SD_AUTHOR=<entry>` set and no `Authored-with:` line
+  in the message, `hooks/commit-msg` now adds `Authored-with: <value>` first
+  in the final trailer paragraph, the value `sd attribute` writes for that
+  name. `human` and `script` read no registry. A name nothing resolves, or
+  `dependabot`, refuses the commit. Unset, the hook writes nothing.
+  `sd attribute` never amends. A harness sets the variable for its session,
+  and a job for its run.
+
+- **`sd attribute`'s repair commit names who ran it (sd:2009, gap 1).** It
+  always wrote `Authored-with: human`, so an agent's repair had to be amended
+  by hand. It now writes the entry `SD_AUTHOR` names, resolved as the
+  commit-msg hook resolves it, and `human` when the variable is unset. A name
+  nothing resolves refuses and writes nothing.
+
+- **`Authored-with: script` for unattended job commits (sd:1637).** A
+  scheduled job that commits generated data had no fitting value, so it
+  wrote `human` and counted as the operator. `script` is a reserved peer of
+  `human` with no vendor, so any provider may review it. `sd attribute`, a
+  squash body and the trailer reader accept it, and `sd-review --explain`
+  names it.
+
 - **`sd gate post --head SHA` posts the local gate outside `sd-ship merge`
   (sd:1989).** A repository under `repo.ci = local` that merges by its own
   automation -- a Dependabot merge, a daily merge script -- got no
@@ -173,6 +206,16 @@
   the remedy, a fresh commit.
 
 ### Fixed
+
+- **`sd-review`'s Jev rows compare Jev with the routing (sd:2359).** `jev`
+  computed `changed` against `--fallback`, which here is a token no tier can
+  be, so every sd-review row in the judgment ledger said `changed=yes`. The
+  reading now passes the routed tier as `--baseline` and the routing's time as
+  `--baseline-ms`, so `jev` records a paired baseline row and `changed` says
+  whether Jev disagreed. The tier, the floor and the decline rules are
+  unchanged. A `jev` without `--baseline` (before system sd:2357) refuses it at
+  argparse; that refusal is asked once more without the two flags, silently,
+  and a refusal of any other flag stays loud.
 
 - **`sd writing list` and `import` refuse a checkout with no `content/`
   folder (sd:1803).** They printed empty results and exited 0 in another
@@ -531,6 +574,16 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **A task or followup merged associate-only can be delivered afterwards
+  (sd:1913).** `sd work deliver N SHA --associated --reason TEXT` (sd:1590)
+  closed only a work item and refused a task. On a task or followup it now
+  verifies reachability and `Item: sd:N` as `--delivered-by` verifies
+  `Delivers:`, and the move to done records the delivery sentence with the
+  reason. `sd-ship prepare --deliver` on a record that merged associate-only
+  refuses as `delivery_after_merge` and names that command with the merge
+  commit, where it used to reconcile in silence. `sd task status N done
+  --delivered-by` on an `Item:`-only commit names it too.
 
 - **An operator-observed criterion goes in the item's Log (sd:1933).**
   `WORKFLOW.md` records the operator's 2026-09-30 ruling: a criterion only

@@ -16,7 +16,8 @@ database, without a Git checkout, PRD or GitHub issue. `sd today` and `sd store
 items` use the same queries as Today and Backlog. Completion of an ordinary
 task is independent of code delivery. `sd work deliver` verifies delivery
 evidence; `sd work cancel --reason` records a cancellation without waiting for
-another merge. Artifact relinking preserves the item's identity and history.
+another merge, and `sd task cancel --reason` does the same for a task or
+followup. Artifact relinking preserves the item's identity and history.
 
 Writing uses shared stage and review-evidence checks through `sd writing` and
 the Writing screen. After the verified one-time cutover, stages, parking and
@@ -320,8 +321,9 @@ A whole-item merge prepared without `--deliver` carries `Item:` and no
 `Delivers:`, so `sd work deliver` refuses it. `sd work deliver <row-id>
 <full-commit-sha> --associated --reason TEXT` closes that row. It runs the same
 reachability check, accepts the `Item:` trailer for the row instead, and records
-the trailer and the reason on the receipt. It refuses an ordinary task and a
-missing reason.
+the trailer and the reason on the receipt. A task or followup has no receipt:
+its move to done records the delivery sentence and the reason. It refuses a
+missing reason, and `sd-ship prepare --deliver` on such a record names it.
 
 `sd work cancel <row-id> --reason TEXT` records cancellation immediately,
 without a status-file change or another pull request. It does not claim the
@@ -330,6 +332,14 @@ that merge is not a prerequisite for database completion. Readers with no
 database can use explicit `Delivers:` or `Closes:` evidence to see that work is
 closed, while only `Delivers:` says it shipped. A shallow clone that cannot
 establish the evidence reports uncertainty.
+
+`sd task cancel <row-id> --reason TEXT` closes a task or followup nobody will
+do. It writes the same `done` status and `cancelled` receipt, through the same
+library call with the task guard (sd:1005). `sd task status <row-id> done`
+writes no receipt, so the row reads as finished work. A finding that
+`sd-review-ack` carried to a cancelled row reads `carry-dropped` and holds
+again. The guard refuses a recurring task and a row with an active assignment.
+An `sd_db` older than the guard refuses the verb by name.
 
 The item directory stays in place. Use `sd work relink <row-id> <path>` when an
 artifact moves: it preserves the row, notes and original source identity. No
@@ -597,9 +607,16 @@ before. Temperature is not a registry field: `kimi-k3` refuses any value but
 
 Adding a provider is an entry; adding money is a bill. Both role lines are
 read in order. `author` is picked when an assignment starts and never switched
-mid-item; outside the runner, `SD_AUTHOR` or `--author` names it to
+mid-item; outside the runner, `--author` names it to
 `sd-ship`, which stamps it on each commit it makes as `Authored-with:
-<name>/<vendor>`, the vendor as the registry gave it at commit time. The
+<name>/<vendor>`, the vendor as the registry gave it at commit time.
+`SD_AUTHOR=<name>` names it to the pack's `commit-msg` hook, which writes the
+same line on a commit whose message states none (sd:1295); a name nothing
+resolves refuses the commit, and `sd attribute` never amends. Its own
+repair commit says `SD_AUTHOR`'s entry too, else `human` (sd:2009). `human` is a
+commit a person wrote; `script` is one a deterministic job wrote, with no
+model and no person in the loop (sd:1637). Both are reserved and carry no
+vendor, so any provider may review them. The
 review reads no declaration: every commit in the reviewed range is attributed
 by its own trailer, or by an `Attributes: <sha> <name>/<vendor>` trailer on a
 later commit in the range that `sd attribute` makes, and a commit with neither
