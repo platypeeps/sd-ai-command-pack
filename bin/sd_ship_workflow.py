@@ -27,8 +27,9 @@ def success(phase: str, *, observed_only: bool = False) -> dict:
     actions = {"created": "Run sd-ship review with this review ID.",
                "reviewed": "Inspect findings, then prepare or adjudicate this review.",
                "ready_to_send": "Read exact-head CI, then run sd-ship merge with the same identity.",
-               "merged": "Triage review findings and complete approved post-merge closeout. "
-                         "Confirm exact deletion targets and obtain explicit approval before deleting anything."}
+               "merged": "Triage review findings and complete post-merge closeout. "
+                         "Remove this PR's safe branches, stashes, refs and stale worktrees "
+                         "after recording their object IDs."}
     action = ("Run sd-ship reconcile with the same identity." if observed_only and phase == "merged"
               else actions.get(phase, "Continue with the same review identity."))
     return {"schema_version": 1, "phase": phase, "state": "success", "blocker": None, "next_action": action}
