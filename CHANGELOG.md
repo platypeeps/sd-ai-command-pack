@@ -4,6 +4,17 @@
 
 ### Added
 
+- **`sd gate post --head SHA` posts the local gate outside `sd-ship merge`
+  (sd:1989).** A repository under `repo.ci = local` that merges by its own
+  automation -- a Dependabot merge, a daily merge script -- got no
+  `sd/local-gate` status, so its required check never reported and every
+  merge waited. The verb runs `sd-check` at that commit in a clean worktree
+  and posts the result there, with `sd-ship merge`'s own run and post. It
+  prints the result as JSON and exits 0 on `success`, 1 on `failure`. A name
+  that is no commit, or a `--base` this checkout has not fetched, refuses
+  and posts nothing. `--base` defaults to the branch `origin/HEAD` names. It
+  reads and writes no gate receipt, so it always runs.
+
 - **No GitHub issues from a managed repository (sd:2256).** A new
   `PreToolUse` hook, `bin/sd-issue-guard`, denies `gh issue create` (and its
   alias `gh issue new`) and `mcp__github__issue_write` when the session's
