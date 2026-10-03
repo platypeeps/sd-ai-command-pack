@@ -56,6 +56,12 @@ class AdvisoryAuthorshipTests(ReviewFixture):
         self.assertIn(result["authorship_refusal"], output.getvalue())
         self.assertIn("explain only, nothing ran", output.getvalue())
 
+    def test_a_script_branch_is_named_and_excludes_no_vendor(self):
+        """sd:1637: `--explain` names `script`, and as with `human` no reviewer is excluded."""
+        result = self.explained(self.branch("change\n\nAuthored-with: script"))
+        self.assertEqual(result["authorship_refusal"], "")
+        self.assertEqual((result["authored_with"], result["authored_with_report"]), ([], "script"))
+
     def test_invalid_trailer_is_unknown_not_a_human_claim(self):
         self.assert_unknown(self.explained(self.branch("change\n\nAuthored-with: openai")))
 

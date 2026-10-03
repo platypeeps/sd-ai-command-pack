@@ -29,6 +29,11 @@ tree at the exact head, a scrubbed Python environment and no virtualenv on
 tools are this machine's image; the repository's own `check` entrypoint owns a
 hermetic environment if it needs one. When the checkout under test is the pack
 itself and `sd-ship` runs from it, the gate's own `bin/` is that checkout.
+
+`sd gate post --head SHA` (`post_head`, sd:1989) runs this same gate and post
+outside `sd-ship merge`, for a repository's own merge path: a Dependabot merge
+or a script that merges by itself gets no `sd/local-gate` otherwise, and its
+required check never reports. It reads and writes no receipt, so it always runs.
 """
 
 from __future__ import annotations
@@ -44,7 +49,7 @@ from sd_gate_run import (
     check_in_worktree,
     gate_inputs,
 )
-from sd_ship_remote import Refusal
+from sd_ship_remote import GitHub, Refusal, git, slug
 from sd_ship_review import FAILING_TAIL_CHARS, failing_check_tails
 
 CONTEXT = sd_lib.LOCAL_GATE_CONTEXT
@@ -75,6 +80,34 @@ def local_gate(api: Any, root: pathlib.Path, head: str, *, base: str | None = No
                       next_action="Inspect the command error, resolve its cause, then retry.") from None
     post_gate_status(api, head, result, inputs)
     return {**result, "inputs": inputs}
+
+
+def post_head(root: pathlib.Path, head: str, *, base: str | None = None, api: Any = None) -> dict[str, Any]:
+    """Run the gate at `head` and post `sd/local-gate` there: `sd gate post` (sd:1989).
+
+    `head` is any name for a commit this checkout has; the status goes to its
+    full SHA. `base` narrows the run to a declared docs-only scope against
+    that branch, as `sd-ship merge` passes the PR's target. With no `base`
+    every check runs: this verb does not know the PR's target, and a head
+    bound for a release branch can read as docs-only against the default
+    branch while carrying unchecked code. A base whose
+    remote-tracking ref is missing refuses, since `sd-check --base` would fail
+    and that failure would be posted as the gate's. `api` is the GitHub
+    client, `origin`'s by default.
+    """
+    commit = sd_lib.git_output(["rev-parse", "--verify", "--quiet", f"{head}^{{commit}}"], root)
+    if not commit:
+        raise Refusal(f"{head} names no commit in this checkout; nothing is posted",
+                      code="invalid_input", boundary="input", state="retryable_failure",
+                      next_action="Fetch the commit, then retry with its SHA.")
+    ref = base_ref(base)
+    if ref and sd_lib.git_output(["rev-parse", "--verify", "--quiet", ref], root) is None:
+        raise Refusal(f"the base {ref} is not in this checkout; nothing is posted",
+                      code="invalid_input", boundary="input", state="retryable_failure",
+                      next_action="Fetch origin or name another --base, then retry.")
+    if api is None:
+        api = GitHub(root, slug(git(root, "config", "--get", "remote.origin.url")))
+    return local_gate(api, root, commit, base=base)
 
 
 def refuse_failure(result: dict[str, Any], head: str, kept: str) -> None:

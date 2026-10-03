@@ -144,6 +144,7 @@ class NeverPostsTests(unittest.TestCase):
             "subprocess",
             "sys",
             "tempfile",
+            "time",  # sd:2359: times the routing for the Jev ledger's paired row.
             "typing",
             # sd:495. The runner records the repository check it ran on the
             # clone, and `recorded_check` reads that row instead of running the
@@ -875,11 +876,15 @@ class LineBudgetTests(unittest.TestCase):
         # child drops `FORCE_COLOR`, `CLICOLOR_FORCE` and `PY_COLORS` and gets
         # `NO_COLOR=1` and `PYTHON_COLORS=0`: the wrapped tuple and the
         # commented constant. A terminal's colour failed another repo's gate.
+        # 4608 -> 4682 is sd:2359: `bin/sd_jev.py` +69 passes the routed tier
+        # as `--baseline` and the routing time as `--baseline-ms`, retries once
+        # without them when an older `jev` refuses the flag, and says why in the
+        # module docstring (+19); `bin/sd-review` +5 times `sd_route.route`.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4608,
+            4682,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

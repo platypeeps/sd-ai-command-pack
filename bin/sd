@@ -2811,7 +2811,10 @@ def cmd_attribute(args: argparse.Namespace) -> int:
     registry, reason = sd_registry.read_or_report()
     if reason and args.entry.strip() not in sd_lib.RESERVED_AUTHORS:
         raise Refusal(f"{reason}; an attribution names an entry the registry has")
-    sha, value, covered = sd_lib.attribute(root, args.commits, args.entry, registry)
+    # The repair commit says who made it: `SD_AUTHOR`'s entry, else `human` (sd:2009).
+    invoker = os.environ.get(sd_lib.AUTHOR_VARIABLE, "").strip()
+    writer = sd_lib.commit_author(invoker, lambda: (registry, reason)) if invoker else sd_lib.HUMAN_AUTHOR
+    sha, value, covered = sd_lib.attribute(root, args.commits, args.entry, registry, writer)
     print(f"{sha[:12]} attributes {len(covered)} commit(s) to {value}")
     for target in covered:
         print(f"  {target[:12]}")
@@ -2819,7 +2822,12 @@ def cmd_attribute(args: argparse.Namespace) -> int:
 
 
 def cmd_gate(args: argparse.Namespace) -> int:
-    """`sd gate run|status` -- the sd:2262 gate queue, with the machine's `sd.gate_*` settings."""
+    """`sd gate run|status` -- the sd:2262 gate queue, with the machine's `sd.gate_*` settings.
+
+    `sd gate post` is the merge gate itself, run outside `sd-ship merge`; see `gate_post`.
+    """
+    if args.command_name == "post":
+        return gate_post(args)
     environ = dict(os.environ)
     try:
         slots, _ = sd_gate_slots.configured(environ, sd_lib.core_setting("gate_slots", environ))
@@ -2828,6 +2836,28 @@ def cmd_gate(args: argparse.Namespace) -> int:
     except ValueError as error:
         raise UsageError(str(error)) from None
     return sd_gate_slots.gate_verb(args, environ, slots, rule)
+
+
+def gate_post(args: argparse.Namespace) -> int:
+    """`sd gate post --head SHA` (sd:1989): run `sd-check` at SHA and post `sd/local-gate` there.
+
+    For a repository's own merge path under `repo.ci = local`, where no
+    `sd-ship merge` runs the gate. The run and the post are `sd-ship merge`'s
+    own (`sd_local_gate.post_head`). Prints the result as JSON and exits 0
+    when it posted `success`, 1 when it posted `failure`; a refusal posts
+    nothing, prints no JSON and exits 1.
+    """
+    import sd_local_gate  # the GitHub client and the gate load only for this verb
+    from sd_ship_remote import Refusal as ShipRefusal
+    root = sd_lib.repo_root(None)
+    if root is None:
+        raise Refusal("cwd is not inside a Git repository")
+    try:
+        result = sd_local_gate.post_head(root, args.head, base=args.base)
+    except ShipRefusal as refusal:
+        raise Refusal(str(refusal)) from None
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result.get("status") == "success" else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -3090,13 +3120,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="record who wrote commits that did not say, as one empty commit")
     attributer.add_argument("commits", help="a commit, or a `<from>..<to>` range, on this branch")
     attributer.add_argument(
-        "entry", help=f"a registry entry, `{sd_lib.HUMAN_AUTHOR}` for the operator, "
-                      f"or `{sd_lib.DEPENDABOT_ENTRY}` for a bump rewritten after GitHub made it")
+        "entry", help=f"a registry entry, `{sd_lib.HUMAN_AUTHOR}` for the operator, `{sd_lib.SCRIPT_AUTHOR}` "
+                      f"for an unattended job, or `{sd_lib.DEPENDABOT_ENTRY}` for a bump rewritten after GitHub made it")
     attributer.set_defaults(handler=cmd_attribute)
 
-    gate = groups.add_parser("gate", help="the machine-wide gate queue: run a command in it, or show it")
+    gate = groups.add_parser("gate", help="the machine-wide gate queue: run a command in it, or show it; "
+                                 "post the local gate at a commit")
     gating = gate.add_subparsers(dest="command_name", required=True)
     sd_gate_slots.add_gate_verbs(gating)
+    poster = gating.add_parser("post", help="run sd-check at a commit and post sd/local-gate there, "
+                               "for a merge path that is not sd-ship merge")
+    poster.add_argument("--head", required=True, metavar="SHA", help="the commit to check and post to")
+    poster.add_argument("--base", metavar="BRANCH",
+                        help="the PR's target branch, for a docs-only scope (default: none, so every check runs)")
     gate.set_defaults(handler=cmd_gate)
 
     sd_work.register(groups, kept)
