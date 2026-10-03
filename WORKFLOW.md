@@ -299,8 +299,8 @@ advance (operator ruling 2026-09-30, sd:1933).
 
 `sd-ship` owns the lines `sd_lib.OWNED_TRAILERS` names: `Item:`, `Work:`,
 `Delivers:`, `Closes:`, `Authored-with:` and `Attributes:`. `prepare` appends
-`Work:` to the body it publishes, and `merge` appends `Item:`, `Delivers:` and
-the authorship lines to the squash message, so a body written for `sd-ship`
+`Work:` to the body it publishes, and `merge` appends `Item:`, `Delivers:`, any
+owed `Closes:` and the authorship lines to the squash message, so a body written for `sd-ship`
 carries none of them. A supplied line that says what `sd-ship` would write is
 stripped and listed in the result's `normalized`; any other owned line is
 refused by line number, with the expected value. So the body `sd-ship`
@@ -332,6 +332,16 @@ reachability check, accepts the `Item:` trailer for the row instead, and records
 the trailer and the reason on the receipt. A task or followup has no receipt:
 its move to done records the delivery sentence and the reason. It refuses a
 missing reason, and `sd-ship prepare --deliver` on such a record names it.
+
+A `--deliver` squash GitHub lands on a base its review did not cover is held:
+reconcile records the merge and not the delivery, and no git reader takes its
+`Delivers:`. Once the combined tree passes and the operator closes the row by
+hand, reconcile clears the hold and records `closing_owed` on the receipt. The
+next `sd-ship merge` in the same repository then writes `Closes: <item>` into
+its squash's trailer block, at most 10 per squash, and its result names each
+in `carried_closes`. Its reconcile marks them paid only if that squash is not
+held itself. Accepted gap (sd:1600): until that merge lands, a reader with no
+database still sees the item open; `closes_left` names debts past the cap.
 
 `sd work cancel <row-id> --reason TEXT` records cancellation immediately,
 without a status-file change or another pull request. It does not claim the
@@ -611,6 +621,12 @@ retains the endpoint default. These values require support from the selected
 model: MiniMax-M3 supports disabled thinking, and Baseten's DeepSeek-V4-Pro-0813
 supports effort `none`. Lower reasoning can change finding quality; full
 subject coverage and the required reviewer count remain mandatory.
+A URL entry can also declare `response_format: json_schema`. `sd-review`
+then sends the findings schema as a strict `response_format`, in the copy
+Moonshot's strict mode takes: every property typed, `line` as `anyOf`
+integer or null, and no `minLength` or `maxItems`. The answer is still parsed
+against the full schema. Only an entry that declares the field sends it; an
+endpoint that accepts it may ignore it, as MiniMax-M3 does (sd:1827).
 Incomplete output still fails the review. A pin is changed by editing the
 registry file, never by a page.
 A `url` answer that fails the findings schema is retried once on the same

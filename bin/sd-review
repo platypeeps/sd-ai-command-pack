@@ -1237,11 +1237,11 @@ def charged_call(
     with contextlib.closing(connection):
         try:
             result = calls.call(
-                connection, entry=ledger.library.Provider(**vars(provider)), prompt=prompt, environ=environ,
-                timeout=timeout, role="reviewer", repo=sd_lib.stored_repo(root),
+                connection, entry=sd_registry.library_entry(ledger.library.Provider, provider), prompt=prompt, environ=environ,
+                timeout=timeout, role="reviewer", repo=sd_lib.stored_repo(root), **sd_registry.strict_fields(provider, CODEX_OUTPUT_SCHEMA, "findings"),
                 transport=None if client is None else _wire(client, provider, prompt, environ),
             )
-        except (calls.CallRefused, ledger.library.LedgerRefused) as error:
+        except (calls.CallRefused, ledger.library.LedgerRefused, sd_registry.RegistryError) as error:
             return _outcome(provider.name, REFUSED, str(error))
     receipt = {"call_id": result.call_id, "outcome": result.outcome, "bound_usd": result.bound,
                "usd": result.usd, "reason": result.reason}
@@ -1298,7 +1298,7 @@ def _url_attempt(provider: sd_registry.Provider, subject: Subject, request_promp
     if isinstance(charged, Outcome):
         return charged
     # `None` is the road's own wire: the library's above, this seam's here.
-    response, receipt = charged or ((client or sd_registry.chat_completion)(provider, request_prompt, provider_env, timeout), None)
+    response, receipt = charged or ((client or sd_registry.strict_completion(CODEX_OUTPUT_SCHEMA, "findings"))(provider, request_prompt, provider_env, timeout), None)
     result = Completed(*response[:4])
     text, diagnostic = sd_registry.url_response(result.stdout)
     diagnostic["transport_exit_code"] = result.exit_code

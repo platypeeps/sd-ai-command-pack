@@ -2795,6 +2795,100 @@ roles:
         change_status(self.connection, self.item, "done", who="operator", reason=f"delivered at {commit} on origin/main")
         self.assertFalse(self.merge()["delivery_pending"])
 
+    def hand_delivered_held_squash(self) -> int:
+        """A held task squash the operator closed by hand; reconcile owes it a `Closes:`."""
+        from sd_db.workflow import change_status
+        self.task_item("task")
+        racing, self.double._route = self.double._route, self.double._route
+        commit = self.held_merge()["merge_commit"]
+        self.double._route = racing
+        change_status(self.connection, self.item, "done", who="operator", reason=f"delivered at {commit} on origin/main")
+        reconciled = self.merge()
+        self.assertFalse(reconciled["delivery_pending"])
+        self.assertEqual(reconciled["closing_owed"]["commit"], commit)
+        return self.item
+
+    def carrier_merge(self, name: str = "second") -> dict:
+        """Another task's unheld `--deliver` merge in the same repository."""
+        _git(self.root, "fetch", "-q", "origin", "main")
+        _git(self.root, "checkout", "-q", "-b", name, "FETCH_HEAD")
+        (self.root / f"{name}.py").write_text("y = 2\n")
+        _git(self.root, "add", f"{name}.py")
+        _git(self.root, "commit", "-qm", f"{name}\n\nAuthored-with: human")
+        self.item = create_item(self.connection, kind="task", title=f"{name} task", status="in_progress",
+                                repo=str(self.operator), branch=name)
+        self.unanswered("--deliver").prepare()
+        with patch.object(ship.time, "sleep"):
+            return self.merge()
+
+    def test_a_hand_delivered_held_squash_reads_as_closed_in_git_after_the_next_merge(self):
+        """Reconcile clears the hold once the row records the hand delivery, and
+        git-only readers must agree: they read the squash's parent, which never
+        changes, so the next squash here carries the close (sd:1600)."""
+        held = self.hand_delivered_held_squash()
+        self.assertNotEqual(ship.sd_lib.delivered(self.root, f"sd:{held}"), ship.sd_lib.YES)
+        carrier = self.carrier_merge()
+        self.assertFalse(carrier["delivery_pending"], carrier)
+        self.assertEqual([debt["item"] for debt in carrier["carried_closes"]], [held])
+        message = _git(self.remote.path, "log", "-1", "--format=%B", "main")
+        parsed = subprocess.run(["git", "interpret-trailers", "--parse"], input=message, capture_output=True,
+                                text=True, check=True).stdout
+        self.assertIn(f"Closes: sd:{held}\n", parsed)
+        self.assertIn("Authored-with: human", parsed)
+        self.assertEqual(ship.sd_lib.delivered(self.root, f"sd:{held}"), ship.sd_lib.YES)
+        receipt = receipts.read(self.connection, receipts.receipt_key(self.remote.slug, "topic", held))[1]
+        self.assertEqual(receipt["closing_paid"], carrier["merge_commit"])
+
+    def test_a_paid_close_is_not_carried_again(self):
+        held = self.hand_delivered_held_squash()
+        self.carrier_merge()
+        third = self.carrier_merge("third")
+        self.assertNotIn("carried_closes", third)
+        self.assertNotIn(f"Closes: sd:{held}", _git(self.remote.path, "log", "-1", "--format=%B", "main"))
+
+    def owe(self, repository: str, item: int, branch: str) -> None:
+        """A merged receipt in `repository` that owes `item` a `Closes:`."""
+        key = receipts.receipt_key(repository, branch, item)
+        revision, _ = receipts.read(self.connection, key)
+        receipts.save(self.connection, key, revision, {
+            "repository": repository, "branch": branch, "head": "a" * 40, "merge_commit": "b" * 40,
+            "closing_owed": {"item": item, "commit": "b" * 40, "branch": branch}})
+
+    def test_an_owed_close_never_crosses_into_another_repository(self):
+        """Two repositories in one database: a carrier pays only its own
+        repository's debts, and only for an item whose row names it (sd:1600)."""
+        other = self.directory / "other"
+        upsert_repo(self.connection, str(other), remote="https://github.com/example-org/other.git", status_source="row")
+        here = create_item(self.connection, kind="task", title="owed here", status="done", repo=str(self.operator))
+        there = create_item(self.connection, kind="task", title="owed there", status="done", repo=str(other))
+        moved = create_item(self.connection, kind="task", title="row elsewhere", status="done", repo=str(other))
+        self.owe(self.remote.slug, here, "here")
+        self.owe("example-org/other", there, "there")
+        self.owe(self.remote.slug, moved, "moved")
+        carrier = self.carrier_merge()
+        self.assertEqual([debt["item"] for debt in carrier["carried_closes"]], [here])
+        message = _git(self.remote.path, "log", "-1", "--format=%B", "main")
+        self.assertNotIn(f"Closes: sd:{there}", message)
+        self.assertNotIn(f"Closes: sd:{moved}", message)
+        self.assertNotIn("closing_paid", receipts.read(self.connection, receipts.receipt_key("example-org/other", "there", there))[1])
+
+    def test_a_carrier_pays_at_most_the_cap(self):
+        owed = [create_item(self.connection, kind="task", title=f"owed {n}", status="done", repo=str(self.operator))
+                for n in range(12)]
+        for item in owed:
+            self.owe(self.remote.slug, item, f"b{item}")
+        carried, left = ship.sd_ship_squash.owed_closes(self.connection, self.remote.slug, "", lambda item: self.remote.slug)
+        self.assertEqual(([d["item"] for d in carried], [d["item"] for d in left]), (sorted(owed)[:10], sorted(owed)[10:]))
+
+    def test_owed_closes_past_the_cap_stay_owed_and_the_merge_says_so(self):
+        held = self.hand_delivered_held_squash()
+        with patch.object(ship.sd_ship_squash, "OWED_CLOSES_CAP", 0):
+            carrier = self.carrier_merge()
+        self.assertEqual((carrier.get("carried_closes"), carrier["closes_left"]), (None, [held]))
+        self.assertNotEqual(ship.sd_lib.delivered(self.root, f"sd:{held}"), ship.sd_lib.YES)
+        receipt = receipts.read(self.connection, receipts.receipt_key(self.remote.slug, "topic", held))[1]
+        self.assertNotIn("closing_paid", receipt)
+
     def test_a_held_followup_names_a_close_it_can_take(self):
         """A followup takes no `--delivered-by` (sd:809); its hold names the reason form."""
         self.task_item("followup")
@@ -3251,7 +3345,7 @@ roles:
 
     def test_a_no_item_record_refuses_a_live_branch_switch(self):
         """sd:1937 review. `--no-item` compares the live checkout too, not only its stored record."""
-        delivery = SimpleNamespace(branch="topic", repository=ship.slug(REMOTE_URL))
+        delivery = SimpleNamespace(branch="topic", checkout_branch="topic", repository=ship.slug(REMOTE_URL))
         _git(self.root, "checkout", "-q", "-b", "elsewhere")
         with self.assertRaisesRegex(ship.Refusal, "the checkout left topic"):
             ship.identity_unchanged(self.root, self.connection, SimpleNamespace(no_item=True), receipts, delivery)
@@ -3260,7 +3354,7 @@ roles:
 
     def test_a_remote_change_alone_refuses(self):
         """sd:1937 PR review. The branch is unchanged, so only the remote comparison can refuse."""
-        delivery = SimpleNamespace(branch="topic", repository=ship.slug(REMOTE_URL))
+        delivery = SimpleNamespace(branch="topic", checkout_branch="topic", repository=ship.slug(REMOTE_URL))
         _git(self.root, "checkout", "-q", "topic")
         _git(self.root, "remote", "set-url", "origin", "https://github.com/example/elsewhere.git")
         with self.assertRaisesRegex(ship.Refusal, "the checkout left topic"):
@@ -4100,14 +4194,18 @@ roles:
             self.additional(head)
         self.spent_reviews()
         prior = self.operation().state["passes"]
-        for flags in (["--additional-review-for", head], ["--request-reason", "reason"],
-                      ["--additional-review-for", head, "--request-reason", "  "],
-                      ["--additional-review-for", head[:12], "--request-reason", "reason"],
-                      ["--additional-review-for", "0" * 40, "--request-reason", "reason"],
-                      ["--additional-review-for", head, "--request-reason", "reason", "--retry-review"]):
+        # Each refusal names the flag that fixes it (sd:2026): a nonempty
+        # `--request-reason` alone used to be told its reason was empty.
+        for flags, names in ((["--additional-review-for", head], "needs a nonempty --request-reason"),
+                             (["--request-reason", "reason"], "valid only with --additional-review-for"),
+                             (["--additional-review-for", head, "--request-reason", "  "], "needs a nonempty --request-reason"),
+                             (["--additional-review-for", head[:12], "--request-reason", "reason"], "is not the clean current HEAD"),
+                             (["--additional-review-for", "0" * 40, "--request-reason", "reason"], "is not the clean current HEAD"),
+                             (["--additional-review-for", head, "--request-reason", "reason", "--retry-review"],
+                              "--retry-review and --additional-review-for do not combine")):
             operation = self.operation("prepare", *flags)
             with self.subTest(flags=flags), patch.object(ship, "review_process", side_effect=AssertionError("review dispatched")):
-                with self.assertRaises(ship.Refusal):
+                with self.assertRaisesRegex(ship.Refusal, re.escape(names)):
                     operation.review(head)
             self.assertEqual(self.operation().state["passes"], prior)
 
