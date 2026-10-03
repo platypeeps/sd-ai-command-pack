@@ -61,6 +61,8 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    Read its cap on that row in the sd-ai-command-pack checkout's `.claude/rules/sd-planning-adversarial-review.md`.
    Run `sd-docs-lint` against the built PR body.
    With no work root, use `--body-only`; do not create planning files to satisfy tree checks.
+   `sd-ship prepare` refuses only the lint failures the branch introduces.
+   A tree failure already on `origin/<base>` returns as a warning.
    Dispose every blocker.
    Commit fixes and verify the diff since the preceding reviewed head, including current source for prior findings.
    An incomplete review needs full-branch coverage.

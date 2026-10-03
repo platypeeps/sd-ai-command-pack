@@ -1242,12 +1242,20 @@ class Ship(SharedReview):
         lint = [sys.executable, str(BIN / "sd-docs-lint")]
         if not (self.root / "docs/work").is_dir():
             lint.append("--body-only")
+        lint_warnings: list[str] = []
         with tempfile.TemporaryDirectory(prefix="sd-ship-lint-") as directory:
             body_path = pathlib.Path(directory) / "pr-body.md"
             body_path.write_text(body, encoding="utf-8")
-            run(self.root, [*lint, "--pr-body", str(body_path)], timeout=300)
+            try:
+                run(self.root, [*lint, "--pr-body", str(body_path)], timeout=300)
+            except Refusal as refusal:
+                # Failed: run it again in full and gate only on what the
+                # branch introduces, not on what origin/<base> carries (sd:1646).
+                if refusal.workflow["blocker"]["code"] != "command_failed":
+                    raise
+                lint_warnings = sd_ship_body.lint_against_base(self.root, [*lint, "--pr-body", str(body_path)], base)
         self.review(head)
-        self.save(warnings=self.commit_warnings(head))
+        self.save(warnings=lint_warnings + self.commit_warnings(head))
         self.assert_scope()
         # Artifact exposure is checked again against the actual push target.
         mode = self.resolve_mode()

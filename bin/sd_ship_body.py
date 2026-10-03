@@ -24,9 +24,11 @@ import dataclasses
 import functools
 import pathlib
 import re
+import subprocess
+import tempfile
 
 import sd_lib
-from sd_ship_remote import Refusal
+from sd_ship_remote import Refusal, completed_process
 
 #: The canonical spelling of each owned key, by its case-folded name.
 _CANONICAL = {key.rstrip(":").lower(): key for key in sd_lib.OWNED_TRAILERS}
@@ -150,6 +152,66 @@ def published(body: str, item: int) -> str:
 def docs_lint():
     """`sd-docs-lint` as a module, loaded once: rule 8 is the one reading of scope."""
     return sd_lib.sibling("sd_docs_lint_scope", "sd-docs-lint")
+
+
+def lint_failures(tree: pathlib.Path, argv: list[str]) -> list[str]:
+    """The `FAIL` lines `argv` prints in `tree`, each path made relative to `tree`."""
+    result = completed_process(tree, argv, timeout=300, answers=frozenset({0, 1}))
+    # Longest first: a resolved `/private/var/...` contains the `/var/...` form.
+    prefixes = sorted({f"{tree}/", f"{tree.resolve()}/"}, key=len, reverse=True)
+    failures = []
+    for line in result.stderr.splitlines():
+        if line.startswith("FAIL "):
+            failure = line[len("FAIL "):]
+            for prefix in prefixes:
+                failure = failure.replace(prefix, "")
+            failures.append(failure)
+    return failures
+
+
+def base_lint_failures(root: pathlib.Path, argv: list[str], base: str) -> set[str]:
+    """`lint_failures` in a scratch checkout of `origin/<base>`; empty if it cannot be checked out.
+
+    Hooks are off for the checkout: a consumer's `post-checkout` is no part of a lint.
+    """
+    with tempfile.TemporaryDirectory(prefix="sd-ship-lint-base-") as directory:
+        tree = pathlib.Path(directory) / "base"
+        added = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "worktree", "add", "--detach", "--quiet",
+                                str(tree), f"refs/remotes/origin/{base}"], cwd=root, capture_output=True, check=False)
+        if added.returncode:
+            return set()
+        try:
+            return set(lint_failures(tree, argv))
+        finally:
+            subprocess.run(["git", "worktree", "remove", "--force", str(tree)], cwd=root,
+                           capture_output=True, check=False)
+
+
+def lint_against_base(root: pathlib.Path, argv: list[str], base: str) -> list[str]:
+    """Judge a failed docs lint against the same lint at `origin/<base>` (sd:1646).
+
+    A tree failure the default branch already has is not the branch's to fix:
+    it comes back as a warning, and only the failures the branch introduces
+    refuse. The base run gets no `--pr-body`, since the body is the branch's
+    own, so a body-rule failure is never excused. Under `--body-only` no tree
+    rule ran, and the head's answer stands. A failure is matched by its whole
+    line, so one the branch moved to another line counts as introduced.
+    """
+    head = lint_failures(root, argv)
+    known: list[str] = []
+    if head and "--body-only" not in argv:
+        at = argv.index("--pr-body") if "--pr-body" in argv else len(argv)
+        on_base = base_lint_failures(root, argv[:at] + argv[at + 2:], base)
+        known = [failure for failure in head if failure in on_base]
+    introduced = [failure for failure in head if failure not in known]
+    if introduced:
+        also = f"\n{len(known)} more failure(s) already on origin/{base} do not block this branch." if known else ""
+        raise Refusal(f"sd-docs-lint: {len(introduced)} failure(s) this branch introduces:\n"
+                      + "\n".join(f"FAIL {failure}" for failure in introduced) + also,
+                      code="docs_lint_failed", state="retryable_failure",
+                      next_action="Fix the failures this branch introduces, commit, then prepare again.")
+    return [f"sd-docs-lint: {len(known)} failure(s) already on origin/{base}, not introduced by this branch, "
+            "do not block it: " + "; ".join(known)] if known else []
 
 
 def pull_paths(files: list) -> list[str]:
