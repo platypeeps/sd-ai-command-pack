@@ -302,6 +302,13 @@ preserves the original receipt. A missing trailer or unavailable remote leaves
 the claim unverified and reports the missing evidence; a bare merged branch or
 stale issue status cannot close the item.
 
+A whole-item merge prepared without `--deliver` carries `Item:` and no
+`Delivers:`, so `sd work deliver` refuses it. `sd work deliver <row-id>
+<full-commit-sha> --associated --reason TEXT` closes that row. It runs the same
+reachability check, accepts the `Item:` trailer for the row instead, and records
+the trailer and the reason on the receipt. It refuses an ordinary task and a
+missing reason.
+
 `sd work cancel <row-id> --reason TEXT` records cancellation immediately,
 without a status-file change or another pull request. It does not claim the
 work shipped. A later associated merge may carry `Closes: <item>` for context;

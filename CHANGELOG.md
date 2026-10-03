@@ -4,6 +4,20 @@
 
 ### Added
 
+- **`sd work deliver --associated --reason` closes an item merged without
+  `--deliver` (sd:1590).** A whole-item merge prepared without `--deliver`
+  carried `Item: sd:<id>` and no `Delivers:`, and every verb that could close
+  the row refused it. `--associated` calls the library's
+  `deliver_associated_work`: the commit must be on the verified default branch
+  and name the item in an `Item:` trailer. The receipt records the trailer and
+  the reason. It needs a nonblank `--reason`, refuses an ordinary task, and
+  `--reason` without `--associated` is refused rather than dropped.
+
+- **A note on a done item prints an advisory (sd:1317).** `sd task note` on a
+  row whose status is `done` prints `sd: advisory: sd:N is done since <date>,
+  delivered by #<PR>` to stderr, from the item's latest merge comment, or the
+  delivering commit, or "no delivery is recorded". The note is still written.
+
 - **No GitHub issues from a managed repository (sd:2256).** A new
   `PreToolUse` hook, `bin/sd-issue-guard`, denies `gh issue create` (and its
   alias `gh issue new`) and `mcp__github__issue_write` when the session's
