@@ -367,6 +367,7 @@ class ReceiptTests(ReviewFixture):
         # pack's tree is the evidence: once it tracks a declaration, this fails
         # and the help, sd-review and sd-ship skills need the sentence removed.
         pack = pathlib.Path(sd_review._BIN).parent
+        # ls-files-form: plain -- empty output is the claim: the pack tracks no declaration
         self.assertNotIn(receipts.CONTRACT, subprocess.run(["git", "ls-files", "--", receipts.CONTRACT], cwd=pack,
                                                            capture_output=True, text=True, check=True).stdout)
         help_text = next(action.help for action in sd_review.build_parser()._actions if "--reuse-check" in action.option_strings)
