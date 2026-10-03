@@ -1608,6 +1608,23 @@ roles:
         self.assertEqual(operation.planning_artifacts(base, head),
                          ["docs/spec/naïve.md", "docs/work/é.md"])
 
+    def test_a_guest_opt_out_takes_decision_records_out_of_the_push_check(self):
+        """`guest_allow: docs/decisions` in the local block, and only that tree
+        leaves the planning paths a guest push refuses (sd:2168)."""
+        base = _git(self.root, "rev-parse", "HEAD")
+        for name in ("docs/decisions/0001-a-choice.md", "docs/work/plan.md", "docs/spec/a.md"):
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("body\n")
+        _git(self.root, "add", "-A")
+        _git(self.root, "commit", "-m", "plan and decide\n\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        everything = ["docs/decisions/0001-a-choice.md", "docs/spec/a.md", "docs/work/plan.md"]
+        self.assertEqual(self.operation().planning_artifacts(base, head), everything)
+        local = self.root / "CLAUDE.local.md"
+        local.write_text(local.read_text().replace("mode: full\n", "mode: full\nguest_allow: docs/decisions\n"))
+        self.assertEqual(self.operation().planning_artifacts(base, head), everything[1:])
+
     def test_a_move_out_of_the_shipped_surface_still_names_its_source(self):
         """A rename reports its destination only, and the source vanished.
 
