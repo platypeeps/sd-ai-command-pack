@@ -232,6 +232,21 @@
 
 ### Fixed
 
+- **Seven guard tests read shapes they used to miss (sd:999).**
+  `tests/test_suite_shape.py` reads `assert` statements and folds a
+  comparison, `and`/`or` and `not` as literals, so `assert True` and
+  `assertTrue(1 == 1)` are named. `assert False` stays legal. It and
+  `tests/test_no_shipped_shell.py` read `git ls-files -z` as bytes and decode
+  each name with `os.fsdecode`, so a `\r` in a tracked name no longer drops
+  the file. `tests/test_code_health.py` reports a `DYNAMIC` entry that gained a
+  reference, and names the Git 2.31 floor `--deduplicate` sets; CONTRIBUTING
+  states it. `tests/test_ls_files_form.py` reads a shell comment after the
+  subcommand as a bare call. `tests/test_pull_request_template_links.py`
+  checks a `<dest>` link and reads anchors in an upper-case `.MD` page.
+  `tests/test_cut_symbols.py` sees `.get()`, single-quoted and `getattr()`
+  reads. `tests/test_writer_skills_consult_the_registry.py` needs the pointer
+  in a sentence that runs it before the write.
+
 - **The Dependabot guard keeps a consumer's trailing comment, and `guard same`
   means unchanged (sd:1000).** A comment the consumer wrote below the last
   `ignore:` item read as part of that item. A guard above it read `differs`,

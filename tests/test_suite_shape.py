@@ -21,6 +21,7 @@ from __future__ import annotations
 import ast
 import functools
 import inspect
+import os
 import pathlib
 import subprocess
 import tempfile
@@ -125,6 +126,11 @@ def tracked_sources(root: pathlib.Path = REPO_ROOT) -> list[pathlib.Path]:
     verdict was never wrong here -- results are collected into lists and
     compared -- which is precisely why nothing ever surfaced it.
 
+    Bytes, split on NUL before anything is decoded (sd:999, review-839).
+    `text=True` applied universal newlines first, so a `\\r` in a tracked name
+    arrived as `\\n` and the source was dropped like the spaced path above.
+    `os.fsdecode` turns each name into the path the filesystem holds.
+
     `root` is the test seam and is kept off the callers below deliberately: the
     cases point the enumeration at a throwaway repository, because nothing
     about a clean checkout tells any of these behaviours apart.
@@ -132,12 +138,12 @@ def tracked_sources(root: pathlib.Path = REPO_ROOT) -> list[pathlib.Path]:
 
     listed = subprocess.run(
         ["git", "ls-files", "-z", "--deduplicate"],
-        cwd=root, capture_output=True, text=True, check=True)
+        cwd=root, capture_output=True, check=True)
     found = []
-    for name in listed.stdout.split("\0"):
-        if not name:
+    for raw in listed.stdout.split(b"\0"):
+        if not raw:
             continue
-        path = root / name
+        path = root / os.fsdecode(raw)
         if not path.is_file():
             continue
         if path.suffix == ".py":
@@ -296,6 +302,26 @@ class EnumerationTests(unittest.TestCase):
                 "a tracked path containing a space was split into two "
                 "nonexistent paths and dropped, so the source left the scan "
                 "with nothing printed and the run still green")
+
+    def test_a_path_with_a_carriage_return_arrives_whole(self) -> None:
+        """sd:999 (review-839). The NUL split comes before any decoding.
+
+        `text=True` decodes with universal newlines, so a `\\r` inside a
+        tracked name arrived as `\\n`, named no file, and the `is_file()`
+        guard dropped the source in silence. Git permits the byte in a path.
+        Reading bytes, splitting on NUL and decoding each name with
+        `os.fsdecode` keeps the name git reported.
+        """
+
+        with tempfile.TemporaryDirectory() as home:
+            root = pathlib.Path(home)
+            git = _git(root)
+            (root / "carriage\rreturn.py").write_text("CR = True\n")
+            git("init", "-q", "-b", "main", ".")
+            git("add", "-A")
+            git("commit", "-qm", "base")
+
+            self.assertEqual(tracked_sources(root=root), [root / "carriage\rreturn.py"])
 
     def test_a_source_being_merged_arrives_once(self) -> None:
         """An unmerged path must arrive once, not once per merge stage.
@@ -465,7 +491,9 @@ def _is_literal(node: ast.AST) -> bool:
     `assertEqual(2 + 2, 4)` and `assertEqual('wheel-1.0.whl', 'w-1.0.whl2'[:9])`
     reach no code under test either, and reading only `ast.Constant` at the top
     let both through -- the arithmetic is the source asking itself a question
-    however many operators it is spelled with.
+    however many operators it is spelled with. A comparison, `and`/`or` and
+    `not` fold the same way (sd:999, review-875): `assertTrue(1 == 1)` and
+    `assertTrue(not False)` reach no code either.
     """
 
     if isinstance(node, ast.Constant):
@@ -479,10 +507,14 @@ def _is_literal(node: ast.AST) -> bool:
         return all(_is_literal(part)
                    for pair in zip(node.keys, node.values, strict=True)
                    for part in pair if part is not None)
-    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+    if isinstance(node, ast.UnaryOp):
         return _is_literal(node.operand)
     if isinstance(node, ast.BinOp):
         return _is_literal(node.left) and _is_literal(node.right)
+    if isinstance(node, ast.BoolOp):
+        return all(_is_literal(value) for value in node.values)
+    if isinstance(node, ast.Compare):
+        return _is_literal(node.left) and all(_is_literal(part) for part in node.comparators)
     if isinstance(node, ast.Subscript):
         return _is_literal(node.value) and _is_literal(node.slice)
     if isinstance(node, ast.Slice):
@@ -567,6 +599,33 @@ def methods(tree: ast.Module):
                 yield node.name, member
 
 
+#: The comparisons whose two sides are interchangeable, so the same expression
+#: on both sides settles the verdict: `x == x` cannot fail, `x is not x`
+#: cannot pass.
+SYMMETRIC_COMPARISONS = (ast.Eq, ast.NotEq, ast.Is, ast.IsNot)
+
+
+def _settled_assert(node: ast.Assert) -> str | None:
+    """Why an `assert` statement's verdict is fixed by its source, or `None`.
+
+    The statement form of the two shapes below (sd:999, review-865): the
+    calls were read and `assert True` was not. A falsy constant is not a
+    finding. `assert False, "unreachable"` is the statement spelling of
+    `self.fail()`, which this check already leaves alone.
+    """
+
+    test = node.test
+    if isinstance(test, ast.Constant) and not test.value:
+        return None
+    if (isinstance(test, ast.Compare) and len(test.ops) == 1
+            and isinstance(test.ops[0], SYMMETRIC_COMPARISONS)
+            and ast.unparse(test.left) == ast.unparse(test.comparators[0])):
+        return f"assert compares {ast.unparse(test.left)} with itself"
+    if _is_literal(test):
+        return "assert tests only literals"
+    return None
+
+
 def decorative_assertions(tree: ast.Module) -> list[str]:
     """Assertions in `tree` whose verdict its own source already fixes.
 
@@ -579,12 +638,17 @@ def decorative_assertions(tree: ast.Module) -> list[str]:
 
     The operands are the ones the method's signature names (`_operands`), not
     the positional arguments. The message is not an operand, and an operand
-    does not stop being one for being passed by keyword.
+    does not stop being one for being passed by keyword. An `assert`
+    statement is read by `_settled_assert`.
     """
 
     found = []
     for class_name, function in methods(tree):
         for node in ast.walk(function):
+            if isinstance(node, ast.Assert):
+                if (reason := _settled_assert(node)) is not None:
+                    found.append(f"{class_name}.{function.name} line {node.lineno}: {reason}")
+                continue
             name = _assertion_call(node)
             if name not in COMPARING_ASSERTIONS or not isinstance(node, ast.Call):
                 continue
@@ -802,6 +866,43 @@ class AssertionsCanFail(unittest.TestCase):
                           # the call is not read rather than read wrongly.
                           "self.assertEqual(*pair)"):
             self.assertEqual(findings(near_miss), [], near_miss)
+
+    def test_a_bare_assert_and_a_folded_literal_are_read_too(self) -> None:
+        """sd:999 (review-865, review-875). Two shapes the predicate did not see.
+
+        `decorative_assertions` read only `*.assert*()` calls, so the
+        statement form -- `assert True`, `assert 1 == 1`, `assert x == x` --
+        passed whatever it held. And `_is_literal` folded arithmetic and
+        subscripts but not a comparison, a boolean or `not`, so
+        `assertTrue(1 == 1)` and `assertTrue(not False)` passed too. Each line
+        below is settled by its own source. `assert False` stays legal: it
+        is the statement spelling of `self.fail()`.
+        """
+
+        def findings(statement: str) -> list[str]:
+            return decorative_assertions(ast.parse(
+                f"class T:\n    def test_x(self):\n        {statement}\n"))
+
+        for settled in ("assert True",
+                        "assert 1 == 1",
+                        "assert built() == built()",
+                        "assert value is not value",
+                        "assert (1, 2)",
+                        "self.assertTrue(1 == 1)",
+                        "self.assertTrue(not False)",
+                        "self.assertTrue(True and True)",
+                        "self.assertFalse(1 in (2, 3))"):
+            with self.subTest(settled=settled):
+                self.assertEqual(len(findings(settled)), 1, settled)
+        for near_miss in ("assert False, 'unreachable'",
+                          "assert read(path) == 'x'",
+                          "assert left == right",
+                          "assert value",
+                          "assert 1 < limit",
+                          "self.assertTrue(not ready)",
+                          "self.assertTrue(read(path) == 'x')"):
+            with self.subTest(near_miss=near_miss):
+                self.assertEqual(findings(near_miss), [], near_miss)
 
     def test_the_operand_reader_takes_its_arity_from_the_signature(self) -> None:
         """The predicate's own input, asserted directly.

@@ -2,6 +2,7 @@
 
 Use Homebrew Python 3.14 for the local virtual environment on macOS.
 The `requires-python` floor stays 3.13; tests run on 3.14 only.
+Use Git 2.31 or later: the pack and its tests call `git ls-files --deduplicate`.
 
 ## Setup
 
