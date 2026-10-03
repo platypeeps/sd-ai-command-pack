@@ -2434,6 +2434,42 @@ def attribution_value(name: str, registry: Any) -> str:
     return value
 
 
+#: Names who is committing, for `hooks/commit-msg` to write as `Authored-with:`
+#: on a message that states none (sd:1295): a registry entry, `human` or
+#: `script`. A harness sets it for its session and a job for its run, so the
+#: trailer lands at commit time and no `sd attribute` commit follows.
+AUTHOR_VARIABLE = "SD_AUTHOR"
+
+
+def states_author(message: str) -> bool:
+    """Whether any unindented line of `message` begins `Authored-with:`."""
+    return any(line.startswith(AUTHORED_TRAILER) for line in message.splitlines())
+
+
+def commit_author(name: str, read_registry: Callable[[], tuple[Any, str]]) -> str:
+    """The `Authored-with:` value `SD_AUTHOR=<name>` stands for; `TrailerError` when none.
+
+    `attribution_value`'s answer, so the hook writes what `sd attribute`
+    writes for the same name. `human` and `script` read no registry.
+    `dependabot` refuses: that claim rests on the identity GitHub writes, and a
+    local commit does not carry it.
+    """
+    entry = name.strip()
+    if entry == DEPENDABOT_ENTRY:
+        raise TrailerError(f"{AUTHOR_VARIABLE}={entry!r}: a local commit is never "
+                           f"Dependabot's; GitHub's identity on its own commits says that")
+    if entry in VENDORLESS_AUTHORS:
+        return entry
+    registry, reason = read_registry()
+    if reason:
+        raise TrailerError(f"{AUTHOR_VARIABLE}={entry!r} names no reserved author, and the "
+                           f"provider registry does not read: {reason}")
+    try:
+        return attribution_value(entry, registry)
+    except TrailerError as error:
+        raise TrailerError(f"{AUTHOR_VARIABLE}={entry!r}: {error}") from None
+
+
 def _own_trailer(root: pathlib.Path, sha: str) -> str:
     """Its own `Authored-with:` value, or "" -- last paragraph, unindented,
     `attribution`'s rule, so a commit that quotes a trailer stays repairable.

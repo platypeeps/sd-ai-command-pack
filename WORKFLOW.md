@@ -580,9 +580,15 @@ before. Temperature is not a registry field: `kimi-k3` refuses any value but
 
 Adding a provider is an entry; adding money is a bill. Both role lines are
 read in order. `author` is picked when an assignment starts and never switched
-mid-item; outside the runner, `SD_AUTHOR` or `--author` names it to
+mid-item; outside the runner, `--author` names it to
 `sd-ship`, which stamps it on each commit it makes as `Authored-with:
-<name>/<vendor>`, the vendor as the registry gave it at commit time. The
+<name>/<vendor>`, the vendor as the registry gave it at commit time.
+`SD_AUTHOR=<name>` names it to the pack's `commit-msg` hook, which writes the
+same line on a commit whose message states none (sd:1295); a name nothing
+resolves refuses the commit, and `sd attribute` never amends. `human` is a
+commit a person wrote; `script` is one a deterministic job wrote, with no
+model and no person in the loop (sd:1637). Both are reserved and carry no
+vendor, so any provider may review them. The
 review reads no declaration: every commit in the reviewed range is attributed
 by its own trailer, or by an `Attributes: <sha> <name>/<vendor>` trailer on a
 later commit in the range that `sd attribute` makes, and a commit with neither

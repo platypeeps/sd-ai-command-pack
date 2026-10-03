@@ -4,6 +4,23 @@
 
 ### Added
 
+- **The commit-msg hook writes `Authored-with:` at commit time (sd:1295).**
+  A branch whose commits said nothing took one empty `sd attribute` commit
+  per review round. With `SD_AUTHOR=<entry>` set and no `Authored-with:` line
+  in the message, `hooks/commit-msg` now adds `Authored-with: <value>` first
+  in the final trailer paragraph, the value `sd attribute` writes for that
+  name. `human` and `script` read no registry. A name nothing resolves, or
+  `dependabot`, refuses the commit. Unset, the hook writes nothing.
+  `sd attribute` never amends. A harness sets the variable for its session,
+  and a job for its run.
+
+- **`Authored-with: script` for unattended job commits (sd:1637).** A
+  scheduled job that commits generated data had no fitting value, so it
+  wrote `human` and counted as the operator. `script` is a reserved peer of
+  `human` with no vendor, so any provider may review it. `sd attribute`, a
+  squash body and the trailer reader accept it, and `sd-review --explain`
+  names it.
+
 - **A guest repository can take decision records (sd:2168).** A `guest_allow: docs/decisions` line in the repository's `CLAUDE.local.md` block takes `docs/decisions/` out of the guest planning-artifact refusal: the `sd-ship` push check, the `sd-review --scope planning` gate and the `sd-status` shared-tree list. `docs/decisions/` stays refused by default, and `docs/work/` and `docs/spec/` stay refused always; naming either is a configuration error. The push check now reads `sd_lib.guest_refused_dirs` instead of its own copy of the three trees, and the installer's block template lists the key commented out.
 
 - **`sd fleet stamp` honours a per-repository exemption list (sd:1797).** A
