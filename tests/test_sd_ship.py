@@ -995,11 +995,49 @@ roles:
                     operation.state.pop("binding_manifest")
                 else:
                     operation.state["binding_manifest"]["verdict"]["sd-review"] = "ast:before"
+                    # sd:1397. The reviewers would now be asked something else, so no replay keeps it.
+                    operation.state["passes"][-1]["review_request"] = {"sha256": "another request", "verify": None, "resume": None}
                 operation.save()
                 self.assertEqual(self.prepare()["phase"], "ready_to_send")
                 state = self.operation().state
                 self.assertEqual(state["passes"][-1]["review_binding_change"]["changed"], changed)
                 self.assertEqual(state["binding_manifest"], ship.binding_manifest(self.root))
+
+    def test_a_landing_that_leaves_the_request_unchanged_keeps_the_receipt(self):
+        """sd:1397, option E. A verdict file moved, but `sd-review --explain` replayed for the
+        stored pass asks the reviewers the same thing, so the receipt stands and no pass is spent."""
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+
+        def land():
+            operation = self.operation()
+            operation.state["binding"] = "a review tool file landed on the default branch"
+            operation.state["binding_manifest"]["verdict"]["sd_route.py"] = "ast:before"
+            operation.save()
+
+        land()
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        state = self.operation().state
+        self.assertEqual(len(state["passes"]), 1, "a kept receipt spends no pass")
+        self.assertEqual(state["binding"], ship.binding(self.root))
+        self.assertEqual(state["binding_manifest"], ship.binding_manifest(self.root))
+        self.assertEqual(state["review_binding_kept"][0]["changed"], [["sd_route.py", "verdict"]])
+        self.assertEqual(state["review_binding_kept"][0]["request_sha256"], state["passes"][0]["review_request"]["sha256"])
+        land()
+        self.assertEqual(self.merge()["phase"], "merged")
+
+    def test_a_landing_that_moves_finding_parsing_re_reviews_though_the_request_is_unchanged(self):
+        """sd:1397, operator ruling (option A). `sd-review` parses and disposes findings, so a
+        landing that moves it re-reviews even when `--explain` would ask the reviewers the same."""
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        operation = self.operation()
+        operation.state["binding"] = "a review tool file landed on the default branch"
+        operation.state["binding_manifest"]["verdict"]["sd-review"] = "ast:before"
+        operation.save()
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        state = self.operation().state
+        self.assertEqual(len(state["passes"]), 2, "moved finding code spends a re-review")
+        self.assertNotIn("review_binding_kept", state)
+        self.assertEqual(state["passes"][-1]["review_binding_change"]["changed"], [["sd-review", "verdict"]])
 
     def test_prepare_rereads_a_pull_object_that_lags_the_push(self):
         # sd:1394, live on #1145 and system #572: the pull object still named

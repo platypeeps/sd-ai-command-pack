@@ -1985,7 +1985,7 @@ MUTATIONS: dict[str, Mutation] = {
         new='    ("bin/sd-handoff-restore", "SessionStart", '
             '("startup", "clear", "compact")),',
         test="tests.test_sd_install.IdempotencyTests"
-             ".test_the_hook_table_is_exactly_these_three_registrations",
+             ".test_the_hook_table_is_exactly_these_registrations",
     ),
     "bin/sd-status::_age_rows": Mutation(
         path="bin/sd-status",

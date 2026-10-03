@@ -8,7 +8,8 @@ disable-model-invocation: true
 
 Deliver only the enumerated scope.
 Invocation authorizes its scoped commits, branch push, and merge, subject to execution permissions and existing gates.
-Invocation alone authorizes no local branch, worktree, or checkout deletion.
+Post-merge closeout removes the merged PR's safe branches, stashes, refs and stale worktrees without asking (operator ruling 2026-10-02).
+Invocation alone authorizes no checkout deletion.
 Use STE-Concise; report delivery state, decisive checks, blockers, and retained worktrees.
 
 ## Standing permission
@@ -104,9 +105,10 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    No-item changes create no row or placeholder trailer.
 9. **Complete post-merge closeout.**
    After every confirmed in-scope merge, read `skills/sd-ship/references/post-merge-closeout.md` in the sd-ai-command-pack checkout.
-   Run `git fetch -p`; repository `delete_branch_on_merge` owns remote branch removal.
+   Run `git fetch -p`; repository `delete_branch_on_merge` removes the remote branch first.
    Review remaining findings and inventory refs, branches, stashes, and worktrees.
-   Retain local branches, stashes, and worktrees until one exact target list receives separate approval with verified recovery evidence.
+   Remove the merged PR's local and remote branches, stashes, refs and stale worktrees when the reference's safety conditions hold, without asking.
+   Record each target's full object ID or path in an `sd task note` before its removal; keep any target that fails a condition.
    Do not move another checkout's main branch.
    Report the branch, worktree, merge, and installation state separately.
 
@@ -225,6 +227,8 @@ Existing result fields and exit meanings remain authoritative; the new object do
 Receipts bind repository, branch, item or review identity, exact head, tools, policy, and review history.
 The tools bound are the `verdict` class in `bin/sd_ship_bindings.py`: the code `sd-review` runs, compared without comments or docstrings.
 Gate and check code runs again on every `prepare` and `merge`, so a change there does not void a receipt.
+When only review code moved, and none of it parses or disposes findings (`FINDING_FILES`), `sd-ship` replays `sd-review --explain` for the stored pass first.
+An unchanged `request_sha256` keeps the receipt, spends no pass, and appends to `review_binding_kept`.
 A moved binding refuses with "review tools or repository policy changed after review:" and names each changed file and its class.
 Run `prepare` again; it re-reviews the same head in full.
 `--expected-head` compares evidence; it does not replace evidence.
@@ -269,8 +273,8 @@ Acknowledgement failures produce warnings, not review clearance.
 - Never push a head the local lane has not seen.
 - Never weaken checks, permissions, review depth, or ownership/protection gates to reach green.
 - Never treat a written reason as executable clearance.
-- Never delete local branches, worktrees, or checkouts as an implicit shipping step.
-  Routine closeout inventories retained work; a separate, explicitly approved cleanup may remove only its enumerated targets.
+- Never delete a checkout, or a worktree, branch, stash or ref that fails a closeout safety condition or belongs to another PR.
+- Never force a worktree removal.
 - Never accept a repository path; cwd determines the checkout, and `-C <dir>` only changes cwd first (R10-D6).
 - Never post reviews or labels in a guest upstream repository.
 - Make no further change after settled-green.

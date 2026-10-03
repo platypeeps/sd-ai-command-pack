@@ -828,11 +828,38 @@ class LineBudgetTests(unittest.TestCase):
         # toward depth (`partial` in `bin/sd-review`, `coverage` in the manifest),
         # and a text diff names a UTF-16 or BOM encoding, sending an
         # encoding-only change in binary form (`encoding`, `text_diff`).
+        # 4196 -> 4264 is sd:2325, sd:2326 and sd:2328 in `sd_check_receipts.py`:
+        # exact tracked paths the secret-name filter admits, a digest of the
+        # declared environment alone, and each rustup toolchain bound by its
+        # contents. They let a Rust repository declare `complete: true`.
+        # 4264 -> 4286 is sd:2325 review: an explicit `+toolchain`, `rustup run`
+        # or declared `+<toolchain>` binds the toolchain it selects, or refuses.
+        # 4286 -> 4338 is sd:2327: declared build outputs, which a recorded run
+        # builds into fresh temporary folders through each output's variable,
+        # removed after the run; the operator's folder is never touched.
+        # 4338 -> 4348 is sd:2327 review: a toolchain link that dangles, loops or
+        # resolves outside the toolchain refuses the binding.
+        # 4348 -> 4354 is sd:1397: `bin/sd-review` grows +6 for
+        # `request_sha256`, the digest of what the reviewers are asked, which
+        # `sd-ship` replays at a moved binding to keep an unchanged receipt.
+        # The replay itself is `bin/sd_ship_review.py`, outside the lane.
+        # 4354 -> 4520 is sd:2445: opencode 2.x dropped `debug agent` and
+        # `--pure`. `bin/sd_opencode.py` grows +163: the probe that replaces
+        # `debug agent`, a private `opencode serve` polled for the lazily
+        # loaded agent and its plugins (+67 with `__main__`); the report,
+        # version, plugin and tail checks (+42); the 2.x permission list and
+        # environment (+32); the docstring's 2.x measurements (+22).
+        # `bin/sd-review` grows +3 for the run's own config dir. Measured, not
+        # carried: `sd_opencode.py` is 467 on this tree.
+        # 4520 -> 4550 is sd:2400: `bin/sd_review_material.py` grows +30 for
+        # `renamed_material`, which sends a rename git detects as its rename
+        # patch under the new path and a one-line record under the old one, so
+        # a folder move fits the input limit and both paths stay listed.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4196,
+            4550,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

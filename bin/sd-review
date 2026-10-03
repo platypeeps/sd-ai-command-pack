@@ -1387,7 +1387,10 @@ def run_provider(
         argv = provider_argv(provider, root, workdir)
         launch_cwd = root
         if provider.reader == "opencode-json":
-            child = sd_opencode.opencode_environment(child)
+            # An empty config dir of the run's own: on 2.x no switch drops the
+            # operator's plugins and keeps the rest of its config (sd:2445).
+            (workdir / "opencode-config").mkdir()
+            child = sd_opencode.opencode_environment(child, workdir / "opencode-config")
             # opencode's project root is its launch directory: it merges that
             # root's opencode.json over our inline config and injects the root's
             # AGENTS.md as instructions. Launched inside the reviewed checkout
@@ -2051,6 +2054,12 @@ def review(
         "codex_preflight": auth,
         "codex_skill_suppression": skills,
         "input_manifest": input_manifest,
+        # sd:1397. What the reviewers are asked, by digest, and the manifest whose
+        # `omitted_paths` decides a partial review. When a pack landing moves the
+        # binding, sd-ship replays `--explain` and keeps the receipt only while this is unchanged.
+        "request_sha256": hashlib.sha256(json.dumps(
+            {"scope": args.scope, "prompt": prompt, "material": _material, "route": plan._asdict(),
+             "providers": providers, "requested_reviews": depth, "input_manifest": input_manifest}, sort_keys=True).encode()).hexdigest(),
         "local_block_prepended": prepended,
         "scrubbed_env_names": list(scrubbed_names(env)),
         "check": None,

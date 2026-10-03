@@ -6,9 +6,10 @@ kept independent (sd:1329).
 OpenAI, Anthropic, Moonshot, MiniMax, Baseten and Google among them. So an
 entry's `vendor` is a claim about the model rather than about the program,
 exactly as for `agy`, and `sd_registry.MULTIVENDOR_READERS` requires the
-entry to pin one. The fixtures below are captured from `opencode 1.18.30`
-(`opencode run --format json`, 2026-09-22); each is labelled with what
-produced it.
+entry to pin one. The stream fixtures below are captured from `opencode
+1.18.30` (`opencode run --format json`, 2026-09-22) unless labelled 2.0.20;
+2.0.20 prints the same `text` part (measured 2026-10-02). Each is labelled
+with what produced it.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ from tests.test_sd_review import sd_review  # noqa: E402
 
 SHIPPED = sd_registry.shipped_path(REPO_ROOT)
 
-#: Verbatim from a real run: `opencode run --format json --pure --agent
+#: Verbatim from a real 1.18.30 run: `opencode run --format json --pure --agent
 #: sd-review -m openai/gpt-5.5 'Reply with exactly ... {"findings": []}'`.
 #: One event per line; the answer is the whole `text` part, not deltas.
 CLEAN_STREAM = "\n".join((
@@ -61,6 +62,13 @@ ERROR_STREAM = (
     '"error":{"name":"APIError","data":{"message":"Bad Request: {\\"detail\\":\\"The \'gpt-5.4-mini\' model '
     'is not supported when using Codex with a ChatGPT account.\\"}","statusCode":400,"isRetryable":false,'
     '"metadata":{"url":"https://api.openai.com/v1/responses"}}}}'
+)
+
+#: Verbatim from 2.0.20 (`opencode run --standalone --format json --agent
+#: sd-review` with the inline config unset): the cause is `error.message`.
+ERROR_STREAM_V2 = (
+    '{"type":"error","timestamp":1790980295125,"sessionID":"ses_f0141770effeWsopVwITFpYgv8",'
+    '"error":{"type":"unknown","message":"Agent not found: \\"sd-review\\""}}'
 )
 
 
@@ -107,9 +115,11 @@ class TheArgvIsConfined(unittest.TestCase):
         self.workdir = pathlib.Path(self.dir.name)
         self.argv = sd_opencode.opencode_argv(self.workdir, "opencode run", "openai/gpt-5.5")
 
-    def test_it_asks_for_json_events_and_no_external_plugins(self) -> None:
+    def test_it_asks_for_json_events_from_a_private_server(self) -> None:
+        """2.x's shared service never sees the inline config (measured)."""
         self.assertEqual(self.argv[self.argv.index("--format") + 1], "json")
-        self.assertIn("--pure", self.argv)
+        self.assertIn("--standalone", self.argv)
+        self.assertNotIn("--server", self.argv)
 
     def test_it_runs_the_private_agent(self) -> None:
         self.assertEqual(self.argv[self.argv.index("--agent") + 1], sd_opencode.AGENT)
@@ -130,26 +140,13 @@ class TheArgvIsConfined(unittest.TestCase):
         self.assertNotIn("--model", sd_opencode.opencode_argv(self.workdir, "opencode run", None))
 
 
-def _rules(permission: dict[str, object]) -> list[tuple[str, str, str]]:
-    """opencode's `fromConfig` (`permission/index.ts`, v1.18.30): a string
-    value is one rule on pattern `*`; an object is one rule per pattern, in
-    its own order."""
-    rules: list[tuple[str, str, str]] = []
-    for key, value in permission.items():
-        if isinstance(value, str):
-            rules.append((key, "*", value))
-        else:
-            rules.extend((key, pattern, action) for pattern, action in value.items())  # type: ignore[union-attr]
-    return rules
-
-
-def _decide(permission: dict[str, object], name: str, pattern: str = "*") -> str:
-    """opencode's `evaluate`: the last rule whose permission and pattern both
+def _decide(permission: list[dict[str, str]], name: str, pattern: str = "*") -> str:
+    """opencode's evaluation: the last rule whose action and resource both
     match wins, and no match is `ask`. An MCP server's tool asks as its own
-    name with pattern `*`; the resource readers ask `read` with
-    `mcp:<server>:<uri>` (`session/tools.ts`, v1.18.30)."""
-    hits = [action for key, rule, action in _rules(permission)
-            if fnmatch.fnmatchcase(name, key) and fnmatch.fnmatchcase(pattern, rule)]
+    name; 1.x's resource readers asked `read` with `mcp:<server>:<uri>`, and
+    2.x's ask as `opencode_*_mcp_resource(s)`."""
+    hits = [rule["effect"] for rule in permission
+            if fnmatch.fnmatchcase(name, rule["action"]) and fnmatch.fnmatchcase(pattern, rule["resource"])]
     return hits[-1] if hits else "ask"
 
 
@@ -158,26 +155,28 @@ class TheEnvironmentCarriesTheAgent(unittest.TestCase):
     default-deny: `*` first, a read-only allow-list after it, decided the way
     opencode decides. Nothing it refuses is refused by name."""
 
-    def permission(self) -> dict[str, object]:
-        child = sd_opencode.opencode_environment({"PATH": "/usr/bin", "HOME": "/h"})
+    CONFIG_DIR = pathlib.Path("/run/sd-review-x/opencode-config")
+
+    def permission(self) -> list[dict[str, str]]:
+        child = sd_opencode.opencode_environment({"PATH": "/usr/bin", "HOME": "/h"}, self.CONFIG_DIR)
         self.assertEqual(child["PATH"], "/usr/bin")
         config = json.loads(child["OPENCODE_CONFIG_CONTENT"])
-        return dict(config["agent"][sd_opencode.AGENT]["permission"])
+        return list(config["agents"][sd_opencode.AGENT]["permissions"])
 
     def test_the_default_is_deny_and_it_comes_first(self) -> None:
         permission = self.permission()
-        self.assertEqual(list(permission)[0], "*", "a later `*` would outrank every allowance")
-        self.assertEqual(permission["*"], "deny")
-        self.assertEqual({key for key in permission if key != "*"}, {"read", "glob", "grep", "list"})
-        self.assertEqual({key: value for key, value in permission.items() if value == "allow"},
-                         {"glob": "allow", "grep": "allow", "list": "allow"})
+        self.assertEqual(permission[0], {"action": "*", "resource": "*", "effect": "deny"},
+                         "a later `*` would outrank every allowance")
+        self.assertEqual({rule["action"] for rule in permission[1:]}, {"read", "glob", "grep", "list"})
+        self.assertNotIn("*", [rule["action"] for rule in permission[1:]])
 
     def test_the_built_in_tools_are_denied_without_being_named(self) -> None:
         permission = self.permission()
-        for tool in ("edit", "bash", "webfetch", "websearch", "task", "skill", "lsp", "question",
-                     "external_directory"):
+        for tool in ("edit", "bash", "shell", "write", "patch", "webfetch", "websearch", "task", "subagent",
+                     "skill", "lsp", "question", "external_directory", "opencode_read_mcp_resource",
+                     "opencode_list_mcp_resources"):
             self.assertEqual(_decide(permission, tool), "deny", tool)
-            self.assertNotIn(tool, permission, f"{tool} falls to `*`, not to a line of its own")
+            self.assertNotIn(tool, [rule["action"] for rule in permission], f"{tool} falls to `*`")
         for tool in ("read", "glob", "grep", "list"):
             self.assertEqual(_decide(permission, tool, "/repo/README.md"), "allow", tool)
 
@@ -193,12 +192,12 @@ class TheEnvironmentCarriesTheAgent(unittest.TestCase):
         fall to `*`, the resources to `read`'s `mcp:*`, and a file read to
         `read`'s `*`."""
         operator = {"mcp": {"mutator": {"type": "local", "command": ["mutator-mcp"], "enabled": True}}}
-        child = sd_opencode.opencode_environment({"HOME": "/h"})
+        child = sd_opencode.opencode_environment({"HOME": "/h"}, self.CONFIG_DIR)
         config = json.loads(child["OPENCODE_CONFIG_CONTENT"])
         self.assertNotIn("mcp", config, "the reader disables nothing by name")
         for server in operator["mcp"]:
             self.assertNotIn(server, json.dumps(config))
-            permission = config["agent"][sd_opencode.AGENT]["permission"]
+            permission = config["agents"][sd_opencode.AGENT]["permissions"]
             for tool in (f"{server}_write", f"{server}_delete", f"{server}_get"):
                 self.assertEqual(_decide(permission, tool), "deny", tool)
             self.assertEqual(_decide(permission, "read", f"mcp:{server}:*"), "deny")
@@ -206,9 +205,23 @@ class TheEnvironmentCarriesTheAgent(unittest.TestCase):
             self.assertEqual(_decide(permission, "read", "/repo/README.md"), "allow")
 
     def test_the_parent_is_not_mutated(self) -> None:
-        parent = {"PATH": "/usr/bin"}
-        sd_opencode.opencode_environment(parent)
-        self.assertEqual(parent, {"PATH": "/usr/bin"})
+        parent = {"PATH": "/usr/bin", "PWD": "/repo"}
+        sd_opencode.opencode_environment(parent, self.CONFIG_DIR)
+        self.assertEqual(parent, {"PATH": "/usr/bin", "PWD": "/repo"})
+
+    def test_only_the_inline_config_is_loaded(self) -> None:
+        """On 2.0.20 an inherited `PWD` naming the checkout started its MCP
+        server from a neutral cwd, and the operator's config dir loads every
+        plugin in it. The run's own empty dir replaces that dir, a named
+        config file goes, and project config is off under both names."""
+        child = sd_opencode.opencode_environment(
+            {"PWD": "/repo", "OPENCODE_CONFIG": "/repo/hostile.json", "OPENCODE_CONFIG_DIR": "/home/op/.config/opencode",
+             "OPENCODE_CONFIG_PROJECT_DISABLE": "0", "HOME": "/h"}, self.CONFIG_DIR)
+        self.assertNotIn("PWD", child)
+        self.assertNotIn("OPENCODE_CONFIG", child)
+        self.assertEqual(child["OPENCODE_CONFIG_DIR"], str(self.CONFIG_DIR))
+        self.assertEqual(child["OPENCODE_CONFIG_PROJECT_DISABLE"], "1")
+        self.assertEqual(child["OPENCODE_DISABLE_PROJECT_CONFIG"], "1")
 
 
 class TheStreamIsReadBack(unittest.TestCase):
@@ -247,10 +260,11 @@ class TheStreamIsReadBack(unittest.TestCase):
         self.assertEqual(len(parsed.findings), 1)
 
     def test_an_error_event_refuses_and_names_the_cause(self) -> None:
-        result, parsed = self.answer(ERROR_STREAM)
-        self.assertIsNone(parsed)
-        self.assertNotEqual(result.exit_code, 0)
-        self.assertIn("gpt-5.4-mini", result.stderr)
+        for stream, cause in ((ERROR_STREAM, "gpt-5.4-mini"), (ERROR_STREAM_V2, "Agent not found")):
+            result, parsed = self.answer(stream)
+            self.assertIsNone(parsed)
+            self.assertNotEqual(result.exit_code, 0)
+            self.assertIn(cause, result.stderr)
 
     def test_no_text_event_is_not_a_clean_review(self) -> None:
         only_steps = "\n".join(line for line in CLEAN_STREAM.splitlines() if '"type":"text"' not in line)
@@ -401,13 +415,13 @@ class TheLaunchIsIsolated(unittest.TestCase):
 
 class TheResolvedConfinementIsChecked(unittest.TestCase):
     """The run is refused unless opencode itself resolves the sd-review agent
-    to this map (sd:1375). The neutral launch dir decides where opencode
-    looks; this reads back what it resolved, so a widening that arrives by any
-    other route -- an inherited variable, an ancestor `.opencode/` -- refuses
-    the run instead of starting it. The fakes answer in the shape
-    `opencode debug agent sd-review` printed on 1.18.30."""
+    to this map and loads no plugin of its own (sd:1375, sd:2445). The neutral
+    launch dir decides where opencode looks; this reads back what it resolved,
+    so a widening that arrives by any other route refuses the run instead of
+    starting it. The fakes answer in the probe's report shape, built from what
+    `agent.list` and `plugin.list` returned on 2.0.20."""
 
-    BASH = {"permission": "bash", "action": "allow", "pattern": "*"}
+    SHELL = {"action": "shell", "resource": "*", "effect": "allow"}
 
     def provider(self) -> Any:
         return sd_registry.Provider(name="opencode", vendor="openai", bill="openai",
@@ -418,7 +432,7 @@ class TheResolvedConfinementIsChecked(unittest.TestCase):
         from tests.test_sd_review import FakeRunner
 
         def answer(argv, env, cwd, timeout):
-            if list(argv[1:3]) == ["debug", "agent"]:
+            if sd_opencode.probe_program(list(argv)):
                 return probe(env) if callable(probe) else probe
             return sd_review.Completed(0, finding_stream('{"findings": []}'), "")
         runner = FakeRunner(answers={"opencode": answer})
@@ -426,141 +440,209 @@ class TheResolvedConfinementIsChecked(unittest.TestCase):
             outcome = sd_review.run_provider(
                 self.provider(), pathlib.Path(raw_root),
                 sd_review.Subject("worktree", "HEAD", "worktree", (), 0, ""),
-                "prompt", runner, {"HOME": "/home/reviewer"}, 60)
+                "prompt", runner, {"HOME": "/home/reviewer", "PWD": raw_root}, 60)
         return outcome, runner
 
     def test_a_widened_resolution_refuses_before_the_review_starts(self) -> None:
         from tests.test_sd_review import resolved_agent
-        outcome, runner = self.run_with(lambda env: sd_review.Completed(0, resolved_agent(env, self.BASH), ""))
+        outcome, runner = self.run_with(sd_review.Completed(0, resolved_agent(self.SHELL), ""))
         self.assertEqual(outcome.status, sd_review.REFUSED, outcome.detail)
-        self.assertIn('"bash"', outcome.detail)
+        self.assertIn('"shell"', outcome.detail)
         self.assertEqual(len(runner.calls), 1, "the review itself must not start")
 
-    def test_the_probe_asks_the_same_launch_dir_and_environment(self) -> None:
+    def test_the_probe_asks_the_same_opencode_launch_dir_and_environment(self) -> None:
         from tests.test_sd_review import resolved_agent
-        outcome, runner = self.run_with(lambda env: sd_review.Completed(0, resolved_agent(env), ""))
+        outcome, runner = self.run_with(sd_review.Completed(0, resolved_agent(), ""))
         self.assertEqual(outcome.status, sd_review.CLEAN, outcome.detail)
         probe, review = runner.calls
-        self.assertEqual(probe["argv"], ["opencode", "debug", "agent", "sd-review", "--pure"])
+        self.assertEqual(sd_opencode.probe_program(probe["argv"]), ["opencode"])
+        self.assertEqual(probe["argv"][1:4], ["-I", str(pathlib.Path(sd_opencode.__file__).resolve()),
+                                              sd_opencode.PROBE])
         self.assertEqual(probe["cwd"], review["cwd"])
-        self.assertEqual(probe["env"]["OPENCODE_CONFIG_CONTENT"], review["env"]["OPENCODE_CONFIG_CONTENT"])
+        self.assertEqual(probe["env"], review["env"])
+        self.assertNotIn("PWD", review["env"])
+        config_dir = pathlib.Path(review["env"]["OPENCODE_CONFIG_DIR"])
+        self.assertEqual(config_dir.parent, review["cwd"], "the config dir is the run's own")
 
     def test_a_probe_that_cannot_answer_refuses(self) -> None:
-        for probe in (sd_review.Completed(1, "", "unknown command"), sd_review.Completed(0, "not json", "")):
+        for probe in (sd_review.Completed(1, "", "unknown command"), sd_review.Completed(0, "not json", ""),
+                      sd_review.Completed(0, json.dumps({"agent": None}), "")):
             outcome, runner = self.run_with(probe)
             self.assertEqual(outcome.status, sd_review.REFUSED, outcome.detail)
             self.assertIn("unconfirmed", outcome.detail)
             self.assertEqual(len(runner.calls), 1)
 
-    def breach(self, *extra: dict, env: dict | None = None) -> str | None:
+    def breach(self, *extra: dict, **report: Any) -> str | None:
         from tests.test_sd_review import resolved_agent
-        env = env or {"HOME": "/home/reviewer"}
-        stdout = resolved_agent(env, *extra)
+        stdout = resolved_agent(*extra, **report)
         return sd_opencode.confinement_breach(
-            lambda *args: sd_review.Completed(0, stdout, ""), "opencode run", env, pathlib.Path("/x"), 60)
+            lambda *args: sd_review.Completed(0, stdout, ""), "opencode run", {"HOME": "/h"}, pathlib.Path("/x"), 60)
 
     def test_only_the_exact_map_passes(self) -> None:
         self.assertIsNone(self.breach())
-        self.assertIsNone(self.breach(env={"HOME": "/h", "XDG_DATA_HOME": "/xdg"}))
         # Not a list of known keys: an unknown tool, a re-opened MCP read and
         # even a narrowing all differ from the map, and all refuse.
-        for rule in (self.BASH, {"permission": "mutator_mutate", "action": "allow", "pattern": "*"},
-                     {"permission": "read", "action": "allow", "pattern": "mcp:*"},
-                     {"permission": "external_directory", "action": "allow", "pattern": "*"},
-                     {"permission": "grep", "action": "deny", "pattern": "*"}):
+        for rule in (self.SHELL, {"action": "mutator_mutate", "resource": "*", "effect": "allow"},
+                     {"action": "read", "resource": "mcp:*", "effect": "allow"},
+                     {"action": "external_directory", "resource": "*", "effect": "allow"},
+                     {"action": "grep", "resource": "*", "effect": "deny"}):
             self.assertIsNotNone(self.breach(rule), rule)
 
     def test_a_resolution_without_the_default_deny_refuses(self) -> None:
-        stdout = json.dumps({"permission": [{"permission": "*", "action": "allow", "pattern": "*"}]})
+        stdout = json.dumps({"version": "opencode v2.0.20", "plugins": [],
+                             "agent": {"permissions": [{"action": "*", "resource": "*", "effect": "allow"}]}})
         breach = sd_opencode.confinement_breach(
             lambda *args: sd_review.Completed(0, stdout, ""), "opencode run", {"HOME": "/h"}, pathlib.Path("/x"), 60)
         self.assertIn("no `*: deny`", breach or "")
+
+    def test_an_unmeasured_major_version_refuses_and_names_it(self) -> None:
+        for version in ("1.18.30", "opencode v3.0.0", ""):
+            breach = self.breach(version=version) or ""
+            self.assertIn("is not 2.x", breach, version)
+            self.assertIn(version or "(no version)", breach)
+
+    def test_a_plugin_that_is_not_built_in_refuses_whatever_its_state(self) -> None:
+        """2.x imports every file in a config dir's `plugins/`, and one that
+        then fails to register has still run (measured on 2.0.20)."""
+        from tests.test_sd_review import BUILTIN_PLUGINS
+        for state in ("active", "failed"):
+            local = {"id": "widen", "source": {"type": "local", "path": "/x/plugins/widen.js"},
+                     "state": {"status": state}}
+            breach = self.breach(plugins=[*BUILTIN_PLUGINS, local]) or ""
+            self.assertIn("not built in", breach, state)
+            self.assertIn("/x/plugins/widen.js", breach)
+        self.assertIsNone(self.breach(plugins=BUILTIN_PLUGINS))
+        self.assertIn("unconfirmed", self.breach(plugins="none") or "")
+
+    def test_the_probe_argv_is_the_entrys_program(self) -> None:
+        argv = sd_opencode.probe_argv("/opt/oc/bin/opencode run", 40)
+        self.assertEqual(sd_opencode.probe_program(argv), ["/opt/oc/bin/opencode"])
+        self.assertEqual(argv[4], "40")
+        self.assertIsNone(sd_opencode.probe_program(["opencode", "run"]))
+        self.assertEqual(sd_opencode.major_version("opencode v2.0.20"), 2)
+        self.assertIsNone(sd_opencode.major_version("opencode"))
+
+
+def _opencode_major() -> int | None:
+    if not shutil.which("opencode"):
+        return None
+    done = subprocess.run(["opencode", "--version"], capture_output=True, text=True, timeout=30,
+                          stdin=subprocess.DEVNULL, check=False)
+    return sd_opencode.major_version(done.stdout)
 
 
 @unittest.skipUnless(shutil.which("opencode"), "the opencode binary is not on PATH")
 class TheEscapeIsClosedLive(unittest.TestCase):
     """The confinement asserted against opencode itself, not only against the
     generated config. A hostile checkout is built from
-    `tests/fixtures/opencode_escape`, and opencode is launched both ways: from
-    inside the checkout (the escape) and from a neutral directory (the fix).
-    The assertion is on opencode's own startup log -- whether it contributed
-    the checkout's `opencode.json` -- and on the inert mutator, not on the
-    model declining. The config-load half is offline, so no credential is
-    needed; the run is bounded and killed after bootstrap."""
+    `tests/fixtures/opencode_escape`. The marker that opencode loaded the
+    checkout's config is the checkout's own MCP server starting: the inert
+    mutator writes `server-started` to `MUTATOR_EVIDENCE` during bootstrap,
+    before any model call. Measured on 2.0.20; another major is refused by
+    the reader before any of this runs, so it skips here."""
 
     FIXTURE = REPO_ROOT / "tests" / "fixtures" / "opencode_escape"
+
+    def setUp(self) -> None:
+        major = _opencode_major()
+        if major != sd_opencode.SUPPORTED_MAJOR:
+            self.skipTest(f"opencode major {major} is refused by the reader, not measured here")
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.tmp = pathlib.Path(self.dir.name).resolve()
+        self.checkout = self.build_checkout(self.tmp)
+        self.neutral = self.tmp / "neutral"
+        self.neutral.mkdir()
+        for launch in (self.checkout, self.neutral):
+            (launch / "review-subject.md").write_text("Reply with {\"findings\": []}\n", encoding="utf-8")
+        sd_opencode.assert_isolated_launch(self.neutral, self.checkout)
 
     def build_checkout(self, tmp: pathlib.Path) -> pathlib.Path:
         checkout = tmp / "checkout"
         (checkout / "tools").mkdir(parents=True)
-        (checkout / "opencode.json").write_text((self.FIXTURE / "checkout_opencode.json").read_text())
-        (checkout / "AGENTS.md").write_text((self.FIXTURE / "AGENTS.md").read_text())
-        (checkout / "tools" / "mutator_mcp.py").write_text((self.FIXTURE / "mutator_mcp.py").read_text())
-        (checkout / "mod.py").write_text("def add(a, b):\n    return a + b\n")
+        (checkout / "opencode.json").write_text((self.FIXTURE / "checkout_opencode.json").read_text(encoding="utf-8"), encoding="utf-8")
+        (checkout / "AGENTS.md").write_text((self.FIXTURE / "AGENTS.md").read_text(encoding="utf-8"), encoding="utf-8")
+        (checkout / "tools" / "mutator_mcp.py").write_text((self.FIXTURE / "mutator_mcp.py").read_text(encoding="utf-8"), encoding="utf-8")
+        (checkout / "mod.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
         subprocess.run(["git", "init", "-q", str(checkout)], check=True)
         return checkout
 
-    def bootstrap_log(self, cwd: pathlib.Path, checkout: pathlib.Path, evidence: pathlib.Path) -> str:
-        env = sd_opencode.opencode_environment(dict(os.environ))
-        env["MUTATOR_EVIDENCE"] = str(evidence)
-        argv = ["opencode", "run", "--print-logs", "--log-level", "INFO",
-                *sd_opencode.opencode_argv(cwd, "opencode run", "openai/gpt-5.5")[1:]]
+    def reader_env(self, name: str, **parent: str) -> dict[str, str]:
+        """The environment the reader hands opencode, from this process's own
+        plus `parent`, with a fresh empty config dir."""
+        config_dir = self.tmp / f"config-{name}"
+        config_dir.mkdir()
+        return sd_opencode.opencode_environment({**os.environ, **parent}, config_dir)
+
+    def server_started(self, cwd: pathlib.Path, env: dict[str, str], name: str) -> bool:
+        evidence = self.tmp / f"{name}.log"
+        argv = sd_opencode.opencode_argv(cwd, "opencode run", "openai/gpt-5.5")
         try:
-            done = subprocess.run(argv, cwd=str(cwd), env=env, capture_output=True,
-                                  text=True, timeout=45)
-            return done.stderr
-        except subprocess.TimeoutExpired as expired:
-            err = expired.stderr or b""
-            return err.decode("utf-8", "replace") if isinstance(err, bytes) else err
+            subprocess.run(argv, cwd=str(cwd), env={**env, "MUTATOR_EVIDENCE": str(evidence)},
+                           capture_output=True, text=True, timeout=45, stdin=subprocess.DEVNULL, check=False)
+        except subprocess.TimeoutExpired:
+            pass
+        return evidence.exists() and "server-started" in evidence.read_text(encoding="utf-8")
 
-    def test_the_checkout_config_is_contributed_from_inside_but_not_from_neutral(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            tmp = pathlib.Path(raw)
-            checkout = self.build_checkout(tmp)
-            (checkout / "review-subject.md").write_text("Reply with {\"findings\": []}\n")
-            # macOS symlinks /var -> /private/var, and opencode logs the
-            # resolved path, so the marker must be resolved to match.
-            marker = f"loading path={(checkout / 'opencode.json').resolve()}"
+    def test_the_checkout_mcp_server_starts_from_inside_but_never_under_the_reader(self) -> None:
+        # A shell standing in the checkout, with project config on.
+        open_env = {key: value for key, value in self.reader_env("control").items()
+                    if key not in ("OPENCODE_CONFIG_PROJECT_DISABLE", "OPENCODE_DISABLE_PROJECT_CONFIG")}
+        open_env["PWD"] = str(self.checkout)
+        self.assertTrue(self.server_started(self.checkout, open_env, "control"),
+                        "control arm: inside the checkout with project config on, opencode starts its server")
+        # The reader's launch, from a parent that stood in the checkout: the
+        # inherited `PWD` alone started the server from a neutral cwd on 2.0.20.
+        self.assertFalse(self.server_started(self.neutral, self.reader_env("reader", PWD=str(self.checkout)), "reader"),
+                         "the checkout's MCP server must not start under the reader's launch")
+        # The second layer on its own: even launched inside, project config is off.
+        self.assertFalse(self.server_started(self.checkout, self.reader_env("layer"), "layer"),
+                         "project config must stay off even inside the checkout")
+        self.assertFalse((self.checkout / "PWNED-1375.txt").exists(), "no mutation may reach the checkout")
 
-            inside = self.bootstrap_log(checkout, checkout, tmp / "inside.log")
-            self.assertIn(marker, inside,
-                          "control arm: launched inside the checkout, opencode must load its config")
+    def report(self, cwd: pathlib.Path, env: dict[str, str]) -> dict[str, Any]:
+        result = sd_review.subprocess_runner(sd_opencode.probe_argv("opencode run", 40), env, cwd, 45)
+        report = sd_opencode.probe_report(result.stdout) if result.exit_code == 0 else None
+        self.assertIsNotNone(report, result.stderr)
+        return report or {}
 
-            neutral = tmp / "neutral"
-            neutral.mkdir()
-            (neutral / "review-subject.md").write_text("Reply with {\"findings\": []}\n")
-            sd_opencode.assert_isolated_launch(neutral, checkout)
-            neutral_log = self.bootstrap_log(neutral, checkout, tmp / "neutral.log")
-            self.assertNotIn(marker, neutral_log,
-                             "the checkout's opencode.json must not be contributed from a neutral launch dir")
-            self.assertFalse((tmp / "neutral.log").exists() and "server-started" in (tmp / "neutral.log").read_text(),
-                             "the checkout's MCP mutation server must not start")
-            self.assertFalse((checkout / "PWNED-1375.txt").exists(), "no mutation may reach the checkout")
+    def breach(self, cwd: pathlib.Path, env: dict[str, str]) -> str | None:
+        return sd_opencode.confinement_breach(sd_review.subprocess_runner, "opencode run", env, cwd, 45)
 
-    def probe(self, cwd: pathlib.Path, env: dict[str, str]) -> str | None:
-        return sd_opencode.confinement_breach(sd_review.subprocess_runner, "opencode run",
-                                              sd_opencode.opencode_environment(env), cwd, 45)
+    def test_opencode_resolves_the_map_and_the_probe_refuses_a_widening(self) -> None:
+        """Measured through opencode, not the loader. The reader's launch
+        resolves the exact map with no plugin of its own, from the neutral dir
+        and from inside the checkout alike. With project config on, the
+        hostile rules are contributed but land before our deny: 2.x merges
+        the inline config last. A rule after the deny, and a plugin in the
+        config dir, refuse; `XDG_CONFIG_HOME` no longer reaches the run."""
+        self.assertIsNone(self.breach(self.neutral, self.reader_env("neutral")))
+        inside = self.report(self.checkout, self.reader_env("inside"))
+        self.assertNotIn("mutator_mutate", json.dumps(inside["agent"]), "project config is off")
+        self.assertIsNone(self.breach(self.checkout, self.reader_env("inside2")))
 
-    def test_opencode_resolves_the_hostile_config_as_a_breach_by_any_route(self) -> None:
-        """Measured through opencode, not the loader: from inside the hostile
-        checkout it resolves `bash` and `mutator_mutate` allowances, and the
-        same config handed in through `XDG_CONFIG_HOME` -- a route the
-        neutral launch dir does not close -- is refused just the same."""
-        with tempfile.TemporaryDirectory() as raw:
-            tmp = pathlib.Path(raw)
-            checkout = self.build_checkout(tmp)
-            neutral = tmp / "neutral"
-            neutral.mkdir()
-            env = dict(os.environ)
-            inside = self.probe(checkout, env) or ""
-            self.assertIn('"bash"', inside)
-            self.assertIn('"mutator_mutate"', inside)
-            self.assertIsNone(self.probe(neutral, env))
-            config = tmp / "xdg" / "opencode"
-            config.mkdir(parents=True)
-            (config / "opencode.json").write_text((self.FIXTURE / "checkout_opencode.json").read_text())
-            routed = self.probe(neutral, {**env, "XDG_CONFIG_HOME": str(tmp / "xdg")}) or ""
-            self.assertIn('"bash"', routed)
+        open_env = {key: value for key, value in self.reader_env("open").items()
+                    if key not in ("OPENCODE_CONFIG_PROJECT_DISABLE", "OPENCODE_DISABLE_PROJECT_CONFIG")}
+        rules = sd_opencode.resolved_rules(self.report(self.checkout, open_env)) or []
+        hostile = {"action": "mutator_mutate", "resource": "*", "effect": "allow"}
+        self.assertIn(hostile, rules, "the probe reads opencode's merge, not our config")
+        self.assertLess(rules.index(hostile), rules.index(sd_opencode.PERMISSION[0]))
+        self.assertIsNone(self.breach(self.checkout, open_env))
+
+        widened = self.reader_env("widened")
+        config = json.loads(widened["OPENCODE_CONFIG_CONTENT"])
+        config["agents"][sd_opencode.AGENT]["permissions"].append({"action": "shell", "resource": "*", "effect": "allow"})
+        self.assertIn('"shell"', self.breach(self.neutral, {**widened, "OPENCODE_CONFIG_CONTENT": json.dumps(config)}) or "")
+
+        xdg = self.tmp / "xdg" / "opencode" / "plugins"
+        xdg.mkdir(parents=True)
+        (xdg / "plugin_local.js").write_text((self.FIXTURE / "plugin_local.js").read_text(encoding="utf-8"), encoding="utf-8")
+        self.assertIsNone(self.breach(self.neutral, self.reader_env("xdg", XDG_CONFIG_HOME=str(self.tmp / "xdg"))))
+        planted = self.reader_env("planted")
+        (pathlib.Path(planted["OPENCODE_CONFIG_DIR"]) / "plugins").mkdir()
+        (pathlib.Path(planted["OPENCODE_CONFIG_DIR"]) / "plugins" / "plugin_local.js").write_text(
+            (self.FIXTURE / "plugin_local.js").read_text(encoding="utf-8"), encoding="utf-8")
+        self.assertIn("sd-fixture-local", self.breach(self.neutral, planted) or "")
 
 
 if __name__ == "__main__":

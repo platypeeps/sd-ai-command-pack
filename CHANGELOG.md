@@ -4,6 +4,16 @@
 
 ### Added
 
+- **No GitHub issues from a managed repository (sd:2256).** A new
+  `PreToolUse` hook, `bin/sd-issue-guard`, denies `gh issue create` (and its
+  alias `gh issue new`) and `mcp__github__issue_write` when the session's
+  checkout is a repository whose `repo.managed` row is set. The denial tells
+  the agent to record the work with `sd task add`. Anywhere else -- an
+  unmanaged or unregistered repository, no workflow database, a payload it
+  cannot read -- it prints nothing and the call proceeds. `--user` registers
+  it with the other hooks; `SD_ISSUE_GUARD=0` switches it off. The pack's
+  own `.claude/settings.json` also denies both tools outright.
+
 - **One machine-wide queue for local gates (sd:2262).** Every gate that waits
   for a slot -- `sd-check`, so every `sd-ship` gate, and the pack's own
   `run-tests.sh` -- now takes a place in one queue under the slot directory,
@@ -112,6 +122,67 @@
   argparse; that refusal is asked once more without the two flags, silently,
   and a refusal of any other flag stays loud.
 
+- **opencode reviews run again on opencode 2.x, and refuse 1.x (sd:2445).**
+  opencode 2.0.20 removed `debug agent` and `--pure`, so every opencode
+  review was refused and the live confinement tests failed `make check`.
+  The confinement probe now starts a private `opencode serve` in the review's
+  environment and launch dir and reads the resolved `sd-review` agent and the
+  loaded plugins. A run is refused when the version is not 2.x, when any
+  plugin is not built in (2.x cannot drop plugins as `--pure` did), or when
+  anything after `*: deny` differs from the map. The run gets its own empty
+  `OPENCODE_CONFIG_DIR`, which keeps the operator's plugins out; `PWD` and
+  `OPENCODE_CONFIG` are dropped, and project config is switched off. Each was
+  measured on 2.0.20: an inherited `PWD` naming the checkout had started its
+  MCP server from the neutral dir. The review runs `--standalone`, as the
+  shared background service never sees the inline config.
+
+- **A pack landing no longer voids a receipt whose review request is unchanged (sd:1397).**
+  `sd-review --explain` now reports `request_sha256`, a digest of the prompt,
+  the review material and its input manifest (whose `omitted_paths` decide a
+  partial review), the route and the chosen providers. `sd-ship` stores
+  it on each pass. When only review code moved the binding, `prepare` and
+  `merge` replay `--explain` for the stored pass, with the prior report it
+  was handed, and keep the receipt when the digest is unchanged: no pass is
+  spent, the binding is rebound, and `review_binding_kept` records what
+  moved. A policy change, a legacy receipt, a failed replay, a changed
+  digest, or a move in code that parses or disposes findings (`sd-review`,
+  `sd_opencode.py`, `sd_registry.py`, listed as `FINDING_FILES`) still
+  refuses and re-reviews as before.
+
+- **A folder rename fits the review input (sd:2400).** `sd-review` sent a
+  moved file as a full deletion plus a full addition, so a pure folder move
+  of 111 files measured 5 MB and was refused at the 2 MB limit. A rename git
+  detects now sends git's rename patch, with any content hunks, under the new
+  path, and a one-line record naming the new path under the old one. The
+  inventory still lists both paths, so each stays visible and citable; the
+  same move measures 127 KB. The unchanged lines are not sent, so both paths
+  count as summarized: a reviewer that reads only the material reports
+  partial coverage, and the chain falls through to one that reads the
+  repository.
+
+- **A recorded check builds into a fresh folder (sd:2327).** An optional
+  `build_outputs` key in `.github/sd-check-reuse.json` names each ignored
+  folder the check builds and the variable that redirects it, such as
+  `"target": "CARGO_TARGET_DIR"`. `sd-check --record-receipt` points that
+  variable at a fresh, empty temporary folder and removes it after the run,
+  also when the run fails, so a receipt never vouches for an earlier build.
+  The operator's own folder is never deleted, moved or hashed. An output with
+  no variable (`null`) refuses recording while it exists. A rustup toolchain
+  link that leaves the toolchain, dangles or loops now refuses the binding:
+  its text stays equal when the file it names changes.
+
+- **A Rust repository can declare complete check receipts (sd:2325, sd:2326,
+  sd:2328).** Three rulings on sd:1912 change `.github/sd-check-reuse.json`
+  receipts. An optional `secret_name_exceptions` key lists exact tracked
+  files under a declared root, such as `src/token.rs`, that the secret-name
+  filter admits; every other secret-looking name stays refused. The
+  environment digest covers the declared variables only: `PATH`, `HOME`,
+  `LANG`, `LC_ALL` and `TMPDIR` drifted inside one session and voided
+  receipts, and the check still runs with them. When `rustup` is on the
+  controlled `PATH`, each toolchain a tool runs from binds by the content of
+  its whole directory, not by its name or version. An explicit `cargo
+  +nightly` or `rustup run nightly`, or a declared `+nightly` tool, binds the
+  toolchain it selects, and a selection rustup cannot answer refuses reuse.
 - **The local test gate leaves the machine room (sd:1955).**
   `.github/scripts/run-tests.sh` ran CPUs minus one workers locally, so two
   gates in the two machine-wide slots put 30 workers on 16 cores; the load

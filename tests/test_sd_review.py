@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from typing import Any, Mapping, Sequence
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -69,8 +70,11 @@ class FakeRunner:
         self.calls.append(
             {"argv": list(argv), "env": dict(env), "cwd": pathlib.Path(cwd), "timeout": timeout, "stdin": input_text}
         )
-        program = pathlib.Path(argv[0]).name
-        if program.startswith("python") or argv[-1] == "--json" and "sd-check" in " ".join(argv):
+        # The opencode confinement probe runs as `python sd_opencode.py probe
+        # ... opencode`, so it answers as the opencode program it asks about.
+        probe = sd_review.sd_opencode.probe_program(list(argv))
+        program = pathlib.Path((probe or argv)[0]).name
+        if not probe and (program.startswith("python") or argv[-1] == "--json" and "sd-check" in " ".join(argv)):
             program = "sd-check"
         answer = self.answers.get(program, self.default)
         if callable(answer):
@@ -83,26 +87,36 @@ class FakeRunner:
             return sd_review.Completed(0, PROMPT_INPUT_SUPPRESSED, "")
         # The opencode confinement probe (sd:1375) reads a resolved agent, so
         # an unscripted one gets the agent a clean launch resolves.
-        if program not in self.answers and list(argv[1:3]) == OPENCODE_PROBE_WORDS:
-            return sd_review.Completed(0, resolved_agent(env), "")
+        if program not in self.answers and probe:
+            return sd_review.Completed(0, resolved_agent(), "")
         return answer
 
 
 #: The skill-suppression probe's argv, by the two words that identify it.
 SKILL_PROBE_WORDS = ["debug", "prompt-input"]
 
-#: The opencode confinement probe's argv, by the two words that identify it.
-OPENCODE_PROBE_WORDS = ["debug", "agent"]
+#: Built-in plugins as `plugin.list` lists them on 2.0.20 (two of seventy).
+BUILTIN_PLUGINS = [{"id": "opencode.agent", "source": {"type": "builtin"}, "features": {"server": True},
+                    "state": {"status": "active"}},
+                   {"id": "opencode.config.agent", "source": {"type": "builtin"}, "features": {"server": True},
+                    "state": {"status": "active"}}]
 
 
-def resolved_agent(env: Mapping[str, str], *extra: dict[str, str]) -> str:
-    """`opencode debug agent sd-review` in the measured 1.18.30 shape: the
-    defaults, then the map's `*: deny` and its rules; `extra` lands right after
-    the deny, where a merged checkout config put its allowances."""
+def resolved_agent(*extra: dict[str, str], version: str = "opencode v2.0.20",
+                   plugins: list[dict[str, Any]] | None = None) -> str:
+    """The probe's report in the shape measured on 2.0.20: opencode's defaults,
+    its tool-output allowance among them, then the map's `*: deny` and its
+    rules. `extra` lands right after the deny, where a widening would."""
 
-    deny, *confined = sd_review.sd_opencode.confined_rules(env)
-    rules = [{"permission": "*", "action": "allow", "pattern": "*"}, deny, *extra, *confined]
-    return json.dumps({"name": "sd-review", "mode": "primary", "permission": rules})
+    deny, *confined = sd_review.sd_opencode.confined_rules()
+    defaults = [{"action": "*", "resource": "*", "effect": "allow"},
+                {"action": "external_directory", "resource": "*", "effect": "ask"},
+                {"action": "external_directory", "resource": "/h/.local/share/opencode/tool-output/*",
+                 "effect": "allow"}]
+    agent = {"id": "sd-review", "name": "sd-review", "mode": "primary",
+             "permissions": [*defaults, deny, *extra, *confined]}
+    return json.dumps({"version": version, "agent": agent,
+                       "plugins": BUILTIN_PLUGINS if plugins is None else plugins})
 
 
 def prompt_input(*texts: str) -> str:
@@ -1028,6 +1042,34 @@ class PipelineTests(ReviewFixture):
         self.assert_no_session_started(runner)
         self.assertEqual([call["argv"][1:3] for call in runner.calls], [SKILL_PROBE_WORDS])
         self.assertTrue(result["route"]["reason"])
+
+    def test_explain_digests_what_the_reviewers_would_be_asked(self) -> None:
+        """sd:1397. sd-ship replays `--explain` at a moved binding and keeps the receipt on an equal digest."""
+        root = self.make_repo()
+        self.prepare(root)
+        first = self.run_review(root, FakeRunner(), explain=True)["request_sha256"]
+        self.assertRegex(first, r"^[0-9a-f]{64}$")
+        self.assertEqual(self.run_review(root, FakeRunner(), explain=True)["request_sha256"], first)
+        self.assertNotEqual(self.run_review(root, FakeRunner(), explain=True, challenge=True)["request_sha256"], first)
+        (root / "src.py").write_text("x = 2\n", encoding="utf-8")
+        self.assertNotEqual(self.run_review(root, FakeRunner(), explain=True)["request_sha256"], first)
+
+    def test_a_coverage_change_moves_the_request_digest_though_the_material_does_not(self) -> None:
+        """sd:1397 review: `partial` marks a review incomplete from the manifest's `omitted_paths`.
+        A change to `sd_review_material` coverage that leaves material, prompt and route alone must
+        still move the digest, or a replay would keep a receipt the new code calls incomplete."""
+        root = self.make_repo()
+        self.prepare(root)
+        first = self.run_review(root, FakeRunner(), explain=True)
+        original = sd_review.sd_review_material.coverage
+
+        def summarizing(inventory, overheads):
+            return original([dict(row, summarized=True) for row in inventory], overheads)
+
+        with unittest.mock.patch.object(sd_review.sd_review_material, "coverage", summarizing):
+            moved = self.run_review(root, FakeRunner(), explain=True)
+        self.assertNotEqual(moved["input_manifest"]["omitted_paths"], first["input_manifest"]["omitted_paths"])
+        self.assertNotEqual(moved["request_sha256"], first["request_sha256"])
 
     def test_dry_run_prints_argv_and_runs_nothing(self) -> None:
         root = self.make_repo()
