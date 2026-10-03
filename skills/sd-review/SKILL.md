@@ -96,7 +96,7 @@ An unreadable database stops execution instead of ignoring operator controls.
 | `--dry-run` | Print invocations without execution. |
 | `--draft` | Apply draft routing. |
 | `--json` | Emit structured results. |
-| `--reuse-check` | Explicitly reuse eligible full-check evidence; otherwise run the deterministic gate. |
+| `--reuse-check` | Explicitly reuse eligible full-check evidence; otherwise run the deterministic gate. Never reuses in sd-ai-command-pack itself, which tracks no reuse declaration (`.github/sd-check-reuse.json`). |
 | `--gate-check BRANCH` | Branch scope: run the gate as the local gate does against `origin/BRANCH`, leaving a gate receipt for the merge gate; `sd-ship prepare` passes it under `repo.ci = local`. |
 | `--timeout SECONDS` | Set the per-phase timeout for the gate and each provider; unset, the gate gets 3600 and each provider 1800. |
 

@@ -8,6 +8,7 @@ Local receipts do not replace required CI or completed independent review covera
 
 The checkout must be clean and committed, without staged, unstaged, or untracked changes.
 Track `.github/sd-check-reuse.json` in that checkout.
+A refusal for a missing, untracked, or incomplete declaration names this file and a minimal example.
 The declaration requires exactly these keys and values:
 
 ```json
@@ -49,6 +50,8 @@ Do not declare secret material.
 List every additional executable the check invokes under `tools`.
 Detected command executables also contribute to the binding.
 Recording runs with only `PATH`, `HOME`, `LANG`, `LC_ALL`, `TMPDIR`, and declared environment variables.
+`LANG` and `LC_ALL` are set to `C.UTF-8` unless the declaration lists them, so the locale cannot vary between runs.
+The binding records both values under `locale`, and reuse compares them.
 Declared names must be valid variable identifiers.
 Names containing `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`, `COOKIE`, or `AUTH` are rejected, ignoring case.
 The binding fingerprints the declared variables only; their values are not stored in the binding.

@@ -26,6 +26,26 @@
   delivered by #<PR>` to stderr, from the item's latest merge comment, or the
   delivering commit, or "no delivery is recorded". The note is still written.
 
+- **A guest repository can take decision records (sd:2168).** A `guest_allow: docs/decisions` line in the repository's `CLAUDE.local.md` block takes `docs/decisions/` out of the guest planning-artifact refusal: the `sd-ship` push check, the `sd-review --scope planning` gate and the `sd-status` shared-tree list. `docs/decisions/` stays refused by default, and `docs/work/` and `docs/spec/` stay refused always; naming either is a configuration error. The push check now reads `sd_lib.guest_refused_dirs` instead of its own copy of the three trees, and the installer's block template lists the key commented out.
+
+- **`sd fleet stamp` honours a per-repository exemption list (sd:1797).** A
+  tracked `.github/sd-fleet.json` holding `{"exempt": ["<path>", ...]}`
+  declines stamped files once. The stamp names each exempt path as an adapted
+  line and never proposes it, so a declined file stops coming back on every
+  run. A file that does not read, or that exempts a path the stamp does not
+  write, refuses the repository. The fleet audit runs the dry run, so it
+  honours the same list.
+
+- **A test holds the system's gap ids to the pack's (sd:1372).** The pack owns
+  the gap vocabulary. `GapVocabularyTests` reads `sd_db.protection` at the
+  `.sd-system-rev` pin and fails naming each gap id or merge flag that one
+  side has and the other lacks.
+
+- **WORKFLOW.md states how to run a Python mutation check (sd:1790).** A new
+  Mutation checks section says to run with `PYTHONDONTWRITEBYTECODE=1` and to
+  delete `__pycache__` first: a same-size edit restored within a second
+  otherwise runs stale bytecode.
+
 - **No GitHub issues from a managed repository (sd:2256).** A new
   `PreToolUse` hook, `bin/sd-issue-guard`, denies `gh issue create` (and its
   alias `gh issue new`) and `mcp__github__issue_write` when the session's
@@ -139,6 +159,108 @@
   checkout, which reads as "no pieces" rather than "wrong checkout". The
   refusal `verify` gained in sd:1660 now covers `list` and both forms of
   `import`, and names the verb.
+
+- `sd-ship prepare`: a docs-lint failure already on the default branch no longer blocks a pull request that did not introduce it. A failed lint runs again in a scratch checkout of `origin/<base>`, without the body. A tree failure found there returns as a warning, and the refusal names only the failures the branch introduces, as `docs_lint_failed` (sd:1646). A non-zero lint exit that printed no `FAIL` line, such as an uncaught exception, refuses with its raw output, and a base run that did not finish excuses nothing.
+
+- `sd-ship merge`: the second `base_moved` refusal, read again just before the merge under a declared or accepted `strict` gap, now names `git merge origin/<base>` or `sd-ship prepare --catch-up` instead of a rebase. `WORKFLOW.md` states the rule: after review, take a newer default branch by a merge, never a rebase (sd:2034).
+
+- **A no-item `prepare` warns about a branch `Delivers:` trailer (sd:2171).**
+  The no-item squash message carries no branch commit's `Delivers: sd:N`, so
+  `sd task status N done --delivered-by <squash>` later found no trailer.
+  `prepare --no-item` now adds one advisory warning per such trailer, naming
+  the commit and suggesting `--item N`. It refuses nothing, and the squash
+  still does not copy the trailer; whether it should is an open question.
+
+- **`prepare` accepts a `--title` the live pull request carries (sd:1378).**
+  Once a pull request was stored, `prepare` refused any `--title` that
+  differed from the stored title with `existing PR delivery claim or title
+  differs`, even when the pull request had been retitled to it on GitHub. The
+  guard now reads the live title when the two differ and accepts and stores a
+  title that matches it. Any other title still refuses, naming the given, the
+  stored and the live title; a changed delivery claim refuses on its own.
+
+- **Prepare and merge receipts name their invoker (sd:2078).** A merge
+  nobody claimed could not be traced: its `Code delivery` note named the head
+  and the review, and no process. `prepare` now stores `invoker` in the ship
+  receipt and returns it; the merge that dispatches the `PUT` stores
+  `merge_invoker`, and the merge result and its `Code delivery` note carry it
+  as `invoker`. The block holds the pid and parent pid, the process start
+  time, the checkout and the `-C` value, `--run ID` or `--manual`, and the
+  lock-holder record the ship lock writes. A later `sd-ship reconcile`
+  reports the invoker of the merge, not its own.
+
+- **`sd-ship` reports `sd-review`'s authorship refusal (sd:2067).** A
+  branch commit with no `Authored-with:` trailer made `sd-ship review` and
+  `prepare` refuse with `local review emitted no valid timing plan`, and the
+  cause was readable only from `sd-review --scope branch`. When the plan
+  carries an `authorship_refusal`, the refusal now quotes it, with code
+  `authorship_unknown`, `operator_decision`, and a `next_action` naming
+  `sd attribute`. No provider pass is reserved, as before.
+
+- **A failed gate names each failing check and its tail (sd:2021, sd:2066).**
+  `sd-ship merge` under `repo.ci = local` said only the status description,
+  such as `sd-check fail (check fail)`, and finding the failing step meant
+  running the gate again. It now refuses right after the gate, naming each
+  failing check, its exit code, and the last 1200 characters of its stderr
+  and its stdout, from the saved `local_gate` report. The refusal says the
+  whole report is kept in the ship receipt and names the `sd-ship observe`
+  command that prints it. Prepare's `gate_failed` refusal names the failing
+  checks the same way; it kept the last 500 characters of one stream, which
+  dropped the failing test's assertion. `sd_ship_review.failing_check_tails`
+  renders both.
+
+- **`sd-ship observe` reads the ship receipt before a pull request exists
+  (sd:2021).** A prepare refused before its first push stores no pull-request
+  reference, and `observe` answered `there is no durable pull-request receipt
+  to observe`. It now returns the stored phase, with no pull request, and every
+  `observe` result carries `receipt`: the stored phase, the pass count, the
+  last review's status and findings, `review_preflight_error` and
+  `local_gate`.
+
+- **`sd-ship reconcile` names a merge commit the default branch lacks (sd:1461).**
+  The reconcile check ran `git merge-base --is-ancestor` through the raising
+  `git` helper, which reads the "no" exit as an empty, retryable
+  `git failed`. It now runs through `sd_ship_review.is_ancestor`, the sd:1348
+  shape. A merge commit outside the fetched default branch refuses as
+  `merge_commit_unreachable`, `operator_decision`, not retryable, and the
+  refusal names both commits and how to restore the merge.
+
+- **Stopping `sd gate run` no longer raises `PermissionError` (sd:2402).**
+  The signal it forwards to the command's process group now treats EPERM
+  like ESRCH: macOS answers `killpg` on a group that already exited with
+  either, and both mean the command is gone.
+
+- **`make check VENV=.venv` passes `tests.test_sd_lib` again (sd:1641).**
+  The tests' own `make` calls drop `MAKEFLAGS`, `MFLAGS` and `MAKELEVEL`, so
+  a VENV on the outer command line no longer reaches the fixture Makefile
+  and overrides its choice of environment.
+
+- **A receipt refusal names the declaration file; a timed-out gate names
+  `--timeout` (sd:1560).** A missing, untracked or incomplete declaration now
+  refuses with "track .github/sd-check-reuse.json, for example {...}", the
+  smallest declaration the parser accepts. A gate stopped at its bound -- a
+  check `sd-check` killed at `--timeout`, no gate slot within the bound, or
+  the runner killing `sd-check` itself -- reports `reason: timed_out`, and
+  `sd-review` says to give it longer with `--timeout SECONDS` (`sd-ship
+  prepare`: `--review-timeout SECONDS`). A missing program still wins.
+
+- **Recorded checks run under one locale (sd:2386).** A receipt's controlled
+  environment sets `LANG` and `LC_ALL` to `C.UTF-8` unless the declaration
+  lists them, and the binding records both under `locale`. A session's locale
+  can no longer change what a recorded check saw; receipts recorded before
+  this change rerun once.
+
+- **A text file that starts with the media marker is not summarized
+  (sd:2431).** Whole-file material (planning, untracked) is classed
+  `summarized` from its bytes (`is_media`), not from the rendered text, so a
+  note that begins "[binary, not sent] " keeps a material-only reviewer's
+  coverage complete.
+
+- **A renamed and edited non-media binary is sent as its rename delta
+  (sd:2432).** The `git diff --binary` fallback ran with `--no-renames`, so
+  such a file went as a full base64 literal under its new path. It now runs
+  with `-M` over both paths and sends git's rename patch, usually a small
+  delta, with the `[renamed]` record; both paths stay listed and summarized.
 
 - **opencode reviews run again on opencode 2.x, and refuse 1.x (sd:2445).**
   opencode 2.0.20 removed `debug agent` and `--pure`, so every opencode
@@ -374,6 +496,30 @@
   `full` and `minimal` and refuses `guest`. `--check` reads the same mode set
   (`sd_setup_guard.LANE_MODES`), so a tracked lane in `minimal` is compared
   against the template rather than marked `REMOVE` (sd:1285).
+
+- **The test run names its tree by content, and each shard by name (sd:2080).**
+  `run-tests.sh` adds `content=<tree-id>` to its `run-tests: start` and
+  `run-tests: end` lines on stderr. It is the tree id of the working tree,
+  untracked files included, so two edits of one dirty file read as two trees.
+  The end line reads it when the run ends, so an edit made during the run
+  shows as two ids. Each shard log now opens with `shard <name>: start`, so a
+  `Ran` line sits inside its own shard's labels instead of above them.
+
+- **The review prompt names six generic defect classes (sd:1635).** For a
+  code subject, `sd-review` asks for external JSON used before narrowing, an
+  error that names the wrong stage, substring identifier matching, unisolated
+  test I/O, rendering edge cases, and every sibling site of a defect's shape.
+  The adjudication reference asks for the same sibling sweep. The prompt
+  change moves `request_sha256`, so an open item's review receipt does not
+  survive this landing, and its next `prepare` re-reviews.
+
+- **`--reuse-check` says the pack itself never reuses (sd:1296).** The flag's
+  help and the `sd-review` and `sd-ship` skills now say it, not only the
+  receipts reference: the pack tracks no `.github/sd-check-reuse.json`.
+
+- **A rejection that survives one review pass is adjudicated before the next
+  fix (sd:1929).** One line in the `sd-ship` skill; the adjudication
+  reference points back to it.
 
 - **A review carries forward across a clean merge-in of the base (sd:1485).**
   Every catch-up merge moved the head, so the local review spent a

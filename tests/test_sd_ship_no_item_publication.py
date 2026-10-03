@@ -23,9 +23,14 @@ no_item = review_fixture.no_item
 
 
 class NoItemPublication(unittest.TestCase):
+    #: A commit message to add on the branch before the record is made.
+    extra_commit: str | None = None
+
     def setUp(self):
         fixture.ShipCase.setUp(self)
         review_fixture.freeze_library(self, self.directory)
+        if getattr(self, "extra_commit", None):
+            _git(self.root, "commit", "--allow-empty", "-qm", self.extra_commit)
         self.database = self.database.with_name("no-items.db")
         initialise(self.database)
         self.connection = connect(self.database)
@@ -234,6 +239,22 @@ class NoItemPublication(unittest.TestCase):
             result = self.merge(code=3)
         self.assertIn("does not bind", result["error"])
         self.assertFalse([call for call in self.remote.calls if call.method == "PUT"])
+
+
+
+class NoItemDeliversWarning(unittest.TestCase):
+    """sd:2171. A no-item squash drops a branch commit's `Delivers:`, so
+    `sd task status N done --delivered-by` found no trailer; prepare says so."""
+
+    extra_commit = "record the delivery\n\nDelivers: sd:2005\nAuthored-with: human"
+    setUp, invoke = NoItemPublication.setUp, NoItemPublication.invoke
+
+    def test_a_branch_commit_that_delivers_an_item_warns_to_ship_with_it(self):
+        prepared = self.invoke("prepare", "--title", "Record the delivery")
+        self.assertEqual(prepared["phase"], "ready_to_send")
+        [warning] = [line for line in prepared["warnings"] if "Delivers:" in line]
+        self.assertEqual(warning, f"commit {self.head[:12]} carries `Delivers: sd:2005`, and a no-item squash "
+                                  "does not carry it; ship with --item 2005 to record the delivery")
 
 
 if __name__ == "__main__":
