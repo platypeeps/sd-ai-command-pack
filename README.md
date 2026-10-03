@@ -172,6 +172,7 @@ These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOM
 Wrap a plain `make check` in any repository that way, and drop a per-repository `lockf` from lane scripts: the pool orders gates across every repository.
 A waiting gate names who holds each slot and since when.
 `sd gate post --head SHA` runs the merge gate at SHA and posts `sd/local-gate`, for a merge path that is not `sd-ship merge`.
+`sd gate check` runs the same check at `HEAD` and records a pass that `sd-ship prepare` and the merge gate reuse at that head; it posts nothing.
 
 `configured` allows private code and scoped review context to the operator's eligible configured providers, including future entries.
 A local `reviewers` list restricts recipients; an explicit empty value denies review.
@@ -224,6 +225,11 @@ that reason and the item closes without it. A `followup` filed in a
 registered checkout carries that checkout since sd:809, but only a task's
 move to done records a delivering commit, so the flag is refused there too,
 on that second reason, and the item closes without it just the same.
+A row worked on its own branch, as `sd runner prepare --branch` records it,
+does not close plainly while no merge of that branch is recorded (sd:1990).
+Name the merge with `--delivered-by`, or say why no pull request is needed
+with `--reason`, which the transition records. A merge `sd-ship` recorded,
+or a row on `main` or `master`, closes as before.
 
 A task that repeats carries a rule:
 `sd task add "File the weekly report" --due 2026-01-01 --recur FREQ=WEEKLY`.

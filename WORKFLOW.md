@@ -151,7 +151,8 @@ After the switch:
 - The description carries `inputs <digest>` as provenance: the head, the copied `CLAUDE.local.md` and the pack's `bin/` files.
 - Every merge attempt posts a fresh status. `sd-ship prepare` runs this same gate, through `sd-review --gate-check`.
   Prepare's pass leaves a receipt; the merge gate at the same head and binding, within 30 minutes, reads it instead of running `sd-check` again.
-  The status then says `(reused)`. Prepare never reads a receipt and the merge gate never writes one.
+  The status then says `(reused)`. The merge gate never writes a receipt.
+  Prepare reads one too: a pass that `sd gate check` or an earlier prepare left at the same head and binding (sd:1912).
   Inputs outside the repository are not bound; `bin/sd_gate_receipts.py` names the binding and this trust boundary.
 - Given the base branch, the gate passes `sd-check --base`: a repository's declared docs-only scope applies (sd:2072).
 - `sd-ship merge --watch` starts no remote watch: no remote check is coming, and the gate runs to completion in the merge (sd:1875).
@@ -603,6 +604,12 @@ retains the endpoint default. These values require support from the selected
 model: MiniMax-M3 supports disabled thinking, and Baseten's DeepSeek-V4-Pro-0813
 supports effort `none`. Lower reasoning can change finding quality; full
 subject coverage and the required reviewer count remain mandatory.
+A URL entry can also declare `response_format: json_schema`. `sd-review`
+then sends the findings schema as a strict `response_format`, in the copy
+Moonshot's strict mode takes: every property typed, `line` as `anyOf`
+integer or null, and no `minLength` or `maxItems`. The answer is still parsed
+against the full schema. Only an entry that declares the field sends it; an
+endpoint that accepts it may ignore it, as MiniMax-M3 does (sd:1827).
 Incomplete output still fails the review. A pin is changed by editing the
 registry file, never by a page.
 A `url` answer that fails the findings schema is retried once on the same
