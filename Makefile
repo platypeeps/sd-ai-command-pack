@@ -278,7 +278,9 @@ endif
 # sd:1541. Local test runs at once on this machine; `SD_GATE_SLOTS=0 make test` lifts it.
 # Under `sd-check`, which holds a machine-wide gate slot (sd:1996), the variable
 # arrives as 0 and `?=` keeps it, so the gate's own tests take no second slot.
-SD_GATE_SLOTS ?= 2
+# sd:2522. Unset, the count is the machine's, read as `sd-check` reads it, so a
+# plain `make test` and every gate share one pool; a helper that cannot answer still caps.
+SD_GATE_SLOTS ?= $(shell "$(PYTHON)" bin/sd_gate_slots.py count 2>/dev/null || echo 1)
 
 test:
 	PYTHON_BIN="$(VENV_PYTHON)" SD_GATE_SLOTS="$(SD_GATE_SLOTS)" $(TEST_RUNNER_ENV) bash .github/scripts/run-tests.sh
