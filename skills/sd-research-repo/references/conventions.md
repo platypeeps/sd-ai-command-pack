@@ -357,7 +357,9 @@ checkout owns it and that the note is not the place to edit.
 tab, and the tab lists and serves **everything it finds there**. That folder is
 gitignored — it is regenerated whenever git moves the tree — and `render` adds
 the ignore entry itself. Registration is one line in the dashboard's
-`documents.conf`, `label|<key>|<label>`, written once and idempotent. It
+`documents.conf`, `label|<key>|<label>`, written once and idempotent. The file
+is `project-dashboard/documents.conf` under `$SYSTEM_TOOLS_CONFIG`, which
+defaults to `$XDG_CONFIG_HOME/system`, else `~/.config/system`. It
 carries no path: the dashboard enumerates `docs/dashboard/` from disk, so a
 path in the row would be the default location written down a second time and
 would go stale the moment the repo moved. The dashboard reads that file and
@@ -484,13 +486,18 @@ delivered: `render` keeps a receipt beside the queue, the drain's last step
 from a linked worktree writes that worktree's `docs/dashboard/` and nothing
 else -- no vault copy, no request -- unless `SD_PUBLISH_FROM_WORKTREE=1` is on
 the invocation; the refusal names the main checkout to run in.
+`SD_SKIP_MIRROR=<reason>` renders and queues nothing; the hook sets it for a
+branch checkout behind its upstream, so the pull that follows queues instead.
 `references/publication-contract.md` says how the status report surfaces one.
 
 Mirror shape — the full document minus its H1, opening with a pointer back to
-the file so a reader who lands in the mirror knows where to edit:
+the file so a reader who lands in the mirror knows where to edit. The pointer
+links the request's `source_url` verbatim, the GitHub URL the render read from
+`origin`; where that is `null`, it names the `source` path instead. The drain
+never composes a GitHub URL itself:
 
 ```markdown
-*Source: **`<absolute path to the markdown>`** — edit there, then update this page.*
+*Source: **[`<repo-relative path>`](<source_url>)** — edit there, then update this page.*
 
 <the document's provenance line>
 
@@ -498,6 +505,9 @@ the file so a reader who lands in the mirror knows where to edit:
 
 ## 1. First section
 ```
+
+Without a `source_url`, the first line is
+`` *Source: **`<absolute path to the markdown>`** — edit there, then update this page.* ``
 
 **Notion.** It round-trips tables, fenced code blocks (ASCII diagrams
 included), blockquotes, and nested lists faithfully; write an empty table cell

@@ -1,9 +1,14 @@
 """An optional Jev reading of the review tier, on wherever Jev can answer.
 
 `sd_route.route` decides the tier from the policy and the changed paths, and it
-stays the decision: this module is a second opinion over a diff shape the
+stays the floor: this module is a second opinion over a diff shape the
 policy's globs cannot see. It is experimental and additive. No output changes
 unless a `jev` on `PATH` says it can answer on this machine.
+
+**Jev may raise the tier, never lower it** (sd:2132). An answer below the
+routed tier -- `skip` included -- keeps the routed tier and records what Jev
+said as `below_routed`. Jev orders, routes and triages; it never removes a
+review the policy asked for.
 
 `jev` lives in a private companion repository and is absent on most machines.
 Absence is the ordinary case and not a fault, so it is silent: a module that
@@ -106,6 +111,7 @@ def jev_tier(
     reason: str,
     env: Mapping[str, str],
     stream: TextIO | None = None,
+    root: str | None = None,
 ) -> tuple[str, dict[str, Any] | None]:
     """The tier to review at, and the record of the reading that moved it.
 
@@ -133,7 +139,7 @@ def jev_tier(
         return _jev_declined(tier, note, f"`{COMMAND} enabled` exited {gate.returncode}")
     options = [str(name) for name in order]
     fallback = _jev_fallback(options)
-    answer = _jev_run(_jev_argv(binary, fallback, options), env,
+    answer = _jev_run(_jev_argv(binary, fallback, options, _jev_subject(root)), env,
                       _jev_state(paths, lines, reason))
     chosen = (answer.stdout or "").strip()
     if answer.returncode != 0:
@@ -145,6 +151,9 @@ def jev_tier(
         return _jev_declined(tier, note, f"Jev was unsure below {UNSURE_BELOW} confidence")
     if chosen not in options:
         return _jev_declined(tier, note, f"answer {chosen!r} is not one of {', '.join(options)}")
+    if options.index(chosen) < options.index(tier):
+        return tier, {"routed_tier": tier, "tier": tier, "moved": False, "source": "judged",
+                      "below_routed": chosen}
     return chosen, {"routed_tier": tier, "tier": chosen, "moved": chosen != tier, "source": "judged"}
 
 
@@ -165,7 +174,17 @@ def _jev_declined(tier: str, stream: TextIO, why: str) -> tuple[str, None]:
     return tier, None
 
 
-def _jev_argv(binary: str, fallback: str, options: Sequence[str]) -> list[str]:
+def _jev_subject(root: str | None) -> str | None:
+    """The judged change, for the ledger only (sd:2107): `jev --subject` records it
+    as the row's question id and never sends it. None past the ledger's 96 characters."""
+
+    head = sd_lib.github_head(root) if root else None
+    subject = f"sd-review-tier:{head[0]}.{head[1]}:{head[2][:12]}" if head else ""
+    return subject if 0 < len(subject) <= 96 else None
+
+
+def _jev_argv(binary: str, fallback: str, options: Sequence[str],
+              subject: str | None = None) -> list[str]:
     """The one place the `jev` command line is written, and it is checked.
 
     `choice` takes its instructions positionally and its named set in
@@ -178,7 +197,8 @@ def _jev_argv(binary: str, fallback: str, options: Sequence[str]) -> list[str]:
             "--criteria", _jev_criteria(options),
             "--unsure-below", UNSURE_BELOW,
             "--state", "-", "--state-format", "json", "--caller", CALLER,
-            "--id", "sd-review-tier", "--stage", STAGE, "--fallback", fallback]
+            "--id", "sd-review-tier", "--stage", STAGE, "--fallback", fallback,
+            *(["--subject", subject] if subject else [])]
 
 
 def _jev_criteria(options: Sequence[str]) -> str:

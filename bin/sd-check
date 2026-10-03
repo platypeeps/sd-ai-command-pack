@@ -21,15 +21,27 @@ Exit 0 when nothing failed, 1 when a check failed, 2 when the invocation or the
 configuration was wrong. A controlled error prints a sentence, never a traceback.
 Only --record-receipt writes local checkpoint evidence; it never changes Git.
 The repository's check commands own their effects, including any network calls.
+
+With `--base REF`, a repository that declares a docs-only scope
+(`sd_check_scope`, sd:2072) runs only its docs command when every path changed
+since the merge base is a docs path. The report's `scope` says which ran; the
+three names are then `skipped` and a fourth row, `docs`, carries the result.
+
+Every run that executes a check first takes a machine-wide gate slot
+(`sd_gate_slots`, sd:1996): every `repo.ci = local` repository's gate passes
+through here, so here is where the cap on concurrent gates is kept. The wait
+counts against `--timeout`, each check gets what is left, and the checks run
+with `SD_GATE_SLOTS=0`, so a gate inside them never waits on this one's slot.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import pathlib
-import subprocess
+import signal
 import sys
 import time
 from typing import Mapping, TextIO
@@ -39,6 +51,8 @@ if _BIN not in sys.path:
     sys.path.insert(0, _BIN)
 
 import sd_check_receipts  # noqa: E402
+import sd_check_scope  # noqa: E402
+import sd_gate_slots  # noqa: E402
 import sd_lib  # noqa: E402
 
 PASS = "pass"
@@ -62,7 +76,7 @@ def _tail(text: str) -> tuple[str, bool]:
 
 
 def plan(
-    detection: sd_lib.Detection, only: str | None
+    detection: sd_lib.Detection, only: str | None, scope: sd_check_scope.Scope | None = None
 ) -> list[dict[str, object]]:
     """Decide, before running anything, what each name's outcome will be.
 
@@ -94,6 +108,9 @@ def plan(
                 }
             )
             continue
+        if scope is not None and scope.mode == sd_check_scope.DOCS_ONLY:
+            entries.append({"name": name, "command": command, "status": SKIPPED, "reason": "docs-only scope"})
+            continue
         if only is None and name != "check" and "check" in commands:
             entries.append(
                 {
@@ -105,25 +122,26 @@ def plan(
             )
             continue
         entries.append({"name": name, "command": command, "status": None, "reason": ""})
+    if scope is not None and scope.mode == sd_check_scope.DOCS_ONLY:
+        entries.append({"name": "docs", "command": list(scope.command), "status": None, "reason": ""})
     return entries
 
 
 def run_one(
     command: list[str], root: pathlib.Path, timeout: int, environ: Mapping[str, str] | None = None
 ) -> tuple[str, int | None, float, str, str, str]:
-    """Run one check. Output is captured and attributed, never interleaved."""
+    """Run one check. Output is captured and attributed, never interleaved.
+
+    The check leads a process group, and the group ends with the call (sd:1815):
+    at the timeout, on SIGTERM or SIGINT, and after a normal exit, so nothing
+    `make check` started outlives the run. Its stdin is /dev/null.
+    """
     started = time.monotonic()
     try:
-        completed = subprocess.run(  # fixed argv, no shell
-            command,
-            cwd=str(root),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-            env=environ,
+        completed = sd_lib.run_group(  # fixed argv, no shell
+            command, cwd=root, env=dict(os.environ if environ is None else environ), timeout=timeout
         )
-    except subprocess.TimeoutExpired:
+    except sd_lib.GroupTimeout:
         return FAIL, None, time.monotonic() - started, "", "", f"timed out after {timeout}s"
     except OSError as error:
         return FAIL, None, time.monotonic() - started, "", "", f"cannot run {command[0]}: {error}"
@@ -149,8 +167,11 @@ def execute(
     dry_run: bool,
     timeout: int,
     environ: Mapping[str, str] | None = None,
+    blocked: str | None = None,
+    scope: sd_check_scope.Scope | None = None,
 ) -> dict[str, object]:
-    entries = plan(detection, only)
+    """Run the planned checks; `blocked` fails every one that would run, unrun, with that reason."""
+    entries = plan(detection, only, scope)
     checks: list[dict[str, object]] = []
     for entry in entries:
         record: dict[str, object] = {
@@ -170,6 +191,9 @@ def execute(
             if dry_run:
                 record["status"] = SKIPPED
                 record["reason"] = "dry run"
+            elif blocked is not None:
+                record["status"] = FAIL
+                record["reason"] = blocked
             else:
                 status, code, duration, out, err, note = (run_one(command, root, timeout) if environ is None
                                                         else run_one(command, root, timeout, environ))
@@ -196,6 +220,7 @@ def execute(
         "detected": detection.reason,
         "warnings": list(detection.warnings),
         "dry_run": dry_run,
+        "scope": (scope or sd_check_scope.Scope(sd_check_scope.FULL, "no --base given")).as_report(),
         "status": SKIPPED if dry_run and detection.commands else overall(statuses),
         "checks": checks,
     }
@@ -211,6 +236,9 @@ def render(result: dict[str, object], stream: TextIO) -> None:
     assert isinstance(warnings, list)
     for warning in warnings:
         write(f"  warning: {warning}\n")
+    scope = result.get("scope")
+    if isinstance(scope, dict) and scope.get("mode") == sd_check_scope.DOCS_ONLY:
+        write(f"  scope: docs-only ({scope['reason']})\n")
     checks = result["checks"]
     assert isinstance(checks, list)
     for record in checks:
@@ -229,6 +257,9 @@ def render(result: dict[str, object], stream: TextIO) -> None:
             text = str(record[channel])
             if text.strip():
                 write(f"[{channel}]\n{text.rstrip()}\n")
+    slot = result.get("gate_slot")
+    if isinstance(slot, dict) and slot.get("slots"):
+        write(f"  gate slot: cap {slot['slots']} ({slot['source']}), waited {float(slot['waited_seconds']):.1f}s\n")
     if result["dry_run"]:
         write("sd-check: dry run, nothing executed\n")
     else:
@@ -246,6 +277,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", help="emit one machine-readable object")
     parser.add_argument("--dry-run", action="store_true", help="print what would run, then exit 0")
     parser.add_argument("--only", metavar="NAME", help=f"run one of {', '.join(sd_lib.CHECK_NAMES)}")
+    parser.add_argument("--base", metavar="REF",
+                        help=f"scope the run to the change since the merge base with REF; see {sd_check_scope.DECLARATION}")
     parser.add_argument("--record-receipt", action="store_true", help="explicitly store a reusable clean full-check receipt")
     parser.add_argument("--database", type=pathlib.Path, help="receipt database; only with --record-receipt")
     parser.add_argument(
@@ -253,9 +286,71 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_TIMEOUT_SECONDS,
         metavar="SECONDS",
-        help=f"per-check timeout (default: {DEFAULT_TIMEOUT_SECONDS})",
+        help=f"per-check timeout; a wait for a gate slot counts against it (default: {DEFAULT_TIMEOUT_SECONDS})",
     )
     return parser
+
+
+def take_slot(environ: Mapping[str, str], timeout: int) -> tuple[sd_gate_slots.Slot | None, dict[str, object]]:
+    """A gate slot for this run, waiting at most `timeout`; None when it never came.
+
+    The cap is `SD_GATE_SLOTS`, then the machine's `sd.gate_slots`, then a
+    quarter of the cores; CI and a holder's children (`SD_GATE_SLOTS=0`) take
+    none. The wait is a place in the sd:2262 queue, under its load rule.
+    """
+    try:
+        slots, source = sd_gate_slots.configured(environ, sd_lib.core_setting("gate_slots", dict(environ)))
+        rule = sd_gate_slots.load_rule(environ, sd_lib.core_setting("gate_load_max", dict(environ)),
+                                       sd_lib.core_setting("gate_settle_seconds", dict(environ)))
+    except ValueError as error:
+        raise UsageError(str(error)) from None
+    try:
+        slot = sd_gate_slots.acquire(slots, environ, stream=sys.stderr, timeout=timeout, rule=rule,
+                                     label=f"sd-check {pathlib.Path.cwd().name}")
+    except sd_gate_slots.LauncherExited:
+        raise UsageError("the process that started this gate exited while it waited for a slot") from None
+    report: dict[str, object] = {"slots": slots, "source": source, "waited_seconds": float(timeout),
+                                 "path": None}
+    if slot is not None:
+        report.update(waited_seconds=round(slot.waited, 3), path=str(slot.path) if slot.path else None)
+    return slot, report
+
+
+def gated_execute(root: pathlib.Path, detection: sd_lib.Detection, args: argparse.Namespace,
+                  environ: Mapping[str, str] | None) -> dict[str, object]:
+    """`execute` inside a gate slot when anything will run; the checks get the timeout the wait left."""
+    scope = getattr(args, "scope", None)
+    runnable = any(entry["status"] is None for entry in plan(detection, args.only, scope))
+    if args.dry_run or not runnable:
+        return execute(root, detection, args.only, args.dry_run, args.timeout, environ, scope=scope)
+    slot, report = take_slot(os.environ, args.timeout)
+    children = {**(environ if environ is not None else os.environ), sd_gate_slots.SLOTS_VARIABLE: "0"}
+    try:
+        if slot is None:
+            result = execute(root, detection, args.only, False, args.timeout, children,
+                             f"no gate slot came free within {args.timeout}s", scope)
+        else:
+            result = execute(root, detection, args.only, False, max(1, int(args.timeout - slot.waited)), children,
+                             scope=scope)
+    finally:
+        if slot is not None:
+            slot.release()
+    result["gate_slot"] = report
+    return result
+
+
+def run_scope(args: argparse.Namespace, root: pathlib.Path, detection: sd_lib.Detection) -> sd_check_scope.Scope | None:
+    """What `--base` scopes the run to (sd:2072), or None without it; a bad pairing or declaration is a usage error."""
+    if args.base is None:
+        return None
+    if args.record_receipt:
+        raise UsageError("--record-receipt requires an actual full check")
+    if args.only is not None:
+        raise UsageError("--base scopes a whole run; it does not combine with --only")
+    try:
+        return sd_check_scope.decide(root, args.base, detection)
+    except sd_check_scope.DeclarationError as error:
+        raise UsageError(str(error)) from None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -278,19 +373,23 @@ def main(argv: list[str] | None = None) -> int:
             raise UsageError("--database requires --record-receipt")
         if args.record_receipt and (args.only or args.dry_run):
             raise UsageError("--record-receipt requires an actual full check")
+        args.scope = run_scope(args, root, detection)
         before, controlled = None, None
-        if args.record_receipt:
-            try:
-                before = sd_check_receipts.prepare_check_receipt(root, os.environ, args.database)
-                controlled = sd_check_receipts.receipt_environment(sd_check_receipts.reuse_contract(root), os.environ)
-            except Exception as error:
-                raise UsageError(f"receipt unavailable: {error}") from None
-        result = execute(root, detection, args.only, args.dry_run, args.timeout, controlled)
-        if before is not None:
-            try:
-                result["receipt_revision"] = sd_check_receipts.store_check_receipt(root, os.environ, args.database, before, result)
-            except Exception as error:
-                result["receipt_error"] = str(error)
+        with contextlib.ExitStack() as outputs:  # a recorded run's build folders go when it ends (sd:2327)
+            if args.record_receipt:
+                try:
+                    contract = sd_check_receipts.reuse_contract(root)
+                    controlled = outputs.enter_context(sd_check_receipts.build_output_environment(
+                        root, contract, sd_check_receipts.receipt_environment(contract, os.environ)))
+                    before = sd_check_receipts.prepare_check_receipt(root, os.environ, args.database)
+                except Exception as error:
+                    raise UsageError(f"receipt unavailable: {error}") from None
+            result = gated_execute(root, detection, args, controlled)
+            if before is not None:
+                try:
+                    result["receipt_revision"] = sd_check_receipts.store_check_receipt(root, os.environ, args.database, before, result)
+                except Exception as error:
+                    result["receipt_error"] = str(error)
     except sd_lib.ConfigError as error:
         print(f"sd-check: error: {error}", file=sys.stderr)
         return 2
@@ -307,5 +406,15 @@ def main(argv: list[str] | None = None) -> int:
     return 1 if result["status"] == FAIL or result.get("receipt_error") else 0
 
 
+def interrupted() -> None:
+    """Ctrl-C: `run_group` has ended the check's group; say so, then die of SIGINT as a shell expects."""
+    print("sd-check: interrupted", file=sys.stderr)
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    os.kill(os.getpid(), signal.SIGINT)
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        interrupted()

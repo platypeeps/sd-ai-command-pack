@@ -1,0 +1,204 @@
+#!/usr/bin/env python3
+"""PreToolUse hook: in a managed repository, file work with sd, not a GitHub issue.
+
+The operator's repositories track work in the sd workflow database, and their
+GitHub issues are switched off. An agent that reaches for `gh issue create`
+or `mcp__github__issue_write` there either gets a refusal from GitHub that
+says nothing useful, or files an issue nobody reads. This hook denies both
+and names the tracker instead: `sd task add` (sd:2256).
+
+Which repositories: those whose `repo` row says `managed = 1`. That column is
+the one stored fact for "a repository the operator manages" (system
+migration 015), so this hook reads it rather than guessing from the owner on
+the remote. The checkout resolves to its row the way `sd` resolves it --
+`sd_db.repos.registered_for`, path first and then origin -- so a linked
+worktree of a managed repository is denied as its main checkout is.
+
+**A session anywhere else keeps working.** Not a managed repository, not a
+registered one, not a git checkout at all, no `sd_db` on the machine, a
+payload it cannot read, any internal error: the hook prints nothing and exits
+0, and the tool call proceeds under the session's own permissions. A deny is
+the only thing it ever prints, because a `PreToolUse` hook that writes to
+stdout is speaking to the model before a tool runs.
+
+It is registered on `Bash`, so it starts on every shell call. The command is
+read first and the database is opened only when the command files an issue,
+so the common case costs the interpreter start and one tokenisation.
+`SD_ISSUE_GUARD=0` switches it off for a session that needs the old path.
+
+What counts as filing an issue from the shell: `gh` in command position --
+first in a pipeline segment, after `VAR=value` assignments and the wrappers
+`WRAPPERS` names -- whose first two positional words are `issue create` or its
+alias `issue new`. Flags before them are skipped, `-R`/`--repo` with their
+value. A quoted string that mentions the command is one token and never
+matches; an unquoted heredoc line that starts with it does, and is denied.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shlex
+import sys
+from pathlib import Path
+
+HOOK_EVENT = "PreToolUse"
+MCP_TOOL = "mcp__github__issue_write"
+
+REASON = (
+    "This repository tracks work in sd, not GitHub issues. Record the work "
+    "with `sd task add \"<title>\" --body \"<detail>\"` from this checkout;"
+    " `sd task note <n> \"<text>\"` adds to an existing item."
+)
+
+#: The characters that separate commands. Newline is one, outside quotes. The
+#: lexer groups a run of them into one token (`&&`, `;\n`), so a separator is
+#: any token made of nothing else.
+PUNCTUATION = ";&|()\n"
+
+#: Words that run the command after them. `rtk` is the token-saving proxy a
+#: shell hook may put in front of `gh`.
+WRAPPERS = frozenset({"env", "command", "exec", "nohup", "sudo", "time", "rtk"})
+
+#: `gh` global flags that take a value as the next word.
+VALUED_FLAGS = frozenset({"-R", "--repo"})
+
+ISSUE_VERBS = frozenset({"create", "new"})
+
+
+def tokens(command: str) -> list[str] | None:
+    """Shell words and separators, or None when the line does not parse."""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=PUNCTUATION)
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    try:
+        return list(lexer)
+    except ValueError:
+        return None
+
+
+def separator(word: str) -> bool:
+    return bool(word) and not word.strip(PUNCTUATION)
+
+
+def files_an_issue(command: str) -> bool:
+    """Whether a shell command line runs `gh issue create` anywhere in it."""
+    words = tokens(command)
+    if not words:
+        return False
+    at_start = True
+    position = 0
+    while position < len(words):
+        word = words[position]
+        position += 1
+        if separator(word):
+            at_start = True
+            continue
+        if not at_start:
+            continue
+        if "=" in word and not word.startswith("=") and word.split("=", 1)[0].isidentifier():
+            continue
+        if word in WRAPPERS:
+            continue
+        at_start = False
+        if os.path.basename(word) != "gh":
+            continue
+        positional: list[str] = []
+        while position < len(words) and not separator(words[position]):
+            argument = words[position]
+            position += 1
+            if argument in VALUED_FLAGS:
+                position += 1
+            elif not argument.startswith("-"):
+                positional.append(argument)
+            if len(positional) == 2:
+                break
+        if positional[:1] == ["issue"] and positional[1:2] and positional[1] in ISSUE_VERBS:
+            return True
+    return False
+
+
+def files_from(payload: dict) -> bool:
+    """Whether this tool call would file a GitHub issue."""
+    tool = payload.get("tool_name")
+    if tool == MCP_TOOL:
+        return True
+    if tool != "Bash":
+        return False
+    sent = payload.get("tool_input")
+    command = sent.get("command") if isinstance(sent, dict) else None
+    return isinstance(command, str) and files_an_issue(command)
+
+
+def call_directory(payload: dict, environ: dict[str, str]) -> Path:
+    """Where the call runs: payload `.cwd`, then `$PWD`, then the launch dir.
+
+    `bin/sd-skill-use`'s order and for its reason: `CLAUDE_PROJECT_DIR` is
+    fixed for the session, so preferring it inside a linked worktree would
+    name the wrong checkout.
+    """
+    for candidate in (payload.get("cwd"), environ.get("PWD"),
+                      environ.get("CLAUDE_PROJECT_DIR")):
+        if isinstance(candidate, str) and candidate and os.path.isdir(candidate):
+            return Path(candidate).resolve()
+    return Path.cwd().resolve()
+
+
+def managed(where: Path) -> bool:
+    """Whether `where` is a checkout of a repository the operator manages.
+
+    Every way of not knowing is False: no library, no database, no git, no
+    row. The cost of a wrong False is an issue filed; the cost of a wrong
+    True is a session that cannot do what its repository allows.
+    """
+    try:
+        import sd_lib  # noqa: PLC0415 - deferred: only a matching call pays for it
+
+        sd_db = sd_lib.import_sd_db().module
+        if sd_db is None:
+            return False
+        root = sd_lib.git_output(["rev-parse", "--show-toplevel"], where)
+        if not root:
+            return False
+        origin = sd_lib.git_output(["remote", "get-url", "origin"], where)
+        connection = sd_db.connect(write=False)
+        try:
+            key = sd_db.repos.registered_for(connection, str(Path(root).resolve()), origin)
+            row = sd_db.repos.row_for(connection, key)
+            return bool(row is not None and row["managed"])
+        finally:
+            connection.close()
+    except Exception:  # noqa: BLE001 - not knowing is not a reason to deny
+        return False
+
+
+def guard_call(stdin_text: str, environ: dict[str, str], out) -> int:
+    """Print a deny for an issue filed from a managed repository; else nothing."""
+    if environ.get("SD_ISSUE_GUARD") == "0":
+        return 0
+    try:
+        payload = json.loads(stdin_text) if stdin_text.strip() else {}
+    except ValueError:
+        return 0
+    if not isinstance(payload, dict) or payload.get("hook_event_name") != HOOK_EVENT:
+        return 0
+    if not files_from(payload) or not managed(call_directory(payload, environ)):
+        return 0
+    out.write(json.dumps({"hookSpecificOutput": {
+        "hookEventName": HOOK_EVENT,
+        "permissionDecision": "deny",
+        "permissionDecisionReason": REASON,
+    }}))
+    return 0
+
+
+def guard_main() -> int:
+    """Run from stdin; an unreadable stdin or any error is a silent 0."""
+    try:
+        return guard_call(sys.stdin.read(), dict(os.environ), sys.stdout)
+    except BaseException:  # noqa: BLE001 - a hook never breaks a tool call
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(guard_main())

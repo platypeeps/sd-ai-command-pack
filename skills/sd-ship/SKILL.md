@@ -8,7 +8,8 @@ disable-model-invocation: true
 
 Deliver only the enumerated scope.
 Invocation authorizes its scoped commits, branch push, and merge, subject to execution permissions and existing gates.
-Invocation alone authorizes no local branch, worktree, or checkout deletion.
+Post-merge closeout removes the merged PR's safe branches, stashes, refs and stale worktrees without asking (operator ruling 2026-10-02).
+Invocation alone authorizes no checkout deletion.
 Use STE-Concise; report delivery state, decisive checks, blockers, and retained worktrees.
 
 ## Standing permission
@@ -22,6 +23,13 @@ When the value is `controlled` and the gates pass, merge; do not ask the operato
 Installation grants no permission.
 Shared contributors do not revoke permission; existing ownership, protection, review, and CI gates still apply.
 A refusal stops execution.
+When another ship operation owns the repository, rerun `prepare` or `merge` with `--wait <seconds>`; do not write a retry loop.
+`reconcile` and `adjudicate` also take the lock but cannot wait for it; rerun them once the holder is gone.
+`sd runner status` names the holder under `ship_locks`; a file under `ship-locks/` is not a hold.
+A merge lane that ships one item across several commands holds the lane: `sd-ship hold --item ID --holder NAME [--for SECONDS]`.
+The hold is taken under the ship lock and lasts `--for` seconds, 3600 by default and 86400 at most; rerun it to renew.
+While it stands, `prepare` and `merge` for any other item refuse as `lane_held`, naming the item, holder and expiry.
+The held item's merge ends it; `sd-ship release --item ID` ends it sooner, and only for the held item.
 Do not change gates to obtain a merge.
 An existing manual operator path needs separate authorization; a gate refusal does not grant it.
 Standing permission starts no background work and does not enable `runner_merge: auto` on the repository row.
@@ -84,6 +92,7 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    Stop and obtain permission before that history rewrite.
 7. **Merge through the authorized adapter.**
    It uses `gh pr merge --squash --match-head-commit <the reviewed sha> -t "<title> (#N)" -b "<body>"`.
+   `<title>` is the pull request's current title, not the last commit subject.
    Keep the explicit title and body; exclude `wip:` subjects from main.
    Put contiguous trailers in the body's final paragraph.
    Never use the CLI's branch-deletion option.
@@ -96,9 +105,10 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    No-item changes create no row or placeholder trailer.
 9. **Complete post-merge closeout.**
    After every confirmed in-scope merge, read `skills/sd-ship/references/post-merge-closeout.md` in the sd-ai-command-pack checkout.
-   Run `git fetch -p`; repository `delete_branch_on_merge` owns remote branch removal.
+   Run `git fetch -p`; repository `delete_branch_on_merge` removes the remote branch first.
    Review remaining findings and inventory refs, branches, stashes, and worktrees.
-   Retain local branches, stashes, and worktrees until one exact target list receives separate approval with verified recovery evidence.
+   Remove the merged PR's local and remote branches, stashes, refs and stale worktrees when the reference's safety conditions hold, without asking.
+   Record each target's full object ID or path in an `sd task note` before its removal; keep any target that fails a condition.
    Do not move another checkout's main branch.
    Report the branch, worktree, merge, and installation state separately.
 
@@ -125,15 +135,22 @@ Never allocate another review ID to reset spent passes or discard history.
 - `sd-ship prepare --item ID --deliver|--associate-only --json` reviews, pushes, and opens or reconciles the PR.
   It returns `ready_to_send` and never merges.
   `--title` and `--body-file` supply the PR description.
-  Without `--body-file`, an open PR's live body is the description; reprepare preserves the delivery claim.
+  Without `--title` or a stored title, a one-commit branch uses its subject; a longer branch is refused.
+  Without `--body-file`, an open PR's live body is the description, found by branch when no receipt names one; reprepare preserves the delivery claim.
   The sd-ai-command-pack checkout's `WORKFLOW.md`, section **The path for a change**, lists the body lines sd-ship owns.
-- `sd-ship body --item ID [--body-file FILE]` prints the body prepare would publish and its body lint.
-  It reads no sd state, calls no GitHub API, and exits non-zero on a refusal or a lint failure.
+- `sd-ship body --item ID [--body-file FILE] [--pr N]` prints the body prepare would publish and its body lint.
+  Its `scope` says whether the diff demands a scope line, such as `CI/review scope:` for `.github/**`, and whether the body has it.
+  The diff is the checkout's HEAD; `--pr N` lints that pull request's files and, without `--body-file`, its live body.
+  It reads no sd state, calls GitHub only for `--pr`, and exits non-zero on a refusal or a lint failure.
 - Optional commits require `--path FILE` for each file, `--message-file FILE`, and `--author ENTRY`.
   Directories and a pre-populated index are invalid.
   Actual provider/vendor attribution belongs on the commit.
 - `sd-ship merge --item ID --expected-head SHA --manual --json` performs an explicit operator merge.
 - `sd-ship merge --item ID --expected-head SHA --run RUN-ID --json` requires its exclusive runner lease and matching clone.
+- Merge may run from any checkout of the repository, such as a lane's checkout on the default branch.
+  When the checkout's own branch holds no receipt for the item, the item's one receipt names the branch.
+  `--branch BRANCH` names it when the item has more than one receipt.
+  From another checkout, `--expected-head` must equal the branch's tip fetched from origin; no checkout moves.
   Matching item/head and `runner_merge: auto` on the repository row are also required.
   An author assignment cannot use this authority.
 - Both merge forms require fresh ownership, enforcing protection, current default branch, exact reviewed head, and passing required checks.
@@ -146,7 +163,14 @@ Never allocate another review ID to reset spent passes or discard history.
   Every fact it pins must equal the live state, read as the status report reads it.
   An app, a team, a role or an admin bypass still refuses.
   The receipt's `protection.accepted_gaps` names the entries a merge honoured.
-  GitHub's merge rules must also pass.
+  GitHub's merge rules must also pass: `mergeable` true, and `mergeable_state` `clean` or `unstable`.
+  `unstable` means a check the protection does not require is pending or failed; the required ones are still read.
+  Under `repo.ci = local`, merge reads GitHub's answer up to five times over 30 seconds after posting `sd/local-gate`.
+  A pull request GitHub reports BEHIND refuses as `base_moved`, before the local gate runs.
+  Under `repo.ci = local`, prepare runs its check as the local gate does, and its pass leaves a gate receipt.
+  The merge gate at the same head and binding, within 30 minutes, reuses it, and the status says `(reused)`.
+  Inputs outside the repository (external makefiles, tool files, machine state) are not bound; that window is the accepted residual risk.
+  The gate's bound is 3600 s in both, unless `--review-timeout` names one for prepare.
   A refusal returns `manualRequired: true`; it changes no protection and requests no reviewer.
 - `--watch --wait-seconds 900` starts one bounded fail-fast CI watcher.
   Its persisted start prevents another automatic watch on rerun.
@@ -202,6 +226,12 @@ Blockers identify `code`, `boundary`, `retryable`, and `approval_required`.
 Existing result fields and exit meanings remain authoritative; the new object does not grant permission.
 
 Receipts bind repository, branch, item or review identity, exact head, tools, policy, and review history.
+The tools bound are the `verdict` class in `bin/sd_ship_bindings.py`: the code `sd-review` runs, compared without comments or docstrings.
+Gate and check code runs again on every `prepare` and `merge`, so a change there does not void a receipt.
+When only review code moved, and none of it parses or disposes findings (`FINDING_FILES`), `sd-ship` replays `sd-review --explain` for the stored pass first.
+An unchanged `request_sha256` keeps the receipt, spends no pass, and appends to `review_binding_kept`.
+A moved binding refuses with "review tools or repository policy changed after review:" and names each changed file and its class.
+Run `prepare` again; it re-reviews the same head in full.
 `--expected-head` compares evidence; it does not replace evidence.
 There is no `--reviewed-head` override.
 An interrupted review retains its reserved pass.
@@ -217,6 +247,8 @@ Read its review-retry section only when a review stopped or exhausted its automa
 
 ## Evidence-backed disposition acceptance
 
+A blocking local review refuses with code `review_blocking`, naming each blocking finding in the error and in `findings`.
+Its `next_action` names the `sd-ship adjudicate` command that prints each finding in full.
 Use acceptance only for a complete review of the exact clean head with passing deterministic checks.
 It cannot waive missing depth, incomplete transport, failed checks, or changed source.
 Fixes still require verification on their new head.
@@ -242,8 +274,8 @@ Acknowledgement failures produce warnings, not review clearance.
 - Never push a head the local lane has not seen.
 - Never weaken checks, permissions, review depth, or ownership/protection gates to reach green.
 - Never treat a written reason as executable clearance.
-- Never delete local branches, worktrees, or checkouts as an implicit shipping step.
-  Routine closeout inventories retained work; a separate, explicitly approved cleanup may remove only its enumerated targets.
+- Never delete a checkout, or a worktree, branch, stash or ref that fails a closeout safety condition or belongs to another PR.
+- Never force a worktree removal.
 - Never accept a repository path; cwd determines the checkout, and `-C <dir>` only changes cwd first (R10-D6).
 - Never post reviews or labels in a guest upstream repository.
 - Make no further change after settled-green.

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import importlib
 import json
 import pathlib
+import subprocess
 import tempfile
 import types
 import unittest
@@ -164,20 +166,61 @@ class SharedBindingTests(unittest.TestCase):
                                       repository="owner/repo", branch="feature", head=self.head,
                                       key="ship:fixture", revision=None, identity=ItemIdentity(7),
                                       history=ItemHistory(), runtime=ship.review_runtime(), state={
-                                          "binding": ship.binding(self.root), "passes": [{"head": self.head,
-                                          "report": self.report, "exit_code": 1}]})
+                                          "binding": ship.binding(self.root), "binding_manifest": ship.binding_manifest(self.root),
+                                          "passes": [{"head": self.head, "report": self.report, "exit_code": 1}]})
         self.git = patch.object(dispositions, "git", side_effect=lambda root, *args: "" if args[0] == "status" else self.head)
         self.git.start()
         self.addCleanup(self.git.stop)
 
-    def test_each_review_manifest_member_mutation_refuses_stale_review(self):
-        self.assertEqual(self.operation.review_inputs(self.head), self.report)
+    @staticmethod
+    def edited(target, suffix=b"changed"):
         original = pathlib.Path.read_bytes
-        for name in bindings.REVIEW_TOOL_FILES:
-            target = bindings.BIN / name
-            with self.subTest(name=name), patch.object(pathlib.Path, "read_bytes", lambda path, target=target: original(path) + (b"changed" if path == target else b"")):
-                with self.assertRaisesRegex(ship.Refusal, "tools or repository policy changed"):
+        return patch.object(pathlib.Path, "read_bytes", lambda path: original(path) + (suffix if path == target else b""))
+
+    def test_each_verdict_member_mutation_refuses_stale_review(self):
+        self.assertEqual(self.operation.review_inputs(self.head), self.report)
+        for name in bindings.VERDICT_FILES:
+            with self.subTest(name=name), self.edited(bindings.BIN / name):
+                with self.assertRaisesRegex(ship.Refusal, f"tools or repository policy changed after review: {name} \\(verdict\\)"):
                     self.operation.review_inputs(self.head)
+
+    def test_a_comment_on_a_verdict_member_keeps_the_review(self):
+        """sd:1834. The reviewer was asked the same thing; a comment cannot change a verdict."""
+        for name in bindings.VERDICT_FILES:
+            with self.subTest(name=name), self.edited(bindings.BIN / name, b"\n# a comment moves no verdict\n"):
+                self.assertEqual(self.operation.review_inputs(self.head), self.report)
+
+    def test_each_gate_and_check_member_mutation_keeps_the_review(self):
+        """sd:1834. Gate code runs live on every prepare and merge, and the merge
+        gate runs the check again; binding them spent a pass for no evidence."""
+        for name in bindings.GATE_FILES + bindings.CHECK_FILES:
+            with self.subTest(name=name), self.edited(bindings.BIN / name):
+                self.assertEqual(self.operation.review_inputs(self.head), self.report)
+
+    def test_a_moved_binding_names_what_moved_and_marks_what_does_not_bind(self):
+        """sd:1246. The refusal names the file; nobody substitutes blobs to find it."""
+        original = pathlib.Path.read_bytes
+        targets = {bindings.BIN / "sd-review", bindings.BIN / "sd-ship"}
+        with patch.object(pathlib.Path, "read_bytes", lambda path: original(path) + (b"changed" if path in targets else b"")):
+            with self.assertRaises(ship.Refusal) as caught:
+                self.operation.review_inputs(self.head)
+        self.assertEqual(str(caught.exception), "review tools or repository policy changed after review: "
+                                                "sd-review (verdict); also changed, not binding: sd-ship (gate)")
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "review_binding_moved")
+        self.assertIn("sd-ship prepare", caught.exception.workflow["next_action"])
+
+    def test_a_policy_change_refuses_and_is_named(self):
+        (self.root / ".github").mkdir()
+        (self.root / ".github" / "sd-review.json").write_text("{}")
+        with self.assertRaisesRegex(ship.Refusal, "changed after review: .github/sd-review.json \\(policy\\)$"):
+            self.operation.review_inputs(self.head)
+
+    def test_a_receipt_without_a_manifest_refuses_once_and_says_why(self):
+        """Stored before sd:1834. Its binding is never backfilled from current files."""
+        self.operation.state.pop("binding_manifest")
+        self.operation.state["binding"] = "schema-1 digest"
+        with self.assertRaisesRegex(ship.Refusal, "changed after review: receipt predates the per-file manifest \\(legacy\\)$"):
+            self.operation.review_inputs(self.head)
 
     def test_each_adjudicator_manifest_member_mutation_refuses_stale_proposal(self):
         context, rows = dispositions.context(self.operation, self.head)
@@ -190,13 +233,108 @@ class SharedBindingTests(unittest.TestCase):
         # Isolate the adjudicator manifest from the earlier review-binding check.
         self.operation.review_inputs = types.MethodType(lambda operation, head: self.report, self.operation)
         original = pathlib.Path.read_bytes
-        targets = [bindings.BIN / name for name in bindings.REVIEW_TOOL_FILES]
+        targets = [bindings.BIN / name for name in bindings.VERDICT_FILES]
         targets += [bindings.BIN.parent / name for name in bindings.ADJUDICATOR_POLICY_FILES]
         targets.append(pathlib.Path(self.operation.store.__file__))
         for target in targets:
             with self.subTest(path=target), patch.object(pathlib.Path, "read_bytes", lambda path, target=target: original(path) + (b"changed" if path == target else b"")):
                 with self.assertRaisesRegex(ship.Refusal, "does not bind"):
                     dispositions.validate(self.operation, self.head, proposal)
+        # sd:1834. Tool files bind by class; the library and policy above stay byte-exact.
+        for name in bindings.GATE_FILES + bindings.CHECK_FILES:
+            with self.subTest(gate=name), self.edited(bindings.BIN / name):
+                self.assertEqual(dispositions.validate(self.operation, self.head, proposal), dispositions.digest(proposal))
+        for name in bindings.VERDICT_FILES:
+            with self.subTest(comment=name), self.edited(bindings.BIN / name, b"\n# a comment moves no verdict\n"):
+                self.assertEqual(dispositions.validate(self.operation, self.head, proposal), dispositions.digest(proposal))
+
+    def replaying(self, answer: str, exit_code: int = 0) -> list[list[str]]:
+        """sd:1397. The `--explain` replay answers `answer`; each argv is kept, with its prior report's digest."""
+        calls: list[list[str]] = []
+
+        def process(root, argv, timeout):
+            calls.append(list(argv))
+            for flag in ("--verify-report", "--resume-report"):
+                if flag in argv:
+                    calls[-1].append(hashlib.sha256(pathlib.Path(argv[argv.index(flag) + 1]).read_bytes()).hexdigest())
+            return subprocess.CompletedProcess(argv, exit_code, json.dumps({"request_sha256": answer}), "")
+
+        self.operation.runtime = dataclasses.replace(self.operation.runtime, process=process)
+        self.operation.save = lambda **updates: self.operation.state.update(updates)
+        return calls
+
+    def test_a_moved_verdict_binding_keeps_a_receipt_whose_request_replays_unchanged(self):
+        """sd:1397, option E. A pack landing that leaves the reviewers' question unchanged spends no pass."""
+        self.operation.state["passes"][-1]["review_request"] = {"sha256": "asked", "verify": None, "resume": None}
+        calls = self.replaying("asked")
+        with self.edited(bindings.BIN / "sd_route.py"):
+            self.assertEqual(self.operation.review_inputs(self.head), self.report)
+            self.assertEqual(self.operation.state["binding"], ship.binding(self.root))
+            self.assertEqual(self.operation.review_inputs(self.head), self.report)
+        self.assertEqual(len(calls), 1, "a kept receipt is rebound, so the replay runs once")
+        self.assertIn("--explain", calls[0])
+        self.assertNotIn("--base", calls[0])
+        kept = self.operation.state["review_binding_kept"]
+        self.assertEqual([row["changed"] for row in kept], [[["sd_route.py", "verdict"]]])
+        self.assertEqual(kept[0]["request_sha256"], "asked")
+
+    def test_a_moved_binding_whose_request_replays_differently_still_refuses(self):
+        self.operation.state["passes"][-1]["review_request"] = {"sha256": "asked", "verify": None, "resume": None}
+        for answer, exit_code in (("asked differently", 0), ("asked", 1)):
+            calls = self.replaying(answer, exit_code)
+            with self.subTest(answer=answer, exit_code=exit_code), self.edited(bindings.BIN / "sd_route.py"):
+                with self.assertRaisesRegex(ship.Refusal, "changed after review: sd_route.py \\(verdict\\)$"):
+                    self.operation.review_inputs(self.head)
+                self.assertEqual(len(calls), 1)
+        self.assertNotIn("review_binding_kept", self.operation.state)
+
+    def test_a_moved_finding_parser_re_reviews_even_with_an_unchanged_request(self):
+        """sd:1397, operator ruling (option A). An equal request does not make an equal verdict
+        when the code that parses reviewer output or disposes findings moved; no replay is asked."""
+        self.operation.state["passes"][-1]["review_request"] = {"sha256": "asked", "verify": None, "resume": None}
+        stored = {key: self.operation.state[key] for key in ("binding", "binding_manifest")}
+        for name in ("sd-review", "sd_opencode.py", "sd_registry.py"):
+            self.operation.state.update(stored)
+            calls = self.replaying("asked")
+            with self.subTest(name=name), self.edited(bindings.BIN / name):
+                with self.assertRaisesRegex(ship.Refusal, f"changed after review: {name} \\(verdict\\)$"):
+                    self.operation.review_inputs(self.head)
+            self.assertEqual(calls, [], name)
+        self.assertNotIn("review_binding_kept", self.operation.state)
+        self.assertEqual(set(getattr(bindings, "FINDING_FILES", ())), {"sd-review", "sd_opencode.py", "sd_registry.py"})
+        self.assertLessEqual(set(bindings.FINDING_FILES), set(bindings.VERDICT_FILES))
+
+    def test_a_policy_change_is_never_kept_by_a_replay(self):
+        """Policy stays byte-exact (sd:1834 operator decision); no replay is even asked."""
+        self.operation.state["passes"][-1]["review_request"] = {"sha256": "asked", "verify": None, "resume": None}
+        calls = self.replaying("asked")
+        (self.root / ".github").mkdir()
+        (self.root / ".github" / "sd-review.json").write_text("{}")
+        with self.assertRaisesRegex(ship.Refusal, "\\.github/sd-review.json \\(policy\\)$"):
+            self.operation.review_inputs(self.head)
+        self.assertEqual(calls, [])
+
+    def test_a_fix_verification_replays_with_the_prior_report_it_verified(self):
+        first = dict(self.report, subject={"head": "b" * 40})
+        verified = {"head": self.head, "base": "b" * 40, "report": self.report, "exit_code": 1, "requested_provider": "fixture",
+                    "review_request": {"sha256": "asked", "verify": digest(first), "resume": None}}
+        self.operation.state["passes"] = [{"head": "b" * 40, "report": first, "exit_code": 1}, verified]
+        stored = {name: self.operation.state[name] for name in ("binding", "binding_manifest")}
+        calls = self.replaying("asked")
+        with self.edited(bindings.BIN / "sd_route.py"):
+            self.assertFalse(self.operation.binding_moved())
+        argv = calls[0]
+        self.assertEqual(argv[argv.index("--base") + 1], "b" * 40)
+        self.assertEqual(argv[argv.index("--provider") + 1], "fixture")
+        self.assertEqual(argv[-1], digest(first), "the replay hands over the very report the pass verified")
+        # A prior that no longer reproduces from the stored history is not guessed at.
+        verified["review_request"]["verify"] = "a report nobody stored"
+        self.operation.state.update(stored)
+        del self.operation._binding_moved
+        calls.clear()
+        with self.edited(bindings.BIN / "sd_route.py"):
+            self.assertTrue(self.operation.binding_moved())
+        self.assertEqual(calls, [])
 
     def test_missing_manifest_members_never_fall_back_to_partial_binding(self):
         original = pathlib.Path.read_bytes
@@ -337,6 +475,54 @@ class HistoryChainTests(unittest.TestCase):
         state["passes"][-1]["report"] = broken
         with self.assertRaisesRegex(ship.Refusal, "retain the incomplete review evidence"):
             ItemHistory()._validate_coverage(state, broken)
+
+    def _request_past(self, reservation: dict) -> tuple[dict, dict]:
+        """A completed pass at a, `reservation` at b, then a request at c verifying a (sd:2192)."""
+        first = {"head": "a" * 40, "report": self._complete("0" * 40, "a" * 40)}
+        request = {"head": "c" * 40, "reason": "operator asked", "allowed_passes": 1,
+                   "prior_history_digest": digest([first, reservation])}
+        verification = self._complete("a" * 40, "c" * 40, first)
+        return {"passes": [first, reservation, {"head": "c" * 40, "base": "a" * 40, "report": verification,
+                                                "additional_review_request": request}]}, verification
+
+    def test_a_request_links_past_a_reservation_that_holds_no_evidence(self):
+        """sd:2192. The chain check reads the request's link to the last completed pass."""
+        unreadable = {"head": "b" * 40, "base": "a" * 40,
+                      "execution_error": {"kind": "unreadable_receipt", "stage": "execution"}}
+        self.assertEqual(importlib.import_module("sd_ship_history").verified_index([{"head": "a" * 40, "report": self._complete(
+            "0" * 40, "a" * 40)}, unreadable]), 0)
+        state, verification = self._request_past(unreadable)
+        self.assertIsNone(ItemHistory()._validate_coverage(state, verification))
+
+    def test_a_request_does_not_link_past_a_reservation_that_kept_a_finding(self):
+        """sd:2192. Only a full-branch resume keeps that finding, so the skip-link refuses."""
+        incomplete = dict(self._complete("a" * 40, "b" * 40, {"report": self._complete("0" * 40, "a" * 40)}),
+                          status="blocking", requested_reviews=2,
+                          findings=[{"path": "src.py", "summary": "found by the reviewer that completed"}])
+        state, verification = self._request_past({"head": "b" * 40, "base": "a" * 40, "report": incomplete})
+        with self.assertRaisesRegex(ship.Refusal, "never completed"):
+            ItemHistory()._validate_coverage(state, verification)
+
+    def test_a_request_does_not_link_past_a_failed_full_branch_review(self):
+        """sd:2192. A binding re-review that failed still owes the whole branch.
+
+        Dispatch stored the new binding before the pass ran, so after it failed
+        the binding no longer reads as moved. Skipping the reservation would
+        verify the fix against a report written under the old policy.
+        """
+        verified_index = importlib.import_module("sd_ship_history").verified_index
+        first = {"head": "a" * 40, "report": self._complete("0" * 40, "a" * 40)}
+        moved = {"head": "a" * 40, "base": None,
+                 "review_binding_change": {"head": "a" * 40, "superseded_binding": "old policy", "changed": []},
+                 "execution_error": {"kind": "unreadable_receipt", "stage": "execution"}}
+        self.assertIsNone(verified_index([first, moved]))
+        # A retry of it that also failed does not clear what it owed.
+        retried = {"head": "a" * 40, "base": None, "retry": True,
+                   "execution_error": {"kind": "unreadable_receipt", "stage": "execution"}}
+        self.assertIsNone(verified_index([first, moved, retried]))
+        state, verification = self._request_past(moved)
+        with self.assertRaisesRegex(ship.Refusal, "never completed"):
+            ItemHistory()._validate_coverage(state, verification)
 
     def test_an_automatic_verification_that_produced_no_report_is_resumed_not_refused(self):
         """A reservation is not a verification, whatever the next pass calls itself.

@@ -129,7 +129,7 @@
      "path": "tests/test_gate_harness_isolation.py"
     },
     {
-     "author": "sdelmas",
+     "author": "example-user",
      "body": "Right, and it is the same defect this branch is about. Fixed in 371495dc: the stand-down moved to immediately before the publish, so the watchdog now covers the log concatenation as well as the shards. It is not moved past the publish on purpose \u2014 that is the one step where being killed half-way leaves the root holding half of one run and half of another, which is worse than an orphan finishing a publish of data that is already complete and its own. Everything before it is interruptible with no consequence.",
      "id": 3996362325,
      "in_reply_to_id": 3996311677,
@@ -137,7 +137,7 @@
      "path": ".github/scripts/run-tests.sh"
     },
     {
-     "author": "sdelmas",
+     "author": "example-user",
      "body": "Unchecked failures: agreed, and fixed in 371495dc. Each publish step now sets `publish_status`, and a publish that did not land exits non-zero naming the root rather than reporting the tests' own success \u2014 a half-published root under a zero exit is the exact shape of failure this script is being fixed for. Verified against an unwritable repo root: `exit status with an unwritable repo root: 1`, `error: could not publish this run's results to <root>; the files there are not this run's.`\n\nSerialization: deliberately not added, and the PR body now says so. Two runs can only reach this block together if someone started both on purpose \u2014 an orphan no longer gets there, since the watchdog reaps it first \u2014 and a lock would have to survive a SIGKILLed holder to be safe. A stale lock blocking every later gate in the checkout is a worse failure than the race it removes. The house rule is one writer per checkout; the residual is last-writer-wins between two deliberate, completed runs, and each of those publishes a self-consistent set.",
      "id": 3996362739,
      "in_reply_to_id": 3996311665,
@@ -145,7 +145,7 @@
      "path": ".github/scripts/run-tests.sh"
     },
     {
-     "author": "sdelmas",
+     "author": "example-user",
      "body": "Correct \u2014 the docstring claimed something the code did not do, which is the worse half. Fixed in 371495dc: `_process_rows` reads `ps -A -o pid= -o ppid= -o state=` and `_alive` returns false for a row whose state starts with `Z`. That matters most where PID 1 does not reap promptly, since a flaky failure there would look exactly like the defect the test exists to catch. The state field is parsed defensively \u2014 a `ps` that does not print it leaves the state empty rather than dropping the row.",
      "id": 3996363005,
      "in_reply_to_id": 3996311684,
@@ -161,19 +161,19 @@
      "state": "COMMENTED"
     },
     {
-     "author": "sdelmas",
+     "author": "example-user",
      "body": "",
      "id": 5186569858,
      "state": "COMMENTED"
     },
     {
-     "author": "sdelmas",
+     "author": "example-user",
      "body": "",
      "id": 5186570257,
      "state": "COMMENTED"
     },
     {
-     "author": "sdelmas",
+     "author": "example-user",
      "body": "",
      "id": 5186570503,
      "state": "COMMENTED"

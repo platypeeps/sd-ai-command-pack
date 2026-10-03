@@ -98,6 +98,11 @@ class NormalizeTests(unittest.TestCase):
                 self.assertEqual(once, normalize(published)[0])
                 self.assertEqual(published, sd_ship_body.published(normalize(published)[0], 7))
 
+    def test_a_pull_request_rename_names_both_of_its_paths(self) -> None:
+        files = [{"filename": "ci/ci.yml", "previous_filename": ".github/workflows/ci.yml"},
+                 {"filename": "src.py"}, {"filename": "src.py"}, "not a row"]
+        self.assertEqual([".github/workflows/ci.yml", "ci/ci.yml", "src.py"], sd_ship_body.pull_paths(files))
+
     def test_the_parser_reads_the_one_constant(self) -> None:
         body = "".join(f"{key} sd:7\n" for key in sd_lib.OWNED_TRAILERS)
         self.assertEqual(list(sd_lib.OWNED_TRAILERS), [line.key for line in sd_ship_body.owned_lines(body)])
@@ -145,6 +150,25 @@ class PrepareTests(unittest.TestCase):
                          self.operation().state["body"])
         self.assertEqual("live_pr", result["body_source"])
 
+    def test_a_hand_opened_pull_request_without_a_receipt_is_prepared_from_its_live_body(self) -> None:
+        # sd:1878: no receipt names the pull request, so before this the
+        # default body was reviewed and squashed while GitHub showed another.
+        _git(self.root, "push", "-q", "origin", "HEAD:refs/heads/topic")
+        written = f"Opened by hand.\r\n\r\nCI/review scope: none.\r\n\r\nWork: sd:{self.item}\r\n"
+        pull = self.remote.open_pull_request("topic", title="by hand", body=written)
+        self.remote.commit_on("elsewhere", "another branch\n\nAuthored-with: human")
+        self.remote.open_pull_request("elsewhere", title="another branch", body="Not this one.\n")
+        result = self.prepare()
+        self.assertEqual(("live_pr", [f"Work: sd:{self.item}"]), (result["body_source"], result["normalized"]))
+        self.assertEqual(f"Opened by hand.\n\nCI/review scope: none.\n\nWork: sd:{self.item}\n",
+                         self.operation().state["body"])
+        self.assertEqual(pull.number, self.operation().state["pull_request"]["number"])
+
+    def test_a_blank_hand_opened_body_falls_back_to_the_default(self) -> None:
+        _git(self.root, "push", "-q", "origin", "HEAD:refs/heads/topic")
+        self.remote.open_pull_request("topic", title="by hand", body="  \n")
+        self.assertEqual("default", self.prepare()["body_source"])
+
     def test_a_different_item_in_the_body_file_is_refused_before_anything_is_pushed(self) -> None:
         body = self.directory / "body.md"
         body.write_text(f"A slice.\n\nWork: sd:{self.item + 1}\n")
@@ -156,14 +180,35 @@ class PrepareTests(unittest.TestCase):
 class BodyVerbTests(unittest.TestCase):
     setUp = ship_fixture.ShipCase.setUp
 
-    def body(self, text: str, *extra: str) -> tuple[int, dict]:
-        path = self.directory / "body.md"
-        path.write_text(text)
-        done = subprocess.run([sys.executable, str(ROOT / "bin/sd-ship"), "body", "--item", "7",
-                               "--body-file", str(path), "--json", *extra],
+    def run_verb(self, *extra: str) -> tuple[int, dict]:
+        done = subprocess.run([sys.executable, str(ROOT / "bin/sd-ship"), "body", "--item", "7", "--json", *extra],
                               cwd=self.root, env=self.environment, capture_output=True, text=True,
                               timeout=ship_fixture.CLI_TIMEOUT, check=False)
         return done.returncode, json.loads(done.stdout)
+
+    def body(self, text: str, *extra: str) -> tuple[int, dict]:
+        path = self.directory / "body.md"
+        path.write_text(text)
+        return self.run_verb("--body-file", str(path), *extra)
+
+    def policy(self) -> None:
+        """The scope policy in the working tree only, so the checkout's own diff stays empty."""
+        policy = self.root / ".github/copilot-instructions.md"
+        policy.parent.mkdir(parents=True, exist_ok=True)
+        policy.write_text(scope_fixture.SCOPE_POLICY)
+
+    def pull_request(self, body: str, files: list[dict]) -> int:
+        """A pull request opened by hand on another branch, and the files GitHub lists for it."""
+        self.remote.commit_on("elsewhere", "a hand-opened change\n\nAuthored-with: human")
+        number = self.remote.open_pull_request("elsewhere", title="by hand", body=body).number
+        route = self.double._route
+
+        def files_route(method, path, payload):
+            if method == "GET" and path.split("?")[0] == f"/repos/{self.remote.slug}/pulls/{number}/files":
+                return 200, files
+            return route(method, path, payload)
+        self.double._route = files_route
+        return number
 
     def test_the_verb_prints_the_published_body_and_its_lint(self) -> None:
         before = self.database.read_bytes()
@@ -182,18 +227,43 @@ class BodyVerbTests(unittest.TestCase):
         self.assertIn("line 3: `Item: sd:8`; expected `Item: sd:7`", result["error"])
 
     def test_the_verb_exits_nonzero_when_the_body_lint_fails(self) -> None:
-        policy = self.root / ".github/copilot-instructions.md"
-        policy.parent.mkdir(parents=True, exist_ok=True)
-        policy.write_text(scope_fixture.SCOPE_POLICY)
+        self.policy()
         (self.root / ".github/workflows").mkdir(parents=True, exist_ok=True)
         (self.root / ".github/workflows/ci.yml").write_text("on: push\n")
-        _git(self.root, "add", ".github")
+        _git(self.root, "add", ".github/workflows")
         _git(self.root, "commit", "-m", "touch the CI surface\n\nAuthored-with: human")
         code, result = self.body("A slice.\n")
         self.assertEqual(3, code, result)
         self.assertIn('carries no "CI/review scope:" line', result["lint"]["output"])
+        self.assertEqual([{"line": "CI/review scope:", "path": ".github/workflows/ci.yml", "present": False}],
+                         result["scope"]["demanded"])
+        self.assertEqual("origin/HEAD...HEAD", result["scope"]["changed_from"])
         code, result = self.body("A slice.\n\nCI/review scope: one workflow.\n")
         self.assertEqual(0, code, result)
+        self.assertEqual([{"line": "CI/review scope:", "path": ".github/workflows/ci.yml", "present": True}],
+                         result["scope"]["demanded"])
+
+    def test_a_given_pull_request_is_linted_against_its_own_files_and_live_body(self) -> None:
+        # sd:1877: the pull request's diff, not the checkout's, is the one
+        # read, and the answer comes before prepare refuses.
+        self.policy()
+        number = self.pull_request("Opened by hand.\r\n", [
+            {"filename": "ci/ci.yml", "previous_filename": ".github/workflows/ci.yml", "status": "renamed"}])
+        code, result = self.run_verb("--pr", str(number))
+        self.assertEqual(3, code, result)
+        self.assertEqual(("live_pr", "Opened by hand.\n\nWork: sd:7\n"), (result["body_source"], result["body"]))
+        self.assertEqual({"changed_from": f"pull request #{number}", "changed": 2,
+                          "demanded": [{"line": "CI/review scope:", "path": ".github/workflows/ci.yml",
+                                        "present": False}]}, result["scope"])
+        self.assertIn("touches .github/workflows/ci.yml", result["lint"]["output"])
+        self.assertNotIn(".github/workflows/ci.yml", str(self.run_verb()[1]["scope"]))
+        code, result = self.body("Opened by hand.\n\nCI/review scope: the workflow moves out.\n", "--pr", str(number))
+        self.assertEqual((0, "file", True), (code, result["body_source"], result["scope"]["demanded"][0]["present"]))
+
+    def test_a_pull_request_github_does_not_have_is_a_refusal(self) -> None:
+        code, result = self.run_verb("--pr", "99")
+        self.assertEqual(3, code)
+        self.assertFalse(result["ok"])
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import getpass
 import json
 from pathlib import Path
@@ -11,6 +12,11 @@ from typing import Any
 import sd_handoff_rows
 import sd_lib
 from sd_work import WorkRefusal
+
+#: Verbs that write journals or publish, so they read only merged prose (sd:2024).
+REGISTERED_ONLY = frozenset({"import", "register", "cutover", "recover", "publication-render", "publication-recover",
+                             "publication-claim", "publication-status", "publication-dispatch",
+                             "publication-receipt", "publication-reconcile", "publication-abandon"})
 
 
 def run(args: argparse.Namespace) -> int:
@@ -22,8 +28,18 @@ def run(args: argparse.Namespace) -> int:
     root = sd_lib.repo_root()
     if root is None:
         raise WorkRefusal("writing controls require the writing Git checkout as the current directory")
-    repo = sd_lib.stored_repo(root.resolve())
+    root = root.resolve()
+    # A linked worktree keys rows to the main checkout and reads its own files (sd:2024).
+    registered = sd_lib.main_worktree_root(root)
+    repo = sd_lib.stored_repo(registered)
     action = args.writing_action
+    linked = registered != root
+    if linked and action in REGISTERED_ONLY:
+        raise WorkRefusal(f"sd writing {action} runs only in the main checkout {registered}, not a linked worktree")
+    # Looked up, not imported: the gate builds an older sd_db that lacks it.
+    checkout: Any = getattr(writing, "checkout", None)
+    if linked and checkout is None:
+        raise WorkRefusal("install the current system/local-sd-db build to run writing controls from a worktree")
     if action == "verify" and not any((root / name).is_dir() for name in ("content", "content-parked")):
         # Another checkout has no pieces, so verify would pass on zero files and zero rows (sd:1660).
         raise WorkRefusal(f"{root} holds no content/ folder, so there is nothing to verify; "
@@ -32,7 +48,10 @@ def run(args: argparse.Namespace) -> int:
                        "publication-claim", "publication-dispatch", "publication-receipt", "publication-reconcile", "publication-abandon", "publication-recover"} or (
         action == "import" and args.apply)
     connection = sd_handoff_rows.connect(sd_db, write=write)
+    scope = contextlib.ExitStack()
     try:
+        if linked:
+            scope.enter_context(checkout(repo, root))
         who = getpass.getuser()
         revision = getattr(args, "if_revision", None)
         result: Any
@@ -117,6 +136,7 @@ def run(args: argparse.Namespace) -> int:
     except (sd_db.SdDbError, ValueError, OSError) as error:
         raise WorkRefusal(str(error)) from error
     finally:
+        scope.close()
         connection.close()
 
 

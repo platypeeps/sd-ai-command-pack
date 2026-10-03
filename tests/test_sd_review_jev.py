@@ -211,6 +211,25 @@ class JevTierTests(ReviewFixture):
         self.assertEqual(held["route"]["tier"], "standard")
         self.assertEqual(held["jev"]["moved"], False)
 
+    def test_an_answer_below_the_routed_tier_never_lowers_it(self):
+        """sd:2132. Jev may raise the tier, never lower it: `skip` on a
+        `standard` route would have removed a review the policy asked for."""
+
+        root = self.prepare()
+        baseline = json.loads(self.run_review(root)[0])
+        for lower in ("skip", "cheap"):
+            with self.subTest(answer=lower):
+                self.install_stub(answer=lower)
+                held = json.loads(self.run_review(root)[0])
+                self.assertEqual(held["route"]["tier"], "standard")
+                self.assertEqual(held["route"]["depth"], baseline["route"]["depth"])
+                self.assertEqual(held["remote_reviews"], baseline["remote_reviews"])
+                self.assertEqual(held["jev"], {"routed_tier": "standard", "tier": "standard",
+                                               "moved": False, "source": "judged",
+                                               "below_routed": lower})
+                self.assertTrue(held["route"]["reason"].endswith(
+                    f"Jev read the diff and chose tier {lower}, below the routed tier, which stands"))
+
     def test_the_fallback_token_is_not_an_answer_although_it_exits_zero(self):
         """The case `--fallback` exists for, and the one an exit code cannot see."""
 
@@ -256,6 +275,40 @@ class JevTierTests(ReviewFixture):
         for private in (str(root), str(self.tmp), "privatename", "work", "Fixture",
                         "fixture@example.invalid", "value = 1"):
             self.assertNotIn(private, state + " ".join(argv), f"{private!r} left the machine")
+
+    def test_a_github_checkout_names_the_judged_change_for_the_ledger(self):
+        """sd:2107. The subject goes to `jev --subject`, which records it as the
+        row's question id and never sends it; `--id` stays the constant key
+        the request carries, so no repository name reaches the model."""
+
+        root = self.prepare()
+        subprocess.run(["git", "remote", "add", "origin",
+                        "git@github.com:Example-Owner/privatename.git"],
+                       cwd=str(root), check=True)
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(root), check=True,
+                              capture_output=True, text=True).stdout.strip()
+        record = self.install_stub()
+        self.run_review(root)
+        argv = json.loads(record.read_text())["argv"]
+        self.assertEqual(argv[argv.index("--subject") + 1],
+                         f"sd-review-tier:example-owner.privatename:{head[:12]}")
+        self.assertEqual(argv[argv.index("--id") + 1], "sd-review-tier")
+
+    def test_a_checkout_that_is_not_one_github_repository_names_nothing(self):
+        root = self.prepare()
+        subprocess.run(["git", "remote", "add", "origin", "https://example.test/owner/repo.git"],
+                       cwd=str(root), check=True)
+        record = self.install_stub()
+        self.run_review(root)
+        self.assertNotIn("--subject", json.loads(record.read_text())["argv"])
+
+    def test_a_subject_past_the_ledger_cap_is_left_out(self):
+        root = self.prepare()
+        subprocess.run(["git", "remote", "add", "origin",
+                        f"https://github.com/owner/{'r' * 90}.git"], cwd=str(root), check=True)
+        record = self.install_stub()
+        self.run_review(root)
+        self.assertNotIn("--subject", json.loads(record.read_text())["argv"])
 
     def test_both_calls_name_themselves_for_the_judgment_ledger(self):
         """sd:1253. Without `--caller` and `--stage` the judgment lands under

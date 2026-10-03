@@ -10,15 +10,25 @@ import hashlib
 import json
 import os
 import pathlib
+import posixpath
 import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any, Callable
 
 import sd_lib
+import sd_review_request
+import sd_ship_bindings
 import sd_ship_dispositions
-from sd_ship_history import AUTOMATIC_CODE_REVIEW_PASSES, completed_depth, digest
+from sd_ship_history import (
+    AUTOMATIC_CODE_REVIEW_PASSES,
+    completed_depth,
+    digest,
+    reservation,
+    verified_index,
+)
 from sd_ship_remote import Refusal, completed_process
 from sd_ship_workflow import success
 
@@ -56,6 +66,103 @@ def empty_branch_base(root: pathlib.Path, head: str) -> str | None:
     return None
 
 
+def own_patch_id(root: pathlib.Path, head: str, base_ref: str) -> str | None:
+    """`git patch-id --stable` of the branch's own change, fork..head, or None.
+
+    Bytes, not text: a diff of a non-UTF-8 file must still hash. `--binary`
+    puts binary content in the hash; without it only an `index` line names
+    it, and patch-id ignores that line. Any git failure is None, and None
+    carries nothing forward.
+    """
+    fork = sd_lib.git_output(["merge-base", head, base_ref], root)
+    if not fork:
+        return None
+    try:
+        diff = subprocess.run(["git", "diff", "--binary", "--full-index", "--no-renames", "--no-color",
+                               "--no-ext-diff", "--no-textconv", fork, head],
+                              cwd=root, capture_output=True, timeout=120, check=False)
+        if diff.returncode or not diff.stdout:
+            return None
+        hashed = subprocess.run(["git", "patch-id", "--stable"], cwd=root, input=diff.stdout,
+                                capture_output=True, timeout=120, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    words = hashed.stdout.decode("ascii", "replace").split()
+    return words[0] if hashed.returncode == 0 and words else None
+
+
+def clean_merges(root: pathlib.Path, reviewed: str, head: str, base_ref: str) -> list[str] | None:
+    """The commits `head` adds to `reviewed`, when each is a clean merge-in of the base.
+
+    Every commit the base does not already hold must have exactly two
+    parents, the second held by the base, and a tree that is git's own
+    conflict-free merge of them. A resolved conflict, an edit folded into
+    the merge, or any ordinary commit returns None.
+    """
+    listed = sd_lib.git_output(["rev-list", "--parents", head, f"^{reviewed}", f"^{base_ref}"], root)
+    if not listed:
+        return None
+    merges = []
+    for line in listed.splitlines():
+        commit, *parents = line.split()
+        if len(parents) != 2 or not is_ancestor(root, parents[1], base_ref):
+            return None
+        merged = sd_lib.git_output(["merge-tree", "--write-tree", "--no-messages", *parents], root)
+        if not merged or merged != sd_lib.git_output(["rev-parse", f"{commit}^{{tree}}"], root):
+            return None
+        merges.append(commit)
+    return merges
+
+
+def paths_between(root: pathlib.Path, old: str, new: str) -> set[str] | None:
+    """Every path `old..new` changes, both sides of a rename, or None when git cannot answer."""
+    listed = sd_lib.git_output(["diff", "--name-only", "-z", "--no-renames", old, new], root)
+    return None if listed is None else {path for path in listed.split("\0") if path}
+
+
+def base_near_branch(root: pathlib.Path, reviewed: str, head: str, base_ref: str) -> bool:
+    """Whether the base's new commits touch a file, or a directory, the branch touches (sd:1485).
+
+    An unchanged patch-id does not show the branch still works on the new
+    base: main can change a callee's contract while the branch adds a
+    caller in another file. The operator's ruling narrows the carry to base
+    commits that stay out of every file the branch changes and every
+    directory holding one. A directory is a path's own parent, so a
+    top-level file shares the root with every other top-level file.
+    Unanswerable reads as near.
+    """
+    old = sd_lib.git_output(["merge-base", reviewed, base_ref], root)
+    new = sd_lib.git_output(["merge-base", head, base_ref], root)
+    brought = paths_between(root, old, new) if old and new else None
+    own = paths_between(root, new, head) if new else None
+    if brought is None or own is None:
+        return True
+    directories = {posixpath.dirname(path) for path in own}
+    return any(path in own or posixpath.dirname(path) in directories for path in brought)
+
+
+def carry_forward(root: pathlib.Path, reviewed: str, head: str, base_ref: str) -> dict | None:
+    """sd:1485. Why a review of `reviewed` still covers `head`, or None.
+
+    A catch-up merge moves the head, and a review of the old head used to
+    count as stale. It still covers the branch when `reviewed` is an
+    ancestor, every commit since is a clean merge-in of the base
+    (`clean_merges`), the base's new commits stay out of the branch's files
+    and directories (`base_near_branch`), and the branch's own patch-id
+    against the base is unchanged. A rebase is not carried: no merge commit
+    shows that nothing else changed.
+    """
+    if reviewed == head or not is_ancestor(root, reviewed, head):
+        return None
+    merges = clean_merges(root, reviewed, head, base_ref)
+    if merges is None or base_near_branch(root, reviewed, head, base_ref):
+        return None
+    before = own_patch_id(root, reviewed, base_ref)
+    if before is None or before != own_patch_id(root, head, base_ref):
+        return None
+    return {"from": reviewed, "to": head, "patch_id": before, "merges": merges}
+
+
 @dataclass(frozen=True)
 class ReviewRuntime:
     binding: Callable[[pathlib.Path], str]
@@ -66,6 +173,9 @@ class ReviewRuntime:
     bin_dir: pathlib.Path
     setup_seconds: int
     diagnostic_bytes: int
+    # The per-file manifest stored beside `binding`, so a moved binding names
+    # what moved (sd:1834). None where a test seam supplies a bare digest.
+    manifest: Callable[[pathlib.Path], dict] | None = None
 
 
 def complete_report(last: dict, head: str, reviewed_head: str | None) -> dict:
@@ -129,6 +239,9 @@ class SharedReview:
             report = passes[-1].get("report") or {}
             result["review_selection"] = {"requested_provider": passes[-1].get("requested_provider"),
                                           "reviewed_by": report.get("reviewed_by", [])}
+            carried = self.state.get("review_carry_forward") or {}
+            if carried.get("to") and carried.get("to") == self.state.get("reviewed_head"):
+                result["review_carry_forward"] = carried
         return result
 
     def review_inputs(self, head: str) -> dict:
@@ -138,13 +251,50 @@ class SharedReview:
             return {"status": "clean", "findings": [], "subject": {"base": waived["base"], "head": head, "paths": []}}
         if not passes:
             raise Refusal("no completed local review receipt for this head")
-        if self.state.get("binding") != self.runtime.binding(self.root):
-            raise Refusal("review tools or repository policy changed after review")
-        report = complete_report(passes[-1], head, self.state.get("reviewed_head"))
+        if not self.binding_holds():
+            raise self.binding_refusal()
+        subject = self.carried_from(head, passes[-1])
+        report = complete_report(passes[-1], subject, subject if subject != head else self.state.get("reviewed_head"))
         validate_provider_selection(report, passes[-1].get("requested_provider"), completed=True)
         self.history.validate_coverage(self.state, report)
         validate_findings(report)
         return report
+
+    def carried_from(self, head: str, last: dict) -> str:
+        """The head the last pass reviewed, when a recorded carry covers `head` (sd:1485), else `head`."""
+        carried = self.state.get("review_carry_forward") or {}
+        if (carried.get("to") == head and carried.get("from") == last.get("head")
+                and self.state.get("reviewed_head") == head
+                and (last.get("report") or {}).get("status") in ("clean", "advisory")):
+            return carried["from"]
+        return head
+
+    def carried_review(self, head: str) -> bool:
+        """sd:1485. Carry the last cleared review to a clean merge-in of the base.
+
+        Only a clean or advisory receipt: a blocking one is cleared by
+        dispositions bound to its own head. `carry_forward` decides; the
+        receipt records what it found, and the output names it.
+        """
+        passes, base = self.history.native(self.state), self.state.get("base")
+        if not passes or not base or not self.state.get("reviewed_head"):
+            return False
+        report = passes[-1].get("report") or {}
+        if report.get("status") not in ("clean", "advisory") or not completed_depth(report) or self.binding_moved():
+            return False
+        # A named reviewer is a selection a receipt from another cannot replace.
+        requested = getattr(self.args, "provider", None)
+        if requested is not None and report.get("reviewed_by") != [requested]:
+            return False
+        carried = carry_forward(self.root, passes[-1]["head"], head, f"refs/remotes/origin/{base}")
+        if carried is None:
+            return False
+        self.save(reviewed_head=head, review_carry_forward={**carried, "recorded_at": self.runtime.clock()})
+        self.check_review(head)
+        print(f"sd-ship: {head[:12]} adds only clean merges of origin/{base} to reviewed {carried['from'][:12]}, "
+              "and the branch's own patch-id is unchanged; its review carries forward, no provider called",
+              file=sys.stderr)
+        return True
 
     def check_review(self, head: str, *, refresh_adjudication: bool = False) -> dict | None:
         if self.review_inputs(head)["status"] == "blocking":
@@ -188,6 +338,23 @@ class SharedReview:
         self.history.validate_requests(self.state)
         self.history.aggregate(self.state)
 
+    def binding_changes(self) -> list[tuple[str, str]]:
+        """What moved since the stored manifest, by entry and class (sd:1246).
+
+        Called only once the digests differ: the digest decides, and this
+        names. Gate and check entries ride along, marked, never decisive.
+        """
+        manifest = getattr(self.runtime, "manifest", None)
+        if manifest is None:
+            return []
+        return sd_ship_bindings.binding_change(self.state.get("binding_manifest"), manifest(self.root))
+
+    def binding_refusal(self) -> Refusal:
+        detail = sd_ship_bindings.describe_change(self.binding_changes())
+        return Refusal("review tools or repository policy changed after review" + (f": {detail}" if detail else ""),
+                       code="review_binding_moved", boundary="review", state="operator_decision",
+                       next_action="Run sd-ship prepare again; it re-reviews this head in full (sd:1390).")
+
     def binding_moved(self) -> bool:
         """The stored receipt was produced by review tools or policy now gone.
 
@@ -207,14 +374,71 @@ class SharedReview:
         pins by making the binding read itself raise, not every subprocess.
         """
         if not hasattr(self, "_binding_moved"):
-            self._binding_moved = bool(self.history.native(self.state)) and self.state.get("binding") != self.runtime.binding(self.root)
+            self._binding_moved = bool(self.history.native(self.state)) and not self.binding_holds()
         return self._binding_moved
+
+    def binding_holds(self) -> bool:
+        return self.state.get("binding") == self.runtime.binding(self.root) or self.request_unchanged()
+
+    def request_unchanged(self) -> bool:
+        """sd:1397, option E: only review code moved, and the reviewers would be asked the same.
+
+        `sd-review --explain` is replayed for the stored pass, with the prior
+        report it was handed, and its `request_sha256` compared with the one
+        the pass recorded. Equal, the receipt is rebound and the record says
+        so; no pass is spent. Policy stays byte-exact, a legacy receipt has no
+        request to replay, a moved `FINDING_FILES` member could judge the same
+        request differently, and any doubt re-reviews.
+        """
+        passes = self.history.native(self.state)
+        request = (passes[-1].get("review_request") if passes else None) or {}
+        changed, manifest = self.binding_changes(), getattr(self.runtime, "manifest", None)
+        if (manifest is None or not request.get("sha256") or not changed
+                or any(kind not in ("verdict", "gate", "check") or name in sd_ship_bindings.FINDING_FILES
+                       for name, kind in changed)
+                or self.replayed_request(passes, request) != request["sha256"]):
+            return False
+        kept = {"head": passes[-1].get("head"), "recorded_at": self.runtime.clock(), "superseded_binding": self.state.get("binding"),
+                "changed": [list(row) for row in changed], "request_sha256": request["sha256"]}
+        self.save(binding=self.runtime.binding(self.root), binding_manifest=manifest(self.root),
+                  review_binding_kept=[*(self.state.get("review_binding_kept") or []), kept])
+        return True
+
+    def replayed_request(self, passes: list[dict], request: dict) -> str | None:
+        """The request digest `--explain` gives now for the last pass; None when it cannot be rebuilt."""
+        last = passes[-1]
+        argv = sd_review_request.review_argv(self.runtime.bin_dir, self.database,
+                                             SimpleNamespace(provider=last.get("requested_provider")), last.get("base"))
+        wanted = request.get("verify") or request.get("resume")
+        with tempfile.TemporaryDirectory(prefix="sd-ship-replay-") as directory:
+            if wanted:
+                # The prior is rebuilt the two ways `review` builds it, and used only if it is the one handed over.
+                earlier = dict(self.state, passes=passes[:-1])
+                candidates = [self.history.prior(earlier)]
+                try:
+                    candidates.append(self.history.aggregate(earlier))
+                except Refusal:
+                    pass
+                prior = next((row for row in candidates if digest(row) == wanted), None)
+                if prior is None:
+                    return None
+                path = pathlib.Path(directory) / "prior-review.json"
+                path.write_text(json.dumps(prior, sort_keys=True), encoding="utf-8")
+                argv += ["--verify-report" if request.get("verify") else "--resume-report", str(path)]
+            try:
+                planned = self.runtime.process(self.root, argv + ["--explain"], timeout=self.runtime.setup_seconds)
+                return json.loads(planned.stdout).get("request_sha256") if planned.returncode == 0 else None
+            except (ReviewTimeout, ValueError, AttributeError):
+                return None
 
     def reusable_review(self, head: str, prior: dict, retry: bool, additional: bool) -> bool:
         if additional:
             return False
         requested = getattr(self.args, "provider", None)
-        if (requested is not None and prior.get("subject", {}).get("head") == head
+        # A carried head is covered by the receipt of the head it came from (sd:1485).
+        passes = self.history.native(self.state)
+        covered = self.carried_from(head, passes[-1]) if passes else head
+        if (requested is not None and prior.get("subject", {}).get("head") == covered
                 and completed_depth(prior) and prior.get("reviewed_by") != [requested]):
             raise Refusal("completed receipt does not match the requested reviewer; selection cannot replace review evidence",
                           code="review_provider_mismatch", boundary="provider", state="operator_decision",
@@ -235,7 +459,7 @@ class SharedReview:
                 return False
             self.check_review(head)
             return True
-        return False
+        return not retry and self.carried_review(head)
 
     def validate_dispatch(self, head: str, prior: dict, retry: bool, additional: bool) -> None:
         passes = self.history.native(self.state)
@@ -275,20 +499,69 @@ class SharedReview:
             return self.state["empty_diff"]["base"]
         return passes[-1]["report"].get("authorship_base") or passes[0]["report"]["subject"]["base"]
 
-    def review_argv(self, base: str | None) -> list[str]:
-        """The sd-review command both stages run: `--explain` first, then the pass."""
-        argv = [sys.executable, str(self.runtime.bin_dir / "sd-review"), "--scope", "branch", "--challenge", "--json", "--database", str(self.database)]
-        requested = getattr(self.args, "provider", None)
-        if requested is not None:
-            argv += ["--provider", requested]
-        if getattr(self.args, "reuse_check", False):
-            argv.append("--reuse-check")
-        if getattr(self.args, "review_timeout", None):
-            # sd:1475. sd-review sizes its timing plan, and so this watchdog, from it.
-            argv += ["--timeout", str(self.args.review_timeout)]
-        if base:
-            argv += ["--base", base]
-        return argv
+    def gate_check_base(self) -> str | None:
+        """The base sd-review runs the gate check against, or None (sd:2041).
+
+        Under `repo.ci = local` the merge gate runs this same check again; run
+        it as the gate does, so its receipt answers there.
+        """
+        if self.state.get("base") and sd_lib.repo_ci(self.connection, self.root) == "local":
+            return self.state["base"]
+        return None
+
+    def request_verifies_fix(self, passes: list[dict], head: str) -> bool:
+        """sd:2147. Whether a post-cap request reviews the diff since the last reviewed head.
+
+        That is the subject an automatic pass would take at this head. A
+        request used to review the whole branch unconditionally, so a branch
+        whose fix deltas each fit the review input cap outgrew it on the one
+        pass the operator asked for (ui-design #19: 2.1 MB over 85 files).
+        The whole branch is still reviewed where a fix verification has no
+        sound base: no completed pass to verify, the same head again (an
+        empty range), a moved review binding, or an imported history whose
+        every native pass is a full-branch continuation. A catch-up merge is
+        read after this, by `caught_up_pass`, as it is for an automatic pass.
+        The completed pass is the last one that verified something: a spent
+        request that reviewed nothing and kept no evidence is skipped (sd:2192).
+        """
+        if not passes or self.history.requires_continuation(self.state):
+            return False
+        index = verified_index(passes)
+        if index is None or passes[index]["head"] == head:
+            return False
+        return not self.binding_moved()
+
+    @staticmethod
+    def verified_pass(passes: list[dict], additional: bool) -> dict:
+        """The pass a fix verification continues: for a request, the one `request_verifies_fix` read."""
+        index = verified_index(passes) if additional else None
+        return passes[-1 if index is None else index]
+
+    def dispatch_prior(self, passes: list[dict], prior: dict, full: bool, additional: bool) -> dict:
+        """The evidence a pass resumes, or the report a fix verification verifies (sd:2192)."""
+        if full:
+            return self.history.aggregate(self.state)
+        if additional and reservation(passes[-1]):
+            return self.verified_pass(passes, additional)["report"]
+        return prior
+
+    def caught_up_pass(self, passes: list[dict], head: str, whole: bool, additional: bool = False) -> dict | None:
+        """Where the base was merged in since the last pass, when it was (sd:2023).
+
+        From the previous head, the range then holds every commit the base
+        brought in, and a fix verification would review code this branch never
+        touched, so the pass is full-branch. Read from git ancestry, not from
+        the `--catch-up` flag: a prepare that fails after the merge, or a merge
+        done by hand, must be scoped the same way on the next run.
+        """
+        base = self.state.get("base")
+        if not passes or whole or not base:
+            return None
+        previous = self.verified_pass(passes, additional)["head"]
+        fork = sd_lib.git_output(["merge-base", head, f"refs/remotes/origin/{base}"], self.root)
+        if not fork or is_ancestor(self.root, fork, previous):
+            return None
+        return {"from": previous, "base": fork}
 
     def review(self, head: str) -> None:
         passes = self.history.native(self.state)
@@ -301,8 +574,10 @@ class SharedReview:
         retry = bool(self.args.retry_review)
         request = self.additional_request(head, passes)
         additional = request is not None
-        if additional:
-            prior = self.history.aggregate(self.state)
+        # sd:2147. A request verifies the fix like the automatic pass it
+        # follows, where one would; only a request with no such pass reviews
+        # the whole branch again.
+        whole = additional and not self.request_verifies_fix(passes, head)
         if self.reusable_review(head, prior, retry, additional):
             return
         self.validate_dispatch(head, prior, retry, additional)
@@ -311,25 +586,31 @@ class SharedReview:
         # not a fix verification: `--base <previous head>` would be this same
         # head and would review an empty range, which is a rubber stamp rather
         # than a review. It resumes the complete prior history so no earlier
-        # blocker is dropped, exactly as a post-cap request does.
-        moved = not additional and self.binding_moved()
-        if moved:
-            prior = self.history.aggregate(self.state)
-        base = passes[-1]["head"] if passes and not (retry or additional or moved) else None
-        argv = self.review_argv(base)
+        # blocker is dropped, exactly as a whole-branch post-cap request does.
+        # sd:2192. A request under a moved binding is marked too, so a later
+        # request cannot verify past it if it fails (`verified_index`).
+        moved = self.binding_moved()
+        caught_up = self.caught_up_pass(passes, head, whole, additional)
+        full = whole or moved or caught_up is not None
+        prior = self.dispatch_prior(passes, prior, full, additional)
+        base = self.verified_pass(passes, additional)["head"] if passes and not (retry or full) else None
+        argv = sd_review_request.review_argv(self.runtime.bin_dir, self.database, self.args, base, gate_check=self.gate_check_base())
         requested = getattr(self.args, "provider", None)
         passes.append({"head": head, "started_at": self.runtime.clock(), "base": base, "retry": retry,
                        "requested_provider": requested})
         if request:
             passes[-1]["additional_review_request"] = request
+        if caught_up is not None:
+            passes[-1]["catch_up"] = caught_up
         if moved:
             passes[-1]["review_binding_change"] = {"head": head, "recorded_at": self.runtime.clock(),
-                                                   "superseded_binding": self.state.get("binding")}
+                                                   "superseded_binding": self.state.get("binding"),
+                                                   "changed": [list(row) for row in self.binding_changes()]}
         with tempfile.TemporaryDirectory(prefix="sd-ship-verify-") as directory:
             if prior:
                 prior_path = pathlib.Path(directory) / "prior-review.json"
                 prior_path.write_text(json.dumps(prior, sort_keys=True), encoding="utf-8")
-                argv += ["--resume-report" if retry or additional or moved else "--verify-report", str(prior_path)]
+                argv += ["--resume-report" if retry or full else "--verify-report", str(prior_path)]
             result = self.execute_review(argv, head, passes)
         self.record_review(result, head, passes)
 
@@ -354,9 +635,17 @@ class SharedReview:
             except Refusal:
                 self.save(review_preflight_error=self.preflight_diagnostic(planned))
                 raise
+            # sd:1397. What the reviewers are asked, so a moved binding can replay it.
+            explained = json.loads(planned.stdout)
+            passes[-1]["review_request"] = {"sha256": explained.get("request_sha256"),
+                                            "verify": explained.get("verification_report_digest"),
+                                            "resume": explained.get("resume_report_digest")}
             # What dispatch overwrites, so a released gate failure can put it back.
             self.superseded = {key: self.state.get(key, ABSENT) for key in DISPATCH_FIELDS}
-            self.save(passes=passes, phase="reviewing", head=head, binding=self.runtime.binding(self.root), review_preflight_error=None, review_clearance=None)
+            bound: dict[str, Any] = {"binding": self.runtime.binding(self.root)}
+            if self.runtime.manifest is not None:
+                bound["binding_manifest"] = self.runtime.manifest(self.root)
+            self.save(passes=passes, phase="reviewing", head=head, **bound, review_preflight_error=None, review_clearance=None)
             stage = "execution"
             return self.runtime.process(self.root, argv + ["--expected-timing", digest(plan)], timeout=plan["execution_seconds"])
         except ReviewTimeout as error:
@@ -367,7 +656,7 @@ class SharedReview:
                 passes[-1].update(execution_error=diagnostic, exit_code=124)
                 self.save(passes=passes, reviewed_head=None, phase="reviewed")
             raise Refusal(f"local review {stage} watchdog expired after {error.diagnostic['allowed_seconds']}s; "
-                          + ("no provider pass reserved; " if stage == "planning" else "reserved pass retained; ")
+                          + ("no provider pass reserved; " if stage == "planning" else f"reserved pass retained{consumed(passes)}; ")
                           + "bounded diagnostics remain in the item ship receipt") from None
 
     def release_gate_failure(self, report: dict, head: str, passes: list[dict]) -> None:
@@ -387,16 +676,11 @@ class SharedReview:
         stop re-reviewing (found by the local review of sd:1475). Every field dispatch overwrote
         goes back to what it was.
         """
-        passes.pop()
         check = report.get("check") or {}
         detail = str(check.get("detail") or "")[-self.runtime.diagnostic_bytes:]
         checks = gate_diagnostics(check, self.runtime.diagnostic_bytes)
-        for key, value in self.superseded.items():
-            if value is ABSENT:
-                self.state.pop(key, None)
-        self.save(passes=passes, **{key: value for key, value in self.superseded.items() if value is not ABSENT},
-                  review_preflight_error={"kind": "gate_failed", "stage": "check", "head": head,
-                                          "exit_code": check.get("exit_code"), "detail": detail, "checks": checks})
+        self.release_pass(passes, {"kind": "gate_failed", "stage": "check", "head": head,
+                                   "exit_code": check.get("exit_code"), "detail": detail, "checks": checks})
         failed = next((c for c in checks if c["status"] == "fail"), {})
         evidence = detail.strip() or (failed.get("stderr") or failed.get("stdout") or failed.get("reason") or "").strip()
         raise Refusal(f"the repository gate failed before any reviewer was asked; no review pass was spent: "
@@ -404,6 +688,35 @@ class SharedReview:
                       code="gate_failed", boundary="runtime", state="retryable_failure",
                       next_action="Fix the gate, or rerun prepare when the machine is less loaded "
                                   "(--review-timeout raises the limit); the next prepare reviews normally.")
+
+    def release_pass(self, passes: list[dict], diagnostic: dict) -> None:
+        """Drop the pass just reserved and put back every field its dispatch overwrote."""
+        passes.pop()
+        for key, value in self.superseded.items():
+            if value is ABSENT:
+                self.state.pop(key, None)
+        self.save(passes=passes, **{key: value for key, value in self.superseded.items() if value is not ABSENT},
+                  review_preflight_error=diagnostic)
+
+    def release_unreviewed_request(self, report: dict, head: str, passes: list[dict], exit_code: int) -> None:
+        """sd:2147. A post-cap pass that reviewed nothing does not spend the operator's request.
+
+        The request buys one review. A pass in which no reviewer completed
+        and none left a finding -- every reviewer refused the input, failed,
+        or answered without citing the subject -- bought none, and keeping it
+        made the operator renew with a history digest for a review that never
+        happened. It is released the way a gate failure is, and what the
+        reviewers said stays under `review_preflight_error`. A pass that kept
+        a finding, or a watchdog or unreadable receipt whose evidence cannot
+        say it reviewed nothing, stays spent.
+        """
+        self.release_pass(passes, {"kind": "additional_review_unreviewed", "stage": "execution", "head": head,
+                                   "exit_code": exit_code, "status": report.get("status"),
+                                   "detail": failed_outcomes(report)[-self.runtime.diagnostic_bytes:]})
+        raise Refusal(f"local review {report.get('status')}: 0/{report.get('requested_reviews', 0)} completed"
+                      f"{failed_outcomes(report)}; nothing was reviewed, so the operator request was not consumed",
+                      code="review_unreviewed", boundary="review", state="operator_decision",
+                      next_action="Resolve the reviewers' refusals, then repeat the same --additional-review-for request.")
 
     def record_review(self, result: subprocess.CompletedProcess, head: str, passes: list[dict]) -> None:
         try:
@@ -423,10 +736,14 @@ class SharedReview:
             passes[-1].update(execution_error=error, exit_code=result.returncode)
             self.save(passes=passes, reviewed_head=None, phase="reviewed")
             raise Refusal(f"local review emitted no valid receipt (sd-review exit {result.returncode}); "
-                          "its reserved pass remains recorded; bounded diagnostics remain in the item ship receipt")
+                          f"its reserved pass remains recorded{consumed(passes)}; "
+                          "bounded diagnostics remain in the item ship receipt")
         stash_raw_responses(report, head)
         if unreviewed_gate_failure(report, result.returncode):
             self.release_gate_failure(report, head, passes)
+        request = passes[-1].get("additional_review_request")
+        if request and unreviewed(report, result.returncode):
+            self.release_unreviewed_request(report, head, passes, result.returncode)
         passes[-1]["report"] = report
         passes[-1]["exit_code"] = result.returncode
         self.save(passes=passes, reviewed_head=head if result.returncode == 0 else None, phase="reviewed")
@@ -436,15 +753,42 @@ class SharedReview:
             self.save(reviewed_head=None)
             raise
         if result.returncode:
-            raise Refusal(f"local review {report.get('status')}: {report.get('completed_reviews', 0)}/{report.get('requested_reviews', 0)} completed"
-                          f"{failed_outcomes(report)}; see item ship receipt")
+            message = (f"local review {report.get('status')}: {report.get('completed_reviews', 0)}/{report.get('requested_reviews', 0)} completed"
+                       f"{failed_outcomes(report)}{REQUEST_CONSUMED if request else ''}")
+            if report.get("status") == "blocking":
+                raise sd_ship_dispositions.blocking_refusal(self, head, report, message)
+            raise Refusal(f"{message}; see item ship receipt")
         self.check_review(head)
         if self.runtime.current_head(self.root) != head:
             raise Refusal("HEAD or checkout changed during local checks and review")
 
 
+#: What a refusal adds when the pass it kept was an explicit post-cap request (sd:2147).
+REQUEST_CONSUMED = "; the operator request was consumed"
+
+
+def consumed(passes: list[dict]) -> str:
+    return REQUEST_CONSUMED if passes and passes[-1].get("additional_review_request") else ""
+
+
+def unreviewed(report: dict, exit_code: int) -> bool:
+    """sd:2147. A failed pass in which no reviewer completed and no finding survived.
+
+    Read from a whole receipt only: one that names the reviewers it asked,
+    each with a failed outcome. A report missing those fields cannot say it
+    reviewed nothing, so its pass stays spent.
+    """
+    outcomes = report.get("outcomes")
+    requested = report.get("requested_reviews")
+    return (exit_code != 0 and report.get("status") in ("refused", "rate_limited", "unavailable")
+            and type(requested) is int and requested > 0 and report.get("completed_reviews") == 0
+            and report.get("reviewed_by") == [] and report.get("findings") == []
+            and isinstance(outcomes, list) and bool(outcomes)
+            and all(isinstance(row, dict) and row.get("status") not in ANSWERED for row in outcomes))
+
+
 #: The receipt fields `execute_review` overwrites when it dispatches a pass.
-DISPATCH_FIELDS = ("phase", "head", "binding", "review_clearance")
+DISPATCH_FIELDS = ("phase", "head", "binding", "binding_manifest", "review_clearance")
 ABSENT = object()
 
 
@@ -460,10 +804,13 @@ def gate_diagnostics(check: dict, limit: int) -> list[dict]:
     records = check.get("checks")
     if not isinstance(records, list):
         return []
+    # A docs-only run (sd:2072) adds one `docs` row after the three names; it is the one that ran.
+    docs = [record for record in records[len(sd_lib.CHECK_NAMES):] if isinstance(record, dict)
+            and record.get("name") == "docs"][:1]
     return [{"name": record.get("name"), "status": record.get("status"), "exit_code": record.get("exit_code"),
              "reason": str(record.get("reason") or "")[-limit:],
              "stdout": str(record.get("stdout") or "")[-limit:], "stderr": str(record.get("stderr") or "")[-limit:]}
-            for record in records[:len(sd_lib.CHECK_NAMES)] if isinstance(record, dict)]
+            for record in [*records[:len(sd_lib.CHECK_NAMES)], *docs] if isinstance(record, dict)]
 
 
 #: Statuses of a reviewer that answered usably; any other outcome names its cause.

@@ -68,7 +68,8 @@ NOT_ON_ASK = ("--id", "--json", "--gate", "--levels", "--criteria",
 
 #: Options `ask` does take, so a typo in the reference is caught rather than
 #: read as an option this module has not heard of.
-ON_ASK = ("--questions", "--state", "--state-format", "--model", "--fallback")
+ON_ASK = ("--questions", "--state", "--state-format", "--model", "--fallback",
+          "--caller", "--stage")
 
 #: A row of the reference's dimension table: `| `name` | question |`.
 TABLE_ROW = re.compile(r"^\|\s*`(\w+)`\s*\|", re.MULTILINE)

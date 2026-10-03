@@ -15,4 +15,4 @@ Valid attribution retains the normal rule that an author vendor cannot review it
 An actual review still requires valid attribution for every commit in its reviewed range.
 `--dry-run` retains that requirement because it plans concrete provider requests.
 Other errors, including invalid routing policy or an unavailable comparison base, still fail the action.
-This correction replaces the unconditional advisory refusal introduced by #750, as reported in [#799](https://github.com/platypeeps/sd-ai-command-pack/issues/799).
+This correction replaces the unconditional advisory refusal introduced by #750, as reported in retired GitHub issue 799; PR #802 holds the record.

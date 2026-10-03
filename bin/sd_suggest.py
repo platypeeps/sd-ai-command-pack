@@ -1,4 +1,4 @@
-"""`sd suggest` — a framework suggestion is a row first and an issue only on request.
+"""`sd suggest` — a framework suggestion is a row first and an sd item only on request.
 
 The skill this backs once told a model to file to a tracker the moment friction
 cost a turn, while its own tooling section pointed at a standalone command that
@@ -9,9 +9,14 @@ the step that fails on a fork, in `guest` mode, or with no credential.
 
 So the row comes first. `sd suggest add` writes a `proposal` note against a
 work item in every mode and reaches nothing outside this machine. `sd suggest
-publish` is the separate, explicit act that files one, and it refuses without a
-`--to`, because the destination of a suggestion is a decision and never a
-default.
+publish` is the separate, explicit act that turns one into an sd item of its
+own, and it refuses without a `--belongs-to`, because the checkout a
+suggestion belongs to is a decision and never a default.
+
+It files no GitHub issue (sd:2002). Since 2026-09-28 every issue is filed in
+the sd database, and this repository has GitHub issues disabled, so the
+`gh api repos/<to>/issues` path `publish` once took pointed at a tracker nobody
+reads. `--to owner/repo` is kept only to refuse by name.
 
 Two things this deliberately does not do:
 
@@ -26,7 +31,9 @@ Two things this deliberately does not do:
 vocabulary is the `CHECK` on `note.kind` in the schema, which already carries
 `proposal` beside `followup`. The library frame, the connection and the item
 resolver are `bin/sd_handoff_rows.py`'s, built for criterion 29 and reused
-whole rather than restated here.
+whole rather than restated here. `publish` writes its item through
+`sd_db.workflow.capture_task`, the one `sd task add` uses, and reads its
+checkout the way `sd task edit --belongs-to` does.
 """
 
 from __future__ import annotations
@@ -38,9 +45,15 @@ PROPOSAL = "proposal"
 
 #: What `publish` refuses to guess.
 NO_DESTINATION = (
-    "`sd suggest publish` needs `--to owner/repo`. The destination of a "
-    "suggestion is a decision, and a default here files into whichever "
-    "tracker happened to be configured when nobody was looking."
+    "`sd suggest publish` needs `--belongs-to PATH`, a registered checkout. The "
+    "checkout a suggestion belongs to is a decision, and a default here files "
+    "into whichever repository happened to be current when nobody was looking."
+)
+
+#: What `--to` now answers. It named a GitHub repository to file an issue in.
+RETIRED_TO = (
+    "`--to owner/repo` is retired: `sd suggest publish` files an sd item, never a "
+    "GitHub issue (sd:2002). Name the checkout with `--belongs-to PATH`."
 )
 
 
@@ -81,54 +94,63 @@ def suggest_add(args) -> int:
     finally:
         connection.close()
     print(f"proposal [{note}] on {item_dir.name}, in {where} mode; filed nowhere")
-    print(f"`sd suggest publish --to owner/repo --note {note}` files it")
+    print(f"`sd suggest publish --belongs-to PATH --note {note}` files it")
     return 0
 
 
 def suggest_publish(args) -> int:
-    """File one row as an issue at the destination `--to` names, after a dedup read."""
+    """File one row as an sd item in the checkout `--belongs-to` names, after a dedup read."""
+    import getpass  # noqa: PLC0415 - same
+
     import sd_lib  # noqa: PLC0415 - same
+    import sd_work  # noqa: PLC0415 - same
 
     rows = _rows()
-    if not args.to:
+    if getattr(args, "to", ""):
+        raise rows.RowsRefusal(RETIRED_TO)
+    if not getattr(args, "belongs_to", ""):
         raise rows.RowsRefusal(NO_DESTINATION)
-    root = sd_lib.repo_root(pathlib.Path.cwd())
-    if root is None:
-        raise rows.RowsRefusal("not inside a git repository")
-
-    sd_db = rows.library()
-    connection = rows.connect(sd_db)
+    sd_db, workflow = sd_work._library()
+    connection = rows.connect(sd_db, write=True)
     try:
         row = connection.execute(
             "SELECT body FROM note WHERE id = ? AND kind = ?", (args.note, PROPOSAL)
         ).fetchone()
+        if row is None:
+            raise rows.RowsRefusal(
+                f"no {PROPOSAL} note with id {args.note}; `sd suggest add` prints it")
+        title = row["body"].splitlines()[0][:120]
+
+        # The row's own spelling of the checkout, as `sd task add` stores it
+        # (sd:1439): `capture_task` refuses a repository the `repo` table does
+        # not carry, and the dedup read below compares against that spelling.
+        key = sd_work._belongs_to(args.belongs_to)
+        registered = sd_lib.repo_row(connection, key)
+        if registered is None:
+            raise rows.RowsRefusal(f"--belongs-to: {key} is not a registered repository")
+        repo = str(registered["path"])
+
+        # The dedup read the skill requires at `skills/sd-suggest/SKILL.md` --
+        # an open item in that checkout with the same title is the suggestion
+        # already filed, so this files nothing and says which item holds it.
+        # `same_repo` rather than an equality probe, so every stored form of the
+        # checkout matches (sd:1439, `tests/test_home_relative.py`).
+        for item in connection.execute(
+            "SELECT id, title, repo FROM item WHERE status != 'done'"
+        ):
+            if (sd_lib.same_repo(item["repo"], repo)
+                    and item["title"].strip().lower() == title.strip().lower()):
+                print(f"already open as sd:{item['id']}; filed nothing")
+                return 0
+
+        state = workflow.capture_task(
+            connection, title=title,
+            body=f"{row['body']}\n\nFrom proposal note {args.note}.",
+            repo=repo, who=getpass.getuser(),
+        )
+    except sd_db.SdDbError as error:
+        raise rows.RowsRefusal(str(error)) from error
     finally:
         connection.close()
-    if row is None:
-        raise rows.RowsRefusal(f"no {PROPOSAL} note with id {args.note}; `sd suggest add` prints it")
-    title = row["body"].splitlines()[0][:120]
-
-    # The dedup read the skill already requires at `skills/sd-suggest/SKILL.md:36`
-    # -- "not 'I searched my memory' -- the list API call, actually made". It is
-    # a read, so a failure here refuses rather than falling through to a file:
-    # filing blind is the outcome the read exists to prevent.
-    pr_state = sd_lib.sibling("sd_pr_state", "sd-pr-state")
-    open_issues, error = pr_state.gh_json(
-        ["api", f"repos/{args.to}/issues?state=open&per_page=100"], pathlib.Path(root)
-    )
-    if error:
-        raise rows.RowsRefusal(f"cannot read {args.to}'s open issues, so filing blind: {error}")
-    for issue in open_issues or []:
-        if issue.get("title", "").strip().lower() == title.strip().lower():
-            print(f"already open at {issue.get('html_url')}; filed nothing")
-            return 0
-
-    payload, error = pr_state.gh_json(
-        ["api", "--method", "POST", f"repos/{args.to}/issues",
-         "-f", f"title={title}", "-f", f"body={row['body']}"],
-        pathlib.Path(root),
-    )
-    if error:
-        raise rows.RowsRefusal(f"gh would not file the issue at {args.to}: {error}")
-    print((payload or {}).get("html_url") or f"filed at {args.to}")
+    print(f"filed sd:{state['item']['id']} in {repo}; the proposal note stays")
     return 0

@@ -2,20 +2,29 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
 import pathlib
 import re
 import shutil
+import subprocess
 import sys
+import tempfile
 from contextlib import closing
-from typing import Any, Mapping
+from typing import Any, Collection, Iterator, Mapping
 
 import sd_lib
 
 CONTRACT = ".github/sd-check-reuse.json"
 FIELDS = {"schema_version", "complete", "network", "dependencies", "tools", "environment"}
+#: Optional: exact tracked files under a declared root that the secret-name filter admits (sd:2325).
+EXCEPTIONS = "secret_name_exceptions"
+#: Optional: ignored folders the check builds, each to its variable or null; never bound, never reused (sd:2327).
+OUTPUTS = "build_outputs"
+#: The check runs with these, but they are not digested: they drift inside one
+#: session, and the tools and toolchains they select are bound by bytes (sd:2326).
 BASE_ENV = ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR")
 SECRET = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|COOKIE|AUTH", re.I)
 BIN = pathlib.Path(__file__).resolve().parent
@@ -40,15 +49,17 @@ def file_digest(path: pathlib.Path) -> str:
 
 def reuse_contract(root: pathlib.Path) -> dict[str, Any]:
     value = json.loads((root / CONTRACT).read_text(encoding="utf-8"))
-    if (not isinstance(value, dict) or set(value) != FIELDS or type(value["schema_version"]) is not int
+    if (not isinstance(value, dict) or set(value) - {EXCEPTIONS, OUTPUTS} != FIELDS or type(value["schema_version"]) is not int
             or value["schema_version"] != 1 or value["complete"] is not True or value["network"] != "none"):
         raise Unavailable("reuse requires a complete local-only dependency declaration")
-    for name in ("dependencies", "tools", "environment"):
+    value.setdefault(EXCEPTIONS, [])
+    for name in ("dependencies", "tools", "environment", EXCEPTIONS):
         entries = value[name]
         if not isinstance(entries, list) or any(not isinstance(v, str) or not v for v in entries) or len(set(entries)) != len(entries):
             raise Unavailable(f"invalid reuse {name}")
     if any(not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", name) or SECRET.search(name) for name in value["environment"]):
         raise Unavailable("receipt environments cannot declare credential variables")
+    value.setdefault(OUTPUTS, {})
     return value
 
 
@@ -57,17 +68,86 @@ def receipt_environment(value: Mapping[str, Any], env: Mapping[str, str]) -> dic
     return {key: env[key] for key in (*BASE_ENV, *value["environment"]) if key in env}
 
 
-def dependency_files(root: pathlib.Path, names: list[str]) -> dict[str, str]:
+def environment_digest(value: Mapping[str, Any], env: Mapping[str, str]) -> str:
+    """The declared variables only; a base variable is bound when the declaration names it."""
+    return receipt_digest({key: env[key] for key in value["environment"] if key in env})
+
+
+def secret_name_exceptions(root: pathlib.Path, value: Mapping[str, Any]) -> set[str]:
+    """The declaration's exact paths, each a tracked regular file under a declared root."""
+    allowed = set()
+    for name in value.get(EXCEPTIONS, []):
+        path = root / name
+        if (not plain_path(name)
+                or not any(name == dependency or name.startswith(dependency.rstrip("/") + "/") for dependency in value["dependencies"])
+                or path.is_symlink() or not path.is_file() or path.resolve() != path
+                or sd_lib.git_output(["ls-files", "--error-unmatch", "--", name], root) != name):
+            raise Unavailable(f"unsupported secret-name exception: {name}")
+        allowed.add(name)
+    return allowed
+
+
+def output_variables(value: Mapping[str, Any]) -> dict[str, str | None]:
+    """Each build output's variable: distinct, a plain name, never declared, base or secret-looking."""
+    outputs = value[OUTPUTS]
+    variables = [v for v in outputs.values() if v is not None] if isinstance(outputs, dict) else []
+    if (not isinstance(outputs, dict) or len(set(variables)) != len(variables)
+            or any(not isinstance(v, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", v) or SECRET.search(v)
+                   or v in (*BASE_ENV, *value["environment"]) for v in variables)):
+        raise Unavailable(f"invalid reuse {OUTPUTS}")
+    return dict(outputs)
+
+
+def plain_path(name: str) -> bool:
+    """A normalised repository-relative path with no pattern, `.`, `..` or `.git` part."""
+    relative = pathlib.PurePosixPath(name)
+    return (bool(name) and not relative.is_absolute() and relative.as_posix() == name
+            and not any(part in ("..", ".", ".git") for part in relative.parts) and not any(c in name for c in "*?["))
+
+
+def build_outputs(root: pathlib.Path, value: Mapping[str, Any]) -> dict[str, str | None]:
+    """The declared build outputs: ignored folders that hold no tracked file and share nothing with a dependency."""
+    outputs = output_variables(value)
+    declared = [name.rstrip("/") for name in (*value["dependencies"], *value[EXCEPTIONS])]
+    for name in outputs:
+        if (not plain_path(name) or (root / name).is_symlink()
+                or any(other == name or other.startswith(name + "/") or name.startswith(other + "/") for other in declared)
+                # ls-files-form: plain -- empty output is the claim: no tracked file under the build output
+                or sd_lib.git_output(["ls-files", "--", name], root) != ""):
+            raise Unavailable(f"unsupported build output: {name}")
+    return outputs
+
+
+@contextlib.contextmanager
+def build_output_environment(root: pathlib.Path, value: Mapping[str, Any], env: Mapping[str, str]) -> Iterator[dict[str, str]]:
+    """The recorded run's environment: each build output's variable names a fresh, empty folder, removed after.
+
+    The operator's own folder is never deleted or moved. An output with no
+    variable cannot be redirected, so recording refuses while it exists.
+    """
+    outputs = build_outputs(root.resolve(), value)
+    for name, variable in outputs.items():
+        if variable is None and os.path.lexists(root / name):
+            raise Unavailable(f"build output {name} exists and names no variable; remove it before recording")
+    with contextlib.ExitStack() as folders:
+        yield {**env, **{variable: folders.enter_context(tempfile.TemporaryDirectory(
+            prefix="sd-check-build-", dir=env.get("TMPDIR") or None, ignore_cleanup_errors=True))
+            for variable in filter(None, outputs.values())}}
+
+
+def dependency_files(root: pathlib.Path, names: list[str], allowed: Collection[str] = ()) -> dict[str, str]:
     files = {}
     for name in names:
         relative = pathlib.Path(name)
         path = root / relative
         if (relative.is_absolute() or ".." in relative.parts or path.resolve() != path
-                or not path.exists() or ".git" in relative.parts or SECRET.search(relative.name)):
+                or not path.exists() or ".git" in relative.parts or (SECRET.search(relative.name) and name not in allowed)):
             raise Unavailable(f"unsupported dependency path: {name}")
         entries = [path, *sorted(path.rglob("*"))] if path.is_dir() else [path]
         for entry in entries:
-            if entry.is_symlink() or SECRET.search(entry.name) or entry.name == ".git" or not (entry.is_file() or entry.is_dir()):
+            exempt = entry.is_file() and str(entry.relative_to(root)) in allowed
+            if (entry.is_symlink() or (SECRET.search(entry.name) and not exempt) or entry.name == ".git"
+                    or not (entry.is_file() or entry.is_dir())):
                 raise Unavailable(f"unsupported dependency entry: {entry.relative_to(root)}")
             if entry.is_file():
                 files[str(entry.relative_to(root))] = file_digest(entry)
@@ -89,6 +169,76 @@ def tool_identity(name: str, env: Mapping[str, str], root: pathlib.Path) -> dict
     return {"invocation": name, "path": str(path.resolve()), "sha256": file_digest(path)}
 
 
+def tree_digest(root: pathlib.Path) -> str:
+    """Every entry under `root` by relative path: a file by mode and bytes, a link by target, a folder by mode.
+
+    A link's text does not change when the file it names does, so a link must resolve inside `root`, whose
+    entries are all hashed here; one that leaves the tree, dangles or loops refuses the binding.
+    """
+    entries = {}
+    for entry in sorted(root.rglob("*")):
+        key = str(entry.relative_to(root))
+        if entry.is_symlink():
+            try:
+                target = entry.resolve(strict=True)
+            except (OSError, RuntimeError):
+                raise Unavailable(f"toolchain link {entry} dangles or loops") from None
+            if not target.is_relative_to(root):
+                raise Unavailable(f"toolchain link {entry} resolves outside its toolchain: {target}")
+            entries[key] = "link:" + os.readlink(entry)
+        elif entry.is_file():
+            entries[key] = file_digest(entry)
+        else:
+            entries[key] = f"directory:{entry.stat().st_mode}"
+    return receipt_digest(entries)
+
+
+def toolchain_selections(tools: list[str], commands: list[list[str]]) -> list[tuple[str, str | None]]:
+    """Each (tool, explicit toolchain or None) the binding can see: `cargo +nightly`, `rustup run nightly`, a declared `+nightly`.
+
+    A Makefile's own `+toolchain` is invisible here, so the declaration names it as a `+<toolchain>` tool.
+    """
+    selections: list[tuple[str, str | None]] = [(name, None) for name in tools if not name.startswith("+")]
+    selections += [("cargo", name[1:]) for name in tools if name.startswith("+")]
+    for argv in commands:
+        if len(argv) > 1 and argv[1].startswith("+"):
+            selections.append((argv[0], argv[1][1:]))
+        elif len(argv) > 2 and os.path.basename(argv[0]) == "rustup" and argv[1] == "run":
+            selections.append(("cargo", argv[2]))
+    return selections
+
+
+def toolchain_identities(selections: list[tuple[str, str | None]], env: Mapping[str, str],
+                         root: pathlib.Path) -> list[dict[str, str]]:
+    """Each rustup toolchain a tool runs from, by contents: a proxy's bytes and a toolchain's name bind nothing (sd:2328).
+
+    `rustup which` runs in the check's cwd and environment, so it honours `rust-toolchain.toml` and
+    `RUSTUP_TOOLCHAIN` as the check will; it never installs. An explicit selection it cannot answer refuses.
+    """
+    search_path = os.pathsep.join(str(root / component) for component in os.get_exec_path(env))
+    rustup = shutil.which("rustup", path=search_path)
+    found = {}
+    for name, chosen in selections:
+        if not rustup:
+            if chosen is not None:
+                raise Unavailable(f"cannot bind toolchain +{chosen} for {name}: no rustup")
+            continue
+        selector = ["--toolchain", chosen] if chosen is not None else []
+        answer = subprocess.run([rustup, "which", *selector, os.path.basename(name)], cwd=root,
+                                env={**env, "RUSTUP_AUTO_INSTALL": "0"}, capture_output=True, text=True, timeout=30, check=False)
+        if answer.returncode != 0 and chosen is not None:
+            raise Unavailable(f"cannot bind toolchain +{chosen} for {name}: {answer.stderr.strip()[:200]}")
+        if answer.returncode != 0:
+            continue  # not a toolchain binary; its own bytes are already bound
+        binary = pathlib.Path(answer.stdout.strip())
+        if not binary.is_absolute() or binary.parent.name != "bin" or not binary.parent.parent.is_dir():
+            raise Unavailable(f"rustup named no toolchain for {name}: {answer.stdout.strip()!r}")
+        toolchain = binary.parent.parent.resolve()
+        if str(toolchain) not in found:
+            found[str(toolchain)] = {"path": str(toolchain), "sha256": tree_digest(toolchain)}
+    return [found[key] for key in sorted(found)]
+
+
 def check_binding(root: pathlib.Path, env: Mapping[str, str]) -> dict[str, Any]:
     root = root.resolve()
     if sd_lib.git_output(["status", "--porcelain", "--untracked-files=all"], root) != "":
@@ -101,7 +251,8 @@ def check_binding(root: pathlib.Path, env: Mapping[str, str]) -> dict[str, Any]:
     if not detection.commands:
         raise Unavailable("there is no full check to record")
     tools = sorted(set(value["tools"]) | {argv[0] for argv in detection.commands.values()})
-    files = dependency_files(root, value["dependencies"])
+    build_outputs(root, value)
+    files = dependency_files(root, value["dependencies"], secret_name_exceptions(root, value))
     for name in ("sd-check", "sd_check_receipts.py", "sd_lib.py"):
         files["pack:" + name] = file_digest(BIN / name)
     for name in ("CLAUDE.local.md", ".github/sd-review.json", CONTRACT):
@@ -111,10 +262,11 @@ def check_binding(root: pathlib.Path, env: Mapping[str, str]) -> dict[str, Any]:
             "tree": sd_lib.git_output(["rev-parse", "HEAD^{tree}"], root),
             "argv": [sys.executable, str(BIN / "sd-check"), "--json"],
             "detection": {"source": detection.source, "commands": detection.commands, "origin": str(detection.origin)},
-            "files": files, "tools": [tool_identity(name, controlled, root) for name in tools],
+            "files": files, "tools": [tool_identity(name, controlled, root) for name in tools if not name.startswith("+")],
+            "toolchains": toolchain_identities(toolchain_selections(tools, list(detection.commands.values())), controlled, root),
             "python": {"executable": str(pathlib.Path(sys.executable).resolve()), "sha256": file_digest(pathlib.Path(sys.executable)),
                        "version": sys.version, "prefix": sys.prefix},
-            "environment_sha256": receipt_digest(controlled)}
+            "environment_sha256": environment_digest(value, controlled)}
 
 
 def full_success(result: Any, expected: Mapping[str, Any]) -> bool:
