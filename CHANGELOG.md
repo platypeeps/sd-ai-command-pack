@@ -4,6 +4,14 @@
 
 ### Added
 
+- **`sd-slice-builder` holds `Skill` and `Monitor` (sd:2526).** A builder
+  waited on a gate longer than one Bash call with a `sleep` loop or a
+  background task, and could not run a skill its brief named. The agent now
+  declares both tools, and its working rules say to wait on a gate longer
+  than 10 minutes with `Monitor` on its log and to report in the turn it
+  ends. The installer copies agents into `~/.claude/agents`, so the change
+  reaches a machine at the next `sd_install.py --user`.
+
 - **`sd gate post --head SHA` posts the local gate outside `sd-ship merge`
   (sd:1989).** A repository under `repo.ci = local` that merges by its own
   automation -- a Dependabot merge, a daily merge script -- got no
