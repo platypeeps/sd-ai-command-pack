@@ -4,6 +4,16 @@
 
 ### Added
 
+- **`sd task cancel N --reason TEXT` cancels a task or followup (sd:1005).**
+  `sd task status N done` was the only way to close one, and it wrote no
+  completion mark, so a dropped followup read as finished work and a finding
+  carried to it never reopened. The verb calls `sd_db.progress.cancel_work`
+  with `guard=progress.task_guard`: the row reads `done` with the `cancelled`
+  receipt a cancelled work item carries, and `sd-review-ack` reads a finding
+  carried to it as `carry-dropped`. An `sd_db` without `task_guard` refuses
+  the verb by name and points at `sd-install`; the verb works once the
+  system pin carries the guard.
+
 - **`sd work deliver --associated --reason` closes an item merged without
   `--deliver` (sd:1590).** A whole-item merge prepared without `--deliver`
   carried `Item: sd:<id>` and no `Delivers:`, and every verb that could close

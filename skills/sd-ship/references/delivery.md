@@ -51,6 +51,7 @@ The immutable witness has no arbitrary expiry.
 ## Cancellation
 
 Use `sd work cancel <row-id> --reason TEXT`.
+For a task or followup, use `sd task cancel <row-id> --reason TEXT`.
 The cancel writes `done` with a `cancelled` receipt and touches no file.
 A cancel opens no pull request and does not wait for another merge.
 A later merge associated with the cancelled item can carry `Closes: <item>` but no `Delivers:`.

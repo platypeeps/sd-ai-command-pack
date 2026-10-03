@@ -791,6 +791,27 @@ def _deliver(progress: Any, workflow: Any, connection: Any, args: argparse.Names
                    expected_revision=args.if_revision)
 
 
+def _cancel_guard(progress: Any, action: str) -> dict[str, Any]:
+    """The guard `sd task cancel` hands `cancel_work` (sd:1005); none for work.
+
+    `cancel_work` is the one cancellation the library has, and its default
+    guard admits work rows only. A task or followup passes `task_guard`
+    instead, so the row reads `done` with the same `cancelled` receipt a
+    cancelled work item carries, and `sd-review-ack` reopens a finding
+    carried to it. A library from before the guard has neither the guard nor
+    the keyword, so it is refused by name rather than reaching a TypeError.
+    """
+    if action == "cancel":
+        return {}
+    guard = getattr(progress, "task_guard", None)
+    if guard is None:
+        raise WorkRefusal(
+            "the installed sd_db cannot cancel a task or followup; it is missing "
+            "sd_db.progress.task_guard. Install the current system/local-sd-db build "
+            "with the pack's installer (`sd-install`), then run this again.")
+    return {"guard": guard}
+
+
 def _capture(sd_db: Any, workflow: Any, args: argparse.Namespace,
              connection: Any, who: str) -> Any:
     """The row `add` writes, and the one step `capture_task` will not take.
@@ -879,16 +900,16 @@ def run(args: argparse.Namespace) -> int:
                 connection, args.note, who=who, expected_revision=revision)
         elif action == "register":
             result = _register(sd_db, connection, args, who)
-        elif action in {"relink", "cancel", "deliver"}:
+        elif action in {"relink", "cancel", "cancel-task", "deliver"}:
             import sd_db.progress as progress
 
             if action == "relink":
                 result = progress.relink_artifact(
                     connection, args.item, args.path, who=who, expected_revision=revision)
-            elif action == "cancel":
+            elif action in {"cancel", "cancel-task"}:
                 result = progress.cancel_work(
                     connection, args.item, reason=args.reason, who=who,
-                    expected_revision=revision)
+                    expected_revision=revision, **_cancel_guard(progress, action))
             else:
                 result = _deliver(progress, workflow, connection, args, who)
         else:
@@ -1172,6 +1193,12 @@ def register(groups: Any, store: Any) -> None:
                         help="registered checkout the --delivered-by commit landed in, "
                              "when it is not the item's own; the item keeps its checkout")
     _output(status, "status", revision=True)
+
+    cancel = verbs.add_parser(
+        "cancel", help="close a task or followup nobody will do: done, with a cancelled receipt")
+    cancel.add_argument("item", type=int)
+    cancel.add_argument("--reason", required=True)
+    _output(cancel, "cancel-task", revision=True)
 
     note = verbs.add_parser("note", help="add an item note or follow-up")
     note.add_argument("item", type=int)
