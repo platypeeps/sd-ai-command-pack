@@ -4,6 +4,16 @@
 
 ### Added
 
+- **Reviews take a machine-wide review slot (sd:2523).** Lanes in several
+  repositories each started a Codex review at once, with no shared limit, so
+  load and quota spiked together. After its check, a review now holds one of
+  `sd.review_slots` slots (unset: 2; `SD_REVIEW_SLOTS` for one run, `0` no
+  cap) from its first reviewer to its last. A waiting review prints one line
+  naming each holder, and a dead holder frees its slot. The wait spends what
+  the check left of its bound, then refuses with `review_slot_busy`. The
+  result records `review_slot`. `make test` runs with `SD_REVIEW_SLOTS=0`, so
+  a test review never waits on a real one.
+
 - **`sd gate post --head SHA` posts the local gate outside `sd-ship merge`
   (sd:1989).** A repository under `repo.ci = local` that merges by its own
   automation -- a Dependabot merge, a daily merge script -- got no

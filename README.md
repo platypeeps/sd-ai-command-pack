@@ -169,6 +169,7 @@ These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOM
 `sd.gate_slots` is load control, not a grant: how many repository gates may run at once on the machine (unset: a quarter of the cores).
 `sd.gate_load_max` and `sd.gate_settle_seconds` are load control too: the gate queue starts its head only while load1 is below the limit (unset: 2.5 per core), with starts 45 s apart by default.
 `sd gate run -- make check` queues any command the same way; `sd gate status` shows the queue.
+`sd.review_slots` is load control too: how many reviews may run their reviewers at once on the machine (unset: 2).
 `sd gate post --head SHA` runs the merge gate at SHA and posts `sd/local-gate`, for a merge path that is not `sd-ship merge`.
 
 `configured` allows private code and scoped review context to the operator's eligible configured providers, including future entries.

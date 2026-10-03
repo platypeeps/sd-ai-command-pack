@@ -32,6 +32,7 @@ import sd_opencode  # noqa: E402
 import sd_registry  # noqa: E402
 import sd_review_material  # noqa: E402
 import sd_review_readiness  # noqa: E402
+import sd_review_slots  # noqa: E402
 import sd_route  # noqa: E402
 
 # All that `bin/sd_setup_github.py` reaches through: the resolved policy, read
@@ -2127,6 +2128,8 @@ def review(
     # Legacy runner rows lack before-check/runtime identity and never grant reuse.
     check = (sd_check_receipts.reuse_checked_result(root, env, getattr(args, "database", None)) if getattr(args, "reuse_check", False) else None)
     gate_branch = getattr(args, "gate_check", None)
+    # sd:2523. The slot wait spends what the check leaves of its bound, so sd-ship's watchdog still holds.
+    slot_deadline = sd_review_slots.clock() + check_seconds
     check = check or (run_gate_check(root, runner, env, check_seconds, gate_branch, args) if gate_branch
                       else run_check(root, runner, env, check_seconds))
     result["check"] = check
@@ -2143,25 +2146,37 @@ def review(
         result["status"] = "refused"
         return result
 
-    outcomes: list[Outcome] = []
-    reviewed: list[str] = []
-    cited = reviewed_paths(root, subject, previous)
-    omitted = tuple(input_manifest.get("omitted_paths", ()))
-    for provider in chosen:
-        if len(reviewed) >= depth:
-            break
-        # Measured against the binary about to run, so each entry answers for
-        # itself. The result key carries the last; each outcome carries its own.
-        if provider.reader == "codex-json" and auth["ok"]:
-            skills = result["codex_skill_suppression"] = codex_skill_state(provider, root, runner, env, auth_home)
-        unread = omitted if provider.url or provider.reader in MATERIAL_READERS else ()
-        for outcome in _attempts(provider, lambda: partial(unlocated(run_provider(
-                provider, root, subject, prompt, runner, env, phase,  # noqa: B023 -- run in this iteration
-                codex_auth_home, client, ledger, skills), cited, result["severity_floor"]), unread)):  # noqa: B023
-            outcomes.append(outcome)
-            if outcome.status in (CLEAN, FINDINGS):
-                reviewed.append(outcome.backend)
-    return finish_review(result, outcomes, reviewed)
+    slot = sd_review_slots.take_review_slot(env, lambda: sd_lib.core_setting("review_slots", dict(env)), stream=sys.stderr,
+                                   label=f"sd-review {root}", deadline=slot_deadline)
+    if slot is None:
+        result["readiness"]["status"] = "blocked"
+        result["readiness"]["blockers"].append(sd_review_readiness.blocker(
+            "review_slot_busy", "capacity", "No review slot came free within the check's bound; prepare again."))
+        result["status"] = "refused"
+        return result
+    result["review_slot"] = slot.report
+    try:
+        outcomes: list[Outcome] = []
+        reviewed: list[str] = []
+        cited = reviewed_paths(root, subject, previous)
+        omitted = tuple(input_manifest.get("omitted_paths", ()))
+        for provider in chosen:
+            if len(reviewed) >= depth:
+                break
+            # Measured against the binary about to run, so each entry answers for
+            # itself. The result key carries the last; each outcome carries its own.
+            if provider.reader == "codex-json" and auth["ok"]:
+                skills = result["codex_skill_suppression"] = codex_skill_state(provider, root, runner, env, auth_home)
+            unread = omitted if provider.url or provider.reader in MATERIAL_READERS else ()
+            for outcome in _attempts(provider, lambda: partial(unlocated(run_provider(
+                    provider, root, subject, prompt, runner, env, phase,  # noqa: B023 -- run in this iteration
+                    codex_auth_home, client, ledger, skills), cited, result["severity_floor"]), unread)):  # noqa: B023
+                outcomes.append(outcome)
+                if outcome.status in (CLEAN, FINDINGS):
+                    reviewed.append(outcome.backend)
+        return finish_review(result, outcomes, reviewed)
+    finally:
+        slot.give_back()
 
 
 def provider_preflight(result: dict[str, Any], chosen: Sequence[sd_registry.Provider], root: pathlib.Path,

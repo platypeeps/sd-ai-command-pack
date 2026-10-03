@@ -81,6 +81,9 @@ CORE_CONFIG = {
     "gate_load_max": {"pattern": r"[0-9]+(\.[0-9]+)?",
                       "description": "The gate queue starts a gate only while load1 is below this; 0 is no load "
                                      "condition. Unset reads 2.5 per core; SD_GATE_LOAD_MAX overrides it for one run."},
+    "review_slots": {"pattern": "[0-9]+",
+                     "description": "How many reviews may run their reviewers at once on this machine; 0 is no cap. "
+                                    "Unset reads 2; SD_REVIEW_SLOTS overrides it for one run."},
     "gate_settle_seconds": {"pattern": "[0-9]+",
                             "description": "Seconds between two gate starts, and of low load1 while load5 is high; "
                                            "0 is none. Unset reads 45; SD_GATE_SETTLE_SECONDS overrides it for one run."},
