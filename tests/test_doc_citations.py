@@ -3035,8 +3035,11 @@ BACKTICKED_PATH = re.compile(r"`(\.?[A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:md|py|json|
 #: whose preceding `-` is a non-word character.
 QUALIFIER = re.compile(r"\bpack\b", re.IGNORECASE)
 
-#: Where a sentence ends: a terminator before whitespace or the end of text.
-#: A dot inside a backticked path is followed by a letter, so it ends nothing.
+#: Where a sentence ends: a terminator before whitespace and a capital, or
+#: before the end of the text. A dot inside a backticked path is followed by a
+#: letter, so it ends nothing. Neither does the dot of `e.g.`, `i.e.` or
+#: `etc.`: "the pack's rules (e.g. `<path>`)" is one sentence (review round 1
+#: on sd:999), and the capital alone does not settle "e.g. Makefile".
 #:
 #: The qualifier is read in the citation's own sentence, on *both* sides of
 #: the citation, which the first version did not. English puts the
@@ -3049,7 +3052,7 @@ QUALIFIER = re.compile(r"\bpack\b", re.IGNORECASE)
 #: A sentence, not a character window (sd:999, review-836). The 100-character
 #: window that came before let a neighbouring sentence vouch for the path:
 #: "`<path>`. See the pack's release notes." read as qualified.
-SENTENCE_END = re.compile(r"[.!?](?=\s|$)")
+SENTENCE_END = re.compile(r"(?<!\be\.g)(?<!\bi\.e)(?<!\betc)[.!?](?=\s+[A-Z]|\s*$)")
 
 #: The one way the next sentence may carry the qualifier: by opening on the
 #: file just cited. "`<path>` gives the cap. That file lives only in the
@@ -3326,6 +3329,10 @@ class ForeignCheckoutCitationTests(unittest.TestCase):
             " sd-ai-command-pack checkout.\n",
             "the cap is in\n`.claude/rules/caps.md`.\nIt ships only with the pack.\n",
             "the cap is in the pack's\n`.claude/rules/caps.md`, which no other checkout has.\n",
+            # An abbreviation's dot is not a sentence end (review round 1).
+            "Read the sd-ai-command-pack checkout's rules (e.g.\n`.claude/rules/caps.md`).\n",
+            "Read the rules (e.g. `.claude/rules/caps.md`, i.e. the caps) in the pack.\n",
+            "From the pack, read the caps, notes, etc. in `.claude/rules/caps.md`.\n",
         ):
             with self.subTest(real=real):
                 document.write_text(real, encoding="utf-8")
