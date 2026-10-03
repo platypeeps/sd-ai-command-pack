@@ -31,6 +31,7 @@ asserts the Antigravity count is zero or twelve, never partial.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import importlib
 import json
@@ -42,7 +43,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Iterable
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -1847,6 +1848,30 @@ def provision_library(ctx: Context, out, ref: str | None = None) -> tuple[bool, 
     return True, f"sd_db installed from {source} at {ref}{dirty}"
 
 
+#: The one machine-wide hold every `sd_db` install takes, under the state home.
+PROVISION_LOCK = "sd-db-provision.lock"
+
+
+@contextmanager
+def provisioning_lock(ctx: Context):
+    """Hold the machine-wide `sd_db` provisioning lock; a dry run takes none (sd:2108 review).
+
+    Two shippers reconciling library merges at once each read the installed
+    commit, each passed the ancestry check, and the older install could land
+    last. Pip into one virtualenv from two processes is unsafe in any case.
+    The hold spans the read, the check and the install, so each provisioner
+    sees what the previous one installed.
+    """
+    if ctx.dry_run:
+        yield
+        return
+    path = state_home(ctx.home, ctx.environ) / STATE_DIR / PROVISION_LOCK
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        yield
+
+
 def installed_library_commit(pack: Path) -> str | None:
     """The commit pip installed `sd_db` from into `pack`'s virtualenv, or None.
 
@@ -1885,18 +1910,20 @@ def reprovision_after_merge(root: Path, commit: str, environ: dict[str, str], pa
     if not touched:
         return None
     pack = pack or lib.main_worktree_root(Path(__file__).resolve().parent.parent)
+    ctx = Context(checkout=pack, home=Path(os.path.expanduser("~")), environ=dict(environ))
     # The downgrade guard compares schema numbers, so two library merges under
     # one schema pass it in either order. A late reconcile of an older merge
-    # must not replace a newer copy: install only over an ancestor of `commit`.
-    present = installed_library_commit(pack)
-    if present == commit:
-        return {"ref": commit, "installed": False, "report": f"sd_db {commit} is already installed"}
-    if present and lib.git_output(["merge-base", "--is-ancestor", present, commit], root) is None:
-        return {"ref": commit, "installed": False,
-                "report": f"kept installed sd_db {present}: installed sd_db {present} is not an ancestor of "
-                          f"{commit}, so installing would replace newer or unrelated library code"}
-    ctx = Context(checkout=pack, home=Path(os.path.expanduser("~")), environ=dict(environ))
-    installed, report = provision_library(ctx, None, ref=commit)
+    # must not replace a newer copy: install only over an ancestor of `commit`,
+    # read and installed under one hold so a concurrent install cannot interleave.
+    with provisioning_lock(ctx):
+        present = installed_library_commit(pack)
+        if present == commit:
+            return {"ref": commit, "installed": False, "report": f"sd_db {commit} is already installed"}
+        if present and lib.git_output(["merge-base", "--is-ancestor", present, commit], root) is None:
+            return {"ref": commit, "installed": False,
+                    "report": f"kept installed sd_db {present}: installed sd_db {present} is not an ancestor of "
+                              f"{commit}, so installing would replace newer or unrelated library code"}
+        installed, report = provision_library(ctx, None, ref=commit)
     return {"ref": commit, "installed": installed, "report": report}
 
 
@@ -2866,7 +2893,8 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
         # a second file learning the path to the system checkout. It is the
         # only door: `--user` reads the library and never installs it, because
         # rendering skills must not rebuild the virtualenv it renders from.
-        installed, report = provision_library(ctx, out)
+        with provisioning_lock(ctx):
+            installed, report = provision_library(ctx, out)
         print(report, file=out)
         return 0 if installed else 1
     if mode == "user":

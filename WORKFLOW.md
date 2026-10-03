@@ -68,7 +68,9 @@ These run without being asked.
   A merge into the system checkout that changes `local-sd-db` also installs
   `sd_db` at the merge commit into the pack's virtualenv, so the dashboard's
   next restart finds the library it expects (sd:2108). An installed copy that
-  is not an ancestor of the merge commit is kept. The receipt's `library`
+  is not an ancestor of the merge commit is kept. Every install holds one
+  machine-wide lock across that check and pip, so concurrent reconciles
+  cannot interleave. The receipt's `library`
   says whether the install worked, or why it was skipped.
   After each confirmed in-scope merge, the agent follows the ship skill's post-merge closeout procedure.
   It dispositions remaining findings and inventories refs, branches, stashes, and worktrees.

@@ -16,6 +16,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -39,7 +40,9 @@ class ReprovisionAfterMerge(unittest.TestCase):
         git(self.system, "config", "user.email", "test@example.test")
         git(self.system, "config", "user.name", "Test")
         self.commit("README.md")
-        self.environ = {sd_install.SYSTEM_CHECKOUT_ENV: str(self.system)}
+        # The provisioning lock lives under the state home: the test's own.
+        self.environ = {sd_install.SYSTEM_CHECKOUT_ENV: str(self.system),
+                        "XDG_STATE_HOME": str(self.system.parent / "state")}
         # A pack of the test's own, so the developer's virtualenv is never read.
         self.pack = self.system.parent / "pack"
         self.calls: list[str | None] = []
@@ -122,6 +125,50 @@ class NoAncestryDowngrade(ReprovisionAfterMerge):
         newer = self.commit("local-sd-db/sd_db/b.py")
         sd_install.reprovision_after_merge(self.system, newer, self.environ, pack=self.install_record(older))
         self.assertEqual(self.calls, [newer])
+
+    def test_two_reconciles_at_once_cannot_land_the_older_install_last(self) -> None:
+        """Each read the same installed ancestor and passed the ancestry check;
+        the newer install finished first, and the older one then replaced it."""
+        base = self.commit("local-sd-db/sd_db/base.py")
+        older = self.commit("local-sd-db/sd_db/a.py")
+        newer = self.commit("local-sd-db/sd_db/b.py")
+        pack = self.install_record(base)
+        older_installing, newer_installed = threading.Event(), threading.Event()
+
+        def provision(ctx, out, ref=None):
+            self.calls.append(ref)
+            if ref == older:
+                # The older install is slow: it records only after the newer
+                # one has finished, or after a bound when the newer one waits.
+                older_installing.set()
+                newer_installed.wait(2)
+            self.install_record(ref)
+            if ref == newer:
+                newer_installed.set()
+            return True, f"sd_db installed at {ref}"
+
+        def reconcile(commit: str) -> None:
+            sd_install.reprovision_after_merge(self.system, commit, self.environ, pack=pack)
+        with mock.patch.object(sd_install, "provision_library", provision):
+            first = threading.Thread(target=reconcile, args=(older,))
+            first.start()
+            self.assertTrue(older_installing.wait(10))
+            second = threading.Thread(target=reconcile, args=(newer,))
+            second.start()
+            first.join(30)
+            second.join(30)
+        self.assertEqual(sd_install.installed_library_commit(pack), newer)
+        self.assertEqual(self.calls, [older, newer])
+
+
+class ProvisioningLock(unittest.TestCase):
+    def test_a_dry_run_takes_no_lock_and_writes_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            home = pathlib.Path(temp)
+            ctx = sd_install.Context(checkout=home / "pack", home=home, environ={}, dry_run=True)
+            with sd_install.provisioning_lock(ctx):
+                pass
+            self.assertEqual(list(home.iterdir()), [])
 
 
 class InstalledLibraryCommit(unittest.TestCase):
