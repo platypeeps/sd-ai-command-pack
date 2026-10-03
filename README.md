@@ -225,6 +225,11 @@ that reason and the item closes without it. A `followup` filed in a
 registered checkout carries that checkout since sd:809, but only a task's
 move to done records a delivering commit, so the flag is refused there too,
 on that second reason, and the item closes without it just the same.
+A row worked on its own branch, as `sd runner prepare --branch` records it,
+does not close plainly while no merge of that branch is recorded (sd:1990).
+Name the merge with `--delivered-by`, or say why no pull request is needed
+with `--reason`, which the transition records. A merge `sd-ship` recorded,
+or a row on `main` or `master`, closes as before.
 
 A task that repeats carries a rule:
 `sd task add "File the weekly report" --due 2026-01-01 --recur FREQ=WEEKLY`.
