@@ -2781,62 +2781,24 @@ roles:
             f"claim check: origin branch fix/sd{self.item}-draft names sd:{self.item} and has no open pull request",
         ])
 
-    def refs_items(self) -> tuple[int, ...]:
-        """A task, a followup and a work item in the claimed item's repository."""
-        return tuple(create_item(self.connection, kind=kind, title=f"co-delivered {kind}", status="planning",
-                                 repo=str(self.operator)) for kind in ("task", "followup", "work"))
-
-    def test_a_merge_closes_the_claimed_item_and_every_refs_item(self):
-        """sd:1481. #1150 fixed three rows and closed none: its body named two
-        of them in prose, and one PR may claim one item. `Refs:` names the
-        others, the squash carries a `Delivers:` for each, and the merge
-        closes them all with the delivery sentence."""
+    def test_a_refs_item_stays_open_after_the_merge(self):
+        """`Refs:` names a related or partial item, which stays open (sd:1481).
+        The lane writes it for rows a pull request touches without finishing,
+        so the merge closes only the claimed item, adds no `Delivers:` for a
+        `Refs:` item, and prepare refuses none, not even one it cannot find."""
         self.task_item("task")
-        refs = self.refs_items()
+        related = create_item(self.connection, kind="task", title="related, still open", status="planning",
+                              repo=str(self.operator))
         body = self.directory / "body.md"
-        body.write_text("Three fixes in one change.\n\nRefs: " + ", ".join(f"sd:{number}" for number in refs) + "\n")
+        body.write_text(f"A change.\n\nRefs: sd:{related}, sd:99999\n")
         self.unanswered("--deliver", "--body-file", str(body)).prepare()
         with patch.object(ship.time, "sleep"):
             result = self.merge()
         self.assert_closed_by_merge(result)
-        self.assertEqual(result.get("refs_closed"), [f"sd:{number}" for number in refs])
-        commit = result["merge_commit"]
         block = ship.sd_lib.trailer_block(_git(self.remote.path, "log", "-1", "--format=%B", "main")).splitlines()
-        for number in refs:
-            with self.subTest(item=number):
-                self.assertIn(f"Delivers: sd:{number}", block)
-                self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (number,)).fetchone()[0], "done")
-        for number in refs[:2]:
-            reasons = [row[0] for row in self.connection.execute(
-                "SELECT body FROM note WHERE item = ? AND kind = 'status_change'", (number,))]
-            self.assertIn(f"planning -> done by sd-ship: delivered at {commit} on origin/main", reasons)
-        again = self.operation("reconcile").reconcile()
-        self.assertFalse(again["delivery_pending"], again)
-
-    def test_an_associate_only_merge_still_closes_its_refs_items(self):
-        self.task_item("task")
-        refs = self.refs_items()[:1]
-        body = self.directory / "body.md"
-        body.write_text(f"An early slice that also fixes another row.\n\nRefs: sd:{refs[0]}\n")
-        self.unanswered("--associate-only", "--body-file", str(body)).prepare()
-        with patch.object(ship.time, "sleep"):
-            result = self.merge()
-        self.assertFalse(result["delivery_pending"], result)
-        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "in_progress")
-        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (refs[0],)).fetchone()[0], "done")
-
-    def test_prepare_refuses_a_refs_item_the_merge_could_not_close(self):
-        self.task_item("task")
-        elsewhere = self.directory / "elsewhere"
-        upsert_repo(self.connection, str(elsewhere), remote="https://github.com/example/elsewhere")
-        foreign = create_item(self.connection, kind="task", title="another repository", status="planning", repo=str(elsewhere))
-        body = self.directory / "body.md"
-        for refs, names in (("sd:99999", "which is no item"), (f"sd:{foreign}", "belongs to another repository")):
-            with self.subTest(refs=refs):
-                body.write_text(f"A change.\n\nRefs: {refs}\n")
-                with self.assertRaisesRegex(ship.Refusal, names):
-                    self.unanswered("--deliver", "--body-file", str(body)).prepare()
-        self.assertFalse(self.remote.pull_requests)
+        self.assertIn(f"Delivers: sd:{self.item}", block)
+        self.assertNotIn(f"Delivers: sd:{related}", block)
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (related,)).fetchone()[0], "planning")
 
     def test_a_followup_delivers_on_merge(self):
         self.task_item("followup")

@@ -182,16 +182,6 @@
 
 ### Fixed
 
-- **A merge closes every `Refs:` item the body names (sd:1481).** One pull
-  request claims one item, and its `Refs: sd:A, sd:B` lines name the others it
-  fixes (operator decision 2026-10-03). The merge closed only the claimed
-  item, so every co-delivered row stayed open until someone closed it by
-  hand. The squash message now carries `Delivers:` for each `Refs:` item and
-  the merge closes it, with or without `--deliver`. Prepare refuses a `Refs:`
-  item that does not exist, is no work, task or followup row, or belongs to
-  another repository. One the merge could not close returns
-  `delivery_pending: true` with `refs_failed`, and `reconcile` retries it.
-
 - **The merge gate reads every reviewer's findings, not only Copilot's
   (sd:998).** The ack gate ran at the merge step but read Copilot's material
   alone, and returned early on a pull request Copilot never reviewed. Another
