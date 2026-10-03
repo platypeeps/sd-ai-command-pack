@@ -356,6 +356,19 @@ class BinaryMaterialTests(ReviewFixture):
         self.assertIn('--- "raw.dat" ---\n[binary, base64]\n', material)
         self.assertIn("[binary, not sent] added (untracked); 2100008 bytes", material)
 
+    def test_a_text_file_that_starts_with_the_media_marker_is_not_summarized(self):
+        # sd:2431: summarized is decided from the bytes, not from the rendered text.
+        root = self.make_repo()
+        (root / "notes.txt").write_text("[binary, not sent] a note that only looks like a summary\n")
+        (root / "new.png").write_bytes(self.SHOT)
+        for scope in ("worktree", "planning"):
+            with self.subTest(scope=scope):
+                subject = (sd_review.resolve_subject(root, "worktree") if scope == "worktree"
+                           else mock.Mock(scope="planning", paths=["notes.txt", "new.png"]))
+                _material, inventory = sd_review.sd_review_material.collect_review_material(root, subject)
+                summarized = {row["path"]: row.get("summarized", False) for row in inventory}
+                self.assertEqual((summarized["notes.txt"], summarized["new.png"]), (False, True), inventory)
+
     def test_ico_magic_is_not_a_media_pass(self):
         # sd:2181 review: 00 00 01 00 is too weak a signature to let a file escape review.
         root, base = self.screenshot_branch()
@@ -370,7 +383,7 @@ class BinaryMaterialTests(ReviewFixture):
         self.assertIn("GIT binary patch", piece)
         self.assertNotIn("[binary, not sent]", piece)
         self.assertIn('--- "loose.ico" ---\n[binary, base64]\n',
-                      sd_review.sd_review_material.file_material(root, "loose.ico", "added (untracked)"))
+                      sd_review.sd_review_material.file_material(root, "loose.ico", "added (untracked)")[0])
 
     def test_a_summarized_path_leaves_a_material_only_review_partial(self):
         # sd:2181 review pass 2: a hash line is not a review. A `-diff` script that starts
