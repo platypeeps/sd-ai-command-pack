@@ -602,7 +602,10 @@ def methods(tree: ast.Module):
 #: The comparisons whose two sides are interchangeable, so the same expression
 #: on both sides settles the verdict: `x == x` cannot fail, `x is not x`
 #: cannot pass.
-SYMMETRIC_COMPARISONS = (ast.Eq, ast.NotEq, ast.Is, ast.IsNot)
+#: The comparisons whose verdict on a name and itself is fixed. Identity
+#: is: `x is x` holds for any object. Equality is not: NaN is not equal to
+#: itself, and `__eq__` may say anything (review round 1 on sd:999).
+IDENTITY_COMPARISONS = (ast.Is, ast.IsNot)
 
 
 def _settled_assert(node: ast.Assert) -> str | None:
@@ -617,10 +620,14 @@ def _settled_assert(node: ast.Assert) -> str | None:
     test = node.test
     if isinstance(test, ast.Constant) and not test.value:
         return None
+    # A plain name only: a call or an attribute evaluates once per side, and
+    # `next(values) != next(values)` or a property may differ.
     if (isinstance(test, ast.Compare) and len(test.ops) == 1
-            and isinstance(test.ops[0], SYMMETRIC_COMPARISONS)
-            and ast.unparse(test.left) == ast.unparse(test.comparators[0])):
-        return f"assert compares {ast.unparse(test.left)} with itself"
+            and isinstance(test.ops[0], IDENTITY_COMPARISONS)
+            and isinstance(test.left, ast.Name)
+            and isinstance(test.comparators[0], ast.Name)
+            and test.left.id == test.comparators[0].id):
+        return f"assert compares {test.left.id} with itself"
     if _is_literal(test):
         return "assert tests only literals"
     return None
@@ -871,7 +878,7 @@ class AssertionsCanFail(unittest.TestCase):
         """sd:999 (review-865, review-875). Two shapes the predicate did not see.
 
         `decorative_assertions` read only `*.assert*()` calls, so the
-        statement form -- `assert True`, `assert 1 == 1`, `assert x == x` --
+        statement form -- `assert True`, `assert 1 == 1`, `assert x is x` --
         passed whatever it held. And `_is_literal` folded arithmetic and
         subscripts but not a comparison, a boolean or `not`, so
         `assertTrue(1 == 1)` and `assertTrue(not False)` passed too. Each line
@@ -885,8 +892,8 @@ class AssertionsCanFail(unittest.TestCase):
 
         for settled in ("assert True",
                         "assert 1 == 1",
-                        "assert built() == built()",
                         "assert value is not value",
+                        "assert value is value",
                         "assert (1, 2)",
                         "self.assertTrue(1 == 1)",
                         "self.assertTrue(not False)",
@@ -900,7 +907,14 @@ class AssertionsCanFail(unittest.TestCase):
                           "assert value",
                           "assert 1 < limit",
                           "self.assertTrue(not ready)",
-                          "self.assertTrue(read(path) == 'x')"):
+                          "self.assertTrue(read(path) == 'x')",
+                          # Each side evaluates on its own, and NaN is not
+                          # equal to itself (review round 1).
+                          "assert built() == built()",
+                          "assert next(values) != next(values)",
+                          "assert value != value",
+                          "assert value == value",
+                          "assert item.size is item.size"):
             with self.subTest(near_miss=near_miss):
                 self.assertEqual(findings(near_miss), [], near_miss)
 
