@@ -3124,7 +3124,7 @@ roles:
 
     def test_a_no_item_record_refuses_a_live_branch_switch(self):
         """sd:1937 review. `--no-item` compares the live checkout too, not only its stored record."""
-        delivery = SimpleNamespace(branch="topic", repository=ship.slug(REMOTE_URL))
+        delivery = SimpleNamespace(branch="topic", checkout_branch="topic", repository=ship.slug(REMOTE_URL))
         _git(self.root, "checkout", "-q", "-b", "elsewhere")
         with self.assertRaisesRegex(ship.Refusal, "the checkout left topic"):
             ship.identity_unchanged(self.root, self.connection, SimpleNamespace(no_item=True), receipts, delivery)
@@ -3133,7 +3133,7 @@ roles:
 
     def test_a_remote_change_alone_refuses(self):
         """sd:1937 PR review. The branch is unchanged, so only the remote comparison can refuse."""
-        delivery = SimpleNamespace(branch="topic", repository=ship.slug(REMOTE_URL))
+        delivery = SimpleNamespace(branch="topic", checkout_branch="topic", repository=ship.slug(REMOTE_URL))
         _git(self.root, "checkout", "-q", "topic")
         _git(self.root, "remote", "set-url", "origin", "https://github.com/example/elsewhere.git")
         with self.assertRaisesRegex(ship.Refusal, "the checkout left topic"):
