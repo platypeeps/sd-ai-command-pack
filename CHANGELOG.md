@@ -112,6 +112,11 @@
 
 ### Fixed
 
+- **Stopping `sd gate run` no longer raises `PermissionError` (sd:2402).**
+  The signal it forwards to the command's process group now treats EPERM
+  like ESRCH: macOS answers `killpg` on a group that already exited with
+  either, and both mean the command is gone.
+
 - **opencode reviews run again on opencode 2.x, and refuse 1.x (sd:2445).**
   opencode 2.0.20 removed `debug agent` and `--pure`, so every opencode
   review was refused and the live confinement tests failed `make check`.
