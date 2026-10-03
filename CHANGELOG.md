@@ -360,6 +360,12 @@
 
 ### Changed
 
+- **An operator-observed criterion goes in the item's Log (sd:1933).**
+  `WORKFLOW.md` records the operator's 2026-09-30 ruling: a criterion only
+  the operator can observe is written in the item's `## Log`, dated, when it
+  is observed. The delivering pull request never ticks it in advance, so no
+  second pull request is needed for one checkbox.
+
 - **A `minimal` repository may install the review routing lane (sd:1292).**
   R10-D5 refused the lane in `minimal` and `guest` alike, but `minimal` is
   written by hand and never produced by detection: it names the operator's

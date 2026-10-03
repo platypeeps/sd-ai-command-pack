@@ -274,6 +274,11 @@ and GitHub's appended `Co-authored-by:` joins a trailer block that ends the
 message but opens a new paragraph after anything else.
 `.github/PULL_REQUEST_TEMPLATE.md` ends in that order, with `Refs:` only.
 
+A criterion only the operator can observe, such as a command running unprompted
+on their machine, is not a checklist box. Record it in the item's `## Log` with
+its date when it is observed; the delivering pull request never ticks it in
+advance (operator ruling 2026-09-30, sd:1933).
+
 `sd-ship` owns the lines `sd_lib.OWNED_TRAILERS` names: `Item:`, `Work:`,
 `Delivers:`, `Closes:`, `Authored-with:` and `Attributes:`. `prepare` appends
 `Work:` to the body it publishes, and `merge` appends `Item:`, `Delivers:` and
