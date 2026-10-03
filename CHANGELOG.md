@@ -4,6 +4,8 @@
 
 ### Added
 
+- **One passing gate check per head (sd:1912).** `sd-ship prepare`'s gate now reads a gate receipt at the same head and binding, so a second prepare at an unchanged head runs no second check. The new `sd gate check` runs the local gate's check at `HEAD`, in a clean worktree with the gate's environment, and records a pass that prepare and then the merge gate reuse. A plain `make check` leaves no receipt. The gate child no longer gets the agent harness's session variables (`CLAUDE*`, `HERDR_*`, `ITERM_*`, `TERM_SESSION_ID`, `PWD`, `OLDPWD`, `SHLVL`, `_`), so two sessions' passes bind equal; every other variable, `MAKEFLAGS` included, still binds. A failed or unfinished run records nothing, a new head (a merge of `main` included) runs again, and the 30-minute window counts from the run that passed.
+
 - **One gate-slot pool for every gate, and a waiting gate names its holders
   (sd:2522).** The slots were already machine-wide, but the callers counted
   them differently. `sd-check` read `sd.gate_slots`, the pack's own

@@ -66,6 +66,9 @@ LOCAL_BLOCK = "CLAUDE.local.md"
 #: Variables that pick Python packages; the child must not inherit the caller's.
 DROPPED_ENVIRONMENT = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX", "__PYVENV_LAUNCHER__",
                        "FORCE_COLOR", "CLICOLOR_FORCE", "PY_COLORS")
+#: Session variables, by name or prefix: dropped so two sessions' passes at one head bind equal (sd:1912, D1).
+SESSION_ENVIRONMENT = ("CLAUDECODE", "TERM_SESSION_ID", "PWD", "OLDPWD", "SHLVL", "_")
+SESSION_PREFIXES = ("CLAUDE_", "HERDR_", "ITERM_")
 #: Set in the child: the gate captures output, and the caller's terminal colour must not change a result (sd:2076).
 NO_COLOUR_ENVIRONMENT = {"NO_COLOR": "1", "PYTHON_COLORS": "0"}
 #: Set to "1" in the child: the run is the gate, so the check provisions rather than borrows.
@@ -107,12 +110,13 @@ def gate_inputs(root: pathlib.Path, head: str) -> str:
 
 
 def gate_environment(root: pathlib.Path, environ: dict[str, str] | None = None) -> dict[str, str]:
-    """The caller's environment without package selectors, forced colour, `PATH` entries in `root`, or venv `bin`s.
+    """The caller's environment without package selectors, forced colour, session variables, `PATH` entries in `root`, or venv `bin`s.
 
     Plus `SD_LOCAL_GATE=1`, `NO_COLOR=1` and `PYTHON_COLORS=0`, whatever the caller had them set to.
     """
     source = os.environ if environ is None else environ
-    env = {key: value for key, value in source.items() if key not in DROPPED_ENVIRONMENT}
+    env = {key: value for key, value in source.items()
+           if key not in DROPPED_ENVIRONMENT + SESSION_ENVIRONMENT and not key.startswith(SESSION_PREFIXES)}
     top = root.resolve()
     kept = [entry for entry in env.get("PATH", "").split(os.pathsep)
             if entry and os.path.isabs(entry) and not pathlib.Path(entry).resolve().is_relative_to(top)
@@ -155,9 +159,7 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
     environment is made from, the process's own by default. With a `database`, a matching
     receipt answers instead of a run (the result then carries `reused`), and a
     passing run leaves one when its binding held from before the run to after.
-    `reuse=False` never reads one and `record=False` never writes one: prepare
-    only records and the merge gate only reuses, so a receipt spans one
-    prepare-to-merge handoff and nothing else.
+    `reuse=False` never reads one and `record=False` never writes one (the merge gate).
     """
     with tempfile.TemporaryDirectory(prefix="sd-local-gate-") as parent:
         tree = pathlib.Path(parent) / "tree"
