@@ -128,6 +128,19 @@ class Probe(unittest.TestCase):
         print(f"shard niceness={os.getpriority(os.PRIO_PROCESS, 0)}")
 """
 
+#: The header and footer `run-tests.sh` writes on stderr around a run (sd:1407, sd:2080).
+START_LINE = r"run-tests: start head=(\S+) dirty=\S+ content=(\S+) pid=(\d+) at=\S+"
+END_LINE = r"run-tests: end head=(\S+) content=(\S+) pid=(\d+) exit=\d+ at=\S+"
+
+#: A shard that edits the fixture's tracked file while the run is under way.
+EDITS_MID_RUN = PLAIN + """
+    def test_three(self):
+        import os
+        import pathlib
+        notes = pathlib.Path(os.environ["FIXTURE_COUNTER"]).parent / "notes.txt"
+        notes.write_text("edited mid-run\\n")
+"""
+
 SPLIT_NAMES =("test_sd_ship", "test_sd_ship_dispositions", "test_sd_ship_disposition_guards")
 
 
@@ -219,6 +232,75 @@ class SplitModuleFixtures(unittest.TestCase):
         self.assertEqual({name for name, _, _ in summaries},
                          {f"tests.{name}.part{part}of2" for name in SPLIT_NAMES for part in (1, 2)})
         self.assertEqual([status for _, _, status in summaries], ["0"] * 6)
+
+    def commit_fixture(self) -> str:
+        """Make the fixture root a repository with one tracked `notes.txt`."""
+        git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+        (self.root / ".gitignore").write_text("unittest-output.log\n.coverage\n.coverage.*\n__pycache__/\n")
+        (self.root / "notes.txt").write_text("zero\n")
+        subprocess.run(git + ["init", "-q"], cwd=self.root, check=True)
+        subprocess.run(git + ["add", "-A"], cwd=self.root, check=True)
+        subprocess.run(git + ["commit", "-qm", "fixture"], cwd=self.root, check=True)
+        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.root, check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    def ends(self, result: subprocess.CompletedProcess) -> tuple[re.Match, re.Match]:
+        """The run's start and end lines from stderr, each found exactly once."""
+        starts = [match for line in result.stderr.splitlines() if (match := re.fullmatch(START_LINE, line))]
+        ends = [match for line in result.stderr.splitlines() if (match := re.fullmatch(END_LINE, line))]
+        self.assertEqual((len(starts), len(ends)), (1, 1), result.stderr)
+        return starts[0], ends[0]
+
+    def test_the_log_names_its_tree_and_each_result_its_shard(self) -> None:
+        """sd:2080. The start line names the tree by content, the end line
+        closes the same run on the same tree, and every `Ran` line sits inside
+        its own shard's start and end lines. A `Ran` printed before its
+        shard's only label was credited to the shard above it by any
+        positional parse."""
+        head = self.commit_fixture()
+        contents = []
+        # Two edits of one already-dirty file: the dirty-path count is the same
+        # for both, so only a content fingerprint tells the runs apart.
+        for text in ("one\n", "two\n"):
+            (self.root / "notes.txt").write_text(text)
+            result = self.run_harness()
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            start, end = self.ends(result)
+            self.assertEqual((start.group(1), end.group(1)), (head, head))
+            # Nothing changed during the run, so it opens and closes on one tree.
+            self.assertEqual(end.group(2), start.group(2))
+            self.assertEqual(end.group(3), start.group(3))
+            contents.append(start.group(2))
+        self.assertNotIn("unknown", contents)
+        self.assertNotEqual(contents[0], contents[1])
+        current, labelled = None, 0
+        for line in result.stdout.splitlines():
+            if match := re.fullmatch(r"shard (\S+): start", line):
+                self.assertIsNone(current, line)
+                current = match.group(1)
+            elif match := re.fullmatch(r"shard (\S+): \d+s exit=\d+", line):
+                self.assertEqual(match.group(1), current, line)
+                current, labelled = None, labelled + 1
+            elif line.startswith("Ran "):
+                self.assertIsNotNone(current, f"{line!r} sits outside any shard")
+        self.assertEqual(labelled, 6, result.stdout)
+
+    def test_the_footer_reads_the_tree_after_the_run(self) -> None:
+        """sd:2080, Copilot on #1178. Equal fingerprints on an unchanged tree
+        cannot tell a footer sampled after the shards from one sampled with
+        the header. Here a shard edits a tracked file, so the footer must name
+        a different tree from the header -- and the same one the next run
+        opens on, which proves it read the tree the shards left behind."""
+        self.commit_fixture()
+        result = self.run_harness(test_sd_ship=EDITS_MID_RUN)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.root / "notes.txt").read_text(), "edited mid-run\n")
+        start, end = self.ends(result)
+        self.assertNotEqual(end.group(2), start.group(2), "the footer read the tree the run started on")
+        # The same modules again, so the only difference is what the shards did.
+        after = self.run_harness(test_sd_ship=EDITS_MID_RUN)
+        self.assertEqual(after.returncode, 0, after.stdout + after.stderr)
+        self.assertEqual(self.ends(after)[0].group(2), end.group(2))
 
     def test_shard_timing_does_not_hide_a_failed_test(self) -> None:
         failing = PLAIN.replace("self.assertTrue(self.ready)", "self.assertFalse(self.ready)")

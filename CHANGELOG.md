@@ -342,6 +342,14 @@
 
 ### Changed
 
+- **The test run names its tree by content, and each shard by name (sd:2080).**
+  `run-tests.sh` adds `content=<tree-id>` to its `run-tests: start` and
+  `run-tests: end` lines on stderr. It is the tree id of the working tree,
+  untracked files included, so two edits of one dirty file read as two trees.
+  The end line reads it when the run ends, so an edit made during the run
+  shows as two ids. Each shard log now opens with `shard <name>: start`, so a
+  `Ran` line sits inside its own shard's labels instead of above them.
+
 - **A review carries forward across a clean merge-in of the base (sd:1485).**
   Every catch-up merge moved the head, so the local review spent a
   full-branch pass again and a Copilot review went stale

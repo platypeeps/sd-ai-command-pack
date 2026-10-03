@@ -354,13 +354,30 @@ reap_shards() {
 # with the exit, so a reader can tell which run a log line belongs to and
 # whether it saw their edit. `cleanup` runs on every exit and once more after a
 # signal, and the footer is printed once.
+#
+# sd:2080. `content` is the tree id of the working tree, untracked files
+# included and ignored ones not, written through a scratch copy of the index so
+# the real one is untouched. A count of dirty paths cannot tell two edits of one
+# dirty file apart; a content id can. The footer reads it when the run ends, so
+# an edit made while the shards ran shows as two different ids.
 run_head=""
 footer_printed=""
+tree_content() {
+  local index content=""
+  if [ "$run_head" != "unknown" ] && index="$(mktemp)"; then
+    rm -f "$index"
+    cp "$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-path index 2>/dev/null)" "$index" 2>/dev/null
+    content="$(GIT_INDEX_FILE="$index" git -C "$REPO_ROOT" add -A 2>/dev/null &&
+      GIT_INDEX_FILE="$index" git -C "$REPO_ROOT" write-tree 2>/dev/null)" || content=""
+    rm -f "$index"
+  fi
+  printf '%s' "${content:-unknown}"
+}
 run_footer() {
   if [ -n "$run_head" ] && [ -z "$footer_printed" ]; then
     footer_printed=1
-    printf 'run-tests: end head=%s pid=%s exit=%s at=%s\n' \
-      "$run_head" "$$" "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
+    printf 'run-tests: end head=%s content=%s pid=%s exit=%s at=%s\n' \
+      "$run_head" "$(tree_content)" "$$" "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
   fi
 }
 
@@ -506,8 +523,8 @@ else
   run_dirty="unknown"
 fi
 # On stderr: stdout is the run log, byte for byte (unittest-output.log).
-printf 'run-tests: start head=%s dirty=%s pid=%s at=%s\n' \
-  "$run_head" "$run_dirty" "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
+printf 'run-tests: start head=%s dirty=%s content=%s pid=%s at=%s\n' \
+  "$run_head" "$run_dirty" "$(tree_content)" "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
 
 watchdog() {
   # Stated rather than relied on: bash resets trapped signals in the subshell a
@@ -549,8 +566,12 @@ set -m
     exit 1
   }
   # Unquoted on purpose: one name per line, and a unittest name has no blanks.
+  # The start line labels the output below it: unittest prints its `Ran` line
+  # last, so with only the end line a `Ran` sat above its own label and read
+  # as the shard before it (sd:2080).
   started=$SECONDS
-  "$1" -m coverage run --parallel-mode -m unittest $ids > "$2/$3.log" 2>&1
+  printf "shard %s: start\n" "$3" > "$2/$3.log" || exit 1
+  "$1" -m coverage run --parallel-mode -m unittest $ids >> "$2/$3.log" 2>&1
   status=$?
   printf "\nshard %s: %ss exit=%s\n" "$3" "$((SECONDS - started))" "$status" >> "$2/$3.log" || exit 1
   exit "$status"
