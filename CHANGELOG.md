@@ -15,6 +15,26 @@
   and posts nothing. `--base` defaults to the branch `origin/HEAD` names. It
   reads and writes no gate receipt, so it always runs.
 
+- **A guest repository can take decision records (sd:2168).** A `guest_allow: docs/decisions` line in the repository's `CLAUDE.local.md` block takes `docs/decisions/` out of the guest planning-artifact refusal: the `sd-ship` push check, the `sd-review --scope planning` gate and the `sd-status` shared-tree list. `docs/decisions/` stays refused by default, and `docs/work/` and `docs/spec/` stay refused always; naming either is a configuration error. The push check now reads `sd_lib.guest_refused_dirs` instead of its own copy of the three trees, and the installer's block template lists the key commented out.
+
+- **`sd fleet stamp` honours a per-repository exemption list (sd:1797).** A
+  tracked `.github/sd-fleet.json` holding `{"exempt": ["<path>", ...]}`
+  declines stamped files once. The stamp names each exempt path as an adapted
+  line and never proposes it, so a declined file stops coming back on every
+  run. A file that does not read, or that exempts a path the stamp does not
+  write, refuses the repository. The fleet audit runs the dry run, so it
+  honours the same list.
+
+- **A test holds the system's gap ids to the pack's (sd:1372).** The pack owns
+  the gap vocabulary. `GapVocabularyTests` reads `sd_db.protection` at the
+  `.sd-system-rev` pin and fails naming each gap id or merge flag that one
+  side has and the other lacks.
+
+- **WORKFLOW.md states how to run a Python mutation check (sd:1790).** A new
+  Mutation checks section says to run with `PYTHONDONTWRITEBYTECODE=1` and to
+  delete `__pycache__` first: a same-size edit restored within a second
+  otherwise runs stale bytecode.
+
 - **No GitHub issues from a managed repository (sd:2256).** A new
   `PreToolUse` hook, `bin/sd-issue-guard`, denies `gh issue create` (and its
   alias `gh issue new`) and `mcp__github__issue_write` when the session's
@@ -122,6 +142,38 @@
   the remedy, a fresh commit.
 
 ### Fixed
+
+- **The local gate ignores the terminal's colour settings (sd:2076).** The
+  gate's child no longer inherits `FORCE_COLOR`, `CLICOLOR_FORCE` or
+  `PY_COLORS`, and gets `NO_COLOR=1` and `PYTHON_COLORS=0`. An inherited
+  `FORCE_COLOR=3` had coloured Python 3.14 `--help` output and failed a
+  repository's CLI tests in its merge gate.
+
+- **A branch switch in the main checkout queues no mirror (sd:2019).** The
+  re-render hook fires on post-checkout, so a feature branch or a detached
+  HEAD replaced the pending request with unmerged text. The main checkout
+  now queues a mirror from its default branch only; the vault copy and
+  `docs/dashboard/` are still written. The default branch is `origin`'s,
+  not the one HEAD's tracking remote names, so a branch tracking a fork is
+  held too. With an `origin`, only `origin/HEAD` names it; when that is
+  unset, the mirror is held and the message names
+  `git remote set-head origin --auto`. `SD_PUBLISH_FROM_WORKTREE=1` lifts
+  the hold, as it does for a linked worktree.
+
+- **`sd fleet stamp` reads the operator's owner logins from the machine
+  config (sd:2324).** `fleet.owners` in `config.json`, a list of GitHub
+  logins, decides which repositories are the operator's own; unset, the
+  pack's previous pair applies. A malformed value refuses the stamp.
+
+- **Small read and report defects (sd:1000).** `sd-status` marks
+  `undisclosed-tool` unchecked when a skill root cannot be listed, where it
+  raised out of the whole report. `sd-review --explain` prints the registry
+  refusal itself on a machine with no reachable reviewer, where it called a
+  present but unreadable registry absent. `sd-status` and `sd_lib` date a
+  work item with one shared pattern, pinned by a parity test. The
+  `accepted_gaps` id in `.github/sd-status.schema.json` is an enum of the
+  ids the loader accepts.
+- `sd-ship prepare`: a docs-lint failure already on the default branch no longer blocks a pull request that did not introduce it. A failed lint runs again in a scratch checkout of `origin/<base>`, without the body. A tree failure found there returns as a warning, and the refusal names only the failures the branch introduces, as `docs_lint_failed` (sd:1646). A non-zero lint exit that printed no `FAIL` line, such as an uncaught exception, refuses with its raw output, and a base run that did not finish excuses nothing.
 
 - `sd-ship merge`: the second `base_moved` refusal, read again just before the merge under a declared or accepted `strict` gap, now names `git merge origin/<base>` or `sd-ship prepare --catch-up` instead of a rebase. `WORKFLOW.md` states the rule: after review, take a newer default branch by a merge, never a rebase (sd:2034).
 
@@ -442,6 +494,11 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **The publication contract says how a drain renders a relative link
+  (sd:2243).** A link to a target mirrored to the same destination uses its
+  recorded page URL; a link to an unmirrored target becomes its repo-relative
+  path in plain text, never a `file:///` URL or an absolute path.
 
 - **The test run names its tree by content, and each shard by name (sd:2080).**
   `run-tests.sh` adds `content=<tree-id>` to its `run-tests: start` and

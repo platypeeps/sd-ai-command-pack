@@ -139,8 +139,6 @@ DELIVERING_KINDS = ("work", "task", "followup")
 #: repository root, so a nested `src/docs/` stays inside the surface and a
 #: repository that wants a wider exemption does not get one by accident.
 UNSHIPPED_PREFIXES = ("docs/",)
-#: Where local planning artifacts live; a guest destination receives none of them.
-PLANNING_PREFIXES = ("docs/work/", "docs/spec/", "docs/decisions/")
 #: How many shipped paths a stale-review refusal names before it counts the rest.
 UNSHIPPED_NAMED = 5
 #: What a decoded value is called when the receipt refuses it for not being an
@@ -1014,9 +1012,12 @@ class Ship(SharedReview):
         `"docs/work/\\303\\251.md"`, which no prefix matches: the refusal failed
         open and a guest received the planning file (sd:1440). NUL-separated
         output is never quoted, so every path arrives as its own bytes.
+
+        The trees are `sd_lib`'s, less any the local block's `guest_allow`
+        takes out (sd:2168), so the push check and the review gate read one list.
         """
         changed = git(self.root, "diff", "--name-only", "-z", f"{base}...{head}").split("\0")
-        return sorted(path for path in changed if path.startswith(PLANNING_PREFIXES))
+        return list(sd_lib.guest_artifacts(filter(None, changed), sd_lib.guest_refused_dirs(self.root)))
 
     def unreviewed_shipped_surface(self, reviewed: str, merge_head: str) -> list[str]:
         """The shipped paths the Copilot review of `reviewed` did not read.
@@ -1242,12 +1243,20 @@ class Ship(SharedReview):
         lint = [sys.executable, str(BIN / "sd-docs-lint")]
         if not (self.root / "docs/work").is_dir():
             lint.append("--body-only")
+        lint_warnings: list[str] = []
         with tempfile.TemporaryDirectory(prefix="sd-ship-lint-") as directory:
             body_path = pathlib.Path(directory) / "pr-body.md"
             body_path.write_text(body, encoding="utf-8")
-            run(self.root, [*lint, "--pr-body", str(body_path)], timeout=300)
+            try:
+                run(self.root, [*lint, "--pr-body", str(body_path)], timeout=300)
+            except Refusal as refusal:
+                # Failed: run it again in full and gate only on what the
+                # branch introduces, not on what origin/<base> carries (sd:1646).
+                if refusal.workflow["blocker"]["code"] != "command_failed":
+                    raise
+                lint_warnings = sd_ship_body.lint_against_base(self.root, [*lint, "--pr-body", str(body_path)], base)
         self.review(head)
-        self.save(warnings=self.commit_warnings(head))
+        self.save(warnings=lint_warnings + self.commit_warnings(head))
         self.assert_scope()
         # Artifact exposure is checked again against the actual push target.
         mode = self.resolve_mode()

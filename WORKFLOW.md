@@ -239,8 +239,11 @@ In a shared repository:
   already carries this: planning artifacts go to the fork's integration branch.
   Two machines enforce that refusal. `sd-review --scope planning` calls
   `sd_lib.guest_artifact_refusal`, which resolves the mode and names refused
-  paths. `sd-plan` uses that review before promotion. `sd-ship` separately
-  checks the same three path prefixes before a guest push.
+  paths. `sd-plan` uses that review before promotion. `sd-ship` checks the
+  same list, `sd_lib.guest_refused_dirs`, before a guest push.
+  A `guest_allow: docs/decisions` line in the local block takes decision
+  records out of both checks for that repository (sd:2168).
+  `docs/work/` and `docs/spec/` stay refused; naming either is an error.
   Nothing yet refuses a `docs/spec/` or
   `docs/decisions/` write at the moment it happens — `sd-spec` and `sd-plan
   --decision` are still prose there, and the push gate is where those are
@@ -319,6 +322,17 @@ establish the evidence reports uncertainty.
 The item directory stays in place. Use `sd work relink <row-id> <path>` when an
 artifact moves: it preserves the row, notes and original source identity. No
 command automatically deletes or archives a completed item directory.
+
+## Mutation checks
+
+A mutation check edits the code a test covers, runs the test, and restores the
+edit; a test that passes on the mutation has not earned its place.
+Run a Python mutation check with `PYTHONDONTWRITEBYTECODE=1`, and delete the
+`__pycache__` folders first (sd:1790). Python reuses a `.pyc` whose recorded
+source size and whole-second mtime still match, so a same-size edit restored
+within a second runs stale bytecode: a mutation reads as killed or survived by
+timing, and a restored file can fail its own test. The variable stops writes,
+not reads, so a cache left from an earlier run still answers.
 
 ## Parallel work
 
@@ -695,6 +709,7 @@ The `CLAUDE.local.md` block carries these keys, and the pack reads no others.
     test: <optional, when the repo spells its tests separately>
     lint: <optional, same>
     reviewers: <entry@recipient pairs that may receive this repository's diff, e.g. claude@claude+3f9a1c2e, baseten@inference.baseten.co>
+    guest_allow: docs/decisions   (optional; the only tree a guest repository can take out of the refusal)
 
 `check`, `test` and `lint` run in that order and are optional; one combined command can use `check` alone.
 `reviewers` restricts the effective authorization described above. Each local entry binds its destination:
