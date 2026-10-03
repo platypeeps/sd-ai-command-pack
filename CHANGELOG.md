@@ -117,6 +117,11 @@
   like ESRCH: macOS answers `killpg` on a group that already exited with
   either, and both mean the command is gone.
 
+- **`make check VENV=.venv` passes `tests.test_sd_lib` again (sd:1641).**
+  The tests' own `make` calls drop `MAKEFLAGS`, `MFLAGS` and `MAKELEVEL`, so
+  a VENV on the outer command line no longer reaches the fixture Makefile
+  and overrides its choice of environment.
+
 - **opencode reviews run again on opencode 2.x, and refuse 1.x (sd:2445).**
   opencode 2.0.20 removed `debug agent` and `--pure`, so every opencode
   review was refused and the live confinement tests failed `make check`.
