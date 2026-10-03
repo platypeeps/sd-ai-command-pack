@@ -3145,6 +3145,10 @@ ACKNOWLEDGED_FACTS = (
 #: able to accept its own breakage. All three are ids no acknowledgement could
 #: ever match, so admitting them here would re-open the hole under a
 #: better-spelled name.
+#:
+#: The pack owns this vocabulary (sd:1372). The system's collector writes the
+#: same ids as `sd_db.protection.GAP_IDS`, less `unprotected`, its status
+#: column; `GapVocabularyTests` in `tests/test_sd_status.py` fails on drift.
 ACKNOWLEDGEABLE_GAPS = (
     "bypass",
     "enforce_admins",
