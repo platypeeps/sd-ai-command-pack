@@ -340,6 +340,28 @@ class ReceiptTests(ReviewFixture):
         (self.root / receipts.CONTRACT).write_text(receipts.EXAMPLE)
         self.assertEqual(receipts.reuse_contract(self.root)["schema_version"], 1)
 
+    def test_recorded_checks_run_under_one_locale_whatever_the_caller_sets(self):
+        # sd:2386: an undeclared LANG/LC_ALL is fixed, so the locale cannot vary between runs.
+        fixed = {"LANG": receipts.LOCALE, "LC_ALL": receipts.LOCALE}
+        bindings = []
+        for caller in ({"LANG": "de_DE.UTF-8", "LC_ALL": "de_DE.UTF-8"}, {"LANG": "C"}, {}):
+            env = {key: value for key, value in self.env.items() if key not in fixed} | caller
+            with self.subTest(caller=caller):
+                self.assertEqual({key: receipts.receipt_environment(self.contract, env)[key] for key in fixed}, fixed)
+                bindings.append(receipts.check_binding(self.root, env))
+                self.assertEqual(bindings[-1]["locale"], fixed)
+        self.assertEqual(bindings[0], bindings[-1])
+        self.local_block(self.root, f"check: {sys.executable} -c \"import os, sys; sys.exit(os.environ.get('LC_ALL') != 'C.UTF-8')\"")
+        self.git("add", "--force", "CLAUDE.local.md")
+        self.git("commit", "--quiet", "-m", "locale check")
+        self.env.update(LANG="de_DE.UTF-8", LC_ALL="de_DE.UTF-8")
+        code, out, err = self.cli("--json", "--record-receipt", "--database", str(self.database))
+        self.assertEqual((code, err), (0, ""), out)
+        # A declaration that names a locale variable keeps the caller's value, and binds it.
+        self.commit_contract(environment=["TEST_MODE", "LANG"])
+        self.assertEqual(receipts.receipt_environment(self.contract, self.env)["LANG"], "de_DE.UTF-8")
+        self.assertEqual(receipts.check_binding(self.root, self.env)["locale"], {"LANG": "de_DE.UTF-8", "LC_ALL": receipts.LOCALE})
+
     def commit_contract(self, **fields):
         self.contract.update(fields)
         (self.root / receipts.CONTRACT).write_text(json.dumps(self.contract))

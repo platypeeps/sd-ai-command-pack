@@ -28,6 +28,8 @@ OUTPUTS = "build_outputs"
 #: The check runs with these, but they are not digested: they drift inside one
 #: session, and the tools and toolchains they select are bound by bytes (sd:2326).
 BASE_ENV = ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR")
+#: An undeclared LANG or LC_ALL is set to this, so the locale cannot vary between runs; the binding records it (sd:2386).
+LOCALE = "C.UTF-8"
 SECRET = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|COOKIE|AUTH", re.I)
 BIN = pathlib.Path(__file__).resolve().parent
 
@@ -72,8 +74,9 @@ def reuse_contract(root: pathlib.Path) -> dict[str, Any]:
 
 
 def receipt_environment(value: Mapping[str, Any], env: Mapping[str, str]) -> dict[str, str]:
-    """Checks recorded for reuse run only with this declared environment."""
-    return {key: env[key] for key in (*BASE_ENV, *value["environment"]) if key in env}
+    """Checks recorded for reuse run only with this declared environment, under `LOCALE` unless it declares its own."""
+    controlled = {key: env[key] for key in (*BASE_ENV, *value["environment"]) if key in env}
+    return {**controlled, **{key: LOCALE for key in ("LANG", "LC_ALL") if key not in value["environment"]}}
 
 
 def environment_digest(value: Mapping[str, Any], env: Mapping[str, str]) -> str:
@@ -274,6 +277,7 @@ def check_binding(root: pathlib.Path, env: Mapping[str, str]) -> dict[str, Any]:
             "toolchains": toolchain_identities(toolchain_selections(tools, list(detection.commands.values())), controlled, root),
             "python": {"executable": str(pathlib.Path(sys.executable).resolve()), "sha256": file_digest(pathlib.Path(sys.executable)),
                        "version": sys.version, "prefix": sys.prefix},
+            "locale": {key: controlled.get(key) for key in ("LANG", "LC_ALL")},
             "environment_sha256": environment_digest(value, controlled)}
 
 
