@@ -81,6 +81,9 @@ class LaneChdirTests(unittest.TestCase):
         report = json.loads(result.stdout)
         self.assertFalse(report.get("ok", True))
         self.assertIn("not inside a git repository", report["error"].lower())
+        # sd:2499: the refusal names the -C directory, as the lane commands do.
+        self.assertIn(str(self.empty.resolve()), report["error"], "the named cwd is the -C one")
+        self.assertNotIn(str(self.outside.resolve()), report["error"])
 
     def test_sd_ship_body_resolves_the_repository_from_the_c_directory(self) -> None:
         # `body` is the one sd-ship verb with no database and no GitHub; it

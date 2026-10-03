@@ -112,6 +112,29 @@
 
 ### Fixed
 
+- **Itemless refusals name the command that allocates a review ID (sd:2008,
+  sd:2026).** A missing `--review-id`, an unknown one, and one given beside
+  `--create-record` each refuse with their own blocker code, and the
+  `next_action` names `sd-ship review --no-item --create-record
+  --assert-new-work` and the `review_id` field that prints the ID. Both sites
+  that refuse a missing ID now build it from one definition. `--help` says an
+  ID is allocated, never chosen.
+
+- **An additional-review refusal names the flag at fault (sd:2026).** A
+  nonempty `--request-reason` without `--additional-review-for` used to be told
+  it needed a "nonempty reason"; each fault -- no head, a wrong head, an empty
+  reason, `--retry-review`, commit flags -- now refuses on its own.
+
+- **A merged itemless record reconciles from the default branch (sd:1932).**
+  After the merge deletes its branch, `sd-ship reconcile --no-item` no longer
+  refuses with "bound to branch"; the guard stays for unmerged and closed
+  records. `review --close-record` already ran from any branch; a test pins it.
+  The branch-mismatch refusal names `--rebind-branch`.
+
+- **`sd-ship -C <dir>` outside a repository names the directory (sd:2499).**
+  The refusal read "cwd is not inside a Git repository"; it now names the
+  directory, as the other lane commands do.
+
 - **Stopping `sd gate run` no longer raises `PermissionError` (sd:2402).**
   The signal it forwards to the command's process group now treats EPERM
   like ESRCH: macOS answers `killpg` on a group that already exited with
