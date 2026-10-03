@@ -198,7 +198,8 @@
   alone, and returned early on a pull request Copilot never reviewed. Another
   reviewer's finding merged unread while `sd-status` listed it as
   unanswered. The merge now refuses with `review_findings_open` before the
-  merge call until each such finding has a disposition.
+  merge call until each such finding has a disposition. Registry rule
+  `R14-D2` holds it, so the skill line that teaches it cites a row.
 
 - **An empty commit gets its own no-item record (sd:2009).** An `sd attribute`
   repair is an empty commit, so its tree is the base's -- the tree the last

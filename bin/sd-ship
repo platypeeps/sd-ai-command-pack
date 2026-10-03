@@ -1724,6 +1724,7 @@ class Ship(SharedReview):
 
     def close_items(self, commit: str, ref: str) -> tuple[list[int], dict[str, str]]:
         """Close each open `Closes:` item at the verified merge, as the claimed item closes."""
+        sd_lib.import_sd_db()  # main() resolved it already; this keeps the gateway's order visible here
         from sd_db.errors import SdDbError
         from sd_db.progress import deliver_work
         from sd_db.workflow import WorkflowError, change_status
