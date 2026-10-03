@@ -1608,8 +1608,7 @@ def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], t
 
     `sd-ship prepare` asks for this under `repo.ci = local`, so the merge gate
     that follows finds this run's receipt at the same head and binding and does
-    not run the check a second time. It reads one too (sd:1912): a pass that
-    `sd gate check` or an earlier prepare left at this head and binding stands.
+    not run the check a second time; nor does a later prepare there (sd:1912).
     The child still runs through `runner`, so the gate's deadline ends its
     whole process group (sd:1482). Without the library there is no receipt,
     and the check simply runs.
