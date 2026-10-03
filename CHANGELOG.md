@@ -218,6 +218,15 @@
 
 ### Fixed
 
+- **A row worked on its own branch no longer closes with no merge (sd:1990).**
+  Three runner items (sd:1686, sd:1688, sd:1703) were closed with a plain
+  `sd task status N done` while their `fleet/*` branch had no pull request.
+  The move to done now refuses a row whose `branch` is not `main` or
+  `master` unless a merge is recorded (`sd-ship`'s `Code delivery` comment or
+  a delivering transition), `--delivered-by` names one, or `--reason` says
+  why no pull request is needed. The refusal leaves the row open and names
+  both flags. A work item still goes to `sd work deliver`.
+
 - **`sd-review`'s Jev rows compare Jev with the routing (sd:2359).** `jev`
   computed `changed` against `--fallback`, which here is a token no tier can
   be, so every sd-review row in the judgment ledger said `changed=yes`. The

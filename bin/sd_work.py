@@ -668,6 +668,7 @@ def _status_reason(workflow: Any, connection: Any, args: argparse.Namespace) -> 
         if delivered_in:
             raise WorkRefusal("--delivered-in names where --delivered-by is verified; "
                               "it takes no effect alone")
+        _refuse_unlanded_branch(workflow, connection, args)
         return args.reason
     if args.status != "done":
         raise WorkRefusal("--delivered-by belongs on the move to done")
@@ -694,6 +695,37 @@ def _status_reason(workflow: Any, connection: Any, args: argparse.Namespace) -> 
             "move to done records one")
     checkout = _delivered_in(connection, delivered_in) if delivered_in else None
     return _delivery_reason(row, args.delivered_by, checkout)
+
+
+#: The names a default branch goes by; a row on one has no branch of its own
+#: to land, so a close needs no merge of it (see `_working_branch`).
+DEFAULT_BRANCHES = ("main", "master")
+
+
+def _refuse_unlanded_branch(workflow: Any, connection: Any, args: argparse.Namespace) -> None:
+    """Refuse a plain close of a row worked on its own branch (sd:1990).
+
+    `sd runner prepare --branch` records the branch an item is worked on.
+    Three such items were closed with a plain `sd task status done` while
+    their branches had no pull request, and one never reached main. A close
+    now needs a recorded merge (the `Code delivery` comment `sd-ship` writes,
+    or a delivering transition), `--delivered-by` naming the merge, or
+    `--reason` saying why no pull request is needed, which goes on the
+    transition. A work item is left to the library, which sends it to
+    `sd work deliver`.
+    """
+    if args.status != "done" or (args.reason or "").strip():
+        return
+    state = workflow.item_state(connection, args.item)
+    row = state["item"]
+    branch = row.get("branch") or ""
+    if (row["kind"] == "work" or row["status"] == "done" or not branch
+            or branch.removeprefix("origin/") in DEFAULT_BRANCHES or _delivered_by(state)):
+        return
+    raise WorkRefusal(
+        f"item {args.item} was worked on branch {branch}, and no merge of it is recorded; "
+        f"close it with --delivered-by <commit> naming the merge that landed it, "
+        f"or with --reason saying why no pull request is needed")
 
 
 def _change_status(workflow: Any, connection: Any, args: argparse.Namespace,
@@ -1204,7 +1236,8 @@ def register(groups: Any, store: Any) -> None:
     status.add_argument("item", type=int)
     status.add_argument("status")
     reason = status.add_mutually_exclusive_group()
-    reason.add_argument("--reason")
+    reason.add_argument("--reason", help="recorded on the transition; on a row worked on "
+                                           "its own branch, why no pull request is needed")
     # `--delivered-by` and not `--commit`: the row records what delivered the
     # task, and the word says so where `--commit` would only say which one.
     # Exclusive with `--reason` because both write the same field and a caller
