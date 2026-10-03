@@ -668,6 +668,14 @@ def local_conventions(root: pathlib.Path) -> str:
     )
 
 
+#: Generic defect classes for a code subject, from a manual pre-PR checklist this lane replaced (sd:1635).
+DEFECT_CLASSES = (
+    "external JSON used before its type is narrowed", "an error that reports a stage other than the one that failed",
+    "identifiers matched by substring rather than at token boundaries",
+    "tests that touch files, network or environment without isolating them",
+    "output that breaks on empty, very long, non-ASCII or markup-bearing input")
+
+
 def build_prompt(subject: Subject, challenge: bool, conventions: str) -> str:
     """The review instruction, pinned to the endpoints `resolve_subject` chose."""
 
@@ -699,10 +707,13 @@ def build_prompt(subject: Subject, challenge: bool, conventions: str) -> str:
             "adversarial stance: find the strongest reasons this change should not "
             "ship yet."
         )
+    classes = "" if subject.scope == "planning" else (
+        f" Check in particular for {'; '.join(DEFECT_CLASSES)}. When you find a defect, check every "
+        "sibling site of the same shape, not only the reported line.")
     return (
         f"{conventions}{stance} Review {target}. Report defects the change "
         "introduces: correctness bugs, security issues, data-integrity risks, and "
-        "maintainability problems that would cost real time later. Judge severity "
+        f"maintainability problems that would cost real time later.{classes} Judge severity "
         "per finding; high means it should block a merge. Do not report style, "
         "wording, or observations that are not defects. Do not report cosmetic "
         "findings, whose fix changes no behaviour or reader action (wording, "
@@ -1481,6 +1492,10 @@ _NOT_FOUND = re.compile(
     r"(?m)^(?P<source>\S+?): (?:(?:line )?(?P<line>\d+): )?(?P<command>\S+): "
     r"(?:command not found|not found|No such file or directory)\s*$")
 _RECIPE_EXIT_127 = re.compile(r"\bError 127\b")
+#: sd-check's reason for a check it killed at `--timeout` or no gate slot admitted, and the runner's line
+#: for sd-check itself (sd:1560). Weaker than a missing program, so it is read last.
+GATE_TIMED_OUT = "timed_out"
+_TIMED_OUT = re.compile(r"\b(?:timed out after|no gate slot came free within) \d+s")
 
 
 def _spawn_failed(check: Mapping[str, Any]) -> bool:
@@ -1539,7 +1554,17 @@ def classify_gate(checks: Any) -> dict[str, Any] | None:
             found = _not_found_report(check)
         if found is not None:
             return {**found, "entrypoint": str(check.get("name", "?")), "started": started}
-    return None
+    timed = next(((check, hit) for check in records if (hit := _TIMED_OUT.search(str(check.get("reason") or "")))), None)
+    return {"reason": GATE_TIMED_OUT, "evidence": timed[1].group(0), "entrypoint": str(timed[0].get("name", "?")),
+            "started": started} if timed else None
+
+
+def gate_failure(checks: Any, detail: str) -> dict[str, Any]:
+    """`classify_gate`, or, with no record to read, the runner's own timeout line for sd-check."""
+    found = classify_gate(checks)
+    if found is None and not checks and (line := _TIMED_OUT.search(detail)):
+        found = {"reason": GATE_TIMED_OUT, "evidence": line.group(0), "entrypoint": "sd-check", "started": []}
+    return found or {}
 
 
 def gate_failed_line(check: Mapping[str, Any] | None) -> str:
@@ -1557,6 +1582,9 @@ def gate_failed_line(check: Mapping[str, Any] | None) -> str:
         where = f" at line {check['missing_line']}" if check.get("missing_line") else ""
         return (f"sd-review: the gate's {check['entrypoint']} failed: {what}{where} ({check['evidence']}); "
                 "it ran up to that point, so a check may have run; no provider was asked")
+    if check and check.get("reason") == GATE_TIMED_OUT:
+        return (f"sd-review: the gate's {check['entrypoint']} stopped at its bound ({check['evidence']}); no provider "
+                "was asked; give it longer with --timeout SECONDS (sd-ship prepare: --review-timeout SECONDS)")
     return "sd-review: the repository's own gate failed; no provider was asked"
 
 
@@ -1619,7 +1647,7 @@ def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], t
     if gate.get("reused"):
         report["reused"] = gate["reused"]
     if report["status"] == "fail":
-        report.update(classify_gate(checks) or {})
+        report.update(gate_failure(checks, report["detail"]))
     return report
 
 
@@ -1639,7 +1667,7 @@ def run_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeou
         "checks": checks,
     }
     if result.exit_code != 0:
-        report.update(classify_gate(checks) or {})
+        report.update(gate_failure(checks, report["detail"]))
     return report
 
 
@@ -2423,7 +2451,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-C", dest="chdir", metavar="DIR", action=sd_lib.DirectoryAction, help=sd_lib.DIRECTORY_OPTION_HELP)
     parser.add_argument("--scope", choices=SCOPES, default="worktree", help="what to review (default: worktree)")
     parser.add_argument("--database", type=pathlib.Path, help="explicit provider-state database for an owned runner")
-    parser.add_argument("--reuse-check", action="store_true", help="reuse a matching explicit full-check receipt; otherwise rerun")
+    parser.add_argument("--reuse-check", action="store_true",
+                        help="reuse a matching explicit full-check receipt; otherwise rerun. Never reuses in "
+                             "sd-ai-command-pack itself, which tracks no reuse declaration (.github/sd-check-reuse.json)")
     parser.add_argument("--gate-check", metavar="BRANCH",
                         help="branch scope: run the check as the local gate does, against origin/BRANCH, "
                              "leaving a gate receipt at HEAD for the merge gate")

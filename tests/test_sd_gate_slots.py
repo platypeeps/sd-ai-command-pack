@@ -15,11 +15,13 @@ import json
 import os
 import pathlib
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SD_CHECK = REPO_ROOT / "bin" / "sd-check"
@@ -221,6 +223,33 @@ class SlotCount(unittest.TestCase):
         lines = stream.getvalue().splitlines()
         self.assertTrue(lines[0].startswith("waiting for a gate slot: 1 of 1 in use"), lines)
         self.assertTrue(any(line.startswith("still waiting for a gate slot after") for line in lines), lines)
+
+
+class SignalForwarding(unittest.TestCase):
+    def test_a_stop_signal_for_a_group_that_is_gone_is_not_an_error(self):
+        """sd:2402. macOS answers `killpg` on a group that already exited with EPERM, not only ESRCH."""
+        handlers: dict[int, object] = {}
+
+        class Child:
+            pid = 999999
+
+            def wait(self) -> int:
+                handlers[signal.SIGTERM](signal.SIGTERM, None)
+                return 0
+
+        def record(signum: int, handler: object) -> object:
+            handlers[signum] = handler
+            return signal.SIG_DFL
+
+        for error in (PermissionError, ProcessLookupError):
+            with self.subTest(error=error.__name__), \
+                    mock.patch.object(sd_gate_slots.subprocess, "Popen", return_value=Child()), \
+                    mock.patch.object(sd_gate_slots.signal, "signal", side_effect=record), \
+                    mock.patch.object(sd_gate_slots.os, "killpg", side_effect=error) as killpg:
+                code = sd_gate_slots.run_gated(["true"], {}, slots=0, rule=sd_gate_slots.LoadRule(0, 0, "off"),
+                                               stream=io.StringIO())
+                self.assertEqual(code, 0)
+                killpg.assert_called_once_with(Child.pid, signal.SIGTERM)
 
 
 if __name__ == "__main__":

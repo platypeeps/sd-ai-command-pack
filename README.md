@@ -86,6 +86,10 @@ else is. Its executables write these paths, and no others:
   whose `sd-status.json` entry or `CLAUDE.md` rule forbids CI gets no workflow.
   A repository whose `repo.ci` row says `local` gets no workflow either, from
   the stamp or from `setup-github`; see [WORKFLOW.md § No-CI mode](WORKFLOW.md#no-ci-mode).
+  A repository declines any of these files once, in a tracked
+  `.github/sd-fleet.json` holding `{"exempt": ["<path>", ...]}`; the stamp
+  names each exempt path and never proposes it, and a file that does not read
+  refuses the repository.
   It also adds the template's new lines to that checkout's `CLAUDE.local.md`
   block, removing none, and creates its untracked `docs/dashboard/`. `--dry-run` prints every auto repository's diff against
   its `origin/HEAD` and writes nothing.
@@ -328,7 +332,11 @@ links `.git/hooks/pre-commit` to the tracked `hooks/pre-commit`, which runs
 Ruff over the staged Python and the two whole-tree test passes
 (`tests.test_code_health`, `tests.test_doc_citations`) in about five seconds
 and prints its own wall time against the budget its header states.
-`SD_SKIP_HOOKS=1 git commit` skips it with a notice. The hook is one per
+`SD_SKIP_HOOKS=1 git commit` skips it with a notice. The same target links
+`.git/hooks/commit-msg` to `hooks/commit-msg`, which refuses a message whose
+`Authored-with:`, `Needed-by:` or other checked trailer sits outside the final
+paragraph, where git does not read it; it names the line, and
+`SD_SKIP_HOOKS` does not skip it. The hook is one per
 clone: the link sits in the clone's common `.git/hooks`, its target is the
 relative `../../hooks/pre-commit`, so it reads the main checkout's tracked
 file and every linked worktree shares it, whichever worktree ran `make

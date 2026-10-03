@@ -2752,18 +2752,37 @@ def delivered(root: pathlib.Path, item: "str | tuple[str, ...]") -> Answer:
 #: push time, and two lists is how one of them gains a fourth entry alone.
 GUEST_REFUSED_DIRS = ("docs/work", "docs/spec", "docs/decisions")
 
+#: The local-block key that takes a tree out of the guest refusal, and the one
+#: tree it may name (sd:2168). The operator ruled it per repository and opt-in:
+#: `docs/decisions` stays refused by default, and `docs/work` and `docs/spec`
+#: stay refused always, so naming either refuses rather than being ignored.
+GUEST_ALLOW_KEY = "guest_allow"
+GUEST_ALLOWABLE_DIRS = ("docs/decisions",)
 
-def guest_artifacts(paths: Any) -> tuple[str, ...]:
+
+def guest_refused_dirs(root: pathlib.Path) -> tuple[str, ...]:
+    """`GUEST_REFUSED_DIRS` less the trees this repository's local block allows."""
+    raw = local_block(root).get(GUEST_ALLOW_KEY, "")
+    allowed = {entry.strip().rstrip("/") for entry in raw.split(",") if entry.strip()}
+    wrong = sorted(allowed - set(GUEST_ALLOWABLE_DIRS))
+    if wrong:
+        raise ConfigError(f"{local_block_path(root)}: {GUEST_ALLOW_KEY}: only {', '.join(GUEST_ALLOWABLE_DIRS)} "
+                          f"can be allowed, not {', '.join(wrong)}; docs/work and docs/spec stay refused in guest mode")
+    return tuple(directory for directory in GUEST_REFUSED_DIRS if directory not in allowed)
+
+
+def guest_artifacts(paths: Any, refused: tuple[str, ...] = GUEST_REFUSED_DIRS) -> tuple[str, ...]:
     """The repo-relative `paths` that live under a guest-refused tree.
 
     Separate from the mode question on purpose: this half is pure, so a caller
     with nothing to refuse never reaches the network to find that out.
+    `refused` is `guest_refused_dirs` of the repository, when it has one.
     """
 
     found = set()
     for entry in paths:
         text = re.sub(r"^(?:\./)+", "", str(entry).replace(os.sep, "/"))
-        for directory in GUEST_REFUSED_DIRS:
+        for directory in refused:
             if text == directory or text.startswith(directory + "/"):
                 found.add(text)
     return tuple(sorted(found))
@@ -2787,7 +2806,7 @@ def guest_artifact_refusal(root: pathlib.Path, paths: Any, *, ask: Asker = gh_ap
     code, because this module raises nothing.
     """
 
-    refused = guest_artifacts(paths)
+    refused = guest_artifacts(paths, guest_refused_dirs(root))
     if not refused:
         return ""
     if mode(root, ask=ask) != "guest":
@@ -2821,8 +2840,13 @@ def shared_tree_artifacts(root: pathlib.Path) -> tuple[str, ...]:
     remote, default = upstream(root)
     if not remote:
         return ()
+    try:
+        trees = guest_refused_dirs(root)
+    except ConfigError:
+        # A report names more, never fewer; the push check refuses the line itself.
+        trees = GUEST_REFUSED_DIRS
     listed = git_output(["ls-tree", "-r", "--name-only", "-z", f"refs/remotes/{remote}/{default}",
-                         "--", *GUEST_REFUSED_DIRS], root)
+                         "--", *trees], root)
     if listed is None:
         return ()
     return tuple(sorted(name for name in listed.split("\0") if name))
@@ -2884,6 +2908,70 @@ def demoted_trailers(message: str) -> tuple[str, ...]:
         line for line in message.splitlines()
         if _STATED_RE.match(line) and line not in block
     )
+
+
+#: The trailer names `hooks/commit-msg` holds to the block git reads (sd:1931).
+#: Wider than `STATED_TRAILERS`: a stray `Needed-by:` or `Authored-with:`
+#: closes nothing, but `sd-ship` and `sd-review` read both, and a line they
+#: cannot see reads as a line nobody wrote. `Work:` is not here; `sd-ship`
+#: writes it into a pull-request body, above the squash's own block.
+CHECKED_TRAILERS = ("Needed-by:", AUTHORED_TRAILER, "Co-Authored-By:", "Claude-Session:",
+                    ITEM_TRAILER, DELIVERS_TRAILER, CLOSES_TRAILER, ATTRIBUTES_TRAILER)
+
+#: A checked trailer at column zero, the same anchor `_STATED_RE` uses.
+_CHECKED_RE = re.compile(
+    r"^(?P<key>" + "|".join(re.escape(name.rstrip(":")) for name in CHECKED_TRAILERS)
+    + r"):[ \t]*(?P<value>\S.*)$"
+)
+
+
+def _trailer_pair(key: str, value: str) -> tuple[str, str]:
+    """A trailer as a comparable pair: git matches keys without case and unfolds values."""
+    return key.lower(), " ".join(value.split())
+
+
+def unread_trailers(message: str, parsed: str) -> tuple[str, ...]:
+    """The checked trailer lines in `message` that git's own parse did not return.
+
+    `parsed` is `git interpret-trailers --parse --no-divider` over the same
+    message, which is the reader of record: `git log --format=%(trailers)`
+    reads the same block and, like `--no-divider`, does not stop at a `---`
+    line. `trailer_block` is not used here, because git's paragraph is not
+    always Python's: a whitespace-only line also ends one, and a final
+    paragraph that is mostly prose is not a trailer block at all. Asking git
+    covers both. A line counts once per time git returned it, so a trailer
+    written above the block and again inside it still names the stray copy.
+
+    A continuation line (indented, straight after a trailer) is folded into
+    its trailer before comparing, as `--parse` unfolds it.
+    """
+    returned: dict[tuple[str, str], int] = {}
+    for line in parsed.splitlines():
+        key, colon, value = line.partition(":")
+        if colon:
+            pair = _trailer_pair(key, value)
+            returned[pair] = returned.get(pair, 0) + 1
+    stated: list[tuple[str, tuple[str, str]]] = []
+    folding = False
+    for line in message.splitlines():
+        match = _CHECKED_RE.match(line)
+        if match:
+            stated.append((line, _trailer_pair(match["key"], match["value"])))
+            folding = True
+        elif folding and line[:1] in (" ", "\t") and line.strip():
+            first, (key, value) = stated[-1]
+            stated[-1] = (first, _trailer_pair(key, f"{value} {line}"))
+        else:
+            folding = False
+    # Last first, so a line git did read uses up its own return and a copy
+    # of it higher up is the one named.
+    stray = []
+    for line, pair in reversed(stated):
+        if returned.get(pair, 0) > 0:
+            returned[pair] -= 1
+        else:
+            stray.append(line)
+    return tuple(reversed(stray))
 
 
 def display_fields(
@@ -3145,6 +3233,10 @@ ACKNOWLEDGED_FACTS = (
 #: able to accept its own breakage. All three are ids no acknowledgement could
 #: ever match, so admitting them here would re-open the hole under a
 #: better-spelled name.
+#:
+#: The pack owns this vocabulary (sd:1372). The system's collector writes the
+#: same ids as `sd_db.protection.GAP_IDS`, less `unprotected`, its status
+#: column; `GapVocabularyTests` in `tests/test_sd_status.py` fails on drift.
 ACKNOWLEDGEABLE_GAPS = (
     "bypass",
     "enforce_admins",
