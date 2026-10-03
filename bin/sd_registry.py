@@ -1330,17 +1330,39 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-_OPENER = urllib.request.build_opener(_NoRedirect)
+class _LazyOpener:
+    """`build_opener(*handlers)`, built on the first request rather than at import.
+
+    The default `ProxyHandler` asks the system for its proxies when it is
+    built, an IPC round trip of 0.1-0.2 s on macOS, and every `sd-status`,
+    `sd-review` and `sd-ship` process imports this module whether or not it
+    sends a request (sd:1615). The proxies are read once, at the first request.
+    """
+
+    def __init__(self, *handlers: Any) -> None:
+        self._handlers = handlers
+        self._built: urllib.request.OpenerDirector | None = None
+
+    def built(self) -> urllib.request.OpenerDirector:
+        if self._built is None:
+            self._built = urllib.request.build_opener(*self._handlers)
+        return self._built
+
+    def open(self, *args: Any, **kwargs: Any) -> Any:
+        return self.built().open(*args, **kwargs)
+
+
+_OPENER = _LazyOpener(_NoRedirect)
 
 #: For a recipient on this machine. `build_opener` installs a `ProxyHandler`
-#: that reads `HTTP_PROXY` at import, and urllib's bypass list does not
+#: that reads `HTTP_PROXY` when it is built, and urllib's bypass list does not
 #: special-case loopback: on a box where `HTTP_PROXY` is set and `NO_PROXY`
 #: omits `localhost`, a loopback request is forwarded to the proxy and the
 #: diff leaves the machine. An empty mapping installs no proxy at all -- and
 #: `build_opener` drops it rather than registering an inert one -- so the
 #: socket goes where the URL says. A public host keeps `_OPENER`, because a
 #: proxy is how it is reachable at all on such a box.
-_DIRECT_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
+_DIRECT_OPENER = _LazyOpener(urllib.request.ProxyHandler({}), _NoRedirect)
 
 
 def _opener(url: str):
