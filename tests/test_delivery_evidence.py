@@ -264,6 +264,18 @@ class DeliveryReasonTests(unittest.TestCase):
                                     rf"carries no `Delivers: sd:7`.*sd work deliver 7 {commit} --associated --reason"):
             sd_work._delivery_reason(self.row, commit)
 
+    def test_a_commit_naming_neither_trailer_is_sent_to_the_ways_out(self) -> None:
+        """sd:2565. A no-item squash carries neither `Delivers:` nor `Item:`
+        (sd:2171), and the refusal named no way out of it."""
+        (self.root / "file.txt").write_text("six\n", encoding="utf-8")
+        self.git("commit", "-q", "-a", "-m", "feat: shipped with no item\n\nAuthored-with: human\n")
+        commit = self.git("rev-parse", "HEAD")
+        with self.assertRaises(sd_work.WorkRefusal) as caught:
+            sd_work._delivery_reason(self.row, commit)
+        for way_out in ("--item 7 --deliver", "`Closes: sd:7`", "--reason TEXT"):
+            with self.subTest(way_out=way_out):
+                self.assertIn(way_out, str(caught.exception))
+
     def test_a_commit_with_no_delivers_trailer_is_refused(self) -> None:
         (self.root / "file.txt").write_text("three\n", encoding="utf-8")
         self.git("commit", "-q", "-a", "-m", "chore: no trailer at all\n")

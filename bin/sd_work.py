@@ -636,9 +636,19 @@ def _delivery_reason(row: Any, commit: str, checkout: str | None = None,
 
 
 def _repair(item: int, commit: str, block: list[str], trailer: str) -> str:
-    """The way out for `Item:` alone: a merge prepared associate-only (sd:1913)."""
-    if trailer != "Delivers" or f"Item: sd:{item}" not in block:
+    """The way out for `Item:` alone: a merge prepared associate-only (sd:1913).
+
+    A merge naming neither trailer, such as a no-item squash (sd:2171), can
+    never verify for the item, so the refusal names the three ways out
+    (sd:2565).
+    """
+    if trailer != "Delivers":
         return ""
+    if f"Item: sd:{item}" not in block:
+        return (f"; it names neither `Delivers: sd:{item}` nor `Item: sd:{item}`, so ship "
+                f"the work with `sd-ship prepare --item {item} --deliver`, name `Closes: sd:{item}` "
+                f"in a later item merge's body, or close it by hand with `--reason TEXT` and no "
+                f"`--delivered-by`")
     return (f"; it carries `Item: sd:{item}`, so `sd work deliver {item} {commit} "
             "--associated --reason TEXT` delivers it")
 
