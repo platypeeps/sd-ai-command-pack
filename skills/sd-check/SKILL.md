@@ -75,6 +75,19 @@ The short same-head window is the accepted residual risk; a repository that need
 `bin/sd_gate_receipts.py` names the binding and `REUSE_WINDOW_SECONDS`.
 These receipts need no declaration and are separate from the optional receipts below.
 
+A repository whose check reads no commit history may key its gate receipts by tree instead of head:
+
+```json
+{"schema_version": 1, "key": "tree", "reason": "the check reads no commit message, range or tag"}
+```
+
+Track it as `.github/sd-gate-reuse.json`.
+A new head with the same tree and the same merge base with the base branch then reuses the earlier pass.
+That covers an `sd attribute` commit, a reworded message, or a rebase that changed nothing (sd:1912).
+Without the declaration a new head runs again, since a commit-message lint can pass at one head and fail at the next.
+A run with no base branch, a declaration that does not parse, or another `key` keeps the head key.
+A tree-keyed receipt stands for 6 hours (`TREE_REUSE_WINDOW_SECONDS`); a head-keyed one stays at 30 minutes.
+
 ## Optional check receipts
 
 Default invocations store nothing.

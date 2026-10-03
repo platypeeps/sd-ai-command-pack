@@ -120,3 +120,19 @@ set saves little.
   D2), and it counts from the run that passed. "Prepare never reads a receipt"
   above no longer holds. `sd gate check` records a builder's pass; using it is
   optional (ruling D3).
+- 2026-10-03, sd:1912 slice A: a repository may key gate receipts by tree
+  instead of head, through `.github/sd-gate-reuse.json` (`{"schema_version": 1,
+  "key": "tree", "reason": ...}`). The key, the binding and the `gate_inputs`
+  digest then name `HEAD^{tree}` and the merge base with the base branch, not
+  the head. Opt-in, because two heads with one tree differ in commit metadata,
+  and a commit-message lint or a `git describe` stamp can pass at one and fail
+  at the other. The merge base is bound because a check may read an old commit
+  by name; a run with no base keeps the head key. The receipt row keeps the
+  passing head, and a reuse reports it as `reused.head`. Ruling D2': a
+  tree-keyed receipt stands for 6 hours (`TREE_REUSE_WINDOW_SECONDS`); the head
+  key keeps 30 minutes. Ruling D4: no. The pack does not declare the key. Its
+  `make check` reads commit trailers and ranges: `tests/test_sd_review.py` runs
+  `sd-review --explain` at the checkout root, which reads the branch range's
+  `Authored-with:` trailers; `tests/test_sd_size_report.py` renders "this
+  change" and the last 30 days from the log; `tests/test_archive_untouched.py`
+  reads the commit that added `docs/work/.status-source`.
