@@ -218,6 +218,18 @@
   (billing-blocked) check run still refuses; WORKFLOW.md § No-CI mode names
   the remedy, a fresh commit.
 
+- **A `url` entry can opt in to the strict findings schema (sd:1827, pack
+  half).** With `response_format: json_schema` on its registry entry,
+  `sd-review` sends the findings schema as a strict `response_format`, on the
+  ledger road through `sd_db.calls.call` and on the no-ledger road through
+  `sd_registry.chat_completion` alike. The copy is the one Moonshot's strict
+  mode takes: every property typed, `line` as `anyOf` integer or null, and no
+  `minLength` or `maxItems`; the answer is still parsed against the full
+  schema. Every other entry sends the request it sent before. The shipped
+  registry opts no entry in: kimi-k3 waits for a paid strict-mode test, and
+  MiniMax-M3 ignores the field. An `sd_db` without the field refuses a
+  registry that sets it.
+
 ### Fixed
 
 - **`sd-review`'s Jev rows compare Jev with the routing (sd:2359).** `jev`
