@@ -1621,6 +1621,10 @@ class Ship(SharedReview):
             extras["row_authorized_merge"] = self.state["row_authorized_merge"]
         if self.state.get("merge_invoker"):
             extras["invoker"] = self.state["merge_invoker"]
+        # Why an unrelated merge carries `Closes:` lines, and what still waits (sd:1600).
+        for name in ("carried_closes", "closes_left", "closing_owed"):
+            if self.state.get(name):
+                extras[name] = self.state[name]
         return extras
 
     def invoker(self) -> dict:
@@ -1712,6 +1716,37 @@ class Ship(SharedReview):
             deliver_work(self.connection, self.args.item, commit, who="sd-ship", verification_root=self.root)
         else:
             self.close_task(commit, ref)
+
+    def squash_message(self, head: str, reviewed: str) -> tuple[str, dict]:
+        """The squash message, with the owed `Closes:` lines inside its one trailer block (sd:1600)."""
+        body = self.squash_body(reviewed)
+        carried, left = sd_ship_squash.owed_closes(
+            self.connection, self.repository, body,
+            lambda item: slug(self.store.identity(self.connection, item)["repo"]["remote"] or ""))
+        body += "".join(f"{sd_lib.CLOSES_TRAILER} sd:{debt['item']}\n" for debt in carried)
+        return body + self.squash_authorship(head, reviewed), {
+            "carried_closes": carried, "closes_left": [debt["item"] for debt in left]}
+
+    def settle_closes(self, held: bool, commit: str, evidence: dict) -> None:
+        """Owe a held hand delivery its `Closes:`, or pay what an unheld squash carried (sd:1600).
+
+        Reconcile reaches this past the hold, so a held `--deliver` squash here
+        was delivered by hand. No git reader takes its `Delivers:`, so the next
+        squash in this repository owes it a `Closes:`.
+        """
+        if not held:
+            self.pay_closes(commit)
+        elif not self.args.no_item and self.state.get("deliver") and not self.state.get("closing_paid"):
+            self.save(closing_owed={"item": self.args.item, "commit": commit, "branch": self.branch})
+            evidence["closing_owed"] = self.state["closing_owed"]
+
+    def pay_closes(self, commit: str) -> None:
+        """Mark each owed close this unheld squash carried as paid on its own receipt."""
+        for debt in self.state.get("carried_closes") or []:
+            key = self.store.receipt_key(self.repository, debt["branch"], debt["item"])
+            revision, receipt = self.store.read(self.connection, key)
+            if receipt.get("closing_owed") == debt and not receipt.get("closing_paid"):
+                self.store.save(self.connection, key, revision, {**receipt, "closing_paid": commit})
 
     def by_hand(self, commit: str) -> str:
         """The hand close for a held delivery: `sd work deliver`'s, or a task's.
@@ -1883,7 +1918,7 @@ class Ship(SharedReview):
         self.require_copilot_clearance(observed["number"], observed, head)
         self.save(phase="ci_passed", protection=protection)
         reviewed = self.reviewed_base(head, base)
-        body = self.squash_body(reviewed) + self.squash_authorship(head, reviewed)
+        body, closes = self.squash_message(head, reviewed)
         # The squash message is composed here and read by `git
         # interpret-trailers --parse` afterwards, and those two only agree
         # while the trailers sit in the message's *last* paragraph. One blank
@@ -1917,7 +1952,7 @@ class Ship(SharedReview):
         # ownership-only merge therefore cannot inherit a claim from a merge
         # that never happened (sd:1347).
         title = squash_title(observed, self.state["title"])
-        self.save(phase="merge_dispatch", merge_message=body, row_authorized_merge=self.row_authority,
+        self.save(phase="merge_dispatch", merge_message=body, row_authorized_merge=self.row_authority, **closes,
                   warnings=self.dispatch_warnings(), merge_invoker=self.invoker())
         try:
             self.api.api(f"{self.api.prefix}/pulls/{observed['number']}/merge", method="PUT",
@@ -2007,6 +2042,7 @@ class Ship(SharedReview):
                               state="operator_decision")
             return {**evidence, "delivery_pending": True, "merged_parent": parent,
                     "workflow": {**evidence["workflow"], **pending}}
+        self.settle_closes(held, commit, evidence)
         if not self.args.no_item and self.state.get("deliver"):
             from sd_db.errors import SdDbError
             self.assert_scope()
