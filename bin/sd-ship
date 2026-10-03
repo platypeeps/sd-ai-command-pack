@@ -613,7 +613,28 @@ class Ship(SharedReview):
         base = self.state.get("base")
         if base:
             warnings.extend(self.squash_notes(base, head))
+            warnings.extend(self.dropped_delivery_notes(base, head))
         return warnings + list(self.catch_up_notes)
+
+    def dropped_delivery_notes(self, base: str, head: str) -> list[str]:
+        """One advisory per `Delivers:` a no-item squash will not carry (sd:2171).
+
+        The no-item squash message is composed here and carries no branch
+        commit's `Delivers:`, so `sd task status N done --delivered-by` then
+        found no trailer. Whether to copy it into the squash is not decided;
+        this only says so before the merge.
+        """
+        if not self.args.no_item:
+            return []
+        notes = []
+        for commit, message in sd_lib.commit_messages(self.root, f"refs/remotes/origin/{base}", head):
+            for line in sd_lib.trailer_block(message).splitlines():
+                name, _, value = line.strip().partition(" ")
+                if name == sd_lib.DELIVERS_TRAILER and value.strip():
+                    item = value.strip().removeprefix("sd:")
+                    notes.append(f"commit {commit[:12]} carries `{line.strip()}`, and a no-item squash does not "
+                                 f"carry it; ship with --item {item} to record the delivery")
+        return notes
 
     def squash_notes(self, base: str, head: str) -> list[str]:
         """One note per pre-squash head this branch carries (sd:1409)."""

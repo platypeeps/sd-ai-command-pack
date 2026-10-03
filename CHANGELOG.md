@@ -112,6 +112,13 @@
 
 ### Fixed
 
+- **A no-item `prepare` warns about a branch `Delivers:` trailer (sd:2171).**
+  The no-item squash message carries no branch commit's `Delivers: sd:N`, so
+  `sd task status N done --delivered-by <squash>` later found no trailer.
+  `prepare --no-item` now adds one advisory warning per such trailer, naming
+  the commit and suggesting `--item N`. It refuses nothing, and the squash
+  still does not copy the trailer; whether it should is an open question.
+
 - **`prepare` accepts a `--title` the live pull request carries (sd:1378).**
   Once a pull request was stored, `prepare` refused any `--title` that
   differed from the stored title with `existing PR delivery claim or title
