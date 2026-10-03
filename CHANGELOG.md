@@ -122,6 +122,33 @@
   a VENV on the outer command line no longer reaches the fixture Makefile
   and overrides its choice of environment.
 
+- **A receipt refusal names the declaration file; a timed-out gate names
+  `--timeout` (sd:1560).** A missing, untracked or incomplete declaration now
+  refuses with "track .github/sd-check-reuse.json, for example {...}", the
+  smallest declaration the parser accepts. A gate stopped at its bound -- a
+  check `sd-check` killed at `--timeout`, no gate slot within the bound, or
+  the runner killing `sd-check` itself -- reports `reason: timed_out`, and
+  `sd-review` says to give it longer with `--timeout SECONDS` (`sd-ship
+  prepare`: `--review-timeout SECONDS`). A missing program still wins.
+
+- **Recorded checks run under one locale (sd:2386).** A receipt's controlled
+  environment sets `LANG` and `LC_ALL` to `C.UTF-8` unless the declaration
+  lists them, and the binding records both under `locale`. A session's locale
+  can no longer change what a recorded check saw; receipts recorded before
+  this change rerun once.
+
+- **A text file that starts with the media marker is not summarized
+  (sd:2431).** Whole-file material (planning, untracked) is classed
+  `summarized` from its bytes (`is_media`), not from the rendered text, so a
+  note that begins "[binary, not sent] " keeps a material-only reviewer's
+  coverage complete.
+
+- **A renamed and edited non-media binary is sent as its rename delta
+  (sd:2432).** The `git diff --binary` fallback ran with `--no-renames`, so
+  such a file went as a full base64 literal under its new path. It now runs
+  with `-M` over both paths and sends git's rename patch, usually a small
+  delta, with the `[renamed]` record; both paths stay listed and summarized.
+
 - **opencode reviews run again on opencode 2.x, and refuse 1.x (sd:2445).**
   opencode 2.0.20 removed `debug agent` and `--pure`, so every opencode
   review was refused and the live confinement tests failed `make check`.
@@ -349,6 +376,22 @@
   The end line reads it when the run ends, so an edit made during the run
   shows as two ids. Each shard log now opens with `shard <name>: start`, so a
   `Ran` line sits inside its own shard's labels instead of above them.
+
+- **The review prompt names six generic defect classes (sd:1635).** For a
+  code subject, `sd-review` asks for external JSON used before narrowing, an
+  error that names the wrong stage, substring identifier matching, unisolated
+  test I/O, rendering edge cases, and every sibling site of a defect's shape.
+  The adjudication reference asks for the same sibling sweep. The prompt
+  change moves `request_sha256`, so an open item's review receipt does not
+  survive this landing, and its next `prepare` re-reviews.
+
+- **`--reuse-check` says the pack itself never reuses (sd:1296).** The flag's
+  help and the `sd-review` and `sd-ship` skills now say it, not only the
+  receipts reference: the pack tracks no `.github/sd-check-reuse.json`.
+
+- **A rejection that survives one review pass is adjudicated before the next
+  fix (sd:1929).** One line in the `sd-ship` skill; the adjudication
+  reference points back to it.
 
 - **A review carries forward across a clean merge-in of the base (sd:1485).**
   Every catch-up merge moved the head, so the local review spent a
