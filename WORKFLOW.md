@@ -236,8 +236,11 @@ In a shared repository:
   already carries this: planning artifacts go to the fork's integration branch.
   Two machines enforce that refusal. `sd-review --scope planning` calls
   `sd_lib.guest_artifact_refusal`, which resolves the mode and names refused
-  paths. `sd-plan` uses that review before promotion. `sd-ship` separately
-  checks the same three path prefixes before a guest push.
+  paths. `sd-plan` uses that review before promotion. `sd-ship` checks the
+  same list, `sd_lib.guest_refused_dirs`, before a guest push.
+  A `guest_allow: docs/decisions` line in the local block takes decision
+  records out of both checks for that repository (sd:2168).
+  `docs/work/` and `docs/spec/` stay refused; naming either is an error.
   Nothing yet refuses a `docs/spec/` or
   `docs/decisions/` write at the moment it happens — `sd-spec` and `sd-plan
   --decision` are still prose there, and the push gate is where those are
@@ -703,6 +706,7 @@ The `CLAUDE.local.md` block carries these keys, and the pack reads no others.
     test: <optional, when the repo spells its tests separately>
     lint: <optional, same>
     reviewers: <entry@recipient pairs that may receive this repository's diff, e.g. claude@claude+3f9a1c2e, baseten@inference.baseten.co>
+    guest_allow: docs/decisions   (optional; the only tree a guest repository can take out of the refusal)
 
 `check`, `test` and `lint` run in that order and are optional; one combined command can use `check` alone.
 `reviewers` restricts the effective authorization described above. Each local entry binds its destination:

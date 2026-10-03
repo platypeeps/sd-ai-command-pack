@@ -5,9 +5,9 @@ Six things drift silently and each has a test here.
 **The override keys.** The `CLAUDE.local.md` block the installer writes and the
 Overrides section of `WORKFLOW.md` describe the same set of keys. Neither is
 checked against a list written down beside it: the expectation is enumerated
-from `sd_lib.MODES`, `sd_lib.CHECK_NAMES` and `sd_lib.CONSENT_KEY` in the
-source, so adding a sixth key to the library and to only one of the two pages
-fails here.
+from `sd_lib.MODES`, `sd_lib.CHECK_NAMES`, `sd_lib.CONSENT_KEY` and
+`sd_lib.GUEST_ALLOW_KEY` in the source, so adding a seventh key to the library
+and to only one of the two pages fails here.
 
 **The review table.** It appears in exactly two files and the two copies are
 byte-identical. A cap edited in one place and not the other is the failure this
@@ -161,7 +161,7 @@ def bare_vendor_tokens(names: list[str], root: pathlib.Path = REPO_ROOT) -> list
 def expected_keys() -> set[str]:
     """The key set, enumerated from the library rather than from a list."""
     keys = {"mode"} if sd_lib.MODES else set()
-    return keys | set(sd_lib.CHECK_NAMES) | {sd_lib.CONSENT_KEY}
+    return keys | set(sd_lib.CHECK_NAMES) | {sd_lib.CONSENT_KEY, sd_lib.GUEST_ALLOW_KEY}
 
 
 def section(text: str, heading: str) -> str:
