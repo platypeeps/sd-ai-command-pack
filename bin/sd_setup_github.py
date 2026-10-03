@@ -19,9 +19,8 @@ replaced; the rest of that file stays the consumer's.
 
 Three refusals, each with a decision behind it:
 
-  * A `guest` repository cannot install it (R10-D5), so a repository whose
-    control was never established can never grow the framework's workflow.
-    `minimal`, an operator's own quiet repository, may (sd:1292).
+  * A `guest` repository, whose control was never established, cannot install
+    it (R10-D5); `minimal`, the operator's own quiet repository, may (sd:1292).
   * A repository still carrying the sd-github-review footprint refuses without
     `--remove-legacy`: two routers in one repository is how a change gets
     reviewed twice and read once.
