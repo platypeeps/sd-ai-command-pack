@@ -220,6 +220,14 @@
 
 ### Fixed
 
+- **A failed rules read leaves protection unknown, not unprotected
+  (sd:1000).** An admin's 404 on classic protection says only that classic
+  protection is absent; a ruleset may still gate the merge. When the rules
+  endpoint did not answer, `sd-status` still reported `unprotected`, and a
+  standing `.github/sd-status.json` acknowledgement then moved it to
+  `accepted`. It now prints `protection unknown` with the rules read error as
+  the reason, raises no `unprotected` finding, and accepts nothing.
+
 - **`sd-review`'s Jev rows compare Jev with the routing (sd:2359).** `jev`
   computed `changed` against `--fallback`, which here is a token no tier can
   be, so every sd-review row in the judgment ledger said `changed=yes`. The
