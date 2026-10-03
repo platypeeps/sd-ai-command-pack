@@ -2753,18 +2753,37 @@ def delivered(root: pathlib.Path, item: "str | tuple[str, ...]") -> Answer:
 #: push time, and two lists is how one of them gains a fourth entry alone.
 GUEST_REFUSED_DIRS = ("docs/work", "docs/spec", "docs/decisions")
 
+#: The local-block key that takes a tree out of the guest refusal, and the one
+#: tree it may name (sd:2168). The operator ruled it per repository and opt-in:
+#: `docs/decisions` stays refused by default, and `docs/work` and `docs/spec`
+#: stay refused always, so naming either refuses rather than being ignored.
+GUEST_ALLOW_KEY = "guest_allow"
+GUEST_ALLOWABLE_DIRS = ("docs/decisions",)
 
-def guest_artifacts(paths: Any) -> tuple[str, ...]:
+
+def guest_refused_dirs(root: pathlib.Path) -> tuple[str, ...]:
+    """`GUEST_REFUSED_DIRS` less the trees this repository's local block allows."""
+    raw = local_block(root).get(GUEST_ALLOW_KEY, "")
+    allowed = {entry.strip().rstrip("/") for entry in raw.split(",") if entry.strip()}
+    wrong = sorted(allowed - set(GUEST_ALLOWABLE_DIRS))
+    if wrong:
+        raise ConfigError(f"{local_block_path(root)}: {GUEST_ALLOW_KEY}: only {', '.join(GUEST_ALLOWABLE_DIRS)} "
+                          f"can be allowed, not {', '.join(wrong)}; docs/work and docs/spec stay refused in guest mode")
+    return tuple(directory for directory in GUEST_REFUSED_DIRS if directory not in allowed)
+
+
+def guest_artifacts(paths: Any, refused: tuple[str, ...] = GUEST_REFUSED_DIRS) -> tuple[str, ...]:
     """The repo-relative `paths` that live under a guest-refused tree.
 
     Separate from the mode question on purpose: this half is pure, so a caller
     with nothing to refuse never reaches the network to find that out.
+    `refused` is `guest_refused_dirs` of the repository, when it has one.
     """
 
     found = set()
     for entry in paths:
         text = re.sub(r"^(?:\./)+", "", str(entry).replace(os.sep, "/"))
-        for directory in GUEST_REFUSED_DIRS:
+        for directory in refused:
             if text == directory or text.startswith(directory + "/"):
                 found.add(text)
     return tuple(sorted(found))
@@ -2788,7 +2807,7 @@ def guest_artifact_refusal(root: pathlib.Path, paths: Any, *, ask: Asker = gh_ap
     code, because this module raises nothing.
     """
 
-    refused = guest_artifacts(paths)
+    refused = guest_artifacts(paths, guest_refused_dirs(root))
     if not refused:
         return ""
     if mode(root, ask=ask) != "guest":
@@ -2822,8 +2841,13 @@ def shared_tree_artifacts(root: pathlib.Path) -> tuple[str, ...]:
     remote, default = upstream(root)
     if not remote:
         return ()
+    try:
+        trees = guest_refused_dirs(root)
+    except ConfigError:
+        # A report names more, never fewer; the push check refuses the line itself.
+        trees = GUEST_REFUSED_DIRS
     listed = git_output(["ls-tree", "-r", "--name-only", "-z", f"refs/remotes/{remote}/{default}",
-                         "--", *GUEST_REFUSED_DIRS], root)
+                         "--", *trees], root)
     if listed is None:
         return ()
     return tuple(sorted(name for name in listed.split("\0") if name))
