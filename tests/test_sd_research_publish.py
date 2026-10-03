@@ -1434,6 +1434,10 @@ class SourceUrlTests(Fixture):
         if git(self.repo, "remote"):
             git(self.repo, "remote", "remove", "origin")
         git(self.repo, "remote", "add", "origin", url)
+        # As a fetch leaves it: with an origin, only origin's refs name the
+        # default branch the mirror publishes from (sd:2019).
+        git(self.repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        git(self.repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
 
     def queued(self, docs: list[dict] | None = None, name: str = NAME) -> dict:
         with unittest.mock.patch.dict(PUBLISH.ENVIRON, SD_MIRROR_REQUEUE="1"):
@@ -1590,6 +1594,107 @@ class WorktreeIdentityTests(Fixture):
         plain = self.root / "plain"
         plain.mkdir()
         self.assertEqual(PUBLISH.repo_home(plain), plain)
+
+
+class BranchCheckoutTests(Fixture):
+    """The main checkout queues a mirror from its default branch only (sd:2019).
+
+    The init-hook render fires on post-checkout, so a branch switch in the
+    main checkout rewrote the pending request with that branch's text: a
+    drain in that window published unmerged content as the canonical mirror.
+    """
+
+    NAME = "my-research.a.notion.json"
+    DOC = [dict(src="10-x/a.md", out="a", title="A", notion=dict())]
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.repo / "build").rmdir()
+        self.repo.rmdir()
+        self.repo = research_repo(self.root)
+        PUBLISH.enqueue(self.repo, self.DOC)
+        self.pending = (PUBLISH.QUEUE / self.NAME).read_text()
+
+    def switch(self, *args: str) -> None:
+        git(self.repo, "checkout", "-q", *args)
+        (self.repo / "10-x" / "a.md").write_text("# A\n\nbranch text\n", encoding="utf-8")
+
+    def test_a_feature_branch_switch_queues_nothing(self) -> None:
+        self.switch("-b", "feature")
+        said = PUBLISH.enqueue(self.repo, self.DOC)
+        self.assertFalse(any("queued" in line and "not queued" not in line for line in said), said)
+        self.assertEqual((PUBLISH.QUEUE / self.NAME).read_text(), self.pending)
+        self.assertEqual(len(said), 1, said)
+        self.assertIn("feature", said[0])
+        self.assertIn("SD_PUBLISH_FROM_WORKTREE", said[0])
+
+    def test_a_detached_head_queues_nothing(self) -> None:
+        self.switch("--detach")
+        said = PUBLISH.enqueue(self.repo, self.DOC)
+        self.assertEqual((PUBLISH.QUEUE / self.NAME).read_text(), self.pending)
+        self.assertIn("SD_PUBLISH_FROM_WORKTREE", said[0])
+
+    def test_with_the_opt_in_a_feature_branch_queues(self) -> None:
+        self.switch("-b", "feature")
+        PUBLISH.ENVIRON = dict(PUBLISH.ENVIRON, SD_PUBLISH_FROM_WORKTREE="1")
+        said = PUBLISH.enqueue(self.repo, self.DOC)
+        self.assertTrue(any("queued a" in line for line in said), said)
+        self.assertNotEqual((PUBLISH.QUEUE / self.NAME).read_text(), self.pending)
+
+    def test_the_vault_copy_is_still_written_on_a_branch(self) -> None:
+        """Only the mirror is held: the vault copy is local and the next render replaces it."""
+        self.switch("-b", "feature")
+        self.assertEqual(PUBLISH.publish_refusal(self.repo, "obsidian"), "")
+
+    def fork(self, origin_head: bool) -> None:
+        """`feature` tracks a fork whose default branch is `feature`.
+
+        No network: the remotes' refs are written as a fetch would leave them.
+        """
+        for name, url in (("origin", "https://example.test/canon.git"),
+                          ("fork", "https://example.test/fork.git")):
+            git(self.repo, "remote", "add", name, url)
+        git(self.repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        if origin_head:
+            git(self.repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        self.switch("-b", "feature")
+        git(self.repo, "update-ref", "refs/remotes/fork/feature", "HEAD")
+        git(self.repo, "symbolic-ref", "refs/remotes/fork/HEAD", "refs/remotes/fork/feature")
+        git(self.repo, "config", "branch.feature.remote", "fork")
+        git(self.repo, "config", "branch.feature.merge", "refs/heads/feature")
+
+    def test_a_branch_tracking_a_fork_is_held(self) -> None:
+        """The default branch is origin's, not the one HEAD's tracking remote publishes."""
+        self.fork(origin_head=True)
+        said = PUBLISH.enqueue(self.repo, self.DOC)
+        self.assertEqual((PUBLISH.QUEUE / self.NAME).read_text(), self.pending)
+        self.assertIn("queues from main only", said[0])
+
+    def test_without_origin_head_a_fork_branch_is_still_held(self) -> None:
+        """No `origin/HEAD`: nothing names the default, so the fork's branch is held."""
+        self.fork(origin_head=False)
+        refusal = PUBLISH.publish_refusal(self.repo, "mirror")
+        self.assertIn("not queued from branch feature", refusal)
+        self.assertIn("git remote set-head origin --auto", refusal)
+
+    def test_without_origin_head_an_origin_main_does_not_name_the_default(self) -> None:
+        """origin's default is `trunk`; an `origin/main` it also has is not proof of it."""
+        git(self.repo, "remote", "add", "origin", "https://example.test/canon.git")
+        git(self.repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        git(self.repo, "update-ref", "refs/remotes/origin/trunk", "HEAD")
+        self.assertEqual(git(self.repo, "branch", "--show-current").strip(), "main")
+        self.assertIsNone(PUBLISH.canonical_branch(self.repo))
+        self.assertIn("git remote set-head origin --auto",
+                      PUBLISH.publish_refusal(self.repo, "mirror"))
+
+    def test_with_an_origin_a_local_main_does_not_name_the_default(self) -> None:
+        """origin's default is `trunk`, with no `origin/HEAD`: a local `main` is a feature branch."""
+        git(self.repo, "remote", "add", "origin", "https://example.test/canon.git")
+        git(self.repo, "update-ref", "refs/remotes/origin/trunk", "HEAD")
+        self.assertEqual(git(self.repo, "branch", "--show-current").strip(), "main")
+        (self.repo / "10-x" / "a.md").write_text("# A\n\nbranch text\n", encoding="utf-8")
+        self.assertIsNone(PUBLISH.canonical_branch(self.repo))
+        self.assertNotEqual(PUBLISH.publish_refusal(self.repo, "mirror"), "")
 
 
 class HookTests(unittest.TestCase):
