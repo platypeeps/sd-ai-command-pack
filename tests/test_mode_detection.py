@@ -404,10 +404,9 @@ esac
 class TheInstallerGate(Fixture):
     """End to end: `bin/sd_setup_github.py`'s R10-D5 refusal, on a real fork.
 
-    The gate reads `sd_lib.mode(root)` and refuses anything but `full`. Before
-    detection existed, a fork with no `mode:` line read `full` and this
-    installed the routing lane -- the one thing R10-D5 restricts to full-mode
-    repositories. Asserted through the real `gh_api`, against a `gh` on `PATH`.
+    The gate reads `sd_lib.mode(root)` and refuses `guest`. Before detection
+    existed, a fork with no `mode:` line read `full` and this installed the
+    routing lane -- the one thing R10-D5 withholds from a guest repository. Asserted through the real `gh_api`, against a `gh` on `PATH`.
     """
 
     def gate(self, root: pathlib.Path, repo_json: str) -> dict[str, Any]:
