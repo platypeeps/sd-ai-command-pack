@@ -92,6 +92,11 @@ def git(*args: str, cwd: pathlib.Path, stdin: str | None = None) -> str:
 def clean_env(**extra: str) -> dict[str, str]:
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     env.pop("SD_SKIP_HOOKS", None)
+    # Git runs the hook through `#!/usr/bin/env python3`, which under the gate
+    # can be an interpreter without coverage.py; the harness's sitecustomize
+    # then prints its warning on stderr. The hook is outside `.coveragerc`'s
+    # include, so nothing is lost by not asking for subprocess coverage.
+    env.pop("SD_COVERAGE_PROCESS_START", None)
     env.update(extra)
     return env
 
