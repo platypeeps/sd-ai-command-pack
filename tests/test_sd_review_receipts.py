@@ -362,6 +362,17 @@ class ReceiptTests(ReviewFixture):
         self.assertEqual(receipts.receipt_environment(self.contract, self.env)["LANG"], "de_DE.UTF-8")
         self.assertEqual(receipts.check_binding(self.root, self.env)["locale"], {"LANG": "de_DE.UTF-8", "LC_ALL": receipts.LOCALE})
 
+    def test_reuse_check_help_says_the_pack_itself_never_reuses(self):
+        # sd:1296: the flag's own help says it, not only a reference file. The
+        # pack's tree is the evidence: once it tracks a declaration, this fails
+        # and the help, sd-review and sd-ship skills need the sentence removed.
+        pack = pathlib.Path(sd_review._BIN).parent
+        self.assertNotIn(receipts.CONTRACT, subprocess.run(["git", "ls-files", "--", receipts.CONTRACT], cwd=pack,
+                                                           capture_output=True, text=True, check=True).stdout)
+        help_text = next(action.help for action in sd_review.build_parser()._actions if "--reuse-check" in action.option_strings)
+        self.assertIn(f"Never reuses in sd-ai-command-pack itself, which tracks no reuse declaration ({receipts.CONTRACT})",
+                      help_text)
+
     def commit_contract(self, **fields):
         self.contract.update(fields)
         (self.root / receipts.CONTRACT).write_text(json.dumps(self.contract))

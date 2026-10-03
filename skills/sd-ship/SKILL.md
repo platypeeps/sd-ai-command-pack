@@ -183,6 +183,7 @@ Never allocate another review ID to reset spent passes or discard history.
 Add `--reuse-check` to prepare or standalone review only when explicitly reusing eligible deterministic-check evidence.
 Before opting in, read `skills/sd-check/references/check-receipts.md` in the sd-ai-command-pack checkout.
 Reuse requires complete local-only dependencies and unchanged before-and-after identity; legacy receipts rerun.
+The flag never reuses in sd-ai-command-pack itself: the pack tracks no reuse declaration (`.github/sd-check-reuse.json`), so its gate runs.
 This flag does not reuse incomplete reviews or bypass source, policy, or receipt validation.
 
 Add `--provider NAME` to prepare or standalone review only for an explicitly requested reviewer.

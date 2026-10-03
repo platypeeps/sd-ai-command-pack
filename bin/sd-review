@@ -2435,7 +2435,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-C", dest="chdir", metavar="DIR", action=sd_lib.DirectoryAction, help=sd_lib.DIRECTORY_OPTION_HELP)
     parser.add_argument("--scope", choices=SCOPES, default="worktree", help="what to review (default: worktree)")
     parser.add_argument("--database", type=pathlib.Path, help="explicit provider-state database for an owned runner")
-    parser.add_argument("--reuse-check", action="store_true", help="reuse a matching explicit full-check receipt; otherwise rerun")
+    parser.add_argument("--reuse-check", action="store_true",
+                        help="reuse a matching explicit full-check receipt; otherwise rerun. Never reuses in "
+                             "sd-ai-command-pack itself, which tracks no reuse declaration (.github/sd-check-reuse.json)")
     parser.add_argument("--gate-check", metavar="BRANCH",
                         help="branch scope: run the check as the local gate does, against origin/BRANCH, "
                              "leaving a gate receipt at HEAD for the merge gate")
