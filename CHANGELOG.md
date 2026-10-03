@@ -133,6 +133,12 @@
   note that begins "[binary, not sent] " keeps a material-only reviewer's
   coverage complete.
 
+- **A renamed and edited non-media binary is sent as its rename delta
+  (sd:2432).** The `git diff --binary` fallback ran with `--no-renames`, so
+  such a file went as a full base64 literal under its new path. It now runs
+  with `-M` over both paths and sends git's rename patch, usually a small
+  delta, with the `[renamed]` record; both paths stay listed and summarized.
+
 - **opencode reviews run again on opencode 2.x, and refuse 1.x (sd:2445).**
   opencode 2.0.20 removed `debug agent` and `--pure`, so every opencode
   review was refused and the live confinement tests failed `make check`.

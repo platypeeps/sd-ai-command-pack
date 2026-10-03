@@ -44,6 +44,7 @@ def untracked(root: pathlib.Path) -> list[str]:
 # stays base64, so the size check refuses honestly. Not media: zip, gzip (can carry source), ICO (weak magic).
 BINARY_MARKER = re.compile(r"(?m)^Binary files .* differ\n?")
 SUMMARY = re.compile(r"(?m)^\[(?:binary, not sent|renamed)\] ")  # a patch prefixes content lines
+RENAMED = re.compile(r'(?m)^\[renamed\] ("(?:[^"\\]|\\.)*") -> "(?:[^"\\]|\\.)*"; unchanged lines not sent$')
 MEDIA_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"wOFF", b"wOF2", b"%PDF-")
 
 
@@ -211,12 +212,22 @@ def binary_material(root: pathlib.Path, subject: Any, args: list[str], pieces: d
     sides = binary_sides(root, subject, pieces)
     material = {name: text for name, piece in pieces.items() if (text := binary_piece(name, piece, sides[name])) is not None}
     raw = [name for name in pieces if name not in material]
-    if raw:
-        patch = read_git_material(root, ["diff", "--binary", *args, *(":(literal)" + name for name in raw)])
+    moved = {name: found for name in raw if (found := RENAMED.search(pieces[name]))}
+    plain = [name for name in raw if name not in moved]
+    if plain:
+        patch = read_git_material(root, ["diff", "--binary", *args, *(":(literal)" + name for name in plain)])
         encoded = list(filter(None, re.split(r"(?m)(?=^diff --git )", patch)))
-        if len(encoded) != len(raw):
+        if len(encoded) != len(plain):
             raise ValueError("review patch and path inventory disagree; no partial subject sent")
-        material.update(zip(raw, encoded, strict=True))
+        material.update(zip(plain, encoded, strict=True))
+    renames = ["-M", *(arg for arg in args if arg != "--no-renames")]
+    for new, record in moved.items():  # sd:2432: -M sends a moved, edited blob as its delta, not a full literal
+        encoded = list(filter(None, re.split(r"(?m)(?=^diff --git )", read_git_material(
+            root, ["diff", "--binary", *renames, ":(literal)" + json.loads(record.group(1)), ":(literal)" + new]))))
+        if len(encoded) != 1 or "\nrename from " not in encoded[0]:
+            raise ValueError("review patch and path inventory disagree; no partial subject sent")
+        head, _, rest = encoded[0].partition("\n")
+        material[new] = f"{head}\n{record.group(0)}\n{rest}"
     return material
 
 
