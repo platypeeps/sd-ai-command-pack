@@ -670,6 +670,20 @@ roles:
         self.assertEqual(self.merge()["phase"], "merged")
         self.assertEqual(self.remote.pull(number).title.split("\n")[0], f"Switch the widget to local CI (#{number})")
 
+    def test_a_title_matching_the_retitled_pull_request_is_accepted_and_stored(self):
+        # sd:1378: the guard compared a new --title with the stale stored one
+        # and refused the very title the pull request carried on GitHub.
+        number = self.prepare()["pull_request"]["number"]
+        self.remote.pull(number).title = "Retitled on GitHub"
+        (self.root / "src.py").write_text("value = 2\n")
+        _git(self.root, "commit", "-qam", "follow-up\n\nAuthored-with: human")
+        with patch.object(ship.Ship, "review"), patch.object(ship.Ship, "check_review"):
+            with self.assertRaisesRegex(ship.Refusal, r'the title "Elsewhere" differs from the stored "change" '
+                                                      r'and the pull request\'s "Retitled on GitHub"'):
+                self.prepare("--title", "Elsewhere")
+            self.assertEqual(self.prepare("--title", "Retitled on GitHub")["phase"], "ready_to_send")
+        self.assertEqual(self.operation().state["title"], "Retitled on GitHub")
+
     def test_a_wip_pull_request_title_never_reaches_the_default_branch(self):
         number = self.prepare()["pull_request"]["number"]
         self.remote.pull(number).title = "WIP switch the widget"

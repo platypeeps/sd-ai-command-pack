@@ -1199,9 +1199,10 @@ class Ship(SharedReview):
             raise Refusal("explicit Copilot review requires a full-owned repository")
         if not self.args.no_item and (mode != "guest" or local_work):
             body = sd_ship_body.published(body, self.args.item)
-        if self.state.get("pull_request") and (self.state.get("title") != title
-                                               or (not self.args.no_item and self.state.get("deliver") != deliver)):
-            raise Refusal("existing PR delivery claim or title differs; reconcile the prepared scope first")
+        if self.state.get("pull_request"):
+            self.assert_title_matches(title)
+            if not self.args.no_item and self.state.get("deliver") != deliver:
+                raise Refusal("existing PR delivery claim differs; reconcile the prepared scope first")
         self.assert_scope()
         if not self.state:
             self.save(repository=self.repository, branch=self.branch, item=self.args.item, phase="new")
@@ -1271,6 +1272,24 @@ class Ship(SharedReview):
             self.save(warnings=list(self.state.get("warnings") or []) + [copilot["warning"]])
         return self.result("ready_to_send", copilot_review=copilot, invoker=self.state["invoker"],
                            body_source=self.body_source, normalized=list(self.body_normalized))
+
+    def assert_title_matches(self, title: str) -> None:
+        """Accept a title the stored one or the live pull request's agrees with (sd:1378).
+
+        A pull request retitled on GitHub left the stored title stale, and the
+        guard refused a `--title` that matched the live one. A matching title
+        is stored by the caller; any other still refuses, naming all three.
+        """
+        stored = self.state.get("title")
+        if title == stored:
+            return
+        live = str(self.api.pull(self.state["pull_request"]["number"]).get("title") or "").strip()
+        if title == live:
+            return
+        raise Refusal(f'the title "{title}" differs from the stored "{stored}" and the pull request\'s "{live}"; '
+                      "reconcile the prepared scope first",
+                      next_action="Pass --title with the pull request's title, or retitle the pull request "
+                                  "on GitHub to the new one, then prepare again.")
 
     def pushed_pull(self, number: int, head: str) -> dict:
         """Read the pull object until it shows the head just pushed (sd:1394).

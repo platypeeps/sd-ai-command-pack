@@ -112,6 +112,14 @@
 
 ### Fixed
 
+- **`prepare` accepts a `--title` the live pull request carries (sd:1378).**
+  Once a pull request was stored, `prepare` refused any `--title` that
+  differed from the stored title with `existing PR delivery claim or title
+  differs`, even when the pull request had been retitled to it on GitHub. The
+  guard now reads the live title when the two differ and accepts and stores a
+  title that matches it. Any other title still refuses, naming the given, the
+  stored and the live title; a changed delivery claim refuses on its own.
+
 - **Prepare and merge receipts name their invoker (sd:2078).** A merge
   nobody claimed could not be traced: its `Code delivery` note named the head
   and the review, and no process. `prepare` now stores `invoker` in the ship
