@@ -92,7 +92,10 @@ else is. Its executables write these paths, and no others:
   refuses the repository.
   It also adds the template's new lines to that checkout's `CLAUDE.local.md`
   block, removing none, and creates its untracked `docs/dashboard/`. `--dry-run` prints every auto repository's diff against
-  its `origin/HEAD` and writes nothing.
+  its `origin/HEAD` and writes nothing. A repository is the operator's own
+  when its owner is in `fleet.owners` of the machine config, a JSON list of
+  GitHub logins (unset: `DEFAULT_OWNERS` in `bin/sd_fleet.py`); any other
+  owner's protection stands.
 - `docs/work/<item>/.citations.tsv` — the citation baseline, one per active work
   item, from `sd-docs-lint --update-citations`. **Tracked.**
 - `build/` — HTML from `sd-research-kit render`, into the research repository you
@@ -257,7 +260,8 @@ every worker.
 
 From the writing checkout, `sd writing list`, `sd writing readiness --piece
 YEAR/slug`, and `sd writing stage` share the dashboard's writing controls.
-Import and cutover have separate preview and verification commands. Once the
+Import and cutover have separate preview and verification commands. `list`,
+`import` and `verify` refuse a checkout with no `content/` folder. Once the
 repository uses rows, routine stage, parking and metadata changes leave content
 files untouched. See the writing pack's `.claude/reference/database-workflow.md`
 for review evidence and recovery commands.

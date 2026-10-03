@@ -17,7 +17,9 @@ import getpass
 import json
 import os
 import pathlib
+import re
 import stat
+import sys
 from typing import Any
 
 import sd_handoff_rows
@@ -719,6 +721,83 @@ def _refuse_task_delivery(workflow: Any, connection: Any, args: argparse.Namespa
             f"{args.commit}`, which verifies the same commit")
 
 
+#: The comment `sd_db.ship.note_merge` writes for each merge of an item.
+CODE_DELIVERY = re.compile(r"Code delivery (\S+) at ([0-9a-f]{40,64})\b")
+#: The sentence every delivering transition writes (`DELIVERY_REASON`).
+DELIVERED_AT = re.compile(r"delivered at ([0-9a-f]{40,64})\b")
+
+
+def _delivered_by(state: dict[str, Any]) -> str | None:
+    """What delivered a done row, as a reader would name it, or None.
+
+    The latest merge comment names the pull request; a delivery without one
+    still names its commit on the status transition.
+    """
+    notes = state.get("notes") or []
+    for note in reversed(notes):
+        found = CODE_DELIVERY.match(note.get("body") or "")
+        if found:
+            url = found.group(1)
+            number = url.rstrip("/").rpartition("/pull/")[2]
+            return f"#{number}" if number.isdigit() else url
+    for note in reversed(notes):
+        found = DELIVERED_AT.search(note.get("body") or "")
+        if found and note.get("kind") == "status_change":
+            return f"commit {found.group(1)[:12]}"
+    return None
+
+
+def _done_advisory(workflow: Any, connection: Any, item: int) -> None:
+    """Warn on stderr when a note lands on a row that is already done (sd:1317).
+
+    Two lanes once worked one item: the second posted its note after the
+    first had delivered, and nothing remarked on it. The note is still
+    written; this is advice at the cheapest point to catch a duplicate.
+    """
+    state = workflow.item_state(connection, item)
+    row = state["item"]
+    if row.get("status") != "done":
+        return
+    since = (row.get("status_since") or "")[:10]
+    head = f"sd:{item} is done" + (f" since {since}" if since else "")
+    delivered = _delivered_by(state)
+    tail = f", delivered by {delivered}" if delivered else "; no delivery is recorded"
+    print(f"sd: advisory: {head}{tail}; the note is recorded anyway", file=sys.stderr)
+
+
+def _deliver(progress: Any, workflow: Any, connection: Any, args: argparse.Namespace,
+             who: str) -> Any:
+    """`sd work deliver`, ordinary or after the fact (sd:1590).
+
+    A whole-item merge prepared without `--deliver` lands `Item: sd:<id>` and
+    no `Delivers:`, and nothing could close the row afterwards: `deliver_work`
+    refuses the commit, `task status done` refuses a work item, and `prepare`
+    on a merged item only reconciles. `deliver_associated_work` is the
+    library's named way out. It is reached only through `--associated` with
+    a reason, so an ordinary delivery never falls through to it, and the
+    receipt records the trailer and the reason.
+    """
+    if not args.associated:
+        if args.reason is not None:
+            raise WorkRefusal("--reason belongs to --associated; an ordinary delivery records the commit only")
+        _refuse_task_delivery(workflow, connection, args)
+        return progress.deliver_work(
+            connection, args.item, args.commit, who=who, expected_revision=args.if_revision)
+    if not (args.reason or "").strip():
+        raise WorkRefusal("--associated needs --reason: say why the merge carried Item: and not Delivers:")
+    if workflow.item_state(connection, args.item)["item"]["kind"] == "task":
+        raise WorkRefusal(
+            f"item {args.item} is an ordinary task; --associated delivers a work item "
+            "whose merge carried `Item:`")
+    deliver = getattr(progress, "deliver_associated_work", None)
+    if deliver is None:
+        raise WorkRefusal(
+            "the installed sd_db lacks deliver_associated_work; install the current "
+            "system/local-sd-db build")
+    return deliver(connection, args.item, args.commit, who=who, reason=args.reason,
+                   expected_revision=args.if_revision)
+
+
 def _capture(sd_db: Any, workflow: Any, args: argparse.Namespace,
              connection: Any, who: str) -> Any:
     """The row `add` writes, and the one step `capture_task` will not take.
@@ -798,6 +877,7 @@ def run(args: argparse.Namespace) -> int:
         elif action == "status":
             result, following = _change_status(workflow, connection, args, who)
         elif action == "note":
+            _done_advisory(workflow, connection, args.item)
             result = workflow.add_item_note(
                 connection, args.item, body=args.body, kind=args.kind, who=who,
                 expected_revision=revision)
@@ -817,10 +897,7 @@ def run(args: argparse.Namespace) -> int:
                     connection, args.item, reason=args.reason, who=who,
                     expected_revision=revision)
             else:
-                _refuse_task_delivery(workflow, connection, args)
-                result = progress.deliver_work(
-                    connection, args.item, args.commit, who=who,
-                    expected_revision=revision)
+                result = _deliver(progress, workflow, connection, args, who)
         else:
             raise WorkRefusal(f"unknown workflow operation: {action}")
         _emit(result, machine=args.json, moved=moved, following=following)
@@ -1138,4 +1215,9 @@ def register(groups: Any, store: Any) -> None:
     deliver = working.add_parser("deliver", help="verify a delivery commit and complete its item")
     deliver.add_argument("item", type=int)
     deliver.add_argument("commit", help="full commit SHA carrying the item's Delivers trailer")
+    deliver.add_argument("--associated", action="store_true",
+                         help="accept a merge whose trailer block carries `Item:` for the item "
+                              "where `Delivers:` was meant; needs --reason")
+    deliver.add_argument("--reason", help="why the merge carried Item: and not Delivers:; "
+                                          "recorded on the receipt")
     _output(deliver, "deliver", revision=True)

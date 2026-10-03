@@ -162,7 +162,7 @@ Never allocate another review ID to reset spent passes or discard history.
   Checks that are not strict refuse unless the reviewed head declares that exact state.
   Each declaration is an `accepted_gaps` entry in `.github/sd-status.json`, id `bypass` or `strict`, pinning its own fact; a `strict` entry also pins `bypass`.
   Every fact it pins must equal the live state, read as the status report reads it.
-  An app, a team, a role or an admin bypass still refuses.
+  An app, a team, a role or an admin bypass still refuses, and `sd-ship` never accepts a declaration for a missing `pull_request` rule (R14-D1).
   The receipt's `protection.accepted_gaps` names the entries a merge honoured.
   GitHub's merge rules must also pass: `mergeable` true, and `mergeable_state` `clean` or `unstable`.
   `unstable` means a check the protection does not require is pending or failed; the required ones are still read.

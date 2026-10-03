@@ -724,6 +724,104 @@ class TaskDeliveryCLITests(unittest.TestCase):
                       "move to done records one", refused.stderr)
 
 
+class AssociatedDeliveryCLITests(unittest.TestCase):
+    """sd:1590: `sd work deliver --associated --reason` closes a work item whose
+    whole-item merge carried `Item:` where `Delivers:` was meant.
+
+    Seen on system sd:1577 (#592): prepared without `--deliver`, so the squash
+    named the item and delivered nothing, and every verb that could close the
+    row refused it. The fixture is `TaskDeliveryCLITests`'s, borrowed rather
+    than inherited so its tests do not run twice.
+    """
+
+    REASON = "prepared without --deliver; the merge is the whole item"
+
+    host = TaskDeliveryCLITests.host
+    repository = TaskDeliveryCLITests.repository
+    commit = TaskDeliveryCLITests.commit
+    statuses = TaskDeliveryCLITests.statuses
+
+    def work_item(self, case, root: pathlib.Path) -> int:
+        """A `kind=work` row in a row-status checkout, as `deliver_work` requires."""
+        import sd_db
+        import sd_db.writes
+
+        item = json.loads(case.call("task", "add", "Ship the feature", "--json",
+                                    cwd=root).stdout)["item"]["id"]
+        with sd_db.connect(sd_db.default_path(case.home), write=True) as connection:
+            sd_db.writes.set_item_fields(connection, item, kind="work")
+            connection.commit()
+        return item
+
+    def status(self, case, root: pathlib.Path, item: int) -> str:
+        return json.loads(case.call("store", "item", item, "--json",
+                                    cwd=root).stdout)["item"]["status"]
+
+    def test_an_item_merge_closes_only_through_associated_with_a_reason(self) -> None:
+        case = self.host()
+        root = self.repository(case)
+        item = self.work_item(case, root)
+        sha = self.commit(root, f"feat: the feature (#1)\n\nItem: sd:{item}\n", "one\n")
+
+        refused = case.call("work", "deliver", item, sha, code=1, cwd=root)
+        self.assertIn("no Delivers trailer", refused.stderr)
+        self.assertEqual("planning", self.status(case, root, item))
+
+        done = json.loads(case.call("work", "deliver", item, sha, "--associated",
+                                    "--reason", self.REASON, "--json", cwd=root).stdout)
+        self.assertEqual("done", done["item"]["status"])
+        fields = done["item"]["fields"]
+        completion = (json.loads(fields) if isinstance(fields, str) else fields)["completion"]
+        self.assertEqual(("delivered", sha, "Item", self.REASON),
+                         (completion["outcome"], completion["commit"],
+                          completion["trailer"], completion["after_the_fact"]))
+        self.assertIn(f"delivered at {sha} on refs/heads/main", self.statuses(case, item)[-1])
+
+    def test_associated_without_a_reason_refuses_and_leaves_the_row_open(self) -> None:
+        case = self.host()
+        root = self.repository(case)
+        item = self.work_item(case, root)
+        sha = self.commit(root, f"feat: the feature (#1)\n\nItem: sd:{item}\n", "one\n")
+        for extra in ((), ("--reason", "  ")):
+            with self.subTest(extra=extra):
+                refused = case.call("work", "deliver", item, sha, "--associated", *extra,
+                                    code=1, cwd=root)
+                self.assertIn("--associated needs --reason", refused.stderr)
+        self.assertEqual("planning", self.status(case, root, item))
+
+    def test_a_reason_without_associated_is_refused(self) -> None:
+        """Otherwise `--reason` on an ordinary delivery would be dropped unread."""
+        case = self.host()
+        root = self.repository(case)
+        item = self.work_item(case, root)
+        sha = self.commit(root, f"feat: the feature\n\nDelivers: sd:{item}\n", "one\n")
+        refused = case.call("work", "deliver", item, sha, "--reason", self.REASON,
+                            code=1, cwd=root)
+        self.assertIn("--reason belongs to --associated", refused.stderr)
+        self.assertEqual("planning", self.status(case, root, item))
+
+    def test_associated_still_needs_the_item_trailer(self) -> None:
+        """The control: `--associated` accepts the `Item:` trailer and no other."""
+        case = self.host()
+        root = self.repository(case)
+        item = self.work_item(case, root)
+        sha = self.commit(root, f"feat: the feature\n\nRefs: sd:{item}\n", "one\n")
+        refused = case.call("work", "deliver", item, sha, "--associated",
+                            "--reason", self.REASON, code=1, cwd=root)
+        self.assertIn(f"no Item trailer for sd:{item}", refused.stderr)
+        self.assertEqual("planning", self.status(case, root, item))
+
+    def test_associated_on_an_ordinary_task_is_refused_by_name(self) -> None:
+        case = self.host()
+        root = self.repository(case)
+        item = json.loads(case.call("task", "add", "Fix the thing", "--json",
+                                    cwd=root).stdout)["item"]["id"]
+        sha = self.commit(root, f"fix: the thing\n\nItem: sd:{item}\n", "one\n")
+        refused = case.call("work", "deliver", item, sha, "--associated",
+                            "--reason", self.REASON, code=1, cwd=root)
+        self.assertIn(f"item {item} is an ordinary task; --associated", refused.stderr)
+
+
 class ShipMergeGuardTests(unittest.TestCase):
     """`sd-ship merge` refuses to dispatch a squash that demotes its own trailer.
 

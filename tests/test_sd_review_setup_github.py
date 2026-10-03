@@ -127,13 +127,14 @@ class ModeTests(SetupFixture):
         self.assertEqual(result["status"], "installed")
         self.assertTrue(self.workflow(root).is_file())
 
-    def test_minimal_mode_refuses(self) -> None:
+    def test_minimal_mode_installs_the_workflow(self) -> None:
+        # sd:1292: `minimal` is the operator's own assertion, never detected,
+        # so the lane is theirs to install; only `guest` refuses it.
         root = self.make_repo()
         self.set_mode(root, "minimal")
-        with self.assertRaises(setup.Refusal) as caught:
-            install(root)
-        self.assertIn("minimal mode", str(caught.exception))
-        self.assertFalse(self.workflow(root).exists())
+        result = install(root)
+        self.assertEqual((result["mode"], result["status"]), ("minimal", "installed"))
+        self.assertTrue(self.workflow(root).is_file())
 
     def test_guest_mode_refuses(self) -> None:
         root = self.make_repo()
@@ -1001,21 +1002,30 @@ class CheckTests(SetupFixture):
         self.assertFalse(self.workflow(root).exists())
         self.assertFalse(self.dependabot(root).exists())
 
-    def test_a_tracked_lane_outside_full_mode_is_to_remove_not_drift(self) -> None:
-        # sd:1285: the installer refuses these modes, so DIFFERS would be a
-        # finding nothing could fix. The lane is reported as one to remove.
-        for value in ("minimal", "guest"):
-            with self.subTest(mode=value):
-                root = self.make_repo(value)
-                install(root)
-                self.set_mode(root, value)
-                before = self.workflow(root).read_text(encoding="utf-8")
-                code, out = self.run_check(root)
-                self.assertEqual(code, 1)
-                self.assertNotIn("DIFFERS", out)
-                self.assertEqual(out.splitlines()[0], f"REMOVE {setup.WORKFLOW_RELATIVE_PATH}")
-                self.assertIn(f"{value} mode", out)
-                self.assertEqual(self.workflow(root).read_text(encoding="utf-8"), before)
+    def test_a_tracked_lane_in_guest_mode_is_to_remove_not_drift(self) -> None:
+        # sd:1285: the installer refuses guest, so DIFFERS would be a finding
+        # nothing could fix. The lane is reported as one to remove.
+        root = self.make_repo()
+        install(root)
+        self.set_mode(root, "guest")
+        before = self.workflow(root).read_text(encoding="utf-8")
+        code, out = self.run_check(root)
+        self.assertEqual(code, 1)
+        self.assertNotIn("DIFFERS", out)
+        self.assertEqual(out.splitlines()[0], f"REMOVE {setup.WORKFLOW_RELATIVE_PATH}")
+        self.assertIn("guest mode", out)
+        self.assertEqual(self.workflow(root).read_text(encoding="utf-8"), before)
+
+    def test_a_tracked_lane_in_minimal_mode_compares_the_template(self) -> None:
+        # sd:1292 with sd:1285: the installer accepts minimal, so --check
+        # compares the lane it would write rather than marking it for removal.
+        root = self.make_repo()
+        self.set_mode(root, "minimal")
+        install(root)
+        code, out = self.run_check(root)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("REMOVE", out)
+        self.assertEqual(out.count("same "), 2)
 
     def test_a_remote_demotion_still_compares_the_template(self) -> None:
         # A written `full` that the remote lowers -- or that no remote could be
@@ -1036,12 +1046,12 @@ class CheckTests(SetupFixture):
                 self.assertEqual(out.count("same "), 2)
                 self.assertIn(answer.reason, out)
 
-    def test_no_lane_outside_full_mode_passes_without_a_pin(self) -> None:
+    def test_no_lane_in_guest_mode_passes_without_a_pin(self) -> None:
         root = self.make_repo()
-        self.set_mode(root, "minimal")
+        self.set_mode(root, "guest")
         code, out = self.run_check(root)
         self.assertEqual(code, 0)
-        self.assertEqual(out, f"absent {setup.WORKFLOW_RELATIVE_PATH} (minimal mode carries no routing lane)\n")
+        self.assertEqual(out, f"absent {setup.WORKFLOW_RELATIVE_PATH} (guest mode carries no routing lane)\n")
         self.assertFalse(self.workflow(root).exists())
 
 
