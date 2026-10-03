@@ -43,6 +43,7 @@ from sd_ship_review import (
     ReviewTimeout,
     SharedReview,
     carry_forward,
+    is_ancestor,
 )
 from sd_ship_workflow import blocked, failure
 
@@ -1859,7 +1860,7 @@ class Ship(SharedReview):
             raise Refusal("the current default branch differs from the prepared base")
         git(self.root, "fetch", "--no-tags", "origin", f"refs/heads/{reference['base']}")
         tip = git(self.root, "rev-parse", "FETCH_HEAD")
-        git(self.root, "merge-base", "--is-ancestor", commit, tip)
+        require_merge_on_base(self.root, commit, tip, reference["base"])
         advertised = git(self.root, "ls-remote", "origin", f"refs/heads/{reference['base']}").split()
         if not advertised or advertised[0] != tip:
             raise Refusal("default branch changed during merge verification; retry reconciliation")
@@ -1900,6 +1901,21 @@ class Ship(SharedReview):
         git(self.root, "fetch", "--prune", "origin")
         return {**evidence, "delivery_pending": False, "retained_branch": self.branch,
                 "retained_worktrees": git(self.root, "worktree", "list", "--porcelain")}
+
+
+def require_merge_on_base(root: pathlib.Path, commit: str, tip: str, base: str) -> None:
+    """Refuse a merge commit the fetched default branch does not contain.
+
+    `--is-ancestor` answers "no" by exit status alone, so the raising `git`
+    helper read it as an empty, retryable "git failed" (sd:1461).
+    """
+    if not is_ancestor(root, commit, tip):
+        raise Refusal(
+            f"merge commit {commit} is not an ancestor of origin/{base} at {tip}; "
+            "GitHub reports the pull request merged, but the default branch does not contain the merge",
+            code="merge_commit_unreachable", boundary="ci", state="operator_decision",
+            next_action=f"Inspect origin/{base}: if it was rewritten after the merge, restore {commit} "
+                        "to it, then run sd-ship reconcile. An unchanged retry refuses the same way.")
 
 
 def quote_branch(repository, branch):

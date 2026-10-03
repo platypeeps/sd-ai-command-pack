@@ -112,6 +112,14 @@
 
 ### Fixed
 
+- **`sd-ship reconcile` names a merge commit the default branch lacks (sd:1461).**
+  The reconcile check ran `git merge-base --is-ancestor` through the raising
+  `git` helper, which reads the "no" exit as an empty, retryable
+  `git failed`. It now runs through `sd_ship_review.is_ancestor`, the sd:1348
+  shape. A merge commit outside the fetched default branch refuses as
+  `merge_commit_unreachable`, `operator_decision`, not retryable, and the
+  refusal names both commits and how to restore the merge.
+
 - **opencode reviews run again on opencode 2.x, and refuse 1.x (sd:2445).**
   opencode 2.0.20 removed `debug agent` and `--pure`, so every opencode
   review was refused and the live confinement tests failed `make check`.

@@ -2513,6 +2513,29 @@ roles:
         self.assertEqual(self.merge()["phase"], "merged")
         self.assertEqual(len([call for call in self.remote.calls if call.method == "PUT"]), 1)
 
+    def test_a_merge_commit_outside_the_default_branch_names_both_commits(self):
+        """`--is-ancestor` says "no" by exit status alone; the reconcile check
+        read that as an empty, retryable "git failed" (sd:1461)."""
+        self.prepare()
+        saved = self.double._route
+
+        def route(method, path, body):
+            answer = saved(method, path, body)
+            if method == "PUT" and path.endswith("/merge"):
+                # The clone holds the merge commit; origin's main no longer does.
+                _git(self.root, "fetch", "-q", str(self.remote.path), "main")
+                _git(self.remote.path, "update-ref", "refs/heads/main", f"{answer[1]['sha']}^")
+            return answer
+        self.double._route = route
+        with self.assertRaises(ship.Refusal) as caught:
+            self.merge()
+        commit = self.remote.pull(1).merge_commit_sha
+        tip = _git(self.remote.path, "rev-parse", "refs/heads/main")
+        self.assertIn(f"merge commit {commit} is not an ancestor of origin/main at {tip}", str(caught.exception))
+        blocker = caught.exception.workflow["blocker"]
+        self.assertEqual((blocker["code"], blocker["retryable"]), ("merge_commit_unreachable", False))
+        self.assertIn(f"restore {commit}", caught.exception.workflow["next_action"])
+
     def test_a_base_that_advanced_under_the_put_holds_delivery(self):
         """GitHub squashes onto the base it holds at the `PUT`, not the one the
         freshness reads saw. A same-file advance between them lands a combined
