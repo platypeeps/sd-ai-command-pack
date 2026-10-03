@@ -11,6 +11,8 @@ decides, and a double would only restate the answer.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import pathlib
 import subprocess  # nosec B404 - fixed argv, running git
@@ -70,11 +72,21 @@ class ADirectCall(Fixture):
         self.register(root, managed=1)
         self.assertIsNone(sd_lib.unmanaged(root))
 
-    def test_not_knowing_proceeds(self) -> None:
+    def test_no_database_proceeds_in_silence(self) -> None:
+        said = io.StringIO()
+        with contextlib.redirect_stderr(said):
+            self.assertIsNone(sd_lib.unmanaged(self.checkout("unregistered")))
+        self.assertEqual(said.getvalue(), "")
+
+    def test_no_row_proceeds_with_one_warning_naming_the_flag(self) -> None:
         root = self.checkout("unregistered")
-        self.assertIsNone(sd_lib.unmanaged(root), "no database")
         self.register(self.checkout("other"), managed=0)
-        self.assertIsNone(sd_lib.unmanaged(root), "no row")
+        said = io.StringIO()
+        with contextlib.redirect_stderr(said):
+            self.assertIsNone(sd_lib.unmanaged(root))
+        self.assertEqual(said.getvalue().count("\n"), 1, said.getvalue())
+        self.assertIn("(repo.managed); proceeding", said.getvalue())
+        self.assertIn("sd-db.sh repo managed ", said.getvalue())
 
 
 class SdCiLocal(Fixture):

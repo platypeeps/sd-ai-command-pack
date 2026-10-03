@@ -710,7 +710,7 @@ def here(rows: list[tuple[pathlib.Path, str | None]], cwd: pathlib.Path) -> tupl
     slug = owner_slug(sd_lib.git_output(["config", "--get", "remote.origin.url"], top))
     match = [row for row in rows if slug and owner_slug(row[1]) == slug]
     if not match:
-        raise FleetRefusal(sd_lib.unmanaged(top)
+        raise FleetRefusal(sd_lib.unmanaged(top, warn=False)
                            or f"{top} is not a checkout of a runner_merge=auto repository; the stamp covers only those")
     branch = sd_lib.git_output(["symbolic-ref", "--quiet", "--short", "HEAD"], top)
     # An unknown default is treated as both names `default_ref` falls back to,

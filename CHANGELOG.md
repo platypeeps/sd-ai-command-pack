@@ -224,8 +224,9 @@
   managed `runner_merge=auto` rows only. A write in an unmanaged checkout
   refuses, and so does `sd ci local`; each refusal names `repo.managed = no`
   and the `sd-db.sh repo managed <path> yes` remedy. `sd_lib.managed_rows`
-  and `sd_lib.unmanaged` are the shared helpers. Not knowing proceeds: no
-  library, no database, no row and no column all behave as before.
+  and `sd_lib.unmanaged` are the shared helpers. No library, no database
+  and no column behave as before. A database with no row for the checkout
+  proceeds with one warning that names the flag and its remedy.
 
 - **`sd-review`'s Jev rows compare Jev with the routing (sd:2359).** `jev`
   computed `changed` against `--fallback`, which here is a token no tier can

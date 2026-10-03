@@ -1009,12 +1009,14 @@ def managed_rows(rows: Iterable[Any]) -> list[Any]:
     return [row for row in rows if is_managed(row)]
 
 
-def unmanaged(root: pathlib.Path | str) -> str | None:
+def unmanaged(root: pathlib.Path | str, *, warn: bool = True) -> str | None:
     """The refusal for a direct call in an unmanaged repository, or None to proceed.
 
     Only a row that exists and says `managed = 0` refuses. No library, no
-    database, no row, no column and any read fault all proceed: a public user
-    of the pack has no sd database, and not knowing is no reason to deny.
+    database, no column and any read fault proceed in silence: a public user
+    of the pack has no sd database, and not knowing is no reason to deny. A
+    database with no row for the checkout proceeds too, with one warning on
+    stderr naming the flag, because that is the state an operator can fix.
     """
     if import_sd_db().module is None:
         return None
@@ -1031,7 +1033,13 @@ def unmanaged(root: pathlib.Path | str) -> str | None:
             connection.close()
     except Exception:  # every fault is "not said"; see the docstring
         return None
-    return None if row is None or is_managed(row) else unmanaged_text(row["path"])
+    if row is None:
+        if warn:
+            print(f"warning: {path} has no row in the sd database, so nothing says whether it is managed "
+                  f"(repo.managed); proceeding. Register it with `sd-db.sh repo add {path}`, then "
+                  f"`sd-db.sh repo managed {path} yes`", file=sys.stderr)
+        return None
+    return None if is_managed(row) else unmanaged_text(row["path"])
 
 
 def repo_disk(value: pathlib.Path | str) -> pathlib.Path:
