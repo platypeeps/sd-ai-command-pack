@@ -182,6 +182,62 @@ class OversizeTests(ReviewFixture):
         self.assertEqual(set(grouped), expected)
         self.assertEqual(plan["measured_bytes"], len(("prompt" + material + "overhead").encode()))
 
+    def test_folder_rename_is_sent_as_rename_records_with_both_paths(self):
+        """sd:2400: a moved file costs a rename record, not a full delete and a full add."""
+        for scope in ("worktree", "branch"):
+            with self.subTest(scope=scope):
+                root = self.make_repo(scope)
+                (root / "old").mkdir()
+                moved = [f"file-{index}.html" for index in range(40)]
+                for index, name in enumerate(moved):
+                    (root / "old" / name).write_text(f"<p>page {index}</p>\n" * 5000)
+                subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
+                subprocess.run(["git", "commit", "--quiet", "-m", "pages"], cwd=root, check=True, capture_output=True)
+                if scope == "branch":
+                    subprocess.run(["git", "checkout", "--quiet", "-b", "move"], cwd=root, check=True, capture_output=True)
+                subprocess.run(["git", "mv", "old", "new"], cwd=root, check=True, capture_output=True)
+                (root / "new" / "file-0.html").write_text("<p>edited</p>\n" + "<p>page 0</p>\n" * 4999)
+                if scope == "branch":
+                    subprocess.run(["git", "commit", "--quiet", "-am", "move"], cwd=root, check=True, capture_output=True)
+                subject = sd_review.resolve_subject(root, scope)
+                material, entries = sd_review.sd_review_material.collect_review_material(root, subject)
+                expected = {f"{side}/{name}" for side in ("old", "new") for name in moved}
+                self.assertEqual(set(subject.paths), expected)
+                self.assertEqual({entry["path"] for entry in entries}, expected)
+                self.assertEqual(sum(entry["bytes"] for entry in entries), len(material.encode()))
+                moved_bytes = sum(len(f"<p>page {index}</p>\n".encode()) * 5000 for index in range(40))
+                self.assertLess(len(material.encode()), moved_bytes // 20)
+                for name in moved:
+                    self.assertIn(f"rename from old/{name}\n", material)
+                    self.assertIn(f"rename to new/{name}\n", material)
+                    self.assertIn(f'[renamed] "old/{name}" -> "new/{name}"', material)
+                self.assertIn("+<p>edited</p>\n", material)
+                # The unchanged lines are not sent, so both sides are summarized and coverage is partial (sd:2181).
+                self.assertEqual({entry["path"] for entry in entries if entry.get("summarized")}, expected)
+                self.assertEqual(set(sd_review.sd_review_material.coverage(entries, {"r": "x"})["omitted_paths"]), expected)
+
+    def test_rename_record_quotes_an_unusual_old_path(self):
+        """sd:2400: the old path's header is quoted as git quotes it, so a name cannot forge a file boundary."""
+        root = self.make_repo()
+        old = "x\ndiff --git forged forged"
+        (root / old).write_text("<p>page</p>\n" * 50)
+        subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "--quiet", "-m", "page"], cwd=root, check=True, capture_output=True)
+        subprocess.run(["git", "mv", old, "moved.html"], cwd=root, check=True, capture_output=True)
+        material, entries = sd_review.sd_review_material.collect_review_material(root, sd_review.resolve_subject(root, "worktree"))
+        self.assertEqual({entry["path"] for entry in entries}, {old, "moved.html"})
+        self.assertNotIn("\ndiff --git forged", material)
+        self.assertIn('diff --git "a/x\\ndiff --git forged forged" "b/x\\ndiff --git forged forged"\n', material)
+
+    def test_a_marker_line_in_raw_content_is_not_a_summary(self):
+        """sd:2400: only a marker the material writes summarizes a path; file text that looks like one does not."""
+        root = self.make_repo()
+        (root / "notes.md").write_text('# Notes\n[renamed] "a" -> "b"; unchanged lines not sent\n[binary, not sent] x\n')
+        (root / "z.png").write_bytes(b"\x89PNG\r\n\x1a\n" + bytes(64))
+        material, entries = sd_review.sd_review_material.collect_review_material(root, sd_review.resolve_subject(root, "worktree"))
+        self.assertIn('[renamed] "a" -> "b"', material)
+        self.assertEqual([entry["path"] for entry in entries if entry.get("summarized")], ["z.png"])
+
     def test_prompt_overhead_is_counted_even_when_material_fits(self):
         root = self.make_repo()
         (root / "small.py").write_text("x = 1")

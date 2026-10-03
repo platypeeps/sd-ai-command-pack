@@ -112,6 +112,20 @@
 
 ### Fixed
 
+- **opencode reviews run again on opencode 2.x, and refuse 1.x (sd:2445).**
+  opencode 2.0.20 removed `debug agent` and `--pure`, so every opencode
+  review was refused and the live confinement tests failed `make check`.
+  The confinement probe now starts a private `opencode serve` in the review's
+  environment and launch dir and reads the resolved `sd-review` agent and the
+  loaded plugins. A run is refused when the version is not 2.x, when any
+  plugin is not built in (2.x cannot drop plugins as `--pure` did), or when
+  anything after `*: deny` differs from the map. The run gets its own empty
+  `OPENCODE_CONFIG_DIR`, which keeps the operator's plugins out; `PWD` and
+  `OPENCODE_CONFIG` are dropped, and project config is switched off. Each was
+  measured on 2.0.20: an inherited `PWD` naming the checkout had started its
+  MCP server from the neutral dir. The review runs `--standalone`, as the
+  shared background service never sees the inline config.
+
 - **A pack landing no longer voids a receipt whose review request is unchanged (sd:1397).**
   `sd-review --explain` now reports `request_sha256`, a digest of the prompt,
   the review material and its input manifest (whose `omitted_paths` decide a
@@ -124,6 +138,17 @@
   digest, or a move in code that parses or disposes findings (`sd-review`,
   `sd_opencode.py`, `sd_registry.py`, listed as `FINDING_FILES`) still
   refuses and re-reviews as before.
+
+- **A folder rename fits the review input (sd:2400).** `sd-review` sent a
+  moved file as a full deletion plus a full addition, so a pure folder move
+  of 111 files measured 5 MB and was refused at the 2 MB limit. A rename git
+  detects now sends git's rename patch, with any content hunks, under the new
+  path, and a one-line record naming the new path under the old one. The
+  inventory still lists both paths, so each stays visible and citable; the
+  same move measures 127 KB. The unchanged lines are not sent, so both paths
+  count as summarized: a reviewer that reads only the material reports
+  partial coverage, and the chain falls through to one that reads the
+  repository.
 
 - **A recorded check builds into a fresh folder (sd:2327).** An optional
   `build_outputs` key in `.github/sd-check-reuse.json` names each ignored
