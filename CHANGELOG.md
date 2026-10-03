@@ -144,8 +144,10 @@
   now queues a mirror from its default branch only; the vault copy and
   `docs/dashboard/` are still written. The default branch is `origin`'s,
   not the one HEAD's tracking remote names, so a branch tracking a fork is
-  held too. `SD_PUBLISH_FROM_WORKTREE=1` lifts the hold, as it does for a
-  linked worktree.
+  held too. With an `origin`, only `origin/HEAD` names it; when that is
+  unset, the mirror is held and the message names
+  `git remote set-head origin --auto`. `SD_PUBLISH_FROM_WORKTREE=1` lifts
+  the hold, as it does for a linked worktree.
 
 - **`sd fleet stamp` reads the operator's owner logins from the machine
   config (sd:2324).** `fleet.owners` in `config.json`, a list of GitHub

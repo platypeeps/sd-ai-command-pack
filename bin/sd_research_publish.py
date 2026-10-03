@@ -350,10 +350,15 @@ def publish_refusal(repo: Path, copy: str) -> str:
     default = canonical_branch(repo)
     if branch and branch == default:
         return ""
+    where = "branch %s" % branch if branch else "a detached HEAD"
+    if default is None:
+        return ("%s: not queued from %s; no default branch resolves (origin/HEAD "
+                "is unset): run `git remote set-head origin --auto`, or set %s=1 "
+                "to publish this branch's content"
+                % (copy, where, PUBLISH_FROM_WORKTREE))
     return ("%s: not queued from %s; the main checkout queues from %s only, "
             "or set %s=1 to publish this branch's content"
-            % (copy, "branch %s" % branch if branch else "a detached HEAD",
-               default or "its default branch", PUBLISH_FROM_WORKTREE))
+            % (copy, where, default, PUBLISH_FROM_WORKTREE))
 
 
 def canonical_branch(repo: Path) -> str | None:
@@ -361,20 +366,20 @@ def canonical_branch(repo: Path) -> str | None:
 
     Read from `origin` and never from HEAD's tracking remote: a feature branch
     that tracks a fork whose default is that branch would otherwise name
-    itself canonical and publish unmerged content. The order is
-    `origin/HEAD`, then the first of `origin/main` and `origin/master` this
-    checkout has. Only a checkout with no `origin` falls back to a local
-    `main` or `master`: with an `origin`, a local branch of that name can be a
-    feature branch and says nothing about the remote default. None holds the
-    mirror: no branch then matches.
+    itself canonical and publish unmerged content. With an `origin`, only
+    `origin/HEAD` names it: an `origin/main` or a local `main` can exist
+    beside a different default, so a conventional name proves nothing. Only a
+    checkout with no `origin` falls back to a local `main` or `master`. None
+    holds the mirror: no branch then matches, and the refusal names
+    `git remote set-head origin --auto`.
     """
     named = git_output(["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], repo)
     if named and named.startswith("origin/"):
         return named[len("origin/"):]
-    has_origin = git_output(["remote", "get-url", "origin"], repo) is not None
-    prefix = "refs/remotes/origin/" if has_origin else "refs/heads/"
+    if git_output(["remote", "get-url", "origin"], repo) is not None:
+        return None
     for name in ("main", "master"):
-        if git_output(["rev-parse", "--verify", "--quiet", prefix + name], repo) is not None:
+        if git_output(["rev-parse", "--verify", "--quiet", "refs/heads/" + name], repo) is not None:
             return name
     return None
 

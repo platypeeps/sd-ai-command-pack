@@ -1437,6 +1437,7 @@ class SourceUrlTests(Fixture):
         # As a fetch leaves it: with an origin, only origin's refs name the
         # default branch the mirror publishes from (sd:2019).
         git(self.repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        git(self.repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
 
     def queued(self, docs: list[dict] | None = None, name: str = NAME) -> dict:
         with unittest.mock.patch.dict(PUBLISH.ENVIRON, SD_MIRROR_REQUEUE="1"):
@@ -1670,11 +1671,21 @@ class BranchCheckoutTests(Fixture):
         self.assertIn("queues from main only", said[0])
 
     def test_without_origin_head_a_fork_branch_is_still_held(self) -> None:
-        """No `origin/HEAD`: `origin/main` names the default, never the fork's HEAD."""
+        """No `origin/HEAD`: nothing names the default, so the fork's branch is held."""
         self.fork(origin_head=False)
         refusal = PUBLISH.publish_refusal(self.repo, "mirror")
         self.assertIn("not queued from branch feature", refusal)
-        self.assertIn("queues from main only", refusal)
+        self.assertIn("git remote set-head origin --auto", refusal)
+
+    def test_without_origin_head_an_origin_main_does_not_name_the_default(self) -> None:
+        """origin's default is `trunk`; an `origin/main` it also has is not proof of it."""
+        git(self.repo, "remote", "add", "origin", "https://example.test/canon.git")
+        git(self.repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        git(self.repo, "update-ref", "refs/remotes/origin/trunk", "HEAD")
+        self.assertEqual(git(self.repo, "branch", "--show-current").strip(), "main")
+        self.assertIsNone(PUBLISH.canonical_branch(self.repo))
+        self.assertIn("git remote set-head origin --auto",
+                      PUBLISH.publish_refusal(self.repo, "mirror"))
 
     def test_with_an_origin_a_local_main_does_not_name_the_default(self) -> None:
         """origin's default is `trunk`, with no `origin/HEAD`: a local `main` is a feature branch."""
