@@ -419,8 +419,10 @@ the block; the file is untracked by construction.
 `sd_lib.guest_artifact_refusal` and `sd-ship`'s push check refuse
 `docs/work/`, `docs/spec/` and `docs/decisions/` in `guest` only, so a
 `minimal` repository can commit and push them unrefused. `sd-ship` also adds
-the `Work: sd:<id>` line in `minimal`, as it does in `full`. What `minimal`
-refuses is the review routing lane (R10-D5), as `guest` does.
+the `Work: sd:<id>` line in `minimal`, as it does in `full`. Only `guest`
+refuses the review routing lane (R10-D5): `minimal` is written by hand and
+never detected, so it names the operator's own quiet repository, and may
+install the lane (operator ruling 2026-09-30, sd:1292).
 
 Access decides where artifacts go, whichever namespace holds the
 repository. Without a `mode:` line, the pack asks three questions of the

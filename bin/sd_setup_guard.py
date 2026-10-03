@@ -35,6 +35,15 @@ from typing import Any, Mapping, TextIO
 
 DEPENDABOT_RELATIVE_PATH = pathlib.Path(".github") / "dependabot.yml"
 
+#: The modes that may carry the routing lane (R10-D5 in `bin/sd_rules.py`).
+#: `minimal` is in it since the operator's 2026-09-30 ruling (sd:1292): it is
+#: written by hand and never produced by detection, so it says the operator
+#: administers the repository and chose to keep it quiet. `guest` is detection's
+#: fallback -- control of the repository was not established -- and stays out.
+#: `setup_github` and `report_mode` both read this, so `--check` agrees with
+#: the installer (sd:1285).
+LANE_MODES = frozenset({"full", "minimal"})
+
 
 class GuardError(Exception):
     """The file has no place for the guard; the message names why."""
@@ -480,11 +489,11 @@ def report_mode(root: pathlib.Path, workflow: pathlib.Path, repo_mode: str, demo
     """
 
     if demotion is None:
-        if repo_mode == "full":
+        if repo_mode in LANE_MODES:
             return None
         return report_unwanted(root, workflow, f"{repo_mode} mode carries no routing lane",
-                               f"this repository is in {repo_mode} mode; only a full-mode repository carries the "
-                               "routing lane", stream)
+                               f"this repository is in {repo_mode} mode; only a full- or minimal-mode repository "
+                               "carries the routing lane", stream)
     stream.write(f"note: this run resolves to {repo_mode} mode ({demotion.reason}); "
                  "compared against the full-mode template\n")
     return None

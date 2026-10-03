@@ -1952,7 +1952,7 @@ INSIDE_A_SYMBOL = (f"bin/sd_library_guard.py:"
 MUTATIONS: dict[str, Mutation] = {
     "bin/sd_setup_github.py::setup_github": Mutation(
         path="bin/sd_setup_github.py",
-        old='    if repo_mode != "full":',
+        old='    if repo_mode not in sd_setup_guard.LANE_MODES:',
         new="    if False:  # leg d: the mode guard, defeated",
         test="tests.test_mode_detection.TheInstallerGate"
              ".test_a_fork_with_no_mode_line_is_refused",

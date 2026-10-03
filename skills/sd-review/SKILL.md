@@ -170,7 +170,7 @@ The `never_skip` deny-list overrides docs-skip rules.
 ## setup-github
 
 This is a separate, explicitly requested installation operation, not part of local review.
-Modes `minimal` and `guest` cannot install the routing workflow (R10-D5).
+Mode `guest` cannot install the routing workflow (R10-D5); `full` and `minimal` can.
 Before installation or drift checks, read `skills/sd-review/references/setup-github.md` in the sd-ai-command-pack checkout.
 The workflow reports routing only; it requests no reviewer and posts no comment.
 

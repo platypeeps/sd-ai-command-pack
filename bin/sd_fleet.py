@@ -547,8 +547,9 @@ def plan_repo(root: pathlib.Path, remote: str | None, *, pin: str, tree: Tree,
         if current != after:
             plan.changes.append(Change(path, where, current, after))
 
-    # A guest or minimal repository carries none of the framework's tracked
-    # files (R10-D5), so nothing tracked is proposed there at all; its
+    # A guest or minimal repository is stamped with none of the framework's
+    # tracked files, so nothing tracked is proposed there at all (a minimal
+    # one may still install the routing lane by hand, R10-D5); its
     # untracked block is still the operator's to keep current. Otherwise the
     # remote is asked the three questions, as `setup-github` asks them, and
     # the one no a row can override is sd-ship's: co-ownership (sd:1347).

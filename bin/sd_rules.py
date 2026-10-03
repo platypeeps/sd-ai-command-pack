@@ -161,9 +161,11 @@ class Rule(NamedTuple):
 RULES: tuple[Rule, ...] = (
     Rule(
         id="R10-D5",
-        subject="only a full-mode repository installs the review routing "
-                "lane; `minimal` and `guest` refuse it, so a shared or "
-                "upstream repository can never grow the framework's workflow",
+        subject="only a full- or minimal-mode repository installs the "
+                "review routing lane; `guest` refuses it, so a repository "
+                "whose control detection could not establish can never grow "
+                "the framework's workflow, while `minimal`, written by hand "
+                "and never detected, is the operator's own quiet repository",
         checker="bin/sd_setup_github.py::setup_github",
         proof="replace the mode guard in `bin/sd_setup_github.py` with a "
               "condition that is never true; the installer then accepts a "

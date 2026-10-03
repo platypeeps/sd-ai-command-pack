@@ -352,6 +352,15 @@
 
 ### Changed
 
+- **A `minimal` repository may install the review routing lane (sd:1292).**
+  R10-D5 refused the lane in `minimal` and `guest` alike, but `minimal` is
+  written by hand and never produced by detection: it names the operator's
+  own quiet repository, while `guest` means control was not established. By
+  the operator's 2026-09-30 ruling, `sd-review setup-github` now installs in
+  `full` and `minimal` and refuses `guest`. `--check` reads the same mode set
+  (`sd_setup_guard.LANE_MODES`), so a tracked lane in `minimal` is compared
+  against the template rather than marked `REMOVE` (sd:1285).
+
 - **A review carries forward across a clean merge-in of the base (sd:1485).**
   Every catch-up merge moved the head, so the local review spent a
   full-branch pass again and a Copilot review went stale
