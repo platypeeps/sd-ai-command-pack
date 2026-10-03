@@ -332,7 +332,11 @@ links `.git/hooks/pre-commit` to the tracked `hooks/pre-commit`, which runs
 Ruff over the staged Python and the two whole-tree test passes
 (`tests.test_code_health`, `tests.test_doc_citations`) in about five seconds
 and prints its own wall time against the budget its header states.
-`SD_SKIP_HOOKS=1 git commit` skips it with a notice. The hook is one per
+`SD_SKIP_HOOKS=1 git commit` skips it with a notice. The same target links
+`.git/hooks/commit-msg` to `hooks/commit-msg`, which refuses a message whose
+`Authored-with:`, `Needed-by:` or other checked trailer sits outside the final
+paragraph, where git does not read it; it names the line, and
+`SD_SKIP_HOOKS` does not skip it. The hook is one per
 clone: the link sits in the clone's common `.git/hooks`, its target is the
 relative `../../hooks/pre-commit`, so it reads the main checkout's tracked
 file and every linked worktree shares it, whichever worktree ran `make
