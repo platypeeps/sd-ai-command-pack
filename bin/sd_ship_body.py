@@ -24,7 +24,6 @@ import dataclasses
 import functools
 import pathlib
 import re
-import subprocess
 import tempfile
 
 import sd_lib
@@ -173,18 +172,20 @@ def base_lint_failures(root: pathlib.Path, argv: list[str], base: str) -> set[st
     """`lint_failures` in a scratch checkout of `origin/<base>`; empty if it cannot be checked out.
 
     Hooks are off for the checkout: a consumer's `post-checkout` is no part of a lint.
+    Git runs through `completed_process`, whose timeout a large tree's checkout fits.
     """
     with tempfile.TemporaryDirectory(prefix="sd-ship-lint-base-") as directory:
         tree = pathlib.Path(directory) / "base"
-        added = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "worktree", "add", "--detach", "--quiet",
-                                str(tree), f"refs/remotes/origin/{base}"], cwd=root, capture_output=True, check=False)
-        if added.returncode:
+        try:
+            completed_process(root, ["git", "-c", "core.hooksPath=/dev/null", "worktree", "add", "--detach",
+                                     "--quiet", str(tree), f"refs/remotes/origin/{base}"], timeout=300)
+        except Refusal:
             return set()
         try:
             return set(lint_failures(tree, argv))
         finally:
-            subprocess.run(["git", "worktree", "remove", "--force", str(tree)], cwd=root,
-                           capture_output=True, check=False)
+            completed_process(root, ["git", "worktree", "remove", "--force", str(tree)], timeout=300,
+                              answers=frozenset(range(256)))
 
 
 def lint_against_base(root: pathlib.Path, argv: list[str], base: str) -> list[str]:
