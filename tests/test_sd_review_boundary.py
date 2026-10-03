@@ -143,6 +143,7 @@ class NeverPostsTests(unittest.TestCase):
             "subprocess",
             "sys",
             "tempfile",
+            "time",  # sd:2359: times the routing for the Jev ledger's paired row.
             "typing",
             # sd:495. The runner records the repository check it ran on the
             # clone, and `recorded_check` reads that row instead of running the
@@ -870,11 +871,15 @@ class LineBudgetTests(unittest.TestCase):
         # spends it: `bin/sd_review_material.py` +11 for `RENAMED` and the
         # `--binary -M` fallback in `binary_material`, so a renamed and edited
         # non-media binary is sent as its rename delta, not a full literal.
+        # 4605 -> 4679 is sd:2359: `bin/sd_jev.py` +69 passes the routed tier
+        # as `--baseline` and the routing time as `--baseline-ms`, retries once
+        # without them when an older `jev` refuses the flag, and says why in the
+        # module docstring (+19); `bin/sd-review` +5 times `sd_route.route`.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4605,
+            4679,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
