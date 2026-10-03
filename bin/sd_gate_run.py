@@ -118,8 +118,7 @@ def gate_environment(root: pathlib.Path, environ: dict[str, str] | None = None) 
             if entry and os.path.isabs(entry) and not pathlib.Path(entry).resolve().is_relative_to(top)
             and not (pathlib.Path(entry).resolve().parent / "pyvenv.cfg").is_file()]
     env["PATH"] = os.pathsep.join(kept)
-    env[GATE_VARIABLE] = "1"
-    env.update(NO_COLOUR_ENVIRONMENT)
+    env.update({GATE_VARIABLE: "1", **NO_COLOUR_ENVIRONMENT})
     return env
 
 
