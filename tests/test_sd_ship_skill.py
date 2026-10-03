@@ -86,7 +86,8 @@ DELETION = re.compile(
 #: The only deletion commands the post-merge closeout may name: one exact
 #: target each, never a pattern, never forced (sd:2452).
 SANCTIONED_CLEANUP = frozenset({
-    "git branch -d", "git branch -D", "git push origin --delete <branch>",
+    "git branch -d", "git branch -D",
+    "git push --force-with-lease=<branch>:<recorded id> origin --delete <branch>",
     "git stash drop <selector>", "git update-ref -d <ref> <recorded id>",
     "git worktree remove <path>",
 })
@@ -478,7 +479,8 @@ class PostMergeCloseout(unittest.TestCase):
                       "index and untracked parents", "concurrent stash activity",
                       "another open PR", "`git status --porcelain` is empty",
                       "only build output or caches", "not under `~/repos`",
-                      "Keep the target and report it", "Retention is not a failure"):
+                      "Keep the target and report it", "Retention is not a failure",
+                      "its index parent and its untracked parent", "The lease makes the delete refuse"):
             with self.subTest(boundary=token):
                 self.assertIn(token, self.closeout)
         for command in commands(self.closeout):
@@ -486,7 +488,7 @@ class PostMergeCloseout(unittest.TestCase):
                 with self.subTest(command=command):
                     self.assertIn(command, SANCTIONED_CLEANUP)
         for line in self.closeout.splitlines():
-            if "stash clear" in line or "--force" in line:
+            if "stash clear" in line or re.search(r"--force(?!-with-lease=<branch>:<recorded id>)", line):
                 with self.subTest(line=line):
                     self.assertTrue(line.startswith("Never"), line)
 

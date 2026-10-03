@@ -68,7 +68,8 @@ A target is safe only when every condition holds:
 - It belongs to this PR: its branch is the PR's head branch, or a stash was made on that branch.
 - It holds nothing the merge did not deliver.
   A branch tip is the merged PR head or an ancestor of it.
-  A stash's tracked and untracked files already match the merge commit, path by path.
+  A stash's working tree, its index parent and its untracked parent each match the merge commit, path by path.
+  Staged work can differ from the working tree, so a match on the working tree alone is not enough.
 - No worktree has it checked out, no process uses it, and no lock holds it.
 - It is not a default branch, a protected branch, or the head or base of another open PR.
 - Its identity did not change since the inventory; re-read it immediately before removal.
@@ -78,15 +79,17 @@ Retention is not a failure.
 
 Write a recovery record before each removal: an `sd task note` on the item.
 Name the target and its full object ID; for a stash, also name its index and untracked parents.
-A removed branch or stash stays recoverable from that ID until garbage collection: `git branch <name> <id>` or `git stash store <id>`.
+Locally, `git branch <name> <id>` or `git stash store <id>` restores a removed target until garbage collection.
+That window is short, which is why every condition above must hold: the merge must already carry the content.
 Then remove the targets one by one:
 
 - Local branch: `git branch -d`, or `git branch -D` only for a tip the PR head contains.
-- Remote branch: `git push origin --delete <branch>`, only when `delete_branch_on_merge` left it.
+- Remote branch: `git push --force-with-lease=<branch>:<recorded id> origin --delete <branch>`, only when `delete_branch_on_merge` left it.
+  The lease makes the delete refuse when the remote tip moved after the re-read.
 - Stash: confirm the selector still names the recorded object ID, then `git stash drop <selector>`.
 - Other refs that point only at the PR's delivered commits: `git update-ref -d <ref> <recorded id>`.
 
-Never use `git stash clear`, broad deletion patterns, force pushes, or forced worktree removal.
+Never use `git stash clear`, broad deletion patterns, a force push that overwrites a branch, or forced worktree removal.
 Do not rename or reset shared stash state to stabilize a selector.
 Report what was removed with its recovery ID, and what was kept and why.
 
