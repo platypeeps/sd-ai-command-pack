@@ -140,6 +140,10 @@ COLLABORATOR_QUERY = "repos/{owner}/{repo}/collaborators"
 Asker = Callable[[str, pathlib.Path], tuple[Any, str]]
 
 _DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
+#: A leading ISO day. `item_date` here and `_item_date` in `bin/sd-status` read
+#: `created:` and the directory name with this one pattern, so the two reports
+#: cannot date one item differently (sd:1000).
+ITEM_DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
 _MAKE_TARGET_RE = re.compile(r"^(?P<names>[^\t#=:]+):(?!=)")
 _TASKFILE_TASKS_RE = re.compile(r"^tasks:\s*$")
 _TASKFILE_ENTRY_RE = re.compile(r"^(?P<indent>\s+)(?P<name>[A-Za-z0-9_][A-Za-z0-9_:.\-]*):")
@@ -1702,17 +1706,14 @@ def item_date(item: WorkItem) -> datetime.date | None:
     Ages are measured from `last_active`, because a birth date says when an
     item began and the check that reads it says the item has been neglected.
     """
-    raw = (item.created or "").strip()
-    if raw:
+    for text in ((item.created or "").strip(), item.path.name):
+        found = ITEM_DATE_RE.match(text)
+        if not found:
+            continue
         try:
-            return datetime.date.fromisoformat(raw[:10])
+            return datetime.date.fromisoformat(found.group(1))
         except ValueError:
-            pass
-    if _DATE_PREFIX_RE.match(item.path.name):
-        try:
-            return datetime.date.fromisoformat(item.path.name[:10])
-        except ValueError:
-            return None
+            continue
     return None
 
 

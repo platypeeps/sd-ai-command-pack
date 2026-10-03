@@ -588,6 +588,14 @@ class AcknowledgementTests(unittest.TestCase):
         # only the loader would object, one commit later.
         self.assertIs(state["additionalProperties"], False)
 
+    def test_the_schema_offers_exactly_the_ids_the_reader_accepts(self) -> None:
+        """An editor is told the ids `ACKNOWLEDGEABLE_GAPS` allows, not any string (sd:1000)."""
+        schema = json.loads(
+            (BIN.parent / ".github" / "sd-status.schema.json").read_text(encoding="utf-8")
+        )
+        gap_id = schema["properties"]["accepted_gaps"]["items"]["properties"]["id"]
+        self.assertEqual(gap_id.get("enum"), sorted(status.ACKNOWLEDGEABLE_GAPS))
+
     def test_absent_protection_is_a_distinct_observed_state_from_empty_protection(self) -> None:
         """The fact that separates "no object" from "an object enforcing nothing".
 
@@ -2581,6 +2589,28 @@ class WorkItemInventoryTests(InventoryFixture):
         )
 
 
+class ItemDateParityTests(unittest.TestCase):
+    """`_item_date` here and `sd_lib.item_date` read one date the same way (sd:1000).
+
+    Each held its own pattern: the library accepted `created: 20260701` and
+    a padded value, and this file did not, so one item could be undated in
+    one report and dated in the other.
+    """
+
+    CREATED = ("2026-07-01", " 2026-07-01", "2026-07-01T10:00", "20260701", "soon", "", "2026-13-45")
+    NAMES = ("2026-01-01-x", "2026-01-01", "untitled", "2026-13-45-x", "20260101-x")
+
+    def test_both_readers_give_the_same_date(self) -> None:
+        for created, name in itertools.product(self.CREATED, self.NAMES):
+            with self.subTest(created=created, name=name):
+                item = SimpleNamespace(created=created, path=pathlib.Path("docs/work") / name)
+                entry = {"created": created, "path": f"docs/work/{name}"}
+                self.assertEqual(status._item_date(entry), status.sd_lib.item_date(item))
+
+    def test_one_pattern_is_shared(self) -> None:
+        self.assertIs(status._ITEM_DATE_RE, status.sd_lib.ITEM_DATE_RE)
+
+
 class OpenStepTests(InventoryFixture):
     def test_two_identical_boxes_under_one_heading_get_two_ids(self) -> None:
         """C-13: the ordinal is what stops one id naming two tasks."""
@@ -2790,6 +2820,17 @@ class LowYieldProducerTests(InventoryFixture):
         self.assertEqual([row["title"] for row in found], ["bin/sd-thing"])
         self.assertFalse(found[0]["abnormal"])
         self.assertEqual(found[0]["key"], "skills/sd-thing/SKILL.md#bin/sd-thing")
+
+    def test_an_unreadable_skill_root_marks_the_class_unchecked(self) -> None:
+        """An unreadable root is reported, not raised out of the whole report (sd:1000)."""
+        skills = self.repo / "skills"
+        (skills / "sd-thing").mkdir(parents=True)
+        (skills / "sd-thing" / "SKILL.md").write_text("Run `bin/sd-thing`.\n", encoding="utf-8")
+        skills.chmod(0)
+        self.addCleanup(skills.chmod, 0o755)
+        inventory = status.actionable_inventory(self.repo, self.sections(), self.TODAY)
+        self.assertEqual([], self.by_check(inventory.rows, "undisclosed-tool"))
+        self.assertIn("skills", inventory.unchecked["undisclosed-tool"])
 
     def test_a_contrib_skill_discloses_on_the_same_terms_as_a_shipped_one(
         self,

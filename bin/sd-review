@@ -2325,8 +2325,10 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
     if result.get("explain_only"):
         if not reachable:
             # One line rather than six, and it says the block was suppressed
-            # rather than leaving a reader to think the tool forgot it.
-            write(f"\nno provider registry at {result['registry']}, and no reviewer resolves"
+            # rather than leaving a reader to think the tool forgot it. The
+            # refusal itself, since a registry that is present but unreadable
+            # is not absent (sd:1000).
+            write(f"\n{result['registry_refusal'].rstrip('.')}, and no reviewer resolves"
                   " here; the provider lines are not reported.\n")
         else:
             write(f"\nreviewer chain ({sd_registry.chain_heading(result.get('order_source') or '', result['registry'])}):\n")
