@@ -44,6 +44,22 @@ class GateFailureSpendsNoPass(unittest.TestCase):
         self.assertEqual(review.state["review_preflight_error"]["kind"], "gate_failed")
         self.assertEqual(process.call_count, 2)
 
+    def test_the_refusal_names_each_failing_check_and_its_own_tail(self):
+        """sd:2021. The refusal kept the last 500 characters of one stream, so a
+        long traceback after the assertion dropped the line that said why."""
+        rows = [{"name": "check", "status": "pass", "exit_code": 0, "stdout": "ok", "stderr": ""},
+                {"name": "test", "status": "fail", "exit_code": 1, "reason": "",
+                 "stdout": "", "stderr": "AssertionError: sd2021 marker\n" + "t" * 600 + "\nFAILED (failures=1)"},
+                {"name": "lint", "status": "fail", "exit_code": 2, "reason": "", "stdout": "E501 line too long", "stderr": ""}]
+        failed = {**GATE_FAILED, "check": {"status": "fail", "exit_code": 1, "detail": "", "checks": rows}}
+        review, _process = self.context(report_changes=failed)
+        with self.assertRaisesRegex(ship.Refusal, "no review pass was spent") as caught:
+            review.review(HEAD)
+        message = str(caught.exception)
+        self.assertIn("test (exit 1): stderr: AssertionError: sd2021 marker", message)
+        self.assertIn("lint (exit 2): stdout: E501 line too long", message)
+        self.assertNotIn("check (exit 0)", message)
+
     def test_the_next_prepare_reviews_without_a_retry_flag(self):
         failed, _process = self.context(report_changes=GATE_FAILED)
         with self.assertRaises(ship.Refusal):

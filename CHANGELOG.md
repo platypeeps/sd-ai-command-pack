@@ -112,6 +112,69 @@
 
 ### Fixed
 
+- `sd-ship merge`: the second `base_moved` refusal, read again just before the merge under a declared or accepted `strict` gap, now names `git merge origin/<base>` or `sd-ship prepare --catch-up` instead of a rebase. `WORKFLOW.md` states the rule: after review, take a newer default branch by a merge, never a rebase (sd:2034).
+
+- **A no-item `prepare` warns about a branch `Delivers:` trailer (sd:2171).**
+  The no-item squash message carries no branch commit's `Delivers: sd:N`, so
+  `sd task status N done --delivered-by <squash>` later found no trailer.
+  `prepare --no-item` now adds one advisory warning per such trailer, naming
+  the commit and suggesting `--item N`. It refuses nothing, and the squash
+  still does not copy the trailer; whether it should is an open question.
+
+- **`prepare` accepts a `--title` the live pull request carries (sd:1378).**
+  Once a pull request was stored, `prepare` refused any `--title` that
+  differed from the stored title with `existing PR delivery claim or title
+  differs`, even when the pull request had been retitled to it on GitHub. The
+  guard now reads the live title when the two differ and accepts and stores a
+  title that matches it. Any other title still refuses, naming the given, the
+  stored and the live title; a changed delivery claim refuses on its own.
+
+- **Prepare and merge receipts name their invoker (sd:2078).** A merge
+  nobody claimed could not be traced: its `Code delivery` note named the head
+  and the review, and no process. `prepare` now stores `invoker` in the ship
+  receipt and returns it; the merge that dispatches the `PUT` stores
+  `merge_invoker`, and the merge result and its `Code delivery` note carry it
+  as `invoker`. The block holds the pid and parent pid, the process start
+  time, the checkout and the `-C` value, `--run ID` or `--manual`, and the
+  lock-holder record the ship lock writes. A later `sd-ship reconcile`
+  reports the invoker of the merge, not its own.
+
+- **`sd-ship` reports `sd-review`'s authorship refusal (sd:2067).** A
+  branch commit with no `Authored-with:` trailer made `sd-ship review` and
+  `prepare` refuse with `local review emitted no valid timing plan`, and the
+  cause was readable only from `sd-review --scope branch`. When the plan
+  carries an `authorship_refusal`, the refusal now quotes it, with code
+  `authorship_unknown`, `operator_decision`, and a `next_action` naming
+  `sd attribute`. No provider pass is reserved, as before.
+
+- **A failed gate names each failing check and its tail (sd:2021, sd:2066).**
+  `sd-ship merge` under `repo.ci = local` said only the status description,
+  such as `sd-check fail (check fail)`, and finding the failing step meant
+  running the gate again. It now refuses right after the gate, naming each
+  failing check, its exit code, and the last 1200 characters of its stderr
+  and its stdout, from the saved `local_gate` report. The refusal says the
+  whole report is kept in the ship receipt and names the `sd-ship observe`
+  command that prints it. Prepare's `gate_failed` refusal names the failing
+  checks the same way; it kept the last 500 characters of one stream, which
+  dropped the failing test's assertion. `sd_ship_review.failing_check_tails`
+  renders both.
+
+- **`sd-ship observe` reads the ship receipt before a pull request exists
+  (sd:2021).** A prepare refused before its first push stores no pull-request
+  reference, and `observe` answered `there is no durable pull-request receipt
+  to observe`. It now returns the stored phase, with no pull request, and every
+  `observe` result carries `receipt`: the stored phase, the pass count, the
+  last review's status and findings, `review_preflight_error` and
+  `local_gate`.
+
+- **`sd-ship reconcile` names a merge commit the default branch lacks (sd:1461).**
+  The reconcile check ran `git merge-base --is-ancestor` through the raising
+  `git` helper, which reads the "no" exit as an empty, retryable
+  `git failed`. It now runs through `sd_ship_review.is_ancestor`, the sd:1348
+  shape. A merge commit outside the fetched default branch refuses as
+  `merge_commit_unreachable`, `operator_decision`, not retryable, and the
+  refusal names both commits and how to restore the merge.
+
 - **Stopping `sd gate run` no longer raises `PermissionError` (sd:2402).**
   The signal it forwards to the command's process group now treats EPERM
   like ESRCH: macOS answers `killpg` on a group that already exited with
