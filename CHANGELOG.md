@@ -27,6 +27,40 @@
   squash body and the trailer reader accept it, and `sd-review --explain`
   names it.
 
+- **`sd gate post --head SHA` posts the local gate outside `sd-ship merge`
+  (sd:1989).** A repository under `repo.ci = local` that merges by its own
+  automation -- a Dependabot merge, a daily merge script -- got no
+  `sd/local-gate` status, so its required check never reported and every
+  merge waited. The verb runs `sd-check` at that commit in a clean worktree
+  and posts the result there, with `sd-ship merge`'s own run and post. It
+  prints the result as JSON and exits 0 on `success`, 1 on `failure`. A name
+  that is no commit, or a `--base` this checkout has not fetched, refuses
+  and posts nothing. `--base` names the PR's target for a docs-only scope;
+  without it every check runs, since the verb cannot know the target. It
+  reads and writes no gate receipt, so it always runs.
+
+- **`sd work deliver --associated --reason` closes an item merged without
+  `--deliver` (sd:1590).** A whole-item merge prepared without `--deliver`
+  carried `Item: sd:<id>` and no `Delivers:`, and every verb that could close
+  the row refused it. `--associated` calls the library's
+  `deliver_associated_work`: the commit must be on the verified default branch
+  and name the item in an `Item:` trailer. The receipt records the trailer and
+  the reason. It needs a nonblank `--reason`, refuses an ordinary task, and
+  `--reason` without `--associated` is refused rather than dropped.
+
+- **A registry rule for sd-ship's protection-gap policy (sd:1460).** `R14-D1`
+  in `bin/sd_rules.py`: the merge gate honours a declared gap only for
+  `bypass` and `strict`, only on its exact live state, and never for a
+  missing `pull_request` rule. Its checker is
+  `bin/sd_ship_remote.py::validate_protection`, and leg d proves it by
+  replacing the exact-state match. `skills/sd-ship/SKILL.md` now states the
+  claim #1167 had reworded away, and cites the rule.
+
+- **A note on a done item prints an advisory (sd:1317).** `sd task note` on a
+  row whose status is `done` prints `sd: advisory: sd:N is done since <date>,
+  delivered by #<PR>` to stderr, from the item's latest merge comment, or the
+  delivering commit, or "no delivery is recorded". The note is still written.
+
 - **A guest repository can take decision records (sd:2168).** A `guest_allow: docs/decisions` line in the repository's `CLAUDE.local.md` block takes `docs/decisions/` out of the guest planning-artifact refusal: the `sd-ship` push check, the `sd-review --scope planning` gate and the `sd-status` shared-tree list. `docs/decisions/` stays refused by default, and `docs/work/` and `docs/spec/` stay refused always; naming either is a configuration error. The push check now reads `sd_lib.guest_refused_dirs` instead of its own copy of the three trees, and the installer's block template lists the key commented out.
 
 - **`sd fleet stamp` honours a per-repository exemption list (sd:1797).** A
@@ -155,6 +189,42 @@
 
 ### Fixed
 
+- **`sd writing list` and `import` refuse a checkout with no `content/`
+  folder (sd:1803).** They printed empty results and exited 0 in another
+  checkout, which reads as "no pieces" rather than "wrong checkout". The
+  refusal `verify` gained in sd:1660 now covers `list` and both forms of
+  `import`, and names the verb.
+
+- **The local gate ignores the terminal's colour settings (sd:2076).** The
+  gate's child no longer inherits `FORCE_COLOR`, `CLICOLOR_FORCE` or
+  `PY_COLORS`, and gets `NO_COLOR=1` and `PYTHON_COLORS=0`. An inherited
+  `FORCE_COLOR=3` had coloured Python 3.14 `--help` output and failed a
+  repository's CLI tests in its merge gate.
+
+- **A branch switch in the main checkout queues no mirror (sd:2019).** The
+  re-render hook fires on post-checkout, so a feature branch or a detached
+  HEAD replaced the pending request with unmerged text. The main checkout
+  now queues a mirror from its default branch only; the vault copy and
+  `docs/dashboard/` are still written. The default branch is `origin`'s,
+  not the one HEAD's tracking remote names, so a branch tracking a fork is
+  held too. With an `origin`, only `origin/HEAD` names it; when that is
+  unset, the mirror is held and the message names
+  `git remote set-head origin --auto`. `SD_PUBLISH_FROM_WORKTREE=1` lifts
+  the hold, as it does for a linked worktree.
+
+- **`sd fleet stamp` reads the operator's owner logins from the machine
+  config (sd:2324).** `fleet.owners` in `config.json`, a list of GitHub
+  logins, decides which repositories are the operator's own; unset, the
+  pack's previous pair applies. A malformed value refuses the stamp.
+
+- **Small read and report defects (sd:1000).** `sd-status` marks
+  `undisclosed-tool` unchecked when a skill root cannot be listed, where it
+  raised out of the whole report. `sd-review --explain` prints the registry
+  refusal itself on a machine with no reachable reviewer, where it called a
+  present but unreadable registry absent. `sd-status` and `sd_lib` date a
+  work item with one shared pattern, pinned by a parity test. The
+  `accepted_gaps` id in `.github/sd-status.schema.json` is an enum of the
+  ids the loader accepts.
 - `sd-ship prepare`: a docs-lint failure already on the default branch no longer blocks a pull request that did not introduce it. A failed lint runs again in a scratch checkout of `origin/<base>`, without the body. A tree failure found there returns as a warning, and the refusal names only the failures the branch introduces, as `docs_lint_failed` (sd:1646). A non-zero lint exit that printed no `FAIL` line, such as an uncaught exception, refuses with its raw output, and a base run that did not finish excuses nothing.
 
 - `sd-ship merge`: the second `base_moved` refusal, read again just before the merge under a declared or accepted `strict` gap, now names `git merge origin/<base>` or `sd-ship prepare --catch-up` instead of a rebase. `WORKFLOW.md` states the rule: after review, take a newer default branch by a merge, never a rebase (sd:2034).
@@ -476,6 +546,26 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **An operator-observed criterion goes in the item's Log (sd:1933).**
+  `WORKFLOW.md` records the operator's 2026-09-30 ruling: a criterion only
+  the operator can observe is written in the item's `## Log`, dated, when it
+  is observed. The delivering pull request never ticks it in advance, so no
+  second pull request is needed for one checkbox.
+
+- **A `minimal` repository may install the review routing lane (sd:1292).**
+  R10-D5 refused the lane in `minimal` and `guest` alike, but `minimal` is
+  written by hand and never produced by detection: it names the operator's
+  own quiet repository, while `guest` means control was not established. By
+  the operator's 2026-09-30 ruling, `sd-review setup-github` now installs in
+  `full` and `minimal` and refuses `guest`. `--check` reads the same mode set
+  (`sd_setup_guard.LANE_MODES`), so a tracked lane in `minimal` is compared
+  against the template rather than marked `REMOVE` (sd:1285).
+
+- **The publication contract says how a drain renders a relative link
+  (sd:2243).** A link to a target mirrored to the same destination uses its
+  recorded page URL; a link to an unmirrored target becomes its repo-relative
+  path in plain text, never a `file:///` URL or an absolute path.
 
 - **The test run names its tree by content, and each shard by name (sd:2080).**
   `run-tests.sh` adds `content=<tree-id>` to its `run-tests: start` and

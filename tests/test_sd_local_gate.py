@@ -6,6 +6,7 @@ GitHub side is a recorder, so nothing leaves the machine.
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import subprocess
@@ -108,7 +109,16 @@ class RunCheck(Repository):
         env = sd_gate_run.gate_environment(self.root, {
             "PATH": os.pathsep.join([inside, outside, "relative/bin"]), "PYTHONPATH": str(self.root),
             "PYTHONHOME": "/x", "VIRTUAL_ENV": inside, "CONDA_PREFIX": "/c", "__PYVENV_LAUNCHER__": "/l", "HOME": "/h"})
-        self.assertEqual(env, {"PATH": outside, "HOME": "/h", "SD_LOCAL_GATE": "1"})
+        self.assertEqual(env, {"PATH": outside, "HOME": "/h", "SD_LOCAL_GATE": "1", "NO_COLOR": "1",
+                               "PYTHON_COLORS": "0"})
+
+    def test_the_operators_colour_settings_do_not_reach_the_check(self) -> None:
+        """`FORCE_COLOR=3` in a terminal failed a repository's gate on ANSI-coloured output (sd:2076)."""
+        env = sd_gate_run.gate_environment(self.root, {
+            "PATH": "/usr/bin", "FORCE_COLOR": "3", "CLICOLOR_FORCE": "1", "PY_COLORS": "1",
+            "NO_COLOR": "", "PYTHON_COLORS": "1"})
+        self.assertFalse({"FORCE_COLOR", "CLICOLOR_FORCE", "PY_COLORS"} & env.keys())
+        self.assertEqual((env["NO_COLOR"], env["PYTHON_COLORS"]), ("1", "0"))
 
     def test_the_check_is_told_it_is_the_gate(self) -> None:
         """`SD_LOCAL_GATE=1` is the contract a repository reads to provision instead of borrow (sd:1918)."""
@@ -395,6 +405,116 @@ class DocsScopeGate(Repository):
         self.assertTrue(api.posts[0][1]["description"].endswith(": sd-check pass (docs-only)"))
         without = sd_local_gate.local_gate(Recorder(), self.root, head)
         self.assertEqual(without["status"], "failure")
+
+
+class PostHead(Repository):
+    """`sd gate post --head SHA` (sd:1989): the merge gate's run and post, for a repository's own merge path.
+
+    A repository that merges by its own automation (a Dependabot merge, a
+    daily script) gets no `sd/local-gate` from `sd-ship merge`, so its
+    required check never reports and every merge waits.
+    """
+
+    def test_the_named_commit_is_checked_and_posted_at_its_full_sha(self) -> None:
+        head = self.commit("check:\n\t@echo ok\n")
+        self.commit("check:\n\t@false\n")
+        api = Recorder()
+        result = sd_local_gate.post_head(self.root, head[:10], api=api)
+        self.assertEqual((result["head"], result["status"]), (head, "success"))
+        [(path, body)] = api.posts
+        self.assertEqual((path, body["context"], body["state"]), (f"repos/o/r/statuses/{head}", "sd/local-gate", "success"))
+
+    def test_a_failing_check_posts_failure(self) -> None:
+        head = self.commit("check:\n\t@false\n")
+        api = Recorder()
+        self.assertEqual(sd_local_gate.post_head(self.root, head, api=api)["status"], "failure")
+        self.assertEqual(api.posts[0][1]["state"], "failure")
+
+    def test_a_name_that_is_no_commit_is_refused_and_nothing_is_posted(self) -> None:
+        self.commit("check:\n\t@echo ok\n")
+        api = Recorder()
+        with self.assertRaisesRegex(Refusal, "names no commit in this checkout"):
+            sd_local_gate.post_head(self.root, "f" * 40, api=api)
+        self.assertEqual(api.posts, [])
+
+    def docs_only_head(self) -> str:
+        """A docs commit on top of a head whose full check fails, under a declared docs-only scope."""
+        (self.root / ".github").mkdir()
+        (self.root / ".github" / "sd-check-scope.json").write_text(
+            '{"schema_version": 1, "docs_paths": ["docs/**"], "docs_command": ["true"]}', encoding="utf-8")
+        self.commit("check:\n\t@false\n")
+        git(self.root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        git(self.root, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        (self.root / "docs").mkdir()
+        (self.root / "docs" / "a.md").write_text("a\n", encoding="utf-8")
+        git(self.root, "add", "docs")
+        git(self.root, "commit", "-q", "-m", "docs")
+        return git(self.root, "rev-parse", "HEAD")
+
+    def test_without_a_base_every_check_runs(self) -> None:
+        """No --base: the PR's target is unknown, so no docs-only scope is guessed from origin/HEAD.
+
+        A head bound for a release branch can carry code main already has plus
+        a docs commit; against main it reads as docs-only, and its success
+        would satisfy the release branch's required check unchecked.
+        """
+        result = sd_local_gate.post_head(self.root, self.docs_only_head(), api=Recorder())
+        self.assertEqual(result["status"], "failure")
+
+    def test_a_named_base_applies_the_docs_only_scope(self) -> None:
+        """A declared docs-only scope applies as it does in the merge gate, against the named base."""
+        result = sd_local_gate.post_head(self.root, self.docs_only_head(), base="main", api=Recorder())
+        self.assertEqual((result["status"], result["summary"]), ("success", "sd-check pass (docs-only)"))
+
+    def test_a_base_the_checkout_has_not_fetched_is_refused_and_nothing_is_posted(self) -> None:
+        """`sd-check --base` with a missing ref fails, and that failure would be posted as the gate's."""
+        head = self.commit("check:\n\t@echo ok\n")
+        api = Recorder()
+        with self.assertRaisesRegex(Refusal, "refs/remotes/origin/trunk"):
+            sd_local_gate.post_head(self.root, head, base="trunk", api=api)
+        self.assertEqual(api.posts, [])
+
+
+class PostCommand(Repository):
+    """`sd gate post` end to end, with a recording `gh` on `PATH` standing in for GitHub."""
+
+    def sd(self, *args: str) -> subprocess.CompletedProcess:
+        bindir = self.root.parent / "fakebin"
+        bindir.mkdir(exist_ok=True)
+        self.log = self.root.parent / "gh.log"
+        fake = bindir / "gh"
+        fake.write_text(
+            f"#!{sys.executable}\nimport json, sys\n"
+            f"open({str(self.log)!r}, 'a').write(json.dumps([sys.argv[1:], sys.stdin.read()]) + '\\n')\n"
+            "print(json.dumps({'state': 'success'}))\n", encoding="utf-8")
+        fake.chmod(0o755)
+        env = dict(os.environ, PATH=str(bindir) + os.pathsep + os.environ.get("PATH", ""))
+        return subprocess.run([sys.executable, str(REPO_ROOT / "bin" / "sd"), "gate", "post", *args],
+                              cwd=self.root, env=env, capture_output=True, text=True, timeout=600)
+
+    def test_a_pass_is_posted_and_printed_as_json(self) -> None:
+        git(self.root, "remote", "add", "origin", "https://github.com/o/r.git")
+        head = self.commit("check:\n\t@echo ok\n")
+        done = self.sd("--head", head)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads(done.stdout)["status"], "success")
+        [(argv, body)] = [json.loads(line) for line in self.log.read_text().splitlines()]
+        self.assertEqual(argv[:4], ["api", f"repos/o/r/statuses/{head}", "--method", "POST"])
+        self.assertEqual(json.loads(body)["context"], "sd/local-gate")
+
+    def test_a_failure_is_posted_and_exits_1(self) -> None:
+        git(self.root, "remote", "add", "origin", "https://github.com/o/r.git")
+        head = self.commit("check:\n\t@false\n")
+        done = self.sd("--head", head)
+        self.assertEqual((done.returncode, json.loads(done.stdout)["status"]), (1, "failure"))
+
+    def test_a_refusal_prints_no_json_and_posts_nothing(self) -> None:
+        git(self.root, "remote", "add", "origin", "https://github.com/o/r.git")
+        self.commit("check:\n\t@echo ok\n")
+        done = self.sd("--head", "f" * 40)
+        self.assertEqual((done.returncode, done.stdout), (1, ""))
+        self.assertIn("names no commit in this checkout", done.stderr)
+        self.assertFalse(self.log.exists())
 
 
 class CiMode(unittest.TestCase):
