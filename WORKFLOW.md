@@ -159,6 +159,9 @@ After the switch:
 - Under a declared gap, the status replaces the `pull_request` workflow runs `every_check` asks for.
   Under protection, the status is required beside the protection's own contexts.
 - Protection for such a repository should require `sd/local-gate`; `sd ci local` sets that.
+  A merge path of the repository's own (a Dependabot merge, a script that merges) gets no status from `sd-ship merge`.
+  Have it run `sd gate post --head SHA` first, or its required check never reports (sd:1989).
+  After a switch, grep the repository for such automation, such as a script that polls check runs.
   `sd-status` reports it as the one produced context, so a required workflow context shows as not produced.
 - Under a declared gap, a head that already carries a failed check run still refuses: a workflow that ran before the switch, or a billing-blocked one.
   GitHub reports the pull request `unstable`, not `clean`, and `every_check` requires every check run to pass.

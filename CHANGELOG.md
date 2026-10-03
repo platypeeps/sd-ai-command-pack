@@ -4,6 +4,18 @@
 
 ### Added
 
+- **`sd gate post --head SHA` posts the local gate outside `sd-ship merge`
+  (sd:1989).** A repository under `repo.ci = local` that merges by its own
+  automation -- a Dependabot merge, a daily merge script -- got no
+  `sd/local-gate` status, so its required check never reported and every
+  merge waited. The verb runs `sd-check` at that commit in a clean worktree
+  and posts the result there, with `sd-ship merge`'s own run and post. It
+  prints the result as JSON and exits 0 on `success`, 1 on `failure`. A name
+  that is no commit, or a `--base` this checkout has not fetched, refuses
+  and posts nothing. `--base` names the PR's target for a docs-only scope;
+  without it every check runs, since the verb cannot know the target. It
+  reads and writes no gate receipt, so it always runs.
+
 - **`sd work deliver --associated --reason` closes an item merged without
   `--deliver` (sd:1590).** A whole-item merge prepared without `--deliver`
   carried `Item: sd:<id>` and no `Delivers:`, and every verb that could close
