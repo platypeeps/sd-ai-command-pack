@@ -218,6 +218,18 @@
   (billing-blocked) check run still refuses; WORKFLOW.md § No-CI mode names
   the remedy, a fresh commit.
 
+- **A `url` entry can opt in to the strict findings schema (sd:1827, pack
+  half).** With `response_format: json_schema` on its registry entry,
+  `sd-review` sends the findings schema as a strict `response_format`, on the
+  ledger road through `sd_db.calls.call` and on the no-ledger road through
+  `sd_registry.chat_completion` alike. The copy is the one Moonshot's strict
+  mode takes: every property typed, `line` as `anyOf` integer or null, and no
+  `minLength` or `maxItems`; the answer is still parsed against the full
+  schema. Every other entry sends the request it sent before. The shipped
+  registry opts no entry in: kimi-k3 waits for a paid strict-mode test, and
+  MiniMax-M3 ignores the field. An `sd_db` without the field refuses a
+  registry that sets it.
+
 ### Fixed
 
 - **A failed rules read leaves protection unknown, not unprotected
@@ -227,6 +239,46 @@
   standing `.github/sd-status.json` acknowledgement then moved it to
   `accepted`. It now prints `protection unknown` with the rules read error as
   the reason, raises no `unprotected` finding, and accepts nothing.
+
+- **Itemless refusals name the command that allocates a review ID (sd:2008,
+  sd:2026).** A missing `--review-id`, an unknown one, and one given beside
+  `--create-record` each refuse with their own blocker code, and the
+  `next_action` names `sd-ship review --no-item --create-record
+  --assert-new-work` and the `review_id` field that prints the ID. Both sites
+  that refuse a missing ID now build it from one definition. `--help` says an
+  ID is allocated, never chosen.
+
+- **An additional-review refusal names the flag at fault (sd:2026).** A
+  nonempty `--request-reason` without `--additional-review-for` used to be told
+  it needed a "nonempty reason"; each fault -- no head, a wrong head, an empty
+  reason, `--retry-review`, commit flags -- now refuses on its own.
+
+- **A merged itemless record reconciles from the default branch (sd:1932).**
+  After the merge deletes its branch, `sd-ship reconcile --no-item` no longer
+  refuses with "bound to branch"; the guard stays for unmerged and closed
+  records. `review --close-record` already ran from any branch; a test pins it.
+  The branch-mismatch refusal names `--rebind-branch`.
+
+- **`sd-ship -C <dir>` outside a repository names the directory (sd:2499).**
+  The refusal read "cwd is not inside a Git repository"; it now names the
+  directory, as the other lane commands do.
+
+- **`--delivered-by` names the way out for a commit with no item trailer
+  (sd:2565).** `sd task status N done --delivered-by` refused a commit naming
+  neither `Delivers: sd:N` nor `Item: sd:N`, such as a no-item squash
+  (sd:2171), with only "carries no `Delivers:` trailer". The refusal now
+  names three ways out: ship the work with `sd-ship prepare --item N
+  --deliver`, name `Closes: sd:N` in a later item merge's body, or close the
+  task by hand with `--reason TEXT`.
+
+- **A row worked on its own branch no longer closes with no merge (sd:1990).**
+  Three runner items (sd:1686, sd:1688, sd:1703) were closed with a plain
+  `sd task status N done` while their `fleet/*` branch had no pull request.
+  The move to done now refuses a row whose `branch` is not `main` or
+  `master` unless a merge is recorded (`sd-ship`'s `Code delivery` comment or
+  a delivering transition), `--delivered-by` names one, or `--reason` says
+  why no pull request is needed. The refusal leaves the row open and names
+  both flags. A work item still goes to `sd work deliver`.
 
 - **`sd-review`'s Jev rows compare Jev with the routing (sd:2359).** `jev`
   computed `changed` against `--fallback`, which here is a token no tier can

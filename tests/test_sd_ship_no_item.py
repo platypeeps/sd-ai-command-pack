@@ -379,6 +379,45 @@ class NoItemContracts(unittest.TestCase):
         self.refused("review", pattern="review-id|record identity")
         self.assertEqual(self.keys(), [])
 
+    def test_each_identity_refusal_names_the_command_that_allocates_a_record(self):
+        """sd:2008, sd:2026: a caller learns the allocation command from the refusal, not the skill.
+
+        A chosen ID, a missing one, and a chosen one beside --create-record each
+        cost an attempt before the working call.
+        """
+        allocate = "sd-ship review --no-item --create-record --assert-new-work"
+        missing = self.refused("review", pattern="review-id|record identity")
+        chosen = self.refused("review", "--review-id", "my-chosen-name", pattern="no no-item record my-chosen-name")
+        beside = self.refused("review", "--create-record", "--assert-new-work", "--review-id", "my-chosen-name",
+                              pattern="drop --review-id my-chosen-name")
+        prepare = self.refused("prepare", pattern="record identity")
+        merge = self.refused("merge", "--manual", "--expected-head", self.head, pattern="record identity")
+        self.assertIn(allocate, chosen["error"])
+        for failure, code in ((missing, "review_identity_required"), (prepare, "review_identity_required"),
+                              (merge, "review_identity_required"), (chosen, "review_record_missing"),
+                              (beside, "review_id_not_chosen")):
+            with self.subTest(code=code):
+                self.assertEqual(failure["workflow"]["blocker"]["code"], code)
+                self.assertIn(allocate, failure["workflow"]["next_action"])
+                self.assertIn("review_id", failure["workflow"]["next_action"])
+        self.assertEqual(self.keys(), [])
+
+    def test_both_missing_identity_sites_refuse_with_one_definition(self):
+        # The CLI refuses in `validate_identity` before the adapter runs, so the
+        # adapter's own guard is reached only by a direct call.
+        _code, cli, _diagnostic = self.cli("review")
+        args = ship.parser().parse_args(["review", "--no-item", "--json"])
+        with self.assertRaises(ship.Refusal) as direct:
+            no_item.run_no_item(self.root, self.connection, self.database, args, receipts, None)
+        self.assertEqual(ship.failure("review", direct.exception), cli)
+
+    def test_a_branch_mismatch_names_the_rebind_command(self):
+        review_id = self.create()
+        _git(self.root, "checkout", "-q", "-b", "renamed")
+        failure = self.refused("review", "--review-id", review_id, pattern="bound to branch topic, not renamed")
+        self.assertEqual(failure["workflow"]["blocker"]["code"], "review_branch_mismatch")
+        self.assertIn(f"--review-id {review_id} --rebind-branch topic", failure["workflow"]["next_action"])
+
     def test_dirty_checkout_and_empty_branch_refuse_creation(self):
         (self.root / "src.py").write_text("value = 2\n")
         self.refused("review", "--create-record", "--assert-new-work", pattern="uncommitted|clean")
