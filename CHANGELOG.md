@@ -4,6 +4,8 @@
 
 ### Added
 
+- **A guest repository can take decision records (sd:2168).** A `guest_allow: docs/decisions` line in the repository's `CLAUDE.local.md` block takes `docs/decisions/` out of the guest planning-artifact refusal: the `sd-ship` push check, the `sd-review --scope planning` gate and the `sd-status` shared-tree list. `docs/decisions/` stays refused by default, and `docs/work/` and `docs/spec/` stay refused always; naming either is a configuration error. The push check now reads `sd_lib.guest_refused_dirs` instead of its own copy of the three trees, and the installer's block template lists the key commented out.
+
 - **`sd fleet stamp` honours a per-repository exemption list (sd:1797).** A
   tracked `.github/sd-fleet.json` holding `{"exempt": ["<path>", ...]}`
   declines stamped files once. The stamp names each exempt path as an adapted
