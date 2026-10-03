@@ -52,16 +52,27 @@ class TheMakefile(unittest.TestCase):
 
 
 class ThePin(unittest.TestCase):
-    def test_the_gate_reads_the_ref_ci_pins(self) -> None:
-        text = provision.WORKFLOW.read_text(encoding="utf-8")
-        self.assertEqual([provision.pinned_ref(text)], test_system_pin.pins(text))
+    def test_the_gate_reads_the_ref_the_pin_file_holds(self) -> None:
+        self.assertEqual(provision.PIN_FILE, test_system_pin.PIN_FILE)
+        self.assertEqual(provision.pinned_ref(provision.PIN_FILE.read_text(encoding="utf-8")),
+                         test_system_pin.pin())
 
-    def test_no_pin_or_two_pins_is_refused(self) -> None:
-        one = "      - uses: actions/checkout\n        with:\n          repository: platypeeps/system\n" \
-              "          ref: sd-db-v0.1.0\n"
-        for text in ("", one + one.replace("0.1.0", "0.2.0")):
-            with self.subTest(text=text[:20]), self.assertRaises(provision.GateError):
+    def test_an_empty_two_line_or_branch_pin_is_refused(self) -> None:
+        for text in ("", "\n", "sd-db-v0.1.0\nsd-db-v0.2.0\n", "main\n", "2facc3fe\n"):
+            with self.subTest(text=text), self.assertRaises(provision.GateError):
                 provision.pinned_ref(text)
+
+    def test_a_commit_or_release_tag_is_read(self) -> None:
+        for ref in ("a" * 40, "sd-db-v0.1.0"):
+            with self.subTest(ref=ref):
+                self.assertEqual(provision.pinned_ref(ref + "\n"), ref)
+
+    def test_a_missing_pin_file_fails_the_gate_by_name(self) -> None:
+        with mock.patch.object(provision, "PIN_FILE", REPO_ROOT / "no-such-pin"), \
+                mock.patch.object(provision, "require_opencode", return_value="opencode"):
+            with mock.patch("sys.stderr") as err:
+                self.assertEqual(provision.main(["provision-gate-env.py"]), 1)
+        self.assertIn("no-such-pin", "".join(call.args[0] for call in err.write.call_args_list))
 
 
 class TheRefusals(unittest.TestCase):

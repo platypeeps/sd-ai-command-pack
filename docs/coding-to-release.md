@@ -13,7 +13,7 @@ An agent runs the commands; the user owns scope, exceptions, and release permiss
 | Check readiness | `sd-review --scope branch --challenge --explain --json` | Pack inspects; agent handles approval | Local blockers are resolved before checks or dispatch. Runtime approval remains separate. |
 | Check | `sd-check --json`; repository `make check` | Repository checks, invoked by agent | Required checks pass. A partial test run does not replace the full gate. |
 | Review | `sd-review --scope branch --challenge`; `sd-gate-probes` skill | Independent reviewer; agent dispositions findings | Required coverage completes and blocking findings have evidenced dispositions. |
-| Commit, push, open PR | `sd-ship prepare --item ID --json` | Pack command, directed by agent | Exact reviewed head is published. Optional commit flags enumerate each path. |
+| Commit, push, open PR | `sd-ship prepare --item ID --deliver\|--associate-only --json` | Pack command, directed by agent | Exact reviewed head is published. Optional commit flags enumerate each path. |
 | Wait for CI | `gh pr checks N --watch --fail-fast` | GitHub runs checks; agent watches once | Checks pass for the intended head. Failures return to implementation. |
 | Merge | `sd-ship merge --item ID --expected-head SHA --manual --watch --json` | User authorizes; pack checks; GitHub merges | Review, ownership, protection, and exact-head checks permit the merge. |
 | Record delivery | `sd work deliver ID FULL_MERGE_SHA`; `sd-ship reconcile --item ID --json` | Shared database verifies evidence | Delivering merge is confirmed. Slice merges leave the item open. |
@@ -83,7 +83,7 @@ These are recommendations, not implemented behavior.
 - [Ship procedure and executable boundary](../skills/sd-ship/SKILL.md)
 - [Review procedure](../skills/sd-review/SKILL.md)
 - [Contribution and release policy](../CONTRIBUTING.md)
-- [CI routing implementation](../.github/workflows/sd-review-route.yml)
+- [CI routing implementation](../actions/review-route/action.yml)
 
 Command forms were checked with their local `--help` output on 2026-09-18.
 The settings check found STE-Concise in Claude's configuration and Codex's global instructions.

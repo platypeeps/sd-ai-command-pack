@@ -74,9 +74,11 @@ import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+import sd_ci  # noqa: E402
 import sd_codex  # noqa: E402
 import sd_controls  # noqa: E402
 import sd_fleet  # noqa: E402
+import sd_gate_slots  # noqa: E402
 import sd_handoff_rows  # noqa: E402
 import sd_lib  # noqa: E402
 import sd_notes  # noqa: E402
@@ -2807,13 +2809,25 @@ def cmd_attribute(args: argparse.Namespace) -> int:
     if root is None:
         raise Refusal("not inside a git repository")
     registry, reason = sd_registry.read_or_report()
-    if reason and args.entry.strip() != sd_lib.HUMAN_AUTHOR:
+    if reason and args.entry.strip() not in sd_lib.RESERVED_AUTHORS:
         raise Refusal(f"{reason}; an attribution names an entry the registry has")
     sha, value, covered = sd_lib.attribute(root, args.commits, args.entry, registry)
     print(f"{sha[:12]} attributes {len(covered)} commit(s) to {value}")
     for target in covered:
         print(f"  {target[:12]}")
     return 0
+
+
+def cmd_gate(args: argparse.Namespace) -> int:
+    """`sd gate run|status` -- the sd:2262 gate queue, with the machine's `sd.gate_*` settings."""
+    environ = dict(os.environ)
+    try:
+        slots, _ = sd_gate_slots.configured(environ, sd_lib.core_setting("gate_slots", environ))
+        rule = sd_gate_slots.load_rule(environ, sd_lib.core_setting("gate_load_max", environ),
+                                       sd_lib.core_setting("gate_settle_seconds", environ))
+    except ValueError as error:
+        raise UsageError(str(error)) from None
+    return sd_gate_slots.gate_verb(args, environ, slots, rule)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -2973,10 +2987,15 @@ def build_parser() -> argparse.ArgumentParser:
     adder.add_argument("--item", required=True, help="work-item directory name")
     adder.set_defaults(handler=sd_suggest.suggest_add)
 
+    # `--belongs-to` and not `--repo`, for the reason `sd task edit` gives in
+    # `sd_work._belongs_to`. `--to` filed a GitHub issue and now only refuses
+    # (sd:2002), so it stays out of the help.
     publisher = suggesting.add_parser(
-        "publish", help="file one recorded proposal as an issue, after a dedup read")
+        "publish", help="file one recorded proposal as an sd item, after a dedup read")
     publisher.add_argument("--note", type=int, required=True, help="the id the write printed")
-    publisher.add_argument("--to", default="", help="owner/repo the issue is filed at")
+    publisher.add_argument("--belongs-to", default="", metavar="PATH",
+                           help="the registered checkout the item belongs to")
+    publisher.add_argument("--to", default="", help=argparse.SUPPRESS)
     publisher.set_defaults(handler=sd_suggest.suggest_publish)
 
     shadow = groups.add_parser(
@@ -3071,8 +3090,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="record who wrote commits that did not say, as one empty commit")
     attributer.add_argument("commits", help="a commit, or a `<from>..<to>` range, on this branch")
     attributer.add_argument(
-        "entry", help=f"a registry entry, or `{sd_lib.HUMAN_AUTHOR}` for the operator")
+        "entry", help=f"a registry entry, `{sd_lib.HUMAN_AUTHOR}` for the operator, "
+                      f"or `{sd_lib.DEPENDABOT_ENTRY}` for a bump rewritten after GitHub made it")
     attributer.set_defaults(handler=cmd_attribute)
+
+    gate = groups.add_parser("gate", help="the machine-wide gate queue: run a command in it, or show it")
+    gating = gate.add_subparsers(dest="command_name", required=True)
+    sd_gate_slots.add_gate_verbs(gating)
+    gate.set_defaults(handler=cmd_gate)
 
     sd_work.register(groups, kept)
     sd_writing.register(groups)
@@ -3080,6 +3105,7 @@ def build_parser() -> argparse.ArgumentParser:
     sd_controls.register(groups)
     sd_runner.register(groups)
     sd_fleet.register_fleet(groups)
+    sd_ci.register_ci(groups)
     sd_notes.register_note_group(groups)
     return parser
 

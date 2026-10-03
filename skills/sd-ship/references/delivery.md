@@ -9,7 +9,12 @@ Every associated merge carries `Item: <item>`, which closes nothing.
 Whole-item delivery also carries `Delivers: <item>`.
 Changes without an item omit both trailers and create no placeholder row.
 
-Use `prepare --deliver --acceptance-file FILE` only when every item acceptance criterion has evidence.
+The first prepare of an item names its claim, or it refuses.
+Give `--deliver` to the item's last PR and `--associate-only` to each earlier PR.
+A forgotten `--deliver` leaves the row open with its code on the default branch.
+A task or followup takes `--deliver` without an acceptance file.
+Its verified merge moves it to done with the sentence `sd task status ID done --delivered-by SHA` records.
+For a work item, use `prepare --deliver --acceptance-file FILE` only when every item acceptance criterion has evidence.
 The JSON requires `item`, `complete: true`, and a nonempty `criteria` array.
 Each criterion contains `criterion`, `passed: true`, and concrete `evidence`.
 The claim binds the item's current title, body, and artifact path.

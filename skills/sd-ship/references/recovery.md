@@ -72,6 +72,21 @@ merged commit's last paragraph read afterwards. `git interpret-trailers
 --parse` on the merged commit answers it in one line; if `Closes:` is not in
 its output, the trailer did not land.
 
+## A branch behind its base
+
+Under strict protection, another landing leaves an open branch BEHIND the base, and merge refuses it as `base_moved`.
+Run `sd-ship prepare --catch-up` with the same identity.
+It merges `origin/<base>` into the branch, never rebases, and pushes a fast-forward.
+A clean merge can carry the last clean or advisory review forward and spend no pass.
+It does so only when the base's new commits touch no file and no directory the branch touches, and the branch's own patch-id is unchanged.
+A `--provider` that did not write that review re-reviews instead.
+A Copilot review of the earlier head carries forward the same way; the receipt records `review_carry_forward` (sd:1485).
+Otherwise the new head gets a full-branch pass: the review covers the branch's own diff, not the code the base brought in.
+A conflict aborts the merge and leaves the branch unchanged; resolve it by hand, then prepare again.
+One conflict is resolved for you: two additions to `CHANGELOG.md` at the root, and no other conflicted path.
+Both entries are kept, the branch's first, and the receipt warnings name the resolution.
+Merge again with the new `--expected-head`; the local gate runs at that head.
+
 ## A branch built on a squashed branch
 
 A squash merge leaves the merged head off the default branch's history.
@@ -82,6 +97,16 @@ While the branch is still behind the base, the `base_moved` refusal carries the 
 Resolve every conflicted path by hand, against the merge base, not with `git checkout --ours`.
 No path is proven safe for `--ours`: the default branch can leave a path and return to it, and `--ours` would discard that change.
 Do not rebase onto the squash; that needs a force-push.
+
+## A failed check run under local CI
+
+`sd ci local` switches a repository to the local gate; its dry run shows the changes, and `--apply` makes them.
+A pull request opened before the switch can still carry a failed check run at its head.
+A billing-blocked run is the common case.
+Under a declared gap that run still blocks the merge, whatever `sd/local-gate` says: `every_check` requires every check run to pass.
+Under protection it does not block unless the protection requires it: GitHub reports the pull request `unstable` and allows the merge.
+Push a fresh commit to the branch, an empty one if nothing else is due, and prepare again.
+With the workflows off, nothing but the local gate runs on the new head.
 
 ## Copilot request recovery
 
@@ -147,9 +172,17 @@ Do not combine this request with retry or commit flags.
 
 At least five previous spent passes must exist.
 The reservation binds the head, reason, and preceding history before dispatch.
-It preserves earlier findings with source heads and report digests.
+The request reviews the subject an automatic pass would review at that head.
+After a completed pass on an earlier head, it verifies the diff since that head.
+A fix delta then fits the 2,000,000-byte review input cap even when the whole branch does not.
+Otherwise the request reviews the whole branch again.
+That covers the same head, an incomplete last pass, a moved binding, a catch-up merge, and imported history.
+A whole-branch request preserves earlier findings with source heads and report digests.
 It retains the union of author vendors.
-A failed additional review remains spent.
+A pass in which no reviewer completed and no finding survived reviewed nothing.
+It does not consume the request; repeat the same request after resolving the refusals.
+Any other failed additional review remains spent.
+Each refusal of an additional pass says whether the operator request was consumed.
 
 After six spent passes, each later pass requires a fresh explicit user decision and current history digest.
 Add `--review-history-digest SHA256`.

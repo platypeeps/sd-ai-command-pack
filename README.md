@@ -53,9 +53,11 @@ other halves are, is in [domain packs](docs/domain-packs.md).
   `bin/`, so the commands resolve from any directory; `--bin-dir DIR` puts them
   elsewhere. The installer never edits `PATH`: `--user` warns when the link
   directory is not on it, and `--status` says how many commands resolve.
-- three hook entries in `~/.claude/settings.json` — `SessionStart` for
-  `sd-handoff-restore`, and `PreToolUse` and `UserPromptSubmit` for
-  `sd-skill-use`. `bin/sd_install.py`'s `HOOK_SPECS` is the one list; this
+- four hook entries in `~/.claude/settings.json` — `SessionStart` for
+  `sd-handoff-restore`, `PreToolUse` and `UserPromptSubmit` for
+  `sd-skill-use`, and `PreToolUse` on `Bash` and `mcp__github__issue_write`
+  for `sd-issue-guard`, which denies filing a GitHub issue from a managed
+  repository and points to `sd task add`. `bin/sd_install.py`'s `HOOK_SPECS` is the one list; this
   line describes it and does not govern it.
 - one line — `CLAUDE.local.md` — in the global git excludes
 
@@ -70,7 +72,7 @@ else is. Its executables write these paths, and no others:
 - `.github/workflows/sd-review-route.yml` — the routing lane, from `sd-review
   setup-github`, which runs only in a `full`-mode repository. **Tracked.** With
   `--remove-legacy` it also deletes the three files the old `sd-github-review`
-  installer left.
+  installer left. `--remove` deletes the workflow and its Dependabot guard.
 - The fleet stamp, from `sd fleet stamp`, into the checkout you stand in, which
   must be a checkout of a `runner_merge=auto` repository: the routing lane and
   its Dependabot guard as `setup-github` writes them,
@@ -157,6 +159,9 @@ sd config set sd.assistant_merge controlled
 
 These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOME` overrides the configuration root.
 `sd config get`, `list`, and `unset` inspect or remove settings. No personal grant ships in this repository.
+`sd.gate_slots` is load control, not a grant: how many repository gates may run at once on the machine (unset: a quarter of the cores).
+`sd.gate_load_max` and `sd.gate_settle_seconds` are load control too: the gate queue starts its head only while load1 is below the limit (unset: 2.5 per core), with starts 45 s apart by default.
+`sd gate run -- make check` queues any command the same way; `sd gate status` shows the queue.
 
 `configured` allows private code and scoped review context to the operator's eligible configured providers, including future entries.
 A local `reviewers` list restricts recipients; an explicit empty value denies review.
@@ -411,22 +416,15 @@ make setup   # once
 make check   # test + lint + audit + docs-lint
 ```
 
-CI is two gating jobs in `tests.yml` and one in `pr-body-lint.yml`, named here
-by the status context GitHub emits for each (the matrix job's context carries
-its matrix values), plus the advisory `route` job in `sd-review-route.yml`:
-
-| Context | What it runs |
-|---|---|
-| `unittest (ubuntu-latest, 3.14)` | The suite on Ubuntu, Python 3.14, plus the installer coverage gate |
-| `body-lint` | `sd-docs-lint --body-only` over the pull request's body and changed paths; it also runs when the body is edited, so a body fixed after a red run is graded again |
-| `lint` | Ruff over `bin/` and `tests/` and mypy over `bin/` (the path lists are `LINT_RUFF_PATHS` and `LINT_MYPY_PATHS` in the `Makefile`, read rather than restated), `sd-docs-lint` over this checkout's `docs/`, then Bandit over `bin/`, zizmor over the workflows, and ShellCheck over the tracked shell |
-
-`sd-status` compares the live protection object with the contexts the
-workflow files produce, not with this table, so a row here can go stale
-without anything saying so; the workflow files are the inventory.
+This repository has `repo.ci = local`: it carries no GitHub Actions workflow.
+`sd-ship merge` runs `sd-check` (here `make check`) in a fresh worktree and
+posts the result as the `sd/local-gate` status on the head commit. The gate
+installs `sd_db` at the `platypeeps/system` ref in `.sd-system-rev`.
+`sd-ship prepare` grades the pull request body with `sd-docs-lint --body-only`.
+WORKFLOW.md "No-CI mode" describes the gate.
 
 `main` carries classic branch protection: pull requests with no required
-approvals, the strict `lint`, `unittest` and `body-lint` checks above, and enforce_admins.
+approvals, the strict `sd/local-gate` check, and enforce_admins.
 `.github/sd-status.json` accepts one gap, `reviews`: the approval count is 0
 because the sole maintainer cannot approve their own pull request. `sd-ship merge`
 reads the protection object before it reads the pull request's checks and

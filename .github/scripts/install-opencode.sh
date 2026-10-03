@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Installs the pinned opencode on a CI runner and puts it on PATH for the
-# steps after the one that calls this. Both jobs in `tests.yml` that run the
-# suite call it, so the version and its checksum live here once (sd:1557).
+# Installs the pinned opencode on a linux-x64 GitHub runner and puts it on
+# PATH for later steps. The retired CI jobs called it. It stays as the one
+# record of the measured version and checksum (sd:1557), and the local gate
+# names it when opencode is missing.
 #
 # `tests/test_sd_review_opencode.py::TheEscapeIsClosedLive` is the only
 # check that the sd:1375 config-merge escape is closed against opencode
@@ -22,8 +23,7 @@
 # per-version registry tarball and checks it against the sha256 of the
 # artifact npm publishes. It is deliberately not `npm install -g
 # opencode-ai@...`: that form installs outside a lockfile, which the `zizmor`
-# gate reports as `adhoc-packages` (a real surfaced finding, not a
-# persona-gated one, so it cannot be recorded in check-zizmor-personas.py).
+# gate reported as `adhoc-packages` in the retired workflow.
 # A checksummed download is the `--require-hashes` equivalent for a tool with
 # no lockfile, and it needs no Node toolchain.
 #

@@ -236,7 +236,10 @@ class ProviderEnvironmentTests(ReviewFixture):
                     "review", FakeRunner(), self.environment(OWN_KEY="mine", OTHER_KEY="not-mine"), 5,
                     client=client)
         self.assertEqual(outcome.status, sd_review.CLEAN)
-        self.assertEqual(client.sent[0]["env"], self.environment(OWN_KEY="mine", USER=pwd.getpwuid(os.getuid()).pw_name))
+        # The fixture's gate-queue variables (sd:2262) are not a provider's to read; the allow-list drops them.
+        expected = {key: value for key, value in self.environment(OWN_KEY="mine", USER=pwd.getpwuid(os.getuid()).pw_name).items()
+                    if not key.startswith("SD_GATE_")}
+        self.assertEqual(client.sent[0]["env"], expected)
         self.assertIn("exact_source_marker = 456", client.sent[0]["prompt"])
 
     def test_untracked_symlinks_expose_the_link_not_external_file_contents(self) -> None:

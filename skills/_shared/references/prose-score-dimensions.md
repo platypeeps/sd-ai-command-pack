@@ -19,8 +19,10 @@ Run the pass only when both conditions hold:
 
 1. The user asks for prose scores, by name, in this session. Nothing infers
    the request, and no earlier session's request carries over.
-2. `jev enabled` exits `0`. That command calls nothing and costs nothing, so
-   it is safe to run first every time.
+2. `jev enabled JEV_SD_PROSE_SCORE --record --caller <skill>` exits `0`,
+   where `<skill>` is the skill running the pass: `sd-prose-lint` or
+   `sd-humanizer`. That command calls nothing and costs nothing, so it is
+   safe to run first every time. `JEV_SD_PROSE_SCORE=0` switches the pass off.
 
 If `jev` is absent from `PATH`, or `jev enabled` exits `3`, say so in one
 plain sentence and finish the review without scores. A missing scorer is a
@@ -94,7 +96,8 @@ an earlier answer would need a second call, and none of these does.
 Write the draft to a file, write the block below to a file, then run:
 
 ```sh
-jev ask --questions questions.json --state draft.txt
+jev ask --questions questions.json --state draft.txt \
+    --caller <skill> --stage JEV_SD_PROSE_SCORE
 ```
 
 Both `--questions` and `--state` read stdin when given `-`, so at most one of

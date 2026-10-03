@@ -22,9 +22,9 @@ mdurl==0.1.2 \
     # via
     #   -r requirements-security.txt
     #   markdown-it-py
-pygments==2.20.0 \
-    --hash=sha256:6757cd03768053ff99f3039c1a36d6c0aa0b263438fcab17520b30a303a82b5f \
-    --hash=sha256:81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176
+pygments==2.21.0 \
+    --hash=sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9 \
+    --hash=sha256:610ca751c9bc2492b38eb9a38a7fbc93edbbb2d7182edaf34e66ae493dee5c8c
     # via
     #   -r requirements-security.txt
     #   rich
@@ -111,9 +111,9 @@ rich==15.0.0 \
     # via
     #   -r requirements-security.txt
     #   bandit
-stevedore==5.9.0 \
-    --hash=sha256:abbd0af7a38a8bbb1d6adea2e35b17609cf004eaac323e88a8d8963640dd2b3c \
-    --hash=sha256:e520945d4c257700eddc1eb1d79df04b2ea578eef185e0e3fa5b442fc848d3f7
+stevedore==5.9.1 \
+    --hash=sha256:5c8ff3a9f336cc1a06ac0f597bc79d11a2f950bfd32e290ca56b5a301fafafbf \
+    --hash=sha256:e97a2667923efda926e8713fde6a73616df68210a3cbc6f02b48967b676fd8bf
     # via
     #   -r requirements-security.txt
     #   bandit

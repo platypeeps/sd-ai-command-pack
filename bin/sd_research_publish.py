@@ -6,10 +6,12 @@ The publication contract is
 script can carry out. Two jobs, both run at the end of `render`:
 
 1. **Register.** Append this repo's `label|key|label` line to the dashboard's
-   `documents.conf`, once. The dashboard finds `docs/dashboard/` on disk, so
-   the line says what to call it and carries no path; `root|` stays for a
-   directory the dashboard cannot find. The dashboard reads that file and
-   never writes it, so nothing here touches the dashboard's own source.
+   `documents.conf`, once. The file is in the machine's config directory, not
+   the dashboard checkout; `dashboard_config` says where. The dashboard finds
+   `docs/dashboard/` on disk, so the line says what to call it and carries no
+   path; `root|` stays for a directory the dashboard cannot find. The
+   dashboard reads that file and never writes it, so nothing here touches the
+   dashboard's own source.
 
 2. **Enqueue.** For each document designated for a destination in
    `DESTINATIONS`, write a sync request naming the document, its container, the
@@ -39,19 +41,39 @@ import json
 import os
 import re
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from sd_lib import git_output, main_worktree_root
 
-#: Where the dashboard checkout lives. Overridable because a fleet machine may
-#: hold it elsewhere; not discovered by searching, because a search that found
-#: two checkouts would have to guess which one the browser is serving.
-DASHBOARD_HOME = Path(
-    os.environ.get("SD_DASHBOARD_HOME", "~/repos/system/local-project-dashboard")
-).expanduser()
+
+def dashboard_config(environ: Mapping[str, str]) -> Path:
+    """The directory the dashboard reads `documents.conf` from.
+
+    `<config>/project-dashboard`, `<config>` being `$SYSTEM_TOOLS_CONFIG`, else
+    `$XDG_CONFIG_HOME/system`, else `~/.config/system`. This mirrors `root` and
+    `config_dir` in the system repository's `lib/system_tools_config.py`, which
+    `sd_dashboard/documents.py` reads `documents.conf` through since system
+    350553a; change the two together. Mirrored rather than imported: a render
+    runs on machines with no system checkout. Before that commit the file sat
+    in the dashboard checkout, and looking there reported every listed
+    repository as not registered (sd:2010).
+    """
+    named = environ.get("SYSTEM_TOOLS_CONFIG")
+    if named:
+        return Path(os.path.expanduser(named)) / "project-dashboard"
+    base = environ.get("XDG_CONFIG_HOME") or os.path.join(
+        environ.get("HOME") or os.path.expanduser("~"), ".config")
+    return Path(os.path.expanduser(base)) / "system" / "project-dashboard"
+
+
+#: Where the dashboard's per-machine configuration lives, `documents.conf`
+#: among it. Read once, when the module loads, as the dashboard reads it; not
+#: discovered by searching, because a search that found two would have to
+#: guess which one the browser is serving.
+DASHBOARD_CONFIG = dashboard_config(os.environ)
 
 #: Durable, outside any repo, and beside the vault-write queue that already
 #: works this way. `~/.claude/` and not `/tmp`: a request that a reboot deletes
@@ -150,7 +172,7 @@ class NotionScope(NamedTuple):
     #: `private` or `team`: which Notion space the mirror may reach.
     scope: str
     #: The environment variable holding this operator's folder page id.
-    #: Beside `OBSIDIAN_VAULT`, `SD_DASHBOARD_HOME` and `SD_MIRROR_QUEUE`,
+    #: Beside `OBSIDIAN_VAULT`, `SYSTEM_TOOLS_CONFIG` and `SD_MIRROR_QUEUE`,
     #: which is where this module's other per-machine destinations live. Not
     #: `sd config`: that namespace holds standing authorization, and a folder
     #: is a destination rather than a permission.
@@ -175,8 +197,8 @@ NOTION_SCOPES = {
                       "your team Notion briefs folder, under %s"),
 }
 
-#: The environment the folder settings, `SD_MIRROR_REQUEUE` and
-#: `SD_PUBLISH_FROM_WORKTREE` are read out of. A module attribute for the same
+#: The environment the folder settings, `SD_MIRROR_REQUEUE`,
+#: `SD_PUBLISH_FROM_WORKTREE` and `SD_SKIP_MIRROR` are read out of. A module attribute for the same
 #: reason `QUEUE` and `VAULT` are: a test points it at a fixture rather than
 #: at the machine running the test.
 ENVIRON: dict[str, str] = dict(os.environ)
@@ -209,7 +231,7 @@ KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
 def documents_conf() -> Path:
-    return DASHBOARD_HOME / "documents.conf"
+    return DASHBOARD_CONFIG / "documents.conf"
 
 
 #: Where a render by hand records the sha256 of the research.conf.py it
@@ -287,6 +309,14 @@ def linked_worktree(repo: Path) -> bool:
 #: named for what it does, so an operator who sets it is asking, in words,
 #: for branch content to become the canonical copy.
 PUBLISH_FROM_WORKTREE = "SD_PUBLISH_FROM_WORKTREE"
+
+
+#: The switch that renders without queueing a mirror, set to the reason. The
+#: hook sets it for a branch checkout that lands behind its upstream: that
+#: tree is about to be replaced by a pull, and a request queued from it is
+#: stale text a drain may publish before the pull's render replaces it
+#: (sd:1991). The dashboard still wants the render; the queue does not.
+SKIP_MIRROR = "SD_SKIP_MIRROR"
 
 
 def publish_refusal(repo: Path, copy: str) -> str:
@@ -415,6 +445,34 @@ def revision(repo: Path) -> str:
     would mean a second timeout and a second answer to what a failure means.
     """
     return git_output(["rev-parse", "HEAD"], repo) or "unknown"
+
+
+#: The three spellings of a github.com `origin` this pack reads elsewhere
+#: (`sd_ship_remote.slug`), with no credential in them. Anything else -- no
+#: origin, another host, a token in the URL -- names no GitHub repository.
+GITHUB_ORIGIN = re.compile(
+    r"(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)"
+    r"([\w.-]+)/([\w.-]+?)(?:\.git)?/?")
+
+
+def source_url(repo: Path, src: str) -> str | None:
+    """The GitHub URL of `src` for a mirror's pointer line, or None.
+
+    Read from `origin`, so the drain never composes an owner itself: it did,
+    and a moved repository's pages named its old owner for six days
+    (sd:1999). `blob/HEAD/` is GitHub's name for the
+    default branch, whatever it is called: the link is where to edit, and a
+    commit permalink would change the request on every commit.
+    """
+    match = GITHUB_ORIGIN.fullmatch(git_output(["remote", "get-url", "origin"], repo) or "")
+    if not match or not src:
+        return None
+    try:
+        path = (repo / src).resolve().relative_to(repo.resolve())
+    except ValueError:
+        return None
+    return "https://github.com/%s/%s/blob/HEAD/%s" % (
+        match[1], match[2], quote(path.as_posix(), safe="/"))
 
 
 def notion_target(
@@ -827,8 +885,12 @@ def mirror_fingerprint(request: dict[str, Any], target: dict[str, str], what: st
     mirror is called; the identity `mirror_identity` compares, because a
     document moved to another container is a new mirror; the designation's
     own page or file id, because a `page=` the user wrote is an instruction
-    the drain has to see; and the source path, because the request carries
-    it and the mirror's pointer line names it.
+    the drain has to see; and the source path and `source_url`, because the
+    request carries them and the mirror's pointer line names them. A request
+    with no `source_url` hashes exactly what it did before the field existed,
+    so a repository without a GitHub origin re-queues nothing on upgrade; one
+    with it re-queues each document once, which is what corrects a pointer a
+    drain composed with the wrong owner (sd:1999).
 
     Not the revision: a commit that touches nothing the mirror is made of
     still moves HEAD, and re-queueing on every commit is the defect this
@@ -839,6 +901,8 @@ def mirror_fingerprint(request: dict[str, Any], target: dict[str, str], what: st
     named = mirror_identity(request, target, what)
     named.update(title=request.get("title", ""), source=request.get("source", ""),
                  designated=request.get(what, ""))
+    if request.get("source_url"):
+        named.update(source_url=request["source_url"])
     digest = hashlib.sha256(json.dumps(named, sort_keys=True).encode("utf-8"))
     digest.update(str(request.get("content", "")).encode("utf-8"))
     return digest.hexdigest()
@@ -1004,8 +1068,12 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
     that was lost on the far side and has to be written again.
 
     A linked worktree queues nothing unless `SD_PUBLISH_FROM_WORKTREE=1`
-    says to; see `publish_refusal`.
+    says to; see `publish_refusal`. Nothing is queued, and nothing pending is
+    touched, while `SD_SKIP_MIRROR` holds a reason; see `SKIP_MIRROR`.
     """
+    held = str(ENVIRON.get(SKIP_MIRROR, "")).strip()
+    if held:
+        return ["mirror: not queued: %s (%s)" % (held, SKIP_MIRROR)]
     reports: list[str] = []
     refused = publish_refusal(repo, "mirror")
     if refused:
@@ -1038,6 +1106,9 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
                 "document": out,
                 "title": cfg.get("title", out),
                 "source": str(repo / src) if src else "",
+                # The pointer line's link, read from `origin` and never
+                # composed by the drain; None where origin names no GitHub repo.
+                "source_url": source_url(repo, src),
                 "rendered": str(repo / DASHBOARD_DIR / (out + ".html")),
                 "markdown": str(vault / (out + ".md")) if vault else "",
                 # What the drain mirrors, read once here. The three paths
@@ -1064,25 +1135,60 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
             # what a drain did, and never overrides what the document says.
             carried = "" if request[what] else recorded(path, identity, what)
             request[what] = request[what] or carried
+            reverted = not force and reverts_to_delivered(path, name, digest)
             # The generation this request is: what `mirror_delivered()` acknowledges.
             request["fingerprint"] = digest
             path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
-            try:
-                receipts().mkdir(parents=True, exist_ok=True)
-                record = load_record(receipts() / name)
-                record.update(queued=digest, revision=rev, repo=str(home),
-                              document=out, destination=target["destination"])
-                record.pop("fingerprint", None)
-                (receipts() / name).write_text(
-                    json.dumps(record, indent=2) + "\n", encoding="utf-8")
-            except OSError as problem:
-                # The request is written; only the memory of it is not, and the
-                # cost of that is one more queue of this document next time.
-                reports.append("mirror: cannot write receipt for %s (%s)" % (out, problem))
-            reports.append("mirror: queued %s -> %s%s" % (
-                out, target["target"],
-                ", updating the %s already recorded" % what if carried else ""))
+            reports += record_queued(name, dict(
+                queued=digest, revision=rev, repo=str(home), document=out,
+                destination=target["destination"]))
+            reports.append(queued_report(out, target["target"], what, carried, reverted))
     return reports
+
+
+def reverts_to_delivered(path: Path, name: str, digest: str) -> bool:
+    """Whether writing `digest` over the request at `path` returns it to the
+    generation a drain last delivered.
+
+    Rewritten then and not withdrawn (sd:1991). A drain reads its request
+    outside the queue lock, so the one being replaced may already be on the
+    destination with its acknowledgement still to come -- or never coming,
+    from a drain that stopped after writing. Withdrawn, that acknowledgement
+    finds nothing and records nothing, every later render reads the receipt's
+    old `delivered`, and the replaced text stays on the destination for good.
+    Only a request left standing puts the delivered text back, at the cost of
+    one rewrite of a mirror that may already match; this says that is why.
+    """
+    return path.exists() and load_record(receipts() / name).get("delivered") == digest
+
+
+def record_queued(name: str, fields: dict[str, str]) -> list[str]:
+    """Record on the receipt what was just queued, or say why it could not.
+
+    The request is written by then; only the memory of it is not, and the cost
+    of that is one more queue of this document next time.
+    """
+    try:
+        receipts().mkdir(parents=True, exist_ok=True)
+        record = load_record(receipts() / name)
+        record.update(fields)
+        record.pop("fingerprint", None)
+        (receipts() / name).write_text(
+            json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    except OSError as problem:
+        return ["mirror: cannot write receipt for %s (%s)" % (fields["document"], problem)]
+    return []
+
+
+def queued_report(out: str, target: str, what: str, carried: str, reverted: bool) -> str:
+    """The line a render prints for a request it wrote."""
+    notes = ""
+    if carried:
+        notes += ", updating the %s already recorded" % what
+    if reverted:
+        notes += ("; back to the delivered version, replacing a pending request "
+                  "a drain may already hold")
+    return "mirror: queued %s -> %s%s" % (out, target, notes)
 
 
 def publish(repo: Path, project: str, docs: list[dict[str, Any]]) -> list[str]:
@@ -1157,6 +1263,14 @@ HOOK = '''#!/usr/bin/env python3
 # and otherwise say how to render once it is read. The render they run is told
 # it is automatic, checks the bytes it executes again, and records nothing
 # (sd:1376). Whether a repository may instruct this tool at all is sd:1375.
+#
+# A branch checkout that lands behind its upstream renders and queues no
+# mirror (sd:1991). Checking out a stale `main` and pulling it is the usual
+# way to update, and the checkout's render queued the stale text for the
+# shared mirror a moment before the pull's render replaced it: a drain in
+# between published it. The render is told why in `SD_SKIP_MIRROR`. Only
+# the local tracking ref is read, so nothing here fetches, and a branch with
+# no upstream renders and queues as before.
 
 import hashlib
 import os
@@ -1237,6 +1351,27 @@ TRUSTED = "sd-research-conf.sha256"
 # then executes only a recorded config and records nothing itself.
 TRIGGER_ENV = "SD_RESEARCH_TRIGGER"
 
+# What this sets, to a reason, for a render that must queue no mirror.
+SKIP_MIRROR = "SD_SKIP_MIRROR"
+
+
+def behind_upstream(root):
+    # How many commits this branch's upstream has that HEAD lacks, read off
+    # the local tracking ref; 0 when there is no upstream to be behind. No
+    # fetch: a hook that reached the network would make every checkout wait
+    # on it, and the ref a pull is about to fast-forward to is already local
+    # whenever the pull is `--ff-only` after a fetch.
+    counted = subprocess.run(
+        ["git", "rev-list", "--count", "HEAD..@{u}"],
+        cwd=root, capture_output=True, text=True, timeout=30,
+    )
+    if counted.returncode != 0:
+        return 0
+    try:
+        return int(counted.stdout.strip() or 0)
+    except ValueError:
+        return 0
+
 
 def conf_trusted(root):
     # Whether the tree's research.conf.py is one a render by hand executed
@@ -1280,6 +1415,15 @@ def main(argv):
             ).stdout.split()
             if not any(name.endswith((".md", ".py")) for name in changed):
                 return 0
+        env = dict(os.environ, **{TRIGGER_ENV: trigger})
+        # A branch checkout is the only trigger with a range and no pull of
+        # its own; post-merge is the pull, and renders the tree it brought.
+        behind = behind_upstream(root) if (
+            trigger == "post-checkout" and query != ALWAYS) else 0
+        if behind:
+            env[SKIP_MIRROR] = ("%s: HEAD is %d commit%s behind its upstream; "
+                                "pull, and that render queues the mirrors"
+                                % (trigger, behind, "" if behind == 1 else "s"))
         if not conf_trusted(root):
             print("%s: no render by hand has executed this research.conf.py, and "
                   "a render executes it; read it, then run `sd-research-kit "
@@ -1296,7 +1440,7 @@ def main(argv):
         return 0
     try:
         subprocess.run([kit, "render"], cwd=root, timeout=600, check=True,
-                       env=dict(os.environ, **{TRIGGER_ENV: trigger}))
+                       env=env)
     except (OSError, subprocess.SubprocessError):
         print("%s: render failed; docs/dashboard/ is now stale" % trigger,
               file=sys.stderr)
@@ -2391,6 +2535,192 @@ def main(argv):
         return 0
     try:
         subprocess.run([kit, "render"], cwd=root, timeout=600, check=True)
+    except (OSError, subprocess.SubprocessError):
+        print("%s: render failed; docs/dashboard/ is now stale" % trigger,
+              file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
+''',
+    # `e81f7fc0`, sd:1376's third body, replaced by sd:1991's: a branch
+    # checkout behind its upstream rendered and queued the stale tree.
+    '''#!/usr/bin/env python3
+# Re-render this research repo when git changes a document.
+#
+# Installed by `sd-research-kit init-hook` under three names at once:
+# post-commit, post-merge and post-checkout. A pull, a branch switch and a
+# checkout of one path change the documents as surely as a commit does, and
+# a `docs/dashboard/` left from the old tree is the stale render this exists
+# to prevent. Post-commit and not pre-commit: `docs/dashboard/` is generated
+# and not committed, so there is nothing to stage, and the commit is the
+# revision a queued mirror should name.
+#
+# One source, three names, and the trigger is read from `argv[0]`, because each
+# one has to ask git a different question. `diff-tree ... HEAD` is
+# commit-shaped: it prints nothing at all for a merge commit, and a checkout's
+# HEAD says nothing about what the checkout moved. So a copy of the
+# post-commit body under the other two names would never render.
+#
+# Rendered output goes stale the moment its source changes, and a stale page is
+# worse than a missing one because it looks current. This is what keeps the
+# dashboard's Documents tab a statement about the render rather than about who
+# remembered to run it.
+#
+# Never fails the git command. The commit, the merge or the checkout is already
+# made when this runs, so exiting non-zero would report a failure for work that
+# succeeded. A render that cannot run says so and leaves git alone.
+#
+# `SD_SKIP_RENDER=1` skips it, for all three.
+#
+# A render executes research.conf.py, and after a pull or a checkout it can
+# be one nobody here has read. A commit does not vouch for it either: after a
+# declined pull, a commit of doc.md alone leaves the incoming config in the
+# tree. So all three render only a config a render by hand has executed here,
+# and otherwise say how to render once it is read. The render they run is told
+# it is automatic, checks the bytes it executes again, and records nothing
+# (sd:1376). Whether a repository may instruct this tool at all is sd:1375.
+
+import hashlib
+import os
+import shutil
+import subprocess
+import sys
+
+# What `diff_argv` answers for a trigger that renders without asking git
+# anything. Not an empty list: "git named nothing" is a statement about the
+# tree, and this is the refusal to make one.
+ALWAYS = "always"
+
+
+def diff_argv(trigger, argv):
+    # The git command that names what this trigger moved; ALWAYS to render
+    # without asking; None for an invocation that renders nothing. Three
+    # answers and not two, because "ask git nothing" and "git answered
+    # nothing" are different, and only the second is a statement about the
+    # tree.
+    if trigger == "post-commit":
+        # Only when the commit carried a document. A commit touching nothing
+        # but the config or a script still renders: both change the output.
+        return ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]
+    if trigger == "post-merge":
+        # HEAD is the merge commit and `diff-tree` prints nothing for one, so
+        # the post-commit question is unusable here. ORIG_HEAD is where this
+        # branch stood before the merge, which is what the pull changed from.
+        return ["diff", "--name-only", "ORIG_HEAD", "HEAD"]
+    if trigger == "post-checkout":
+        # git passes the previous HEAD, the new HEAD, and 1 for a branch
+        # checkout or 0 for a file checkout.
+        #
+        # All zeros for the previous HEAD is a fresh clone or a
+        # `git worktree add`: nothing is rendered there yet and nothing
+        # has been committed to it, so a render would publish a checkout
+        # nobody has worked in. Said here rather than left to the `git
+        # diff 0000000 <new>` below failing into the caller's error arm:
+        # that arm returns 0 for any failure of that command, so the day
+        # something else throws in it a fresh clone stops rendering and
+        # the test that pins this goes on passing.
+        if len(argv) >= 2 and argv[1] and set(argv[1]) <= {"0"}:
+            return None
+        # A branch checkout has a range, and the range is the only thing
+        # that names what it moved.
+        if len(argv) >= 4 and argv[3] == "1" and argv[1] != argv[2]:
+            return ["diff", "--name-only", argv[1], argv[2]]
+        # Everything else this trigger fires for moved no branch, so its two
+        # revisions are equal and there is no range -- and it renders anyway,
+        # without a question, because there is no question worth asking here.
+        #
+        # Do not reintroduce `diff --name-only HEAD` as an optimisation. It
+        # looks like the right guard and it is the wrong one: it asks whether
+        # the tree differs from HEAD, and what a mirror needs to know is
+        # whether the tree differs from what was published. Those agree only
+        # while the published copy tracks HEAD, and a file checkout is exactly
+        # what breaks that. `git checkout <rev> -- doc.md` publishes the older
+        # text; `git checkout HEAD -- doc.md` then restores a clean tree, the
+        # guard sees no diff, and the published copy keeps the reverted text
+        # for good. Comparing against what was published instead would be a
+        # second record of the same fact, which is the failure this contract
+        # exists to close.
+        #
+        # So it renders on an unchanged tree too. That is the price, and it is
+        # small: a render that finds nothing changed is cheap, and a mirror
+        # holding text nobody can see is not.
+        return ALWAYS
+    # An unrecognised name is not this hook's trigger. Guessing would run a
+    # render on a git event nobody installed it for.
+    return None
+
+
+# Where `sd-research-kit render`, run by hand, records the sha256 of the
+# research.conf.py it executed: under the git directory, per checkout, never
+# in the tree.
+TRUSTED = "sd-research-conf.sha256"
+
+# What this sets, to the trigger's name, for the render it runs. The render
+# then executes only a recorded config and records nothing itself.
+TRIGGER_ENV = "SD_RESEARCH_TRIGGER"
+
+
+def conf_trusted(root):
+    # Whether the tree's research.conf.py is one a render by hand executed
+    # here, after the operator read it. Asking git whether this operation
+    # changed the config is not enough, and neither is a commit: a declined
+    # pull leaves the incoming config in the tree, and the next file checkout
+    # or commit of doc.md alone would execute it. No record means no render
+    # has vouched for it, which declines too.
+    path = subprocess.run(
+        ["git", "rev-parse", "--git-path", TRUSTED],
+        cwd=root, capture_output=True, text=True, timeout=30, check=True,
+    ).stdout.strip()
+    try:
+        with open(os.path.join(root, path), encoding="utf-8") as handle:
+            recorded = handle.read().strip()
+        with open(os.path.join(root, "research.conf.py"), "rb") as handle:
+            current = hashlib.sha256(handle.read()).hexdigest()
+    except OSError:
+        return False
+    return recorded == current
+
+
+def main(argv):
+    if os.environ.get("SD_SKIP_RENDER"):
+        return 0
+    trigger = os.path.basename(argv[0]) if argv else ""
+    query = diff_argv(trigger, argv)
+    if query is None:
+        return 0
+    try:
+        root = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=30, check=True,
+        ).stdout.strip()
+        if not os.path.isfile(os.path.join(root, "research.conf.py")):
+            return 0
+        if query != ALWAYS:
+            changed = subprocess.run(
+                ["git"] + query,
+                cwd=root, capture_output=True, text=True, timeout=30, check=True,
+            ).stdout.split()
+            if not any(name.endswith((".md", ".py")) for name in changed):
+                return 0
+        if not conf_trusted(root):
+            print("%s: no render by hand has executed this research.conf.py, and "
+                  "a render executes it; read it, then run `sd-research-kit "
+                  "render`. docs/dashboard/ is stale until then" % trigger,
+                  file=sys.stderr)
+            return 0
+    except (OSError, subprocess.SubprocessError):
+        return 0
+
+    kit = shutil.which("sd-research-kit")
+    if kit is None:
+        print("%s: sd-research-kit not on PATH; docs/dashboard/ is now stale"
+              % trigger, file=sys.stderr)
+        return 0
+    try:
+        subprocess.run([kit, "render"], cwd=root, timeout=600, check=True,
+                       env=dict(os.environ, **{TRIGGER_ENV: trigger}))
     except (OSError, subprocess.SubprocessError):
         print("%s: render failed; docs/dashboard/ is now stale" % trigger,
               file=sys.stderr)

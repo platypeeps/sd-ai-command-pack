@@ -377,6 +377,69 @@ def rendered(text: str | None, action: str = DEFAULT_ACTION) -> str:
     return "\n".join(lines) + "\n"
 
 
+def unguarded(text: str, action: str = DEFAULT_ACTION) -> str | None:
+    """`text` with `action`'s guard taken out: what `setup-github --remove` writes.
+
+    The inverse of `rendered` for the lines it owns. Each guard item goes with
+    its comment run, an `ignore:` list the removal empties goes too, and every
+    other line stays: the rest of the file is the consumer's. A file that is
+    exactly `minimal_file(action)` was created by the installer, so it answers
+    None, which the caller reads as delete.
+    """
+
+    if text == minimal_file(action):
+        return None
+    lines = text.splitlines()
+    try:
+        places = _places(lines, action)
+    except GuardError:
+        return text
+    for placement, at, until, indent, _action in reversed(places):
+        if placement != "replace":
+            continue
+        key = next(i for i in range(at - 1, -1, -1) if lines[i].strip() == "ignore:")
+        del lines[at:until]
+        following = next((line for line in lines[key + 1:] if line.strip()), "")
+        if _indent(following) < indent or not following.lstrip().startswith(("- ", "#")):
+            del lines[key]
+    return "\n".join(lines) + "\n"
+
+
+def removal(root: pathlib.Path, workflow: pathlib.Path, template: Any, *, self_install: bool,
+            force: bool) -> list[tuple[pathlib.Path, str | None, str]]:
+    """What `setup-github --remove` changes: (path, new text or None to delete, report line).
+
+    Text in, a plan out; the installer does the writing. `template(pin)` is
+    the workflow the installer writes at `pin`, so a workflow the repository
+    edited beyond its pin needs `force`, as replacing one does.
+    The guard stays while another workflow still names review-route, because
+    Dependabot would bump that pin the day the guard went. Any mention counts,
+    quoted or not: keeping a guard costs nothing, and lifting a needed one does.
+    """
+
+    target = root / workflow
+    current = target.read_text(encoding="utf-8") if target.is_file() else None
+    pin = None if self_install or current is None else read_pin(current)
+    if current is not None and current != template(pin) and not force:
+        raise GuardError(f"{workflow} differs from the template beyond its pin; rerun with --force to remove it")
+    verdict = "remove" if current is not None else "absent"
+    plan: list[tuple[pathlib.Path, str | None, str]] = [(target, None, f"{verdict} {workflow}")]
+    dependabot = root / DEPENDABOT_RELATIVE_PATH
+    before = dependabot.read_text(encoding="utf-8") if dependabot.is_file() else None
+    pinned = sorted(str(path.relative_to(root)) for path in (root / workflow.parent).glob("*.y*ml")
+                    if path != target and DEPENDENCY in path.read_text(encoding="utf-8"))
+    if before is None:
+        plan.append((dependabot, None, f"absent {DEPENDABOT_RELATIVE_PATH}"))
+    elif pinned:
+        plan.append((dependabot, before, f"kept {DEPENDABOT_RELATIVE_PATH} ({', '.join(pinned)} still pins "
+                                         f"{DEPENDENCY})"))
+    else:
+        after = unguarded(before)
+        verb = "remove" if after is None else "unguard" if after != before else "same"
+        plan.append((dependabot, after, f"{verb} {DEPENDABOT_RELATIVE_PATH}"))
+    return plan
+
+
 def report_drift(root: pathlib.Path, expected: Mapping[pathlib.Path, str], stream: TextIO) -> int:
     """One line per file, `same <path>` or `DIFFERS <path>` plus a unified diff.
 
@@ -417,44 +480,50 @@ def report_mode(root: pathlib.Path, workflow: pathlib.Path, repo_mode: str, demo
     """
 
     if demotion is None:
-        return None if repo_mode == "full" else report_unwanted(root, workflow, repo_mode, stream)
+        if repo_mode == "full":
+            return None
+        return report_unwanted(root, workflow, f"{repo_mode} mode carries no routing lane",
+                               f"this repository is in {repo_mode} mode; only a full-mode repository carries the "
+                               "routing lane", stream)
     stream.write(f"note: this run resolves to {repo_mode} mode ({demotion.reason}); "
                  "compared against the full-mode template\n")
     return None
 
 
-def report_unwanted(root: pathlib.Path, workflow: pathlib.Path, repo_mode: str, stream: TextIO) -> int:
-    """`setup-github --check` outside full mode, where the installer refuses (sd:1285).
+def report_unwanted(root: pathlib.Path, workflow: pathlib.Path, absent: str, why: str, stream: TextIO) -> int:
+    """`setup-github --check` where no lane may exist.
+
+    That is outside full mode (sd:1285), or under `repo.ci = local` (sd:1843).
 
     With no template to converge on, a tracked workflow is not `DIFFERS` --
-    that is drift `--force` cannot fix -- but `REMOVE`, exit 1. Passing
-    silently would hide a lane the mode says must not exist. The Dependabot
-    guard is named, not judged: another of the pack's actions may pin under it.
+    that is drift `--force` cannot fix -- but `REMOVE`, exit 1, naming the
+    verb that removes it. Passing silently would hide a lane that must not
+    exist, or one that never runs. Absence is the target: exit 0.
     """
 
     if not (root / workflow).is_file():
-        stream.write(f"absent {workflow} ({repo_mode} mode carries no routing lane)\n")
+        stream.write(f"absent {workflow} ({absent})\n")
         return 0
-    stream.write(
-        f"REMOVE {workflow}\n"
-        f"  this repository is in {repo_mode} mode; only a full-mode repository carries the "
-        f"routing lane. Delete the workflow, and its guard in {DEPENDABOT_RELATIVE_PATH} "
-        "unless another pack action's pin needs it.\n"
-    )
+    stream.write(f"REMOVE {workflow}\n"
+                 f"  {why}; remove the workflow and its guard with `sd-review setup-github --remove`\n")
     return 1
 
 
-def ci_local_skip(root: pathlib.Path) -> str | None:
+def ci_local_skip(root: pathlib.Path, workflow: pathlib.Path | None = None) -> str | None:
     """Why a workflow installer lays nothing in `root`, or None when it may.
 
     A repository whose `repo.ci` row says `local` runs no GitHub Actions
     (sd:1843): `sd-ship merge` runs `sd-check` at the head and posts
     `sd/local-gate` instead. `sd_lib.ci_mode` answers `github` on any doubt,
-    so an unread row installs as before.
+    so an unread row installs as before. Given `workflow`, a tracked one is
+    named with the verb that removes it.
     """
     import sd_lib  # noqa: PLC0415 - kept out of this module's import-time surface
 
     if sd_lib.ci_mode(root) != "local":
         return None
-    return (f"skipped: repo.ci is local for {root}, so no GitHub workflow is laid; sd-ship merge runs "
-            f"sd-check at the exact head and posts the {sd_lib.LOCAL_GATE_CONTEXT} status instead")
+    reason = (f"skipped: repo.ci is local for {root}, so no GitHub workflow is laid; sd-ship merge runs "
+              f"sd-check at the exact head and posts the {sd_lib.LOCAL_GATE_CONTEXT} status instead")
+    if workflow is not None and (root / workflow).is_file():
+        reason += f"; {workflow} is still tracked and never runs: remove it with `sd-review setup-github --remove`"
+    return reason

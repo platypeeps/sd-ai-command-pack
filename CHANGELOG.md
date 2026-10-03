@@ -2,7 +2,326 @@
 
 ## Unreleased
 
+### Added
+
+- **No GitHub issues from a managed repository (sd:2256).** A new
+  `PreToolUse` hook, `bin/sd-issue-guard`, denies `gh issue create` (and its
+  alias `gh issue new`) and `mcp__github__issue_write` when the session's
+  checkout is a repository whose `repo.managed` row is set. The denial tells
+  the agent to record the work with `sd task add`. Anywhere else -- an
+  unmanaged or unregistered repository, no workflow database, a payload it
+  cannot read -- it prints nothing and the call proceeds. `--user` registers
+  it with the other hooks; `SD_ISSUE_GUARD=0` switches it off. The pack's
+  own `.claude/settings.json` also denies both tools outright.
+
+- **One machine-wide queue for local gates (sd:2262).** Every gate that waits
+  for a slot -- `sd-check`, so every `sd-ship` gate, and the pack's own
+  `run-tests.sh` -- now takes a place in one queue under the slot directory,
+  and only the head starts: first to wait, first to start. Admission is one
+  step under `queue.lock`, so two waiters never share a free slot or a load
+  reading. The head starts only while load1 is below `sd.gate_load_max`
+  (unset: 2.5 per core, 40 on 16); while load5 is still above it, load1 must
+  stay below for `sd.gate_settle_seconds` (unset: 45), and two starts are that
+  far apart. `SD_GATE_LOAD_MAX` and `SD_GATE_SETTLE_SECONDS` override them for
+  one run. `sd gate run -- CMD` waits, runs any command, and frees its slot
+  when the command ends, also on a signal or a crash; it exits with the
+  command's code, 124 when `--timeout` passed first. `sd gate status [--json]`
+  shows who holds a slot and who waits, with their place and since when. A
+  dead waiter's ticket is removed by the next poll, as its `flock` is free.
+
+- **A held merge lane, and merge from the lane's checkout (sd:2035, sd:2037).**
+  `sd-ship hold --item N --holder NAME [--for SECONDS]` reserves the
+  repository's merge lane for one item. It is written under the ship lock,
+  lasts `--for` seconds (3600 by default, 86400 at most) and renews on a
+  rerun. While it stands, `prepare` and `merge` for any other item refuse as
+  `lane_held`, naming the held item, the holder and the expiry, both before
+  taking the lock and under it. The held item's merge ends the hold, and
+  `sd-ship release --item N` ends it sooner. `sd-ship merge` no longer
+  requires the item's branch to be checked out: when the checkout's branch
+  holds no receipt for the item, the item's one receipt names the branch,
+  `--branch` names it when there are several, and `--expected-head` is checked
+  against the branch's tip fetched from origin. Neither checkout moves.
+
+- **One passing local gate per head (sd:2041, sd:1912).** Under `repo.ci =
+  local`, `sd-ship prepare` runs its check as the merge gate does -- a clean
+  worktree at the head, the gate's environment, `sd-review --gate-check` --
+  and a pass leaves a receipt in this machine's workflow database. The merge
+  gate of the same head, within 30 minutes (`REUSE_WINDOW_SECONDS`), reads it
+  instead of a second run, and the status says `(reused)`. Prepare never
+  reads a receipt and the merge gate never writes one. The binding is the
+  head, its tree, the gate inputs (every pack `bin/` file and an untracked
+  `CLAUDE.local.md`), the scope, the detected commands, each command's
+  executable, the interpreter and the gate's whole environment, every
+  variable by name and value. Inputs outside the repository (external
+  makefiles, tool files, machine state) are not bound; the short same-head
+  window is the accepted residual risk, and a repository that needs more uses
+  the explicit dependency contract (sd:1912). The gate's bound in prepare is
+  now the merge gate's 3600 s, not the reviewers' 1800 s, unless
+  `--review-timeout` names one; the timing plan carries it as
+  `check_seconds`.
+
+- **A declared docs-only check scope (sd:2072).** A repository may track
+  `.github/sd-check-scope.json` naming `docs_paths` globs and a
+  `docs_command`. `sd-check --base REF` then runs only the docs command when
+  every path changed since the merge base is a docs path; the merge gate and
+  prepare's gate pass the base branch. A change to the declaration, a
+  Makefile, the file the entrypoints came from, `CLAUDE.local.md` or a file a
+  check command names runs the full check. The status reads `sd-check pass
+  (docs-only)`. No declaration is today's behaviour.
+
+- **A Dependabot commit is attributed by the identity GitHub gives it
+  (sd:2065).** Dependabot writes no `Authored-with:`, so `sd-review` refused
+  every bump as `authored unknown` and `sd attribute` had no truthful value to
+  record. A commit whose author is `dependabot[bot]` with its fixed noreply
+  address and whose committer is `GitHub <noreply@github.com>` now reads as
+  `dependabot/github`: vendor `github`, which excludes no reviewer, and the
+  value the squash carries. A local rewrite changes the committer, so it says
+  nothing again; `sd attribute <sha> dependabot` records it by hand. A human
+  fix-up on the branch still needs its own trailer. The identity is a claim,
+  as a trailer is; the GitHub signature is not verified.
+
+- **`sd-ship prepare --catch-up` merges the base into a BEHIND branch
+  (sd:2023).** Under strict protection another landing left a branch behind,
+  and the recovery was a hand merge, a push, a review and a prepare. The flag
+  merges `origin/<base>` (no rebase, no force push), and the new head gets a
+  full-branch pass, so the review covers the branch's own diff and not the
+  base's code. A conflict aborts and leaves the branch unchanged. Merge now
+  names BEHIND as `base_moved`, before the local gate runs, and points at the
+  flag.
+
+- **Every repository gate takes a machine-wide slot (sd:1996).** `sd-check`,
+  which every `sd-ship` gate runs, waits for one of `sd.gate_slots` slots
+  before it runs a check; unset reads a quarter of the cores, `SD_GATE_SLOTS`
+  overrides it for one run, and CI takes none. The pack's own test harness
+  used a cap alone (sd:1541), and on 2026-09-28 nine gates across repositories
+  reached a load average of 141 on 16 cores. Both now share
+  `bin/sd_gate_slots.py`. A queued gate says so on stderr, the wait counts
+  against `--timeout`, and a holder's checks run with `SD_GATE_SLOTS=0`.
+
+- **`sd ci local` switches a repository to local CI (sd:1914).** Run from a
+  checkout, it sets `repo.ci` to `local`, makes `sd/local-gate` the one
+  required status check with `strict` on -- in classic protection, or in each
+  repository ruleset that requires checks, keeping every other rule -- and
+  turns Actions off for a private repository. A public repository keeps
+  Actions for its dynamic workflows (CodeQL, Dependabot, Copilot) and has
+  each workflow its files declare disabled. It is a dry run unless `--apply`
+  is given, refuses without `admin`, and a second run finds nothing to do.
+  The contexts it drops are named. A head that already carries a failed
+  (billing-blocked) check run still refuses; WORKFLOW.md § No-CI mode names
+  the remedy, a fresh commit.
+
 ### Fixed
+
+- **opencode reviews run again on opencode 2.x, and refuse 1.x (sd:2445).**
+  opencode 2.0.20 removed `debug agent` and `--pure`, so every opencode
+  review was refused and the live confinement tests failed `make check`.
+  The confinement probe now starts a private `opencode serve` in the review's
+  environment and launch dir and reads the resolved `sd-review` agent and the
+  loaded plugins. A run is refused when the version is not 2.x, when any
+  plugin is not built in (2.x cannot drop plugins as `--pure` did), or when
+  anything after `*: deny` differs from the map. The run gets its own empty
+  `OPENCODE_CONFIG_DIR`, which keeps the operator's plugins out; `PWD` and
+  `OPENCODE_CONFIG` are dropped, and project config is switched off. Each was
+  measured on 2.0.20: an inherited `PWD` naming the checkout had started its
+  MCP server from the neutral dir. The review runs `--standalone`, as the
+  shared background service never sees the inline config.
+
+- **A pack landing no longer voids a receipt whose review request is unchanged (sd:1397).**
+  `sd-review --explain` now reports `request_sha256`, a digest of the prompt,
+  the review material and its input manifest (whose `omitted_paths` decide a
+  partial review), the route and the chosen providers. `sd-ship` stores
+  it on each pass. When only review code moved the binding, `prepare` and
+  `merge` replay `--explain` for the stored pass, with the prior report it
+  was handed, and keep the receipt when the digest is unchanged: no pass is
+  spent, the binding is rebound, and `review_binding_kept` records what
+  moved. A policy change, a legacy receipt, a failed replay, a changed
+  digest, or a move in code that parses or disposes findings (`sd-review`,
+  `sd_opencode.py`, `sd_registry.py`, listed as `FINDING_FILES`) still
+  refuses and re-reviews as before.
+
+- **A folder rename fits the review input (sd:2400).** `sd-review` sent a
+  moved file as a full deletion plus a full addition, so a pure folder move
+  of 111 files measured 5 MB and was refused at the 2 MB limit. A rename git
+  detects now sends git's rename patch, with any content hunks, under the new
+  path, and a one-line record naming the new path under the old one. The
+  inventory still lists both paths, so each stays visible and citable; the
+  same move measures 127 KB. The unchanged lines are not sent, so both paths
+  count as summarized: a reviewer that reads only the material reports
+  partial coverage, and the chain falls through to one that reads the
+  repository.
+
+- **A recorded check builds into a fresh folder (sd:2327).** An optional
+  `build_outputs` key in `.github/sd-check-reuse.json` names each ignored
+  folder the check builds and the variable that redirects it, such as
+  `"target": "CARGO_TARGET_DIR"`. `sd-check --record-receipt` points that
+  variable at a fresh, empty temporary folder and removes it after the run,
+  also when the run fails, so a receipt never vouches for an earlier build.
+  The operator's own folder is never deleted, moved or hashed. An output with
+  no variable (`null`) refuses recording while it exists. A rustup toolchain
+  link that leaves the toolchain, dangles or loops now refuses the binding:
+  its text stays equal when the file it names changes.
+
+- **A Rust repository can declare complete check receipts (sd:2325, sd:2326,
+  sd:2328).** Three rulings on sd:1912 change `.github/sd-check-reuse.json`
+  receipts. An optional `secret_name_exceptions` key lists exact tracked
+  files under a declared root, such as `src/token.rs`, that the secret-name
+  filter admits; every other secret-looking name stays refused. The
+  environment digest covers the declared variables only: `PATH`, `HOME`,
+  `LANG`, `LC_ALL` and `TMPDIR` drifted inside one session and voided
+  receipts, and the check still runs with them. When `rustup` is on the
+  controlled `PATH`, each toolchain a tool runs from binds by the content of
+  its whole directory, not by its name or version. An explicit `cargo
+  +nightly` or `rustup run nightly`, or a declared `+nightly` tool, binds the
+  toolchain it selects, and a selection rustup cannot answer refuses reuse.
+- **The local test gate leaves the machine room (sd:1955).**
+  `.github/scripts/run-tests.sh` ran CPUs minus one workers locally, so two
+  gates in the two machine-wide slots put 30 workers on 16 cores; the load
+  average read 65-73 and the runner heartbeat missed during such runs. A local
+  run now takes half the CPUs and runs its shards at `nice -n 10`. CI keeps
+  every CPU at normal priority, and `TEST_WORKERS` still overrides the count.
+
+- **A blocking local review names its findings (sd:2102).** `sd-ship
+  prepare` refused with `local review blocking: 1/1 completed; see item ship
+  receipt`, and no command printed that receipt: the operator read each
+  finding out of the `state` table by hand. The refusal now has code
+  `review_blocking`, names up to five blocking findings as severity,
+  `path:line` and a summary cut to 160 characters, and carries all of them in
+  the JSON result's `findings` field. Its `next_action` names `sd-ship
+  adjudicate --item N --expected-head SHA --json` (or `--no-item --review-id
+  ID`), whose disposition template prints each finding whole. A later prepare
+  of the same head, refused because no disposition was accepted, reports the
+  same way.
+
+- **A stopped or timed-out `sd-check` ends everything its check started
+  (sd:1815).** Each check now leads a process group of its own, through
+  `sd_lib.run_group`, and the group is killed when the check ends: at
+  `--timeout`, on SIGTERM or SIGINT to `sd-check` alone (as `pkill` sends
+  it), and after a normal exit. Before, `subprocess.run` killed only the
+  check's first process at the timeout, and a signal reached none of them,
+  so `make check` and its test workers ran on with parent pid 1. A check's
+  stdin is now `/dev/null`. Ctrl-C prints `sd-check: interrupted` instead of
+  a traceback and still exits by SIGINT. A caller that SIGKILLs `sd-check`
+  itself still leaves the group running; nothing can forward that signal.
+
+- **A catch-up keeps both CHANGELOG.md entries (sd:2174).** `sd-ship prepare
+  --catch-up` aborted on any conflict, and in the pack it stopped almost every
+  time on `CHANGELOG.md`: the branch and the base had each added an entry at
+  the top of the same section. When `CHANGELOG.md` at the root is the only
+  unmerged path and every conflict hunk has an empty base, the merge now keeps
+  both, the branch's entries first and one blank line between them, and the
+  receipt carries a warning that says so. An edit on either side, or any other
+  conflicted path, still aborts with the same `merge_conflict` refusal. No
+  `merge=union` attribute: it drops the blank line between entries.
+
+- **Jev can no longer lower a review (sd:2132).** `sd-review` replaced the
+  routed tier with Jev's choice, so an answer of `skip` or `cheap` removed a
+  review the policy asked for. An answer below the routed tier now keeps the
+  routed tier and records what Jev said as `below_routed` in the `jev` block;
+  the route reason names it. Answers at or above the routed tier are
+  unchanged.
+
+- **The writing skills name their Jev calls (sd:2133).** `sd-fact-check`,
+  `sd-publish`, `sd-prose-lint` and `sd-humanizer` probed with a bare `jev
+  enabled` and sent no `--caller` or `--stage`, so the judgment ledger could
+  not count them. They now pass `JEV_SD_FACT_CHECK`, `JEV_SD_PUBLISH` and
+  `JEV_SD_PROSE_SCORE` with the skill's name, and each stage variable set to
+  `0` switches that pass off.
+
+- **`sd-ship prepare` no longer titles a multi-commit branch after its newest
+  commit (sd:2097).** With no `--title` and no stored title, prepare used the
+  newest non-merge subject, so an 11-commit branch opened as a pull request
+  named for its last fix (ui-design PR #16). A one-commit branch still uses
+  its subject. A branch of two or more non-merge commits is refused before the
+  review, and the refusal names the count and the subject it would have used.
+  Merges still never count (sd:1377), and `merge` still squashes with the live
+  pull request title (sd:1876).
+
+- **A mirror request carries its GitHub URL (sd:1999).** A request under
+  `~/.claude/pending-mirror-syncs/` named its source only as a local path, so
+  the drain composed the pointer line's URL itself, and the owner drifted:
+  after a repository moved to a new owner, its Notion pages named the old
+  owner for six days. `render` now writes
+  `source_url`, read from `origin` and normalized to
+  `https://github.com/<owner>/<repo>/blob/HEAD/<path>`, and `null` where
+  origin is missing, on another host or carries a credential. The contract's
+  drain step 3 and the mirror shape link it verbatim. The field is part of
+  the fingerprint only when present, so each document of a repository with a
+  GitHub origin re-queues once, and no other repository re-queues anything.
+
+- **A post-cap request verifies past a reservation (sd:2192).** A request
+  whose last pass reviewed nothing -- a watchdog, an unreadable receipt, or a
+  pass no reviewer completed -- still reviewed the whole branch. On a guest
+  repository PR the fix since the last completed pass was about 8 KB and the
+  branch about 2.1 MB, so every reviewer refused the input and the request
+  could not run. The request now verifies the diff since the last completed
+  pass, and the coverage check links it to that pass. A reservation that kept
+  a finding or a timeout capture is not passed over, and neither is a failed
+  pass dispatched under a moved review binding, which a request now marks as
+  an automatic re-review does; that request still reviews the whole branch.
+  The request's history digest is unchanged.
+
+- **A post-cap review verifies the fix, and a pass that reviewed nothing
+  spends no request (sd:2147).** `sd-ship prepare --additional-review-for`
+  reviewed the whole branch against its base on every request. The design
+  read an explicit request as a full-branch checkpoint that supersedes the
+  history before it, so the one pass the operator asked for was the largest
+  subject the item had. On ui-design #19 the branch was 2.1 MB over 85 files,
+  every reviewer refused the input past the 2,000,000-byte cap, and the
+  refused pass still spent the request. A request after a completed pass on
+  an earlier head now verifies the diff since that head, as an automatic pass
+  would; the whole branch is reviewed only where no such pass exists. A pass
+  in which no reviewer completed and no finding survived is released like a
+  gate failure, and every refusal of an additional pass says whether the
+  request was consumed.
+
+- **No test reaches the real Jev (sd:2136).** On a keyed machine, tests that
+  ran `sd-review` or `sd-docs-lint` against the checkout sent live, metered
+  calls: 141 on 2026-09-29. `run-tests.sh` now exports `JEV_ENABLED=0`; the
+  Jev tests keep their own stubs. `sd-docs-lint` now names both of its calls
+  (`JEV_SD_DOCS_LINT`, `--caller sd-docs-lint`) so its intended gate reading
+  is counted.
+
+- **`sd writing` runs from a linked worktree (sd:2024).** It keyed rows to
+  the worktree's own path, so every piece answered "no database piece". It
+  now keys rows to the main checkout and, through `sd_db.writing.checkout`,
+  reads piece files and gate reports from the worktree. Import, register,
+  cutover, recovery and every `publication-*` verb still run only in the main
+  checkout. A library without `checkout` refuses a worktree by name.
+
+- **`sd-ship merge` accepts GitHub's `unstable` answer (sd:2075).** The
+  merge-rules poll from sd:2050 treated only `clean` as mergeable, so it
+  refused answerbook/mezmo_benchmark #583 after five reads: `sd/local-gate`,
+  the one required context, had passed, and only the optional CodeQL run was
+  still in progress. `unstable` with `mergeable` true is GitHub allowing the
+  merge, and it now passes readiness on both `repo.ci` paths. `blocked`,
+  `dirty`, `behind` and `mergeable` false still refuse, and a declared gap
+  still requires every check run to pass.
+
+- **`sd-ship merge` waits for GitHub's merge-rules answer after posting
+  `sd/local-gate` (sd:2050).** GitHub recomputes mergeability after a new
+  status, and one read refused #580 in mezmo_benchmark seconds before a retry
+  merged it, after a second full gate run. Under `repo.ci = local` merge reads
+  again up to five times, waiting 3, 6, 9 and 12 seconds. The refusal is now
+  `merge_rules_unconfirmed`, retryable, and names GitHub's last
+  `mergeable_state` and the time waited.
+
+- **`sd-research-kit render` registers in the file the dashboard reads
+  (sd:2010).** Since system 350553a the dashboard reads
+  `<config>/project-dashboard/documents.conf`, `<config>` being
+  `$SYSTEM_TOOLS_CONFIG`, else `$XDG_CONFIG_HOME/system`, else
+  `~/.config/system`. The renderer still looked in the dashboard checkout,
+  found no file there, and printed `dashboard not registered` on every render,
+  even for a repository the dashboard already listed. It now resolves the path
+  by the dashboard's rule. `SD_DASHBOARD_HOME` is gone: nothing else read the
+  checkout.
+
+- **`sd-ship`'s squash subject is the pull request's title (sd:1876).**
+  `prepare` stores the newest non-merge commit subject when no `--title` is
+  given, and `merge` used that stored title, so a pull request adopted with
+  its own title, or retitled after prepare, landed on main under a commit
+  subject such as `ci: re-run on the local gate`. The merge now takes the
+  title from the pull request it has just read, falling back to the stored
+  one, and still refuses a `wip` title.
 
 - **`sd-ship merge --watch` accepts a `ci = local` pull request (sd:1875).**
   `--watch` ran `gh pr checks --watch --fail-fast` before reading `repo.ci`,
@@ -12,6 +331,62 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **A review carries forward across a clean merge-in of the base (sd:1485).**
+  Every catch-up merge moved the head, so the local review spent a
+  full-branch pass again and a Copilot review went stale
+  (`copilot_review_stale`) when main's commits touched shipped files. Both
+  now carry forward when the reviewed head is an ancestor, every commit since
+  it is a two-parent merge of a base commit whose tree is git's own
+  conflict-free merge result, the base's new commits touch no file the
+  branch changes and no file in a directory holding one, and `git patch-id
+  --stable` of the branch's own change against the base is unchanged. An
+  unchanged patch-id alone does not show the branch still works on the new
+  base, so the directory rule is the operator's narrowing. The local review
+  must be clean or advisory, and a `--provider` the receipt's reviewer does
+  not match is never carried, nor reused at a carried head. The receipt
+  records `review_carry_forward` (from, to, patch-id, merges), `prepare`
+  prints it and returns it, and the Copilot merge warning says why the gate
+  cleared. Anything else reviews again as before. A rebase is not carried,
+  so `reviewed_head_orphaned` is unchanged.
+
+- **`sd-ship prepare` reads a hand-opened pull request's live body (sd:1878).**
+  The live body outranked the stored one only when a receipt named the pull
+  request. A pull request opened by hand has no receipt, so `prepare`
+  reviewed, linted and squashed its default body while GitHub showed the
+  author's. With no receipt and no `--body-file`, the one open pull request
+  from this branch of this repository is now read; `body_source` says
+  `live_pr`. A blank body, or more than one open pull request, falls back as
+  before.
+
+- **The pack's own GitHub Actions workflows are gone.** This repository gates
+  locally (`repo.ci = local`), so `tests.yml`, `pr-body-lint.yml` and
+  `sd-review-route.yml` never ran. The gate's `sd_db` pin moved from
+  `tests.yml` to `.sd-system-rev`, and a missing or malformed pin fails the
+  gate. `make audit` says there is no workflow for zizmor to audit.
+  `check-zizmor-personas.py` and its tests are deleted with their subject.
+  Dependabot no longer watches `github-actions`.
+
+- **The first `sd-ship prepare` of an item names its claim (sd:1928).**
+  Associate-only was the silent default, so a forgotten `--deliver` merged
+  sd:1910 with `Item:` alone and left its row planning with the code on
+  main. A first item prepare now refuses unless it gets `--deliver` (the
+  item's last pull request) or the new `--associate-only` (an earlier one).
+  A reprepare keeps the stored claim. The owned runner, which names its
+  `--database`, keeps the old default. `--deliver` now also takes a task or
+  followup, with no acceptance file: its squash carries `Delivers:` and the
+  verified merge moves it to done with the sentence
+  `sd task status N done --delivered-by` records, so a task merge no longer
+  needs a hand close.
+
+- **`sd-ship body` says which scope line a diff demands, for a given pull
+  request too (sd:1877).** The result's `scope` lists each line the diff
+  demands -- `CI/review scope:` for a `.github/**` path -- with the path that
+  demands it and whether the body carries it, read with rule 8's own classes
+  and matchers. `--pr N` takes the diff from that pull request's files, both
+  ends of a rename, and without `--body-file` reads its live body, so a pull
+  request opened by hand is checked before `prepare` refuses it. The lint is
+  handed the same path list, so the two answers cannot disagree.
 
 - **The lane commands take `-C <dir>` (sd:1910).** `sd-ship`, `sd-check`,
   `sd-review`, `sd-review-ack` and `sd-pr-state` accept a global `-C <dir>`

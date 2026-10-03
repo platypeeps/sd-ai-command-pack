@@ -27,8 +27,8 @@
 > claims them. `CONTRIBUTING.md` carries the same account. The surrounding
 > Testing Requirements prose is not: it names a Ruff scope over `install.py`,
 > `installer/`, `scripts/` and `templates/scripts/` (the live scope is
-> `LINT_RUFF_PATHS` in the Makefile) and a macOS unittest leg that R11-D4
-> dropped. Most of the manifest-path, symlink-escape and occupied-target rules
+> `LINT_RUFF_PATHS` in the Makefile) and a macOS unittest leg that was
+> dropped; the pack has gated locally since 2026-09-28. Most of the manifest-path, symlink-escape and occupied-target rules
 > under **Required Patterns** and the **Code Review Checklist** describe an
 > installer that wrote into other repositories; `bin/sd_install.py` is
 > machine-scope and writes no tracked file anywhere.
@@ -1778,7 +1778,7 @@ Correct: PYTHON_BIN=.venv/bin/python bash .github/scripts/check-shipped-script-c
 Use this contract when changing `templates/scripts/sd-ai-command-pack-review-preflight.mjs`
 coverage instrumentation, the `c8` devDependency in `package.json` /
 `package-lock.json`, or the coverage steps in the `ci-scope` job's bookkeeping
-lane in `.github/workflows/tests.yml`.
+lane in `.github/workflows/tests.yml` [absent: removed when the pack moved to local CI on 2026-09-28].
 
 ### 2. Signatures
 
@@ -1849,7 +1849,7 @@ Correct: run both calls with --clean=false and one shared --temp-directory, then
 
 ### 1. Scope / Trigger
 
-Use this contract when changing `.github/workflows/tests.yml`,
+Use this contract when changing `.github/workflows/tests.yml` [absent: removed when the pack moved to local CI on 2026-09-28],
 `.github/scripts/bookkeeping_ci_scope.py` [absent: removed with the release train in 0.72.0],
 `.github/scripts/check-ci-result.sh` [absent: removed with the release train in 0.72.0], or finish-work bookkeeping validation
 that affects exact-head CI.

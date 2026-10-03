@@ -26,6 +26,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import unittest.mock
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -88,17 +89,17 @@ class Fixture(Configured):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        self.dashboard = self.root / "dashboard"
-        self.dashboard.mkdir()
+        self.dashboard = self.root / "config" / "project-dashboard"
+        self.dashboard.mkdir(parents=True)
         self.conf = self.dashboard / "documents.conf"
         self.conf.write_text(HEADER, encoding="utf-8")
         self.repo = self.root / "my-research"
         (self.repo / "build").mkdir(parents=True)
 
         self.vault = self.root / "vault"
-        original = (PUBLISH.DASHBOARD_HOME, PUBLISH.QUEUE, PUBLISH.VAULT,
+        original = (PUBLISH.DASHBOARD_CONFIG, PUBLISH.QUEUE, PUBLISH.VAULT,
                     PUBLISH.LEGACY_QUEUE)
-        PUBLISH.DASHBOARD_HOME = self.dashboard
+        PUBLISH.DASHBOARD_CONFIG = self.dashboard
         PUBLISH.QUEUE = self.root / "queue"
         PUBLISH.VAULT = str(self.vault)
         # Pointed inside the fixture even when a test does not use it, so no
@@ -107,7 +108,7 @@ class Fixture(Configured):
         PUBLISH.LEGACY_QUEUE = self.legacy
 
         def restore() -> None:
-            (PUBLISH.DASHBOARD_HOME, PUBLISH.QUEUE, PUBLISH.VAULT,
+            (PUBLISH.DASHBOARD_CONFIG, PUBLISH.QUEUE, PUBLISH.VAULT,
              PUBLISH.LEGACY_QUEUE) = original
 
         self.addCleanup(restore)
@@ -172,9 +173,72 @@ class RegisterTests(Fixture):
         self.assertIn("~/elsewhere", self.roots()[1])
 
     def test_no_dashboard_is_reported_not_raised(self) -> None:
-        PUBLISH.DASHBOARD_HOME = self.root / "absent"
+        PUBLISH.DASHBOARD_CONFIG = self.root / "absent"
         said = PUBLISH.register_root(self.repo, "MINE", self.repo / "build")
         self.assertIn("not registered", said)
+
+
+class DashboardConfigTests(unittest.TestCase):
+    """`documents.conf` is where the dashboard reads it (sd:2010).
+
+    Since system 350553a the dashboard reads `<config>/project-dashboard/
+    documents.conf`, `<config>` being `$SYSTEM_TOOLS_CONFIG` or
+    `~/.config/system`. The renderer kept looking in the dashboard checkout,
+    found nothing there, and printed "not registered" on every render of a
+    repository the dashboard already listed.
+
+    Each case loads the module afresh under a patched environment, because
+    the path is read when the module loads -- the way a render reads it.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.repo = self.root / "my-research"
+        (self.repo / "docs" / "dashboard").mkdir(parents=True)
+
+    def loaded(self, **env: str):
+        """The module as a render with `env` in its environment loads it."""
+        clean = {k: v for k, v in os.environ.items()
+                 if k not in ("SYSTEM_TOOLS_CONFIG", "XDG_CONFIG_HOME")}
+        with unittest.mock.patch.dict(os.environ, dict(clean, **env), clear=True):
+            return load()
+
+    def test_system_tools_config_names_the_file_the_dashboard_reads(self) -> None:
+        conf = self.root / "config" / "project-dashboard" / "documents.conf"
+        conf.parent.mkdir(parents=True)
+        conf.write_text(HEADER, encoding="utf-8")
+        module = self.loaded(SYSTEM_TOOLS_CONFIG=str(self.root / "config"))
+
+        said = module.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
+        self.assertNotIn("not registered", said)
+        self.assertIn("registered my-research", said)
+        self.assertIn("label|my-research|MINE\n", conf.read_text(encoding="utf-8"))
+
+        said = module.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
+        self.assertIn("already registered", said)
+
+    def test_no_file_at_the_config_path_is_reported_not_raised(self) -> None:
+        module = self.loaded(SYSTEM_TOOLS_CONFIG=str(self.root / "empty"))
+        said = module.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
+        self.assertIn("not registered", said)
+        self.assertIn(str(self.root / "empty" / "project-dashboard" / "documents.conf"), said)
+
+    def test_the_directory_follows_the_system_repositorys_rule(self) -> None:
+        """`lib/system_tools_config.py` in the system repository, case by case."""
+        cases = (
+            ({"SYSTEM_TOOLS_CONFIG": "/cfg", "XDG_CONFIG_HOME": "/xdg", "HOME": "/h"},
+             Path("/cfg/project-dashboard")),
+            ({"SYSTEM_TOOLS_CONFIG": "", "XDG_CONFIG_HOME": "/xdg", "HOME": "/h"},
+             Path("/xdg/system/project-dashboard")),
+            ({"HOME": "/h"}, Path("/h/.config/system/project-dashboard")),
+            ({"SYSTEM_TOOLS_CONFIG": "~/cfg"},
+             Path.home() / "cfg" / "project-dashboard"),
+        )
+        for environ, expected in cases:
+            with self.subTest(environ):
+                self.assertEqual(PUBLISH.dashboard_config(environ), expected)
 
 
 class MirrorTargetTests(Configured):
@@ -1011,6 +1075,36 @@ class ReceiptTests(ReceiptFixture):
         self.assertTrue(any("queued a" in line for line in said), said)
 
 
+class MirrorHoldTests(ReceiptFixture):
+    """A render told to hold its mirrors queues nothing, and says why.
+
+    sd:1991: a branch switch onto a `main` behind its upstream rendered the
+    stale tree, and the render queued that text for the shared mirror a
+    moment before the pull brought the current one. The hook now renders
+    such a checkout with `SD_SKIP_MIRROR` set to its reason, so the dashboard
+    stays current and the queue is left alone.
+    """
+
+    NAME = "my-research.a.notion.json"
+    REASON = "post-checkout: HEAD is 1 commit behind its upstream"
+
+    def test_a_held_render_queues_nothing_and_says_why(self) -> None:
+        self.source("stale\n")
+        PUBLISH.ENVIRON = dict(PUBLISH.ENVIRON, SD_SKIP_MIRROR=self.REASON)
+        said = PUBLISH.enqueue(self.repo, self.doc())
+        self.assertEqual(list(PUBLISH.QUEUE.glob("*.json")), [], said)
+        self.assertTrue(any(self.REASON in line for line in said), said)
+
+    def test_a_held_render_leaves_a_pending_request_as_it_was(self) -> None:
+        self.source("current\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        before = (PUBLISH.QUEUE / self.NAME).read_text()
+        self.source("stale\n")
+        PUBLISH.ENVIRON = dict(PUBLISH.ENVIRON, SD_SKIP_MIRROR=self.REASON)
+        PUBLISH.enqueue(self.repo, self.doc())
+        self.assertEqual((PUBLISH.QUEUE / self.NAME).read_text(), before)
+
+
 class DrainRaceTests(ReceiptFixture):
     """A render that queues during a drain is not acknowledged by that drain.
 
@@ -1221,6 +1315,45 @@ class RevertTests(ReceiptFixture):
         self.assertTrue(any("unchanged" in line for line in said), said)
         self.assertEqual(list(PUBLISH.QUEUE.glob("*.json")), [])
 
+    def test_a_return_to_the_delivered_text_says_so(self) -> None:
+        """sd:1991's second render: the stale checkout queued old text, and the
+        pull's render asked for exactly what the receipt says was delivered.
+        The request is rewritten to it, and the report says why a request for
+        content the destination already holds is standing."""
+        self.source("current\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        self.drain()
+        self.source("stale\n")
+        PUBLISH.enqueue(self.repo, self.doc())  # the checkout of a stale main
+        self.source("current\n")
+        said = PUBLISH.enqueue(self.repo, self.doc())  # the pull
+        self.assertTrue(any("back to the delivered version" in line for line in said), said)
+        delivered = json.loads((PUBLISH.receipts() / self.NAME).read_text())["delivered"]
+        pending = json.loads((PUBLISH.QUEUE / self.NAME).read_text())
+        self.assertEqual((pending["content"], pending["fingerprint"]), ("current\n", delivered))
+
+    def test_a_drain_holding_the_replaced_request_is_undone_by_the_next(self) -> None:
+        """Why the return to the delivered text rewrites and does not withdraw.
+
+        A drain reads its request outside the queue lock. One that read the
+        stale request and wrote it has only its acknowledgement left; were the
+        request withdrawn, that acknowledgement found nothing, recorded
+        nothing, and every later render read the receipt's old `delivered` and
+        left the stale text on the destination for good.
+        """
+        self.source("current\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        self.drain()
+        self.source("stale\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        read = json.loads((PUBLISH.QUEUE / self.NAME).read_text())  # drain step 1
+        self.source("current\n")
+        PUBLISH.enqueue(self.repo, self.doc())  # the pull, while the drain writes
+        said = PUBLISH.mirror_delivered(self.NAME, read["fingerprint"])  # drain step 6
+        self.assertIn("newer request is pending and stays", said)
+        pending = json.loads((PUBLISH.QUEUE / self.NAME).read_text())
+        self.assertEqual(pending["content"], "current\n", "STALE: remote=stale, queue empty")
+
 
 class MutableSourceTests(ReceiptFixture):
     """A request carries the Markdown it was queued with, and the fingerprint
@@ -1274,6 +1407,92 @@ class MutableSourceTests(ReceiptFixture):
         self.assertNotEqual(
             PUBLISH.mirror_fingerprint(dict(request, content="B\n"), targets[0], what),
             request["fingerprint"], "the fingerprint ignores the content")
+
+
+class SourceUrlTests(Fixture):
+    """A request carries the GitHub URL of its source, read from `origin`.
+
+    The request named only a local path, so the drain composed the pointer
+    line's URL itself, and the owner drifted: after a repository moved to
+    a new owner, its Notion pages still pointed at the old owner for six
+    days (sd:1999). The render reads the owner from `origin`, and a repository
+    whose origin is missing or not on github.com carries `None` rather than
+    a guessed URL.
+    """
+
+    NAME = "my-research.a.notion.json"
+    DOC = [dict(src="10-x/a.md", out="a", title="A", notion=dict())]
+    URL = "https://github.com/example-org/research-repo/blob/HEAD/10-x/a.md"
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.repo / "build").rmdir()
+        self.repo.rmdir()
+        self.repo = research_repo(self.root)
+
+    def origin(self, url: str) -> None:
+        if git(self.repo, "remote"):
+            git(self.repo, "remote", "remove", "origin")
+        git(self.repo, "remote", "add", "origin", url)
+
+    def queued(self, docs: list[dict] | None = None, name: str = NAME) -> dict:
+        with unittest.mock.patch.dict(PUBLISH.ENVIRON, SD_MIRROR_REQUEUE="1"):
+            PUBLISH.enqueue(self.repo, docs or self.DOC)
+        return json.loads((PUBLISH.QUEUE / name).read_text())
+
+    def test_ssh_and_https_origins_give_one_https_url(self) -> None:
+        for url in ("git@github.com:example-org/research-repo.git",
+                    "ssh://git@github.com/example-org/research-repo.git",
+                    "https://github.com/example-org/research-repo.git",
+                    "https://github.com/example-org/research-repo"):
+            with self.subTest(origin=url):
+                self.origin(url)
+                self.assertEqual(self.queued()["source_url"], self.URL)
+
+    def test_no_origin_carries_no_url(self) -> None:
+        self.assertIsNone(self.queued()["source_url"])
+
+    def test_an_origin_not_on_github_carries_no_url(self) -> None:
+        for url in ("https://gitlab.com/example-org/research-repo.git",
+                    "https://token@github.com/example-org/research-repo.git",
+                    "/srv/git/research-repo.git"):
+            with self.subTest(origin=url):
+                self.origin(url)
+                request = self.queued()
+                self.assertIsNone(request["source_url"])
+                self.assertNotIn("token", json.dumps(request))
+
+    def test_the_path_is_repo_relative_and_quoted(self) -> None:
+        (self.repo / "10-x" / "a b.md").write_text("# B\n", encoding="utf-8")
+        self.origin("git@github.com:example-org/research-repo.git")
+        request = self.queued([dict(src="10-x/a b.md", out="b", title="B", notion=dict())],
+                              "my-research.b.notion.json")
+        self.assertEqual(request["source_url"],
+                         "https://github.com/example-org/research-repo/blob/HEAD/10-x/a%20b.md")
+
+    def test_a_moved_origin_queues_the_delivered_document_again(self) -> None:
+        """The pointer line is part of the mirror, so a new owner is a new
+        generation: a delivered page naming the old owner is written again."""
+        self.origin("git@github.com:old-owner/research-repo.git")
+        PUBLISH.enqueue(self.repo, self.DOC)
+        fingerprint = json.loads((PUBLISH.QUEUE / self.NAME).read_text())["fingerprint"]
+        self.assertIn("request removed", PUBLISH.mirror_delivered(self.NAME, fingerprint))
+        self.origin("git@github.com:example-org/research-repo.git")
+        said = PUBLISH.enqueue(self.repo, self.DOC)
+        self.assertTrue(any("queued a" in line for line in said), said)
+        request = json.loads((PUBLISH.QUEUE / self.NAME).read_text())
+        self.assertEqual(request["source_url"], self.URL)
+        self.assertNotEqual(request["fingerprint"], fingerprint)
+
+    def test_a_request_without_a_url_keeps_its_fingerprint(self) -> None:
+        """No origin on GitHub adds nothing to the digest, so upgrading the
+        pack re-queues no delivered document of such a repository."""
+        request = self.queued()
+        targets, _ = PUBLISH.mirror_targets(self.DOC[0], self.repo)
+        what = PUBLISH.BY_NAME["notion"].what
+        without = {k: v for k, v in request.items() if k != "source_url"}
+        self.assertEqual(PUBLISH.mirror_fingerprint(without, targets[0], what),
+                         request["fingerprint"])
 
 
 class WorktreeIdentityTests(Fixture):

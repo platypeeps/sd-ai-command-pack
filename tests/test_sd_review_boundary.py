@@ -191,6 +191,12 @@ class NeverPostsTests(unittest.TestCase):
             # this repository and is itself held to the never-posts assertions
             # below, so it widens the allow-list without widening the boundary.
             "sd_setup_github",
+            # The local gate's run (sd:2041), imported inside `--gate-check`
+            # only. It is the half of the gate that posts nothing: the status
+            # post stayed in `sd_local_gate`, which this lane does not import,
+            # so the gate check widens the allow-list by a worktree and a
+            # child process and not by a way out to GitHub.
+            "sd_gate_run",
         }
         self.assertEqual(sorted(imported_names() - allowed), [])
 
@@ -777,11 +783,83 @@ class LineBudgetTests(unittest.TestCase):
         # comment lines). The parse and the change of directory are
         # `sd_lib.enter_directory_from_argv` and `sd_lib.enter_directory`,
         # shared core, so none of that is spent here. Measured on the branch.
+        # 3709 -> 3736 is `setup-github --remove`, the supported way for a
+        # `repo.ci = local` repository (sd:1843) to shed a route workflow that
+        # never runs. `bin/sd_setup_github.py` grows +27: the flag, its
+        # dispatch in `main` (refused beside `--check`, which never writes), `--check` naming a tracked workflow REMOVE there,
+        # `remove` itself, and `_apply`, which the install and the removal now
+        # share as the lane's one write site. What goes and what stays --
+        # the guard lifted out of `dependabot.yml`, kept while another
+        # workflow pins the action -- is `sd_setup_guard.removal` and
+        # `unguarded`, outside the lane, so none of that is spent here.
+        # 3736 -> 4036 is sd:2041, `sd-review --gate-check`: `sd-ship
+        # prepare` runs the review's deterministic gate as the merge gate
+        # does, so a pass leaves a receipt the merge gate reuses instead of
+        # running the check a second time. `bin/sd_gate_run.py` joins the
+        # lane at 229 lines: the clean worktree, the scrubbed environment and
+        # the receipt lookup, split out of `sd_local_gate` so the lane imports
+        # the run and not the status post. It is the local gate's code moved,
+        # not new code; the merge gate runs the same lines. `bin/sd-review`
+        # grows +71: `run_gate_check`, the `--gate-check` flag and its
+        # refusals, and a `check_seconds` bound in the timing plan beside the
+        # reviewers' phase. The binding and its age limit are
+        # `sd_gate_receipts`, outside the lane, so none of that is spent here.
+        # 4036 -> 4042 is the one-handoff window (sd:2041 review): prepare's
+        # gate check passes `reuse=False` and `sd_gate_run` takes `reuse` and
+        # `record`, so a receipt spans prepare to merge and nothing else.
+        # 4042 -> 4052 is sd:2132: Jev may raise the review tier, never lower
+        # it. `bin/sd_jev.py` grows +8: the floor (3) and the docstring that
+        # states it (5). `bin/sd-review` grows +2: the route reason names an
+        # answer below the routed tier. Measured on the branch.
+        # 4052 -> 4065 is sd:2107: `bin/sd_jev.py` passes `jev --subject`, the
+        # judged change as `sd-review-tier:<owner>.<repo>:<sha12>`, so a later
+        # labeller can score the tier from the pull request's outcome. It grows
+        # +12 (`_jev_subject`, the optional argv pair, the `root` argument) and
+        # `bin/sd-review` +1 (passing `root`). Reading `origin` and `HEAD` is
+        # `sd_lib.github_head`, shared core, so none of that is spent here.
+        # 4065 -> 4161 is sd:2181: `bin/sd_review_material.py` grows +96 to send
+        # a media file (PNG, JPEG, GIF, WebP, WOFF, PDF by magic bytes) as
+        # its sizes and hashes instead of `git diff --binary` base64, to send
+        # what git calls binary but is UTF-8 or BOM-marked UTF-16 as a text
+        # diff, and to read both sides in one `cat-file --batch`; three helpers
+        # keep each under the complexity ceiling.
+        # 4161 -> 4196 is sd:2181 review pass 2: a summarized path makes a
+        # material-only reader's coverage partial, so its answer does not count
+        # toward depth (`partial` in `bin/sd-review`, `coverage` in the manifest),
+        # and a text diff names a UTF-16 or BOM encoding, sending an
+        # encoding-only change in binary form (`encoding`, `text_diff`).
+        # 4196 -> 4264 is sd:2325, sd:2326 and sd:2328 in `sd_check_receipts.py`:
+        # exact tracked paths the secret-name filter admits, a digest of the
+        # declared environment alone, and each rustup toolchain bound by its
+        # contents. They let a Rust repository declare `complete: true`.
+        # 4264 -> 4286 is sd:2325 review: an explicit `+toolchain`, `rustup run`
+        # or declared `+<toolchain>` binds the toolchain it selects, or refuses.
+        # 4286 -> 4338 is sd:2327: declared build outputs, which a recorded run
+        # builds into fresh temporary folders through each output's variable,
+        # removed after the run; the operator's folder is never touched.
+        # 4338 -> 4348 is sd:2327 review: a toolchain link that dangles, loops or
+        # resolves outside the toolchain refuses the binding.
+        # 4348 -> 4354 is sd:1397: `bin/sd-review` grows +6 for
+        # `request_sha256`, the digest of what the reviewers are asked, which
+        # `sd-ship` replays at a moved binding to keep an unchanged receipt.
+        # The replay itself is `bin/sd_ship_review.py`, outside the lane.
+        # 4354 -> 4520 is sd:2445: opencode 2.x dropped `debug agent` and
+        # `--pure`. `bin/sd_opencode.py` grows +163: the probe that replaces
+        # `debug agent`, a private `opencode serve` polled for the lazily
+        # loaded agent and its plugins (+67 with `__main__`); the report,
+        # version, plugin and tail checks (+42); the 2.x permission list and
+        # environment (+32); the docstring's 2.x measurements (+22).
+        # `bin/sd-review` grows +3 for the run's own config dir. Measured, not
+        # carried: `sd_opencode.py` is 467 on this tree.
+        # 4520 -> 4550 is sd:2400: `bin/sd_review_material.py` grows +30 for
+        # `renamed_material`, which sends a rename git detects as its rename
+        # patch under the new path and a one-line record under the old one, so
+        # a folder move fits the input limit and both paths stay listed.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3709,
+            4550,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

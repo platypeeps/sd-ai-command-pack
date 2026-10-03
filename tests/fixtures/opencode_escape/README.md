@@ -16,16 +16,26 @@ from a neutral directory instead of inside the checkout.
   to the file named by `MUTATOR_EVIDENCE` and touches nothing else, so a test
   can see whether the tool was reachable without any real side effect.
 
-`tests/test_sd_review_opencode.py::TheEscapeIsClosedLive` builds a throwaway
-checkout from these, launches opencode the way the reader does, and asserts
-the checkout's config is not contributed (no `loading path=` line for it) and
-the mutation does not fire. It self-skips where the `opencode` binary is
-absent; the config-load half is offline and needs no credentials.
+- `plugin_local.js` -- an inert opencode 2.x server plugin (sd:2445). It
+  registers and does nothing; a test drops it into a config dir's `plugins/`
+  to see whether opencode loads it and whether the probe refuses it.
 
-`TheEscapeIsClosedLive::test_opencode_resolves_the_hostile_config_as_a_breach_by_any_route`
-asks opencode what it resolved (`opencode debug agent sd-review --pure`, the
-probe `sd_opencode.confinement_breach` runs before every review). From inside
-the checkout the resolution carries this config's `bash` and `mutator_mutate`
-allowances; from a neutral dir it is clean; and the same file handed in
-through `XDG_CONFIG_HOME` is refused again. That last route is why the
-neutral dir alone is not the boundary.
+`tests/test_sd_review_opencode.py::TheEscapeIsClosedLive` builds a throwaway
+checkout from these and launches opencode the way the reader does. The marker
+that the checkout's config loaded is its MCP server starting: the mutator
+writes `server-started` to `MUTATOR_EVIDENCE` during bootstrap. A control arm,
+inside the checkout with project config on, shows the marker fires; the
+reader's launch, from a neutral dir with an inherited `PWD` naming the
+checkout, and from inside with project config off, never fires it. The class
+runs only against opencode 2.x, the major the reader accepts, and self-skips
+where the binary is absent or another major is installed.
+
+`TheEscapeIsClosedLive::test_opencode_resolves_the_map_and_the_probe_refuses_a_widening`
+runs the probe `sd_opencode.confinement_breach` runs before every review: a
+private `opencode serve` asked for the resolved agent and its plugins. Under
+the reader's environment the resolution is exactly the map, from the neutral
+dir and from inside. With project config on, this config's `mutator_mutate`
+allowance is contributed but lands before our `*: deny`, as 2.x merges the
+inline config last. A rule after the deny is refused, and so is
+`plugin_local.js` in the run's config dir; through `XDG_CONFIG_HOME` it no
+longer reaches the run, because the reader names its own config dir.
