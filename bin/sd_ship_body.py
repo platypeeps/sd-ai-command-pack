@@ -142,6 +142,28 @@ def normalize(body: str, item: int | None, *, deliver: bool = False,
     return "\n".join(kept).rstrip(), tuple(line.text for line in read)
 
 
+#: `Refs: sd:A, sd:B` at column zero names the items a pull request co-delivers (sd:1481).
+_REFS_RE = re.compile(r"^Refs[ \t]*:(?P<value>.*)$", re.IGNORECASE)
+
+
+def refs(body: str, item: int | None) -> tuple[int, ...]:
+    """The items the body's `Refs:` lines name, in order, without `item` or repeats.
+
+    One pull request claims one item, and its `Refs:` lines name the others it
+    fixes; the merge closes them too (operator decision 2026-10-03). Only
+    `sd:<n>` counts, so the template's `sd:<other>` placeholder names nothing.
+    """
+    found: list[int] = []
+    for line in body.split("\n"):
+        match = _REFS_RE.match(line.rstrip("\r"))
+        if match is None:
+            continue
+        for number in re.findall(r"(?<![\w:])sd:(\d+)\b", match["value"]):
+            if int(number) != item and int(number) not in found:
+                found.append(int(number))
+    return tuple(found)
+
+
 def published(body: str, item: int) -> str:
     """The body as `sd-ship` publishes it: normalized, then one `Work:` line."""
     return f"{body}\n\n{sd_lib.WORK_TRAILER} sd:{item}\n"

@@ -4886,6 +4886,21 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
         return status.actionable_inventory(
             self.repo, self.sections(merged_pull_requests=merged), self.TODAY)
 
+    def test_a_finding_that_left_the_window_unanswered_counts_as_expired(self) -> None:
+        """sd:998: past day fourteen a finding lost its row and read as nothing,
+        so expiry looked like resolution. Days fifteen to twenty-eight are
+        counted; the window's own days and day twenty-nine are not."""
+        merged = {"pull_requests": [self.merged(14, 14, ["d14"]), self.merged(15, 15, ["a15", "b15"]),
+                                    self.merged(28, 28, ["c28"]), self.merged(29, 29, ["e29"])]}
+        expired = status.expired_reviews(self.repo, merged, self.TODAY)
+        self.assertEqual({"days": [15, 28], "findings": 3, "pull_requests": [15, 28], "unchecked": ""}, expired)
+        stopped = status.expired_reviews(self.repo, dict(merged, truncated=True, limit=500), self.TODAY)
+        self.assertIn("stopped at its limit of 500", stopped["unchecked"])
+        out = io.StringIO()
+        status._render_threads([], out.write, expired)
+        self.assertIn("  expired: 3 review finding(s) on 2 pull request(s) merged 15-28 days ago "
+                      "expired unanswered: #15, #28\n", out.getvalue())
+
     def test_the_window_holds_day_thirteen_and_fourteen_and_drops_day_fifteen(self) -> None:
         inventory = self.found(self.merged(13, 13, ["a13"]), self.merged(14, 14, ["a14"]),
                                self.merged(15, 15, ["a15"]))
@@ -5235,10 +5250,14 @@ class MergedQueryWindowTests(StatusFixture):
         after = datetime.date.today()
         asked = [line for line in log.read_text(encoding="utf-8").splitlines()
                  if "--state merged" in line]
-        self.assertEqual(1, len(asked), asked)
+        self.assertEqual(2, len(asked), asked)
         allowed = {f"merged:>={(day - datetime.timedelta(days=15)).isoformat()}"
                    for day in (before, after)}
         self.assertTrue(any(token in asked[0] for token in allowed), (asked, allowed))
+        # The expired count's own read, a day wider at each end (sd:998).
+        allowed = {f"merged:{(day - datetime.timedelta(days=29)).isoformat()}.."
+                   f"{(day - datetime.timedelta(days=14)).isoformat()}" for day in (before, after)}
+        self.assertTrue(any(token in asked[1] for token in allowed), (asked, allowed))
 
 
 class CollectMergedTests(unittest.TestCase):

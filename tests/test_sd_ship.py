@@ -126,6 +126,8 @@ class ShipDouble(GitHubDouble):
         #: the merge rules for a just-posted `sd/local-gate` (sd:2050).
         self.blocked_after_status = 0
         self.blocked_pull_reads = 0
+        #: What `GET /pulls/{n}/files` answers, by pull number (sd:1151).
+        self.pull_files = {}
 
     def _pull(self, pull):
         head = getattr(pull, "merged_head", None) or pull.head_sha(self.remote)
@@ -202,6 +204,8 @@ class ShipDouble(GitHubDouble):
         # The review a `prepare` reads to record the findings its push answers.
         # Empty unless a test says otherwise, and answered here rather than by
         # the shared double because the adapter is the only caller of it.
+        if method == "GET" and path.startswith(f"{prefix}/pulls/") and path.endswith("/files"):
+            return 200, [{"filename": name} for name in self.pull_files.get(int(path.split("/")[-2]), [])]
         if method == "GET" and path.startswith(f"{prefix}/pulls/") and path.rsplit("/", 1)[1] in self.review_payload:
             kind = path.rsplit("/", 1)[1]
             sequence = self.review_sequences[kind]
@@ -2103,7 +2107,23 @@ roles:
             with patch.object(ship.time, "sleep"):
                 self.merge()
 
-    def test_human_review_comments_do_not_become_copilot_findings(self):
+    def test_another_reviewers_finding_refuses_the_merge_with_no_copilot_review(self):
+        """sd:998. The merge step is the gate, and a finding is unread whoever
+        wrote it: an inline finding by another reviewer refuses before the PUT,
+        with no Copilot request or review on the pull request at all."""
+        self.prepare()
+        self.double.review_payload["comments"] = [{
+            "id": 9, "user": {"login": "human-reviewer"}, "commit_id": _git(self.root, "rev-parse", "HEAD"),
+            "path": "src.py", "line": 1, "in_reply_to_id": None, "body": "This human finding remains open.",
+        }]
+        with self.assertRaisesRegex(ship.Refusal, "1 pull-request review finding\\(s\\) remain unacknowledged") as caught:
+            self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "review_findings_open")
+        self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
+
+    def test_human_review_findings_gate_the_merge_beside_copilots(self):
+        """Read apart from Copilot's material, so neither becomes the other's,
+        and gated with it (sd:998); before, both human findings merged unread."""
         self.enable_automatic_copilot()
         self.prepare()
         head = _git(self.root, "rev-parse", "HEAD")
@@ -2124,8 +2144,10 @@ roles:
                  "path": "src.py", "line": 1, "in_reply_to_id": None,
                  "body": "This human finding remains open."}
         self.double.review_sequences["comments"] = [[], [human], [human]]
-        with patch.object(ship.time, "sleep"):
-            self.assertEqual(self.merge()["phase"], "merged")
+        with self.assertRaisesRegex(ship.Refusal, "2 pull-request review finding\\(s\\) remain unacknowledged"):
+            with patch.object(ship.time, "sleep"):
+                self.merge()
+        self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
 
     def test_copilot_inline_comment_requires_disposition(self):
         self.enable_automatic_copilot()
@@ -2737,6 +2759,84 @@ roles:
         self.unanswered("--deliver").prepare()
         with patch.object(ship.time, "sleep"):
             self.assert_closed_by_merge(self.merge())
+
+    def test_prepare_names_other_work_on_the_item_or_its_files_and_refuses_nothing(self):
+        """sd:1151. #1120 and #1122 fixed one defect from two sessions; both
+        branches were on origin first. Prepare names each overlap before the
+        review spends a pass, and publishes anyway."""
+        self.remote.commit_on(f"sd-{self.item}-other-session", "same fix\n\nAuthored-with: human", files={"other.py": "x = 1\n"})
+        self.remote.open_pull_request(f"sd-{self.item}-other-session", base="main", title=f"Same fix (sd:{self.item})", body="")
+        self.remote.commit_on("shares-a-file", "touches src\n\nAuthored-with: human", files={"src.py": "value = 9\n"})
+        sharing = self.remote.open_pull_request("shares-a-file", base="main", title="Unrelated", body="")
+        self.double.pull_files[sharing.number] = ["src.py"]
+        self.remote.commit_on(f"fix/sd{self.item}-draft", "claimed\n\nAuthored-with: human", files={"draft.py": "y = 1\n"})
+        self.remote.commit_on("unrelated", "nothing shared\n\nAuthored-with: human", files={"elsewhere.py": "z = 1\n"})
+        self.remote.open_pull_request("unrelated", base="main", title=f"Mentions sd:{self.item}0 only", body="")
+        result = self.prepare()
+        self.assertEqual(result["phase"], "ready_to_send")
+        claims = [line for line in self.operation().state["warnings"] if line.startswith("claim check:")]
+        self.assertEqual(claims, [
+            f"claim check: open pull request #1 (sd-{self.item}-other-session) names sd:{self.item}",
+            f"claim check: open pull request #{sharing.number} (shares-a-file) also changes src.py",
+            f"claim check: origin branch fix/sd{self.item}-draft names sd:{self.item} and has no open pull request",
+        ])
+
+    def refs_items(self) -> tuple[int, ...]:
+        """A task, a followup and a work item in the claimed item's repository."""
+        return tuple(create_item(self.connection, kind=kind, title=f"co-delivered {kind}", status="planning",
+                                 repo=str(self.operator)) for kind in ("task", "followup", "work"))
+
+    def test_a_merge_closes_the_claimed_item_and_every_refs_item(self):
+        """sd:1481. #1150 fixed three rows and closed none: its body named two
+        of them in prose, and one PR may claim one item. `Refs:` names the
+        others, the squash carries a `Delivers:` for each, and the merge
+        closes them all with the delivery sentence."""
+        self.task_item("task")
+        refs = self.refs_items()
+        body = self.directory / "body.md"
+        body.write_text("Three fixes in one change.\n\nRefs: " + ", ".join(f"sd:{number}" for number in refs) + "\n")
+        self.unanswered("--deliver", "--body-file", str(body)).prepare()
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        self.assert_closed_by_merge(result)
+        self.assertEqual(result.get("refs_closed"), [f"sd:{number}" for number in refs])
+        commit = result["merge_commit"]
+        block = ship.sd_lib.trailer_block(_git(self.remote.path, "log", "-1", "--format=%B", "main")).splitlines()
+        for number in refs:
+            with self.subTest(item=number):
+                self.assertIn(f"Delivers: sd:{number}", block)
+                self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (number,)).fetchone()[0], "done")
+        for number in refs[:2]:
+            reasons = [row[0] for row in self.connection.execute(
+                "SELECT body FROM note WHERE item = ? AND kind = 'status_change'", (number,))]
+            self.assertIn(f"planning -> done by sd-ship: delivered at {commit} on origin/main", reasons)
+        again = self.operation("reconcile").reconcile()
+        self.assertFalse(again["delivery_pending"], again)
+
+    def test_an_associate_only_merge_still_closes_its_refs_items(self):
+        self.task_item("task")
+        refs = self.refs_items()[:1]
+        body = self.directory / "body.md"
+        body.write_text(f"An early slice that also fixes another row.\n\nRefs: sd:{refs[0]}\n")
+        self.unanswered("--associate-only", "--body-file", str(body)).prepare()
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        self.assertFalse(result["delivery_pending"], result)
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "in_progress")
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (refs[0],)).fetchone()[0], "done")
+
+    def test_prepare_refuses_a_refs_item_the_merge_could_not_close(self):
+        self.task_item("task")
+        elsewhere = self.directory / "elsewhere"
+        upsert_repo(self.connection, str(elsewhere), remote="https://github.com/example/elsewhere")
+        foreign = create_item(self.connection, kind="task", title="another repository", status="planning", repo=str(elsewhere))
+        body = self.directory / "body.md"
+        for refs, names in (("sd:99999", "which is no item"), (f"sd:{foreign}", "belongs to another repository")):
+            with self.subTest(refs=refs):
+                body.write_text(f"A change.\n\nRefs: {refs}\n")
+                with self.assertRaisesRegex(ship.Refusal, names):
+                    self.unanswered("--deliver", "--body-file", str(body)).prepare()
+        self.assertFalse(self.remote.pull_requests)
 
     def test_a_followup_delivers_on_merge(self):
         self.task_item("followup")

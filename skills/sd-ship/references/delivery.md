@@ -8,6 +8,10 @@ Slices are the default.
 Every associated merge carries `Item: <item>`, which closes nothing.
 Whole-item delivery also carries `Delivers: <item>`.
 Changes without an item omit both trailers and create no placeholder row.
+One PR claims one item; a body line `Refs: sd:A, sd:B` names the other items it fixes.
+The merge adds `Delivers:` for each `Refs:` item and closes it, whatever the claim (operator decision 2026-10-03).
+Prepare refuses a `Refs:` item that does not exist, is not a work, task or followup row, or belongs to another repository.
+A `Refs:` item the merge could not close returns `delivery_pending: true` and names it; `reconcile` retries it.
 
 The first prepare of an item names its claim, or it refuses.
 Give `--deliver` to the item's last PR and `--associate-only` to each earlier PR.

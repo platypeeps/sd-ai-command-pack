@@ -4,6 +4,22 @@
 
 ### Added
 
+- **`sd-ship prepare` names other work on the same item or files (sd:1151).**
+  Two sessions fixed one defect in the same files forty minutes apart (#1120,
+  #1122); both branches were on origin first. Before the review, prepare
+  warns about each open pull request that names the item or changes a file
+  the branch changes, and each origin branch that names the item with no
+  open pull request. The lines go to stderr and the receipt's `warnings`. It
+  refuses nothing, and a read that fails is a warning of its own.
+
+- **`sd-status` counts expired review findings (sd:998).** A merged pull
+  request's unanswered findings left the report on day fifteen and read as
+  nothing, so expiry looked like resolution. `open threads` now ends with an
+  `expired:` line counting the findings nobody answered on pull requests
+  merged 15 to 28 days ago (`MERGED_AGED_DAYS`), and `--json` carries it as
+  `expired_reviews`. Its own read covers those days, so the window's list is
+  not truncated by it; a short read says "at least" and why.
+
 - **`sd gate post --head SHA` posts the local gate outside `sd-ship merge`
   (sd:1989).** A repository under `repo.ci = local` that merges by its own
   automation -- a Dependabot merge, a daily merge script -- got no
@@ -165,6 +181,30 @@
   the remedy, a fresh commit.
 
 ### Fixed
+
+- **A merge closes every `Refs:` item the body names (sd:1481).** One pull
+  request claims one item, and its `Refs: sd:A, sd:B` lines name the others it
+  fixes (operator decision 2026-10-03). The merge closed only the claimed
+  item, so every co-delivered row stayed open until someone closed it by
+  hand. The squash message now carries `Delivers:` for each `Refs:` item and
+  the merge closes it, with or without `--deliver`. Prepare refuses a `Refs:`
+  item that does not exist, is no work, task or followup row, or belongs to
+  another repository. One the merge could not close returns
+  `delivery_pending: true` with `refs_failed`, and `reconcile` retries it.
+
+- **The merge gate reads every reviewer's findings, not only Copilot's
+  (sd:998).** The ack gate ran at the merge step but read Copilot's material
+  alone, and returned early on a pull request Copilot never reviewed. Another
+  reviewer's finding merged unread while `sd-status` listed it as
+  unanswered. The merge now refuses with `review_findings_open` before the
+  merge call until each such finding has a disposition.
+
+- **An empty commit gets its own no-item record (sd:2009).** An `sd attribute`
+  repair is an empty commit, so its tree is the base's -- the tree the last
+  merged record landed. `sd-ship review --no-item --create-record
+  --assert-new-work` refused it as "already owns this tree". The base's own
+  tree is no longer a claimed identity; the commit still is, so the same
+  empty commit cannot allocate twice (operator ruling 2026-09-30).
 
 - **`sd writing list` and `import` refuse a checkout with no `content/`
   folder (sd:1803).** They printed empty results and exited 0 in another

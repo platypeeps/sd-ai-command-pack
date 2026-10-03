@@ -57,6 +57,8 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    A present trailer produces no warning.
    A missing trailer warns; the sequence continues with the commit.
 2. **Review locally before publication.**
+   Before the review, `sd-ship prepare` warns about open PRs and origin branches that name the item or change the same files (sd:1151).
+   The warning refuses nothing; read it before the review spends a pass.
    Use `sd-review --scope branch --challenge` for the *code, before merge* point.
    Read its cap on that row in the sd-ai-command-pack checkout's `.claude/rules/sd-planning-adversarial-review.md`.
    Run `sd-docs-lint` against the built PR body.
@@ -99,6 +101,7 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    Missing protection remains a refusal; this workflow adds no exception.
 8. **Record verified delivery.**
    An associated merge carries `Item:`; only whole-item delivery adds `Delivers:`.
+   Each `Refs: sd:N` item in the body gets `Delivers:` and closes on the merge (sd:1481).
    Record the row only after the remote confirms the merge.
    Read `skills/sd-ship/references/delivery.md` in the sd-ai-command-pack checkout before delivery, cancellation, or completion reporting.
    A slice leaves its item open.
@@ -221,6 +224,7 @@ No local receipt means there is nothing to abandon, and the command refuses.
 It preserves request history and records a separate abandonment.
 Only submitted, non-pending reviews mark matching request heads complete.
 Published Copilot findings still require disposition.
+Every other reviewer's findings require disposition too; the merge refuses with `review_findings_open` before it merges (sd:998).
 
 The additive `workflow` object reports `schema_version`, `phase`, `state`, `blocker`, and `next_action`.
 States are `success`, `retryable_failure`, `operator_decision`, and `policy_block`.
