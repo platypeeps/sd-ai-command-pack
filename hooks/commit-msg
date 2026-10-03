@@ -15,6 +15,13 @@
 # such line is not read further, so a commit that states no trailers keeps
 # the behaviour it had before this hook.
 #
+# It also writes the author (sd:1295). With `SD_AUTHOR` set and no
+# `Authored-with:` line in the message, it adds `Authored-with: <value>` at
+# the start of the final trailer paragraph, by `git interpret-trailers`, the
+# value `sd attribute` would write for that name
+# (`source:bin/sd_lib.py::commit_author`). A name nothing resolves refuses
+# the commit. Unset, it writes nothing, and the review still asks.
+#
 # `SD_SKIP_HOOKS=1` does not skip it. That variable exists because the
 # pre-commit tier costs seconds; this one costs one git call, and
 # `sd attribute` sets the variable on a commit whose only content is its
@@ -24,10 +31,11 @@
 # Installed by `make hooks` beside the pre-commit tier, as the link
 # <common .git>/hooks/commit-msg -> ../../hooks/commit-msg: one per clone,
 # read from the main checkout, shared by every linked worktree.
-"""The commit-msg hook: every checked trailer line must be one git reads."""
+"""The commit-msg hook: write the author `SD_AUTHOR` names; every checked trailer line must be one git reads."""
 
 from __future__ import annotations
 
+import os
 import pathlib
 import subprocess
 import sys
@@ -43,6 +51,24 @@ Fix: put every trailer in the final paragraph, one per line, with no blank line 
 Check after committing: git log -1 --format='%(trailers:key=Authored-with,valueonly)'
 must print the value. The rejected message is kept in .git/COMMIT_EDITMSG.
 """
+
+
+def write_author(root: pathlib.Path, message_file: pathlib.Path, author: str, sd_lib) -> bool:
+    """Add `Authored-with:` for `author` first in the final trailer paragraph; False after a refusal."""
+    import sd_registry
+    try:
+        value = sd_lib.commit_author(author, sd_registry.read_or_report)
+    except sd_lib.TrailerError as error:
+        print(f"commit-msg: refused, {error}", file=sys.stderr)
+        return False
+    written = sd_lib.git_output(
+        ["interpret-trailers", "--in-place", "--no-divider", "--where", "start",
+         "--trailer", f"{sd_lib.AUTHORED_TRAILER} {value}", str(message_file.resolve())], root)
+    if written is None:
+        print(f"commit-msg: refused, `git interpret-trailers` could not write "
+              f"{sd_lib.AUTHORED_TRAILER} {value}", file=sys.stderr)
+        return False
+    return True
 
 
 def main(argv: list[str]) -> int:
@@ -61,6 +87,11 @@ def main(argv: list[str]) -> int:
               file=sys.stderr)
         return 1
     message = message_file.read_text(encoding="utf-8", errors="replace")
+    author = os.environ.get(sd_lib.AUTHOR_VARIABLE, "").strip()
+    if author and not sd_lib.states_author(message):
+        if not write_author(root, message_file, author, sd_lib):
+            return 1
+        message = message_file.read_text(encoding="utf-8", errors="replace")
     if not sd_lib.unread_trailers(message, ""):  # states none of the checked trailers
         return 0
     parsed = sd_lib.git_output(
