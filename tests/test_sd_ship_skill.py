@@ -1042,5 +1042,17 @@ class AKilledRunIsReconciledByTheNext(unittest.TestCase):
         )
 
 
+class AStandingRejection(unittest.TestCase):
+    """sd:1929: a rejection that survives one review pass is adjudicated before the next fix is pushed."""
+
+    RULE = "A rejection that still stands after one review pass is recorded with `sd-ship adjudicate` before the next fix is pushed."
+
+    def test_the_skill_states_the_rule_once_and_the_reference_points_back(self) -> None:
+        self.assertEqual(SKILL_TEXT.count(self.RULE), 1)
+        reference = (REPO_ROOT / "skills/sd-ship/references/adjudication.md").read_text(encoding="utf-8")
+        self.assertNotIn(self.RULE, reference, "one statement of the rule; the reference cross-references it")
+        self.assertIn("before the next fix is pushed (`skills/sd-ship/SKILL.md`", reference)
+
+
 if __name__ == "__main__":
     unittest.main()

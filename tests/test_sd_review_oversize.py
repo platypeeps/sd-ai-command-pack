@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import random
 import subprocess
 from unittest import mock
 
@@ -216,6 +217,32 @@ class OversizeTests(ReviewFixture):
                 self.assertEqual({entry["path"] for entry in entries if entry.get("summarized")}, expected)
                 self.assertEqual(set(sd_review.sd_review_material.coverage(entries, {"r": "x"})["omitted_paths"]), expected)
 
+    def test_a_renamed_and_modified_binary_is_sent_as_its_rename_delta(self):
+        """sd:2432: the `--binary` fallback detects the rename, so a moved, edited blob is not sent as full base64."""
+        data = b"\x00\x01" + random.Random(2432).randbytes(200_000)  # incompressible, so a literal is large
+        for scope in ("worktree", "branch"):
+            with self.subTest(scope=scope):
+                root = self.make_repo(scope)
+                (root / "old.dat").write_bytes(data)
+                subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
+                subprocess.run(["git", "commit", "--quiet", "-m", "blob"], cwd=root, check=True, capture_output=True)
+                if scope == "branch":
+                    subprocess.run(["git", "checkout", "--quiet", "-b", "move"], cwd=root, check=True, capture_output=True)
+                subprocess.run(["git", "mv", "old.dat", "new.dat"], cwd=root, check=True, capture_output=True)
+                (root / "new.dat").write_bytes(data[:1000] + b"edited" + data[1006:])
+                if scope == "branch":
+                    subprocess.run(["git", "commit", "--quiet", "-am", "move"], cwd=root, check=True, capture_output=True)
+                material, entries = sd_review.sd_review_material.collect_review_material(
+                    root, sd_review.resolve_subject(root, scope))
+                self.assertEqual({entry["path"] for entry in entries}, {"old.dat", "new.dat"})
+                self.assertEqual(sum(entry["bytes"] for entry in entries), len(material.encode()))
+                self.assertLess(len(material.encode()), len(data) // 10)
+                piece = material[material.index("diff --git a/old.dat b/new.dat"):]
+                self.assertIn("rename from old.dat\n", piece)
+                self.assertIn("GIT binary patch\ndelta ", piece)
+                # A delta leaves the unchanged bytes unsent, so both sides are summarized, as a text rename is.
+                self.assertEqual({entry["path"] for entry in entries if entry.get("summarized")}, {"old.dat", "new.dat"})
+
     def test_rename_record_quotes_an_unusual_old_path(self):
         """sd:2400: the old path's header is quoted as git quotes it, so a name cannot forge a file boundary."""
         root = self.make_repo()
@@ -356,6 +383,19 @@ class BinaryMaterialTests(ReviewFixture):
         self.assertIn('--- "raw.dat" ---\n[binary, base64]\n', material)
         self.assertIn("[binary, not sent] added (untracked); 2100008 bytes", material)
 
+    def test_a_text_file_that_starts_with_the_media_marker_is_not_summarized(self):
+        # sd:2431: summarized is decided from the bytes, not from the rendered text.
+        root = self.make_repo()
+        (root / "notes.txt").write_text("[binary, not sent] a note that only looks like a summary\n")
+        (root / "new.png").write_bytes(self.SHOT)
+        for scope in ("worktree", "planning"):
+            with self.subTest(scope=scope):
+                subject = (sd_review.resolve_subject(root, "worktree") if scope == "worktree"
+                           else mock.Mock(scope="planning", paths=["notes.txt", "new.png"]))
+                _material, inventory = sd_review.sd_review_material.collect_review_material(root, subject)
+                summarized = {row["path"]: row.get("summarized", False) for row in inventory}
+                self.assertEqual((summarized["notes.txt"], summarized["new.png"]), (False, True), inventory)
+
     def test_ico_magic_is_not_a_media_pass(self):
         # sd:2181 review: 00 00 01 00 is too weak a signature to let a file escape review.
         root, base = self.screenshot_branch()
@@ -370,7 +410,7 @@ class BinaryMaterialTests(ReviewFixture):
         self.assertIn("GIT binary patch", piece)
         self.assertNotIn("[binary, not sent]", piece)
         self.assertIn('--- "loose.ico" ---\n[binary, base64]\n',
-                      sd_review.sd_review_material.file_material(root, "loose.ico", "added (untracked)"))
+                      sd_review.sd_review_material.file_material(root, "loose.ico", "added (untracked)")[0])
 
     def test_a_summarized_path_leaves_a_material_only_review_partial(self):
         # sd:2181 review pass 2: a hash line is not a review. A `-diff` script that starts

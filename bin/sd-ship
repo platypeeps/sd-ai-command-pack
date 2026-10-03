@@ -43,10 +43,13 @@ from sd_ship_review import (
     ReviewTimeout,
     SharedReview,
     carry_forward,
+    is_ancestor,
 )
 from sd_ship_workflow import blocked, failure
 
 BIN = pathlib.Path(__file__).resolve().parent
+#: When this process started, for the invoker a receipt names (sd:2078).
+PROCESS_STARTED = datetime.now(timezone.utc).isoformat()
 REVIEW_SETUP_SECONDS = 3600
 REVIEW_CLEANUP_SECONDS = 5
 REVIEW_DIAGNOSTIC_BYTES = 4096
@@ -302,8 +305,26 @@ def timing_plan(result: subprocess.CompletedProcess) -> dict:
     except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
         valid = False
     if not valid:
+        refuse_authorship(result.stdout)
         raise Refusal("local review emitted no valid timing plan; no provider pass was reserved")
     return plan
+
+
+def refuse_authorship(output: str) -> None:
+    """Refuse with `sd-review`'s own authorship refusal, when its plan carries one (sd:2067).
+
+    "No valid timing plan" hid it: the cause, a commit with no `Authored-with:`
+    trailer, was readable only from `sd-review --scope branch`.
+    """
+    try:
+        said = json.loads(output).get("authorship_refusal")
+    except (ValueError, TypeError, AttributeError, RecursionError):
+        return
+    if isinstance(said, str) and said.strip():
+        raise Refusal(f"local review refused: unknown authorship: {said.strip()}; no provider pass was reserved",
+                      code="authorship_unknown", boundary="policy", state="operator_decision",
+                      next_action="Give each named commit an Authored-with: trailer (sd attribute <sha> <entry> "
+                                  "repairs one without a rewrite), then prepare again.")
 
 
 def moment() -> str:
@@ -595,7 +616,28 @@ class Ship(SharedReview):
         base = self.state.get("base")
         if base:
             warnings.extend(self.squash_notes(base, head))
+            warnings.extend(self.dropped_delivery_notes(base, head))
         return warnings + list(self.catch_up_notes)
+
+    def dropped_delivery_notes(self, base: str, head: str) -> list[str]:
+        """One advisory per `Delivers:` a no-item squash will not carry (sd:2171).
+
+        The no-item squash message is composed here and carries no branch
+        commit's `Delivers:`, so `sd task status N done --delivered-by` then
+        found no trailer. Whether to copy it into the squash is not decided;
+        this only says so before the merge.
+        """
+        if not self.args.no_item:
+            return []
+        notes = []
+        for commit, message in sd_lib.commit_messages(self.root, f"refs/remotes/origin/{base}", head):
+            for line in sd_lib.trailer_block(message).splitlines():
+                name, _, value = line.strip().partition(" ")
+                if name == sd_lib.DELIVERS_TRAILER and value.strip():
+                    item = value.strip().removeprefix("sd:")
+                    notes.append(f"commit {commit[:12]} carries `{line.strip()}`, and a no-item squash does not "
+                                 f"carry it; ship with --item {item} to record the delivery")
+        return notes
 
     def squash_notes(self, base: str, head: str) -> list[str]:
         """One note per pre-squash head this branch carries (sd:1409)."""
@@ -1185,15 +1227,16 @@ class Ship(SharedReview):
             raise Refusal("explicit Copilot review requires a full-owned repository")
         if not self.args.no_item and (mode != "guest" or local_work):
             body = sd_ship_body.published(body, self.args.item)
-        if self.state.get("pull_request") and (self.state.get("title") != title
-                                               or (not self.args.no_item and self.state.get("deliver") != deliver)):
-            raise Refusal("existing PR delivery claim or title differs; reconcile the prepared scope first")
+        if self.state.get("pull_request"):
+            self.assert_title_matches(title)
+            if not self.args.no_item and self.state.get("deliver") != deliver:
+                raise Refusal("existing PR delivery claim differs; reconcile the prepared scope first")
         self.assert_scope()
         if not self.state:
             self.save(repository=self.repository, branch=self.branch, item=self.args.item, phase="new")
         self.persist_copilot_direction()
         fields = {} if self.args.no_item else {"deliver": deliver, "acceptance": claim}
-        self.save(title=title, body=body, base=base, **fields)
+        self.save(title=title, body=body, base=base, invoker=self.invoker(), **fields)
         # Rules 5 and 8 read the pull request body, and the body is built by
         # now. Without it the rules report themselves not run and CI is the
         # first to check the `Work:` line, which the skill said happened
@@ -1255,8 +1298,26 @@ class Ship(SharedReview):
         copilot = self.prepare_copilot_review(number, pull, head, mode)
         if copilot.get("warning"):
             self.save(warnings=list(self.state.get("warnings") or []) + [copilot["warning"]])
-        return self.result("ready_to_send", copilot_review=copilot,
+        return self.result("ready_to_send", copilot_review=copilot, invoker=self.state["invoker"],
                            body_source=self.body_source, normalized=list(self.body_normalized))
+
+    def assert_title_matches(self, title: str) -> None:
+        """Accept a title the stored one or the live pull request's agrees with (sd:1378).
+
+        A pull request retitled on GitHub left the stored title stale, and the
+        guard refused a `--title` that matched the live one. A matching title
+        is stored by the caller; any other still refuses, naming all three.
+        """
+        stored = self.state.get("title")
+        if title == stored:
+            return
+        live = str(self.api.pull(self.state["pull_request"]["number"]).get("title") or "").strip()
+        if title == live:
+            return
+        raise Refusal(f'the title "{title}" differs from the stored "{stored}" and the pull request\'s "{live}"; '
+                      "reconcile the prepared scope first",
+                      next_action="Pass --title with the pull request's title, or retitle the pull request "
+                                  "on GitHub to the new one, then prepare again.")
 
     def pushed_pull(self, number: int, head: str) -> dict:
         """Read the pull object until it shows the head just pushed (sd:1394).
@@ -1544,7 +1605,21 @@ class Ship(SharedReview):
             extras["protection"] = self.state["protection"]
         if self.state.get("row_authorized_merge"):
             extras["row_authorized_merge"] = self.state["row_authorized_merge"]
+        if self.state.get("merge_invoker"):
+            extras["invoker"] = self.state["merge_invoker"]
         return extras
+
+    def invoker(self) -> dict:
+        """Who ran this command, so a receipt can be traced to its process (sd:2078).
+
+        A merge nobody claimed could not be traced: its receipt named the head
+        and the review, and no pid, checkout, authority or lock holder.
+        """
+        run, manual = getattr(self.args, "run", None), getattr(self.args, "manual", False)
+        return {"pid": os.getpid(), "ppid": os.getppid(), "started_at": PROCESS_STARTED,
+                "checkout": str(self.root), "chdir": getattr(self.args, "chdir", None),
+                "authority": f"--run {run}" if run else "--manual" if manual else None,
+                "lock_holder": lock_options(self.args, self.store).get("holder")}
 
     def merge_authority(self, head: str) -> None:
         from sd_db import runner
@@ -1729,11 +1804,15 @@ class Ship(SharedReview):
         # so the freshness `ready` read is read again here:
         # another lane on this account can advance the base between the two,
         # and the merge would land against a base nobody validated (sd:1110).
+        # The remedy is a merge, not a rebase, as in `assert_current_base`:
+        # a rebase rewrites the reviewed commits (sd:2034).
         unstrict = any(gap.get("id") == "strict" for gap in protection.get("accepted_gaps") or [])
         if ("declared_gap" in protection or unstrict) and self.api.commits_behind(base, head) != 0:
-            raise Refusal("the default branch advanced after the readiness check; rebase and re-review",
-                          code="base_moved", boundary="ci", state="retryable_failure",
-                          next_action="Update the branch onto the current default branch, then retry.")
+            raise Refusal(f"the default branch advanced after the readiness check; merge origin/{base} "
+                          "into the branch and re-review", code="base_moved", boundary="ci",
+                          state="retryable_failure",
+                          next_action=f"Run sd-ship prepare --catch-up, or git merge origin/{base} on the branch "
+                                      "and then prepare again.")
 
     def settled_ready(self, number: int, head: str, base: str, protection: dict) -> dict:
         """The pull request once `ready` accepts it, read again while GitHub settles (sd:2050).
@@ -1829,7 +1908,9 @@ class Ship(SharedReview):
             refuse_behind(observed, base)
             # Prepare ran this same gate and left a receipt at this head; a
             # matching one answers instead of a second run (sd:2041).
-            self.save(local_gate=sd_local_gate.local_gate(self.api, self.root, head, base=base, database=self.database))
+            gate = sd_local_gate.local_gate(self.api, self.root, head, base=base, database=self.database)
+            self.save(local_gate=gate)
+            sd_local_gate.refuse_failure(gate, head, f"the ship receipt's local_gate; `{self.observe_command()}` prints it")
         observed = self.settled_ready(observed["number"], head, base, protection)
         self.abandon_copilot_review(observed["number"], head)
         self.require_copilot_clearance(observed["number"], observed, head)
@@ -1870,7 +1951,7 @@ class Ship(SharedReview):
         # that never happened (sd:1347).
         title = squash_title(observed, self.state["title"])
         self.save(phase="merge_dispatch", merge_message=body, row_authorized_merge=self.row_authority,
-                  warnings=self.dispatch_warnings())
+                  warnings=self.dispatch_warnings(), merge_invoker=self.invoker())
         try:
             self.api.api(f"{self.api.prefix}/pulls/{observed['number']}/merge", method="PUT",
                          body={"sha": head, "merge_method": "squash", "commit_title": f"{title} (#{observed['number']})",
@@ -1884,16 +1965,34 @@ class Ship(SharedReview):
     def observe(self) -> dict:
         reference = self.state.get("pull_request")
         if not reference:
-            raise Refusal("there is no durable pull-request receipt to observe")
+            # Before a push stores a reference the checkpoint is the only
+            # record, and a refusal's "see the receipt" points at it (sd:2021).
+            return self.result(str(self.state.get("phase") or "new"), merged=False, observed_only=True,
+                               verified=False, receipt=self.receipt_view())
         pull = self.api.pull(reference["number"])
         if (str(pull.get("html_url", "")).lower() != reference["url"] or pull.get("base", {}).get("ref") != reference["base"]
                 or pull.get("head", {}).get("sha") != self.state.get("reviewed_head")):
             raise Refusal("remote PR differs from the prepared receipt")
         if pull.get("merged") is True:
             return self.result("merged", merged=True, observed_only=True, verified=False,
-                               merge_commit=pull.get("merge_commit_sha"))
+                               merge_commit=pull.get("merge_commit_sha"), receipt=self.receipt_view())
         return self.result("ready_to_send", merged=False, observed_only=True, verified=False,
-                           remote_state=pull.get("state"))
+                           remote_state=pull.get("state"), receipt=self.receipt_view())
+
+    def observe_command(self) -> str:
+        """The command that prints this identity's ship receipt."""
+        selector = f"--no-item --review-id {self.args.review_id}" if self.args.no_item else f"--item {self.args.item}"
+        return f"sd-ship observe {selector} --json"
+
+    def receipt_view(self) -> dict:
+        """The ship checkpoint's parts a refusal points at: the last review, a gate failure, the local gate."""
+        passes = list(self.state.get("passes") or [])
+        report = (passes[-1].get("report") or {}) if passes else {}
+        return {"phase": self.state.get("phase"), "passes": len(passes),
+                "review": {"head": passes[-1].get("head"), "status": report.get("status"),
+                           "findings": report.get("findings") or []} if passes else None,
+                "review_preflight_error": self.state.get("review_preflight_error"),
+                "local_gate": self.state.get("local_gate")}
 
     def reconcile(self) -> dict:
         reference = self.state.get("pull_request")
@@ -1913,7 +2012,7 @@ class Ship(SharedReview):
             raise Refusal("the current default branch differs from the prepared base")
         git(self.root, "fetch", "--no-tags", "origin", f"refs/heads/{reference['base']}")
         tip = git(self.root, "rev-parse", "FETCH_HEAD")
-        git(self.root, "merge-base", "--is-ancestor", commit, tip)
+        require_merge_on_base(self.root, commit, tip, reference["base"])
         advertised = git(self.root, "ls-remote", "origin", f"refs/heads/{reference['base']}").split()
         if not advertised or advertised[0] != tip:
             raise Refusal("default branch changed during merge verification; retry reconciliation")
@@ -1950,6 +2049,21 @@ class Ship(SharedReview):
         git(self.root, "fetch", "--prune", "origin")
         return {**evidence, "delivery_pending": False, "retained_branch": self.branch,
                 "retained_worktrees": git(self.root, "worktree", "list", "--porcelain")}
+
+
+def require_merge_on_base(root: pathlib.Path, commit: str, tip: str, base: str) -> None:
+    """Refuse a merge commit the fetched default branch does not contain.
+
+    `--is-ancestor` answers "no" by exit status alone, so the raising `git`
+    helper read it as an empty, retryable "git failed" (sd:1461).
+    """
+    if not is_ancestor(root, commit, tip):
+        raise Refusal(
+            f"merge commit {commit} is not an ancestor of origin/{base} at {tip}; "
+            "GitHub reports the pull request merged, but the default branch does not contain the merge",
+            code="merge_commit_unreachable", boundary="ci", state="operator_decision",
+            next_action=f"Inspect origin/{base}: if it was rewritten after the merge, restore {commit} "
+                        "to it, then run sd-ship reconcile. An unchanged retry refuses the same way.")
 
 
 def quote_branch(repository, branch):

@@ -260,6 +260,9 @@ In a shared repository:
 
 Small change: branch, commit, local review, push, pull request, CI, merge.
 Use the ship workflow without inventing a planning artifact.
+After review, take a newer default branch with `git merge origin/<base>`, never a rebase:
+a rebase rewrites the reviewed commits, and the next push no longer fast-forwards
+the branch `sd-ship` pushed. `sd-ship prepare --catch-up` makes that merge.
 
 Change that earns a work item: `sd-plan` writes `prd.md` using the requirements
 already available and asks only for missing decisions. Then the small-change
@@ -313,6 +316,17 @@ establish the evidence reports uncertainty.
 The item directory stays in place. Use `sd work relink <row-id> <path>` when an
 artifact moves: it preserves the row, notes and original source identity. No
 command automatically deletes or archives a completed item directory.
+
+## Mutation checks
+
+A mutation check edits the code a test covers, runs the test, and restores the
+edit; a test that passes on the mutation has not earned its place.
+Run a Python mutation check with `PYTHONDONTWRITEBYTECODE=1`, and delete the
+`__pycache__` folders first (sd:1790). Python reuses a `.pyc` whose recorded
+source size and whole-second mtime still match, so a same-size edit restored
+within a second runs stale bytecode: a mutation reads as killed or survived by
+timing, and a restored file can fail its own test. The variable stops writes,
+not reads, so a cache left from an earlier run still answers.
 
 ## Parallel work
 
