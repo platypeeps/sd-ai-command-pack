@@ -132,6 +132,16 @@
 
 ### Fixed
 
+- **A branch review checks the reviewed head in a clean worktree (sd:2077).**
+  `sd-review --scope branch` and `--scope pr`, and so `sd-ship review`, ran
+  `sd-check` in the operator's checkout unless `repo.ci` was `local`. An edit
+  to a bash check script during the run killed it mid-line, and the tree it
+  judged was not the reviewed head. The check now runs in a detached worktree
+  at the subject's head, as the local gate does, and its `check.source` reads
+  `worktree`. It leaves no gate receipt, and exit 0 still passes, so a
+  repository with no entrypoint is not a failed review. A worktree review
+  still checks the live checkout, whose edits are its subject.
+
 - **The issue guard's hint parses (sd:2515).** `bin/sd-issue-guard` told the
   agent to run `sd task note <n> "<text>"`, which `sd` refuses: `note` takes
   the text only as `--body`. The hint now reads `sd task note <n> --body

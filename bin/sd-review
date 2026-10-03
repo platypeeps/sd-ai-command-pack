@@ -1602,25 +1602,24 @@ def gate_seconds(args: argparse.Namespace) -> int:
     return getattr(args, "timeout", None) or sd_lib.GATE_CHECK_SECONDS
 
 
-def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeout: int, branch: str,
-                   args: argparse.Namespace) -> dict[str, Any]:
-    """Step 1 as the local gate runs it: a clean worktree at HEAD, compared with `origin/<branch>` (sd:2041).
+def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeout: int, branch: str | None,
+                   args: argparse.Namespace, head: str | None = None) -> dict[str, Any]:
+    """Step 1 in a clean worktree at `head`, HEAD by default, never the live checkout (sd:2041, sd:2077).
 
-    `sd-ship prepare` asks for this under `repo.ci = local`, so the merge gate
-    that follows finds this run's receipt at the same head and binding and does
-    not run the check a second time. It never reads a receipt itself: reuse
-    spans only the prepare-to-merge handoff.
-    The child still runs through `runner`, so the gate's deadline ends its
-    whole process group (sd:1482). Without the library there is no receipt,
-    and the check simply runs.
+    With a `branch` it runs as the local gate does, against `origin/<branch>`,
+    and leaves a receipt the merge gate reads (`sd-ship prepare` under
+    `repo.ci = local`); it never reads one. Without one it reviews a committed head:
+    no receipt, and exit 0 passes as in `run_check`. An edit in the
+    checkout mid-run killed a bash check script there (sd:2077).
+    The child runs through `runner`, so the deadline ends its process group (sd:1482).
     """
     import sd_gate_run  # noqa: PLC0415 -- the gate's run, which posts nothing; needed only here
 
-    head = sd_lib.git_output(["rev-parse", "HEAD"], root)
+    head = head or sd_lib.git_output(["rev-parse", "HEAD"], root)
     if not head:
         raise UsageError("--gate-check needs a commit at HEAD")
-    database = getattr(args, "database", None)
-    if database is None and (library := sd_lib.import_sd_db().module) is not None:
+    database = getattr(args, "database", None) if branch else None
+    if branch and database is None and (library := sd_lib.import_sd_db().module) is not None:
         database = library.default_path(env.get("HOME"))
 
     def through_runner(argv: list[str], child: dict[str, str], cwd: pathlib.Path, limit: int) -> tuple[int | None, str, str]:
@@ -1635,11 +1634,11 @@ def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], t
         gate = {"status": "failure", "exit_code": None, "stderr": str(error), "head": head}
     checks = (gate.get("report") or {}).get("checks")
     report: dict[str, Any] = {
-        "status": "pass" if gate["status"] == "success" else "fail",
+        "status": "pass" if (gate["status"] == "success" if branch else gate["exit_code"] == 0) else "fail",
         "exit_code": gate["exit_code"],
         "detail": (gate.get("stderr") or "").strip()[-2000:],
         "checks": checks,
-        "source": "gate-receipt" if gate.get("reused") else "gate",
+        "source": "gate-receipt" if gate.get("reused") else "gate" if branch else "worktree",
         "head": gate["head"],
         "summary": gate.get("summary"),
     }
@@ -2127,8 +2126,8 @@ def review(
     # Legacy runner rows lack before-check/runtime identity and never grant reuse.
     check = (sd_check_receipts.reuse_checked_result(root, env, getattr(args, "database", None)) if getattr(args, "reuse_check", False) else None)
     gate_branch = getattr(args, "gate_check", None)
-    check = check or (run_gate_check(root, runner, env, check_seconds, gate_branch, args) if gate_branch
-                      else run_check(root, runner, env, check_seconds))
+    check = check or (run_gate_check(root, runner, env, check_seconds, gate_branch, args, subject.head)
+                      if gate_branch or args.scope in ("branch", "pr") else run_check(root, runner, env, check_seconds))
     result["check"] = check
     if check["status"] == "fail":
         result["status"] = "gate_failed"
