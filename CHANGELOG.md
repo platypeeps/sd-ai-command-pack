@@ -13,6 +13,14 @@
   the reason. It needs a nonblank `--reason`, refuses an ordinary task, and
   `--reason` without `--associated` is refused rather than dropped.
 
+- **A registry rule for sd-ship's protection-gap policy (sd:1460).** `R14-D1`
+  in `bin/sd_rules.py`: the merge gate honours a declared gap only for
+  `bypass` and `strict`, only on its exact live state, and never for a
+  missing `pull_request` rule. Its checker is
+  `bin/sd_ship_remote.py::validate_protection`, and leg d proves it by
+  replacing the exact-state match. `skills/sd-ship/SKILL.md` now states the
+  claim #1167 had reworded away, and cites the rule.
+
 - **A note on a done item prints an advisory (sd:1317).** `sd task note` on a
   row whose status is `done` prints `sd: advisory: sd:N is done since <date>,
   delivered by #<PR>` to stderr, from the item's latest merge comment, or the

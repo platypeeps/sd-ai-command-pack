@@ -539,6 +539,27 @@ RULES: tuple[Rule, ...] = (
         scope="prose",
         teaches="skills/sd-check/SKILL.md#Prose rules",
     ),
+    #: sd-ship's protection-gap policy (sd:1451), registered by sd:1460 so the
+    #: skill can cite it. #1167 reworded the skill's line instead, because no
+    #: row existed for it to cite, which kept the claim count down by avoiding
+    #: the check rather than satisfying it.
+    Rule(
+        id="R14-D1",
+        subject="sd-ship's merge gate honours a declared protection gap only "
+                "for `bypass` and `strict`, only when the reviewed head's "
+                "`accepted_gaps` entry pins that gap's facts and every fact "
+                "it pins equals the live state; a ruleset bypass by any "
+                "actor but a `DeployKey` and a missing `pull_request` rule "
+                "cannot be declared at all",
+        checker="bin/sd_ship_remote.py::validate_protection",
+        proof="replace the `sd_protection.matching_acceptance` call in "
+              "`bin/sd_ship_remote.py` with the first entry carrying the "
+              "gap's id; a bypass list that no longer equals the live one is then "
+              "honoured and `test_a_declared_bypass_list_must_equal_the_live_one` "
+              "goes red",
+        scope="code",
+        teaches="skills/sd-ship/SKILL.md#Executable interface",
+    ),
     #: The twelve repeals of sd:431 step 4, slice H, under one family decision
     #: team-lead took on 2026-09-17 (Dec-9, recommended on note 2665 and
     #: reversible by the owner by deleting these rows' `REPEALED` state).
