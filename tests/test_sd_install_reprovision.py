@@ -124,6 +124,24 @@ class NoAncestryDowngrade(ReprovisionAfterMerge):
         self.assertEqual(self.calls, [newer])
 
 
+class InstalledLibraryCommit(unittest.TestCase):
+    """What pip recorded, read without trusting it: a bad record names no commit."""
+
+    def record(self, pack: pathlib.Path, python: str, text: str) -> None:
+        info = pack / f".venv/lib/{python}/site-packages/sd_db-0.1.dist-info"
+        info.mkdir(parents=True)
+        (info / "direct_url.json").write_text(text, encoding="utf-8")
+
+    def test_an_unreadable_or_path_install_record_names_no_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            pack = pathlib.Path(temp)
+            self.record(pack, "python3.12", "{not json")
+            self.record(pack, "python3.13", json.dumps({"url": "file:///x", "dir_info": {}}))
+            self.assertIsNone(sd_install.installed_library_commit(pack))
+            self.record(pack, "python3.14", json.dumps({"vcs_info": {"commit_id": "abc123"}}))
+            self.assertEqual(sd_install.installed_library_commit(pack), "abc123")
+
+
 class ProvisionAtARef(unittest.TestCase):
     """`provision_library` installs the ref it is handed instead of the checkout's pin."""
 
