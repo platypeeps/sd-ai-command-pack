@@ -42,10 +42,10 @@ from sd_gate_run import (
     GateError,
     base_ref,
     check_in_worktree,
-    failing_check_tails,
     gate_inputs,
 )
 from sd_ship_remote import Refusal
+from sd_ship_review import FAILING_TAIL_CHARS, failing_check_tails
 
 CONTEXT = sd_lib.LOCAL_GATE_CONTEXT
 
@@ -88,7 +88,7 @@ def refuse_failure(result: dict[str, Any], head: str, kept: str) -> None:
         return
     named = failing_check_tails((result.get("report") or {}).get("checks"))
     stderr = str(result.get("stderr") or "").strip()
-    said = "\n".join(named or [f"sd-check: {stderr[-1200:]}"] * bool(stderr))
+    said = "\n".join(named or [f"sd-check: {stderr[-FAILING_TAIL_CHARS:]}"] * bool(stderr))
     raise Refusal(f"repo.ci is local and {CONTEXT} is failure on {head}: {result.get('summary') or 'sd-check failed'}"
                   + (f"\n{said}" if said else "") + f"\nThe whole sd-check report is kept in {kept}.",
                   code="ci_not_passing", boundary="ci", state="retryable_failure",

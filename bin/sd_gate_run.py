@@ -62,8 +62,6 @@ CHECK_SECONDS = sd_lib.GATE_CHECK_SECONDS
 REPORT_GRACE_SECONDS = 60
 #: The tail of `sd-check`'s own stderr the receipt keeps, as `sd-check` tails each check's.
 STDERR_TAIL_CHARS = 4000
-#: How much of each stream of one failing check a refusal repeats; the receipt keeps `sd-check`'s whole tail.
-FAILING_TAIL_CHARS = 1200
 LOCAL_BLOCK = "CLAUDE.local.md"
 #: Variables that pick Python packages; the child must not inherit the caller's.
 DROPPED_ENVIRONMENT = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX", "__PYVENV_LAUNCHER__")
@@ -233,23 +231,3 @@ def check_reading(code: int | None, output: str, errors: str = "") -> dict[str, 
         return {"status": "failure", "exit_code": code, "summary": output[:DESCRIPTION_LIMIT], **said}
     words = f"sd-check {overall or 'error'}" + (f" ({named})" if named else f" (exit {code})")
     return {"status": "failure", "exit_code": code, "summary": words, **said}
-
-
-def failing_check_tails(rows: Any, limit: int = FAILING_TAIL_CHARS) -> list[str]:
-    """Each failing `sd-check` row as a refusal names it: name, exit code, and the tail of its own output.
-
-    Both streams, each cut to its last `limit` characters: a test runner
-    reports on stderr and a linter on stdout, and `make` adds its own
-    `Error 1` line to stderr whichever one failed. A row with no output names
-    `sd-check`'s reason instead, such as a timeout (sd:2066, sd:2021).
-    """
-    named = []
-    for row in rows if isinstance(rows, list) else []:
-        if not isinstance(row, dict) or row.get("status") != "fail":
-            continue
-        streams = [(stream, str(row.get(stream) or "").strip()) for stream in ("stderr", "stdout")]
-        said = [f"{stream}: {'...' if len(text) > limit else ''}{text[-limit:]}" for stream, text in streams if text]
-        reason = str(row.get("reason") or "").strip()
-        named.append(f"{row.get('name')} (exit {row.get('exit_code')}): "
-                     + ("\n".join(said) if said else reason or "no output"))
-    return named

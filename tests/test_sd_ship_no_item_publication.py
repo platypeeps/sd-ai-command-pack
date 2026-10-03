@@ -29,7 +29,7 @@ class NoItemPublication(unittest.TestCase):
     def setUp(self):
         fixture.ShipCase.setUp(self)
         review_fixture.freeze_library(self, self.directory)
-        if self.extra_commit:
+        if getattr(self, "extra_commit", None):
             _git(self.root, "commit", "--allow-empty", "-qm", self.extra_commit)
         self.database = self.database.with_name("no-items.db")
         initialise(self.database)

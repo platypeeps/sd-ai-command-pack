@@ -318,7 +318,7 @@ def refuse_authorship(output: str) -> None:
     """
     try:
         said = json.loads(output).get("authorship_refusal")
-    except (ValueError, AttributeError, RecursionError):
+    except (ValueError, TypeError, AttributeError, RecursionError):
         return
     if isinstance(said, str) and said.strip():
         raise Refusal(f"local review refused: unknown authorship: {said.strip()}; no provider pass was reserved",

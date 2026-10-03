@@ -154,7 +154,7 @@
   whole report is kept in the ship receipt and names the `sd-ship observe`
   command that prints it. Prepare's `gate_failed` refusal names the failing
   checks the same way; it kept the last 500 characters of one stream, which
-  dropped the failing test's assertion. `sd_gate_run.failing_check_tails`
+  dropped the failing test's assertion. `sd_ship_review.failing_check_tails`
   renders both.
 
 - **`sd-ship observe` reads the ship receipt before a pull request exists
