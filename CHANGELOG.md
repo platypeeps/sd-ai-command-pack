@@ -122,8 +122,10 @@
   re-render hook fires on post-checkout, so a feature branch or a detached
   HEAD replaced the pending request with unmerged text. The main checkout
   now queues a mirror from its default branch only; the vault copy and
-  `docs/dashboard/` are still written. `SD_PUBLISH_FROM_WORKTREE=1` lifts
-  the hold, as it does for a linked worktree.
+  `docs/dashboard/` are still written. The default branch is `origin`'s,
+  not the one HEAD's tracking remote names, so a branch tracking a fork is
+  held too. `SD_PUBLISH_FROM_WORKTREE=1` lifts the hold, as it does for a
+  linked worktree.
 
 - **`sd fleet stamp` reads the operator's owner logins from the machine
   config (sd:2324).** `fleet.owners` in `config.json`, a list of GitHub

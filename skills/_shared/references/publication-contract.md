@@ -273,6 +273,10 @@ The main checkout queues a mirror from its default branch only (sd:2019). The
 re-render hook fires on a branch switch, so a feature branch or a detached HEAD
 would otherwise replace the pending request with unmerged text. Its vault copy
 and `docs/dashboard/` are still written, since the next render replaces both.
+The default branch is `origin`'s (`origin/HEAD`, then `origin/main` or
+`origin/master`; local `main` or `master` without `origin`), never the one
+HEAD's tracking remote names, so a branch that tracks a fork is held too.
+When no default branch resolves, nothing is queued.
 `SD_PUBLISH_FROM_WORKTREE=1` lifts this hold too.
 
 A render with `SD_SKIP_MIRROR` set queues nothing and leaves a pending request

@@ -46,7 +46,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 from urllib.parse import quote, urlsplit
 
-from sd_lib import git_output, main_worktree_root, upstream
+from sd_lib import git_output, main_worktree_root
 
 
 def dashboard_config(environ: Mapping[str, str]) -> Path:
@@ -336,6 +336,7 @@ def publish_refusal(repo: Path, copy: str) -> str:
     pending request with that branch's text, and a drain in that window
     published unmerged content. A detached HEAD is off the branch too. The
     vault copy is local and the next render replaces it, so it is not held.
+    The default branch is `canonical_branch`'s, whatever HEAD tracks.
     """
     if ENVIRON.get(PUBLISH_FROM_WORKTREE):
         return ""
@@ -346,13 +347,33 @@ def publish_refusal(repo: Path, copy: str) -> str:
     if copy != "mirror" or git_output(["rev-parse", "--git-dir"], repo) is None:
         return ""
     branch = git_output(["symbolic-ref", "--quiet", "--short", "HEAD"], repo)
-    default = upstream(repo)[1]
-    if branch == default:
+    default = canonical_branch(repo)
+    if branch and branch == default:
         return ""
     return ("%s: not queued from %s; the main checkout queues from %s only, "
             "or set %s=1 to publish this branch's content"
             % (copy, "branch %s" % branch if branch else "a detached HEAD",
-               default, PUBLISH_FROM_WORKTREE))
+               default or "its default branch", PUBLISH_FROM_WORKTREE))
+
+
+def canonical_branch(repo: Path) -> str | None:
+    """The branch the main checkout publishes from, or None when none resolves.
+
+    Read from `origin` and never from HEAD's tracking remote: a feature branch
+    that tracks a fork whose default is that branch would otherwise name
+    itself canonical and publish unmerged content. The order is
+    `origin/HEAD`, then the first of `origin/main` and `origin/master` this
+    checkout has, then the first local `main` or `master` for a checkout with
+    no `origin`. None holds the mirror: no branch then matches.
+    """
+    named = git_output(["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], repo)
+    if named and named.startswith("origin/"):
+        return named[len("origin/"):]
+    for prefix in ("refs/remotes/origin/", "refs/heads/"):
+        for name in ("main", "master"):
+            if git_output(["rev-parse", "--verify", "--quiet", prefix + name], repo) is not None:
+                return name
+    return None
 
 
 def repo_key(repo: Path) -> str:

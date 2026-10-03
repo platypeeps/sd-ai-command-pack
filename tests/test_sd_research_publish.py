@@ -1642,6 +1642,37 @@ class BranchCheckoutTests(Fixture):
         self.switch("-b", "feature")
         self.assertEqual(PUBLISH.publish_refusal(self.repo, "obsidian"), "")
 
+    def fork(self, origin_head: bool) -> None:
+        """`feature` tracks a fork whose default branch is `feature`.
+
+        No network: the remotes' refs are written as a fetch would leave them.
+        """
+        for name, url in (("origin", "https://example.test/canon.git"),
+                          ("fork", "https://example.test/fork.git")):
+            git(self.repo, "remote", "add", name, url)
+        git(self.repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        if origin_head:
+            git(self.repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        self.switch("-b", "feature")
+        git(self.repo, "update-ref", "refs/remotes/fork/feature", "HEAD")
+        git(self.repo, "symbolic-ref", "refs/remotes/fork/HEAD", "refs/remotes/fork/feature")
+        git(self.repo, "config", "branch.feature.remote", "fork")
+        git(self.repo, "config", "branch.feature.merge", "refs/heads/feature")
+
+    def test_a_branch_tracking_a_fork_is_held(self) -> None:
+        """The default branch is origin's, not the one HEAD's tracking remote publishes."""
+        self.fork(origin_head=True)
+        said = PUBLISH.enqueue(self.repo, self.DOC)
+        self.assertEqual((PUBLISH.QUEUE / self.NAME).read_text(), self.pending)
+        self.assertIn("queues from main only", said[0])
+
+    def test_without_origin_head_a_fork_branch_is_still_held(self) -> None:
+        """No `origin/HEAD`: `origin/main` names the default, never the fork's HEAD."""
+        self.fork(origin_head=False)
+        refusal = PUBLISH.publish_refusal(self.repo, "mirror")
+        self.assertIn("not queued from branch feature", refusal)
+        self.assertIn("queues from main only", refusal)
+
 
 class HookTests(unittest.TestCase):
     """`init-hook` installs one script under three names, and git runs it.
