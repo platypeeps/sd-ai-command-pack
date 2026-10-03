@@ -14,6 +14,60 @@
   result records `review_slot`. `make test` runs with `SD_REVIEW_SLOTS=0`, so
   a test review never waits on a real one.
 
+- **One passing gate check per head (sd:1912).** `sd-ship prepare`'s gate now reads a gate receipt at the same head and binding, so a second prepare at an unchanged head runs no second check. The new `sd gate check` runs the local gate's check at `HEAD`, in a clean worktree with the gate's environment, and records a pass that prepare and then the merge gate reuse. A plain `make check` leaves no receipt. The gate child no longer gets the agent harness's session variables (`CLAUDE*`, `HERDR_*`, `ITERM_*`, `TERM_SESSION_ID`, `PWD`, `OLDPWD`, `SHLVL`, `_`), so two sessions' passes bind equal; every other variable, `MAKEFLAGS` included, still binds. A failed or unfinished run records nothing, a new head (a merge of `main` included) runs again, and the 30-minute window counts from the run that passed.
+
+- **One gate-slot pool for every gate, and a waiting gate names its holders
+  (sd:2522).** The slots were already machine-wide, but the callers counted
+  them differently. `sd-check` read `sd.gate_slots`, the pack's own
+  `make test` read 2 from its Makefile, and the stdlib
+  `sd_gate_slots.py run|status` ignored the setting. Every entry point now
+  takes its count from `sd.gate_slots`. `sd_gate_slots.py count` prints it for
+  the Makefile. The waiting line names each holder's label, pid, directory and
+  start time. The default stays a quarter of the cores. Wrap a plain
+  `make check` as `sd gate run -- make check`; a per-repository `lockf` in a
+  lane script is no longer needed.
+
+- **`sd-slice-builder` holds `Skill` and `Monitor` (sd:2526).** A builder
+  waited on a gate longer than one Bash call with a `sleep` loop or a
+  background task, and could not run a skill its brief named. The agent now
+  declares both tools, and its working rules say to wait on a gate longer
+  than 10 minutes with `Monitor` on its log and to report in the turn it
+  ends. The installer copies agents into `~/.claude/agents`, so the change
+  reaches a machine at the next `sd_install.py --user`.
+
+- **`sd task cancel N --reason TEXT` cancels a task or followup (sd:1005).**
+  `sd task status N done` was the only way to close one, and it wrote no
+  completion mark, so a dropped followup read as finished work and a finding
+  carried to it never reopened. The verb calls `sd_db.progress.cancel_work`
+  with `guard=progress.task_guard`: the row reads `done` with the `cancelled`
+  receipt a cancelled work item carries, and `sd-review-ack` reads a finding
+  carried to it as `carry-dropped`. An `sd_db` without `task_guard` refuses
+  the verb by name and points at `sd-install`; the verb works once the
+  system pin carries the guard.
+
+- **The commit-msg hook writes `Authored-with:` at commit time (sd:1295).**
+  A branch whose commits said nothing took one empty `sd attribute` commit
+  per review round. With `SD_AUTHOR=<entry>` set and no `Authored-with:` line
+  in the message, `hooks/commit-msg` now adds `Authored-with: <value>` first
+  in the final trailer paragraph, the value `sd attribute` writes for that
+  name. `human` and `script` read no registry. A name nothing resolves, or
+  `dependabot`, refuses the commit. Unset, the hook writes nothing.
+  `sd attribute` never amends. A harness sets the variable for its session,
+  and a job for its run.
+
+- **`sd attribute`'s repair commit names who ran it (sd:2009, gap 1).** It
+  always wrote `Authored-with: human`, so an agent's repair had to be amended
+  by hand. It now writes the entry `SD_AUTHOR` names, resolved as the
+  commit-msg hook resolves it, and `human` when the variable is unset. A name
+  nothing resolves refuses and writes nothing.
+
+- **`Authored-with: script` for unattended job commits (sd:1637).** A
+  scheduled job that commits generated data had no fitting value, so it
+  wrote `human` and counted as the operator. `script` is a reserved peer of
+  `human` with no vendor, so any provider may review it. `sd attribute`, a
+  squash body and the trailer reader accept it, and `sd-review --explain`
+  names it.
+
 - **`sd gate post --head SHA` posts the local gate outside `sd-ship merge`
   (sd:1989).** A repository under `repo.ci = local` that merges by its own
   automation -- a Dependabot merge, a daily merge script -- got no
@@ -543,6 +597,16 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **A task or followup merged associate-only can be delivered afterwards
+  (sd:1913).** `sd work deliver N SHA --associated --reason TEXT` (sd:1590)
+  closed only a work item and refused a task. On a task or followup it now
+  verifies reachability and `Item: sd:N` as `--delivered-by` verifies
+  `Delivers:`, and the move to done records the delivery sentence with the
+  reason. `sd-ship prepare --deliver` on a record that merged associate-only
+  refuses as `delivery_after_merge` and names that command with the merge
+  commit, where it used to reconcile in silence. `sd task status N done
+  --delivered-by` on an `Item:`-only commit names it too.
 
 - **An operator-observed criterion goes in the item's Log (sd:1933).**
   `WORKFLOW.md` records the operator's 2026-09-30 ruling: a criterion only

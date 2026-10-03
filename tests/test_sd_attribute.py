@@ -28,6 +28,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "bin") not in sys.path:
@@ -344,6 +345,36 @@ class TheRefusalTests(AttributeFixture):
         self.assertIn("range", self.refuses("..HEAD", "claude", claude="anthropic"))
 
 
+class TheScriptTests(AttributeFixture):
+    """`Authored-with: script`: a deterministic job wrote it, no model and no person (sd:1637).
+
+    A peer of `human`: reserved, no vendor, so any provider may review it. It
+    is not `human`, so an unattended job's commits stop counting as the
+    operator's own.
+    """
+
+    refuses = TheRefusalTests.refuses
+
+    def test_a_script_trailer_reads_back_and_contributes_no_vendor(self) -> None:
+        landed = self.commit("chore: data\n\nAuthored-with: script")
+        self.assertEqual(self.said()[landed], sd_lib.SCRIPT_AUTHOR)
+        self.assertEqual(self.vendors(), ())
+
+    def test_sd_attribute_writes_script_bare(self) -> None:
+        silent = self.commit("chore: data")
+        _, value, _ = sd_lib.attribute(self.root, silent, "script", registry(claude="anthropic"))
+        self.assertEqual((value, self.said()[silent]), ("script", "script"))
+        self.assertEqual(self.vendors(), ())
+
+    def test_a_registry_entry_may_not_be_called_script(self) -> None:
+        silent = self.commit("chore: data")
+        self.assertIn("hide its vendor", self.refuses(silent, "script", script="anthropic"))
+
+    def test_a_squash_body_may_carry_script(self) -> None:
+        import sd_ship_body
+        self.assertTrue(sd_ship_body.known_author("script", []))
+
+
 class TheRangeTests(AttributeFixture):
     """The form the rebase repair needs: a mixture, repaired in one commit."""
 
@@ -389,7 +420,7 @@ class TheRangeTests(AttributeFixture):
         self.assertEqual(sd_lib.author_vendors(self.root, moved, "HEAD"), ("anthropic",))
 
 
-class TheCommandTests(AttributeFixture):
+class CommandFixture(AttributeFixture):
     """`sd attribute` end to end, through the parser and the real registry read."""
 
     def setUp(self) -> None:
@@ -438,6 +469,10 @@ class TheCommandTests(AttributeFixture):
             os.environ.update(environment)
         return code, out.getvalue(), err.getvalue()
 
+
+class TheCommandTests(CommandFixture):
+    """The verb's own answers: what it writes, what it refuses, the range form."""
+
     def test_the_verb_writes_a_commit_the_reader_agrees_with(self) -> None:
         silent = self.commit("feat: something")
         code, out, err = self.run_sd("attribute", silent, "claude")
@@ -463,6 +498,43 @@ class TheCommandTests(AttributeFixture):
         self.assertEqual(self.said()[first], "claude/anthropic")
         self.assertEqual(self.said()[second], "claude/anthropic")
 
+
+class TheWriterTests(CommandFixture):
+    """sd:2009 gap 1: the repair commit names who ran `sd attribute`, not `human` always.
+
+    The operator's ruling of 2026-09-30: an agent's repair says the agent's
+    entry. `SD_AUTHOR` names it, as it does to the commit-msg hook (sd:1295);
+    unset, the repair says `human`, as before.
+    """
+
+    def run_as(self, author: str | None, *argv: str) -> tuple[int, str, str]:
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SD_AUTHOR", None)
+            if author is not None:
+                os.environ["SD_AUTHOR"] = author
+            return self.run_sd(*argv)
+
+    def own(self) -> str:
+        return self.git("log", "-1", "--format=%(trailers:key=Authored-with,valueonly)")
+
+    def test_an_agent_repair_says_the_agents_entry(self) -> None:
+        silent = self.commit("feat: something")
+        code, _, err = self.run_as("claude", "attribute", silent, "claude")
+        self.assertEqual((code, self.own()), (0, "claude/anthropic"), err)
+        self.assertEqual(self.vendors(), ("anthropic",))
+
+    def test_without_sd_author_the_repair_says_human(self) -> None:
+        silent = self.commit("feat: something")
+        code, _, err = self.run_as(None, "attribute", silent, "codex")
+        self.assertEqual((code, self.own()), (0, "human"), err)
+
+    def test_an_sd_author_nothing_resolves_writes_nothing(self) -> None:
+        silent = self.commit("feat: something")
+        before = self.git("rev-parse", "HEAD")
+        code, _, err = self.run_as("nosuch", "attribute", silent, "claude")
+        self.assertEqual(code, 1)
+        self.assertIn("SD_AUTHOR='nosuch'", err)
+        self.assertEqual(self.git("rev-parse", "HEAD"), before)
 
 class TheContentGateTests(AttributeFixture):
     """The gate runs on content, and the attributing commit has none.

@@ -2811,7 +2811,10 @@ def cmd_attribute(args: argparse.Namespace) -> int:
     registry, reason = sd_registry.read_or_report()
     if reason and args.entry.strip() not in sd_lib.RESERVED_AUTHORS:
         raise Refusal(f"{reason}; an attribution names an entry the registry has")
-    sha, value, covered = sd_lib.attribute(root, args.commits, args.entry, registry)
+    # The repair commit says who made it: `SD_AUTHOR`'s entry, else `human` (sd:2009).
+    invoker = os.environ.get(sd_lib.AUTHOR_VARIABLE, "").strip()
+    writer = sd_lib.commit_author(invoker, lambda: (registry, reason)) if invoker else sd_lib.HUMAN_AUTHOR
+    sha, value, covered = sd_lib.attribute(root, args.commits, args.entry, registry, writer)
     print(f"{sha[:12]} attributes {len(covered)} commit(s) to {value}")
     for target in covered:
         print(f"  {target[:12]}")
@@ -2825,6 +2828,8 @@ def cmd_gate(args: argparse.Namespace) -> int:
     """
     if args.command_name == "post":
         return gate_post(args)
+    if args.command_name == "check":
+        return gate_check(args)
     environ = dict(os.environ)
     try:
         slots, _ = sd_gate_slots.configured(environ, sd_lib.core_setting("gate_slots", environ))
@@ -2853,6 +2858,34 @@ def gate_post(args: argparse.Namespace) -> int:
         result = sd_local_gate.post_head(root, args.head, base=args.base)
     except ShipRefusal as refusal:
         raise Refusal(str(refusal)) from None
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result.get("status") == "success" else 1
+
+
+def gate_check(args: argparse.Namespace) -> int:
+    """`sd gate check` (sd:1912): run the local gate's check at HEAD and record its pass.
+
+    A builder's plain `make check` leaves nothing a gate can trust. This runs
+    the gate's own check -- a clean worktree at the committed HEAD, the gate's
+    environment -- and a pass leaves the receipt `sd-ship prepare`'s gate and
+    then the merge gate read at the same head and binding. Uncommitted work is
+    not checked. Posts nothing. Prints the result as JSON and exits 0 on a
+    pass, 1 otherwise.
+    """
+    import sd_gate_run  # the gate's run, which posts nothing; needed only here
+    root = sd_lib.repo_root(None)
+    if root is None:
+        raise Refusal("cwd is not inside a Git repository")
+    head = sd_lib.git_output(["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], root)
+    if not head:
+        raise Refusal("HEAD names no commit; commit first, then retry")
+    database = args.database
+    if database is None and (library := sd_lib.import_sd_db().module) is not None:
+        database = library.default_path(os.environ.get("HOME"))
+    try:
+        result = sd_gate_run.check_in_worktree(root, head, base=sd_gate_run.base_ref(args.base), database=database)
+    except sd_gate_run.GateError as error:
+        raise Refusal(str(error)) from None
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result.get("status") == "success" else 1
 
@@ -3117,8 +3150,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="record who wrote commits that did not say, as one empty commit")
     attributer.add_argument("commits", help="a commit, or a `<from>..<to>` range, on this branch")
     attributer.add_argument(
-        "entry", help=f"a registry entry, `{sd_lib.HUMAN_AUTHOR}` for the operator, "
-                      f"or `{sd_lib.DEPENDABOT_ENTRY}` for a bump rewritten after GitHub made it")
+        "entry", help=f"a registry entry, `{sd_lib.HUMAN_AUTHOR}` for the operator, `{sd_lib.SCRIPT_AUTHOR}` "
+                      f"for an unattended job, or `{sd_lib.DEPENDABOT_ENTRY}` for a bump rewritten after GitHub made it")
     attributer.set_defaults(handler=cmd_attribute)
 
     gate = groups.add_parser("gate", help="the machine-wide gate queue: run a command in it, or show it; "
@@ -3130,6 +3163,11 @@ def build_parser() -> argparse.ArgumentParser:
     poster.add_argument("--head", required=True, metavar="SHA", help="the commit to check and post to")
     poster.add_argument("--base", metavar="BRANCH",
                         help="the PR's target branch, for a docs-only scope (default: none, so every check runs)")
+    checker = gating.add_parser("check", help="run the local gate's check at HEAD and record a pass, "
+                                "so prepare's gate and the merge gate reuse it at that head")
+    checker.add_argument("--base", metavar="BRANCH", default="main",
+                         help="the branch the pull request targets, as prepare's gate compares (default: main)")
+    checker.add_argument("--database", type=pathlib.Path, help="the workflow database (default: this machine's)")
     gate.set_defaults(handler=cmd_gate)
 
     sd_work.register(groups, kept)

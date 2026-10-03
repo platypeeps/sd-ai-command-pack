@@ -89,6 +89,89 @@ class TaskCLI(unittest.TestCase):
         missing = self.call("task", "show", 999999, code=1)
         self.assertNotIn("Traceback", missing.stderr)
 
+    def shimmed(self, source):
+        """An environment whose child runs `source` before `sd` imports anything.
+
+        The pack runs `sd_db` at the pinned system SHA, so a test that needs
+        the library with or without an attribute sets it in the child rather
+        than depending on which build the pin carries.
+        """
+        shim = Path(tempfile.mkdtemp(dir=self.home))
+        (shim / "sitecustomize.py").write_text(source)
+        return {**self.environment,
+                "PYTHONPATH": f"{shim}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"}
+
+    # Stands in for the library's `task_guard` and records what `cancel_work`
+    # was handed; the real pair lives in the system repository (sd:1005).
+    RECORDING_CANCEL = (
+        "import json, os\n"
+        "import sd_db.progress as progress\n"
+        "from sd_db.workflow import item_state\n"
+        "def task_guard(connection, row):\n"
+        "    return ''\n"
+        "def cancel_work(connection, item, **keywords):\n"
+        "    guard = keywords.pop('guard', None)\n"
+        "    keywords['guard'] = None if guard is None else guard is task_guard\n"
+        "    with open(os.environ['SD_TEST_CANCEL'], 'w') as handle:\n"
+        "        json.dump({'item': item, **keywords}, handle)\n"
+        "    return item_state(connection, item)\n"
+        "progress.task_guard = task_guard\n"
+        "progress.cancel_work = cancel_work\n")
+
+    def test_task_cancel_hands_cancel_work_the_task_guard(self):
+        """sd:1005. A task or followup is cancelled through `cancel_work`.
+
+        The library's own guard admits work rows only, so the verb has to name
+        `task_guard`; `sd work cancel` keeps the default and names none.
+        """
+
+        environment = self.shimmed(self.RECORDING_CANCEL)
+        record = self.home / "cancel.json"
+        environment["SD_TEST_CANCEL"] = str(record)
+        state = json.loads(self.call("task", "add", "Superseded", "--kind", "followup",
+                                     "--no-repo", "--json").stdout)
+        item = state["item"]["id"]
+        for verb, guard in (("task", True), ("work", None)):
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "bin" / "sd"), verb, "cancel", str(item),
+                 "--reason", "superseded by sd:2", "--if-revision", state["revision"]],
+                cwd=str(self.home), env=environment, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(json.loads(record.read_text()), {
+                "item": item, "reason": "superseded by sd:2", "who": getpass.getuser(),
+                "expected_revision": state["revision"], "guard": guard}, verb)
+
+    def test_task_cancel_on_a_library_without_task_guard_refuses_by_name(self):
+        """An install older than the guard refuses; it does not cancel or crash.
+
+        Its `cancel_work` takes no `guard`, so calling it anyway would be a
+        TypeError from inside an open write, and calling it without one would
+        be the work guard refusing a task for the wrong reason.
+        """
+
+        environment = self.shimmed(
+            "import sd_db.progress as progress\n"
+            "progress.__dict__.pop('task_guard', None)\n")
+        state = json.loads(self.call("task", "add", "Not cancellable here", "--json").stdout)
+        item = state["item"]["id"]
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "bin" / "sd"), "task", "cancel", str(item),
+             "--reason", "dropped"],
+            cwd=str(self.home), env=environment, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("sd_db.progress.task_guard", result.stderr)
+        self.assertIn("sd-install", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        after = json.loads(self.call("store", "item", item, "--json").stdout)
+        self.assertEqual((after["item"]["status"], after["revision"]),
+                         ("planning", state["revision"]))
+
+    def test_task_cancel_needs_a_reason(self):
+        item = json.loads(self.call("task", "add", "No reason given", "--json").stdout)["item"]["id"]
+        refused = self.call("task", "cancel", item, code=2)
+        self.assertIn("--reason", refused.stderr)
+        self.assertIn("--reason", self.call("task", "cancel", "--help").stdout)
+
     def test_cli_and_today_query_agree(self):
         for title in ("One", "Two"):
             state = json.loads(self.call("task", "add", title, "--json").stdout)
