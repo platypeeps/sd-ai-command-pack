@@ -48,6 +48,8 @@ from sd_ship_review import (
 from sd_ship_workflow import blocked, failure
 
 BIN = pathlib.Path(__file__).resolve().parent
+#: When this process started, for the invoker a receipt names (sd:2078).
+PROCESS_STARTED = datetime.now(timezone.utc).isoformat()
 REVIEW_SETUP_SECONDS = 3600
 REVIEW_CLEANUP_SECONDS = 5
 REVIEW_DIAGNOSTIC_BYTES = 4096
@@ -1205,7 +1207,7 @@ class Ship(SharedReview):
             self.save(repository=self.repository, branch=self.branch, item=self.args.item, phase="new")
         self.persist_copilot_direction()
         fields = {} if self.args.no_item else {"deliver": deliver, "acceptance": claim}
-        self.save(title=title, body=body, base=base, **fields)
+        self.save(title=title, body=body, base=base, invoker=self.invoker(), **fields)
         # Rules 5 and 8 read the pull request body, and the body is built by
         # now. Without it the rules report themselves not run and CI is the
         # first to check the `Work:` line, which the skill said happened
@@ -1267,7 +1269,7 @@ class Ship(SharedReview):
         copilot = self.prepare_copilot_review(number, pull, head, mode)
         if copilot.get("warning"):
             self.save(warnings=list(self.state.get("warnings") or []) + [copilot["warning"]])
-        return self.result("ready_to_send", copilot_review=copilot,
+        return self.result("ready_to_send", copilot_review=copilot, invoker=self.state["invoker"],
                            body_source=self.body_source, normalized=list(self.body_normalized))
 
     def pushed_pull(self, number: int, head: str) -> dict:
@@ -1556,7 +1558,21 @@ class Ship(SharedReview):
             extras["protection"] = self.state["protection"]
         if self.state.get("row_authorized_merge"):
             extras["row_authorized_merge"] = self.state["row_authorized_merge"]
+        if self.state.get("merge_invoker"):
+            extras["invoker"] = self.state["merge_invoker"]
         return extras
+
+    def invoker(self) -> dict:
+        """Who ran this command, so a receipt can be traced to its process (sd:2078).
+
+        A merge nobody claimed could not be traced: its receipt named the head
+        and the review, and no pid, checkout, authority or lock holder.
+        """
+        run, manual = getattr(self.args, "run", None), getattr(self.args, "manual", False)
+        return {"pid": os.getpid(), "ppid": os.getppid(), "started_at": PROCESS_STARTED,
+                "checkout": str(self.root), "chdir": getattr(self.args, "chdir", None),
+                "authority": f"--run {run}" if run else "--manual" if manual else None,
+                "lock_holder": lock_options(self.args, self.store).get("holder")}
 
     def merge_authority(self, head: str) -> None:
         from sd_db import runner
@@ -1837,7 +1853,7 @@ class Ship(SharedReview):
         # that never happened (sd:1347).
         title = squash_title(observed, self.state["title"])
         self.save(phase="merge_dispatch", merge_message=body, row_authorized_merge=self.row_authority,
-                  warnings=self.dispatch_warnings())
+                  warnings=self.dispatch_warnings(), merge_invoker=self.invoker())
         try:
             self.api.api(f"{self.api.prefix}/pulls/{observed['number']}/merge", method="PUT",
                          body={"sha": head, "merge_method": "squash", "commit_title": f"{title} (#{observed['number']})",

@@ -112,6 +112,16 @@
 
 ### Fixed
 
+- **Prepare and merge receipts name their invoker (sd:2078).** A merge
+  nobody claimed could not be traced: its `Code delivery` note named the head
+  and the review, and no process. `prepare` now stores `invoker` in the ship
+  receipt and returns it; the merge that dispatches the `PUT` stores
+  `merge_invoker`, and the merge result and its `Code delivery` note carry it
+  as `invoker`. The block holds the pid and parent pid, the process start
+  time, the checkout and the `-C` value, `--run ID` or `--manual`, and the
+  lock-holder record the ship lock writes. A later `sd-ship reconcile`
+  reports the invoker of the merge, not its own.
+
 - **`sd-ship` reports `sd-review`'s authorship refusal (sd:2067).** A
   branch commit with no `Authored-with:` trailer made `sd-ship review` and
   `prepare` refuse with `local review emitted no valid timing plan`, and the

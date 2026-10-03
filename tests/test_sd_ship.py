@@ -2513,6 +2513,21 @@ roles:
         self.assertEqual(self.merge()["phase"], "merged")
         self.assertEqual(len([call for call in self.remote.calls if call.method == "PUT"]), 1)
 
+    def test_prepare_and_merge_receipts_name_their_invoker(self):
+        """sd:2078. A merge nobody claimed could not be traced: its receipt
+        named no pid, checkout, authority or lock holder."""
+        prepared = self.prepare()
+        self.assertEqual((prepared["invoker"]["pid"], prepared["invoker"]["checkout"]), (os.getpid(), str(self.root)))
+        self.assertEqual(prepared["invoker"]["lock_holder"]["command"], f"sd-ship prepare --item {self.item}")
+        merged = self.merge()
+        invoker = merged["invoker"]
+        self.assertEqual((invoker["pid"], invoker["ppid"], invoker["authority"]), (os.getpid(), os.getppid(), "--manual"))
+        self.assertEqual(invoker["lock_holder"]["command"], f"sd-ship merge --item {self.item}")
+        self.assertEqual(invoker["started_at"], ship.PROCESS_STARTED)
+        [note] = self.connection.execute("SELECT body FROM note WHERE item=? AND body LIKE 'Code delivery %'",
+                                         (self.item,)).fetchall()
+        self.assertEqual(json.loads(note[0].split("\n", 1)[1])["invoker"], invoker)
+
     def test_a_merge_commit_outside_the_default_branch_names_both_commits(self):
         """`--is-ancestor` says "no" by exit status alone; the reconcile check
         read that as an empty, retryable "git failed" (sd:1461)."""
