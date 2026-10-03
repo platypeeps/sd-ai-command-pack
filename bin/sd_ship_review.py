@@ -219,6 +219,10 @@ def validate_provider_selection(report: dict, requested: str | None, *, complete
 
 
 class SharedReview:
+    #: The branch this checkout had open when the record was validated, which
+    #: the ship lock compares with the live checkout (sd:2008); never re-read.
+    checkout_branch: str | None = None
+
     def __init__(self, root: pathlib.Path, connection, database: pathlib.Path, args, *, store,
                  repository: str, branch: str, head: str, key: str, revision, state: dict,
                  identity: Any, history: Any, runtime: ReviewRuntime):

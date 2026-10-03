@@ -162,6 +162,28 @@ class NoItemPublication(unittest.TestCase):
         self.assertRegex(self.invoke("reconcile", code=3)["error"], "is closed; reopen it")
         self.assertEqual(no_item.combined_digest(receipts.read(self.connection, self.key)[1]), self.initial_history)
 
+    def test_a_branch_switch_after_validation_is_refused_at_the_lock(self):
+        """The lock compares the checkout with the branch the record validated.
+
+        Read again after validation, a switch in between becomes the expected
+        branch, and the lock would publish another branch's HEAD under this
+        record. The switch lands at the same commit, so only the branch check
+        can refuse it.
+        """
+        self.prepare()
+        _git(self.root, "branch", "-q", "other")
+        validated = no_item.publication_review
+
+        def then_switch(*args, **kwargs):
+            review = validated(*args, **kwargs)
+            _git(self.root, "checkout", "-q", "other")
+            return review
+
+        with patch.object(no_item, "publication_review", side_effect=then_switch):
+            result = self.merge(code=3)
+        self.assertIn("the checkout left topic", result["error"])
+        self.assertFalse([call for call in self.remote.calls if call.method == "PUT"])
+
     def test_item_runner_and_commit_flags_refuse_before_any_database_write(self):
         before = list(self.connection.iterdump())
         for command, flags in (("prepare", ["--deliver"]), ("prepare", ["--path", "src.py"]),

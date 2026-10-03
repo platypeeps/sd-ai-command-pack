@@ -443,9 +443,10 @@ class Ship(SharedReview):
             from sd_ship_no_item import publication_review
             review = publication_review(root, connection, database, args, ship, review_runtime())
             self.__dict__.update(review.__dict__)
-            # The record's branch, except for a merged record reconciled from the
-            # default branch (sd:1932); the lock re-reads this checkout's branch.
-            self.checkout_branch = sd_lib.git_output(["symbolic-ref", "--quiet", "--short", "HEAD"], root)
+            # The branch `publication_review` validated: the record's, or the
+            # default branch a merged record reconciles from (sd:1932). Never a
+            # second read, which would follow a switch made after validation.
+            self.checkout_branch = review.checkout_branch
             self.api = GitHub(root, self.repository)
             return
         self.store, self.root, self.connection, self.args = ship, root, connection, args

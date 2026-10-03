@@ -645,20 +645,23 @@ def open_review(root: pathlib.Path, connection, database: pathlib.Path, args, st
                         history=NoItemHistory(), runtime=runtime)
 
 
-def reconciles_from_default(root: pathlib.Path, args, state: dict) -> bool:
-    """A merged record reconciles from the default branch, its own branch gone (sd:1932).
+def reconciles_from_default(root: pathlib.Path, args, state: dict) -> str | None:
+    """The default branch, when a merged record reconciles from it with its own branch gone (sd:1932).
 
     Reconciling reads GitHub's merge and the default branch's tip, never this
     checkout's branch, so after the branch is deleted the record's branch guard
     only forced the operator to recreate it. The guard stays for every record
-    that has not reached a merge dispatch, and for a closed record.
+    that has not reached a merge dispatch, and for a closed record: None.
+    The branch returned is the one read here, so the ship lock compares the
+    checkout with what was validated, not with a second read.
     """
     if args.command not in ("reconcile", "prepare") or state.get("phase") not in ("merged", "merge_dispatch"):
-        return False
+        return None
     if state.get("lifecycle") != "active":
-        return False
+        return None
     _remote, default = sd_lib.upstream(root)
-    return sd_lib.git_output(["symbolic-ref", "--quiet", "--short", "HEAD"], root) == default != state.get("branch")
+    live = sd_lib.git_output(["symbolic-ref", "--quiet", "--short", "HEAD"], root)
+    return live if live == default != state.get("branch") else None
 
 
 def publication_review(root: pathlib.Path, connection, database: pathlib.Path, args, store, runtime) -> SharedReview:
@@ -669,13 +672,20 @@ def publication_review(root: pathlib.Path, connection, database: pathlib.Path, a
     revision, state = store.read(connection, key)
     if not state:
         raise missing_record(args.review_id)
-    if args.command != "observe" and not reconciles_from_default(root, args, state):
+    # `checkout_branch` is the branch validated here, read once: the ship lock
+    # compares the live checkout with it, so a switch after this point refuses.
+    default = None if args.command == "observe" else reconciles_from_default(root, args, state)
+    if args.command != "observe" and default is None:
         require_diff = args.command == "prepare" and state.get("phase") not in ("merged", "merge_dispatch")
-        return open_review(root, connection, database, args, store, runtime, require_diff=require_diff)
-    return SharedReview(root, connection, database, args, store=store, repository=repository,
-                        branch=state["branch"], head=state.get("head", ""), key=key, revision=revision,
-                        state=stored_digest(state), identity=NoItemIdentity(args.review_id, repository, root),
-                        history=NoItemHistory(), runtime=runtime)
+        review = open_review(root, connection, database, args, store, runtime, require_diff=require_diff)
+        review.checkout_branch = review.branch
+        return review
+    review = SharedReview(root, connection, database, args, store=store, repository=repository,
+                          branch=state["branch"], head=state.get("head", ""), key=key, revision=revision,
+                          state=stored_digest(state), identity=NoItemIdentity(args.review_id, repository, root),
+                          history=NoItemHistory(), runtime=runtime)
+    review.checkout_branch = default or state["branch"]
+    return review
 
 
 def dispatch_review(root: pathlib.Path, connection, database: pathlib.Path, args, store, runtime) -> dict:
