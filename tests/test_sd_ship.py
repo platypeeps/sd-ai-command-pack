@@ -2912,6 +2912,23 @@ roles:
         self.assertTrue(result["delivery_pending"])
         self.assertIn("without delivery evidence", result["delivery_error"])
 
+    # -- sd:1913: an associate-only merge is repaired by `sd work deliver` ---
+
+    def associated_merge(self) -> str:
+        self.unanswered("--associate-only").prepare()
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        self.assertFalse(result["delivery_pending"])
+        self.assertNotEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "done")
+        return result["merge_commit"]
+
+    def test_prepare_on_an_associate_only_merge_names_the_repair(self):
+        commit = self.associated_merge()
+        with self.assertRaisesRegex(
+                ship.Refusal, rf"sd work deliver {self.item} {commit} --associated --reason TEXT") as caught:
+            self.unanswered("--deliver").prepare()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "delivery_after_merge")
+
     def test_work_still_needs_acceptance_evidence_to_deliver(self):
         with self.assertRaisesRegex(ship.Refusal, "--acceptance-file"):
             self.unanswered("--deliver").prepare()

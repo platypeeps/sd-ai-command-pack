@@ -220,6 +220,16 @@ class ContractTests(unittest.TestCase):
                 self.assertIsNone(retired.search(text), f"{path.name} still names se-*")
 
 
+class SliceBuilderTools(unittest.TestCase):
+    """sd:2526. A builder runs gates that outlast one Bash call and skills its
+    brief names; without `Monitor` it waits on a gate with a `sleep` loop or
+    not at all, and without `Skill` it cannot run `sd-review` as a skill."""
+
+    def test_the_slice_builder_holds_skill_and_monitor(self) -> None:
+        _, tools = frontmatter((AGENTS / "sd-slice-builder.md").read_text(encoding="utf-8"))
+        self.assertEqual(sorted({"Skill", "Monitor"} - set(tools)), [])
+
+
 class RenderTests(unittest.TestCase):
     def setUp(self) -> None:
         scratch = tempfile.TemporaryDirectory()

@@ -1211,6 +1211,15 @@ class Ship(SharedReview):
 
     def prepare(self) -> dict:
         if self.state.get("phase") in ("merged", "merge_dispatch"):
+            if self.args.deliver and not self.state.get("deliver"):
+                # A merge prepared associate-only carries `Item:` and no
+                # `Delivers:`; a reprepare cannot change a squash that landed
+                # (sd:1913). `sd work deliver --associated` is the one repair.
+                commit = self.state.get("merge_commit") or "MERGE_SHA"
+                raise Refusal(f"this record merged associate-only; deliver it with `sd work deliver {self.args.item} "
+                              f"{commit} --associated --reason TEXT`", code="delivery_after_merge", boundary="input",
+                              state="operator_decision",
+                              next_action="Run sd work deliver with --associated and --reason.")
             return self.reconcile()
         self.require_claim()
         if (any(value is not None for value in (self.args.additional_review_for, self.args.request_reason, self.args.review_history_digest))

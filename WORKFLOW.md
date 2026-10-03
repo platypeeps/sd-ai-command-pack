@@ -16,7 +16,8 @@ database, without a Git checkout, PRD or GitHub issue. `sd today` and `sd store
 items` use the same queries as Today and Backlog. Completion of an ordinary
 task is independent of code delivery. `sd work deliver` verifies delivery
 evidence; `sd work cancel --reason` records a cancellation without waiting for
-another merge. Artifact relinking preserves the item's identity and history.
+another merge, and `sd task cancel --reason` does the same for a task or
+followup. Artifact relinking preserves the item's identity and history.
 
 Writing uses shared stage and review-evidence checks through `sd writing` and
 the Writing screen. After the verified one-time cutover, stages, parking and
@@ -150,7 +151,8 @@ After the switch:
 - The description carries `inputs <digest>` as provenance: the head, the copied `CLAUDE.local.md` and the pack's `bin/` files.
 - Every merge attempt posts a fresh status. `sd-ship prepare` runs this same gate, through `sd-review --gate-check`.
   Prepare's pass leaves a receipt; the merge gate at the same head and binding, within 30 minutes, reads it instead of running `sd-check` again.
-  The status then says `(reused)`. Prepare never reads a receipt and the merge gate never writes one.
+  The status then says `(reused)`. The merge gate never writes a receipt.
+  Prepare reads one too: a pass that `sd gate check` or an earlier prepare left at the same head and binding (sd:1912).
   Inputs outside the repository are not bound; `bin/sd_gate_receipts.py` names the binding and this trust boundary.
 - Given the base branch, the gate passes `sd-check --base`: a repository's declared docs-only scope applies (sd:2072).
 - `sd-ship merge --watch` starts no remote watch: no remote check is coming, and the gate runs to completion in the merge (sd:1875).
@@ -323,8 +325,9 @@ A whole-item merge prepared without `--deliver` carries `Item:` and no
 `Delivers:`, so `sd work deliver` refuses it. `sd work deliver <row-id>
 <full-commit-sha> --associated --reason TEXT` closes that row. It runs the same
 reachability check, accepts the `Item:` trailer for the row instead, and records
-the trailer and the reason on the receipt. It refuses an ordinary task and a
-missing reason.
+the trailer and the reason on the receipt. A task or followup has no receipt:
+its move to done records the delivery sentence and the reason. It refuses a
+missing reason, and `sd-ship prepare --deliver` on such a record names it.
 
 `sd work cancel <row-id> --reason TEXT` records cancellation immediately,
 without a status-file change or another pull request. It does not claim the
@@ -333,6 +336,14 @@ that merge is not a prerequisite for database completion. Readers with no
 database can use explicit `Delivers:` or `Closes:` evidence to see that work is
 closed, while only `Delivers:` says it shipped. A shallow clone that cannot
 establish the evidence reports uncertainty.
+
+`sd task cancel <row-id> --reason TEXT` closes a task or followup nobody will
+do. It writes the same `done` status and `cancelled` receipt, through the same
+library call with the task guard (sd:1005). `sd task status <row-id> done`
+writes no receipt, so the row reads as finished work. A finding that
+`sd-review-ack` carried to a cancelled row reads `carry-dropped` and holds
+again. The guard refuses a recurring task and a row with an active assignment.
+An `sd_db` older than the guard refuses the verb by name.
 
 The item directory stays in place. Use `sd work relink <row-id> <path>` when an
 artifact moves: it preserves the row, notes and original source identity. No
@@ -397,11 +408,18 @@ which the installer places in `~/.claude/agents`.
   one of `sd.gate_slots` machine-wide slots (unset: a quarter of the cores,
   4 on 16). `SD_GATE_SLOTS` overrides it for one run, `0` lifts the cap, and
   CI takes none. A queued gate prints `waiting for a gate slot` on stderr and
-  again each minute. The wait counts against `sd-check --timeout`, and each
-  check gets the rest. A holder runs its checks with `SD_GATE_SLOTS=0`, so the
-  pack's own `make test` inside a gate takes no second slot; run directly,
-  `make test` takes one of 2. Slots are kernel locks under
+  again each minute, naming each holder's label, pid, directory and start
+  time. The wait counts against `sd-check --timeout`, and each check gets the
+  rest. A holder runs its checks with `SD_GATE_SLOTS=0`, so the pack's own
+  `make test` inside a gate takes no second slot; run directly, `make test`
+  takes one of the same slots. Slots are kernel locks under
   `$XDG_STATE_HOME/sd/gate-slots`, so a dead holder's slot is free at once.
+- **Wrap every other gate in the pool (sd:2522).** The pool is one per
+  machine, not one per repository. A plain `make check` in a repository whose
+  Makefile takes no slot runs as `sd gate run -- make check`, so it queues with
+  every `sd-check` and `sd-ship` gate. A per-repository `lockf` around a lane's
+  gate is then unnecessary: the pool already orders gates across every
+  repository, and a `lockf` only orders the gates of one.
 - **Gates wait in one queue (sd:2262).** Every waiter takes a place in one
   machine-wide queue, and only the head starts: first to wait, first to
   start. The head starts only while load1 is below `sd.gate_load_max`
@@ -600,9 +618,16 @@ before. Temperature is not a registry field: `kimi-k3` refuses any value but
 
 Adding a provider is an entry; adding money is a bill. Both role lines are
 read in order. `author` is picked when an assignment starts and never switched
-mid-item; outside the runner, `SD_AUTHOR` or `--author` names it to
+mid-item; outside the runner, `--author` names it to
 `sd-ship`, which stamps it on each commit it makes as `Authored-with:
-<name>/<vendor>`, the vendor as the registry gave it at commit time. The
+<name>/<vendor>`, the vendor as the registry gave it at commit time.
+`SD_AUTHOR=<name>` names it to the pack's `commit-msg` hook, which writes the
+same line on a commit whose message states none (sd:1295); a name nothing
+resolves refuses the commit, and `sd attribute` never amends. Its own
+repair commit says `SD_AUTHOR`'s entry too, else `human` (sd:2009). `human` is a
+commit a person wrote; `script` is one a deterministic job wrote, with no
+model and no person in the loop (sd:1637). Both are reserved and carry no
+vendor, so any provider may review them. The
 review reads no declaration: every commit in the reviewed range is attributed
 by its own trailer, or by an `Attributes: <sha> <name>/<vendor>` trailer on a
 later commit in the range that `sd attribute` makes, and a commit with neither
@@ -695,8 +720,9 @@ The reserved `sd` namespace declares four settings:
   `sd-review` reports the effective policy, its source and the repository's say under `remote_reviews.copilot`.
   `sd-ship` resolves the decision again at dispatch, from the setting as it stands then and the tiers the
   retained passes recorded, so a setting changed after the review takes effect without another review.
-- `sd.gate_slots`: how many repository gates (`sd-check` runs) may run at once on this machine; `0` is no cap.
-  Absence reads a quarter of the cores. `SD_GATE_SLOTS` overrides it for one run. It grants nothing;
+- `sd.gate_slots`: how many gates (`sd-check` runs, `sd gate run`, the pack's `make test`) may run at once on
+  this machine; `0` is no cap. Absence reads a quarter of the cores. `SD_GATE_SLOTS` overrides it
+  for one run. It grants nothing;
   see [Parallel work](#parallel-work).
 - `sd.gate_load_max`: the gate queue starts a gate only while load1 is below this; `0` is no load condition.
   Absence reads 2.5 per core. `SD_GATE_LOAD_MAX` overrides it for one run. It grants nothing.

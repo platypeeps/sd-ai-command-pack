@@ -76,8 +76,9 @@ CORE_CONFIG = {
                                       "changes only, always on every reviewing tier, never on none; a repository's "
                                       ".github/sd-review.json copilot_review overrides deep and always, and never wins over it."},
     "gate_slots": {"pattern": "[0-9]+",
-                   "description": "How many repository gates (sd-check runs) may run at once on this machine; 0 is no cap. "
-                                  "Unset reads a quarter of the cores; SD_GATE_SLOTS overrides it for one run."},
+                   "description": "How many gates (sd-check runs, sd gate run, the pack's make test) may run at once on this "
+                                  "machine; 0 is no cap. Unset reads a quarter of the cores; SD_GATE_SLOTS overrides it "
+                                  "for one run."},
     "gate_load_max": {"pattern": r"[0-9]+(\.[0-9]+)?",
                       "description": "The gate queue starts a gate only while load1 is below this; 0 is no load "
                                      "condition. Unset reads 2.5 per core; SD_GATE_LOAD_MAX overrides it for one run."},
@@ -2199,6 +2200,12 @@ ATTRIBUTES_TRAILER = "Attributes:"
 #: become reviewable by anthropic every time the trailer was forgotten.
 HUMAN_AUTHOR = "human"
 
+#: What a commit a deterministic job wrote says: no model and no person in the
+#: loop (sd:1637). A peer of `human`: reserved, no vendor, so any provider may
+#: review it; and not `human`, so an unattended job's commits do not count as
+#: the operator's own in authorship figures.
+SCRIPT_AUTHOR = "script"
+
 #: What a commit Dependabot wrote says, though it carries no trailer (sd:2065).
 #: A reserved value like `human` and not a registry entry: the registry lists
 #: what can be started, and nothing starts Dependabot. `github` is its vendor,
@@ -2221,7 +2228,9 @@ DEPENDABOT_IDENTITY = (
 )
 
 #: The values a trailer may carry that no registry entry resolves.
-RESERVED_AUTHORS = {HUMAN_AUTHOR: HUMAN_AUTHOR, DEPENDABOT_ENTRY: DEPENDABOT_AUTHOR}
+RESERVED_AUTHORS = {HUMAN_AUTHOR: HUMAN_AUTHOR, SCRIPT_AUTHOR: SCRIPT_AUTHOR, DEPENDABOT_ENTRY: DEPENDABOT_AUTHOR}
+#: The reserved values that carry no vendor, so they exclude no reviewer.
+VENDORLESS_AUTHORS = (HUMAN_AUTHOR, SCRIPT_AUTHOR)
 
 
 class TrailerError(Exception):
@@ -2364,7 +2373,7 @@ def author_vendors(root: pathlib.Path, base: str, head: str) -> tuple[str, ...]:
                       for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines()
                       if line.startswith(AUTHORED_TRAILER))
     for sha, value in claims:
-        if value == HUMAN_AUTHOR:
+        if value in VENDORLESS_AUTHORS:
             continue
         entry, separator, vendor = value.partition("/")
         # Stripped and folded, because the comparison this feeds is an exact
@@ -2376,7 +2385,7 @@ def author_vendors(root: pathlib.Path, base: str, head: str) -> tuple[str, ...]:
         if not separator or not entry or not vendor:
             raise TrailerError(
                 f"{sha[:12]} says {AUTHORED_TRAILER} {value!r}, which is neither "
-                f"{HUMAN_AUTHOR!r} nor an '<entry>/<vendor>' pair. A trailer that "
+                f"{HUMAN_AUTHOR!r}, {SCRIPT_AUTHOR!r} nor an '<entry>/<vendor>' pair. A trailer that "
                 f"cannot be read is not a weaker claim than one that is missing."
             )
         if vendor not in vendors:
@@ -2411,7 +2420,7 @@ def attribution_value(name: str, registry: Any) -> str:
         known = ", ".join(sorted(registry.providers)) or "nothing"
         raise TrailerError(
             f"no registry entry named {entry!r} in {registry.path}, which holds "
-            f"{known}. Name an entry the registry has, or {HUMAN_AUTHOR!r} bare: a "
+            f"{known}. Name an entry the registry has, or {HUMAN_AUTHOR!r} or {SCRIPT_AUTHOR!r} bare: a "
             f"trailer nothing resolves records no vendor, and a range with no "
             f"vendor is one its own author may review."
         )
@@ -2425,6 +2434,42 @@ def attribution_value(name: str, registry: Any) -> str:
             f"claim is dropped rather than questioned. Fix the registry."
         )
     return value
+
+
+#: Names who is committing, for `hooks/commit-msg` to write as `Authored-with:`
+#: on a message that states none (sd:1295): a registry entry, `human` or
+#: `script`. A harness sets it for its session and a job for its run, so the
+#: trailer lands at commit time and no `sd attribute` commit follows.
+AUTHOR_VARIABLE = "SD_AUTHOR"
+
+
+def states_author(message: str) -> bool:
+    """Whether any unindented line of `message` begins `Authored-with:`."""
+    return any(line.startswith(AUTHORED_TRAILER) for line in message.splitlines())
+
+
+def commit_author(name: str, read_registry: Callable[[], tuple[Any, str]]) -> str:
+    """The `Authored-with:` value `SD_AUTHOR=<name>` stands for; `TrailerError` when none.
+
+    `attribution_value`'s answer, so the hook writes what `sd attribute`
+    writes for the same name. `human` and `script` read no registry.
+    `dependabot` refuses: that claim rests on the identity GitHub writes, and a
+    local commit does not carry it.
+    """
+    entry = name.strip()
+    if entry == DEPENDABOT_ENTRY:
+        raise TrailerError(f"{AUTHOR_VARIABLE}={entry!r}: a local commit is never "
+                           f"Dependabot's; GitHub's identity on its own commits says that")
+    if entry in VENDORLESS_AUTHORS:
+        return entry
+    registry, reason = read_registry()
+    if reason:
+        raise TrailerError(f"{AUTHOR_VARIABLE}={entry!r} names no reserved author, and the "
+                           f"provider registry does not read: {reason}")
+    try:
+        return attribution_value(entry, registry)
+    except TrailerError as error:
+        raise TrailerError(f"{AUTHOR_VARIABLE}={entry!r}: {error}") from None
 
 
 def _own_trailer(root: pathlib.Path, sha: str) -> str:
@@ -2527,15 +2572,16 @@ def _attribution_environment(root: pathlib.Path) -> dict[str, str] | None:
 
 
 def attribute(
-    root: pathlib.Path, target: str, name: str, registry: Any
+    root: pathlib.Path, target: str, name: str, registry: Any, writer: str = HUMAN_AUTHOR
 ) -> tuple[str, str, list[str]]:
     """Record `name` as the author of `target`, as one empty commit on `HEAD`.
 
     `target` is one commit or a `<from>..<to>` range. What lands is a single
     empty commit carrying an `Attributes:` line per repaired commit and its own
-    `Authored-with: human`, because the operator made it and a repair that
-    needs repairing is not one (C-40). Returns the new sha, the value written
-    and the commits covered.
+    `Authored-with: <writer>`, the resolved value of whoever ran it: `human`
+    for the operator, an agent's own entry for an agent (sd:2009), because a
+    repair that needs repairing is not one (C-40). Returns the new sha, the
+    value written and the commits covered.
 
     A commit rather than a note: a notes ref is one mutable ref a repository
     shares, and two clones attributing different commits of one branch diverge
@@ -2549,12 +2595,12 @@ def attribute(
     value = attribution_value(name, registry)
     covered = _covered(root, target)
     trailers = [f"{ATTRIBUTES_TRAILER} {sha} {value}" for sha in covered]
-    trailers.append(f"{AUTHORED_TRAILER} {HUMAN_AUTHOR}")
+    trailers.append(f"{AUTHORED_TRAILER} {writer}")
     written = subprocess.run(  # fixed argv, no shell
         ["git", "commit", "--allow-empty", "--quiet",
          "-m", f"chore(attribution): {len(covered)} commit(s) written with {value}",
-         "-m", "Recorded by the operator, after the fact, for commits that predate "
-               "the trailer or lost it to a rewrite.",
+         "-m", f"Recorded by {'the operator' if writer == HUMAN_AUTHOR else writer}, after the "
+               "fact, for commits that predate the trailer or lost it to a rewrite.",
          "-m", "\n".join(trailers)],
         cwd=str(root), capture_output=True, text=True,
         env=_attribution_environment(root),
