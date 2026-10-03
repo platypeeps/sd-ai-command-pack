@@ -114,7 +114,8 @@ for the controls a run passes through.
 >    Stage the fix and the same commands behave differently again. The answer
 >    depends on the index's state, which is not what you are measuring. A byte
 >    copy compares against the bytes you intended, whatever the index holds.
->    Record the exact failure text of each mutation.
+>    Record the exact failure text of each mutation. For Python, follow
+>    WORKFLOW.md § Mutation checks first: a stale `.pyc` can answer instead.
 > 4. **Gate.** `<gate command>`. Never end a gate command with a pipe; the
 >    reported status is the pipe's. Redirect to a file and grep it afterwards.
 >    Report rc, suite count, test count, and a grep for `FAILED`/`ERROR`.
