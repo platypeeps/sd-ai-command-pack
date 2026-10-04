@@ -473,7 +473,8 @@ class Ship(SharedReview):
         info = ship.identity(connection, args.item)
         self.item, self.repo = info["item"], info["repo"]
         if slug(self.repo["remote"] or "") != self.repository:
-            raise Refusal("item repository does not match this checkout's origin")
+            from sd_ship_no_item import foreign_item
+            raise foreign_item(args.item, slug(self.repo["remote"] or "") or self.repo["path"], self.repository, args.command)
         if args.command == "merge":
             # A lane merges from its own checkout, whichever branch it has open (sd:2037).
             self.checkout_branch = sd_lib.git_output(["symbolic-ref", "--quiet", "--short", "HEAD"], root)
@@ -2475,7 +2476,8 @@ def hold_command(root, connection, database, args, store) -> dict:
     repository = slug(git(root, "config", "--get", "remote.origin.url"))
     info = store.identity(connection, args.item)
     if slug(info["repo"]["remote"] or "") != repository:
-        raise Refusal("item repository does not match this checkout's origin")
+        from sd_ship_no_item import foreign_item
+        raise foreign_item(args.item, slug(info["repo"]["remote"] or "") or info["repo"]["path"], repository, args.command)
     if args.command == "release":
         record = sd_ship_hold.end_hold(database, repository, args.item)
         return {"ok": True, "phase": "released", "repository": repository, "item": args.item, "released": record}

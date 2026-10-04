@@ -126,6 +126,7 @@ The runner uses its provisioned interpreter.
 For itemless work, reuse its stable review ID.
 For genuinely new work, allocate it with `sd-ship review --no-item --create-record --assert-new-work --json`.
 Use `--no-item --review-id ID` instead of `--item ID` for prepare, merge, observe, and reconcile.
+An item of another repository ships here the same way: `--item` refuses and names this path, and `sd task note N` records the PR on the item.
 Prepare reuses complete exact-head review evidence and acceptance; otherwise it follows the same review gates.
 Itemless merge requires `--manual` and `--expected-head SHA`.
 After the merge, run itemless `reconcile` and `review --close-record REASON` from the default branch; the deleted feature branch needs no recreation.

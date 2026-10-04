@@ -86,6 +86,22 @@ def missing_record(review_id: str) -> Refusal:
                    next_action=f"Check the ID against the `review_id` an earlier --create-record printed. {ALLOCATE_HINT}")
 
 
+def foreign_item(item: int, item_repository: str, repository: str, command: str) -> Refusal:
+    """The refusal for `--item N` from a checkout of another repository, naming the way on (sd:2576).
+
+    The PR still ships here, as an itemless record; only `hold` has no itemless form.
+    """
+    where = f"To ship under sd:{item}, run from a checkout of {item_repository}."
+    if command not in ("hold", "release"):
+        where += (f" To ship this checkout's PR without an item, run `{CREATE_RECORD_COMMAND}`, then "
+                  f"`sd-ship {command} --no-item --review-id <review_id>` with the review_id it prints"
+                  f"{'; an itemless merge also needs --manual --expected-head SHA' if command == 'merge' else ''}. "
+                  f"That records nothing on sd:{item}; record the PR there with `sd task note {item}`.")
+    return Refusal(f"item repository does not match this checkout's origin: item sd:{item} belongs to "
+                   f"{item_repository}, not {repository}",
+                   code="item_repository_mismatch", boundary="input", state="operator_decision", next_action=where)
+
+
 def observed_at() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
