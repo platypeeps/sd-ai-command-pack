@@ -249,6 +249,23 @@
 
 ### Fixed
 
+- **One stalled plugin root no longer blocks every plugin lookup (sd:2540).**
+  A prefix lives in its plugin's manifest, so `sd config get <prefix>.<key>`
+  read every registered root in turn until it found the owner. On 2026-10-01
+  one root on an external volume waited on an open() under launchd for 16
+  hours, and every plugin `sd config get` timed out behind it (sd:2537). Now
+  each root reads in its own daemon thread. A lookup (`sd config get`, `set`,
+  `unset`, and a plugin kind) returns once its owner and every root listed
+  before it have answered. A root silent after 5 s is skipped with a
+  `warning: skipped plugin root` line. When two roots carry one prefix, the
+  earlier registry entry owns it for both lookups, whatever answers first.
+  When a root listed before the answering owner stays silent, the prefix
+  refuses as ambiguous, naming both roots: the silent root may own it, so a
+  later root never takes it over.
+  `sd plugin add` does not skip a silent root: it refuses, naming that root,
+  because the root may own the prefix being registered. Core `sd.*` keys
+  still read no plugin root.
+
 - **A review watchdog's drain after KILL waits for the pipes to close (sd:2609).**
   `review_process` used one cleanup bound for both signals, so a test that
   shortened the TERM grace also cut the drain after KILL to 50 ms. Under
