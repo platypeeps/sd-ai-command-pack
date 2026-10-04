@@ -74,7 +74,7 @@ else is. Its executables write these paths, and no others:
   `--remove-legacy` it also deletes the three files the old `sd-github-review`
   installer left. `--remove` deletes the workflow and its Dependabot guard.
 - The fleet stamp, from `sd fleet stamp`, into the checkout you stand in, which
-  must be a checkout of a `runner_merge=auto` repository: the routing lane and
+  must be a checkout of a managed `runner_merge=auto` repository (sd:1620): the routing lane and
   its Dependabot guard as `setup-github` writes them,
   `.github/workflows/sd-check.yml` where no other workflow runs on
   `pull_request` (created only: an existing one is kept as written), the `unprotected` entry in `.github/sd-status.json`

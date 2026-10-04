@@ -13,6 +13,7 @@
       "Bash(make gate-env)",
       "Bash(make hooks)",
       "Bash(make lint)",
+      "Bash(make precheck)",
       "Bash(make setup)",
       "Bash(make test)",
       "Bash(python3 bin/sd-status:*)",
