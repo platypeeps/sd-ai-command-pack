@@ -178,6 +178,19 @@ class ReviewRuntime:
     manifest: Callable[[pathlib.Path], dict] | None = None
 
 
+#: The report fields `timing_plan` judges, kept whole in a refused plan's diagnostic (sd:2646): the stdout tail cut them off.
+PLAN_FIELDS = ("timing", "requested_reviews", "authorship_refusal", "selection_refusal")
+
+
+def plan_fields(output: str) -> dict | None:
+    """`PLAN_FIELDS` from a review run's output; None when the output is not a JSON object."""
+    try:
+        report = json.loads(output)
+    except (ValueError, RecursionError):
+        return None
+    return {key: report.get(key) for key in PLAN_FIELDS} if isinstance(report, dict) else None
+
+
 def complete_report(last: dict, head: str, reviewed_head: str | None) -> dict:
     report = last.get("report") or {}
     blocked = report.get("status") == "blocking"
@@ -671,7 +684,9 @@ class SharedReview:
 
     def preflight_diagnostic(self, planned: subprocess.CompletedProcess,
                              kind: str = "invalid_timing_plan", stage: str = "planning") -> dict:
-        diagnostic: dict = {"kind": kind, "stage": stage, "exit_code": planned.returncode}
+        argv = planned.args if isinstance(planned.args, list) else [planned.args]
+        diagnostic: dict = {"kind": kind, "stage": stage, "exit_code": planned.returncode,
+                            "argv": [str(part) for part in argv], "plan": plan_fields(planned.stdout)}
         limit = self.runtime.diagnostic_bytes
         for name in ("stdout", "stderr"):
             data = getattr(planned, name).encode("utf-8", "replace")
