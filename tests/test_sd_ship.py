@@ -2937,6 +2937,100 @@ roles:
         change_status(self.connection, self.item, "done", who="operator", reason=f"delivered at {commit} on origin/main")
         self.assertFalse(self.merge()["delivery_pending"])
 
+    def hand_delivered_held_squash(self) -> int:
+        """A held task squash the operator closed by hand; reconcile owes it a `Closes:`."""
+        from sd_db.workflow import change_status
+        self.task_item("task")
+        racing, self.double._route = self.double._route, self.double._route
+        commit = self.held_merge()["merge_commit"]
+        self.double._route = racing
+        change_status(self.connection, self.item, "done", who="operator", reason=f"delivered at {commit} on origin/main")
+        reconciled = self.merge()
+        self.assertFalse(reconciled["delivery_pending"])
+        self.assertEqual(reconciled["closing_owed"]["commit"], commit)
+        return self.item
+
+    def carrier_merge(self, name: str = "second") -> dict:
+        """Another task's unheld `--deliver` merge in the same repository."""
+        _git(self.root, "fetch", "-q", "origin", "main")
+        _git(self.root, "checkout", "-q", "-b", name, "FETCH_HEAD")
+        (self.root / f"{name}.py").write_text("y = 2\n")
+        _git(self.root, "add", f"{name}.py")
+        _git(self.root, "commit", "-qm", f"{name}\n\nAuthored-with: human")
+        self.item = create_item(self.connection, kind="task", title=f"{name} task", status="in_progress",
+                                repo=str(self.operator), branch=name)
+        self.unanswered("--deliver").prepare()
+        with patch.object(ship.time, "sleep"):
+            return self.merge()
+
+    def test_a_hand_delivered_held_squash_reads_as_closed_in_git_after_the_next_merge(self):
+        """Reconcile clears the hold once the row records the hand delivery, and
+        git-only readers must agree: they read the squash's parent, which never
+        changes, so the next squash here carries the close (sd:1600)."""
+        held = self.hand_delivered_held_squash()
+        self.assertNotEqual(ship.sd_lib.delivered(self.root, f"sd:{held}"), ship.sd_lib.YES)
+        carrier = self.carrier_merge()
+        self.assertFalse(carrier["delivery_pending"], carrier)
+        self.assertEqual([debt["item"] for debt in carrier["carried_closes"]], [held])
+        message = _git(self.remote.path, "log", "-1", "--format=%B", "main")
+        parsed = subprocess.run(["git", "interpret-trailers", "--parse"], input=message, capture_output=True,
+                                text=True, check=True).stdout
+        self.assertIn(f"Closes: sd:{held}\n", parsed)
+        self.assertIn("Authored-with: human", parsed)
+        self.assertEqual(ship.sd_lib.delivered(self.root, f"sd:{held}"), ship.sd_lib.YES)
+        receipt = receipts.read(self.connection, receipts.receipt_key(self.remote.slug, "topic", held))[1]
+        self.assertEqual(receipt["closing_paid"], carrier["merge_commit"])
+
+    def test_a_paid_close_is_not_carried_again(self):
+        held = self.hand_delivered_held_squash()
+        self.carrier_merge()
+        third = self.carrier_merge("third")
+        self.assertNotIn("carried_closes", third)
+        self.assertNotIn(f"Closes: sd:{held}", _git(self.remote.path, "log", "-1", "--format=%B", "main"))
+
+    def owe(self, repository: str, item: int, branch: str) -> None:
+        """A merged receipt in `repository` that owes `item` a `Closes:`."""
+        key = receipts.receipt_key(repository, branch, item)
+        revision, _ = receipts.read(self.connection, key)
+        receipts.save(self.connection, key, revision, {
+            "repository": repository, "branch": branch, "head": "a" * 40, "merge_commit": "b" * 40,
+            "closing_owed": {"item": item, "commit": "b" * 40, "branch": branch}})
+
+    def test_an_owed_close_never_crosses_into_another_repository(self):
+        """Two repositories in one database: a carrier pays only its own
+        repository's debts, and only for an item whose row names it (sd:1600)."""
+        other = self.directory / "other"
+        upsert_repo(self.connection, str(other), remote="https://github.com/example-org/other.git", status_source="row")
+        here = create_item(self.connection, kind="task", title="owed here", status="done", repo=str(self.operator))
+        there = create_item(self.connection, kind="task", title="owed there", status="done", repo=str(other))
+        moved = create_item(self.connection, kind="task", title="row elsewhere", status="done", repo=str(other))
+        self.owe(self.remote.slug, here, "here")
+        self.owe("example-org/other", there, "there")
+        self.owe(self.remote.slug, moved, "moved")
+        carrier = self.carrier_merge()
+        self.assertEqual([debt["item"] for debt in carrier["carried_closes"]], [here])
+        message = _git(self.remote.path, "log", "-1", "--format=%B", "main")
+        self.assertNotIn(f"Closes: sd:{there}", message)
+        self.assertNotIn(f"Closes: sd:{moved}", message)
+        self.assertNotIn("closing_paid", receipts.read(self.connection, receipts.receipt_key("example-org/other", "there", there))[1])
+
+    def test_a_carrier_pays_at_most_the_cap(self):
+        owed = [create_item(self.connection, kind="task", title=f"owed {n}", status="done", repo=str(self.operator))
+                for n in range(12)]
+        for item in owed:
+            self.owe(self.remote.slug, item, f"b{item}")
+        carried, left = ship.sd_ship_squash.owed_closes(self.connection, self.remote.slug, "", lambda item: self.remote.slug)
+        self.assertEqual(([d["item"] for d in carried], [d["item"] for d in left]), (sorted(owed)[:10], sorted(owed)[10:]))
+
+    def test_owed_closes_past_the_cap_stay_owed_and_the_merge_says_so(self):
+        held = self.hand_delivered_held_squash()
+        with patch.object(ship.sd_ship_squash, "OWED_CLOSES_CAP", 0):
+            carrier = self.carrier_merge()
+        self.assertEqual((carrier.get("carried_closes"), carrier["closes_left"]), (None, [held]))
+        self.assertNotEqual(ship.sd_lib.delivered(self.root, f"sd:{held}"), ship.sd_lib.YES)
+        receipt = receipts.read(self.connection, receipts.receipt_key(self.remote.slug, "topic", held))[1]
+        self.assertNotIn("closing_paid", receipt)
+
     def test_a_held_followup_names_a_close_it_can_take(self):
         """A followup takes no `--delivered-by` (sd:809); its hold names the reason form."""
         self.task_item("followup")
@@ -3393,7 +3487,7 @@ roles:
 
     def test_a_no_item_record_refuses_a_live_branch_switch(self):
         """sd:1937 review. `--no-item` compares the live checkout too, not only its stored record."""
-        delivery = SimpleNamespace(branch="topic", repository=ship.slug(REMOTE_URL))
+        delivery = SimpleNamespace(branch="topic", checkout_branch="topic", repository=ship.slug(REMOTE_URL))
         _git(self.root, "checkout", "-q", "-b", "elsewhere")
         with self.assertRaisesRegex(ship.Refusal, "the checkout left topic"):
             ship.identity_unchanged(self.root, self.connection, SimpleNamespace(no_item=True), receipts, delivery)
@@ -3402,7 +3496,7 @@ roles:
 
     def test_a_remote_change_alone_refuses(self):
         """sd:1937 PR review. The branch is unchanged, so only the remote comparison can refuse."""
-        delivery = SimpleNamespace(branch="topic", repository=ship.slug(REMOTE_URL))
+        delivery = SimpleNamespace(branch="topic", checkout_branch="topic", repository=ship.slug(REMOTE_URL))
         _git(self.root, "checkout", "-q", "topic")
         _git(self.root, "remote", "set-url", "origin", "https://github.com/example/elsewhere.git")
         with self.assertRaisesRegex(ship.Refusal, "the checkout left topic"):
@@ -3658,6 +3752,91 @@ roles:
         program.write_text("#!/usr/bin/env python3\nimport json\nprint(" + repr(json.dumps(payload)) + ")\n")
         self.prepare()
         self.assertEqual(self.operation().state["passes"][1]["report"]["subject"]["base"], reviewed)
+
+    def amend_after_a_blocking_review(self):
+        """One blocking review, then the reviewed commit amended away: (reviewed, amended, payload, program).
+
+        The amended commit is one the remote never had, as with a privacy
+        amend: the fixture's first commit is on the remote already, and
+        rewriting it would need the force push sd-ship never makes.
+        """
+        (self.root / "src.py").write_text("value = 3\n")
+        _git(self.root, "add", "src.py")
+        _git(self.root, "commit", "-m", "change\n\nAuthored-with: human")
+        program = self.programs / "review-fixture"
+        payload = {"type": "result", "subtype": "success", "structured_output": {"findings": [
+            {"path": "src.py", "line": 1, "severity": "high", "family": "correctness", "summary": "value is wrong"}]}}
+        program.write_text("#!/usr/bin/env python3\nimport json\nprint(" + repr(json.dumps(payload)) + ")\n")
+        with self.assertRaisesRegex(ship.Refusal, "local review blocking"):
+            self.prepare()
+        reviewed = self.operation().state["passes"][0]["head"]
+        (self.root / "src.py").write_text("value = 2\n")
+        _git(self.root, "add", "src.py")
+        _git(self.root, "commit", "--amend", "--no-edit")
+        return reviewed, _git(self.root, "rev-parse", "HEAD"), payload, program
+
+    def test_a_rewritten_reviewed_head_restarts_its_review_with_a_reason(self):
+        """sd:2600: an amend that must not be undone gets a fresh review on the item path.
+
+        A privacy amend drops a line that may not reach a public remote, so the
+        `git reset --soft` remedy -- which publishes the reviewed commit -- is
+        not open. `--restart-review REASON` keeps the orphaned passes, with
+        the reason, and reviews the whole branch again from nothing, counting
+        the new pass against the cap with the ones it set aside.
+        """
+        reviewed, amended, payload, program = self.amend_after_a_blocking_review()
+        with self.assertRaises(ship.Refusal) as caught:
+            self.prepare()
+        said = caught.exception.workflow["next_action"]
+        self.assertIn("--restart-review", said)
+        self.assertIn("must not be pushed", said)
+        self.assertLess(said.index("--restart-review"), said.index(f"git reset --soft {reviewed}"),
+                        "the reset stays, as the second option")
+        self.assertIn("only edited a commit message", said)
+        payload["structured_output"]["findings"] = []
+        program.write_text("#!/usr/bin/env python3\nimport json\nprint(" + repr(json.dumps(payload)) + ")\n")
+        prepared = self.prepare("--restart-review", "privacy amend dropped a flagged path")
+        self.assertEqual(prepared["reviewed_head"], amended)
+        state = self.operation().state
+        self.assertEqual([entry["head"] for entry in state["passes"]], [amended])
+        self.assertIsNone(state["passes"][0]["base"], "the restart reviews the whole branch")
+        self.assertEqual(state["passes"][0]["report"]["status"], "clean")
+        [restart] = state["superseded_reviews"]
+        self.assertEqual(restart["reason"], "privacy amend dropped a flagged path")
+        self.assertEqual(restart["head"], amended)
+        self.assertEqual(restart["orphaned"], [reviewed])
+        self.assertEqual([entry["head"] for entry in restart["passes"]], [reviewed])
+        self.assertEqual(restart["passes"][0]["report"]["findings"][0]["summary"], "value is wrong",
+                         "the orphaned review's findings stay in the receipt")
+        self.assertEqual(ship.ItemHistory().spent(state), 2, "the set-aside pass still counts against the cap")
+
+    def test_a_restart_refuses_while_every_reviewed_head_is_reachable(self):
+        """sd:2600: a restart is for an orphaned review, not a way to drop live findings."""
+        program = self.programs / "review-fixture"
+        payload = {"type": "result", "subtype": "success", "structured_output": {"findings": [
+            {"path": "src.py", "line": 1, "severity": "high", "family": "correctness", "summary": "value is wrong"}]}}
+        program.write_text("#!/usr/bin/env python3\nimport json\nprint(" + repr(json.dumps(payload)) + ")\n")
+        with self.assertRaisesRegex(ship.Refusal, "local review blocking"):
+            self.prepare()
+        _git(self.root, "commit", "--allow-empty", "-m", "fix\n\nAuthored-with: human")
+        before = self.operation().state
+        with self.assertRaisesRegex(ship.Refusal, "only when a reviewed head is not an ancestor"):
+            self.prepare("--restart-review", "no reason to restart")
+        self.assertEqual(self.operation().state["passes"], before["passes"])
+        self.assertNotIn("superseded_reviews", self.operation().state)
+
+    def test_a_restart_needs_a_reason_and_combines_with_no_other_review_flag(self):
+        reviewed, amended, _payload, _program = self.amend_after_a_blocking_review()
+        for extra, said in ((["--restart-review", "  "], "nonempty REASON"),
+                            (["--restart-review", "amend", "--retry-review"], "does not combine"),
+                            (["--restart-review", "amend", "--catch-up"], "does not combine"),
+                            (["--restart-review", "amend", "--additional-review-for", amended,
+                              "--request-reason", "more"], "does not combine")):
+            with self.subTest(extra=extra), self.assertRaisesRegex(ship.Refusal, said):
+                self.prepare(*extra)
+            state = self.operation().state
+            self.assertEqual([entry["head"] for entry in state["passes"]], [reviewed])
+            self.assertNotIn("superseded_reviews", state)
 
     def test_tampered_fix_receipt_cannot_claim_original_blockers_were_verified(self):
         self.prepare()
@@ -4242,14 +4421,18 @@ roles:
             self.additional(head)
         self.spent_reviews()
         prior = self.operation().state["passes"]
-        for flags in (["--additional-review-for", head], ["--request-reason", "reason"],
-                      ["--additional-review-for", head, "--request-reason", "  "],
-                      ["--additional-review-for", head[:12], "--request-reason", "reason"],
-                      ["--additional-review-for", "0" * 40, "--request-reason", "reason"],
-                      ["--additional-review-for", head, "--request-reason", "reason", "--retry-review"]):
+        # Each refusal names the flag that fixes it (sd:2026): a nonempty
+        # `--request-reason` alone used to be told its reason was empty.
+        for flags, names in ((["--additional-review-for", head], "needs a nonempty --request-reason"),
+                             (["--request-reason", "reason"], "valid only with --additional-review-for"),
+                             (["--additional-review-for", head, "--request-reason", "  "], "needs a nonempty --request-reason"),
+                             (["--additional-review-for", head[:12], "--request-reason", "reason"], "is not the clean current HEAD"),
+                             (["--additional-review-for", "0" * 40, "--request-reason", "reason"], "is not the clean current HEAD"),
+                             (["--additional-review-for", head, "--request-reason", "reason", "--retry-review"],
+                              "--retry-review and --additional-review-for do not combine")):
             operation = self.operation("prepare", *flags)
             with self.subTest(flags=flags), patch.object(ship, "review_process", side_effect=AssertionError("review dispatched")):
-                with self.assertRaises(ship.Refusal):
+                with self.assertRaisesRegex(ship.Refusal, re.escape(names)):
                     operation.review(head)
             self.assertEqual(self.operation().state["passes"], prior)
 
@@ -4583,7 +4766,8 @@ roles:
         with patch.object(ship, "review_process", side_effect=child):
             self.operation().review(_git(self.root, "rev-parse", "HEAD"))
         state = self.operation().state
-        self.assertEqual(stages, [(True, 3600), (False, 10800)])
+        # sd:2611: the execution watchdog also counts the gate-slot phase.
+        self.assertEqual(stages, [(True, 3600), (False, 10800 + sd_review.sd_lib.GATE_SLOT_SECONDS)])
         self.assertEqual(trace, ["check", "provider"])
         self.assertEqual(len(state["passes"]), 1)
         self.assertEqual(state["passes"][0]["report"]["completed_reviews"], 1)
@@ -4876,6 +5060,33 @@ class ReviewWatchdogTests(unittest.TestCase):
         diagnostic = self.expired_group(ignores_term=True, valid_report=True)
         self.assertEqual(diagnostic["cleanup"], {"term": "sent", "kill": "sent", "drained": True, "leader_reaped": True})
         self.assertEqual(diagnostic["captured_report"], {"completed_reviews": 3, "status": "clean"})
+
+    def test_a_late_close_after_kill_is_awaited_not_cut_at_the_term_grace(self):
+        """A loaded machine closes the pipes late after KILL; the drain waits for that, not for the TERM grace (sd:2609)."""
+        ready = self.root / "holder"
+        def stop_holder():
+            if ready.exists():
+                try:
+                    os.kill(int(ready.read_text()), ship.signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        self.addCleanup(stop_holder)
+        # The holder leaves the owned group with both pipes, as a slow reader would keep them, and closes them after a second.
+        script = ("import os,pathlib,signal,time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nif os.fork()==0:\n os.setsid()\n"
+                  f" pathlib.Path({str(ready)!r}).write_text(str(os.getpid()))\n time.sleep(1)\n os._exit(0)\n"
+                  "while True: time.sleep(1)\n")
+        original_communicate = subprocess.Popen.communicate
+        def after_ready(process, *args, **kwargs):
+            deadline = time.monotonic() + 5
+            while not ready.exists() and time.monotonic() < deadline:
+                time.sleep(.005)
+            return original_communicate(process, *args, **kwargs)
+        started = time.monotonic()
+        with patch.object(subprocess.Popen, "communicate", after_ready), patch.object(ship, "REVIEW_CLEANUP_SECONDS", .05):
+            with self.assertRaises(ship.ReviewTimeout) as raised:
+                ship.review_process(self.root, [sys.executable, "-c", script], timeout=.05)
+        self.assertEqual(raised.exception.diagnostic["cleanup"], {"term": "sent", "kill": "sent", "drained": True, "leader_reaped": True})
+        self.assertLess(time.monotonic() - started, 4, "the drain ends at the close, not at its bound")
 
     def test_exited_leader_cannot_leave_inherited_pipes_and_a_live_grandchild(self):
         diagnostic = self.expired_group(leader_exits=True)
@@ -5390,13 +5601,21 @@ class DeclaredGapCase(unittest.TestCase):
         self.assertEqual(pull_head_waits(sleep), [])
         self.assertEqual(self.puts(), 0)
 
+    def merge_gate_fails(self, failing: str) -> None:
+        """Commit a check that passes in the operator's clone, where `.git` is a
+        directory, and fails in a worktree, where it is a file. Prepare's branch
+        review also checks in a worktree (sd:2077), so a marker outside both
+        lets that first worktree run pass and every later one run `failing`."""
+        marker = pathlib.Path(tempfile.mkdtemp()) / "prepared"
+        self.addCleanup(shutil.rmtree, marker.parent, True)
+        self.commit({"Makefile": f"check:\n\t@test -d .git || if [ -e {marker} ]; then {failing}; else touch {marker}; fi\n"})
+
     def test_ci_local_with_a_failing_check_posts_failure_and_refuses(self):
-        """The check passes in the operator's clone, where `.git` is a directory,
-        and fails in the gate's worktree, where it is a file: the real run, and
-        proof it ran in the worktree rather than the checkout."""
-        self.commit({"Makefile": "check:\n\t@test -d .git\n"})
+        """The merge gate's check fails in its worktree: the real run, and proof
+        it ran in the worktree rather than the checkout."""
+        self.merge_gate_fails("exit 1")
         self.declare()
-        # Prepared before the switch, so prepare's check ran in the clone and passed.
+        # Prepared before the switch, so prepare's check ran first and passed.
         self.local_green()
         self.local_ci()
         self.refuse(r"sd/local-gate is failure", "ci_not_passing")
@@ -5405,7 +5624,7 @@ class DeclaredGapCase(unittest.TestCase):
     def test_ci_local_failure_names_the_failing_check_its_tail_and_the_receipt(self):
         """sd:2066. The merge said only `sd-check fail (check fail)`, the status
         description; finding the failing step meant running the gate again."""
-        self.commit({"Makefile": "check:\n\t@test -d .git || { echo sd2066-out; echo sd2066-err >&2; exit 1; }\n"})
+        self.merge_gate_fails("echo sd2066-out; echo sd2066-err >&2; exit 1")
         self.declare()
         self.local_green()
         self.local_ci()
@@ -5413,7 +5632,12 @@ class DeclaredGapCase(unittest.TestCase):
             self.merge()
         message = str(caught.exception)
         self.assertIn("sd/local-gate is failure", message)
-        self.assertRegex(message, r"check \(exit 2\): stderr: sd2066-err\n.*\nstdout: sd2066-out")
+        self.assertRegex(message, r"check \(exit 2\): whole output: (\S+/sd-check-output/\S+-check\.log)\n"
+                                  r"stderr: sd2066-err\n.*\nstdout: sd2066-out")
+        # sd:2558. The named file is in the repository's Git directory and holds the whole output.
+        kept = pathlib.Path(re.search(r"whole output: (\S+)", message).group(1))
+        self.assertEqual(kept.parent.parent, (self.root / ".git").resolve())
+        self.assertIn("sd2066-out", kept.read_text(encoding="utf-8"))
         self.assertIn(f"`sd-ship observe --item {self.item} --json` prints it", message)
         self.assertEqual(self.puts(), 0)
         observed = self.operation("observe").observe()

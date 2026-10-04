@@ -23,6 +23,7 @@ import time
 from datetime import datetime, timezone
 
 import sd_changelog_merge
+import sd_lane
 import sd_lib
 import sd_local_gate
 import sd_ship_body
@@ -44,6 +45,7 @@ from sd_ship_review import (
     SharedReview,
     carry_forward,
     is_ancestor,
+    restart_reason,
 )
 from sd_ship_workflow import blocked, failure
 
@@ -51,7 +53,11 @@ BIN = pathlib.Path(__file__).resolve().parent
 #: When this process started, for the invoker a receipt names (sd:2078).
 PROCESS_STARTED = datetime.now(timezone.utc).isoformat()
 REVIEW_SETUP_SECONDS = 3600
+#: How long a group sent TERM may take to exit and close its pipes before KILL.
 REVIEW_CLEANUP_SECONDS = 5
+#: How long to wait for the pipes to close once KILL is sent. Nothing in the group
+#: outlives KILL, so only a descendant outside it reaches this bound (sd:2609).
+REVIEW_DRAIN_SECONDS = 5
 REVIEW_DIAGNOSTIC_BYTES = 4096
 #: How deep a captured review report may nest and still be kept as evidence.
 #: Measured rather than chosen: of the 156 review reports the local store held
@@ -240,7 +246,7 @@ def review_process(root: pathlib.Path, argv: list[str], *, timeout: float) -> su
             if isinstance(interruption, subprocess.TimeoutExpired):
                 output, errors = interruption.output or b"", interruption.stderr or b""
             cleanup: dict = {}
-            for name, number in (("term", signal.SIGTERM), ("kill", signal.SIGKILL)):
+            for name, number, bound in (("term", signal.SIGTERM, REVIEW_CLEANUP_SECONDS), ("kill", signal.SIGKILL, REVIEW_DRAIN_SECONDS)):
                 # poll() may already have reaped the leader. Its descendants
                 # still own the group and pipes, so the signal is unconditional.
                 try:
@@ -251,7 +257,7 @@ def review_process(root: pathlib.Path, argv: list[str], *, timeout: float) -> su
                 except OSError as error:
                     cleanup[name] = f"failed: {error}"
                 try:
-                    output, errors = process.communicate(timeout=REVIEW_CLEANUP_SECONDS)
+                    output, errors = process.communicate(timeout=bound)
                     cleanup["drained"] = True
                 except subprocess.TimeoutExpired as error:
                     output, errors = error.output or output, error.stderr or errors
@@ -282,6 +288,14 @@ def review_process(root: pathlib.Path, argv: list[str], *, timeout: float) -> su
             process.stderr.close()
 
 
+def slot_phase(plan: dict) -> int:
+    """sd:2611: the gate-slot wait, its own phase; none in a plan without it. Not a count: `TypeError`, an invalid plan."""
+    slot = plan.get("slot_seconds", 0)
+    if type(slot) is not int or slot < 0:
+        raise TypeError(f"slot_seconds is {slot!r}, not a count of seconds")
+    return slot
+
+
 def timing_plan(result: subprocess.CompletedProcess) -> dict:
     try:
         report = json.loads(result.stdout)
@@ -292,6 +306,7 @@ def timing_plan(result: subprocess.CompletedProcess) -> dict:
         # sd:2041: the gate's own bound, beside the reviewers' phase. A plan
         # without it is one phase for the gate and each reviewer, as before.
         check = plan.get("check_seconds", phase)
+        slot = slot_phase(plan)
         valid = (result.returncode == 0 and report.get("status") == "explained" and not report.get("authorship_refusal")
                  and all(type(bound) is int and bound > 0 for bound in (phase, check))
                  and type(setup) is int and setup == REVIEW_SETUP_SECONDS
@@ -299,7 +314,7 @@ def timing_plan(result: subprocess.CompletedProcess) -> dict:
                  and type(requested) is int and 0 < requested <= len(candidates)
                  and all(isinstance(row, dict) and isinstance(row.get("name"), str)
                          and isinstance(row.get("recipient"), str) for row in candidates)
-                 and total == setup + check + phase * len(candidates))
+                 and total == setup + slot + check + phase * len(candidates))
     except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
         valid = False
     if not valid:
@@ -443,7 +458,10 @@ class Ship(SharedReview):
             from sd_ship_no_item import publication_review
             review = publication_review(root, connection, database, args, ship, review_runtime())
             self.__dict__.update(review.__dict__)
-            self.checkout_branch = self.branch
+            # The branch `publication_review` validated: the record's, or the
+            # default branch a merged record reconciles from (sd:1932). Never a
+            # second read, which would follow a switch made after validation.
+            self.checkout_branch = review.checkout_branch
             self.api = GitHub(root, self.repository)
             return
         self.store, self.root, self.connection, self.args = ship, root, connection, args
@@ -1227,6 +1245,9 @@ class Ship(SharedReview):
             raise Refusal("additional review cannot commit; name an already committed exact head")
         if getattr(self.args, "catch_up", False) and self.args.additional_review_for is not None:
             raise Refusal("--catch-up makes a new head; an additional review names an existing one")
+        if getattr(self.args, "restart_review", None) is not None:
+            # Before anything commits, fetches or merges (sd:2600).
+            restart_reason(self.args)
         commit_paths(self.root, self.args)
         head = current_head(self.root)
         self.additional_request(head, list(self.state.get("passes") or []))
@@ -1653,6 +1674,10 @@ class Ship(SharedReview):
             extras["row_authorized_merge"] = self.state["row_authorized_merge"]
         if self.state.get("merge_invoker"):
             extras["invoker"] = self.state["merge_invoker"]
+        # Why an unrelated merge carries `Closes:` lines, and what still waits (sd:1600).
+        for name in ("carried_closes", "closes_left", "closing_owed"):
+            if self.state.get(name):
+                extras[name] = self.state[name]
         return extras
 
     def invoker(self) -> dict:
@@ -1805,6 +1830,37 @@ class Ship(SharedReview):
             deliver_work(self.connection, self.args.item, commit, who="sd-ship", verification_root=self.root)
         else:
             self.close_task(commit, ref)
+
+    def squash_message(self, head: str, reviewed: str) -> tuple[str, dict]:
+        """The squash message, with the owed `Closes:` lines inside its one trailer block (sd:1600)."""
+        body = self.squash_body(reviewed)
+        carried, left = sd_ship_squash.owed_closes(
+            self.connection, self.repository, body,
+            lambda item: slug(self.store.identity(self.connection, item)["repo"]["remote"] or ""))
+        body += "".join(f"{sd_lib.CLOSES_TRAILER} sd:{debt['item']}\n" for debt in carried)
+        return body + self.squash_authorship(head, reviewed), {
+            "carried_closes": carried, "closes_left": [debt["item"] for debt in left]}
+
+    def settle_closes(self, held: bool, commit: str, evidence: dict) -> None:
+        """Owe a held hand delivery its `Closes:`, or pay what an unheld squash carried (sd:1600).
+
+        Reconcile reaches this past the hold, so a held `--deliver` squash here
+        was delivered by hand. No git reader takes its `Delivers:`, so the next
+        squash in this repository owes it a `Closes:`.
+        """
+        if not held:
+            self.pay_closes(commit)
+        elif not self.args.no_item and self.state.get("deliver") and not self.state.get("closing_paid"):
+            self.save(closing_owed={"item": self.args.item, "commit": commit, "branch": self.branch})
+            evidence["closing_owed"] = self.state["closing_owed"]
+
+    def pay_closes(self, commit: str) -> None:
+        """Mark each owed close this unheld squash carried as paid on its own receipt."""
+        for debt in self.state.get("carried_closes") or []:
+            key = self.store.receipt_key(self.repository, debt["branch"], debt["item"])
+            revision, receipt = self.store.read(self.connection, key)
+            if receipt.get("closing_owed") == debt and not receipt.get("closing_paid"):
+                self.store.save(self.connection, key, revision, {**receipt, "closing_paid": commit})
 
     def by_hand(self, commit: str) -> str:
         """The hand close for a held delivery: `sd work deliver`'s, or a task's.
@@ -1977,7 +2033,7 @@ class Ship(SharedReview):
         self.require_copilot_clearance(observed["number"], observed, head)
         self.save(phase="ci_passed", protection=protection)
         reviewed = self.reviewed_base(head, base)
-        body = self.squash_body(reviewed) + self.squash_authorship(head, reviewed)
+        body, closes = self.squash_message(head, reviewed)
         # The squash message is composed here and read by `git
         # interpret-trailers --parse` afterwards, and those two only agree
         # while the trailers sit in the message's *last* paragraph. One blank
@@ -2011,7 +2067,7 @@ class Ship(SharedReview):
         # ownership-only merge therefore cannot inherit a claim from a merge
         # that never happened (sd:1347).
         title = squash_title(observed, self.state["title"])
-        self.save(phase="merge_dispatch", merge_message=body, row_authorized_merge=self.row_authority,
+        self.save(phase="merge_dispatch", merge_message=body, row_authorized_merge=self.row_authority, **closes,
                   warnings=self.dispatch_warnings(), merge_invoker=self.invoker())
         try:
             self.api.api(f"{self.api.prefix}/pulls/{observed['number']}/merge", method="PUT",
@@ -2097,6 +2153,7 @@ class Ship(SharedReview):
             answer = self.hold_at_merge(commit, parent, evidence)
             if answer is not None:
                 return answer
+        self.settle_closes(held, commit, evidence)
         if not self.args.no_item and self.state.get("deliver"):
             from sd_db.errors import SdDbError
             self.assert_scope()
@@ -2218,7 +2275,7 @@ def no_item_record_flags(action) -> None:
     action.add_argument("--provider", metavar="NAME", help="select one guarded reviewer for this invocation; never changes automatic order")
     action.add_argument("--reuse-check", action="store_true", help="opt into exact-input successful check-receipt reuse")
     review_timeout_flag(action)
-    action.add_argument("--create-record", action="store_true", help="allocate a record without provider dispatch or a spent pass")
+    action.add_argument("--create-record", action="store_true", help="allocate a record without provider dispatch or a spent pass; needs --assert-new-work, takes no --review-id, and prints the allocated review_id")
     action.add_argument("--assert-new-work", action="store_true", help="explicit assertion of new work, not a renamed or rewritten continuation")
     action.add_argument("--import-history", type=pathlib.Path, metavar="FILE", help="import an ordered manifest of historical reports as untrusted evidence")
     action.add_argument("--assert-history-complete", action="store_true", help="explicit operator assertion that the supplied history is complete")
@@ -2228,7 +2285,7 @@ def no_item_record_flags(action) -> None:
     action.add_argument("--retry-review", action="store_true", help="spend one automatic pass on a full-branch retry of an incomplete review")
     action.add_argument("--additional-review-for", metavar="SHA", help="record one explicit post-cap operator request for this exact committed head")
     action.add_argument("--review-history-digest", metavar="SHA256", help="one-use digest of the complete combined history; required to continue after any import")
-    action.add_argument("--request-reason", help="nonempty operator context; this assertion is not proof of user approval")
+    action.add_argument("--request-reason", help="nonempty operator context, valid only with --additional-review-for; this assertion is not proof of user approval")
     # No-item review takes no commit, runner or delivery flags at all.
     action.set_defaults(path=[], message_file=None, author=None)
 
@@ -2258,7 +2315,7 @@ def identity_flags(action) -> None:
     identity = action.add_mutually_exclusive_group(required=True)
     identity.add_argument("--item", type=int)
     identity.add_argument("--no-item", action="store_true", help="a standalone review record, never a placeholder work item")
-    action.add_argument("--review-id", metavar="ID", help="the stable record identity every later no-item command requires")
+    action.add_argument("--review-id", metavar="ID", help="the stable record identity every later no-item command requires; --create-record allocates it and prints it as review_id, it is never chosen")
     action.add_argument("--json", action="store_true")
     action.add_argument("--database", type=pathlib.Path, help="owned runner database; defaults to the operator HOME")
 
@@ -2299,6 +2356,10 @@ def validate_identity(args) -> None:
         raise Refusal("--review-id requires --no-item")
     if not args.no_item:
         return
+    if getattr(args, "restart_review", None) is not None:
+        raise Refusal("--restart-review restarts an item's review; a no-item record starts fresh with --create-record",
+                      code="no_item_flags_refused", boundary="input", state="operator_decision",
+                      next_action="Drop --restart-review, or prepare with --item.")
     if getattr(args, "provider", None) is not None and any(getattr(args, name, None) for name in
             ("create_record", "import_history", "rebind_branch", "close_record", "reopen_record")):
         raise Refusal("--provider cannot combine with metadata-only record operations")
@@ -2310,9 +2371,8 @@ def validate_identity(args) -> None:
                       code="no_item_flags_refused", boundary="input", state="operator_decision",
                       next_action="Commit separately and use --review-id without item, runner, or delivery flags.")
     if not args.review_id and not getattr(args, "create_record", False):
-        raise Refusal("no-item commands require --review-id ID; missing record identity never allocates a fresh review budget",
-                      code="review_identity_required", boundary="input", state="operator_decision",
-                      next_action="Use the existing review ID, or explicitly allocate a record for genuinely new work.")
+        from sd_ship_no_item import review_identity_required
+        raise review_identity_required()
 
 
 def parser():
@@ -2338,9 +2398,12 @@ def parser():
             action.add_argument("--reuse-check", action="store_true", help="opt into exact-input successful check-receipt reuse")
             review_timeout_flag(action)
             action.add_argument("--retry-review", action="store_true", help="spend one automatic pass on a full-branch retry of an incomplete review")
+            action.add_argument("--restart-review", metavar="REASON",
+                                help="after an amend or rebase orphaned a reviewed head: set that review aside with "
+                                     "REASON and spend one automatic pass on a fresh full-branch review (sd:2600)")
             action.add_argument("--additional-review-for", metavar="SHA", help="record one explicit post-cap operator request for this exact committed head")
             action.add_argument("--review-history-digest", metavar="SHA256", help="one-use digest of every existing pass; required to renew after three reservations")
-            action.add_argument("--request-reason", help="nonempty operator context; this assertion is not proof of user approval")
+            action.add_argument("--request-reason", help="nonempty operator context, valid only with --additional-review-for; this assertion is not proof of user approval")
             action.add_argument("--path", action="append", default=[])
             action.add_argument("--message-file", type=pathlib.Path)
             action.add_argument("--author")
@@ -2358,6 +2421,7 @@ def parser():
         if name == "merge":
             merge_flags(action)
     hold_commands(commands)
+    sd_lane.add_lane_verbs(commands)
     for name in ("review", "verify-review", "adjudicate"):
         action = commands.add_parser(name)
         identity_flags(action)
@@ -2411,12 +2475,17 @@ def body_diff(root: pathlib.Path, api: GitHub | None, number: int | None) -> tup
     return changed, (f"{base}...HEAD" if changed is not None else base)
 
 
+def outside_repository() -> Refusal:
+    """Name the directory, as the other lane commands do: under `-C` it is the -C one (sd:2499)."""
+    return Refusal(f"{pathlib.Path.cwd()} is not inside a Git repository")
+
+
 def body_command(args) -> int:
     """`sd-ship body`: normalize, append `Work:`, lint; no database (sd:1870, sd:1877)."""
     try:
         root = sd_lib.repo_root(None)
         if root is None:
-            raise Refusal("cwd is not inside a Git repository")
+            raise outside_repository()
         api = None if args.pr is None else GitHub(root, slug(git(root, "config", "--get", "remote.origin.url")))
         text, source = body_text(args, root, api)
         normalized, stripped = sd_ship_body.normalize(text, args.item, deliver=args.deliver)
@@ -2526,7 +2595,7 @@ def identity_unchanged(root, connection, args, store, delivery) -> None:
     modes: the live checkout, and for an item its row as it stands now.
     """
     # An item merge may ship another branch than the checkout's (sd:2037); the checkout still may not move.
-    expected = delivery.branch if args.no_item else delivery.checkout_branch
+    expected = delivery.checkout_branch
     live = sd_lib.git_output(["symbolic-ref", "--quiet", "--short", "HEAD"], root)
     if live != expected or slug(git(root, "config", "--get", "remote.origin.url")) != delivery.repository:
         raise Refusal(f"the checkout left {expected} while this command waited for the ship lock; "
@@ -2554,6 +2623,8 @@ def main(argv=None) -> int:
         return 3
     if args.command == "body":
         return body_command(args)
+    if args.command == "lane":
+        return sd_lane.lane_main(args)
     # Two refusals, because there are two faults and one remedy each.
     # `sd_lib.import_sd_db` owns the first: it makes the second attempt this
     # entrypoint used not to make -- the provisioned copy, which is the only
@@ -2580,7 +2651,7 @@ def main(argv=None) -> int:
         validate_identity(args)
         root = sd_lib.repo_root(None)
         if root is None:
-            raise Refusal("cwd is not inside a Git repository")
+            raise outside_repository()
         database = args.database or default_path()
         readonly = args.command in ("observe", "verify-review") or (args.command == "adjudicate" and args.accept_dispositions is None)
         connection = connect(database, write=not readonly)

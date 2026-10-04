@@ -74,7 +74,7 @@ else is. Its executables write these paths, and no others:
   `--remove-legacy` it also deletes the three files the old `sd-github-review`
   installer left. `--remove` deletes the workflow and its Dependabot guard.
 - The fleet stamp, from `sd fleet stamp`, into the checkout you stand in, which
-  must be a checkout of a `runner_merge=auto` repository: the routing lane and
+  must be a checkout of a managed `runner_merge=auto` repository (sd:1620): the routing lane and
   its Dependabot guard as `setup-github` writes them,
   `.github/workflows/sd-check.yml` where no other workflow runs on
   `pull_request` (created only: an existing one is kept as written), the `unprotected` entry in `.github/sd-status.json`
@@ -167,7 +167,9 @@ sd config set sd.assistant_merge controlled
 These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOME` overrides the configuration root.
 `sd config get`, `list`, and `unset` inspect or remove settings. No personal grant ships in this repository.
 `sd.gate_slots` is load control, not a grant: how many gates may run at once on the machine, across every repository (unset: a quarter of the cores).
-`sd.gate_load_max` and `sd.gate_settle_seconds` are load control too: the gate queue starts its head only while load1 is below the limit (unset: 2.5 per core), with starts 45 s apart by default.
+`sd.gate_load_max` and `sd.gate_settle_seconds` are load control too: the gate queue starts its head 45 s after the last start by default, and only below a load1 limit where one is set (unset: none, since macOS counts disk waits in the load average).
+`sd.gate_cache_gb` bounds the local gate's warm Rust build folders (unset: 40 GB); past it the gate removes the least recently used free folder.
+`sd-ship lane enqueue|list|cancel|run|watch` keeps a serial prepare-and-merge queue per repository in a file under `sd.lane_root` (unset: `$XDG_STATE_HOME/sd/lanes`), so a queued chain outlives the session that filled it.
 `sd gate run -- make check` queues any command the same way; `sd gate status` shows the queue.
 Wrap a plain `make check` in any repository that way, and drop a per-repository `lockf` from lane scripts: the pool orders gates across every repository.
 A waiting gate names who holds each slot and since when.
@@ -225,6 +227,11 @@ that reason and the item closes without it. A `followup` filed in a
 registered checkout carries that checkout since sd:809, but only a task's
 move to done records a delivering commit, so the flag is refused there too,
 on that second reason, and the item closes without it just the same.
+A row worked on its own branch, as `sd runner prepare --branch` records it,
+does not close plainly while no merge of that branch is recorded (sd:1990).
+Name the merge with `--delivered-by`, or say why no pull request is needed
+with `--reason`, which the transition records. A merge `sd-ship` recorded,
+or a row on `main` or `master`, closes as before.
 
 A task that repeats carries a rule:
 `sd task add "File the weekly report" --due 2026-01-01 --recur FREQ=WEEKLY`.
@@ -430,10 +437,11 @@ Each prose skill has a "State of the tooling" section.
 ```bash
 make setup   # once
 make check   # test + lint + audit + docs-lint
+make precheck   # lint + the always-run test modules, about a minute
 ```
 
 This repository has `repo.ci = local`: it carries no GitHub Actions workflow.
-`sd-ship merge` runs `sd-check` (here `make check`) in a fresh worktree and
+`sd-ship merge` runs `sd-check` (here `make precheck`, then `make check`) in a fresh worktree and
 posts the result as the `sd/local-gate` status on the head commit. The gate
 installs `sd_db` at the `platypeeps/system` ref in `.sd-system-rev`.
 `sd-ship prepare` grades the pull request body with `sd-docs-lint --body-only`.

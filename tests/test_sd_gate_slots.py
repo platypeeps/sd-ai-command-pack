@@ -170,6 +170,39 @@ class ConcurrentGates(GateSlotFixture):
         self.assertEqual(check["reason"], "no gate slot came free within 2s")
         self.assertLess(elapsed, 60)
 
+    def test_a_slot_bound_leaves_each_check_its_whole_timeout(self):
+        """sd:2607: queued 3 s under `--timeout 2`, the check still gets its 2 s; without the bound it got 1."""
+        root = self.repo("repo", f"{PY} -c 'import time; time.sleep(1.5)'")
+        self.slots.mkdir()
+        held = open(self.slots / "slot.1.lock", "a")
+        self.addCleanup(held.close)
+        fcntl.flock(held, fcntl.LOCK_EX)
+        gate = self.start(root, self.env(SD_GATE_SLOTS="1"), "--timeout", "2", "--slot-timeout", "120")
+        self.assertTrue(wait_until(lambda: any((self.slots / "queue").glob("*"))), "the gate never queued")
+        time.sleep(3)
+        held.close()
+        code, report, err = self.finish(gate)
+        self.assertEqual((code, report["status"]), (0, "pass"), f"{err}\n{report}")
+        self.assertGreaterEqual(report["gate_slot"]["waited_seconds"], 3)
+        self.assertEqual(report["gate_slot"]["bound_seconds"], 120)
+
+    def test_a_slot_bound_ends_the_queue_on_its_own_clock(self):
+        root = self.repo("repo", f"{PY} -c pass")
+        self.slots.mkdir()
+        with open(self.slots / "slot.1.lock", "a") as held:
+            fcntl.flock(held, fcntl.LOCK_EX)
+            started = time.monotonic()
+            code, report, err = self.finish(self.start(root, self.env(SD_GATE_SLOTS="1"),
+                                                       "--timeout", "600", "--slot-timeout", "2"))
+            elapsed = time.monotonic() - started
+        self.assertEqual(code, 1, err)
+        self.assertEqual(report["checks"][0]["reason"], "no gate slot came free within 2s")
+        self.assertLess(elapsed, 60)
+        for bad in ("0", "-1", "soon"):
+            with self.subTest(slot_timeout=bad):
+                refused, _, err = self.finish(self.start(root, self.env(SD_GATE_SLOTS="1"), "--slot-timeout", bad))
+                self.assertEqual(refused, 2, err)
+
 
 class SlotOwnership(GateSlotFixture):
     def test_a_dead_holders_slot_is_reclaimed_without_a_wait(self):
@@ -198,6 +231,19 @@ class SlotOwnership(GateSlotFixture):
         self.assertEqual(seen.read_text(), "0")
         self.assertEqual(report["gate_slot"]["slots"], 1)
         self.assertNotIn("waiting for a gate slot", report["checks"][0]["stderr"])
+
+    def test_a_holder_hands_its_cap_to_the_checks_and_a_nested_gate_keeps_it(self):
+        """sd:2607: the tests a gate runs size their workers to the pool, so the holder names its cap."""
+        seen = self.tmp / "seen"
+        inner = self.repo("inner", f"{PY} -c " + shlex.quote(
+            f"import os; open({str(seen)!r}, 'w').write(os.environ.get('SD_GATE_POOL_SIZE', 'unset'))"))
+        outer = self.repo("outer", f"{PY} {shlex.quote(str(SD_CHECK))} -C {shlex.quote(str(inner))}")
+        code, report, err = self.finish(self.start(outer, self.env(SD_GATE_SLOTS="3"), "--timeout", "120"))
+        self.assertEqual(code, 0, f"{err}\n{report}")
+        self.assertEqual(seen.read_text(), "3")
+        self.assertEqual(sd_gate_slots.holder_environment({"SD_GATE_POOL_SIZE": "3"}, 0),
+                         {"SD_GATE_POOL_SIZE": "3", "SD_GATE_SLOTS": "0"})
+        self.assertEqual(sd_gate_slots.holder_environment({}, 0), {"SD_GATE_SLOTS": "0"})
 
     def test_no_cap_and_a_dry_run_take_no_slot(self):
         root = self.repo("repo", f"{PY} -c pass")

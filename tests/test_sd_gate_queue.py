@@ -331,6 +331,20 @@ class LoadRule(unittest.TestCase):
         self.wall.now += 1
         self.assertEqual(self.admit(ticket, rule)[0], 0)
 
+    def test_the_default_rule_admits_by_count_at_a_disk_bound_load(self):
+        """sd:2607: macOS counted disk waits into a load of 124 while most cores idled; only the count holds a gate back."""
+        rule = sd_gate_slots.load_rule({}, None, None)
+        self.assertEqual(rule[:2], (0.0, 45.0))
+        ticket = self.queue.enter("gate", "/", wall=self.wall)
+        self.load = (124.0, 124.0, 110.0)
+        self.assertEqual(self.admit(ticket, rule), (0, ""))
+        self.release()
+        second = self.queue.enter("second", "/", wall=self.wall)
+        self.wall.now += 44
+        self.assertIn("starts are 45s apart", self.admit(second, rule)[1], "the start spacing stays")
+        self.wall.now += 1
+        self.assertEqual(self.admit(second, rule)[0], 0)
+
     def test_an_idle_machine_admits_the_head_at_once(self):
         rule = sd_gate_slots.LoadRule(limit=40.0, settle=45.0, source="test")
         ticket = self.queue.enter("gate", "/", wall=self.wall)
@@ -437,7 +451,7 @@ class Settings(unittest.TestCase):
             self.assertEqual(sd_gate_slots.machine_rule({**environ, "SD_GATE_LOAD_MAX": "3"})[:2], (3.0, 7.0))
             config.write_text("not json")
             stream = io.StringIO()
-            self.assertEqual(sd_gate_slots.machine_rule(environ, stream=stream, cores=16)[:2], (40.0, 45.0))
+            self.assertEqual(sd_gate_slots.machine_rule(environ, stream=stream)[:2], (0.0, 45.0))
             self.assertIn("warning", stream.getvalue())
 
 
@@ -445,7 +459,7 @@ class Settings(unittest.TestCase):
         rule = sd_gate_slots.load_rule
         self.assertEqual(rule({"SD_GATE_LOAD_MAX": "12", "SD_GATE_SETTLE_SECONDS": "5"}, "30", "60")[:2], (12.0, 5.0))
         self.assertEqual(rule({}, "30", "60")[:2], (30.0, 60.0))
-        self.assertEqual(rule({}, None, None, cores=16)[:2], (40.0, 45.0))
+        self.assertEqual(rule({}, None, None)[:2], (0.0, 45.0))
         for bad in ("", "-1", "lots"):
             with self.subTest(value=bad), self.assertRaises(ValueError):
                 rule({"SD_GATE_LOAD_MAX": bad}, None, None)

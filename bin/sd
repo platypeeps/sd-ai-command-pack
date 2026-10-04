@@ -66,11 +66,14 @@ import json
 import math
 import os
 import pathlib
+import queue
 import re
 import stat
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
@@ -776,24 +779,106 @@ def registry(config: dict[str, object]) -> list[str]:
     return [str(p) for p in plugins]
 
 
-def registered(roots: list[str]) -> dict[str, pathlib.Path]:
-    """Prefix -> manifest path, for every root whose manifest still reads.
+#: How long a scan waits for a plugin root to answer (sd:2540).
+ROOT_READ_SECONDS = 5.0
 
-    A root that no longer holds a readable manifest is skipped rather than
-    fatal: it must not stop an unrelated registration, and `list` reports it.
+
+def scan(roots: list[str], wanted: str | None = None, *,
+         complete: bool = False) -> dict[str, tuple[pathlib.Path, dict[str, object]]]:
+    """Prefix -> (manifest path, manifest), for every root that answered in time.
+
+    A prefix lives in its manifest, not in the root's path, so no lookup knows
+    the owning root before it reads. On 2026-10-01 one root on an external
+    volume waited on an open() under launchd for 16 hours, and every
+    `sd config get` for any plugin prefix waited behind it (sd:2537). So each
+    root reads in its own daemon thread: a lookup for `wanted` returns once its
+    owner answers, and a root still silent after ROOT_READ_SECONDS is skipped
+    with a warning. A daemon thread does not hold the process open at exit.
+    A root without a readable manifest is skipped too: it must not stop an
+    unrelated registration, and `list` reports it.
+
+    Two roots can still carry one prefix: a manifest edited after
+    registration, or a registration from before `registered` refused a
+    silent root. The earlier registry entry owns it then, never the root
+    that answers first, so a store write lands in the same plugin every
+    time. A lookup for `wanted` returns once every root listed before its
+    owner has answered or timed out. When one of those earlier roots timed
+    out, it may be the owner, so the prefix refuses as ambiguous instead of
+    passing to the later root: the same manifests must never route to two
+    plugins across runs.
     """
 
-    found: dict[str, pathlib.Path] = {}
-    for root in roots:
-        path = pathlib.Path(root) / MANIFEST_NAME
+    answers: queue.Queue[tuple[str, pathlib.Path, dict[str, object] | None]] = queue.Queue()
+
+    def read_plugin_root(root: str) -> None:
+        path, manifest = pathlib.Path(root) / MANIFEST_NAME, None
         try:
             manifest = read_manifest(path)
         except Refusal:
-            continue
-        prefix = manifest.get("prefix")
-        if isinstance(prefix, str) and prefix:
-            found[prefix] = path
+            pass
+        finally:
+            answers.put((root, path, manifest))
+
+    order = list(dict.fromkeys(roots))
+    pending = list(order)
+    for root in pending:
+        threading.Thread(target=read_plugin_root, args=(root,), daemon=True, name=f"sd plugin root {root}").start()
+    answered: dict[str, tuple[pathlib.Path, dict[str, object]]] = {}
+
+    def owner_in_registry_order() -> dict[str, tuple[pathlib.Path, dict[str, object]]] | None:
+        for root in order:
+            if root in pending:
+                return None
+            if root in answered and answered[root][1].get("prefix") == wanted:
+                return {wanted: answered[root]} if wanted is not None else None
+        return None
+
+    deadline = time.monotonic() + ROOT_READ_SECONDS
+    while pending:
+        if wanted is not None and (owner := owner_in_registry_order()) is not None:
+            return owner
+        try:
+            root, path, manifest = answers.get(timeout=max(0.0, deadline - time.monotonic()))
+        except queue.Empty:
+            break
+        pending.remove(root)
+        if manifest is not None:
+            answered[root] = (path, manifest)
+    if pending and complete:
+        raise Refusal(f"plugin root(s) {', '.join(pending)} did not answer within {ROOT_READ_SECONDS:g}s, "
+                      f"so no prefix can be shown unclaimed; make each readable or remove it from the "
+                      f"machine config, then run this again")
+    for root in pending:
+        print(f"warning: skipped plugin root {root}: its {MANIFEST_NAME} did not answer within "
+              f"{ROOT_READ_SECONDS:g}s", file=sys.stderr)
+    found: dict[str, tuple[pathlib.Path, dict[str, object]]] = {}
+    silent: list[str] = []
+    for root in order:
+        if root in pending:
+            silent.append(root)
+        elif root in answered and isinstance(prefix := answered[root][1].get("prefix"), str) and prefix:
+            if prefix in found:
+                continue
+            if silent and wanted in (None, prefix):
+                raise Refusal(f"prefix {prefix!r} is ambiguous: plugin root(s) {', '.join(silent)}, "
+                              f"registered before {root}, did not answer within {ROOT_READ_SECONDS:g}s "
+                              f"and may own it; make each readable or remove it from the machine "
+                              f"config, then run this again")
+            found[prefix] = answered[root]
     return found
+
+
+def registered(roots: list[str]) -> dict[str, pathlib.Path]:
+    """Prefix -> manifest path, for every root whose manifest still reads; see `scan`.
+
+    Registration asks this to keep prefixes unique, so a root that does not
+    answer refuses instead of being skipped: a silent root may own the very
+    prefix being registered, and a second owner would be shadowed by the
+    earlier registry entry on every lookup. A lookup may skip a stalled
+    root; a uniqueness check may not.
+    """
+
+    return {prefix: path for prefix, (path, _) in scan(roots, complete=True).items()}
 
 
 def write_config(config: dict[str, object], path: pathlib.Path) -> None:
@@ -1049,13 +1134,12 @@ def declared_config(prefix: str) -> tuple[dict[str, dict[str, str]], pathlib.Pat
 
     if prefix == "sd":
         return sd_lib.CORE_CONFIG, pathlib.Path(sd_lib.__file__)
-    roots = registry(sd_lib.machine_config())
-    known = registered(roots)
+    known = scan(registry(sd_lib.machine_config()), wanted=prefix)
     if prefix not in known:
         listed = ", ".join(sorted(known)) or "none"
         raise Refusal(f"no plugin registered under prefix {prefix!r} (registered: {listed})")
-    manifest_path = known[prefix]
-    declared = validate_config(read_manifest(manifest_path))
+    manifest_path, manifest = known[prefix]
+    declared = validate_config(manifest)
     if not declared:
         raise Refusal(f"{prefix} declares no `config` keys in {manifest_path}")
     return declared, manifest_path
@@ -1408,27 +1492,21 @@ def resolve_kind(
     if not isinstance(reference, str) or reference.count(".") != 1:
         raise UsageError(f"{reference!r} is not a <prefix>.<kind> reference")
     prefix, name = reference.split(".")
-    roots = registry(sd_lib.machine_config())
-    for root in roots:
-        manifest_path = pathlib.Path(root) / MANIFEST_NAME
-        try:
-            manifest = read_manifest(manifest_path)
-        except Refusal:
-            continue
-        if manifest.get("prefix") != prefix:
-            continue
-        kinds = validate_kinds(manifest, manifest_path.parent)
-        if name not in kinds:
-            raise Refusal(
-                f"plugin {prefix!r} declares no kind {name!r}"
-                f" (it declares {', '.join(sorted(kinds)) or 'none'})")
-        store = validate_store(manifest, kinds)
-        if store is None:
-            raise Refusal(f"plugin {prefix!r} declares no `store`, so {reference} is not kept")
-        kind = kinds[name]
-        assert isinstance(kind, dict)  # validate_kind builds it; narrows for the type checker
-        return kind, store, name, manifest_path.parent
-    raise Refusal(f"no registered plugin has prefix {prefix!r}")
+    owner = scan(registry(sd_lib.machine_config()), wanted=prefix).get(prefix)
+    if owner is None:
+        raise Refusal(f"no registered plugin has prefix {prefix!r}")
+    manifest_path, manifest = owner
+    kinds = validate_kinds(manifest, manifest_path.parent)
+    if name not in kinds:
+        raise Refusal(
+            f"plugin {prefix!r} declares no kind {name!r}"
+            f" (it declares {', '.join(sorted(kinds)) or 'none'})")
+    store = validate_store(manifest, kinds)
+    if store is None:
+        raise Refusal(f"plugin {prefix!r} declares no `store`, so {reference} is not kept")
+    kind = kinds[name]
+    assert isinstance(kind, dict)  # validate_kind builds it; narrows for the type checker
+    return kind, store, name, manifest_path.parent
 
 
 def kind_base(store: dict[str, object], name: str,
@@ -2883,7 +2961,8 @@ def gate_check(args: argparse.Namespace) -> int:
     if database is None and (library := sd_lib.import_sd_db().module) is not None:
         database = library.default_path(os.environ.get("HOME"))
     try:
-        result = sd_gate_run.check_in_worktree(root, head, base=sd_gate_run.base_ref(args.base), database=database)
+        result = sd_gate_run.check_in_worktree(root, head, base=sd_gate_run.base_ref(args.base), database=database,
+                                               slot_timeout=sd_lib.GATE_SLOT_SECONDS)  # sd:2607
     except sd_gate_run.GateError as error:
         raise Refusal(str(error)) from None
     print(json.dumps(result, indent=2, sort_keys=True))

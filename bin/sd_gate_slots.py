@@ -36,6 +36,13 @@ slots were busy but not who held them. Now every entry point takes its count
 from `configured` with `sd.gate_slots` read (`count` prints it for the shell),
 and a waiting gate names each holder, its directory and since when.
 
+The count is the one limit (sd:2607). On 2026-10-03 three gates read a load
+average of 124 while most cores idled: macOS counts threads waiting on the disk
+in the load average, so the load rule held every waiter back while the CPU had
+room. The load rule is now off unless `sd.gate_load_max` sets it; the starts
+stay `sd.gate_settle_seconds` apart. A holder also exports the cap as
+`SD_GATE_POOL_SIZE`, so the tests it runs size their workers to the pool.
+
 Stdlib only: the harness runs this file from a bare fixture copy.
 """
 
@@ -74,12 +81,13 @@ RUN_TIMED_OUT = 124
 RUN_NOT_STARTED = 125
 RUN_NOT_FOUND = 127
 
-#: The load rule (sd:2262). The defaults are the hand rule of 2026-10-01: load1
-#: below 40 on 16 cores, held for 45 s, and 45 s between two starts.
+#: The load rule (sd:2262): off by default since sd:2607, with 45 s between two starts.
 LOAD_VARIABLE = "SD_GATE_LOAD_MAX"
 SETTLE_VARIABLE = "SD_GATE_SETTLE_SECONDS"
-LOAD_PER_CORE = 2.5
+DEFAULT_LOAD_MAX = 0.0
 DEFAULT_SETTLE_SECONDS = 45.0
+#: The cap a holder hands the commands it starts, beside `SD_GATE_SLOTS=0` (sd:2607).
+POOL_VARIABLE = "SD_GATE_POOL_SIZE"
 #: A gap between two load samples longer than this, or than the settle time,
 #: restarts the low-load record: nobody watched the load in between.
 STALE_SAMPLE_SECONDS = 15.0
@@ -137,19 +145,14 @@ class LoadRule(NamedTuple):
     source: str
 
 
-def default_load_max(cores: int | None = None) -> float:
-    """2.5 per core: 40 on a 16-core machine."""
-    return LOAD_PER_CORE * (cores if cores is not None else (os.cpu_count() or CORES_PER_SLOT))
-
-
 def parse_number(text: str, source: str) -> float:
     if not NUMBER.fullmatch(text):
         raise ValueError(f"{source} must be a non-negative number (got '{text}')")
     return float(text)
 
 
-def load_rule(environ: Mapping[str, str], limit_setting: str | None = None, settle_setting: str | None = None,
-              *, cores: int | None = None) -> LoadRule:
+def load_rule(environ: Mapping[str, str], limit_setting: str | None = None,
+              settle_setting: str | None = None) -> LoadRule:
     """The load rule: each value from its variable, then the machine setting, then the default.
 
     The settings are `sd.gate_load_max` and `sd.gate_settle_seconds`, read by
@@ -161,7 +164,7 @@ def load_rule(environ: Mapping[str, str], limit_setting: str | None = None, sett
         if setting is not None:
             return parse_number(setting, name), name
         return default, None
-    limit, limit_source = setting_value(LOAD_VARIABLE, limit_setting, "sd.gate_load_max", default_load_max(cores))
+    limit, limit_source = setting_value(LOAD_VARIABLE, limit_setting, "sd.gate_load_max", DEFAULT_LOAD_MAX)
     settle, settle_source = setting_value(SETTLE_VARIABLE, settle_setting, "sd.gate_settle_seconds", DEFAULT_SETTLE_SECONDS)
     sources = [source for source in (limit_source, settle_source) if source]
     return LoadRule(limit, settle, ", ".join(sources) or "default")
@@ -202,11 +205,10 @@ def machine_settings(environ: Mapping[str, str], *, stream: TextIO | None = None
     return values
 
 
-def machine_rule(environ: Mapping[str, str], *, stream: TextIO | None = None,
-                 cores: int | None = None) -> LoadRule:
+def machine_rule(environ: Mapping[str, str], *, stream: TextIO | None = None) -> LoadRule:
     """`load_rule` with `sd.gate_load_max` and `sd.gate_settle_seconds` read by `machine_settings`."""
     values = machine_settings(environ, stream=stream)
-    return load_rule(environ, values["gate_load_max"], values["gate_settle_seconds"], cores=cores)
+    return load_rule(environ, values["gate_load_max"], values["gate_settle_seconds"])
 
 
 def utc_stamp(seconds: float) -> str:
@@ -545,6 +547,11 @@ def acquire(slots: int, environ: Mapping[str, str], *, stream: TextIO, timeout: 
     return Slot(held, lock, time.monotonic() - started)
 
 
+def holder_environment(environ: Mapping[str, str], slots: int) -> dict[str, str]:
+    """What a holder's commands run with: no slot of their own, and the cap it took one under (sd:2607)."""
+    return {**environ, SLOTS_VARIABLE: "0", **({POOL_VARIABLE: str(slots)} if slots > 0 else {})}
+
+
 def run_gated(command: Sequence[str], environ: Mapping[str, str], *, slots: int, rule: LoadRule, stream: TextIO,
         label: str = "", timeout: float | None = None) -> int:
     """Wait for a slot, run `command` with `SD_GATE_SLOTS=0`, free the slot, and return its exit code.
@@ -572,7 +579,7 @@ def run_gated(command: Sequence[str], environ: Mapping[str, str], *, slots: int,
     previous = {}
     try:
         try:
-            child = subprocess.Popen(list(command), env={**environ, SLOTS_VARIABLE: "0"}, process_group=0)
+            child = subprocess.Popen(list(command), env=holder_environment(environ, slots), process_group=0)
         except OSError as error:
             stream.write(f"error: cannot run {command[0]}: {error}\n")
             return RUN_NOT_FOUND

@@ -132,6 +132,7 @@ For genuinely new work, allocate it with `sd-ship review --no-item --create-reco
 Use `--no-item --review-id ID` instead of `--item ID` for prepare, merge, observe, and reconcile.
 Prepare reuses complete exact-head review evidence and acceptance; otherwise it follows the same review gates.
 Itemless merge requires `--manual` and `--expected-head SHA`.
+After the merge, run itemless `reconcile` and `review --close-record REASON` from the default branch; the deleted feature branch needs no recreation.
 Itemless publication rejects commit flags, runner authority, and whole-item delivery flags.
 It creates no task row, `Work:` line, `Item:`, or `Delivers:` trailer.
 A branch commit's `Delivers:` does not reach the squash; prepare warns and suggests `--item N`.

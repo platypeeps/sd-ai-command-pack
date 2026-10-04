@@ -304,7 +304,9 @@ class TheReviewGate(Fixture):
         done = self.run_review(root, OWN_JSON)
         self.assertEqual(done.returncode, 0,
                          f"stdout={done.stdout}\nstderr={done.stderr}")
-        self.assertIn("planning", done.stdout + done.stderr)
+        # The explanation's own scope row and footer, not the bare word (sd:1002).
+        self.assertRegex(done.stdout, r"(?m)^  scope +planning  \(")
+        self.assertRegex(done.stdout, r"(?m)^sd-review: explain only[,;] ")
         self.assertNotIn("Traceback", done.stderr)
         self.assertNotIn("guest mode", done.stderr)
         self.assertNotIn("fork's integration branch", done.stderr)

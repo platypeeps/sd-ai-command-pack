@@ -14,9 +14,12 @@ database and no other.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
+import sqlite3
 import threading
+import types
 import unittest
 from typing import Any
 from unittest import mock
@@ -25,7 +28,7 @@ from sd_db import connect, initialise, read_registry, record_cost, seed, writes
 from sd_db.calls import bound_for
 from sd_db.ledger import exposure
 
-from tests.test_sd_registry import SHIPPED
+from tests.test_sd_registry import SHIPPED, _Answer
 from tests.test_sd_review import (
     FakeClient,
     FakeRunner,
@@ -489,3 +492,96 @@ class TheSeamStays(LedgerFixture):
         self.assertEqual(client.sent[0]["provider"], "paid")
         self.assertIn("Schema:", client.sent[0]["prompt"])
         self.assertEqual(client.sent[0]["env"]["REMOTE_KEY"], "fixture")
+
+
+class TheStrictSchema(LedgerFixture):
+    """sd:1827: an entry with `response_format: json_schema` hands both roads
+    the Moonshot-flavoured findings schema; any other entry asks as before."""
+
+    #: Every keyword `charged_call` handed `calls.call` before sd:1827.
+    TODAY = {"entry", "prompt", "environ", "timeout", "role", "repo", "transport"}
+    #: What an opted-in entry is held to: the copy Moonshot's strict mode takes.
+    STRICT = sd_review.sd_registry.strict_schema(sd_review.CODEX_OUTPUT_SCHEMA)
+
+    def provider(self, **fields: Any) -> Any:
+        return sd_review.sd_registry.Provider(name="url", vendor="fixture", bill="paid", model="fixture",
+                                              max_tokens=100, url="https://fixture.example.test/v1",
+                                              env=("OWN_KEY",), **fields)
+
+    def library(self, provider_class: type) -> tuple[Any, list[dict[str, Any]]]:
+        """A library whose `calls.call` records what it was handed."""
+        handed: list[dict[str, Any]] = []
+
+        def call(connection: Any, **keywords: Any) -> Any:
+            handed.append(keywords)
+            return types.SimpleNamespace(call_id=1, outcome="run", bound=0.0, usd=0.0, reason="",
+                                         http_status=200, body=usage_answer()[1])
+        refused = type("Refused", (Exception,), {})
+        library = types.SimpleNamespace(Provider=provider_class, LedgerRefused=refused,
+            calls=types.SimpleNamespace(call=call, CallRefused=refused),
+            connect=lambda database, write: sqlite3.connect(":memory:"))
+        return sd_review.Ledger(library, self.database, frozenset(), ""), handed
+
+    def charged(self, provider: Any, provider_class: type) -> tuple[Any, list[dict[str, Any]]]:
+        ledger, handed = self.library(provider_class)
+        return sd_review.charged_call(ledger, provider, "prompt", {"OWN_KEY": "k"}, 7, None, self.root), handed
+
+    def test_the_url_schema_is_typed_has_no_type_arrays_and_drops_what_strict_mode_rejects(self) -> None:
+        def walk(schema: Any) -> list[Any]:
+            found = [schema]
+            for key, value in schema.items():
+                if key == "properties":
+                    for sub in value.values():
+                        found += walk(sub)
+                elif isinstance(value, dict):
+                    found += walk(value)
+                elif key == "anyOf":
+                    for sub in value:
+                        found += walk(sub)
+            return found
+        schemas = walk(self.STRICT)
+        for schema in schemas:
+            with self.subTest(schema=schema):
+                self.assertTrue(isinstance(schema.get("type"), str) or "anyOf" in schema)
+                self.assertFalse({"minLength", "maxItems"} & set(schema))
+        finding = self.STRICT["properties"]["findings"]["items"]["properties"]
+        self.assertEqual(finding["line"], {"anyOf": [{"type": "integer"}, {"type": "null"}]})
+        self.assertEqual(finding["severity"], {"type": "string", "enum": list(sd_review.SEVERITIES)})
+        self.assertEqual(sd_review.CODEX_OUTPUT_SCHEMA["properties"]["findings"]["maxItems"], sd_review.MAX_FINDINGS)
+
+    def test_an_opted_in_entry_hands_the_library_the_strict_schema(self) -> None:
+        fields = [field.name for field in dataclasses.fields(sd_review.sd_registry.Provider)]
+        current = dataclasses.make_dataclass("Current", [(name, Any, dataclasses.field(default=None)) for name in fields])
+        response, handed = self.charged(self.provider(response_format="json_schema"), current)
+        self.assertEqual(response[0][0], 0)
+        self.assertEqual(handed[0]["entry"].response_format, "json_schema")
+        self.assertEqual(handed[0]["response_schema"], self.STRICT)
+        self.assertEqual(handed[0]["schema_name"], "findings")
+        self.assertEqual(set(handed[0]), self.TODAY | {"response_schema", "schema_name"})
+
+    def test_any_other_entry_hands_the_library_exactly_todays_call(self) -> None:
+        """Even to a library whose `Provider` has no `response_format`."""
+        fields = [field.name for field in dataclasses.fields(sd_review.sd_registry.Provider) if field.name != "response_format"]
+        older = dataclasses.make_dataclass("Older", [(name, Any, dataclasses.field(default=None)) for name in fields])
+        response, handed = self.charged(self.provider(), older)
+        self.assertEqual(response[0][0], 0)
+        self.assertEqual(set(handed[0]), self.TODAY)
+        refused, handed = self.charged(self.provider(response_format="json_schema"), older)
+        self.assertEqual(refused.status, sd_review.REFUSED)
+        self.assertIn("cannot send response_format", refused.detail)
+        self.assertEqual(handed, [])
+
+    def sent(self, provider: Any) -> dict[str, Any]:
+        with mock.patch.object(sd_review.sd_registry._OPENER, "open", return_value=_Answer(usage_answer()[1])) as opened:
+            outcome = sd_review.run_provider(provider, self.root, sd_review.Subject("worktree", "HEAD", "worktree", (), 0, ""),
+                                             "prompt", FakeRunner(), {"OWN_KEY": "k"}, 7)
+        self.assertEqual(outcome.status, sd_review.CLEAN)
+        return json.loads(opened.call_args.args[0].data)
+
+    def test_without_a_ledger_an_opted_in_entry_sends_the_strict_body(self) -> None:
+        body = self.sent(self.provider(response_format="json_schema"))
+        self.assertEqual(body["response_format"], {"type": "json_schema", "json_schema": {
+            "name": "findings", "strict": True, "schema": self.STRICT}})
+
+    def test_without_a_ledger_any_other_entry_sends_exactly_todays_body(self) -> None:
+        self.assertEqual(set(self.sent(self.provider())), {"model", "max_tokens", "messages"})

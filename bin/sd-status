@@ -886,7 +886,8 @@ def protection_section(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any]
         result["detail"]["ruleset_rules"] = sd_protection.rule_types(read["rules"], read["rulesets"])
         if read["error"]:
             result["detail"]["rules_read_error"] = read["error"]
-        unknown = "" if synthesized else _classic_unknown(error, admin, default_branch, slug)
+        unknown = "" if synthesized else (_classic_unknown(error, admin, default_branch, slug)
+                                          or _rules_unknown(read["error"], default_branch))
         if unknown:
             result.update(protected=None, reason=unknown)
             result["detail"]["read_error"] = error
@@ -942,6 +943,19 @@ def _classic_unknown(error: str, admin: bool, branch: str, slug: str) -> str:
             "protected, so this 404 is not \"no protection\""
         )
     return ""
+
+
+def _rules_unknown(error: str, branch: str) -> str:
+    """Why rules that could not be read leave protection unknown, or "".
+
+    An admin's classic 404 says only that classic protection is absent; a
+    ruleset may still gate the merge. Before sd:1000 a failed rules read fell
+    through to `unprotected`, and a standing acknowledgement then moved it to
+    `accepted`: a read failure reported as an accepted state.
+    """
+    if not error:
+        return ""
+    return f"branch rulesets on {branch} could not be read ({error}), so protection is unknown, not absent"
 
 
 def _layered(

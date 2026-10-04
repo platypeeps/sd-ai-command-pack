@@ -155,6 +155,30 @@ class ProviderSelection(unittest.TestCase):
             with self.subTest(flags=flags), self.assertRaisesRegex(ship.Refusal, "provider.*record"):
                 ship.validate_identity(args)
 
+    def test_a_restart_past_the_cap_refuses_and_sets_nothing_aside(self):
+        """sd:2600: passes a restart set aside still count, so the cap holds across it."""
+        reviewed, _process = self.context("minimax")
+        reviewed.review(HEAD)
+        fixed_head = "c" * 40
+        state = dict(reviewed.state, superseded_reviews=[
+            {"reason": "earlier", "passes": [{"head": "d" * 40}] * (sd_ship_review.AUTOMATIC_CODE_REVIEW_PASSES - 1)}])
+        self.assertEqual(ship.ItemHistory().spent(state), sd_ship_review.AUTOMATIC_CODE_REVIEW_PASSES)
+        review, _process = self.context("minimax", state=state, head=fixed_head)
+        review.args.restart_review = "privacy amend"
+        orphaned = subprocess.CompletedProcess([], 1, "", "")
+        with patch("sd_ship_remote.subprocess.run", return_value=orphaned), \
+                self.assertRaisesRegex(ship.Refusal, "spent"):
+            review.restart_review(fixed_head)
+        review.store.save.assert_not_called()
+        self.assertEqual(len(review.state["superseded_reviews"]), 1)
+        self.assertEqual([entry["head"] for entry in review.state["passes"]], [HEAD])
+
+    def test_a_no_item_prepare_refuses_a_restart(self):
+        """sd:2600: the restart is item-path only; a no-item record starts fresh with --create-record."""
+        args = ship.parser().parse_args(["prepare", "--no-item", "--review-id", "record", "--restart-review", "amend"])
+        with self.assertRaisesRegex(ship.Refusal, "restarts an item"):
+            ship.validate_identity(args)
+
     def test_ancestry_check_reads_only_exit_one_as_an_orphaned_head(self):
         """sd:1348 review: exit 1 is the only "not an ancestor" answer.
 
