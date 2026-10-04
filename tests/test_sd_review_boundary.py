@@ -890,7 +890,7 @@ class LineBudgetTests(unittest.TestCase):
         # say so in `gate_environment` (+1). The cache itself is
         # `bin/sd_gate_cache.py`, gate code outside the lane as
         # `sd_gate_receipts` is: `sd-review` does not import it.
-        # sd:2523 adds 2 lines to `bin/sd-review` (4685 -> 4687): it holds a
+        # sd:2523 adds 1 line to `bin/sd-review` (4686 -> 4687): it holds a
         # review slot through `sd_lib.review_slot`. The slot logic is
         # `bin/sd_review_slots.py`, outside the lane: `sd-review` does not
         # import it.

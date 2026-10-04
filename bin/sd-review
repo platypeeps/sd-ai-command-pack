@@ -2145,8 +2145,7 @@ def review(
             "input_changed", "input", "Review inputs changed during checks; rerun readiness and the full check."))
         result["status"] = "refused"
         return result
-    if not (slot := sd_lib.review_slot(result, env, root, check_seconds)):  # noqa: F841 -- sd:2523: held till return
-        return result
+    if not (slot := sd_lib.review_slot(result, env, root, check_seconds)): return result  # noqa: E701, F841 -- sd:2523: slot held till return
 
     outcomes: list[Outcome] = []
     reviewed: list[str] = []
