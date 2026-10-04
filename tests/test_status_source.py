@@ -34,8 +34,11 @@ import datetime
 import importlib.machinery
 import importlib.util
 import io
+import json
 import os
 import pathlib
+import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -1369,3 +1372,72 @@ class TheRowNamesTheBranch(Fixture):
         self.seed("planning", name=OTHER, branch=None)
         self.commit("chore: two items")
         self.assertEqual(self.picked_on("feat/the-thing"), [ITEM])
+
+
+class TheMakeCheckLintReadsNoHistory(Fixture):
+    """`make check` runs `sd-docs-lint` on the checkout, and asks git nothing about history.
+
+    Both readers below fetch the remote and run `git log --grep` once per
+    item: `_from_git` for every open item of a checkout with no database, and
+    `_from_row` for every `done` row no completion recorded. Inside the gate
+    that made the verdict depend on the remote and on commit messages, so a
+    tree-keyed receipt could not stand for it (sd:2606). Delivery is still
+    asked where it belongs, by the lint `sd-ship` runs with the pull request
+    body. The recipe is read from the Makefile, so the test runs the form
+    `make check` runs and not a copy of it.
+    """
+
+    HISTORY = ("fetch", "log", "ls-remote")
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.marker("row")
+        self.write(prd(None, branch="wip/a-thing"))
+        self.commit("chore: the retire")
+        self.remote()
+
+    def recipe(self) -> list[str]:
+        makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+        found = re.search(r"^docs-lint:\n\t(.+)$", makefile, re.MULTILINE)
+        assert found is not None, "the Makefile has a docs-lint recipe"
+        argv = shlex.split(found.group(1).replace("$(VENV_PYTHON)", sys.executable))
+        return [str(REPO_ROOT / word) if word == "bin/sd-docs-lint" else word for word in argv]
+
+    def traced(self, argv: list[str]) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+        """One run in the fixture checkout, and the name of every git command it ran."""
+        trace = self.tmp / "trace"
+        trace.mkdir(exist_ok=True)
+        for old in trace.iterdir():
+            old.unlink()
+        done = subprocess.run(
+            argv, cwd=str(self.root), capture_output=True, text=True,
+            env={**os.environ, "GIT_TRACE2_EVENT": str(trace)},
+        )
+        names = []
+        for path in trace.iterdir():
+            for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                event = json.loads(line)
+                if event.get("event") == "cmd_name":
+                    names.append(event["name"])
+        return done, names
+
+    def assert_reads_no_history(self) -> subprocess.CompletedProcess[str]:
+        done, names = self.traced(self.recipe())
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertEqual([name for name in names if name in self.HISTORY], [], names)
+        self.assertIn("rule 2 delivery: not asked", done.stdout)
+        return done
+
+    def test_the_control_without_the_flag_does_fetch_and_log(self) -> None:
+        """Without this, a fixture no reader reaches would pass the two below."""
+        _, names = self.traced([sys.executable, str(REPO_ROOT / "bin" / "sd-docs-lint")])
+        self.assertIn("fetch", names)
+        self.assertIn("log", names)
+
+    def test_an_open_item_with_no_database_is_not_asked_of_git(self) -> None:
+        done = self.assert_reads_no_history()
+        self.assertIn("every open item reads as unknown", done.stdout)
+
+    def test_a_done_row_nothing_recorded_is_not_asked_of_git(self) -> None:
+        self.seed("done")
+        self.assert_reads_no_history()
