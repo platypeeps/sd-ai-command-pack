@@ -11,6 +11,7 @@ it with a recorder, so nothing reaches pip.
 """
 from __future__ import annotations
 
+import io
 import json
 import pathlib
 import subprocess
@@ -161,6 +162,48 @@ class NoAncestryDowngrade(ReprovisionAfterMerge):
         self.assertEqual(self.calls, [older, newer])
 
 
+class DirectProvisioningAfterANewerReconcile(ReprovisionAfterMerge):
+    """`make setup` from a stale system checkout must not undo a reconcile (sd:2108 review).
+
+    A reconcile installed a newer library merge; the system checkout still
+    stands on an older commit with the same schema. Direct provisioning took
+    the lock but not the ancestry check, so it put the older code back.
+    """
+
+    def make_setup(self, installed: str) -> tuple[int, str]:
+        out = io.StringIO()
+        home = self.system.parent / "home"
+        with mock.patch.object(sd_install, "installed_library_commit", return_value=installed):
+            code = sd_install.main(["--provision-library", "--home", str(home)],
+                                   environ=dict(self.environ), out=out)
+        return code, out.getvalue()
+
+    def test_an_older_checkout_does_not_replace_the_newer_install(self) -> None:
+        older = self.commit("local-sd-db/sd_db/a.py")
+        newer = self.commit("local-sd-db/sd_db/b.py")
+        git(self.system, "checkout", "-q", older)
+        code, output = self.make_setup(newer)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(code, 1)
+        self.assertIn(f"preserving installed sd_db {newer}", output)
+        self.assertIn(older, output)
+
+    def test_a_newer_checkout_installs_its_pin(self) -> None:
+        older = self.commit("local-sd-db/sd_db/a.py")
+        newer = self.commit("local-sd-db/sd_db/b.py")
+        code, _ = self.make_setup(older)
+        self.assertEqual((code, self.calls), (0, [newer]))
+
+    def test_a_diverged_checkout_still_installs_its_pin(self) -> None:
+        """Only a reconcile keeps an unrelated install; `make setup` on a topic branch is the operator's call."""
+        base = self.commit("local-sd-db/sd_db/base.py")
+        installed = self.commit("local-sd-db/sd_db/a.py")
+        git(self.system, "checkout", "-q", "-b", "topic", base)
+        topic = self.commit("local-sd-db/sd_db/b.py")
+        code, _ = self.make_setup(installed)
+        self.assertEqual((code, self.calls), (0, [topic]))
+
+
 class ProvisioningLock(unittest.TestCase):
     def test_a_dry_run_takes_no_lock_and_writes_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -211,7 +254,9 @@ class ProvisionAtARef(unittest.TestCase):
                     mock.patch.object(sd_install.subprocess, "run", pip):
                 installed, report = sd_install.provision_library(ctx, None, ref="abc123")
             self.assertTrue(installed, report)
-            self.assertEqual(seen[0][-1], f"git+file://{system}@abc123#subdirectory=local-sd-db")
+            # The git reads around the install share the mock; the pip call is the one asked about.
+            installs = [argv for argv in seen if "pip" in argv]
+            self.assertEqual(installs[0][-1], f"git+file://{system}@abc123#subdirectory=local-sd-db")
 
 
 if __name__ == "__main__":

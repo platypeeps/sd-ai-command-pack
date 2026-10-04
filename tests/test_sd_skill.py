@@ -644,8 +644,8 @@ class TheProvisioningMode(unittest.TestCase):
         self.addCleanup(setattr, sd_install, "provision_library", self.saved)
 
     def answer(self, installed: bool, report: str) -> None:
-        def stub(ctx, out):
-            del ctx, out
+        def stub(ctx, out, ref=None):
+            del ctx, out, ref
             return installed, report
 
         sd_install.provision_library = stub

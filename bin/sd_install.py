@@ -1796,6 +1796,8 @@ def provision_library(ctx: Context, out, ref: str | None = None) -> tuple[bool, 
 
     `ref` installs that commit instead of the system checkout's pin: a merge
     the checkout has fetched but not checked out (`reprovision_after_merge`).
+    Callers go through `provision_guarded`, which holds the provisioning lock
+    and refuses to put older library code over newer.
 
     Returns whether it worked and a one-line report, rather than raising. A
     machine with no system checkout still gets its skills: the paths render
@@ -1827,9 +1829,12 @@ def provision_library(ctx: Context, out, ref: str | None = None) -> tuple[bool, 
     if refusal:
         return False, refusal
     target = f"git+file://{checkout}@{ref}#subdirectory={LIBRARY_RELATIVE}"
-    dirty = " (uncommitted work in that checkout is not installed)" if pinned and sibling(
-        "sd_lib"
-    ).git_output(["status", "--porcelain"], checkout) else ""
+    git = sibling("sd_lib").git_output
+    # The note is about the checkout's HEAD: a `ref` that is not it installs
+    # nothing the working tree could have changed.
+    at_head = pinned or git(["rev-parse", f"{ref}^{{commit}}"], checkout) == git(["rev-parse", "HEAD"], checkout)
+    dirty = " (uncommitted work in that checkout is not installed)" if at_head and git(
+        ["status", "--porcelain"], checkout) else ""
     if ctx.dry_run:
         return True, f"would install sd_db from {source} at {ref}{dirty}"
     try:
@@ -1889,6 +1894,57 @@ def installed_library_commit(pack: Path) -> str | None:
     return None
 
 
+def ancestry_refusal(pack: Path, system: Path, ref: str, *, merged: bool) -> str:
+    """Why installing `ref` over `pack`'s installed `sd_db` would go backwards, or "".
+
+    The schema guard compares schema numbers, so two library commits under
+    one schema pass it in either order. A `ref` that is an ancestor of the
+    installed commit is older library code, refused on every path: a stale
+    system checkout's `make setup` after a reconcile installed a newer merge
+    (sd:2108 review). A reconcile (`merged`) also keeps an installed commit
+    that is not an ancestor of `ref`, because reconciles need not run in merge
+    order. A record naming no commit, or a ref git cannot resolve, refuses
+    nothing here; the install reports the latter.
+    """
+    git = sibling("sd_lib").git_output
+    present = installed_library_commit(pack)
+    commit = git(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], system)
+    if not present or not commit or present == commit:
+        return ""
+    if merged:
+        if git(["merge-base", "--is-ancestor", present, commit], system) is None:
+            return (f"kept installed sd_db {present}: installed sd_db {present} is not an ancestor of "
+                    f"{commit}, so installing would replace newer or unrelated library code")
+        return ""
+    if git(["merge-base", "--is-ancestor", commit, present], system) is not None:
+        return (f"preserving installed sd_db {present}: {ref} ({commit}) is an ancestor of it, so "
+                f"installing would replace newer library code; update {system} before provisioning")
+    return ""
+
+
+def provision_guarded(ctx: Context, out, ref: str | None = None, *, merged: bool = False) -> tuple[bool, str]:
+    """The one provisioning operation: lock, ancestry check, install (sd:2108 review).
+
+    `make setup` (no `ref`: the system checkout's pin) and a reconcile (`ref`
+    the merge commit, `merged`) both come through here, so the check and the
+    install share one hold and neither path can put older code over newer.
+    A reconcile of the commit already installed installs nothing.
+    """
+    system = system_checkout(ctx.environ)
+    with provisioning_lock(ctx):
+        candidate = ref
+        if candidate is None:
+            candidate, _ = library_pin(system)
+        if candidate:
+            if merged and installed_library_commit(ctx.checkout) == candidate:
+                return False, f"sd_db {candidate} is already installed"
+            refusal = ancestry_refusal(ctx.checkout, system, candidate, merged=merged)
+            if refusal:
+                return False, refusal
+            return provision_library(ctx, out, ref=candidate)
+        return provision_library(ctx, out)
+
+
 def reprovision_after_merge(root: Path, commit: str, environ: dict[str, str], pack: Path | None = None) -> dict | None:
     """Install `sd_db` at `commit` when it merged a change to the library (sd:2108).
 
@@ -1911,19 +1967,7 @@ def reprovision_after_merge(root: Path, commit: str, environ: dict[str, str], pa
         return None
     pack = pack or lib.main_worktree_root(Path(__file__).resolve().parent.parent)
     ctx = Context(checkout=pack, home=Path(os.path.expanduser("~")), environ=dict(environ))
-    # The downgrade guard compares schema numbers, so two library merges under
-    # one schema pass it in either order. A late reconcile of an older merge
-    # must not replace a newer copy: install only over an ancestor of `commit`,
-    # read and installed under one hold so a concurrent install cannot interleave.
-    with provisioning_lock(ctx):
-        present = installed_library_commit(pack)
-        if present == commit:
-            return {"ref": commit, "installed": False, "report": f"sd_db {commit} is already installed"}
-        if present and lib.git_output(["merge-base", "--is-ancestor", present, commit], root) is None:
-            return {"ref": commit, "installed": False,
-                    "report": f"kept installed sd_db {present}: installed sd_db {present} is not an ancestor of "
-                              f"{commit}, so installing would replace newer or unrelated library code"}
-        installed, report = provision_library(ctx, None, ref=commit)
+    installed, report = provision_guarded(ctx, None, ref=commit, merged=True)
     return {"ref": commit, "installed": installed, "report": report}
 
 
@@ -2893,8 +2937,7 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
         # a second file learning the path to the system checkout. It is the
         # only door: `--user` reads the library and never installs it, because
         # rendering skills must not rebuild the virtualenv it renders from.
-        with provisioning_lock(ctx):
-            installed, report = provision_library(ctx, out)
+        installed, report = provision_guarded(ctx, out)
         print(report, file=out)
         return 0 if installed else 1
     if mode == "user":
