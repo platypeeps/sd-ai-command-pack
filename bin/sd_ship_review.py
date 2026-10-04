@@ -499,9 +499,10 @@ class SharedReview:
                 item = getattr(self.identity, "item", None)
                 # The reset publishes the reviewed commit, so it cannot be the
                 # only way out of a rewrite made to keep a line unpublished (sd:2600).
-                restart = (f"If the rewrite must stay, run `sd-ship prepare --item {item} --restart-review REASON`: "
-                           "it sets the orphaned review aside and reviews the whole branch again, one pass "
-                           "against the cap. Otherwise r" if item is not None else "R")
+                restart = (f"If the old history must not be pushed, as after a privacy amend, run "
+                           f"`sd-ship prepare --item {item} --restart-review REASON`: it sets the orphaned review "
+                           "aside and reviews the whole branch again, one pass against the cap. "
+                           "If the amend only edited a commit message, r" if item is not None else "R")
                 raise Refusal(
                     f"reviewed head {previous} is not an ancestor of the offered head {head} on {self.branch}; "
                     "an amend or a rebase after a review orphans the reviewed head, and a review of a "

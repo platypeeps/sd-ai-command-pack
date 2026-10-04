@@ -3621,7 +3621,12 @@ roles:
         reviewed, amended, payload, program = self.amend_after_a_blocking_review()
         with self.assertRaises(ship.Refusal) as caught:
             self.prepare()
-        self.assertIn("--restart-review", caught.exception.workflow["next_action"])
+        said = caught.exception.workflow["next_action"]
+        self.assertIn("--restart-review", said)
+        self.assertIn("must not be pushed", said)
+        self.assertLess(said.index("--restart-review"), said.index(f"git reset --soft {reviewed}"),
+                        "the reset stays, as the second option")
+        self.assertIn("only edited a commit message", said)
         payload["structured_output"]["findings"] = []
         program.write_text("#!/usr/bin/env python3\nimport json\nprint(" + repr(json.dumps(payload)) + ")\n")
         prepared = self.prepare("--restart-review", "privacy amend dropped a flagged path")
