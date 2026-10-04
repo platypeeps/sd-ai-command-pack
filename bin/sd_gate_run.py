@@ -100,12 +100,13 @@ def untracked_local_block(root: pathlib.Path) -> pathlib.Path | None:
     return None
 
 
-def gate_inputs(root: pathlib.Path, head: str, tree: str | None = None) -> str:
-    """A 12-hex digest of what a gate run depends on beyond the commit's own tree; `tree` replaces `head` under a tree key."""
+def gate_inputs(root: pathlib.Path, head: str, tree: str | None = None, own: bool = False) -> str:
+    """A 12-hex digest of what a gate run depends on beyond the commit's own tree; `tree` replaces `head` under a tree key.
+    `own`, the pack gating itself, leaves out the checkout's `bin/`: the run executes the tree's own (sd:2613)."""
     digest = hashlib.sha256((f"head {head}" if tree is None else f"tree {tree}").encode() + b"\n")
     local = untracked_local_block(root)
-    digest.update(b"local " + (local.read_bytes() if local else b"absent") + b"\n")
-    for path in sorted(BIN.iterdir()):
+    digest.update(b"local " + (local.read_bytes() if local else b"absent") + b"\n" + b"pack tree\n" * own)
+    for path in sorted(BIN.iterdir()) if not own else []:
         if path.is_file() and (path.suffix == ".py" or path.name.startswith("sd-")):
             digest.update(f"pack {path.name}\n".encode() + path.read_bytes())
     return digest.hexdigest()[:12]
@@ -174,23 +175,23 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
             env = gate_environment(root, None if environ is None else dict(environ))
             content, fork = sd_gate_receipts.tree_key(tree, base)
             key = sd_gate_receipts.receipt_key(root, head, content)
-            # Hashed once: the pack that ran is the one the run started with, and the lane moves it after a merge (sd:2612).
-            inputs = gate_inputs(root, head, content)
-            identity = sd_gate_receipts.gate_binding(tree, head, inputs, base, env, fork) if database is not None else None
+            own = sd_gate_receipts.gates_itself(root, tree, BIN)
+            identity = (sd_gate_receipts.gate_binding(tree, head, gate_inputs(root, head, content, own), base, env, fork)
+                        if database is not None else None)
             found, miss = sd_gate_receipts.examine(database, key, identity) if reuse and database else (None, None)
             if found is not None:
                 reading = dict(found["reading"], summary=f"{found['reading']['summary']} (reused)"[:DESCRIPTION_LIMIT],
                                reused={"revision": found["revision"], "recorded_at": found["recorded_at"],
                                        "age_seconds": found["age_seconds"], "head": found["head"]})
                 return {"head": gate_git(tree, "rev-parse", "HEAD"), **reading}
-            argv = [sys.executable, str(BIN / "sd-check"), "--json", "--timeout", str(timeout),
+            argv = [sys.executable, str((tree / "bin" if own else BIN) / "sd-check"), "--json", "--timeout", str(timeout),
                     *(["--base", base] if base else []), *(["--slot-timeout", str(slot_timeout)] * (slot_timeout > 0))]
             with sd_gate_cache.cargo_environment(root, tree, env) as child:
                 code, output, errors = (run or run_child)(argv, child, tree, timeout + slot_timeout + REPORT_GRACE_SECONDS)
             checked = gate_git(tree, "rev-parse", "HEAD")
             reading = check_reading(code, output, errors)
             if record and database and identity and reading["status"] == "success" and checked == head:
-                after = sd_gate_receipts.gate_binding(tree, head, inputs, base, env, fork)
+                after = sd_gate_receipts.gate_binding(tree, head, gate_inputs(root, head, content, own), base, env, fork)
                 sd_gate_receipts.record_unless_moved(database, key, identity, after, reading, head)
         finally:
             # The administrative entry goes with the directory; the temporary

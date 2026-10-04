@@ -95,6 +95,8 @@ WRITER = "sd-local-gate"
 #: The reviewed file that keys a repository's receipts by tree instead of head.
 REUSE_DECLARATION = ".github/sd-gate-reuse.json"
 REUSE_FIELDS = {"schema_version", "key", "reason"}
+#: Optional in the declaration: `"tool": "tree"` says the gate runs this tree's own `bin/sd-check` (sd:2613).
+TOOL_FIELD = "tool"
 
 
 def _digest(value: Any) -> str:
@@ -111,8 +113,29 @@ def keyed_by_tree(tree: pathlib.Path) -> bool:
         value = json.loads((tree / REUSE_DECLARATION).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
-    return (isinstance(value, dict) and set(value) == REUSE_FIELDS and value["schema_version"] == 1
+    return (isinstance(value, dict) and set(value) - {TOOL_FIELD} == REUSE_FIELDS and value["schema_version"] == 1
             and value["key"] == "tree" and isinstance(value["reason"], str) and bool(value["reason"].strip()))
+
+
+def gates_itself(root: pathlib.Path, tree: pathlib.Path, pack: pathlib.Path) -> bool:
+    """True when the run in `tree` is the pack gating itself (sd:2613), so the gate runs and binds the tree's own code.
+
+    `tree` must declare the tree key with `"tool": "tree"` and carry `bin/sd-check`, and `pack`, the running
+    pack's `bin/`, must belong to `root`'s repository. A foreign repository's field is ignored: its gate keeps
+    running, and binding, the checkout's pack.
+    """
+    try:
+        value = json.loads((tree / REUSE_DECLARATION).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not (keyed_by_tree(tree) and value.get(TOOL_FIELD) == "tree" and (tree / "bin" / "sd-check").is_file()):
+        return False
+    common = ["rev-parse", "--path-format=absolute", "--git-common-dir"]
+    mine = sd_lib.git_output(common, pack)
+    theirs = sd_lib.git_output(common, root)
+    if not mine or not theirs:
+        return False
+    return pathlib.Path(mine).resolve() == pathlib.Path(theirs).resolve()
 
 
 def tree_key(tree: pathlib.Path, base: str | None) -> tuple[str, str] | tuple[None, None]:
