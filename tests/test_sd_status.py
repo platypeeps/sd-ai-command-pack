@@ -755,6 +755,8 @@ class AcknowledgementTests(unittest.TestCase):
         # where it is meant to be read.
         entries, problems = status.load_acknowledgements(BIN.parent)
         self.assertEqual(problems, [])
+        # An absent file also loads as `([], [])`; the tracked acceptance must be read (sd:1002).
+        self.assertTrue(entries, "the repository's own acceptance file read as empty")
 
     def test_an_empty_state_is_rejected_rather_than_accepting_the_id(self) -> None:
         # An entry with no facts would accept `reviews` whatever the branch

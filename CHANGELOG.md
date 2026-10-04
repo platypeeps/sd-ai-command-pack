@@ -6,6 +6,18 @@
 
 - **`sd-ship` re-provisions `sd_db` after a library merge (sd:2108).** A verified merge into the system checkout, or one of its worktrees, whose squash changes `local-sd-db` now installs `sd_db` at the merge commit into the pack's main-checkout virtualenv. Before, the installed copy lagged the merge, and the next dashboard restart refused until `make setup` ran in the pack. `provision_library` takes the commit as `ref`, and keeps its downgrade guard. An installed copy that is not an ancestor of the merge commit is kept, so a late reconcile of an older merge cannot replace newer library code under the same schema. Every install, this one and `provision-library`, goes through `provision_guarded`, which holds one machine-wide lock across reading the installed commit, the ancestry check and pip, so two concurrent reconciles cannot interleave. On both paths a commit that is an ancestor of the installed one is refused, naming both, so `make setup` from a stale system checkout cannot undo a newer reconcile. A failed install is reported in the receipt's `library` field and does not undo the merge.
 
+- **`sd-ship prepare --restart-review REASON`: a fresh review after a rewrite that must stay (sd:2600).** An amend or a rebase after review orphans the reviewed head, and prepare refuses with `reviewed_head_orphaned`. Its only remedy was `git reset --soft` onto the reviewed head, which publishes that commit, so a privacy amend had no way back on the item path. The new flag applies only while a reviewed head is orphaned and needs a reason. It moves the orphaned passes, with the reason and heads, to `superseded_reviews` in the ship receipt, then reviews the whole branch from nothing. Set-aside passes still count against the automatic cap, and the restart spends one more. It does not combine with `--retry-review`, `--additional-review-for` or `--catch-up`, and a no-item record refuses it. The refusal's next action now names it first.
+
+- **The pack keys its own gate receipts by tree (sd:2610).** `.github/sd-gate-reuse.json` declares that `make check` reads no commit history. sd:2606 removed the last reader, docs-lint's delivery check. A merge-only or trailer-only head with an unchanged tree and merge base now reuses a gate pass for 6 hours, in place of running `make check` again. `tests.test_sd_local_gate.PackDeclaresTreeReuse` pins the declaration and the `--no-history` docs-lint recipe it rests on.
+- **A gate that ran in full says why it did not reuse a receipt (sd:2602).** `sd_gate_receipts.examine` returns the receipt or the reason it does not stand: `no-receipt`, `failed`, `binding` with the binding fields that differ, `expired` with the age and window, or `unreadable`. The merge gate's result, which `sd-ship merge` saves as the ship receipt's `local_gate`, and prepare's gate result carry it as `reuse_miss`. A receipt never stores it. On 2026-10-03 every merge gate ran in full beside a fresh prepare receipt for its head, and nothing said why; the installed pack still predated the sd:2534 session-variable drop. Operator ruling (2026-10-04): the gate child also drops `FNM_MULTISHELL_PATH` and resolves each `PATH` entry, so a builder's `sd gate check` and the lane's prepare on one real node bind the same receipt; a different real node still runs again.
+- **`sd-docs-lint --no-history`, and `make check` lints with it (sd:2606).** Rule 2 asked every open item, and every `done` row with no completion record, whether it was delivered. Each question fetched the remote and ran `git log --grep`, so the gate's verdict depended on the remote and on commit messages, not on the tree alone. With the flag, no fetch, `git log` or `ls-remote` runs: an item only git could answer reads `unknown`, the unmarked check is skipped, and the run prints `rule 2 delivery: not asked`. The lint `sd-ship` runs with the pull request body still asks. A traced `make docs-lint` on this checkout went from 20 fetches, 20 logs and 7 `ls-remote` calls to none.
+
+- **A bound on the local gate's Rust build cache (sd:2598).** The warm `CARGO_TARGET_DIR` folders from sd:2493 grew without limit: each gate still adds about 0.26 GB to the folder it takes. A gate that holds its folder now removes the least recently used free folders, of any repository, until the cache fits `sd.gate_cache_gb` (unset: 40; `0` is no bound; `SD_GATE_CACHE_GB` overrides it for one run). A folder another gate holds is never removed, since removal takes its lock; the gate's own folder goes last, before its run. Each removal prints `sd gate: pruned <folder> (<size> GB, least recently used) ...` on stderr, and a pruned folder costs its next gate one cold build.
+
+- **`make precheck`, run first by `sd-check` (sd:2604).** A repository whose Makefile defines `precheck` has `sd-check` run it before the gate-slot wait. A failure stops the run there: no slot is taken, every check that would have run fails unrun with `precheck failed, so this did not run`, and the report carries a `precheck` record with its output. `sd gate check` and the `sd-ship` gates run `sd-check`, so they stop there too, and the gate summary names the precheck first: `sd-check fail (precheck fail, check fail, ...)`. The pack's `precheck` is `lint` plus the always-run test modules, read off the `# select-tests: always-run` line as the changed-files selector reads them; `.github/scripts/run-precheck.py` runs each module on its own and names every one that fails. `--only` and a docs-only scope skip the precheck. A passing gate now runs `lint` twice and builds its gate environment twice, about a minute more.
+
+- **`sd-docs-lint --no-history`, and `make check` lints with it (sd:2606).** Rule 2 asked every open item, and every `done` row with no completion record, whether it was delivered. Each question fetched the remote and ran `git log --grep`, so the gate's verdict depended on the remote and on commit messages, not on the tree alone. With the flag, no fetch, `git log` or `ls-remote` runs: an item only git could answer reads `unknown`, the unmarked check is skipped, and the run prints `rule 2 delivery: not asked`. The lint `sd-ship` runs with the pull request body still asks. A traced `make docs-lint` on this checkout went from 20 fetches, 20 logs and 7 `ls-remote` calls to none.
+
 - **Two pack suites stop reading the pack's own history (sd:2593).** `tests/test_archive_untouched.py` pins the retire commit by full SHA instead of asking `git log`. `tests/test_sd_size_report.py` checks its anchors with `cat-file` instead of `merge-base --is-ancestor`, and its trend and report tests read a fixture repository with dated commits. In an orphan clone with the same tree, both old forms failed. The tree-keyed declaration waits: `sd-docs-lint` at the root still reads delivery trailers through `sd_lib.delivered()`.
 
 - **Warm Rust builds in the local gate (sd:2493).** A repository with a tracked `Cargo.toml` now builds its gate check into a warm `CARGO_TARGET_DIR` the gate owns, instead of the fresh worktree's `target/`, so a merge gate reuses unchanged dependencies rather than compiling every one cold. Each repository keeps two folders under `${XDG_CACHE_HOME:-~/.cache}/sd/gate/`; a gate holds one by `flock` for its whole run, because cargo-nextest runs test binaries after cargo releases its own lock. A warm run builds with `CARGO_INCREMENTAL=0`: incremental sessions never pay off in a new worktree, and they grew a folder by about 4 GB a gate. When both are held, the run builds cold in its worktree as before. The operator's own `CARGO_TARGET_DIR` no longer reaches the gate child, and the folder does not enter the receipt binding. `SD_GATE_CARGO_TARGETS` sets the count (`0` switches the cache off) and `SD_GATE_CACHE_DIR` moves it. Nothing prunes the folders yet.
@@ -241,6 +253,58 @@
   registry that sets it.
 
 ### Fixed
+
+- **The pack's gate binds its own tree, and a pass that leaves no receipt says why (sd:2612, sd:2613).** The local gate binds a receipt to a digest of the running pack's `bin/`, taken before the run and again after it. The pack lane fast-forwards the pack checkout after each merge, so a pack item's gate that overlapped a landing passed but left no receipt, and a landing between a builder's gate and the lane's prepare made the receipt miss. The pack's `.github/sd-gate-reuse.json` now declares `"tool": "tree"`. Its gate then runs the gated tree's own `bin/sd-check` and leaves the checkout's `bin/` out of the digest, so a checkout move no longer matters there. The field counts only when the running pack belongs to the gated repository (`sd_gate_receipts.gates_itself`). Every other repository keeps the checkout binding and the after-run comparison: a pack that moves mid-run still drops the pass. A pass that leaves no receipt now says why in `receipt_skipped`, for example `moved during the run: inputs`.
+
+- **Suite fixtures that did not do what they are named (sd:1002).** Two
+  `HOME` restores in `tests/test_sd_handoff_rows.py` and the `environment`
+  helper in `tests/test_sd_suggest.py` now put back an unset or empty value as
+  it was. Tests that passed when their subject broke now fail: the
+  repository's own acceptance file must load entries, `fleet-pins` is in the
+  research kit's verb list, the step-6 query pins `--base <this branch>`, the
+  guest-refusal control reads the explain scope row, every planned reviewer
+  gets the local block (and none without the file), the shipped registry
+  carries no `exo`, and the skill-promotion reader counts `publish` as a
+  forge claim, a contraction as a denial, and the tree a move starts from.
+
+- **A branch review checks the reviewed head in a clean worktree (sd:2077).**
+  `sd-review --scope branch` and `--scope pr`, and so `sd-ship review`, ran
+  `sd-check` in the operator's checkout unless `repo.ci` was `local`. An edit
+  to a bash check script during the run killed it mid-line, and the tree it
+  judged was not the reviewed head. The check now runs in a detached worktree
+  at the subject's head, as the local gate does, and its `check.source` reads
+  `worktree`. It leaves no gate receipt, and exit 0 still passes, so a
+  repository with no entrypoint is not a failed review. A worktree review
+  still checks the live checkout, whose edits are its subject.
+
+- **The issue guard's hint parses (sd:2515).** `bin/sd-issue-guard` told the
+  agent to run `sd task note <n> "<text>"`, which `sd` refuses: `note` takes
+  the text only as `--body`. The hint now reads `sd task note <n> --body
+  "<text>"`, and a test hands each `sd` command the denial names to the real
+  parser.
+- **One stalled plugin root no longer blocks every plugin lookup (sd:2540).**
+  A prefix lives in its plugin's manifest, so `sd config get <prefix>.<key>`
+  read every registered root in turn until it found the owner. On 2026-10-01
+  one root on an external volume waited on an open() under launchd for 16
+  hours, and every plugin `sd config get` timed out behind it (sd:2537). Now
+  each root reads in its own daemon thread. A lookup (`sd config get`, `set`,
+  `unset`, and a plugin kind) returns once its owner and every root listed
+  before it have answered. A root silent after 5 s is skipped with a
+  `warning: skipped plugin root` line. When two roots carry one prefix, the
+  earlier registry entry owns it for both lookups, whatever answers first.
+  When a root listed before the answering owner stays silent, the prefix
+  refuses as ambiguous, naming both roots: the silent root may own it, so a
+  later root never takes it over.
+  `sd plugin add` does not skip a silent root: it refuses, naming that root,
+  because the root may own the prefix being registered. Core `sd.*` keys
+  still read no plugin root.
+
+- **A review watchdog's drain after KILL waits for the pipes to close (sd:2609).**
+  `review_process` used one cleanup bound for both signals, so a test that
+  shortened the TERM grace also cut the drain after KILL to 50 ms. Under
+  load the pipes closed later, and `drained` read `False`. The drain after
+  KILL now has its own bound, `REVIEW_DRAIN_SECONDS`, and ends at the close.
+  Production timings are unchanged: both bounds are 5 seconds.
 
 - **Pack tools stay out of repositories the sd database does not mark managed (sd:1620).**
   The operator sets `repo.managed` by hand on their own repositories (sd:1619),
@@ -721,6 +785,23 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **Prepare's and merge's gates queue on their own bound too (sd:2611).** `sd-review` plans the gate-slot wait as its own phase, `timing.slot_seconds` (`sd_lib.GATE_SLOT_SECONDS`, 4 hours), and passes `--slot-timeout` to the check it runs; `execution_seconds` counts it, so the `sd-ship` watchdog no longer kills a gate that is still queued. `sd-ship` accepts a plan without the key as one with no slot phase. The merge gate passes the same bound, and the lane's prepare and merge limits grow by it. A queued gate's checks keep their whole bound; the price is that the outer limits, the runner's and the watchdog's, fire up to 4 hours later when `sd-check` does not honour its own bounds.
+
+- **The gate-slot count is the one limit on concurrent gates (sd:2607).**
+  On 2026-10-03 three gates read a load average of 124 while most cores idled,
+  because macOS counts threads waiting on the disk in it. The gate queue's
+  load rule is now off unless `sd.gate_load_max` sets it; starts stay 45 s apart.
+  `sd-check --slot-timeout` bounds the queue apart from `--timeout`, so a
+  queued gate's checks keep their whole bound. `sd gate check` queues for up to
+  4 hours. A holder exports its cap as `SD_GATE_POOL_SIZE`, and `run-tests.sh`
+  sizes its local workers to twice the CPUs over that cap: 8 at the cap of 4 on
+  16 CPUs, as before. The builder brief and `WORKFLOW.md` drop the advice to
+  wait on the load average or wrap a gate in `lockf`. `sd-review --gate-check`
+  and `sd-ship prepare`/`merge` keep the old bound; their watchdog plans do not
+  count a separate queue time yet.
+
+- **Builders gate first, then review the gated head (sd:2603, slice 1).** The `sd-slice-builder` agent, the `sd-review` skill and `WORKFLOW.md` (Parallel work, Reviews, Defaults) now order each branch round under `repo.ci = local`: `sd gate check --base main` at the head, then `sd-review --scope branch --gate-check main` within the 30-minute reuse window, with the same environment, so the round reads the gate's pass instead of running a second full check. A fix commit needs a new gate pass before the next round. The plain `sd-review --scope branch` form is ruled out there: it runs a full check in the checkout, outside any lock around the gate, and reuses no pass. Docs only; `bin/sd-review` is unchanged.
 
 - **A task or followup merged associate-only can be delivered afterwards
   (sd:1913).** `sd work deliver N SHA --associated --reason TEXT` (sd:1590)
