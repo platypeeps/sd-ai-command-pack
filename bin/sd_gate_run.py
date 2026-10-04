@@ -207,11 +207,17 @@ def named_checks(report: dict[str, Any]) -> str:
     rows = [entry for entry in report.get("checks") or [] if isinstance(entry, dict)]
     scope = report.get("scope")
     if not (isinstance(scope, dict) and scope.get("mode") == "docs-only"):
-        return ", ".join(f"{row.get('name')} {row.get('status')}" for row in rows if row.get("status") != "absent")
+        return ", ".join(summary_row(row) for row in rows if row.get("status") != "absent")
     # The three names read `skipped` in a docs-only run; the scope is what a reader needs.
     if report.get("status") == "pass":
         return "docs-only"
-    return "docs-only: " + ", ".join(f"{row.get('name')} {row.get('status')}" for row in rows if row.get("name") == "docs")
+    return "docs-only: " + ", ".join(summary_row(row) for row in rows if row.get("name") == "docs")
+
+
+def summary_row(row: dict[str, Any]) -> str:
+    """One check as a summary names it; a failed one adds the steps sd-check says failed (sd:2608)."""
+    steps = row.get("failed_steps") if row.get("status") == "fail" else None
+    return f"{row.get('name')} {row.get('status')}" + (f": {'; '.join(map(str, steps))}" if isinstance(steps, list) and steps else "")
 
 
 def check_reading(code: int | None, output: str, errors: str = "") -> dict[str, Any]:
@@ -240,4 +246,5 @@ def check_reading(code: int | None, output: str, errors: str = "") -> dict[str, 
     if code is None:
         return {"status": "failure", "exit_code": code, "summary": output[:DESCRIPTION_LIMIT], **said}
     words = f"sd-check {overall or 'error'}" + (f" ({named})" if named else f" (exit {code})")
+    words = words if len(words) <= DESCRIPTION_LIMIT else words[:DESCRIPTION_LIMIT - 5].rstrip() + " ...)"  # the report keeps every step
     return {"status": "failure", "exit_code": code, "summary": words, **said}

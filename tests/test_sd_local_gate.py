@@ -203,6 +203,19 @@ class Reading(unittest.TestCase):
         self.assertIsNone(sd_gate_run.check_reading(0, "not json")["report"])
 
 
+    def test_a_failure_summary_names_the_failed_step(self) -> None:
+        """sd:2608: the one line a lane log shows said `check fail` and no step."""
+        failed = json.dumps({"status": "fail", "checks": [
+            {"name": "check", "status": "fail", "failed_steps": ["shard tests.test_a: 0s exit=1", "make target test"]},
+            {"name": "test", "status": "skipped"}, {"name": "lint", "status": "skipped"}]})
+        summary = sd_gate_run.check_reading(1, failed)["summary"]
+        self.assertEqual(summary, "sd-check fail (check fail: shard tests.test_a: 0s exit=1; make target test,"
+                                  " test skipped, lint skipped)")
+        many = json.dumps({"status": "fail", "checks": [
+            {"name": "check", "status": "fail", "failed_steps": [f"shard tests.test_{n}: 0s exit=1" for n in range(30)]}]})
+        self.assertLessEqual(len(sd_gate_run.check_reading(1, many)["summary"]), sd_gate_run.DESCRIPTION_LIMIT)
+
+
 class Post(unittest.TestCase):
     HEAD = "a" * 40
 

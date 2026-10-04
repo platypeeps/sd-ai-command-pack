@@ -179,3 +179,13 @@ as `output_path` and the human output as `whole output:`. `failed_shards`
 lists each `shard <name>: <n>s exit=<code>` line with a non-zero code from
 the whole output, so a shard that failed early is named though the tail no
 longer reaches it.
+
+A failing check also names every step that failed in `failed_steps`, and is
+never empty: each failed shard, each suite a runner lists as `<tool>: failed:
+<suite> ...`, and each make target from `make: *** [<target>] Error <n>`.
+A failure that names none of these reads `<name> exit <code>`, or the reason
+the check did not finish, such as a timeout. `failure` holds the failing part
+of the output: each failed shard's own block, else each stream's failure lines
+(`FAIL:`, `ERROR:`, an exception, `FAILED`) and its tail. The human output
+prints them as `failed step:` and `[failure]`; `sd gate check` adds the steps
+to its one-line summary.

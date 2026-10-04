@@ -827,7 +827,10 @@ def gate_diagnostics(check: dict, limit: int) -> list[dict]:
              "stdout": str(record.get("stdout") or "")[-limit:], "stderr": str(record.get("stderr") or "")[-limit:],
              # Where sd-check kept the whole output, and the failed shards it read there (sd:2558).
              "output_path": str(record["output_path"])[:limit] if record.get("output_path") else None,
-             "failed_shards": [str(line)[:limit] for line in shard_lines(record.get("failed_shards"))][:FAILED_SHARDS_NAMED]}
+             "failed_shards": [str(line)[:limit] for line in shard_lines(record.get("failed_shards"))][:FAILED_SHARDS_NAMED],
+             # Every step that failed, shard or not, and the failing part of the output (sd:2608).
+             "failed_steps": [str(line)[:limit] for line in shard_lines(record.get("failed_steps"))][:FAILED_SHARDS_NAMED],
+             "failure": str(record.get("failure") or "")[-limit:]}
             for record in [*records[:len(sd_lib.CHECK_NAMES)], *docs] if isinstance(record, dict)]
 
 
@@ -852,7 +855,8 @@ def failing_check_tails(rows: Any, limit: int = FAILING_TAIL_CHARS) -> list[str]
 
     The failed shards and the file holding the whole output come first: a
     shard that failed early in a long run is in neither tail, and the tails
-    are what a lane log cuts again (sd:2558).
+    are what a lane log cuts again (sd:2558). Then each other failed step,
+    such as a make target, and the failing part of the output (sd:2608).
     """
     named = []
     for row in rows if isinstance(rows, list) else []:
@@ -860,6 +864,12 @@ def failing_check_tails(rows: Any, limit: int = FAILING_TAIL_CHARS) -> list[str]
             continue
         found = [f"failed {line}" for line in shard_lines(row.get("failed_shards"))[:FAILED_SHARDS_NAMED]]
         found += [f"whole output: {row['output_path']}"] * bool(row.get("output_path"))
+        # A step that is no shard, such as a make target, and the lines that say why it failed (sd:2608).
+        shards = set(shard_lines(row.get("failed_shards")))
+        found += [f"failed step: {step}" for step in shard_lines(row.get("failed_steps"))[:FAILED_SHARDS_NAMED]
+                  if step not in shards]
+        failure = str(row.get("failure") or "").strip()
+        found += [f"failure: {'...' if len(failure) > limit else ''}{failure[-limit:]}"] * bool(failure)
         streams = [(stream, str(row.get(stream) or "").strip()) for stream in ("stderr", "stdout")]
         said = [f"{stream}: {'...' if len(text) > limit else ''}{text[-limit:]}" for stream, text in streams if text]
         reason = str(row.get("reason") or "").strip()

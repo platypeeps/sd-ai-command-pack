@@ -240,6 +240,8 @@
 
 ### Fixed
 
+- **A failed gate names the step that failed (sd:2608).** A report could read `failed_shards: []` on the rows a reader looked at, and its summary named no shard, test or target. Each failing `sd-check` row now carries `failed_steps`, never empty: the failed shards, the suites a runner lists as failed, the failed make targets, else the check's exit code or the reason it did not finish. `failure` carries the failing part of the output: each failed shard's own block with its FAIL line and assertion, else each stream's failure lines and tail. `sd gate check`'s summary adds the steps, within the 140-character status bound. The `sd-ship prepare` and local-gate refusals name the steps and the failure, and the receipt row keeps both.
+
 - **Pack tools stay out of repositories the sd database does not mark managed (sd:1620).**
   The operator sets `repo.managed` by hand on their own repositories (sd:1619),
   and the rest must not use any pack capability. `sd fleet stamp` now walks

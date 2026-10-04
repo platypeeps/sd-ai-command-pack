@@ -96,6 +96,64 @@ def failed_shards(*texts: str) -> list[str]:
     return [match.group(0) for text in texts for match in FAILED_SHARD.finditer(text)][:FAILED_SHARDS_KEPT]
 
 
+#: A make target that failed: `make: *** [test] Error 1`, GNU make 4's `make[1]: *** [Makefile:12: lint] Error 2`.
+FAILED_TARGET = re.compile(r"^g?make(?:\[\d+\])?: \*\*\* \[(?:[^\]]*: )?([^\]\s]+)\] (?:Error \d+|Interrupt)", re.MULTILINE)
+#: A runner that lists the suites that failed: `check.sh: failed: shared macos; logs kept in <dir>`.
+FAILED_SUITES = re.compile(r"^[\w.-]+: failed:((?: [\w.-]+)+)(?:;.*)?$", re.MULTILINE)
+#: A line that says what failed: a unittest header, an exception, a summary, a make error.
+FAILURE_LINE = re.compile(r"^(?:FAIL|ERROR): |^\w*(?:Error|Exception)\b|^FAILED\b|\*\*\* \[|^[\w.-]+: failed:")
+FAILURE_LINES_KEPT = 12
+#: How much of one step's output the excerpt ends with, and the excerpt's whole bound.
+STEP_TAIL_CHARS = 600
+FAILURE_CHARS = 4000
+
+
+def failed_steps(name: str, code: int | None, note: str, out: str, err: str) -> list[str]:
+    """What failed, most specific first: each failed shard, each failed suite, each failed make target (sd:2608).
+
+    Never empty: a failure that names no step names the check and its exit
+    code, or the reason it did not finish, so a failed run is never reported
+    with nothing named.
+    """
+    steps = failed_shards(out, err)
+    steps += [f"suite {suite}" for text in (out, err) for match in FAILED_SUITES.finditer(text)
+              for suite in match.group(1).split()]
+    steps += [f"make target {match.group(1)}" for text in (out, err) for match in FAILED_TARGET.finditer(text)]
+    steps = list(dict.fromkeys(steps))[:FAILED_SHARDS_KEPT]
+    if steps:
+        return steps
+    return [f"{name}: {note}" if note else f"{name} exit {code}"]
+
+
+def _excerpt(text: str) -> str:
+    """The lines of `text` that say what failed, then its tail."""
+    lines = [line[:300] for line in text.splitlines() if FAILURE_LINE.search(line)][-FAILURE_LINES_KEPT:]
+    tail = text.rstrip()[-STEP_TAIL_CHARS:]
+    return "\n".join([*lines, "..." if len(text.rstrip()) > STEP_TAIL_CHARS else "", tail]).strip()
+
+
+def failure_excerpt(out: str, err: str, shards: list[str]) -> str:
+    """The failing part of the output (sd:2608): each failed shard's own block, else each stream's failure lines and tail.
+
+    A shard's block runs from its `shard <name>: start` line to its result
+    line, so a shard that failed early in a long run keeps its FAIL line and
+    assertion, which the report's tail no longer reaches.
+    """
+    parts = []
+    for line in shards:
+        for text in (out, err):
+            end = text.find(line)
+            if end < 0:
+                continue
+            start = text.rfind(f"shard {line.split()[1]} start", 0, end)
+            start = text.rfind("\n", 0, start) + 1 if start >= 0 else max(0, end - STEP_TAIL_CHARS)
+            parts.append(_excerpt(text[start:end + len(line)]))
+            break
+    if not parts:
+        parts = [_excerpt(text) for text in (out, err) if text.strip()]
+    return "\n\n".join(parts)[-FAILURE_CHARS:]
+
+
 def keep_output(root: pathlib.Path, name: str, command: list[str], code: int | None, out: str, err: str) -> str:
     """Write one failing check's whole output under the Git common directory; return the file's path.
 
@@ -228,6 +286,8 @@ def execute(
             "output_truncated": False,
             "output_path": None,
             "failed_shards": [],
+            "failed_steps": [],
+            "failure": "",
         }
         if entry["status"] is None:
             command = entry["command"]
@@ -238,6 +298,7 @@ def execute(
             elif blocked is not None:
                 record["status"] = FAIL
                 record["reason"] = blocked
+                record["failed_steps"] = failed_steps(str(entry["name"]), None, blocked, "", "")
             else:
                 status, code, duration, out, err, note = (run_one(command, root, timeout) if environ is None
                                                         else run_one(command, root, timeout, environ))
@@ -252,8 +313,12 @@ def execute(
                     stderr=err_tail,
                     output_truncated=out_cut or err_cut,
                 )
+                if status == FAIL:
+                    shards = failed_shards(out, err)
+                    record["failed_shards"] = shards
+                    record["failed_steps"] = failed_steps(str(entry["name"]), code, note, out, err)
+                    record["failure"] = failure_excerpt(out, err, shards)
                 if status == FAIL and (out or err):
-                    record["failed_shards"] = failed_shards(out, err)
                     try:
                         record["output_path"] = keep_output(root, str(entry["name"]), command, code, out, err)
                     except OSError as error:
@@ -314,14 +379,19 @@ def render(result: dict[str, object], stream: TextIO) -> None:
 
 
 def render_failure(record: dict[str, object], stream: TextIO) -> None:
-    """One failing check: its failed shards and the file with its whole output, then each stream's tail."""
+    """One failing check: its failed steps and shards, the file with its whole output, its failure, then each stream's tail."""
     write = stream.write
     write(f"\n--- {record['name']} (exit {record['exit_code']}) ---\n")
+    steps = record.get("failed_steps")
+    for line in steps if isinstance(steps, list) else []:
+        write(f"failed step: {line}\n")
     shards = record.get("failed_shards")
     for line in shards if isinstance(shards, list) else []:
         write(f"failed {line}\n")
     if record.get("output_path"):
         write(f"whole output: {record['output_path']}\n")
+    if str(record.get("failure") or "").strip():
+        write(f"[failure]\n{str(record['failure']).rstrip()}\n")
     for channel in ("stdout", "stderr"):
         text = str(record[channel])
         if text.strip():
