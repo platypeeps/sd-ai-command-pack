@@ -151,7 +151,8 @@ After the switch:
   A warm run gets `CARGO_INCREMENTAL=0`. When both are held, the run builds cold in its worktree.
   Your own `CARGO_TARGET_DIR` never reaches the check.
   `SD_GATE_CARGO_TARGETS` sets the count, `0` switches the cache off, and `SD_GATE_CACHE_DIR` moves it.
-  Cargo prunes nothing there; delete a folder to reclaim its space.
+  Cargo prunes nothing there, so the gate bounds the cache at `sd.gate_cache_gb` (sd:2598).
+  Past it, the gate removes the least recently used free folders, its own last, and names each on stderr.
 - This is a self-hosted runner, not a hermetic build.
   The gate guarantees a clean tree at the exact head, a scrubbed Python environment and no virtualenv on `PATH`.
   The rest of `PATH` and the system tools are this machine's image.
@@ -445,6 +446,12 @@ which the installer places in `~/.claude/agents`.
   `make test` inside a gate takes no second slot; run directly, `make test`
   takes one of the same slots. Slots are kernel locks under
   `$XDG_STATE_HOME/sd/gate-slots`, so a dead holder's slot is free at once.
+- **A precheck runs before the slot wait (sd:2604).** When the repository's
+  Makefile defines `precheck`, `sd-check` runs `make precheck` first, outside
+  the pool. A failure stops the run there: no slot, no `check`, and the report
+  names the failing check. The pack's `precheck` is `lint` plus the always-run
+  test modules, about a minute. `--only` and a docs-only scope skip it, and
+  the checks get what the precheck left of `--timeout`.
 - **Wrap every other gate in the pool (sd:2522).** The pool is one per
   machine, not one per repository. A plain `make check` in a repository whose
   Makefile takes no slot runs as `sd gate run -- make check`, so it queues with
@@ -777,6 +784,8 @@ The reserved `sd` namespace declares four settings:
   Absence reads 2.5 per core. `SD_GATE_LOAD_MAX` overrides it for one run. It grants nothing.
 - `sd.gate_settle_seconds`: seconds between two gate starts, and of low load1 while load5 is high; `0` is none.
   Absence reads 45. `SD_GATE_SETTLE_SECONDS` overrides it for one run. It grants nothing.
+- `sd.gate_cache_gb`: the most gigabytes the local gate's warm Rust build folders may hold; `0` is no bound.
+  Absence reads 40. `SD_GATE_CACHE_GB` overrides it for one run. It grants nothing.
 - `sd.lane_root`: the folder that holds each repository's `sd-ship lane` queue, as `<root>/<repository>/lane/queue/`.
   Absence reads `$XDG_STATE_HOME/sd/lanes`. `SD_LANE_ROOT` overrides it. It grants nothing.
 

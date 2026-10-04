@@ -86,6 +86,10 @@ CORE_CONFIG = {
                   "description": "The folder holding each repository's `sd-ship lane` queue, as "
                                  "<root>/<repository>/lane/queue/. Unset reads $XDG_STATE_HOME/sd/lanes; "
                                  "SD_LANE_ROOT overrides it. It grants nothing."},
+    "gate_cache_gb": {"pattern": r"[0-9]+(\.[0-9]+)?",
+                      "description": "The most gigabytes the local gate's warm Rust build folders may hold; past it the "
+                                     "gate removes the least recently used free folders. 0 is no bound. Unset reads 40; "
+                                     "SD_GATE_CACHE_GB overrides it for one run. It grants nothing."},
     "gate_settle_seconds": {"pattern": "[0-9]+",
                             "description": "Seconds between two gate starts, and of low load1 while load5 is high; "
                                            "0 is none. Unset reads 45; SD_GATE_SETTLE_SECONDS overrides it for one run."},
@@ -126,6 +130,8 @@ DEFAULT_MODE = "full"
 
 #: The three names every repository is asked about, in the order they run.
 CHECK_NAMES = ("check", "test", "lint")
+#: The Makefile target `sd-check` runs before it waits for a gate slot (sd:2604).
+PRECHECK_NAME = "precheck"
 
 #: Optional repository restriction, overriding standing operator review consent.
 #: Shared by the installer, runtime reader, and workflow inventory check.
@@ -2009,6 +2015,8 @@ class Detection:
     commands: dict[str, list[str]] = field(default_factory=dict)
     reason: str = ""
     warnings: tuple[str, ...] = ()
+    #: The fast check that runs first, when the Makefile defines `PRECHECK_NAME`.
+    precheck: list[str] | None = None
 
 
 def _local_block_entrypoints(root: pathlib.Path) -> Detection | None:
@@ -2072,6 +2080,7 @@ def _makefile_entrypoints(root: pathlib.Path) -> Detection | None:
         origin=path,
         commands=commands,
         reason=f"{path.name} defines {', '.join(commands)}",
+        precheck=["make", PRECHECK_NAME] if PRECHECK_NAME in targets else None,
     )
 
 
