@@ -645,5 +645,92 @@ class DispositionTests(unittest.TestCase):
         self.assertEqual(self.merge()["phase"], "merged")
 
 
+sd_ship_review = importlib.import_module("sd_ship_review")
+
+
+class TheAdjudicatedGate(unittest.TestCase):
+    """sd:2605. A blocking review runs no gate, so the prepare that reads its
+    accepted dispositions runs the gate itself before clearance."""
+
+    setUp = fixture.ShipCase.setUp
+    args = fixture.ShipCase.args
+    operation = fixture.ShipCase.operation
+    prepare = fixture.ShipCase.prepare
+    merge = fixture.ShipCase.merge
+    cli = fixture.ShipCase.cli
+    blocked = DispositionTests.blocked
+    command = DispositionTests.command
+    filled = DispositionTests.filled
+    accepted = DispositionTests.accepted
+
+    def gate_runs(self):
+        """A spy on the one gate run this path makes, passing each call through."""
+        spy = patch.object(sd_ship_review, "adjudicated_check", wraps=sd_ship_review.adjudicated_check)
+        self.addCleanup(spy.stop)
+        return spy.start()
+
+    def test_the_blocking_report_carries_a_gate_that_did_not_run(self):
+        self.blocked()
+        self.assertEqual(self.raw[-1]["report"]["check"]["status"], "not_run")
+
+    def test_prepare_runs_the_gate_once_before_clearance_and_merge_reads_it(self):
+        self.blocked()
+        self.accepted()
+        runs = self.gate_runs()
+        with patch.object(ship, "review_process", side_effect=AssertionError("provider dispatch after adjudication")):
+            self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        state = self.operation().state
+        self.assertEqual((state["adjudicated_gate"]["head"], state["adjudicated_gate"]["status"]), (self.head, "pass"))
+        self.assertEqual(state["review_clearance"]["kind"], "adjudicated")
+        self.assertEqual(state["passes"], self.raw)
+        self.assertEqual(self.merge()["phase"], "merged")
+        self.assertEqual([call.args[1] for call in runs.call_args_list], [self.head])
+
+    def test_publication_and_merge_refuse_a_head_whose_gate_never_passed(self):
+        self.blocked()
+        self.accepted()
+        self.prepare()
+        for recorded in (None, {"head": "0" * 40, "status": "pass"}, {"head": self.head, "status": "fail"}):
+            with self.subTest(recorded=recorded):
+                operation = self.operation("merge", "--manual", "--expected-head", self.head)
+                operation.state["adjudicated_gate"] = recorded
+                runs = self.gate_runs()
+                with self.assertRaises(ship.Refusal) as caught:
+                    operation.check_review(self.head)
+                self.assertEqual(caught.exception.workflow["blocker"]["code"], "gate_not_run")
+                self.assertEqual(runs.call_count, 0)
+
+    def test_a_gate_that_fails_after_adjudication_refuses_and_keeps_the_pass(self):
+        (self.root / "Makefile").write_text("check:\n\t@echo adjudicated-gate-broke; exit 2\n")
+        fixture._git(self.root, "commit", "-qam", "break the gate\n\nAuthored-with: human")
+        self.blocked()
+        self.accepted()
+        with self.assertRaises(ship.Refusal) as caught:
+            self.prepare()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "gate_failed")
+        self.assertIn("after its blocking findings were adjudicated; the review pass stays spent", str(caught.exception))
+        self.assertIn("adjudicated-gate-broke", str(caught.exception))
+        state = self.operation().state
+        self.assertEqual(state["passes"], self.raw)
+        self.assertEqual(state["adjudicated_gate"]["status"], "fail")
+        self.assertIsNone(state.get("review_clearance"))
+
+
+class GateWaivable(unittest.TestCase):
+    """sd:2605. Adjudication waives a gate that passed or never ran, nothing else."""
+
+    def test_a_pass_or_a_gate_that_never_ran(self):
+        for check in ({"status": "pass", "exit_code": 0}, {"status": "not_run", "exit_code": None}):
+            with self.subTest(check=check):
+                self.assertTrue(sd_ship_dispositions.gate_waivable(check))
+
+    def test_never_a_failed_partial_or_malformed_gate(self):
+        for check in ({"status": "fail", "exit_code": 1}, {"status": "not_run", "exit_code": 2},
+                      {"status": "pass", "exit_code": None}, {"status": "pass", "exit_code": True},
+                      {"status": "not_run", "exit_code": "0"}, {}, None, "pass"):
+            with self.subTest(check=check):
+                self.assertFalse(sd_ship_dispositions.gate_waivable(check))
+
+
 if __name__ == "__main__":
     unittest.main()

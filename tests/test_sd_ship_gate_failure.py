@@ -154,13 +154,67 @@ class GateFailureSpendsNoPass(unittest.TestCase):
         self.assertEqual(len(again.state["passes"]), 2)
         self.assertIn("review_binding_change", again.state["passes"][1])
 
-    def test_a_run_that_asked_a_reviewer_still_spends_its_pass(self):
-        asked = {**GATE_FAILED, "outcomes": [{"backend": "automatic", "status": "failed"}]}
-        review, _process = self.context(report_changes=asked)
+    def test_a_gate_failure_after_a_clean_review_releases_the_pass(self):
+        """sd:2605. The gate runs after a review that cleared; when it fails the
+        head cannot ship, and the next prepare reviews the fixed branch again."""
+        cleared = {**GATE_FAILED, "outcomes": [{"backend": "automatic", "status": "clean"}],
+                   "reviewed_by": ["automatic"], "completed_reviews": 1}
+        review, _process = self.context(report_changes=cleared)
+        with self.assertRaisesRegex(ship.Refusal, "after the review cleared; the review pass was released") as caught:
+            review.review(HEAD)
+        self.assertIn("timed out after 900s", str(caught.exception))
+        self.assertEqual(review.state["passes"], [])
+        self.assertIsNone(review.state.get("reviewed_head"))
+        self.assertEqual(review.state["review_preflight_error"]["kind"], "gate_failed")
+
+    def test_a_blocking_finding_beside_a_failed_gate_still_spends_its_pass(self):
+        """Not a gate failure: the finding refuses the head on its own."""
+        finding = {"path": "a.py", "line": 1, "severity": "high", "summary": "s", "disposition": "blocking"}
+        blocked = {**GATE_FAILED, "outcomes": [{"backend": "automatic", "status": "findings"}],
+                   "reviewed_by": ["automatic"], "completed_reviews": 1, "findings": [finding]}
+        review, _process = self.context(report_changes=blocked)
         with self.assertRaises(ship.Refusal) as caught:
             review.review(HEAD)
-        self.assertNotIn("no review pass was spent", str(caught.exception))
+        self.assertNotIn("pass was released", str(caught.exception))
         self.assertEqual(len(review.state["passes"]), 1)
+
+
+NOT_RUN = {"status": "not_run", "exit_code": None, "reason": "the review is blocking; the gate runs on a head it does not block"}
+FINDING = {"path": "a.py", "line": 1, "severity": "high", "summary": "wrong", "family": "correctness",
+           "disposition": "blocking", "backend": "automatic"}
+
+
+class ABlockingReviewRunsNoGate(unittest.TestCase):
+    """sd:2605. sd-review runs the gate only after a review that does not block."""
+
+    context = provider_tests.ProviderSelection.context
+
+    def blocked(self) -> dict:
+        return {"status": "blocking", "check": dict(NOT_RUN), "findings": [dict(FINDING)],
+                "outcomes": [{"backend": "automatic", "status": "findings"}]}
+
+    def test_the_refusal_says_the_gate_did_not_run_and_carries_the_check(self):
+        review, _process = self.context(report_changes=self.blocked())
+        review.args.item = 42
+        with self.assertRaises(ship.Refusal) as caught:
+            review.review(HEAD)
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "review_blocking")
+        self.assertIn("the gate did not run, so no test has passed at this head", str(caught.exception))
+        self.assertEqual(caught.exception.details["check"], NOT_RUN)
+        self.assertEqual(review.state["passes"][-1]["report"]["check"], NOT_RUN)
+
+    def test_a_blocked_report_with_no_gate_is_complete(self):
+        report = {**self.blocked(), "subject": {"head": HEAD}, "scope": "branch",
+                  "requested_reviews": 1, "completed_reviews": 1}
+        last = {"head": HEAD, "report": report, "exit_code": 1}
+        self.assertIs(sd_ship_review.complete_report(last, HEAD, None), report)
+
+    def test_a_clean_report_with_no_gate_is_not(self):
+        report = {"status": "clean", "check": dict(NOT_RUN), "findings": [], "subject": {"head": HEAD},
+                  "scope": "branch", "requested_reviews": 1, "completed_reviews": 1}
+        last = {"head": HEAD, "report": report, "exit_code": 0}
+        with self.assertRaisesRegex(ship.Refusal, "incomplete"):
+            sd_ship_review.complete_report(last, HEAD, HEAD)
 
 
 class TheRealGateFailureIsRecognised(review_tests.ReviewFixture):
@@ -211,7 +265,7 @@ class TheRealGateFailureIsRecognised(review_tests.ReviewFixture):
         runner = FakeRunner({"sd-check": sd_review.Completed(1, "{}", "timed out after 900s")})
         result = self.run_review(root, runner)
         self.assertEqual(result["status"], "gate_failed")
-        self.assertTrue(sd_ship_review.unreviewed_gate_failure(result, sd_review.EXIT_GATE))
+        self.assertTrue(sd_ship_review.released_gate_failure(result, sd_review.EXIT_GATE))
 
 
 class PrepareRunsTheLocalGate(unittest.TestCase):
