@@ -287,6 +287,14 @@ def review_process(root: pathlib.Path, argv: list[str], *, timeout: float) -> su
             process.stderr.close()
 
 
+def slot_phase(plan: dict) -> int:
+    """sd:2611: the gate-slot wait, its own phase; none in a plan without it. Not a count: `TypeError`, an invalid plan."""
+    slot = plan.get("slot_seconds", 0)
+    if type(slot) is not int or slot < 0:
+        raise TypeError(f"slot_seconds is {slot!r}, not a count of seconds")
+    return slot
+
+
 def timing_plan(result: subprocess.CompletedProcess) -> dict:
     try:
         report = json.loads(result.stdout)
@@ -297,6 +305,7 @@ def timing_plan(result: subprocess.CompletedProcess) -> dict:
         # sd:2041: the gate's own bound, beside the reviewers' phase. A plan
         # without it is one phase for the gate and each reviewer, as before.
         check = plan.get("check_seconds", phase)
+        slot = slot_phase(plan)
         valid = (result.returncode == 0 and report.get("status") == "explained" and not report.get("authorship_refusal")
                  and all(type(bound) is int and bound > 0 for bound in (phase, check))
                  and type(setup) is int and setup == REVIEW_SETUP_SECONDS
@@ -304,7 +313,7 @@ def timing_plan(result: subprocess.CompletedProcess) -> dict:
                  and type(requested) is int and 0 < requested <= len(candidates)
                  and all(isinstance(row, dict) and isinstance(row.get("name"), str)
                          and isinstance(row.get("recipient"), str) for row in candidates)
-                 and total == setup + check + phase * len(candidates))
+                 and total == setup + slot + check + phase * len(candidates))
     except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
         valid = False
     if not valid:

@@ -51,8 +51,9 @@ import sd_lib
 
 BIN = pathlib.Path(__file__).resolve().parent
 ROOT_VARIABLE = "SD_LANE_ROOT"
-PREPARE_SECONDS = 3 * 3600
-MERGE_SECONDS = 3 * 3600
+#: Each also covers its gate's slot wait, which has its own bound (sd:2611).
+PREPARE_SECONDS = 3 * 3600 + sd_lib.GATE_SLOT_SECONDS
+MERGE_SECONDS = 3 * 3600 + sd_lib.GATE_SLOT_SECONDS
 MERGE_WAIT_SECONDS = 2100
 #: The lines a gate writes when it ends: the pack's test runner, `make`'s own
 #: failure, and the system repository's check script.

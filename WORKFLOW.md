@@ -443,8 +443,9 @@ which the installer places in `~/.claude/agents`.
   again each minute, naming each holder's label, pid, directory and start
   time. The wait counts against `sd-check --timeout`, and each check gets the
   rest; with `--slot-timeout`, the wait has its own bound and each check gets
-  the whole `--timeout`. `sd gate check` queues that way for up to 4 hours
-  (sd:2607). A holder runs its checks with `SD_GATE_SLOTS=0`, and names its cap
+  the whole `--timeout`. `sd gate check`, the gate `sd-review` runs for
+  `sd-ship prepare`, and the merge gate queue that way for up to 4 hours
+  (sd:2607, sd:2611); the review plan counts that bound as its own phase. A holder runs its checks with `SD_GATE_SLOTS=0`, and names its cap
   in `SD_GATE_POOL_SIZE`, so the pack's own `make test` inside a gate takes no
   second slot and sizes its workers to the pool; run directly, `make test`
   takes one of the same slots. Slots are kernel locks under

@@ -219,5 +219,12 @@ class Watch(Lane):
         self.assertEqual(sd_lane.gate_ends(self.root, seen), ["GATE-END lane/make-check.log: make: *** [test] Error 1"])
 
 
+class Bounds(unittest.TestCase):
+    def test_prepare_and_merge_bounds_cover_a_gates_slot_wait(self) -> None:
+        """sd:2611: the gate under them queues for up to `GATE_SLOT_SECONDS` before its check starts."""
+        for bound in (sd_lane.PREPARE_SECONDS, sd_lane.MERGE_SECONDS):
+            self.assertGreaterEqual(bound, 3 * 3600 + sd_lane.sd_lib.GATE_SLOT_SECONDS)
+
+
 if __name__ == "__main__":
     unittest.main()

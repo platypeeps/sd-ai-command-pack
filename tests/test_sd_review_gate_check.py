@@ -37,8 +37,10 @@ class GateBound(ReviewFixture):
         timing = report["timing"]
         self.assertEqual((timing["check_seconds"], timing["phase_seconds"]),
                          (sd_review.sd_lib.GATE_CHECK_SECONDS, sd_review.DEFAULT_TIMEOUT_SECONDS))
-        self.assertEqual(timing["execution_seconds"], timing["setup_seconds"] + timing["check_seconds"]
-                         + timing["phase_seconds"] * len(timing["candidates"]))
+        # sd:2611: the gate-slot wait is its own phase, so a queued gate is not cut at the check's bound.
+        self.assertEqual(timing["slot_seconds"], sd_review.sd_lib.GATE_SLOT_SECONDS)
+        self.assertEqual(timing["execution_seconds"], timing["setup_seconds"] + timing["slot_seconds"]
+                         + timing["check_seconds"] + timing["phase_seconds"] * len(timing["candidates"]))
 
     def test_the_default_check_is_handed_the_gates_bound(self) -> None:
         root = self.make_repo()
@@ -48,6 +50,9 @@ class GateBound(ReviewFixture):
         self.assertEqual(report["status"], "gate_failed")
         [call] = [call for call in runner.calls if any("sd-check" in word for word in call["argv"])]
         self.assertEqual(call["argv"][call["argv"].index("--timeout") + 1], str(sd_review.sd_lib.GATE_CHECK_SECONDS))
+        # sd:2611: it queues on its own bound, and the runner's limit adds that bound to the check's.
+        self.assertEqual(call["argv"][call["argv"].index("--slot-timeout") + 1], str(sd_review.sd_lib.GATE_SLOT_SECONDS))
+        self.assertEqual(call["timeout"], sd_review.sd_lib.GATE_CHECK_SECONDS + sd_review.sd_lib.GATE_SLOT_SECONDS)
 
 
 class GateRepo(ReviewFixture):
@@ -73,6 +78,18 @@ class GateRepo(ReviewFixture):
     def gate(self, root: pathlib.Path, database: pathlib.Path) -> dict:
         return sd_review.run_gate_check(root, sd_review.subprocess_runner, self.environment(), 120, "main",
                                         namespace(database=database))
+
+
+class GateSlotBound(GateRepo):
+    def test_the_gate_check_queues_on_the_slot_bound_apart_from_its_check(self) -> None:
+        """sd:2611: prepare's gate passes `--slot-timeout`, and the child's limit grows by the same bound."""
+        root, database = self.repo()
+        runner = FakeRunner({"sd-check": sd_review.Completed(1, '{"checks": []}', "")})
+        sd_review.run_gate_check(root, runner, self.environment(), 120, "main", namespace(database=database))
+        [call] = [call for call in runner.calls if any("sd-check" in word for word in call["argv"])]
+        slot = sd_review.sd_lib.GATE_SLOT_SECONDS
+        self.assertEqual(call["argv"][call["argv"].index("--slot-timeout") + 1], str(slot))
+        self.assertGreaterEqual(call["timeout"], 120 + slot)
 
 
 class GateCheck(GateRepo):

@@ -780,6 +780,8 @@
 
 ### Changed
 
+- **Prepare's and merge's gates queue on their own bound too (sd:2611).** `sd-review` plans the gate-slot wait as its own phase, `timing.slot_seconds` (`sd_lib.GATE_SLOT_SECONDS`, 4 hours), and passes `--slot-timeout` to the check it runs; `execution_seconds` counts it, so the `sd-ship` watchdog no longer kills a gate that is still queued. `sd-ship` accepts a plan without the key as one with no slot phase. The merge gate passes the same bound, and the lane's prepare and merge limits grow by it. A queued gate's checks keep their whole bound; the price is that the outer limits, the runner's and the watchdog's, fire up to 4 hours later when `sd-check` does not honour its own bounds.
+
 - **The gate-slot count is the one limit on concurrent gates (sd:2607).**
   On 2026-10-03 three gates read a load average of 124 while most cores idled,
   because macOS counts threads waiting on the disk in it. The gate queue's
