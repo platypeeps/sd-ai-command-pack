@@ -4,6 +4,30 @@
 
 ### Added
 
+- **`sd-ship prepare` names other work on the same item or files (sd:1151).**
+  Two sessions fixed one defect in the same files forty minutes apart (#1120,
+  #1122); both branches were on origin first. Before the review, prepare
+  warns about each open pull request that names the item or changes a file
+  the branch changes, and each origin branch that names the item with no
+  open pull request. The lines go to stderr and the receipt's `warnings`. It
+  refuses nothing, and a read that fails is a warning of its own.
+
+- **`sd-status` counts late review findings (sd:1178).** A review posted
+  after the merge reaches no merge gate: 19 of 219 merged pull requests got
+  their review that way. `open threads` now prints a `late:` line counting
+  the unread findings on pull requests merged in the last 14 days, above
+  `expired:`, and `--json` carries it as `late_reviews`. It is stateless and
+  warns only (operator ruling 2026-10-03); `sd-review-ack` clears a finding
+  there as it clears the row.
+
+- **`sd-status` counts expired review findings (sd:998).** A merged pull
+  request's unanswered findings left the report on day fifteen and read as
+  nothing, so expiry looked like resolution. `open threads` now ends with an
+  `expired:` line counting the findings nobody answered on pull requests
+  merged 15 to 28 days ago (`MERGED_AGED_DAYS`), and `--json` carries it as
+  `expired_reviews`. Its own read covers those days, so the window's list is
+  not truncated by it; a short read says "at least" and why.
+
 - **A registry rule for gate receipt reuse, and the skill line that cites it (sd:1912).** `R15-D1` registers that prepare's gate reuses a passing gate receipt only at its head, or at its tree where `.github/sd-gate-reuse.json` declares tree keying, and only under the same binding. `skills/sd-ship/SKILL.md` tells a builder to run `sd gate check` on the head it hands to the lane. `docs/coding-to-release.md` and the `sd-check` receipt contract no longer call the pack's gate network-dependent, which nothing had audited. They now name the gate-receipt route, which the operator ruled on 2026-10-04 supersedes the planned `sd-check --reuse-check` declaration.
 
 - **`sd-ship` re-provisions `sd_db` after a library merge (sd:2108).** A verified merge into the system checkout, or one of its worktrees, whose squash changes `local-sd-db` now installs `sd_db` at the merge commit into the pack's main-checkout virtualenv. Before, the installed copy lagged the merge, and the next dashboard restart refused until `make setup` ran in the pack. `provision_library` takes the commit as `ref`, and keeps its downgrade guard. An installed copy that is not an ancestor of the merge commit is kept, so a late reconcile of an older merge cannot replace newer library code under the same schema. Every install, this one and `provision-library`, goes through `provision_guarded`, which holds one machine-wide lock across reading the installed commit, the ancestry check and pip, so two concurrent reconciles cannot interleave. On both paths a commit that is an ancestor of the installed one is refused, naming both, so `make setup` from a stale system checkout cannot undo a newer reconcile. A failed install is reported in the receipt's `library` field and does not undo the merge.
@@ -254,6 +278,42 @@
   registry that sets it.
 
 ### Fixed
+
+- **A body `Closes:` line closes co-delivered items on merge (sd:1481).** One
+  pull request claims one item, and #1150 fixed three rows while closing none:
+  it named two of them only in prose. Operator ruling 2026-10-03: a body line
+  `Closes: sd:N[, sd:M]` names co-delivered items. The squash message carries
+  `Delivers:` for each, and the merge closes them with the claimed item, with
+  or without `--deliver`. Prepare refuses a `Closes:` id that is no item
+  (`closes_item_unknown`) or belongs to another repository
+  (`closes_item_foreign`). One the merge could not close returns
+  `delivery_pending: true` with `closes_failed`, and `reconcile` retries it.
+  Each item is verified against the landed message, as the claimed item is,
+  so a pull request merged on GitHub without its `Delivers:` lines leaves
+  those items open, and one already done by hand needs evidence for this
+  commit. A `Closes:` line inside a fenced code block or an HTML comment is
+  an example: it closes nothing, and prepare refuses it at column zero, since
+  the merge would refuse it there as a demoted trailer; indent it to keep it.
+  `Refs:` still names related items, which stay open.
+
+- **The merge gate reads every reviewer's findings, not only Copilot's
+  (sd:998).** The ack gate ran at the merge step but read Copilot's material
+  alone, and returned early on a pull request Copilot never reviewed. Another
+  reviewer's finding merged unread while `sd-status` listed it as
+  unanswered. The merge now refuses with `review_findings_open` before the
+  merge call until each such finding has a disposition. Registry rule
+  `R14-D2` holds it, so the skill line that teaches it cites a row.
+
+- **An empty commit gets its own no-item record (sd:2009).** An `sd attribute`
+  repair is an empty commit, so its tree is the base's -- the tree the last
+  merged record landed. `sd-ship review --no-item --create-record
+  --assert-new-work` refused it as "already owns this tree". The base's own
+  tree is no longer a claimed identity; the commit still is, so the same
+  empty commit cannot allocate twice (operator ruling 2026-09-30).
+
+- **`sd-ship --item N` from another repository's checkout names the way on (sd:2576).** The refusal `item repository does not match this checkout's origin` now names both repositories and has the code `item_repository_mismatch`. For `prepare`, `merge`, `observe` and `reconcile`, its `next_action` gives the itemless path: `sd-ship review --no-item --create-record --assert-new-work`, then the same command with `--no-item --review-id <review_id>`, and `sd task note N` to record the PR on the item. `hold` and `release` name the item's repository only. What is refused does not change. Shipping sd:2300's PRs from two other repositories took four refusals, each shown only after the last was fixed.
+
+- **`sd runner cancel` on a running assignment no attempt owns no longer crashes (sd:2627).** Since sd:991 (system #137) the library ends such a row in place, through the connection the pack hands it. The pack opened that connection read-only, so the cancel died with `sqlite3.OperationalError: attempt to write a readonly database` instead of ending the row. The cancel path now opens a writable connection; `sd worktree resume` and `restore` stay read-only. `tests.test_sd_runner.RunnerCancelOnTheDatabase` runs the verb against a real database: a queued cancel, a running row no attempt owns (whichever answer the installed library gives, refusal or cancel), and a write through the control's connection.
 
 - **A failed gate names the step that failed (sd:2608).** A report could read `failed_shards: []` on the rows a reader looked at, and its summary named no shard, test or target. Each failing `sd-check` row now carries `failed_steps`, never empty: the failed shards, the suites a runner lists as failed, the failed make targets, else the check's exit code or the reason it did not finish. `failure` carries the failing part of the output: each failed shard's own block with its FAIL line and assertion, else each stream's failure lines and tail. `sd gate check`'s summary adds the steps, within the 140-character status bound, then `whole output: <path>`, uncut; the posted `sd/local-gate` status leaves that local path out. The `sd-ship prepare` and local-gate refusals name the steps and the failure, and the receipt row keeps both.
 

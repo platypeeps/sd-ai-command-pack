@@ -133,7 +133,14 @@ def _widen_assembly_window(harness):
     the window instead of near it, and a missing anchor raises rather than
     no-oping.
 
-    The hold is ten seconds in tenths, not one `sleep 10`: bash runs a trap
+    The hold lasts until the watchdog's TERM ends the run, under a cap of
+    two minutes. It was a fixed ten seconds, and under gate load the test's
+    poll for the sentinel plus the watchdog's two-second poll outlasted it:
+    the run left the window and published before the TERM landed (sd:2632).
+    A working watchdog now always lands inside the window, and a broken one
+    still reaches the publish at the cap, so the test still fails for it.
+
+    The hold is counted in tenths, not one long `sleep`: bash runs a trap
     only after its foreground command returns, so a watchdog's TERM waited out
     the whole sleep. `HARNESS_ASSEMBLY_TENTHS` shortens it for a run that is
     not the one under test (sd:1615).
@@ -145,7 +152,7 @@ def _widen_assembly_window(harness):
             f"expected exactly one log-assembly loop to widen, found {len(anchors)}: "
             "the assembly step moved, and this test would otherwise assert nothing"
         )
-    hold = 'held=0; while [ "$held" -lt "${HARNESS_ASSEMBLY_TENTHS:-100}" ]; do sleep 0.1; held=$((held + 1)); done\n'
+    hold = 'held=0; while [ "$held" -lt "${HARNESS_ASSEMBLY_TENTHS:-1200}" ]; do sleep 0.1; held=$((held + 1)); done\n'
     lines.insert(anchors[0], f': > "$REPO_ROOT/{CONCAT_SENTINEL}"\n{hold}')
     harness.write_text("".join(lines))
 

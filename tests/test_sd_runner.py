@@ -308,6 +308,94 @@ class RunnerServiceControls(unittest.TestCase):
         self.control.assert_not_called()
 
 
+class RunnerCancelOnTheDatabase(unittest.TestCase):
+    """`sd runner cancel` against a real database, not mocks (sd:2627).
+
+    A `running` row no attempt owns has no process to stop. The library
+    refused one until sd:991 (system #137); since then its cancel ends the row
+    in place, through the connection the pack hands it. Either answer is the
+    library's to give; the pack must pass it on, never a traceback.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name).resolve()
+        self.home = self.root / "home"
+        self.connection, self.assignment = self.prepared(self.home)
+        self.parser = argparse.ArgumentParser()
+        cli.register(self.parser.add_subparsers(required=True))
+        for patcher in (
+            patch.dict(os.environ, {"HOME": str(self.home)}),
+            patch.object(cli.getpass, "getuser", return_value="operator"),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def prepared(self, home):
+        """A database at `home` with one queued assignment."""
+        initialise(home=home)
+        connection = connect(home=home)
+        self.addCleanup(connection.close)
+        repo = self.root / "repo"
+        repo.mkdir(exist_ok=True)
+        upsert_repo(connection, str(repo), remote="https://example.test/fixture.git")
+        item = create_item(connection, kind="task", title="Cancel fixture", repo=str(repo),
+                           branch="fixture/cancel")
+        (queued,) = runner.enqueue(connection, [item], who="fixture")
+        return connection, queued["id"]
+
+    def unowned(self, connection, assignment):
+        """Mark the assignment `running` by hand, so no `runner_run` row owns it."""
+        with connection:
+            connection.execute("UPDATE assignment SET status = 'running', started = ? WHERE id = ?",
+                               ("2026-10-04T00:00:00+00:00", assignment))
+
+    def cancel(self):
+        arguments = self.parser.parse_args(["runner", "cancel", str(self.assignment), "--json"])
+        with redirect_stdout(io.StringIO()) as output:
+            code = arguments.handler(arguments)
+        return code, output.getvalue()
+
+    def row(self):
+        return self.connection.execute(
+            "SELECT status, result FROM assignment WHERE id = ?", (self.assignment,)).fetchone()
+
+    def test_cancelling_queued_work_ends_the_row(self):
+        code, _ = self.cancel()
+        self.assertEqual((code, tuple(self.row())), (0, ("cancelled", "cancelled by operator")))
+
+    def test_a_running_row_no_attempt_owns_gets_the_librarys_own_answer(self):
+        twin, assignment = self.prepared(self.root / "twin")
+        self.unowned(twin, assignment)
+        try:
+            answer = runner_controls.control(twin, assignment, "cancel",
+                                             expected_revision=runner.queue_state(twin, assignment)["revision"],
+                                             who="operator")["status"]
+        except sd_db.SdDbError as error:
+            answer = str(error)
+        self.unowned(self.connection, self.assignment)
+        try:
+            code, _ = self.cancel()
+            got = self.row()["status"] if code == 0 else f"exit {code}"
+        except cli.WorkRefusal as refusal:
+            got = str(refusal)
+        self.assertEqual(got, answer)
+
+    def test_the_cancel_control_gets_a_connection_it_can_write(self):
+        """Pinned apart from the library's version: an sd:991 cancel writes the row."""
+        self.unowned(self.connection, self.assignment)
+
+        def control(connection, assignment, verb, **_):
+            connection.execute("UPDATE assignment SET result = 'written' WHERE id = ?", (assignment,))
+            connection.commit()
+            return {"ok": True}
+
+        with patch.object(runner_controls, "control", side_effect=control):
+            code, _ = self.cancel()
+        self.assertEqual((code, self.row()["result"]), (0, "written"))
+
+
 class RunnerPreparation(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

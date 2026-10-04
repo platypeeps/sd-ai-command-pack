@@ -560,6 +560,24 @@ RULES: tuple[Rule, ...] = (
         scope="code",
         teaches="skills/sd-ship/SKILL.md#Executable interface",
     ),
+    #: sd-ship's merge-step ack gate for every reviewer (sd:998), registered
+    #: so the skill line that teaches it cites a row instead of avoiding the
+    #: claim check the way #1167 did.
+    Rule(
+        id="R14-D2",
+        subject="sd-ship's merge refuses with `review_findings_open` while any "
+                "pull-request review finding has no disposition, whoever "
+                "wrote it: a human or another bot's finding gates the merge "
+                "as a Copilot finding does, with or without a Copilot review",
+        checker="bin/sd-ship::require_copilot_clearance",
+        proof="replace the `self.other_review_material(number)` call in "
+              "`bin/sd-ship` with two empty lists; another reviewer's open "
+              "finding then merges and "
+              "`test_another_reviewers_finding_refuses_the_merge_with_no_copilot_review` "
+              "goes red",
+        scope="code",
+        teaches="skills/sd-ship/SKILL.md#Executable interface",
+    ),
     #: Gate receipt reuse (sd:1912), registered so the skill line that tells a
     #: builder to run `sd gate check` can cite what prepare does with the pass.
     #: The operator ruled on 2026-10-04 that this route supersedes the

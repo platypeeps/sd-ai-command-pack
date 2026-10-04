@@ -451,8 +451,8 @@ MERGED_LIMIT = 500
 
 
 def collect_merged(root: pathlib.Path, found: dict[str, Any], since: str,
-                   limit: int = MERGED_LIMIT) -> dict[str, Any]:
-    """Pull requests merged on or after `since`, with the findings each carries.
+                   limit: int = MERGED_LIMIT, until: str | None = None) -> dict[str, Any]:
+    """Pull requests merged on or after `since`, and on or before `until` if given, with their findings.
 
     `found` is `probe`'s answer, which the caller already holds. The price is
     one `gh pr list` and one `gh api` over the repository's review comments,
@@ -462,12 +462,12 @@ def collect_merged(root: pathlib.Path, found: dict[str, Any], since: str,
     """
     result: dict[str, Any] = {
         "available": found["available"], "reason": found["reason"], "repo": found["slug"],
-        "since": since, "limit": limit, "truncated": False, "pull_requests": [],
+        "since": since, "until": until, "limit": limit, "truncated": False, "pull_requests": [],
     }
     if not found["available"]:
         return result
     payload, error = gh_json(
-        ["pr", "list", "--state", "merged", "--search", f"merged:>={since}",
+        ["pr", "list", "--state", "merged", "--search", f"merged:{since}..{until}" if until else f"merged:>={since}",
          "--limit", str(limit), "--json", ",".join(MERGED_FIELDS)],
         root,
     )
