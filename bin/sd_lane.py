@@ -10,7 +10,9 @@ runs it under one lock per repository:
   list     print the queue;
   cancel   mark a pending entry cancelled;
   run      pop pending entries in order: head check, `prepare --catch-up`,
-           then `merge`; a failed entry is marked and the runner goes on;
+           then `merge`; a failed entry is marked and the runner goes on.
+           While one entry ships, the next one's gate runs on its predicted
+           landing (sd:2586, below);
   watch    print each gate end a lane or builder log records, once.
 
 The queue is `<lane root>/<repository>/lane/queue/queue.json`. The lane root
@@ -31,6 +33,21 @@ What the hand-run chains taught, kept here:
 The merge needs authority: an entry merges only when it was enqueued with
 `--manual`, which the runner passes on. Without it the runner stops at a
 prepared head and marks the entry `prepared`.
+
+The next entry's gate runs early (sd:2586). Its prepare used to start only
+after the entry ahead merged, then catch up and gate for 10 to 20 minutes.
+When the runner claims an entry that may merge, it predicts the landing: the
+entry's catch-up merge of the fetched base branch, as a commit on that base.
+It merges the next entry onto that commit as prepare's catch-up would,
+CHANGELOG resolver included, in a scratch worktree, and runs `sd gate check`'s
+gate there in the background. The real landing is another commit with the
+same tree, so the next entry's catch-up makes the gated tree, and its prepare
+reuses the receipt. That needs the repository's tree key
+(`sd_gate_receipts`), which names the merge base by its tree; without it, or
+on a conflict, nothing is gated. After a merge the runner waits for that gate
+before the next prepare. A wrong prediction costs only the machine time: the
+receipt names a tree that prepare never gates, and prepare runs its own check.
+The next entry records what happened as its `speculation`.
 """
 
 from __future__ import annotations
@@ -44,9 +61,11 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from typing import Any, Callable, Iterator
 
+import sd_changelog_merge
 import sd_lib
 
 BIN = pathlib.Path(__file__).resolve().parent
@@ -63,6 +82,9 @@ WATCH_MINUTES = 3
 CLAIMS = ("deliver", "associate-only")
 #: `(argv, log) -> sd-ship's JSON answer`; the log receives the step's whole output.
 Ship = Callable[[list[str], pathlib.Path], dict[str, Any]]
+#: `(root, head, base) -> the gate's result`: the next entry's gate on a predicted landing (sd:2586).
+Gate = Callable[[pathlib.Path, str, str], dict[str, Any]]
+SCRATCH_GIT_SECONDS = 60
 
 
 class LaneError(RuntimeError):
@@ -225,8 +247,133 @@ def process(entry: dict[str, Any], logs: pathlib.Path, ship: Ship) -> dict[str, 
     return {**fields, "status": "merged", "merge_commit": merged.get("merge_commit")}
 
 
-def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_ship) -> dict[str, Any]:
-    """Drain this repository's queue in order under its lane lock; never wait for the lock."""
+def default_gate(root: pathlib.Path, head: str, base: str) -> dict[str, Any]:
+    """`sd gate check`'s run at `head` against `base`, which leaves the receipt prepare reads."""
+    import sd_gate_run  # noqa: PLC0415 -- the gate loads only for a speculation
+    library = sd_lib.import_sd_db().module
+    if library is None:
+        raise LaneError("no sd_db library, so a pass would leave no receipt")
+    return sd_gate_run.check_in_worktree(root, head, base=base, database=library.default_path(os.environ.get("HOME")),
+                                         slot_timeout=sd_lib.GATE_SLOT_SECONDS)
+
+
+def scratch_git(tree: pathlib.Path, *args: str) -> str | None:
+    """`git` for a speculation: stripped stdout, or None on any failure.
+
+    No hook runs, since what a hook does is not what prepare's merge makes.
+    The bound is `SCRATCH_GIT_SECONDS`, not `sd_lib`'s 15: a worktree of the
+    whole tree, or a fetch, outlasts that on a loaded machine.
+    """
+    try:
+        done = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", *args], cwd=tree, capture_output=True, text=True,
+                              timeout=SCRATCH_GIT_SECONDS, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def catch_up_in(tree: pathlib.Path, ref: str, message: str) -> bool:
+    """Merge `ref` into the scratch worktree's HEAD as `sd-ship prepare --catch-up` does; False on a conflict."""
+    if scratch_git(tree, "merge", "--no-ff", "--no-edit", "--no-verify", "-m", message, ref) is not None:
+        return True
+    if sd_changelog_merge.resolve_keep_both(tree) and scratch_git(tree, "commit", "--quiet", "--no-verify", "-m", message) is not None:
+        return True
+    scratch_git(tree, "merge", "--abort")
+    return False
+
+
+def predict(entry: dict[str, Any], following: dict[str, Any]) -> dict[str, Any]:
+    """`{"head", "base"}` for `following`'s gate once `entry` lands, or `{"skipped": why}`.
+
+    `base` stands in for `entry`'s squash merge: its catch-up merge's tree, as
+    a commit on the fetched base branch. `head` is `following`'s catch-up
+    merge onto `base`, so its tree is the one `following`'s prepare will gate.
+    """
+    import sd_gate_receipts  # noqa: PLC0415 -- the declaration reader loads only for a speculation
+    root = pathlib.Path(following["worktree"])
+    for row, whose in ((entry, f"sd:{entry['item']}'s"), (following, "its")):
+        if lane_git(pathlib.Path(row["worktree"]), "rev-parse", "HEAD") != row["expected_head"]:
+            return {"skipped": f"{whose} worktree's HEAD moved from the queued head"}
+    remote = lane_git(root, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD") or ""
+    branch = remote.removeprefix("refs/remotes/origin/")
+    if not branch or branch == remote:
+        return {"skipped": "origin/HEAD names no base branch"}
+    if scratch_git(root, "fetch", "--quiet", "--no-tags", "origin", f"refs/heads/{branch}:{remote}") is None:
+        return {"skipped": f"origin/{branch} could not be fetched"}
+    fork, message = lane_git(root, "rev-parse", "--verify", "--quiet", remote), f"Merge origin/{branch}"
+    with tempfile.TemporaryDirectory(prefix="sd-lane-speculate-") as parent:
+        tree = pathlib.Path(parent) / "tree"
+        if not fork or scratch_git(root, "worktree", "add", "--quiet", "--detach", str(tree), entry["expected_head"]) is None:
+            return {"skipped": "the scratch worktree could not be made"}
+        try:
+            if not catch_up_in(tree, fork, message):
+                return {"skipped": f"sd:{entry['item']} conflicts with origin/{branch}"}
+            landed = scratch_git(tree, "commit-tree", "HEAD^{tree}", "-p", fork, "-m",
+                                 f"sd-ship lane: sd:{entry['item']} as predicted to land")
+            if not landed or scratch_git(tree, "checkout", "--quiet", "--detach", following["expected_head"]) is None:
+                return {"skipped": "the predicted landing could not be built"}
+            if not catch_up_in(tree, landed, message):
+                return {"skipped": f"it conflicts with sd:{entry['item']}'s predicted landing"}
+            if not sd_gate_receipts.keyed_by_tree(tree):
+                return {"skipped": f"no tree key in {sd_gate_receipts.REUSE_DECLARATION}, so prepare could not reuse a pass"}
+            head = scratch_git(tree, "rev-parse", "HEAD")
+        finally:
+            scratch_git(root, "worktree", "remove", "--force", str(tree))
+    return {"head": head, "base": landed} if head else {"skipped": "the merged head could not be read"}
+
+
+def speculate(entry: dict[str, Any], path: pathlib.Path, gate: Gate, busy: bool = False) -> threading.Thread | None:
+    """Start the next pending entry's gate on `entry`'s predicted landing; None when no gate started.
+
+    An entry queued without `--manual` stops prepared and never lands, so
+    nothing follows it to predict. `busy` says an earlier speculative gate
+    still runs; one at a time. What happened goes on the next entry as
+    `speculation`, and the gate's whole result to a log beside the others.
+    """
+    following = next((row for row in read_queue(path) if row.get("status") == "pending"), None)
+    if entry.get("authority") != "manual" or following is None:
+        return None
+
+    def record_speculation(fields: dict[str, Any]) -> None:
+        def on_follower(entries: list[dict[str, Any]]) -> None:
+            for row in entries:
+                if row.get("item") == following["item"] and row.get("enqueued_at") == following.get("enqueued_at"):
+                    row["speculation"] = {"after": entry["item"], **fields}
+        with contextlib.suppress(LaneError, OSError):  # a note that cannot be written stops nothing
+            update(path, on_follower)
+    try:
+        plan = {"skipped": "an earlier speculative gate still runs"} if busy else predict(entry, following)
+    except Exception as error:  # a speculation that cannot be set up gates nothing; the lane goes on
+        plan = {"skipped": f"{type(error).__name__}: {error}"[:600]}
+    if "skipped" in plan:
+        record_speculation({"status": "skipped", "reason": plan["skipped"]})
+        return None
+    log = path.parent.parent / "logs" / f"speculate-{following['item']}-{time.strftime('%Y%m%dT%H%M%S', time.gmtime())}.log"
+    record_speculation({"status": "running", **plan, "log": str(log)})
+
+    def run_gate() -> None:
+        try:
+            result = gate(pathlib.Path(following["worktree"]), plan["head"], plan["base"])
+            fields = {"status": result.get("status"), "summary": str(result.get("summary"))[:300],
+                      "receipt": "recorded" if result.get("receipt_revision") is not None else
+                      result.get("receipt_skipped") or result.get("receipt_error") or "none"}
+        except Exception as error:
+            result = fields = {"status": "error", "reason": f"{type(error).__name__}: {error}"[:600]}
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text(json.dumps(result, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
+        record_speculation({**plan, "log": str(log), **fields})
+    thread = threading.Thread(target=run_gate, name=f"sd-lane-speculate-{following['item']}")
+    thread.start()
+    return thread
+
+
+def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_ship,
+             gate: Gate = default_gate) -> dict[str, Any]:
+    """Drain this repository's queue in order under its lane lock; never wait for the lock.
+
+    One speculative gate runs at a time (`speculate`); after a merge the
+    runner waits for it, so the next prepare finds its receipt.
+    """
     path = queue_path(root, environ)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path.parent / "runner.lock", "a", encoding="utf-8") as handle:
@@ -235,6 +382,7 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
         except BlockingIOError:
             return {"ran": [], "busy": f"another runner holds {path.parent / 'runner.lock'}"}
         ran: list[dict[str, Any]] = []
+        ahead: threading.Thread | None = None
         while True:
             def claim_next(entries: list[dict[str, Any]]) -> dict[str, Any] | None:
                 for row in entries:
@@ -244,7 +392,13 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
                 return None
             entry = update(path, claim_next)
             if entry is None:
+                if ahead is not None:
+                    ahead.join()
                 return {"ran": ran}
+            if ahead is not None and ahead.is_alive():
+                speculate(entry, path, gate, busy=True)  # notes the skip: one speculative gate at a time
+            else:
+                ahead = speculate(entry, path, gate)
             try:
                 outcome = process(entry, path.parent.parent / "logs", ship)
             except Exception as error:  # a broken entry is marked; the next one still runs
@@ -256,6 +410,8 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
                         row.update(outcome, finished_at=stamp_now())
             update(path, finish)
             ran.append({"item": entry["item"], **outcome})
+            if ahead is not None and outcome.get("status") == "merged":
+                ahead.join(PREPARE_SECONDS)  # the next prepare reads its receipt
 
 
 def gate_ends(root: pathlib.Path, seen: set[str], minutes: int = WATCH_MINUTES) -> list[str]:
