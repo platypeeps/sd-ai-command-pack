@@ -66,6 +66,11 @@ if argv[:1] == ["api"]:
     if "/compare/" in path:
         print(json.dumps({{"behind_by": data.get("behind_by", 0)}}))
         sys.exit(0)
+    if "/rules/branches/" in path:
+        # A branch no ruleset touches answers `[]`; anything else is a read
+        # that failed, which sd-status reports as unknown (sd:1000).
+        print(json.dumps(data.get("rules", [])))
+        sys.exit(0)
     print(json.dumps(data.get("repo", {{}})))
     sys.exit(0)
 print("unexpected: " + " ".join(argv), file=sys.stderr)

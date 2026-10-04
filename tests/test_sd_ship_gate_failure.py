@@ -58,6 +58,24 @@ class GateFailureSpendsNoPass(unittest.TestCase):
         message = str(caught.exception)
         self.assertIn("test (exit 1): stderr: AssertionError: sd2021 marker", message)
         self.assertIn("lint (exit 2): stdout: E501 line too long", message)
+
+    def test_the_refusal_names_the_failed_shards_and_the_whole_output(self):
+        """sd:2558. A shard that failed early in a long run was in neither
+        tail, so prepare refused without naming the test that failed."""
+        shard = "shard tests.test_middle: 4s exit=1"
+        rows = [{"name": "check", "status": "fail", "exit_code": 2, "reason": "",
+                 "stdout": "shard tests.test_last: 1s exit=0\n" + "o" * 2000, "stderr": "make: *** [test] Error 1",
+                 "output_path": "/tmp/fixture/.git/sd-check-output/run-check.log", "failed_shards": [shard]}]
+        failed = {**GATE_FAILED, "check": {"status": "fail", "exit_code": 1, "detail": "", "checks": rows}}
+        review, _process = self.context(report_changes=failed)
+        with self.assertRaisesRegex(ship.Refusal, "no review pass was spent") as caught:
+            review.review(HEAD)
+        message = str(caught.exception)
+        self.assertIn(f"check (exit 2): failed {shard}\nwhole output: /tmp/fixture/.git/sd-check-output/run-check.log",
+                      message)
+        kept = review.state["review_preflight_error"]["checks"][0]
+        self.assertEqual((kept["failed_shards"], kept["output_path"]),
+                         ([shard], "/tmp/fixture/.git/sd-check-output/run-check.log"))
         self.assertNotIn("check (exit 0)", message)
 
     def test_the_next_prepare_reviews_without_a_retry_flag(self):
@@ -208,6 +226,25 @@ class TimingPlanCarriesTheGatesBound(unittest.TestCase):
                        {"check_seconds": 3600.0}):
             with self.subTest(change=change), self.assertRaises(ship.Refusal):
                 self.plan({**self.TIMING, **change})
+
+
+class TimingPlanCarriesTheSlotBound(TimingPlanCarriesTheGatesBound):
+    """sd:2611. The gate-slot wait is its own phase; a plan from before it has none."""
+
+    SLOT = {**TimingPlanCarriesTheGatesBound.TIMING, "slot_seconds": 14400, "execution_seconds": 10800 + 14400}
+
+    def test_a_plan_that_counts_the_slot_bound_is_accepted(self):
+        self.assertEqual(self.plan(self.SLOT)["execution_seconds"], 25200)
+
+    def test_a_plan_without_a_slot_bound_is_accepted_as_before(self):
+        self.assertNotIn("slot_seconds", self.TIMING)
+        self.assertEqual(self.plan(self.TIMING)["execution_seconds"], 10800)
+
+    def test_a_slot_bound_the_total_does_not_count_or_that_is_not_a_count_is_refused(self):
+        for change in ({"execution_seconds": 10800}, {"slot_seconds": -1, "execution_seconds": 10799},
+                       {"slot_seconds": True, "execution_seconds": 10801}, {"slot_seconds": 14400.0}):
+            with self.subTest(change=change), self.assertRaises(ship.Refusal):
+                self.plan({**self.SLOT, **change})
 
 
 class ReviewTimeoutReachesTheGate(unittest.TestCase):

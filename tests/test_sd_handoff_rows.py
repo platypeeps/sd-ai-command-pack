@@ -25,6 +25,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -92,9 +93,9 @@ class RowCase(unittest.TestCase):
         # Both have to point at the scratch home or the read opens the
         # operator's real database. Set before the row is written, because
         # the row's key is `~/...` under that home (sd:1439).
-        was = os.environ.get("HOME")
-        os.environ["HOME"] = str(self.home)
-        self.addCleanup(os.environ.__setitem__, "HOME", was or "")
+        patched = mock.patch.dict(os.environ, {"HOME": str(self.home)})
+        patched.start()  # restores an unset HOME as unset, not as "" (sd:1002)
+        self.addCleanup(patched.stop)
         sd_db.writes.upsert_repo(self.connection, sd_lib.stored_repo(self.root))
 
     def item(self, name: str = "an-item", status: str = "in_progress") -> int:
@@ -517,9 +518,9 @@ class TheWriter(RowCase):
 
     def note(self, argv: list[str]) -> tuple[int, str, str]:
         out, err = io.StringIO(), io.StringIO()
-        environ = dict(os.environ)
-        os.environ["HOME"] = str(self.home)
-        self.addCleanup(os.environ.update, {"HOME": environ.get("HOME", "")})
+        patched = mock.patch.dict(os.environ, {"HOME": str(self.home)})
+        patched.start()
+        self.addCleanup(patched.stop)
         module = load("sd_note", "sd-note")
         code = module.main(argv, out, err, cwd=str(self.root))
         return code, out.getvalue(), err.getvalue()

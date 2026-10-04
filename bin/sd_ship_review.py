@@ -219,6 +219,10 @@ def validate_provider_selection(report: dict, requested: str | None, *, complete
 
 
 class SharedReview:
+    #: The branch this checkout had open when the record was validated, which
+    #: the ship lock compares with the live checkout (sd:2008); never re-read.
+    checkout_branch: str | None = None
+
     def __init__(self, root: pathlib.Path, connection, database: pathlib.Path, args, *, store,
                  repository: str, branch: str, head: str, key: str, revision, state: dict,
                  identity: Any, history: Any, runtime: ReviewRuntime):
@@ -314,9 +318,18 @@ class SharedReview:
         if all(value is None for value in (args.additional_review_for, args.request_reason, args.review_history_digest)):
             return None
         reason = (args.request_reason or "").strip()
-        if (args.additional_review_for != head or not reason or args.retry_review
-                or args.path or args.message_file or args.author):
-            raise Refusal("additional review needs an exact committed head and nonempty reason, without retry or commit flags")
+        # One refusal per fault, each naming the flag that fixes it (sd:2026).
+        if args.additional_review_for is None:
+            raise Refusal("--request-reason and --review-history-digest are valid only with --additional-review-for SHA; "
+                          "drop them, or name the exact committed head for one more review")
+        if args.additional_review_for != head:
+            raise Refusal(f"--additional-review-for {args.additional_review_for} is not the clean current HEAD {head}")
+        if not reason:
+            raise Refusal("--additional-review-for needs a nonempty --request-reason")
+        if args.retry_review:
+            raise Refusal("--retry-review and --additional-review-for do not combine; a retry spends an automatic pass")
+        if args.path or args.message_file or args.author:
+            raise Refusal("additional review cannot commit; name an already committed exact head")
         self.request_history(args.review_history_digest)
         if self.runtime.current_head(self.root) != head:
             raise Refusal("additional review must name the clean current HEAD")
@@ -483,14 +496,54 @@ class SharedReview:
                 raise Refusal("this head was already reviewed; address its findings before the fix verification")
         for previous in self.history.ancestry_heads(self.state):
             if not is_ancestor(self.root, previous, head):
+                item = getattr(self.identity, "item", None)
+                # The reset publishes the reviewed commit, so it cannot be the
+                # only way out of a rewrite made to keep a line unpublished (sd:2600).
+                restart = (f"If the old history must not be pushed, as after a privacy amend, run "
+                           f"`sd-ship prepare --item {item} --restart-review REASON`: it sets the orphaned review "
+                           "aside and reviews the whole branch again, one pass against the cap. "
+                           "If the amend only edited a commit message, r" if item is not None else "R")
                 raise Refusal(
                     f"reviewed head {previous} is not an ancestor of the offered head {head} on {self.branch}; "
                     "an amend or a rebase after a review orphans the reviewed head, and a review of a "
                     "commit the branch cannot reach is not evidence about the branch",
                     code="reviewed_head_orphaned", boundary="review", state="operator_decision",
-                    next_action=f"Restore a history that contains {previous}: after an amend, run "
+                    next_action=f"{restart}estore a history that contains {previous}: after an amend, run "
                                 f"`git reset --soft {previous}`, commit the change on top, then prepare again. "
                                 "An unchanged retry refuses the same way.")
+
+    def restart_review(self, head: str) -> None:
+        """sd:2600. Set an orphaned review aside, with its reason, for one fresh full-branch review.
+
+        An amend or a rebase after review leaves reviewed heads the branch
+        cannot reach, and `validate_dispatch` refuses them. `git reset --soft`
+        onto the reviewed head restores the ancestry, but it also publishes the
+        reviewed commit, which is closed when the amend removed something that
+        may not reach the remote. sd-review refuses to resume a report whose
+        head is not an ancestor, so the orphaned findings cannot be carried
+        into the new pass. They stay in the receipt under `superseded_reviews`,
+        and their passes still count against the cap (`set_aside`).
+        """
+        reason = restart_reason(self.args)
+        orphaned = [previous for previous in self.history.ancestry_heads(self.state)
+                    if not is_ancestor(self.root, previous, head)]
+        if not orphaned:
+            raise Refusal("--restart-review applies only when a reviewed head is not an ancestor of HEAD; "
+                          "this branch still contains every reviewed head, so their findings stand",
+                          code="restart_review_unneeded", boundary="input", state="operator_decision",
+                          next_action="Prepare again without --restart-review.")
+        if self.history.spent(self.state) >= AUTOMATIC_CODE_REVIEW_PASSES:
+            raise Refusal(f"all {AUTOMATIC_CODE_REVIEW_PASSES} automatic code review passes are spent, "
+                          "set-aside passes included; a restart spends one more")
+        restart = {"reason": reason, "recorded_at": self.runtime.clock(), "head": head, "orphaned": orphaned,
+                   "history_digest": self.history.history_digest(self.state),
+                   "passes": self.history.native(self.state)}
+        self.state.pop("review_carry_forward", None)
+        self.save(passes=[], reviewed_head=None, review_clearance=None,
+                  superseded_reviews=[*(self.state.get("superseded_reviews") or []), restart])
+        print(f"sd-ship: set aside {len(restart['passes'])} pass(es) whose heads this branch cannot reach "
+              f"({', '.join(previous[:12] for previous in orphaned)}); reviewing {head[:12]} in full",
+              file=sys.stderr)
 
     def authorship_start(self) -> str:
         """Where this branch's commits begin, for trailer and vendor reads."""
@@ -564,6 +617,8 @@ class SharedReview:
         return {"from": previous, "base": fork}
 
     def review(self, head: str) -> None:
+        if getattr(self.args, "restart_review", None) is not None:
+            self.restart_review(head)
         passes = self.history.native(self.state)
         if not passes and (base := empty_branch_base(self.root, head)):
             print(f"sd-ship: {head[:12]} changes no file against {base[:12]}; local review skipped, no provider called",
@@ -769,6 +824,21 @@ class SharedReview:
 REQUEST_CONSUMED = "; the operator request was consumed"
 
 
+def restart_reason(args) -> str:
+    """sd:2600. The stated reason for `--restart-review`, once the flag stands alone."""
+    reason = (getattr(args, "restart_review", None) or "").strip()
+    if not reason:
+        raise Refusal("--restart-review needs a nonempty REASON; the receipt records why the review restarted",
+                      code="restart_review_reason", boundary="input", state="operator_decision",
+                      next_action="Repeat the prepare with --restart-review and a reason.")
+    if args.retry_review or args.additional_review_for is not None or getattr(args, "catch_up", False):
+        raise Refusal("--restart-review does not combine with --retry-review, --additional-review-for or --catch-up; "
+                      "it spends one automatic pass on a fresh full-branch review of the current head",
+                      code="restart_review_combined", boundary="input", state="operator_decision",
+                      next_action="Run --restart-review alone, then prepare again for anything else.")
+    return reason
+
+
 def consumed(passes: list[dict]) -> str:
     return REQUEST_CONSUMED if passes and passes[-1].get("additional_review_request") else ""
 
@@ -811,12 +881,22 @@ def gate_diagnostics(check: dict, limit: int) -> list[dict]:
             and record.get("name") == "docs"][:1]
     return [{"name": record.get("name"), "status": record.get("status"), "exit_code": record.get("exit_code"),
              "reason": str(record.get("reason") or "")[-limit:],
-             "stdout": str(record.get("stdout") or "")[-limit:], "stderr": str(record.get("stderr") or "")[-limit:]}
+             "stdout": str(record.get("stdout") or "")[-limit:], "stderr": str(record.get("stderr") or "")[-limit:],
+             # Where sd-check kept the whole output, and the failed shards it read there (sd:2558).
+             "output_path": str(record["output_path"])[:limit] if record.get("output_path") else None,
+             "failed_shards": [str(line)[:limit] for line in shard_lines(record.get("failed_shards"))][:FAILED_SHARDS_NAMED]}
             for record in [*records[:len(sd_lib.CHECK_NAMES)], *docs] if isinstance(record, dict)]
+
+
+def shard_lines(value: object) -> list:
+    """`value` when it is a list, else an empty one: a receipt row is read, not trusted."""
+    return value if isinstance(value, list) else []
 
 
 #: How much of each stream of one failing check a refusal repeats; the receipt keeps `sd-check`'s whole tail.
 FAILING_TAIL_CHARS = 1200
+#: How many failed-shard lines a receipt row and a refusal carry.
+FAILED_SHARDS_NAMED = 20
 
 
 def failing_check_tails(rows: Any, limit: int = FAILING_TAIL_CHARS) -> list[str]:
@@ -826,16 +906,22 @@ def failing_check_tails(rows: Any, limit: int = FAILING_TAIL_CHARS) -> list[str]
     reports on stderr and a linter on stdout, and `make` adds its own
     `Error 1` line to stderr whichever one failed. A row with no output names
     `sd-check`'s reason instead, such as a timeout (sd:2066, sd:2021).
+
+    The failed shards and the file holding the whole output come first: a
+    shard that failed early in a long run is in neither tail, and the tails
+    are what a lane log cuts again (sd:2558).
     """
     named = []
     for row in rows if isinstance(rows, list) else []:
         if not isinstance(row, dict) or row.get("status") != "fail":
             continue
+        found = [f"failed {line}" for line in shard_lines(row.get("failed_shards"))[:FAILED_SHARDS_NAMED]]
+        found += [f"whole output: {row['output_path']}"] * bool(row.get("output_path"))
         streams = [(stream, str(row.get(stream) or "").strip()) for stream in ("stderr", "stdout")]
         said = [f"{stream}: {'...' if len(text) > limit else ''}{text[-limit:]}" for stream, text in streams if text]
         reason = str(row.get("reason") or "").strip()
         named.append(f"{row.get('name')} (exit {row.get('exit_code')}): "
-                     + ("\n".join(said) if said else reason or "no output"))
+                     + "\n".join(found + (said if said else [reason or "no output"])))
     return named
 
 

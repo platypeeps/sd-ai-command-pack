@@ -20,7 +20,7 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, NamedTuple
+from typing import Any, Callable, Iterable, NamedTuple
 
 LOCAL_FILE_NAME = "CLAUDE.local.md"
 LOCAL_BLOCK_START = "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->"
@@ -81,10 +81,18 @@ CORE_CONFIG = {
                                   "for one run."},
     "gate_load_max": {"pattern": r"[0-9]+(\.[0-9]+)?",
                       "description": "The gate queue starts a gate only while load1 is below this; 0 is no load "
-                                     "condition. Unset reads 2.5 per core; SD_GATE_LOAD_MAX overrides it for one run."},
+                                     "condition. Unset is none; SD_GATE_LOAD_MAX overrides it for one run."},
     "review_slots": {"pattern": "[0-9]+",
                      "description": "How many reviews may run their reviewers at once on this machine; 0 is no cap. "
                                     "Unset reads 2; SD_REVIEW_SLOTS overrides it for one run."},
+    "lane_root": {"pattern": r"[~/][^\x00]*",
+                  "description": "The folder holding each repository's `sd-ship lane` queue, as "
+                                 "<root>/<repository>/lane/queue/. Unset reads $XDG_STATE_HOME/sd/lanes; "
+                                 "SD_LANE_ROOT overrides it. It grants nothing."},
+    "gate_cache_gb": {"pattern": r"[0-9]+(\.[0-9]+)?",
+                      "description": "The most gigabytes the local gate's warm Rust build folders may hold; past it the "
+                                     "gate removes the least recently used free folders. 0 is no bound. Unset reads 40; "
+                                     "SD_GATE_CACHE_GB overrides it for one run. It grants nothing."},
     "gate_settle_seconds": {"pattern": "[0-9]+",
                             "description": "Seconds between two gate starts, and of low load1 while load5 is high; "
                                            "0 is none. Unset reads 45; SD_GATE_SETTLE_SECONDS overrides it for one run."},
@@ -125,6 +133,8 @@ DEFAULT_MODE = "full"
 
 #: The three names every repository is asked about, in the order they run.
 CHECK_NAMES = ("check", "test", "lint")
+#: The Makefile target `sd-check` runs before it waits for a gate slot (sd:2604).
+PRECHECK_NAME = "precheck"
 
 #: Optional repository restriction, overriding standing operator review consent.
 #: Shared by the installer, runtime reader, and workflow inventory check.
@@ -937,6 +947,8 @@ LOCAL_GATE_CONTEXT = "sd/local-gate"
 #: `sd-check`'s own 900-second default is for an interactive run; a gate that
 #: builds its environment on a loaded machine ran past 900 s, and past 1800 s.
 GATE_CHECK_SECONDS = 3600
+#: How long `sd gate check` queues for a gate slot, apart from that bound (sd:2607).
+GATE_SLOT_SECONDS = 4 * 3600
 
 
 def repo_ci(connection: Any, root: pathlib.Path | str) -> str:
@@ -986,6 +998,63 @@ def ci_mode(root: pathlib.Path | str) -> str:
         return repo_ci(connection, root)
     finally:
         connection.close()
+
+
+
+
+def is_managed(row: Any) -> bool:
+    """Whether a `repo` row may be walked by a pack tool: `managed` set, or no such column.
+
+    sd:1619 added `repo.managed`; the operator sets it by hand on their own
+    repositories, and the rest must not use any pack capability (sd:1620). A
+    database older than the column says nothing, so its rows stay in: an old
+    library must not empty every fleet verb.
+    """
+    return "managed" not in row.keys() or bool(row["managed"])
+
+
+def unmanaged_text(path: str) -> str:
+    """How a pack tool refuses a repository outside its reach, naming the flag and its remedy."""
+    return (f"{path} is not managed in the sd database (repo.managed = no), so pack tools do not run there; "
+            f"set it with `sd-db.sh repo managed {path} yes` if they should")
+
+
+def managed_rows(rows: Iterable[Any]) -> list[Any]:
+    """The `repo` rows a fleet walk may visit: see `is_managed`."""
+    return [row for row in rows if is_managed(row)]
+
+
+def unmanaged(root: pathlib.Path | str, *, warn: bool = True) -> str | None:
+    """The refusal for a direct call in an unmanaged repository, or None to proceed.
+
+    Only a row that exists and says `managed = 0` refuses. No library, no
+    database, no column and any read fault proceed in silence: a public user
+    of the pack has no sd database, and not knowing is no reason to deny. A
+    database with no row for the checkout proceeds too, with one warning on
+    stderr naming the flag, because that is the state an operator can fix.
+    """
+    if import_sd_db().module is None:
+        return None
+    try:
+        from sd_db import repos  # noqa: PLC0415
+        from sd_db.database import connect, default_path  # noqa: PLC0415
+
+        connection = connect(default_path(), write=False)
+        try:
+            origin = git_output(["config", "--get", "remote.origin.url"], pathlib.Path(root))
+            path = repos.registered_for(connection, str(pathlib.Path(root).resolve()), origin)
+            row = repo_row(connection, path)
+        finally:
+            connection.close()
+    except Exception:  # every fault is "not said"; see the docstring
+        return None
+    if row is None:
+        if warn:
+            print(f"warning: {path} has no row in the sd database, so nothing says whether it is managed "
+                  f"(repo.managed); proceeding. Register it with `sd-db.sh repo add {path}`, then "
+                  f"`sd-db.sh repo managed {path} yes`", file=sys.stderr)
+        return None
+    return None if is_managed(row) else unmanaged_text(row["path"])
 
 
 def repo_disk(value: pathlib.Path | str) -> pathlib.Path:
@@ -1379,18 +1448,26 @@ class Statuses:
     The marker is a property of the checkout and not of the item, so reading
     it per item puts the same question sixty-four times; the database is
     opened once too, and closed by whoever opened it.
+
+    `history=False` asks `delivered` nothing: no fetch, no `git log`. An open
+    item git would have answered reads `unknown`, and a `done` row is not
+    checked for its closing trailer. `make check` lints this way (sd:2606).
     """
 
     root: pathlib.Path
     source: str
     problem: str = ""
     rows: Rows | None = None
+    history: bool = True
 
     @classmethod
-    def of(cls, root: pathlib.Path | str, work_dir: str = WORK_DIR) -> "Statuses":
+    def of(
+        cls, root: pathlib.Path | str, work_dir: str = WORK_DIR, *, history: bool = True
+    ) -> "Statuses":
         root = pathlib.Path(root)
         source, problem = status_marker(root, work_dir)
-        return cls(root, source, problem, Rows(root) if source == FROM_ROW else None)
+        rows = Rows(root) if source == FROM_ROW else None
+        return cls(root, source, problem, rows, history)
 
     def close(self) -> None:
         if self.rows is not None:
@@ -1432,6 +1509,7 @@ def _from_git(
     prd: pathlib.Path,
     fields: dict[str, str],
     problems: list[str],
+    history: bool = True,
 ) -> StatusReport:
     """What a checkout with no database derives once the marker is present.
 
@@ -1440,8 +1518,15 @@ def _from_git(
     delivered" hands finished work back to the next reader that picks it.
     What the retire left behind says which kind of open the rest are -- an
     item recording the branch it lives on is being worked, one that records
-    none is still being planned.
+    none is still being planned. With `history` off git is not asked, and the
+    answer is `unknown` for the same reason.
     """
+    if not history:
+        problems.append(
+            f"{prd}: this run reads no history, so whether {item_dir.name} was "
+            f"delivered is not known here"
+        )
+        return StatusReport("unknown", False, tuple(problems))
     answer = delivered(root, item_dir.name)
     if answer == YES:
         return StatusReport("done", False, tuple(problems))
@@ -1490,7 +1575,7 @@ def _from_row(
                 f"{prd}: {statuses.rows.problem}, so this status came from git "
                 f"and not from the row this checkout's marker names"
             )
-        return _from_git(statuses.root, item_dir, prd, fields, problems)
+        return _from_git(statuses.root, item_dir, prd, fields, problems, statuses.history)
     line = fields.get("status", "").strip()
     if line and line != said:
         problems.append(
@@ -1512,7 +1597,12 @@ def _from_row(
         ((statuses.rows.identity(item_dir) if statuses.rows else ""), item_dir.name)
         if name
     ))
-    if said == "done" and not recorded and delivered(statuses.root, wanted) != YES:
+    if (
+        said == "done"
+        and not recorded
+        and statuses.history
+        and delivered(statuses.root, wanted) != YES
+    ):
         carries = " or ".join(f"{DELIVERS_TRAILER} {name}" for name in wanted)
         problems.append(
             f"{prd}: the row is done and no commit carries {carries}, nor the "
@@ -1930,6 +2020,8 @@ class Detection:
     commands: dict[str, list[str]] = field(default_factory=dict)
     reason: str = ""
     warnings: tuple[str, ...] = ()
+    #: The fast check that runs first, when the Makefile defines `PRECHECK_NAME`.
+    precheck: list[str] | None = None
 
 
 def _local_block_entrypoints(root: pathlib.Path) -> Detection | None:
@@ -1993,6 +2085,7 @@ def _makefile_entrypoints(root: pathlib.Path) -> Detection | None:
         origin=path,
         commands=commands,
         reason=f"{path.name} defines {', '.join(commands)}",
+        precheck=["make", PRECHECK_NAME] if PRECHECK_NAME in targets else None,
     )
 
 

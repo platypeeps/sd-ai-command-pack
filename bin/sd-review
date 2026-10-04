@@ -1238,11 +1238,11 @@ def charged_call(
     with contextlib.closing(connection):
         try:
             result = calls.call(
-                connection, entry=ledger.library.Provider(**vars(provider)), prompt=prompt, environ=environ,
-                timeout=timeout, role="reviewer", repo=sd_lib.stored_repo(root),
+                connection, entry=sd_registry.library_entry(ledger.library.Provider, provider), prompt=prompt, environ=environ,
+                timeout=timeout, role="reviewer", repo=sd_lib.stored_repo(root), **sd_registry.strict_fields(provider, CODEX_OUTPUT_SCHEMA, "findings"),
                 transport=None if client is None else _wire(client, provider, prompt, environ),
             )
-        except (calls.CallRefused, ledger.library.LedgerRefused) as error:
+        except (calls.CallRefused, ledger.library.LedgerRefused, sd_registry.RegistryError) as error:
             return _outcome(provider.name, REFUSED, str(error))
     receipt = {"call_id": result.call_id, "outcome": result.outcome, "bound_usd": result.bound,
                "usd": result.usd, "reason": result.reason}
@@ -1299,7 +1299,7 @@ def _url_attempt(provider: sd_registry.Provider, subject: Subject, request_promp
     if isinstance(charged, Outcome):
         return charged
     # `None` is the road's own wire: the library's above, this seam's here.
-    response, receipt = charged or ((client or sd_registry.chat_completion)(provider, request_prompt, provider_env, timeout), None)
+    response, receipt = charged or ((client or sd_registry.strict_completion(CODEX_OUTPUT_SCHEMA, "findings"))(provider, request_prompt, provider_env, timeout), None)
     result = Completed(*response[:4])
     text, diagnostic = sd_registry.url_response(result.stdout)
     diagnostic["transport_exit_code"] = result.exit_code
@@ -1604,24 +1604,24 @@ def gate_seconds(args: argparse.Namespace) -> int:
     return getattr(args, "timeout", None) or sd_lib.GATE_CHECK_SECONDS
 
 
-def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeout: int, branch: str,
-                   args: argparse.Namespace) -> dict[str, Any]:
-    """Step 1 as the local gate runs it: a clean worktree at HEAD, compared with `origin/<branch>` (sd:2041).
+def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeout: int, branch: str | None,
+                   args: argparse.Namespace, head: str | None = None) -> dict[str, Any]:
+    """Step 1 in a clean worktree at `head`, HEAD by default, never the live checkout (sd:2041, sd:2077).
 
-    `sd-ship prepare` asks for this under `repo.ci = local`, so the merge gate
-    that follows finds this run's receipt at the same head and binding and does
-    not run the check a second time; nor does a later prepare there (sd:1912).
-    The child still runs through `runner`, so the gate's deadline ends its
-    whole process group (sd:1482). Without the library there is no receipt,
-    and the check simply runs.
+    With a `branch` it runs as the local gate does, against `origin/<branch>`, for
+    `sd-ship prepare` under `repo.ci = local`; its receipt spares the merge gate and
+    a later prepare a second run (sd:1912). Without one it reviews a committed head
+    (an edit in the checkout mid-run killed a check script there, sd:2077): no
+    receipt is read or left, and exit 0 passes as in `run_check`.
+    The child runs through `runner`, so the deadline ends its process group (sd:1482).
     """
     import sd_gate_run  # noqa: PLC0415 -- the gate's run, which posts nothing; needed only here
 
-    head = sd_lib.git_output(["rev-parse", "HEAD"], root)
+    head = head or sd_lib.git_output(["rev-parse", "HEAD"], root)
     if not head:
         raise UsageError("--gate-check needs a commit at HEAD")
-    database = getattr(args, "database", None)
-    if database is None and (library := sd_lib.import_sd_db().module) is not None:
+    database = getattr(args, "database", None) if branch else None
+    if branch and database is None and (library := sd_lib.import_sd_db().module) is not None:
         database = library.default_path(env.get("HOME"))
 
     def through_runner(argv: list[str], child: dict[str, str], cwd: pathlib.Path, limit: int) -> tuple[int | None, str, str]:
@@ -1629,17 +1629,17 @@ def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], t
         return finished.exit_code, finished.stdout, finished.stderr
 
     try:
-        gate = sd_gate_run.check_in_worktree(root, head, timeout=timeout, base=sd_gate_run.base_ref(branch),
-                                             database=database, run=through_runner, environ=env)
+        gate = sd_gate_run.check_in_worktree(root, head, timeout=timeout, base=sd_gate_run.base_ref(branch), database=database,
+                                             run=through_runner, environ=env, slot_timeout=sd_lib.GATE_SLOT_SECONDS)
     except sd_gate_run.GateError as error:
         gate = {"status": "failure", "exit_code": None, "stderr": str(error), "head": head}
     checks = (gate.get("report") or {}).get("checks")
     report: dict[str, Any] = {
-        "status": "pass" if gate["status"] == "success" else "fail",
+        "status": "pass" if (gate["status"] == "success" if branch else gate["exit_code"] == 0) else "fail",
         "exit_code": gate["exit_code"],
         "detail": (gate.get("stderr") or "").strip()[-2000:],
         "checks": checks,
-        "source": "gate-receipt" if gate.get("reused") else "gate",
+        "source": "gate-receipt" if gate.get("reused") else "gate" if branch else "worktree",
         "head": gate["head"],
         "summary": gate.get("summary"),
     }
@@ -1652,8 +1652,8 @@ def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], t
 
 def run_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeout: int) -> dict[str, Any]:
     """Step 1: the repository's own gate, through sd-check, held to the planned phase budget (sd:1475)."""
-    argv = [sys.executable, str(pathlib.Path(_BIN) / "sd-check"), "--timeout", str(timeout), "--json"]
-    result = runner(argv, env, root, timeout)
+    argv = [sys.executable, str(pathlib.Path(_BIN) / "sd-check"), "--timeout", str(timeout), "--slot-timeout", str(sd_lib.GATE_SLOT_SECONDS), "--json"]
+    result = runner(argv, env, root, timeout + sd_lib.GATE_SLOT_SECONDS)  # sd:2611: the slot wait is its own plan phase
     try:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError:
@@ -2024,10 +2024,10 @@ def review(
     providers = [provider.name for provider in chosen[:depth]]
     phase, check_seconds = phase_seconds(args), gate_seconds(args)
     timing: dict[str, Any] = {"setup_seconds": SETUP_TIMEOUT_SECONDS, "phase_seconds": phase,
-              "check_seconds": check_seconds,
+              "check_seconds": check_seconds, "slot_seconds": sd_lib.GATE_SLOT_SECONDS,
               "candidates": [{"name": provider.name, "recipient": str(sd_registry.recipient(provider))}
                              for provider in chosen]}
-    timing["execution_seconds"] = SETUP_TIMEOUT_SECONDS + check_seconds + phase * len(chosen)
+    timing["execution_seconds"] = SETUP_TIMEOUT_SECONDS + timing["slot_seconds"] + check_seconds + phase * len(chosen)
     result: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "repo": str(root),
@@ -2133,8 +2133,8 @@ def review(
     gate_branch = getattr(args, "gate_check", None)
     # sd:2523. The slot wait spends what the check leaves of its bound, so sd-ship's watchdog still holds.
     slot_deadline = sd_review_slots.clock() + check_seconds
-    check = check or (run_gate_check(root, runner, env, check_seconds, gate_branch, args) if gate_branch
-                      else run_check(root, runner, env, check_seconds))
+    check = check or (run_gate_check(root, runner, env, check_seconds, gate_branch, args, subject.head)
+                      if gate_branch or args.scope in ("branch", "pr") else run_check(root, runner, env, check_seconds))
     result["check"] = check
     if check["status"] == "fail":
         result["status"] = "gate_failed"

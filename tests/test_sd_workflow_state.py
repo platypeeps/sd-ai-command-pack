@@ -235,6 +235,21 @@ class PolicyReferenceBinding(unittest.TestCase):
             self.assertEqual(broken, "raw:" + hashlib.sha256(b"def f(:\n").hexdigest())
             self.assertNotEqual(hashed("def f(::\n"), broken)
 
+    def test_the_normalized_hash_parses_each_content_once_and_new_bytes_again(self):
+        """sd:1615: the parse is memoized by the bytes' digest, not by path or mtime."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "module.py"
+            parse = Mock(wraps=bindings.normalized_source)
+            with patch.object(bindings, "normalized_source", parse):
+                path.write_text("def f():\n    return 'one'\n")
+                first = bindings.normalized_hash(path)
+                self.assertEqual(bindings.normalized_hash(path), first)
+                self.assertEqual(parse.call_count, 1)
+                # Same size, same path: only the content can tell them apart.
+                path.write_text("def f():\n    return 'two'\n")
+                self.assertNotEqual(bindings.normalized_hash(path), first)
+                self.assertEqual(parse.call_count, 2)
+
     def test_cross_skill_receipt_policy_and_review_helpers_remain_required(self):
         self.assertTrue({"skills/sd-check/SKILL.md", "skills/sd-review/SKILL.md", "skills/sd-ship/SKILL.md",
                          "skills/sd-check/references/check-receipts.md"}.issubset(bindings.ADJUDICATOR_POLICY_FILES))
