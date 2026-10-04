@@ -491,6 +491,7 @@ def main(argv: list[str] | None = None) -> int:
         root = sd_lib.repo_root(None)
         if root is None:
             raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")
+        sd_lib.refuse_unmanaged(root, UsageError, args.database)  # dry runs included
         detection = sd_lib.detect_entrypoints(root)
         if args.database and not args.record_receipt:
             raise UsageError("--database requires --record-receipt")

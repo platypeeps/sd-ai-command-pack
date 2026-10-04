@@ -1021,7 +1021,7 @@ def managed_rows(rows: Iterable[Any]) -> list[Any]:
     return [row for row in rows if is_managed(row)]
 
 
-def unmanaged(root: pathlib.Path | str, *, warn: bool = True) -> str | None:
+def unmanaged(root: pathlib.Path | str, *, warn: bool = True, database: pathlib.Path | str | None = None) -> str | None:
     """The refusal for a direct call in an unmanaged repository, or None to proceed.
 
     Only a row that exists and says `managed = 0` refuses. No library, no
@@ -1029,6 +1029,7 @@ def unmanaged(root: pathlib.Path | str, *, warn: bool = True) -> str | None:
     of the pack has no sd database, and not knowing is no reason to deny. A
     database with no row for the checkout proceeds too, with one warning on
     stderr naming the flag, because that is the state an operator can fix.
+    `database` is a command's `--database`; without it the default store answers.
     """
     if import_sd_db().module is None:
         return None
@@ -1036,7 +1037,7 @@ def unmanaged(root: pathlib.Path | str, *, warn: bool = True) -> str | None:
         from sd_db import repos  # noqa: PLC0415
         from sd_db.database import connect, default_path  # noqa: PLC0415
 
-        connection = connect(default_path(), write=False)
+        connection = connect(database or default_path(), write=False)
         try:
             origin = git_output(["config", "--get", "remote.origin.url"], pathlib.Path(root))
             path = repos.registered_for(connection, str(pathlib.Path(root).resolve()), origin)
@@ -1052,6 +1053,19 @@ def unmanaged(root: pathlib.Path | str, *, warn: bool = True) -> str | None:
                   f"`sd-db.sh repo managed {path} yes`", file=sys.stderr)
         return None
     return None if is_managed(row) else unmanaged_text(row["path"])
+
+
+def refuse_unmanaged(root: pathlib.Path | str, error: Callable[[str], Exception],
+                     database: pathlib.Path | str | None = None) -> None:
+    """Raise `error(refusal)` in an unmanaged checkout (sd:2566); otherwise return.
+
+    The direct-call gate of sd-ship, sd-review, sd-check, sd-status and
+    `sd-ship lane enqueue`, before any network call or write. A checkout
+    with no row proceeds without the warning: these run in fixture
+    repositories and in the local gate's temporary trees on every call.
+    """
+    if why := unmanaged(root, warn=False, database=database):
+        raise error(why)
 
 
 def repo_disk(value: pathlib.Path | str) -> pathlib.Path:

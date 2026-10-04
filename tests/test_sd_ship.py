@@ -381,7 +381,8 @@ class ShipCase(unittest.TestCase):
         initialise(self.database)
         self.connection = connect(self.database)
         self.addCleanup(self.connection.close)
-        upsert_repo(self.connection, str(self.operator), remote=self.remote_url, status_source="row", runner_merge="auto")
+        upsert_repo(self.connection, str(self.operator), remote=self.remote_url, status_source="row", runner_merge="auto",
+                    managed=1)
         self.item = create_item(self.connection, kind="work", title="fixture work", status="in_progress", repo=str(self.operator), branch="topic")
         self.double = ShipDouble(self.remote)
         self.double.__enter__()
@@ -2603,6 +2604,30 @@ roles:
         blocker = caught.exception.workflow["blocker"]
         self.assertEqual((blocker["code"], blocker["retryable"]), ("merge_commit_unreachable", False))
         self.assertIn(f"restore {commit}", caught.exception.workflow["next_action"])
+
+    def test_a_merge_touching_the_library_reprovisions_sd_db_at_the_merge_commit(self):
+        """sd:2108. The dashboard refuses an installed sd_db older than the
+        system checkout's last library commit, and the restart after a
+        library merge failed until somebody ran `make setup` in the pack."""
+        import sd_install
+        library = self.root / "local-sd-db/sd_db/writing.py"
+        library.parent.mkdir(parents=True)
+        library.write_text("STAGES = ()\n")
+        _git(self.root, "add", "-A")
+        _git(self.root, "commit", "-m", "touch the library\n\nAuthored-with: human")
+        self.prepare()
+        installs = []
+
+        def provision(ctx, out, ref=None):
+            installs.append(ref)
+            return True, f"sd_db installed at {ref}"
+        with patch.dict(os.environ, {sd_install.SYSTEM_CHECKOUT_ENV: str(self.root)}), \
+                patch.object(sd_install, "installed_library_commit", return_value=None), \
+                patch.object(sd_install, "provision_library", provision):
+            merged = self.merge()
+        commit = self.remote.pull(1).merge_commit_sha
+        self.assertEqual(installs, [commit])
+        self.assertEqual(merged["library"], {"ref": commit, "installed": True, "report": f"sd_db installed at {commit}"})
 
     def test_a_base_that_advanced_under_the_put_holds_delivery(self):
         """GitHub squashes onto the base it holds at the `PUT`, not the one the
@@ -6234,6 +6259,24 @@ class DeclaredGapCase(unittest.TestCase):
             return saved(method, path, body)
         double._route = route
         self.refuse("ownership or branch protection changed before merge")
+
+    def test_a_protection_re_read_that_cannot_finish_says_so_and_still_refuses(self):
+        """A timed-out `gh` on the last read is not a changed gate (sd:2623)."""
+        self.declare()
+        self.green()
+        gate, calls = ship.GitHub.gate, []
+
+        def flaky(api, base, head):
+            calls.append(head)
+            if len(calls) >= 2:
+                raise ship.Refusal("gh could not finish: timed out after 60 seconds", code="command_unavailable",
+                                   boundary="runtime", state="retryable_failure")
+            return gate(api, base, head)
+        with patch.object(ship.GitHub, "gate", flaky):
+            refusal = self.refuse("^could not re-read branch protection before merge: gh could not finish: timed out",
+                                  "command_unavailable")
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(refusal.workflow["blocker"]["retryable"])
 
 
 

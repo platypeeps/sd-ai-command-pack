@@ -813,7 +813,8 @@ class NoItemContracts(unittest.TestCase):
                     "--dispositions-file", str(proposal_path),
                 )
                 self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
-        self.assertEqual(len(opened), 4)
+        # Two opens per command: the managed-repository check (sd:2566), then the command.
+        self.assertEqual(len(opened), 8)
         self.assertEqual(self.snapshot(), before)
         self.assertEqual(self.evidence_snapshot(), evidence_before)
 

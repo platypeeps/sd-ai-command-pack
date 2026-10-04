@@ -55,6 +55,10 @@ Do not replace required approval with a proposal that the user can veto afterwar
 
 These run without being asked.
 
+- No pack command runs in a checkout whose `repo.managed` is no (sd:1620, sd:2566).
+  `sd-ship`, `sd-review`, `sd-check`, `sd-status` and `sd-ship lane enqueue` refuse there, dry runs included.
+  The refusal names the remedy: `sd-db.sh repo managed <path> yes`.
+  A checkout with no row proceeds; only a row marked unmanaged refuses.
 - `sd-status` reports. It never writes.
 - `sd-review --scope branch --challenge` runs on the machine before a push.
   Blocking findings are fixed or recorded before the branch leaves.
@@ -66,6 +70,13 @@ These run without being asked.
   whose trailer names the item, and runs `git fetch -p`. The repository
   setting `delete_branch_on_merge` removes
   the remote branch.
+  A merge into the system checkout that changes `local-sd-db` also installs
+  `sd_db` at the merge commit into the pack's virtualenv, so the dashboard's
+  next restart finds the library it expects (sd:2108). An installed copy that
+  is not an ancestor of the merge commit is kept. Every install holds one
+  machine-wide lock across that check and pip, so concurrent reconciles
+  cannot interleave. The receipt's `library`
+  says whether the install worked, or why it was skipped.
   After each confirmed in-scope merge, the agent follows the ship skill's post-merge closeout procedure.
   It dispositions remaining findings and inventories refs, branches, stashes, and worktrees.
   It removes the merged PR's local and remote branches, stashes, refs and stale worktrees when they are safe, without asking.
