@@ -6094,6 +6094,24 @@ class DeclaredGapCase(unittest.TestCase):
         double._route = route
         self.refuse("ownership or branch protection changed before merge")
 
+    def test_a_protection_re_read_that_cannot_finish_says_so_and_still_refuses(self):
+        """A timed-out `gh` on the last read is not a changed gate (sd:2623)."""
+        self.declare()
+        self.green()
+        gate, calls = ship.GitHub.gate, []
+
+        def flaky(api, base, head):
+            calls.append(head)
+            if len(calls) >= 2:
+                raise ship.Refusal("gh could not finish: timed out after 60 seconds", code="command_unavailable",
+                                   boundary="runtime", state="retryable_failure")
+            return gate(api, base, head)
+        with patch.object(ship.GitHub, "gate", flaky):
+            refusal = self.refuse("^could not re-read branch protection before merge: gh could not finish: timed out",
+                                  "command_unavailable")
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(refusal.workflow["blocker"]["retryable"])
+
 
 
 class RawCaptureTests(unittest.TestCase):

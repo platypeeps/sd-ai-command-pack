@@ -1830,7 +1830,13 @@ class Ship(SharedReview):
         """
         try:
             again = self.api.gate(base, head)
-        except Refusal:
+        except Refusal as error:
+            # A read that could not finish observed nothing, so it is not a
+            # change of gate: say so, and refuse all the same (sd:2623).
+            if error.workflow["blocker"]["boundary"] == "runtime":
+                refusal = Refusal(f"could not re-read branch protection before merge: {error}")
+                refusal.workflow = error.workflow
+                raise refusal from None
             again = None
         if self.merge_ownership().get("default_branch") != base or again != protection:
             raise Refusal("ownership or branch protection changed before merge")
