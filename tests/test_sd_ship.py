@@ -5345,7 +5345,12 @@ class DeclaredGapCase(unittest.TestCase):
             self.merge()
         message = str(caught.exception)
         self.assertIn("sd/local-gate is failure", message)
-        self.assertRegex(message, r"check \(exit 2\): stderr: sd2066-err\n.*\nstdout: sd2066-out")
+        self.assertRegex(message, r"check \(exit 2\): whole output: (\S+/sd-check-output/\S+-check\.log)\n"
+                                  r"stderr: sd2066-err\n.*\nstdout: sd2066-out")
+        # sd:2558. The named file is in the repository's Git directory and holds the whole output.
+        kept = pathlib.Path(re.search(r"whole output: (\S+)", message).group(1))
+        self.assertEqual(kept.parent.parent, (self.root / ".git").resolve())
+        self.assertIn("sd2066-out", kept.read_text(encoding="utf-8"))
         self.assertIn(f"`sd-ship observe --item {self.item} --json` prints it", message)
         self.assertEqual(self.puts(), 0)
         observed = self.operation("observe").observe()

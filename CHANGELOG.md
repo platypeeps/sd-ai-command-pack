@@ -236,6 +236,15 @@
 
 ### Fixed
 
+- **A failed gate names the shard that failed and keeps its whole output
+  (sd:2558).** `sd-check` kept each stream's last 4,000 characters, and
+  prepare's refusal repeated the last 1,200, so a shard that failed early in
+  a long `make check` was in neither and the failing test could not be found.
+  A failing check now writes its whole output to
+  `<git-common-dir>/sd-check-output/` (the newest 20 stay), and the report
+  carries `output_path` and `failed_shards`. The prepare and merge-gate
+  refusals name each failed shard and the file before the tails.
+
 - **The citation gate's own checks catch what they claim (sd:999).** In
   `tests/test_doc_citations.py`, the pack-rule qualifier read a 100-character
   window, so "`<path>`. See the pack's release notes." passed as qualified. It
