@@ -2189,7 +2189,7 @@ class TimingPlanTests(ReviewFixture):
         root, args, planned = self.planned()
         self.assertEqual(planned["requested_reviews"], 1)
         self.assertEqual(planned["fallback_candidates"], ["p1", "p2", "p3"])
-        self.assertEqual(planned["timing"]["execution_seconds"], 12600)
+        self.assertEqual(planned["timing"]["execution_seconds"], 12600 + sd_review.sd_lib.GATE_SLOT_SECONDS)  # sd:2611
         self.assertEqual([row["name"] for row in planned["timing"]["candidates"]], ["p0", "p1", "p2", "p3"])
         runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", ""), "p0": sd_review.Completed(127, "", "missing", False)},
                             default=sd_review.Completed(0, json.dumps({"type": "result", "subtype": "success", "structured_output": {"findings": []}}), ""))

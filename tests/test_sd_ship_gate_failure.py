@@ -228,6 +228,25 @@ class TimingPlanCarriesTheGatesBound(unittest.TestCase):
                 self.plan({**self.TIMING, **change})
 
 
+class TimingPlanCarriesTheSlotBound(TimingPlanCarriesTheGatesBound):
+    """sd:2611. The gate-slot wait is its own phase; a plan from before it has none."""
+
+    SLOT = {**TimingPlanCarriesTheGatesBound.TIMING, "slot_seconds": 14400, "execution_seconds": 10800 + 14400}
+
+    def test_a_plan_that_counts_the_slot_bound_is_accepted(self):
+        self.assertEqual(self.plan(self.SLOT)["execution_seconds"], 25200)
+
+    def test_a_plan_without_a_slot_bound_is_accepted_as_before(self):
+        self.assertNotIn("slot_seconds", self.TIMING)
+        self.assertEqual(self.plan(self.TIMING)["execution_seconds"], 10800)
+
+    def test_a_slot_bound_the_total_does_not_count_or_that_is_not_a_count_is_refused(self):
+        for change in ({"execution_seconds": 10800}, {"slot_seconds": -1, "execution_seconds": 10799},
+                       {"slot_seconds": True, "execution_seconds": 10801}, {"slot_seconds": 14400.0}):
+            with self.subTest(change=change), self.assertRaises(ship.Refusal):
+                self.plan({**self.SLOT, **change})
+
+
 class ReviewTimeoutReachesTheGate(unittest.TestCase):
     def test_sd_review_hands_its_phase_budget_to_sd_check(self):
         """The phase budget sd-review plans for the gate is the limit sd-check uses."""

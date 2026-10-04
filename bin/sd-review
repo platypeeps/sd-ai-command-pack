@@ -1628,8 +1628,8 @@ def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], t
         return finished.exit_code, finished.stdout, finished.stderr
 
     try:
-        gate = sd_gate_run.check_in_worktree(root, head, timeout=timeout, base=sd_gate_run.base_ref(branch),
-                                             database=database, run=through_runner, environ=env)
+        gate = sd_gate_run.check_in_worktree(root, head, timeout=timeout, base=sd_gate_run.base_ref(branch), database=database,
+                                             run=through_runner, environ=env, slot_timeout=sd_lib.GATE_SLOT_SECONDS)
     except sd_gate_run.GateError as error:
         gate = {"status": "failure", "exit_code": None, "stderr": str(error), "head": head}
     checks = (gate.get("report") or {}).get("checks")
@@ -1651,8 +1651,8 @@ def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], t
 
 def run_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeout: int) -> dict[str, Any]:
     """Step 1: the repository's own gate, through sd-check, held to the planned phase budget (sd:1475)."""
-    argv = [sys.executable, str(pathlib.Path(_BIN) / "sd-check"), "--timeout", str(timeout), "--json"]
-    result = runner(argv, env, root, timeout)
+    argv = [sys.executable, str(pathlib.Path(_BIN) / "sd-check"), "--timeout", str(timeout), "--slot-timeout", str(sd_lib.GATE_SLOT_SECONDS), "--json"]
+    result = runner(argv, env, root, timeout + sd_lib.GATE_SLOT_SECONDS)  # sd:2611: the slot wait is its own plan phase
     try:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError:
@@ -2023,10 +2023,10 @@ def review(
     providers = [provider.name for provider in chosen[:depth]]
     phase, check_seconds = phase_seconds(args), gate_seconds(args)
     timing: dict[str, Any] = {"setup_seconds": SETUP_TIMEOUT_SECONDS, "phase_seconds": phase,
-              "check_seconds": check_seconds,
+              "check_seconds": check_seconds, "slot_seconds": sd_lib.GATE_SLOT_SECONDS,
               "candidates": [{"name": provider.name, "recipient": str(sd_registry.recipient(provider))}
                              for provider in chosen]}
-    timing["execution_seconds"] = SETUP_TIMEOUT_SECONDS + check_seconds + phase * len(chosen)
+    timing["execution_seconds"] = SETUP_TIMEOUT_SECONDS + timing["slot_seconds"] + check_seconds + phase * len(chosen)
     result: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "repo": str(root),
