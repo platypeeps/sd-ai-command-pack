@@ -74,7 +74,7 @@ else is. Its executables write these paths, and no others:
   `--remove-legacy` it also deletes the three files the old `sd-github-review`
   installer left. `--remove` deletes the workflow and its Dependabot guard.
 - The fleet stamp, from `sd fleet stamp`, into the checkout you stand in, which
-  must be a checkout of a `runner_merge=auto` repository: the routing lane and
+  must be a checkout of a managed `runner_merge=auto` repository (sd:1620): the routing lane and
   its Dependabot guard as `setup-github` writes them,
   `.github/workflows/sd-check.yml` where no other workflow runs on
   `pull_request` (created only: an existing one is kept as written), the `unprotected` entry in `.github/sd-status.json`
@@ -437,10 +437,11 @@ Each prose skill has a "State of the tooling" section.
 ```bash
 make setup   # once
 make check   # test + lint + audit + docs-lint
+make precheck   # lint + the always-run test modules, about a minute
 ```
 
 This repository has `repo.ci = local`: it carries no GitHub Actions workflow.
-`sd-ship merge` runs `sd-check` (here `make check`) in a fresh worktree and
+`sd-ship merge` runs `sd-check` (here `make precheck`, then `make check`) in a fresh worktree and
 posts the result as the `sd/local-gate` status on the head commit. The gate
 installs `sd_db` at the `platypeeps/system` ref in `.sd-system-rev`.
 `sd-ship prepare` grades the pull request body with `sd-docs-lint --body-only`.
