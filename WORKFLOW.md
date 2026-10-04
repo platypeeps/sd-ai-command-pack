@@ -86,7 +86,9 @@ These run without being asked.
   and nothing runs the lint there otherwise. A runner has no database, so
   rule 2 reads statuses from git there, with full history, and checks
   fewer items than the machine with the rows; each run prints which source
-  it read.
+  it read. `make check` passes `--no-history`: rule 2 then fetches nothing
+  and reads no `git log`, and an item only git could answer reads `unknown`.
+  The delivery question stays with the lint `sd-ship` runs.
 - A commit to the pack, the system repository or the writing repository names
   what needed it: `Needed-by: <item id>` or `Needed-by: cost | efficiency |
   visibility`. `sd-ship` warns when the trailer is missing and ships anyway.
