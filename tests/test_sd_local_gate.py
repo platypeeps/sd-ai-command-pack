@@ -493,7 +493,9 @@ class MergeReuse(ReceiptFixture):
         head = self.declare()
         with mock.patch.dict(os.environ, {"MAKEFLAGS": "-s"}):
             self.prepare(head)
-        merged = self.merge(head)
+        with mock.patch.dict(os.environ):  # a caller that already exports MAKEFLAGS=-s must still differ
+            os.environ.pop("MAKEFLAGS", None)
+            merged = self.merge(head)
         self.assertEqual(merged["reuse_miss"], {"reason": "binding", "fields": ["environment_sha256"]})
         self.assertEqual(json.loads(json.dumps(merged))["reuse_miss"], merged["reuse_miss"])
 
