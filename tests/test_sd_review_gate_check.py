@@ -6,6 +6,7 @@ Also the gate's bound: with no `--timeout`, the repository gate gets
 
 from __future__ import annotations
 
+import importlib
 import json
 import pathlib
 import subprocess
@@ -174,6 +175,13 @@ class BuilderReceipt(BuilderFixture):
         gate = self.gate(root, database)
         self.assertEqual((gate["status"], gate["source"]), ("pass", "gate-receipt"), json.dumps(gate)[:2000])
         self.assertEqual(self.runs(), 1)
+
+    def test_a_builders_gate_queues_for_a_slot_on_its_own_bound(self) -> None:
+        """sd:2607: `sd gate check` waits in the machine pool for hours, and its check still gets the whole bound."""
+        root, database = self.repo()
+        done = self.builder(root, database)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads(done.stdout)["report"]["gate_slot"]["bound_seconds"], importlib.import_module("sd_lib").GATE_SLOT_SECONDS)
 
     def test_a_builder_in_another_agent_session_is_reused(self) -> None:
         """sd:1912, D1: a builder's session and the lead's differ in the agent

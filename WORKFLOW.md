@@ -431,7 +431,7 @@ which the installer places in `~/.claude/agents`.
   `TEST_WORKERS=6` on one of them makes the review run the full check again.
   A fix commit moves the head, so the next round needs a new gate pass first.
   Never run plain `sd-review --scope branch` there: it runs a second full
-  check in the checkout, outside any lock around the gate, and reuses no pass.
+  check in the checkout and reuses no pass.
 - **Gates share the machine through slots.** Every `sd-check` run, and so
   every gate `sd-ship prepare` or `merge` runs in any repository, first takes
   one of `sd.gate_slots` machine-wide slots (unset: a quarter of the cores,
@@ -439,8 +439,11 @@ which the installer places in `~/.claude/agents`.
   CI takes none. A queued gate prints `waiting for a gate slot` on stderr and
   again each minute, naming each holder's label, pid, directory and start
   time. The wait counts against `sd-check --timeout`, and each check gets the
-  rest. A holder runs its checks with `SD_GATE_SLOTS=0`, so the pack's own
-  `make test` inside a gate takes no second slot; run directly, `make test`
+  rest; with `--slot-timeout`, the wait has its own bound and each check gets
+  the whole `--timeout`. `sd gate check` queues that way for up to 4 hours
+  (sd:2607). A holder runs its checks with `SD_GATE_SLOTS=0`, and names its cap
+  in `SD_GATE_POOL_SIZE`, so the pack's own `make test` inside a gate takes no
+  second slot and sizes its workers to the pool; run directly, `make test`
   takes one of the same slots. Slots are kernel locks under
   `$XDG_STATE_HOME/sd/gate-slots`, so a dead holder's slot is free at once.
 - **Wrap every other gate in the pool (sd:2522).** The pool is one per
@@ -451,11 +454,15 @@ which the installer places in `~/.claude/agents`.
   repository, and a `lockf` only orders the gates of one.
 - **Gates wait in one queue (sd:2262).** Every waiter takes a place in one
   machine-wide queue, and only the head starts: first to wait, first to
-  start. The head starts only while load1 is below `sd.gate_load_max`
-  (unset: 2.5 per core, 40 on 16). While load5 is still above it, load1 must
-  stay below it for `sd.gate_settle_seconds` (unset: 45), and two starts are
-  that far apart. `SD_GATE_LOAD_MAX` and `SD_GATE_SETTLE_SECONDS` override them
-  for one run; `0` turns either off. To gate any other command, such as
+  start, when a slot is free. Two starts are `sd.gate_settle_seconds` apart
+  (unset: 45). The slot count is the one limit (sd:2607): macOS counts threads
+  waiting on the disk in the load average, which read 124 on 2026-10-03 while
+  most cores idled. So do not wait on the load average or wrap a gate in
+  `lockf`; the queue already orders every gate. `sd.gate_load_max` still adds
+  a load1 condition where a machine sets it (unset: none). While load5 is
+  above it, load1 must then stay below it for the settle time.
+  `SD_GATE_LOAD_MAX` and `SD_GATE_SETTLE_SECONDS` override them for one run;
+  `0` turns either off. To gate any other command, such as
   another repository's `make check`, run `sd gate run -- make check`; it waits,
   runs the command, and frees the slot when the command ends.
   `sd gate status` shows who holds a slot and who waits, and since when.
@@ -772,7 +779,7 @@ The reserved `sd` namespace declares four settings:
   for one run. It grants nothing;
   see [Parallel work](#parallel-work).
 - `sd.gate_load_max`: the gate queue starts a gate only while load1 is below this; `0` is no load condition.
-  Absence reads 2.5 per core. `SD_GATE_LOAD_MAX` overrides it for one run. It grants nothing.
+  Absence is no load condition (sd:2607). `SD_GATE_LOAD_MAX` overrides it for one run. It grants nothing.
 - `sd.gate_settle_seconds`: seconds between two gate starts, and of low load1 while load5 is high; `0` is none.
   Absence reads 45. `SD_GATE_SETTLE_SECONDS` overrides it for one run. It grants nothing.
 - `sd.lane_root`: the folder that holds each repository's `sd-ship lane` queue, as `<root>/<repository>/lane/queue/`.

@@ -81,7 +81,7 @@ CORE_CONFIG = {
                                   "for one run."},
     "gate_load_max": {"pattern": r"[0-9]+(\.[0-9]+)?",
                       "description": "The gate queue starts a gate only while load1 is below this; 0 is no load "
-                                     "condition. Unset reads 2.5 per core; SD_GATE_LOAD_MAX overrides it for one run."},
+                                     "condition. Unset is none; SD_GATE_LOAD_MAX overrides it for one run."},
     "lane_root": {"pattern": r"[~/][^\x00]*",
                   "description": "The folder holding each repository's `sd-ship lane` queue, as "
                                  "<root>/<repository>/lane/queue/. Unset reads $XDG_STATE_HOME/sd/lanes; "
@@ -938,6 +938,8 @@ LOCAL_GATE_CONTEXT = "sd/local-gate"
 #: `sd-check`'s own 900-second default is for an interactive run; a gate that
 #: builds its environment on a loaded machine ran past 900 s, and past 1800 s.
 GATE_CHECK_SECONDS = 3600
+#: How long `sd gate check` queues for a gate slot, apart from that bound (sd:2607).
+GATE_SLOT_SECONDS = 4 * 3600
 
 
 def repo_ci(connection: Any, root: pathlib.Path | str) -> str:

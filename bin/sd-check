@@ -34,6 +34,9 @@ Every run that executes a check first takes a machine-wide gate slot
 through here, so here is where the cap on concurrent gates is kept. The wait
 counts against `--timeout`, each check gets what is left, and the checks run
 with `SD_GATE_SLOTS=0`, so a gate inside them never waits on this one's slot.
+With `--slot-timeout`, the wait has its own bound and each check gets the whole
+`--timeout` (sd:2607): a gate in a long queue then fails as unadmitted, never
+as a check cut short by the time it spent queued.
 """
 
 from __future__ import annotations
@@ -328,6 +331,13 @@ def render_failure(record: dict[str, object], stream: TextIO) -> None:
             write(f"[{channel}]\n{text.rstrip()}\n")
 
 
+def queue_seconds(text: str) -> int:
+    """A whole number of seconds above 0, for `--slot-timeout`."""
+    if not text.isascii() or not text.isdigit() or int(text) == 0:
+        raise argparse.ArgumentTypeError(f"takes a positive number of seconds (got '{text}')")
+    return int(text)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sd-check",
@@ -348,6 +358,8 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help=f"per-check timeout; a wait for a gate slot counts against it (default: {DEFAULT_TIMEOUT_SECONDS})",
     )
+    parser.add_argument("--slot-timeout", type=queue_seconds, metavar="SECONDS",
+                        help="bound the wait for a gate slot on its own; each check then gets the whole --timeout")
     return parser
 
 
@@ -370,7 +382,7 @@ def take_slot(environ: Mapping[str, str], timeout: int) -> tuple[sd_gate_slots.S
     except sd_gate_slots.LauncherExited:
         raise UsageError("the process that started this gate exited while it waited for a slot") from None
     report: dict[str, object] = {"slots": slots, "source": source, "waited_seconds": float(timeout),
-                                 "path": None}
+                                 "bound_seconds": timeout, "path": None}
     if slot is not None:
         report.update(waited_seconds=round(slot.waited, 3), path=str(slot.path) if slot.path else None)
     return slot, report
@@ -383,15 +395,17 @@ def gated_execute(root: pathlib.Path, detection: sd_lib.Detection, args: argpars
     runnable = any(entry["status"] is None for entry in plan(detection, args.only, scope))
     if args.dry_run or not runnable:
         return execute(root, detection, args.only, args.dry_run, args.timeout, environ, scope=scope)
-    slot, report = take_slot(os.environ, args.timeout)
-    children = {**(environ if environ is not None else os.environ), sd_gate_slots.SLOTS_VARIABLE: "0"}
+    queued = args.slot_timeout or args.timeout
+    slot, report = take_slot(os.environ, queued)
+    cap = report["slots"] if isinstance(report["slots"], int) else 0
+    children = sd_gate_slots.holder_environment(environ if environ is not None else os.environ, cap)
     try:
         if slot is None:
             result = execute(root, detection, args.only, False, args.timeout, children,
-                             f"no gate slot came free within {args.timeout}s", scope)
+                             f"no gate slot came free within {queued}s", scope)
         else:
-            result = execute(root, detection, args.only, False, max(1, int(args.timeout - slot.waited)), children,
-                             scope=scope)
+            left = args.timeout if args.slot_timeout else max(1, int(args.timeout - slot.waited))
+            result = execute(root, detection, args.only, False, left, children, scope=scope)
     finally:
         if slot is not None:
             slot.release()

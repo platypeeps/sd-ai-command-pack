@@ -2883,7 +2883,8 @@ def gate_check(args: argparse.Namespace) -> int:
     if database is None and (library := sd_lib.import_sd_db().module) is not None:
         database = library.default_path(os.environ.get("HOME"))
     try:
-        result = sd_gate_run.check_in_worktree(root, head, base=sd_gate_run.base_ref(args.base), database=database)
+        result = sd_gate_run.check_in_worktree(root, head, base=sd_gate_run.base_ref(args.base), database=database,
+                                               slot_timeout=sd_lib.GATE_SLOT_SECONDS)  # sd:2607
     except sd_gate_run.GateError as error:
         raise Refusal(str(error)) from None
     print(json.dumps(result, indent=2, sort_keys=True))
