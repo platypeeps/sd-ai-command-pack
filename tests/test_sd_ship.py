@@ -3021,6 +3021,35 @@ roles:
             "repository": repository, "branch": branch, "head": "a" * 40, "merge_commit": "b" * 40,
             "closing_owed": {"item": item, "commit": "b" * 40, "branch": branch}})
 
+    def test_another_repository_s_item_is_refused_with_the_working_path(self):
+        """sd:2576: the first refusal names the itemless path, not only the mismatch.
+
+        sd:2300 shipped PRs in two other repositories; four refusals, each shown
+        only after the previous one was fixed, came before the first working call.
+        """
+        other = self.directory / "other"
+        upsert_repo(self.connection, str(other), remote="https://github.com/example-org/other.git", status_source="row")
+        self.item = create_item(self.connection, kind="task", title="elsewhere", status="in_progress", repo=str(other))
+        allocate = "sd-ship review --no-item --create-record --assert-new-work"
+        for command, extra in (("prepare", ()), ("merge", ("--manual", "--expected-head", "a" * 40))):
+            with self.subTest(command=command):
+                with self.assertRaisesRegex(ship.Refusal, "item repository does not match this checkout's origin") as caught:
+                    ship.Ship(self.root, self.connection, self.database, self.args(command, *extra))
+                message, workflow = str(caught.exception), caught.exception.workflow
+                self.assertIn(f"sd:{self.item} belongs to example-org/other", message)
+                self.assertIn("fixture/repo", message)
+                self.assertEqual((workflow["blocker"]["code"], workflow["blocker"]["boundary"]),
+                                 ("item_repository_mismatch", "input"))
+                self.assertIn(allocate, workflow["next_action"])
+                self.assertIn(f"sd-ship {command} --no-item --review-id", workflow["next_action"])
+                self.assertIn(f"sd task note {self.item}", workflow["next_action"])
+        held = ship.parser().parse_args(["hold", "--item", str(self.item), "--json"])
+        with self.assertRaisesRegex(ship.Refusal, "item repository does not match") as caught:
+            ship.hold_command(self.root, self.connection, self.database, held, receipts)
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "item_repository_mismatch")
+        self.assertIn("example-org/other", caught.exception.workflow["next_action"])
+        self.assertNotIn("--no-item", caught.exception.workflow["next_action"])
+
     def test_an_owed_close_never_crosses_into_another_repository(self):
         """Two repositories in one database: a carrier pays only its own
         repository's debts, and only for an item whose row names it (sd:1600)."""
