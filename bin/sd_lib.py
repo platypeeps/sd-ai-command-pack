@@ -126,6 +126,8 @@ DEFAULT_MODE = "full"
 
 #: The three names every repository is asked about, in the order they run.
 CHECK_NAMES = ("check", "test", "lint")
+#: The Makefile target `sd-check` runs before it waits for a gate slot (sd:2604).
+PRECHECK_NAME = "precheck"
 
 #: Optional repository restriction, overriding standing operator review consent.
 #: Shared by the installer, runtime reader, and workflow inventory check.
@@ -1931,6 +1933,8 @@ class Detection:
     commands: dict[str, list[str]] = field(default_factory=dict)
     reason: str = ""
     warnings: tuple[str, ...] = ()
+    #: The fast check that runs first, when the Makefile defines `PRECHECK_NAME`.
+    precheck: list[str] | None = None
 
 
 def _local_block_entrypoints(root: pathlib.Path) -> Detection | None:
@@ -1994,6 +1998,7 @@ def _makefile_entrypoints(root: pathlib.Path) -> Detection | None:
         origin=path,
         commands=commands,
         reason=f"{path.name} defines {', '.join(commands)}",
+        precheck=["make", PRECHECK_NAME] if PRECHECK_NAME in targets else None,
     )
 
 

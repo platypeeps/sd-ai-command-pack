@@ -436,10 +436,11 @@ Each prose skill has a "State of the tooling" section.
 ```bash
 make setup   # once
 make check   # test + lint + audit + docs-lint
+make precheck   # lint + the always-run test modules, about a minute
 ```
 
 This repository has `repo.ci = local`: it carries no GitHub Actions workflow.
-`sd-ship merge` runs `sd-check` (here `make check`) in a fresh worktree and
+`sd-ship merge` runs `sd-check` (here `make precheck`, then `make check`) in a fresh worktree and
 posts the result as the `sd/local-gate` status on the head commit. The gate
 installs `sd_db` at the `platypeeps/system` ref in `.sd-system-rev`.
 `sd-ship prepare` grades the pull request body with `sd-docs-lint --body-only`.

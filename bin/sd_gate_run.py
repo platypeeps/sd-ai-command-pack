@@ -199,7 +199,13 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
 
 
 def named_checks(report: dict[str, Any]) -> str:
-    """The checks a summary names: each that ran, or, in a docs-only run, the scope and the docs row."""
+    """The checks a summary names: each that ran, or, in a docs-only run, the scope and the docs row.
+
+    A failed precheck is named alone: the checks after it did not run (sd:2604).
+    """
+    precheck = report.get("precheck")
+    if isinstance(precheck, dict) and precheck.get("status") == "fail":
+        return f"{precheck.get('name')} fail"
     rows = [entry for entry in report.get("checks") or [] if isinstance(entry, dict)]
     scope = report.get("scope")
     if not (isinstance(scope, dict) and scope.get("mode") == "docs-only"):

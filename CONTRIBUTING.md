@@ -38,6 +38,7 @@ Remove a conflicting transitive pin before recompiling. Do not edit hashes by ha
 ```bash
 make test
 make lint
+make precheck
 make audit
 make docs-lint
 make check
@@ -45,6 +46,10 @@ make check
 
 `make check` runs `lint`, `audit`, `docs-lint`, then `test`. It stops at the first failure.
 Run the full command before each push.
+
+`make precheck` runs `lint` and then each always-run test module, in about a minute.
+`sd-check` runs it before it waits for a gate slot, and stops there when it fails.
+The output names the failing check: make's `lint` error line, or each failing module.
 
 During development, select tests for changed paths:
 

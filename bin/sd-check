@@ -32,6 +32,11 @@ Every run that executes a check first takes a machine-wide gate slot
 through here, so here is where the cap on concurrent gates is kept. The wait
 counts against `--timeout`, each check gets what is left, and the checks run
 with `SD_GATE_SLOTS=0`, so a gate inside them never waits on this one's slot.
+
+A Makefile that defines `precheck` has it run first, before the slot wait
+(sd:2604). It is the minute of checks that catches most failed full runs; a
+failure there fails every check unrun, takes no slot, and the report's
+`precheck` record says what failed. `--only` and a docs-only scope skip it.
 """
 
 from __future__ import annotations
@@ -160,6 +165,24 @@ def overall(statuses: list[str]) -> str:
     return SKIPPED
 
 
+def record_run(record: dict[str, object], command: list[str], root: pathlib.Path, timeout: int,
+               environ: Mapping[str, str] | None) -> None:
+    """Run `command` and write its outcome and tailed output into `record`."""
+    status, code, duration, out, err, note = (run_one(command, root, timeout) if environ is None
+                                            else run_one(command, root, timeout, environ))
+    out_tail, out_cut = _tail(out)
+    err_tail, err_cut = _tail(err)
+    record.update(
+        status=status,
+        exit_code=code,
+        duration_seconds=round(duration, 3),
+        reason=note,
+        stdout=out_tail,
+        stderr=err_tail,
+        output_truncated=out_cut or err_cut,
+    )
+
+
 def execute(
     root: pathlib.Path,
     detection: sd_lib.Detection,
@@ -195,19 +218,7 @@ def execute(
                 record["status"] = FAIL
                 record["reason"] = blocked
             else:
-                status, code, duration, out, err, note = (run_one(command, root, timeout) if environ is None
-                                                        else run_one(command, root, timeout, environ))
-                out_tail, out_cut = _tail(out)
-                err_tail, err_cut = _tail(err)
-                record.update(
-                    status=status,
-                    exit_code=code,
-                    duration_seconds=round(duration, 3),
-                    reason=note,
-                    stdout=out_tail,
-                    stderr=err_tail,
-                    output_truncated=out_cut or err_cut,
-                )
+                record_run(record, command, root, timeout, environ)
         checks.append(record)
 
     statuses = [str(record["status"]) for record in checks]
@@ -241,6 +252,9 @@ def render(result: dict[str, object], stream: TextIO) -> None:
         write(f"  scope: docs-only ({scope['reason']})\n")
     checks = result["checks"]
     assert isinstance(checks, list)
+    precheck = result.get("precheck")
+    if isinstance(precheck, dict):
+        checks = [precheck, *checks]
     for record in checks:
         command = record["command"]
         shown = " ".join(command) if isinstance(command, list) else "-"
@@ -316,26 +330,57 @@ def take_slot(environ: Mapping[str, str], timeout: int) -> tuple[sd_gate_slots.S
     return slot, report
 
 
+def run_precheck(root: pathlib.Path, detection: sd_lib.Detection, args: argparse.Namespace,
+                 environ: Mapping[str, str]) -> dict[str, object] | None:
+    """The repository's precheck, run before the slot wait (sd:2604); None when it defines none or the run is narrowed.
+
+    A precheck is a Makefile `precheck` target: the checks that take a minute
+    and catch what most often fails a full run. It takes no gate slot, so a
+    lint error fails in a minute rather than after the wait and the suite.
+    `--only` and a docs-only scope run less than a full check, so they skip it.
+    """
+    scope = getattr(args, "scope", None)
+    if detection.precheck is None or args.only is not None or (
+            scope is not None and scope.mode == sd_check_scope.DOCS_ONLY):
+        return None
+    record: dict[str, object] = {"name": sd_lib.PRECHECK_NAME, "command": detection.precheck}
+    record_run(record, detection.precheck, root, args.timeout, environ)
+    return record
+
+
 def gated_execute(root: pathlib.Path, detection: sd_lib.Detection, args: argparse.Namespace,
                   environ: Mapping[str, str] | None) -> dict[str, object]:
-    """`execute` inside a gate slot when anything will run; the checks get the timeout the wait left."""
+    """`execute` inside a gate slot when anything will run; the checks get the timeout the precheck and the wait left.
+
+    A failing precheck fails every check that would have run, unrun, and no slot is taken.
+    """
     scope = getattr(args, "scope", None)
     runnable = any(entry["status"] is None for entry in plan(detection, args.only, scope))
     if args.dry_run or not runnable:
         return execute(root, detection, args.only, args.dry_run, args.timeout, environ, scope=scope)
-    slot, report = take_slot(os.environ, args.timeout)
     children = {**(environ if environ is not None else os.environ), sd_gate_slots.SLOTS_VARIABLE: "0"}
+    started = time.monotonic()
+    first = run_precheck(root, detection, args, children)
+    if first is not None and first["status"] == FAIL:
+        result = execute(root, detection, args.only, False, args.timeout, children,
+                         f"{sd_lib.PRECHECK_NAME} failed, so this did not run", scope)
+        result["precheck"] = first
+        return result
+    left = args.timeout if first is None else max(1, int(args.timeout - (time.monotonic() - started)))
+    slot, report = take_slot(os.environ, left)
     try:
         if slot is None:
-            result = execute(root, detection, args.only, False, args.timeout, children,
-                             f"no gate slot came free within {args.timeout}s", scope)
+            result = execute(root, detection, args.only, False, left, children,
+                             f"no gate slot came free within {left}s", scope)
         else:
-            result = execute(root, detection, args.only, False, max(1, int(args.timeout - slot.waited)), children,
+            result = execute(root, detection, args.only, False, max(1, int(left - slot.waited)), children,
                              scope=scope)
     finally:
         if slot is not None:
             slot.release()
     result["gate_slot"] = report
+    if first is not None:
+        result["precheck"] = first
     return result
 
 

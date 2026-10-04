@@ -201,6 +201,12 @@ class Reading(unittest.TestCase):
         self.assertEqual(reading["summary"], "sd-check pass (check pass)")
         self.assertIsNone(sd_gate_run.check_reading(0, "not json")["report"])
 
+    def test_a_failed_precheck_is_named_alone(self) -> None:
+        """sd:2604: the checks after a failed precheck did not run, so the summary names the precheck."""
+        stopped = ('{"status": "fail", "precheck": {"name": "precheck", "status": "fail"},'
+                   ' "checks": [{"name": "check", "status": "fail"}]}')
+        self.assertEqual(sd_gate_run.check_reading(1, stopped)["summary"], "sd-check fail (precheck fail)")
+
 
 class Post(unittest.TestCase):
     HEAD = "a" * 40
