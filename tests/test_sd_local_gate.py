@@ -502,6 +502,19 @@ class CargoBuildCache(Repository):
         self.assertEqual(len(self.folders()), 1)
 
 
+class PackDeclaresTreeReuse(unittest.TestCase):
+    """The pack keys its own gate receipts by tree (sd:2610): `make check` reads no commit history."""
+
+    def test_the_pack_keys_its_gate_receipts_by_tree(self) -> None:
+        self.assertTrue(sd_gate_receipts.keyed_by_tree(REPO_ROOT), sd_gate_receipts.REUSE_DECLARATION)
+
+    def test_the_check_lints_docs_without_history(self) -> None:
+        """The declaration rests on this: without `--no-history`, docs-lint fetches and reads `git log` (sd:2606)."""
+        makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+        recipe = makefile.split("\ndocs-lint:\n", 1)[1].split("\n\n", 1)[0]
+        self.assertIn("bin/sd-docs-lint --no-history", recipe)
+
+
 class DocsScopeGate(Repository):
     """The merge gate passes the base branch, so a declared docs-only change runs the docs command (sd:2072)."""
 
