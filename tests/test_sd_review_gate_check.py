@@ -180,12 +180,8 @@ class BranchReviewCheck(ReviewFixture):
         self.assertEqual((report["status"], self.trace.read_text().split()), ("gate_failed", ["live"]))
 
 
-class BuilderReceipt(GateRepo):
-    """`sd gate check` (sd:1912): a builder's passing gate at a head is the one prepare's gate reuses.
-
-    A plain `make check` leaves nothing a gate can trust; this verb runs the
-    gate's own check, in a clean worktree at HEAD, and records its receipt.
-    """
+class BuilderFixture(GateRepo):
+    """`GateRepo` plus a builder's `sd gate check` and a count of the check's runs."""
 
     def environment(self, **extra: str) -> dict[str, str]:
         """The fixture's environment as a Python child holds it.
@@ -207,6 +203,14 @@ class BuilderReceipt(GateRepo):
     def runs(self) -> int:
         counter = self.tmp / "runs"
         return len(counter.read_text().splitlines()) if counter.exists() else 0
+
+
+class BuilderReceipt(BuilderFixture):
+    """`sd gate check` (sd:1912): a builder's passing gate at a head is the one prepare's gate reuses.
+
+    A plain `make check` leaves nothing a gate can trust; this verb runs the
+    gate's own check, in a clean worktree at HEAD, and records its receipt.
+    """
 
     def test_prepare_reuses_the_builders_pass_at_the_same_head(self) -> None:
         root, database = self.repo()
@@ -283,3 +287,130 @@ class BuilderReceipt(GateRepo):
         gate = self.gate(root, database)
         self.assertEqual(gate["source"], "gate")
         self.assertEqual(self.runs(), 2)
+
+
+class TreeReceipt(BuilderFixture):
+    """`.github/sd-gate-reuse.json` (sd:1912): a check that reads no commit history is keyed by its tree.
+
+    Two heads with one tree -- an `sd attribute` commit, a message-only amend --
+    differ only in commit metadata. A repository that declares its check reads
+    none of it reuses the first head's pass at the second; one that does not
+    declare keeps the head key, since a commit-message lint can pass at one
+    head and fail at the other.
+    """
+
+    def declared(self) -> tuple[pathlib.Path, pathlib.Path]:
+        root, database = self.repo()
+        (root / ".github").mkdir(exist_ok=True)
+        (root / ".github" / "sd-gate-reuse.json").write_text(
+            json.dumps({"schema_version": 1, "key": "tree",
+                        "reason": "the check reads no commit message, range or tag"}), encoding="utf-8")
+        git(root, "add", ".github/sd-gate-reuse.json")
+        git(root, "commit", "-q", "-m", "declare tree reuse")
+        return root, database
+
+    def test_a_declared_tree_reuses_the_pass_at_a_new_head_with_the_same_tree(self) -> None:
+        root, database = self.declared()
+        self.assertEqual(self.builder(root, database).returncode, 0)
+        git(root, "commit", "-q", "--allow-empty", "-m", "attribute\n\nAuthored-with: claude/anthropic")
+        gate = self.gate(root, database)
+        self.assertEqual((gate["status"], gate["source"]), ("pass", "gate-receipt"), json.dumps(gate)[:2000])
+        self.assertEqual(self.runs(), 1)
+
+    def test_the_merge_gate_reads_a_tree_receipt_at_a_new_head(self) -> None:
+        import sd_gate_run
+
+        root, database = self.declared()
+        built = git(root, "rev-parse", "HEAD")
+        self.assertEqual(self.builder(root, database).returncode, 0)
+        git(root, "commit", "-q", "--amend", "-m", "declare tree reuse, reworded")
+        merged = sd_gate_run.check_in_worktree(root, git(root, "rev-parse", "HEAD"), base=sd_gate_run.base_ref("main"),
+                                               database=database, environ=self.environment(), record=False)
+        self.assertEqual((merged["status"], merged["head"]), ("success", git(root, "rev-parse", "HEAD")))
+        self.assertEqual(merged["reused"]["head"], built)  # the head that passed, which the binding no longer names
+        self.assertEqual(self.runs(), 1)
+
+    def test_without_the_declaration_a_new_head_with_the_same_tree_runs_again(self) -> None:
+        root, database = self.repo()
+        self.assertEqual(self.builder(root, database).returncode, 0)
+        git(root, "commit", "-q", "--allow-empty", "-m", "attribute")
+        gate = self.gate(root, database)
+        self.assertEqual((gate["status"], gate["source"]), ("pass", "gate"))
+        self.assertEqual(self.runs(), 2)
+
+    def test_a_declared_tree_that_changed_runs_again(self) -> None:
+        root, database = self.declared()
+        self.assertEqual(self.builder(root, database).returncode, 0)
+        (root / "src.py").write_text("x = 2\n", encoding="utf-8")
+        git(root, "commit", "-q", "-am", "one byte")
+        gate = self.gate(root, database)
+        self.assertEqual((gate["status"], gate["source"]), ("pass", "gate"))
+        self.assertEqual(self.runs(), 2)
+
+    def test_a_declaration_that_names_another_key_keeps_the_head_key(self) -> None:
+        root, database = self.declared()
+        (root / ".github" / "sd-gate-reuse.json").write_text(json.dumps({"schema_version": 1, "key": "content", "reason": "x"}), encoding="utf-8")
+        git(root, "commit", "-q", "-am", "unknown key")
+        self.assertEqual(self.builder(root, database).returncode, 0)
+        git(root, "commit", "-q", "--allow-empty", "-m", "attribute")
+        gate = self.gate(root, database)
+        self.assertEqual(gate["source"], "gate")
+        self.assertEqual(self.runs(), 2)
+
+    def test_a_declared_tree_at_a_new_merge_base_runs_again(self) -> None:
+        """The merge base is bound: main moved by an empty commit leaves the tree equal and the history not."""
+        root, database = self.declared()
+        self.assertEqual(self.builder(root, database).returncode, 0)
+        git(root, "checkout", "-q", "main")
+        git(root, "commit", "-q", "--allow-empty", "-m", "main moved, tree did not")
+        git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        git(root, "checkout", "-q", "topic")
+        tree = git(root, "rev-parse", "HEAD^{tree}")
+        git(root, "merge", "-q", "--no-edit", "main")
+        self.assertEqual(git(root, "rev-parse", "HEAD^{tree}"), tree)
+        gate = self.gate(root, database)
+        self.assertEqual((gate["status"], gate["source"]), ("pass", "gate"))
+        self.assertEqual(self.runs(), 2)
+
+    def test_a_declared_tree_with_no_base_keeps_the_head_key(self) -> None:
+        import sd_gate_run
+
+        root, database = self.declared()
+        for _ in range(2):
+            ran = sd_gate_run.check_in_worktree(root, git(root, "rev-parse", "HEAD"), database=database,
+                                                environ=self.environment())
+            self.assertEqual((ran["status"], "reused" in ran), ("success", False))
+            git(root, "commit", "-q", "--allow-empty", "-m", "attribute")
+        self.assertEqual(self.runs(), 2)
+
+    def later(self, seconds: int):
+        """The receipt module's clock, `seconds` after now: the window counts from the run that passed."""
+        import time
+        from unittest import mock
+
+        import sd_gate_receipts
+
+        return mock.patch.object(sd_gate_receipts.time, "time", return_value=time.time() + seconds)
+
+    def test_a_tree_receipt_stands_for_six_hours(self) -> None:
+        """Ruling D2' (sd:1912): a tree-keyed receipt counts for 6 h; at 5 h it reuses, at 7 h it runs."""
+        import sd_gate_receipts
+
+        root, database = self.declared()
+        self.assertEqual(self.builder(root, database).returncode, 0)
+        git(root, "commit", "-q", "--allow-empty", "-m", "attribute")
+        with self.later(5 * 3600):
+            self.assertEqual(self.gate(root, database)["source"], "gate-receipt")
+        with self.later(7 * 3600):
+            self.assertEqual(self.gate(root, database)["source"], "gate")
+        self.assertEqual(self.runs(), 2)
+        self.assertEqual(sd_gate_receipts.TREE_REUSE_WINDOW_SECONDS, 6 * 3600)
+
+    def test_a_head_receipt_still_stands_for_thirty_minutes(self) -> None:
+        """The head key keeps D2's 30 minutes: 31 minutes after the pass, the check runs."""
+        root, database = self.repo()
+        self.assertEqual(self.builder(root, database).returncode, 0)
+        with self.later(31 * 60):
+            self.assertEqual(self.gate(root, database)["source"], "gate")
+        self.assertEqual(self.runs(), 2)
+

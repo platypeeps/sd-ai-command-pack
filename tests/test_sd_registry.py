@@ -20,6 +20,7 @@ import json
 import os
 import pathlib
 import shlex
+import subprocess
 import sys
 import tempfile
 import types
@@ -1766,8 +1767,8 @@ class LoopbackNeedsNoCredentialTests(unittest.TestCase):
         self.assertNotIn("Authorization".lower().capitalize(), sent["headers"])
 
     def test_a_loopback_url_routes_past_a_configured_proxy(self):
-        """`build_opener` installs a `ProxyHandler` reading `HTTP_PROXY` at
-        import, and urllib's bypass list does not special-case loopback. On
+        """`build_opener` installs a `ProxyHandler` reading `HTTP_PROXY` when
+        it is built, and urllib's bypass list does not special-case loopback. On
         a box where `HTTP_PROXY` is set and `NO_PROXY` omits `localhost`,
         the default opener forwards a loopback request to the proxy and the
         diff leaves the machine -- the more so now that such a call carries
@@ -1783,8 +1784,8 @@ class LoopbackNeedsNoCredentialTests(unittest.TestCase):
                       sd_registry._OPENER)
 
     def test_the_two_opener_recipes_differ_under_a_configured_proxy(self):
-        """Both are built at import, so what they hold depends on the
-        environment this process was launched with -- which is why this
+        """Both are built at their first request, so what they hold depends on
+        the environment this process had then -- which is why this
         rebuilds each recipe under a forced `http_proxy` rather than reading
         the module's own two. `build_opener` drops a `ProxyHandler({})`
         entirely rather than registering an inert one, so "no ProxyHandler"
@@ -1799,6 +1800,28 @@ class LoopbackNeedsNoCredentialTests(unittest.TestCase):
             [{"http": "http://proxy.example:3128"}])
         self.assertEqual(
             [h for h in direct.handlers if isinstance(h, urllib.request.ProxyHandler)], [])
+
+    def test_importing_the_registry_reads_no_proxy_settings(self):
+        """sd:1615. The default opener's `ProxyHandler` asks the system for
+        its proxies, an IPC round trip of 0.1-0.2 s on macOS, and every
+        `sd-status`, `sd-review` and `sd-ship` process imports this module.
+        The openers are built on their first request; a process that sends
+        none never asks."""
+        probe = (
+            "import sys, urllib.request\n"
+            "asked = []\n"
+            "urllib.request.getproxies = lambda: asked.append(1) or {}\n"
+            f"sys.path.insert(0, {str(REPO_ROOT / 'bin')!r})\n"
+            "import sd_registry\n"
+            "print(len(asked))\n"
+            "opener = sd_registry._OPENER.built()\n"
+            "print(len(asked), opener is sd_registry._OPENER.built(),\n"
+            "      any(isinstance(h, sd_registry._NoRedirect) for h in opener.handlers))\n"
+        )
+        done = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=False)
+        self.assertEqual(done.stdout.split("\n")[0], "0", "the import asked for the proxies")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.split("\n")[1], "1 True True")
 
     def test_a_public_entry_with_no_variable_is_still_refused(self):
         """The half that would be a hole: no key, but not this machine."""

@@ -1157,6 +1157,21 @@ class ProtectionSectionTests(StatusFixture):
         )
         self.assertIn("until a second account with push rights exists", completed.stdout)
 
+    def test_an_accepted_unprotected_branch_whose_rules_failed_prints_as_unknown(self) -> None:
+        """sd:1000. The same acknowledgement, but the rules endpoint did not
+        answer a list: the report says unknown and why, and prints no
+        acceptance over a state it could not read."""
+        self.acknowledge(self.UNPROTECTED)
+        self.with_github(pulls=[], protection=None, rules={"message": "Server Error"})
+        section = self.report()["protection"]
+        self.assertIsNone(section["protected"])
+        self.assertEqual(section["accepted"], [])
+        completed = self.run_tool(SD_STATUS)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("main: protection unknown -- branch rulesets on main could not be read (Server Error",
+                      completed.stdout)
+        self.assertNotIn("accepted 2026-09-11", completed.stdout)
+
     def test_an_unprotected_acknowledgement_naming_protection_does_not_apply(self) -> None:
         """`branch_protection` is a real pin here, and the other four cannot be.
 
@@ -5859,7 +5874,8 @@ class RulesetProtectionCase(unittest.TestCase):
 
     def section(self, rules: Any, ruleset: Any = RULESET, *, repo: dict[str, Any] | None = None,
                 extra: dict[int, Any] | None = None,
-                classic: str = "gh: Branch not protected (HTTP 404)") -> dict[str, Any]:
+                classic: str = "gh: Branch not protected (HTTP 404)",
+                accepted: tuple[dict[str, Any], ...] = ()) -> dict[str, Any]:
         seen: list[str] = []
 
         def answer(args: list[str], root: pathlib.Path) -> tuple[Any, str]:
@@ -5886,6 +5902,10 @@ class RulesetProtectionCase(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
                 status.pr_state, "gh_json", answer):
+            if accepted:
+                (pathlib.Path(directory) / ".github").mkdir()
+                (pathlib.Path(directory) / ".github" / "sd-status.json").write_text(
+                    json.dumps({"accepted_gaps": list(accepted)}), encoding="utf-8")
             result = status.protection_section(pathlib.Path(directory), self.GH)
         result["_seen"] = seen
         return result
@@ -6135,10 +6155,23 @@ class RulesetProtectionCase(unittest.TestCase):
         self.assertEqual(result["detail"]["ruleset_rules"], [])
         self.assertNotIn("rules_read_error", result["detail"])
 
-    def test_rules_that_cannot_be_read_are_named_not_assumed_absent(self) -> None:
-        result = self.section(None)
+    def test_an_acknowledged_unprotected_branch_whose_rules_were_read_is_accepted(self) -> None:
+        """The control for the test below: rules read as `[]` and an admin's
+        classic 404 are evidence, so the acknowledgement applies."""
+        result = self.section([], accepted=(ProtectionSectionTests.UNPROTECTED,))
         self.assertFalse(result["protected"])
-        self.assertIn("unprotected", [gap["id"] for gap in result["gaps"]])
+        self.assertEqual([entry["id"] for entry in result["accepted"]], ["unprotected"])
+
+    def test_rules_that_cannot_be_read_are_named_not_assumed_absent(self) -> None:
+        """sd:1000. An admin's classic 404 says only that classic protection
+        is absent; a ruleset may still gate the merge. A rules read that
+        failed was reported as `unprotected`, which a standing acknowledgement
+        then moved to `accepted`: a read failure shown as an accepted state."""
+        result = self.section(None, accepted=(ProtectionSectionTests.UNPROTECTED,))
+        self.assertIsNone(result["protected"])
+        self.assertNotIn("unprotected", [gap["id"] for gap in result["gaps"]])
+        self.assertEqual(result["accepted"], [])
+        self.assertIn("gh: Not Found (HTTP 404)", result["reason"])
         self.assertEqual(result["detail"]["rules_read_error"], "gh: Not Found (HTTP 404)")
 
 
