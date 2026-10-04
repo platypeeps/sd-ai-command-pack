@@ -2900,7 +2900,9 @@ roles:
         from sd_db.workflow import change_status
         self.task_item("task")
         self.unanswered("--deliver").prepare()
-        change_status(self.connection, self.item, "done", who="operator")
+        # The item has a branch, so a reasonless close is refused (sd_db's
+        # `_refuse_unlanded_branch`); a reason that names no merge is the close.
+        change_status(self.connection, self.item, "done", who="operator", reason="closed by hand, no merge named")
         with patch.object(ship.time, "sleep"):
             result = self.merge()
         self.assertTrue(result["delivery_pending"])
