@@ -249,6 +249,7 @@
 
 ### Fixed
 
+- **A gate's pass is recorded even when the pack moves during the run (sd:2612).** The local gate binds a receipt to a digest of the pack's own `bin/`, computed before the run and again after it. The pack lane fast-forwards the pack checkout after each merge, so a gate that overlapped a landing passed but left no receipt, and the next prepare ran the full check again. The digest is now taken once, at the start: the pack that ran is the one the run started with. A pass that still leaves no receipt now says why in `receipt_skipped` (for example `moved during the run: scope mode`). A pack change between two runs still runs the check again.
 - **One stalled plugin root no longer blocks every plugin lookup (sd:2540).**
   A prefix lives in its plugin's manifest, so `sd config get <prefix>.<key>`
   read every registered root in turn until it found the owner. On 2026-10-01

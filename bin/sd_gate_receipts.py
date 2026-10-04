@@ -167,6 +167,25 @@ def gate_binding(tree: pathlib.Path, head: str, inputs: str, base: str | None, e
         return None
 
 
+def record_unless_moved(database: pathlib.Path, key: str, identity: Mapping[str, Any], after: Mapping[str, Any] | None,
+                        reading: dict[str, Any], head: str) -> None:
+    """Record `reading`'s pass when the binding held from before the run (`identity`) to after it (`after`).
+
+    Otherwise `reading["receipt_skipped"]` names what moved (sd:2612), so a
+    pass that leaves no receipt says why; a failed write sets `receipt_error`.
+    """
+    scope = (reading["report"] or {}).get("scope") or {}
+    moved = [name for name in identity if after.get(name) != identity[name]] if after else ["the binding"]
+    moved += ["scope mode"] if scope.get("mode") != identity["scope"]["mode"] else []
+    if moved:
+        reading["receipt_skipped"] = "moved during the run: " + ", ".join(moved)
+        return
+    try:
+        reading["receipt_revision"] = record_pass(database, key, identity, reading, head)
+    except Exception as error:  # the pass stands; only its reuse is lost
+        reading["receipt_error"] = str(error)
+
+
 def _connect(database: pathlib.Path, *, write: bool) -> Any:
     imported = sd_lib.import_sd_db()
     if imported.module is None:

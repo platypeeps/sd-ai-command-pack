@@ -161,7 +161,8 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
     `base` is a ref for `sd-check --base`; `environ` is what the gate's
     environment is made from, the process's own by default. With a `database`, a matching
     receipt answers instead of a run (the result then carries `reused`), and a
-    passing run leaves one when its binding held from before the run to after.
+    passing run leaves one when its binding held from before the run to after;
+    otherwise the result's `receipt_skipped` names what moved (sd:2612).
     `reuse=False` never reads one and `record=False` never writes one (the merge gate).
     """
     with tempfile.TemporaryDirectory(prefix="sd-local-gate-") as parent:
@@ -173,8 +174,9 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
             env = gate_environment(root, None if environ is None else dict(environ))
             content, fork = sd_gate_receipts.tree_key(tree, base)
             key = sd_gate_receipts.receipt_key(root, head, content)
-            identity = (sd_gate_receipts.gate_binding(tree, head, gate_inputs(root, head, content), base, env, fork)
-                        if database is not None else None)
+            # Hashed once: the pack that ran is the one the run started with, and the lane moves it after a merge (sd:2612).
+            inputs = gate_inputs(root, head, content)
+            identity = sd_gate_receipts.gate_binding(tree, head, inputs, base, env, fork) if database is not None else None
             found, miss = sd_gate_receipts.examine(database, key, identity) if reuse and database else (None, None)
             if found is not None:
                 reading = dict(found["reading"], summary=f"{found['reading']['summary']} (reused)"[:DESCRIPTION_LIMIT],
@@ -188,13 +190,8 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
             checked = gate_git(tree, "rev-parse", "HEAD")
             reading = check_reading(code, output, errors)
             if record and database and identity and reading["status"] == "success" and checked == head:
-                after = sd_gate_receipts.gate_binding(tree, head, gate_inputs(root, head, content), base, env, fork)
-                scope = (reading["report"] or {}).get("scope") or {}
-                if after == identity and scope.get("mode") == identity["scope"]["mode"]:
-                    try:
-                        reading["receipt_revision"] = sd_gate_receipts.record_pass(database, key, identity, reading, head)
-                    except Exception as error:  # the pass stands; only its reuse is lost
-                        reading["receipt_error"] = str(error)
+                after = sd_gate_receipts.gate_binding(tree, head, inputs, base, env, fork)
+                sd_gate_receipts.record_unless_moved(database, key, identity, after, reading, head)
         finally:
             # The administrative entry goes with the directory; the temporary
             # directory's own cleanup removes whatever the removal left.

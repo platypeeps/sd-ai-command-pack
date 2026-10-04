@@ -347,6 +347,33 @@ class Receipts(ReceiptFixture):
             self.assertNotIn("reused", self.gate(head))
         self.assertEqual(self.runs(), 3)
 
+    def passing(self, during=lambda: None, mode: str = "full"):  # type: ignore[no-untyped-def]
+        """A stand-in run that calls `during` while it runs, then passes with scope `mode`."""
+        def run(argv, env, tree, timeout):  # type: ignore[no-untyped-def]
+            during()
+            return 0, json.dumps({"status": "pass", "scope": {"mode": mode}, "checks": []}), ""
+        return run
+
+    def test_a_pack_that_moves_during_the_run_still_records_the_pass(self) -> None:
+        """The lane fast-forwards the pack checkout after each merge (sd:2612). The pack that
+        ran is the one the run started with, so a landing mid-run must not drop the receipt."""
+        head = self.counted()
+        pack = self.root.parent / "pack"
+        pack.mkdir()
+        (pack / "sd-x").write_text("one\n", encoding="utf-8")
+        with mock.patch.object(sd_gate_run, "BIN", pack):
+            result = self.gate(head, run=self.passing(lambda: (pack / "sd-x").write_text("two\n", encoding="utf-8")))
+        self.assertIn("receipt_revision", result)
+        self.assertNotIn("receipt_skipped", result)
+
+    def test_a_pass_left_unrecorded_says_what_moved(self) -> None:
+        """A pass whose binding moved during the run leaves no receipt, and the result says why."""
+        head = self.counted()
+        result = self.gate(head, run=self.passing(mode="docs-only"))
+        self.assertEqual(result["status"], "success")
+        self.assertNotIn("receipt_revision", result)
+        self.assertEqual(result["receipt_skipped"], "moved during the run: scope mode")
+
     def test_a_different_path_runs_the_check_again(self) -> None:
         head = self.counted()
         self.gate(head)
