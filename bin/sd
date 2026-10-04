@@ -802,7 +802,10 @@ def scan(roots: list[str], wanted: str | None = None, *,
     silent root. The earlier registry entry owns it then, never the root
     that answers first, so a store write lands in the same plugin every
     time. A lookup for `wanted` returns once every root listed before its
-    owner has answered or timed out.
+    owner has answered or timed out. When one of those earlier roots timed
+    out, it may be the owner, so the prefix refuses as ambiguous instead of
+    passing to the later root: the same manifests must never route to two
+    plugins across runs.
     """
 
     answers: queue.Queue[tuple[str, pathlib.Path, dict[str, object] | None]] = queue.Queue()
@@ -849,9 +852,19 @@ def scan(roots: list[str], wanted: str | None = None, *,
         print(f"warning: skipped plugin root {root}: its {MANIFEST_NAME} did not answer within "
               f"{ROOT_READ_SECONDS:g}s", file=sys.stderr)
     found: dict[str, tuple[pathlib.Path, dict[str, object]]] = {}
+    silent: list[str] = []
     for root in order:
-        if root in answered and isinstance(prefix := answered[root][1].get("prefix"), str) and prefix:
-            found.setdefault(prefix, answered[root])
+        if root in pending:
+            silent.append(root)
+        elif root in answered and isinstance(prefix := answered[root][1].get("prefix"), str) and prefix:
+            if prefix in found:
+                continue
+            if silent and wanted in (None, prefix):
+                raise Refusal(f"prefix {prefix!r} is ambiguous: plugin root(s) {', '.join(silent)}, "
+                              f"registered before {root}, did not answer within {ROOT_READ_SECONDS:g}s "
+                              f"and may own it; make each readable or remove it from the machine "
+                              f"config, then run this again")
+            found[prefix] = answered[root]
     return found
 
 

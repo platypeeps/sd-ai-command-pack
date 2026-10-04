@@ -35,6 +35,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SD = REPO_ROOT / "bin" / "sd"
@@ -945,7 +946,8 @@ class StalledRootTests(PluginFixture):
     waits for a writer, the way an open() under an ungranted volume waited for
     16 hours on 2026-10-01 (sd:2537). A lookup waits for every root listed
     before the owner, so registry order decides what a stalled root costs:
-    nothing after the owner, at most ROOT_READ_SECONDS before it.
+    nothing after the owner; before it, a refusal within ROOT_READ_SECONDS,
+    since the silent root may own the prefix.
     """
 
     def stalled(self) -> pathlib.Path:
@@ -975,13 +977,14 @@ class StalledRootTests(PluginFixture):
         self.assertLess(time.monotonic() - started, load_sd().ROOT_READ_SECONDS,
                         "the lookup waited for a root listed after its owner")
 
-    def test_the_owner_s_key_answers_within_the_bound_while_an_earlier_root_hangs(self) -> None:
-        stalled = self.stalled()
-        self.write_config({"plugins": [str(stalled), str(self.owner())],
+    def test_an_earlier_silent_root_makes_the_key_refuse_within_the_bound(self) -> None:
+        stalled, owner = self.stalled(), self.owner()
+        self.write_config({"plugins": [str(stalled), str(owner)],
                            "config": {"pp": {"google_account": "personal"}}})
         got = self.run_sd("config", "get", "pp.google_account", timeout=30)
-        self.assertEqual((got.returncode, got.stdout.strip()), (0, "personal"), got.stderr)
-        self.assertIn(f"warning: skipped plugin root {stalled}", got.stderr)
+        self.assertNotEqual(got.returncode, 0, got.stdout)
+        self.assertIn(f"prefix 'pp' is ambiguous: plugin root(s) {stalled}, registered before {owner}",
+                      got.stderr)
 
     def test_a_core_key_reads_no_plugin_root(self) -> None:
         self.write_config({"plugins": [str(self.stalled())], "config": {"sd": {"gate_slots": "3"}}})
@@ -996,7 +999,7 @@ class StalledRootTests(PluginFixture):
 
         def scan() -> None:
             with contextlib.redirect_stderr(said):
-                found.update({prefix: path for prefix, (path, _) in sd.scan([stalled, owner]).items()})
+                found.update({prefix: path for prefix, (path, _) in sd.scan([owner, stalled]).items()})
 
         worker = threading.Thread(target=scan, daemon=True)
         worker.start()
@@ -1046,6 +1049,35 @@ class SharedPrefixTests(PluginFixture):
                 with self.subTest(delays=delays, wanted=wanted):
                     self.assertEqual(self.owners(delays, wanted).name, "first",
                                      "the root that answered first took the prefix, not the earlier registry entry")
+
+    def test_a_later_duplicate_never_takes_a_prefix_from_an_earlier_root_past_the_bound(self) -> None:
+        """Review round 3: the earlier root timed out, so it may own the prefix; refuse, never promote."""
+
+        sd = load_sd()
+        sd.ROOT_READ_SECONDS = 0.3
+        first, second = str(self.kinded("first")), str(self.kinded("second"))
+        read = sd.read_manifest
+
+        def slow_read(path: pathlib.Path) -> dict[str, object]:
+            time.sleep(2.0 if path.parent.name == "first" else 0.0)
+            return read(path)
+
+        sd.read_manifest = slow_read
+        lookups = {
+            "scan for pp": lambda: sd.scan([first, second], wanted="pp"),
+            "full scan": lambda: sd.scan([first, second]),
+            "declared_config": lambda: sd.declared_config("pp"),
+            "resolve_kind": lambda: sd.resolve_kind("pp.tip"),
+        }
+        with mock.patch.object(sd, "registry", return_value=[first, second]), \
+                mock.patch.object(sd.sd_lib, "machine_config", return_value={}), \
+                contextlib.redirect_stderr(io.StringIO()):
+            for name, lookup in lookups.items():
+                with self.subTest(lookup=name):
+                    with self.assertRaises(sd.Refusal, msg="a later duplicate took the prefix") as refused:
+                        lookup()
+                    self.assertIn(f"prefix 'pp' is ambiguous: plugin root(s) {first}, registered before {second}",
+                                  str(refused.exception))
 
 
 class CorePolicyConfigTests(PluginFixture):

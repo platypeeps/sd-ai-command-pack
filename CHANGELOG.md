@@ -250,6 +250,9 @@
   before it have answered. A root silent after 5 s is skipped with a
   `warning: skipped plugin root` line. When two roots carry one prefix, the
   earlier registry entry owns it for both lookups, whatever answers first.
+  When a root listed before the answering owner stays silent, the prefix
+  refuses as ambiguous, naming both roots: the silent root may own it, so a
+  later root never takes it over.
   `sd plugin add` does not skip a silent root: it refuses, naming that root,
   because the root may own the prefix being registered. Core `sd.*` keys
   still read no plugin root.
