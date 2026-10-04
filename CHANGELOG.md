@@ -4,6 +4,10 @@
 
 ### Added
 
+- **`sd-ship lane`: a serial ship queue per repository that outlives its session (sd:2524).** `enqueue`, `list` and `cancel` edit a queue file under `sd.lane_root` (new setting; unset reads `$XDG_STATE_HOME/sd/lanes`, `SD_LANE_ROOT` overrides it). `run` drains it in order under one lock per repository: head check, `prepare --catch-up` with the claim the entry was queued with (`--deliver` or `--associate-only`, required, plus any `--acceptance-file`), then `merge` for an entry queued with `--manual`; a failed entry is marked and the next runs, a second runner exits at once, and each step's whole output is kept. `watch` prints each gate end a lane or builder log records, once.
+
+- **Gate receipts keyed by tree (sd:1912).** A repository that tracks `.github/sd-gate-reuse.json` with `{"schema_version": 1, "key": "tree", "reason": ...}` keys its gate receipts by `HEAD^{tree}` and the merge base with the base branch instead of the head. A new head with the same tree and merge base -- an `sd attribute` commit, a reworded message -- then reuses the earlier pass, and the reuse names the head that passed. A tree-keyed receipt stands for 6 hours; a head-keyed one stays at 30 minutes. Without the declaration, with no base branch, or with a declaration that does not parse, the head key stands. The pack does not declare it: its `make check` reads commit trailers and ranges.
+
 - **One passing gate check per head (sd:1912).** `sd-ship prepare`'s gate now reads a gate receipt at the same head and binding, so a second prepare at an unchanged head runs no second check. The new `sd gate check` runs the local gate's check at `HEAD`, in a clean worktree with the gate's environment, and records a pass that prepare and then the merge gate reuse. A plain `make check` leaves no receipt. The gate child no longer gets the agent harness's session variables (`CLAUDE*`, `HERDR_*`, `ITERM_*`, `TERM_SESSION_ID`, `PWD`, `OLDPWD`, `SHLVL`, `_`), so two sessions' passes bind equal; every other variable, `MAKEFLAGS` included, still binds. A failed or unfinished run records nothing, a new head (a merge of `main` included) runs again, and the 30-minute window counts from the run that passed.
 
 - **One gate-slot pool for every gate, and a waiting gate names its holders
@@ -218,6 +222,18 @@
   (billing-blocked) check run still refuses; WORKFLOW.md § No-CI mode names
   the remedy, a fresh commit.
 
+- **A `url` entry can opt in to the strict findings schema (sd:1827, pack
+  half).** With `response_format: json_schema` on its registry entry,
+  `sd-review` sends the findings schema as a strict `response_format`, on the
+  ledger road through `sd_db.calls.call` and on the no-ledger road through
+  `sd_registry.chat_completion` alike. The copy is the one Moonshot's strict
+  mode takes: every property typed, `line` as `anyOf` integer or null, and no
+  `minLength` or `maxItems`; the answer is still parsed against the full
+  schema. Every other entry sends the request it sent before. The shipped
+  registry opts no entry in: kimi-k3 waits for a paid strict-mode test, and
+  MiniMax-M3 ignores the field. An `sd_db` without the field refuses a
+  registry that sets it.
+
 ### Fixed
 
 - **One stalled plugin root no longer blocks every plugin lookup (sd:2540).**
@@ -231,6 +247,108 @@
   `sd plugin add` does not skip one: it refuses, naming the silent root,
   because that root may own the prefix being registered. Core `sd.*` keys
   still read no plugin root.
+
+- **Seven guard tests read shapes they used to miss (sd:999).**
+  `tests/test_suite_shape.py` reads `assert` statements and folds a
+  comparison, `and`/`or` and `not` as literals, so `assert True` and
+  `assertTrue(1 == 1)` are named. `assert False` stays legal. It and
+  `tests/test_no_shipped_shell.py` read `git ls-files -z` as bytes and decode
+  each name with `os.fsdecode`, so a `\r` in a tracked name no longer drops
+  the file. `tests/test_code_health.py` reports a `DYNAMIC` entry that gained a
+  reference, and names the Git 2.31 floor `--deduplicate` sets; CONTRIBUTING
+  states it. `tests/test_ls_files_form.py` reads a shell comment after the
+  subcommand as a bare call. `tests/test_pull_request_template_links.py`
+  checks a `<dest>` link and reads anchors in an upper-case `.MD` page.
+  `tests/test_cut_symbols.py` sees `.get()`, single-quoted and `getattr()`
+  reads. `tests/test_writer_skills_consult_the_registry.py` needs the pointer
+  in a sentence that runs it before the write.
+
+- **A failed gate names the shard that failed and keeps its whole output
+  (sd:2558).** `sd-check` kept each stream's last 4,000 characters, and
+  prepare's refusal repeated the last 1,200, so a shard that failed early in
+  a long `make check` was in neither and the failing test could not be found.
+  A failing check now writes its whole output to
+  `<git-common-dir>/sd-check-output/` (the newest 20 stay), and the report
+  carries `output_path` and `failed_shards`. The prepare and merge-gate
+  refusals name each failed shard and the file before the tails.
+
+- **The citation gate's own checks catch what they claim (sd:999).** In
+  `tests/test_doc_citations.py`, the pack-rule qualifier read a 100-character
+  window, so "`<path>`. See the pack's release notes." passed as qualified. It
+  now reads the citation's own sentence, or the next one when that sentence
+  opens on the file ("That file lives only in ..."). A paragraph break ends
+  the search. The skill walk is now compared with an `os.walk` count of every
+  `skills/**/*.md`, so a walk of `SKILL.md` alone fails. The scope fixture now
+  carries `.github/sd-status.json`. The literal-separator guard no longer
+  counts the `\r` of a CRLF line ending, so a `core.autocrlf` checkout passes.
+  A source file with a NUL byte has a fixture row, and its refusal catches
+  `ValueError` like its two sibling readers.
+
+- **A held squash delivered by hand closes in git too (sd:1600).** Reconcile
+  records `closing_owed` on the receipt. The next `sd-ship merge` in the same
+  repository writes `Closes: <item>` into its squash's trailer block, at most
+  10 per squash, and names them in `carried_closes`; `closes_left` names the
+  rest. Its reconcile marks them paid only when that squash is not held. A
+  reader with no database sees the item open until that merge lands.
+
+- **The Dependabot guard keeps a consumer's trailing comment, and `guard same`
+  means unchanged (sd:1000).** A comment the consumer wrote below the last
+  `ignore:` item read as part of that item. A guard above it read `differs`,
+  and `--force` deleted the comment with the old guard. A guard appended to
+  such a list went below the comment and took it as its own, so the next
+  `setup-github` run refused without `--force`, and `--remove` deleted the
+  comment. A comment at an item's indentation below it now belongs to the
+  list, not the item. A file whose guard reads `same` now comes back from the
+  render byte for byte. Before, a file with no final newline read `guard same`,
+  was rewritten anyway, and `--check` then called it `DIFFERS`.
+
+- **A failed rules read leaves protection unknown, not unprotected
+  (sd:1000).** An admin's 404 on classic protection says only that classic
+  protection is absent; a ruleset may still gate the merge. When the rules
+  endpoint did not answer, `sd-status` still reported `unprotected`, and a
+  standing `.github/sd-status.json` acknowledgement then moved it to
+  `accepted`. It now prints `protection unknown` with the rules read error as
+  the reason, raises no `unprotected` finding, and accepts nothing.
+
+- **Itemless refusals name the command that allocates a review ID (sd:2008,
+  sd:2026).** A missing `--review-id`, an unknown one, and one given beside
+  `--create-record` each refuse with their own blocker code, and the
+  `next_action` names `sd-ship review --no-item --create-record
+  --assert-new-work` and the `review_id` field that prints the ID. Both sites
+  that refuse a missing ID now build it from one definition. `--help` says an
+  ID is allocated, never chosen.
+
+- **An additional-review refusal names the flag at fault (sd:2026).** A
+  nonempty `--request-reason` without `--additional-review-for` used to be told
+  it needed a "nonempty reason"; each fault -- no head, a wrong head, an empty
+  reason, `--retry-review`, commit flags -- now refuses on its own.
+
+- **A merged itemless record reconciles from the default branch (sd:1932).**
+  After the merge deletes its branch, `sd-ship reconcile --no-item` no longer
+  refuses with "bound to branch"; the guard stays for unmerged and closed
+  records. `review --close-record` already ran from any branch; a test pins it.
+  The branch-mismatch refusal names `--rebind-branch`.
+
+- **`sd-ship -C <dir>` outside a repository names the directory (sd:2499).**
+  The refusal read "cwd is not inside a Git repository"; it now names the
+  directory, as the other lane commands do.
+
+- **`--delivered-by` names the way out for a commit with no item trailer
+  (sd:2565).** `sd task status N done --delivered-by` refused a commit naming
+  neither `Delivers: sd:N` nor `Item: sd:N`, such as a no-item squash
+  (sd:2171), with only "carries no `Delivers:` trailer". The refusal now
+  names three ways out: ship the work with `sd-ship prepare --item N
+  --deliver`, name `Closes: sd:N` in a later item merge's body, or close the
+  task by hand with `--reason TEXT`.
+
+- **A row worked on its own branch no longer closes with no merge (sd:1990).**
+  Three runner items (sd:1686, sd:1688, sd:1703) were closed with a plain
+  `sd task status N done` while their `fleet/*` branch had no pull request.
+  The move to done now refuses a row whose `branch` is not `main` or
+  `master` unless a merge is recorded (`sd-ship`'s `Code delivery` comment or
+  a delivering transition), `--delivered-by` names one, or `--reason` says
+  why no pull request is needed. The refusal leaves the row open and names
+  both flags. A work item still goes to `sd work deliver`.
 
 - **`sd-review`'s Jev rows compare Jev with the routing (sd:2359).** `jev`
   computed `changed` against `--fallback`, which here is a token no tier can

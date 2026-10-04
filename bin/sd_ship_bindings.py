@@ -57,6 +57,7 @@ FINDING_FILES = ("sd-review", "sd_opencode.py", "sd_registry.py")
 IMPORT_EXEMPT = {
     "sd_setup_github.py": "sd-review imports it only for the `setup-github` subcommand",
     "sd_setup_guard.py": "reached only through sd_setup_github.py",
+    "sd_lane.py": "sd-ship's `lane` verbs queue and run prepare and merge; they decide no verdict or gate",
 }
 REVIEW_TOOL_FILES = VERDICT_FILES + GATE_FILES + CHECK_FILES
 POLICY_FILES = ("CLAUDE.local.md", ".github/sd-review.json")
@@ -96,13 +97,23 @@ def normalized_source(data: bytes) -> str | None:
     return ast.dump(tree, include_attributes=False)
 
 
+#: `normalized_hash` answers by the sha256 of the bytes it read (sd:1615). The
+#: parse and `ast.dump` of `sd-review` and `sd_lib.py` cost about half a second
+#: per manifest, and one `sd-ship` command builds several. Keyed by content,
+#: never by path or mtime: bytes that change are a new key and are parsed again.
+_NORMALIZED: dict[str, str] = {}
+
+
 def normalized_hash(path: pathlib.Path) -> str:
     """A file that does not parse is hashed raw, never skipped."""
     data = read_bound(path)
-    source = normalized_source(data)
-    if source is None:
-        return "raw:" + hashlib.sha256(data).hexdigest()
-    return "ast:" + hashlib.sha256(source.encode()).hexdigest()
+    raw = hashlib.sha256(data).hexdigest()
+    known = _NORMALIZED.get(raw)
+    if known is None:
+        source = normalized_source(data)
+        known = "raw:" + raw if source is None else "ast:" + hashlib.sha256(source.encode()).hexdigest()
+        _NORMALIZED[raw] = known
+    return known
 
 
 def tool_manifest() -> dict:

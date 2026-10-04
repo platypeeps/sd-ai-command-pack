@@ -165,6 +165,10 @@ def walk(repo: pathlib.Path, template: str, tracked: frozenset[str]) -> Walk:
     suffixes = {pathlib.PurePosixPath(name).suffix for name in tracked} - {""}
 
     def resolve(target: str, base: pathlib.Path, form: str) -> None:
+        # `[x](<dest>)` is CommonMark's bracketed destination. The brackets
+        # are syntax, not a metavariable (sd:999, review-936).
+        if target.startswith("<") and target.endswith(">"):
+            target = target[1:-1]
         if METAVARIABLE_RE.search(target):
             return
         if SCHEME_RE.match(target):
@@ -185,7 +189,7 @@ def walk(repo: pathlib.Path, template: str, tracked: frozenset[str]) -> Walk:
                 return
         if anchor:
             anchors.append(f"{document}#{anchor}")
-            if document.endswith(".md") and (repo / document).is_file():
+            if document.lower().endswith(".md") and (repo / document).is_file():
                 offered = anchors_of((repo / document).read_text(encoding="utf-8"))
             else:
                 offered = frozenset()
@@ -330,6 +334,23 @@ class WalkerTests(unittest.TestCase):
         self.assertEqual((), self.broken(
             "Named docs/work/YYYY-MM-DD-slug/prd.md, docs/archive/YYYY-MM/ "
             "and [the bucket](/docs/archive/YYYY-MM/DD.md).\n"))
+
+    def test_an_angle_bracketed_destination_is_checked(self) -> None:
+        # CommonMark allows `[x](<dest>)`. The `<` read as a metavariable, so
+        # the destination was skipped, broken or not (sd:999, review-936).
+        self.assertEqual(1, len(self.broken("[gone](<../docs/gone.md>)\n")))
+        result = self.walked("[guide](<../docs/guide.md>)\n")
+        self.assertEqual((), result.broken)
+        self.assertEqual(("docs/guide.md",), result.files)
+        # A pattern inside the brackets is still a pattern.
+        self.assertEqual((), self.broken("[p](<../docs/work/<id>/prd.md>)\n"))
+
+    def test_an_anchor_into_an_upper_case_markdown_file_is_read(self) -> None:
+        # Template discovery ignores case, and so does GitHub's renderer: a
+        # `Guide.MD` offers its headings like any page (sd:999, review-936).
+        extra = {"docs/Notes.MD": "# Guide\n\n## Review scope\n"}
+        self.assertEqual((), self.broken("[x](../docs/Notes.MD#review-scope)\n", extra))
+        self.assertEqual(1, len(self.broken("[x](../docs/Notes.MD#gone)\n", extra)))
 
     def test_a_reference_definition_to_a_missing_file_fails(self) -> None:
         self.assertEqual(1, len(self.broken("[ref]: ../docs/gone.md\n")))
