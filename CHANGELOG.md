@@ -240,6 +240,13 @@
 
 ### Fixed
 
+- **A review watchdog's drain after KILL waits for the pipes to close (sd:2609).**
+  `review_process` used one cleanup bound for both signals, so a test that
+  shortened the TERM grace also cut the drain after KILL to 50 ms. Under
+  load the pipes closed later, and `drained` read `False`. The drain after
+  KILL now has its own bound, `REVIEW_DRAIN_SECONDS`, and ends at the close.
+  Production timings are unchanged: both bounds are 5 seconds.
+
 - **Pack tools stay out of repositories the sd database does not mark managed (sd:1620).**
   The operator sets `repo.managed` by hand on their own repositories (sd:1619),
   and the rest must not use any pack capability. `sd fleet stamp` now walks
