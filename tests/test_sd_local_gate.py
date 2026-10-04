@@ -20,6 +20,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "bin") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "bin"))
 
+import sd_gate_cache  # noqa: E402
 import sd_gate_receipts  # noqa: E402
 import sd_gate_run  # noqa: E402
 import sd_lib  # noqa: E402
@@ -397,6 +398,108 @@ class Receipts(Repository):
         head = self.counted()
         self.assertNotEqual(sd_gate_receipts.receipt_key(self.root, head),
                             sd_gate_receipts.receipt_key(self.root.parent, head))
+
+
+class CargoBuildCache(Repository):
+    """A Rust repository's gates share warm build folders instead of compiling every dependency cold (sd:2493)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.cache = self.root.parent / "cache"
+        self.seen = self.root.parent / "seen"
+
+    def rust(self, recipe: str = 'echo "$$CARGO_TARGET_DIR" >> {seen}') -> str:
+        (self.root / "Cargo.toml").write_text('[package]\nname = "fixture"\nversion = "0.1.0"\n', encoding="utf-8")
+        return self.commit(f"check:\n\t@{recipe.format(seen=self.seen)}\n")
+
+    def environ(self, **extra: str) -> dict[str, str]:
+        env = {key: value for key, value in os.environ.items()
+               if key not in ("CARGO_TARGET_DIR", sd_gate_cache.CARGO_TARGETS_VARIABLE)}
+        return {**env, sd_gate_cache.CACHE_VARIABLE: str(self.cache), **extra}
+
+    def folders(self) -> list[str]:
+        return self.seen.read_text(encoding="utf-8").splitlines()
+
+    def test_two_gates_of_one_repository_build_into_the_same_folder_outside_the_worktree(self) -> None:
+        head = self.rust()
+        for _ in range(2):
+            result = sd_gate_run.check_in_worktree(self.root, head, environ=self.environ())
+            self.assertEqual(result["status"], "success", result)
+        first, second = self.folders()
+        self.assertEqual(first, second)
+        self.assertTrue(pathlib.Path(first).is_relative_to(self.cache), first)
+
+    def test_gates_that_run_at_once_never_share_a_folder(self) -> None:
+        """A shared folder is safe in sequence only: nextest runs binaries after cargo's lock is released,
+        so a second gate's build could replace them mid-run. A held folder is skipped; past the pool, cold."""
+        self.rust()
+        env = self.environ()
+        with sd_gate_cache.cargo_target(self.root, self.root, env) as first, \
+                sd_gate_cache.cargo_target(self.root, self.root, env) as second, \
+                sd_gate_cache.cargo_target(self.root, self.root, env) as third:
+            self.assertIsNotNone(first)
+            self.assertIsNotNone(second)
+            self.assertNotEqual(first, second)
+            self.assertIsNone(third, f"the default pool is {sd_gate_cache.DEFAULT_CARGO_TARGETS}")
+        with sd_gate_cache.cargo_target(self.root, self.root, env) as again:
+            self.assertEqual(again, first, "a released folder is the first one taken again")
+
+    def test_a_warm_folder_builds_without_incremental_state(self) -> None:
+        """Each gate's worktree is new, so incremental sessions never pay off; measured on a Rust repository
+        on macOS, they and their object files grew a warm folder by about 4 GB a gate, against 0.26 GB without."""
+        self.rust()
+        with sd_gate_cache.cargo_environment(self.root, self.root, self.environ(CARGO_INCREMENTAL="1")) as warm:
+            self.assertEqual(warm["CARGO_INCREMENTAL"], "0")
+        cold = self.environ(CARGO_INCREMENTAL="1", **{sd_gate_cache.CARGO_TARGETS_VARIABLE: "0"})
+        with sd_gate_cache.cargo_environment(self.root, self.root, cold) as child:
+            self.assertEqual(child["CARGO_INCREMENTAL"], "1", "a cold build in the worktree runs as it always did")
+
+    def test_another_repository_gets_its_own_folder(self) -> None:
+        self.rust()
+        other = self.root.parent / "other"
+        other.mkdir()
+        git(other, "init", "-q", "-b", "main")
+        (other / "Cargo.toml").write_text("", encoding="utf-8")
+        git(other, "add", "Cargo.toml")
+        env = self.environ()
+        with sd_gate_cache.cargo_target(self.root, self.root, env) as mine, \
+                sd_gate_cache.cargo_target(other, other, env) as theirs:
+            self.assertNotEqual(pathlib.Path(mine).parent, pathlib.Path(theirs).parent)
+
+    def test_the_operators_cargo_target_dir_never_reaches_the_check(self) -> None:
+        """The gate borrows nothing from the operator: with the cache off it builds in its own worktree."""
+        head = self.rust('test -z "$$CARGO_TARGET_DIR"')
+        environ = self.environ(CARGO_TARGET_DIR=str(self.root / "target"), **{sd_gate_cache.CARGO_TARGETS_VARIABLE: "0"})
+        self.assertEqual(sd_gate_run.check_in_worktree(self.root, head, environ=environ)["status"], "success")
+        self.assertFalse(self.cache.exists())
+        self.assertNotIn("CARGO_TARGET_DIR", sd_gate_run.gate_environment(self.root, environ))
+
+    def test_a_repository_without_cargo_takes_no_folder(self) -> None:
+        head = self.commit('check:\n\t@test -z "$$CARGO_TARGET_DIR"\n')
+        environ = self.environ(CARGO_TARGET_DIR="/operator/target")
+        self.assertEqual(sd_gate_run.check_in_worktree(self.root, head, environ=environ)["status"], "success")
+        self.assertFalse(self.cache.exists())
+
+    def test_a_nested_cargo_workspace_counts(self) -> None:
+        (self.root / "rust").mkdir()
+        (self.root / "rust" / "Cargo.toml").write_text("", encoding="utf-8")
+        head = self.commit('check:\n\t@echo "$$CARGO_TARGET_DIR" >> ' + str(self.seen) + "\n")
+        self.assertEqual(sd_gate_run.check_in_worktree(self.root, head, environ=self.environ())["status"], "success")
+        self.assertTrue(pathlib.Path(self.folders()[0]).is_relative_to(self.cache))
+
+    def test_a_pass_in_one_folder_is_reused_from_another(self) -> None:
+        """The folder is a cache, not an input: which one a run took does not bind its receipt."""
+        from sd_db import initialise
+
+        database = self.root.parent / "sd.db"
+        initialise(database)
+        head = self.rust()
+        env = self.environ()
+        with sd_gate_cache.cargo_target(self.root, self.root, env):  # another gate holds the first folder
+            first = sd_gate_run.check_in_worktree(self.root, head, environ=env, database=database)
+        second = sd_gate_run.check_in_worktree(self.root, head, environ=env, database=database)
+        self.assertEqual((first["status"], "reused" in second), ("success", True), second)
+        self.assertEqual(len(self.folders()), 1)
 
 
 class DocsScopeGate(Repository):

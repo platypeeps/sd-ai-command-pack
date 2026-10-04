@@ -6,6 +6,10 @@
 
 - **`sd-ship` re-provisions `sd_db` after a library merge (sd:2108).** A verified merge into the system checkout, or one of its worktrees, whose squash changes `local-sd-db` now installs `sd_db` at the merge commit into the pack's main-checkout virtualenv. Before, the installed copy lagged the merge, and the next dashboard restart refused until `make setup` ran in the pack. `provision_library` takes the commit as `ref`, and keeps its downgrade guard. An installed copy that is not an ancestor of the merge commit is kept, so a late reconcile of an older merge cannot replace newer library code under the same schema. Every install, this one and `provision-library`, holds one machine-wide lock across reading the installed commit, the ancestry check and pip, so two concurrent reconciles cannot interleave. A failed install is reported in the receipt's `library` field and does not undo the merge.
 
+- **Two pack suites stop reading the pack's own history (sd:2593).** `tests/test_archive_untouched.py` pins the retire commit by full SHA instead of asking `git log`. `tests/test_sd_size_report.py` checks its anchors with `cat-file` instead of `merge-base --is-ancestor`, and its trend and report tests read a fixture repository with dated commits. In an orphan clone with the same tree, both old forms failed. The tree-keyed declaration waits: `sd-docs-lint` at the root still reads delivery trailers through `sd_lib.delivered()`.
+
+- **Warm Rust builds in the local gate (sd:2493).** A repository with a tracked `Cargo.toml` now builds its gate check into a warm `CARGO_TARGET_DIR` the gate owns, instead of the fresh worktree's `target/`, so a merge gate reuses unchanged dependencies rather than compiling every one cold. Each repository keeps two folders under `${XDG_CACHE_HOME:-~/.cache}/sd/gate/`; a gate holds one by `flock` for its whole run, because cargo-nextest runs test binaries after cargo releases its own lock. A warm run builds with `CARGO_INCREMENTAL=0`: incremental sessions never pay off in a new worktree, and they grew a folder by about 4 GB a gate. When both are held, the run builds cold in its worktree as before. The operator's own `CARGO_TARGET_DIR` no longer reaches the gate child, and the folder does not enter the receipt binding. `SD_GATE_CARGO_TARGETS` sets the count (`0` switches the cache off) and `SD_GATE_CACHE_DIR` moves it. Nothing prunes the folders yet.
+
 - **`sd-ship lane`: a serial ship queue per repository that outlives its session (sd:2524).** `enqueue`, `list` and `cancel` edit a queue file under `sd.lane_root` (new setting; unset reads `$XDG_STATE_HOME/sd/lanes`, `SD_LANE_ROOT` overrides it). `run` drains it in order under one lock per repository: head check, `prepare --catch-up` with the claim the entry was queued with (`--deliver` or `--associate-only`, required, plus any `--acceptance-file`), then `merge` for an entry queued with `--manual`; a failed entry is marked and the next runs, a second runner exits at once, and each step's whole output is kept. `watch` prints each gate end a lane or builder log records, once.
 
 - **Gate receipts keyed by tree (sd:1912).** A repository that tracks `.github/sd-gate-reuse.json` with `{"schema_version": 1, "key": "tree", "reason": ...}` keys its gate receipts by `HEAD^{tree}` and the merge base with the base branch instead of the head. A new head with the same tree and merge base -- an `sd attribute` commit, a reworded message -- then reuses the earlier pass, and the reuse names the head that passed. A tree-keyed receipt stands for 6 hours; a head-keyed one stays at 30 minutes. Without the declaration, with no base branch, or with a declaration that does not parse, the head key stands. The pack does not declare it: its `make check` reads commit trailers and ranges.
@@ -237,6 +241,31 @@
   registry that sets it.
 
 ### Fixed
+
+- **Pack tools stay out of repositories the sd database does not mark managed (sd:1620).**
+  The operator sets `repo.managed` by hand on their own repositories (sd:1619),
+  and the rest must not use any pack capability. `sd fleet stamp` now walks
+  managed `runner_merge=auto` rows only. A write in an unmanaged checkout
+  refuses, and so does `sd ci local`; each refusal names `repo.managed = no`
+  and the `sd-db.sh repo managed <path> yes` remedy. `sd_lib.managed_rows`
+  and `sd_lib.unmanaged` are the shared helpers. No library, no database
+  and no column behave as before. A database with no row for the checkout
+  proceeds with one warning that names the flag and its remedy.
+
+- **Seven guard tests read shapes they used to miss (sd:999).**
+  `tests/test_suite_shape.py` reads `assert` statements and folds a
+  comparison, `and`/`or` and `not` as literals, so `assert True` and
+  `assertTrue(1 == 1)` are named. `assert False` stays legal. It and
+  `tests/test_no_shipped_shell.py` read `git ls-files -z` as bytes and decode
+  each name with `os.fsdecode`, so a `\r` in a tracked name no longer drops
+  the file. `tests/test_code_health.py` reports a `DYNAMIC` entry that gained a
+  reference, and names the Git 2.31 floor `--deduplicate` sets; CONTRIBUTING
+  states it. `tests/test_ls_files_form.py` reads a shell comment after the
+  subcommand as a bare call. `tests/test_pull_request_template_links.py`
+  checks a `<dest>` link and reads anchors in an upper-case `.MD` page.
+  `tests/test_cut_symbols.py` sees `.get()`, single-quoted and `getattr()`
+  reads. `tests/test_writer_skills_consult_the_registry.py` needs the pointer
+  in a sentence that runs it before the write.
 
 - **A failed gate names the shard that failed and keeps its whole output
   (sd:2558).** `sd-check` kept each stream's last 4,000 characters, and
