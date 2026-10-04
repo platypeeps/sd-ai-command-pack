@@ -15,11 +15,11 @@ The binding is what this module can name about a run, and nothing weaker:
 
   reuse        "head", or "tree" for a declared tree key (below);
   head, tree   the exact commit the worktree held; head is None under a tree key;
-  fork         under a tree key, the merge base with the base branch;
+  fork         under a tree key, the tree of the merge base with the base branch;
   inputs       `sd_gate_run.gate_inputs`: the head (or tree), the copied untracked
                `CLAUDE.local.md` (or its absence) and every pack `bin/` file,
                so a pack upgrade reruns the check;
-  scope        the `sd_check_scope` decision, with its merge base;
+  scope        the `sd_check_scope` decision, with its merge base (its tree under a tree key);
   commands     the detected entrypoints and the detection source;
   tools        path and bytes of each command's executable on the gate's PATH;
   python       the interpreter that runs `sd-check`;
@@ -52,8 +52,12 @@ instead of head, in its reviewed tree:
 Two heads with one tree -- an `sd attribute` commit, a reworded message, a
 rebase that changed nothing -- then share one receipt: the key and the binding
 name the tree and the merge base with the base branch, and `inputs` hashes the
-tree in place of the head. A run with no base keeps the head key: the merge
-base is what binds the history below the branch. Without the
+tree in place of the head. The merge base is named by its tree, not its commit
+(sd:2586, operator ruling 2026-10-04): `sd-ship lane run` gates the next item
+on a predicted landing of the item ahead, and the real squash merge is another
+commit with the same tree, which a check that reads no history cannot tell
+apart. A run with no base keeps the head key: the merge base is what binds
+the content below the branch. Without the
 declaration a new head runs again, because a commit-message lint or a version
 stamp from `git describe` can pass at one head and fail at the next. A
 declaration that does not parse, or names another key, keeps the head key; the
@@ -95,6 +99,8 @@ WRITER = "sd-local-gate"
 #: The reviewed file that keys a repository's receipts by tree instead of head.
 REUSE_DECLARATION = ".github/sd-gate-reuse.json"
 REUSE_FIELDS = {"schema_version", "key", "reason"}
+#: Optional in the declaration: `"tool": "tree"` says the gate runs this tree's own `bin/sd-check` (sd:2613).
+TOOL_FIELD = "tool"
 
 
 def _digest(value: Any) -> str:
@@ -111,21 +117,48 @@ def keyed_by_tree(tree: pathlib.Path) -> bool:
         value = json.loads((tree / REUSE_DECLARATION).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
-    return (isinstance(value, dict) and set(value) == REUSE_FIELDS and value["schema_version"] == 1
+    return (isinstance(value, dict) and set(value) - {TOOL_FIELD} == REUSE_FIELDS and value["schema_version"] == 1
             and value["key"] == "tree" and isinstance(value["reason"], str) and bool(value["reason"].strip()))
 
 
-def tree_key(tree: pathlib.Path, base: str | None) -> tuple[str, str] | tuple[None, None]:
-    """`(tree id, merge base)` for a run in `tree` under a tree key, or `(None, None)` for the head key.
+def gates_itself(root: pathlib.Path, tree: pathlib.Path, pack: pathlib.Path) -> bool:
+    """True when the run in `tree` is the pack gating itself (sd:2613), so the gate runs and binds the tree's own code.
 
-    The tree key needs a `base`: the merge base binds the history below the
-    branch, which a check that reads an old commit by name still depends on.
+    `tree` must declare the tree key with `"tool": "tree"` and carry `bin/sd-check`, and `pack`, the running
+    pack's `bin/`, must belong to `root`'s repository. A foreign repository's field is ignored: its gate keeps
+    running, and binding, the checkout's pack.
+    """
+    try:
+        value = json.loads((tree / REUSE_DECLARATION).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not (keyed_by_tree(tree) and value.get(TOOL_FIELD) == "tree" and (tree / "bin" / "sd-check").is_file()):
+        return False
+    common = ["rev-parse", "--path-format=absolute", "--git-common-dir"]
+    mine = sd_lib.git_output(common, pack)
+    theirs = sd_lib.git_output(common, root)
+    if not mine or not theirs:
+        return False
+    return pathlib.Path(mine).resolve() == pathlib.Path(theirs).resolve()
+
+
+def tree_key(tree: pathlib.Path, base: str | None) -> tuple[str, str] | tuple[None, None]:
+    """`(tree id, the merge base's tree id)` for a run in `tree` under a tree key, or `(None, None)` for the head key.
+
+    The tree key needs a `base`: the merge base binds the content below the
+    branch, which a docs-only scope diffs against. Its tree, not its commit,
+    binds it (sd:2586), as the declaration says the check reads no history.
     """
     if base is None or not keyed_by_tree(tree):
         return None, None
     content = sd_lib.git_output(["rev-parse", "HEAD^{tree}"], tree)
-    fork = sd_lib.git_output(["merge-base", base, "HEAD"], tree)
+    fork = fork_tree(tree, sd_lib.git_output(["merge-base", base, "HEAD"], tree))
     return (content, fork) if content and fork else (None, None)
+
+
+def fork_tree(tree: pathlib.Path, fork: str | None) -> str | None:
+    """The tree of the merge base `fork`, or None without one."""
+    return sd_lib.git_output(["rev-parse", "--verify", "--quiet", f"{fork}^{{tree}}"], tree) if fork else None
 
 
 def receipt_key(root: pathlib.Path, head: str, tree: str | None = None) -> str:
@@ -142,7 +175,8 @@ def gate_binding(tree: pathlib.Path, head: str, inputs: str, base: str | None, e
                  fork: str | None = None) -> dict[str, Any] | None:
     """What a run in `tree` would be bound to, or None when something in it cannot be named.
 
-    `fork` is the merge base under a tree key (`tree_key`); the binding then names it in place of `head`.
+    `fork` is the merge base's tree under a tree key (`tree_key`); the binding then names it in place of
+    `head`, and names the scope's merge base by its tree too.
     """
     try:
         detection = sd_lib.detect_entrypoints(tree)
@@ -158,13 +192,33 @@ def gate_binding(tree: pathlib.Path, head: str, inputs: str, base: str | None, e
         python = pathlib.Path(sys.executable).resolve()
         return {"schema": 2, "reuse": "tree" if fork else "head", "head": None if fork else head, "fork": fork,
                 "tree": sd_lib.git_output(["rev-parse", "HEAD^{tree}"], tree),
-                "inputs": inputs, "scope": {"mode": scope.mode, "fork": scope.fork, "command": list(scope.command)},
+                "inputs": inputs, "scope": {"mode": scope.mode, "fork": fork_tree(tree, scope.fork) if fork else scope.fork,
+                                             "command": list(scope.command)},
                 "detection": {"source": detection.source, "commands": detection.commands},
                 "tools": tools, "python": {"path": str(python), "version": sys.version,
                                            "sha256": sd_check_receipts.file_digest(python)},
                 "environment_sha256": _digest(dict(env))}
     except Exception:  # an input that cannot be named binds nothing; the check runs
         return None
+
+
+def record_unless_moved(database: pathlib.Path, key: str, identity: Mapping[str, Any], after: Mapping[str, Any] | None,
+                        reading: dict[str, Any], head: str) -> None:
+    """Record `reading`'s pass when the binding held from before the run (`identity`) to after it (`after`).
+
+    Otherwise `reading["receipt_skipped"]` names what moved (sd:2612), so a
+    pass that leaves no receipt says why; a failed write sets `receipt_error`.
+    """
+    scope = (reading["report"] or {}).get("scope") or {}
+    moved = [name for name in identity if after.get(name) != identity[name]] if after else ["the binding"]
+    moved += ["scope mode"] if scope.get("mode") != identity["scope"]["mode"] else []
+    if moved:
+        reading["receipt_skipped"] = "moved during the run: " + ", ".join(moved)
+        return
+    try:
+        reading["receipt_revision"] = record_pass(database, key, identity, reading, head)
+    except Exception as error:  # the pass stands; only its reuse is lost
+        reading["receipt_error"] = str(error)
 
 
 def _connect(database: pathlib.Path, *, write: bool) -> Any:
@@ -176,20 +230,42 @@ def _connect(database: pathlib.Path, *, write: bool) -> Any:
 
 def lookup(database: pathlib.Path, key: str, identity: Mapping[str, Any], now: float | None = None) -> dict[str, Any] | None:
     """The recorded success for `identity`, or None: absent, foreign, stale, older than the limit, or unreadable."""
+    return examine(database, key, identity, now)[0]
+
+
+def examine(database: pathlib.Path, key: str, identity: Mapping[str, Any] | None,
+            now: float | None = None) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """`(found, None)` for a reusable success, else `(None, miss)` naming why (sd:2602).
+
+    A merge gate that ran in full said nothing of why, so a binding that moved
+    between prepare and merge read as a gate that never reuses. `miss` is
+    `{"reason": ...}`: `no-receipt`, `failed`, `binding` with the top-level
+    binding `fields` that differ, `expired` with the age and the window,
+    `unbound` when `gate_binding` could not name the run, or `unreadable`.
+    """
+    if identity is None:
+        return None, {"reason": "unbound"}
     try:
         with closing(_connect(database, write=False)) as connection:
             from sd_db import ship  # noqa: PLC0415
             revision, row = ship.read(connection, key)
         age = (time.time() if now is None else now) - float(row.get("recorded_at", "nan"))
-        reading = row.get("reading")
+        reading, stored = row.get("reading"), row.get("binding")
         window = TREE_REUSE_WINDOW_SECONDS if identity.get("reuse") == "tree" else REUSE_WINDOW_SECONDS
-        if (row.get("writer") != WRITER or row.get("binding") != identity or not 0 <= age <= window
-                or not isinstance(reading, dict) or reading.get("status") != "success"):
-            return None
+        if row.get("writer") != WRITER:
+            return None, {"reason": "no-receipt"}
+        if not isinstance(reading, dict) or reading.get("status") != "success":
+            return None, {"reason": "failed"}
+        if stored != identity:
+            stored = stored if isinstance(stored, dict) else {}
+            return None, {"reason": "binding", "fields": sorted(name for name in set(stored) | set(identity)
+                                                                if stored.get(name) != identity.get(name))}
+        if not 0 <= age <= window:
+            return None, {"reason": "expired", "age_seconds": round(age), "window_seconds": window}
         return {"reading": reading, "revision": revision, "recorded_at": row["recorded_at"], "age_seconds": round(age),
-                "head": row.get("head")}
-    except Exception:
-        return None
+                "head": row.get("head")}, None
+    except Exception as error:
+        return None, {"reason": "unreadable", "error": str(error)[:200]}
 
 
 def record_pass(database: pathlib.Path, key: str, identity: Mapping[str, Any], reading: Mapping[str, Any],

@@ -1108,7 +1108,9 @@ class ScopePolicyTests(unittest.TestCase):
 
 class RepositoryTests(unittest.TestCase):
     def test_this_repository_is_clean(self) -> None:
-        report = lint.run(REPO_ROOT, "docs/work", "docs/spec", "docs/decisions", None)
+        # No history, as `make check` lints it: this runs inside the gate too,
+        # and with history it fetches the remote once per item (sd:2606).
+        report = lint.run(REPO_ROOT, "docs/work", "docs/spec", "docs/decisions", None, history=False)
         self.assertEqual(report.failures, [])
 
     def test_missing_work_directory_is_a_failure(self) -> None:
@@ -1132,7 +1134,7 @@ class RepositoryTests(unittest.TestCase):
         # There is no --repo any more (R10-D6): the linter reads cwd, so the
         # test has to stand in the repository it means to lint.
         with in_directory(REPO_ROOT):
-            self.assertEqual(lint.main([]), 0)
+            self.assertEqual(lint.main(["--no-history"]), 0)
 
     def test_cli_rejects_an_unreadable_pr_body(self) -> None:
         with in_directory(REPO_ROOT):
@@ -1225,6 +1227,21 @@ class Rule6CitationTests(LintFixture):
         item = self.work / "2026-08-29-a-cited-item"
         (item / "design.md").write_text("# design\n\nNo citation here.\n", encoding="utf-8")
         self.assert_fails("design.md no longer cites it")
+
+    def test_red_a_citation_added_after_recording_is_not_passed_over(self) -> None:
+        """sd:1000 (1698a5a1f448). The rule walked the manifest only.
+
+        A citation written after the last `--update-citations` was in no row,
+        so nothing checked it and nothing counted it, and the run said clean.
+        """
+
+        self.record()
+        item = self.work / "2026-08-29-a-cited-item"
+        page = item / "design.md"
+        page.write_text(page.read_text(encoding="utf-8") + "\nA second claim cites `prd.md:2`.\n",
+                        encoding="utf-8")
+        failures = self.assert_fails("is cited but not recorded")
+        self.assertIn("`prd.md:2`", "\n".join(failures))
 
     def test_green_a_citation_that_moved_down_its_own_page_is_not_a_failure(self) -> None:
         """The source side is searched, not read at the recorded line.

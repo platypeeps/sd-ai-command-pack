@@ -26,7 +26,9 @@ def commands(args: argparse.Namespace) -> int:
 def service(args):
     sd_db = sd_handoff_rows.library()
     from sd_db import runner, runner_controls
-    connection = sd_handoff_rows.connect(sd_db, write=False)
+    # A cancel writes: since sd:991 the library ends a running row no attempt
+    # owns in place, through this connection (sd:2627).
+    connection = sd_handoff_rows.connect(sd_db, write=args.runner_action == "cancel")
     try:
         current = runner.queue_state(connection, args.assignment)
         revision = getattr(args, "if_revision", None) or current["revision"]

@@ -6,6 +6,9 @@ GitHub side is a recorder, so nothing leaves the machine.
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
+import io
 import json
 import os
 import pathlib
@@ -150,7 +153,7 @@ class RunCheck(Repository):
         (venv / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="utf-8")
         plain.mkdir()
         env = sd_gate_run.gate_environment(self.root, {"PATH": os.pathsep.join([str(venv / "bin"), str(plain)])})
-        self.assertEqual(env["PATH"], str(plain))
+        self.assertEqual(env["PATH"], str(plain.resolve()))  # each kept entry resolved (sd:2602)
 
     def test_the_gates_bound_is_the_per_check_timeout_sd_check_reports(self) -> None:
         """`sd-check`'s own 900 s default must not cut a gate run short; the gate's bound reaches it."""
@@ -183,6 +186,22 @@ class RunCheck(Repository):
         sd_gate_run.check_in_worktree(self.root, head)
         self.assertEqual(self.worktrees(), before)
 
+    def test_a_slot_bound_reaches_sd_check_and_widens_the_childs_limit(self) -> None:
+        """sd:2607: the queue for a slot has its own bound, so the child may live for both."""
+        head = self.commit("check:\n\t@echo ok\n")
+        seen: list[tuple[list[str], int]] = []
+        def run(argv: list[str], env: dict[str, str], cwd: pathlib.Path, limit: int) -> tuple[int | None, str, str]:
+            seen.append((argv, limit))
+            return sd_gate_run.run_child(argv, env, cwd, limit)
+        bounded_result = sd_gate_run.check_in_worktree(self.root, head, timeout=60, slot_timeout=300, run=run)
+        self.assertEqual(bounded_result["report"]["gate_slot"]["bound_seconds"], 300)
+        sd_gate_run.check_in_worktree(self.root, head, timeout=60, run=run)
+        (bounded, wide), (plain, narrow) = seen
+        self.assertEqual(bounded[bounded.index("--slot-timeout") + 1], "300")
+        self.assertEqual(wide, 60 + 300 + sd_gate_run.REPORT_GRACE_SECONDS)
+        self.assertNotIn("--slot-timeout", plain)
+        self.assertEqual(narrow, 60 + sd_gate_run.REPORT_GRACE_SECONDS)
+
 
 class Reading(unittest.TestCase):
     def test_only_an_exit_zero_pass_is_a_success(self) -> None:
@@ -201,6 +220,31 @@ class Reading(unittest.TestCase):
         self.assertEqual(len(reading["stderr"]), sd_gate_run.STDERR_TAIL_CHARS)
         self.assertEqual(reading["summary"], "sd-check pass (check pass)")
         self.assertIsNone(sd_gate_run.check_reading(0, "not json")["report"])
+
+    def test_a_failed_precheck_is_named_first(self) -> None:
+        """sd:2604: the checks after a failed precheck did not run, so the summary names the precheck."""
+        stopped = ('{"status": "fail", "precheck": {"name": "precheck", "status": "fail"},'
+                   ' "checks": [{"name": "check", "status": "fail"}]}')
+        self.assertEqual(sd_gate_run.check_reading(1, stopped)["summary"], "sd-check fail (precheck fail, check fail)")
+
+
+    def test_a_failure_summary_names_the_failed_step(self) -> None:
+        """sd:2608: the one line a lane log shows said `check fail` and no step."""
+        failed = json.dumps({"status": "fail", "checks": [
+            {"name": "check", "status": "fail", "failed_steps": ["shard tests.test_a: 0s exit=1", "make target test"]},
+            {"name": "test", "status": "skipped"}, {"name": "lint", "status": "skipped"}]})
+        summary = sd_gate_run.check_reading(1, failed)["summary"]
+        self.assertEqual(summary, "sd-check fail (check fail: shard tests.test_a: 0s exit=1; make target test,"
+                                  " test skipped, lint skipped)")
+        kept = "/tmp/example/.git/sd-check-output/20261004T000000Z-1-check.log"
+        many = json.dumps({"status": "fail", "checks": [
+            {"name": "check", "status": "fail", "output_path": kept,
+             "failed_steps": [f"shard tests.test_{n}: 0s exit=1" for n in range(30)]}]})
+        steps, said = sd_gate_run.check_reading(1, many)["summary"].split(" whole output: ")
+        # The steps keep a status description's bound; the path to the whole output is never cut.
+        self.assertTrue(steps.startswith("sd-check fail (check fail: shard tests.test_0: 0s exit=1; "), steps)
+        self.assertLessEqual(len(steps), sd_gate_run.DESCRIPTION_LIMIT)
+        self.assertEqual(said, kept)
 
 
 class Post(unittest.TestCase):
@@ -221,6 +265,16 @@ class Post(unittest.TestCase):
         with self.assertRaisesRegex(Refusal, "no status is posted for a commit that was not checked"):
             sd_local_gate.post_gate_status(api, self.HEAD, {"head": "b" * 40, "status": "success"}, "0" * 12)
         self.assertEqual(api.posts, [])
+
+    def test_the_posted_description_leaves_out_the_local_output_path(self) -> None:
+        """sd:2608. The summary names the file with the whole output for the
+        lane log; a commit status is public and the path is a local one."""
+        api = Recorder()
+        summary = "sd-check fail (check fail: make target test) whole output: /tmp/example/.git/sd-check-output/run.log"
+        sd_local_gate.post_gate_status(api, self.HEAD, {"head": self.HEAD, "status": "failure", "summary": summary},
+                                       "0" * 12)
+        self.assertEqual(api.posts[0][1]["description"],
+                         f"{self.HEAD[:12]} inputs {'0' * 12}: sd-check fail (check fail: make target test)")
 
     def test_a_failure_posts_failure(self) -> None:
         api = Recorder()
@@ -259,6 +313,13 @@ class Gate(Repository):
         self.assertEqual([body["state"] for _, body in api.posts], ["success", "success"])
         self.assertTrue(api.posts[1][1]["description"].startswith(f"{head[:12]} inputs {inputs}: "))
 
+    def test_the_merge_gate_queues_on_the_slot_bound_apart_from_its_check(self) -> None:
+        """sd:2611: like `sd gate check`, so a merge queued behind other gates keeps its whole check bound."""
+        head = self.commit("check:\n\t@echo ok\n")
+        with mock.patch.object(sd_local_gate, "check_in_worktree", wraps=sd_local_gate.check_in_worktree) as checked:
+            sd_local_gate.local_gate(Recorder(), self.root, head)
+        self.assertEqual(checked.call_args.kwargs["slot_timeout"], sd_lib.GATE_SLOT_SECONDS)
+
     def test_the_digest_follows_the_local_block(self) -> None:
         head = self.commit("check:\n\t@echo ok\n")
         before = sd_local_gate.gate_inputs(self.root, head)
@@ -266,8 +327,8 @@ class Gate(Repository):
         self.assertNotEqual(sd_local_gate.gate_inputs(self.root, head), before)
 
 
-class Receipts(Repository):
-    """One passing gate per head (sd:2041, sd:1912): a matching receipt answers instead of a second run."""
+class ReceiptFixture(Repository):
+    """A workflow database and a check that counts its real runs."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -286,6 +347,18 @@ class Receipts(Repository):
 
     def gate(self, head: str, **kwargs) -> dict:
         return sd_gate_run.check_in_worktree(self.root, head, database=self.database, **kwargs)
+
+    def passing(self, during=lambda: None, mode: str = "full", argvs: list | None = None):  # type: ignore[no-untyped-def]
+        """A stand-in run that calls `during` while it runs, then passes with scope `mode`; `argvs` collects its argv."""
+        def run(argv, env, tree, timeout):  # type: ignore[no-untyped-def]
+            during()
+            (argvs if argvs is not None else []).append(argv)
+            return 0, json.dumps({"status": "pass", "scope": {"mode": mode}, "checks": []}), ""
+        return run
+
+
+class Receipts(ReceiptFixture):
+    """One passing gate per head (sd:2041, sd:1912): a matching receipt answers instead of a second run."""
 
     def test_a_pass_leaves_a_receipt_the_next_run_at_that_head_reuses(self) -> None:
         head = self.counted()
@@ -333,6 +406,25 @@ class Receipts(Repository):
         with mock.patch.object(sd_gate_run, "gate_inputs", return_value="0" * 12):
             self.assertNotIn("reused", self.gate(head))
         self.assertEqual(self.runs(), 3)
+
+    def test_another_repository_records_nothing_when_the_pack_moves_mid_run(self) -> None:
+        """The child may open the moved pack, so a landing mid-run drops the pass (sd:2612 review), and says so."""
+        head = self.counted()
+        pack = self.root.parent / "pack"
+        pack.mkdir()
+        (pack / "sd-x").write_text("one\n", encoding="utf-8")
+        with mock.patch.object(sd_gate_run, "BIN", pack):
+            result = self.gate(head, run=self.passing(lambda: (pack / "sd-x").write_text("two\n", encoding="utf-8")))
+        self.assertNotIn("receipt_revision", result)
+        self.assertEqual(result["receipt_skipped"], "moved during the run: inputs")
+
+    def test_a_pass_left_unrecorded_says_what_moved(self) -> None:
+        """A pass whose binding moved during the run leaves no receipt, and the result says why."""
+        head = self.counted()
+        result = self.gate(head, run=self.passing(mode="docs-only"))
+        self.assertEqual(result["status"], "success")
+        self.assertNotIn("receipt_revision", result)
+        self.assertEqual(result["receipt_skipped"], "moved during the run: scope mode")
 
     def test_a_different_path_runs_the_check_again(self) -> None:
         head = self.counted()
@@ -398,6 +490,158 @@ class Receipts(Repository):
         head = self.counted()
         self.assertNotEqual(sd_gate_receipts.receipt_key(self.root, head),
                             sd_gate_receipts.receipt_key(self.root.parent, head))
+
+
+class MergeReuse(ReceiptFixture):
+    """`sd-ship merge` posts `sd/local-gate` from prepare's tree receipt, and says why when it cannot (sd:2602).
+
+    Prepare's gate leaves the receipt; the merge gate (`local_gate`, which
+    records none) reads it under the same key and window. A run in full keeps
+    `reuse_miss`, so a merge that should have reused names what stopped it.
+    """
+
+    def declare(self, declared: bool = True) -> str:
+        """A branch off `main` whose tree declares the tree key; `origin/main` is the base."""
+        self.counted()
+        if declared:
+            (self.root / ".github").mkdir()
+            (self.root / ".github" / "sd-gate-reuse.json").write_text(json.dumps(
+                {"schema_version": 1, "key": "tree", "reason": "the check reads no commit history"}), encoding="utf-8")
+            git(self.root, "add", "-A")
+            git(self.root, "commit", "-q", "-m", "declare")
+        git(self.root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        git(self.root, "checkout", "-q", "-b", "topic")
+        (self.root / "src.txt").write_text("one\n", encoding="utf-8")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "topic")
+        return git(self.root, "rev-parse", "HEAD")
+
+    def prepare(self, head: str) -> dict:
+        return self.gate(head, base=sd_gate_run.base_ref("main"))
+
+    def merge(self, head: str, api: Recorder | None = None) -> dict:
+        return sd_local_gate.local_gate(api or Recorder(), self.root, head, base="main", database=self.database)
+
+    def test_an_unchanged_tree_is_posted_from_the_receipt_with_no_run(self) -> None:
+        prepared = self.declare()
+        self.assertEqual(self.prepare(prepared)["status"], "success")
+        git(self.root, "commit", "-q", "--allow-empty", "-m", "attribute\n\nAuthored-with: claude/anthropic")
+        head, api = git(self.root, "rev-parse", "HEAD"), Recorder()
+        merged = self.merge(head, api)
+        self.assertEqual((merged["status"], merged["head"], merged["reused"]["head"]), ("success", head, prepared))
+        self.assertNotIn("reuse_miss", merged)
+        self.assertTrue(api.posts[0][1]["description"].endswith("(reused)"), api.posts)
+        self.assertEqual(self.runs(), 1)
+
+    def test_a_changed_tree_runs_in_full_and_names_no_receipt(self) -> None:
+        prepared = self.declare()
+        self.prepare(prepared)
+        (self.root / "src.txt").write_text("two\n", encoding="utf-8")
+        git(self.root, "commit", "-q", "-am", "changed")
+        merged = self.merge(git(self.root, "rev-parse", "HEAD"))
+        self.assertEqual((merged["status"], "reused" in merged, self.runs()), ("success", False, 2))
+        self.assertEqual(merged["reuse_miss"], {"reason": "no-receipt"})
+
+    def test_without_the_opt_in_a_new_head_runs_in_full(self) -> None:
+        self.prepare(self.declare(declared=False))
+        git(self.root, "commit", "-q", "--allow-empty", "-m", "attribute")
+        merged = self.merge(git(self.root, "rev-parse", "HEAD"))
+        self.assertEqual((merged["status"], "reused" in merged, self.runs()), ("success", False, 2))
+        self.assertEqual(merged["reuse_miss"], {"reason": "no-receipt"})
+
+    def test_an_expired_window_runs_in_full_and_names_the_age(self) -> None:
+        head = self.declare()
+        self.prepare(head)
+        later = time.time() + sd_gate_receipts.TREE_REUSE_WINDOW_SECONDS + 60
+        with mock.patch.object(sd_gate_receipts.time, "time", return_value=later):
+            merged = self.merge(head)
+        self.assertEqual((merged["status"], "reused" in merged, self.runs()), ("success", False, 2))
+        self.assertEqual((merged["reuse_miss"]["reason"], merged["reuse_miss"]["window_seconds"]),
+                         ("expired", sd_gate_receipts.TREE_REUSE_WINDOW_SECONDS))
+        self.assertGreater(merged["reuse_miss"]["age_seconds"], sd_gate_receipts.TREE_REUSE_WINDOW_SECONDS)
+
+    def test_a_different_command_runs_in_full_and_names_the_binding_fields(self) -> None:
+        """The untracked `CLAUDE.local.md` may respell `check`; the tree is equal and the command is not."""
+        head = self.declare()
+        self.prepare(head)
+        (self.root / "CLAUDE.local.md").write_text("## sd-check\n\ncheck: make check MODE=other\n", encoding="utf-8")
+        merged = self.merge(head)
+        self.assertEqual(("reused" in merged, self.runs()), (False, 2))
+        self.assertEqual(merged["reuse_miss"]["reason"], "binding")
+        self.assertIn("inputs", merged["reuse_miss"]["fields"])
+
+    def test_a_run_whose_binding_cannot_be_named_says_so(self) -> None:
+        head = self.declare()
+        self.prepare(head)
+        with mock.patch.object(sd_gate_receipts, "gate_binding", return_value=None):
+            merged = self.merge(head)
+        self.assertEqual((merged["reuse_miss"], self.runs()), ({"reason": "unbound"}, 2))
+
+    def test_a_miss_is_kept_in_the_ship_receipt_beside_the_result(self) -> None:
+        """`sd-ship merge` saves `local_gate` whole, so the miss reaches `sd-ship observe` with no new field."""
+        head = self.declare()
+        with mock.patch.dict(os.environ, {"MAKEFLAGS": "-s"}):
+            self.prepare(head)
+        with mock.patch.dict(os.environ):  # a caller that already exports MAKEFLAGS=-s must still differ
+            os.environ.pop("MAKEFLAGS", None)
+            merged = self.merge(head)
+        self.assertEqual(merged["reuse_miss"], {"reason": "binding", "fields": ["environment_sha256"]})
+        self.assertEqual(json.loads(json.dumps(merged))["reuse_miss"], merged["reuse_miss"])
+
+
+class FnmShells(ReceiptFixture):
+    """fnm gives every shell its own folder (operator ruling, 2026-10-04, sd:2602).
+
+    `FNM_MULTISHELL_PATH` names `fnm_multishells/<pid>_<ms>`, a symlink to the
+    node version in use, and `$FNM_MULTISHELL_PATH/bin` leads `PATH`. Two
+    shells on one node differed in both, so a builder's receipt never bound
+    the lane's prepare. The gate drops the variable and resolves each `PATH`
+    entry; a different real node still differs.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.fnm = self.root.parent / "fnm"
+        for version in ("v20", "v22"):
+            (self.fnm / "node-versions" / version / "bin").mkdir(parents=True)
+            node = self.fnm / "node-versions" / version / "bin" / "node"
+            node.write_text(f"#!/bin/sh\necho {version}\n", encoding="utf-8")
+            node.chmod(0o755)
+        (self.fnm / "multishells").mkdir()
+
+    def shell(self, name: str, version: str = "v20") -> dict[str, str]:
+        """The environment of one shell on `version`, through its own multishell folder."""
+        folder = self.fnm / "multishells" / name
+        folder.symlink_to(self.fnm / "node-versions" / version)
+        return {**os.environ, "FNM_MULTISHELL_PATH": str(folder),
+                "PATH": os.pathsep.join([str(folder / "bin"), os.environ["PATH"]])}
+
+    def node_check(self) -> str:
+        return self.counted("node")
+
+    def merge(self, head: str, environ: dict[str, str]) -> dict:
+        return sd_gate_run.check_in_worktree(self.root, head, database=self.database, environ=environ, record=False)
+
+    def test_two_shells_on_the_same_node_bind_one_receipt(self) -> None:
+        head = self.node_check()
+        self.assertEqual(self.gate(head, environ=self.shell("1739_1")).get("status"), "success")
+        merged = self.merge(head, self.shell("2201_2"))
+        self.assertEqual(("reused" in merged, merged.get("reuse_miss"), self.runs()), (True, None, 1))
+
+    def test_a_different_real_node_still_runs_again(self) -> None:
+        head = self.node_check()
+        self.gate(head, environ=self.shell("1739_1"))
+        merged = self.merge(head, self.shell("2201_2", version="v22"))
+        self.assertEqual(("reused" in merged, merged["reuse_miss"]["reason"], self.runs()), (False, "binding", 2))
+
+    def test_a_path_entry_through_a_shell_folder_binds_as_the_real_folder(self) -> None:
+        head = self.node_check()
+        real = {**os.environ, "PATH": os.pathsep.join([str(self.fnm / "node-versions" / "v20" / "bin"), os.environ["PATH"]])}
+        self.gate(head, environ=real)
+        through = self.shell("2201_2")
+        del through["FNM_MULTISHELL_PATH"]
+        self.assertIn("reused", self.merge(head, through))
+        self.assertEqual(self.runs(), 1)
 
 
 class CargoBuildCache(Repository):
@@ -500,6 +744,138 @@ class CargoBuildCache(Repository):
         second = sd_gate_run.check_in_worktree(self.root, head, environ=env, database=database)
         self.assertEqual((first["status"], "reused" in second), ("success", True), second)
         self.assertEqual(len(self.folders()), 1)
+
+
+class PackGatesItself(ReceiptFixture):
+    """The pack gating itself runs and binds its own tree, not the checkout's `bin/` (sd:2613)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.pack = self.root / "bin"
+        self.pack.mkdir()
+        (self.pack / "sd-check").write_text("#!/bin/sh\n", encoding="utf-8")
+        (self.root / ".github").mkdir()
+        (self.root / ".github" / "sd-gate-reuse.json").write_text(json.dumps(
+            {"schema_version": 1, "key": "tree", "reason": "a fixture", "tool": "tree"}), encoding="utf-8")
+        self.head = self.counted()
+
+    def land(self) -> None:
+        """A pack merge lands in the checkout the gate runs from."""
+        (self.pack / "sd-x").write_text(f"{time.time()}\n", encoding="utf-8")
+
+    def test_the_pack_reuses_its_pass_after_the_checkout_moves(self) -> None:
+        with mock.patch.object(sd_gate_run, "BIN", self.pack):
+            self.gate(self.head, run=self.passing())
+            self.land()
+            self.assertIn("reused", self.gate(self.head, run=self.passing()))
+
+    def test_the_pack_runs_its_own_sd_check(self) -> None:
+        argvs: list = []
+        with mock.patch.object(sd_gate_run, "BIN", self.pack):
+            self.gate(self.head, run=self.passing(argvs=argvs))
+        self.assertTrue(argvs[0][1].endswith("/tree/bin/sd-check"), argvs[0][1])
+
+    def test_a_pack_landing_mid_run_still_records_for_the_pack(self) -> None:
+        with mock.patch.object(sd_gate_run, "BIN", self.pack):
+            result = self.gate(self.head, run=self.passing(self.land))
+        self.assertIn("receipt_revision", result)
+
+    def test_a_foreign_declaration_still_binds_the_checkout(self) -> None:
+        """Another repository's `"tool": "tree"` is ignored: its gate runs and binds the checkout's pack."""
+        foreign = self.root.parent / "pack"
+        foreign.mkdir()
+        (foreign / "sd-check").write_text("#!/bin/sh\n", encoding="utf-8")
+        argvs: list = []
+        with mock.patch.object(sd_gate_run, "BIN", foreign):
+            self.gate(self.head, run=self.passing(argvs=argvs))
+            (foreign / "sd-x").write_text("landed\n", encoding="utf-8")
+            self.assertNotIn("reused", self.gate(self.head, run=self.passing(argvs=argvs)))
+        self.assertEqual(argvs[0][1], str(foreign / "sd-check"))
+
+
+class PackDeclaresTreeReuse(unittest.TestCase):
+    """The pack keys its own gate receipts by tree (sd:2610): `make check` reads no commit history."""
+
+    def test_the_pack_keys_its_gate_receipts_by_tree(self) -> None:
+        self.assertTrue(sd_gate_receipts.keyed_by_tree(REPO_ROOT), sd_gate_receipts.REUSE_DECLARATION)
+
+    def test_the_pack_gates_itself(self) -> None:
+        """sd:2613: the pack's gate runs and binds the pack's own tree."""
+        self.assertTrue(sd_gate_receipts.gates_itself(REPO_ROOT, REPO_ROOT, sd_gate_run.BIN))
+
+    def test_the_check_lints_docs_without_history(self) -> None:
+        """The declaration rests on this: without `--no-history`, docs-lint fetches and reads `git log` (sd:2606)."""
+        makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+        recipe = makefile.split("\ndocs-lint:\n", 1)[1].split("\n\n", 1)[0]
+        self.assertIn("bin/sd-docs-lint --no-history", recipe)
+
+
+class CacheBound(Repository):
+    """The warm folders stay under a bound: the least recently used free folder goes first (sd:2598)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.cache = self.root.parent / "cache"
+
+    def folder(self, name: str, used: float, size: int = 1000) -> pathlib.Path:
+        """A filled warm folder whose lock file says it was last taken `used` seconds after the epoch."""
+        folder = self.cache / name
+        folder.mkdir(parents=True)
+        (folder / "build").write_bytes(b"x" * size)
+        lock = folder.parent / f"{folder.name}.lock"
+        lock.touch()
+        os.utime(lock, (used, used))
+        return folder
+
+    def test_over_the_bound_the_least_recently_used_folder_goes_first(self) -> None:
+        old, mid, new = (self.folder(f"repo-{n}/cargo-target.1", used) for n, used in (("a", 100), ("b", 200), ("c", 300)))
+        pruned = sd_gate_cache.prune(self.cache, new, 2500)
+        self.assertEqual([path for path, _ in pruned], [old])
+        self.assertEqual((old.exists(), mid.exists(), new.exists()), (False, True, True))
+
+    def test_a_folder_in_use_is_never_pruned(self) -> None:
+        old = self.folder("repo-a/cargo-target.1", 100)
+        mid = self.folder("repo-a/cargo-target.2", 200)
+        new = self.folder("repo-b/cargo-target.1", 300)
+        with open(old.parent / "cargo-target.1.lock", "a") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)  # another gate is building in it
+            pruned = sd_gate_cache.prune(self.cache, new, 2500)
+        self.assertEqual([path for path, _ in pruned], [mid])
+        self.assertTrue(old.exists())
+
+    def test_the_held_folder_goes_last_and_only_when_the_rest_is_not_enough(self) -> None:
+        other = self.folder("repo-a/cargo-target.1", 300)
+        held = self.folder("repo-b/cargo-target.1", 100, size=3000)
+        pruned = sd_gate_cache.prune(self.cache, held, 2500)
+        self.assertEqual([path for path, _ in pruned], [other, held])
+
+    def test_under_the_bound_or_with_no_bound_nothing_goes(self) -> None:
+        old = self.folder("repo-a/cargo-target.1", 100)
+        new = self.folder("repo-b/cargo-target.1", 200)
+        self.assertEqual(sd_gate_cache.prune(self.cache, new, 2000), [])
+        self.assertEqual(sd_gate_cache.prune(self.cache, new, 0), [])
+        self.assertTrue(old.exists())
+
+    def test_the_bound_reads_the_variable_then_the_setting_then_the_default(self) -> None:
+        gib = 1024 ** 3
+        home = {"XDG_CONFIG_HOME": str(self.root.parent / "config")}
+        self.assertEqual(sd_gate_cache.cache_bound(home), sd_gate_cache.DEFAULT_CACHE_GB * gib)
+        self.assertEqual(sd_gate_cache.cache_bound({**home, sd_gate_cache.CACHE_GB_VARIABLE: "0.5"}), gib // 2)
+        self.assertEqual(sd_gate_cache.cache_bound({**home, sd_gate_cache.CACHE_GB_VARIABLE: "0"}), 0)
+        with mock.patch.object(sd_lib, "core_setting", return_value="7"):
+            self.assertEqual(sd_gate_cache.cache_bound(home), 7 * gib)
+
+    def test_the_gate_names_what_it_pruned(self) -> None:
+        old = self.folder("other-0123456789ab/cargo-target.1", 100)
+        (self.root / "Cargo.toml").write_text("", encoding="utf-8")
+        git(self.root, "add", "Cargo.toml")
+        env = {key: value for key, value in os.environ.items() if key != sd_gate_cache.CARGO_TARGETS_VARIABLE}
+        env.update({sd_gate_cache.CACHE_VARIABLE: str(self.cache), sd_gate_cache.CACHE_GB_VARIABLE: "0.0000005"})
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors), sd_gate_cache.cargo_target(self.root, self.root, env) as target:
+            self.assertIsNotNone(target)
+        self.assertFalse(old.exists())
+        self.assertIn(f"sd gate: pruned {old}", errors.getvalue())
 
 
 class DocsScopeGate(Repository):

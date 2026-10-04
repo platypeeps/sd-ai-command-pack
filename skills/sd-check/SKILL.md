@@ -69,7 +69,8 @@ The merge gate at the same head and binding, within 30 minutes, reads it instead
 Prepare reads one too: a pass that `sd gate check` or an earlier prepare left at the same head and binding stands (sd:1912).
 `sd gate check` runs the gate's check at the committed `HEAD` and records a pass; a plain `make check` leaves no receipt.
 The merge gate never writes one, and the window counts from the run that passed.
-The gate child drops the agent harness's session variables, so two sessions' passes at one head bind equal.
+A gate that read no receipt and ran in full says why in `reuse_miss`: no receipt, a failed one, the binding fields that differ, or the expired window (sd:2602).
+The gate child drops the agent harness's session variables and fnm's per-shell `FNM_MULTISHELL_PATH`, and resolves each `PATH` entry, so two sessions' passes at one head bind equal.
 Inputs outside the repository are not bound: external makefiles, files a tool reads, machine state.
 The short same-head window is the accepted residual risk; a repository that needs more uses the explicit contract below.
 `bin/sd_gate_receipts.py` names the binding and `REUSE_WINDOW_SECONDS`.
@@ -82,11 +83,13 @@ A repository whose check reads no commit history may key its gate receipts by tr
 ```
 
 Track it as `.github/sd-gate-reuse.json`.
-A new head with the same tree and the same merge base with the base branch then reuses the earlier pass.
+A new head with the same tree, and a merge base with the base branch of the same tree, then reuses the earlier pass.
+The merge base binds by its tree, not its commit, so a predicted landing and the real one match (sd:2586).
 That covers an `sd attribute` commit, a reworded message, or a rebase that changed nothing (sd:1912).
 Without the declaration a new head runs again, since a commit-message lint can pass at one head and fail at the next.
 A run with no base branch, a declaration that does not parse, or another `key` keeps the head key.
 A tree-keyed receipt stands for 6 hours (`TREE_REUSE_WINDOW_SECONDS`); a head-keyed one stays at 30 minutes.
+An optional `"tool": "tree"` is for the pack gating itself (sd:2613); the gate ignores it in any other repository.
 
 ## Optional check receipts
 
@@ -179,3 +182,14 @@ as `output_path` and the human output as `whole output:`. `failed_shards`
 lists each `shard <name>: <n>s exit=<code>` line with a non-zero code from
 the whole output, so a shard that failed early is named though the tail no
 longer reaches it.
+
+A failing check also names every step that failed in `failed_steps`, and is
+never empty: each failed shard, each suite a runner lists as `<tool>: failed:
+<suite> ...`, and each make target from `make: *** [<target>] Error <n>`.
+A failure that names none of these reads `<name> exit <code>`, or the reason
+the check did not finish, such as a timeout. `failure` holds the failing part
+of the output: each failed shard's own block, else each stream's failure lines
+(`FAIL:`, `ERROR:`, an exception, `FAILED`) and its tail. The human output
+prints them as `failed step:` and `[failure]`; `sd gate check` adds the steps
+to its one-line summary, then `whole output: <path>`. The `sd/local-gate`
+status it posts leaves that local path out.

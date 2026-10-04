@@ -54,6 +54,8 @@ import sd_lib
 BIN = pathlib.Path(__file__).resolve().parent
 #: GitHub truncates nothing and refuses a description past 140 characters.
 DESCRIPTION_LIMIT = 140
+#: What a failed summary ends with before the local file holding the whole output; a posted status leaves it out.
+WHOLE_OUTPUT = " whole output: "
 #: The gate's bound on each check, handed to `sd-check --timeout`. Its own
 #: 900-second default is for an interactive run; the gate's `make check` also
 #: builds a virtualenv (sd:1918) and shares the machine's test slots, and on a
@@ -68,8 +70,8 @@ LOCAL_BLOCK = "CLAUDE.local.md"
 #: and the operator's Rust build folder, which `sd_gate_cache.cargo_target` replaces with the gate's own (sd:2493).
 DROPPED_ENVIRONMENT = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX", "__PYVENV_LAUNCHER__",
                        "FORCE_COLOR", "CLICOLOR_FORCE", "PY_COLORS", "CARGO_TARGET_DIR")
-#: Session variables, by name or prefix: dropped so two sessions' passes at one head bind equal (sd:1912, D1).
-SESSION_ENVIRONMENT = ("CLAUDECODE", "TERM_SESSION_ID", "PWD", "OLDPWD", "SHLVL", "_")
+#: Session variables, by name or prefix: dropped so two sessions' passes at one head bind equal (sd:1912, D1; fnm's per-shell folder, sd:2602).
+SESSION_ENVIRONMENT = ("CLAUDECODE", "TERM_SESSION_ID", "PWD", "OLDPWD", "SHLVL", "_", "FNM_MULTISHELL_PATH")
 SESSION_PREFIXES = ("CLAUDE_", "HERDR_", "ITERM_")
 #: Set in the child: the gate captures output, and the caller's terminal colour must not change a result (sd:2076).
 NO_COLOUR_ENVIRONMENT = {"NO_COLOR": "1", "PYTHON_COLORS": "0"}
@@ -100,12 +102,13 @@ def untracked_local_block(root: pathlib.Path) -> pathlib.Path | None:
     return None
 
 
-def gate_inputs(root: pathlib.Path, head: str, tree: str | None = None) -> str:
-    """A 12-hex digest of what a gate run depends on beyond the commit's own tree; `tree` replaces `head` under a tree key."""
+def gate_inputs(root: pathlib.Path, head: str, tree: str | None = None, own: bool = False) -> str:
+    """A 12-hex digest of what a gate run depends on beyond the commit's own tree; `tree` replaces `head` under a tree key.
+    `own`, the pack gating itself, leaves out the checkout's `bin/`: the run executes the tree's own (sd:2613)."""
     digest = hashlib.sha256((f"head {head}" if tree is None else f"tree {tree}").encode() + b"\n")
     local = untracked_local_block(root)
-    digest.update(b"local " + (local.read_bytes() if local else b"absent") + b"\n")
-    for path in sorted(BIN.iterdir()):
+    digest.update(b"local " + (local.read_bytes() if local else b"absent") + b"\n" + b"pack tree\n" * own)
+    for path in sorted(BIN.iterdir()) if not own else []:
         if path.is_file() and (path.suffix == ".py" or path.name.startswith("sd-")):
             digest.update(f"pack {path.name}\n".encode() + path.read_bytes())
     return digest.hexdigest()[:12]
@@ -113,7 +116,7 @@ def gate_inputs(root: pathlib.Path, head: str, tree: str | None = None) -> str:
 
 def gate_environment(root: pathlib.Path, environ: dict[str, str] | None = None) -> dict[str, str]:
     """The caller's environment without package selectors, forced colour, the operator's `CARGO_TARGET_DIR`,
-    session variables, `PATH` entries in `root`, or venv `bin`s.
+    session variables, `PATH` entries in `root`, or venv `bin`s; each `PATH` entry resolved.
 
     Plus `SD_LOCAL_GATE=1`, `NO_COLOR=1` and `PYTHON_COLORS=0`, whatever the caller had them set to.
     """
@@ -121,7 +124,7 @@ def gate_environment(root: pathlib.Path, environ: dict[str, str] | None = None) 
     env = {key: value for key, value in source.items()
            if key not in DROPPED_ENVIRONMENT + SESSION_ENVIRONMENT and not key.startswith(SESSION_PREFIXES)}
     top = root.resolve()
-    kept = [entry for entry in env.get("PATH", "").split(os.pathsep)
+    kept = [str(pathlib.Path(entry).resolve()) for entry in env.get("PATH", "").split(os.pathsep)
             if entry and os.path.isabs(entry) and not pathlib.Path(entry).resolve().is_relative_to(top)
             and not (pathlib.Path(entry).resolve().parent / "pyvenv.cfg").is_file()]
     env["PATH"] = os.pathsep.join(kept)
@@ -149,7 +152,7 @@ def base_ref(branch: str | None) -> str | None:
 def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SECONDS, base: str | None = None,
                       database: pathlib.Path | None = None, run: Run | None = None,
                       environ: Mapping[str, str] | None = None, reuse: bool = True,
-                      record: bool = True) -> dict[str, Any]:
+                      record: bool = True, slot_timeout: int = 0) -> dict[str, Any]:
     """`sd-check --json` in a clean detached worktree of `head`; the worktree is removed after.
 
     Returns `{"head", "status", "exit_code", "summary", "report", "stderr"}`,
@@ -161,7 +164,8 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
     `base` is a ref for `sd-check --base`; `environ` is what the gate's
     environment is made from, the process's own by default. With a `database`, a matching
     receipt answers instead of a run (the result then carries `reused`), and a
-    passing run leaves one when its binding held from before the run to after.
+    passing run leaves one when its binding held from before the run to after;
+    otherwise the result's `receipt_skipped` names what moved (sd:2612).
     `reuse=False` never reads one and `record=False` never writes one (the merge gate).
     """
     with tempfile.TemporaryDirectory(prefix="sd-local-gate-") as parent:
@@ -173,45 +177,47 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
             env = gate_environment(root, None if environ is None else dict(environ))
             content, fork = sd_gate_receipts.tree_key(tree, base)
             key = sd_gate_receipts.receipt_key(root, head, content)
-            identity = (sd_gate_receipts.gate_binding(tree, head, gate_inputs(root, head, content), base, env, fork)
+            own = sd_gate_receipts.gates_itself(root, tree, BIN)
+            identity = (sd_gate_receipts.gate_binding(tree, head, gate_inputs(root, head, content, own), base, env, fork)
                         if database is not None else None)
-            found = sd_gate_receipts.lookup(database, key, identity) if reuse and database and identity else None
+            found, miss = sd_gate_receipts.examine(database, key, identity) if reuse and database else (None, None)
             if found is not None:
                 reading = dict(found["reading"], summary=f"{found['reading']['summary']} (reused)"[:DESCRIPTION_LIMIT],
                                reused={"revision": found["revision"], "recorded_at": found["recorded_at"],
                                        "age_seconds": found["age_seconds"], "head": found["head"]})
                 return {"head": gate_git(tree, "rev-parse", "HEAD"), **reading}
-            argv = [sys.executable, str(BIN / "sd-check"), "--json", "--timeout", str(timeout),
-                    *(["--base", base] if base else [])]
+            argv = [sys.executable, str((tree / "bin" if own else BIN) / "sd-check"), "--json", "--timeout", str(timeout),
+                    *(["--base", base] if base else []), *(["--slot-timeout", str(slot_timeout)] * (slot_timeout > 0))]
             with sd_gate_cache.cargo_environment(root, tree, env) as child:
-                code, output, errors = (run or run_child)(argv, child, tree, timeout + REPORT_GRACE_SECONDS)
+                code, output, errors = (run or run_child)(argv, child, tree, timeout + slot_timeout + REPORT_GRACE_SECONDS)
             checked = gate_git(tree, "rev-parse", "HEAD")
             reading = check_reading(code, output, errors)
             if record and database and identity and reading["status"] == "success" and checked == head:
-                after = sd_gate_receipts.gate_binding(tree, head, gate_inputs(root, head, content), base, env, fork)
-                scope = (reading["report"] or {}).get("scope") or {}
-                if after == identity and scope.get("mode") == identity["scope"]["mode"]:
-                    try:
-                        reading["receipt_revision"] = sd_gate_receipts.record_pass(database, key, identity, reading, head)
-                    except Exception as error:  # the pass stands; only its reuse is lost
-                        reading["receipt_error"] = str(error)
+                after = sd_gate_receipts.gate_binding(tree, head, gate_inputs(root, head, content, own), base, env, fork)
+                sd_gate_receipts.record_unless_moved(database, key, identity, after, reading, head)
         finally:
             # The administrative entry goes with the directory; the temporary
             # directory's own cleanup removes whatever the removal left.
             sd_lib.git_output(["worktree", "remove", "--force", str(tree)], root)
-    return {"head": checked, **reading}
+    return {"head": checked, **reading, **({"reuse_miss": miss} if miss else {})}  # sd:2602; never in the receipt
 
 
 def named_checks(report: dict[str, Any]) -> str:
-    """The checks a summary names: each that ran, or, in a docs-only run, the scope and the docs row."""
-    rows = [entry for entry in report.get("checks") or [] if isinstance(entry, dict)]
+    """The checks a summary names: any precheck (sd:2604) and each that ran, or, in a docs-only run, the scope and the docs row."""
+    rows = [entry for entry in [report.get("precheck"), *(report.get("checks") or [])] if isinstance(entry, dict)]
     scope = report.get("scope")
     if not (isinstance(scope, dict) and scope.get("mode") == "docs-only"):
-        return ", ".join(f"{row.get('name')} {row.get('status')}" for row in rows if row.get("status") != "absent")
+        return ", ".join(summary_row(row) for row in rows if row.get("status") != "absent")
     # The three names read `skipped` in a docs-only run; the scope is what a reader needs.
     if report.get("status") == "pass":
         return "docs-only"
-    return "docs-only: " + ", ".join(f"{row.get('name')} {row.get('status')}" for row in rows if row.get("name") == "docs")
+    return "docs-only: " + ", ".join(summary_row(row) for row in rows if row.get("name") == "docs")
+
+
+def summary_row(row: dict[str, Any]) -> str:
+    """One check as a summary names it; a failed one adds the steps sd-check says failed (sd:2608)."""
+    steps = row.get("failed_steps") if row.get("status") == "fail" else None
+    return f"{row.get('name')} {row.get('status')}" + (f": {'; '.join(map(str, steps))}" if isinstance(steps, list) and steps else "")
 
 
 def check_reading(code: int | None, output: str, errors: str = "") -> dict[str, Any]:
@@ -240,4 +246,7 @@ def check_reading(code: int | None, output: str, errors: str = "") -> dict[str, 
     if code is None:
         return {"status": "failure", "exit_code": code, "summary": output[:DESCRIPTION_LIMIT], **said}
     words = f"sd-check {overall or 'error'}" + (f" ({named})" if named else f" (exit {code})")
+    words = words if len(words) <= DESCRIPTION_LIMIT else words[:DESCRIPTION_LIMIT - 5].rstrip() + " ...)"  # the report keeps every step
+    kept = [row["output_path"] for row in (report or {}).get("checks") or [] if isinstance(row, dict) and row.get("output_path")]
+    words += f"{WHOLE_OUTPUT}{kept[0]}" if kept else ""  # where the lane log's reader finds the whole output, uncut
     return {"status": "failure", "exit_code": code, "summary": words, **said}

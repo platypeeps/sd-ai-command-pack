@@ -182,6 +182,19 @@ class ReviewRuntime:
 GATE_NOT_RUN = "not_run"
 
 
+#: The report fields `timing_plan` judges, kept whole in a refused plan's diagnostic (sd:2646): the stdout tail cut them off.
+PLAN_FIELDS = ("timing", "requested_reviews", "authorship_refusal", "selection_refusal")
+
+
+def plan_fields(output: str) -> dict | None:
+    """`PLAN_FIELDS` from a review run's output; None when the output is not a JSON object."""
+    try:
+        report = json.loads(output)
+    except (ValueError, RecursionError):
+        return None
+    return {key: report.get(key) for key in PLAN_FIELDS} if isinstance(report, dict) else None
+
+
 def complete_report(last: dict, head: str, reviewed_head: str | None) -> dict:
     """The stored report for `head`, refused unless it is whole.
 
@@ -506,14 +519,54 @@ class SharedReview:
                 raise Refusal("this head was already reviewed; address its findings before the fix verification")
         for previous in self.history.ancestry_heads(self.state):
             if not is_ancestor(self.root, previous, head):
+                item = getattr(self.identity, "item", None)
+                # The reset publishes the reviewed commit, so it cannot be the
+                # only way out of a rewrite made to keep a line unpublished (sd:2600).
+                restart = (f"If the old history must not be pushed, as after a privacy amend, run "
+                           f"`sd-ship prepare --item {item} --restart-review REASON`: it sets the orphaned review "
+                           "aside and reviews the whole branch again, one pass against the cap. "
+                           "If the amend only edited a commit message, r" if item is not None else "R")
                 raise Refusal(
                     f"reviewed head {previous} is not an ancestor of the offered head {head} on {self.branch}; "
                     "an amend or a rebase after a review orphans the reviewed head, and a review of a "
                     "commit the branch cannot reach is not evidence about the branch",
                     code="reviewed_head_orphaned", boundary="review", state="operator_decision",
-                    next_action=f"Restore a history that contains {previous}: after an amend, run "
+                    next_action=f"{restart}estore a history that contains {previous}: after an amend, run "
                                 f"`git reset --soft {previous}`, commit the change on top, then prepare again. "
                                 "An unchanged retry refuses the same way.")
+
+    def restart_review(self, head: str) -> None:
+        """sd:2600. Set an orphaned review aside, with its reason, for one fresh full-branch review.
+
+        An amend or a rebase after review leaves reviewed heads the branch
+        cannot reach, and `validate_dispatch` refuses them. `git reset --soft`
+        onto the reviewed head restores the ancestry, but it also publishes the
+        reviewed commit, which is closed when the amend removed something that
+        may not reach the remote. sd-review refuses to resume a report whose
+        head is not an ancestor, so the orphaned findings cannot be carried
+        into the new pass. They stay in the receipt under `superseded_reviews`,
+        and their passes still count against the cap (`set_aside`).
+        """
+        reason = restart_reason(self.args)
+        orphaned = [previous for previous in self.history.ancestry_heads(self.state)
+                    if not is_ancestor(self.root, previous, head)]
+        if not orphaned:
+            raise Refusal("--restart-review applies only when a reviewed head is not an ancestor of HEAD; "
+                          "this branch still contains every reviewed head, so their findings stand",
+                          code="restart_review_unneeded", boundary="input", state="operator_decision",
+                          next_action="Prepare again without --restart-review.")
+        if self.history.spent(self.state) >= AUTOMATIC_CODE_REVIEW_PASSES:
+            raise Refusal(f"all {AUTOMATIC_CODE_REVIEW_PASSES} automatic code review passes are spent, "
+                          "set-aside passes included; a restart spends one more")
+        restart = {"reason": reason, "recorded_at": self.runtime.clock(), "head": head, "orphaned": orphaned,
+                   "history_digest": self.history.history_digest(self.state),
+                   "passes": self.history.native(self.state)}
+        self.state.pop("review_carry_forward", None)
+        self.save(passes=[], reviewed_head=None, review_clearance=None,
+                  superseded_reviews=[*(self.state.get("superseded_reviews") or []), restart])
+        print(f"sd-ship: set aside {len(restart['passes'])} pass(es) whose heads this branch cannot reach "
+              f"({', '.join(previous[:12] for previous in orphaned)}); reviewing {head[:12]} in full",
+              file=sys.stderr)
 
     def authorship_start(self) -> str:
         """Where this branch's commits begin, for trailer and vendor reads."""
@@ -587,6 +640,8 @@ class SharedReview:
         return {"from": previous, "base": fork}
 
     def review(self, head: str) -> None:
+        if getattr(self.args, "restart_review", None) is not None:
+            self.restart_review(head)
         passes = self.history.native(self.state)
         if not passes and (base := empty_branch_base(self.root, head)):
             print(f"sd-ship: {head[:12]} changes no file against {base[:12]}; local review skipped, no provider called",
@@ -639,7 +694,9 @@ class SharedReview:
 
     def preflight_diagnostic(self, planned: subprocess.CompletedProcess,
                              kind: str = "invalid_timing_plan", stage: str = "planning") -> dict:
-        diagnostic: dict = {"kind": kind, "stage": stage, "exit_code": planned.returncode}
+        argv = planned.args if isinstance(planned.args, list) else [planned.args]
+        diagnostic: dict = {"kind": kind, "stage": stage, "exit_code": planned.returncode,
+                            "argv": [str(part) for part in argv], "plan": plan_fields(planned.stdout)}
         limit = self.runtime.diagnostic_bytes
         for name in ("stdout", "stderr"):
             data = getattr(planned, name).encode("utf-8", "replace")
@@ -801,6 +858,21 @@ class SharedReview:
 REQUEST_CONSUMED = "; the operator request was consumed"
 
 
+def restart_reason(args) -> str:
+    """sd:2600. The stated reason for `--restart-review`, once the flag stands alone."""
+    reason = (getattr(args, "restart_review", None) or "").strip()
+    if not reason:
+        raise Refusal("--restart-review needs a nonempty REASON; the receipt records why the review restarted",
+                      code="restart_review_reason", boundary="input", state="operator_decision",
+                      next_action="Repeat the prepare with --restart-review and a reason.")
+    if args.retry_review or args.additional_review_for is not None or getattr(args, "catch_up", False):
+        raise Refusal("--restart-review does not combine with --retry-review, --additional-review-for or --catch-up; "
+                      "it spends one automatic pass on a fresh full-branch review of the current head",
+                      code="restart_review_combined", boundary="input", state="operator_decision",
+                      next_action="Run --restart-review alone, then prepare again for anything else.")
+    return reason
+
+
 def consumed(passes: list[dict]) -> str:
     return REQUEST_CONSUMED if passes and passes[-1].get("additional_review_request") else ""
 
@@ -846,7 +918,10 @@ def gate_diagnostics(check: dict, limit: int) -> list[dict]:
              "stdout": str(record.get("stdout") or "")[-limit:], "stderr": str(record.get("stderr") or "")[-limit:],
              # Where sd-check kept the whole output, and the failed shards it read there (sd:2558).
              "output_path": str(record["output_path"])[:limit] if record.get("output_path") else None,
-             "failed_shards": [str(line)[:limit] for line in shard_lines(record.get("failed_shards"))][:FAILED_SHARDS_NAMED]}
+             "failed_shards": [str(line)[:limit] for line in shard_lines(record.get("failed_shards"))][:FAILED_SHARDS_NAMED],
+             # Every step that failed, shard or not, and the failing part of the output (sd:2608).
+             "failed_steps": [str(line)[:limit] for line in shard_lines(record.get("failed_steps"))][:FAILED_SHARDS_NAMED],
+             "failure": str(record.get("failure") or "")[-limit:]}
             for record in [*records[:len(sd_lib.CHECK_NAMES)], *docs] if isinstance(record, dict)]
 
 
@@ -871,7 +946,9 @@ def failing_check_tails(rows: Any, limit: int = FAILING_TAIL_CHARS) -> list[str]
 
     The failed shards and the file holding the whole output come first: a
     shard that failed early in a long run is in neither tail, and the tails
-    are what a lane log cuts again (sd:2558).
+    are what a lane log cuts again (sd:2558). Each other failed step, such as
+    a make target, follows the tails, and then the failing lines the tails
+    do not already hold (sd:2608).
     """
     named = []
     for row in rows if isinstance(rows, list) else []:
@@ -882,8 +959,14 @@ def failing_check_tails(rows: Any, limit: int = FAILING_TAIL_CHARS) -> list[str]
         streams = [(stream, str(row.get(stream) or "").strip()) for stream in ("stderr", "stdout")]
         said = [f"{stream}: {'...' if len(text) > limit else ''}{text[-limit:]}" for stream, text in streams if text]
         reason = str(row.get("reason") or "").strip()
+        shards = set(shard_lines(row.get("failed_shards")))
+        steps = [f"failed step: {step}" for step in shard_lines(row.get("failed_steps"))[:FAILED_SHARDS_NAMED]
+                 if step not in shards]
+        failure = str(row.get("failure") or "").strip()
+        adds = any(line.strip() and line not in "\n".join(said) for line in failure.splitlines())
+        steps += [f"failure: {'...' if len(failure) > limit else ''}{failure[-limit:]}"] * adds
         named.append(f"{row.get('name')} (exit {row.get('exit_code')}): "
-                     + "\n".join(found + (said if said else [reason or "no output"])))
+                     + "\n".join(found + (said if said else [reason or "no output"]) + steps))
     return named
 
 

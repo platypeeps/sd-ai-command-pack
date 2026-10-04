@@ -2,8 +2,9 @@
 
 Two of them are absences, and an absence is only ever proved structurally:
 
-  * **Findings are never posted.** The tool has no network client and no code
-    path that hands a finding to GitHub. This file reads the source's import
+  * **Findings are never posted.** No code path hands a finding to GitHub;
+    the one network client, `sd_registry`'s, posts a diff to a model endpoint
+    (the allow-list below says why). This file reads the source's import
     graph and its call sites, so adding `import urllib.request` or a `gh pr
     comment` argv fails here even if no other test notices.
   * **The repository comes from cwd (R10-D6).** No option accepts a path to a
@@ -164,7 +165,7 @@ class NeverPostsTests(unittest.TestCase):
             # `chat_completion` fallback of its `client` parameter. So this
             # name does not have `sd_setup_github`'s standing below: nothing
             # holds `sd_registry` to a never-posts assertion, and it would not
-            # pass the import check above if anything did. The client landed
+            # pass `test_no_network_module_is_imported` if anything did. The client landed
             # in that file because the sub-cap below left it nowhere else to
             # go; R11-D34 records that, and this file does not re-argue it.
             #
@@ -889,11 +890,17 @@ class LineBudgetTests(unittest.TestCase):
         # say so in `gate_environment` (+1). The cache itself is
         # `bin/sd_gate_cache.py`, gate code outside the lane as
         # `sd_gate_receipts` is: `sd-review` does not import it.
+        # 4687 -> 4698 is sd:2608: `bin/sd_gate_run.py` +11 so a failed gate's
+        # one-line summary names the steps `sd-check` says failed (`summary_row`,
+        # +6 with its blank lines) within the status bound (+1), then the file
+        # with the whole output (+2) after `WHOLE_OUTPUT` (+2 with its comment),
+        # which `sd_local_gate` cuts from the public status. Reading the steps
+        # out of the output is `bin/sd-check`'s, outside the lane.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4687,
+            4698,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

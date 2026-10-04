@@ -1168,9 +1168,21 @@ class PipelineTests(ReviewFixture):
         self.local_block(root, "check: make check")
         result = self.run_review(root, FakeRunner(), dry_run=True)
         self.assertTrue(result["local_block_prepended"])
-        prompt = [row for row in result["planned_invocations"] if row["would_run"]][0]["stdin"]
-        self.assertIn("check: make check", prompt)
-        self.assertTrue(prompt.startswith("Repository-local conventions"))
+        # Every planned reviewer gets the block, not only the first (sd:1002).
+        prompts = [row["stdin"] for row in result["planned_invocations"] if row["would_run"]]
+        self.assertTrue(prompts)
+        for prompt in prompts:
+            self.assertIn("check: make check", prompt)
+            self.assertTrue(prompt.startswith("Repository-local conventions"))
+
+    def test_without_a_local_file_no_block_is_prepended(self) -> None:
+        root = self.make_repo()
+        self.prepare(root)
+        (root / "CLAUDE.local.md").unlink()
+        result = self.run_review(root, FakeRunner(), dry_run=True)
+        self.assertIs(result["local_block_prepended"], False)
+        for row in result.get("planned_invocations") or []:
+            self.assertNotIn("Repository-local conventions", row["stdin"] or "")
 
     def test_the_prompt_names_the_endpoints_the_scope_resolved(self) -> None:
         root = self.make_repo()
@@ -2203,7 +2215,7 @@ class TimingPlanTests(ReviewFixture):
         root, args, planned = self.planned()
         self.assertEqual(planned["requested_reviews"], 1)
         self.assertEqual(planned["fallback_candidates"], ["p1", "p2", "p3"])
-        self.assertEqual(planned["timing"]["execution_seconds"], 12600)
+        self.assertEqual(planned["timing"]["execution_seconds"], 12600 + sd_review.sd_lib.GATE_SLOT_SECONDS)  # sd:2611
         self.assertEqual([row["name"] for row in planned["timing"]["candidates"]], ["p0", "p1", "p2", "p3"])
         runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", ""), "p0": sd_review.Completed(127, "", "missing", False)},
                             default=sd_review.Completed(0, json.dumps({"type": "result", "subtype": "success", "structured_output": {"findings": []}}), ""))

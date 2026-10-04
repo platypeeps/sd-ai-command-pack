@@ -259,7 +259,7 @@ class NoItemPublication(unittest.TestCase):
 
     def test_assignment_in_another_registered_clone_blocks_itemless_merge(self):
         self.prepare()
-        upsert_repo(self.connection, str(self.operator), remote=self.remote_url)
+        upsert_repo(self.connection, str(self.operator), remote=self.remote_url, managed=1)
         item = create_item(self.connection, kind="work", title="concurrent work", status="in_progress",
                            repo=str(self.operator), branch="other")
         create_assignment(self.connection, item=item, role="author", status="ending")

@@ -17,7 +17,8 @@ finished. `post` refuses any other SHA, so a result cannot be carried to a
 head that was never checked.
 
 Every merge attempt posts a fresh status, from a run or from a receipt; a
-reused pass says so in its description. The description carries
+reused pass says so in its description, and a run in full keeps `reuse_miss`,
+why no receipt stood (sd:2602). The description carries
 `inputs <digest>` as provenance: a digest of the head, the copied
 `CLAUDE.local.md` (or its absence) and the pack's own `bin/` files. Anyone
 with write access can post a status, so `local_gate_passed` trusts only one
@@ -44,6 +45,7 @@ from typing import Any
 import sd_lib
 from sd_gate_run import (
     DESCRIPTION_LIMIT,
+    WHOLE_OUTPUT,
     GateError,
     base_ref,
     check_in_worktree,
@@ -63,7 +65,9 @@ def post_gate_status(api: Any, head: str, result: dict[str, Any], inputs: str) -
                       code="local_gate_mismatch", boundary="ci", state="retryable_failure",
                       next_action="Retry merge from the reviewed head.")
     state = "success" if result.get("status") == "success" else "failure"
-    description = f"{head[:12]} inputs {inputs}: {result.get('summary') or state}"[:DESCRIPTION_LIMIT]
+    # The summary's local output path stays out of a status anyone who reads the repository sees (sd:2608).
+    summary = str(result.get("summary") or state).split(WHOLE_OUTPUT, 1)[0]
+    description = f"{head[:12]} inputs {inputs}: {summary}"[:DESCRIPTION_LIMIT]
     return api.api(f"{api.prefix}/statuses/{head}", method="POST",
                    body={"state": state, "context": CONTEXT, "description": description})
 
@@ -74,7 +78,8 @@ def local_gate(api: Any, root: pathlib.Path, head: str, *, base: str | None = No
     inputs = gate_inputs(root, head)
     try:
         # The merge gate only reads prepare's receipt; its own pass records none (sd:2041).
-        result = check_in_worktree(root, head, base=base_ref(base), database=database, record=False)
+        result = check_in_worktree(root, head, base=base_ref(base), database=database, record=False,
+                                   slot_timeout=sd_lib.GATE_SLOT_SECONDS)  # sd:2611: queue apart from the check
     except GateError as error:
         raise Refusal(str(error), code="command_failed", boundary="runtime", state="retryable_failure",
                       next_action="Inspect the command error, resolve its cause, then retry.") from None

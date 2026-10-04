@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import copy
 import importlib
 import json
@@ -21,6 +22,24 @@ ship = fixture.ship
 sd_ship_review = importlib.import_module("sd_ship_review")
 CAP = fixture.CAP
 HEAD, BASE = "a" * 40, "b" * 40
+
+
+class WholeOptionNames(unittest.TestCase):
+    """sd:2646: `prepare --pr 207` parsed as `--provider 207`, and every review asked for a provider named 207."""
+
+    def test_a_prefix_of_an_option_is_refused(self):
+        with patch("sys.stderr"), self.assertRaises(SystemExit) as refused:
+            ship.parser().parse_args(["prepare", "--pr", "207", "--item", "2645", "--associate-only"])
+        self.assertEqual(refused.exception.code, 2)
+
+    def test_no_subcommand_matches_a_prefix(self):
+        def walk(parser, name):
+            yield name, parser.allow_abbrev
+            for action in parser._actions:
+                if isinstance(action, argparse._SubParsersAction):
+                    for child_name, child in action.choices.items():
+                        yield from walk(child, f"{name} {child_name}")
+        self.assertEqual([name for name, abbreviates in walk(ship.parser(), "sd-ship") if abbreviates], [])
 
 
 class ProviderSelection(unittest.TestCase):
@@ -154,6 +173,30 @@ class ProviderSelection(unittest.TestCase):
             args = ship.parser().parse_args(["review", "--no-item", "--review-id", "record", "--provider", "minimax", *flags])
             with self.subTest(flags=flags), self.assertRaisesRegex(ship.Refusal, "provider.*record"):
                 ship.validate_identity(args)
+
+    def test_a_restart_past_the_cap_refuses_and_sets_nothing_aside(self):
+        """sd:2600: passes a restart set aside still count, so the cap holds across it."""
+        reviewed, _process = self.context("minimax")
+        reviewed.review(HEAD)
+        fixed_head = "c" * 40
+        state = dict(reviewed.state, superseded_reviews=[
+            {"reason": "earlier", "passes": [{"head": "d" * 40}] * (sd_ship_review.AUTOMATIC_CODE_REVIEW_PASSES - 1)}])
+        self.assertEqual(ship.ItemHistory().spent(state), sd_ship_review.AUTOMATIC_CODE_REVIEW_PASSES)
+        review, _process = self.context("minimax", state=state, head=fixed_head)
+        review.args.restart_review = "privacy amend"
+        orphaned = subprocess.CompletedProcess([], 1, "", "")
+        with patch("sd_ship_remote.subprocess.run", return_value=orphaned), \
+                self.assertRaisesRegex(ship.Refusal, "spent"):
+            review.restart_review(fixed_head)
+        review.store.save.assert_not_called()
+        self.assertEqual(len(review.state["superseded_reviews"]), 1)
+        self.assertEqual([entry["head"] for entry in review.state["passes"]], [HEAD])
+
+    def test_a_no_item_prepare_refuses_a_restart(self):
+        """sd:2600: the restart is item-path only; a no-item record starts fresh with --create-record."""
+        args = ship.parser().parse_args(["prepare", "--no-item", "--review-id", "record", "--restart-review", "amend"])
+        with self.assertRaisesRegex(ship.Refusal, "restarts an item"):
+            ship.validate_identity(args)
 
     def test_ancestry_check_reads_only_exit_one_as_an_orphaned_head(self):
         """sd:1348 review: exit 1 is the only "not an ancestor" answer.

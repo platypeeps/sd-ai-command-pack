@@ -601,6 +601,19 @@ class TaskCLI(unittest.TestCase):
         self.assertIsNone(readback["item"]["repo"])
         self.assertEqual(readback["revision"], state["revision"])
 
+    def test_a_home_that_cannot_be_expanded_is_a_refusal_not_a_traceback(self):
+        """sd:1000 (1c0e15d3a773): `~nobody/x` raised RuntimeError out of `expanduser`."""
+        state = json.loads(self.call("task", "add", "Stays put", "--json").stdout)
+        refused = self.call("task", "edit", state["item"]["id"], "--belongs-to",
+                            "~sd-no-such-user-1000/x", code=1)
+        self.assertIn("--belongs-to: cannot expand ~sd-no-such-user-1000/x", refused.stderr)
+        self.assertNotIn("Traceback", refused.stderr)
+
+    def test_here_help_names_the_registration_the_refusal_needs(self):
+        """sd:1000 (6b9855085e9c): the help said any checkout; the refusal needs a registered one."""
+        said = " ".join(self.call("task", "add", "--help").stdout.split())
+        self.assertIn("refuse unless this is a checkout registered in the sd database", said)
+
     def test_belongs_to_and_no_repo_are_the_same_field_and_cannot_both_be_given(self):
         state = json.loads(self.call("task", "add", "One or the other", "--json").stdout)
         self.call("task", "edit", state["item"]["id"], "--belongs-to", self.home,

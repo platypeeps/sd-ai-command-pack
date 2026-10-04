@@ -37,6 +37,7 @@ VERBS = (
     "checklinks",
     "review",
     "pins",
+    "fleet-pins",
     "conventions",
     "init-hook",
     "init-claude-md",

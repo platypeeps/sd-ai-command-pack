@@ -1377,6 +1377,11 @@ class Class(NamedTuple):
 #: grow into a list of every finding this repository never answered.
 MERGED_REVIEW_DAYS = 14
 
+#: How many days past that window `expired_reviews` still counts a finding
+#: nobody answered, so expiry is not read as resolution (sd:998, decision of
+#: 2026-09-26). A count, not rows: the window's rows stay the action list.
+MERGED_AGED_DAYS = 14
+
 #: The most merged-pull-request rows `pending` shows. Lanes that push without
 #: `bin/sd-ship` leave hundreds of merges a fortnight with nothing recorded,
 #: and uncapped those rows would fill all ten slots (review-925 N-4).
@@ -1476,7 +1481,8 @@ EXCLUDED = (
     "markers outside bin/, dashboard/, tests/ and .github/scripts/ -- in "
     "skills/ and docs/ the word documents the convention instead of instancing it",
     f"review findings on pull requests merged more than {MERGED_REVIEW_DAYS} days ago "
-    "-- past that window a finding nobody answered stops being a row (sd:631)",
+    "-- past that window a finding nobody answered stops being a row (sd:631); those "
+    f"up to {MERGED_REVIEW_DAYS + MERGED_AGED_DAYS} days are counted as expired, not as answered (sd:998)",
 )
 
 
@@ -3041,6 +3047,68 @@ def _merged_review_rows(
                             listed, unchecked, reasons)
 
 
+def expired_reviews(root: pathlib.Path, merged: dict[str, Any], day: datetime.date) -> dict[str, Any]:
+    """The findings nobody answered on pull requests that left the window, counted.
+
+    `merged-pr-review-unacknowledged` drops a pull request on day fifteen,
+    answered or not, so its findings stopped reading as anything: expiry looked
+    like resolution (sd:998). This counts each unanswered finding on a pull
+    request merged `MERGED_REVIEW_DAYS + 1` to `MERGED_REVIEW_DAYS +
+    MERGED_AGED_DAYS` days before `day`.
+    """
+    return _unread_between(root, merged, day, MERGED_REVIEW_DAYS + 1, MERGED_REVIEW_DAYS + MERGED_AGED_DAYS)
+
+
+def late_reviews(root: pathlib.Path, merged: dict[str, Any], day: datetime.date) -> dict[str, Any]:
+    """The unread findings on pull requests merged inside the window, counted (sd:1178).
+
+    A review posted after the merge reaches no merge gate, and the window's
+    rows are capped in `pending`, so nothing totalled them. Stateless by the
+    operator's ruling (2026-10-03, go D): `sd-review-ack` clears a finding
+    here as it clears its row.
+    """
+    return _unread_between(root, merged, day, 0, MERGED_REVIEW_DAYS)
+
+
+def _unread_between(root: pathlib.Path, merged: dict[str, Any], day: datetime.date,
+                    first: int, last: int) -> dict[str, Any]:
+    """Unanswered findings on pull requests merged `first` to `last` days before `day`.
+
+    The verdict is the window rows'. A read that failed or stopped at its
+    limit is named in `unchecked`, so a short count is never read as a
+    complete one. Unreadable pull requests are counted with the first reason,
+    not listed: under a `gh` timeout every one of them fails the same way.
+    """
+    findings, numbers, reasons, unreadable = 0, [], [], []
+    if not merged.get("available", True):
+        reasons.append(str(merged.get("reason") or "the merged pull requests could not be read"))
+        return {"days": [first, last], "findings": 0, "pull_requests": [], "unchecked": reasons[0]}
+    if merged.get("truncated"):
+        reasons.append(f"the merged list stopped at its limit of {merged.get('limit')}")
+    ack = sd_lib.sibling("sd_review_ack", "sd-review-ack")
+    _, broken = ack.read_store(root)
+    if broken:
+        reasons.append(broken)
+    ref = ack.landing_ref(root)
+    for pull in merged.get("pull_requests") or []:
+        when = _merged_on(pull)
+        if when is None or not first <= (day - when).days <= last:
+            continue
+        stated = pull.get("review_findings") or {}
+        if stated.get("unreadable"):
+            unreadable.append(f"#{pull.get('number')}: {stated['unreadable']}")
+            continue
+        merge = {"head": str(pull.get("head_oid") or ""), "merge": str(pull.get("merge_oid") or "")}
+        standing = ack.unacknowledged(root, list(stated.get("ids") or []), ref,
+                                      stated.get("stated") or {}, merge)
+        if standing:
+            findings += len(standing)
+            numbers.append(pull.get("number"))
+    if unreadable:
+        reasons.append(f"{len(unreadable)} pull request(s) unreadable, first {unreadable[0]}")
+    return {"days": [first, last], "findings": findings, "pull_requests": numbers, "unchecked": "; ".join(reasons)}
+
+
 def _protection_rows(protection: dict[str, Any]) -> list[dict[str, Any]]:
     """Each open enforcement gap, as `_protection_gaps` already found it.
 
@@ -3484,6 +3552,13 @@ def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str
         # `today` is local, so the producer cuts the exact edge, not the query.
         "merged_pull_requests": pr_state.collect_merged(root, gh, (
             datetime.date.today() - datetime.timedelta(days=MERGED_REVIEW_DAYS + 1)).isoformat()),
+        # Its own read, so a busy fortnight past the window cannot truncate the
+        # window's list; a day wider at each end for the same UTC reason.
+        "expired_reviews": expired_reviews(root, pr_state.collect_merged(
+            root, gh,
+            (datetime.date.today() - datetime.timedelta(days=MERGED_REVIEW_DAYS + MERGED_AGED_DAYS + 1)).isoformat(),
+            until=(datetime.date.today() - datetime.timedelta(days=MERGED_REVIEW_DAYS)).isoformat(),
+        ), datetime.date.today()),
         "setup": setup_section(root),
         "protection": protection_section(root, gh),
         "handoff": handoff_section(root, environ),
@@ -3493,6 +3568,7 @@ def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str
         "jira": jira_section(),
         "contributions": contributions_section(root),
     }
+    result["late_reviews"] = late_reviews(root, result["merged_pull_requests"], datetime.date.today())
     inventory = actionable_inventory(root, result, environ=environ)
     result["inventory"] = {"rows": inventory.rows, "unchecked": inventory.unchecked}
     result["abnormalities"] = banner(inventory)
@@ -3763,7 +3839,8 @@ def _render_next(rows: list[dict[str, Any]], write: Any) -> None:
     write(f"  {top['id']}  {top['suggest']}\n")
 
 
-def _render_threads(rows: list[dict[str, Any]], write: Any) -> None:
+def _render_threads(rows: list[dict[str, Any]], write: Any,
+                    expired: dict[str, Any] | None = None, late: dict[str, Any] | None = None) -> None:
     """Per-source counts over the same list, and what was not swept.
 
     The counts give `pending`'s cap a denominator per source. The exclusions
@@ -3782,6 +3859,22 @@ def _render_threads(rows: list[dict[str, Any]], write: Any) -> None:
     write("  not swept, and named so the counts above are not read as total:\n")
     for reason in EXCLUDED:
         write(f"    - {reason}\n")
+    if late:
+        _render_unread("late", late, f"merged in the last {late['days'][1]} days are unread", write)
+    if expired:
+        first, last = expired["days"]
+        _render_unread("expired", expired, f"merged {first}-{last} days ago expired unanswered", write)
+
+
+def _render_unread(label: str, counted: dict[str, Any], said: str, write: Any) -> None:
+    """One `late:` or `expired:` line: the count, the first pull requests, the hedge."""
+    pulls = counted["pull_requests"]
+    line = f"{counted['findings']} review finding(s) on {len(pulls)} pull request(s) {said}"
+    if pulls:
+        line += f": {', '.join(f'#{n}' for n in pulls[:5])}" + (f" and {len(pulls) - 5} more" if len(pulls) > 5 else "")
+    if counted.get("unchecked"):
+        line += f" (at least; {counted['unchecked']})"
+    write(f"  {label}: {line}\n")
 
 
 def render(result: dict[str, Any], stream: TextIO) -> None:
@@ -3791,7 +3884,7 @@ def render(result: dict[str, Any], stream: TextIO) -> None:
     _render_banner(result["abnormalities"], write)
     _render_pending(rows, write)
     _render_next(rows, write)
-    _render_threads(rows, write)
+    _render_threads(rows, write, result.get("expired_reviews"), result.get("late_reviews"))
     _render_work(result["work"], write)
     _render_contributions(result.get("contributions"), write)
 
@@ -3955,6 +4048,7 @@ def main(argv: list[str] | None = None) -> int:
         root = sd_lib.repo_root()
         if root is None:
             raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")
+        sd_lib.refuse_unmanaged(root, UsageError)
         result = collect(root, dict(os.environ), args.limit)
     except sd_lib.ConfigError as error:
         print(f"sd-status: error: {error}", file=sys.stderr)

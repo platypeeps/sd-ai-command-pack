@@ -72,8 +72,10 @@ Do not substitute another diff or copy a cap into this procedure.
    A clean fallback cannot erase earlier findings.
 4. Run the repository's deterministic gate through `sd-check`, after a review that does not block.
    A blocking or incomplete review runs no gate and records `check.status: not_run`; no test passed.
+   Branch and `pr` scope run it in a clean detached worktree at the reviewed head, so an edit in the checkout during the run is not what passes.
    Explicit `--reuse-check` can reuse eligible full-check evidence; a reused receipt runs no gate.
    A failing gate fails the review.
+   Under `repo.ci = local`, follow the round order below instead.
 
 Reviewing tiers require one completed independent local review.
 Skip requires none, subject to planning and challenge minimums.
@@ -84,6 +86,18 @@ Shipping may request it afterward through the configured `deep` tier or explicit
 The registry uses read-only database controls when available.
 A missing database permits file defaults without creating a database.
 An unreadable database stops execution instead of ignoring operator controls.
+
+### Branch rounds under `repo.ci = local`
+
+1. Run `sd gate check --base main` at the head, inside any lock the brief names.
+   It runs the full check in a clean worktree, takes a gate slot, and records a pass.
+2. Review with `sd-review --scope branch --gate-check main` within 30 minutes of that pass.
+   This form reuses the pass and runs no second check.
+3. Run both with the same environment. The receipt binds it, so a one-off prefix such as `TEST_WORKERS=6` on one of them reruns the full check.
+4. After a fix commit, run step 1 again before the next round.
+
+Never run the plain branch form there: it runs a second full check in the checkout, outside any lock around the gate, and reuses no pass.
+`WORKFLOW.md`, section **Parallel work**, holds the rule (sd:2603).
 
 ## Flags and results
 

@@ -13,7 +13,8 @@
 #
 # Env:
 #   PYTHON_BIN     interpreter to run (default: python3)
-#   TEST_WORKERS   workers (default: all CPUs in CI; half the CPUs locally, min 1)
+#   TEST_WORKERS   workers (default: all CPUs in CI; locally twice the CPUs over
+#                  the machine's gate cap, at most the CPUs; half the CPUs with no cap)
 #
 # sd:1955. Locally the shards also run at `nice -n 10`. Two gates may hold the
 # two machine-wide slots at once (sd.gate_slots), and CPUs minus one each let
@@ -24,6 +25,13 @@
 # Measured on the 16-core machine before the change, 15 workers, other gates
 # sharing it: 473 s of tests, 1-minute load peak 100 and mean 63.
 # CI gets every CPU at normal priority: nothing else runs on a CI runner.
+#
+# sd:2607. The local default follows the gate cap, so the pool's full load is
+# twice the CPUs in workers whatever the cap: 8 each at the cap of 4 on 16 CPUs,
+# 16 at a cap of 2. The cap is the one the gate took its slot under:
+# SD_GATE_POOL_SIZE from a holder such as `sd-check`, else this run's own
+# SD_GATE_SLOTS. It is the cap and not the slots in use, because the shards are
+# planned once, here: a run that started alone keeps its workers when others join.
 set -uo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -67,13 +75,19 @@ else
     '' | *[!0-9]*) cores=4 ;;
   esac
   [ "$cores" -ge 1 ] || cores=1
+  pool="${SD_GATE_POOL_SIZE:-${SD_GATE_SLOTS:-0}}"
+  case "$pool" in
+    '' | *[!0-9]*) pool=0 ;;
+  esac
   if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
     TEST_WORKERS="$cores"
-  elif [ "$cores" -gt 1 ]; then
-    TEST_WORKERS=$((cores / 2))
+  elif [ "$pool" -gt 0 ]; then
+    TEST_WORKERS=$((2 * cores / pool))
+    [ "$TEST_WORKERS" -le "$cores" ] || TEST_WORKERS="$cores"
   else
-    TEST_WORKERS=1
+    TEST_WORKERS=$((cores / 2))
   fi
+  [ "$TEST_WORKERS" -ge 1 ] || TEST_WORKERS=1
 fi
 
 # Everything this run writes goes to a private directory and is published to the
@@ -515,7 +529,7 @@ acquire_gate_slot() {
   fi
   stop_if_launcher_exited
   printf '%s\n' "$$" >"$gate_slot" 2>/dev/null || :
-  export SD_GATE_SLOTS=0
+  export SD_GATE_SLOTS=0 SD_GATE_POOL_SIZE="$slots"
 }
 acquire_gate_slot
 

@@ -61,11 +61,57 @@ class NormalizeTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaisesRegex(ship.Refusal, r"line 1: .*registry resolves"):
                 normalize(f"Authored-with: {value}\n")
 
-    def test_attributes_and_closes_are_always_refused(self) -> None:
+    def test_attributes_and_a_closes_line_naming_the_claimed_item_are_refused(self) -> None:
         with self.assertRaisesRegex(ship.Refusal, r"line 1: `Attributes: 0123456 claude/anthropic`; expected no line: it names a pre-squash sha"):
             normalize("Attributes: 0123456 claude/anthropic\n")
-        with self.assertRaisesRegex(ship.Refusal, r"line 1: `Closes: sd:7`; expected no line"):
+        with self.assertRaisesRegex(ship.Refusal, r"line 1: `Closes: sd:7`; expected `Closes: sd:<n>\[, sd:<m>\]` naming co-delivered items other than sd:7"):
             normalize("Closes: sd:7\n")
+        for value in ("sd:8, sd:7", "#12", "sd:08", ""):
+            with self.subTest(value=value), self.assertRaisesRegex(ship.Refusal, r"line 1: `Closes:"):
+                normalize(f"Closes: {value}\n")
+
+    def test_a_closes_line_naming_other_items_stays_in_the_body(self) -> None:
+        """sd:1481: the merge reads `Closes:` from the body, so normalize keeps it."""
+        body = "Summary.\n\nCloses: sd:8, sd:9\nCloses: sd:9,sd:10\n    Closes: sd:11\nRefs: sd:12\n"
+        kept, stripped = normalize(body)
+        self.assertEqual(body.rstrip(), kept)
+        self.assertEqual((), stripped)
+        self.assertEqual((8, 9, 10), sd_ship_body.closes_named(kept, 7))
+        self.assertEqual((), sd_ship_body.closes_named(kept, None))
+        self.assertEqual("Summary.\n\n    Closes: sd:11\nRefs: sd:12", sd_ship_body.strip_closes(kept))
+
+    def test_a_closes_line_in_a_fence_or_a_comment_is_an_example_and_never_closes(self) -> None:
+        """A quoted `Closes:` closed sd:8 on merge, even with --associate-only (late-reviews review)."""
+        bodies = {
+            "backtick fence": "Example only:\n```text\nCloses: sd:8\n```\n",
+            "tilde fence": "Example only:\n~~~~\nCloses: sd:8\n~~~\n~~~~\n",
+            "unclosed fence": "Example only:\n```\nCloses: sd:8\n",
+            "comment": "Summary.\n<!-- for example\nCloses: sd:8\n-->\n",
+            "comment opened mid-line": "Summary. <!--\nCloses: sd:8 -->\n",
+        }
+        for name, body in bodies.items():
+            with self.subTest(name):
+                self.assertEqual((), sd_ship_body.closes_named(body, 7))
+                self.assertEqual(body, sd_ship_body.strip_closes(body))
+                with self.assertRaisesRegex(ship.Refusal, r"`Closes: sd:8[^`]*`; a code block or comment holds it"):
+                    normalize(body)
+                indented = body.replace("\nCloses: sd:8", "\n    Closes: sd:8")
+                self.assertEqual((indented.rstrip(), ()), normalize(indented))
+
+    def test_a_column_zero_closes_line_outside_fences_and_comments_still_counts(self) -> None:
+        body = ("Summary.\n```sh\necho done\n```\n<!-- a note -->\n<!--\nRefs: sd:3\n-->\n"
+                "Closes: sd:8\n~~~\n    Closes: sd:9\n~~~\n")
+        kept, stripped = normalize(body)
+        self.assertEqual((body.rstrip(), ()), (kept, stripped))
+        self.assertEqual((8,), sd_ship_body.closes_named(kept, 7))
+        self.assertNotIn("\nCloses: sd:8\n", sd_ship_body.strip_closes(kept))
+        self.assertIn("    Closes: sd:9", sd_ship_body.strip_closes(kept))
+
+    def test_quoted_lines_follow_commonmark_fences(self) -> None:
+        body = "a\n````md\n```\nb\n```\n````\nc\n```x`y\nd\n"
+        # The four-backtick fence holds lines 2-6; three backticks do not close
+        # it, and a backtick fence's info string cannot hold a backtick.
+        self.assertEqual({2, 3, 4, 5, 6}, sd_ship_body.quoted_lines(body))
 
     def test_a_stripped_line_between_blank_lines_leaves_one_gap(self) -> None:
         self.assertEqual("A\n\nB", normalize("A\n\nWork: sd:7\n\nB\n")[0])
@@ -89,7 +135,8 @@ class NormalizeTests(unittest.TestCase):
 
     def test_normalize_is_a_fixpoint_and_the_published_body_round_trips(self) -> None:
         bodies = ("Summary.", "Summary.\n", "Summary.\n\nWork: sd:7\n", "A\n\nItem: sd:7\n\nB\n\n\n",
-                  "Summary.\r\n\r\nWork: sd:7\r\n", "Work: sd:7", "", "Refs: sd:8\nItem: sd:7")
+                  "Summary.\r\n\r\nWork: sd:7\r\n", "Work: sd:7", "", "Refs: sd:8\nItem: sd:7",
+                  "Summary.\n\nCloses: sd:8\nItem: sd:7\n")
         for body in bodies:
             with self.subTest(body=body):
                 once, _ = normalize(body, deliver=True)
