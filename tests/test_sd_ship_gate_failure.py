@@ -92,11 +92,21 @@ class GateFailureSpendsNoPass(unittest.TestCase):
         with self.assertRaisesRegex(ship.Refusal, "no review pass was spent") as caught:
             review.review(HEAD)
         message = str(caught.exception)
-        self.assertIn("check (exit 2): whole output: /tmp/fixture/.git/sd-check-output/run-check.log\n"
-                      "failed step: make target docs-lint\n"
-                      "failure: docs-lint: README.md cites a missing anchor", message)
+        # The path and the two tails keep their sd:2066 order; the step and the failing lines follow.
+        self.assertRegex(message, r"check \(exit 2\): whole output: /tmp/fixture/\.git/sd-check-output/run-check\.log\n"
+                                  r"stderr: make: \*\*\* \[docs-lint\] Error 1\nstdout: \.\.\.o+\n"
+                                  r"failed step: make target docs-lint\n"
+                                  r"failure: docs-lint: README\.md cites a missing anchor")
         kept = review.state["review_preflight_error"]["checks"][0]
         self.assertEqual((kept["failed_steps"], kept["failure"]), (rows[0]["failed_steps"], rows[0]["failure"]))
+
+    def test_the_refusal_leaves_out_failing_lines_the_tails_already_hold(self):
+        """sd:2608. A short run's failure lines are its tails; saying them twice only lengthens the refusal."""
+        row = {"name": "check", "status": "fail", "exit_code": 2, "stdout": "sd2066-out",
+               "stderr": "sd2066-err\nmake[1]: *** [check] Error 1", "failed_shards": [], "output_path": "",
+               "failed_steps": ["make target check"], "failure": "sd2066-out\n\nmake[1]: *** [check] Error 1"}
+        [named] = sd_ship_review.failing_check_tails([row])
+        self.assertTrue(named.endswith("stdout: sd2066-out\nfailed step: make target check"), named)
 
     def test_the_next_prepare_reviews_without_a_retry_flag(self):
         failed, _process = self.context(report_changes=GATE_FAILED)

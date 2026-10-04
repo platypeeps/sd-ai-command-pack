@@ -855,8 +855,9 @@ def failing_check_tails(rows: Any, limit: int = FAILING_TAIL_CHARS) -> list[str]
 
     The failed shards and the file holding the whole output come first: a
     shard that failed early in a long run is in neither tail, and the tails
-    are what a lane log cuts again (sd:2558). Then each other failed step,
-    such as a make target, and the failing part of the output (sd:2608).
+    are what a lane log cuts again (sd:2558). Each other failed step, such as
+    a make target, follows the tails, and then the failing lines the tails
+    do not already hold (sd:2608).
     """
     named = []
     for row in rows if isinstance(rows, list) else []:
@@ -864,17 +865,17 @@ def failing_check_tails(rows: Any, limit: int = FAILING_TAIL_CHARS) -> list[str]
             continue
         found = [f"failed {line}" for line in shard_lines(row.get("failed_shards"))[:FAILED_SHARDS_NAMED]]
         found += [f"whole output: {row['output_path']}"] * bool(row.get("output_path"))
-        # A step that is no shard, such as a make target, and the lines that say why it failed (sd:2608).
-        shards = set(shard_lines(row.get("failed_shards")))
-        found += [f"failed step: {step}" for step in shard_lines(row.get("failed_steps"))[:FAILED_SHARDS_NAMED]
-                  if step not in shards]
-        failure = str(row.get("failure") or "").strip()
-        found += [f"failure: {'...' if len(failure) > limit else ''}{failure[-limit:]}"] * bool(failure)
         streams = [(stream, str(row.get(stream) or "").strip()) for stream in ("stderr", "stdout")]
         said = [f"{stream}: {'...' if len(text) > limit else ''}{text[-limit:]}" for stream, text in streams if text]
         reason = str(row.get("reason") or "").strip()
+        shards = set(shard_lines(row.get("failed_shards")))
+        steps = [f"failed step: {step}" for step in shard_lines(row.get("failed_steps"))[:FAILED_SHARDS_NAMED]
+                 if step not in shards]
+        failure = str(row.get("failure") or "").strip()
+        adds = any(line.strip() and line not in "\n".join(said) for line in failure.splitlines())
+        steps += [f"failure: {'...' if len(failure) > limit else ''}{failure[-limit:]}"] * adds
         named.append(f"{row.get('name')} (exit {row.get('exit_code')}): "
-                     + "\n".join(found + (said if said else [reason or "no output"])))
+                     + "\n".join(found + (said if said else [reason or "no output"]) + steps))
     return named
 
 
