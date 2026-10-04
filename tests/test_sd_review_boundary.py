@@ -879,11 +879,15 @@ class LineBudgetTests(unittest.TestCase):
         # as `--baseline` and the routing time as `--baseline-ms`, retries once
         # without them when an older `jev` refuses the flag, and says why in the
         # module docstring (+19); `bin/sd-review` +5 times `sd_route.route`.
+        # 4682 -> 4683 is sd:1912: `bin/sd_gate_run.py` +1 asks
+        # `sd_gate_receipts.tree_key` whether the head declares a tree key; the
+        # key, binding and docstring for it live in `sd_gate_receipts`, outside
+        # the lane.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4682,
+            4683,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
