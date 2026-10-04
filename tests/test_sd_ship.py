@@ -377,7 +377,8 @@ class ShipCase(unittest.TestCase):
         initialise(self.database)
         self.connection = connect(self.database)
         self.addCleanup(self.connection.close)
-        upsert_repo(self.connection, str(self.operator), remote=self.remote_url, status_source="row", runner_merge="auto")
+        upsert_repo(self.connection, str(self.operator), remote=self.remote_url, status_source="row", runner_merge="auto",
+                    managed=1)
         self.item = create_item(self.connection, kind="work", title="fixture work", status="in_progress", repo=str(self.operator), branch="topic")
         self.double = ShipDouble(self.remote)
         self.double.__enter__()
