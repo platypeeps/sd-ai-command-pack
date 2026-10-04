@@ -318,6 +318,10 @@ clean clone on a detached `HEAD` that nobody works in, for example
   receipt. `--rollback` detaches at that commit and re-renders, so a second
   `--rollback` undoes the first. It refuses a checkout on a branch, a dirty
   tree, a receipt with no `previousCommit`, and a commit the tree does not have.
+- **Both** refuse a target commit whose installer declares no
+  `ACTIVATION_CONTRACT`: it predates the serving tree, so no second
+  `--rollback` could come back from it. A render that refuses or fails puts
+  the tree back at the commit it started from and leaves the receipt as it was.
 - **Verify:** `--verify --json` is as strict as in any checkout. Planning
   drafts or a `HEAD` moved without a render fail the source check, which is why
   nobody works in the serving tree.

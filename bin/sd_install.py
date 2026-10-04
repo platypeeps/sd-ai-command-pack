@@ -85,6 +85,16 @@ GIT_TIMEOUT = 15
 #: waits forever for a remote is an install nobody can script.
 PULL_TIMEOUT = 120
 
+#: The serving-tree activation contract (sd:1118). An installer that declares
+#: it moves a detached serving tree by commit on `--pull`, records
+#: `previousCommit` in the receipt, and answers `--rollback`. The next
+#: activation runs the target commit's installer, so `--pull` and `--rollback`
+#: refuse a target whose `bin/sd_install.py` does not declare it: from there
+#: no second rollback could come back (review round 1). Raise the number when
+#: a serving tree's activation changes in a way an older installer cannot
+#: follow; a target needs at least 1.
+ACTIVATION_CONTRACT = 1
+
 
 def sibling(name: str):
     """A module out of this file's own `bin/`, which is not a package.
@@ -2682,14 +2692,63 @@ def _git(ctx: Context, args: list[str], timeout: float = GIT_TIMEOUT) -> tuple[i
     return done.returncode, done.stdout.strip(), done.stderr.strip()
 
 
+def activation_contract(ctx: Context, commit: str) -> int:
+    """The `ACTIVATION_CONTRACT` that `commit`'s installer declares; 0 when it declares none."""
+    code, text, _ = _git(ctx, ["show", f"{commit}:bin/sd_install.py"])
+    found = None if code else re.search(r"^ACTIVATION_CONTRACT = (\d+)$", text, re.MULTILINE)
+    return int(found.group(1)) if found else 0
+
+
 def _activate(ctx: Context, commit: str, out) -> int:
-    """Detach the serving tree at exactly `commit`, then re-render."""
+    """Detach the serving tree at exactly `commit` and re-render; on any failure, put both back.
+
+    This installer, already loaded, does the whole activation: checkout,
+    render and receipt (review round 1). The helpers it loads lazily are
+    loaded before the checkout, so the files changing under it cannot swap
+    in the target's copy halfway through. A render that refuses or raises
+    leaves the tree detached at the commit it started from and the receipt
+    as it was, so the commands served and the receipt never disagree.
+    """
+    if activation_contract(ctx, commit) < 1:
+        print(f"error: the installer at {commit} declares no ACTIVATION_CONTRACT: it predates the serving "
+              "tree, so after it no --pull or --rollback could move this tree by commit. Refusing; "
+              "nothing moved.", file=out)
+        return 1
+    code, original, err = _git(ctx, ["rev-parse", "--verify", "HEAD^{commit}"])
+    if code or not original:
+        print(f"error: cannot read the serving tree's HEAD:\n{err}", file=out)
+        return 1
+    for name in ("sd_lib", "sd_registry"):
+        sibling(name)
+    receipt = ctx.receipt.read_bytes() if ctx.receipt.exists() else None
     code, _, err = _git(ctx, ["checkout", "--quiet", "--detach", commit])
     if code:
         print(f"error: git checkout --detach {commit} failed:\n{err}", file=out)
         return 1
     print(f"serving {commit}", file=out)
-    return cmd_user(ctx, out)
+    rendered = 1
+    try:
+        rendered = cmd_user(ctx, out)
+    finally:
+        if rendered:
+            _put_back(ctx, original, receipt, commit, out)
+    return rendered
+
+
+def _put_back(ctx: Context, original: str, receipt: bytes | None, commit: str, out) -> None:
+    """Return the serving tree to `original` and the receipt to `receipt` after a failed render of `commit`."""
+    code, _, err = _git(ctx, ["checkout", "--quiet", "--detach", original])
+    if receipt is None:
+        ctx.receipt.unlink(missing_ok=True)
+    else:
+        ctx.receipt.write_bytes(receipt)
+    if code:
+        print(f"error: the render at {commit} failed, and git could not return the serving tree to "
+              f"{original}:\n{err}\nIt serves {commit} while the receipt names {original}; run "
+              f"`git -C {ctx.checkout} checkout --detach {original}`.", file=out)
+        return
+    print(f"error: the render at {commit} failed; the serving tree is back at {original}, "
+          "and the receipt is as it was.", file=out)
 
 
 def cmd_pull_serving(ctx: Context, out) -> int:

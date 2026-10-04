@@ -2220,9 +2220,19 @@ class ServingTreeTests(InstallerHarness):
     def git(self, repo: Path, *args: str) -> str:
         return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout.strip()
 
-    def commit(self, repo: Path, body: str) -> str:
+    def commit(self, repo: Path, body: str, *, contract: bool = True, command: str | None = None) -> str:
+        """A commit whose installer declares the activation contract, unless `contract` is False.
+
+        `command` adds an executable `bin/<command>`, which `--user` links.
+        """
         (repo / "file.txt").write_text(body, encoding="utf-8")
-        self.git(repo, "add", "file.txt")
+        (repo / "bin").mkdir(exist_ok=True)
+        (repo / "bin" / "sd_install.py").write_text("ACTIVATION_CONTRACT = 1\n" if contract else "MODES = ()\n",
+                                                    encoding="utf-8")
+        if command:
+            (repo / "bin" / command).write_text("#!/bin/sh\n", encoding="utf-8")
+            (repo / "bin" / command).chmod(0o755)
+        self.git(repo, "add", "-A")
         self.git(repo, "commit", "-qm", body.strip())
         return self.git(repo, "rev-parse", "HEAD")
 
@@ -2412,6 +2422,60 @@ class ServingTreeTests(InstallerHarness):
         self.assertEqual(sd_install.previous_commit({"commit": "a"}, "b"), "a")
         self.assertEqual(sd_install.previous_commit({"commit": "b", "previousCommit": "a"}, "b"), "a")
         self.assertEqual(sd_install.previous_commit({"commit": "b", "previousCommit": "b"}, "b"), "")
+
+    def test_a_failed_render_puts_the_tree_and_the_receipt_back(self):
+        """Review round 1: a refused update to C leaves the tree serving B and the receipt naming B."""
+
+        before = self.commit(self.origin, "a\n")
+        current = self.commit(self.origin, "b\n")
+        self.commit(self.origin, "c\n", command="sd-collides")
+        self.git(self.serving, "fetch", "-q", "origin")
+        self.git(self.serving, "checkout", "-q", "--detach", current)
+        links = self.home / "links"
+        links.mkdir()
+        (links / "sd-collides").write_text("somebody else's\n", encoding="utf-8")
+        self.write_receipt(commit=current, previousCommit=before, binDir=str(links))
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1, out.getvalue())
+        self.assertEqual(self.head(), current, "the tree kept serving the commit whose render failed")
+        receipt = sd_install.read_receipt(self.context(self.serving).receipt)
+        self.assertEqual((receipt["commit"], receipt["previousCommit"]), (current, before))
+        self.assertIn("sd-collides exists and is not a link", out.getvalue())
+        self.assertIn(f"the serving tree is back at {current}", out.getvalue())
+
+    def test_a_render_that_raises_puts_the_tree_and_the_receipt_back_and_raises(self):
+        merged = self.commit(self.origin, "two\n")
+        self.write_receipt(commit=self.first)
+
+        def half_render(ctx, out):
+            self.write_receipt(commit=merged, previousCommit=self.first)
+            raise OSError("disk full")
+
+        with unittest.mock.patch.object(sd_install, "cmd_user", side_effect=half_render):
+            with self.assertRaises(OSError):
+                sd_install.cmd_pull(self.context(self.serving), io.StringIO())
+        self.assertEqual(self.head(), self.first, "the tree kept serving the commit whose render raised")
+        self.assertEqual(sd_install.read_receipt(self.context(self.serving).receipt), {
+            "schema": sd_install.RECEIPT_SCHEMA, "commit": self.first}, "the receipt kept the failed render's write")
+
+    def test_a_target_whose_installer_predates_the_contract_is_refused(self):
+        """Review round 1: after such a target no second rollback could come back, so neither verb moves to it."""
+
+        old = self.commit(self.origin, "old\n", contract=False)
+        self.git(self.serving, "fetch", "-q", "origin")
+        self.write_receipt(commit=self.first, previousCommit=old)
+        for verb in (sd_install.cmd_pull, sd_install.cmd_rollback):
+            with self.subTest(verb=verb.__name__):
+                out = io.StringIO()
+                with self.recording():
+                    self.assertEqual(verb(self.context(self.serving), out), 1, out.getvalue())
+                self.assertIn(f"the installer at {old} declares no ACTIVATION_CONTRACT", out.getvalue())
+                self.assertEqual((self.head(), self.rendered), (self.first, []))
+
+    def test_the_installer_declares_the_contract_a_target_needs(self):
+        self.assertGreaterEqual(sd_install.ACTIVATION_CONTRACT, 1)
+        self.assertRegex((REPO_ROOT / "bin" / "sd_install.py").read_text(encoding="utf-8"),
+                         r"(?m)^ACTIVATION_CONTRACT = \d+$")
 
     def test_the_receipt_a_render_writes_carries_the_previous_commit(self):
         ctx = self.context(REPO_ROOT)

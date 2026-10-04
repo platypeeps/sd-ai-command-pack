@@ -33,6 +33,22 @@ Both refuse tracked and untracked changes before they run git.
 `previousCommit`, so a second `--rollback` undoes the first. It refuses a
 receipt with no `previousCommit` and a commit the tree does not have.
 
+## Activation (review round 1)
+
+`_activate` runs the whole activation in the installer already loaded:
+checkout, render and receipt. It loads `sd_lib` and `sd_registry` before
+the checkout, so the files changing under it cannot swap in the target's
+copy halfway through.
+
+- **Contract.** The next activation runs the target commit's installer. So
+  `--pull` and `--rollback` refuse a target whose `bin/sd_install.py`
+  declares no `ACTIVATION_CONTRACT`. An installer from before the serving tree
+  rejects `--rollback`, and no second rollback could come back from it.
+- **Put back.** A render that refuses or raises returns the tree to the
+  commit it started from, and the receipt to its bytes before the run. The
+  commands served and the receipt never disagree, so `--rollback` after a
+  failed update still starts from the commit the receipt names.
+
 ## Verification
 
 `verify_source` is unchanged. It compares `HEAD` with the receipt's commit
