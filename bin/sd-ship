@@ -1639,11 +1639,27 @@ class Ship(SharedReview):
             extras["row_authorized_merge"] = self.state["row_authorized_merge"]
         if self.state.get("merge_invoker"):
             extras["invoker"] = self.state["merge_invoker"]
+        if self.state.get("library"):
+            extras["library"] = self.state["library"]
         # Why an unrelated merge carries `Closes:` lines, and what still waits (sd:1600).
         for name in ("carried_closes", "closes_left", "closing_owed"):
             if self.state.get(name):
                 extras[name] = self.state[name]
         return extras
+
+    def reprovision_library(self, commit: str) -> None:
+        """Install `sd_db` at a merge that changed it, once per merge commit (sd:2108).
+
+        The dashboard refuses an installed `sd_db` older than the system
+        checkout's last library commit; `sd_install` decides whether this
+        merge is one, and reports a failed install rather than raising.
+        """
+        if (self.state.get("library") or {}).get("ref") == commit:
+            return
+        import sd_install  # noqa: PLC0415 - large, and only a library merge needs it
+        library = sd_install.reprovision_after_merge(self.root, commit, dict(os.environ))
+        if library is not None:
+            self.save(library=library)
 
     def invoker(self) -> dict:
         """Who ran this command, so a receipt can be traced to its process (sd:2078).
@@ -2036,6 +2052,7 @@ class Ship(SharedReview):
         advertised = git(self.root, "ls-remote", "origin", f"refs/heads/{reference['base']}").split()
         if not advertised or advertised[0] != tip:
             raise Refusal("default branch changed during merge verification; retry reconciliation")
+        self.reprovision_library(commit)
         evidence = self.result("merged", merge_commit=commit, verified_tip=tip, **self.merge_extras())
         self.save(phase="merged", merge_commit=commit, evidence=evidence)
         if not self.args.no_item:
