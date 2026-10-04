@@ -136,3 +136,15 @@ set saves little.
   `Authored-with:` trailers; `tests/test_sd_size_report.py` renders "this
   change" and the last 30 days from the log; `tests/test_archive_untouched.py`
   reads the commit that added `docs/work/.status-source`.
+- 2026-10-04, sd:2602: the merge gate already read prepare's receipt (sd:2041),
+  yet on 2026-10-03 every merge gate ran in full, most beside a prepare receipt
+  for the same head made minutes before. Cause: the installed pack sat at
+  `929b34cd` from 11:16 to 19:06 MDT and lacked `e2930c27` (ruling D1), so
+  `PWD`, `SHLVL`, `_` and `CLAUDE_*` still bound and differed between the
+  shells that ran prepare and merge. The first merge after the install of
+  `2ca892be` reused. A gate that runs in full now returns `reuse_miss`, the
+  reason no receipt stood, beside its result. Operator ruling (2026-10-04,
+  "drop it"), an addition to D1: `FNM_MULTISHELL_PATH` is dropped too, and each
+  kept `PATH` entry is resolved, so fnm's per-shell folder that leads to the
+  same real node binds the same receipt; a different real node still differs.
+  Tool paths in the binding were already resolved (`tool_identity`).
