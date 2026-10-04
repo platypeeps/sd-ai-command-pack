@@ -86,6 +86,10 @@ CORE_CONFIG = {
                   "description": "The folder holding each repository's `sd-ship lane` queue, as "
                                  "<root>/<repository>/lane/queue/. Unset reads $XDG_STATE_HOME/sd/lanes; "
                                  "SD_LANE_ROOT overrides it. It grants nothing."},
+    "gate_cache_gb": {"pattern": r"[0-9]+(\.[0-9]+)?",
+                      "description": "The most gigabytes the local gate's warm Rust build folders may hold; past it the "
+                                     "gate removes the least recently used free folders. 0 is no bound. Unset reads 40; "
+                                     "SD_GATE_CACHE_GB overrides it for one run. It grants nothing."},
     "gate_settle_seconds": {"pattern": "[0-9]+",
                             "description": "Seconds between two gate starts, and of low load1 while load5 is high; "
                                            "0 is none. Unset reads 45; SD_GATE_SETTLE_SECONDS overrides it for one run."},
@@ -126,6 +130,8 @@ DEFAULT_MODE = "full"
 
 #: The three names every repository is asked about, in the order they run.
 CHECK_NAMES = ("check", "test", "lint")
+#: The Makefile target `sd-check` runs before it waits for a gate slot (sd:2604).
+PRECHECK_NAME = "precheck"
 
 #: Optional repository restriction, overriding standing operator review consent.
 #: Shared by the installer, runtime reader, and workflow inventory check.
@@ -1439,18 +1445,26 @@ class Statuses:
     The marker is a property of the checkout and not of the item, so reading
     it per item puts the same question sixty-four times; the database is
     opened once too, and closed by whoever opened it.
+
+    `history=False` asks `delivered` nothing: no fetch, no `git log`. An open
+    item git would have answered reads `unknown`, and a `done` row is not
+    checked for its closing trailer. `make check` lints this way (sd:2606).
     """
 
     root: pathlib.Path
     source: str
     problem: str = ""
     rows: Rows | None = None
+    history: bool = True
 
     @classmethod
-    def of(cls, root: pathlib.Path | str, work_dir: str = WORK_DIR) -> "Statuses":
+    def of(
+        cls, root: pathlib.Path | str, work_dir: str = WORK_DIR, *, history: bool = True
+    ) -> "Statuses":
         root = pathlib.Path(root)
         source, problem = status_marker(root, work_dir)
-        return cls(root, source, problem, Rows(root) if source == FROM_ROW else None)
+        rows = Rows(root) if source == FROM_ROW else None
+        return cls(root, source, problem, rows, history)
 
     def close(self) -> None:
         if self.rows is not None:
@@ -1492,6 +1506,7 @@ def _from_git(
     prd: pathlib.Path,
     fields: dict[str, str],
     problems: list[str],
+    history: bool = True,
 ) -> StatusReport:
     """What a checkout with no database derives once the marker is present.
 
@@ -1500,8 +1515,15 @@ def _from_git(
     delivered" hands finished work back to the next reader that picks it.
     What the retire left behind says which kind of open the rest are -- an
     item recording the branch it lives on is being worked, one that records
-    none is still being planned.
+    none is still being planned. With `history` off git is not asked, and the
+    answer is `unknown` for the same reason.
     """
+    if not history:
+        problems.append(
+            f"{prd}: this run reads no history, so whether {item_dir.name} was "
+            f"delivered is not known here"
+        )
+        return StatusReport("unknown", False, tuple(problems))
     answer = delivered(root, item_dir.name)
     if answer == YES:
         return StatusReport("done", False, tuple(problems))
@@ -1550,7 +1572,7 @@ def _from_row(
                 f"{prd}: {statuses.rows.problem}, so this status came from git "
                 f"and not from the row this checkout's marker names"
             )
-        return _from_git(statuses.root, item_dir, prd, fields, problems)
+        return _from_git(statuses.root, item_dir, prd, fields, problems, statuses.history)
     line = fields.get("status", "").strip()
     if line and line != said:
         problems.append(
@@ -1572,7 +1594,12 @@ def _from_row(
         ((statuses.rows.identity(item_dir) if statuses.rows else ""), item_dir.name)
         if name
     ))
-    if said == "done" and not recorded and delivered(statuses.root, wanted) != YES:
+    if (
+        said == "done"
+        and not recorded
+        and statuses.history
+        and delivered(statuses.root, wanted) != YES
+    ):
         carries = " or ".join(f"{DELIVERS_TRAILER} {name}" for name in wanted)
         problems.append(
             f"{prd}: the row is done and no commit carries {carries}, nor the "
@@ -1990,6 +2017,8 @@ class Detection:
     commands: dict[str, list[str]] = field(default_factory=dict)
     reason: str = ""
     warnings: tuple[str, ...] = ()
+    #: The fast check that runs first, when the Makefile defines `PRECHECK_NAME`.
+    precheck: list[str] | None = None
 
 
 def _local_block_entrypoints(root: pathlib.Path) -> Detection | None:
@@ -2053,6 +2082,7 @@ def _makefile_entrypoints(root: pathlib.Path) -> Detection | None:
         origin=path,
         commands=commands,
         reason=f"{path.name} defines {', '.join(commands)}",
+        precheck=["make", PRECHECK_NAME] if PRECHECK_NAME in targets else None,
     )
 
 

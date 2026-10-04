@@ -4809,6 +4809,33 @@ class ReviewWatchdogTests(unittest.TestCase):
         self.assertEqual(diagnostic["cleanup"], {"term": "sent", "kill": "sent", "drained": True, "leader_reaped": True})
         self.assertEqual(diagnostic["captured_report"], {"completed_reviews": 3, "status": "clean"})
 
+    def test_a_late_close_after_kill_is_awaited_not_cut_at_the_term_grace(self):
+        """A loaded machine closes the pipes late after KILL; the drain waits for that, not for the TERM grace (sd:2609)."""
+        ready = self.root / "holder"
+        def stop_holder():
+            if ready.exists():
+                try:
+                    os.kill(int(ready.read_text()), ship.signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        self.addCleanup(stop_holder)
+        # The holder leaves the owned group with both pipes, as a slow reader would keep them, and closes them after a second.
+        script = ("import os,pathlib,signal,time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nif os.fork()==0:\n os.setsid()\n"
+                  f" pathlib.Path({str(ready)!r}).write_text(str(os.getpid()))\n time.sleep(1)\n os._exit(0)\n"
+                  "while True: time.sleep(1)\n")
+        original_communicate = subprocess.Popen.communicate
+        def after_ready(process, *args, **kwargs):
+            deadline = time.monotonic() + 5
+            while not ready.exists() and time.monotonic() < deadline:
+                time.sleep(.005)
+            return original_communicate(process, *args, **kwargs)
+        started = time.monotonic()
+        with patch.object(subprocess.Popen, "communicate", after_ready), patch.object(ship, "REVIEW_CLEANUP_SECONDS", .05):
+            with self.assertRaises(ship.ReviewTimeout) as raised:
+                ship.review_process(self.root, [sys.executable, "-c", script], timeout=.05)
+        self.assertEqual(raised.exception.diagnostic["cleanup"], {"term": "sent", "kill": "sent", "drained": True, "leader_reaped": True})
+        self.assertLess(time.monotonic() - started, 4, "the drain ends at the close, not at its bound")
+
     def test_exited_leader_cannot_leave_inherited_pipes_and_a_live_grandchild(self):
         diagnostic = self.expired_group(leader_exits=True)
         self.assertEqual(diagnostic["cleanup"]["kill"], "sent")
