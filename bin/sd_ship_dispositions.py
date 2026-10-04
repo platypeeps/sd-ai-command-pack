@@ -122,7 +122,7 @@ def blocking_refusal(operation: Any, head: str, report: dict, lead: str) -> Refu
     return Refusal(f"{lead}: {named}{more}", code="review_blocking", boundary="review", state="operator_decision",
                    next_action=f"Run `{command}` to print each blocking finding in full; fix them and prepare "
                                "again, or rebut or park each one through that adjudication.",
-                   details={"findings": findings})
+                   details={"findings": findings, "check": report.get("check")})
 
 
 def place(row: dict) -> str:

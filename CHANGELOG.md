@@ -720,6 +720,8 @@
 
 ### Changed
 
+- **The review runs before the gate, and a blocking review runs no gate (sd:2605).** `sd-review` ran the repository gate first, so a blocking finding arrived only after a full `make check`; four prepares lost a 45-minute gate that way in one night. The reviewers now run first. The gate runs only after a clean, advisory or skipped review. A blocking or incomplete review records `check: {"status": "not_run"}`, and `sd-ship prepare`'s refusal says the gate did not run and carries that `check`. A `--reuse-check` receipt is still read first and still runs no gate. A gate that fails after a review that cleared releases the review pass, so the next prepare reviews the fixed branch again.
+
 - **A task or followup merged associate-only can be delivered afterwards
   (sd:1913).** `sd work deliver N SHA --associated --reason TEXT` (sd:1590)
   closed only a work item and refused a task. On a task or followup it now
