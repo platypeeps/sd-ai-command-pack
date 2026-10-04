@@ -203,8 +203,8 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
 
 
 def named_checks(report: dict[str, Any]) -> str:
-    """The checks a summary names: each that ran, or, in a docs-only run, the scope and the docs row."""
-    rows = [entry for entry in report.get("checks") or [] if isinstance(entry, dict)]
+    """The checks a summary names: any precheck (sd:2604) and each that ran, or, in a docs-only run, the scope and the docs row."""
+    rows = [entry for entry in [report.get("precheck"), *(report.get("checks") or [])] if isinstance(entry, dict)]
     scope = report.get("scope")
     if not (isinstance(scope, dict) and scope.get("mode") == "docs-only"):
         return ", ".join(f"{row.get('name')} {row.get('status')}" for row in rows if row.get("status") != "absent")

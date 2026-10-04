@@ -6,6 +6,9 @@ GitHub side is a recorder, so nothing leaves the machine.
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
+import io
 import json
 import os
 import pathlib
@@ -201,6 +204,12 @@ class Reading(unittest.TestCase):
         self.assertEqual(len(reading["stderr"]), sd_gate_run.STDERR_TAIL_CHARS)
         self.assertEqual(reading["summary"], "sd-check pass (check pass)")
         self.assertIsNone(sd_gate_run.check_reading(0, "not json")["report"])
+
+    def test_a_failed_precheck_is_named_first(self) -> None:
+        """sd:2604: the checks after a failed precheck did not run, so the summary names the precheck."""
+        stopped = ('{"status": "fail", "precheck": {"name": "precheck", "status": "fail"},'
+                   ' "checks": [{"name": "check", "status": "fail"}]}')
+        self.assertEqual(sd_gate_run.check_reading(1, stopped)["summary"], "sd-check fail (precheck fail, check fail)")
 
 
 class Post(unittest.TestCase):
@@ -656,6 +665,74 @@ class CargoBuildCache(Repository):
         second = sd_gate_run.check_in_worktree(self.root, head, environ=env, database=database)
         self.assertEqual((first["status"], "reused" in second), ("success", True), second)
         self.assertEqual(len(self.folders()), 1)
+
+
+class CacheBound(Repository):
+    """The warm folders stay under a bound: the least recently used free folder goes first (sd:2598)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.cache = self.root.parent / "cache"
+
+    def folder(self, name: str, used: float, size: int = 1000) -> pathlib.Path:
+        """A filled warm folder whose lock file says it was last taken `used` seconds after the epoch."""
+        folder = self.cache / name
+        folder.mkdir(parents=True)
+        (folder / "build").write_bytes(b"x" * size)
+        lock = folder.parent / f"{folder.name}.lock"
+        lock.touch()
+        os.utime(lock, (used, used))
+        return folder
+
+    def test_over_the_bound_the_least_recently_used_folder_goes_first(self) -> None:
+        old, mid, new = (self.folder(f"repo-{n}/cargo-target.1", used) for n, used in (("a", 100), ("b", 200), ("c", 300)))
+        pruned = sd_gate_cache.prune(self.cache, new, 2500)
+        self.assertEqual([path for path, _ in pruned], [old])
+        self.assertEqual((old.exists(), mid.exists(), new.exists()), (False, True, True))
+
+    def test_a_folder_in_use_is_never_pruned(self) -> None:
+        old = self.folder("repo-a/cargo-target.1", 100)
+        mid = self.folder("repo-a/cargo-target.2", 200)
+        new = self.folder("repo-b/cargo-target.1", 300)
+        with open(old.parent / "cargo-target.1.lock", "a") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)  # another gate is building in it
+            pruned = sd_gate_cache.prune(self.cache, new, 2500)
+        self.assertEqual([path for path, _ in pruned], [mid])
+        self.assertTrue(old.exists())
+
+    def test_the_held_folder_goes_last_and_only_when_the_rest_is_not_enough(self) -> None:
+        other = self.folder("repo-a/cargo-target.1", 300)
+        held = self.folder("repo-b/cargo-target.1", 100, size=3000)
+        pruned = sd_gate_cache.prune(self.cache, held, 2500)
+        self.assertEqual([path for path, _ in pruned], [other, held])
+
+    def test_under_the_bound_or_with_no_bound_nothing_goes(self) -> None:
+        old = self.folder("repo-a/cargo-target.1", 100)
+        new = self.folder("repo-b/cargo-target.1", 200)
+        self.assertEqual(sd_gate_cache.prune(self.cache, new, 2000), [])
+        self.assertEqual(sd_gate_cache.prune(self.cache, new, 0), [])
+        self.assertTrue(old.exists())
+
+    def test_the_bound_reads_the_variable_then_the_setting_then_the_default(self) -> None:
+        gib = 1024 ** 3
+        home = {"XDG_CONFIG_HOME": str(self.root.parent / "config")}
+        self.assertEqual(sd_gate_cache.cache_bound(home), sd_gate_cache.DEFAULT_CACHE_GB * gib)
+        self.assertEqual(sd_gate_cache.cache_bound({**home, sd_gate_cache.CACHE_GB_VARIABLE: "0.5"}), gib // 2)
+        self.assertEqual(sd_gate_cache.cache_bound({**home, sd_gate_cache.CACHE_GB_VARIABLE: "0"}), 0)
+        with mock.patch.object(sd_lib, "core_setting", return_value="7"):
+            self.assertEqual(sd_gate_cache.cache_bound(home), 7 * gib)
+
+    def test_the_gate_names_what_it_pruned(self) -> None:
+        old = self.folder("other-0123456789ab/cargo-target.1", 100)
+        (self.root / "Cargo.toml").write_text("", encoding="utf-8")
+        git(self.root, "add", "Cargo.toml")
+        env = {key: value for key, value in os.environ.items() if key != sd_gate_cache.CARGO_TARGETS_VARIABLE}
+        env.update({sd_gate_cache.CACHE_VARIABLE: str(self.cache), sd_gate_cache.CACHE_GB_VARIABLE: "0.0000005"})
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors), sd_gate_cache.cargo_target(self.root, self.root, env) as target:
+            self.assertIsNotNone(target)
+        self.assertFalse(old.exists())
+        self.assertIn(f"sd gate: pruned {old}", errors.getvalue())
 
 
 class DocsScopeGate(Repository):

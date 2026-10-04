@@ -168,6 +168,7 @@ These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOM
 `sd config get`, `list`, and `unset` inspect or remove settings. No personal grant ships in this repository.
 `sd.gate_slots` is load control, not a grant: how many gates may run at once on the machine, across every repository (unset: a quarter of the cores).
 `sd.gate_load_max` and `sd.gate_settle_seconds` are load control too: the gate queue starts its head only while load1 is below the limit (unset: 2.5 per core), with starts 45 s apart by default.
+`sd.gate_cache_gb` bounds the local gate's warm Rust build folders (unset: 40 GB); past it the gate removes the least recently used free folder.
 `sd-ship lane enqueue|list|cancel|run|watch` keeps a serial prepare-and-merge queue per repository in a file under `sd.lane_root` (unset: `$XDG_STATE_HOME/sd/lanes`), so a queued chain outlives the session that filled it.
 `sd gate run -- make check` queues any command the same way; `sd gate status` shows the queue.
 Wrap a plain `make check` in any repository that way, and drop a per-repository `lockf` from lane scripts: the pool orders gates across every repository.
@@ -436,10 +437,11 @@ Each prose skill has a "State of the tooling" section.
 ```bash
 make setup   # once
 make check   # test + lint + audit + docs-lint
+make precheck   # lint + the always-run test modules, about a minute
 ```
 
 This repository has `repo.ci = local`: it carries no GitHub Actions workflow.
-`sd-ship merge` runs `sd-check` (here `make check`) in a fresh worktree and
+`sd-ship merge` runs `sd-check` (here `make precheck`, then `make check`) in a fresh worktree and
 posts the result as the `sd/local-gate` status on the head commit. The gate
 installs `sd_db` at the `platypeeps/system` ref in `.sd-system-rev`.
 `sd-ship prepare` grades the pull request body with `sd-docs-lint --body-only`.

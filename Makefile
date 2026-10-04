@@ -126,7 +126,7 @@ VENV_BIN = $(VENV)/bin
 SETUP_VENV = $(if $(filter command line environment,$(origin VENV)),$(VENV),.venv)
 SETUP_PYTHON = $(SETUP_VENV)/bin/python
 
-.PHONY: setup hooks fonts test lint audit docs-lint check gate-env
+.PHONY: setup hooks fonts test lint precheck audit docs-lint check gate-env
 
 # The record BORROWED reads lives inside the environment, so `rm -rf .venv`
 # takes both and a record can never outlive what it describes. The rest of
@@ -355,6 +355,18 @@ lint:
 	fi
 	@STRICT="$(STRICT)" bash .github/scripts/check-bash32-syntax.sh
 
+# `precheck` is `lint` plus the always-run test modules, about a minute
+# (sd:2604). `sd-check` runs it before it waits for a gate slot and runs
+# nothing more when it fails, so a lint error or a broken whole-tree module
+# costs a minute rather than the slot wait and a full suite. The modules are
+# the ones select-tests.py reads as the always-run set; run-precheck.py runs
+# each on its own and names every one that fails. A lint failure stops make
+# at `lint`, and make's own error line names it. `check` does not run
+# `precheck`: under `sd-check` it has already run, and `check` still runs
+# `lint` first and every module in `test`.
+precheck: lint
+	"$(VENV_PYTHON)" .github/scripts/run-precheck.py
+
 # A scanner found on PATH is whatever version happens to be installed, while
 # `make setup` installs the requirements-security.txt pin under
 # --require-hashes. When the two differ the gate is not reproducible: a newer
@@ -433,7 +445,7 @@ check: lint audit docs-lint test
 # Gate mode only (see SD_LOCAL_GATE above): every lane waits for the pinned
 # in-tree environment, which is built once per make. Outside the gate
 # GATE_ENV is empty and this line adds nothing.
-lint audit docs-lint test: $(GATE_ENV)
+lint precheck audit docs-lint test: $(GATE_ENV)
 
 gate-env:
 	"$(PYTHON)" .github/scripts/provision-gate-env.py "$(PYTHON)"

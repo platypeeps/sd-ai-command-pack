@@ -15,8 +15,13 @@ the run builds cold in its worktree, as before. The operator's own
 not bind its receipt: the folder is a cache, not an input.
 
 A warm run also gets `CARGO_INCREMENTAL=0` (`WARM_ENVIRONMENT`). Cargo
-prunes nothing in these folders; deleting one reclaims its space and costs
-the next gate that takes it one cold build.
+prunes nothing in these folders, and each gate still adds about 0.26 GB to
+the one it takes. So the gate bounds the whole cache (sd:2598): once it holds
+its folder, `prune` removes the least recently used free folders, any
+repository's, until the cache fits `sd.gate_cache_gb`. A folder another gate
+holds is skipped, since removing it needs its lock; the gate's own folder
+goes last, before its run starts. A pruned folder costs its next gate one
+cold build, and the gate names each one on stderr.
 """
 
 from __future__ import annotations
@@ -24,8 +29,11 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import hashlib
+import os
 import pathlib
-from typing import Iterator, Mapping
+import shutil
+import sys
+from typing import Iterator, Mapping, TextIO
 
 import sd_lib
 
@@ -38,6 +46,11 @@ DEFAULT_CARGO_TARGETS = 2
 #: Set with a warm folder. Each gate's worktree is new, so rustc's incremental sessions never pay off, and on
 #: macOS they and their session-named object files grew a folder by about 4 GB a gate; 0.26 GB without.
 WARM_ENVIRONMENT = {"CARGO_INCREMENTAL": "0"}
+#: The cache's bound in gigabytes for one run; `sd.gate_cache_gb` sets it for the machine, and 0 is no bound.
+CACHE_GB_VARIABLE = "SD_GATE_CACHE_GB"
+#: Two folders of the one Rust repository gated here measured 9 GB cold and about 18 GB after five builds.
+DEFAULT_CACHE_GB = 40
+GIB = 1024 ** 3
 
 
 def cache_root(environ: Mapping[str, str]) -> pathlib.Path:
@@ -54,6 +67,80 @@ def cargo_pool(environ: Mapping[str, str]) -> int:
     if text is None:
         return DEFAULT_CARGO_TARGETS
     return int(text) if text.isascii() and text.isdigit() else 0
+
+
+def cache_bound(environ: Mapping[str, str]) -> int:
+    """The cache's bound in bytes: `SD_GATE_CACHE_GB`, then `sd.gate_cache_gb`, then 40 GB; 0 is no bound."""
+    text = environ.get(CACHE_GB_VARIABLE)
+    if text is None:
+        try:
+            text = sd_lib.core_setting("gate_cache_gb", dict(environ))
+        except sd_lib.ConfigError:
+            text = None
+    try:
+        return int(float(text) * GIB) if text is not None else DEFAULT_CACHE_GB * GIB
+    except ValueError:
+        return DEFAULT_CACHE_GB * GIB
+
+
+def folder_bytes(folder: pathlib.Path) -> int:
+    """The bytes of every file under `folder`."""
+    total = 0
+    for base, _, names in os.walk(folder):
+        for name in names:
+            with contextlib.suppress(OSError):
+                total += os.lstat(os.path.join(base, name)).st_size
+    return total
+
+
+def folder_lock(folder: pathlib.Path) -> pathlib.Path:
+    """The lock file that guards a warm folder; its mtime is the folder's last use."""
+    return folder.parent / f"{folder.name}.lock"
+
+
+def last_used(folder: pathlib.Path) -> float:
+    """When a gate last took `folder`; never, for a folder without its lock file."""
+    try:
+        return folder_lock(folder).stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def hold_unless_held(path: pathlib.Path) -> TextIO | None:
+    """An open handle holding `path`'s lock, or None when another gate holds it."""
+    handle = open(path, "a")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return None
+    return handle
+
+
+def prune(root: pathlib.Path, held: pathlib.Path, bound: int) -> list[tuple[pathlib.Path, int]]:
+    """Remove the least recently used free folders under `root` until it fits `bound` bytes; `held` goes last.
+
+    The caller holds `held`'s lock. Every other folder is removed only under its
+    own lock, so a folder another gate is using stays. 0 is no bound.
+    """
+    if bound <= 0:
+        return []
+    sizes = {folder: folder_bytes(folder) for folder in root.glob("*/cargo-target.*") if folder.is_dir()}
+    total = sum(sizes.values())
+    order = sorted((folder for folder in sizes if folder != held), key=last_used)
+    pruned: list[tuple[pathlib.Path, int]] = []
+    for folder in order + ([held] if held in sizes else []):
+        if total <= bound:
+            break
+        handle = None if folder == held else hold_unless_held(folder_lock(folder))
+        if folder != held and handle is None:
+            continue
+        shutil.rmtree(folder, ignore_errors=True)
+        if handle is not None:
+            handle.close()
+        total -= sizes[folder]
+        pruned.append((folder, sizes[folder]))
+    return pruned
 
 
 def uses_cargo(tree: pathlib.Path) -> bool:
@@ -83,14 +170,9 @@ def cargo_target(root: pathlib.Path, tree: pathlib.Path, environ: Mapping[str, s
     try:
         folder.mkdir(parents=True, exist_ok=True)
         for number in range(1, pool + 1):
-            handle = open(folder / f"cargo-target.{number}.lock", "a")
-            try:
-                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except OSError:
-                handle.close()
-                continue
-            held = handle, folder / f"cargo-target.{number}"
-            break
+            if (handle := hold_unless_held(folder / f"cargo-target.{number}.lock")) is not None:
+                held = handle, folder / f"cargo-target.{number}"
+                break
     except OSError:
         held = None
     if held is None:
@@ -98,9 +180,22 @@ def cargo_target(root: pathlib.Path, tree: pathlib.Path, environ: Mapping[str, s
         return
     handle, target = held
     try:
+        report_pruned(target, environ)
         yield str(target)
     finally:
         handle.close()
+
+
+def report_pruned(target: pathlib.Path, environ: Mapping[str, str]) -> None:
+    """Mark `target` used, bound the cache around it, and name each pruned folder on stderr."""
+    try:
+        os.utime(folder_lock(target))
+        bound = cache_bound(environ)
+        for folder, size in prune(target.parent.parent, target, bound):
+            print(f"sd gate: pruned {folder} ({size / GIB:.1f} GB, least recently used) to keep the gate cache "
+                  f"under {bound / GIB:g} GB (sd.gate_cache_gb)", file=sys.stderr)
+    except OSError as error:
+        print(f"sd gate: cache not pruned: {error}", file=sys.stderr)
 
 
 @contextlib.contextmanager
