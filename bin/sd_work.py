@@ -191,7 +191,10 @@ def _belongs_to(value: str) -> str:
     that decides -- `edit_item` refuses an unregistered path by name, and one
     rule with one owner is the point of the move going through the library.
     """
-    path = pathlib.Path(value).expanduser()
+    try:
+        path = pathlib.Path(value).expanduser()
+    except RuntimeError as error:  # `~nobody/x`: a refusal, not a traceback (sd:1000)
+        raise WorkRefusal(f"--belongs-to: cannot expand {value}: {error}") from None
     root = sd_lib.repo_root(path)
     if root is None:
         return sd_lib.stored_repo(path.resolve())
@@ -1211,7 +1214,8 @@ def register(groups: Any, store: Any) -> None:
     _recurrence_flags(add)
     where = add.add_mutually_exclusive_group()
     where.add_argument("--here", action="store_true",
-                       help="refuse unless this is a checkout (one is used by default)")
+                       help="refuse unless this is a checkout registered in the sd database "
+                            "(a registered one is used by default)")
     where.add_argument("--no-repo", action="store_true",
                        help="file the item, whatever --kind names, belonging to no checkout")
     _output(add, "add")

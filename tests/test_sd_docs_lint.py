@@ -1228,6 +1228,21 @@ class Rule6CitationTests(LintFixture):
         (item / "design.md").write_text("# design\n\nNo citation here.\n", encoding="utf-8")
         self.assert_fails("design.md no longer cites it")
 
+    def test_red_a_citation_added_after_recording_is_not_passed_over(self) -> None:
+        """sd:1000 (1698a5a1f448). The rule walked the manifest only.
+
+        A citation written after the last `--update-citations` was in no row,
+        so nothing checked it and nothing counted it, and the run said clean.
+        """
+
+        self.record()
+        item = self.work / "2026-08-29-a-cited-item"
+        page = item / "design.md"
+        page.write_text(page.read_text(encoding="utf-8") + "\nA second claim cites `prd.md:2`.\n",
+                        encoding="utf-8")
+        failures = self.assert_fails("is cited but not recorded")
+        self.assertIn("`prd.md:2`", "\n".join(failures))
+
     def test_green_a_citation_that_moved_down_its_own_page_is_not_a_failure(self) -> None:
         """The source side is searched, not read at the recorded line.
 
