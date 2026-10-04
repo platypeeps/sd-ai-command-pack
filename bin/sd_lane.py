@@ -12,7 +12,8 @@ runs it under one lock per repository:
   run      pop pending entries in order: head check, `prepare --catch-up`,
            then `merge`; a failed entry is marked and the runner goes on.
            While one entry ships, the next one's gate runs on its predicted
-           landing (sd:2586, below);
+           landing (sd:2586, below). After a merge it cleans up, notes the
+           item and fast-forwards the main checkout (sd:2568, below);
   watch    print each gate end a lane or builder log records, once.
 
 The queue is `<lane root>/<repository>/lane/queue/queue.json`. The lane root
@@ -48,6 +49,19 @@ on a conflict, nothing is gated. After a merge the runner waits for that gate
 before the next prepare. A wrong prediction costs only the machine time: the
 receipt names a tree that prepare never gates, and prepare runs its own check.
 The next entry records what happened as its `speculation`.
+
+After a merge the runner lands the entry (sd:2568), as the integrator's
+scratch helper did by hand. It removes the worktree and its local branch, and
+deletes the remote branch with `--force-with-lease`, only while the
+worktree's tip is the merged head and nothing in it is uncommitted. A
+worktree that holds any ignored entry stays (operator ruling, sd:2584 option
+a): removal deletes ignored files, and no recover command brings them back.
+It notes the item with the merge commit, what the cleanup did, and a `git
+branch` recover command. Then it fast-forwards the main checkout. When that
+checkout holds the running `sd-ship`, as the pack's does for every lane, it
+tries each other lane's runner lock once and skips if one is held: a lane
+mid-prepare must not have its tools change under it, and no lane waits on
+another's lock. The next landing retries.
 """
 
 from __future__ import annotations
@@ -84,6 +98,8 @@ CLAIMS = ("deliver", "associate-only")
 Ship = Callable[[list[str], pathlib.Path], dict[str, Any]]
 #: `(root, head, base) -> the gate's result`: the next entry's gate on a predicted landing (sd:2586).
 Gate = Callable[[pathlib.Path, str, str], dict[str, Any]]
+#: `(item, body, main checkout) -> what happened`: the landing's item note (sd:2568).
+Note = Callable[[int, str, pathlib.Path], str]
 
 
 class LaneError(RuntimeError):
@@ -155,12 +171,13 @@ def stamp_now() -> str:
 
 def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: pathlib.Path, environ: dict[str, str], *,
                   expected_head: str | None = None, manual: bool = False, claim: str | None = None,
-                  acceptance_file: pathlib.Path | None = None) -> dict[str, Any]:
+                  acceptance_file: pathlib.Path | None = None, keep_worktree: bool = False) -> dict[str, Any]:
     """Add one entry; the head defaults to the worktree's, and must name a commit there.
 
     `claim` is prepare's delivery choice, `deliver` or `associate-only`, and
     is refused when absent as prepare refuses it; it and `acceptance_file`
-    reach prepare unchanged.
+    reach prepare unchanged. `keep_worktree` keeps the worktree and its
+    branch after the merge; the remote branch still goes.
     """
     worktree = worktree.resolve()
     sd_lib.refuse_unmanaged(worktree, LaneError)  # its prepare would refuse; do not queue it
@@ -177,7 +194,7 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
     entry = {"worktree": str(worktree), "item": item, "expected_head": head, "title": title,
              "body_file": str(body_file.resolve()), "authority": "manual" if manual else None, "claim": claim,
              "acceptance_file": str(acceptance_file.resolve()) if acceptance_file else None,
-             "status": "pending", "enqueued_at": stamp_now()}
+             "keep_worktree": keep_worktree, "status": "pending", "enqueued_at": stamp_now()}
 
     def add_entry(entries: list[dict[str, Any]]) -> dict[str, Any]:
         if any(row.get("item") == item and row.get("status") in ("pending", "running") for row in entries):
@@ -365,20 +382,146 @@ def speculate(entry: dict[str, Any], path: pathlib.Path, gate: Gate, busy: bool 
     return thread
 
 
+def default_note(item: int, body: str, main: pathlib.Path) -> str:
+    """`sd task note`, run from the main checkout as a person would."""
+    done = subprocess.run([sys.executable, str(BIN / "sd"), "task", "note", str(item), "--body", body], cwd=main,
+                          capture_output=True, text=True, timeout=120, check=False)
+    return "written" if done.returncode == 0 else f"failed: {(done.stderr or done.stdout).strip()[-300:]}"
+
+
+def ignored_entries(worktree: pathlib.Path) -> list[str] | None:
+    """Every ignored path in `worktree`, NUL-separated so no name is quoted; None when `git status` fails."""
+    listed = lane_git(worktree, "status", "--porcelain", "-z", "--untracked-files=all", "--ignored=matching")
+    if listed is None:
+        return None
+    return [entry[3:] for entry in listed.split("\0") if entry.startswith("!! ")]
+
+
+def remove_local(worktree: pathlib.Path, main: pathlib.Path, branch: str, tip: str) -> tuple[list[str], str | None]:
+    """Remove the worktree, then its branch only while it is still at `tip`; what went, or why cleanup stopped.
+
+    A worktree that holds the running tools stays: the runner still needs its
+    `sd-ship` and `sd`. So does one with any ignored entry, build output
+    included: removal deletes it for good. The branch is deleted against the
+    verified tip, so a builder commit made after the tip check keeps it.
+    """
+    if BIN.is_relative_to(worktree):
+        return ["worktree kept: holds the running lane tools"], None
+    ignored = ignored_entries(worktree)
+    if ignored is None:
+        return ["worktree kept: git status --ignored failed"], None
+    if ignored:
+        return [f"worktree kept: holds ignored entries: {', '.join(ignored[:3])}{'…' * (len(ignored) > 3)}"], None
+    if lane_git(main, "worktree", "remove", str(worktree)) is None:
+        return [], f"Cleanup stopped: git worktree remove {worktree} failed"
+    if lane_git(main, "update-ref", "-d", f"refs/heads/{branch}", tip) is not None:
+        return [f"removed worktree {worktree}", f"removed branch {branch}"], None
+    newer = lane_git(main, "rev-parse", "--verify", "-q", f"refs/heads/{branch}")
+    return [], (f"Cleanup stopped: branch {branch} moved to {newer or 'an unreadable ref'}, not {tip}; "
+                f"worktree {worktree} removed, branch {branch} and origin/{branch} kept")
+
+
+def clean_up(entry: dict[str, Any], head: str | None, main: pathlib.Path, branch: str, tip: str | None) -> str:
+    """Remove a merged worktree, its branch and the remote branch, only while nothing else is on them."""
+    worktree = pathlib.Path(entry["worktree"]).resolve()
+    if worktree == main:
+        return f"Cleanup skipped: {worktree} is the main checkout"
+    if not branch:
+        return "Cleanup skipped: the worktree has no branch checked out"
+    if not tip or tip != head:
+        return f"Cleanup skipped: the worktree's tip {tip} is not the merged head {head}"
+    # Explicit, so `status.showUntrackedFiles=no` cannot hide an untracked file.
+    dirty = lane_git(worktree, "status", "--porcelain", "--untracked-files=all")
+    if dirty is None or dirty:
+        return "Cleanup skipped: the worktree has uncommitted changes" if dirty else "Cleanup skipped: git status failed"
+    listed = lane_git(main, "ls-remote", "origin", f"refs/heads/{branch}")
+    remote = listed.split()[0] if listed else None
+    done: list[str] = []
+    if entry.get("keep_worktree"):
+        done.append("worktree and branch kept: queued with --keep-worktree")
+    else:
+        done, stopped = remove_local(worktree, main, branch, tip)
+        if stopped:
+            return stopped
+    if remote == tip:
+        deleted = lane_git(main, "push", "-q", f"--force-with-lease=refs/heads/{branch}:{tip}", "origin", "--delete", branch)
+        done.append(f"removed origin/{branch}" if deleted is not None else f"origin/{branch} kept: the delete failed")
+    elif remote:
+        done.append(f"origin/{branch} kept: it is at {remote}, not the merged head")
+    return "Cleanup: " + ", ".join(done) if done else "Cleanup: nothing to remove"
+
+
+@contextlib.contextmanager
+def other_lanes_idle(lanes: pathlib.Path, own: pathlib.Path) -> Iterator[str | None]:
+    """Hold every other lane's runner lock for one step, trying each once; yields the busy lane, or None."""
+    with contextlib.ExitStack() as held:
+        for lock in sorted(lanes.glob("*/lane/queue/runner.lock")):
+            if lock.resolve() == own.resolve():
+                continue
+            handle = held.enter_context(open(lock, "a", encoding="utf-8"))
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                yield lock.parent.parent.parent.name
+                return
+        yield None
+
+
+def fast_forward(main: pathlib.Path, environ: dict[str, str], own_lock: pathlib.Path) -> str:
+    """Bring the main checkout to its merged base, never waiting on another lane."""
+    branch = lane_git(main, "branch", "--show-current")
+    default = (lane_git(main, "symbolic-ref", "--short", "refs/remotes/origin/HEAD") or "").removeprefix("origin/")
+    if not branch or branch != (default or branch) or (not default and branch not in ("main", "master")):
+        return f"fast-forward skipped: the main checkout is on {branch or 'a detached HEAD'}, not the default branch"
+    lane_git(main, "fetch", "-q", "origin")
+    # Every lane runs the tools from wherever `sd-ship` resolves; moving that
+    # checkout under another lane's running prepare changes its code mid-step.
+    guarded = BIN.is_relative_to(main)
+    with other_lanes_idle(lane_root(environ), own_lock) if guarded else contextlib.nullcontext() as busy:
+        if busy:
+            return f"fast-forward skipped: the {busy} lane is running from this checkout; the next landing retries"
+        moved = lane_git(main, "merge", "-q", "--ff-only", f"origin/{branch}")
+    return (f"fast-forwarded {main} to {lane_git(main, 'rev-parse', '--short', 'HEAD')}" if moved is not None
+            else f"fast-forward skipped: git merge --ff-only origin/{branch} failed")
+
+
+def land(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, str], note: Note,
+         own_lock: pathlib.Path) -> dict[str, Any]:
+    """After a merge: clean up, note the item with a recover command, fast-forward the main checkout."""
+    worktree = pathlib.Path(entry["worktree"])
+    main = sd_lib.main_worktree_root(worktree).resolve()
+    head, merged = outcome.get("head"), str(outcome.get("merge_commit") or "")
+    branch = lane_git(worktree, "branch", "--show-current") or ""
+    tip = lane_git(worktree, "rev-parse", "HEAD")
+    fields: dict[str, Any] = {"cleanup": clean_up(entry, head, main, branch, tip)}
+    body = f"Landed: merged at {merged[:12]} (head {str(head)[:12]}). {fields['cleanup']}."
+    if branch and tip:
+        body += f" Recover: git branch {branch} {tip}."
+    try:
+        fields["note"] = note(entry["item"], body, main)
+    except Exception as error:  # the merge stands; the record says the note did not land
+        fields["note"] = f"failed: {type(error).__name__}: {error}"[:400]
+    fields["fast_forward"] = fast_forward(main, environ, own_lock)
+    return fields
+
+
 def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_ship,
-             gate: Gate = default_gate) -> dict[str, Any]:
+             gate: Gate = default_gate, note: Note | None = None) -> dict[str, Any]:
     """Drain this repository's queue in order under its lane lock; never wait for the lock.
 
     One speculative gate runs at a time (`speculate`); after a merge the
-    runner waits for it, so the next prepare finds its receipt.
+    runner lands the entry (`land`), then waits for that gate, so the next
+    prepare finds its receipt. `note` defaults to `default_note`, read at the
+    call, so a suite can replace it.
     """
     path = queue_path(root, environ)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path.parent / "runner.lock", "a", encoding="utf-8") as handle:
+    own_lock = path.parent / "runner.lock"
+    with open(own_lock, "a", encoding="utf-8") as handle:
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            return {"ran": [], "busy": f"another runner holds {path.parent / 'runner.lock'}"}
+            return {"ran": [], "busy": f"another runner holds {own_lock}"}
         ran: list[dict[str, Any]] = []
         ahead: threading.Thread | None = None
         while True:
@@ -401,6 +544,11 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
                 outcome = process(entry, path.parent.parent / "logs", ship)
             except Exception as error:  # a broken entry is marked; the next one still runs
                 outcome = {"status": "failed", "reason": f"{type(error).__name__}: {error}"[:600]}
+            if outcome.get("status") == "merged":
+                try:
+                    outcome.update(land(entry, outcome, environ, note or default_note, own_lock))
+                except Exception as error:  # the merge stands; the entry says what did not follow it
+                    outcome["cleanup"] = f"failed: {type(error).__name__}: {error}"[:600]
 
             def finish(entries: list[dict[str, Any]], entry=entry, outcome=outcome) -> None:
                 for row in entries:
@@ -454,6 +602,8 @@ def add_lane_verbs(commands: Any) -> None:
                                     "an earlier pull request of the item, as prepare --associate-only"), strict=True):
         choice.add_argument(f"--{claim}", dest="claim", action="store_const", const=claim, help=text)
     adder.add_argument("--acceptance-file", type=pathlib.Path, help="forwarded to prepare unchanged")
+    adder.add_argument("--keep-worktree", action="store_true",
+                       help="keep the worktree and its branch after the merge; the remote branch still goes")
     verbs.add_parser("list", help="print this repository's queue")
     canceller = verbs.add_parser("cancel", help="mark a pending entry cancelled")
     canceller.add_argument("item", type=int)
@@ -474,7 +624,7 @@ def lane_main(args: Any) -> int:
         if args.lane_command == "enqueue":
             result: Any = enqueue_entry(root, args.item, args.title, args.body_file, environ,
                                         expected_head=args.expected_head, manual=args.manual, claim=args.claim,
-                                        acceptance_file=args.acceptance_file)
+                                        acceptance_file=args.acceptance_file, keep_worktree=args.keep_worktree)
         elif args.lane_command == "list":
             path = queue_path(root, environ)
             result = {"queue": str(path), "entries": read_queue(path)}

@@ -499,7 +499,7 @@ which the installer places in `~/.claude/agents`.
   `sd gate status` shows who holds a slot and who waits, and since when.
 - **Ship a run of items through one lane queue (sd:2524).** `sd-ship lane
   enqueue --item N --title T --body-file F --deliver|--associate-only
-  [--acceptance-file A] [--manual]` adds a worktree's item
+  [--acceptance-file A] [--manual] [--keep-worktree]` adds a worktree's item
   to its repository's queue file, which outlives the session. `sd-ship lane
   run` drains it in order under one lock per repository: head check,
   `prepare --catch-up` with the entry's delivery claim and acceptance file,
@@ -513,6 +513,19 @@ which the installer places in `~/.claude/agents`.
   predicted landing in the background, and waits for that gate after the
   merge, so the next prepare reuses its receipt (sd:2586). That needs the
   tree key above; the next entry's `speculation` field says what ran.
+- **After a lane merge, the runner lands the entry (sd:2568).** It removes
+  the worktree and its local branch, and deletes the remote branch with
+  `--force-with-lease`, only while the worktree's tip is the merged head and
+  nothing in it is uncommitted. The main checkout is never removed. A
+  worktree stays, with its branch, when it holds the running lane tools,
+  when it holds any ignored entry (build output included; the entry's
+  `cleanup` names the first three), or when it was queued with
+  `--keep-worktree`. The local branch goes only while it is still at the
+  checked tip. The runner then notes the item: `Landed: merged at <merge>
+  (head <head>). Cleanup: …. Recover: git branch <branch> <tip>.` Last, it
+  fast-forwards the main checkout when it is on the default branch. When that
+  checkout holds the running `sd-ship`, it first tries every other lane's
+  runner lock once and skips if one is held; the next landing retries.
 - **Test one version per language, the latest stable (Python 3.14, Node
   26), in CI and locally; no version matrices.**
 

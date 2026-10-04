@@ -4,6 +4,19 @@
 
 ### Added
 
+- **`sd-ship lane run` lands each merged entry (sd:2568).** After a merge
+  the runner does what the integrator's scratch helper did by hand. It
+  removes the worktree and its local branch, and deletes the remote branch
+  with `--force-with-lease`, only while the worktree's tip is the merged head
+  and nothing in it is uncommitted. A worktree with any ignored entry stays
+  (operator ruling on sd:2584, option a), as does one that holds the running
+  tools or was queued with the new `enqueue --keep-worktree`. It notes the
+  item with the merge commit, the cleanup and a `git branch` recover
+  command, then fast-forwards the main checkout. When that checkout holds
+  the running `sd-ship`, it tries every other lane's runner lock once and
+  skips if one is held. The entry records `cleanup`, `note` and
+  `fast_forward`.
+
 - **`sd-ship lane run` gates the next entry while this one ships (sd:2586).**
   Each prepare caught up with the base after the entry ahead merged, then
   ran a 10 to 20 minute gate on the new tree. When the runner claims an
