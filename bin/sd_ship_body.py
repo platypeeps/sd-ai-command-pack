@@ -21,6 +21,12 @@ prose about a trailer, and the body keeps it.
 the pull request co-delivers, and the merge closes each with a `Delivers:`
 trailer beside the claimed item's (sd:1481, operator ruling 2026-10-03).
 `Refs:` is not owned: it names related items, which stay open.
+
+A column-zero owned line inside a fenced code block or an HTML comment is
+an example, not a claim, so `closes_named` and `strip_closes` never read one.
+`normalize` refuses it rather than keep it: the squash carries the body as
+written, and `sd_lib.demoted_trailers` would refuse the line there, at merge.
+Indented, it is prose like any other example.
 """
 
 from __future__ import annotations
@@ -55,16 +61,63 @@ class OwnedLine:
     key: str
     value: str
     indented: bool
+    quoted: bool
+
+
+#: A fence that opens or closes a fenced code block: up to three spaces, then
+#: three or more backticks or tildes (CommonMark).
+_FENCE_RE = re.compile(r"^ {0,3}(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
+
+
+def quoted_lines(body: str) -> set[int]:
+    """The 1-based numbers of the lines of `body` a fenced code block or an HTML comment holds.
+
+    A fence closes on a line of the same character, at least as long, and
+    nothing else; an unclosed fence runs to the end. A comment holds a line
+    when it is open where the line starts. Inside a fence a comment is text.
+    """
+    quoted: set[int] = set()
+    fence = ""
+    commented = False
+    for number, line in enumerate(body.split("\n"), start=1):
+        line = line.rstrip("\r")
+        if fence:
+            quoted.add(number)
+            match = _FENCE_RE.match(line)
+            if match and match["fence"][0] == fence[0] and len(match["fence"]) >= len(fence) and not match["info"].strip():
+                fence = ""
+            continue
+        if commented:
+            quoted.add(number)
+        match = _FENCE_RE.match(line)
+        if not commented and match and not (match["fence"][0] == "`" and "`" in match["info"]):
+            quoted.add(number)
+            fence = match["fence"]
+            continue
+        rest = line
+        while True:
+            if commented:
+                end = rest.find("-->")
+                if end < 0:
+                    break
+                commented, rest = False, rest[end + 3:]
+            else:
+                start = rest.find("<!--")
+                if start < 0:
+                    break
+                commented, rest = True, rest[start + 4:]
+    return quoted
 
 
 def owned_lines(body: str) -> list[OwnedLine]:
-    """Every line of `body` that starts with an owned key, indented or not."""
+    """Every line of `body` that starts with an owned key, indented or not, quoted or not."""
     found = []
+    quoted = quoted_lines(body)
     for number, line in enumerate(body.split("\n"), start=1):
         match = _OWNED_RE.match(line.rstrip("\r"))
         if match is not None:
             found.append(OwnedLine(number, line.rstrip("\r"), _CANONICAL[match["key"].lower()],
-                                   match["value"].strip(), bool(match["indent"])))
+                                   match["value"].strip(), bool(match["indent"]), number in quoted))
     return found
 
 
@@ -98,6 +151,9 @@ def known_author(value: str, readers: list) -> bool:
 
 def problem(line: OwnedLine, item: int, deliver: bool, readers: list | None) -> str | None:
     """Why `line` cannot be stripped from an item's body, or None when it can."""
+    if line.quoted:
+        return ("a code block or comment holds it, so it reads as an example; indent it to keep it as one, "
+                "or move it out of the block to make it a trailer")
     expected = f"sd:{item}"
     if line.key in (sd_lib.ITEM_TRAILER, sd_lib.WORK_TRAILER):
         return None if line.value == expected else f"expected `{line.key} {expected}`"
@@ -162,7 +218,7 @@ def _ids(value: str) -> list[str]:
 
 
 def closes_named(body: str, item: int | None) -> tuple[int, ...]:
-    """The items the body's column-zero `Closes:` lines name, in order, without repeats.
+    """The items the body's column-zero, unquoted `Closes:` lines name, in order, without repeats.
 
     No item, no closing: a no-item body refuses the line in `normalize`.
     """
@@ -170,7 +226,7 @@ def closes_named(body: str, item: int | None) -> tuple[int, ...]:
         return ()
     found: list[int] = []
     for line in owned_lines(body):
-        if line.key == sd_lib.CLOSES_TRAILER and not line.indented:
+        if line.key == sd_lib.CLOSES_TRAILER and not line.indented and not line.quoted:
             for number in (int(name[3:]) for name in _ids(line.value)):
                 if number not in found:
                     found.append(number)
@@ -184,7 +240,8 @@ def strip_closes(body: str) -> str:
     the prose is a trailer outside the block git reads, and the merge refuses
     such a message (`sd_lib.demoted_trailers`).
     """
-    kept = {line.number for line in owned_lines(body) if line.key == sd_lib.CLOSES_TRAILER and not line.indented}
+    kept = {line.number for line in owned_lines(body)
+            if line.key == sd_lib.CLOSES_TRAILER and not line.indented and not line.quoted}
     return "\n".join(text for number, text in enumerate(body.split("\n"), start=1) if number not in kept)
 
 

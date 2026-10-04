@@ -291,7 +291,9 @@
   Each item is verified against the landed message, as the claimed item is,
   so a pull request merged on GitHub without its `Delivers:` lines leaves
   those items open, and one already done by hand needs evidence for this
-  commit.
+  commit. A `Closes:` line inside a fenced code block or an HTML comment is
+  an example: it closes nothing, and prepare refuses it at column zero, since
+  the merge would refuse it there as a demoted trailer; indent it to keep it.
   `Refs:` still names related items, which stay open.
 
 - **The merge gate reads every reviewer's findings, not only Copilot's

@@ -80,6 +80,39 @@ class NormalizeTests(unittest.TestCase):
         self.assertEqual((), sd_ship_body.closes_named(kept, None))
         self.assertEqual("Summary.\n\n    Closes: sd:11\nRefs: sd:12", sd_ship_body.strip_closes(kept))
 
+    def test_a_closes_line_in_a_fence_or_a_comment_is_an_example_and_never_closes(self) -> None:
+        """A quoted `Closes:` closed sd:8 on merge, even with --associate-only (late-reviews review)."""
+        bodies = {
+            "backtick fence": "Example only:\n```text\nCloses: sd:8\n```\n",
+            "tilde fence": "Example only:\n~~~~\nCloses: sd:8\n~~~\n~~~~\n",
+            "unclosed fence": "Example only:\n```\nCloses: sd:8\n",
+            "comment": "Summary.\n<!-- for example\nCloses: sd:8\n-->\n",
+            "comment opened mid-line": "Summary. <!--\nCloses: sd:8 -->\n",
+        }
+        for name, body in bodies.items():
+            with self.subTest(name):
+                self.assertEqual((), sd_ship_body.closes_named(body, 7))
+                self.assertEqual(body, sd_ship_body.strip_closes(body))
+                with self.assertRaisesRegex(ship.Refusal, r"`Closes: sd:8[^`]*`; a code block or comment holds it"):
+                    normalize(body)
+                indented = body.replace("\nCloses: sd:8", "\n    Closes: sd:8")
+                self.assertEqual((indented.rstrip(), ()), normalize(indented))
+
+    def test_a_column_zero_closes_line_outside_fences_and_comments_still_counts(self) -> None:
+        body = ("Summary.\n```sh\necho done\n```\n<!-- a note -->\n<!--\nRefs: sd:3\n-->\n"
+                "Closes: sd:8\n~~~\n    Closes: sd:9\n~~~\n")
+        kept, stripped = normalize(body)
+        self.assertEqual((body.rstrip(), ()), (kept, stripped))
+        self.assertEqual((8,), sd_ship_body.closes_named(kept, 7))
+        self.assertNotIn("\nCloses: sd:8\n", sd_ship_body.strip_closes(kept))
+        self.assertIn("    Closes: sd:9", sd_ship_body.strip_closes(kept))
+
+    def test_quoted_lines_follow_commonmark_fences(self) -> None:
+        body = "a\n````md\n```\nb\n```\n````\nc\n```x`y\nd\n"
+        # The four-backtick fence holds lines 2-6; three backticks do not close
+        # it, and a backtick fence's info string cannot hold a backtick.
+        self.assertEqual({2, 3, 4, 5, 6}, sd_ship_body.quoted_lines(body))
+
     def test_a_stripped_line_between_blank_lines_leaves_one_gap(self) -> None:
         self.assertEqual("A\n\nB", normalize("A\n\nWork: sd:7\n\nB\n")[0])
         self.assertEqual("A\n\n\nB", normalize("A\n\n\nB\n")[0])
