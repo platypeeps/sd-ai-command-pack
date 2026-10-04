@@ -153,6 +153,7 @@ After the switch:
   Prepare's pass leaves a receipt; the merge gate at the same head and binding, within 30 minutes, reads it instead of running `sd-check` again.
   The status then says `(reused)`. The merge gate never writes a receipt.
   Prepare reads one too: a pass that `sd gate check` or an earlier prepare left at the same head and binding (sd:1912).
+  A repository that tracks `.github/sd-gate-reuse.json` keys receipts by tree and merge base instead of head, for 6 hours (sd:1912).
   Inputs outside the repository are not bound; `bin/sd_gate_receipts.py` names the binding and this trust boundary.
 - Given the base branch, the gate passes `sd-check --base`: a repository's declared docs-only scope applies (sd:2072).
 - `sd-ship merge --watch` starts no remote watch: no remote check is coming, and the gate runs to completion in the merge (sd:1875).
@@ -292,8 +293,8 @@ advance (operator ruling 2026-09-30, sd:1933).
 
 `sd-ship` owns the lines `sd_lib.OWNED_TRAILERS` names: `Item:`, `Work:`,
 `Delivers:`, `Closes:`, `Authored-with:` and `Attributes:`. `prepare` appends
-`Work:` to the body it publishes, and `merge` appends `Item:`, `Delivers:` and
-the authorship lines to the squash message, so a body written for `sd-ship`
+`Work:` to the body it publishes, and `merge` appends `Item:`, `Delivers:`, any
+owed `Closes:` and the authorship lines to the squash message, so a body written for `sd-ship`
 carries none of them. A supplied line that says what `sd-ship` would write is
 stripped and listed in the result's `normalized`; any other owned line is
 refused by line number, with the expected value. So the body `sd-ship`
@@ -325,6 +326,16 @@ reachability check, accepts the `Item:` trailer for the row instead, and records
 the trailer and the reason on the receipt. A task or followup has no receipt:
 its move to done records the delivery sentence and the reason. It refuses a
 missing reason, and `sd-ship prepare --deliver` on such a record names it.
+
+A `--deliver` squash GitHub lands on a base its review did not cover is held:
+reconcile records the merge and not the delivery, and no git reader takes its
+`Delivers:`. Once the combined tree passes and the operator closes the row by
+hand, reconcile clears the hold and records `closing_owed` on the receipt. The
+next `sd-ship merge` in the same repository then writes `Closes: <item>` into
+its squash's trailer block, at most 10 per squash, and its result names each
+in `carried_closes`. Its reconcile marks them paid only if that squash is not
+held itself. Accepted gap (sd:1600): until that merge lands, a reader with no
+database still sees the item open; `closes_left` names debts past the cap.
 
 `sd work cancel <row-id> --reason TEXT` records cancellation immediately,
 without a status-file change or another pull request. It does not claim the
@@ -427,6 +438,18 @@ which the installer places in `~/.claude/agents`.
   another repository's `make check`, run `sd gate run -- make check`; it waits,
   runs the command, and frees the slot when the command ends.
   `sd gate status` shows who holds a slot and who waits, and since when.
+- **Ship a run of items through one lane queue (sd:2524).** `sd-ship lane
+  enqueue --item N --title T --body-file F --deliver|--associate-only
+  [--acceptance-file A] [--manual]` adds a worktree's item
+  to its repository's queue file, which outlives the session. `sd-ship lane
+  run` drains it in order under one lock per repository: head check,
+  `prepare --catch-up` with the entry's delivery claim and acceptance file,
+  then `merge` for an entry queued with `--manual`. An entry with no claim is
+  refused at enqueue, as prepare refuses it. A
+  failed entry is marked and the next one runs. A second runner exits at once
+  rather than wait. Each prepare and merge keeps its whole output under
+  `<lane>/logs/`. `list` and `cancel` read and edit the queue; `watch` prints
+  each gate end a log under `sd.lane_root` records, once.
 - **Test one version per language, the latest stable (Python 3.14, Node
   26), in CI and locally; no version matrices.**
 
@@ -731,6 +754,8 @@ The reserved `sd` namespace declares four settings:
   Absence reads 2.5 per core. `SD_GATE_LOAD_MAX` overrides it for one run. It grants nothing.
 - `sd.gate_settle_seconds`: seconds between two gate starts, and of low load1 while load5 is high; `0` is none.
   Absence reads 45. `SD_GATE_SETTLE_SECONDS` overrides it for one run. It grants nothing.
+- `sd.lane_root`: the folder that holds each repository's `sd-ship lane` queue, as `<root>/<repository>/lane/queue/`.
+  Absence reads `$XDG_STATE_HOME/sd/lanes`. `SD_LANE_ROOT` overrides it. It grants nothing.
 
 Installation supplies neither grant. A new operator must state their own policy; never copy another user's personal permission.
 These settings start no background work, enable no runner policy, and bypass no ownership, review, CI, or protection gate.
