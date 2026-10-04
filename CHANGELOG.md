@@ -249,6 +249,33 @@
 
 ### Fixed
 
+- **Suite fixtures that did not do what they are named (sd:1002).** Two
+  `HOME` restores in `tests/test_sd_handoff_rows.py` and the `environment`
+  helper in `tests/test_sd_suggest.py` now put back an unset or empty value as
+  it was. Tests that passed when their subject broke now fail: the
+  repository's own acceptance file must load entries, `fleet-pins` is in the
+  research kit's verb list, the step-6 query pins `--base <this branch>`, the
+  guest-refusal control reads the explain scope row, every planned reviewer
+  gets the local block (and none without the file), the shipped registry
+  carries no `exo`, and the skill-promotion reader counts `publish` as a
+  forge claim, a contraction as a denial, and the tree a move starts from.
+
+- **A branch review checks the reviewed head in a clean worktree (sd:2077).**
+  `sd-review --scope branch` and `--scope pr`, and so `sd-ship review`, ran
+  `sd-check` in the operator's checkout unless `repo.ci` was `local`. An edit
+  to a bash check script during the run killed it mid-line, and the tree it
+  judged was not the reviewed head. The check now runs in a detached worktree
+  at the subject's head, as the local gate does, and its `check.source` reads
+  `worktree`. It leaves no gate receipt, and exit 0 still passes, so a
+  repository with no entrypoint is not a failed review. A worktree review
+  still checks the live checkout, whose edits are its subject.
+
+- **The issue guard's hint parses (sd:2515).** `bin/sd-issue-guard` told the
+  agent to run `sd task note <n> "<text>"`, which `sd` refuses: `note` takes
+  the text only as `--body`. The hint now reads `sd task note <n> --body
+  "<text>"`, and a test hands each `sd` command the denial names to the real
+  parser.
+
 - **One stalled plugin root no longer blocks every plugin lookup (sd:2540).**
   A prefix lives in its plugin's manifest, so `sd config get <prefix>.<key>`
   read every registered root in turn until it found the owner. On 2026-10-01
@@ -752,6 +779,19 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **The gate-slot count is the one limit on concurrent gates (sd:2607).**
+  On 2026-10-03 three gates read a load average of 124 while most cores idled,
+  because macOS counts threads waiting on the disk in it. The gate queue's
+  load rule is now off unless `sd.gate_load_max` sets it; starts stay 45 s apart.
+  `sd-check --slot-timeout` bounds the queue apart from `--timeout`, so a
+  queued gate's checks keep their whole bound. `sd gate check` queues for up to
+  4 hours. A holder exports its cap as `SD_GATE_POOL_SIZE`, and `run-tests.sh`
+  sizes its local workers to twice the CPUs over that cap: 8 at the cap of 4 on
+  16 CPUs, as before. The builder brief and `WORKFLOW.md` drop the advice to
+  wait on the load average or wrap a gate in `lockf`. `sd-review --gate-check`
+  and `sd-ship prepare`/`merge` keep the old bound; their watchdog plans do not
+  count a separate queue time yet.
 
 - **Builders gate first, then review the gated head (sd:2603, slice 1).** The `sd-slice-builder` agent, the `sd-review` skill and `WORKFLOW.md` (Parallel work, Reviews, Defaults) now order each branch round under `repo.ci = local`: `sd gate check --base main` at the head, then `sd-review --scope branch --gate-check main` within the 30-minute reuse window, with the same environment, so the round reads the gate's pass instead of running a second full check. A fix commit needs a new gate pass before the next round. The plain `sd-review --scope branch` form is ruled out there: it runs a full check in the checkout, outside any lock around the gate, and reuses no pass. Docs only; `bin/sd-review` is unchanged.
 

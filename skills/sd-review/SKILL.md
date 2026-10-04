@@ -61,6 +61,7 @@ Do not substitute another diff or copy a cap into this procedure.
 
 1. Run the repository's deterministic gate through `sd-check`.
    A failing gate stops the review before provider dispatch.
+   Branch and `pr` scope run it in a clean detached worktree at the reviewed head, so an edit in the checkout during the run is not what passes.
    Explicit `--reuse-check` can reuse eligible full-check evidence; missing or stale evidence runs the gate normally.
    Under `repo.ci = local`, follow the round order below instead.
 2. Use the routing decision from `sd_route.route`.

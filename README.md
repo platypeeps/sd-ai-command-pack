@@ -167,7 +167,7 @@ sd config set sd.assistant_merge controlled
 These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOME` overrides the configuration root.
 `sd config get`, `list`, and `unset` inspect or remove settings. No personal grant ships in this repository.
 `sd.gate_slots` is load control, not a grant: how many gates may run at once on the machine, across every repository (unset: a quarter of the cores).
-`sd.gate_load_max` and `sd.gate_settle_seconds` are load control too: the gate queue starts its head only while load1 is below the limit (unset: 2.5 per core), with starts 45 s apart by default.
+`sd.gate_load_max` and `sd.gate_settle_seconds` are load control too: the gate queue starts its head 45 s after the last start by default, and only below a load1 limit where one is set (unset: none, since macOS counts disk waits in the load average).
 `sd.gate_cache_gb` bounds the local gate's warm Rust build folders (unset: 40 GB); past it the gate removes the least recently used free folder.
 `sd-ship lane enqueue|list|cancel|run|watch` keeps a serial prepare-and-merge queue per repository in a file under `sd.lane_root` (unset: `$XDG_STATE_HOME/sd/lanes`), so a queued chain outlives the session that filled it.
 `sd gate run -- make check` queues any command the same way; `sd gate status` shows the queue.
