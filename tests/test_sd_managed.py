@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import pathlib
 import subprocess  # nosec B404 - fixed argv, running git
@@ -27,7 +28,10 @@ sys.path.insert(0, str(REPO_ROOT / "bin"))
 import sd_ci  # noqa: E402
 import sd_db  # noqa: E402 - installed into this virtualenv by `make setup`
 import sd_fleet  # noqa: E402
+import sd_lane  # noqa: E402
 import sd_lib  # noqa: E402
+
+BIN = REPO_ROOT / "bin"
 
 
 class Fixture(unittest.TestCase):
@@ -88,6 +92,75 @@ class ADirectCall(Fixture):
         self.assertEqual(said.getvalue().count("\n"), 1, said.getvalue())
         self.assertIn("(repo.managed); proceeding", said.getvalue())
         self.assertIn("sd-db.sh repo managed ", said.getvalue())
+
+
+class TheDirectCommands(Fixture):
+    """sd:2566. sd-ship, sd-review, sd-check and sd-status refuse an unmanaged
+    checkout before any network call, check or write; `--explain` and
+    `--dry-run` included. A checkout with no row proceeds without a word."""
+
+    COMMANDS = {
+        "sd-ship": ["observe", "--item", "1", "--json"],
+        "sd-review": ["--scope", "branch", "--explain", "--json"],
+        "sd-check": ["--dry-run", "--json"],
+        "sd-status": ["--json"],
+    }
+
+    def run_command(self, name: str, root: pathlib.Path, *extra: str) -> subprocess.CompletedProcess:
+        return subprocess.run([sys.executable, str(BIN / name), *self.COMMANDS[name], *extra],  # nosec B603
+                              cwd=root, capture_output=True, text=True, timeout=120, check=False)
+
+    def test_each_refuses_an_unmanaged_checkout_naming_the_flag(self) -> None:
+        root = self.checkout("theirs")
+        self.register(root, managed=0)
+        for name in self.COMMANDS:
+            with self.subTest(name):
+                done = self.run_command(name, root)
+                self.assertEqual(done.returncode, {"sd-ship": 3, "sd-review": 3, "sd-check": 2, "sd-status": 2}[name],
+                                 done.stdout + done.stderr)
+                said = done.stdout + done.stderr
+                self.assertIn("repo.managed = no", said)
+                self.assertIn("sd-db.sh repo managed ~/theirs yes", said)
+        refused = json.loads(self.run_command("sd-ship", root).stdout)
+        self.assertEqual(refused["workflow"]["blocker"]["code"], "unmanaged_repository")
+
+    def test_each_passes_a_managed_checkout_and_one_with_no_row_in_silence(self) -> None:
+        mine, unregistered = self.checkout("mine"), self.checkout("unregistered")
+        self.register(mine, managed=1)
+        for root in (mine, unregistered):
+            for name in self.COMMANDS:
+                with self.subTest(name, checkout=root.name):
+                    self.assertNotIn("repo.managed", (done := self.run_command(name, root)).stdout + done.stderr)
+
+    def test_sd_ship_reads_the_database_it_is_given(self) -> None:
+        root = self.checkout("theirs")
+        self.register(root, managed=1)
+        other = self.home / "other"
+        other.mkdir()
+        sd_db.initialise(home=other)
+        connection = sd_db.connect(home=other)
+        try:
+            sd_db.writes.upsert_repo(connection, sd_db.add_repo(connection, root, home=self.home),
+                                     remote="https://github.com/example/theirs", managed=0)
+            connection.commit()
+            database = connection.execute("PRAGMA database_list").fetchone()[2]
+        finally:
+            connection.close()
+        self.assertIsNone(sd_lib.unmanaged(root, warn=False))
+        self.assertIn("repo.managed = no", sd_lib.unmanaged(root, warn=False, database=database) or "")
+        done = self.run_command("sd-ship", root, "--database", database)
+        self.assertIn("repo.managed = no", done.stdout, done.stderr)
+
+    def test_lane_enqueue_refuses_before_queueing(self) -> None:
+        root = self.checkout("theirs")
+        self.register(root, managed=0)
+        body = self.home / "body.md"
+        body.write_text("Item: sd:1\n")
+        environ = {"HOME": str(self.home), sd_lane.ROOT_VARIABLE: str(self.home / "lanes")}
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.enqueue_entry(root, 1, "A title", body, environ, claim="deliver")
+        self.assertIn("repo.managed = no", str(refused.exception))
+        self.assertFalse((self.home / "lanes").exists(), "an unmanaged entry reached the queue folder")
 
 
 class SdCiLocal(Fixture):
