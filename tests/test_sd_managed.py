@@ -39,20 +39,21 @@ class Fixture(unittest.TestCase):
         patched.start()
         self.addCleanup(patched.stop)
 
-    def checkout(self, name: str) -> pathlib.Path:
+    def checkout(self, name: str, origin: str | None = None) -> pathlib.Path:
         root = self.home / name
         root.mkdir()
         subprocess.run(["git", "init", "-q", str(root)], check=True)  # nosec B603 B607
         subprocess.run(["git", "-C", str(root), "remote", "add", "origin",  # nosec B603 B607
-                        f"https://github.com/example/{name}"], check=True)
+                        f"https://github.com/example/{origin or name}"], check=True)
         return root
 
-    def register(self, root: pathlib.Path, **columns: object) -> None:
+    def register(self, root: pathlib.Path, origin: str | None = None, **columns: object) -> None:
         sd_db.initialise(home=self.home)
         connection = sd_db.connect(home=self.home)
         try:
             key = sd_db.add_repo(connection, root, home=self.home)
-            sd_db.writes.upsert_repo(connection, key, remote=f"https://github.com/example/{root.name}", **columns)
+            sd_db.writes.upsert_repo(connection, key, remote=f"https://github.com/example/{origin or root.name}",
+                                     **columns)
             connection.commit()
         finally:
             connection.close()
@@ -116,6 +117,23 @@ class AFleetWalk(Fixture):
         with self.assertRaises(sd_fleet.FleetRefusal) as refused:
             sd_fleet.here(sd_fleet.auto_rows(), theirs)
         self.assertIn("repo.managed = no", str(refused.exception))
+
+    def test_an_unmanaged_checkout_sharing_a_managed_rows_origin_refuses(self) -> None:
+        """The lane review of sd:1620: `here` matched by origin first, so an
+        unmanaged checkout of the same repository as a managed auto row took
+        that row and wrote. Management is per row; the checkout's own row decides."""
+        mine, theirs = self.checkout("mine"), self.checkout("theirs", origin="mine")
+        self.register(mine, managed=1, runner_merge="auto")
+        self.register(theirs, origin="mine", managed=0, runner_merge="auto")
+        with self.assertRaises(sd_fleet.FleetRefusal) as refused:
+            sd_fleet.here(sd_fleet.auto_rows(), theirs)
+        self.assertIn("repo.managed = no", str(refused.exception))
+        self.assertEqual(sd_fleet.here(sd_fleet.auto_rows(), mine)[0], mine)
+
+    def test_an_unregistered_worktree_still_resolves_by_origin(self) -> None:
+        mine, worktree = self.checkout("mine"), self.checkout("worktree", origin="mine")
+        self.register(mine, managed=1, runner_merge="auto")
+        self.assertEqual(sd_fleet.here(sd_fleet.auto_rows(), worktree)[0], worktree)
 
     def test_a_row_without_the_column_stays_in(self) -> None:
         class Row(dict):

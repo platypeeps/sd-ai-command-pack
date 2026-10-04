@@ -701,17 +701,23 @@ def here(rows: list[tuple[pathlib.Path, str | None]], cwd: pathlib.Path) -> tupl
     """The checkout a write lands in: the one the caller stands in (R10-D6).
 
     It must be a checkout of an auto row's repository -- matched by origin,
-    so a worktree of a registered checkout qualifies. The third value says
-    whether its HEAD is a feature branch, the only place tracked files go.
+    so a worktree of a registered checkout qualifies. The checkout's own row
+    is read first, path before origin as `sd_ci.ci_step` reads it, and an
+    unmanaged one refuses: two checkouts can share an origin, and management
+    belongs to the row, not to the origin (the sd:1620 lane review). The third
+    value says whether its HEAD is a feature branch, the only place tracked
+    files go.
     """
     top = sd_lib.repo_root(cwd)
     if top is None:
         raise FleetRefusal(f"{cwd} is not inside a git repository")
+    refusal = sd_lib.unmanaged(top, warn=False)
+    if refusal:
+        raise FleetRefusal(refusal)
     slug = owner_slug(sd_lib.git_output(["config", "--get", "remote.origin.url"], top))
     match = [row for row in rows if slug and owner_slug(row[1]) == slug]
     if not match:
-        raise FleetRefusal(sd_lib.unmanaged(top, warn=False)
-                           or f"{top} is not a checkout of a runner_merge=auto repository; the stamp covers only those")
+        raise FleetRefusal(f"{top} is not a checkout of a runner_merge=auto repository; the stamp covers only those")
     branch = sd_lib.git_output(["symbolic-ref", "--quiet", "--short", "HEAD"], top)
     # An unknown default is treated as both names `default_ref` falls back to,
     # so a `master` repository without `origin/HEAD` is not a feature branch.
