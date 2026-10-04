@@ -1639,11 +1639,27 @@ class Ship(SharedReview):
             extras["row_authorized_merge"] = self.state["row_authorized_merge"]
         if self.state.get("merge_invoker"):
             extras["invoker"] = self.state["merge_invoker"]
+        if self.state.get("library"):
+            extras["library"] = self.state["library"]
         # Why an unrelated merge carries `Closes:` lines, and what still waits (sd:1600).
         for name in ("carried_closes", "closes_left", "closing_owed"):
             if self.state.get(name):
                 extras[name] = self.state[name]
         return extras
+
+    def reprovision_library(self, commit: str) -> None:
+        """Install `sd_db` at a merge that changed it, once per merge commit (sd:2108).
+
+        The dashboard refuses an installed `sd_db` older than the system
+        checkout's last library commit; `sd_install` decides whether this
+        merge is one, and reports a failed install rather than raising.
+        """
+        if (self.state.get("library") or {}).get("ref") == commit:
+            return
+        import sd_install  # noqa: PLC0415 - large, and only a library merge needs it
+        library = sd_install.reprovision_after_merge(self.root, commit, dict(os.environ))
+        if library is not None:
+            self.save(library=library)
 
     def invoker(self) -> dict:
         """Who ran this command, so a receipt can be traced to its process (sd:2078).
@@ -2036,6 +2052,7 @@ class Ship(SharedReview):
         advertised = git(self.root, "ls-remote", "origin", f"refs/heads/{reference['base']}").split()
         if not advertised or advertised[0] != tip:
             raise Refusal("default branch changed during merge verification; retry reconciliation")
+        self.reprovision_library(commit)
         evidence = self.result("merged", merge_commit=commit, verified_tip=tip, **self.merge_extras())
         self.save(phase="merged", merge_commit=commit, evidence=evidence)
         if not self.args.no_item:
@@ -2345,6 +2362,12 @@ def body_diff(root: pathlib.Path, api: GitHub | None, number: int | None) -> tup
     return changed, (f"{base}...HEAD" if changed is not None else base)
 
 
+def unmanaged_refusal(why: str) -> Refusal:
+    """A checkout the sd database marks unmanaged (sd:2566): no prepare, merge or record runs there."""
+    return Refusal(why, code="unmanaged_repository", boundary="policy", state="operator_decision",
+                   next_action="Mark the repository managed with sd-db.sh repo managed, or ship it without the pack.")
+
+
 def outside_repository() -> Refusal:
     """Name the directory, as the other lane commands do: under `-C` it is the -C one (sd:2499)."""
     return Refusal(f"{pathlib.Path.cwd()} is not inside a Git repository")
@@ -2522,6 +2545,7 @@ def main(argv=None) -> int:
         root = sd_lib.repo_root(None)
         if root is None:
             raise outside_repository()
+        sd_lib.refuse_unmanaged(root, unmanaged_refusal, args.database)
         database = args.database or default_path()
         readonly = args.command in ("observe", "verify-review") or (args.command == "adjudicate" and args.accept_dispositions is None)
         connection = connect(database, write=not readonly)
