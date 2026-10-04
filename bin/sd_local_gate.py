@@ -17,7 +17,8 @@ finished. `post` refuses any other SHA, so a result cannot be carried to a
 head that was never checked.
 
 Every merge attempt posts a fresh status, from a run or from a receipt; a
-reused pass says so in its description. The description carries
+reused pass says so in its description, and a run in full keeps `reuse_miss`,
+why no receipt stood (sd:2602). The description carries
 `inputs <digest>` as provenance: a digest of the head, the copied
 `CLAUDE.local.md` (or its absence) and the pack's own `bin/` files. Anyone
 with write access can post a status, so `local_gate_passed` trusts only one

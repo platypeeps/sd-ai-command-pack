@@ -176,20 +176,42 @@ def _connect(database: pathlib.Path, *, write: bool) -> Any:
 
 def lookup(database: pathlib.Path, key: str, identity: Mapping[str, Any], now: float | None = None) -> dict[str, Any] | None:
     """The recorded success for `identity`, or None: absent, foreign, stale, older than the limit, or unreadable."""
+    return examine(database, key, identity, now)[0]
+
+
+def examine(database: pathlib.Path, key: str, identity: Mapping[str, Any] | None,
+            now: float | None = None) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """`(found, None)` for a reusable success, else `(None, miss)` naming why (sd:2602).
+
+    A merge gate that ran in full said nothing of why, so a binding that moved
+    between prepare and merge read as a gate that never reuses. `miss` is
+    `{"reason": ...}`: `no-receipt`, `failed`, `binding` with the top-level
+    binding `fields` that differ, `expired` with the age and the window,
+    `unbound` when `gate_binding` could not name the run, or `unreadable`.
+    """
+    if identity is None:
+        return None, {"reason": "unbound"}
     try:
         with closing(_connect(database, write=False)) as connection:
             from sd_db import ship  # noqa: PLC0415
             revision, row = ship.read(connection, key)
         age = (time.time() if now is None else now) - float(row.get("recorded_at", "nan"))
-        reading = row.get("reading")
+        reading, stored = row.get("reading"), row.get("binding")
         window = TREE_REUSE_WINDOW_SECONDS if identity.get("reuse") == "tree" else REUSE_WINDOW_SECONDS
-        if (row.get("writer") != WRITER or row.get("binding") != identity or not 0 <= age <= window
-                or not isinstance(reading, dict) or reading.get("status") != "success"):
-            return None
+        if row.get("writer") != WRITER:
+            return None, {"reason": "no-receipt"}
+        if not isinstance(reading, dict) or reading.get("status") != "success":
+            return None, {"reason": "failed"}
+        if stored != identity:
+            stored = stored if isinstance(stored, dict) else {}
+            return None, {"reason": "binding", "fields": sorted(name for name in set(stored) | set(identity)
+                                                                if stored.get(name) != identity.get(name))}
+        if not 0 <= age <= window:
+            return None, {"reason": "expired", "age_seconds": round(age), "window_seconds": window}
         return {"reading": reading, "revision": revision, "recorded_at": row["recorded_at"], "age_seconds": round(age),
-                "head": row.get("head")}
-    except Exception:
-        return None
+                "head": row.get("head")}, None
+    except Exception as error:
+        return None, {"reason": "unreadable", "error": str(error)[:200]}
 
 
 def record_pass(database: pathlib.Path, key: str, identity: Mapping[str, Any], reading: Mapping[str, Any],

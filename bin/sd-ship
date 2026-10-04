@@ -53,7 +53,11 @@ BIN = pathlib.Path(__file__).resolve().parent
 #: When this process started, for the invoker a receipt names (sd:2078).
 PROCESS_STARTED = datetime.now(timezone.utc).isoformat()
 REVIEW_SETUP_SECONDS = 3600
+#: How long a group sent TERM may take to exit and close its pipes before KILL.
 REVIEW_CLEANUP_SECONDS = 5
+#: How long to wait for the pipes to close once KILL is sent. Nothing in the group
+#: outlives KILL, so only a descendant outside it reaches this bound (sd:2609).
+REVIEW_DRAIN_SECONDS = 5
 REVIEW_DIAGNOSTIC_BYTES = 4096
 #: How deep a captured review report may nest and still be kept as evidence.
 #: Measured rather than chosen: of the 156 review reports the local store held
@@ -242,7 +246,7 @@ def review_process(root: pathlib.Path, argv: list[str], *, timeout: float) -> su
             if isinstance(interruption, subprocess.TimeoutExpired):
                 output, errors = interruption.output or b"", interruption.stderr or b""
             cleanup: dict = {}
-            for name, number in (("term", signal.SIGTERM), ("kill", signal.SIGKILL)):
+            for name, number, bound in (("term", signal.SIGTERM, REVIEW_CLEANUP_SECONDS), ("kill", signal.SIGKILL, REVIEW_DRAIN_SECONDS)):
                 # poll() may already have reaped the leader. Its descendants
                 # still own the group and pipes, so the signal is unconditional.
                 try:
@@ -253,7 +257,7 @@ def review_process(root: pathlib.Path, argv: list[str], *, timeout: float) -> su
                 except OSError as error:
                     cleanup[name] = f"failed: {error}"
                 try:
-                    output, errors = process.communicate(timeout=REVIEW_CLEANUP_SECONDS)
+                    output, errors = process.communicate(timeout=bound)
                     cleanup["drained"] = True
                 except subprocess.TimeoutExpired as error:
                     output, errors = error.output or output, error.stderr or errors

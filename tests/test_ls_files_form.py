@@ -147,7 +147,7 @@ def is_call(line: str, start: int, end: int) -> bool:
       `subprocess` -- which is unambiguous, since nothing quotes a lone
       subcommand for any other reason.
     * Written as a shell word after `git`, and followed by something an
-      argument can start with.
+      argument can start with, or by a shell comment.
     """
 
     before, after = line[:start], line[end:]
@@ -158,6 +158,11 @@ def is_call(line: str, start: int, end: int) -> bool:
     if not AFTER_GIT.search(before):
         return False
     rest = after.lstrip()
+    if rest.startswith("#"):
+        # A shell comment ends the command, so nothing followed the
+        # subcommand: a bare call (sd:999, review-960). `#` opens a comment
+        # only at the start of a word; `ls-files#x` is one word, and no call.
+        return rest != after
     return rest == "" or rest.startswith(ARGUMENT)
 
 
@@ -354,6 +359,18 @@ class TheRecogniserTellsCallsFromProse(unittest.TestCase):
                      f"enumerate it -- git grep -nI -- {SUBJECT} -- tests bin"):
             with self.subTest(line=line):
                 self.assertEqual(self.found(line), [])
+
+    def test_a_shell_comment_after_the_subcommand_is_a_call(self) -> None:
+        """sd:999 (review-960). The comment ends the command; nothing followed it.
+
+        `#` was not in `ARGUMENT`, so `git ... # enumerate the index` read as
+        prose and a bare shell call written that way passed unseen. A `#` that
+        does not begin a word is part of the word, and is not this command.
+        """
+
+        self.assertEqual(self.found(f"git {SUBJECT} # enumerate the index"), [1])
+        self.assertEqual(self.found(f"git {SUBJECT}\t# enumerate the index"), [1])
+        self.assertEqual(self.found(f"git {SUBJECT}#not-a-comment"), [])
 
     def test_the_markers_own_name_is_not_a_call(self) -> None:
         """Otherwise the escape hatch would need an escape hatch."""

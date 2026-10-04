@@ -69,7 +69,8 @@ The merge gate at the same head and binding, within 30 minutes, reads it instead
 Prepare reads one too: a pass that `sd gate check` or an earlier prepare left at the same head and binding stands (sd:1912).
 `sd gate check` runs the gate's check at the committed `HEAD` and records a pass; a plain `make check` leaves no receipt.
 The merge gate never writes one, and the window counts from the run that passed.
-The gate child drops the agent harness's session variables, so two sessions' passes at one head bind equal.
+A gate that read no receipt and ran in full says why in `reuse_miss`: no receipt, a failed one, the binding fields that differ, or the expired window (sd:2602).
+The gate child drops the agent harness's session variables and fnm's per-shell `FNM_MULTISHELL_PATH`, and resolves each `PATH` entry, so two sessions' passes at one head bind equal.
 Inputs outside the repository are not bound: external makefiles, files a tool reads, machine state.
 The short same-head window is the accepted residual risk; a repository that needs more uses the explicit contract below.
 `bin/sd_gate_receipts.py` names the binding and `REUSE_WINDOW_SECONDS`.
@@ -172,3 +173,10 @@ page being written.
 Output is captured and attributed per check, never interleaved, and tails at
 4,000 characters with a truncation marker. When reporting to the user, quote
 the shortest decisive line of that tail rather than the whole block.
+
+A failing check also keeps its whole output in a file under the Git common
+directory, `sd-check-output/`, which holds the newest 20. The report names it
+as `output_path` and the human output as `whole output:`. `failed_shards`
+lists each `shard <name>: <n>s exit=<code>` line with a non-zero code from
+the whole output, so a shard that failed early is named though the tail no
+longer reaches it.

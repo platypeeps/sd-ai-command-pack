@@ -39,6 +39,9 @@ are read from git against `origin/HEAD`, with renames split into their two
 paths so a file moved out of a scope class still names it.
 `--body-only` runs rules 5 and 8 and nothing else, for a repository with no
 work root: the tree rules need one and say so, the body rules do not.
+`--no-history` reads no commit history: rule 2 asks no item whether it was
+delivered, so nothing fetches or runs `git log`, and the run says so. `make
+check` lints this way; the lint `sd-ship` runs with the body still asks.
 
 Exits 0 when every rule that ran passed, 1 when any of them failed, and 2 when
 the arguments themselves were wrong.
@@ -256,6 +259,12 @@ def status_source_note(statuses: sd_lib.Statuses) -> str:
     rows = statuses.rows
     if rows is not None and rows.opened:
         return "the row"
+    if not statuses.history:
+        return (
+            "git, not the row this checkout's marker names, and --no-history "
+            "reads no history; every open item reads as unknown, so rule 2 "
+            "does not check it"
+        )
     return (
         "git, not the row this checkout's marker names; an open item with no "
         "branch: line reads as planning here, so rule 2 does not check it, and "
@@ -1583,6 +1592,7 @@ def run(
     changed: list[str] | None = None,
     body_only: bool = False,
     work_dir_named: bool = True,
+    history: bool = True,
 ) -> Report:
     """Every rule over `repo`. `changed` is rule 8's path list; None reads git.
 
@@ -1599,6 +1609,9 @@ def run(
     `.github/**` (#972 review). The body rules need no work root. Rule 5
     still resolves a path-shaped `Work:` value against the root it was told,
     and a root that is not there resolves nothing, which is the right answer.
+
+    `history=False` is `--no-history`: rule 2 reads no commit history, so a
+    tree lints to the same verdict whatever the remote and the log hold.
     """
     report = Report()
     repo = repo.resolve()
@@ -1642,7 +1655,21 @@ def run(
         check_pr_scope(repo, pr_body, changed, report)
         return report
 
-    statuses = sd_lib.Statuses.of(repo, work_dir)
+    check_work_items(repo, work_dir, report, history)
+    check_decisions(repo / decisions_dir, report)
+    check_spec_index(repo / spec_dir, report)
+    check_pr_link(repo, work_root, pr_body, report)
+    check_pr_scope(repo, pr_body, changed, report)
+    check_citations(work_root, report)
+    check_claim_support(repo, work_root, report)
+    check_work_references(repo, work_dir, report)
+    return report
+
+
+def check_work_items(repo: pathlib.Path, work_dir: str, report: Report, history: bool) -> None:
+    """Rules 1 and 2 over every item, with the status each one reads, said once."""
+    work_root = repo / work_dir
+    statuses = sd_lib.Statuses.of(repo, work_dir, history=history)
     try:
         check_shape(work_root, report, statuses.source)
         workable = check_ready(work_root, report, statuses)
@@ -1656,14 +1683,11 @@ def run(
         f"{workable} of them workable by rule 2"
     )
     report.note(f"rule 2 status source: {source}")
-    check_decisions(repo / decisions_dir, report)
-    check_spec_index(repo / spec_dir, report)
-    check_pr_link(repo, work_root, pr_body, report)
-    check_pr_scope(repo, pr_body, changed, report)
-    check_citations(work_root, report)
-    check_claim_support(repo, work_root, report)
-    check_work_references(repo, work_dir, report)
-    return report
+    if not history:
+        report.note(
+            "rule 2 delivery: not asked; --no-history reads no commit history, "
+            "and the lint sd-ship runs with the pull request body asks it"
+        )
 
 
 def check_branch_lines(
@@ -1809,6 +1833,12 @@ def main(argv: list[str] | None = None) -> int:
         "for a repository with no work root",
     )
     parser.add_argument(
+        "--no-history",
+        action="store_true",
+        help="read no commit history: rule 2 asks no item whether it was delivered, "
+        "so nothing fetches or runs git log; what make check runs",
+    )
+    parser.add_argument(
         "--update-citations",
         action="store_true",
         help="record rule 6's baseline for every active work item, then exit",
@@ -1848,7 +1878,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     report = run(root, args.work_dir, args.spec_dir, args.decisions_dir, body, changed, args.body_only,
-                 work_dir_named)
+                 work_dir_named, history=not args.no_history)
     for note in report.notes:
         print(note)
     for failure in report.failures:

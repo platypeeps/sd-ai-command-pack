@@ -213,6 +213,8 @@ class JsonShapeTests(CheckFixture):
                     "stdout",
                     "stderr",
                     "output_truncated",
+                    "output_path",
+                    "failed_shards",
                 },
             )
             self.assertIn(record["status"], {"pass", "fail", "skipped", "absent"})
@@ -233,6 +235,59 @@ class JsonShapeTests(CheckFixture):
         self.assertIn("boom", by_name["test"]["stderr"])
         self.assertEqual(by_name["lint"]["status"], "pass")
         self.assertEqual(by_name["lint"]["stderr"], "")
+
+
+class WholeOutputTests(CheckFixture):
+    """sd:2558. The report keeps each stream's tail, so a shard that failed
+    early in a long run was in neither; prepare named a failed gate without
+    the test that failed it."""
+
+    SHARD = "shard tests.test_middle: 4s exit=1"
+
+    def long_failing_run(self, root: pathlib.Path) -> None:
+        (root / "suite.py").write_text(
+            "import sys\n"
+            "print('first line of the run')\n"
+            "for index in range(3000):\n"
+            "    print(f'filler {index}')\n"
+            "    if index == 1500:\n"
+            f"        print('shard tests.test_fine: 2s exit=0')\n"
+            f"        print({self.SHARD!r})\n"
+            "print('last line of the run')\n"
+            "sys.exit(1)\n",
+            encoding="utf-8",
+        )
+        self.declare(root, check=f"{PY} suite.py")
+
+    def test_a_failed_shard_in_the_middle_is_named_and_the_file_holds_everything(self) -> None:
+        root = self.make_repo()
+        self.long_failing_run(root)
+        result = self.run_json(root)
+        record = {row["name"]: row for row in result["checks"]}["check"]
+        self.assertEqual(record["status"], "fail")
+        self.assertTrue(record["output_truncated"])
+        self.assertNotIn(self.SHARD, record["stdout"])
+        self.assertEqual(record["failed_shards"], [self.SHARD])
+        kept = pathlib.Path(record["output_path"])
+        self.assertEqual(kept.parent, (root / ".git" / "sd-check-output").resolve())
+        text = kept.read_text(encoding="utf-8")
+        for line in ("first line of the run", "filler 0", self.SHARD, "filler 2999", "last line of the run"):
+            self.assertIn(line, text)
+
+    def test_the_human_report_names_the_failed_shard_and_the_file(self) -> None:
+        root = self.make_repo()
+        self.long_failing_run(root)
+        completed = self.run_check(root)
+        self.assertEqual(completed.returncode, 1)
+        self.assertIn(f"failed {self.SHARD}", completed.stdout)
+        self.assertIn("whole output: ", completed.stdout)
+
+    def test_a_passing_check_keeps_no_file(self) -> None:
+        root = self.make_repo()
+        self.declare(root, check=f"{PY} -c pass")
+        record = self.run_json(root)["checks"][0]
+        self.assertIsNone(record["output_path"])
+        self.assertFalse((root / ".git" / "sd-check-output").exists())
 
 
 class AbsentTests(CheckFixture):
