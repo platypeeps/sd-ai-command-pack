@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 BIN = REPO_ROOT / "bin"
@@ -145,6 +146,30 @@ class TheReviewHoldsASlot(ReviewFixture):
         after = slots.take_review_slot(cap, lambda: None, stream=io.StringIO(), label="after",
                                        deadline=slots.clock(), poll=0.01)
         self.assertIsNotNone(after, "the review kept its slot after it returned")
+        after.give_back()
+
+    def test_the_slot_is_free_once_main_s_handler_catches_what_the_review_raised(self) -> None:
+        """The raising path: `main` catches a Refusal `as error`, and the clause's end drops the frame and the slot.
+
+        Each call raises a new exception, as real code does: one instance kept
+        and re-raised would keep its traceback, the `review` frame and the slot.
+        """
+
+        where = self.tmp / "review-slots"
+        cap = {"SD_REVIEW_SLOTS": "1", "SD_REVIEW_SLOTS_DIR": str(where)}
+
+        def refuse(*_args: object, **_kwargs: object) -> None:
+            raise sd_review.Refusal("the review failed after it took its slot")
+
+        with mock.patch.object(sd_review, "finish_review", refuse):
+            try:
+                sd_review.review(self.change(), namespace(), FakeRunner(), self.environment(**cap), self.chatgpt_home())
+            except sd_review.Refusal as error:
+                said = str(error)
+        self.assertEqual(said, "the review failed after it took its slot")
+        after = slots.take_review_slot(cap, lambda: None, stream=io.StringIO(), label="after",
+                                       deadline=slots.clock(), poll=0.01)
+        self.assertIsNotNone(after, "the slot stayed held after the handler that caught the review's error")
         after.give_back()
 
     def test_with_every_slot_held_the_review_refuses_before_any_reviewer(self) -> None:
