@@ -1965,6 +1965,13 @@ MUTATIONS: dict[str, Mutation] = {
         test="tests.test_sd_ship_remote.RulesetCase"
              ".test_a_declared_bypass_list_must_equal_the_live_one",
     ),
+    "bin/sd_gate_run.py::check_in_worktree": Mutation(
+        path="bin/sd_gate_run.py",
+        old="            found, miss = sd_gate_receipts.examine(database, key, identity) if reuse and database else (None, None)",
+        new="            found, miss = (None, None)  # leg d: receipt reuse, defeated",
+        test="tests.test_sd_review_gate_check.BuilderReceipt"
+             ".test_prepare_reuses_the_builders_pass_at_the_same_head",
+    ),
     "tests/test_verb_inventory.py::test_no_command_accepts_a_repository_path":
         Mutation(
             path="bin/sd_work.py",

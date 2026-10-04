@@ -57,17 +57,28 @@ commit and its inputs; a fix commit is a new head and a new run, by design.
 
 ## Acceptance criteria
 
-- [ ] The Log names the network reader in `make check`, or says there is none
-      and the two doc sentences are corrected.
-- [ ] If eligible: `git ls-files .github/sd-check-reuse.json` lists it, and
-      `sd-check --record-receipt --json` on a clean head reports a reusable
-      pass.
-- [ ] If eligible: `sd-ship prepare --item <id> --reuse-check --json` on that
-      head reports the gate as reused, not run.
-- [ ] `skills/sd-ship/SKILL.md` has the one line from requirement 3.
+Superseded 2026-10-04 by operator ruling (note 9383 on sd:1912): the
+gate-receipt route replaces requirements 1 to 3. `sd gate check` records a
+receipt in the gate's own environment, and prepare's gate reuses it at the
+same head, or at the same tree under `.github/sd-gate-reuse.json` (sd:2610).
+The pack never declares `sd-check` reuse, so the network audit and
+`.github/sd-check-reuse.json` are not needed.
+
+- [x] ~~The Log names the network reader in `make check`.~~ Superseded. The two
+      doc sentences no longer call the gate network-dependent; they name the
+      gate-receipt route instead.
+- [x] ~~If eligible: `git ls-files .github/sd-check-reuse.json` lists it.~~
+      Superseded: the pack tracks `.github/sd-gate-reuse.json` instead.
+- [x] ~~If eligible: `sd-ship prepare --item <id> --reuse-check --json`
+      reports the gate as reused.~~ Superseded: prepare's gate reports
+      `source: gate-receipt` without a flag (`BuilderReceipt` in
+      `tests/test_sd_review_gate_check.py`).
+- [x] `skills/sd-ship/SKILL.md` has the one line, in its gate-receipt form:
+      run `sd gate check` on the head handed to the lane, citing `R15-D1`.
 - [ ] The Log has seven `sd-check --json` durations, one per repository in
-      requirement 5, and the operator's threshold.
-- [ ] `CHANGELOG.md` Unreleased names the change.
+      requirement 5. Not done; the 2026-10-04 ruling closes the item without
+      it, and the pack timings in the Log stand in for requirement 4.
+- [x] `CHANGELOG.md` Unreleased names the change.
 
 ## References
 
@@ -87,3 +98,12 @@ commit and its inputs; a fix commit is a new head and a new run, by design.
   builders use `sd gate check` (no, optional). Prepare's gate now reads a
   same-head receipt; requirements 1-6 above (the pack's declared contract and
   the measurements) remain open.
+- 2026-10-04 audit (builder-gate-speed, note 9250 on sd:1912): all 18 pack
+  merges since 00:30 reused prepare's receipt at the same head, so each merge
+  step took 11 to 13 s instead of a full check. Prepare itself never reused
+  the builder's receipt: the lane's catch-up merge of main makes a new tree,
+  and that prepare ran the full gate, 7 to 21 min per item. sd:2586 targets
+  that gap.
+- 2026-10-04 operator ruling (note 9383): the gate-receipt route supersedes
+  requirements 1 to 3; close the item after the doc fix. The fix registers
+  `R15-D1`, adds the skill line, and corrects the two sentences.
