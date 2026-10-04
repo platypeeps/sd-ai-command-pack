@@ -18,9 +18,10 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Iterable, NamedTuple
+from typing import Any, Callable, Iterable, Mapping, NamedTuple
 
 LOCAL_FILE_NAME = "CLAUDE.local.md"
 LOCAL_BLOCK_START = "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->"
@@ -474,6 +475,25 @@ def machine_config_path(environ: dict[str, str] | None = None) -> pathlib.Path:
     env = os.environ if environ is None else environ
     home = pathlib.Path(env.get("XDG_CONFIG_HOME") or pathlib.Path(env.get("HOME") or pathlib.Path.home()) / ".config")
     return home / CONFIG_RELATIVE_PATH
+
+
+#: When this process imported sd_lib: `sd-review` imports it first, so its
+#: review slot wait counts its check bound from here (sd:2523).
+STARTED = time.monotonic()
+
+
+def review_slot(result: dict[str, Any], environ: Mapping[str, str], root: pathlib.Path,
+                check_seconds: float) -> object | None:
+    """Hold a machine-wide review slot for `sd-review`, or refuse the review in `result`.
+
+    A thin door: the slot logic is `sd_review_slots.hold_review_slot`, which
+    `sd-review` does not import, so it stays outside the review lane's line
+    budget the way `sd_gate_receipts` does. Imported here on first use,
+    because `sd_review_slots` imports this module.
+    """
+    import sd_review_slots
+
+    return sd_review_slots.hold_review_slot(result, environ, root, check_seconds)
 
 
 def core_setting(key: str, environ: dict[str, str] | None = None) -> str | None:

@@ -10,7 +10,8 @@
   `sd.review_slots` slots (unset: 2; `SD_REVIEW_SLOTS` for one run, `0` no
   cap) from its first reviewer to its last. A waiting review prints one line
   naming each holder, and a dead holder frees its slot. The wait spends what
-  the check left of its bound, then refuses with `review_slot_busy`. The
+  is left of the check's bound, counted from the review's start, then
+  refuses with `review_slot_busy`. The
   result records `review_slot`. `make test` runs with `SD_REVIEW_SLOTS=0`, so
   a test review never waits on a real one.
 

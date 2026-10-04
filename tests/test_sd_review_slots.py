@@ -134,6 +134,19 @@ class TheReviewHoldsASlot(ReviewFixture):
         self.assertEqual(report["review_slot"]["slots"], slots.DEFAULT_SLOTS, json.dumps(report)[:2000])
         self.assertEqual(report["reviewed_by"], ["codex"])
 
+    def test_the_slot_is_free_once_the_review_returns(self) -> None:
+        """`sd-review` holds the slot in a local of `review`, so returning frees it, as a `finally` did."""
+
+        where = self.tmp / "review-slots"
+        cap = {"SD_REVIEW_SLOTS": "1", "SD_REVIEW_SLOTS_DIR": str(where)}
+        report = sd_review.review(self.change(), namespace(), FakeRunner(), self.environment(**cap),
+                                  self.chatgpt_home())
+        self.assertEqual(report["review_slot"]["slot"], 1, json.dumps(report)[:2000])
+        after = slots.take_review_slot(cap, lambda: None, stream=io.StringIO(), label="after",
+                                       deadline=slots.clock(), poll=0.01)
+        self.assertIsNotNone(after, "the review kept its slot after it returned")
+        after.give_back()
+
     def test_with_every_slot_held_the_review_refuses_before_any_reviewer(self) -> None:
         where = self.tmp / "review-slots"
         child = subprocess.Popen([sys.executable, "-c", HOLDER, str(BIN), "another lane"], stdout=subprocess.PIPE,

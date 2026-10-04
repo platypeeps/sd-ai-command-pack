@@ -19,9 +19,12 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import sys
 import time
-from typing import Callable, Mapping, TextIO
+from typing import Any, Callable, Mapping, TextIO
 
+import sd_lib
+import sd_review_readiness
 from sd_gate_slots import parse_count, try_lock, utc_stamp, write_info
 
 SLOTS_VARIABLE = "SD_REVIEW_SLOTS"
@@ -71,6 +74,11 @@ class Slot:
             self.handle.close()
             self.handle = None
 
+    def __del__(self) -> None:
+        # `sd-review` holds the slot in a local of `review`, so the slot frees
+        # when that call returns or raises, as a `finally` would free it.
+        self.give_back()
+
 
 def take_review_slot(environ: Mapping[str, str], setting: Callable[[], str | None], *, stream: TextIO, label: str,
             deadline: float | None = None, poll: float = POLL_SECONDS) -> Slot | None:
@@ -114,3 +122,26 @@ def take_review_slot(environ: Mapping[str, str], setting: Callable[[], str | Non
     write_info(where / f"slot.{taken + 1}.lock", os.getpid(), label, os.getcwd())
     report.update(slot=taken + 1, waited_seconds=round(clock() - started))
     return Slot(handles[taken], report)
+
+
+def hold_review_slot(result: dict[str, Any], environ: Mapping[str, str], root: pathlib.Path,
+                     check_seconds: float) -> Slot | None:
+    """`sd-review`'s slot step: hold a slot for its reviewers, or refuse the review in `result`.
+
+    The wait spends what the review's check bound leaves, counted from the
+    process start that `sd_lib.STARTED` records, so sd-ship's watchdog still
+    holds; setup before the check counts against it too, which only shortens
+    the wait. Kept here, outside the review lane, so `sd-review` spends two
+    lines on it (sd:2523). The caller keeps the returned slot in a local
+    until its reviewers finish; None means the review refused.
+    """
+    slot = take_review_slot(environ, lambda: sd_lib.core_setting("review_slots", dict(environ)), stream=sys.stderr,
+                            label=f"sd-review {root}", deadline=sd_lib.STARTED + check_seconds)
+    if slot is None:
+        result["readiness"]["status"] = "blocked"
+        result["readiness"]["blockers"].append(sd_review_readiness.blocker(
+            "review_slot_busy", "capacity", "No review slot came free within the check's bound; prepare again."))
+        result["status"] = "refused"
+        return None
+    result["review_slot"] = slot.report
+    return slot

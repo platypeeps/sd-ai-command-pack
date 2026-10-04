@@ -199,10 +199,6 @@ class NeverPostsTests(unittest.TestCase):
             # so the gate check widens the allow-list by a worktree and a
             # child process and not by a way out to GitHub.
             "sd_gate_run",
-            # The machine-wide review slots (sd:2523): a kernel lock in a local
-            # directory, and the gate pool's lock helpers. No child process and
-            # no way out of the machine.
-            "sd_review_slots",
         }
         self.assertEqual(sorted(imported_names() - allowed), [])
 
@@ -894,19 +890,15 @@ class LineBudgetTests(unittest.TestCase):
         # say so in `gate_environment` (+1). The cache itself is
         # `bin/sd_gate_cache.py`, gate code outside the lane as
         # `sd_gate_receipts` is: `sd-review` does not import it.
-        # 4687 -> 4816 is sd:2523: `bin/sd_review_slots.py` (116) caps the
-        # reviews that run their reviewers at once on a machine, and
-        # `bin/sd-review` +15 holds a slot around the reviewer loop and refuses
-        # when none frees within the check's bound. Several lanes' prepares each
-        # started a Codex review at once with no shared limit, and load and
-        # quota spiked together. The gate pool could not be reused in place:
-        # it is `sd-check`'s and holds a load rule a reviewer has no use for.
-        # The lane read 4685 on main, so the 131 lines land at 4816.
+        # sd:2523 adds 2 lines to `bin/sd-review` (4685 -> 4687): it holds a
+        # review slot through `sd_lib.review_slot`. The slot logic is
+        # `bin/sd_review_slots.py`, outside the lane: `sd-review` does not
+        # import it.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4816,
+            4687,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

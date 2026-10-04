@@ -485,8 +485,9 @@ which the installer places in `~/.claude/agents`.
   (unset: 2) before its first reviewer starts, and frees it after the last.
   `SD_REVIEW_SLOTS` overrides it for one run, and `0` lifts the cap. A waiting
   review prints one `waiting for a review slot` line on stderr, naming each
-  holder. The wait spends what the check left of its bound; when that runs
-  out, the review refuses with `review_slot_busy`. Slots are kernel locks
+  holder. The wait spends what is left of the check's bound, counted from
+  the review's start; when that runs out, the review refuses with
+  `review_slot_busy`. Slots are kernel locks
   under `$XDG_STATE_HOME/sd/review-slots`, so a dead holder's slot is free.
 - **Ship a run of items through one lane queue (sd:2524).** `sd-ship lane
   enqueue --item N --title T --body-file F --deliver|--associate-only
