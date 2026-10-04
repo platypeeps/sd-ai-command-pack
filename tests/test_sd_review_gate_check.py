@@ -6,6 +6,7 @@ Also the gate's bound: with no `--timeout`, the repository gate gets
 
 from __future__ import annotations
 
+import importlib
 import json
 import pathlib
 import subprocess
@@ -36,8 +37,10 @@ class GateBound(ReviewFixture):
         timing = report["timing"]
         self.assertEqual((timing["check_seconds"], timing["phase_seconds"]),
                          (sd_review.sd_lib.GATE_CHECK_SECONDS, sd_review.DEFAULT_TIMEOUT_SECONDS))
-        self.assertEqual(timing["execution_seconds"], timing["setup_seconds"] + timing["check_seconds"]
-                         + timing["phase_seconds"] * len(timing["candidates"]))
+        # sd:2611: the gate-slot wait is its own phase, so a queued gate is not cut at the check's bound.
+        self.assertEqual(timing["slot_seconds"], sd_review.sd_lib.GATE_SLOT_SECONDS)
+        self.assertEqual(timing["execution_seconds"], timing["setup_seconds"] + timing["slot_seconds"]
+                         + timing["check_seconds"] + timing["phase_seconds"] * len(timing["candidates"]))
 
     def test_the_default_check_is_handed_the_gates_bound(self) -> None:
         root = self.make_repo()
@@ -47,6 +50,9 @@ class GateBound(ReviewFixture):
         self.assertEqual(report["status"], "gate_failed")
         [call] = [call for call in runner.calls if any("sd-check" in word for word in call["argv"])]
         self.assertEqual(call["argv"][call["argv"].index("--timeout") + 1], str(sd_review.sd_lib.GATE_CHECK_SECONDS))
+        # sd:2611: it queues on its own bound, and the runner's limit adds that bound to the check's.
+        self.assertEqual(call["argv"][call["argv"].index("--slot-timeout") + 1], str(sd_review.sd_lib.GATE_SLOT_SECONDS))
+        self.assertEqual(call["timeout"], sd_review.sd_lib.GATE_CHECK_SECONDS + sd_review.sd_lib.GATE_SLOT_SECONDS)
 
 
 class GateRepo(ReviewFixture):
@@ -72,6 +78,18 @@ class GateRepo(ReviewFixture):
     def gate(self, root: pathlib.Path, database: pathlib.Path) -> dict:
         return sd_review.run_gate_check(root, sd_review.subprocess_runner, self.environment(), 120, "main",
                                         namespace(database=database))
+
+
+class GateSlotBound(GateRepo):
+    def test_the_gate_check_queues_on_the_slot_bound_apart_from_its_check(self) -> None:
+        """sd:2611: prepare's gate passes `--slot-timeout`, and the child's limit grows by the same bound."""
+        root, database = self.repo()
+        runner = FakeRunner({"sd-check": sd_review.Completed(1, '{"checks": []}', "")})
+        sd_review.run_gate_check(root, runner, self.environment(), 120, "main", namespace(database=database))
+        [call] = [call for call in runner.calls if any("sd-check" in word for word in call["argv"])]
+        slot = sd_review.sd_lib.GATE_SLOT_SECONDS
+        self.assertEqual(call["argv"][call["argv"].index("--slot-timeout") + 1], str(slot))
+        self.assertGreaterEqual(call["timeout"], 120 + slot)
 
 
 class GateCheck(GateRepo):
@@ -132,6 +150,54 @@ class GateCheck(GateRepo):
         self.assertEqual(pathlib.Path(taken["path"]).parent, slots)
 
 
+class BranchReviewCheck(ReviewFixture):
+    """sd:2077: a branch review checks the committed head in a clean worktree, never the live checkout.
+
+    `sd-ship review` ran `sd-check` in the operator's checkout; an edit to the
+    check script mid-run killed it with half a word as a command, and the tree
+    it judged was no longer the head under review.
+    """
+
+    def repo(self) -> pathlib.Path:
+        root = self.make_repo()
+        self.trace = self.tmp / "ran"
+        self.local_block(root, "check: sh check.sh")
+        (root / "check.sh").write_text(f"echo committed >> {self.trace}\n", encoding="utf-8")
+        git(root, "add", "-A")
+        git(root, "commit", "-q", "-m", "check")
+        git(root, "checkout", "-q", "-b", "topic")
+        (root / "src.py").write_text("x = 1\n", encoding="utf-8")
+        git(root, "add", "src.py")
+        git(root, "commit", "-q", "-m", "change\n\nAuthored-with: human")
+        # The operator keeps editing while the review runs.
+        (root / "check.sh").write_text(f"echo live >> {self.trace}\nexit 1\n", encoding="utf-8")
+        return root
+
+    def runner(self) -> FakeRunner:
+        return FakeRunner({"sd-check": lambda argv, env, cwd, limit: sd_review.subprocess_runner(argv, env, cwd, limit)})
+
+    def test_a_branch_review_checks_the_committed_head_not_the_live_checkout(self) -> None:
+        root = self.repo()
+        for scope in ("branch", "pr"):
+            with self.subTest(scope=scope):
+                self.trace.unlink(missing_ok=True)
+                runner = self.runner()
+                report = sd_review.review(root, namespace(scope=scope), runner, self.environment(), self.chatgpt_home())
+                self.assertEqual(self.trace.read_text().split(), ["committed"], json.dumps(report.get("check"))[:2000])
+                self.assertEqual((report["check"]["status"], report["check"]["head"]),
+                                 ("pass", git(root, "rev-parse", "HEAD")))
+                [call] = [call for call in runner.calls if any("sd-check" in word for word in call["argv"])]
+                self.assertNotEqual(call["cwd"], root)
+                self.assertIn("exit 1", (root / "check.sh").read_text(), "the operator's edit is left alone")
+
+    def test_a_worktree_review_still_checks_the_live_checkout(self) -> None:
+        """The uncommitted change is a worktree review's subject, so its check runs where it is."""
+        root = self.repo()
+        runner = self.runner()
+        report = sd_review.review(root, namespace(scope="worktree"), runner, self.environment(), self.chatgpt_home())
+        self.assertEqual((report["status"], self.trace.read_text().split()), ("gate_failed", ["live"]))
+
+
 class BuilderFixture(GateRepo):
     """`GateRepo` plus a builder's `sd gate check` and a count of the check's runs."""
 
@@ -174,6 +240,13 @@ class BuilderReceipt(BuilderFixture):
         gate = self.gate(root, database)
         self.assertEqual((gate["status"], gate["source"]), ("pass", "gate-receipt"), json.dumps(gate)[:2000])
         self.assertEqual(self.runs(), 1)
+
+    def test_a_builders_gate_queues_for_a_slot_on_its_own_bound(self) -> None:
+        """sd:2607: `sd gate check` waits in the machine pool for hours, and its check still gets the whole bound."""
+        root, database = self.repo()
+        done = self.builder(root, database)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads(done.stdout)["report"]["gate_slot"]["bound_seconds"], importlib.import_module("sd_lib").GATE_SLOT_SECONDS)
 
     def test_a_builder_in_another_agent_session_is_reused(self) -> None:
         """sd:1912, D1: a builder's session and the lead's differ in the agent

@@ -165,6 +165,11 @@ def full_branch_coverage(report: dict, prior: dict) -> None:
         raise Refusal("additional review history or full-branch coverage does not match")
 
 
+def set_aside(state: dict) -> int:
+    """How many passes `--restart-review` moved out of `passes` (sd:2600)."""
+    return sum(len(restart.get("passes") or []) for restart in state.get("superseded_reviews") or [])
+
+
 class ReviewHistory:
     """The history surface the shared gates consume, stated once.
 
@@ -201,7 +206,9 @@ class ReviewHistory:
         return list(state.get("passes") or [])
 
     def spent(self, state: dict) -> int:
-        return len(self._records(state))
+        # Passes a `--restart-review` set aside still count (sd:2600): a restart
+        # is a fresh review, not a fresh budget.
+        return len(self._records(state)) + set_aside(state)
 
     def history_digest(self, state: dict) -> str:
         return self._digest(state)

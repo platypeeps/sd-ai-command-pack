@@ -163,6 +163,19 @@ The next prepare reviews normally, without `--retry-review`.
 A slow gate under load can take a longer limit: `sd-ship prepare --review-timeout SECONDS`.
 It reaches `sd-review --timeout`, which bounds the gate and each reviewer.
 
+## A reviewed commit rewritten
+
+An amend or a rebase after review leaves the reviewed head outside the branch.
+Prepare then refuses with `reviewed_head_orphaned`.
+If the old history must not be pushed, as after a privacy amend, do not reset.
+Run `sd-ship prepare --item ID --restart-review REASON --json` instead.
+It applies only while a reviewed head is orphaned, and it takes no other review flag.
+It moves the orphaned passes, with the reason, to `superseded_reviews` in the ship receipt.
+Then it reviews the whole branch again from nothing; the earlier findings cannot be resumed against a head the branch cannot reach.
+The set-aside passes still count against the automatic cap, and the restart spends one more.
+If the amend only edited a commit message, run `git reset --soft <reviewed head>` instead.
+Commit on top of it, then prepare again; the fix verification continues from the reviewed head.
+
 ## Additional review
 
 After the automatic cap, obtain a new direct user request before another paid review.

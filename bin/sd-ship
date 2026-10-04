@@ -45,6 +45,7 @@ from sd_ship_review import (
     SharedReview,
     carry_forward,
     is_ancestor,
+    restart_reason,
 )
 from sd_ship_workflow import blocked, failure
 
@@ -52,7 +53,11 @@ BIN = pathlib.Path(__file__).resolve().parent
 #: When this process started, for the invoker a receipt names (sd:2078).
 PROCESS_STARTED = datetime.now(timezone.utc).isoformat()
 REVIEW_SETUP_SECONDS = 3600
+#: How long a group sent TERM may take to exit and close its pipes before KILL.
 REVIEW_CLEANUP_SECONDS = 5
+#: How long to wait for the pipes to close once KILL is sent. Nothing in the group
+#: outlives KILL, so only a descendant outside it reaches this bound (sd:2609).
+REVIEW_DRAIN_SECONDS = 5
 REVIEW_DIAGNOSTIC_BYTES = 4096
 #: How deep a captured review report may nest and still be kept as evidence.
 #: Measured rather than chosen: of the 156 review reports the local store held
@@ -241,7 +246,7 @@ def review_process(root: pathlib.Path, argv: list[str], *, timeout: float) -> su
             if isinstance(interruption, subprocess.TimeoutExpired):
                 output, errors = interruption.output or b"", interruption.stderr or b""
             cleanup: dict = {}
-            for name, number in (("term", signal.SIGTERM), ("kill", signal.SIGKILL)):
+            for name, number, bound in (("term", signal.SIGTERM, REVIEW_CLEANUP_SECONDS), ("kill", signal.SIGKILL, REVIEW_DRAIN_SECONDS)):
                 # poll() may already have reaped the leader. Its descendants
                 # still own the group and pipes, so the signal is unconditional.
                 try:
@@ -252,7 +257,7 @@ def review_process(root: pathlib.Path, argv: list[str], *, timeout: float) -> su
                 except OSError as error:
                     cleanup[name] = f"failed: {error}"
                 try:
-                    output, errors = process.communicate(timeout=REVIEW_CLEANUP_SECONDS)
+                    output, errors = process.communicate(timeout=bound)
                     cleanup["drained"] = True
                 except subprocess.TimeoutExpired as error:
                     output, errors = error.output or output, error.stderr or errors
@@ -283,6 +288,14 @@ def review_process(root: pathlib.Path, argv: list[str], *, timeout: float) -> su
             process.stderr.close()
 
 
+def slot_phase(plan: dict) -> int:
+    """sd:2611: the gate-slot wait, its own phase; none in a plan without it. Not a count: `TypeError`, an invalid plan."""
+    slot = plan.get("slot_seconds", 0)
+    if type(slot) is not int or slot < 0:
+        raise TypeError(f"slot_seconds is {slot!r}, not a count of seconds")
+    return slot
+
+
 def timing_plan(result: subprocess.CompletedProcess) -> dict:
     try:
         report = json.loads(result.stdout)
@@ -293,6 +306,7 @@ def timing_plan(result: subprocess.CompletedProcess) -> dict:
         # sd:2041: the gate's own bound, beside the reviewers' phase. A plan
         # without it is one phase for the gate and each reviewer, as before.
         check = plan.get("check_seconds", phase)
+        slot = slot_phase(plan)
         valid = (result.returncode == 0 and report.get("status") == "explained" and not report.get("authorship_refusal")
                  and all(type(bound) is int and bound > 0 for bound in (phase, check))
                  and type(setup) is int and setup == REVIEW_SETUP_SECONDS
@@ -300,7 +314,7 @@ def timing_plan(result: subprocess.CompletedProcess) -> dict:
                  and type(requested) is int and 0 < requested <= len(candidates)
                  and all(isinstance(row, dict) and isinstance(row.get("name"), str)
                          and isinstance(row.get("recipient"), str) for row in candidates)
-                 and total == setup + check + phase * len(candidates))
+                 and total == setup + slot + check + phase * len(candidates))
     except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
         valid = False
     if not valid:
@@ -1211,6 +1225,9 @@ class Ship(SharedReview):
             raise Refusal("additional review cannot commit; name an already committed exact head")
         if getattr(self.args, "catch_up", False) and self.args.additional_review_for is not None:
             raise Refusal("--catch-up makes a new head; an additional review names an existing one")
+        if getattr(self.args, "restart_review", None) is not None:
+            # Before anything commits, fetches or merges (sd:2600).
+            restart_reason(self.args)
         commit_paths(self.root, self.args)
         head = current_head(self.root)
         self.additional_request(head, list(self.state.get("passes") or []))
@@ -2209,6 +2226,10 @@ def validate_identity(args) -> None:
         raise Refusal("--review-id requires --no-item")
     if not args.no_item:
         return
+    if getattr(args, "restart_review", None) is not None:
+        raise Refusal("--restart-review restarts an item's review; a no-item record starts fresh with --create-record",
+                      code="no_item_flags_refused", boundary="input", state="operator_decision",
+                      next_action="Drop --restart-review, or prepare with --item.")
     if getattr(args, "provider", None) is not None and any(getattr(args, name, None) for name in
             ("create_record", "import_history", "rebind_branch", "close_record", "reopen_record")):
         raise Refusal("--provider cannot combine with metadata-only record operations")
@@ -2247,6 +2268,9 @@ def parser():
             action.add_argument("--reuse-check", action="store_true", help="opt into exact-input successful check-receipt reuse")
             review_timeout_flag(action)
             action.add_argument("--retry-review", action="store_true", help="spend one automatic pass on a full-branch retry of an incomplete review")
+            action.add_argument("--restart-review", metavar="REASON",
+                                help="after an amend or rebase orphaned a reviewed head: set that review aside with "
+                                     "REASON and spend one automatic pass on a fresh full-branch review (sd:2600)")
             action.add_argument("--additional-review-for", metavar="SHA", help="record one explicit post-cap operator request for this exact committed head")
             action.add_argument("--review-history-digest", metavar="SHA256", help="one-use digest of every existing pass; required to renew after three reservations")
             action.add_argument("--request-reason", help="nonempty operator context, valid only with --additional-review-for; this assertion is not proof of user approval")

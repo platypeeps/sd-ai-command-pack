@@ -17,7 +17,8 @@ finished. `post` refuses any other SHA, so a result cannot be carried to a
 head that was never checked.
 
 Every merge attempt posts a fresh status, from a run or from a receipt; a
-reused pass says so in its description. The description carries
+reused pass says so in its description, and a run in full keeps `reuse_miss`,
+why no receipt stood (sd:2602). The description carries
 `inputs <digest>` as provenance: a digest of the head, the copied
 `CLAUDE.local.md` (or its absence) and the pack's own `bin/` files. Anyone
 with write access can post a status, so `local_gate_passed` trusts only one
@@ -77,7 +78,8 @@ def local_gate(api: Any, root: pathlib.Path, head: str, *, base: str | None = No
     inputs = gate_inputs(root, head)
     try:
         # The merge gate only reads prepare's receipt; its own pass records none (sd:2041).
-        result = check_in_worktree(root, head, base=base_ref(base), database=database, record=False)
+        result = check_in_worktree(root, head, base=base_ref(base), database=database, record=False,
+                                   slot_timeout=sd_lib.GATE_SLOT_SECONDS)  # sd:2611: queue apart from the check
     except GateError as error:
         raise Refusal(str(error), code="command_failed", boundary="runtime", state="retryable_failure",
                       next_action="Inspect the command error, resolve its cause, then retry.") from None

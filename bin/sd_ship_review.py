@@ -496,14 +496,54 @@ class SharedReview:
                 raise Refusal("this head was already reviewed; address its findings before the fix verification")
         for previous in self.history.ancestry_heads(self.state):
             if not is_ancestor(self.root, previous, head):
+                item = getattr(self.identity, "item", None)
+                # The reset publishes the reviewed commit, so it cannot be the
+                # only way out of a rewrite made to keep a line unpublished (sd:2600).
+                restart = (f"If the old history must not be pushed, as after a privacy amend, run "
+                           f"`sd-ship prepare --item {item} --restart-review REASON`: it sets the orphaned review "
+                           "aside and reviews the whole branch again, one pass against the cap. "
+                           "If the amend only edited a commit message, r" if item is not None else "R")
                 raise Refusal(
                     f"reviewed head {previous} is not an ancestor of the offered head {head} on {self.branch}; "
                     "an amend or a rebase after a review orphans the reviewed head, and a review of a "
                     "commit the branch cannot reach is not evidence about the branch",
                     code="reviewed_head_orphaned", boundary="review", state="operator_decision",
-                    next_action=f"Restore a history that contains {previous}: after an amend, run "
+                    next_action=f"{restart}estore a history that contains {previous}: after an amend, run "
                                 f"`git reset --soft {previous}`, commit the change on top, then prepare again. "
                                 "An unchanged retry refuses the same way.")
+
+    def restart_review(self, head: str) -> None:
+        """sd:2600. Set an orphaned review aside, with its reason, for one fresh full-branch review.
+
+        An amend or a rebase after review leaves reviewed heads the branch
+        cannot reach, and `validate_dispatch` refuses them. `git reset --soft`
+        onto the reviewed head restores the ancestry, but it also publishes the
+        reviewed commit, which is closed when the amend removed something that
+        may not reach the remote. sd-review refuses to resume a report whose
+        head is not an ancestor, so the orphaned findings cannot be carried
+        into the new pass. They stay in the receipt under `superseded_reviews`,
+        and their passes still count against the cap (`set_aside`).
+        """
+        reason = restart_reason(self.args)
+        orphaned = [previous for previous in self.history.ancestry_heads(self.state)
+                    if not is_ancestor(self.root, previous, head)]
+        if not orphaned:
+            raise Refusal("--restart-review applies only when a reviewed head is not an ancestor of HEAD; "
+                          "this branch still contains every reviewed head, so their findings stand",
+                          code="restart_review_unneeded", boundary="input", state="operator_decision",
+                          next_action="Prepare again without --restart-review.")
+        if self.history.spent(self.state) >= AUTOMATIC_CODE_REVIEW_PASSES:
+            raise Refusal(f"all {AUTOMATIC_CODE_REVIEW_PASSES} automatic code review passes are spent, "
+                          "set-aside passes included; a restart spends one more")
+        restart = {"reason": reason, "recorded_at": self.runtime.clock(), "head": head, "orphaned": orphaned,
+                   "history_digest": self.history.history_digest(self.state),
+                   "passes": self.history.native(self.state)}
+        self.state.pop("review_carry_forward", None)
+        self.save(passes=[], reviewed_head=None, review_clearance=None,
+                  superseded_reviews=[*(self.state.get("superseded_reviews") or []), restart])
+        print(f"sd-ship: set aside {len(restart['passes'])} pass(es) whose heads this branch cannot reach "
+              f"({', '.join(previous[:12] for previous in orphaned)}); reviewing {head[:12]} in full",
+              file=sys.stderr)
 
     def authorship_start(self) -> str:
         """Where this branch's commits begin, for trailer and vendor reads."""
@@ -577,6 +617,8 @@ class SharedReview:
         return {"from": previous, "base": fork}
 
     def review(self, head: str) -> None:
+        if getattr(self.args, "restart_review", None) is not None:
+            self.restart_review(head)
         passes = self.history.native(self.state)
         if not passes and (base := empty_branch_base(self.root, head)):
             print(f"sd-ship: {head[:12]} changes no file against {base[:12]}; local review skipped, no provider called",
@@ -780,6 +822,21 @@ class SharedReview:
 
 #: What a refusal adds when the pass it kept was an explicit post-cap request (sd:2147).
 REQUEST_CONSUMED = "; the operator request was consumed"
+
+
+def restart_reason(args) -> str:
+    """sd:2600. The stated reason for `--restart-review`, once the flag stands alone."""
+    reason = (getattr(args, "restart_review", None) or "").strip()
+    if not reason:
+        raise Refusal("--restart-review needs a nonempty REASON; the receipt records why the review restarted",
+                      code="restart_review_reason", boundary="input", state="operator_decision",
+                      next_action="Repeat the prepare with --restart-review and a reason.")
+    if args.retry_review or args.additional_review_for is not None or getattr(args, "catch_up", False):
+        raise Refusal("--restart-review does not combine with --retry-review, --additional-review-for or --catch-up; "
+                      "it spends one automatic pass on a fresh full-branch review of the current head",
+                      code="restart_review_combined", boundary="input", state="operator_decision",
+                      next_action="Run --restart-review alone, then prepare again for anything else.")
+    return reason
 
 
 def consumed(passes: list[dict]) -> str:

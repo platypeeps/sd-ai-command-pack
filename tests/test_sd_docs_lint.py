@@ -1108,7 +1108,9 @@ class ScopePolicyTests(unittest.TestCase):
 
 class RepositoryTests(unittest.TestCase):
     def test_this_repository_is_clean(self) -> None:
-        report = lint.run(REPO_ROOT, "docs/work", "docs/spec", "docs/decisions", None)
+        # No history, as `make check` lints it: this runs inside the gate too,
+        # and with history it fetches the remote once per item (sd:2606).
+        report = lint.run(REPO_ROOT, "docs/work", "docs/spec", "docs/decisions", None, history=False)
         self.assertEqual(report.failures, [])
 
     def test_missing_work_directory_is_a_failure(self) -> None:
@@ -1132,7 +1134,7 @@ class RepositoryTests(unittest.TestCase):
         # There is no --repo any more (R10-D6): the linter reads cwd, so the
         # test has to stand in the repository it means to lint.
         with in_directory(REPO_ROOT):
-            self.assertEqual(lint.main([]), 0)
+            self.assertEqual(lint.main(["--no-history"]), 0)
 
     def test_cli_rejects_an_unreadable_pr_body(self) -> None:
         with in_directory(REPO_ROOT):
