@@ -32,8 +32,9 @@ HARNESS = REPO_ROOT / ".github/scripts/run-tests.sh"
 # and which that copy reads. It is inert only while this harness copies
 # `run-tests.sh` alone and not `select-tests.py`, so an outer narrowed run
 # would start narrowing its own nested runs the day a fixture copies
-# `.github/scripts` whole. Drop it, and `CHANGED` with it.
-DROPPED_FROM_FIXTURES = ("PYTHONPATH", "TEST_CHANGED_FILES", "CHANGED")
+# `.github/scripts` whole. Drop it, and `CHANGED` with it. `SD_GATE_POOL_SIZE`
+# is the outer gate's cap (sd:2607), which would set a fixture's worker count.
+DROPPED_FROM_FIXTURES = ("PYTHONPATH", "TEST_CHANGED_FILES", "CHANGED", "SD_GATE_POOL_SIZE")
 
 
 def fixture_env(**overrides: str) -> dict[str, str]:
@@ -183,6 +184,20 @@ class SplitModuleFixtures(unittest.TestCase):
         """sd:1955. Two gate slots at half the cores each fill the machine and no more."""
         for environment, workers in (({}, 2), ({"FIXTURE_CORES": "5"}, 2), ({"FIXTURE_CORES": "16"}, 8),
                                      ({"CI": "1"}, 4), ({"GITHUB_ACTIONS": "true"}, 4)):
+            with self.subTest(environment=environment):
+                result = self.run_harness(workers=None, environment=environment)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn(f"test runner: workers={workers} ", result.stdout)
+
+    def test_local_workers_follow_the_gate_cap_so_the_pool_holds_twice_the_cores(self) -> None:
+        """sd:2607: the cap a holder names, else this run's own, sets the workers; CI and an explicit count win."""
+        for environment, workers in (({"FIXTURE_CORES": "16", "SD_GATE_POOL_SIZE": "4", "SD_GATE_SLOTS": "0"}, 8),
+                                     ({"FIXTURE_CORES": "16", "SD_GATE_POOL_SIZE": "2", "SD_GATE_SLOTS": "0"}, 16),
+                                     ({"FIXTURE_CORES": "16", "SD_GATE_POOL_SIZE": "8", "SD_GATE_SLOTS": "0"}, 4),
+                                     ({"FIXTURE_CORES": "16", "SD_GATE_POOL_SIZE": "1", "SD_GATE_SLOTS": "0"}, 16),
+                                     ({"FIXTURE_CORES": "16", "SD_GATE_POOL_SIZE": "64", "SD_GATE_SLOTS": "0"}, 1),
+                                     ({"FIXTURE_CORES": "16", "SD_GATE_POOL_SIZE": "0", "SD_GATE_SLOTS": "0"}, 8),
+                                     ({"FIXTURE_CORES": "16", "SD_GATE_POOL_SIZE": "4", "CI": "1"}, 16)):
             with self.subTest(environment=environment):
                 result = self.run_harness(workers=None, environment=environment)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

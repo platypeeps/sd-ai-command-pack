@@ -12,6 +12,7 @@ assert that a lookup happened, not that the right repository was found.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import os
@@ -126,6 +127,31 @@ class AManagedRepositoryIsDenied(Fixture):
             tool_input={"method": "create", "owner": "example", "repo": "managed",
                         "title": "x"}))
         self.assertIn("sd task add", reason)
+
+    def test_every_sd_command_the_denial_names_parses(self) -> None:
+        """sd:2515: the hint said `sd task note <n> "<text>"`, and `note` takes
+        the text only as `--body`, so an agent that followed it hit a usage
+        error. Each backticked `sd` command is filled in and handed to the
+        real parser; a usage error is `SystemExit(2)`."""
+        import importlib.machinery
+        import importlib.util
+        import re
+        import shlex
+
+        loader = importlib.machinery.SourceFileLoader("sd_under_test", str(REPO_ROOT / "bin" / "sd"))
+        spec = importlib.util.spec_from_loader("sd_under_test", loader)
+        sd = importlib.util.module_from_spec(spec)
+        loader.exec_module(sd)
+        commands = re.findall(r"`(sd [^`]+)`", self.module.REASON)
+        self.assertGreaterEqual(len(commands), 2, self.module.REASON)
+        for command in commands:
+            with self.subTest(command=command):
+                argv = shlex.split(command.replace("<n>", "7"))[1:]
+                with contextlib.redirect_stderr(io.StringIO()) as stderr:
+                    try:
+                        sd.build_parser().parse_args(argv)
+                    except SystemExit as error:
+                        self.fail(f"{command!r} is a usage error ({error.code}): {stderr.getvalue()}")
 
     def test_the_spellings_an_agent_actually_uses_are_denied(self) -> None:
         for command in (

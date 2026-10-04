@@ -579,6 +579,9 @@ class ABranchAnotherPullRequestIsBasedOn(unittest.TestCase):
             len(asks), 1, f"step 6 issues {len(asks)} base queries, not one"
         )
         words = shlex.split(asks[0])
+        self.assertIn(
+            "--base <this branch> ", asks[0] + " ",
+            "the query asks about another branch's children, not this one's (sd:1002)")
         self.assertEqual(
             words[words.index("--state") + 1], "open",
             "the query is not scoped to open pull requests, so a merged or "

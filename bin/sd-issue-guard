@@ -48,7 +48,7 @@ MCP_TOOL = "mcp__github__issue_write"
 REASON = (
     "This repository tracks work in sd, not GitHub issues. Record the work "
     "with `sd task add \"<title>\" --body \"<detail>\"` from this checkout;"
-    " `sd task note <n> \"<text>\"` adds to an existing item."
+    " `sd task note <n> --body \"<text>\"` adds to an existing item."
 )
 
 #: The characters that separate commands. Newline is one, outside quotes. The

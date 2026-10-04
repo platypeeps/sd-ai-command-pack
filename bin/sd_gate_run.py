@@ -149,7 +149,7 @@ def base_ref(branch: str | None) -> str | None:
 def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SECONDS, base: str | None = None,
                       database: pathlib.Path | None = None, run: Run | None = None,
                       environ: Mapping[str, str] | None = None, reuse: bool = True,
-                      record: bool = True) -> dict[str, Any]:
+                      record: bool = True, slot_timeout: int = 0) -> dict[str, Any]:
     """`sd-check --json` in a clean detached worktree of `head`; the worktree is removed after.
 
     Returns `{"head", "status", "exit_code", "summary", "report", "stderr"}`,
@@ -184,9 +184,9 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
                                        "age_seconds": found["age_seconds"], "head": found["head"]})
                 return {"head": gate_git(tree, "rev-parse", "HEAD"), **reading}
             argv = [sys.executable, str(BIN / "sd-check"), "--json", "--timeout", str(timeout),
-                    *(["--base", base] if base else [])]
+                    *(["--base", base] if base else []), *(["--slot-timeout", str(slot_timeout)] * (slot_timeout > 0))]
             with sd_gate_cache.cargo_environment(root, tree, env) as child:
-                code, output, errors = (run or run_child)(argv, child, tree, timeout + REPORT_GRACE_SECONDS)
+                code, output, errors = (run or run_child)(argv, child, tree, timeout + slot_timeout + REPORT_GRACE_SECONDS)
             checked = gate_git(tree, "rev-parse", "HEAD")
             reading = check_reading(code, output, errors)
             if record and database and identity and reading["status"] == "success" and checked == head:
