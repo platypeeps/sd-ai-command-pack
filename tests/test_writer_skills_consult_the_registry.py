@@ -117,6 +117,28 @@ def outside_fences(text: str) -> str:
     return "\n".join(kept)
 
 
+#: Where a sentence ends: a terminator before whitespace and a capital, or at
+#: the end of the text. A dot inside `<page>.md` is followed by a letter.
+SENTENCE_END = re.compile(r"[.!?](?=\s+[A-Z]|\s*$)")
+
+
+def names_the_verb_before_writing(page: str) -> bool:
+    """Whether a sentence outside a fence runs the verb *before* a write.
+
+    The contract is a setup-step action (sd:999, review-1018): the owner's
+    note says "skills call it in their setup step". Page-wide presence let the
+    pointer move into a report paragraph while no step ran it. Each live
+    skill writes the order into the sentence that holds the pointer --
+    "Before the first edit to a file, run", "before rewriting", "the setup
+    step, before it resumes writing" -- so that sentence must say `before`.
+    """
+
+    flat = outside_fences(page).replace("\n", " ")
+    sentences = SENTENCE_END.split(flat)
+    return any(POINTER in sentence and re.search(r"\bbefore\b", sentence, re.IGNORECASE)
+               for sentence in sentences)
+
+
 def writer_shaped(root: pathlib.Path = REPO_ROOT) -> dict[str, str]:
     """Every skill `WRITES_A_FILE` matches, with the first sentence it matched."""
 
@@ -137,17 +159,35 @@ class TheSetupStep(unittest.TestCase):
         missing = []
         for name in WRITER_SKILLS:
             text = pages[name].read_text(encoding="utf-8", errors="replace")
-            if POINTER not in outside_fences(text):
+            if not names_the_verb_before_writing(text):
                 missing.append(name)
         self.assertEqual(missing, [], f"""
-These writer skills do not name `{POINTER}` in their setup step (a fenced
-example does not count): {missing}.
+These writer skills do not name `{POINTER}` in a sentence that runs it
+before the write (a fenced example does not count): {missing}.
 
 Before the skill writes a file, its setup step runs the verb for that file and
 cites the ids it prints -- the shape `skills/sd-handoff/SKILL.md` uses in its
 restore step. If a skill here has stopped writing files, take it out of
 `WRITER_SKILLS`; the derivation test will then say whether the predicate agrees.
 """)
+
+
+class TheSetupStepIsAnchored(unittest.TestCase):
+    """sd:999 (review-1018). The pointer has to run before the write, not just appear."""
+
+    def test_a_pointer_outside_a_before_sentence_does_not_count(self) -> None:
+        for page in (f"Report what `{POINTER} <path>` printed.\n",
+                     f"## Final report\n\nList the `{POINTER}` ids you cited.\n",
+                     f"Edit the file. Then run `{POINTER} <path>`.\n"):
+            with self.subTest(page=page):
+                self.assertFalse(names_the_verb_before_writing(page))
+
+    def test_each_live_shape_counts(self) -> None:
+        for page in (f"Before the first edit to a file, run\n`{POINTER} <path>` first.\n",
+                     f"run `{POINTER} <path>` from the root before rewriting.\n",
+                     f"The setup step, before it resumes writing a file, is\n`{POINTER} <path>`.\n"):
+            with self.subTest(page=page):
+                self.assertTrue(names_the_verb_before_writing(page))
 
 
 class TheWriterList(unittest.TestCase):

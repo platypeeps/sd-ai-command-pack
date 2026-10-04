@@ -883,11 +883,17 @@ class LineBudgetTests(unittest.TestCase):
         # `sd_gate_receipts.tree_key` whether the head declares a tree key; the
         # key, binding and docstring for it live in `sd_gate_receipts`, outside
         # the lane.
+        # 4683 -> 4687 is sd:2493: `bin/sd_gate_run.py` +4 to run the check
+        # inside `sd_gate_cache.cargo_environment` (+1), drop the operator's
+        # `CARGO_TARGET_DIR` (+1 comment line), import the module (+1) and
+        # say so in `gate_environment` (+1). The cache itself is
+        # `bin/sd_gate_cache.py`, gate code outside the lane as
+        # `sd_gate_receipts` is: `sd-review` does not import it.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4683,
+            4687,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

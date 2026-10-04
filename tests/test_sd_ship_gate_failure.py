@@ -58,6 +58,24 @@ class GateFailureSpendsNoPass(unittest.TestCase):
         message = str(caught.exception)
         self.assertIn("test (exit 1): stderr: AssertionError: sd2021 marker", message)
         self.assertIn("lint (exit 2): stdout: E501 line too long", message)
+
+    def test_the_refusal_names_the_failed_shards_and_the_whole_output(self):
+        """sd:2558. A shard that failed early in a long run was in neither
+        tail, so prepare refused without naming the test that failed."""
+        shard = "shard tests.test_middle: 4s exit=1"
+        rows = [{"name": "check", "status": "fail", "exit_code": 2, "reason": "",
+                 "stdout": "shard tests.test_last: 1s exit=0\n" + "o" * 2000, "stderr": "make: *** [test] Error 1",
+                 "output_path": "/tmp/fixture/.git/sd-check-output/run-check.log", "failed_shards": [shard]}]
+        failed = {**GATE_FAILED, "check": {"status": "fail", "exit_code": 1, "detail": "", "checks": rows}}
+        review, _process = self.context(report_changes=failed)
+        with self.assertRaisesRegex(ship.Refusal, "no review pass was spent") as caught:
+            review.review(HEAD)
+        message = str(caught.exception)
+        self.assertIn(f"check (exit 2): failed {shard}\nwhole output: /tmp/fixture/.git/sd-check-output/run-check.log",
+                      message)
+        kept = review.state["review_preflight_error"]["checks"][0]
+        self.assertEqual((kept["failed_shards"], kept["output_path"]),
+                         ([shard], "/tmp/fixture/.git/sd-check-output/run-check.log"))
         self.assertNotIn("check (exit 0)", message)
 
     def test_the_next_prepare_reviews_without_a_retry_flag(self):
