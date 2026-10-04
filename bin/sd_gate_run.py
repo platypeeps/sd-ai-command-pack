@@ -172,7 +172,7 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
             key = sd_gate_receipts.receipt_key(root, head, content)
             identity = (sd_gate_receipts.gate_binding(tree, head, gate_inputs(root, head, content), base, env, fork)
                         if database is not None else None)
-            found = sd_gate_receipts.lookup(database, key, identity) if reuse and database and identity else None
+            found, miss = sd_gate_receipts.examine(database, key, identity) if reuse and database else (None, None)
             if found is not None:
                 reading = dict(found["reading"], summary=f"{found['reading']['summary']} (reused)"[:DESCRIPTION_LIMIT],
                                reused={"revision": found["revision"], "recorded_at": found["recorded_at"],
@@ -195,7 +195,7 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
             # The administrative entry goes with the directory; the temporary
             # directory's own cleanup removes whatever the removal left.
             sd_lib.git_output(["worktree", "remove", "--force", str(tree)], root)
-    return {"head": checked, **reading}
+    return {"head": checked, **reading, **({"reuse_miss": miss} if miss else {})}  # sd:2602; never in the receipt
 
 
 def named_checks(report: dict[str, Any]) -> str:

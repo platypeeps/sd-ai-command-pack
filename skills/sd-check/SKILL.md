@@ -69,6 +69,7 @@ The merge gate at the same head and binding, within 30 minutes, reads it instead
 Prepare reads one too: a pass that `sd gate check` or an earlier prepare left at the same head and binding stands (sd:1912).
 `sd gate check` runs the gate's check at the committed `HEAD` and records a pass; a plain `make check` leaves no receipt.
 The merge gate never writes one, and the window counts from the run that passed.
+A gate that read no receipt and ran in full says why in `reuse_miss`: no receipt, a failed one, the binding fields that differ, or the expired window (sd:2602).
 The gate child drops the agent harness's session variables, so two sessions' passes at one head bind equal.
 Inputs outside the repository are not bound: external makefiles, files a tool reads, machine state.
 The short same-head window is the accepted residual risk; a repository that needs more uses the explicit contract below.

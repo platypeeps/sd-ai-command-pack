@@ -265,8 +265,8 @@ class Gate(Repository):
         self.assertNotEqual(sd_local_gate.gate_inputs(self.root, head), before)
 
 
-class Receipts(Repository):
-    """One passing gate per head (sd:2041, sd:1912): a matching receipt answers instead of a second run."""
+class ReceiptFixture(Repository):
+    """A workflow database and a check that counts its real runs."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -285,6 +285,10 @@ class Receipts(Repository):
 
     def gate(self, head: str, **kwargs) -> dict:
         return sd_gate_run.check_in_worktree(self.root, head, database=self.database, **kwargs)
+
+
+class Receipts(ReceiptFixture):
+    """One passing gate per head (sd:2041, sd:1912): a matching receipt answers instead of a second run."""
 
     def test_a_pass_leaves_a_receipt_the_next_run_at_that_head_reuses(self) -> None:
         head = self.counted()
@@ -397,6 +401,101 @@ class Receipts(Repository):
         head = self.counted()
         self.assertNotEqual(sd_gate_receipts.receipt_key(self.root, head),
                             sd_gate_receipts.receipt_key(self.root.parent, head))
+
+
+class MergeReuse(ReceiptFixture):
+    """`sd-ship merge` posts `sd/local-gate` from prepare's tree receipt, and says why when it cannot (sd:2602).
+
+    Prepare's gate leaves the receipt; the merge gate (`local_gate`, which
+    records none) reads it under the same key and window. A run in full keeps
+    `reuse_miss`, so a merge that should have reused names what stopped it.
+    """
+
+    def declare(self, declared: bool = True) -> str:
+        """A branch off `main` whose tree declares the tree key; `origin/main` is the base."""
+        self.counted()
+        if declared:
+            (self.root / ".github").mkdir()
+            (self.root / ".github" / "sd-gate-reuse.json").write_text(json.dumps(
+                {"schema_version": 1, "key": "tree", "reason": "the check reads no commit history"}), encoding="utf-8")
+            git(self.root, "add", "-A")
+            git(self.root, "commit", "-q", "-m", "declare")
+        git(self.root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        git(self.root, "checkout", "-q", "-b", "topic")
+        (self.root / "src.txt").write_text("one\n", encoding="utf-8")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "topic")
+        return git(self.root, "rev-parse", "HEAD")
+
+    def prepare(self, head: str) -> dict:
+        return self.gate(head, base=sd_gate_run.base_ref("main"))
+
+    def merge(self, head: str, api: Recorder | None = None) -> dict:
+        return sd_local_gate.local_gate(api or Recorder(), self.root, head, base="main", database=self.database)
+
+    def test_an_unchanged_tree_is_posted_from_the_receipt_with_no_run(self) -> None:
+        prepared = self.declare()
+        self.assertEqual(self.prepare(prepared)["status"], "success")
+        git(self.root, "commit", "-q", "--allow-empty", "-m", "attribute\n\nAuthored-with: claude/anthropic")
+        head, api = git(self.root, "rev-parse", "HEAD"), Recorder()
+        merged = self.merge(head, api)
+        self.assertEqual((merged["status"], merged["head"], merged["reused"]["head"]), ("success", head, prepared))
+        self.assertNotIn("reuse_miss", merged)
+        self.assertTrue(api.posts[0][1]["description"].endswith("(reused)"), api.posts)
+        self.assertEqual(self.runs(), 1)
+
+    def test_a_changed_tree_runs_in_full_and_names_no_receipt(self) -> None:
+        prepared = self.declare()
+        self.prepare(prepared)
+        (self.root / "src.txt").write_text("two\n", encoding="utf-8")
+        git(self.root, "commit", "-q", "-am", "changed")
+        merged = self.merge(git(self.root, "rev-parse", "HEAD"))
+        self.assertEqual((merged["status"], "reused" in merged, self.runs()), ("success", False, 2))
+        self.assertEqual(merged["reuse_miss"], {"reason": "no-receipt"})
+
+    def test_without_the_opt_in_a_new_head_runs_in_full(self) -> None:
+        self.prepare(self.declare(declared=False))
+        git(self.root, "commit", "-q", "--allow-empty", "-m", "attribute")
+        merged = self.merge(git(self.root, "rev-parse", "HEAD"))
+        self.assertEqual((merged["status"], "reused" in merged, self.runs()), ("success", False, 2))
+        self.assertEqual(merged["reuse_miss"], {"reason": "no-receipt"})
+
+    def test_an_expired_window_runs_in_full_and_names_the_age(self) -> None:
+        head = self.declare()
+        self.prepare(head)
+        later = time.time() + sd_gate_receipts.TREE_REUSE_WINDOW_SECONDS + 60
+        with mock.patch.object(sd_gate_receipts.time, "time", return_value=later):
+            merged = self.merge(head)
+        self.assertEqual((merged["status"], "reused" in merged, self.runs()), ("success", False, 2))
+        self.assertEqual((merged["reuse_miss"]["reason"], merged["reuse_miss"]["window_seconds"]),
+                         ("expired", sd_gate_receipts.TREE_REUSE_WINDOW_SECONDS))
+        self.assertGreater(merged["reuse_miss"]["age_seconds"], sd_gate_receipts.TREE_REUSE_WINDOW_SECONDS)
+
+    def test_a_different_command_runs_in_full_and_names_the_binding_fields(self) -> None:
+        """The untracked `CLAUDE.local.md` may respell `check`; the tree is equal and the command is not."""
+        head = self.declare()
+        self.prepare(head)
+        (self.root / "CLAUDE.local.md").write_text("## sd-check\n\ncheck: make check MODE=other\n", encoding="utf-8")
+        merged = self.merge(head)
+        self.assertEqual(("reused" in merged, self.runs()), (False, 2))
+        self.assertEqual(merged["reuse_miss"]["reason"], "binding")
+        self.assertIn("inputs", merged["reuse_miss"]["fields"])
+
+    def test_a_run_whose_binding_cannot_be_named_says_so(self) -> None:
+        head = self.declare()
+        self.prepare(head)
+        with mock.patch.object(sd_gate_receipts, "gate_binding", return_value=None):
+            merged = self.merge(head)
+        self.assertEqual((merged["reuse_miss"], self.runs()), ({"reason": "unbound"}, 2))
+
+    def test_a_miss_is_kept_in_the_ship_receipt_beside_the_result(self) -> None:
+        """`sd-ship merge` saves `local_gate` whole, so the miss reaches `sd-ship observe` with no new field."""
+        head = self.declare()
+        with mock.patch.dict(os.environ, {"MAKEFLAGS": "-s"}):
+            self.prepare(head)
+        merged = self.merge(head)
+        self.assertEqual(merged["reuse_miss"], {"reason": "binding", "fields": ["environment_sha256"]})
+        self.assertEqual(json.loads(json.dumps(merged))["reuse_miss"], merged["reuse_miss"])
 
 
 class DocsScopeGate(Repository):
