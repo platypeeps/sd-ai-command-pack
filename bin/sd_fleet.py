@@ -338,10 +338,11 @@ def _git_show(root: pathlib.Path, spec: str) -> str | None:
     return done.stdout if done.returncode == 0 else None
 
 
-def configured_owners() -> tuple[str, ...]:
+def configured_owners(default: tuple[str, ...] = DEFAULT_OWNERS) -> tuple[str, ...]:
     """The owner logins in the machine config's `fleet.owners`, lower-cased.
 
-    Absent, the key reads `DEFAULT_OWNERS`. A value that is not a non-empty
+    Absent, the key reads `default`: `DEFAULT_OWNERS` for the stamp, the
+    system collector's baseline owners for `sd-status` (sd:1807). A value that is not a non-empty
     list of logins refuses: ownership decides the `unprotected` declaration,
     so a guess in either direction is the wrong answer.
     """
@@ -351,7 +352,7 @@ def configured_owners() -> tuple[str, ...]:
     except sd_lib.ConfigError as error:
         raise FleetRefusal(f"cannot read fleet.owners: {error}") from None
     if fleet is None or (isinstance(fleet, dict) and "owners" not in fleet):
-        return DEFAULT_OWNERS
+        return default
     owners = fleet.get("owners") if isinstance(fleet, dict) else None
     if (not isinstance(owners, list) or not owners
             or not all(isinstance(login, str) and LOGIN.fullmatch(login) for login in owners)):
