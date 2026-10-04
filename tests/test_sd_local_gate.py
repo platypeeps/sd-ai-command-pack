@@ -186,6 +186,22 @@ class RunCheck(Repository):
         sd_gate_run.check_in_worktree(self.root, head)
         self.assertEqual(self.worktrees(), before)
 
+    def test_a_slot_bound_reaches_sd_check_and_widens_the_childs_limit(self) -> None:
+        """sd:2607: the queue for a slot has its own bound, so the child may live for both."""
+        head = self.commit("check:\n\t@echo ok\n")
+        seen: list[tuple[list[str], int]] = []
+        def run(argv: list[str], env: dict[str, str], cwd: pathlib.Path, limit: int) -> tuple[int | None, str, str]:
+            seen.append((argv, limit))
+            return sd_gate_run.run_child(argv, env, cwd, limit)
+        bounded_result = sd_gate_run.check_in_worktree(self.root, head, timeout=60, slot_timeout=300, run=run)
+        self.assertEqual(bounded_result["report"]["gate_slot"]["bound_seconds"], 300)
+        sd_gate_run.check_in_worktree(self.root, head, timeout=60, run=run)
+        (bounded, wide), (plain, narrow) = seen
+        self.assertEqual(bounded[bounded.index("--slot-timeout") + 1], "300")
+        self.assertEqual(wide, 60 + 300 + sd_gate_run.REPORT_GRACE_SECONDS)
+        self.assertNotIn("--slot-timeout", plain)
+        self.assertEqual(narrow, 60 + sd_gate_run.REPORT_GRACE_SECONDS)
+
 
 class Reading(unittest.TestCase):
     def test_only_an_exit_zero_pass_is_a_success(self) -> None:
@@ -665,6 +681,19 @@ class CargoBuildCache(Repository):
         second = sd_gate_run.check_in_worktree(self.root, head, environ=env, database=database)
         self.assertEqual((first["status"], "reused" in second), ("success", True), second)
         self.assertEqual(len(self.folders()), 1)
+
+
+class PackDeclaresTreeReuse(unittest.TestCase):
+    """The pack keys its own gate receipts by tree (sd:2610): `make check` reads no commit history."""
+
+    def test_the_pack_keys_its_gate_receipts_by_tree(self) -> None:
+        self.assertTrue(sd_gate_receipts.keyed_by_tree(REPO_ROOT), sd_gate_receipts.REUSE_DECLARATION)
+
+    def test_the_check_lints_docs_without_history(self) -> None:
+        """The declaration rests on this: without `--no-history`, docs-lint fetches and reads `git log` (sd:2606)."""
+        makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+        recipe = makefile.split("\ndocs-lint:\n", 1)[1].split("\n\n", 1)[0]
+        self.assertIn("bin/sd-docs-lint --no-history", recipe)
 
 
 class CacheBound(Repository):
