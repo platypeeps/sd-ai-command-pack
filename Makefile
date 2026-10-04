@@ -400,9 +400,11 @@ audit:
 # `test` lints temporary fixture repositories, `sd-ship` lints at delivery
 # time, and nothing ran either against this checkout's own docs/work. The lint
 # reads `sd_lib` and the working tree only, so it needs no database and no
-# provisioned library. Item 370.
+# provisioned library. Item 370. `--no-history` keeps it to the tree: without
+# it rule 2 fetches the remote and reads `git log` for each item's delivery,
+# and the gate's verdict would hang on both (sd:2606).
 docs-lint:
-	"$(VENV_PYTHON)" bin/sd-docs-lint
+	"$(VENV_PYTHON)" bin/sd-docs-lint --no-history
 
 # Re-vendor the research renderer's Latin woff2 faces and rewrite
 # bin/sd_research_fonts.py from them. Needs network; not part of `check`,

@@ -4,6 +4,8 @@
 
 ### Added
 
+- **`sd-docs-lint --no-history`, and `make check` lints with it (sd:2606).** Rule 2 asked every open item, and every `done` row with no completion record, whether it was delivered. Each question fetched the remote and ran `git log --grep`, so the gate's verdict depended on the remote and on commit messages, not on the tree alone. With the flag, no fetch, `git log` or `ls-remote` runs: an item only git could answer reads `unknown`, the unmarked check is skipped, and the run prints `rule 2 delivery: not asked`. The lint `sd-ship` runs with the pull request body still asks. A traced `make docs-lint` on this checkout went from 20 fetches, 20 logs and 7 `ls-remote` calls to none.
+
 - **Two pack suites stop reading the pack's own history (sd:2593).** `tests/test_archive_untouched.py` pins the retire commit by full SHA instead of asking `git log`. `tests/test_sd_size_report.py` checks its anchors with `cat-file` instead of `merge-base --is-ancestor`, and its trend and report tests read a fixture repository with dated commits. In an orphan clone with the same tree, both old forms failed. The tree-keyed declaration waits: `sd-docs-lint` at the root still reads delivery trailers through `sd_lib.delivered()`.
 
 - **Warm Rust builds in the local gate (sd:2493).** A repository with a tracked `Cargo.toml` now builds its gate check into a warm `CARGO_TARGET_DIR` the gate owns, instead of the fresh worktree's `target/`, so a merge gate reuses unchanged dependencies rather than compiling every one cold. Each repository keeps two folders under `${XDG_CACHE_HOME:-~/.cache}/sd/gate/`; a gate holds one by `flock` for its whole run, because cargo-nextest runs test binaries after cargo releases its own lock. A warm run builds with `CARGO_INCREMENTAL=0`: incremental sessions never pay off in a new worktree, and they grew a folder by about 4 GB a gate. When both are held, the run builds cold in its worktree as before. The operator's own `CARGO_TARGET_DIR` no longer reaches the gate child, and the folder does not enter the receipt binding. `SD_GATE_CARGO_TARGETS` sets the count (`0` switches the cache off) and `SD_GATE_CACHE_DIR` moves it. Nothing prunes the folders yet.
@@ -726,6 +728,8 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **Builders gate first, then review the gated head (sd:2603, slice 1).** The `sd-slice-builder` agent, the `sd-review` skill and `WORKFLOW.md` (Parallel work, Reviews, Defaults) now order each branch round under `repo.ci = local`: `sd gate check --base main` at the head, then `sd-review --scope branch --gate-check main` within the 30-minute reuse window, with the same environment, so the round reads the gate's pass instead of running a second full check. A fix commit needs a new gate pass before the next round. The plain `sd-review --scope branch` form is ruled out there: it runs a full check in the checkout, outside any lock around the gate, and reuses no pass. Docs only; `bin/sd-review` is unchanged.
 
 - **A task or followup merged associate-only can be delivered afterwards
   (sd:1913).** `sd work deliver N SHA --associated --reason TEXT` (sd:1590)

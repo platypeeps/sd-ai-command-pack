@@ -62,6 +62,7 @@ Do not substitute another diff or copy a cap into this procedure.
 1. Run the repository's deterministic gate through `sd-check`.
    A failing gate stops the review before provider dispatch.
    Explicit `--reuse-check` can reuse eligible full-check evidence; missing or stale evidence runs the gate normally.
+   Under `repo.ci = local`, follow the round order below instead.
 2. Use the routing decision from `sd_route.route`.
    Repository policy determines risk and depth; the registry determines eligible reviewers.
 3. Review the exact resolved subject.
@@ -83,6 +84,18 @@ Shipping may request it afterward through the configured `deep` tier or explicit
 The registry uses read-only database controls when available.
 A missing database permits file defaults without creating a database.
 An unreadable database stops execution instead of ignoring operator controls.
+
+### Branch rounds under `repo.ci = local`
+
+1. Run `sd gate check --base main` at the head, inside any lock the brief names.
+   It runs the full check in a clean worktree, takes a gate slot, and records a pass.
+2. Review with `sd-review --scope branch --gate-check main` within 30 minutes of that pass.
+   This form reuses the pass and runs no second check.
+3. Run both with the same environment. The receipt binds it, so a one-off prefix such as `TEST_WORKERS=6` on one of them reruns the full check.
+4. After a fix commit, run step 1 again before the next round.
+
+Never run the plain branch form there: it runs a second full check in the checkout, outside any lock around the gate, and reuses no pass.
+`WORKFLOW.md`, section **Parallel work**, holds the rule (sd:2603).
 
 ## Flags and results
 

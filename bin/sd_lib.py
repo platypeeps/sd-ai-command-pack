@@ -1437,18 +1437,26 @@ class Statuses:
     The marker is a property of the checkout and not of the item, so reading
     it per item puts the same question sixty-four times; the database is
     opened once too, and closed by whoever opened it.
+
+    `history=False` asks `delivered` nothing: no fetch, no `git log`. An open
+    item git would have answered reads `unknown`, and a `done` row is not
+    checked for its closing trailer. `make check` lints this way (sd:2606).
     """
 
     root: pathlib.Path
     source: str
     problem: str = ""
     rows: Rows | None = None
+    history: bool = True
 
     @classmethod
-    def of(cls, root: pathlib.Path | str, work_dir: str = WORK_DIR) -> "Statuses":
+    def of(
+        cls, root: pathlib.Path | str, work_dir: str = WORK_DIR, *, history: bool = True
+    ) -> "Statuses":
         root = pathlib.Path(root)
         source, problem = status_marker(root, work_dir)
-        return cls(root, source, problem, Rows(root) if source == FROM_ROW else None)
+        rows = Rows(root) if source == FROM_ROW else None
+        return cls(root, source, problem, rows, history)
 
     def close(self) -> None:
         if self.rows is not None:
@@ -1490,6 +1498,7 @@ def _from_git(
     prd: pathlib.Path,
     fields: dict[str, str],
     problems: list[str],
+    history: bool = True,
 ) -> StatusReport:
     """What a checkout with no database derives once the marker is present.
 
@@ -1498,8 +1507,15 @@ def _from_git(
     delivered" hands finished work back to the next reader that picks it.
     What the retire left behind says which kind of open the rest are -- an
     item recording the branch it lives on is being worked, one that records
-    none is still being planned.
+    none is still being planned. With `history` off git is not asked, and the
+    answer is `unknown` for the same reason.
     """
+    if not history:
+        problems.append(
+            f"{prd}: this run reads no history, so whether {item_dir.name} was "
+            f"delivered is not known here"
+        )
+        return StatusReport("unknown", False, tuple(problems))
     answer = delivered(root, item_dir.name)
     if answer == YES:
         return StatusReport("done", False, tuple(problems))
@@ -1548,7 +1564,7 @@ def _from_row(
                 f"{prd}: {statuses.rows.problem}, so this status came from git "
                 f"and not from the row this checkout's marker names"
             )
-        return _from_git(statuses.root, item_dir, prd, fields, problems)
+        return _from_git(statuses.root, item_dir, prd, fields, problems, statuses.history)
     line = fields.get("status", "").strip()
     if line and line != said:
         problems.append(
@@ -1570,7 +1586,12 @@ def _from_row(
         ((statuses.rows.identity(item_dir) if statuses.rows else ""), item_dir.name)
         if name
     ))
-    if said == "done" and not recorded and delivered(statuses.root, wanted) != YES:
+    if (
+        said == "done"
+        and not recorded
+        and statuses.history
+        and delivered(statuses.root, wanted) != YES
+    ):
         carries = " or ".join(f"{DELIVERS_TRAILER} {name}" for name in wanted)
         problems.append(
             f"{prd}: the row is done and no commit carries {carries}, nor the "
