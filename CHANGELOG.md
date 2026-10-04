@@ -242,10 +242,12 @@
   one root on an external volume waited on an open() under launchd for 16
   hours, and every plugin `sd config get` timed out behind it (sd:2537). Now
   each root reads in its own daemon thread. A lookup (`sd config get`, `set`,
-  `unset`, and a plugin kind) returns as soon as its owner answers. A root
-  silent after 5 s is skipped with a `warning: skipped plugin root` line.
-  `sd plugin add` does not skip one: it refuses, naming the silent root,
-  because that root may own the prefix being registered. Core `sd.*` keys
+  `unset`, and a plugin kind) returns once its owner and every root listed
+  before it have answered. A root silent after 5 s is skipped with a
+  `warning: skipped plugin root` line. When two roots carry one prefix, the
+  earlier registry entry owns it for both lookups, whatever answers first.
+  `sd plugin add` does not skip a silent root: it refuses, naming that root,
+  because the root may own the prefix being registered. Core `sd.*` keys
   still read no plugin root.
 
 - **Seven guard tests read shapes they used to miss (sd:999).**

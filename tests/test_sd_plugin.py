@@ -943,8 +943,9 @@ class StalledRootTests(PluginFixture):
 
     The stalled root is a FIFO named `sd-plugin.json`: opening it for reading
     waits for a writer, the way an open() under an ungranted volume waited for
-    16 hours on 2026-10-01 (sd:2537). It is listed first, so a serial scan
-    reaches it before the root that owns the key.
+    16 hours on 2026-10-01 (sd:2537). A lookup waits for every root listed
+    before the owner, so registry order decides what a stalled root costs:
+    nothing after the owner, at most ROOT_READ_SECONDS before it.
     """
 
     def stalled(self) -> pathlib.Path:
@@ -965,14 +966,22 @@ class StalledRootTests(PluginFixture):
     def owner(self) -> pathlib.Path:
         return self.plugin("owner", config=ConfigTests.DECLARED)
 
-    def test_the_owner_s_key_answers_while_another_root_hangs(self) -> None:
-        self.write_config({"plugins": [str(self.stalled()), str(self.owner())],
+    def test_the_owner_s_key_answers_while_a_later_root_hangs(self) -> None:
+        self.write_config({"plugins": [str(self.owner()), str(self.stalled())],
                            "config": {"pp": {"google_account": "personal"}}})
         started = time.monotonic()
         got = self.run_sd("config", "get", "pp.google_account", timeout=30)
         self.assertEqual((got.returncode, got.stdout.strip()), (0, "personal"), got.stderr)
         self.assertLess(time.monotonic() - started, load_sd().ROOT_READ_SECONDS,
-                        "the lookup waited for the stalled root instead of returning on its owner")
+                        "the lookup waited for a root listed after its owner")
+
+    def test_the_owner_s_key_answers_within_the_bound_while_an_earlier_root_hangs(self) -> None:
+        stalled = self.stalled()
+        self.write_config({"plugins": [str(stalled), str(self.owner())],
+                           "config": {"pp": {"google_account": "personal"}}})
+        got = self.run_sd("config", "get", "pp.google_account", timeout=30)
+        self.assertEqual((got.returncode, got.stdout.strip()), (0, "personal"), got.stderr)
+        self.assertIn(f"warning: skipped plugin root {stalled}", got.stderr)
 
     def test_a_core_key_reads_no_plugin_root(self) -> None:
         self.write_config({"plugins": [str(self.stalled())], "config": {"sd": {"gate_slots": "3"}}})
@@ -1008,6 +1017,35 @@ class StalledRootTests(PluginFixture):
         self.assertNotEqual(added.returncode, 0, "a plugin registered while another root was silent")
         self.assertIn(f"plugin root(s) {stalled} did not answer within", added.stderr)
         self.assertEqual(self.config()["plugins"], [stalled])
+
+
+class SharedPrefixTests(PluginFixture):
+    """sd:2540 review round 2. Two registered roots with one prefix: the earlier entry owns it.
+
+    A manifest edited after registration can give two roots one prefix. The
+    owner must follow the registry, never whichever manifest answers first,
+    or one store write lands in a different plugin from the next.
+    """
+
+    def owners(self, delays: dict[str, float], wanted: str | None) -> pathlib.Path:
+        sd = load_sd()
+        first, second = str(self.plugin("first")), str(self.plugin("second"))
+        read = sd.read_manifest
+
+        def slow_read(path: pathlib.Path) -> dict[str, object]:
+            time.sleep(delays[path.parent.name])
+            return read(path)
+
+        sd.read_manifest = slow_read
+        found = sd.scan([first, second], wanted=wanted)
+        return found["pp"][0].parent
+
+    def test_the_earlier_registry_entry_owns_a_shared_prefix_whatever_answers_first(self) -> None:
+        for delays in ({"first": 0.4, "second": 0.0}, {"first": 0.0, "second": 0.4}):
+            for wanted in ("pp", None):
+                with self.subTest(delays=delays, wanted=wanted):
+                    self.assertEqual(self.owners(delays, wanted).name, "first",
+                                     "the root that answered first took the prefix, not the earlier registry entry")
 
 
 class CorePolicyConfigTests(PluginFixture):

@@ -796,6 +796,13 @@ def scan(roots: list[str], wanted: str | None = None, *,
     with a warning. A daemon thread does not hold the process open at exit.
     A root without a readable manifest is skipped too: it must not stop an
     unrelated registration, and `list` reports it.
+
+    Two roots can still carry one prefix: a manifest edited after
+    registration, or a registration from before `registered` refused a
+    silent root. The earlier registry entry owns it then, never the root
+    that answers first, so a store write lands in the same plugin every
+    time. A lookup for `wanted` returns once every root listed before its
+    owner has answered or timed out.
     """
 
     answers: queue.Queue[tuple[str, pathlib.Path, dict[str, object] | None]] = queue.Queue()
@@ -809,12 +816,24 @@ def scan(roots: list[str], wanted: str | None = None, *,
         finally:
             answers.put((root, path, manifest))
 
-    pending = list(dict.fromkeys(roots))
+    order = list(dict.fromkeys(roots))
+    pending = list(order)
     for root in pending:
         threading.Thread(target=read_plugin_root, args=(root,), daemon=True, name=f"sd plugin root {root}").start()
     answered: dict[str, tuple[pathlib.Path, dict[str, object]]] = {}
+
+    def owner_in_registry_order() -> dict[str, tuple[pathlib.Path, dict[str, object]]] | None:
+        for root in order:
+            if root in pending:
+                return None
+            if root in answered and answered[root][1].get("prefix") == wanted:
+                return {wanted: answered[root]} if wanted is not None else None
+        return None
+
     deadline = time.monotonic() + ROOT_READ_SECONDS
     while pending:
+        if wanted is not None and (owner := owner_in_registry_order()) is not None:
+            return owner
         try:
             root, path, manifest = answers.get(timeout=max(0.0, deadline - time.monotonic()))
         except queue.Empty:
@@ -822,8 +841,6 @@ def scan(roots: list[str], wanted: str | None = None, *,
         pending.remove(root)
         if manifest is not None:
             answered[root] = (path, manifest)
-            if wanted is not None and manifest.get("prefix") == wanted:
-                return {wanted: (path, manifest)}
     if pending and complete:
         raise Refusal(f"plugin root(s) {', '.join(pending)} did not answer within {ROOT_READ_SECONDS:g}s, "
                       f"so no prefix can be shown unclaimed; make each readable or remove it from the "
@@ -832,9 +849,9 @@ def scan(roots: list[str], wanted: str | None = None, *,
         print(f"warning: skipped plugin root {root}: its {MANIFEST_NAME} did not answer within "
               f"{ROOT_READ_SECONDS:g}s", file=sys.stderr)
     found: dict[str, tuple[pathlib.Path, dict[str, object]]] = {}
-    for root in roots:
+    for root in order:
         if root in answered and isinstance(prefix := answered[root][1].get("prefix"), str) and prefix:
-            found[prefix] = answered[root]
+            found.setdefault(prefix, answered[root])
     return found
 
 
@@ -843,9 +860,9 @@ def registered(roots: list[str]) -> dict[str, pathlib.Path]:
 
     Registration asks this to keep prefixes unique, so a root that does not
     answer refuses instead of being skipped: a silent root may own the very
-    prefix being registered, and two owners would make every later lookup
-    pick whichever answers first. A lookup may skip a stalled root; a
-    uniqueness check may not.
+    prefix being registered, and a second owner would be shadowed by the
+    earlier registry entry on every lookup. A lookup may skip a stalled
+    root; a uniqueness check may not.
     """
 
     return {prefix: path for prefix, (path, _) in scan(roots, complete=True).items()}
