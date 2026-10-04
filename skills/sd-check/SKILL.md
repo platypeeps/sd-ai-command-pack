@@ -172,3 +172,10 @@ page being written.
 Output is captured and attributed per check, never interleaved, and tails at
 4,000 characters with a truncation marker. When reporting to the user, quote
 the shortest decisive line of that tail rather than the whole block.
+
+A failing check also keeps its whole output in a file under the Git common
+directory, `sd-check-output/`, which holds the newest 20. The report names it
+as `output_path` and the human output as `whole output:`. `failed_shards`
+lists each `shard <name>: <n>s exit=<code>` line with a non-zero code from
+the whole output, so a shard that failed early is named though the tail no
+longer reaches it.

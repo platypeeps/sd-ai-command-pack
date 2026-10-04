@@ -6,6 +6,8 @@
 
 - **Two pack suites stop reading the pack's own history (sd:2593).** `tests/test_archive_untouched.py` pins the retire commit by full SHA instead of asking `git log`. `tests/test_sd_size_report.py` checks its anchors with `cat-file` instead of `merge-base --is-ancestor`, and its trend and report tests read a fixture repository with dated commits. In an orphan clone with the same tree, both old forms failed. The tree-keyed declaration waits: `sd-docs-lint` at the root still reads delivery trailers through `sd_lib.delivered()`.
 
+- **Warm Rust builds in the local gate (sd:2493).** A repository with a tracked `Cargo.toml` now builds its gate check into a warm `CARGO_TARGET_DIR` the gate owns, instead of the fresh worktree's `target/`, so a merge gate reuses unchanged dependencies rather than compiling every one cold. Each repository keeps two folders under `${XDG_CACHE_HOME:-~/.cache}/sd/gate/`; a gate holds one by `flock` for its whole run, because cargo-nextest runs test binaries after cargo releases its own lock. A warm run builds with `CARGO_INCREMENTAL=0`: incremental sessions never pay off in a new worktree, and they grew a folder by about 4 GB a gate. When both are held, the run builds cold in its worktree as before. The operator's own `CARGO_TARGET_DIR` no longer reaches the gate child, and the folder does not enter the receipt binding. `SD_GATE_CARGO_TARGETS` sets the count (`0` switches the cache off) and `SD_GATE_CACHE_DIR` moves it. Nothing prunes the folders yet.
+
 - **`sd-ship lane`: a serial ship queue per repository that outlives its session (sd:2524).** `enqueue`, `list` and `cancel` edit a queue file under `sd.lane_root` (new setting; unset reads `$XDG_STATE_HOME/sd/lanes`, `SD_LANE_ROOT` overrides it). `run` drains it in order under one lock per repository: head check, `prepare --catch-up` with the claim the entry was queued with (`--deliver` or `--associate-only`, required, plus any `--acceptance-file`), then `merge` for an entry queued with `--manual`; a failed entry is marked and the next runs, a second runner exits at once, and each step's whole output is kept. `watch` prints each gate end a lane or builder log records, once.
 
 - **Gate receipts keyed by tree (sd:1912).** A repository that tracks `.github/sd-gate-reuse.json` with `{"schema_version": 1, "key": "tree", "reason": ...}` keys its gate receipts by `HEAD^{tree}` and the merge base with the base branch instead of the head. A new head with the same tree and merge base -- an `sd attribute` commit, a reworded message -- then reuses the earlier pass, and the reuse names the head that passed. A tree-keyed receipt stands for 6 hours; a head-keyed one stays at 30 minutes. Without the declaration, with no base branch, or with a declaration that does not parse, the head key stands. The pack does not declare it: its `make check` reads commit trailers and ranges.
@@ -237,6 +239,42 @@
   registry that sets it.
 
 ### Fixed
+
+- **Seven guard tests read shapes they used to miss (sd:999).**
+  `tests/test_suite_shape.py` reads `assert` statements and folds a
+  comparison, `and`/`or` and `not` as literals, so `assert True` and
+  `assertTrue(1 == 1)` are named. `assert False` stays legal. It and
+  `tests/test_no_shipped_shell.py` read `git ls-files -z` as bytes and decode
+  each name with `os.fsdecode`, so a `\r` in a tracked name no longer drops
+  the file. `tests/test_code_health.py` reports a `DYNAMIC` entry that gained a
+  reference, and names the Git 2.31 floor `--deduplicate` sets; CONTRIBUTING
+  states it. `tests/test_ls_files_form.py` reads a shell comment after the
+  subcommand as a bare call. `tests/test_pull_request_template_links.py`
+  checks a `<dest>` link and reads anchors in an upper-case `.MD` page.
+  `tests/test_cut_symbols.py` sees `.get()`, single-quoted and `getattr()`
+  reads. `tests/test_writer_skills_consult_the_registry.py` needs the pointer
+  in a sentence that runs it before the write.
+
+- **A failed gate names the shard that failed and keeps its whole output
+  (sd:2558).** `sd-check` kept each stream's last 4,000 characters, and
+  prepare's refusal repeated the last 1,200, so a shard that failed early in
+  a long `make check` was in neither and the failing test could not be found.
+  A failing check now writes its whole output to
+  `<git-common-dir>/sd-check-output/` (the newest 20 stay), and the report
+  carries `output_path` and `failed_shards`. The prepare and merge-gate
+  refusals name each failed shard and the file before the tails.
+
+- **The citation gate's own checks catch what they claim (sd:999).** In
+  `tests/test_doc_citations.py`, the pack-rule qualifier read a 100-character
+  window, so "`<path>`. See the pack's release notes." passed as qualified. It
+  now reads the citation's own sentence, or the next one when that sentence
+  opens on the file ("That file lives only in ..."). A paragraph break ends
+  the search. The skill walk is now compared with an `os.walk` count of every
+  `skills/**/*.md`, so a walk of `SKILL.md` alone fails. The scope fixture now
+  carries `.github/sd-status.json`. The literal-separator guard no longer
+  counts the `\r` of a CRLF line ending, so a `core.autocrlf` checkout passes.
+  A source file with a NUL byte has a fixture row, and its refusal catches
+  `ValueError` like its two sibling readers.
 
 - **A held squash delivered by hand closes in git too (sd:1600).** Reconcile
   records `closing_owed` on the receipt. The next `sd-ship merge` in the same

@@ -26,6 +26,7 @@ else is the change that needs a decision record.
 # select-tests: always-run
 
 
+import os
 import subprocess
 import tempfile
 import unittest
@@ -56,6 +57,10 @@ def tracked_files(root=REPO_ROOT):
     was a report that named one file three times to somebody mid-merge who was
     already hunting for what they had just broken.
 
+    Bytes, split on NUL before anything is decoded, and each name through
+    `os.fsdecode` (sd:999, review-839). `text=True` applied universal newlines
+    first, so a `\\r` in a tracked name arrived as `\\n`.
+
     `root` is the test seam, kept off the callers below: the case at the foot
     of this file points the enumeration at a throwaway repository, because
     nothing about a clean checkout separates the two behaviours and a check
@@ -66,10 +71,9 @@ def tracked_files(root=REPO_ROOT):
         ["git", "ls-files", "-z", "--deduplicate"],
         cwd=root,
         capture_output=True,
-        text=True,
         check=True,
     )
-    return [p for p in result.stdout.split("\0") if p]
+    return [os.fsdecode(p) for p in result.stdout.split(b"\0") if p]
 
 
 def looks_like_shell(path):
@@ -258,6 +262,24 @@ class EnumerationTests(unittest.TestCase):
                 [p for p in tracked_files(root=root) if looks_like_shell(p)],
                 ["tool.sh"],
                 "a script being merged was reported once per merge stage")
+
+    def test_a_path_with_a_carriage_return_arrives_whole(self):
+        """sd:999 (review-839). The NUL split comes before any decoding.
+
+        `text=True` decodes with universal newlines, so a `\\r` inside a
+        tracked name arrived as `\\n` and named a file that does not exist.
+        Git permits the byte in a path. Reading bytes, splitting on NUL and
+        decoding each name with `os.fsdecode` keeps the name git reported.
+        """
+
+        with tempfile.TemporaryDirectory() as home:
+            root = Path(home)
+            name = "carriage\rreturn.sh"
+            (root / name).write_text("#!/bin/sh\n")
+            subprocess.run(["git", "init", "-q", "-b", "main", "."], cwd=root, check=True)
+            subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+            self.assertEqual(tracked_files(root=root), [name])
+            self.assertTrue((root / tracked_files(root=root)[0]).is_file())
 
     def test_the_seam_reads_the_repository_it_is_pointed_at(self):
         """`root` must move the enumeration, not merely be accepted.
