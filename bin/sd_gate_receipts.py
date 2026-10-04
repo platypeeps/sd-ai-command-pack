@@ -95,6 +95,8 @@ WRITER = "sd-local-gate"
 #: The reviewed file that keys a repository's receipts by tree instead of head.
 REUSE_DECLARATION = ".github/sd-gate-reuse.json"
 REUSE_FIELDS = {"schema_version", "key", "reason"}
+#: Optional in the declaration: `"tool": "tree"` says the gate runs this tree's own `bin/sd-check` (sd:2613).
+TOOL_FIELD = "tool"
 
 
 def _digest(value: Any) -> str:
@@ -111,8 +113,29 @@ def keyed_by_tree(tree: pathlib.Path) -> bool:
         value = json.loads((tree / REUSE_DECLARATION).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
-    return (isinstance(value, dict) and set(value) == REUSE_FIELDS and value["schema_version"] == 1
+    return (isinstance(value, dict) and set(value) - {TOOL_FIELD} == REUSE_FIELDS and value["schema_version"] == 1
             and value["key"] == "tree" and isinstance(value["reason"], str) and bool(value["reason"].strip()))
+
+
+def gates_itself(root: pathlib.Path, tree: pathlib.Path, pack: pathlib.Path) -> bool:
+    """True when the run in `tree` is the pack gating itself (sd:2613), so the gate runs and binds the tree's own code.
+
+    `tree` must declare the tree key with `"tool": "tree"` and carry `bin/sd-check`, and `pack`, the running
+    pack's `bin/`, must belong to `root`'s repository. A foreign repository's field is ignored: its gate keeps
+    running, and binding, the checkout's pack.
+    """
+    try:
+        value = json.loads((tree / REUSE_DECLARATION).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not (keyed_by_tree(tree) and value.get(TOOL_FIELD) == "tree" and (tree / "bin" / "sd-check").is_file()):
+        return False
+    common = ["rev-parse", "--path-format=absolute", "--git-common-dir"]
+    mine = sd_lib.git_output(common, pack)
+    theirs = sd_lib.git_output(common, root)
+    if not mine or not theirs:
+        return False
+    return pathlib.Path(mine).resolve() == pathlib.Path(theirs).resolve()
 
 
 def tree_key(tree: pathlib.Path, base: str | None) -> tuple[str, str] | tuple[None, None]:
@@ -165,6 +188,25 @@ def gate_binding(tree: pathlib.Path, head: str, inputs: str, base: str | None, e
                 "environment_sha256": _digest(dict(env))}
     except Exception:  # an input that cannot be named binds nothing; the check runs
         return None
+
+
+def record_unless_moved(database: pathlib.Path, key: str, identity: Mapping[str, Any], after: Mapping[str, Any] | None,
+                        reading: dict[str, Any], head: str) -> None:
+    """Record `reading`'s pass when the binding held from before the run (`identity`) to after it (`after`).
+
+    Otherwise `reading["receipt_skipped"]` names what moved (sd:2612), so a
+    pass that leaves no receipt says why; a failed write sets `receipt_error`.
+    """
+    scope = (reading["report"] or {}).get("scope") or {}
+    moved = [name for name in identity if after.get(name) != identity[name]] if after else ["the binding"]
+    moved += ["scope mode"] if scope.get("mode") != identity["scope"]["mode"] else []
+    if moved:
+        reading["receipt_skipped"] = "moved during the run: " + ", ".join(moved)
+        return
+    try:
+        reading["receipt_revision"] = record_pass(database, key, identity, reading, head)
+    except Exception as error:  # the pass stands; only its reuse is lost
+        reading["receipt_error"] = str(error)
 
 
 def _connect(database: pathlib.Path, *, write: bool) -> Any:

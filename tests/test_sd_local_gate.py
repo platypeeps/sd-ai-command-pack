@@ -319,6 +319,14 @@ class ReceiptFixture(Repository):
     def gate(self, head: str, **kwargs) -> dict:
         return sd_gate_run.check_in_worktree(self.root, head, database=self.database, **kwargs)
 
+    def passing(self, during=lambda: None, mode: str = "full", argvs: list | None = None):  # type: ignore[no-untyped-def]
+        """A stand-in run that calls `during` while it runs, then passes with scope `mode`; `argvs` collects its argv."""
+        def run(argv, env, tree, timeout):  # type: ignore[no-untyped-def]
+            during()
+            (argvs if argvs is not None else []).append(argv)
+            return 0, json.dumps({"status": "pass", "scope": {"mode": mode}, "checks": []}), ""
+        return run
+
 
 class Receipts(ReceiptFixture):
     """One passing gate per head (sd:2041, sd:1912): a matching receipt answers instead of a second run."""
@@ -369,6 +377,25 @@ class Receipts(ReceiptFixture):
         with mock.patch.object(sd_gate_run, "gate_inputs", return_value="0" * 12):
             self.assertNotIn("reused", self.gate(head))
         self.assertEqual(self.runs(), 3)
+
+    def test_another_repository_records_nothing_when_the_pack_moves_mid_run(self) -> None:
+        """The child may open the moved pack, so a landing mid-run drops the pass (sd:2612 review), and says so."""
+        head = self.counted()
+        pack = self.root.parent / "pack"
+        pack.mkdir()
+        (pack / "sd-x").write_text("one\n", encoding="utf-8")
+        with mock.patch.object(sd_gate_run, "BIN", pack):
+            result = self.gate(head, run=self.passing(lambda: (pack / "sd-x").write_text("two\n", encoding="utf-8")))
+        self.assertNotIn("receipt_revision", result)
+        self.assertEqual(result["receipt_skipped"], "moved during the run: inputs")
+
+    def test_a_pass_left_unrecorded_says_what_moved(self) -> None:
+        """A pass whose binding moved during the run leaves no receipt, and the result says why."""
+        head = self.counted()
+        result = self.gate(head, run=self.passing(mode="docs-only"))
+        self.assertEqual(result["status"], "success")
+        self.assertNotIn("receipt_revision", result)
+        self.assertEqual(result["receipt_skipped"], "moved during the run: scope mode")
 
     def test_a_different_path_runs_the_check_again(self) -> None:
         head = self.counted()
@@ -688,6 +715,70 @@ class CargoBuildCache(Repository):
         second = sd_gate_run.check_in_worktree(self.root, head, environ=env, database=database)
         self.assertEqual((first["status"], "reused" in second), ("success", True), second)
         self.assertEqual(len(self.folders()), 1)
+
+
+class PackGatesItself(ReceiptFixture):
+    """The pack gating itself runs and binds its own tree, not the checkout's `bin/` (sd:2613)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.pack = self.root / "bin"
+        self.pack.mkdir()
+        (self.pack / "sd-check").write_text("#!/bin/sh\n", encoding="utf-8")
+        (self.root / ".github").mkdir()
+        (self.root / ".github" / "sd-gate-reuse.json").write_text(json.dumps(
+            {"schema_version": 1, "key": "tree", "reason": "a fixture", "tool": "tree"}), encoding="utf-8")
+        self.head = self.counted()
+
+    def land(self) -> None:
+        """A pack merge lands in the checkout the gate runs from."""
+        (self.pack / "sd-x").write_text(f"{time.time()}\n", encoding="utf-8")
+
+    def test_the_pack_reuses_its_pass_after_the_checkout_moves(self) -> None:
+        with mock.patch.object(sd_gate_run, "BIN", self.pack):
+            self.gate(self.head, run=self.passing())
+            self.land()
+            self.assertIn("reused", self.gate(self.head, run=self.passing()))
+
+    def test_the_pack_runs_its_own_sd_check(self) -> None:
+        argvs: list = []
+        with mock.patch.object(sd_gate_run, "BIN", self.pack):
+            self.gate(self.head, run=self.passing(argvs=argvs))
+        self.assertTrue(argvs[0][1].endswith("/tree/bin/sd-check"), argvs[0][1])
+
+    def test_a_pack_landing_mid_run_still_records_for_the_pack(self) -> None:
+        with mock.patch.object(sd_gate_run, "BIN", self.pack):
+            result = self.gate(self.head, run=self.passing(self.land))
+        self.assertIn("receipt_revision", result)
+
+    def test_a_foreign_declaration_still_binds_the_checkout(self) -> None:
+        """Another repository's `"tool": "tree"` is ignored: its gate runs and binds the checkout's pack."""
+        foreign = self.root.parent / "pack"
+        foreign.mkdir()
+        (foreign / "sd-check").write_text("#!/bin/sh\n", encoding="utf-8")
+        argvs: list = []
+        with mock.patch.object(sd_gate_run, "BIN", foreign):
+            self.gate(self.head, run=self.passing(argvs=argvs))
+            (foreign / "sd-x").write_text("landed\n", encoding="utf-8")
+            self.assertNotIn("reused", self.gate(self.head, run=self.passing(argvs=argvs)))
+        self.assertEqual(argvs[0][1], str(foreign / "sd-check"))
+
+
+class PackDeclaresTreeReuse(unittest.TestCase):
+    """The pack keys its own gate receipts by tree (sd:2610): `make check` reads no commit history."""
+
+    def test_the_pack_keys_its_gate_receipts_by_tree(self) -> None:
+        self.assertTrue(sd_gate_receipts.keyed_by_tree(REPO_ROOT), sd_gate_receipts.REUSE_DECLARATION)
+
+    def test_the_pack_gates_itself(self) -> None:
+        """sd:2613: the pack's gate runs and binds the pack's own tree."""
+        self.assertTrue(sd_gate_receipts.gates_itself(REPO_ROOT, REPO_ROOT, sd_gate_run.BIN))
+
+    def test_the_check_lints_docs_without_history(self) -> None:
+        """The declaration rests on this: without `--no-history`, docs-lint fetches and reads `git log` (sd:2606)."""
+        makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+        recipe = makefile.split("\ndocs-lint:\n", 1)[1].split("\n\n", 1)[0]
+        self.assertIn("bin/sd-docs-lint --no-history", recipe)
 
 
 class CacheBound(Repository):

@@ -88,6 +88,7 @@ That covers an `sd attribute` commit, a reworded message, or a rebase that chang
 Without the declaration a new head runs again, since a commit-message lint can pass at one head and fail at the next.
 A run with no base branch, a declaration that does not parse, or another `key` keeps the head key.
 A tree-keyed receipt stands for 6 hours (`TREE_REUSE_WINDOW_SECONDS`); a head-keyed one stays at 30 minutes.
+An optional `"tool": "tree"` is for the pack gating itself (sd:2613); the gate ignores it in any other repository.
 
 ## Optional check receipts
 

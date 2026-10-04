@@ -45,6 +45,7 @@ from sd_ship_review import (
     SharedReview,
     carry_forward,
     is_ancestor,
+    restart_reason,
 )
 from sd_ship_workflow import blocked, failure
 
@@ -1224,6 +1225,9 @@ class Ship(SharedReview):
             raise Refusal("additional review cannot commit; name an already committed exact head")
         if getattr(self.args, "catch_up", False) and self.args.additional_review_for is not None:
             raise Refusal("--catch-up makes a new head; an additional review names an existing one")
+        if getattr(self.args, "restart_review", None) is not None:
+            # Before anything commits, fetches or merges (sd:2600).
+            restart_reason(self.args)
         commit_paths(self.root, self.args)
         head = current_head(self.root)
         self.additional_request(head, list(self.state.get("passes") or []))
@@ -2222,6 +2226,10 @@ def validate_identity(args) -> None:
         raise Refusal("--review-id requires --no-item")
     if not args.no_item:
         return
+    if getattr(args, "restart_review", None) is not None:
+        raise Refusal("--restart-review restarts an item's review; a no-item record starts fresh with --create-record",
+                      code="no_item_flags_refused", boundary="input", state="operator_decision",
+                      next_action="Drop --restart-review, or prepare with --item.")
     if getattr(args, "provider", None) is not None and any(getattr(args, name, None) for name in
             ("create_record", "import_history", "rebind_branch", "close_record", "reopen_record")):
         raise Refusal("--provider cannot combine with metadata-only record operations")
@@ -2260,6 +2268,9 @@ def parser():
             action.add_argument("--reuse-check", action="store_true", help="opt into exact-input successful check-receipt reuse")
             review_timeout_flag(action)
             action.add_argument("--retry-review", action="store_true", help="spend one automatic pass on a full-branch retry of an incomplete review")
+            action.add_argument("--restart-review", metavar="REASON",
+                                help="after an amend or rebase orphaned a reviewed head: set that review aside with "
+                                     "REASON and spend one automatic pass on a fresh full-branch review (sd:2600)")
             action.add_argument("--additional-review-for", metavar="SHA", help="record one explicit post-cap operator request for this exact committed head")
             action.add_argument("--review-history-digest", metavar="SHA256", help="one-use digest of every existing pass; required to renew after three reservations")
             action.add_argument("--request-reason", help="nonempty operator context, valid only with --additional-review-for; this assertion is not proof of user approval")

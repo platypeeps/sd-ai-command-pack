@@ -3587,6 +3587,91 @@ roles:
         self.prepare()
         self.assertEqual(self.operation().state["passes"][1]["report"]["subject"]["base"], reviewed)
 
+    def amend_after_a_blocking_review(self):
+        """One blocking review, then the reviewed commit amended away: (reviewed, amended, payload, program).
+
+        The amended commit is one the remote never had, as with a privacy
+        amend: the fixture's first commit is on the remote already, and
+        rewriting it would need the force push sd-ship never makes.
+        """
+        (self.root / "src.py").write_text("value = 3\n")
+        _git(self.root, "add", "src.py")
+        _git(self.root, "commit", "-m", "change\n\nAuthored-with: human")
+        program = self.programs / "review-fixture"
+        payload = {"type": "result", "subtype": "success", "structured_output": {"findings": [
+            {"path": "src.py", "line": 1, "severity": "high", "family": "correctness", "summary": "value is wrong"}]}}
+        program.write_text("#!/usr/bin/env python3\nimport json\nprint(" + repr(json.dumps(payload)) + ")\n")
+        with self.assertRaisesRegex(ship.Refusal, "local review blocking"):
+            self.prepare()
+        reviewed = self.operation().state["passes"][0]["head"]
+        (self.root / "src.py").write_text("value = 2\n")
+        _git(self.root, "add", "src.py")
+        _git(self.root, "commit", "--amend", "--no-edit")
+        return reviewed, _git(self.root, "rev-parse", "HEAD"), payload, program
+
+    def test_a_rewritten_reviewed_head_restarts_its_review_with_a_reason(self):
+        """sd:2600: an amend that must not be undone gets a fresh review on the item path.
+
+        A privacy amend drops a line that may not reach a public remote, so the
+        `git reset --soft` remedy -- which publishes the reviewed commit -- is
+        not open. `--restart-review REASON` keeps the orphaned passes, with
+        the reason, and reviews the whole branch again from nothing, counting
+        the new pass against the cap with the ones it set aside.
+        """
+        reviewed, amended, payload, program = self.amend_after_a_blocking_review()
+        with self.assertRaises(ship.Refusal) as caught:
+            self.prepare()
+        said = caught.exception.workflow["next_action"]
+        self.assertIn("--restart-review", said)
+        self.assertIn("must not be pushed", said)
+        self.assertLess(said.index("--restart-review"), said.index(f"git reset --soft {reviewed}"),
+                        "the reset stays, as the second option")
+        self.assertIn("only edited a commit message", said)
+        payload["structured_output"]["findings"] = []
+        program.write_text("#!/usr/bin/env python3\nimport json\nprint(" + repr(json.dumps(payload)) + ")\n")
+        prepared = self.prepare("--restart-review", "privacy amend dropped a flagged path")
+        self.assertEqual(prepared["reviewed_head"], amended)
+        state = self.operation().state
+        self.assertEqual([entry["head"] for entry in state["passes"]], [amended])
+        self.assertIsNone(state["passes"][0]["base"], "the restart reviews the whole branch")
+        self.assertEqual(state["passes"][0]["report"]["status"], "clean")
+        [restart] = state["superseded_reviews"]
+        self.assertEqual(restart["reason"], "privacy amend dropped a flagged path")
+        self.assertEqual(restart["head"], amended)
+        self.assertEqual(restart["orphaned"], [reviewed])
+        self.assertEqual([entry["head"] for entry in restart["passes"]], [reviewed])
+        self.assertEqual(restart["passes"][0]["report"]["findings"][0]["summary"], "value is wrong",
+                         "the orphaned review's findings stay in the receipt")
+        self.assertEqual(ship.ItemHistory().spent(state), 2, "the set-aside pass still counts against the cap")
+
+    def test_a_restart_refuses_while_every_reviewed_head_is_reachable(self):
+        """sd:2600: a restart is for an orphaned review, not a way to drop live findings."""
+        program = self.programs / "review-fixture"
+        payload = {"type": "result", "subtype": "success", "structured_output": {"findings": [
+            {"path": "src.py", "line": 1, "severity": "high", "family": "correctness", "summary": "value is wrong"}]}}
+        program.write_text("#!/usr/bin/env python3\nimport json\nprint(" + repr(json.dumps(payload)) + ")\n")
+        with self.assertRaisesRegex(ship.Refusal, "local review blocking"):
+            self.prepare()
+        _git(self.root, "commit", "--allow-empty", "-m", "fix\n\nAuthored-with: human")
+        before = self.operation().state
+        with self.assertRaisesRegex(ship.Refusal, "only when a reviewed head is not an ancestor"):
+            self.prepare("--restart-review", "no reason to restart")
+        self.assertEqual(self.operation().state["passes"], before["passes"])
+        self.assertNotIn("superseded_reviews", self.operation().state)
+
+    def test_a_restart_needs_a_reason_and_combines_with_no_other_review_flag(self):
+        reviewed, amended, _payload, _program = self.amend_after_a_blocking_review()
+        for extra, said in ((["--restart-review", "  "], "nonempty REASON"),
+                            (["--restart-review", "amend", "--retry-review"], "does not combine"),
+                            (["--restart-review", "amend", "--catch-up"], "does not combine"),
+                            (["--restart-review", "amend", "--additional-review-for", amended,
+                              "--request-reason", "more"], "does not combine")):
+            with self.subTest(extra=extra), self.assertRaisesRegex(ship.Refusal, said):
+                self.prepare(*extra)
+            state = self.operation().state
+            self.assertEqual([entry["head"] for entry in state["passes"]], [reviewed])
+            self.assertNotIn("superseded_reviews", state)
+
     def test_tampered_fix_receipt_cannot_claim_original_blockers_were_verified(self):
         self.prepare()
         _git(self.root, "commit", "--allow-empty", "-m", "fix\n\nAuthored-with: human")
