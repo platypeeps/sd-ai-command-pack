@@ -149,7 +149,7 @@ class RunCheck(Repository):
         (venv / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="utf-8")
         plain.mkdir()
         env = sd_gate_run.gate_environment(self.root, {"PATH": os.pathsep.join([str(venv / "bin"), str(plain)])})
-        self.assertEqual(env["PATH"], str(plain))
+        self.assertEqual(env["PATH"], str(plain.resolve()))  # each kept entry resolved (sd:2602)
 
     def test_the_gates_bound_is_the_per_check_timeout_sd_check_reports(self) -> None:
         """`sd-check`'s own 900 s default must not cut a gate run short; the gate's bound reaches it."""
@@ -496,6 +496,61 @@ class MergeReuse(ReceiptFixture):
         merged = self.merge(head)
         self.assertEqual(merged["reuse_miss"], {"reason": "binding", "fields": ["environment_sha256"]})
         self.assertEqual(json.loads(json.dumps(merged))["reuse_miss"], merged["reuse_miss"])
+
+
+class FnmShells(ReceiptFixture):
+    """fnm gives every shell its own folder (operator ruling, 2026-10-04, sd:2602).
+
+    `FNM_MULTISHELL_PATH` names `fnm_multishells/<pid>_<ms>`, a symlink to the
+    node version in use, and `$FNM_MULTISHELL_PATH/bin` leads `PATH`. Two
+    shells on one node differed in both, so a builder's receipt never bound
+    the lane's prepare. The gate drops the variable and resolves each `PATH`
+    entry; a different real node still differs.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.fnm = self.root.parent / "fnm"
+        for version in ("v20", "v22"):
+            (self.fnm / "node-versions" / version / "bin").mkdir(parents=True)
+            node = self.fnm / "node-versions" / version / "bin" / "node"
+            node.write_text(f"#!/bin/sh\necho {version}\n", encoding="utf-8")
+            node.chmod(0o755)
+        (self.fnm / "multishells").mkdir()
+
+    def shell(self, name: str, version: str = "v20") -> dict[str, str]:
+        """The environment of one shell on `version`, through its own multishell folder."""
+        folder = self.fnm / "multishells" / name
+        folder.symlink_to(self.fnm / "node-versions" / version)
+        return {**os.environ, "FNM_MULTISHELL_PATH": str(folder),
+                "PATH": os.pathsep.join([str(folder / "bin"), os.environ["PATH"]])}
+
+    def node_check(self) -> str:
+        return self.counted("node")
+
+    def merge(self, head: str, environ: dict[str, str]) -> dict:
+        return sd_gate_run.check_in_worktree(self.root, head, database=self.database, environ=environ, record=False)
+
+    def test_two_shells_on_the_same_node_bind_one_receipt(self) -> None:
+        head = self.node_check()
+        self.assertEqual(self.gate(head, environ=self.shell("1739_1")).get("status"), "success")
+        merged = self.merge(head, self.shell("2201_2"))
+        self.assertEqual(("reused" in merged, merged.get("reuse_miss"), self.runs()), (True, None, 1))
+
+    def test_a_different_real_node_still_runs_again(self) -> None:
+        head = self.node_check()
+        self.gate(head, environ=self.shell("1739_1"))
+        merged = self.merge(head, self.shell("2201_2", version="v22"))
+        self.assertEqual(("reused" in merged, merged["reuse_miss"]["reason"], self.runs()), (False, "binding", 2))
+
+    def test_a_path_entry_through_a_shell_folder_binds_as_the_real_folder(self) -> None:
+        head = self.node_check()
+        real = {**os.environ, "PATH": os.pathsep.join([str(self.fnm / "node-versions" / "v20" / "bin"), os.environ["PATH"]])}
+        self.gate(head, environ=real)
+        through = self.shell("2201_2")
+        del through["FNM_MULTISHELL_PATH"]
+        self.assertIn("reused", self.merge(head, through))
+        self.assertEqual(self.runs(), 1)
 
 
 class DocsScopeGate(Repository):

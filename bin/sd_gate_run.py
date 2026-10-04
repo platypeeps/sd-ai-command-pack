@@ -66,8 +66,8 @@ LOCAL_BLOCK = "CLAUDE.local.md"
 #: Variables that pick Python packages; the child must not inherit the caller's.
 DROPPED_ENVIRONMENT = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX", "__PYVENV_LAUNCHER__",
                        "FORCE_COLOR", "CLICOLOR_FORCE", "PY_COLORS")
-#: Session variables, by name or prefix: dropped so two sessions' passes at one head bind equal (sd:1912, D1).
-SESSION_ENVIRONMENT = ("CLAUDECODE", "TERM_SESSION_ID", "PWD", "OLDPWD", "SHLVL", "_")
+#: Session variables, by name or prefix: dropped so two sessions' passes at one head bind equal (sd:1912, D1; fnm's per-shell folder, sd:2602).
+SESSION_ENVIRONMENT = ("CLAUDECODE", "TERM_SESSION_ID", "PWD", "OLDPWD", "SHLVL", "_", "FNM_MULTISHELL_PATH")
 SESSION_PREFIXES = ("CLAUDE_", "HERDR_", "ITERM_")
 #: Set in the child: the gate captures output, and the caller's terminal colour must not change a result (sd:2076).
 NO_COLOUR_ENVIRONMENT = {"NO_COLOR": "1", "PYTHON_COLORS": "0"}
@@ -110,7 +110,7 @@ def gate_inputs(root: pathlib.Path, head: str, tree: str | None = None) -> str:
 
 
 def gate_environment(root: pathlib.Path, environ: dict[str, str] | None = None) -> dict[str, str]:
-    """The caller's environment without package selectors, forced colour, session variables, `PATH` entries in `root`, or venv `bin`s.
+    """The caller's environment without package selectors, forced colour, session variables, `PATH` entries in `root`, or venv `bin`s; each `PATH` entry resolved.
 
     Plus `SD_LOCAL_GATE=1`, `NO_COLOR=1` and `PYTHON_COLORS=0`, whatever the caller had them set to.
     """
@@ -118,7 +118,7 @@ def gate_environment(root: pathlib.Path, environ: dict[str, str] | None = None) 
     env = {key: value for key, value in source.items()
            if key not in DROPPED_ENVIRONMENT + SESSION_ENVIRONMENT and not key.startswith(SESSION_PREFIXES)}
     top = root.resolve()
-    kept = [entry for entry in env.get("PATH", "").split(os.pathsep)
+    kept = [str(pathlib.Path(entry).resolve()) for entry in env.get("PATH", "").split(os.pathsep)
             if entry and os.path.isabs(entry) and not pathlib.Path(entry).resolve().is_relative_to(top)
             and not (pathlib.Path(entry).resolve().parent / "pyvenv.cfg").is_file()]
     env["PATH"] = os.pathsep.join(kept)
