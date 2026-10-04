@@ -4850,6 +4850,23 @@ roles:
         self.assertEqual(state["review_preflight_error"]["exit_code"], 0)
         self.assertEqual(state["review_preflight_error"]["stdout"]["tail"], "{}")
 
+    def test_a_refused_plan_keeps_its_argv_and_plan_fields_past_the_tail(self):
+        """sd:2646. The tail held 4 KiB of an explained report and cut off the fields the plan was refused on."""
+        timing = {"candidates": [], "check_seconds": 3600, "execution_seconds": 21600, "phase_seconds": 1800,
+                  "setup_seconds": 3600, "slot_seconds": 14400}
+        explained = json.dumps({"timing": timing, "requested_reviews": 1, "authorship_refusal": "",
+                                "selection_refusal": "no provider '207'", "status": "explained", "padding": "x" * 10000})
+        with patch.object(ship, "review_process",
+                          side_effect=lambda root, argv, **kwargs: subprocess.CompletedProcess(argv, 0, explained, "")):
+            with self.assertRaisesRegex(ship.Refusal, "no valid timing plan"):
+                self.operation().review(_git(self.root, "rev-parse", "HEAD"))
+        diagnostic = self.operation().state["review_preflight_error"]
+        self.assertNotIn("selection_refusal", diagnostic["stdout"]["tail"])
+        self.assertEqual(diagnostic["plan"], {"timing": timing, "requested_reviews": 1, "authorship_refusal": "",
+                                              "selection_refusal": "no provider '207'"})
+        self.assertEqual(diagnostic["argv"][-1], "--explain")
+        self.assertIn("--scope", diagnostic["argv"])
+
     def assert_insufficient_reviewers_refuse(self, count):
         import sd_registry
 

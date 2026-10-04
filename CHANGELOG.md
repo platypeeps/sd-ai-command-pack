@@ -279,6 +279,8 @@
 
 ### Fixed
 
+- **`sd-ship` options match their whole name only (sd:2646).** argparse's prefix matching read `prepare --pr 207` as `--provider 207`: prepare has no `--pr`, and `--pr` begins exactly one option. Every review then asked for a provider named 207, and prepare refused with `local review emitted no valid timing plan`. Every `sd-ship` subcommand now refuses an unknown option, so `--pr 207` exits 2 with `unrecognized arguments`. A refused plan's `review_preflight_error` also keeps the review argv and the report's `timing`, `requested_reviews`, `authorship_refusal` and `selection_refusal` whole. The 4 KiB stdout tail had cut them off.
+
 - **A body `Closes:` line closes co-delivered items on merge (sd:1481).** One
   pull request claims one item, and #1150 fixed three rows while closing none:
   it named two of them only in prose. Operator ruling 2026-10-03: a body line
