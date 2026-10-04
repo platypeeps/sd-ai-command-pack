@@ -445,6 +445,12 @@ which the installer places in `~/.claude/agents`.
   `make test` inside a gate takes no second slot; run directly, `make test`
   takes one of the same slots. Slots are kernel locks under
   `$XDG_STATE_HOME/sd/gate-slots`, so a dead holder's slot is free at once.
+- **A precheck runs before the slot wait (sd:2604).** When the repository's
+  Makefile defines `precheck`, `sd-check` runs `make precheck` first, outside
+  the pool. A failure stops the run there: no slot, no `check`, and the report
+  names the failing check. The pack's `precheck` is `lint` plus the always-run
+  test modules, about a minute. `--only` and a docs-only scope skip it, and
+  the checks get what the precheck left of `--timeout`.
 - **Wrap every other gate in the pool (sd:2522).** The pool is one per
   machine, not one per repository. A plain `make check` in a repository whose
   Makefile takes no slot runs as `sd gate run -- make check`, so it queues with
