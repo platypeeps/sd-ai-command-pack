@@ -23,6 +23,7 @@ import time
 from datetime import datetime, timezone
 
 import sd_changelog_merge
+import sd_lane
 import sd_lib
 import sd_local_gate
 import sd_ship_body
@@ -2266,6 +2267,7 @@ def parser():
         if name == "merge":
             merge_flags(action)
     hold_commands(commands)
+    sd_lane.add_lane_verbs(commands)
     for name in ("review", "verify-review", "adjudicate"):
         action = commands.add_parser(name)
         identity_flags(action)
@@ -2467,6 +2469,8 @@ def main(argv=None) -> int:
         return 3
     if args.command == "body":
         return body_command(args)
+    if args.command == "lane":
+        return sd_lane.lane_main(args)
     # Two refusals, because there are two faults and one remedy each.
     # `sd_lib.import_sd_db` owns the first: it makes the second attempt this
     # entrypoint used not to make -- the provisioned copy, which is the only
