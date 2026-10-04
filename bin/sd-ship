@@ -1519,7 +1519,7 @@ class Ship(SharedReview):
                 self.row_authority = self.row_authority_record(answer)
                 return self.api.metadata
             if answer is not None and not answer.full and sd_lib.remote_can_lower(sd_lib.written_mode(self.root)):
-                self.note_demotion(answer)
+                self.note_demotion(answer, at_push=False)
             raise
         # Ownership answered on its own, so this read claims no row authority.
         # Assigned rather than left alone: `merge` reads ownership more than
@@ -1528,7 +1528,7 @@ class Ship(SharedReview):
         self.row_authority = None
         return metadata
 
-    def note_demotion(self, answer) -> None:
+    def note_demotion(self, answer, *, at_push: bool = True) -> None:
         """One demotion note per item and remote, through `sd_db`'s note API.
 
         Idempotent on the whole marker line `sd_lib.demotion_note` returns,
@@ -1544,7 +1544,7 @@ class Ship(SharedReview):
             return
         from sd_db.database import transaction
         from sd_db.writes import add_note
-        marker, body = sd_lib.demotion_note(self.repository, answer)
+        marker, body = sd_lib.demotion_note(self.repository, answer, at_push=at_push)
         key = sd_lib.demotion_note_key(marker)
         with transaction(self.connection):
             present = self.connection.execute(
