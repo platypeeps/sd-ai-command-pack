@@ -54,6 +54,8 @@ import sd_lib
 BIN = pathlib.Path(__file__).resolve().parent
 #: GitHub truncates nothing and refuses a description past 140 characters.
 DESCRIPTION_LIMIT = 140
+#: What a failed summary ends with before the local file holding the whole output; a posted status leaves it out.
+WHOLE_OUTPUT = " whole output: "
 #: The gate's bound on each check, handed to `sd-check --timeout`. Its own
 #: 900-second default is for an interactive run; the gate's `make check` also
 #: builds a virtualenv (sd:1918) and shares the machine's test slots, and on a
@@ -247,4 +249,6 @@ def check_reading(code: int | None, output: str, errors: str = "") -> dict[str, 
         return {"status": "failure", "exit_code": code, "summary": output[:DESCRIPTION_LIMIT], **said}
     words = f"sd-check {overall or 'error'}" + (f" ({named})" if named else f" (exit {code})")
     words = words if len(words) <= DESCRIPTION_LIMIT else words[:DESCRIPTION_LIMIT - 5].rstrip() + " ...)"  # the report keeps every step
+    kept = [row["output_path"] for row in (report or {}).get("checks") or [] if isinstance(row, dict) and row.get("output_path")]
+    words += f"{WHOLE_OUTPUT}{kept[0]}" if kept else ""  # where the lane log's reader finds the whole output, uncut
     return {"status": "failure", "exit_code": code, "summary": words, **said}

@@ -44,6 +44,7 @@ from typing import Any
 import sd_lib
 from sd_gate_run import (
     DESCRIPTION_LIMIT,
+    WHOLE_OUTPUT,
     GateError,
     base_ref,
     check_in_worktree,
@@ -63,7 +64,9 @@ def post_gate_status(api: Any, head: str, result: dict[str, Any], inputs: str) -
                       code="local_gate_mismatch", boundary="ci", state="retryable_failure",
                       next_action="Retry merge from the reviewed head.")
     state = "success" if result.get("status") == "success" else "failure"
-    description = f"{head[:12]} inputs {inputs}: {result.get('summary') or state}"[:DESCRIPTION_LIMIT]
+    # The summary's local output path stays out of a status anyone who reads the repository sees (sd:2608).
+    summary = str(result.get("summary") or state).split(WHOLE_OUTPUT, 1)[0]
+    description = f"{head[:12]} inputs {inputs}: {summary}"[:DESCRIPTION_LIMIT]
     return api.api(f"{api.prefix}/statuses/{head}", method="POST",
                    body={"state": state, "context": CONTEXT, "description": description})
 

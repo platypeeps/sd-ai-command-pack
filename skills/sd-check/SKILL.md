@@ -188,4 +188,5 @@ the check did not finish, such as a timeout. `failure` holds the failing part
 of the output: each failed shard's own block, else each stream's failure lines
 (`FAIL:`, `ERROR:`, an exception, `FAILED`) and its tail. The human output
 prints them as `failed step:` and `[failure]`; `sd gate check` adds the steps
-to its one-line summary.
+to its one-line summary, then `whole output: <path>`. The `sd/local-gate`
+status it posts leaves that local path out.
