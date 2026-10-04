@@ -412,7 +412,7 @@ def status_entries(worktree: pathlib.Path) -> list[tuple[str, str]] | None:
 
 def tracked_files(worktree: pathlib.Path) -> dict[str, tuple[int, int, int]] | None:
     """Inode, size and modification time of each tracked file on disk; None when `git ls-files` fails."""
-    listed = lane_git(worktree, "ls-files", "-z")
+    listed = lane_git(worktree, "ls-files", "-z", "--deduplicate")
     if listed is None:
         return None
     files = {}
