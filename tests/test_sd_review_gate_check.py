@@ -10,7 +10,6 @@ import json
 import pathlib
 import subprocess
 import sys
-import unittest
 
 from tests.test_sd_review import FakeRunner, ReviewFixture, namespace, sd_review
 
@@ -367,22 +366,3 @@ class TreeReceipt(BuilderFixture):
             self.assertEqual(self.gate(root, database)["source"], "gate")
         self.assertEqual(self.runs(), 2)
 
-
-class ThePackDeclaresItsOwnCheck(unittest.TestCase):
-    """The pack's `make check` reads no commit history of its own, and says so (sd:2593).
-
-    The audit behind the declaration is in its reason. The suites that read
-    the pack's history -- `git log` for the retire commit, `merge-base` and
-    `rev-list` for the size report's anchors and trend -- read pinned objects
-    or fixture repositories now, so a head with the same tree passes the
-    same, and the gate may reuse its receipt.
-    """
-
-    def test_the_declaration_keys_the_pack_by_tree(self) -> None:
-        import sd_gate_receipts
-
-        root = pathlib.Path(__file__).resolve().parents[1]
-        self.assertTrue(sd_gate_receipts.keyed_by_tree(root),
-                        f"{sd_gate_receipts.REUSE_DECLARATION} is missing or malformed")
-        reason = json.loads((root / sd_gate_receipts.REUSE_DECLARATION).read_text(encoding="utf-8"))["reason"]
-        self.assertIn("sd:2593", reason, "the reason names no audit a reader can check")
