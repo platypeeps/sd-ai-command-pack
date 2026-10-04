@@ -830,6 +830,33 @@ def check_manifest(
     return checked
 
 
+def check_unrecorded(item: pathlib.Path, recordable: list[str], report: Report) -> None:
+    """Fail each citation a recorded item's pages carry but its manifest does not (sd:1000).
+
+    `check_manifest` walks the manifest, so it sees what was recorded and
+    nothing added since: a citation written after the last
+    `--update-citations` was neither checked nor counted, and the run said
+    clean. Keyed on (page, citation) without the line, as `check_manifest`
+    matches, so an edit above a recorded citation does not read as new. A
+    citation the recorder refuses is not here; the census names it.
+    """
+    def keys(rows: list[str]) -> set[tuple[str, str]]:
+        found = set()
+        for row in rows:
+            fields = row.rstrip().split("\t")
+            if len(fields) == 5:
+                found.add((fields[0].rpartition(":")[0] or fields[0], fields[1]))
+        return found
+
+    recorded = keys((item / CITATION_MANIFEST).read_text(encoding="utf-8").splitlines())
+    for page, citation in sorted(keys(recordable) - recorded):
+        report.fail(
+            f"{item.name}/{page}",
+            f"`{citation}` is cited but not recorded, so nothing checks it; "
+            "re-record with sd-docs-lint --update-citations",
+        )
+
+
 def census_note(declined: list[Skip]) -> str:
     """The citations rule 6 saw and declined, counted by which decline it was.
 
@@ -921,6 +948,7 @@ def check_citations(work_root: pathlib.Path, report: Report) -> None:
             continue
         manifests += 1
         checked += check_manifest(item, work_root, report)
+        check_unrecorded(item, recordable, report)
     # Both numbers, always, and on one line. A reader who is told only how
     # many items were recorded cannot tell a complete run from a partial one;
     # told how many are active beside it, a gap reads as a gap at a glance.
