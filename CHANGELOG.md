@@ -4,6 +4,19 @@
 
 ### Added
 
+- **`sd-ship lane run` gates the next entry while this one ships (sd:2586).**
+  Each prepare caught up with the base after the entry ahead merged, then
+  ran a 10 to 20 minute gate on the new tree. When the runner claims an
+  entry queued with `--manual`, it now predicts that entry's landing (its
+  catch-up tree, as a commit on the fetched base), merges the next entry onto
+  it as `--catch-up` would, CHANGELOG resolver included, and runs `sd gate
+  check`'s gate there in the background. After the merge it waits for that
+  gate, and the next prepare reuses the receipt. A tree-keyed receipt now
+  binds the merge base by its tree, not its commit (operator ruling
+  2026-10-04), since the predicted and the real landing are two commits with
+  one tree. A conflict, a missing tree key or a wrong prediction gates
+  nothing that prepare reads; the next entry's `speculation` field says why.
+
 - **`sd-ship prepare` names other work on the same item or files (sd:1151).**
   Two sessions fixed one defect in the same files forty minutes apart (#1120,
   #1122); both branches were on origin first. Before the review, prepare

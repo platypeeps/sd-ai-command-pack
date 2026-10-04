@@ -382,20 +382,74 @@ class TreeReceipt(BuilderFixture):
         self.assertEqual(gate["source"], "gate")
         self.assertEqual(self.runs(), 2)
 
-    def test_a_declared_tree_at_a_new_merge_base_runs_again(self) -> None:
-        """The merge base is bound: main moved by an empty commit leaves the tree equal and the history not."""
-        root, database = self.declared()
-        self.assertEqual(self.builder(root, database).returncode, 0)
+    def main_moved(self, root: pathlib.Path, *, path: str | None = None) -> None:
+        """Commit on main (`path` from the topic, else nothing), merge it into the topic, and check the topic's tree held."""
+        tree = git(root, "rev-parse", "HEAD^{tree}")
         git(root, "checkout", "-q", "main")
-        git(root, "commit", "-q", "--allow-empty", "-m", "main moved, tree did not")
+        if path:
+            git(root, "checkout", "topic", "--", path)
+        git(root, "commit", "-q", "--allow-empty", "-m", "main moved")
         git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
         git(root, "checkout", "-q", "topic")
-        tree = git(root, "rev-parse", "HEAD^{tree}")
         git(root, "merge", "-q", "--no-edit", "main")
         self.assertEqual(git(root, "rev-parse", "HEAD^{tree}"), tree)
+
+    def test_a_declared_tree_at_a_new_merge_base_with_the_same_tree_reuses(self) -> None:
+        """sd:2586, ruled: the merge base is bound by its tree. `sd-ship lane run` gates the next item on a
+        predicted landing, and the real squash merge is another commit with the same tree."""
+        root, database = self.declared()
+        self.assertEqual(self.builder(root, database).returncode, 0)
+        self.main_moved(root)
+        gate = self.gate(root, database)
+        self.assertEqual((gate["status"], gate["source"]), ("pass", "gate-receipt"), json.dumps(gate)[:2000])
+        self.assertEqual(self.runs(), 1)
+
+    def test_a_declared_tree_at_a_merge_base_with_another_tree_runs_again(self) -> None:
+        """The merge base's tree is bound: main takes the topic's own change, so the topic's tree holds and the base's moves."""
+        root, database = self.declared()
+        self.assertEqual(self.builder(root, database).returncode, 0)
+        self.main_moved(root, path="src.py")
         gate = self.gate(root, database)
         self.assertEqual((gate["status"], gate["source"]), ("pass", "gate"))
         self.assertEqual(self.runs(), 2)
+
+    def test_the_lanes_speculative_pass_serves_the_prepare_after_the_landing(self) -> None:
+        """sd:2586, end to end: the lane gates the topic on a predicted landing of the entry ahead; the real
+        landing is another commit, and the topic's prepare after it reuses that pass instead of running."""
+        import sd_gate_run
+        import sd_lane
+
+        root, database = self.declared()
+        origin = self.tmp / "origin.git"
+        git(self.tmp, "init", "-q", "--bare", "-b", "main", str(origin))
+        git(root, "remote", "add", "origin", str(origin))
+        git(root, "push", "-q", "origin", "main")
+        git(root, "remote", "set-head", "origin", "main")
+        ahead = self.tmp / "ahead"
+        git(root, "worktree", "add", "-q", "-b", "ahead", str(ahead), "main")
+        (ahead / "ahead.py").write_text("z = 3\n", encoding="utf-8")
+        git(ahead, "add", "ahead.py")
+        git(ahead, "commit", "-q", "-m", "ahead")
+        moved = self.tmp / "main"
+        git(root, "worktree", "add", "-q", str(moved), "main")
+        (moved / "other.py").write_text("y = 2\n", encoding="utf-8")
+        git(moved, "add", "other.py")
+        git(moved, "commit", "-q", "-m", "main moved")
+        git(moved, "push", "-q", "origin", "main")
+        entry = {"item": 1, "worktree": str(ahead), "expected_head": git(ahead, "rev-parse", "HEAD")}
+        plan = sd_lane.predict(entry, {"item": 2, "worktree": str(root), "expected_head": git(root, "rev-parse", "HEAD")})
+        speculative = sd_gate_run.check_in_worktree(root, plan["head"], base=plan["base"], database=database,
+                                                    environ=self.environment())
+        self.assertIn("receipt_revision", speculative, json.dumps(speculative)[:2000])
+        git(ahead, "merge", "-q", "--no-ff", "--no-edit", "origin/main")  # the entry ahead's catch-up, then its squash
+        landed = git(root, "commit-tree", git(ahead, "rev-parse", "HEAD^{tree}"), "-p", "origin/main", "-m", "ahead (#1)")
+        git(root, "push", "-q", "origin", f"{landed}:refs/heads/main")
+        git(root, "fetch", "-q", "origin")
+        git(root, "merge", "-q", "--no-ff", "--no-edit", "origin/main")  # prepare's catch-up
+        self.assertNotEqual(git(root, "rev-parse", "HEAD"), plan["head"])
+        gate = self.gate(root, database)
+        self.assertEqual((gate["status"], gate["source"]), ("pass", "gate-receipt"), json.dumps(gate)[:2000])
+        self.assertEqual(self.runs(), 1)
 
     def test_a_declared_tree_with_no_base_keeps_the_head_key(self) -> None:
         import sd_gate_run

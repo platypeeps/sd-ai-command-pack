@@ -15,11 +15,11 @@ The binding is what this module can name about a run, and nothing weaker:
 
   reuse        "head", or "tree" for a declared tree key (below);
   head, tree   the exact commit the worktree held; head is None under a tree key;
-  fork         under a tree key, the merge base with the base branch;
+  fork         under a tree key, the tree of the merge base with the base branch;
   inputs       `sd_gate_run.gate_inputs`: the head (or tree), the copied untracked
                `CLAUDE.local.md` (or its absence) and every pack `bin/` file,
                so a pack upgrade reruns the check;
-  scope        the `sd_check_scope` decision, with its merge base;
+  scope        the `sd_check_scope` decision, with its merge base (its tree under a tree key);
   commands     the detected entrypoints and the detection source;
   tools        path and bytes of each command's executable on the gate's PATH;
   python       the interpreter that runs `sd-check`;
@@ -52,8 +52,12 @@ instead of head, in its reviewed tree:
 Two heads with one tree -- an `sd attribute` commit, a reworded message, a
 rebase that changed nothing -- then share one receipt: the key and the binding
 name the tree and the merge base with the base branch, and `inputs` hashes the
-tree in place of the head. A run with no base keeps the head key: the merge
-base is what binds the history below the branch. Without the
+tree in place of the head. The merge base is named by its tree, not its commit
+(sd:2586, operator ruling 2026-10-04): `sd-ship lane run` gates the next item
+on a predicted landing of the item ahead, and the real squash merge is another
+commit with the same tree, which a check that reads no history cannot tell
+apart. A run with no base keeps the head key: the merge base is what binds
+the content below the branch. Without the
 declaration a new head runs again, because a commit-message lint or a version
 stamp from `git describe` can pass at one head and fail at the next. A
 declaration that does not parse, or names another key, keeps the head key; the
@@ -139,16 +143,22 @@ def gates_itself(root: pathlib.Path, tree: pathlib.Path, pack: pathlib.Path) -> 
 
 
 def tree_key(tree: pathlib.Path, base: str | None) -> tuple[str, str] | tuple[None, None]:
-    """`(tree id, merge base)` for a run in `tree` under a tree key, or `(None, None)` for the head key.
+    """`(tree id, the merge base's tree id)` for a run in `tree` under a tree key, or `(None, None)` for the head key.
 
-    The tree key needs a `base`: the merge base binds the history below the
-    branch, which a check that reads an old commit by name still depends on.
+    The tree key needs a `base`: the merge base binds the content below the
+    branch, which a docs-only scope diffs against. Its tree, not its commit,
+    binds it (sd:2586), as the declaration says the check reads no history.
     """
     if base is None or not keyed_by_tree(tree):
         return None, None
     content = sd_lib.git_output(["rev-parse", "HEAD^{tree}"], tree)
-    fork = sd_lib.git_output(["merge-base", base, "HEAD"], tree)
+    fork = fork_tree(tree, sd_lib.git_output(["merge-base", base, "HEAD"], tree))
     return (content, fork) if content and fork else (None, None)
+
+
+def fork_tree(tree: pathlib.Path, fork: str | None) -> str | None:
+    """The tree of the merge base `fork`, or None without one."""
+    return sd_lib.git_output(["rev-parse", "--verify", "--quiet", f"{fork}^{{tree}}"], tree) if fork else None
 
 
 def receipt_key(root: pathlib.Path, head: str, tree: str | None = None) -> str:
@@ -165,7 +175,8 @@ def gate_binding(tree: pathlib.Path, head: str, inputs: str, base: str | None, e
                  fork: str | None = None) -> dict[str, Any] | None:
     """What a run in `tree` would be bound to, or None when something in it cannot be named.
 
-    `fork` is the merge base under a tree key (`tree_key`); the binding then names it in place of `head`.
+    `fork` is the merge base's tree under a tree key (`tree_key`); the binding then names it in place of
+    `head`, and names the scope's merge base by its tree too.
     """
     try:
         detection = sd_lib.detect_entrypoints(tree)
@@ -181,7 +192,8 @@ def gate_binding(tree: pathlib.Path, head: str, inputs: str, base: str | None, e
         python = pathlib.Path(sys.executable).resolve()
         return {"schema": 2, "reuse": "tree" if fork else "head", "head": None if fork else head, "fork": fork,
                 "tree": sd_lib.git_output(["rev-parse", "HEAD^{tree}"], tree),
-                "inputs": inputs, "scope": {"mode": scope.mode, "fork": scope.fork, "command": list(scope.command)},
+                "inputs": inputs, "scope": {"mode": scope.mode, "fork": fork_tree(tree, scope.fork) if fork else scope.fork,
+                                             "command": list(scope.command)},
                 "detection": {"source": detection.source, "commands": detection.commands},
                 "tools": tools, "python": {"path": str(python), "version": sys.version,
                                            "sha256": sd_check_receipts.file_digest(python)},
