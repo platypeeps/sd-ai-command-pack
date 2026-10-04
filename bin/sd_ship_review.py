@@ -824,12 +824,22 @@ def gate_diagnostics(check: dict, limit: int) -> list[dict]:
             and record.get("name") == "docs"][:1]
     return [{"name": record.get("name"), "status": record.get("status"), "exit_code": record.get("exit_code"),
              "reason": str(record.get("reason") or "")[-limit:],
-             "stdout": str(record.get("stdout") or "")[-limit:], "stderr": str(record.get("stderr") or "")[-limit:]}
+             "stdout": str(record.get("stdout") or "")[-limit:], "stderr": str(record.get("stderr") or "")[-limit:],
+             # Where sd-check kept the whole output, and the failed shards it read there (sd:2558).
+             "output_path": str(record["output_path"])[:limit] if record.get("output_path") else None,
+             "failed_shards": [str(line)[:limit] for line in shard_lines(record.get("failed_shards"))][:FAILED_SHARDS_NAMED]}
             for record in [*records[:len(sd_lib.CHECK_NAMES)], *docs] if isinstance(record, dict)]
+
+
+def shard_lines(value: object) -> list:
+    """`value` when it is a list, else an empty one: a receipt row is read, not trusted."""
+    return value if isinstance(value, list) else []
 
 
 #: How much of each stream of one failing check a refusal repeats; the receipt keeps `sd-check`'s whole tail.
 FAILING_TAIL_CHARS = 1200
+#: How many failed-shard lines a receipt row and a refusal carry.
+FAILED_SHARDS_NAMED = 20
 
 
 def failing_check_tails(rows: Any, limit: int = FAILING_TAIL_CHARS) -> list[str]:
@@ -839,16 +849,22 @@ def failing_check_tails(rows: Any, limit: int = FAILING_TAIL_CHARS) -> list[str]
     reports on stderr and a linter on stdout, and `make` adds its own
     `Error 1` line to stderr whichever one failed. A row with no output names
     `sd-check`'s reason instead, such as a timeout (sd:2066, sd:2021).
+
+    The failed shards and the file holding the whole output come first: a
+    shard that failed early in a long run is in neither tail, and the tails
+    are what a lane log cuts again (sd:2558).
     """
     named = []
     for row in rows if isinstance(rows, list) else []:
         if not isinstance(row, dict) or row.get("status") != "fail":
             continue
+        found = [f"failed {line}" for line in shard_lines(row.get("failed_shards"))[:FAILED_SHARDS_NAMED]]
+        found += [f"whole output: {row['output_path']}"] * bool(row.get("output_path"))
         streams = [(stream, str(row.get(stream) or "").strip()) for stream in ("stderr", "stdout")]
         said = [f"{stream}: {'...' if len(text) > limit else ''}{text[-limit:]}" for stream, text in streams if text]
         reason = str(row.get("reason") or "").strip()
         named.append(f"{row.get('name')} (exit {row.get('exit_code')}): "
-                     + ("\n".join(said) if said else reason or "no output"))
+                     + "\n".join(found + (said if said else [reason or "no output"])))
     return named
 
 

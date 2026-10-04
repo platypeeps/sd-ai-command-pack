@@ -57,6 +57,7 @@ FINDING_FILES = ("sd-review", "sd_opencode.py", "sd_registry.py")
 IMPORT_EXEMPT = {
     "sd_setup_github.py": "sd-review imports it only for the `setup-github` subcommand",
     "sd_setup_guard.py": "reached only through sd_setup_github.py",
+    "sd_lane.py": "sd-ship's `lane` verbs queue and run prepare and merge; they decide no verdict or gate",
 }
 REVIEW_TOOL_FILES = VERDICT_FILES + GATE_FILES + CHECK_FILES
 POLICY_FILES = ("CLAUDE.local.md", ".github/sd-review.json")
