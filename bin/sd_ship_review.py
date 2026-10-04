@@ -219,6 +219,10 @@ def validate_provider_selection(report: dict, requested: str | None, *, complete
 
 
 class SharedReview:
+    #: The branch this checkout had open when the record was validated, which
+    #: the ship lock compares with the live checkout (sd:2008); never re-read.
+    checkout_branch: str | None = None
+
     def __init__(self, root: pathlib.Path, connection, database: pathlib.Path, args, *, store,
                  repository: str, branch: str, head: str, key: str, revision, state: dict,
                  identity: Any, history: Any, runtime: ReviewRuntime):
@@ -314,9 +318,18 @@ class SharedReview:
         if all(value is None for value in (args.additional_review_for, args.request_reason, args.review_history_digest)):
             return None
         reason = (args.request_reason or "").strip()
-        if (args.additional_review_for != head or not reason or args.retry_review
-                or args.path or args.message_file or args.author):
-            raise Refusal("additional review needs an exact committed head and nonempty reason, without retry or commit flags")
+        # One refusal per fault, each naming the flag that fixes it (sd:2026).
+        if args.additional_review_for is None:
+            raise Refusal("--request-reason and --review-history-digest are valid only with --additional-review-for SHA; "
+                          "drop them, or name the exact committed head for one more review")
+        if args.additional_review_for != head:
+            raise Refusal(f"--additional-review-for {args.additional_review_for} is not the clean current HEAD {head}")
+        if not reason:
+            raise Refusal("--additional-review-for needs a nonempty --request-reason")
+        if args.retry_review:
+            raise Refusal("--retry-review and --additional-review-for do not combine; a retry spends an automatic pass")
+        if args.path or args.message_file or args.author:
+            raise Refusal("additional review cannot commit; name an already committed exact head")
         self.request_history(args.review_history_digest)
         if self.runtime.current_head(self.root) != head:
             raise Refusal("additional review must name the clean current HEAD")

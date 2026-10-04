@@ -554,9 +554,14 @@ def invisible_separators(target: pathlib.Path) -> dict[str, int]:
     byte read from a text read: reverting the read to `read_text` survived all
     126 tests. Given a path, the guard itself can be asked of a fixture that
     does carry one.
+
+    A `\\r\\n` pair is one line ending, not a separator: the tokenizer ends a
+    line there as it does at `\\n`, so a CRLF checkout of this module holds no
+    fixture character on that account (sd:999, review-956). Only a `\\r` left
+    over once the pairs are gone is counted.
     """
 
-    text = undecoded_text(target)
+    text = undecoded_text(target).replace("\r\n", "\n")
     return {f"U+{ord(char):04X}": text.count(char)
             for char in INVISIBLE_SEPARATORS if char in text}
 
@@ -1817,14 +1822,31 @@ class TheMarkerGrammar(unittest.TestCase):
         `pathlib.Path(__file__).read_text()` was still green across all 126
         tests of the module (review-959). This module holds no carriage return
         of its own and so cannot show the difference; a fixture with a CRLF and
-        a bare CR can, and holds two carriage returns by bytes and none by text.
+        a bare CR can, and holds one stray carriage return by bytes and none by
+        text. The CRLF's own `\\r` is a line ending and is not counted.
         """
         with tempfile.TemporaryDirectory() as tmp:
             fixture = pathlib.Path(tmp) / "carriage.txt"
             fixture.write_bytes(b"a\r\nb\rc\n")
-            self.assertEqual(invisible_separators(fixture), {"U+000D": 2})
+            self.assertEqual(invisible_separators(fixture), {"U+000D": 1})
             self.assertEqual(fixture.read_text(encoding="utf-8").count("\r"), 0,
                              "the premise: universal newlines translates both away")
+
+    def test_a_crlf_line_ending_is_not_an_invisible_separator(self) -> None:
+        """sd:999 (review-956). A CRLF checkout is not a module full of fixtures.
+
+        The tokenizer ends a line at `\\r\\n` exactly as it does at `\\n`, so the
+        `\\r` of that pair is a line ending and never a character inside a
+        fixture. Counted as one, every line of this module on a `core.autocrlf`
+        checkout read as a literal separator, and the guard above failed a file
+        that holds none. A bare `\\r` is still the character the guard hunts.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = pathlib.Path(tmp) / "crlf.py"
+            fixture.write_bytes(b"A = 1\r\nB = 2\r\n")
+            self.assertEqual(invisible_separators(fixture), {})
+            fixture.write_bytes(b"A = 1\r\nB = '\r'\r\n")
+            self.assertEqual(invisible_separators(fixture), {"U+000D": 1})
 
     def test_every_direct_read_of_a_cited_file_is_named_here(self) -> None:
         """review-959. `file_lines`' docstring lists them; the list is enumerated.
@@ -2076,7 +2098,7 @@ def source_declaration_error(root: pathlib.Path, path: str, symbol: str) -> str 
         if not target.is_file():
             return f"{path}: target is not a regular file"
         tree = ast.parse(target.read_text(encoding="utf-8"), filename=path)
-    except (OSError, UnicodeError, SyntaxError) as error:
+    except (OSError, UnicodeError, SyntaxError, ValueError) as error:
         return f"{path}: cannot read a Python source declaration: {error}"
 
     declarations = declared_at(tree, symbol)
@@ -3013,16 +3035,58 @@ BACKTICKED_PATH = re.compile(r"`(\.?[A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:md|py|json|
 #: whose preceding `-` is a non-word character.
 QUALIFIER = re.compile(r"\bpack\b", re.IGNORECASE)
 
-#: Enough to reach back over "live in the sd-ai-command-pack checkout's" and a
-#: line wrap, and short enough that the word has to be about this citation.
+#: A sentence-end candidate: a terminator before whitespace or the end of the
+#: text. A dot inside a backticked path is followed by a letter, so it ends
+#: nothing. Neither does the dot of `e.g.`, `i.e.` or `etc.`: "the pack's
+#: rules (e.g. `<path>`)" is one sentence (review round 1 on sd:999), and the
+#: capital alone does not settle "e.g. Makefile". `sentence_ends` keeps a
+#: candidate only when the next sentence opens like one.
 #:
-#: Read on *both* sides of the citation, which the first version did not.
-#: English puts the qualification either way round -- "the cap is in the
-#: sd-ai-command-pack checkout's `<path>`" and "`<path>` ... that file lives
-#: only in the sd-ai-command-pack checkout" are the same statement -- and a
-#: guard that accepts one word order and not the other enforces a house style
-#: instead of the invariant. Both forms are live in `skills/` today.
-QUALIFIER_WINDOW = 100
+#: The qualifier is read in the citation's own sentence, on *both* sides of
+#: the citation, which the first version did not. English puts the
+#: qualification either way round -- "the cap is in the sd-ai-command-pack
+#: checkout's `<path>`" and "`<path>` ... that file lives only in the
+#: sd-ai-command-pack checkout" are the same statement -- and a guard that
+#: accepts one word order and not the other enforces a house style instead of
+#: the invariant. Both forms are live in `skills/` today.
+#:
+#: A sentence, not a character window (sd:999, review-836). The 100-character
+#: window that came before let a neighbouring sentence vouch for the path:
+#: "`<path>`. See the pack's release notes." read as qualified.
+SENTENCE_END = re.compile(r"(?<!\be\.g)(?<!\bi\.e)(?<!\betc)[.!?](?=\s|$)")
+
+#: Markup a sentence may open on before its first word: emphasis, a link, a
+#: parenthesis or a quote.
+SENTENCE_OPENER_MARKUP = "*_[(\"'\u201c\u2018"
+
+
+def sentence_ends(flat: str) -> list[int]:
+    """Where each sentence of `flat` ends, as offsets just past the terminator.
+
+    The next sentence opens on a capital in any script, a digit or a code
+    span, after any opening markup. "**Read** `<path>`", "`<path>` holds"
+    and "Über" each open one (review round 3 on sd:999). An ASCII-capital
+    test merged those into the sentence before, so a pack mention there
+    vouched for an unrelated citation. A lower-case word after the dot does
+    not open a sentence: that is an abbreviation the lookbehinds missed.
+    """
+
+    ends = []
+    for end in SENTENCE_END.finditer(flat):
+        opener = flat[end.end():end.end() + 40].lstrip().lstrip(SENTENCE_OPENER_MARKUP)
+        if not opener or opener[0].isupper() or opener[0].isdigit() or opener[0] == "`":
+            ends.append(end.end())
+    return ends
+
+#: The one way the next sentence may carry the qualifier: by opening on the
+#: file just cited. "`<path>` gives the cap. That file lives only in the
+#: sd-ai-command-pack checkout" is one claim in two sentences, and
+#: `skills/sd-plan` writes it that way.
+BACK_REFERENCE = re.compile(r"\s*(?:(?:that|this|the)\s+(?:rule\s+)?file|it)\b", re.IGNORECASE)
+
+#: A blank line ends a paragraph, and nothing in the next one is about this
+#: citation.
+PARAGRAPH_BREAK = re.compile(r"\n[ \t]*\n")
 
 
 def skill_documents(root: pathlib.Path) -> list[pathlib.Path]:
@@ -3062,19 +3126,32 @@ def rule_path_citations(root: pathlib.Path) -> list[tuple[pathlib.Path, str, boo
     rule_paths = pack_rule_paths(root)
     found: list[tuple[pathlib.Path, str, bool]] = []
     for doc in skill_documents(root):
-        # Newlines flattened: the qualifier routinely wraps away from the path.
-        flat = doc.read_text(encoding="utf-8").replace("\n", " ")
-        for match in BACKTICKED_PATH.finditer(flat):
-            cited = match.group(1)
-            if cited not in rule_paths:
-                continue
-            # The citation itself is excluded from the window on purpose: a
-            # cited path with `pack` as a segment would otherwise qualify
-            # itself, which is a citation vouching for its own resolution.
-            before = flat[max(0, match.start() - QUALIFIER_WINDOW):match.start()]
-            after = flat[match.end():match.end() + QUALIFIER_WINDOW]
-            found.append((doc, cited, bool(QUALIFIER.search(before) or QUALIFIER.search(after))))
+        for paragraph in PARAGRAPH_BREAK.split(doc.read_text(encoding="utf-8")):
+            # Whitespace collapsed: the qualifier routinely wraps away from the
+            # path, and an indented continuation line is still one space.
+            flat = " ".join(paragraph.split())
+            for match in BACKTICKED_PATH.finditer(flat):
+                cited = match.group(1)
+                if cited in rule_paths:
+                    found.append((doc, cited, citation_is_qualified(flat, match)))
     return found
+
+
+def citation_is_qualified(flat: str, match: re.Match[str]) -> bool:
+    """Whether the citation's sentence, or a next one about the file, names the pack.
+
+    The citation itself is excluded on purpose: a cited path with `pack` as a
+    segment would otherwise qualify itself, which is a citation vouching for
+    its own resolution.
+    """
+
+    ends = sentence_ends(flat)
+    start = max((end for end in ends if end <= match.start()), default=0)
+    stop = min((end for end in ends if end > match.end()), default=len(flat))
+    if QUALIFIER.search(flat[start:match.start()]) or QUALIFIER.search(flat[match.end():stop]):
+        return True
+    following = flat[stop:min((end for end in ends if end > stop), default=len(flat))]
+    return bool(BACK_REFERENCE.match(following) and QUALIFIER.search(following))
 
 
 def unqualified_rule_paths(root: pathlib.Path) -> list[str]:
@@ -3111,12 +3188,16 @@ class ForeignCheckoutCitationTests(unittest.TestCase):
         """The generalisation, asserted rather than assumed.
 
         The predecessor hardcoded `skills/sd-research-repo` and so watched one
-        skill while four carried the citation. Two things are checked. Every
+        skill while four carried the citation. Three things are checked. Every
         directory holding a `SKILL.md` is reached by the walk -- computed from
         disk on both sides, so adding a skill cannot quietly fall outside it.
-        And the citations actually classified come from more than one skill,
-        which a walk that had silently collapsed back to a single directory
-        could not satisfy.
+        Every document is reached, counted by `os.walk` rather than by the
+        walk under test (sd:999, review-836): a walk that collapsed to
+        `SKILL.md` alone still reaches every skill directory, and misses the
+        `references/` and `templates/` pages that cite the rule too. And the
+        citations actually classified come from more than one skill, which a
+        walk that had silently collapsed back to a single directory could not
+        satisfy.
         """
 
         authored = {
@@ -3125,6 +3206,17 @@ class ForeignCheckoutCitationTests(unittest.TestCase):
         self.assertGreater(len(authored), 1, "the skills tree did not enumerate")
         walked = {doc.parent for doc in skill_documents(REPO_ROOT)}
         self.assertEqual(authored - walked, set(), "a skill directory was not walked")
+
+        expected = {
+            pathlib.Path(top) / name
+            for top, _, names in os.walk(REPO_ROOT / SKILLS_DIR)
+            for name in names
+            if name.endswith(".md") and not os.path.islink(os.path.join(top, name))
+        }
+        self.assertTrue(any(doc.name != "SKILL.md" for doc in expected),
+                        "no nested skill document to check the walk against")
+        self.assertEqual(expected - set(skill_documents(REPO_ROOT)), set(),
+                         "a skill document was not walked")
 
         cited_by = {doc.relative_to(REPO_ROOT).parts[1] for doc, _, _ in rule_path_citations(REPO_ROOT)}
         self.assertGreater(len(cited_by), 1, f"only one skill was scanned: {sorted(cited_by)}")
@@ -3187,14 +3279,32 @@ class ForeignCheckoutCitationTests(unittest.TestCase):
         self.assertEqual(len(problems), 1, "\n".join(problems))
         self.assertIn(f"{SKILLS_DIR}/sd-beta/SKILL.md", problems[0])
 
+    def test_a_citation_in_a_nested_skill_document_is_caught(self) -> None:
+        """sd:999 (review-836). `references/` is a skill document too.
+
+        `skills/sd-research-repo/references/conventions.md` cites the rule
+        file, so a walk of `SKILL.md` files alone would pass it unread.
+        """
+
+        root = self.fixture()
+        nested = root / SKILLS_DIR / "sd-example" / "references"
+        nested.mkdir(parents=True)
+        (nested.parent / "SKILL.md").write_text("# sd-example\n", encoding="utf-8")
+        (nested / "conventions.md").write_text(
+            "its cap is in\n`.claude/rules/caps.md`.\n", encoding="utf-8")
+
+        problems = unqualified_rule_paths(root)
+        self.assertEqual(len(problems), 1, "\n".join(problems))
+        self.assertIn(f"{SKILLS_DIR}/sd-example/references/conventions.md", problems[0])
+
     def test_the_qualifier_counts_on_either_side_of_the_citation(self) -> None:
         """The word order is prose, not the invariant.
 
         "the pack's `<path>`" and "`<path>` ... that file lives only in the
         sd-ai-command-pack checkout" say the same thing, and both are live in
-        `skills/` today. A window that reads only backwards passes the first
+        `skills/` today. A guard that reads only backwards passes the first
         and fails the second, which makes the guard a style rule. The third
-        case is the one that must still fail: a mention far enough away to be
+        case is the one that must still fail: a mention in a later sentence
         about something else does not qualify anything.
         """
 
@@ -3213,6 +3323,52 @@ class ForeignCheckoutCitationTests(unittest.TestCase):
             f"{'Read it before promoting the item. ' * 6}It ships with the pack.\n",
             encoding="utf-8")
         self.assertEqual(len(unqualified_rule_paths(root)), 1)
+
+    def test_a_pack_mention_in_another_sentence_does_not_qualify_a_citation(self) -> None:
+        """sd:999 (review-836). The word has to be about this citation.
+
+        A 100-character window let a neighbouring sentence vouch for the path:
+        "`<path>`. See the pack's release notes." read as qualified, and so did
+        a sentence before the citation and a paragraph after it. Each decoy
+        here passed the window. The qualifier now has to be in the citation's
+        own sentence, or in the next one when that sentence opens by pointing
+        back at the file. The second half keeps the forms the skills use.
+        """
+
+        root = self.fixture()
+        skill = root / SKILLS_DIR / "sd-example"
+        skill.mkdir()
+        document = skill / "SKILL.md"
+
+        for decoy in (
+            "the cap is in\n`.claude/rules/caps.md`. See the pack's release notes.\n",
+            "The pack is large. The cap is in\n`.claude/rules/caps.md`.\n",
+            "the cap is in\n`.claude/rules/caps.md`.\n\nThat file lives only in the pack.\n",
+            # A sentence may open on markup or a non-ASCII capital (review round 3).
+            "See the pack's notes. **Read** `.claude/rules/caps.md` for the cap.\n",
+            "See the pack's notes. `.claude/rules/caps.md` holds the cap.\n",
+            "See the pack's notes. Über-caps live in `.claude/rules/caps.md`.\n",
+        ):
+            with self.subTest(decoy=decoy):
+                document.write_text(decoy, encoding="utf-8")
+                self.assertEqual(len(unqualified_rule_paths(root)), 1)
+
+        for real in (
+            "the cap is in\n`.claude/rules/caps.md`. That file lives only in the"
+            " sd-ai-command-pack checkout.\n",
+            "the cap is in\n`.claude/rules/caps.md`.\nIt ships only with the pack.\n",
+            "the cap is in the pack's\n`.claude/rules/caps.md`, which no other checkout has.\n",
+            # An abbreviation's dot is not a sentence end (review round 1).
+            "Read the sd-ai-command-pack checkout's rules (e.g.\n`.claude/rules/caps.md`).\n",
+            "Read the rules (e.g. `.claude/rules/caps.md`, i.e. the caps) in the pack.\n",
+            "From the pack, read the caps, notes, etc. in `.claude/rules/caps.md`.\n",
+            # A wrap inside the back-reference is still one (review round 2).
+            "the cap is in\n`.claude/rules/caps.md`. That\n  file lives only in the pack.\n",
+            "the cap is in\n`.claude/rules/caps.md`. This rule\n   file ships with the pack.\n",
+        ):
+            with self.subTest(real=real):
+                document.write_text(real, encoding="utf-8")
+                self.assertEqual(unqualified_rule_paths(root), [])
 
     def test_a_word_containing_pack_does_not_qualify_a_citation(self) -> None:
         """The false negative from the other side, and the reason for `\\b`.
@@ -3261,11 +3417,13 @@ class ForeignCheckoutCitationTests(unittest.TestCase):
         test exists to prevent:
 
         * `references/x.md` ships beside the installed skill.
-        * `.github/sd-review.json` and `.github/workflows/sd-review-route.yml`
-          are per-repository configuration written into the reader's checkout
-          by `bin/sd_setup_github.py`; the reader's copy is the one that
-          governs. A draft of this class that flagged every path resolving in
-          this checkout reported all three, plus `.github/sd-status.json`.
+        * `.github/sd-review.json`, `.github/workflows/sd-review-route.yml`
+          and `.github/sd-status.json` are per-repository configuration
+          written into the reader's checkout by `bin/sd_setup_github.py`; the
+          reader's copy is the one that governs. A draft of this class that
+          flagged every path resolving in this checkout reported all of them.
+          The fixture carries all three (sd:999, review-836): one left out is
+          a scope regression nothing here would see.
         * a path this checkout does not have is naming another repository,
           which is what the prose beside it says.
         """
@@ -3276,10 +3434,11 @@ class ForeignCheckoutCitationTests(unittest.TestCase):
         (root / ".github" / "workflows").mkdir(parents=True)
         (root / ".github" / "sd-review.json").write_text("{}\n", encoding="utf-8")
         (root / ".github" / "workflows" / "route.yml").write_text("on: push\n", encoding="utf-8")
+        (root / ".github" / "sd-status.json").write_text("{}\n", encoding="utf-8")
         (skill / "SKILL.md").write_text(
             "read `references/conventions.md`, the repository's `.github/sd-review.json`,"
-            " the route in `.github/workflows/route.yml`, and"
-            " `local-adversarial-gate/core.md`\n",
+            " its `.github/sd-status.json`, the route in `.github/workflows/route.yml`,"
+            " and `local-adversarial-gate/core.md`\n",
             encoding="utf-8")
         self.assertEqual(unqualified_rule_paths(root), [])
 
@@ -3716,8 +3875,13 @@ class CitationRepointerTests(unittest.TestCase):
         which reads as a renamed symbol. The page itself is also named through
         `..` (sd:822 R6): a check that compared the unresolved paths sent that
         spelling on to be parsed as Python. Nothing is rewritten in any case.
+
+        A file with a NUL byte is refused as unreadable, not raised out of the
+        run (sd:999, review-945). Python before 3.12 raised `ValueError` there,
+        which the two sibling readers of the same file already catch.
         """
         (self.root / "bin" / "run").write_text("#!/bin/sh\necho {\n", encoding="utf-8")
+        (self.root / "bin" / "nul.py").write_bytes(b"def render():\n    pass\n\0\n")
         (self.root / "docs.md").write_text("# notes\n\n- a (b\n", encoding="utf-8")
         os.symlink("loop", self.root / "bin" / "loop")
         self.source.write_text("def render():\n    pass\n" * 2, encoding="utf-8")
@@ -3727,6 +3891,7 @@ class CitationRepointerTests(unittest.TestCase):
                 ("bin", "render", "bin: target is a directory"),
                 ("bin/loop", "render", "bin/loop: target is a symlink loop"),
                 ("bin/run", "render", "bin/run: cannot read a Python source declaration"),
+                ("bin/nul.py", "render", "bin/nul.py: cannot read a Python source declaration"),
                 ("docs.md", "render", "docs.md: a markdown page declares no Python symbol"),
                 ("notes.md", "render", "notes.md: a markdown page declares no Python symbol"),
                 ("page.md", "render", "names the page it sits on"),
