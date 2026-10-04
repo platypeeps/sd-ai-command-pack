@@ -236,6 +236,18 @@
 
 ### Fixed
 
+- **The citation gate's own checks catch what they claim (sd:999).** In
+  `tests/test_doc_citations.py`, the pack-rule qualifier read a 100-character
+  window, so "`<path>`. See the pack's release notes." passed as qualified. It
+  now reads the citation's own sentence, or the next one when that sentence
+  opens on the file ("That file lives only in ..."). A paragraph break ends
+  the search. The skill walk is now compared with an `os.walk` count of every
+  `skills/**/*.md`, so a walk of `SKILL.md` alone fails. The scope fixture now
+  carries `.github/sd-status.json`. The literal-separator guard no longer
+  counts the `\r` of a CRLF line ending, so a `core.autocrlf` checkout passes.
+  A source file with a NUL byte has a fixture row, and its refusal catches
+  `ValueError` like its two sibling readers.
+
 - **A held squash delivered by hand closes in git too (sd:1600).** Reconcile
   records `closing_owed` on the receipt. The next `sd-ship merge` in the same
   repository writes `Closes: <item>` into its squash's trailer block, at most
