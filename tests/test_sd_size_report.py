@@ -15,16 +15,18 @@ taken the executable bit for a command, or counted lines with `read().count`,
 each of those would land near enough to look right and none of them would hit
 all four.
 
-Both revisions are pinned by full SHA and both are asserted to be in this
-checkout's history rather than assumed to be: the item these come from carries
-a correction for citing a pre-squash hash that never landed, and a test
-anchored to an object that is not on the branch fails everywhere except the
-machine it was written on.
+Both revisions are pinned by full SHA and read as objects, never found by
+walking this checkout's history (sd:2593). A squash, a rebase or an orphan
+branch with the same tree measures the same, which is what lets the check
+declare tree-keyed gate reuse. The item these come from carries a correction
+for citing a pre-squash hash that never landed; the guard against that is that
+each pin must be a commit object present here, and that its measurement
+matches four recorded figures at once, which no wrong commit does by chance.
 
-Reading history at all makes this file depend on a full clone. That is a real
-dependency and it is the one CI already carries deliberately -- the unittest
-job checks out at `fetch-depth: 0` because `tests/test_archive_untouched.py`
-needs the same thing, and the reason is written in the workflow.
+Reading those objects makes this file depend on a full clone, as
+`tests/test_archive_untouched.py` does for its own pinned commit. Every other
+test here, the trend and the report included, reads a fixture repository with
+synthetic, dated commits.
 
 The rest of the file is the control. Anchors alone would pass against a tool
 that had stopped discriminating between revisions -- a `size_at` that read one
@@ -35,8 +37,10 @@ each measurement against a case built to move it.
 
 from __future__ import annotations
 
+import datetime as dt
 import importlib.machinery
 import importlib.util
+import os
 import pathlib
 import subprocess
 import sys
@@ -106,36 +110,55 @@ def a_repository_with_two_commits(root: pathlib.Path) -> None:
     git(root, "commit", "-qm", "second")
 
 
+def a_repository_with_dated_commits(root: pathlib.Path) -> list[str]:
+    """A throwaway repository with commits 29, 15 and 0 days back, oldest first.
+
+    The trend and the report read this, not this checkout's history (sd:2593).
+    `rev-list --before` reads the committer date, so both dates are set. Noon
+    for the older two, and today's midnight for the last, which no clock that
+    runs the test is before.
+    """
+
+    git(root, "init", "-q", "-b", "main", ".")
+    (root / "bin").mkdir()
+    today = dt.datetime.now(dt.timezone.utc).date()
+    commits = []
+    for index, back in enumerate((29, 15, 0)):
+        day = today - dt.timedelta(days=back)
+        stamp = f"{day.isoformat()}T{'00:00:00' if back == 0 else '12:00:00'}Z"
+        (root / "bin" / f"part{index}.py").write_text(f"def part{index}():\n    return {index}\n")
+        git(root, "add", "-A")
+        subprocess.run(
+            ["git", "-c", "user.email=size@example.invalid", "-c", "user.name=size",
+             "-c", "commit.gpgsign=false", "commit", "-qm", f"part {index}"],
+            cwd=root, capture_output=True, text=True, check=True,
+            env={**os.environ, "GIT_AUTHOR_DATE": stamp, "GIT_COMMITTER_DATE": stamp})
+        commits.append(git(root, "rev-parse", "HEAD").strip())
+    return commits
+
+
 class RecordedFigures(unittest.TestCase):
     """The anchors: the tool agrees with two independent hand measurements."""
 
-    def test_both_anchor_revisions_are_on_the_branch(self) -> None:
+    def test_both_anchor_revisions_are_commits_here(self) -> None:
         """The premise, asserted before the conclusions that rest on it.
 
-        A revision that is not in this repository's history is not evidence
-        about it, and measuring one would prove nothing about the figures the
-        item recorded. This is the check the item's own correction was written
-        after somebody skipped: it cited a pre-squash hash whose object exists
-        and whose commit never landed, and every claim resting on it was
-        unfalsifiable on any machine but the one that made it.
-
-        Against `HEAD` rather than `origin/main`, and the difference is CI. No
-        other test here depends on this checkout's own `refs/remotes/origin/*`
-        -- the ones that mention `origin/main` create it inside a fixture
-        repository -- and a test that needs a remote-tracking ref a checkout
-        action may not have written is a test that fails for reasons unrelated
-        to the code under test. `HEAD` always resolves, and on a pull request
-        it is the merge with the default branch, so an anchor that is not
-        under it is not on the mainline either.
+        A revision that is not a commit object here is not evidence about
+        this repository, and `size_at` would answer `None` for it with no
+        reason. Presence, not ancestry: `merge-base --is-ancestor <pin> HEAD`
+        read this checkout's history, so an orphan commit carrying the same
+        tree failed it while every figure below still held (sd:2593). The
+        pre-squash hash the item corrected is caught by the figures: a
+        commit that never landed does not measure four recorded values.
         """
 
         for anchor in (FIRST_RELEASE, CAP_RETIRED):
             with self.subTest(anchor=anchor):
                 self.assertEqual(
                     subprocess.run(
-                        ["git", "merge-base", "--is-ancestor", anchor, "HEAD"],
+                        ["git", "cat-file", "-e", f"{anchor}^{{commit}}"],
                         cwd=REPO_ROOT, capture_output=True, check=False).returncode,
-                    0, f"{anchor} is not an ancestor of HEAD")
+                    0, f"{anchor} is not a commit in this repository")
 
     def test_the_first_release_measures_what_was_recorded(self) -> None:
         measured = report.size_at(REPO_ROOT, FIRST_RELEASE)
@@ -236,7 +259,10 @@ class History(unittest.TestCase):
         the one movement missing from it.
         """
 
-        samples = report.trend_revisions(REPO_ROOT)
+        with tempfile.TemporaryDirectory() as home:
+            root = pathlib.Path(home)
+            a_repository_with_dated_commits(root)
+            samples = report.trend_revisions(root)
         newest = samples[-1][0]
         self.assertEqual(
             newest,
@@ -246,12 +272,36 @@ class History(unittest.TestCase):
         """A quiet fortnight otherwise prints one commit three times, which
         reads as three weeks of flat growth rather than as no new data."""
 
-        commits = [commit for _when, commit in report.trend_revisions(REPO_ROOT)]
+        with tempfile.TemporaryDirectory() as home:
+            root = pathlib.Path(home)
+            a_repository_with_dated_commits(root)
+            commits = [commit for _when, commit in report.trend_revisions(root)]
         self.assertEqual(sorted(commits), sorted(set(commits)))
 
     def test_the_trend_is_ordered_oldest_first(self) -> None:
-        dates = [when for when, _commit in report.trend_revisions(REPO_ROOT)]
+        with tempfile.TemporaryDirectory() as home:
+            root = pathlib.Path(home)
+            a_repository_with_dated_commits(root)
+            dates = [when for when, _commit in report.trend_revisions(root)]
         self.assertEqual(dates, sorted(dates))
+
+    def test_each_sample_is_the_newest_commit_at_or_before_its_date(self) -> None:
+        """The samples, named. The three tests above hold on any history.
+
+        Commits 29, 15 and 0 days back, sampled at 30, 23, 16, 9, 2 and 0:
+        30 is before the first commit and gives nothing, 23 and 16 give the
+        first, 9 and 2 the second, and 0 the third. Each commit once, at its
+        oldest sample point.
+        """
+
+        with tempfile.TemporaryDirectory() as home:
+            root = pathlib.Path(home)
+            commits = a_repository_with_dated_commits(root)
+            samples = report.trend_revisions(root)
+        today = report.dt.datetime.now(report.dt.timezone.utc).date()
+        expected = [((today - report.dt.timedelta(days=back)).isoformat(), commit)
+                    for back, commit in zip((23, 9, 0), commits, strict=True)]
+        self.assertEqual(samples, expected)
 
     def test_a_repository_without_a_remote_falls_back_to_the_previous_commit(self) -> None:
         """No `origin/main` is the ordinary state of a fresh or shallow clone,
@@ -277,8 +327,14 @@ class History(unittest.TestCase):
 class TheReport(unittest.TestCase):
     """What the pull request actually sees."""
 
+    def setUp(self) -> None:
+        home = tempfile.TemporaryDirectory()
+        self.addCleanup(home.cleanup)
+        self.root = pathlib.Path(home.name)
+        a_repository_with_dated_commits(self.root)
+
     def test_the_report_names_every_measure_and_the_change(self) -> None:
-        rendered = "\n".join(report.render_report(REPO_ROOT))
+        rendered = "\n".join(report.render_report(self.root))
         for expected in ("lines", "definitions", "commands", "lines/definition",
                          "this change", "The last 30 days"):
             self.assertIn(expected, rendered, expected)
@@ -288,13 +344,15 @@ class TheReport(unittest.TestCase):
         that reads as a threshold acquires the ratchet the cap had, which is
         the whole reason the item asked for a report instead of a cap."""
 
-        self.assertIn("never a gate", "\n".join(report.render_report(REPO_ROOT)))
+        self.assertIn("never a gate", "\n".join(report.render_report(self.root)))
 
     def test_running_it_prints_the_report_and_exits_zero(self) -> None:
-        done = subprocess.run([str(REPORT_PATH)], cwd=REPO_ROOT,
+        done = subprocess.run([str(REPORT_PATH)], cwd=self.root,
                               capture_output=True, text=True, check=False)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn("lines/definition", done.stdout)
+        # Every dated commit sampled, so the trend rows came from the fixture.
+        self.assertEqual(done.stdout.count("\n| 20"), 3, done.stdout)
 
     def test_it_refuses_outside_a_repository_instead_of_measuring_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as home:

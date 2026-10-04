@@ -31,6 +31,7 @@ asserts the Antigravity count is zero or twelve, never partial.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import importlib
 import json
@@ -42,7 +43,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Iterable
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -1352,6 +1353,7 @@ DEFAULT_BLOCK_BODY = """\
     test: <optional, when this repo spells its tests separately>
     lint: <optional, same>
     reviewers: <registry entries allowed to receive this repo's diff>
+    guest_allow: <docs/decisions, in guest mode, to commit decision records>
 """
 
 
@@ -1789,8 +1791,13 @@ def library_pin(checkout: Path) -> tuple[str, str]:
     return ref, ""
 
 
-def provision_library(ctx: Context, out) -> tuple[bool, str]:
+def provision_library(ctx: Context, out, ref: str | None = None) -> tuple[bool, str]:
     """Install `sd_db` into this pack's virtualenv, as a copy.
+
+    `ref` installs that commit instead of the system checkout's pin: a merge
+    the checkout has fetched but not checked out (`reprovision_after_merge`).
+    Callers go through `provision_guarded`, which holds the provisioning lock
+    and refuses to put older library code over newer.
 
     Returns whether it worked and a one-line report, rather than raising. A
     machine with no system checkout still gets its skills: the paths render
@@ -1812,17 +1819,22 @@ def provision_library(ctx: Context, out) -> tuple[bool, str]:
     if not (source / "pyproject.toml").is_file():
         return False, f"no library at {source}; sd_db is absent, trials unavailable"
     checkout = system_checkout(ctx.environ)
-    ref, why = library_pin(checkout)
-    if not ref:
-        return False, f"sd_db not installed, trials unavailable: {why}"
+    pinned = ref is None
+    if pinned:
+        ref, why = library_pin(checkout)
+        if not ref:
+            return False, f"sd_db not installed, trials unavailable: {why}"
     refusal = sibling("sd_library_guard").downgrade_refusal(
         ctx.checkout, checkout, ref, sibling("sd_lib").git_output)
     if refusal:
         return False, refusal
     target = f"git+file://{checkout}@{ref}#subdirectory={LIBRARY_RELATIVE}"
-    dirty = " (uncommitted work in that checkout is not installed)" if sibling(
-        "sd_lib"
-    ).git_output(["status", "--porcelain"], checkout) else ""
+    git = sibling("sd_lib").git_output
+    # The note is about the checkout's HEAD: a `ref` that is not it installs
+    # nothing the working tree could have changed.
+    at_head = pinned or git(["rev-parse", f"{ref}^{{commit}}"], checkout) == git(["rev-parse", "HEAD"], checkout)
+    dirty = " (uncommitted work in that checkout is not installed)" if at_head and git(
+        ["status", "--porcelain"], checkout) else ""
     if ctx.dry_run:
         return True, f"would install sd_db from {source} at {ref}{dirty}"
     try:
@@ -1839,6 +1851,124 @@ def provision_library(ctx: Context, out) -> tuple[bool, str]:
         last = done.stderr.strip().splitlines()[-1:] or ["no output"]
         return False, f"sd_db install failed: {last[0]}"
     return True, f"sd_db installed from {source} at {ref}{dirty}"
+
+
+#: The one machine-wide hold every `sd_db` install takes, under the state home.
+PROVISION_LOCK = "sd-db-provision.lock"
+
+
+@contextmanager
+def provisioning_lock(ctx: Context):
+    """Hold the machine-wide `sd_db` provisioning lock; a dry run takes none (sd:2108 review).
+
+    Two shippers reconciling library merges at once each read the installed
+    commit, each passed the ancestry check, and the older install could land
+    last. Pip into one virtualenv from two processes is unsafe in any case.
+    The hold spans the read, the check and the install, so each provisioner
+    sees what the previous one installed.
+    """
+    if ctx.dry_run:
+        yield
+        return
+    path = state_home(ctx.home, ctx.environ) / STATE_DIR / PROVISION_LOCK
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        yield
+
+
+def installed_library_commit(pack: Path) -> str | None:
+    """The commit pip installed `sd_db` from into `pack`'s virtualenv, or None.
+
+    A VCS install records `vcs_info.commit_id` in `direct_url.json`; a path
+    install records none, and neither does a virtualenv without `sd_db`.
+    """
+    for record in sorted((pack / ".venv/lib").glob("python*/site-packages/sd_db-*.dist-info/direct_url.json")):
+        try:
+            vcs = json.loads(record.read_text(encoding="utf-8")).get("vcs_info")
+        except (OSError, ValueError, AttributeError):
+            continue
+        commit = vcs.get("commit_id") if isinstance(vcs, dict) else None
+        if isinstance(commit, str) and commit:
+            return commit
+    return None
+
+
+def ancestry_refusal(pack: Path, system: Path, ref: str, *, merged: bool) -> str:
+    """Why installing `ref` over `pack`'s installed `sd_db` would go backwards, or "".
+
+    The schema guard compares schema numbers, so two library commits under
+    one schema pass it in either order. A `ref` that is an ancestor of the
+    installed commit is older library code, refused on every path: a stale
+    system checkout's `make setup` after a reconcile installed a newer merge
+    (sd:2108 review). A reconcile (`merged`) also keeps an installed commit
+    that is not an ancestor of `ref`, because reconciles need not run in merge
+    order. A record naming no commit, or a ref git cannot resolve, refuses
+    nothing here; the install reports the latter.
+    """
+    git = sibling("sd_lib").git_output
+    present = installed_library_commit(pack)
+    commit = git(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], system)
+    if not present or not commit or present == commit:
+        return ""
+    if merged:
+        if git(["merge-base", "--is-ancestor", present, commit], system) is None:
+            return (f"kept installed sd_db {present}: installed sd_db {present} is not an ancestor of "
+                    f"{commit}, so installing would replace newer or unrelated library code")
+        return ""
+    if git(["merge-base", "--is-ancestor", commit, present], system) is not None:
+        return (f"preserving installed sd_db {present}: {ref} ({commit}) is an ancestor of it, so "
+                f"installing would replace newer library code; update {system} before provisioning")
+    return ""
+
+
+def provision_guarded(ctx: Context, out, ref: str | None = None, *, merged: bool = False) -> tuple[bool, str]:
+    """The one provisioning operation: lock, ancestry check, install (sd:2108 review).
+
+    `make setup` (no `ref`: the system checkout's pin) and a reconcile (`ref`
+    the merge commit, `merged`) both come through here, so the check and the
+    install share one hold and neither path can put older code over newer.
+    A reconcile of the commit already installed installs nothing.
+    """
+    system = system_checkout(ctx.environ)
+    with provisioning_lock(ctx):
+        candidate = ref
+        if candidate is None:
+            candidate, _ = library_pin(system)
+        if candidate:
+            if merged and installed_library_commit(ctx.checkout) == candidate:
+                return False, f"sd_db {candidate} is already installed"
+            refusal = ancestry_refusal(ctx.checkout, system, candidate, merged=merged)
+            if refusal:
+                return False, refusal
+            return provision_library(ctx, out, ref=candidate)
+        return provision_library(ctx, out)
+
+
+def reprovision_after_merge(root: Path, commit: str, environ: dict[str, str], pack: Path | None = None) -> dict | None:
+    """Install `sd_db` at `commit` when it merged a change to the library (sd:2108).
+
+    The dashboard refuses an installed `sd_db` that lacks the system
+    checkout's last library commit, and until this nothing installed one
+    between a merge and the next restart, which then failed. None when `root`
+    is not the system checkout or one of its worktrees, or when `commit`
+    leaves `local-sd-db` alone. The pack whose virtualenv receives the copy is
+    this file's main checkout, the one the dashboard runs under. A failed
+    install is reported, not raised: the merge it follows has happened. An
+    installed copy that is not an ancestor of `commit` is kept, and the
+    report says why: reconciles need not run in merge order.
+    """
+    lib = sibling("sd_lib")
+    system = system_checkout(environ)
+    if not system.is_dir() or lib.main_worktree_root(root).resolve() != system.resolve():
+        return None
+    touched = lib.git_output(["diff", "--name-only", f"{commit}^1", commit, "--", str(LIBRARY_RELATIVE)], root)
+    if not touched:
+        return None
+    pack = pack or lib.main_worktree_root(Path(__file__).resolve().parent.parent)
+    ctx = Context(checkout=pack, home=Path(os.path.expanduser("~")), environ=dict(environ))
+    installed, report = provision_guarded(ctx, None, ref=commit, merged=True)
+    return {"ref": commit, "installed": installed, "report": report}
 
 
 def open_library(ctx: Context):
@@ -2807,7 +2937,7 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
         # a second file learning the path to the system checkout. It is the
         # only door: `--user` reads the library and never installs it, because
         # rendering skills must not rebuild the virtualenv it renders from.
-        installed, report = provision_library(ctx, out)
+        installed, report = provision_guarded(ctx, out)
         print(report, file=out)
         return 0 if installed else 1
     if mode == "user":

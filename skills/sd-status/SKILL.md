@@ -185,6 +185,18 @@ request on the report for 14 days after the merge: merged fourteen days ago is
 in, fifteen is out. Past that it is no longer a row, and `open threads` names
 the exclusion.
 
+Expiry is not an answer (sd:998). `open threads` ends with an `expired:` line
+that counts the findings nobody answered on pull requests merged 15 to 28 days
+ago (`MERGED_AGED_DAYS`), names those pull requests, and says "at least" with
+the reason when its read failed or stopped at its limit. It is a count, not
+rows: it never reaches `pending` or the banner. `--json` carries it as
+`expired_reviews`.
+
+A review posted after the merge reaches no merge gate (sd:1178).
+Above `expired:`, a `late:` line counts the unread findings on pull requests merged in the last 14 days.
+It reads the window's own list, so it costs no extra `gh` call, and `sd-review-ack` clears a finding there as it clears the row.
+It warns only; `--json` carries it as `late_reviews`.
+
 The days are counted from the UTC calendar day GitHub records the merge on to
 the local date `sd-status` runs on. So the edge can move by the local offset
 from UTC: in California a pull request merged in the evening falls on the next
@@ -232,7 +244,8 @@ stopped at its limit.
 
 The read runs two `gh` commands, however many pull requests merged: `gh pr list
 --state merged` for the window, and one `gh api --paginate` over the
-repository's review comments. That call's `since` is the oldest merged pull
+repository's review comments. The `expired:` count runs the same two over its
+own days, so a busy fortnight past the window cannot truncate the window's list. That call's `since` is the oldest merged pull
 request's creation time, since no review comment predates its pull request. It
 is still as many HTTP pages as there are comments since then, and one
 long-lived pull request that merges widens it. If it runs past `sd-pr-state`'s
@@ -295,7 +308,9 @@ protection is actually enforcing*. Protection is read from both of GitHub's
 mechanisms: the classic object, and when that answers 404, the branch's active
 rulesets -- a `pull_request` or `required_status_checks` rule there is
 protection and gets the same gap analysis; `deletion` alone is not, and the
-`unprotected` finding then names the rules it saw. Protection that exempts admins is prose, not
+`unprotected` finding then names the rules it saw.
+Rules that could not be read leave protection unknown, with the read error as the reason (sd:1000).
+Protection that exempts admins is prose, not
 authority: it stops collaborators and leaves the one account that does the
 merging entirely ungated. So this section reports enforcement state, and each
 missing leg prints as a named gap:
@@ -367,7 +382,8 @@ so capping it would make the cap the interface.
 
 The `--json` schema is version **3**. Beyond the section keys it carries
 `merged_pull_requests` (the pull requests merged inside the review window, with
-the findings each carries), `inventory` (`rows` plus the `unchecked` map),
+the findings each carries), `expired_reviews` (the `expired:` count, its
+days, its pull requests and why it is short, if it is), `late_reviews` (the `late:` count, in the same shape), `inventory` (`rows` plus the `unchecked` map),
 `abnormalities`, `actions` — the uncapped inventory, of which `pending` is the
 first ten after each class's `pending_cap` (`pending_rows`) — and `next`. It
 has no top-level `pending` key, and the two nested ones are something else

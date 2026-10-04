@@ -2,8 +2,9 @@
 
 Two of them are absences, and an absence is only ever proved structurally:
 
-  * **Findings are never posted.** The tool has no network client and no code
-    path that hands a finding to GitHub. This file reads the source's import
+  * **Findings are never posted.** No code path hands a finding to GitHub;
+    the one network client, `sd_registry`'s, posts a diff to a model endpoint
+    (the allow-list below says why). This file reads the source's import
     graph and its call sites, so adding `import urllib.request` or a `gh pr
     comment` argv fails here even if no other test notices.
   * **The repository comes from cwd (R10-D6).** No option accepts a path to a
@@ -143,6 +144,7 @@ class NeverPostsTests(unittest.TestCase):
             "subprocess",
             "sys",
             "tempfile",
+            "time",  # sd:2359: times the routing for the Jev ledger's paired row.
             "typing",
             # sd:495. The runner records the repository check it ran on the
             # clone, and `recorded_check` reads that row instead of running the
@@ -163,7 +165,7 @@ class NeverPostsTests(unittest.TestCase):
             # `chat_completion` fallback of its `client` parameter. So this
             # name does not have `sd_setup_github`'s standing below: nothing
             # holds `sd_registry` to a never-posts assertion, and it would not
-            # pass the import check above if anything did. The client landed
+            # pass `test_no_network_module_is_imported` if anything did. The client landed
             # in that file because the sub-cap below left it nowhere else to
             # go; R11-D34 records that, and this file does not re-argue it.
             #
@@ -828,11 +830,77 @@ class LineBudgetTests(unittest.TestCase):
         # toward depth (`partial` in `bin/sd-review`, `coverage` in the manifest),
         # and a text diff names a UTF-16 or BOM encoding, sending an
         # encoding-only change in binary form (`encoding`, `text_diff`).
+        # 4196 -> 4264 is sd:2325, sd:2326 and sd:2328 in `sd_check_receipts.py`:
+        # exact tracked paths the secret-name filter admits, a digest of the
+        # declared environment alone, and each rustup toolchain bound by its
+        # contents. They let a Rust repository declare `complete: true`.
+        # 4264 -> 4286 is sd:2325 review: an explicit `+toolchain`, `rustup run`
+        # or declared `+<toolchain>` binds the toolchain it selects, or refuses.
+        # 4286 -> 4338 is sd:2327: declared build outputs, which a recorded run
+        # builds into fresh temporary folders through each output's variable,
+        # removed after the run; the operator's folder is never touched.
+        # 4338 -> 4348 is sd:2327 review: a toolchain link that dangles, loops or
+        # resolves outside the toolchain refuses the binding.
+        # 4348 -> 4354 is sd:1397: `bin/sd-review` grows +6 for
+        # `request_sha256`, the digest of what the reviewers are asked, which
+        # `sd-ship` replays at a moved binding to keep an unchanged receipt.
+        # The replay itself is `bin/sd_ship_review.py`, outside the lane.
+        # 4354 -> 4520 is sd:2445: opencode 2.x dropped `debug agent` and
+        # `--pure`. `bin/sd_opencode.py` grows +163: the probe that replaces
+        # `debug agent`, a private `opencode serve` polled for the lazily
+        # loaded agent and its plugins (+67 with `__main__`); the report,
+        # version, plugin and tail checks (+42); the 2.x permission list and
+        # environment (+32); the docstring's 2.x measurements (+22).
+        # `bin/sd-review` grows +3 for the run's own config dir. Measured, not
+        # carried: `sd_opencode.py` is 467 on this tree.
+        # 4520 -> 4550 is sd:2400: `bin/sd_review_material.py` grows +30 for
+        # `renamed_material`, which sends a rename git detects as its rename
+        # patch under the new path and a one-line record under the old one, so
+        # a folder move fits the input limit and both paths stay listed.
+        # 4550 -> 4594 is six receipt-friction items, raised in its own commit
+        # before the commits that spend it. sd:2431: `bin/sd_review_material.py`
+        # +2, `file_material` returns its `is_media` verdict so a text file that
+        # starts with the media marker is not summarized. sd:1560: `bin/sd-review`
+        # +17 for `timed_out` in `classify_gate`, `gate_failure` for the runner's
+        # own timeout line, and the `--timeout` sentence in `gate_failed_line`;
+        # `bin/sd_check_receipts.py` +8 for `EXAMPLE` and `declaration_needed`,
+        # so a refusal names the declaration file. sd:2386: receipts +4, one
+        # fixed `LOCALE` recorded in the binding. sd:1296: `bin/sd-review` +2,
+        # the `--reuse-check` help says the pack never reuses. sd:1635:
+        # `bin/sd-review` +11, `DEFECT_CLASSES` in the code review prompt.
+        # 4594 -> 4605 is sd:2432, raised in its own commit before the one that
+        # spends it: `bin/sd_review_material.py` +11 for `RENAMED` and the
+        # `--binary -M` fallback in `binary_material`, so a renamed and edited
+        # non-media binary is sent as its rename delta, not a full literal.
+        # 4605 -> 4608 is sd:2076: `bin/sd_gate_run.py` grows +3 so the gate's
+        # child drops `FORCE_COLOR`, `CLICOLOR_FORCE` and `PY_COLORS` and gets
+        # `NO_COLOR=1` and `PYTHON_COLORS=0`: the wrapped tuple and the
+        # commented constant. A terminal's colour failed another repo's gate.
+        # 4608 -> 4682 is sd:2359: `bin/sd_jev.py` +69 passes the routed tier
+        # as `--baseline` and the routing time as `--baseline-ms`, retries once
+        # without them when an older `jev` refuses the flag, and says why in the
+        # module docstring (+19); `bin/sd-review` +5 times `sd_route.route`.
+        # 4682 -> 4683 is sd:1912: `bin/sd_gate_run.py` +1 asks
+        # `sd_gate_receipts.tree_key` whether the head declares a tree key; the
+        # key, binding and docstring for it live in `sd_gate_receipts`, outside
+        # the lane.
+        # 4683 -> 4687 is sd:2493: `bin/sd_gate_run.py` +4 to run the check
+        # inside `sd_gate_cache.cargo_environment` (+1), drop the operator's
+        # `CARGO_TARGET_DIR` (+1 comment line), import the module (+1) and
+        # say so in `gate_environment` (+1). The cache itself is
+        # `bin/sd_gate_cache.py`, gate code outside the lane as
+        # `sd_gate_receipts` is: `sd-review` does not import it.
+        # 4687 -> 4698 is sd:2608: `bin/sd_gate_run.py` +11 so a failed gate's
+        # one-line summary names the steps `sd-check` says failed (`summary_row`,
+        # +6 with its blank lines) within the status bound (+1), then the file
+        # with the whole output (+2) after `WHOLE_OUTPUT` (+2 with its comment),
+        # which `sd_local_gate` cuts from the public status. Reading the steps
+        # out of the output is `bin/sd-check`'s, outside the lane.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4196,
+            4698,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

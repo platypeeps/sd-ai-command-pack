@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from typing import Any, Mapping, Sequence
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -69,8 +70,11 @@ class FakeRunner:
         self.calls.append(
             {"argv": list(argv), "env": dict(env), "cwd": pathlib.Path(cwd), "timeout": timeout, "stdin": input_text}
         )
-        program = pathlib.Path(argv[0]).name
-        if program.startswith("python") or argv[-1] == "--json" and "sd-check" in " ".join(argv):
+        # The opencode confinement probe runs as `python sd_opencode.py probe
+        # ... opencode`, so it answers as the opencode program it asks about.
+        probe = sd_review.sd_opencode.probe_program(list(argv))
+        program = pathlib.Path((probe or argv)[0]).name
+        if not probe and (program.startswith("python") or argv[-1] == "--json" and "sd-check" in " ".join(argv)):
             program = "sd-check"
         answer = self.answers.get(program, self.default)
         if callable(answer):
@@ -83,26 +87,36 @@ class FakeRunner:
             return sd_review.Completed(0, PROMPT_INPUT_SUPPRESSED, "")
         # The opencode confinement probe (sd:1375) reads a resolved agent, so
         # an unscripted one gets the agent a clean launch resolves.
-        if program not in self.answers and list(argv[1:3]) == OPENCODE_PROBE_WORDS:
-            return sd_review.Completed(0, resolved_agent(env), "")
+        if program not in self.answers and probe:
+            return sd_review.Completed(0, resolved_agent(), "")
         return answer
 
 
 #: The skill-suppression probe's argv, by the two words that identify it.
 SKILL_PROBE_WORDS = ["debug", "prompt-input"]
 
-#: The opencode confinement probe's argv, by the two words that identify it.
-OPENCODE_PROBE_WORDS = ["debug", "agent"]
+#: Built-in plugins as `plugin.list` lists them on 2.0.20 (two of seventy).
+BUILTIN_PLUGINS = [{"id": "opencode.agent", "source": {"type": "builtin"}, "features": {"server": True},
+                    "state": {"status": "active"}},
+                   {"id": "opencode.config.agent", "source": {"type": "builtin"}, "features": {"server": True},
+                    "state": {"status": "active"}}]
 
 
-def resolved_agent(env: Mapping[str, str], *extra: dict[str, str]) -> str:
-    """`opencode debug agent sd-review` in the measured 1.18.30 shape: the
-    defaults, then the map's `*: deny` and its rules; `extra` lands right after
-    the deny, where a merged checkout config put its allowances."""
+def resolved_agent(*extra: dict[str, str], version: str = "opencode v2.0.20",
+                   plugins: list[dict[str, Any]] | None = None) -> str:
+    """The probe's report in the shape measured on 2.0.20: opencode's defaults,
+    its tool-output allowance among them, then the map's `*: deny` and its
+    rules. `extra` lands right after the deny, where a widening would."""
 
-    deny, *confined = sd_review.sd_opencode.confined_rules(env)
-    rules = [{"permission": "*", "action": "allow", "pattern": "*"}, deny, *extra, *confined]
-    return json.dumps({"name": "sd-review", "mode": "primary", "permission": rules})
+    deny, *confined = sd_review.sd_opencode.confined_rules()
+    defaults = [{"action": "*", "resource": "*", "effect": "allow"},
+                {"action": "external_directory", "resource": "*", "effect": "ask"},
+                {"action": "external_directory", "resource": "/h/.local/share/opencode/tool-output/*",
+                 "effect": "allow"}]
+    agent = {"id": "sd-review", "name": "sd-review", "mode": "primary",
+             "permissions": [*defaults, deny, *extra, *confined]}
+    return json.dumps({"version": version, "agent": agent,
+                       "plugins": BUILTIN_PLUGINS if plugins is None else plugins})
 
 
 def prompt_input(*texts: str) -> str:
@@ -952,6 +966,48 @@ class PipelineTests(ReviewFixture):
         self.assertNotIn("no check ran", stream.getvalue())
         self.assertIn("test ran", stream.getvalue())
 
+    def test_a_gate_that_timed_out_names_the_timeout_flag(self) -> None:
+        """sd:1560: a gate stopped at its bound says so and names the flag that
+        gives it longer, whether sd-check killed one entrypoint, no gate slot
+        came free, or the runner killed sd-check itself and left no record."""
+        root = self.make_repo()
+        self.prepare(root)
+        killed = [{"name": "check", "command": ["make", "check"], "status": "fail", "exit_code": None,
+                   "reason": "timed out after 3600s", "stderr": ""}]
+        no_slot = [dict(killed[0], reason="no gate slot came free within 3600s")]
+        for label, answer, evidence in (
+                ("record", sd_review.Completed(1, json.dumps({"checks": killed}), ""), "timed out after 3600s"),
+                ("slot", sd_review.Completed(1, json.dumps({"checks": no_slot}), ""), "no gate slot came free within 3600s"),
+                ("runner", sd_review.Completed(124, "", "python3: timed out after 3600s", False), "timed out after 3600s")):
+            with self.subTest(label=label):
+                result = self.run_review(root, FakeRunner({"sd-check": answer}))
+                self.assertEqual(result["status"], "gate_failed")
+                self.assertEqual((result["check"]["reason"], result["check"]["evidence"]), ("timed_out", evidence))
+                line = sd_review.gate_failed_line(result["check"])
+                self.assertIn("--timeout SECONDS", line)
+                self.assertIn("--review-timeout", line)
+                self.assertIn("no provider was asked", line)
+        # A spawn failure beside a timeout is still the stronger evidence.
+        spawn = [killed[0], {"name": "lint", "command": ["/no/python"], "status": "fail", "exit_code": None,
+                             "reason": "cannot run /no/python: [Errno 2] No such file or directory"}]
+        self.assertEqual(sd_review.classify_gate(spawn)["reason"], "toolchain_missing")
+
+    def test_the_code_prompt_names_the_six_operator_listed_defect_classes(self) -> None:
+        """sd:1635: the classes a retired manual checklist held, named in the lane's own prompt."""
+        root = self.make_repo()
+        self.prepare(root)
+        code = sd_review.build_prompt(sd_review.resolve_subject(root, "worktree"), False, "")
+        for phrase in ("external JSON used before its type is narrowed",
+                       "an error that reports a stage other than the one that failed",
+                       "identifiers matched by substring rather than at token boundaries",
+                       "tests that touch files, network or environment without isolating them",
+                       "empty, very long, non-ASCII or markup-bearing input",
+                       "check every sibling site of the same shape, not only the reported line"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, code)
+        planning = sd_review.Subject("planning", "", "", ("docs/work/x/prd.md",), 0, "")
+        self.assertNotIn("external JSON", sd_review.build_prompt(planning, False, ""))
+
     def test_a_blocking_finding_blocks(self) -> None:
         root = self.make_repo()
         self.prepare(root)
@@ -1029,6 +1085,34 @@ class PipelineTests(ReviewFixture):
         self.assertEqual([call["argv"][1:3] for call in runner.calls], [SKILL_PROBE_WORDS])
         self.assertTrue(result["route"]["reason"])
 
+    def test_explain_digests_what_the_reviewers_would_be_asked(self) -> None:
+        """sd:1397. sd-ship replays `--explain` at a moved binding and keeps the receipt on an equal digest."""
+        root = self.make_repo()
+        self.prepare(root)
+        first = self.run_review(root, FakeRunner(), explain=True)["request_sha256"]
+        self.assertRegex(first, r"^[0-9a-f]{64}$")
+        self.assertEqual(self.run_review(root, FakeRunner(), explain=True)["request_sha256"], first)
+        self.assertNotEqual(self.run_review(root, FakeRunner(), explain=True, challenge=True)["request_sha256"], first)
+        (root / "src.py").write_text("x = 2\n", encoding="utf-8")
+        self.assertNotEqual(self.run_review(root, FakeRunner(), explain=True)["request_sha256"], first)
+
+    def test_a_coverage_change_moves_the_request_digest_though_the_material_does_not(self) -> None:
+        """sd:1397 review: `partial` marks a review incomplete from the manifest's `omitted_paths`.
+        A change to `sd_review_material` coverage that leaves material, prompt and route alone must
+        still move the digest, or a replay would keep a receipt the new code calls incomplete."""
+        root = self.make_repo()
+        self.prepare(root)
+        first = self.run_review(root, FakeRunner(), explain=True)
+        original = sd_review.sd_review_material.coverage
+
+        def summarizing(inventory, overheads):
+            return original([dict(row, summarized=True) for row in inventory], overheads)
+
+        with unittest.mock.patch.object(sd_review.sd_review_material, "coverage", summarizing):
+            moved = self.run_review(root, FakeRunner(), explain=True)
+        self.assertNotEqual(moved["input_manifest"]["omitted_paths"], first["input_manifest"]["omitted_paths"])
+        self.assertNotEqual(moved["request_sha256"], first["request_sha256"])
+
     def test_dry_run_prints_argv_and_runs_nothing(self) -> None:
         root = self.make_repo()
         self.prepare(root)
@@ -1058,9 +1142,21 @@ class PipelineTests(ReviewFixture):
         self.local_block(root, "check: make check")
         result = self.run_review(root, FakeRunner(), dry_run=True)
         self.assertTrue(result["local_block_prepended"])
-        prompt = [row for row in result["planned_invocations"] if row["would_run"]][0]["stdin"]
-        self.assertIn("check: make check", prompt)
-        self.assertTrue(prompt.startswith("Repository-local conventions"))
+        # Every planned reviewer gets the block, not only the first (sd:1002).
+        prompts = [row["stdin"] for row in result["planned_invocations"] if row["would_run"]]
+        self.assertTrue(prompts)
+        for prompt in prompts:
+            self.assertIn("check: make check", prompt)
+            self.assertTrue(prompt.startswith("Repository-local conventions"))
+
+    def test_without_a_local_file_no_block_is_prepended(self) -> None:
+        root = self.make_repo()
+        self.prepare(root)
+        (root / "CLAUDE.local.md").unlink()
+        result = self.run_review(root, FakeRunner(), dry_run=True)
+        self.assertIs(result["local_block_prepended"], False)
+        for row in result.get("planned_invocations") or []:
+            self.assertNotIn("Repository-local conventions", row["stdin"] or "")
 
     def test_the_prompt_names_the_endpoints_the_scope_resolved(self) -> None:
         root = self.make_repo()
@@ -1664,6 +1760,19 @@ class TheWorkstationLaneIsNotPrintedWhereItCannotBeReached(ReviewFixture):
         self.assertIn("no provider registry", text)
         self.assertIn("the provider lines are not reported", text)
 
+    def test_the_suppression_prints_the_registry_refusal_itself(self) -> None:
+        """A registry that is present but unreadable must not be called absent (sd:1000)."""
+
+        home = self.tmp / "broken-home"
+        (home / ".local" / "share" / "sd").mkdir(parents=True)
+        (home / ".local" / "share" / "sd" / "providers.yaml").write_text("providers: [\n", encoding="utf-8")
+        result, text = self.explained({"HOME": str(home)})
+        self.assertTrue(result["registry_refusal"])
+        self.assertNotIn("no provider registry", result["registry_refusal"])
+        self.assertIn(result["registry_refusal"], text)
+        self.assertNotIn("no provider registry", text)
+        self.assertIn("the provider lines are not reported", text)
+
     def test_what_the_lane_is_kept_for_still_prints(self) -> None:
         """The gate is five lines wide, not the whole report."""
 
@@ -2080,7 +2189,7 @@ class TimingPlanTests(ReviewFixture):
         root, args, planned = self.planned()
         self.assertEqual(planned["requested_reviews"], 1)
         self.assertEqual(planned["fallback_candidates"], ["p1", "p2", "p3"])
-        self.assertEqual(planned["timing"]["execution_seconds"], 12600)
+        self.assertEqual(planned["timing"]["execution_seconds"], 12600 + sd_review.sd_lib.GATE_SLOT_SECONDS)  # sd:2611
         self.assertEqual([row["name"] for row in planned["timing"]["candidates"]], ["p0", "p1", "p2", "p3"])
         runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", ""), "p0": sd_review.Completed(127, "", "missing", False)},
                             default=sd_review.Completed(0, json.dumps({"type": "result", "subtype": "success", "structured_output": {"findings": []}}), ""))

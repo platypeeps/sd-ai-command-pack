@@ -23,9 +23,14 @@ no_item = review_fixture.no_item
 
 
 class NoItemPublication(unittest.TestCase):
+    #: A commit message to add on the branch before the record is made.
+    extra_commit: str | None = None
+
     def setUp(self):
         fixture.ShipCase.setUp(self)
         review_fixture.freeze_library(self, self.directory)
+        if getattr(self, "extra_commit", None):
+            _git(self.root, "commit", "--allow-empty", "-qm", self.extra_commit)
         self.database = self.database.with_name("no-items.db")
         initialise(self.database)
         self.connection = connect(self.database)
@@ -136,6 +141,49 @@ class NoItemPublication(unittest.TestCase):
         self.invoke("reconcile")
         self.assertEqual(len([call for call in self.remote.calls if call.method == "PUT"]), 1)
 
+    def test_a_merged_record_reconciles_and_closes_from_the_default_branch(self):
+        """sd:1932: once the merge deletes its branch, the record finishes from main.
+
+        Closing used to need the branch recreated at its old head. Reconcile
+        reads GitHub and the default branch, never this checkout's branch, so
+        the branch guard is lifted for a merged record only.
+        """
+        self.prepare()
+        _git(self.root, "checkout", "-q", "main")
+        self.assertIn("bound to branch topic, not main", self.invoke("reconcile", code=3)["error"])
+        _git(self.root, "checkout", "-q", "topic")
+        merged = self.merge()
+        _git(self.root, "checkout", "-q", "main")
+        _git(self.root, "fetch", "-q", "origin")
+        _git(self.root, "reset", "-q", "--hard", "origin/main")
+        _git(self.root, "branch", "-q", "-D", "topic")
+        self.assertEqual(self.invoke("reconcile")["merge_commit"], merged["merge_commit"])
+        self.assertEqual(self.invoke("review", "--close-record", "fixture work merged")["lifecycle"], "closed")
+        self.assertRegex(self.invoke("reconcile", code=3)["error"], "is closed; reopen it")
+        self.assertEqual(no_item.combined_digest(receipts.read(self.connection, self.key)[1]), self.initial_history)
+
+    def test_a_branch_switch_after_validation_is_refused_at_the_lock(self):
+        """The lock compares the checkout with the branch the record validated.
+
+        Read again after validation, a switch in between becomes the expected
+        branch, and the lock would publish another branch's HEAD under this
+        record. The switch lands at the same commit, so only the branch check
+        can refuse it.
+        """
+        self.prepare()
+        _git(self.root, "branch", "-q", "other")
+        validated = no_item.publication_review
+
+        def then_switch(*args, **kwargs):
+            review = validated(*args, **kwargs)
+            _git(self.root, "checkout", "-q", "other")
+            return review
+
+        with patch.object(no_item, "publication_review", side_effect=then_switch):
+            result = self.merge(code=3)
+        self.assertIn("the checkout left topic", result["error"])
+        self.assertFalse([call for call in self.remote.calls if call.method == "PUT"])
+
     def test_item_runner_and_commit_flags_refuse_before_any_database_write(self):
         before = list(self.connection.iterdump())
         for command, flags in (("prepare", ["--deliver"]), ("prepare", ["--path", "src.py"]),
@@ -211,7 +259,7 @@ class NoItemPublication(unittest.TestCase):
 
     def test_assignment_in_another_registered_clone_blocks_itemless_merge(self):
         self.prepare()
-        upsert_repo(self.connection, str(self.operator), remote=self.remote_url)
+        upsert_repo(self.connection, str(self.operator), remote=self.remote_url, managed=1)
         item = create_item(self.connection, kind="work", title="concurrent work", status="in_progress",
                            repo=str(self.operator), branch="other")
         create_assignment(self.connection, item=item, role="author", status="ending")
@@ -234,6 +282,22 @@ class NoItemPublication(unittest.TestCase):
             result = self.merge(code=3)
         self.assertIn("does not bind", result["error"])
         self.assertFalse([call for call in self.remote.calls if call.method == "PUT"])
+
+
+
+class NoItemDeliversWarning(unittest.TestCase):
+    """sd:2171. A no-item squash drops a branch commit's `Delivers:`, so
+    `sd task status N done --delivered-by` found no trailer; prepare says so."""
+
+    extra_commit = "record the delivery\n\nDelivers: sd:2005\nAuthored-with: human"
+    setUp, invoke = NoItemPublication.setUp, NoItemPublication.invoke
+
+    def test_a_branch_commit_that_delivers_an_item_warns_to_ship_with_it(self):
+        prepared = self.invoke("prepare", "--title", "Record the delivery")
+        self.assertEqual(prepared["phase"], "ready_to_send")
+        [warning] = [line for line in prepared["warnings"] if "Delivers:" in line]
+        self.assertEqual(warning, f"commit {self.head[:12]} carries `Delivers: sd:2005`, and a no-item squash "
+                                  "does not carry it; ship with --item 2005 to record the delivery")
 
 
 if __name__ == "__main__":

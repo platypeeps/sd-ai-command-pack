@@ -16,6 +16,17 @@ A body with no item owns nothing: every owned line refuses there, indented
 or not, and nothing is stripped. With an item, only a line at column zero is
 read, because that is the only form git or rule 5 reads; an indented line is
 prose about a trailer, and the body keeps it.
+
+`Closes: sd:N[, sd:M]` is the one owned line a body keeps: it names the items
+the pull request co-delivers, and the merge closes each with a `Delivers:`
+trailer beside the claimed item's (sd:1481, operator ruling 2026-10-03).
+`Refs:` is not owned: it names related items, which stay open.
+
+A column-zero owned line inside a fenced code block or an HTML comment is
+an example, not a claim, so `closes_named` and `strip_closes` never read one.
+`normalize` refuses it rather than keep it: the squash carries the body as
+written, and `sd_lib.demoted_trailers` would refuse the line there, at merge.
+Indented, it is prose like any other example.
 """
 
 from __future__ import annotations
@@ -24,9 +35,13 @@ import dataclasses
 import functools
 import pathlib
 import re
+import tempfile
 
 import sd_lib
-from sd_ship_remote import Refusal
+from sd_ship_remote import Refusal, completed_process
+
+#: A `Closes:` value: one or more `sd:<n>`, comma-separated.
+_CLOSES_VALUE = re.compile(r"sd:[1-9][0-9]*(?:[ \t]*,[ \t]*sd:[1-9][0-9]*)*")
 
 #: The canonical spelling of each owned key, by its case-folded name.
 _CANONICAL = {key.rstrip(":").lower(): key for key in sd_lib.OWNED_TRAILERS}
@@ -46,16 +61,63 @@ class OwnedLine:
     key: str
     value: str
     indented: bool
+    quoted: bool
+
+
+#: A fence that opens or closes a fenced code block: up to three spaces, then
+#: three or more backticks or tildes (CommonMark).
+_FENCE_RE = re.compile(r"^ {0,3}(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
+
+
+def quoted_lines(body: str) -> set[int]:
+    """The 1-based numbers of the lines of `body` a fenced code block or an HTML comment holds.
+
+    A fence closes on a line of the same character, at least as long, and
+    nothing else; an unclosed fence runs to the end. A comment holds a line
+    when it is open where the line starts. Inside a fence a comment is text.
+    """
+    quoted: set[int] = set()
+    fence = ""
+    commented = False
+    for number, line in enumerate(body.split("\n"), start=1):
+        line = line.rstrip("\r")
+        if fence:
+            quoted.add(number)
+            match = _FENCE_RE.match(line)
+            if match and match["fence"][0] == fence[0] and len(match["fence"]) >= len(fence) and not match["info"].strip():
+                fence = ""
+            continue
+        if commented:
+            quoted.add(number)
+        match = _FENCE_RE.match(line)
+        if not commented and match and not (match["fence"][0] == "`" and "`" in match["info"]):
+            quoted.add(number)
+            fence = match["fence"]
+            continue
+        rest = line
+        while True:
+            if commented:
+                end = rest.find("-->")
+                if end < 0:
+                    break
+                commented, rest = False, rest[end + 3:]
+            else:
+                start = rest.find("<!--")
+                if start < 0:
+                    break
+                commented, rest = True, rest[start + 4:]
+    return quoted
 
 
 def owned_lines(body: str) -> list[OwnedLine]:
-    """Every line of `body` that starts with an owned key, indented or not."""
+    """Every line of `body` that starts with an owned key, indented or not, quoted or not."""
     found = []
+    quoted = quoted_lines(body)
     for number, line in enumerate(body.split("\n"), start=1):
         match = _OWNED_RE.match(line.rstrip("\r"))
         if match is not None:
             found.append(OwnedLine(number, line.rstrip("\r"), _CANONICAL[match["key"].lower()],
-                                   match["value"].strip(), bool(match["indent"])))
+                                   match["value"].strip(), bool(match["indent"]), number in quoted))
     return found
 
 
@@ -89,6 +151,9 @@ def known_author(value: str, readers: list) -> bool:
 
 def problem(line: OwnedLine, item: int, deliver: bool, readers: list | None) -> str | None:
     """Why `line` cannot be stripped from an item's body, or None when it can."""
+    if line.quoted:
+        return ("a code block or comment holds it, so it reads as an example; indent it to keep it as one, "
+                "or move it out of the block to make it a trailer")
     expected = f"sd:{item}"
     if line.key in (sd_lib.ITEM_TRAILER, sd_lib.WORK_TRAILER):
         return None if line.value == expected else f"expected `{line.key} {expected}`"
@@ -99,8 +164,13 @@ def problem(line: OwnedLine, item: int, deliver: bool, readers: list | None) -> 
     if line.key == sd_lib.AUTHORED_TRAILER:
         if known_author(line.value, registries() if readers is None else readers):
             return None
-        return (f"expected `{line.key} {sd_lib.HUMAN_AUTHOR}` or an `<entry>/<vendor>` the provider "
+        return (f"expected `{line.key} {sd_lib.HUMAN_AUTHOR}`, `{sd_lib.SCRIPT_AUTHOR}` or an `<entry>/<vendor>` the provider "
                 f"registry resolves; the commits decide authorship")
+    if line.key == sd_lib.CLOSES_TRAILER:
+        if _CLOSES_VALUE.fullmatch(line.value) and expected not in _ids(line.value):
+            return None
+        return (f"expected `{line.key} sd:<n>[, sd:<m>]` naming co-delivered items other than {expected}, "
+                "which closes with --deliver")
     if line.key == sd_lib.ATTRIBUTES_TRAILER:
         return "expected no line: it names a pre-squash sha, and the squash carries authorship from the commits"
     return f"expected no line: `{line.key}` rides a later merge or an empty commit, never this body"
@@ -129,6 +199,8 @@ def normalize(body: str, item: int | None, *, deliver: bool = False,
                       + "; ".join(f"line {line.number}: `{line.text}`; {reason}" for line, reason in problems),
                       code="body_trailer_refused", boundary="input", state="operator_decision",
                       next_action="Remove or correct the named lines; sd-ship writes them itself.")
+    # A `Closes:` line stays: it is the body's own claim, and the merge reads it there.
+    read = [line for line in read if line.key != sd_lib.CLOSES_TRAILER]
     stripped = {line.number for line in read}
     lines = body.split("\n")
     kept: list[str] = []
@@ -141,6 +213,38 @@ def normalize(body: str, item: int | None, *, deliver: bool = False,
     return "\n".join(kept).rstrip(), tuple(line.text for line in read)
 
 
+def _ids(value: str) -> list[str]:
+    return re.findall(r"sd:[0-9]+", value)
+
+
+def closes_named(body: str, item: int | None) -> tuple[int, ...]:
+    """The items the body's column-zero, unquoted `Closes:` lines name, in order, without repeats.
+
+    No item, no closing: a no-item body refuses the line in `normalize`.
+    """
+    if item is None:
+        return ()
+    found: list[int] = []
+    for line in owned_lines(body):
+        if line.key == sd_lib.CLOSES_TRAILER and not line.indented and not line.quoted:
+            for number in (int(name[3:]) for name in _ids(line.value)):
+                if number not in found:
+                    found.append(number)
+    return tuple(found)
+
+
+def strip_closes(body: str) -> str:
+    """`body` without its column-zero `Closes:` lines, for the squash message.
+
+    The squash states each as a `Delivers:` trailer; a `Closes:` line left in
+    the prose is a trailer outside the block git reads, and the merge refuses
+    such a message (`sd_lib.demoted_trailers`).
+    """
+    kept = {line.number for line in owned_lines(body)
+            if line.key == sd_lib.CLOSES_TRAILER and not line.indented and not line.quoted}
+    return "\n".join(text for number, text in enumerate(body.split("\n"), start=1) if number not in kept)
+
+
 def published(body: str, item: int) -> str:
     """The body as `sd-ship` publishes it: normalized, then one `Work:` line."""
     return f"{body}\n\n{sd_lib.WORK_TRAILER} sd:{item}\n"
@@ -150,6 +254,80 @@ def published(body: str, item: int) -> str:
 def docs_lint():
     """`sd-docs-lint` as a module, loaded once: rule 8 is the one reading of scope."""
     return sd_lib.sibling("sd_docs_lint_scope", "sd-docs-lint")
+
+
+def lint_failures(tree: pathlib.Path, argv: list[str]) -> list[str]:
+    """The `FAIL` lines `argv` prints in `tree`, each path made relative to `tree`.
+
+    A non-zero exit that printed no `FAIL` line is refused with its raw output:
+    the lint also exits 1 on an uncaught exception, and a traceback read as
+    zero failures would let a lint that never finished pass.
+    """
+    result = completed_process(tree, argv, timeout=300, answers=frozenset({0, 1}))
+    # Longest first: a resolved `/private/var/...` contains the `/var/...` form.
+    prefixes = sorted({f"{tree}/", f"{tree.resolve()}/"}, key=len, reverse=True)
+    failures = []
+    for line in result.stderr.splitlines():
+        if line.startswith("FAIL "):
+            failure = line[len("FAIL "):]
+            for prefix in prefixes:
+                failure = failure.replace(prefix, "")
+            failures.append(failure)
+    if result.returncode and not failures:
+        raise Refusal((result.stderr or result.stdout or f"{argv[0]} failed").strip()[-2000:],
+                      code="docs_lint_failed", state="retryable_failure",
+                      next_action="Inspect the lint error, resolve its cause, then prepare again.")
+    return failures
+
+
+def base_lint_failures(root: pathlib.Path, argv: list[str], base: str) -> set[str]:
+    """`lint_failures` in a scratch checkout of `origin/<base>`; empty if it cannot be checked out or linted.
+
+    Hooks are off for the checkout: a consumer's `post-checkout` is no part of a lint.
+    Git runs through `completed_process`, whose timeout a large tree's checkout fits.
+    """
+    with tempfile.TemporaryDirectory(prefix="sd-ship-lint-base-") as directory:
+        tree = pathlib.Path(directory) / "base"
+        try:
+            completed_process(root, ["git", "-c", "core.hooksPath=/dev/null", "worktree", "add", "--detach",
+                                     "--quiet", str(tree), f"refs/remotes/origin/{base}"], timeout=300)
+        except Refusal:
+            return set()
+        try:
+            return set(lint_failures(tree, argv))
+        except Refusal:
+            # A base run that did not finish excuses nothing.
+            return set()
+        finally:
+            completed_process(root, ["git", "worktree", "remove", "--force", str(tree)], timeout=300,
+                              answers=frozenset(range(256)))
+
+
+def lint_against_base(root: pathlib.Path, argv: list[str], base: str) -> list[str]:
+    """Judge a failed docs lint against the same lint at `origin/<base>` (sd:1646).
+
+    A tree failure the default branch already has is not the branch's to fix:
+    it comes back as a warning, and only the failures the branch introduces
+    refuse. The base run gets no `--pr-body`, since the body is the branch's
+    own, so a body-rule failure is never excused. Under `--body-only` no tree
+    rule ran, and the head's answer stands. A failure is matched by its whole
+    line, so one the branch moved to another line counts as introduced.
+    """
+    head = lint_failures(root, argv)
+    known: list[str] = []
+    if head and "--body-only" not in argv:
+        at = argv.index("--pr-body") if "--pr-body" in argv else len(argv)
+        on_base = base_lint_failures(root, argv[:at] + argv[at + 2:], base)
+        known = [failure for failure in head if failure in on_base]
+    introduced = [failure for failure in head if failure not in known]
+    if introduced:
+        also = f"\n{len(known)} more failure(s) already on origin/{base} do not block this branch." if known else ""
+        raise Refusal(f"sd-docs-lint: {len(introduced)} failure(s) this branch introduces:\n"
+                      + "\n".join(f"FAIL {failure}" for failure in introduced) + also,
+                      code="docs_lint_failed", state="retryable_failure",
+                      next_action="Fix the failures this branch introduces, commit, then prepare again.")
+    return [f"sd-docs-lint: {len(known)} failure(s) already on origin/{base}, not introduced by this branch, "
+            "do not block it: " + "; ".join(known)] if known else []
 
 
 def pull_paths(files: list) -> list[str]:

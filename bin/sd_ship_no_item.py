@@ -65,6 +65,41 @@ UNTRUSTED = "untrusted imported evidence; it consumes budget and proves no cover
 #: the canonical repository, the stable review ID, and the two ordered record
 #: lists. Branch, lifecycle, and identity revision are mutable and stay out.
 HISTORY_DIGEST_VERSION = 1
+#: The one command that allocates a record. An ID is allocated, never chosen,
+#: so every refusal about a missing or absent ID names this (sd:2008, sd:2026).
+CREATE_RECORD_COMMAND = "sd-ship review --no-item --create-record --assert-new-work"
+ALLOCATE_HINT = (f"Allocate a record for genuinely new work with `{CREATE_RECORD_COMMAND}`; "
+                 "its result prints the ID in the `review_id` field. Never allocate to reset spent passes.")
+
+
+def review_identity_required() -> Refusal:
+    """The refusal for a no-item command without `--review-id`, from one definition."""
+    return Refusal("no-item commands require --review-id ID; missing record identity never allocates a fresh review budget",
+                   code="review_identity_required", boundary="input", state="operator_decision",
+                   next_action=f"Pass the review ID an earlier --create-record printed. {ALLOCATE_HINT}")
+
+
+def missing_record(review_id: str) -> Refusal:
+    return Refusal(f"no no-item record {review_id} exists in this repository; a review ID is allocated "
+                   f"by `{CREATE_RECORD_COMMAND}`, never chosen",
+                   code="review_record_missing", boundary="input", state="operator_decision",
+                   next_action=f"Check the ID against the `review_id` an earlier --create-record printed. {ALLOCATE_HINT}")
+
+
+def foreign_item(item: int, item_repository: str, repository: str, command: str) -> Refusal:
+    """The refusal for `--item N` from a checkout of another repository, naming the way on (sd:2576).
+
+    The PR still ships here, as an itemless record; only `hold` has no itemless form.
+    """
+    where = f"To ship under sd:{item}, run from a checkout of {item_repository}."
+    if command not in ("hold", "release"):
+        where += (f" To ship this checkout's PR without an item, run `{CREATE_RECORD_COMMAND}`, then "
+                  f"`sd-ship {command} --no-item --review-id <review_id>` with the review_id it prints"
+                  f"{'; an itemless merge also needs --manual --expected-head SHA' if command == 'merge' else ''}. "
+                  f"That records nothing on sd:{item}; record the PR there with `sd task note {item}`.")
+    return Refusal(f"item repository does not match this checkout's origin: item sd:{item} belongs to "
+                   f"{item_repository}, not {repository}",
+                   code="item_repository_mismatch", boundary="input", state="operator_decision", next_action=where)
 
 
 def observed_at() -> str:
@@ -241,6 +276,9 @@ class GitFacts:
     base: str
     commits: tuple[str, ...]
     trees: tuple[str, ...]
+    #: The refreshed base's tree. A commit that changes nothing has it too, and
+    #: so does every record that landed there (sd:2009).
+    base_tree: str = ""
 
 
 def committed_facts(root: pathlib.Path, *, require_diff: bool = True) -> GitFacts:
@@ -274,7 +312,8 @@ def committed_facts(root: pathlib.Path, *, require_diff: bool = True) -> GitFact
             "commit the proposed change before allocating a record"
         )
     trees = tuple(git(root, "rev-parse", f"{commit}^{{tree}}") for commit in commits)
-    return GitFacts(repository, branch, head, git(root, "rev-parse", "HEAD^{tree}"), base, commits, trees)
+    return GitFacts(repository, branch, head, git(root, "rev-parse", "HEAD^{tree}"), base, commits, trees,
+                    git(root, "rev-parse", f"{base}^{{tree}}"))
 
 
 def receipt_covers(receipt: dict, facts: GitFacts) -> bool:
@@ -307,10 +346,17 @@ def index_owner(connection: sqlite3.Connection, store, facts: GitFacts, family: 
 
 
 def index_claims(facts: GitFacts) -> tuple[tuple[str, str], ...]:
+    """The identities a record claims. The base's own tree is not one of them.
+
+    An empty commit, such as an `sd attribute` repair, has the tree the base
+    already holds, which is the tree the last merged record landed. Claiming it
+    refused every attribution repair as a continuation of that record (sd:2009);
+    its commit is still claimed, so the same empty commit cannot allocate twice.
+    """
     claims = [("branch", facts.branch), ("tree", facts.tree)]
     claims += [("head", commit) for commit in facts.commits]
     claims += [("tree", tree) for tree in facts.trees]
-    return tuple(dict.fromkeys(claims))
+    return tuple(claim for claim in dict.fromkeys(claims) if claim != ("tree", facts.base_tree))
 
 
 def check_no_item_records(connection: sqlite3.Connection, store, facts: GitFacts) -> None:
@@ -428,7 +474,10 @@ def create_record(root: pathlib.Path, connection: sqlite3.Connection, database: 
             "not a renamed or rewritten continuation, and hashes cannot prove that"
         )
     if args.review_id:
-        raise Refusal("--create-record allocates a new record; it cannot name an existing --review-id")
+        raise Refusal(f"--create-record allocates a new record and prints its ID; drop --review-id {args.review_id}, "
+                      "since an ID is allocated, never chosen",
+                      code="review_id_not_chosen", boundary="input", state="operator_decision",
+                      next_action=f"Run `{CREATE_RECORD_COMMAND}` without --review-id, then pass the printed review_id.")
     facts = committed_facts(root)
     imported, evidence = import_claim(root, args, facts)
     check_item_receipts(connection, store, facts)
@@ -463,13 +512,17 @@ def selected_record(connection: sqlite3.Connection, store, root: pathlib.Path, a
     key = review_key(facts.repository, args.review_id)
     revision, state = store.read(connection, key)
     if not state:
-        raise Refusal(f"no no-item record {args.review_id} exists in this repository")
+        raise missing_record(args.review_id)
     if state.get("lifecycle") != "active":
         raise Refusal(f"no-item record {args.review_id} is closed; reopen it before any further operation")
     if state.get("branch") != facts.branch:
         raise Refusal(
             f"no-item record {args.review_id} is bound to branch {state.get('branch')}, not {facts.branch}; "
-            "rebind the record explicitly before any other operation"
+            "rebind the record explicitly before any other operation",
+            code="review_branch_mismatch", boundary="input", state="operator_decision",
+            next_action=(f"Run this from branch {state.get('branch')}, or move the record here with "
+                         f"`sd-ship review --no-item --review-id {args.review_id} --rebind-branch {state.get('branch')}`. "
+                         "--close-record and --reopen-record run from any branch."),
         )
     return key, facts, revision, state
 
@@ -619,6 +672,25 @@ def open_review(root: pathlib.Path, connection, database: pathlib.Path, args, st
                         history=NoItemHistory(), runtime=runtime)
 
 
+def reconciles_from_default(root: pathlib.Path, args, state: dict) -> str | None:
+    """The default branch, when a merged record reconciles from it with its own branch gone (sd:1932).
+
+    Reconciling reads GitHub's merge and the default branch's tip, never this
+    checkout's branch, so after the branch is deleted the record's branch guard
+    only forced the operator to recreate it. The guard stays for every record
+    that has not reached a merge dispatch, and for a closed record: None.
+    The branch returned is the one read here, so the ship lock compares the
+    checkout with what was validated, not with a second read.
+    """
+    if args.command not in ("reconcile", "prepare") or state.get("phase") not in ("merged", "merge_dispatch"):
+        return None
+    if state.get("lifecycle") != "active":
+        return None
+    _remote, default = sd_lib.upstream(root)
+    live = sd_lib.git_output(["symbolic-ref", "--quiet", "--short", "HEAD"], root)
+    return live if live == default != state.get("branch") else None
+
+
 def publication_review(root: pathlib.Path, connection, database: pathlib.Path, args, store, runtime) -> SharedReview:
     """Observation reads a durable identity without inspecting or changing the current branch."""
     validate_schema(connection)
@@ -626,14 +698,21 @@ def publication_review(root: pathlib.Path, connection, database: pathlib.Path, a
     key = review_key(repository, args.review_id)
     revision, state = store.read(connection, key)
     if not state:
-        raise Refusal(f"no no-item record {args.review_id} exists in this repository")
-    if args.command != "observe":
+        raise missing_record(args.review_id)
+    # `checkout_branch` is the branch validated here, read once: the ship lock
+    # compares the live checkout with it, so a switch after this point refuses.
+    default = None if args.command == "observe" else reconciles_from_default(root, args, state)
+    if args.command != "observe" and default is None:
         require_diff = args.command == "prepare" and state.get("phase") not in ("merged", "merge_dispatch")
-        return open_review(root, connection, database, args, store, runtime, require_diff=require_diff)
-    return SharedReview(root, connection, database, args, store=store, repository=repository,
-                        branch=state["branch"], head=state.get("head", ""), key=key, revision=revision,
-                        state=stored_digest(state), identity=NoItemIdentity(args.review_id, repository, root),
-                        history=NoItemHistory(), runtime=runtime)
+        review = open_review(root, connection, database, args, store, runtime, require_diff=require_diff)
+        review.checkout_branch = review.branch
+        return review
+    review = SharedReview(root, connection, database, args, store=store, repository=repository,
+                          branch=state["branch"], head=state.get("head", ""), key=key, revision=revision,
+                          state=stored_digest(state), identity=NoItemIdentity(args.review_id, repository, root),
+                          history=NoItemHistory(), runtime=runtime)
+    review.checkout_branch = default or state["branch"]
+    return review
 
 
 def dispatch_review(root: pathlib.Path, connection, database: pathlib.Path, args, store, runtime) -> dict:
@@ -689,7 +768,7 @@ def any_record(connection: sqlite3.Connection, store, root: pathlib.Path, args) 
     key = review_key(facts.repository, args.review_id)
     revision, state = store.read(connection, key)
     if not state:
-        raise Refusal(f"no no-item record {args.review_id} exists in this repository")
+        raise missing_record(args.review_id)
     return key, facts, revision, stored_digest(state)
 
 
@@ -797,10 +876,7 @@ def run_no_item(root: pathlib.Path, connection: sqlite3.Connection, database: pa
     if args.command == "review" and args.create_record:
         return create_record(root, connection, database, args, store)
     if not args.review_id:
-        raise Refusal(
-            "no-item commands require --review-id ID; missing record identity "
-            "never allocates a fresh review budget"
-        )
+        raise review_identity_required()
     if args.command == "verify-review":
         return verify_review(root, connection, database, args, store, runtime)
     if args.command == "adjudicate":

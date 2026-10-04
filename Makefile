@@ -126,7 +126,7 @@ VENV_BIN = $(VENV)/bin
 SETUP_VENV = $(if $(filter command line environment,$(origin VENV)),$(VENV),.venv)
 SETUP_PYTHON = $(SETUP_VENV)/bin/python
 
-.PHONY: setup hooks fonts test lint audit docs-lint check gate-env
+.PHONY: setup hooks fonts test lint precheck audit docs-lint check gate-env
 
 # The record BORROWED reads lives inside the environment, so `rm -rf .venv`
 # takes both and a record can never outlive what it describes. The rest of
@@ -199,7 +199,9 @@ setup:
 
 # The pre-commit tier of sd:431. `hooks/pre-commit` runs Ruff over the staged
 # Python and the two whole-tree test passes that walk the tree, with a
-# wall-time budget in its header. The install is one relative symlink,
+# wall-time budget in its header. `hooks/commit-msg` (sd:1931) refuses a
+# trailer line git will not read, and is linked the same way beside it; both
+# paths are checked before either link is made. The install is one relative symlink,
 # <common .git>/hooks/pre-commit -> ../../hooks/pre-commit, in the clone's
 # common git directory: one hook per clone, read from the main checkout's
 # tracked file, shared by every linked worktree, whichever worktree ran
@@ -220,12 +222,17 @@ hooks:
 		printf '%s\n' "error: core.hooksPath is set to $$set; the pack's hook lives in .git/hooks -- run 'git config --unset core.hooksPath' (bin/sd-status names it as residue) and retry" >&2; \
 		exit 1; \
 	fi; \
-	dir="$$(git rev-parse --path-format=absolute --git-common-dir)/hooks"; link="$$dir/pre-commit"; target=../../hooks/pre-commit; \
-	if { [ -e "$$link" ] || [ -L "$$link" ]; } && [ "$$(readlink "$$link")" != "$$target" ]; then \
-		printf '%s\n' "error: $$link exists and is not the link to hooks/pre-commit; move it aside first" >&2; \
-		exit 1; \
-	fi; \
-	mkdir -p "$$dir" && ln -sfn "$$target" "$$link" && printf '%s\n' "git hooks: $$link -> $$(readlink "$$link")"
+	dir="$$(git rev-parse --path-format=absolute --git-common-dir)/hooks"; \
+	for hook in pre-commit commit-msg; do \
+		link="$$dir/$$hook"; target="../../hooks/$$hook"; \
+		if { [ -e "$$link" ] || [ -L "$$link" ]; } && [ "$$(readlink "$$link")" != "$$target" ]; then \
+			printf '%s\n' "error: $$link exists and is not the link to hooks/$$hook; move it aside first" >&2; \
+			exit 1; \
+		fi; \
+	done; \
+	mkdir -p "$$dir" && for hook in pre-commit commit-msg; do \
+		ln -sfn "../../hooks/$$hook" "$$dir/$$hook" && printf '%s\n' "git hooks: $$dir/$$hook -> $$(readlink "$$dir/$$hook")" || exit 1; \
+	done
 
 # `generate` and `surface-check` are gone with step 3e. They regenerated the
 # committed per-platform copies under templates/ from .github/command-sources/,
@@ -271,7 +278,9 @@ endif
 # sd:1541. Local test runs at once on this machine; `SD_GATE_SLOTS=0 make test` lifts it.
 # Under `sd-check`, which holds a machine-wide gate slot (sd:1996), the variable
 # arrives as 0 and `?=` keeps it, so the gate's own tests take no second slot.
-SD_GATE_SLOTS ?= 2
+# sd:2522. Unset, the count is the machine's, read as `sd-check` reads it, so a
+# plain `make test` and every gate share one pool; a helper that cannot answer still caps.
+SD_GATE_SLOTS ?= $(shell "$(PYTHON)" bin/sd_gate_slots.py count 2>/dev/null || echo 1)
 
 test:
 	PYTHON_BIN="$(VENV_PYTHON)" SD_GATE_SLOTS="$(SD_GATE_SLOTS)" $(TEST_RUNNER_ENV) bash .github/scripts/run-tests.sh
@@ -346,6 +355,18 @@ lint:
 	fi
 	@STRICT="$(STRICT)" bash .github/scripts/check-bash32-syntax.sh
 
+# `precheck` is `lint` plus the always-run test modules, about a minute
+# (sd:2604). `sd-check` runs it before it waits for a gate slot and runs
+# nothing more when it fails, so a lint error or a broken whole-tree module
+# costs a minute rather than the slot wait and a full suite. The modules are
+# the ones select-tests.py reads as the always-run set; run-precheck.py runs
+# each on its own and names every one that fails. A lint failure stops make
+# at `lint`, and make's own error line names it. `check` does not run
+# `precheck`: under `sd-check` it has already run, and `check` still runs
+# `lint` first and every module in `test`.
+precheck: lint
+	"$(VENV_PYTHON)" .github/scripts/run-precheck.py
+
 # A scanner found on PATH is whatever version happens to be installed, while
 # `make setup` installs the requirements-security.txt pin under
 # --require-hashes. When the two differ the gate is not reproducible: a newer
@@ -391,9 +412,11 @@ audit:
 # `test` lints temporary fixture repositories, `sd-ship` lints at delivery
 # time, and nothing ran either against this checkout's own docs/work. The lint
 # reads `sd_lib` and the working tree only, so it needs no database and no
-# provisioned library. Item 370.
+# provisioned library. Item 370. `--no-history` keeps it to the tree: without
+# it rule 2 fetches the remote and reads `git log` for each item's delivery,
+# and the gate's verdict would hang on both (sd:2606).
 docs-lint:
-	"$(VENV_PYTHON)" bin/sd-docs-lint
+	"$(VENV_PYTHON)" bin/sd-docs-lint --no-history
 
 # Re-vendor the research renderer's Latin woff2 faces and rewrite
 # bin/sd_research_fonts.py from them. Needs network; not part of `check`,
@@ -422,7 +445,7 @@ check: lint audit docs-lint test
 # Gate mode only (see SD_LOCAL_GATE above): every lane waits for the pinned
 # in-tree environment, which is built once per make. Outside the gate
 # GATE_ENV is empty and this line adds nothing.
-lint audit docs-lint test: $(GATE_ENV)
+lint precheck audit docs-lint test: $(GATE_ENV)
 
 gate-env:
 	"$(PYTHON)" .github/scripts/provision-gate-env.py "$(PYTHON)"

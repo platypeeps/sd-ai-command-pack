@@ -43,12 +43,15 @@ _FORGE_CLAIMS = (
     r"\bfork(?:s|ed|ing)?\b",
     r"\brebas(?:e|es|ed|ing)\b",
     r"\bcherry\s*pick(?:s|ed|ing)?\b",
+    r"\bpublish(?:es|ed|ing)?\b",
+    r"\breleas(?:e|es|ed|ing)\b",
 )
 
 #: What turns a mention of that vocabulary into a denial. "no branch" and
 #: "open nothing themselves" are true statements the comment exists to make,
 #: so the check reads clause by clause and skips any clause that denies.
-_NEGATORS = r"\b(?:no|not|never|nothing|none|neither|nor|without)\b"
+#: A contraction ("doesn't", "won't") denies as "not" does.
+_NEGATORS = r"\b(?:no|not|never|nothing|none|neither|nor|without)\b|n['\u2019]t\b"
 
 #: Clause boundaries. `and` and `but` split as well as punctuation, so a
 #: promise cannot shelter under a denial standing next to it.
@@ -349,8 +352,8 @@ class SkillHelpText(SkillFixture):
                 }
         raise AssertionError("sd has no `skill` group")
 
-    def queued_move(self, verb: str, name: str, path: str | None = None):
-        """What one real run of `verb` queues: how many, and to where."""
+    def queued_move(self, verb: str, name: str, source: str, path: str | None = None):
+        """What one real run of `verb` queues: how many, and to where; it must move from `source` (sd:1002)."""
 
         result = self.request(verb, name, path)
         move = re.search(
@@ -359,6 +362,7 @@ class SkillHelpText(SkillFixture):
         )
         self.assertIsNotNone(move, "the queued brief no longer names the move")
         assert move is not None
+        self.assertEqual(move.group(1), source, f"{verb} moves from the wrong tree")
         endpoint = "contrib" if move.group(2) == "contrib" else "path"
         return len(result["assignments"]), endpoint
 
@@ -378,8 +382,8 @@ class SkillHelpText(SkillFixture):
     def test_help_matches_what_each_verb_really_queues(self) -> None:
         item, notes = self.reviewed()
         observed = {
-            "promote": self.queued_move("promote", "sd-candidate", "development"),
-            "demote": self.queued_move("demote", "sd-kept"),
+            "promote": self.queued_move("promote", "sd-candidate", "contrib", "development"),
+            "demote": self.queued_move("demote", "sd-kept", "skills"),
             # Neither moves a directory, so the brief names no endpoint.
             "review": (len(self.request("review", "sd-candidate")["assignments"]), None),
             "apply": (len(self.request("apply", item=item, notes=notes)["assignments"]), None),
@@ -404,6 +408,19 @@ class SkillHelpText(SkillFixture):
         self.assertIn("queue", text)
         self.assertIn("checkout", text)
         self.assertRegex(text, _NEGATORS)
+
+
+class PromiseReaderTests(unittest.TestCase):
+    """sd:1002: the promise reader itself, on the strings its review found it misread."""
+
+    def test_a_promise_to_publish_is_a_forge_claim(self) -> None:
+        self.assertNotEqual([], _promised(
+            "queue one code review task to move a contrib/ skill onto a path and publish the result"))
+
+    def test_a_contracted_denial_is_a_denial(self) -> None:
+        for text in ("doesn't open a pull request", "it won't push a branch", "can’t merge anything"):
+            with self.subTest(text=text):
+                self.assertEqual([], _promised(text))
 
 
 if __name__ == "__main__":

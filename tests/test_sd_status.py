@@ -521,6 +521,36 @@ class ProtectionGapTests(unittest.TestCase):
         self.assertIn("no pull-request review is required on main", found[0]["gap"])
 
 
+class GapVocabularyTests(unittest.TestCase):
+    """The pack owns the gap vocabulary, and the system's collector must agree (sd:1372).
+
+    `sd_db.protection` writes the fleet's gap ids and the dashboard reads them;
+    `sd-status` emits them here and `ACKNOWLEDGEABLE_GAPS` accepts them. Both
+    sides were checked alone, and nothing held them together: an id added on
+    one side only failed nothing. This reads the system library at the pin in
+    `.sd-system-rev`, the one `make setup` installs, and names each id on one
+    side only. `unprotected` is the system's status column, not a gap cell.
+    """
+
+    def test_the_systems_gap_ids_are_the_packs(self) -> None:
+        import sd_db.protection as system  # noqa: PLC0415 - provisioned by `make setup`
+
+        pack = set(status.ACKNOWLEDGEABLE_GAPS) - {"unprotected"}
+        self.assertEqual(
+            (sorted(pack - set(system.GAP_IDS)), sorted(set(system.GAP_IDS) - pack)), ([], []),
+            "(pack only, system only) gap ids",
+        )
+
+    def test_the_systems_merge_flags_are_the_ones_sd_status_reports(self) -> None:
+        import sd_db.protection as system  # noqa: PLC0415 - provisioned by `make setup`
+
+        pack = {flag["id"] for flag in status._merge_settings({})}
+        self.assertEqual(
+            (sorted(pack - set(system.MERGE_FLAG_IDS)), sorted(set(system.MERGE_FLAG_IDS) - pack)), ([], []),
+            "(pack only, system only) merge flag ids",
+        )
+
+
 class AcknowledgementTests(unittest.TestCase):
     """`.github/sd-status.json`: what it accepts, and when it stops accepting.
 
@@ -587,6 +617,14 @@ class AcknowledgementTests(unittest.TestCase):
         # agreement binding; without it the schema would accept anything and
         # only the loader would object, one commit later.
         self.assertIs(state["additionalProperties"], False)
+
+    def test_the_schema_offers_exactly_the_ids_the_reader_accepts(self) -> None:
+        """An editor is told the ids `ACKNOWLEDGEABLE_GAPS` allows, not any string (sd:1000)."""
+        schema = json.loads(
+            (BIN.parent / ".github" / "sd-status.schema.json").read_text(encoding="utf-8")
+        )
+        gap_id = schema["properties"]["accepted_gaps"]["items"]["properties"]["id"]
+        self.assertEqual(gap_id.get("enum"), sorted(status.ACKNOWLEDGEABLE_GAPS))
 
     def test_absent_protection_is_a_distinct_observed_state_from_empty_protection(self) -> None:
         """The fact that separates "no object" from "an object enforcing nothing".
@@ -717,6 +755,8 @@ class AcknowledgementTests(unittest.TestCase):
         # where it is meant to be read.
         entries, problems = status.load_acknowledgements(BIN.parent)
         self.assertEqual(problems, [])
+        # An absent file also loads as `([], [])`; the tracked acceptance must be read (sd:1002).
+        self.assertTrue(entries, "the repository's own acceptance file read as empty")
 
     def test_an_empty_state_is_rejected_rather_than_accepting_the_id(self) -> None:
         # An entry with no facts would accept `reviews` whatever the branch
@@ -1116,6 +1156,21 @@ class ProtectionSectionTests(StatusFixture):
             "ok  [unprotected] accepted 2026-09-11: sole operator", completed.stdout
         )
         self.assertIn("until a second account with push rights exists", completed.stdout)
+
+    def test_an_accepted_unprotected_branch_whose_rules_failed_prints_as_unknown(self) -> None:
+        """sd:1000. The same acknowledgement, but the rules endpoint did not
+        answer a list: the report says unknown and why, and prints no
+        acceptance over a state it could not read."""
+        self.acknowledge(self.UNPROTECTED)
+        self.with_github(pulls=[], protection=None, rules={"message": "Server Error"})
+        section = self.report()["protection"]
+        self.assertIsNone(section["protected"])
+        self.assertEqual(section["accepted"], [])
+        completed = self.run_tool(SD_STATUS)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("main: protection unknown -- branch rulesets on main could not be read (Server Error",
+                      completed.stdout)
+        self.assertNotIn("accepted 2026-09-11", completed.stdout)
 
     def test_an_unprotected_acknowledgement_naming_protection_does_not_apply(self) -> None:
         """`branch_protection` is a real pin here, and the other four cannot be.
@@ -2581,6 +2636,28 @@ class WorkItemInventoryTests(InventoryFixture):
         )
 
 
+class ItemDateParityTests(unittest.TestCase):
+    """`_item_date` here and `sd_lib.item_date` read one date the same way (sd:1000).
+
+    Each held its own pattern: the library accepted `created: 20260701` and
+    a padded value, and this file did not, so one item could be undated in
+    one report and dated in the other.
+    """
+
+    CREATED = ("2026-07-01", " 2026-07-01", "2026-07-01T10:00", "20260701", "soon", "", "2026-13-45")
+    NAMES = ("2026-01-01-x", "2026-01-01", "untitled", "2026-13-45-x", "20260101-x")
+
+    def test_both_readers_give_the_same_date(self) -> None:
+        for created, name in itertools.product(self.CREATED, self.NAMES):
+            with self.subTest(created=created, name=name):
+                item = SimpleNamespace(created=created, path=pathlib.Path("docs/work") / name)
+                entry = {"created": created, "path": f"docs/work/{name}"}
+                self.assertEqual(status._item_date(entry), status.sd_lib.item_date(item))
+
+    def test_one_pattern_is_shared(self) -> None:
+        self.assertIs(status._ITEM_DATE_RE, status.sd_lib.ITEM_DATE_RE)
+
+
 class OpenStepTests(InventoryFixture):
     def test_two_identical_boxes_under_one_heading_get_two_ids(self) -> None:
         """C-13: the ordinal is what stops one id naming two tasks."""
@@ -2790,6 +2867,17 @@ class LowYieldProducerTests(InventoryFixture):
         self.assertEqual([row["title"] for row in found], ["bin/sd-thing"])
         self.assertFalse(found[0]["abnormal"])
         self.assertEqual(found[0]["key"], "skills/sd-thing/SKILL.md#bin/sd-thing")
+
+    def test_an_unreadable_skill_root_marks_the_class_unchecked(self) -> None:
+        """An unreadable root is reported, not raised out of the whole report (sd:1000)."""
+        skills = self.repo / "skills"
+        (skills / "sd-thing").mkdir(parents=True)
+        (skills / "sd-thing" / "SKILL.md").write_text("Run `bin/sd-thing`.\n", encoding="utf-8")
+        skills.chmod(0)
+        self.addCleanup(skills.chmod, 0o755)
+        inventory = status.actionable_inventory(self.repo, self.sections(), self.TODAY)
+        self.assertEqual([], self.by_check(inventory.rows, "undisclosed-tool"))
+        self.assertIn("skills", inventory.unchecked["undisclosed-tool"])
 
     def test_a_contrib_skill_discloses_on_the_same_terms_as_a_shipped_one(
         self,
@@ -4815,6 +4903,46 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
         return status.actionable_inventory(
             self.repo, self.sections(merged_pull_requests=merged), self.TODAY)
 
+    def test_a_finding_that_left_the_window_unanswered_counts_as_expired(self) -> None:
+        """sd:998: past day fourteen a finding lost its row and read as nothing,
+        so expiry looked like resolution. Days fifteen to twenty-eight are
+        counted; the window's own days and day twenty-nine are not."""
+        merged = {"pull_requests": [self.merged(14, 14, ["d14"]), self.merged(15, 15, ["a15", "b15"]),
+                                    self.merged(28, 28, ["c28"]), self.merged(29, 29, ["e29"])]}
+        expired = status.expired_reviews(self.repo, merged, self.TODAY)
+        self.assertEqual({"days": [15, 28], "findings": 3, "pull_requests": [15, 28], "unchecked": ""}, expired)
+        stopped = status.expired_reviews(self.repo, dict(merged, truncated=True, limit=500), self.TODAY)
+        self.assertIn("stopped at its limit of 500", stopped["unchecked"])
+        out = io.StringIO()
+        status._render_threads([], out.write, expired)
+        self.assertIn("  expired: 3 review finding(s) on 2 pull request(s) merged 15-28 days ago "
+                      "expired unanswered: #15, #28\n", out.getvalue())
+
+    def test_unread_findings_on_pull_requests_merged_in_the_window_count_as_late(self) -> None:
+        """sd:1178, operator ruling 2026-10-03 (go D). A review posted after the
+        merge reaches no merge gate, so the report totals the unread findings on
+        pull requests merged in the last fourteen days. Day fifteen is
+        `expired:`'s, and a finding `sd-review-ack` dismissed counts nowhere."""
+        ack = status.sd_lib.sibling("sd_review_ack_late", "sd-review-ack")
+        rows = ack.findings(2, [{"author": "bot", "commit_id": "", "body":
+                                 "| File | Summary |\n|---|---|\n"
+                                 "| `bin/a.py` | Moderate finding (1 vote): wrong. |\n"
+                                 "| `bin/b.py` | Moderate finding (1 vote): also wrong. |\n"}], [])
+        ack.acknowledge(self.repo, rows[1], "dismissed", "the reviewer misread the diff")
+        merged = {"pull_requests": [self.merged(0, 0, ["z0"]), self.merged(2, 2, [row["id"] for row in rows]),
+                                    self.merged(14, 14, ["d14", "e14"]), self.merged(15, 15, ["a15"])]}
+        late = status.late_reviews(self.repo, merged, self.TODAY)
+        self.assertEqual({"days": [0, 14], "findings": 4, "pull_requests": [0, 2, 14], "unchecked": ""}, late)
+        unread = status.late_reviews(self.repo, {"available": False, "reason": "gh is not signed in"}, self.TODAY)
+        self.assertEqual("gh is not signed in", unread["unchecked"])
+        timed_out = {"pull_requests": [self.merged(n, 1, [], unreadable="gh timed out after 60s") for n in (5, 6, 7)]}
+        self.assertEqual("3 pull request(s) unreadable, first #5: gh timed out after 60s",
+                         status.late_reviews(self.repo, timed_out, self.TODAY)["unchecked"])
+        out = io.StringIO()
+        status._render_threads([], out.write, late=late)
+        self.assertIn("  late: 4 review finding(s) on 3 pull request(s) merged in the last 14 days "
+                      "are unread: #0, #2, #14\n", out.getvalue())
+
     def test_the_window_holds_day_thirteen_and_fourteen_and_drops_day_fifteen(self) -> None:
         inventory = self.found(self.merged(13, 13, ["a13"]), self.merged(14, 14, ["a14"]),
                                self.merged(15, 15, ["a15"]))
@@ -5164,10 +5292,14 @@ class MergedQueryWindowTests(StatusFixture):
         after = datetime.date.today()
         asked = [line for line in log.read_text(encoding="utf-8").splitlines()
                  if "--state merged" in line]
-        self.assertEqual(1, len(asked), asked)
+        self.assertEqual(2, len(asked), asked)
         allowed = {f"merged:>={(day - datetime.timedelta(days=15)).isoformat()}"
                    for day in (before, after)}
         self.assertTrue(any(token in asked[0] for token in allowed), (asked, allowed))
+        # The expired count's own read, a day wider at each end (sd:998).
+        allowed = {f"merged:{(day - datetime.timedelta(days=29)).isoformat()}.."
+                   f"{(day - datetime.timedelta(days=14)).isoformat()}" for day in (before, after)}
+        self.assertTrue(any(token in asked[1] for token in allowed), (asked, allowed))
 
 
 class CollectMergedTests(unittest.TestCase):
@@ -5786,7 +5918,8 @@ class RulesetProtectionCase(unittest.TestCase):
 
     def section(self, rules: Any, ruleset: Any = RULESET, *, repo: dict[str, Any] | None = None,
                 extra: dict[int, Any] | None = None,
-                classic: str = "gh: Branch not protected (HTTP 404)") -> dict[str, Any]:
+                classic: str = "gh: Branch not protected (HTTP 404)",
+                accepted: tuple[dict[str, Any], ...] = ()) -> dict[str, Any]:
         seen: list[str] = []
 
         def answer(args: list[str], root: pathlib.Path) -> tuple[Any, str]:
@@ -5813,6 +5946,10 @@ class RulesetProtectionCase(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
                 status.pr_state, "gh_json", answer):
+            if accepted:
+                (pathlib.Path(directory) / ".github").mkdir()
+                (pathlib.Path(directory) / ".github" / "sd-status.json").write_text(
+                    json.dumps({"accepted_gaps": list(accepted)}), encoding="utf-8")
             result = status.protection_section(pathlib.Path(directory), self.GH)
         result["_seen"] = seen
         return result
@@ -6062,10 +6199,23 @@ class RulesetProtectionCase(unittest.TestCase):
         self.assertEqual(result["detail"]["ruleset_rules"], [])
         self.assertNotIn("rules_read_error", result["detail"])
 
-    def test_rules_that_cannot_be_read_are_named_not_assumed_absent(self) -> None:
-        result = self.section(None)
+    def test_an_acknowledged_unprotected_branch_whose_rules_were_read_is_accepted(self) -> None:
+        """The control for the test below: rules read as `[]` and an admin's
+        classic 404 are evidence, so the acknowledgement applies."""
+        result = self.section([], accepted=(ProtectionSectionTests.UNPROTECTED,))
         self.assertFalse(result["protected"])
-        self.assertIn("unprotected", [gap["id"] for gap in result["gaps"]])
+        self.assertEqual([entry["id"] for entry in result["accepted"]], ["unprotected"])
+
+    def test_rules_that_cannot_be_read_are_named_not_assumed_absent(self) -> None:
+        """sd:1000. An admin's classic 404 says only that classic protection
+        is absent; a ruleset may still gate the merge. A rules read that
+        failed was reported as `unprotected`, which a standing acknowledgement
+        then moved to `accepted`: a read failure shown as an accepted state."""
+        result = self.section(None, accepted=(ProtectionSectionTests.UNPROTECTED,))
+        self.assertIsNone(result["protected"])
+        self.assertNotIn("unprotected", [gap["id"] for gap in result["gaps"]])
+        self.assertEqual(result["accepted"], [])
+        self.assertIn("gh: Not Found (HTTP 404)", result["reason"])
         self.assertEqual(result["detail"]["rules_read_error"], "gh: Not Found (HTTP 404)")
 
 

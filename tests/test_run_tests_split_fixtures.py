@@ -32,8 +32,9 @@ HARNESS = REPO_ROOT / ".github/scripts/run-tests.sh"
 # and which that copy reads. It is inert only while this harness copies
 # `run-tests.sh` alone and not `select-tests.py`, so an outer narrowed run
 # would start narrowing its own nested runs the day a fixture copies
-# `.github/scripts` whole. Drop it, and `CHANGED` with it.
-DROPPED_FROM_FIXTURES = ("PYTHONPATH", "TEST_CHANGED_FILES", "CHANGED")
+# `.github/scripts` whole. Drop it, and `CHANGED` with it. `SD_GATE_POOL_SIZE`
+# is the outer gate's cap (sd:2607), which would set a fixture's worker count.
+DROPPED_FROM_FIXTURES = ("PYTHONPATH", "TEST_CHANGED_FILES", "CHANGED", "SD_GATE_POOL_SIZE")
 
 
 def fixture_env(**overrides: str) -> dict[str, str]:
@@ -128,6 +129,19 @@ class Probe(unittest.TestCase):
         print(f"shard niceness={os.getpriority(os.PRIO_PROCESS, 0)}")
 """
 
+#: The header and footer `run-tests.sh` writes on stderr around a run (sd:1407, sd:2080).
+START_LINE = r"run-tests: start head=(\S+) dirty=\S+ content=(\S+) pid=(\d+) at=\S+"
+END_LINE = r"run-tests: end head=(\S+) content=(\S+) pid=(\d+) exit=\d+ at=\S+"
+
+#: A shard that edits the fixture's tracked file while the run is under way.
+EDITS_MID_RUN = PLAIN + """
+    def test_three(self):
+        import os
+        import pathlib
+        notes = pathlib.Path(os.environ["FIXTURE_COUNTER"]).parent / "notes.txt"
+        notes.write_text("edited mid-run\\n")
+"""
+
 SPLIT_NAMES =("test_sd_ship", "test_sd_ship_dispositions", "test_sd_ship_disposition_guards")
 
 
@@ -170,6 +184,20 @@ class SplitModuleFixtures(unittest.TestCase):
         """sd:1955. Two gate slots at half the cores each fill the machine and no more."""
         for environment, workers in (({}, 2), ({"FIXTURE_CORES": "5"}, 2), ({"FIXTURE_CORES": "16"}, 8),
                                      ({"CI": "1"}, 4), ({"GITHUB_ACTIONS": "true"}, 4)):
+            with self.subTest(environment=environment):
+                result = self.run_harness(workers=None, environment=environment)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn(f"test runner: workers={workers} ", result.stdout)
+
+    def test_local_workers_follow_the_gate_cap_so_the_pool_holds_twice_the_cores(self) -> None:
+        """sd:2607: the cap a holder names, else this run's own, sets the workers; CI and an explicit count win."""
+        for environment, workers in (({"FIXTURE_CORES": "16", "SD_GATE_POOL_SIZE": "4", "SD_GATE_SLOTS": "0"}, 8),
+                                     ({"FIXTURE_CORES": "16", "SD_GATE_POOL_SIZE": "2", "SD_GATE_SLOTS": "0"}, 16),
+                                     ({"FIXTURE_CORES": "16", "SD_GATE_POOL_SIZE": "8", "SD_GATE_SLOTS": "0"}, 4),
+                                     ({"FIXTURE_CORES": "16", "SD_GATE_POOL_SIZE": "1", "SD_GATE_SLOTS": "0"}, 16),
+                                     ({"FIXTURE_CORES": "16", "SD_GATE_POOL_SIZE": "64", "SD_GATE_SLOTS": "0"}, 1),
+                                     ({"FIXTURE_CORES": "16", "SD_GATE_POOL_SIZE": "0", "SD_GATE_SLOTS": "0"}, 8),
+                                     ({"FIXTURE_CORES": "16", "SD_GATE_POOL_SIZE": "4", "CI": "1"}, 16)):
             with self.subTest(environment=environment):
                 result = self.run_harness(workers=None, environment=environment)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -219,6 +247,93 @@ class SplitModuleFixtures(unittest.TestCase):
         self.assertEqual({name for name, _, _ in summaries},
                          {f"tests.{name}.part{part}of2" for name in SPLIT_NAMES for part in (1, 2)})
         self.assertEqual([status for _, _, status in summaries], ["0"] * 6)
+
+    def commit_fixture(self) -> str:
+        """Make the fixture root a repository with one tracked `notes.txt`."""
+        git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+        (self.root / ".gitignore").write_text("unittest-output.log\n.coverage\n.coverage.*\n__pycache__/\n")
+        (self.root / "notes.txt").write_text("zero\n")
+        subprocess.run(git + ["init", "-q"], cwd=self.root, check=True)
+        subprocess.run(git + ["add", "-A"], cwd=self.root, check=True)
+        subprocess.run(git + ["commit", "-qm", "fixture"], cwd=self.root, check=True)
+        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.root, check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    def ends(self, result: subprocess.CompletedProcess) -> tuple[re.Match, re.Match]:
+        """The run's start and end lines from stderr, each found exactly once."""
+        starts = [match for line in result.stderr.splitlines() if (match := re.fullmatch(START_LINE, line))]
+        ends = [match for line in result.stderr.splitlines() if (match := re.fullmatch(END_LINE, line))]
+        self.assertEqual((len(starts), len(ends)), (1, 1), result.stderr)
+        return starts[0], ends[0]
+
+    def test_the_log_names_its_tree_and_each_result_its_shard(self) -> None:
+        """sd:2080. The start line names the tree by content, the end line
+        closes the same run on the same tree, and every `Ran` line sits inside
+        its own shard's start and end lines. A `Ran` printed before its
+        shard's only label was credited to the shard above it by any
+        positional parse."""
+        head = self.commit_fixture()
+        contents = []
+        # Two edits of one already-dirty file: the dirty-path count is the same
+        # for both, so only a content fingerprint tells the runs apart.
+        for text in ("one\n", "two\n"):
+            (self.root / "notes.txt").write_text(text)
+            result = self.run_harness()
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            start, end = self.ends(result)
+            self.assertEqual((start.group(1), end.group(1)), (head, head))
+            # Nothing changed during the run, so it opens and closes on one tree.
+            self.assertEqual(end.group(2), start.group(2))
+            self.assertEqual(end.group(3), start.group(3))
+            contents.append(start.group(2))
+        self.assertNotIn("unknown", contents)
+        self.assertNotEqual(contents[0], contents[1])
+        current, labelled = None, 0
+        for line in result.stdout.splitlines():
+            if match := re.fullmatch(r"shard (\S+): start", line):
+                self.assertIsNone(current, line)
+                current = match.group(1)
+            elif match := re.fullmatch(r"shard (\S+): \d+s exit=\d+", line):
+                self.assertEqual(match.group(1), current, line)
+                current, labelled = None, labelled + 1
+            elif line.startswith("Ran "):
+                self.assertIsNotNone(current, f"{line!r} sits outside any shard")
+        self.assertEqual(labelled, 6, result.stdout)
+
+    def test_the_footer_reads_the_tree_after_the_run(self) -> None:
+        """sd:2080, Copilot on #1178. Equal fingerprints on an unchanged tree
+        cannot tell a footer sampled after the shards from one sampled with
+        the header. Here a shard edits a tracked file, so the footer must name
+        a different tree from the header -- and the same one the next run
+        opens on, which proves it read the tree the shards left behind."""
+        self.commit_fixture()
+        result = self.run_harness(test_sd_ship=EDITS_MID_RUN)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.root / "notes.txt").read_text(), "edited mid-run\n")
+        start, end = self.ends(result)
+        self.assertNotEqual(end.group(2), start.group(2), "the footer read the tree the run started on")
+        # The same modules again, so the only difference is what the shards did.
+        after = self.run_harness(test_sd_ship=EDITS_MID_RUN)
+        self.assertEqual(after.returncode, 0, after.stdout + after.stderr)
+        self.assertEqual(self.ends(after)[0].group(2), end.group(2))
+
+    def test_an_index_flag_does_not_hide_an_edit_from_the_fingerprint(self) -> None:
+        """sd:2080 review. The scratch index starts as a copy of the real one,
+        whose assume-unchanged and skip-worktree flags make `git add -A` skip
+        a file the tests still read from disk. The fingerprint clears them."""
+        self.commit_fixture()
+        contents = []
+        for flag in ("--assume-unchanged", "--skip-worktree"):
+            subprocess.run(["git", "update-index", flag, "notes.txt"], cwd=self.root, check=True)
+            for text in (f"{flag} one\n", f"{flag} two\n"):
+                (self.root / "notes.txt").write_text(text)
+                result = self.run_harness()
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                contents.append(self.ends(result)[0].group(2))
+            subprocess.run(["git", "update-index", flag.replace("--", "--no-", 1), "notes.txt"],
+                           cwd=self.root, check=True)
+        self.assertNotIn("unknown", contents)
+        self.assertEqual(len(set(contents)), 4, contents)
 
     def test_shard_timing_does_not_hide_a_failed_test(self) -> None:
         failing = PLAIN.replace("self.assertTrue(self.ready)", "self.assertFalse(self.ready)")

@@ -43,7 +43,8 @@ def untracked(root: pathlib.Path) -> list[str]:
 # screenshot overruns the limit. UTF-8 (a `-diff` file) and BOM-marked UTF-16 go as text; anything else
 # stays base64, so the size check refuses honestly. Not media: zip, gzip (can carry source), ICO (weak magic).
 BINARY_MARKER = re.compile(r"(?m)^Binary files .* differ\n?")
-SUMMARY = re.compile(r"(?m)^\[binary, not sent\] ")
+SUMMARY = re.compile(r"(?m)^\[(?:binary, not sent|renamed)\] ")  # a patch prefixes content lines
+RENAMED = re.compile(r'(?m)^\[renamed\] ("(?:[^"\\]|\\.)*") -> "(?:[^"\\]|\\.)*"; unchanged lines not sent$')
 MEDIA_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"wOFF", b"wOF2", b"%PDF-")
 
 
@@ -67,20 +68,23 @@ def content_summary(data: bytes) -> str:
     return f"{len(data)} bytes, sha256 {hashlib.sha256(data).hexdigest()}"
 
 
-def file_material(root: pathlib.Path, name: str, change: str) -> str:
+def file_material(root: pathlib.Path, name: str, change: str) -> tuple[str, bool]:
+    """A whole file and whether it is summarized, read from its bytes: a text file may start with the marker (sd:2431)."""
     path = root / name
+    media = False
     if path.is_symlink():
         content = "symlink -> " + os.readlink(path)
     else:
         data = path.read_bytes()
-        text = None if is_media(data) else as_text(data)
+        media = is_media(data)
+        text = None if media else as_text(data)
         if text is not None:
             content = ("" if encoding(data) == "utf-8" else f"[encoding] {encoding(data)}\n") + text
-        elif is_media(data):
+        elif media:
             content = f"[binary, not sent] {change}; {content_summary(data)}"
         else:
             content = "[binary, base64]\n" + base64.b64encode(data).decode("ascii")
-    return f"\n--- {json.dumps(name)} ---\n{content}"
+    return f"\n--- {json.dumps(name)} ---\n{content}", media
 
 
 def collect_review_material(root: pathlib.Path, subject: Any) -> tuple[str, list[dict[str, Any]]]:
@@ -91,28 +95,57 @@ def collect_review_material(root: pathlib.Path, subject: Any) -> tuple[str, list
     inventory: list[dict[str, Any]] = []
     for name in subject.paths:
         if subject.scope == "planning" or name in extra:
-            part = file_material(root, name, "current" if subject.scope == "planning" else "added (untracked)")
+            part, summarized = file_material(root, name, "current" if subject.scope == "planning" else "added (untracked)")
         else:
-            part = patches[name]
+            part, summarized = patches[name], bool(SUMMARY.search(patches[name]))
         part = ("\n" if parts else "") + part
         parts.append(part)
         inventory.append({"path": name, "bytes": len(part.encode("utf-8")),
                           "boundary": name.split("/", 1)[0] if "/" in name else "repository-root",
-                          **({"summarized": True} if SUMMARY.search(part) else {})})
+                          **({"summarized": True} if summarized else {})})
     return "".join(parts), inventory
 
 
 def tracked_material(root: pathlib.Path, subject: Any) -> dict[str, str]:
-    args = ["--no-renames", "--no-ext-diff", "--no-textconv", "--no-color", "--submodule=short", subject.base,
-            *([] if subject.head == "worktree" else [subject.head]), "--"]
+    common = ["--no-ext-diff", "--no-textconv", "--no-color", "--submodule=short", subject.base,
+              *([] if subject.head == "worktree" else [subject.head]), "--"]
+    args = ["--no-renames", *common]
     names = list(filter(None, read_git_material(root, ["diff", "--name-only", "-z", *args]).split("\0")))
     patch = read_git_material(root, ["diff", *args])
     pieces = list(filter(None, re.split(r"(?m)(?=^diff --git )", patch)))
     if len(names) != len(pieces):
         raise ValueError("review patch and path inventory disagree; no partial subject sent")
     material = dict(zip(names, pieces, strict=True))
+    if any("\ndeleted file mode " in piece for piece in pieces) and any("\nnew file mode " in piece for piece in pieces):
+        material.update(renamed_material(root, common, material))
     binary = {name: piece for name, piece in material.items() if BINARY_MARKER.search(piece)}
     return {**material, **binary_material(root, subject, args, binary)} if binary else material
+
+
+def renamed_material(root: pathlib.Path, common: list[str], material: dict[str, str]) -> dict[str, str]:
+    """sd:2400: a rename sends git's rename patch under the new path and a record under the old.
+    Both sides stay listed, but unchanged lines are not sent, so both are summarized: partial coverage (sd:2181)."""
+    rows = read_git_material(root, ["diff", "--name-status", "-z", "-M", *common]).split("\0")
+    entries, index = [], 0
+    while index < len(rows) and rows[index]:
+        width = 2 if rows[index][:1] in ("R", "C") else 1
+        entries.append((rows[index], rows[index + 1:index + 1 + width]))
+        index += 1 + width
+    if not any(status.startswith("R") for status, _paths in entries):
+        return {}
+    patch = read_git_material(root, ["diff", "-M", *common])
+    pieces = list(filter(None, re.split(r"(?m)(?=^diff --git )", patch)))
+    if len(entries) != len(pieces) or any(path not in material for _status, paths in entries for path in paths):
+        raise ValueError("review patch and path inventory disagree; no partial subject sent")
+    renamed = {}
+    for (status, paths), piece in zip(entries, pieces, strict=True):
+        if status.startswith("R"):
+            old, new = paths
+            record = f"[renamed] {json.dumps(old)} -> {json.dumps(new)}; unchanged lines not sent"
+            side = [json.dumps(f) if re.search(r'[\x00-\x1f"\\\x7f]', f) else f for f in (f"a/{old}", f"b/{old}")]
+            renamed[old], (head, _, rest) = f"diff --git {side[0]} {side[1]}\n{record}\n", piece.partition("\n")
+            renamed[new] = f"{head}\n{record}\n{rest}"
+    return renamed
 
 
 def read_blobs(root: pathlib.Path, oids: list[str]) -> dict[str, tuple[str, bytes]]:
@@ -179,12 +212,22 @@ def binary_material(root: pathlib.Path, subject: Any, args: list[str], pieces: d
     sides = binary_sides(root, subject, pieces)
     material = {name: text for name, piece in pieces.items() if (text := binary_piece(name, piece, sides[name])) is not None}
     raw = [name for name in pieces if name not in material]
-    if raw:
-        patch = read_git_material(root, ["diff", "--binary", *args, *(":(literal)" + name for name in raw)])
+    moved = {name: found for name in raw if (found := RENAMED.search(pieces[name]))}
+    plain = [name for name in raw if name not in moved]
+    if plain:
+        patch = read_git_material(root, ["diff", "--binary", *args, *(":(literal)" + name for name in plain)])
         encoded = list(filter(None, re.split(r"(?m)(?=^diff --git )", patch)))
-        if len(encoded) != len(raw):
+        if len(encoded) != len(plain):
             raise ValueError("review patch and path inventory disagree; no partial subject sent")
-        material.update(zip(raw, encoded, strict=True))
+        material.update(zip(plain, encoded, strict=True))
+    renames = ["-M", *(arg for arg in args if arg != "--no-renames")]
+    for new, record in moved.items():  # sd:2432: -M sends a moved, edited blob as its delta, not a full literal
+        encoded = list(filter(None, re.split(r"(?m)(?=^diff --git )", read_git_material(
+            root, ["diff", "--binary", *renames, ":(literal)" + json.loads(record.group(1)), ":(literal)" + new]))))
+        if len(encoded) != 1 or "\nrename from " not in encoded[0]:
+            raise ValueError("review patch and path inventory disagree; no partial subject sent")
+        head, _, rest = encoded[0].partition("\n")
+        material[new] = f"{head}\n{record.group(0)}\n{rest}"
     return material
 
 

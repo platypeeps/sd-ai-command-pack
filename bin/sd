@@ -66,11 +66,14 @@ import json
 import math
 import os
 import pathlib
+import queue
 import re
 import stat
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
@@ -776,24 +779,106 @@ def registry(config: dict[str, object]) -> list[str]:
     return [str(p) for p in plugins]
 
 
-def registered(roots: list[str]) -> dict[str, pathlib.Path]:
-    """Prefix -> manifest path, for every root whose manifest still reads.
+#: How long a scan waits for a plugin root to answer (sd:2540).
+ROOT_READ_SECONDS = 5.0
 
-    A root that no longer holds a readable manifest is skipped rather than
-    fatal: it must not stop an unrelated registration, and `list` reports it.
+
+def scan(roots: list[str], wanted: str | None = None, *,
+         complete: bool = False) -> dict[str, tuple[pathlib.Path, dict[str, object]]]:
+    """Prefix -> (manifest path, manifest), for every root that answered in time.
+
+    A prefix lives in its manifest, not in the root's path, so no lookup knows
+    the owning root before it reads. On 2026-10-01 one root on an external
+    volume waited on an open() under launchd for 16 hours, and every
+    `sd config get` for any plugin prefix waited behind it (sd:2537). So each
+    root reads in its own daemon thread: a lookup for `wanted` returns once its
+    owner answers, and a root still silent after ROOT_READ_SECONDS is skipped
+    with a warning. A daemon thread does not hold the process open at exit.
+    A root without a readable manifest is skipped too: it must not stop an
+    unrelated registration, and `list` reports it.
+
+    Two roots can still carry one prefix: a manifest edited after
+    registration, or a registration from before `registered` refused a
+    silent root. The earlier registry entry owns it then, never the root
+    that answers first, so a store write lands in the same plugin every
+    time. A lookup for `wanted` returns once every root listed before its
+    owner has answered or timed out. When one of those earlier roots timed
+    out, it may be the owner, so the prefix refuses as ambiguous instead of
+    passing to the later root: the same manifests must never route to two
+    plugins across runs.
     """
 
-    found: dict[str, pathlib.Path] = {}
-    for root in roots:
-        path = pathlib.Path(root) / MANIFEST_NAME
+    answers: queue.Queue[tuple[str, pathlib.Path, dict[str, object] | None]] = queue.Queue()
+
+    def read_plugin_root(root: str) -> None:
+        path, manifest = pathlib.Path(root) / MANIFEST_NAME, None
         try:
             manifest = read_manifest(path)
         except Refusal:
-            continue
-        prefix = manifest.get("prefix")
-        if isinstance(prefix, str) and prefix:
-            found[prefix] = path
+            pass
+        finally:
+            answers.put((root, path, manifest))
+
+    order = list(dict.fromkeys(roots))
+    pending = list(order)
+    for root in pending:
+        threading.Thread(target=read_plugin_root, args=(root,), daemon=True, name=f"sd plugin root {root}").start()
+    answered: dict[str, tuple[pathlib.Path, dict[str, object]]] = {}
+
+    def owner_in_registry_order() -> dict[str, tuple[pathlib.Path, dict[str, object]]] | None:
+        for root in order:
+            if root in pending:
+                return None
+            if root in answered and answered[root][1].get("prefix") == wanted:
+                return {wanted: answered[root]} if wanted is not None else None
+        return None
+
+    deadline = time.monotonic() + ROOT_READ_SECONDS
+    while pending:
+        if wanted is not None and (owner := owner_in_registry_order()) is not None:
+            return owner
+        try:
+            root, path, manifest = answers.get(timeout=max(0.0, deadline - time.monotonic()))
+        except queue.Empty:
+            break
+        pending.remove(root)
+        if manifest is not None:
+            answered[root] = (path, manifest)
+    if pending and complete:
+        raise Refusal(f"plugin root(s) {', '.join(pending)} did not answer within {ROOT_READ_SECONDS:g}s, "
+                      f"so no prefix can be shown unclaimed; make each readable or remove it from the "
+                      f"machine config, then run this again")
+    for root in pending:
+        print(f"warning: skipped plugin root {root}: its {MANIFEST_NAME} did not answer within "
+              f"{ROOT_READ_SECONDS:g}s", file=sys.stderr)
+    found: dict[str, tuple[pathlib.Path, dict[str, object]]] = {}
+    silent: list[str] = []
+    for root in order:
+        if root in pending:
+            silent.append(root)
+        elif root in answered and isinstance(prefix := answered[root][1].get("prefix"), str) and prefix:
+            if prefix in found:
+                continue
+            if silent and wanted in (None, prefix):
+                raise Refusal(f"prefix {prefix!r} is ambiguous: plugin root(s) {', '.join(silent)}, "
+                              f"registered before {root}, did not answer within {ROOT_READ_SECONDS:g}s "
+                              f"and may own it; make each readable or remove it from the machine "
+                              f"config, then run this again")
+            found[prefix] = answered[root]
     return found
+
+
+def registered(roots: list[str]) -> dict[str, pathlib.Path]:
+    """Prefix -> manifest path, for every root whose manifest still reads; see `scan`.
+
+    Registration asks this to keep prefixes unique, so a root that does not
+    answer refuses instead of being skipped: a silent root may own the very
+    prefix being registered, and a second owner would be shadowed by the
+    earlier registry entry on every lookup. A lookup may skip a stalled
+    root; a uniqueness check may not.
+    """
+
+    return {prefix: path for prefix, (path, _) in scan(roots, complete=True).items()}
 
 
 def write_config(config: dict[str, object], path: pathlib.Path) -> None:
@@ -1049,13 +1134,12 @@ def declared_config(prefix: str) -> tuple[dict[str, dict[str, str]], pathlib.Pat
 
     if prefix == "sd":
         return sd_lib.CORE_CONFIG, pathlib.Path(sd_lib.__file__)
-    roots = registry(sd_lib.machine_config())
-    known = registered(roots)
+    known = scan(registry(sd_lib.machine_config()), wanted=prefix)
     if prefix not in known:
         listed = ", ".join(sorted(known)) or "none"
         raise Refusal(f"no plugin registered under prefix {prefix!r} (registered: {listed})")
-    manifest_path = known[prefix]
-    declared = validate_config(read_manifest(manifest_path))
+    manifest_path, manifest = known[prefix]
+    declared = validate_config(manifest)
     if not declared:
         raise Refusal(f"{prefix} declares no `config` keys in {manifest_path}")
     return declared, manifest_path
@@ -1408,27 +1492,21 @@ def resolve_kind(
     if not isinstance(reference, str) or reference.count(".") != 1:
         raise UsageError(f"{reference!r} is not a <prefix>.<kind> reference")
     prefix, name = reference.split(".")
-    roots = registry(sd_lib.machine_config())
-    for root in roots:
-        manifest_path = pathlib.Path(root) / MANIFEST_NAME
-        try:
-            manifest = read_manifest(manifest_path)
-        except Refusal:
-            continue
-        if manifest.get("prefix") != prefix:
-            continue
-        kinds = validate_kinds(manifest, manifest_path.parent)
-        if name not in kinds:
-            raise Refusal(
-                f"plugin {prefix!r} declares no kind {name!r}"
-                f" (it declares {', '.join(sorted(kinds)) or 'none'})")
-        store = validate_store(manifest, kinds)
-        if store is None:
-            raise Refusal(f"plugin {prefix!r} declares no `store`, so {reference} is not kept")
-        kind = kinds[name]
-        assert isinstance(kind, dict)  # validate_kind builds it; narrows for the type checker
-        return kind, store, name, manifest_path.parent
-    raise Refusal(f"no registered plugin has prefix {prefix!r}")
+    owner = scan(registry(sd_lib.machine_config()), wanted=prefix).get(prefix)
+    if owner is None:
+        raise Refusal(f"no registered plugin has prefix {prefix!r}")
+    manifest_path, manifest = owner
+    kinds = validate_kinds(manifest, manifest_path.parent)
+    if name not in kinds:
+        raise Refusal(
+            f"plugin {prefix!r} declares no kind {name!r}"
+            f" (it declares {', '.join(sorted(kinds)) or 'none'})")
+    store = validate_store(manifest, kinds)
+    if store is None:
+        raise Refusal(f"plugin {prefix!r} declares no `store`, so {reference} is not kept")
+    kind = kinds[name]
+    assert isinstance(kind, dict)  # validate_kind builds it; narrows for the type checker
+    return kind, store, name, manifest_path.parent
 
 
 def kind_base(store: dict[str, object], name: str,
@@ -2811,7 +2889,10 @@ def cmd_attribute(args: argparse.Namespace) -> int:
     registry, reason = sd_registry.read_or_report()
     if reason and args.entry.strip() not in sd_lib.RESERVED_AUTHORS:
         raise Refusal(f"{reason}; an attribution names an entry the registry has")
-    sha, value, covered = sd_lib.attribute(root, args.commits, args.entry, registry)
+    # The repair commit says who made it: `SD_AUTHOR`'s entry, else `human` (sd:2009).
+    invoker = os.environ.get(sd_lib.AUTHOR_VARIABLE, "").strip()
+    writer = sd_lib.commit_author(invoker, lambda: (registry, reason)) if invoker else sd_lib.HUMAN_AUTHOR
+    sha, value, covered = sd_lib.attribute(root, args.commits, args.entry, registry, writer)
     print(f"{sha[:12]} attributes {len(covered)} commit(s) to {value}")
     for target in covered:
         print(f"  {target[:12]}")
@@ -2819,7 +2900,14 @@ def cmd_attribute(args: argparse.Namespace) -> int:
 
 
 def cmd_gate(args: argparse.Namespace) -> int:
-    """`sd gate run|status` -- the sd:2262 gate queue, with the machine's `sd.gate_*` settings."""
+    """`sd gate run|status` -- the sd:2262 gate queue, with the machine's `sd.gate_*` settings.
+
+    `sd gate post` is the merge gate itself, run outside `sd-ship merge`; see `gate_post`.
+    """
+    if args.command_name == "post":
+        return gate_post(args)
+    if args.command_name == "check":
+        return gate_check(args)
     environ = dict(os.environ)
     try:
         slots, _ = sd_gate_slots.configured(environ, sd_lib.core_setting("gate_slots", environ))
@@ -2828,6 +2916,57 @@ def cmd_gate(args: argparse.Namespace) -> int:
     except ValueError as error:
         raise UsageError(str(error)) from None
     return sd_gate_slots.gate_verb(args, environ, slots, rule)
+
+
+def gate_post(args: argparse.Namespace) -> int:
+    """`sd gate post --head SHA` (sd:1989): run `sd-check` at SHA and post `sd/local-gate` there.
+
+    For a repository's own merge path under `repo.ci = local`, where no
+    `sd-ship merge` runs the gate. The run and the post are `sd-ship merge`'s
+    own (`sd_local_gate.post_head`). Prints the result as JSON and exits 0
+    when it posted `success`, 1 when it posted `failure`; a refusal posts
+    nothing, prints no JSON and exits 1.
+    """
+    import sd_local_gate  # the GitHub client and the gate load only for this verb
+    from sd_ship_remote import Refusal as ShipRefusal
+    root = sd_lib.repo_root(None)
+    if root is None:
+        raise Refusal("cwd is not inside a Git repository")
+    try:
+        result = sd_local_gate.post_head(root, args.head, base=args.base)
+    except ShipRefusal as refusal:
+        raise Refusal(str(refusal)) from None
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result.get("status") == "success" else 1
+
+
+def gate_check(args: argparse.Namespace) -> int:
+    """`sd gate check` (sd:1912): run the local gate's check at HEAD and record its pass.
+
+    A builder's plain `make check` leaves nothing a gate can trust. This runs
+    the gate's own check -- a clean worktree at the committed HEAD, the gate's
+    environment -- and a pass leaves the receipt `sd-ship prepare`'s gate and
+    then the merge gate read at the same head and binding. Uncommitted work is
+    not checked. Posts nothing. Prints the result as JSON and exits 0 on a
+    pass, 1 otherwise.
+    """
+    import sd_gate_run  # the gate's run, which posts nothing; needed only here
+    root = sd_lib.repo_root(None)
+    if root is None:
+        raise Refusal("cwd is not inside a Git repository")
+    head = sd_lib.git_output(["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], root)
+    if not head:
+        raise Refusal("HEAD names no commit; commit first, then retry")
+    database = args.database
+    if database is None and (library := sd_lib.import_sd_db().module) is not None:
+        database = library.default_path(os.environ.get("HOME"))
+    try:
+        result = sd_gate_run.check_in_worktree(root, head, base=sd_gate_run.base_ref(args.base), database=database,
+                                               slot_timeout=sd_lib.GATE_SLOT_SECONDS)  # sd:2607
+    except sd_gate_run.GateError as error:
+        raise Refusal(str(error)) from None
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result.get("status") == "success" else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -3090,13 +3229,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="record who wrote commits that did not say, as one empty commit")
     attributer.add_argument("commits", help="a commit, or a `<from>..<to>` range, on this branch")
     attributer.add_argument(
-        "entry", help=f"a registry entry, `{sd_lib.HUMAN_AUTHOR}` for the operator, "
-                      f"or `{sd_lib.DEPENDABOT_ENTRY}` for a bump rewritten after GitHub made it")
+        "entry", help=f"a registry entry, `{sd_lib.HUMAN_AUTHOR}` for the operator, `{sd_lib.SCRIPT_AUTHOR}` "
+                      f"for an unattended job, or `{sd_lib.DEPENDABOT_ENTRY}` for a bump rewritten after GitHub made it")
     attributer.set_defaults(handler=cmd_attribute)
 
-    gate = groups.add_parser("gate", help="the machine-wide gate queue: run a command in it, or show it")
+    gate = groups.add_parser("gate", help="the machine-wide gate queue: run a command in it, or show it; "
+                                 "post the local gate at a commit")
     gating = gate.add_subparsers(dest="command_name", required=True)
     sd_gate_slots.add_gate_verbs(gating)
+    poster = gating.add_parser("post", help="run sd-check at a commit and post sd/local-gate there, "
+                               "for a merge path that is not sd-ship merge")
+    poster.add_argument("--head", required=True, metavar="SHA", help="the commit to check and post to")
+    poster.add_argument("--base", metavar="BRANCH",
+                        help="the PR's target branch, for a docs-only scope (default: none, so every check runs)")
+    checker = gating.add_parser("check", help="run the local gate's check at HEAD and record a pass, "
+                                "so prepare's gate and the merge gate reuse it at that head")
+    checker.add_argument("--base", metavar="BRANCH", default="main",
+                         help="the branch the pull request targets, as prepare's gate compares (default: main)")
+    checker.add_argument("--database", type=pathlib.Path, help="the workflow database (default: this machine's)")
     gate.set_defaults(handler=cmd_gate)
 
     sd_work.register(groups, kept)

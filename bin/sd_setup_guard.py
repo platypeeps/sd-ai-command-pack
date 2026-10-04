@@ -35,6 +35,15 @@ from typing import Any, Mapping, TextIO
 
 DEPENDABOT_RELATIVE_PATH = pathlib.Path(".github") / "dependabot.yml"
 
+#: The modes that may carry the routing lane (R10-D5 in `bin/sd_rules.py`).
+#: `minimal` is in it since the operator's 2026-09-30 ruling (sd:1292): it is
+#: written by hand and never produced by detection, so it says the operator
+#: administers the repository and chose to keep it quiet. `guest` is detection's
+#: fallback -- control of the repository was not established -- and stays out.
+#: `setup_github` and `report_mode` both read this, so `--check` agrees with
+#: the installer (sd:1285).
+LANE_MODES = frozenset({"full", "minimal"})
+
 
 class GuardError(Exception):
     """The file has no place for the guard; the message names why."""
@@ -192,6 +201,22 @@ def _trim(lines: list[str], start: int, stop: int) -> int:
     return stop
 
 
+def _trim_tail(lines: list[str], start: int, stop: int, indent: int) -> int:
+    """`stop` moved back over blank lines and comments at `indent`, never past `start`.
+
+    A comment at an item's own indentation, below it, is not the item's: it
+    is the next item's leading comment, or the consumer's note on the list.
+    Counted as the item's, replacing the guard deleted it (sd:1000).
+    """
+
+    while stop > start and (
+        not lines[stop - 1].strip()
+        or (_indent(lines[stop - 1]) == indent and lines[stop - 1].lstrip().startswith("#"))
+    ):
+        stop -= 1
+    return stop
+
+
 def _blocks(lines: list[str], first: int, stop: int, indent: int) -> list[tuple[int, int]]:
     """Each `- ` item at `indent` in `lines[first:stop]`, with its leading comments.
 
@@ -209,7 +234,7 @@ def _blocks(lines: list[str], first: int, stop: int, indent: int) -> list[tuple[
                 begin -= 1
             starts.append(begin)
     return [
-        (begin, _trim(lines, begin, starts[n + 1] if n + 1 < len(starts) else stop))
+        (begin, _trim_tail(lines, begin, starts[n + 1] if n + 1 < len(starts) else stop, indent))
         for n, begin in enumerate(starts)
     ]
 
@@ -251,14 +276,17 @@ def _place(lines: list[str], start: int, wanted: str | None) -> tuple[str, int, 
     first = next((i for i in range(ignore + 1, stop) if lines[i].strip()), stop)
     indent = _indent(lines[first]) if first < stop and _indent(lines[first]) > key else key + 2
     until = _end(lines, ignore, indent) if first < stop else ignore + 1
-    for begin, end in _blocks(lines, ignore + 1, until, indent):
+    blocks = _blocks(lines, ignore + 1, until, indent)
+    for begin, end in blocks:
         guarded = next(
             (found for found in (_guarded(line, wanted) for line in lines[begin:end]) if found),
             None,
         )
         if guarded is not None:
             return "replace", begin, end, indent, guarded
-    return "append", _trim(lines, ignore + 1, until), until, indent, None
+    # After the last item, not after a comment trailing it: the guard would
+    # take that comment as its own leading comment and read `differs`.
+    return "append", blocks[-1][1] if blocks else _trim(lines, ignore + 1, until), until, indent, None
 
 
 def _places(lines: list[str], wanted: str | None = None) -> list[tuple[str, int, int, int, str | None]]:
@@ -331,7 +359,10 @@ def rendered(text: str | None, action: str = DEFAULT_ACTION) -> str:
     """`text` with the guard in place: the one the installer writes and `--check` expects.
 
     Idempotent: rendering a rendered file changes nothing, which is what lets
-    `--check` say `same` by comparing this with the tracked bytes.
+    `--check` say `same` by comparing this with the tracked bytes. A file
+    whose every entry reads `same` comes back as it is, final newline and
+    line endings included, so `guard same` always means the run leaves it
+    alone (sd:1000).
 
     `action` is the one this render is about, and defaults to the action
     `setup-github` installs: a guard for another of the pack's actions is left
@@ -349,6 +380,8 @@ def rendered(text: str | None, action: str = DEFAULT_ACTION) -> str:
 
     if text is None:
         return minimal_file(action)
+    if set(guard_states(text, action)) == {"same"}:
+        return text
     lines = text.splitlines()
     try:
         places = _places(lines, action)
@@ -399,8 +432,9 @@ def unguarded(text: str, action: str = DEFAULT_ACTION) -> str | None:
             continue
         key = next(i for i in range(at - 1, -1, -1) if lines[i].strip() == "ignore:")
         del lines[at:until]
-        following = next((line for line in lines[key + 1:] if line.strip()), "")
-        if _indent(following) < indent or not following.lstrip().startswith(("- ", "#")):
+        # Comments do not keep the key: a consumer's note can outlive the list.
+        following = next((line for line in lines[key + 1:] if line.strip() and not line.lstrip().startswith("#")), "")
+        if _indent(following) < indent or not following.lstrip().startswith("- "):
             del lines[key]
     return "\n".join(lines) + "\n"
 
@@ -480,11 +514,11 @@ def report_mode(root: pathlib.Path, workflow: pathlib.Path, repo_mode: str, demo
     """
 
     if demotion is None:
-        if repo_mode == "full":
+        if repo_mode in LANE_MODES:
             return None
         return report_unwanted(root, workflow, f"{repo_mode} mode carries no routing lane",
-                               f"this repository is in {repo_mode} mode; only a full-mode repository carries the "
-                               "routing lane", stream)
+                               f"this repository is in {repo_mode} mode; only a full- or minimal-mode repository "
+                               "carries the routing lane", stream)
     stream.write(f"note: this run resolves to {repo_mode} mode ({demotion.reason}); "
                  "compared against the full-mode template\n")
     return None

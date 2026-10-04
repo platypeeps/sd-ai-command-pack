@@ -61,7 +61,9 @@ Do not substitute another diff or copy a cap into this procedure.
 
 1. Run the repository's deterministic gate through `sd-check`.
    A failing gate stops the review before provider dispatch.
+   Branch and `pr` scope run it in a clean detached worktree at the reviewed head, so an edit in the checkout during the run is not what passes.
    Explicit `--reuse-check` can reuse eligible full-check evidence; missing or stale evidence runs the gate normally.
+   Under `repo.ci = local`, follow the round order below instead.
 2. Use the routing decision from `sd_route.route`.
    Repository policy determines risk and depth; the registry determines eligible reviewers.
 3. Review the exact resolved subject.
@@ -84,6 +86,18 @@ The registry uses read-only database controls when available.
 A missing database permits file defaults without creating a database.
 An unreadable database stops execution instead of ignoring operator controls.
 
+### Branch rounds under `repo.ci = local`
+
+1. Run `sd gate check --base main` at the head, inside any lock the brief names.
+   It runs the full check in a clean worktree, takes a gate slot, and records a pass.
+2. Review with `sd-review --scope branch --gate-check main` within 30 minutes of that pass.
+   This form reuses the pass and runs no second check.
+3. Run both with the same environment. The receipt binds it, so a one-off prefix such as `TEST_WORKERS=6` on one of them reruns the full check.
+4. After a fix commit, run step 1 again before the next round.
+
+Never run the plain branch form there: it runs a second full check in the checkout, outside any lock around the gate, and reuses no pass.
+`WORKFLOW.md`, section **Parallel work**, holds the rule (sd:2603).
+
 ## Flags and results
 
 | Flag | Meaning |
@@ -96,7 +110,7 @@ An unreadable database stops execution instead of ignoring operator controls.
 | `--dry-run` | Print invocations without execution. |
 | `--draft` | Apply draft routing. |
 | `--json` | Emit structured results. |
-| `--reuse-check` | Explicitly reuse eligible full-check evidence; otherwise run the deterministic gate. |
+| `--reuse-check` | Explicitly reuse eligible full-check evidence; otherwise run the deterministic gate. Never reuses in sd-ai-command-pack itself, which tracks no reuse declaration (`.github/sd-check-reuse.json`). |
 | `--gate-check BRANCH` | Branch scope: run the gate as the local gate does against `origin/BRANCH`, leaving a gate receipt for the merge gate; `sd-ship prepare` passes it under `repo.ci = local`. |
 | `--timeout SECONDS` | Set the per-phase timeout for the gate and each provider; unset, the gate gets 3600 and each provider 1800. |
 
@@ -170,7 +184,7 @@ The `never_skip` deny-list overrides docs-skip rules.
 ## setup-github
 
 This is a separate, explicitly requested installation operation, not part of local review.
-Modes `minimal` and `guest` cannot install the routing workflow (R10-D5).
+Mode `guest` cannot install the routing workflow (R10-D5); `full` and `minimal` can.
 Before installation or drift checks, read `skills/sd-review/references/setup-github.md` in the sd-ai-command-pack checkout.
 The workflow reports routing only; it requests no reviewer and posts no comment.
 

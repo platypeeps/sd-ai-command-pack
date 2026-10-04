@@ -8,6 +8,12 @@ Slices are the default.
 Every associated merge carries `Item: <item>`, which closes nothing.
 Whole-item delivery also carries `Delivers: <item>`.
 Changes without an item omit both trailers and create no placeholder row.
+One PR claims one item.
+A body line `Closes: sd:A, sd:B` names the other items it delivers (operator ruling 2026-10-03, sd:1481).
+The merge adds `Delivers:` for each `Closes:` item and closes it, with or without `--deliver`.
+Prepare refuses a `Closes:` id that is no item or belongs to another repository, and a `Closes:` line naming the claimed item.
+A `Closes:` item the merge could not close returns `delivery_pending: true` with `closes_failed`; `reconcile` retries it.
+A body line `Refs: sd:A, sd:B` names related or partial items; the merge adds no trailer for them and leaves them open.
 
 The first prepare of an item names its claim, or it refuses.
 Give `--deliver` to the item's last PR and `--associate-only` to each earlier PR.
@@ -51,6 +57,7 @@ The immutable witness has no arbitrary expiry.
 ## Cancellation
 
 Use `sd work cancel <row-id> --reason TEXT`.
+For a task or followup, use `sd task cancel <row-id> --reason TEXT`.
 The cancel writes `done` with a `cancelled` receipt and touches no file.
 A cancel opens no pull request and does not wait for another merge.
 A later merge associated with the cancelled item can carry `Closes: <item>` but no `Delivers:`.

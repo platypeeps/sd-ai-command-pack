@@ -20,7 +20,7 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, NamedTuple
+from typing import Any, Callable, Iterable, NamedTuple
 
 LOCAL_FILE_NAME = "CLAUDE.local.md"
 LOCAL_BLOCK_START = "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->"
@@ -76,11 +76,20 @@ CORE_CONFIG = {
                                       "changes only, always on every reviewing tier, never on none; a repository's "
                                       ".github/sd-review.json copilot_review overrides deep and always, and never wins over it."},
     "gate_slots": {"pattern": "[0-9]+",
-                   "description": "How many repository gates (sd-check runs) may run at once on this machine; 0 is no cap. "
-                                  "Unset reads a quarter of the cores; SD_GATE_SLOTS overrides it for one run."},
+                   "description": "How many gates (sd-check runs, sd gate run, the pack's make test) may run at once on this "
+                                  "machine; 0 is no cap. Unset reads a quarter of the cores; SD_GATE_SLOTS overrides it "
+                                  "for one run."},
     "gate_load_max": {"pattern": r"[0-9]+(\.[0-9]+)?",
                       "description": "The gate queue starts a gate only while load1 is below this; 0 is no load "
-                                     "condition. Unset reads 2.5 per core; SD_GATE_LOAD_MAX overrides it for one run."},
+                                     "condition. Unset is none; SD_GATE_LOAD_MAX overrides it for one run."},
+    "lane_root": {"pattern": r"[~/][^\x00]*",
+                  "description": "The folder holding each repository's `sd-ship lane` queue, as "
+                                 "<root>/<repository>/lane/queue/. Unset reads $XDG_STATE_HOME/sd/lanes; "
+                                 "SD_LANE_ROOT overrides it. It grants nothing."},
+    "gate_cache_gb": {"pattern": r"[0-9]+(\.[0-9]+)?",
+                      "description": "The most gigabytes the local gate's warm Rust build folders may hold; past it the "
+                                     "gate removes the least recently used free folders. 0 is no bound. Unset reads 40; "
+                                     "SD_GATE_CACHE_GB overrides it for one run. It grants nothing."},
     "gate_settle_seconds": {"pattern": "[0-9]+",
                             "description": "Seconds between two gate starts, and of low load1 while load5 is high; "
                                            "0 is none. Unset reads 45; SD_GATE_SETTLE_SECONDS overrides it for one run."},
@@ -121,6 +130,8 @@ DEFAULT_MODE = "full"
 
 #: The three names every repository is asked about, in the order they run.
 CHECK_NAMES = ("check", "test", "lint")
+#: The Makefile target `sd-check` runs before it waits for a gate slot (sd:2604).
+PRECHECK_NAME = "precheck"
 
 #: Optional repository restriction, overriding standing operator review consent.
 #: Shared by the installer, runtime reader, and workflow inventory check.
@@ -140,6 +151,10 @@ COLLABORATOR_QUERY = "repos/{owner}/{repo}/collaborators"
 Asker = Callable[[str, pathlib.Path], tuple[Any, str]]
 
 _DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
+#: A leading ISO day. `item_date` here and `_item_date` in `bin/sd-status` read
+#: `created:` and the directory name with this one pattern, so the two reports
+#: cannot date one item differently (sd:1000).
+ITEM_DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
 _MAKE_TARGET_RE = re.compile(r"^(?P<names>[^\t#=:]+):(?!=)")
 _TASKFILE_TASKS_RE = re.compile(r"^tasks:\s*$")
 _TASKFILE_ENTRY_RE = re.compile(r"^(?P<indent>\s+)(?P<name>[A-Za-z0-9_][A-Za-z0-9_:.\-]*):")
@@ -929,6 +944,8 @@ LOCAL_GATE_CONTEXT = "sd/local-gate"
 #: `sd-check`'s own 900-second default is for an interactive run; a gate that
 #: builds its environment on a loaded machine ran past 900 s, and past 1800 s.
 GATE_CHECK_SECONDS = 3600
+#: How long `sd gate check` queues for a gate slot, apart from that bound (sd:2607).
+GATE_SLOT_SECONDS = 4 * 3600
 
 
 def repo_ci(connection: Any, root: pathlib.Path | str) -> str:
@@ -978,6 +995,77 @@ def ci_mode(root: pathlib.Path | str) -> str:
         return repo_ci(connection, root)
     finally:
         connection.close()
+
+
+
+
+def is_managed(row: Any) -> bool:
+    """Whether a `repo` row may be walked by a pack tool: `managed` set, or no such column.
+
+    sd:1619 added `repo.managed`; the operator sets it by hand on their own
+    repositories, and the rest must not use any pack capability (sd:1620). A
+    database older than the column says nothing, so its rows stay in: an old
+    library must not empty every fleet verb.
+    """
+    return "managed" not in row.keys() or bool(row["managed"])
+
+
+def unmanaged_text(path: str) -> str:
+    """How a pack tool refuses a repository outside its reach, naming the flag and its remedy."""
+    return (f"{path} is not managed in the sd database (repo.managed = no), so pack tools do not run there; "
+            f"set it with `sd-db.sh repo managed {path} yes` if they should")
+
+
+def managed_rows(rows: Iterable[Any]) -> list[Any]:
+    """The `repo` rows a fleet walk may visit: see `is_managed`."""
+    return [row for row in rows if is_managed(row)]
+
+
+def unmanaged(root: pathlib.Path | str, *, warn: bool = True, database: pathlib.Path | str | None = None) -> str | None:
+    """The refusal for a direct call in an unmanaged repository, or None to proceed.
+
+    Only a row that exists and says `managed = 0` refuses. No library, no
+    database, no column and any read fault proceed in silence: a public user
+    of the pack has no sd database, and not knowing is no reason to deny. A
+    database with no row for the checkout proceeds too, with one warning on
+    stderr naming the flag, because that is the state an operator can fix.
+    `database` is a command's `--database`; without it the default store answers.
+    """
+    if import_sd_db().module is None:
+        return None
+    try:
+        from sd_db import repos  # noqa: PLC0415
+        from sd_db.database import connect, default_path  # noqa: PLC0415
+
+        connection = connect(database or default_path(), write=False)
+        try:
+            origin = git_output(["config", "--get", "remote.origin.url"], pathlib.Path(root))
+            path = repos.registered_for(connection, str(pathlib.Path(root).resolve()), origin)
+            row = repo_row(connection, path)
+        finally:
+            connection.close()
+    except Exception:  # every fault is "not said"; see the docstring
+        return None
+    if row is None:
+        if warn:
+            print(f"warning: {path} has no row in the sd database, so nothing says whether it is managed "
+                  f"(repo.managed); proceeding. Register it with `sd-db.sh repo add {path}`, then "
+                  f"`sd-db.sh repo managed {path} yes`", file=sys.stderr)
+        return None
+    return None if is_managed(row) else unmanaged_text(row["path"])
+
+
+def refuse_unmanaged(root: pathlib.Path | str, error: Callable[[str], Exception],
+                     database: pathlib.Path | str | None = None) -> None:
+    """Raise `error(refusal)` in an unmanaged checkout (sd:2566); otherwise return.
+
+    The direct-call gate of sd-ship, sd-review, sd-check, sd-status and
+    `sd-ship lane enqueue`, before any network call or write. A checkout
+    with no row proceeds without the warning: these run in fixture
+    repositories and in the local gate's temporary trees on every call.
+    """
+    if why := unmanaged(root, warn=False, database=database):
+        raise error(why)
 
 
 def repo_disk(value: pathlib.Path | str) -> pathlib.Path:
@@ -1371,18 +1459,26 @@ class Statuses:
     The marker is a property of the checkout and not of the item, so reading
     it per item puts the same question sixty-four times; the database is
     opened once too, and closed by whoever opened it.
+
+    `history=False` asks `delivered` nothing: no fetch, no `git log`. An open
+    item git would have answered reads `unknown`, and a `done` row is not
+    checked for its closing trailer. `make check` lints this way (sd:2606).
     """
 
     root: pathlib.Path
     source: str
     problem: str = ""
     rows: Rows | None = None
+    history: bool = True
 
     @classmethod
-    def of(cls, root: pathlib.Path | str, work_dir: str = WORK_DIR) -> "Statuses":
+    def of(
+        cls, root: pathlib.Path | str, work_dir: str = WORK_DIR, *, history: bool = True
+    ) -> "Statuses":
         root = pathlib.Path(root)
         source, problem = status_marker(root, work_dir)
-        return cls(root, source, problem, Rows(root) if source == FROM_ROW else None)
+        rows = Rows(root) if source == FROM_ROW else None
+        return cls(root, source, problem, rows, history)
 
     def close(self) -> None:
         if self.rows is not None:
@@ -1424,6 +1520,7 @@ def _from_git(
     prd: pathlib.Path,
     fields: dict[str, str],
     problems: list[str],
+    history: bool = True,
 ) -> StatusReport:
     """What a checkout with no database derives once the marker is present.
 
@@ -1432,8 +1529,15 @@ def _from_git(
     delivered" hands finished work back to the next reader that picks it.
     What the retire left behind says which kind of open the rest are -- an
     item recording the branch it lives on is being worked, one that records
-    none is still being planned.
+    none is still being planned. With `history` off git is not asked, and the
+    answer is `unknown` for the same reason.
     """
+    if not history:
+        problems.append(
+            f"{prd}: this run reads no history, so whether {item_dir.name} was "
+            f"delivered is not known here"
+        )
+        return StatusReport("unknown", False, tuple(problems))
     answer = delivered(root, item_dir.name)
     if answer == YES:
         return StatusReport("done", False, tuple(problems))
@@ -1482,7 +1586,7 @@ def _from_row(
                 f"{prd}: {statuses.rows.problem}, so this status came from git "
                 f"and not from the row this checkout's marker names"
             )
-        return _from_git(statuses.root, item_dir, prd, fields, problems)
+        return _from_git(statuses.root, item_dir, prd, fields, problems, statuses.history)
     line = fields.get("status", "").strip()
     if line and line != said:
         problems.append(
@@ -1504,7 +1608,12 @@ def _from_row(
         ((statuses.rows.identity(item_dir) if statuses.rows else ""), item_dir.name)
         if name
     ))
-    if said == "done" and not recorded and delivered(statuses.root, wanted) != YES:
+    if (
+        said == "done"
+        and not recorded
+        and statuses.history
+        and delivered(statuses.root, wanted) != YES
+    ):
         carries = " or ".join(f"{DELIVERS_TRAILER} {name}" for name in wanted)
         problems.append(
             f"{prd}: the row is done and no commit carries {carries}, nor the "
@@ -1702,17 +1811,14 @@ def item_date(item: WorkItem) -> datetime.date | None:
     Ages are measured from `last_active`, because a birth date says when an
     item began and the check that reads it says the item has been neglected.
     """
-    raw = (item.created or "").strip()
-    if raw:
+    for text in ((item.created or "").strip(), item.path.name):
+        found = ITEM_DATE_RE.match(text)
+        if not found:
+            continue
         try:
-            return datetime.date.fromisoformat(raw[:10])
+            return datetime.date.fromisoformat(found.group(1))
         except ValueError:
-            pass
-    if _DATE_PREFIX_RE.match(item.path.name):
-        try:
-            return datetime.date.fromisoformat(item.path.name[:10])
-        except ValueError:
-            return None
+            continue
     return None
 
 
@@ -1925,6 +2031,8 @@ class Detection:
     commands: dict[str, list[str]] = field(default_factory=dict)
     reason: str = ""
     warnings: tuple[str, ...] = ()
+    #: The fast check that runs first, when the Makefile defines `PRECHECK_NAME`.
+    precheck: list[str] | None = None
 
 
 def _local_block_entrypoints(root: pathlib.Path) -> Detection | None:
@@ -1988,6 +2096,7 @@ def _makefile_entrypoints(root: pathlib.Path) -> Detection | None:
         origin=path,
         commands=commands,
         reason=f"{path.name} defines {', '.join(commands)}",
+        precheck=["make", PRECHECK_NAME] if PRECHECK_NAME in targets else None,
     )
 
 
@@ -2198,6 +2307,12 @@ ATTRIBUTES_TRAILER = "Attributes:"
 #: become reviewable by anthropic every time the trailer was forgotten.
 HUMAN_AUTHOR = "human"
 
+#: What a commit a deterministic job wrote says: no model and no person in the
+#: loop (sd:1637). A peer of `human`: reserved, no vendor, so any provider may
+#: review it; and not `human`, so an unattended job's commits do not count as
+#: the operator's own in authorship figures.
+SCRIPT_AUTHOR = "script"
+
 #: What a commit Dependabot wrote says, though it carries no trailer (sd:2065).
 #: A reserved value like `human` and not a registry entry: the registry lists
 #: what can be started, and nothing starts Dependabot. `github` is its vendor,
@@ -2220,7 +2335,9 @@ DEPENDABOT_IDENTITY = (
 )
 
 #: The values a trailer may carry that no registry entry resolves.
-RESERVED_AUTHORS = {HUMAN_AUTHOR: HUMAN_AUTHOR, DEPENDABOT_ENTRY: DEPENDABOT_AUTHOR}
+RESERVED_AUTHORS = {HUMAN_AUTHOR: HUMAN_AUTHOR, SCRIPT_AUTHOR: SCRIPT_AUTHOR, DEPENDABOT_ENTRY: DEPENDABOT_AUTHOR}
+#: The reserved values that carry no vendor, so they exclude no reviewer.
+VENDORLESS_AUTHORS = (HUMAN_AUTHOR, SCRIPT_AUTHOR)
 
 
 class TrailerError(Exception):
@@ -2363,7 +2480,7 @@ def author_vendors(root: pathlib.Path, base: str, head: str) -> tuple[str, ...]:
                       for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines()
                       if line.startswith(AUTHORED_TRAILER))
     for sha, value in claims:
-        if value == HUMAN_AUTHOR:
+        if value in VENDORLESS_AUTHORS:
             continue
         entry, separator, vendor = value.partition("/")
         # Stripped and folded, because the comparison this feeds is an exact
@@ -2375,7 +2492,7 @@ def author_vendors(root: pathlib.Path, base: str, head: str) -> tuple[str, ...]:
         if not separator or not entry or not vendor:
             raise TrailerError(
                 f"{sha[:12]} says {AUTHORED_TRAILER} {value!r}, which is neither "
-                f"{HUMAN_AUTHOR!r} nor an '<entry>/<vendor>' pair. A trailer that "
+                f"{HUMAN_AUTHOR!r}, {SCRIPT_AUTHOR!r} nor an '<entry>/<vendor>' pair. A trailer that "
                 f"cannot be read is not a weaker claim than one that is missing."
             )
         if vendor not in vendors:
@@ -2410,7 +2527,7 @@ def attribution_value(name: str, registry: Any) -> str:
         known = ", ".join(sorted(registry.providers)) or "nothing"
         raise TrailerError(
             f"no registry entry named {entry!r} in {registry.path}, which holds "
-            f"{known}. Name an entry the registry has, or {HUMAN_AUTHOR!r} bare: a "
+            f"{known}. Name an entry the registry has, or {HUMAN_AUTHOR!r} or {SCRIPT_AUTHOR!r} bare: a "
             f"trailer nothing resolves records no vendor, and a range with no "
             f"vendor is one its own author may review."
         )
@@ -2424,6 +2541,42 @@ def attribution_value(name: str, registry: Any) -> str:
             f"claim is dropped rather than questioned. Fix the registry."
         )
     return value
+
+
+#: Names who is committing, for `hooks/commit-msg` to write as `Authored-with:`
+#: on a message that states none (sd:1295): a registry entry, `human` or
+#: `script`. A harness sets it for its session and a job for its run, so the
+#: trailer lands at commit time and no `sd attribute` commit follows.
+AUTHOR_VARIABLE = "SD_AUTHOR"
+
+
+def states_author(message: str) -> bool:
+    """Whether any unindented line of `message` begins `Authored-with:`."""
+    return any(line.startswith(AUTHORED_TRAILER) for line in message.splitlines())
+
+
+def commit_author(name: str, read_registry: Callable[[], tuple[Any, str]]) -> str:
+    """The `Authored-with:` value `SD_AUTHOR=<name>` stands for; `TrailerError` when none.
+
+    `attribution_value`'s answer, so the hook writes what `sd attribute`
+    writes for the same name. `human` and `script` read no registry.
+    `dependabot` refuses: that claim rests on the identity GitHub writes, and a
+    local commit does not carry it.
+    """
+    entry = name.strip()
+    if entry == DEPENDABOT_ENTRY:
+        raise TrailerError(f"{AUTHOR_VARIABLE}={entry!r}: a local commit is never "
+                           f"Dependabot's; GitHub's identity on its own commits says that")
+    if entry in VENDORLESS_AUTHORS:
+        return entry
+    registry, reason = read_registry()
+    if reason:
+        raise TrailerError(f"{AUTHOR_VARIABLE}={entry!r} names no reserved author, and the "
+                           f"provider registry does not read: {reason}")
+    try:
+        return attribution_value(entry, registry)
+    except TrailerError as error:
+        raise TrailerError(f"{AUTHOR_VARIABLE}={entry!r}: {error}") from None
 
 
 def _own_trailer(root: pathlib.Path, sha: str) -> str:
@@ -2526,15 +2679,16 @@ def _attribution_environment(root: pathlib.Path) -> dict[str, str] | None:
 
 
 def attribute(
-    root: pathlib.Path, target: str, name: str, registry: Any
+    root: pathlib.Path, target: str, name: str, registry: Any, writer: str = HUMAN_AUTHOR
 ) -> tuple[str, str, list[str]]:
     """Record `name` as the author of `target`, as one empty commit on `HEAD`.
 
     `target` is one commit or a `<from>..<to>` range. What lands is a single
     empty commit carrying an `Attributes:` line per repaired commit and its own
-    `Authored-with: human`, because the operator made it and a repair that
-    needs repairing is not one (C-40). Returns the new sha, the value written
-    and the commits covered.
+    `Authored-with: <writer>`, the resolved value of whoever ran it: `human`
+    for the operator, an agent's own entry for an agent (sd:2009), because a
+    repair that needs repairing is not one (C-40). Returns the new sha, the
+    value written and the commits covered.
 
     A commit rather than a note: a notes ref is one mutable ref a repository
     shares, and two clones attributing different commits of one branch diverge
@@ -2548,12 +2702,12 @@ def attribute(
     value = attribution_value(name, registry)
     covered = _covered(root, target)
     trailers = [f"{ATTRIBUTES_TRAILER} {sha} {value}" for sha in covered]
-    trailers.append(f"{AUTHORED_TRAILER} {HUMAN_AUTHOR}")
+    trailers.append(f"{AUTHORED_TRAILER} {writer}")
     written = subprocess.run(  # fixed argv, no shell
         ["git", "commit", "--allow-empty", "--quiet",
          "-m", f"chore(attribution): {len(covered)} commit(s) written with {value}",
-         "-m", "Recorded by the operator, after the fact, for commits that predate "
-               "the trailer or lost it to a rewrite.",
+         "-m", f"Recorded by {'the operator' if writer == HUMAN_AUTHOR else writer}, after the "
+               "fact, for commits that predate the trailer or lost it to a rewrite.",
          "-m", "\n".join(trailers)],
         cwd=str(root), capture_output=True, text=True,
         env=_attribution_environment(root),
@@ -2590,8 +2744,9 @@ ITEM_TRAILER = "Item:"
 WORK_TRAILER = "Work:"
 #: The trailer lines `sd-ship` owns in a pull-request body (sd:1870). It
 #: writes `Work:` into the body it publishes and `Item:`, `Delivers:` and the
-#: authorship lines into the squash message; `Closes:` rides a later merge or
-#: an empty commit, never a body `sd-ship` publishes. `sd_ship_body` reads a
+#: authorship lines into the squash message. `Closes:` rides a later merge or
+#: an empty commit, and in a body names the items a pull request co-delivers,
+#: which the merge closes with a `Delivers:` each (sd:1481). `sd_ship_body` reads a
 #: supplied body against this tuple, and the template test holds the
 #: template's closing block to it.
 OWNED_TRAILERS = (ITEM_TRAILER, WORK_TRAILER, DELIVERS_TRAILER, CLOSES_TRAILER,
@@ -2752,18 +2907,37 @@ def delivered(root: pathlib.Path, item: "str | tuple[str, ...]") -> Answer:
 #: push time, and two lists is how one of them gains a fourth entry alone.
 GUEST_REFUSED_DIRS = ("docs/work", "docs/spec", "docs/decisions")
 
+#: The local-block key that takes a tree out of the guest refusal, and the one
+#: tree it may name (sd:2168). The operator ruled it per repository and opt-in:
+#: `docs/decisions` stays refused by default, and `docs/work` and `docs/spec`
+#: stay refused always, so naming either refuses rather than being ignored.
+GUEST_ALLOW_KEY = "guest_allow"
+GUEST_ALLOWABLE_DIRS = ("docs/decisions",)
 
-def guest_artifacts(paths: Any) -> tuple[str, ...]:
+
+def guest_refused_dirs(root: pathlib.Path) -> tuple[str, ...]:
+    """`GUEST_REFUSED_DIRS` less the trees this repository's local block allows."""
+    raw = local_block(root).get(GUEST_ALLOW_KEY, "")
+    allowed = {entry.strip().rstrip("/") for entry in raw.split(",") if entry.strip()}
+    wrong = sorted(allowed - set(GUEST_ALLOWABLE_DIRS))
+    if wrong:
+        raise ConfigError(f"{local_block_path(root)}: {GUEST_ALLOW_KEY}: only {', '.join(GUEST_ALLOWABLE_DIRS)} "
+                          f"can be allowed, not {', '.join(wrong)}; docs/work and docs/spec stay refused in guest mode")
+    return tuple(directory for directory in GUEST_REFUSED_DIRS if directory not in allowed)
+
+
+def guest_artifacts(paths: Any, refused: tuple[str, ...] = GUEST_REFUSED_DIRS) -> tuple[str, ...]:
     """The repo-relative `paths` that live under a guest-refused tree.
 
     Separate from the mode question on purpose: this half is pure, so a caller
     with nothing to refuse never reaches the network to find that out.
+    `refused` is `guest_refused_dirs` of the repository, when it has one.
     """
 
     found = set()
     for entry in paths:
         text = re.sub(r"^(?:\./)+", "", str(entry).replace(os.sep, "/"))
-        for directory in GUEST_REFUSED_DIRS:
+        for directory in refused:
             if text == directory or text.startswith(directory + "/"):
                 found.add(text)
     return tuple(sorted(found))
@@ -2787,7 +2961,7 @@ def guest_artifact_refusal(root: pathlib.Path, paths: Any, *, ask: Asker = gh_ap
     code, because this module raises nothing.
     """
 
-    refused = guest_artifacts(paths)
+    refused = guest_artifacts(paths, guest_refused_dirs(root))
     if not refused:
         return ""
     if mode(root, ask=ask) != "guest":
@@ -2821,8 +2995,13 @@ def shared_tree_artifacts(root: pathlib.Path) -> tuple[str, ...]:
     remote, default = upstream(root)
     if not remote:
         return ()
+    try:
+        trees = guest_refused_dirs(root)
+    except ConfigError:
+        # A report names more, never fewer; the push check refuses the line itself.
+        trees = GUEST_REFUSED_DIRS
     listed = git_output(["ls-tree", "-r", "--name-only", "-z", f"refs/remotes/{remote}/{default}",
-                         "--", *GUEST_REFUSED_DIRS], root)
+                         "--", *trees], root)
     if listed is None:
         return ()
     return tuple(sorted(name for name in listed.split("\0") if name))
@@ -2884,6 +3063,70 @@ def demoted_trailers(message: str) -> tuple[str, ...]:
         line for line in message.splitlines()
         if _STATED_RE.match(line) and line not in block
     )
+
+
+#: The trailer names `hooks/commit-msg` holds to the block git reads (sd:1931).
+#: Wider than `STATED_TRAILERS`: a stray `Needed-by:` or `Authored-with:`
+#: closes nothing, but `sd-ship` and `sd-review` read both, and a line they
+#: cannot see reads as a line nobody wrote. `Work:` is not here; `sd-ship`
+#: writes it into a pull-request body, above the squash's own block.
+CHECKED_TRAILERS = ("Needed-by:", AUTHORED_TRAILER, "Co-Authored-By:", "Claude-Session:",
+                    ITEM_TRAILER, DELIVERS_TRAILER, CLOSES_TRAILER, ATTRIBUTES_TRAILER)
+
+#: A checked trailer at column zero, the same anchor `_STATED_RE` uses.
+_CHECKED_RE = re.compile(
+    r"^(?P<key>" + "|".join(re.escape(name.rstrip(":")) for name in CHECKED_TRAILERS)
+    + r"):[ \t]*(?P<value>\S.*)$"
+)
+
+
+def _trailer_pair(key: str, value: str) -> tuple[str, str]:
+    """A trailer as a comparable pair: git matches keys without case and unfolds values."""
+    return key.lower(), " ".join(value.split())
+
+
+def unread_trailers(message: str, parsed: str) -> tuple[str, ...]:
+    """The checked trailer lines in `message` that git's own parse did not return.
+
+    `parsed` is `git interpret-trailers --parse --no-divider` over the same
+    message, which is the reader of record: `git log --format=%(trailers)`
+    reads the same block and, like `--no-divider`, does not stop at a `---`
+    line. `trailer_block` is not used here, because git's paragraph is not
+    always Python's: a whitespace-only line also ends one, and a final
+    paragraph that is mostly prose is not a trailer block at all. Asking git
+    covers both. A line counts once per time git returned it, so a trailer
+    written above the block and again inside it still names the stray copy.
+
+    A continuation line (indented, straight after a trailer) is folded into
+    its trailer before comparing, as `--parse` unfolds it.
+    """
+    returned: dict[tuple[str, str], int] = {}
+    for line in parsed.splitlines():
+        key, colon, value = line.partition(":")
+        if colon:
+            pair = _trailer_pair(key, value)
+            returned[pair] = returned.get(pair, 0) + 1
+    stated: list[tuple[str, tuple[str, str]]] = []
+    folding = False
+    for line in message.splitlines():
+        match = _CHECKED_RE.match(line)
+        if match:
+            stated.append((line, _trailer_pair(match["key"], match["value"])))
+            folding = True
+        elif folding and line[:1] in (" ", "\t") and line.strip():
+            first, (key, value) = stated[-1]
+            stated[-1] = (first, _trailer_pair(key, f"{value} {line}"))
+        else:
+            folding = False
+    # Last first, so a line git did read uses up its own return and a copy
+    # of it higher up is the one named.
+    stray = []
+    for line, pair in reversed(stated):
+        if returned.get(pair, 0) > 0:
+            returned[pair] -= 1
+        else:
+            stray.append(line)
+    return tuple(reversed(stray))
 
 
 def display_fields(
@@ -3145,6 +3388,10 @@ ACKNOWLEDGED_FACTS = (
 #: able to accept its own breakage. All three are ids no acknowledgement could
 #: ever match, so admitting them here would re-open the hole under a
 #: better-spelled name.
+#:
+#: The pack owns this vocabulary (sd:1372). The system's collector writes the
+#: same ids as `sd_db.protection.GAP_IDS`, less `unprotected`, its status
+#: column; `GapVocabularyTests` in `tests/test_sd_status.py` fails on drift.
 ACKNOWLEDGEABLE_GAPS = (
     "bypass",
     "enforce_admins",

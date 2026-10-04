@@ -17,7 +17,8 @@ finished. `post` refuses any other SHA, so a result cannot be carried to a
 head that was never checked.
 
 Every merge attempt posts a fresh status, from a run or from a receipt; a
-reused pass says so in its description. The description carries
+reused pass says so in its description, and a run in full keeps `reuse_miss`,
+why no receipt stood (sd:2602). The description carries
 `inputs <digest>` as provenance: a digest of the head, the copied
 `CLAUDE.local.md` (or its absence) and the pack's own `bin/` files. Anyone
 with write access can post a status, so `local_gate_passed` trusts only one
@@ -29,6 +30,11 @@ tree at the exact head, a scrubbed Python environment and no virtualenv on
 tools are this machine's image; the repository's own `check` entrypoint owns a
 hermetic environment if it needs one. When the checkout under test is the pack
 itself and `sd-ship` runs from it, the gate's own `bin/` is that checkout.
+
+`sd gate post --head SHA` (`post_head`, sd:1989) runs this same gate and post
+outside `sd-ship merge`, for a repository's own merge path: a Dependabot merge
+or a script that merges by itself gets no `sd/local-gate` otherwise, and its
+required check never reports. It reads and writes no receipt, so it always runs.
 """
 
 from __future__ import annotations
@@ -39,12 +45,14 @@ from typing import Any
 import sd_lib
 from sd_gate_run import (
     DESCRIPTION_LIMIT,
+    WHOLE_OUTPUT,
     GateError,
     base_ref,
     check_in_worktree,
     gate_inputs,
 )
-from sd_ship_remote import Refusal
+from sd_ship_remote import GitHub, Refusal, git, slug
+from sd_ship_review import FAILING_TAIL_CHARS, failing_check_tails
 
 CONTEXT = sd_lib.LOCAL_GATE_CONTEXT
 
@@ -57,7 +65,9 @@ def post_gate_status(api: Any, head: str, result: dict[str, Any], inputs: str) -
                       code="local_gate_mismatch", boundary="ci", state="retryable_failure",
                       next_action="Retry merge from the reviewed head.")
     state = "success" if result.get("status") == "success" else "failure"
-    description = f"{head[:12]} inputs {inputs}: {result.get('summary') or state}"[:DESCRIPTION_LIMIT]
+    # The summary's local output path stays out of a status anyone who reads the repository sees (sd:2608).
+    summary = str(result.get("summary") or state).split(WHOLE_OUTPUT, 1)[0]
+    description = f"{head[:12]} inputs {inputs}: {summary}"[:DESCRIPTION_LIMIT]
     return api.api(f"{api.prefix}/statuses/{head}", method="POST",
                    body={"state": state, "context": CONTEXT, "description": description})
 
@@ -68,9 +78,56 @@ def local_gate(api: Any, root: pathlib.Path, head: str, *, base: str | None = No
     inputs = gate_inputs(root, head)
     try:
         # The merge gate only reads prepare's receipt; its own pass records none (sd:2041).
-        result = check_in_worktree(root, head, base=base_ref(base), database=database, record=False)
+        result = check_in_worktree(root, head, base=base_ref(base), database=database, record=False,
+                                   slot_timeout=sd_lib.GATE_SLOT_SECONDS)  # sd:2611: queue apart from the check
     except GateError as error:
         raise Refusal(str(error), code="command_failed", boundary="runtime", state="retryable_failure",
                       next_action="Inspect the command error, resolve its cause, then retry.") from None
     post_gate_status(api, head, result, inputs)
     return {**result, "inputs": inputs}
+
+
+def post_head(root: pathlib.Path, head: str, *, base: str | None = None, api: Any = None) -> dict[str, Any]:
+    """Run the gate at `head` and post `sd/local-gate` there: `sd gate post` (sd:1989).
+
+    `head` is any name for a commit this checkout has; the status goes to its
+    full SHA. `base` narrows the run to a declared docs-only scope against
+    that branch, as `sd-ship merge` passes the PR's target. With no `base`
+    every check runs: this verb does not know the PR's target, and a head
+    bound for a release branch can read as docs-only against the default
+    branch while carrying unchecked code. A base whose
+    remote-tracking ref is missing refuses, since `sd-check --base` would fail
+    and that failure would be posted as the gate's. `api` is the GitHub
+    client, `origin`'s by default.
+    """
+    commit = sd_lib.git_output(["rev-parse", "--verify", "--quiet", f"{head}^{{commit}}"], root)
+    if not commit:
+        raise Refusal(f"{head} names no commit in this checkout; nothing is posted",
+                      code="invalid_input", boundary="input", state="retryable_failure",
+                      next_action="Fetch the commit, then retry with its SHA.")
+    ref = base_ref(base)
+    if ref and sd_lib.git_output(["rev-parse", "--verify", "--quiet", ref], root) is None:
+        raise Refusal(f"the base {ref} is not in this checkout; nothing is posted",
+                      code="invalid_input", boundary="input", state="retryable_failure",
+                      next_action="Fetch origin or name another --base, then retry.")
+    if api is None:
+        api = GitHub(root, slug(git(root, "config", "--get", "remote.origin.url")))
+    return local_gate(api, root, commit, base=base)
+
+
+def refuse_failure(result: dict[str, Any], head: str, kept: str) -> None:
+    """Refuse a failed gate naming each failing check and its own tail, and where the report is kept (sd:2066).
+
+    The status description is cut to 140 characters, so `sd-check fail
+    (check fail)` was all a merge said, and finding the failing step meant
+    running the gate again. `kept` names the record that holds the whole report.
+    """
+    if result.get("status") != "failure":
+        return
+    named = failing_check_tails((result.get("report") or {}).get("checks"))
+    stderr = str(result.get("stderr") or "").strip()
+    said = "\n".join(named or [f"sd-check: {stderr[-FAILING_TAIL_CHARS:]}"] * bool(stderr))
+    raise Refusal(f"repo.ci is local and {CONTEXT} is failure on {head}: {result.get('summary') or 'sd-check failed'}"
+                  + (f"\n{said}" if said else "") + f"\nThe whole sd-check report is kept in {kept}.",
+                  code="ci_not_passing", boundary="ci", state="retryable_failure",
+                  next_action="Fix the failing check, push, then retry merge.")

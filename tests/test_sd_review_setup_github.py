@@ -127,13 +127,14 @@ class ModeTests(SetupFixture):
         self.assertEqual(result["status"], "installed")
         self.assertTrue(self.workflow(root).is_file())
 
-    def test_minimal_mode_refuses(self) -> None:
+    def test_minimal_mode_installs_the_workflow(self) -> None:
+        # sd:1292: `minimal` is the operator's own assertion, never detected,
+        # so the lane is theirs to install; only `guest` refuses it.
         root = self.make_repo()
         self.set_mode(root, "minimal")
-        with self.assertRaises(setup.Refusal) as caught:
-            install(root)
-        self.assertIn("minimal mode", str(caught.exception))
-        self.assertFalse(self.workflow(root).exists())
+        result = install(root)
+        self.assertEqual((result["mode"], result["status"]), ("minimal", "installed"))
+        self.assertTrue(self.workflow(root).is_file())
 
     def test_guest_mode_refuses(self) -> None:
         root = self.make_repo()
@@ -408,6 +409,19 @@ updates:
 """
 
 
+# A comment the consumer wrote below the last item of the list.
+CONSUMER_NOTE = "      # consumer note: renovate owns everything else here\n"
+
+NOTED_CONSUMER = (
+    "version: 2\n"
+    "updates:\n"
+    "  - package-ecosystem: github-actions\n"
+    "    directory: /\n"
+    "    ignore:\n"
+    "      - dependency-name: actions/checkout\n" + CONSUMER_NOTE
+)
+
+
 class GuardTests(SetupFixture):
     """The Dependabot guard is written from one template, beside the workflow."""
 
@@ -516,6 +530,50 @@ class GuardTests(SetupFixture):
         self.assertIn("-two", lines)
         self.assertIn("\\ No newline at end of file", lines)
         self.assertEqual(lines[-1], "same b")
+
+    def test_a_consumer_comment_after_the_last_guard_item_is_not_the_guards(self) -> None:
+        """The last `ignore:` block ran to the end of the list, so a comment
+        the consumer wrote below the guard read as part of it: the guard read
+        `differs`, and `--force` replaced it and deleted the comment (sd:1000)."""
+        for name, text in (("current", guard.minimal_file()), ("old", OLD_WORDING)):
+            with self.subTest(name=name):
+                noted = text + CONSUMER_NOTE
+                out = guard.rendered(noted)
+                self.assertIn(CONSUMER_NOTE, out)
+                self.assertEqual(guard.guard_state(out), "same")
+        self.assertEqual(guard.guard_state(guard.minimal_file() + CONSUMER_NOTE), "same")
+
+    def test_an_appended_guard_goes_above_a_trailing_consumer_comment(self) -> None:
+        """Appended below the comment, the guard took it as its own leading
+        comment, so the next run read `differs` and refused without --force."""
+        root = self.make_repo()
+        self.seed_dependabot(root, NOTED_CONSUMER)
+        self.assertEqual(install(root)["guard"], "absent")
+        text = self.dependabot(root).read_text(encoding="utf-8")
+        self.assertTrue(text.endswith(guard.guard_block("      ") + CONSUMER_NOTE), text)
+        self.assertEqual(guard.guard_state(text), "same")
+        self.assertEqual(install(root)["status"], "unchanged")
+
+    def test_guard_same_means_the_run_leaves_the_file_alone(self) -> None:
+        """`guard_state` read lines, `rendered` rewrote bytes: a file with no
+        final newline read `same`, was rewritten anyway, and `--check` then
+        called it DIFFERS (sd:1000). CRLF reaches only `rendered` itself:
+        `setup-github` reads with universal newlines."""
+        for name, text in (
+            ("no final newline", guard.minimal_file().rstrip("\n")),
+            ("crlf", guard.minimal_file().replace("\n", "\r\n")),
+        ):
+            with self.subTest(name=name):
+                root = self.make_repo(name.replace(" ", "-"))
+                self.dependabot(root).parent.mkdir(parents=True)
+                self.dependabot(root).write_bytes(text.encode("utf-8"))
+                result = install(root)
+                self.assertEqual(result["guard"], "same")
+                self.assertEqual(self.dependabot(root).read_bytes(), text.encode("utf-8"))
+                self.assertEqual(guard.rendered(text), text)
+                stream = io.StringIO()
+                setup.check_files(root, setup_args(check=True, pin=None), stream)
+                self.assertIn(f"same {guard.DEPENDABOT_RELATIVE_PATH}", stream.getvalue().splitlines())
 
     def test_a_file_with_no_entry_at_all_refuses_by_name(self) -> None:
         with self.assertRaises(guard.GuardError) as caught:
@@ -1001,21 +1059,30 @@ class CheckTests(SetupFixture):
         self.assertFalse(self.workflow(root).exists())
         self.assertFalse(self.dependabot(root).exists())
 
-    def test_a_tracked_lane_outside_full_mode_is_to_remove_not_drift(self) -> None:
-        # sd:1285: the installer refuses these modes, so DIFFERS would be a
-        # finding nothing could fix. The lane is reported as one to remove.
-        for value in ("minimal", "guest"):
-            with self.subTest(mode=value):
-                root = self.make_repo(value)
-                install(root)
-                self.set_mode(root, value)
-                before = self.workflow(root).read_text(encoding="utf-8")
-                code, out = self.run_check(root)
-                self.assertEqual(code, 1)
-                self.assertNotIn("DIFFERS", out)
-                self.assertEqual(out.splitlines()[0], f"REMOVE {setup.WORKFLOW_RELATIVE_PATH}")
-                self.assertIn(f"{value} mode", out)
-                self.assertEqual(self.workflow(root).read_text(encoding="utf-8"), before)
+    def test_a_tracked_lane_in_guest_mode_is_to_remove_not_drift(self) -> None:
+        # sd:1285: the installer refuses guest, so DIFFERS would be a finding
+        # nothing could fix. The lane is reported as one to remove.
+        root = self.make_repo()
+        install(root)
+        self.set_mode(root, "guest")
+        before = self.workflow(root).read_text(encoding="utf-8")
+        code, out = self.run_check(root)
+        self.assertEqual(code, 1)
+        self.assertNotIn("DIFFERS", out)
+        self.assertEqual(out.splitlines()[0], f"REMOVE {setup.WORKFLOW_RELATIVE_PATH}")
+        self.assertIn("guest mode", out)
+        self.assertEqual(self.workflow(root).read_text(encoding="utf-8"), before)
+
+    def test_a_tracked_lane_in_minimal_mode_compares_the_template(self) -> None:
+        # sd:1292 with sd:1285: the installer accepts minimal, so --check
+        # compares the lane it would write rather than marking it for removal.
+        root = self.make_repo()
+        self.set_mode(root, "minimal")
+        install(root)
+        code, out = self.run_check(root)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("REMOVE", out)
+        self.assertEqual(out.count("same "), 2)
 
     def test_a_remote_demotion_still_compares_the_template(self) -> None:
         # A written `full` that the remote lowers -- or that no remote could be
@@ -1036,12 +1103,12 @@ class CheckTests(SetupFixture):
                 self.assertEqual(out.count("same "), 2)
                 self.assertIn(answer.reason, out)
 
-    def test_no_lane_outside_full_mode_passes_without_a_pin(self) -> None:
+    def test_no_lane_in_guest_mode_passes_without_a_pin(self) -> None:
         root = self.make_repo()
-        self.set_mode(root, "minimal")
+        self.set_mode(root, "guest")
         code, out = self.run_check(root)
         self.assertEqual(code, 0)
-        self.assertEqual(out, f"absent {setup.WORKFLOW_RELATIVE_PATH} (minimal mode carries no routing lane)\n")
+        self.assertEqual(out, f"absent {setup.WORKFLOW_RELATIVE_PATH} (guest mode carries no routing lane)\n")
         self.assertFalse(self.workflow(root).exists())
 
 
@@ -1206,6 +1273,14 @@ class RemoveTests(SetupFixture):
         install(root)
         self.remove(root)
         self.assertEqual(self.dependabot(root).read_text(), original)
+
+    def test_remove_keeps_a_consumer_comment_below_the_guard(self) -> None:
+        root = self.make_repo()
+        self.seed_dependabot(root, NOTED_CONSUMER)
+        install(root)
+        code, text = self.remove(root)
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self.dependabot(root).read_text(encoding="utf-8"), NOTED_CONSUMER)
 
     def test_a_changed_workflow_needs_force(self) -> None:
         root = self.make_repo()

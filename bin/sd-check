@@ -20,6 +20,8 @@ target is not a repository that failed lint.
 Exit 0 when nothing failed, 1 when a check failed, 2 when the invocation or the
 configuration was wrong. A controlled error prints a sentence, never a traceback.
 Only --record-receipt writes local checkpoint evidence; it never changes Git.
+A failing check's whole output is kept as a file in the Git directory, outside
+the tree (`keep_output`, sd:2558): the report holds only each stream's tail.
 The repository's check commands own their effects, including any network calls.
 
 With `--base REF`, a repository that declares a docs-only scope
@@ -32,14 +34,24 @@ Every run that executes a check first takes a machine-wide gate slot
 through here, so here is where the cap on concurrent gates is kept. The wait
 counts against `--timeout`, each check gets what is left, and the checks run
 with `SD_GATE_SLOTS=0`, so a gate inside them never waits on this one's slot.
+With `--slot-timeout`, the wait has its own bound and each check gets the whole
+`--timeout` (sd:2607): a gate in a long queue then fails as unadmitted, never
+as a check cut short by the time it spent queued.
+
+A Makefile that defines `precheck` has it run first, before the slot wait
+(sd:2604). It is the minute of checks that catches most failed full runs; a
+failure there fails every check unrun, takes no slot, and the report's
+`precheck` record says what failed. `--only` and a docs-only scope skip it.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import pathlib
+import re
 import signal
 import sys
 import time
@@ -72,6 +84,103 @@ def _tail(text: str) -> tuple[str, bool]:
     if len(text) <= OUTPUT_TAIL_CHARS:
         return text, False
     return text[-OUTPUT_TAIL_CHARS:], True
+
+
+#: Where a failing check's whole output goes, under the Git common directory,
+#: and how many files stay there; the oldest beyond that are removed.
+OUTPUT_FOLDER = "sd-check-output"
+OUTPUT_KEEP = 20
+#: A shard the pack's `run-tests.sh` reports as failed: `shard <name>: <n>s exit=<code>`, code not 0.
+FAILED_SHARD = re.compile(r"^shard \S+: \d+s exit=(?!0$)\d+$", re.MULTILINE)
+FAILED_SHARDS_KEPT = 20
+
+
+def failed_shards(*texts: str) -> list[str]:
+    """Each failed-shard line in the whole output, in order, at most `FAILED_SHARDS_KEPT`.
+
+    A suite's summary ends a long run, so the shard that failed sits in the
+    middle, where the report's tail no longer reaches (sd:2558).
+    """
+    return [match.group(0) for text in texts for match in FAILED_SHARD.finditer(text)][:FAILED_SHARDS_KEPT]
+
+
+#: A make target that failed: `make: *** [test] Error 1`, GNU make 4's `make[1]: *** [Makefile:12: lint] Error 2`.
+FAILED_TARGET = re.compile(r"^g?make(?:\[\d+\])?: \*\*\* \[(?:[^\]]*: )?([^\]\s]+)\] (?:Error \d+|Interrupt)", re.MULTILINE)
+#: A runner that lists the suites that failed: `check.sh: failed: shared macos; logs kept in <dir>`.
+FAILED_SUITES = re.compile(r"^[\w.-]+: failed:((?: [\w.-]+)+)(?:;.*)?$", re.MULTILINE)
+#: A line that says what failed: a unittest header, an exception, a summary, a make error.
+FAILURE_LINE = re.compile(r"^(?:FAIL|ERROR): |^\w*(?:Error|Exception)\b|^FAILED\b|\*\*\* \[|^[\w.-]+: failed:")
+FAILURE_LINES_KEPT = 12
+#: How much of one step's output the excerpt ends with, and the excerpt's whole bound.
+STEP_TAIL_CHARS = 600
+FAILURE_CHARS = 4000
+
+
+def failed_steps(name: str, code: int | None, note: str, out: str, err: str) -> list[str]:
+    """What failed, most specific first: each failed shard, each failed suite, each failed make target (sd:2608).
+
+    Never empty: a failure that names no step names the check and its exit
+    code, or the reason it did not finish, so a failed run is never reported
+    with nothing named.
+    """
+    steps = failed_shards(out, err)
+    steps += [f"suite {suite}" for text in (out, err) for match in FAILED_SUITES.finditer(text)
+              for suite in match.group(1).split()]
+    steps += [f"make target {match.group(1)}" for text in (out, err) for match in FAILED_TARGET.finditer(text)]
+    steps = list(dict.fromkeys(steps))[:FAILED_SHARDS_KEPT]
+    if steps:
+        return steps
+    return [f"{name}: {note}" if note else f"{name} exit {code}"]
+
+
+def _excerpt(text: str) -> str:
+    """The lines of `text` that say what failed, then its tail."""
+    lines = [line[:300] for line in text.splitlines() if FAILURE_LINE.search(line)][-FAILURE_LINES_KEPT:]
+    tail = text.rstrip()[-STEP_TAIL_CHARS:]
+    return "\n".join([*lines, "..." if len(text.rstrip()) > STEP_TAIL_CHARS else "", tail]).strip()
+
+
+def failure_excerpt(out: str, err: str, shards: list[str]) -> str:
+    """The failing part of the output (sd:2608): each failed shard's own block, else each stream's failure lines and tail.
+
+    A shard's block runs from its `shard <name>: start` line to its result
+    line, so a shard that failed early in a long run keeps its FAIL line and
+    assertion, which the report's tail no longer reaches.
+    """
+    parts = []
+    for line in shards:
+        for text in (out, err):
+            end = text.find(line)
+            if end < 0:
+                continue
+            start = text.rfind(f"shard {line.split()[1]} start", 0, end)
+            start = text.rfind("\n", 0, start) + 1 if start >= 0 else max(0, end - STEP_TAIL_CHARS)
+            parts.append(_excerpt(text[start:end + len(line)]))
+            break
+    if not parts:
+        parts = [_excerpt(text) for text in (out, err) if text.strip()]
+    return "\n\n".join(parts)[-FAILURE_CHARS:]
+
+
+def keep_output(root: pathlib.Path, name: str, command: list[str], code: int | None, out: str, err: str) -> str:
+    """Write one failing check's whole output under the Git common directory; return the file's path.
+
+    The gate runs in a temporary worktree that is removed afterwards, and
+    every worktree of a repository shares its common directory, so the file
+    outlives the run. Raises OSError when it cannot be written.
+    """
+    common = sd_lib.git_output(["rev-parse", "--path-format=absolute", "--git-common-dir"], root)
+    if not common:
+        raise OSError(f"{root} has no Git directory to keep the output in")
+    folder = pathlib.Path(common) / OUTPUT_FOLDER
+    folder.mkdir(exist_ok=True)
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    path = folder / f"{stamp}-{os.getpid()}-{name}.log"
+    path.write_text(f"sd-check {name} exit {code} in {root}\ncommand: {' '.join(command)}\n"
+                    f"--- stdout ---\n{out}\n--- stderr ---\n{err}\n", encoding="utf-8")
+    for old in sorted(folder.glob("*.log"))[:-OUTPUT_KEEP]:
+        old.unlink(missing_ok=True)
+    return str(path)
 
 
 def plan(
@@ -159,6 +268,34 @@ def overall(statuses: list[str]) -> str:
     return SKIPPED
 
 
+def record_run(record: dict[str, object], command: list[str], root: pathlib.Path, timeout: int,
+               environ: Mapping[str, str] | None) -> None:
+    """Run `command` and write its outcome and tailed output into `record`."""
+    status, code, duration, out, err, note = (run_one(command, root, timeout) if environ is None
+                                            else run_one(command, root, timeout, environ))
+    out_tail, out_cut = _tail(out)
+    err_tail, err_cut = _tail(err)
+    record.update(
+        status=status,
+        exit_code=code,
+        duration_seconds=round(duration, 3),
+        reason=note,
+        stdout=out_tail,
+        stderr=err_tail,
+        output_truncated=out_cut or err_cut,
+    )
+    if status == FAIL:
+        shards = failed_shards(out, err)
+        record["failed_shards"] = shards
+        record["failed_steps"] = failed_steps(str(record["name"]), code, note, out, err)
+        record["failure"] = failure_excerpt(out, err, shards)
+    if status == FAIL and (out or err):
+        try:
+            record["output_path"] = keep_output(root, str(record["name"]), command, code, out, err)
+        except OSError as error:
+            record["reason"] = "; ".join(filter(None, [note, f"output not kept: {error}"]))
+
+
 def execute(
     root: pathlib.Path,
     detection: sd_lib.Detection,
@@ -183,6 +320,10 @@ def execute(
             "stdout": "",
             "stderr": "",
             "output_truncated": False,
+            "output_path": None,
+            "failed_shards": [],
+            "failed_steps": [],
+            "failure": "",
         }
         if entry["status"] is None:
             command = entry["command"]
@@ -193,20 +334,9 @@ def execute(
             elif blocked is not None:
                 record["status"] = FAIL
                 record["reason"] = blocked
+                record["failed_steps"] = failed_steps(str(entry["name"]), None, blocked, "", "")
             else:
-                status, code, duration, out, err, note = (run_one(command, root, timeout) if environ is None
-                                                        else run_one(command, root, timeout, environ))
-                out_tail, out_cut = _tail(out)
-                err_tail, err_cut = _tail(err)
-                record.update(
-                    status=status,
-                    exit_code=code,
-                    duration_seconds=round(duration, 3),
-                    reason=note,
-                    stdout=out_tail,
-                    stderr=err_tail,
-                    output_truncated=out_cut or err_cut,
-                )
+                record_run(record, command, root, timeout, environ)
         checks.append(record)
 
     statuses = [str(record["status"]) for record in checks]
@@ -240,6 +370,9 @@ def render(result: dict[str, object], stream: TextIO) -> None:
         write(f"  scope: docs-only ({scope['reason']})\n")
     checks = result["checks"]
     assert isinstance(checks, list)
+    precheck = result.get("precheck")
+    if isinstance(precheck, dict):
+        checks = [precheck, *checks]
     for record in checks:
         command = record["command"]
         shown = " ".join(command) if isinstance(command, list) else "-"
@@ -249,13 +382,8 @@ def render(result: dict[str, object], stream: TextIO) -> None:
             f" {float(record['duration_seconds']):6.1f}s  {shown}{note}\n"
         )
     for record in checks:
-        if record["status"] != FAIL:
-            continue
-        write(f"\n--- {record['name']} (exit {record['exit_code']}) ---\n")
-        for channel in ("stdout", "stderr"):
-            text = str(record[channel])
-            if text.strip():
-                write(f"[{channel}]\n{text.rstrip()}\n")
+        if record["status"] == FAIL:
+            render_failure(record, stream)
     slot = result.get("gate_slot")
     if isinstance(slot, dict) and slot.get("slots"):
         write(f"  gate slot: cap {slot['slots']} ({slot['source']}), waited {float(slot['waited_seconds']):.1f}s\n")
@@ -265,6 +393,33 @@ def render(result: dict[str, object], stream: TextIO) -> None:
         write(f"sd-check: {result['status']}\n")
     if result.get("receipt_error"):
         write(f"sd-check: receipt unavailable: {result['receipt_error']}\n")
+
+
+def render_failure(record: dict[str, object], stream: TextIO) -> None:
+    """One failing check: its failed steps and shards, the file with its whole output, its failure, then each stream's tail."""
+    write = stream.write
+    write(f"\n--- {record['name']} (exit {record['exit_code']}) ---\n")
+    steps = record.get("failed_steps")
+    for line in steps if isinstance(steps, list) else []:
+        write(f"failed step: {line}\n")
+    shards = record.get("failed_shards")
+    for line in shards if isinstance(shards, list) else []:
+        write(f"failed {line}\n")
+    if record.get("output_path"):
+        write(f"whole output: {record['output_path']}\n")
+    if str(record.get("failure") or "").strip():
+        write(f"[failure]\n{str(record['failure']).rstrip()}\n")
+    for channel in ("stdout", "stderr"):
+        text = str(record[channel])
+        if text.strip():
+            write(f"[{channel}]\n{text.rstrip()}\n")
+
+
+def queue_seconds(text: str) -> int:
+    """A whole number of seconds above 0, for `--slot-timeout`."""
+    if not text.isascii() or not text.isdigit() or int(text) == 0:
+        raise argparse.ArgumentTypeError(f"takes a positive number of seconds (got '{text}')")
+    return int(text)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -287,6 +442,8 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help=f"per-check timeout; a wait for a gate slot counts against it (default: {DEFAULT_TIMEOUT_SECONDS})",
     )
+    parser.add_argument("--slot-timeout", type=queue_seconds, metavar="SECONDS",
+                        help="bound the wait for a gate slot on its own; each check then gets the whole --timeout")
     return parser
 
 
@@ -309,32 +466,69 @@ def take_slot(environ: Mapping[str, str], timeout: int) -> tuple[sd_gate_slots.S
     except sd_gate_slots.LauncherExited:
         raise UsageError("the process that started this gate exited while it waited for a slot") from None
     report: dict[str, object] = {"slots": slots, "source": source, "waited_seconds": float(timeout),
-                                 "path": None}
+                                 "bound_seconds": timeout, "path": None}
     if slot is not None:
         report.update(waited_seconds=round(slot.waited, 3), path=str(slot.path) if slot.path else None)
     return slot, report
 
 
+def run_precheck(root: pathlib.Path, detection: sd_lib.Detection, args: argparse.Namespace,
+                 environ: Mapping[str, str]) -> dict[str, object] | None:
+    """The repository's precheck, run before the slot wait (sd:2604); None when it defines none or the run is narrowed.
+
+    A precheck is a Makefile `precheck` target: the checks that take a minute
+    and catch what most often fails a full run. It takes no gate slot, so a
+    lint error fails in a minute rather than after the wait and the suite.
+    `--only` and a docs-only scope run less than a full check, so they skip it.
+    """
+    scope = getattr(args, "scope", None)
+    if detection.precheck is None or args.only is not None or (
+            scope is not None and scope.mode == sd_check_scope.DOCS_ONLY):
+        return None
+    record: dict[str, object] = {"name": sd_lib.PRECHECK_NAME, "command": detection.precheck,
+                                 "output_path": None, "failed_shards": [], "failed_steps": [], "failure": ""}
+    record_run(record, detection.precheck, root, args.timeout, environ)
+    return record
+
+
 def gated_execute(root: pathlib.Path, detection: sd_lib.Detection, args: argparse.Namespace,
                   environ: Mapping[str, str] | None) -> dict[str, object]:
-    """`execute` inside a gate slot when anything will run; the checks get the timeout the wait left."""
+    """`execute` inside a gate slot when anything will run; the checks get the timeout the precheck left, less the wait.
+
+    With `--slot-timeout` the wait has its own bound and is not taken off (sd:2607).
+
+    A failing precheck fails every check that would have run, unrun, and no slot is taken.
+    """
     scope = getattr(args, "scope", None)
     runnable = any(entry["status"] is None for entry in plan(detection, args.only, scope))
     if args.dry_run or not runnable:
         return execute(root, detection, args.only, args.dry_run, args.timeout, environ, scope=scope)
-    slot, report = take_slot(os.environ, args.timeout)
-    children = {**(environ if environ is not None else os.environ), sd_gate_slots.SLOTS_VARIABLE: "0"}
+    base = environ if environ is not None else os.environ
+    started = time.monotonic()
+    unslotted = sd_gate_slots.holder_environment(base, 0)
+    first = run_precheck(root, detection, args, unslotted)
+    if first is not None and first["status"] == FAIL:
+        result = execute(root, detection, args.only, False, args.timeout, unslotted,
+                         f"{sd_lib.PRECHECK_NAME} failed, so this did not run", scope)
+        result["precheck"] = first
+        return result
+    left = args.timeout if first is None else max(1, int(args.timeout - (time.monotonic() - started)))
+    queued = args.slot_timeout or left
+    slot, report = take_slot(os.environ, queued)
+    children = sd_gate_slots.holder_environment(base, report["slots"] if isinstance(report["slots"], int) else 0)
     try:
         if slot is None:
-            result = execute(root, detection, args.only, False, args.timeout, children,
-                             f"no gate slot came free within {args.timeout}s", scope)
+            result = execute(root, detection, args.only, False, left, children,
+                             f"no gate slot came free within {queued}s", scope)
         else:
-            result = execute(root, detection, args.only, False, max(1, int(args.timeout - slot.waited)), children,
-                             scope=scope)
+            budget = left if args.slot_timeout else max(1, int(left - slot.waited))
+            result = execute(root, detection, args.only, False, budget, children, scope=scope)
     finally:
         if slot is not None:
             slot.release()
     result["gate_slot"] = report
+    if first is not None:
+        result["precheck"] = first
     return result
 
 
@@ -367,6 +561,7 @@ def main(argv: list[str] | None = None) -> int:
         root = sd_lib.repo_root(None)
         if root is None:
             raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")
+        sd_lib.refuse_unmanaged(root, UsageError, args.database)  # dry runs included
         detection = sd_lib.detect_entrypoints(root)
         if args.database and not args.record_receipt:
             raise UsageError("--database requires --record-receipt")
@@ -374,18 +569,21 @@ def main(argv: list[str] | None = None) -> int:
             raise UsageError("--record-receipt requires an actual full check")
         args.scope = run_scope(args, root, detection)
         before, controlled = None, None
-        if args.record_receipt:
-            try:
-                before = sd_check_receipts.prepare_check_receipt(root, os.environ, args.database)
-                controlled = sd_check_receipts.receipt_environment(sd_check_receipts.reuse_contract(root), os.environ)
-            except Exception as error:
-                raise UsageError(f"receipt unavailable: {error}") from None
-        result = gated_execute(root, detection, args, controlled)
-        if before is not None:
-            try:
-                result["receipt_revision"] = sd_check_receipts.store_check_receipt(root, os.environ, args.database, before, result)
-            except Exception as error:
-                result["receipt_error"] = str(error)
+        with contextlib.ExitStack() as outputs:  # a recorded run's build folders go when it ends (sd:2327)
+            if args.record_receipt:
+                try:
+                    contract = sd_check_receipts.reuse_contract(root)
+                    controlled = outputs.enter_context(sd_check_receipts.build_output_environment(
+                        root, contract, sd_check_receipts.receipt_environment(contract, os.environ)))
+                    before = sd_check_receipts.prepare_check_receipt(root, os.environ, args.database)
+                except Exception as error:
+                    raise UsageError(f"receipt unavailable: {error}") from None
+            result = gated_execute(root, detection, args, controlled)
+            if before is not None:
+                try:
+                    result["receipt_revision"] = sd_check_receipts.store_check_receipt(root, os.environ, args.database, before, result)
+                except Exception as error:
+                    result["receipt_error"] = str(error)
     except sd_lib.ConfigError as error:
         print(f"sd-check: error: {error}", file=sys.stderr)
         return 2

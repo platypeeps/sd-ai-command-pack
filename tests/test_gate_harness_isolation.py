@@ -53,6 +53,9 @@ SITECUSTOMIZE = REPO_ROOT / "tests/coverage_sitecustomize/sitecustomize.py"
 
 # The slow module holds the run open for as long as the overlap needs; the
 # padding is what makes `ls -S` schedule it first, as it does in the real repo.
+# `HARNESS_FIXTURE_RELEASE` names a file that ends the hold early: a test that
+# has seen the overlap it waited for releases the run rather than sleeping out
+# the rest of `HARNESS_FIXTURE_SLEEP`, which stays the cap (sd:1615).
 SLOW_MODULE = '''import os
 import time
 import unittest
@@ -60,7 +63,10 @@ import unittest
 
 class Slow(unittest.TestCase):
     def test_slow(self):
-        time.sleep(float(os.environ.get("HARNESS_FIXTURE_SLEEP", "12")))
+        deadline = time.monotonic() + float(os.environ.get("HARNESS_FIXTURE_SLEEP", "12"))
+        release = os.environ.get("HARNESS_FIXTURE_RELEASE")
+        while time.monotonic() < deadline and not (release and os.path.exists(release)):
+            time.sleep(0.05)
         self.assertTrue(True)
 
 
@@ -126,6 +132,18 @@ def _widen_assembly_window(harness):
     The inserted sentinel is what the test waits on, so the kill lands inside
     the window instead of near it, and a missing anchor raises rather than
     no-oping.
+
+    The hold lasts until the watchdog's TERM ends the run, under a cap of
+    two minutes. It was a fixed ten seconds, and under gate load the test's
+    poll for the sentinel plus the watchdog's two-second poll outlasted it:
+    the run left the window and published before the TERM landed (sd:2632).
+    A working watchdog now always lands inside the window, and a broken one
+    still reaches the publish at the cap, so the test still fails for it.
+
+    The hold is counted in tenths, not one long `sleep`: bash runs a trap
+    only after its foreground command returns, so a watchdog's TERM waited out
+    the whole sleep. `HARNESS_ASSEMBLY_TENTHS` shortens it for a run that is
+    not the one under test (sd:1615).
     """
     lines = harness.read_text().splitlines(keepends=True)
     anchors = [i for i, line in enumerate(lines) if line.startswith(CONCAT_ANCHOR)]
@@ -134,7 +152,8 @@ def _widen_assembly_window(harness):
             f"expected exactly one log-assembly loop to widen, found {len(anchors)}: "
             "the assembly step moved, and this test would otherwise assert nothing"
         )
-    lines.insert(anchors[0], f': > "$REPO_ROOT/{CONCAT_SENTINEL}"\nsleep 10\n')
+    hold = 'held=0; while [ "$held" -lt "${HARNESS_ASSEMBLY_TENTHS:-1200}" ]; do sleep 0.1; held=$((held + 1)); done\n'
+    lines.insert(anchors[0], f': > "$REPO_ROOT/{CONCAT_SENTINEL}"\n{hold}')
     harness.write_text("".join(lines))
 
 
@@ -337,12 +356,13 @@ class InFlightIsolationTests(unittest.TestCase):
             root = Path(tmp)
             script = _build_fixture(root)
             slow_log = root / "slow.log"
+            release = root / "release"
             with open(slow_log, "w", encoding="utf-8") as handle:
                 slow = subprocess.Popen(
                     ["bash", str(script)],
                     stdout=handle,
                     stderr=subprocess.STDOUT,
-                    env=_fixture_env(HARNESS_FIXTURE_SLEEP="30"),
+                    env=_fixture_env(HARNESS_FIXTURE_SLEEP="30", HARNESS_FIXTURE_RELEASE=str(release)),
                 )
                 try:
                     _wait_for(lambda: len(_descendants(slow.pid)) >= 2, timeout=60)
@@ -359,6 +379,8 @@ class InFlightIsolationTests(unittest.TestCase):
                         slow.poll(),
                         "the long run finished first; the overlap never happened",
                     )
+                    # The overlap happened; the long run need not sleep out its cap.
+                    release.touch()
 
                     self.assertEqual(slow.wait(timeout=180), 0, slow_log.read_text())
                 finally:
@@ -493,11 +515,12 @@ class AssemblyWindowTests(unittest.TestCase):
             script = _build_fixture(root, widen_assembly=True)
             env = _fixture_env(HARNESS_FIXTURE_SLEEP="0")
 
+            # Only the second run is the one under test; the first need not hold.
             first = subprocess.run(
                 ["bash", str(script)],
                 capture_output=True,
                 text=True,
-                env=env,
+                env={**env, "HARNESS_ASSEMBLY_TENTHS": "0"},
                 check=False,
             )
             self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
@@ -886,7 +909,7 @@ class GateSlotTests(unittest.TestCase):
 
     def test_make_test_sets_the_cap_and_a_holder_lifts_it_for_its_children(self):
         makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
-        self.assertIn("SD_GATE_SLOTS ?= 2", makefile)
+        self.assertIn('SD_GATE_SLOTS ?= $(shell "$(PYTHON)" bin/sd_gate_slots.py count', makefile)
         self.assertIn('SD_GATE_SLOTS="$(SD_GATE_SLOTS)"', makefile)
         self.assertIn("export SD_GATE_SLOTS=0", HARNESS.read_text(encoding="utf-8"))
 

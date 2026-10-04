@@ -29,6 +29,20 @@ by its waiter, so a dead waiter's ticket is free and the next poll removes it.
 who holds and who waits. `sd gate run` and `sd gate status` are the same verbs
 with the machine settings read.
 
+One pool for every caller (sd:2522). On 2026-10-03 the pack's own `make test`
+counted 2 slots from its Makefile while `sd-check` counted the machine's 4, the
+stdlib `run` ignored `sd.gate_slots`, and a gate that waited said how many
+slots were busy but not who held them. Now every entry point takes its count
+from `configured` with `sd.gate_slots` read (`count` prints it for the shell),
+and a waiting gate names each holder, its directory and since when.
+
+The count is the one limit (sd:2607). On 2026-10-03 three gates read a load
+average of 124 while most cores idled: macOS counts threads waiting on the disk
+in the load average, so the load rule held every waiter back while the CPU had
+room. The load rule is now off unless `sd.gate_load_max` sets it; the starts
+stay `sd.gate_settle_seconds` apart. A holder also exports the cap as
+`SD_GATE_POOL_SIZE`, so the tests it runs size their workers to the pool.
+
 Stdlib only: the harness runs this file from a bare fixture copy.
 """
 
@@ -67,12 +81,13 @@ RUN_TIMED_OUT = 124
 RUN_NOT_STARTED = 125
 RUN_NOT_FOUND = 127
 
-#: The load rule (sd:2262). The defaults are the hand rule of 2026-10-01: load1
-#: below 40 on 16 cores, held for 45 s, and 45 s between two starts.
+#: The load rule (sd:2262): off by default since sd:2607, with 45 s between two starts.
 LOAD_VARIABLE = "SD_GATE_LOAD_MAX"
 SETTLE_VARIABLE = "SD_GATE_SETTLE_SECONDS"
-LOAD_PER_CORE = 2.5
+DEFAULT_LOAD_MAX = 0.0
 DEFAULT_SETTLE_SECONDS = 45.0
+#: The cap a holder hands the commands it starts, beside `SD_GATE_SLOTS=0` (sd:2607).
+POOL_VARIABLE = "SD_GATE_POOL_SIZE"
 #: A gap between two load samples longer than this, or than the settle time,
 #: restarts the low-load record: nobody watched the load in between.
 STALE_SAMPLE_SECONDS = 15.0
@@ -130,19 +145,14 @@ class LoadRule(NamedTuple):
     source: str
 
 
-def default_load_max(cores: int | None = None) -> float:
-    """2.5 per core: 40 on a 16-core machine."""
-    return LOAD_PER_CORE * (cores if cores is not None else (os.cpu_count() or CORES_PER_SLOT))
-
-
 def parse_number(text: str, source: str) -> float:
     if not NUMBER.fullmatch(text):
         raise ValueError(f"{source} must be a non-negative number (got '{text}')")
     return float(text)
 
 
-def load_rule(environ: Mapping[str, str], limit_setting: str | None = None, settle_setting: str | None = None,
-              *, cores: int | None = None) -> LoadRule:
+def load_rule(environ: Mapping[str, str], limit_setting: str | None = None,
+              settle_setting: str | None = None) -> LoadRule:
     """The load rule: each value from its variable, then the machine setting, then the default.
 
     The settings are `sd.gate_load_max` and `sd.gate_settle_seconds`, read by
@@ -154,41 +164,51 @@ def load_rule(environ: Mapping[str, str], limit_setting: str | None = None, sett
         if setting is not None:
             return parse_number(setting, name), name
         return default, None
-    limit, limit_source = setting_value(LOAD_VARIABLE, limit_setting, "sd.gate_load_max", default_load_max(cores))
+    limit, limit_source = setting_value(LOAD_VARIABLE, limit_setting, "sd.gate_load_max", DEFAULT_LOAD_MAX)
     settle, settle_source = setting_value(SETTLE_VARIABLE, settle_setting, "sd.gate_settle_seconds", DEFAULT_SETTLE_SECONDS)
     sources = [source for source in (limit_source, settle_source) if source]
     return LoadRule(limit, settle, ", ".join(sources) or "default")
 
 
-def machine_rule(environ: Mapping[str, str], *, stream: TextIO | None = None,
-                 cores: int | None = None) -> LoadRule:
-    """`load_rule` with `sd.gate_load_max` and `sd.gate_settle_seconds` read from the machine config.
+#: The machine settings the stdlib entry points read, with the check each value passes.
+MACHINE_SETTINGS: tuple[tuple[str, Callable[[str, str], object]], ...] = (
+    ("gate_slots", parse_count), ("gate_load_max", parse_number), ("gate_settle_seconds", parse_number))
 
-    For the stdlib-only entry points (`wait`, which `run-tests.sh` runs, and
-    `run`/`status` here), so they read the rule `sd-check` and `sd gate` read.
-    The path is `sd_lib.machine_config_path`'s. A file that cannot be read or
-    holds a bad value gives the defaults with a warning: load control never
-    fails a gate.
+
+def machine_settings(environ: Mapping[str, str], *, stream: TextIO | None = None) -> dict[str, str | None]:
+    """`sd.gate_slots`, `sd.gate_load_max` and `sd.gate_settle_seconds` from the machine config, as text.
+
+    For the stdlib-only entry points (`wait` and `count`, which `run-tests.sh`
+    runs, and `run`/`status` here), so they read what `sd-check` and `sd gate`
+    read. The path is `sd_lib.machine_config_path`'s. A file that cannot be
+    read or holds a bad value gives no settings, so the defaults, with a
+    warning: load control never fails a gate.
     """
     home = environ.get("XDG_CONFIG_HOME") or str(pathlib.Path(environ.get("HOME") or pathlib.Path.home()) / ".config")
     path = pathlib.Path(home) / "sd-ai-command-pack" / "config.json"
-    values: list[str | None] = [None, None]
+    values: dict[str, str | None] = {key: None for key, _ in MACHINE_SETTINGS}
     try:
         loaded = json.loads(path.read_text(encoding="utf-8"))
         mine = loaded.get("config", {}).get("sd", {}) if isinstance(loaded, dict) else {}
-        for index, (key, name) in enumerate((("gate_load_max", "sd.gate_load_max"),
-                                             ("gate_settle_seconds", "sd.gate_settle_seconds"))):
+        for key, check in MACHINE_SETTINGS:
             value = mine.get(key) if isinstance(mine, dict) else None
             if value is not None:
-                parse_number(value if isinstance(value, str) else repr(value), name)
-                values[index] = value
+                text = value if isinstance(value, str) else repr(value)
+                check(text, f"sd.{key}")
+                values[key] = text
     except FileNotFoundError:
-        values = [None, None]
+        pass
     except (OSError, ValueError, AttributeError) as error:
         if stream is not None:
             stream.write(f"warning: cannot read the gate settings in {path} ({error}); using the defaults\n")
-        values = [None, None]
-    return load_rule(environ, values[0], values[1], cores=cores)
+        values = dict.fromkeys(values)
+    return values
+
+
+def machine_rule(environ: Mapping[str, str], *, stream: TextIO | None = None) -> LoadRule:
+    """`load_rule` with `sd.gate_load_max` and `sd.gate_settle_seconds` read by `machine_settings`."""
+    values = machine_settings(environ, stream=stream)
+    return load_rule(environ, values["gate_load_max"], values["gate_settle_seconds"])
 
 
 def utc_stamp(seconds: float) -> str:
@@ -413,8 +433,9 @@ def wait_for_slot(fds: Sequence[int], where: pathlib.Path, *, poll: float, strea
     `stop` is asked before every attempt, so a waiter whose launcher died
     takes nothing even when a slot frees during its sleep. While queued it
     says why on `stream` at once and every `REPORT_EVERY_SECONDS` after. With
-    no `rule` the load is not read. A queue that cannot be written falls back
-    to taking any free slot, as before sd:2262.
+    no `rule` the load is not read. Each report names who holds the slots
+    (sd:2522). A queue that cannot be written falls back to taking any free
+    slot, as before sd:2262.
     """
     rule = rule if rule is not None else LoadRule(0.0, 0.0, "none")
     queue = Queue(where)
@@ -441,11 +462,11 @@ def wait_for_slot(fds: Sequence[int], where: pathlib.Path, *, poll: float, strea
                 return taken
             now = clock()
             if reported is None:
-                stream.write(f"waiting for a gate slot: {reason} under {where}\n")
+                stream.write(f"waiting for a gate slot: {reason} under {where}{held_by(queue)}\n")
                 stream.flush()
                 reported = now
             elif now - reported >= REPORT_EVERY_SECONDS:
-                stream.write(f"still waiting for a gate slot after {now - started:.0f}s: {reason}\n")
+                stream.write(f"still waiting for a gate slot after {now - started:.0f}s: {reason}{held_by(queue)}\n")
                 stream.flush()
                 reported = now
             if deadline is not None and now >= deadline:
@@ -526,6 +547,11 @@ def acquire(slots: int, environ: Mapping[str, str], *, stream: TextIO, timeout: 
     return Slot(held, lock, time.monotonic() - started)
 
 
+def holder_environment(environ: Mapping[str, str], slots: int) -> dict[str, str]:
+    """What a holder's commands run with: no slot of their own, and the cap it took one under (sd:2607)."""
+    return {**environ, SLOTS_VARIABLE: "0", **({POOL_VARIABLE: str(slots)} if slots > 0 else {})}
+
+
 def run_gated(command: Sequence[str], environ: Mapping[str, str], *, slots: int, rule: LoadRule, stream: TextIO,
         label: str = "", timeout: float | None = None) -> int:
     """Wait for a slot, run `command` with `SD_GATE_SLOTS=0`, free the slot, and return its exit code.
@@ -553,7 +579,7 @@ def run_gated(command: Sequence[str], environ: Mapping[str, str], *, slots: int,
     previous = {}
     try:
         try:
-            child = subprocess.Popen(list(command), env={**environ, SLOTS_VARIABLE: "0"}, process_group=0)
+            child = subprocess.Popen(list(command), env=holder_environment(environ, slots), process_group=0)
         except OSError as error:
             stream.write(f"error: cannot run {command[0]}: {error}\n")
             return RUN_NOT_FOUND
@@ -561,7 +587,8 @@ def run_gated(command: Sequence[str], environ: Mapping[str, str], *, slots: int,
         def forward(signum: int, _frame: object) -> None:
             try:
                 os.killpg(child.pid, signum)
-            except ProcessLookupError:
+            except (ProcessLookupError, PermissionError):
+                # A group that already exited: macOS answers EPERM, not only ESRCH (sd:2402).
                 pass
 
         for signum in forwarded:
@@ -574,45 +601,64 @@ def run_gated(command: Sequence[str], environ: Mapping[str, str], *, slots: int,
     return 128 - code if code < 0 else code
 
 
-def snapshot(where: pathlib.Path, slots: int, rule: LoadRule, *,
-             loadavg: Callable[[], Sequence[float]] = os.getloadavg, wall: Callable[[], float] = time.time) -> dict:
-    """Who holds a slot, who waits and in which place, and the load rule; read under `queue.lock`.
+def read_holders(where: pathlib.Path) -> list[dict]:
+    """Who holds each slot under `where`; call under `queue.lock`, so no admission races the probe.
 
     A slot is held exactly when this process cannot lock it. Its label shows
     only when `slot.N.info` names the pid the lock file names, so a holder
     that wrote no info never shows an earlier holder's label.
     """
+    holders = []
+    numbers = {int(match.group(1)) for path in where.glob("slot.*.lock")
+               if (match := re.fullmatch(r"slot\.([0-9]+)\.lock", path.name))}
+    for number in sorted(numbers):
+        lock = where / f"slot.{number}.lock"
+        try:
+            fd = os.open(lock, os.O_RDWR)
+        except OSError:
+            continue
+        try:
+            if try_lock(fd):
+                fcntl.flock(fd, fcntl.LOCK_UN)
+                continue
+            text = lock.read_text(encoding="utf-8", errors="replace").split()
+            pid = int(text[0]) if text and text[0].isdigit() else None
+            try:
+                info = json.loads(lock.with_suffix(".info").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                info = {}
+            if not isinstance(info, dict) or info.get("pid") != pid:
+                info = {}
+            recorded = info.get("since")
+            since = float(recorded) if isinstance(recorded, (int, float)) else lock.stat().st_mtime
+            holders.append({"slot": number, "pid": pid, "label": info.get("label", ""),
+                            "cwd": info.get("cwd", ""), "since": utc_stamp(since)})
+        finally:
+            os.close(fd)
+    return holders
+
+
+def held_by(queue: Queue) -> str:
+    """The holders as one clause for a waiting line, or "" when none can be read (sd:2522)."""
+    try:
+        with queue.admission_lock():
+            holders = read_holders(queue.where)
+    except OSError:
+        return ""
+    return "".join(f"; slot {entry['slot']} held by {entry['label'] or 'an unlabelled gate'} "
+                   f"(pid {entry['pid'] or '?'}) since {entry['since']}"
+                   + (f" in {entry['cwd']}" if entry["cwd"] else "") for entry in holders)
+
+
+def snapshot(where: pathlib.Path, slots: int, rule: LoadRule, *,
+             loadavg: Callable[[], Sequence[float]] = os.getloadavg, wall: Callable[[], float] = time.time) -> dict:
+    """Who holds a slot (`read_holders`), who waits and in which place, and the load rule; read under `queue.lock`."""
     queue = Queue(where)
     holders, waiters, state = [], [], {}
     if where.is_dir():
         with queue.admission_lock():
             state = queue.state()
-            numbers = {int(match.group(1)) for path in where.glob("slot.*.lock")
-                       if (match := re.fullmatch(r"slot\.([0-9]+)\.lock", path.name))}
-            for number in sorted(numbers):
-                lock = where / f"slot.{number}.lock"
-                try:
-                    fd = os.open(lock, os.O_RDWR)
-                except OSError:
-                    continue
-                try:
-                    if try_lock(fd):
-                        fcntl.flock(fd, fcntl.LOCK_UN)
-                        continue
-                    text = lock.read_text(encoding="utf-8", errors="replace").split()
-                    pid = int(text[0]) if text and text[0].isdigit() else None
-                    try:
-                        info = json.loads(lock.with_suffix(".info").read_text(encoding="utf-8"))
-                    except (OSError, ValueError):
-                        info = {}
-                    if not isinstance(info, dict) or info.get("pid") != pid:
-                        info = {}
-                    recorded = info.get("since")
-                    since = float(recorded) if isinstance(recorded, (int, float)) else lock.stat().st_mtime
-                    holders.append({"slot": number, "pid": pid, "label": info.get("label", ""),
-                                    "cwd": info.get("cwd", ""), "since": utc_stamp(since)})
-                finally:
-                    os.close(fd)
+            holders = read_holders(where)
             for place, entry in enumerate(queue.waiters(prune=False), start=1):
                 queued = entry.get("since")
                 waiters.append({"place": place, "pid": entry.get("pid"), "label": entry.get("label", ""),
@@ -668,11 +714,11 @@ def gate_verb(args: argparse.Namespace, environ: Mapping[str, str], slots: int, 
 
 
 def slot_command(argv: list[str] | None = None) -> int:
-    """`directory` prints where the slots live; `wait --pid P --ppid Q --dir D FD...`
-    queues, locks one inherited descriptor and prints its index; `run` and
-    `status` are `sd gate run` and `sd gate status`; all three read the machine's
-    load rule through `machine_rule`, and `run` and `status` take the slot
-    count from `SD_GATE_SLOTS` or the default.
+    """`directory` prints where the slots live; `count` prints how many there are;
+    `wait --pid P --ppid Q --dir D FD...` queues, locks one inherited descriptor
+    and prints its index; `run` and `status` are `sd gate run` and `sd gate
+    status`. All of them read the machine settings through `machine_settings`,
+    so the count is `sd-check`'s: `SD_GATE_SLOTS`, CI, `sd.gate_slots`, the default.
 
     The shell that opened the descriptors keeps the lock after `wait` exits.
     Exit 3 when P's launcher exited, or when this process's own parent did.
@@ -680,6 +726,7 @@ def slot_command(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sd_gate_slots.py")
     commands = parser.add_subparsers(dest="command_name", required=True)
     commands.add_parser("directory", help="print the slot directory")
+    commands.add_parser("count", help="print how many slots this machine has (0: no cap)")
     wait = commands.add_parser("wait", help="queue, then lock one of the inherited slot descriptors")
     wait.add_argument("--pid", type=int, required=True, help="the gate's pid")
     wait.add_argument("--ppid", type=int, required=True, help="the gate's parent when it started")
@@ -691,9 +738,13 @@ def slot_command(argv: list[str] | None = None) -> int:
         print(directory(os.environ))
         return 0
     try:
-        rule = machine_rule(os.environ, stream=sys.stderr)
-        if args.command_name in ("run", "status"):
-            slots, _ = configured(os.environ, None)
+        settings = machine_settings(os.environ, stream=sys.stderr)
+        rule = load_rule(os.environ, settings["gate_load_max"], settings["gate_settle_seconds"])
+        if args.command_name in ("count", "run", "status"):
+            slots, _ = configured(os.environ, settings["gate_slots"])
+            if args.command_name == "count":
+                print(slots)
+                return 0
             return gate_verb(args, os.environ, slots, rule)
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)

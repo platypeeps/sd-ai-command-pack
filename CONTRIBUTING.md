@@ -2,6 +2,7 @@
 
 Use Homebrew Python 3.14 for the local virtual environment on macOS.
 The `requires-python` floor stays 3.13; tests run on 3.14 only.
+Use Git 2.31 or later: the pack and its tests call `git ls-files --deduplicate`.
 
 ## Setup
 
@@ -38,6 +39,7 @@ Remove a conflicting transitive pin before recompiling. Do not edit hashes by ha
 ```bash
 make test
 make lint
+make precheck
 make audit
 make docs-lint
 make check
@@ -45,6 +47,10 @@ make check
 
 `make check` runs `lint`, `audit`, `docs-lint`, then `test`. It stops at the first failure.
 Run the full command before each push.
+
+`make precheck` runs `lint` and then each always-run test module, in about a minute.
+`sd-check` runs it before it waits for a gate slot, and stops there when it fails.
+The output names the failing check: make's `lint` error line, or each failing module.
 
 During development, select tests for changed paths:
 
@@ -66,7 +72,9 @@ A narrowed run skips coverage combination and the installer coverage gate, then 
 The other three checks still run over their full scope.
 A narrowed run does not replace the full check before a push.
 
-`.github/scripts/run-tests.sh` uses half the CPUs locally, at least one, and runs the shards at `nice -n 10`.
+`.github/scripts/run-tests.sh` runs the shards at `nice -n 10` locally.
+Its local workers are twice the CPUs divided by the machine's gate cap, at most the CPUs and at least one: 8 at the cap of 4 on 16 CPUs.
+With no cap it uses half the CPUs.
 It uses every CPU when `CI` or `GITHUB_ACTIONS` has a non-empty value.
 Set `TEST_WORKERS` to override either default.
 Each shard reports its name, elapsed seconds, and exit status.

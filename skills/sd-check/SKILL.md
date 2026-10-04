@@ -66,11 +66,29 @@ The local gate and the review lane's gate check pass the pull request's base bra
 
 Under `repo.ci = local`, `sd-ship prepare` runs the check as the merge gate does, and a pass leaves a gate receipt.
 The merge gate at the same head and binding, within 30 minutes, reads it instead of running the check again; its status says `(reused)`.
-Only that handoff reuses: prepare never reads a receipt, and the merge gate never writes one.
+Prepare reads one too: a pass that `sd gate check` or an earlier prepare left at the same head and binding stands (sd:1912).
+`sd gate check` runs the gate's check at the committed `HEAD` and records a pass; a plain `make check` leaves no receipt.
+The merge gate never writes one, and the window counts from the run that passed.
+A gate that read no receipt and ran in full says why in `reuse_miss`: no receipt, a failed one, the binding fields that differ, or the expired window (sd:2602).
+The gate child drops the agent harness's session variables and fnm's per-shell `FNM_MULTISHELL_PATH`, and resolves each `PATH` entry, so two sessions' passes at one head bind equal.
 Inputs outside the repository are not bound: external makefiles, files a tool reads, machine state.
 The short same-head window is the accepted residual risk; a repository that needs more uses the explicit contract below.
 `bin/sd_gate_receipts.py` names the binding and `REUSE_WINDOW_SECONDS`.
 These receipts need no declaration and are separate from the optional receipts below.
+
+A repository whose check reads no commit history may key its gate receipts by tree instead of head:
+
+```json
+{"schema_version": 1, "key": "tree", "reason": "the check reads no commit message, range or tag"}
+```
+
+Track it as `.github/sd-gate-reuse.json`.
+A new head with the same tree and the same merge base with the base branch then reuses the earlier pass.
+That covers an `sd attribute` commit, a reworded message, or a rebase that changed nothing (sd:1912).
+Without the declaration a new head runs again, since a commit-message lint can pass at one head and fail at the next.
+A run with no base branch, a declaration that does not parse, or another `key` keeps the head key.
+A tree-keyed receipt stands for 6 hours (`TREE_REUSE_WINDOW_SECONDS`); a head-keyed one stays at 30 minutes.
+An optional `"tool": "tree"` is for the pack gating itself (sd:2613); the gate ignores it in any other repository.
 
 ## Optional check receipts
 
@@ -156,3 +174,21 @@ page being written.
 Output is captured and attributed per check, never interleaved, and tails at
 4,000 characters with a truncation marker. When reporting to the user, quote
 the shortest decisive line of that tail rather than the whole block.
+
+A failing check also keeps its whole output in a file under the Git common
+directory, `sd-check-output/`, which holds the newest 20. The report names it
+as `output_path` and the human output as `whole output:`. `failed_shards`
+lists each `shard <name>: <n>s exit=<code>` line with a non-zero code from
+the whole output, so a shard that failed early is named though the tail no
+longer reaches it.
+
+A failing check also names every step that failed in `failed_steps`, and is
+never empty: each failed shard, each suite a runner lists as `<tool>: failed:
+<suite> ...`, and each make target from `make: *** [<target>] Error <n>`.
+A failure that names none of these reads `<name> exit <code>`, or the reason
+the check did not finish, such as a timeout. `failure` holds the failing part
+of the output: each failed shard's own block, else each stream's failure lines
+(`FAIL:`, `ERROR:`, an exception, `FAILED`) and its tail. The human output
+prints them as `failed step:` and `[failure]`; `sd gate check` adds the steps
+to its one-line summary, then `whole output: <path>`. The `sd/local-gate`
+status it posts leaves that local path out.

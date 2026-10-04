@@ -32,6 +32,7 @@ class WritingImport(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.repo = Path(tmp.name).resolve()
+        (self.repo / "content").mkdir()
         self.parser = argparse.ArgumentParser()
         cli.register(self.parser.add_subparsers(required=True))
         self.connection = Mock()
@@ -123,6 +124,66 @@ class WritingVerifyCheckout(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(output)["files"], 1)
         self.verified.assert_called_once_with(self.connection, str(self.repo))
+
+
+class WritingContentCheckout(unittest.TestCase):
+    """`list` and `import` refuse where there are no pieces, as `verify` does (sd:1803).
+
+    In a checkout with no content/ folder they printed empty results and
+    exited 0, which reads as "this repository has no pieces" rather than
+    "you are in the wrong checkout".
+    """
+
+    VERBS = (("list", "list_pieces", []), ("import", "cutover_preview", {"pieces": []}),
+             ("import --apply", "import_pieces", {"items": [], "warnings": []}))
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.repo = Path(tmp.name).resolve()
+        self.parser = argparse.ArgumentParser()
+        cli.register(self.parser.add_subparsers(required=True))
+        self.connection = Mock()
+        self.connect = Mock(return_value=self.connection)
+        for patcher in (
+            patch.object(cli.sd_handoff_rows, "library", return_value=sd_db),
+            patch.object(cli.sd_handoff_rows, "connect", self.connect),
+            patch.object(cli.sd_lib, "repo_root", return_value=self.repo),
+            *(patch.object(writing, name, autospec=True, return_value=result)
+              for _verb, name, result in self.VERBS),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def run_verb(self, verb):
+        arguments = self.parser.parse_args(["writing", *verb.split(), "--json"])
+        with redirect_stdout(io.StringIO()) as output:
+            code = arguments.handler(arguments)
+        return code, output.getvalue()
+
+    def test_checkout_without_content_refuses_each_verb(self):
+        for verb, name, _result in self.VERBS:
+            with self.subTest(verb=verb):
+                action = verb.split()[0]
+                with self.assertRaisesRegex(
+                        cli.WorkRefusal, f"no content/ folder, so there is nothing to {action}; "
+                                         f"run sd writing {action} from the writing Git checkout"):
+                    self.run_verb(verb)
+                getattr(writing, name).assert_not_called()
+        self.connect.assert_not_called()
+
+    def test_writing_checkout_answers_each_verb(self):
+        (self.repo / "content").mkdir()
+        for verb, name, result in self.VERBS:
+            with self.subTest(verb=verb):
+                code, output = self.run_verb(verb)
+                self.assertEqual((0, result), (code, json.loads(output)))
+                getattr(writing, name).assert_called_once()
+
+    def test_a_parked_only_checkout_still_answers(self):
+        """`content-parked` alone counts, as it does for `verify`."""
+        (self.repo / "content-parked").mkdir()
+        self.assertEqual(0, self.run_verb("list")[0])
 
 
 class WritingFromWorktree(unittest.TestCase):

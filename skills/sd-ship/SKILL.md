@@ -8,7 +8,8 @@ disable-model-invocation: true
 
 Deliver only the enumerated scope.
 Invocation authorizes its scoped commits, branch push, and merge, subject to execution permissions and existing gates.
-Invocation alone authorizes no local branch, worktree, or checkout deletion.
+Post-merge closeout removes the merged PR's safe branches, stashes, refs and stale worktrees without asking (operator ruling 2026-10-02).
+Invocation alone authorizes no checkout deletion.
 Use STE-Concise; report delivery state, decisive checks, blockers, and retained worktrees.
 
 ## Standing permission
@@ -56,6 +57,8 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    A present trailer produces no warning.
    A missing trailer warns; the sequence continues with the commit.
 2. **Review locally before publication.**
+   Before the review, `sd-ship prepare` warns about open PRs and origin branches that name the item or change the same files (sd:1151).
+   The warning refuses nothing; read it before the review spends a pass.
    Use `sd-review --scope branch --challenge` for the *code, before merge* point.
    Read its cap on that row in the sd-ai-command-pack checkout's `.claude/rules/sd-planning-adversarial-review.md`.
    Run `sd-docs-lint` against the built PR body.
@@ -98,15 +101,19 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    Missing protection remains a refusal; this workflow adds no exception.
 8. **Record verified delivery.**
    An associated merge carries `Item:`; only whole-item delivery adds `Delivers:`.
+   A body `Closes: sd:N[, sd:M]` line names co-delivered items; each gets `Delivers:` and closes on the merge (sd:1481).
+   Prepare refuses one inside a code fence or HTML comment; indent an example.
+   A body `Refs: sd:N` line names a related or partial item; the merge leaves it open.
    Record the row only after the remote confirms the merge.
    Read `skills/sd-ship/references/delivery.md` in the sd-ai-command-pack checkout before delivery, cancellation, or completion reporting.
    A slice leaves its item open.
    No-item changes create no row or placeholder trailer.
 9. **Complete post-merge closeout.**
    After every confirmed in-scope merge, read `skills/sd-ship/references/post-merge-closeout.md` in the sd-ai-command-pack checkout.
-   Run `git fetch -p`; repository `delete_branch_on_merge` owns remote branch removal.
+   Run `git fetch -p`; repository `delete_branch_on_merge` removes the remote branch first.
    Review remaining findings and inventory refs, branches, stashes, and worktrees.
-   Retain local branches, stashes, and worktrees until one exact target list receives separate approval with verified recovery evidence.
+   Remove the merged PR's local and remote branches, stashes, refs and stale worktrees when the reference's safety conditions hold, without asking.
+   Record each target's full object ID or path in an `sd task note` before its removal; keep any target that fails a condition.
    Do not move another checkout's main branch.
    Report the branch, worktree, merge, and installation state separately.
 
@@ -126,8 +133,10 @@ For genuinely new work, allocate it with `sd-ship review --no-item --create-reco
 Use `--no-item --review-id ID` instead of `--item ID` for prepare, merge, observe, and reconcile.
 Prepare reuses complete exact-head review evidence and acceptance; otherwise it follows the same review gates.
 Itemless merge requires `--manual` and `--expected-head SHA`.
+After the merge, run itemless `reconcile` and `review --close-record REASON` from the default branch; the deleted feature branch needs no recreation.
 Itemless publication rejects commit flags, runner authority, and whole-item delivery flags.
 It creates no task row, `Work:` line, `Item:`, or `Delivers:` trailer.
+A branch commit's `Delivers:` does not reach the squash; prepare warns and suggests `--item N`.
 Never allocate another review ID to reset spent passes or discard history.
 
 - `sd-ship prepare --item ID --deliver|--associate-only --json` reviews, pushes, and opens or reconciles the PR.
@@ -159,7 +168,7 @@ Never allocate another review ID to reset spent passes or discard history.
   Checks that are not strict refuse unless the reviewed head declares that exact state.
   Each declaration is an `accepted_gaps` entry in `.github/sd-status.json`, id `bypass` or `strict`, pinning its own fact; a `strict` entry also pins `bypass`.
   Every fact it pins must equal the live state, read as the status report reads it.
-  An app, a team, a role or an admin bypass still refuses.
+  An app, a team, a role or an admin bypass still refuses, and `sd-ship` never accepts a declaration for a missing `pull_request` rule (R14-D1).
   The receipt's `protection.accepted_gaps` names the entries a merge honoured.
   GitHub's merge rules must also pass: `mergeable` true, and `mergeable_state` `clean` or `unstable`.
   `unstable` means a check the protection does not require is pending or failed; the required ones are still read.
@@ -174,6 +183,7 @@ Never allocate another review ID to reset spent passes or discard history.
   Its persisted start prevents another automatic watch on rerun.
   Under `repo.ci = local` it starts none: the local gate runs inside the merge and is the wait.
 - `sd-ship observe --item ID --json` reads receipt and remote state without changing files, refs, or database.
+  Its `receipt` field holds the last review, a gate failure, and the local gate report; before a PR exists it reads the receipt alone.
 - `sd-ship reconcile --item ID --json` fetches merge evidence in an owned clone.
   Observation alone does not establish ancestry.
   Reconciliation removes no branch, worktree, or clone.
@@ -181,6 +191,7 @@ Never allocate another review ID to reset spent passes or discard history.
 Add `--reuse-check` to prepare or standalone review only when explicitly reusing eligible deterministic-check evidence.
 Before opting in, read `skills/sd-check/references/check-receipts.md` in the sd-ai-command-pack checkout.
 Reuse requires complete local-only dependencies and unchanged before-and-after identity; legacy receipts rerun.
+The flag never reuses in sd-ai-command-pack itself: the pack tracks no reuse declaration (`.github/sd-check-reuse.json`), so its gate runs.
 This flag does not reuse incomplete reviews or bypass source, policy, or receipt validation.
 
 Add `--provider NAME` to prepare or standalone review only for an explicitly requested reviewer.
@@ -216,6 +227,7 @@ No local receipt means there is nothing to abandon, and the command refuses.
 It preserves request history and records a separate abandonment.
 Only submitted, non-pending reviews mark matching request heads complete.
 Published Copilot findings still require disposition.
+Every other reviewer's findings require disposition too; the merge refuses with `review_findings_open` before it merges (R14-D2, sd:998).
 
 The additive `workflow` object reports `schema_version`, `phase`, `state`, `blocker`, and `next_action`.
 States are `success`, `retryable_failure`, `operator_decision`, and `policy_block`.
@@ -225,6 +237,8 @@ Existing result fields and exit meanings remain authoritative; the new object do
 Receipts bind repository, branch, item or review identity, exact head, tools, policy, and review history.
 The tools bound are the `verdict` class in `bin/sd_ship_bindings.py`: the code `sd-review` runs, compared without comments or docstrings.
 Gate and check code runs again on every `prepare` and `merge`, so a change there does not void a receipt.
+When only review code moved, and none of it parses or disposes findings (`FINDING_FILES`), `sd-ship` replays `sd-review --explain` for the stored pass first.
+An unchanged `request_sha256` keeps the receipt, spends no pass, and appends to `review_binding_kept`.
 A moved binding refuses with "review tools or repository policy changed after review:" and names each changed file and its class.
 Run `prepare` again; it re-reviews the same head in full.
 `--expected-head` compares evidence; it does not replace evidence.
@@ -247,6 +261,7 @@ Its `next_action` names the `sd-ship adjudicate` command that prints each findin
 Use acceptance only for a complete review of the exact clean head with passing deterministic checks.
 It cannot waive missing depth, incomplete transport, failed checks, or changed source.
 Fixes still require verification on their new head.
+A rejection that still stands after one review pass is recorded with `sd-ship adjudicate` before the next fix is pushed.
 Before proposing or accepting dispositions, read `skills/sd-ship/references/adjudication.md` in the sd-ai-command-pack checkout.
 Standing merge permission does not approve individual findings.
 Do not invent acceptance for the operator.
@@ -269,8 +284,8 @@ Acknowledgement failures produce warnings, not review clearance.
 - Never push a head the local lane has not seen.
 - Never weaken checks, permissions, review depth, or ownership/protection gates to reach green.
 - Never treat a written reason as executable clearance.
-- Never delete local branches, worktrees, or checkouts as an implicit shipping step.
-  Routine closeout inventories retained work; a separate, explicitly approved cleanup may remove only its enumerated targets.
+- Never delete a checkout, or a worktree, branch, stash or ref that fails a closeout safety condition or belongs to another PR.
+- Never force a worktree removal.
 - Never accept a repository path; cwd determines the checkout, and `-C <dir>` only changes cwd first (R10-D6).
 - Never post reviews or labels in a guest upstream repository.
 - Make no further change after settled-green.

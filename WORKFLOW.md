@@ -16,7 +16,8 @@ database, without a Git checkout, PRD or GitHub issue. `sd today` and `sd store
 items` use the same queries as Today and Backlog. Completion of an ordinary
 task is independent of code delivery. `sd work deliver` verifies delivery
 evidence; `sd work cancel --reason` records a cancellation without waiting for
-another merge. Artifact relinking preserves the item's identity and history.
+another merge, and `sd task cancel --reason` does the same for a task or
+followup. Artifact relinking preserves the item's identity and history.
 
 Writing uses shared stage and review-evidence checks through `sd writing` and
 the Writing screen. After the verified one-time cutover, stages, parking and
@@ -54,9 +55,14 @@ Do not replace required approval with a proposal that the user can veto afterwar
 
 These run without being asked.
 
+- No pack command runs in a checkout whose `repo.managed` is no (sd:1620, sd:2566).
+  `sd-ship`, `sd-review`, `sd-check`, `sd-status` and `sd-ship lane enqueue` refuse there, dry runs included.
+  The refusal names the remedy: `sd-db.sh repo managed <path> yes`.
+  A checkout with no row proceeds; only a row marked unmanaged refuses.
 - `sd-status` reports. It never writes.
 - `sd-review --scope branch --challenge` runs on the machine before a push.
   Blocking findings are fixed or recorded before the branch leaves.
+  Under `repo.ci = local`, each round adds `--gate-check main` after an `sd gate check --base main` pass at that head (sd:2603).
 - CI runs on the pull request.
   Wait for required checks on the exact head; preserve review, ownership, protection, and authorization gates.
 - `sd-ship` commits enumerated paths, pushes, opens the pull request, waits
@@ -64,9 +70,17 @@ These run without being asked.
   whose trailer names the item, and runs `git fetch -p`. The repository
   setting `delete_branch_on_merge` removes
   the remote branch.
+  A merge into the system checkout that changes `local-sd-db` also installs
+  `sd_db` at the merge commit into the pack's virtualenv, so the dashboard's
+  next restart finds the library it expects (sd:2108). An installed copy that
+  is not an ancestor of the merge commit is kept. Every install holds one
+  machine-wide lock across that check and pip, so concurrent reconciles
+  cannot interleave. The receipt's `library`
+  says whether the install worked, or why it was skipped.
   After each confirmed in-scope merge, the agent follows the ship skill's post-merge closeout procedure.
   It dispositions remaining findings and inventories refs, branches, stashes, and worktrees.
-  Local deletion needs separate, consolidated approval for exact targets with verified recovery evidence.
+  It removes the merged PR's local and remote branches, stashes, refs and stale worktrees when they are safe, without asking.
+  It records each removed target's object ID or path first, and keeps anything that fails a safety condition.
 - Expected branch protection requires pull requests, current CI, and up-to-date branches, with no required approvals.
   Configure it deliberately in GitHub; installation does not grant a protection exception.
   `sd-status` reports gaps; executable merge stops when required protection is absent.
@@ -83,7 +97,9 @@ These run without being asked.
   and nothing runs the lint there otherwise. A runner has no database, so
   rule 2 reads statuses from git there, with full history, and checks
   fewer items than the machine with the rows; each run prints which source
-  it read.
+  it read. `make check` passes `--no-history`: rule 2 then fetches nothing
+  and reads no `git log`, and an item only git could answer reads `unknown`.
+  The delivery question stays with the lint `sd-ship` runs.
 - A commit to the pack, the system repository or the writing repository names
   what needed it: `Needed-by: <item id>` or `Needed-by: cost | efficiency |
   visibility`. `sd-ship` warns when the trailer is missing and ships anyway.
@@ -121,6 +137,7 @@ A repository whose `repo.ci` row says `local` runs no GitHub Actions (sd:1843).
 
 Switch a repository with `sd ci local`, run from its checkout (sd:1914).
 It is a dry run; `--apply` makes the changes, and a second run finds none.
+It refuses a repository the sd database does not mark managed (`repo.managed = no`, sd:1620).
 It needs `admin` on the repository and makes three changes, each only where it does not hold yet:
 
 - It sets `repo.ci` to `local`, as `sd-db.sh repo ci <path> local` does.
@@ -140,6 +157,13 @@ After the switch:
   It runs `sd-check` there, not in your checkout, and removes the worktree after.
 - The child drops `PYTHONPATH`, `PYTHONHOME`, `VIRTUAL_ENV`, `CONDA_PREFIX` and `PATH` entries inside your checkout.
   It also drops any `PATH` entry whose parent holds `pyvenv.cfg`: a virtualenv's `bin`, wherever it lives.
+- A Rust repository (any tracked `Cargo.toml`) builds into a warm folder the gate owns, not the worktree's `target/` (sd:2493).
+  Each repository keeps two under `${XDG_CACHE_HOME:-~/.cache}/sd/gate/`, one gate at a time in each; `CARGO_TARGET_DIR` names it.
+  A warm run gets `CARGO_INCREMENTAL=0`. When both are held, the run builds cold in its worktree.
+  Your own `CARGO_TARGET_DIR` never reaches the check.
+  `SD_GATE_CARGO_TARGETS` sets the count, `0` switches the cache off, and `SD_GATE_CACHE_DIR` moves it.
+  Cargo prunes nothing there, so the gate bounds the cache at `sd.gate_cache_gb` (sd:2598).
+  Past it, the gate removes the least recently used free folders, its own last, and names each on stderr.
 - This is a self-hosted runner, not a hermetic build.
   The gate guarantees a clean tree at the exact head, a scrubbed Python environment and no virtualenv on `PATH`.
   The rest of `PATH` and the system tools are this machine's image.
@@ -149,7 +173,13 @@ After the switch:
 - The description carries `inputs <digest>` as provenance: the head, the copied `CLAUDE.local.md` and the pack's `bin/` files.
 - Every merge attempt posts a fresh status. `sd-ship prepare` runs this same gate, through `sd-review --gate-check`.
   Prepare's pass leaves a receipt; the merge gate at the same head and binding, within 30 minutes, reads it instead of running `sd-check` again.
-  The status then says `(reused)`. Prepare never reads a receipt and the merge gate never writes one.
+  The status then says `(reused)`. The merge gate never writes a receipt.
+  Prepare reads one too: a pass that `sd gate check` or an earlier prepare left at the same head and binding (sd:1912).
+  A repository that tracks `.github/sd-gate-reuse.json` keys receipts by tree and merge base instead of head, for 6 hours (sd:1912).
+  The pack's own declaration adds `"tool": "tree"`: its gate runs the gated tree's own `bin/sd-check` and binds that tree, not the checkout's `bin/` (sd:2613).
+  A pack landing between a builder's gate and the lane's prepare then keeps the pack item's receipt.
+  The field counts only when the running pack belongs to the gated repository; any other repository's gate keeps the checkout binding.
+  A pass whose binding moved during the run leaves no receipt, and the result's `receipt_skipped` names what moved (sd:2612).
   Inputs outside the repository are not bound; `bin/sd_gate_receipts.py` names the binding and this trust boundary.
 - Given the base branch, the gate passes `sd-check --base`: a repository's declared docs-only scope applies (sd:2072).
 - `sd-ship merge --watch` starts no remote watch: no remote check is coming, and the gate runs to completion in the merge (sd:1875).
@@ -158,6 +188,9 @@ After the switch:
 - Under a declared gap, the status replaces the `pull_request` workflow runs `every_check` asks for.
   Under protection, the status is required beside the protection's own contexts.
 - Protection for such a repository should require `sd/local-gate`; `sd ci local` sets that.
+  A merge path of the repository's own (a Dependabot merge, a script that merges) gets no status from `sd-ship merge`.
+  Have it run `sd gate post --head SHA` first, or its required check never reports (sd:1989).
+  After a switch, grep the repository for such automation, such as a script that polls check runs.
   `sd-status` reports it as the one produced context, so a required workflow context shows as not produced.
 - Under a declared gap, a head that already carries a failed check run still refuses: a workflow that ran before the switch, or a billing-blocked one.
   GitHub reports the pull request `unstable`, not `clean`, and `every_check` requires every check run to pass.
@@ -185,10 +218,12 @@ past the cap marks the item `blocked`; non-blocking findings hold nothing.
 | Development | prd and design | Scope, missing requirements, wrong assumptions | 5 |
 | Development | Code, before merge | Defects a second reader finds | 5 rounds |
 
-The code pass reads a head. A fix that changes it gets a further verification
-pass over the diff since the reviewed head, up to the cap above; `sd-ship`
-pushes only the reviewed head or a verified fix of it, and merges naming that
-head with `gh pr merge --squash --match-head-commit <the reviewed sha>` —
+The code pass reads a head. Under `repo.ci = local` a gate pass at that head
+comes first; see [Parallel work](#parallel-work). A fix that changes the head
+gets a further verification pass over the diff since the reviewed head, up
+to the cap above; `sd-ship` pushes only the reviewed head or a verified fix
+of it, and merges naming that head with
+`gh pr merge --squash --match-head-commit <the reviewed sha>` —
 equivalently `PUT /repos/{owner}/{repo}/pulls/{n}/merge`
 with `sha=` — so a head that moved after the review is refused at GitHub with
 a 405. The flag is what does the refusing: a merge that carries only a title
@@ -235,8 +270,11 @@ In a shared repository:
   already carries this: planning artifacts go to the fork's integration branch.
   Two machines enforce that refusal. `sd-review --scope planning` calls
   `sd_lib.guest_artifact_refusal`, which resolves the mode and names refused
-  paths. `sd-plan` uses that review before promotion. `sd-ship` separately
-  checks the same three path prefixes before a guest push.
+  paths. `sd-plan` uses that review before promotion. `sd-ship` checks the
+  same list, `sd_lib.guest_refused_dirs`, before a guest push.
+  A `guest_allow: docs/decisions` line in the local block takes decision
+  records out of both checks for that repository (sd:2168).
+  `docs/work/` and `docs/spec/` stay refused; naming either is an error.
   Nothing yet refuses a `docs/spec/` or
   `docs/decisions/` write at the moment it happens — `sd-spec` and `sd-plan
   --decision` are still prose there, and the push gate is where those are
@@ -259,6 +297,9 @@ In a shared repository:
 
 Small change: branch, commit, local review, push, pull request, CI, merge.
 Use the ship workflow without inventing a planning artifact.
+After review, take a newer default branch with `git merge origin/<base>`, never a rebase:
+a rebase rewrites the reviewed commits, and the next push no longer fast-forwards
+the branch `sd-ship` pushed. `sd-ship prepare --catch-up` makes that merge.
 
 Change that earns a work item: `sd-plan` writes `prd.md` using the requirements
 already available and asks only for missing decisions. Then the small-change
@@ -273,11 +314,21 @@ and GitHub's appended `Co-authored-by:` joins a trailer block that ends the
 message but opens a new paragraph after anything else.
 `.github/PULL_REQUEST_TEMPLATE.md` ends in that order, with `Refs:` only.
 
+A criterion only the operator can observe, such as a command running unprompted
+on their machine, is not a checklist box. Record it in the item's `## Log` with
+its date when it is observed; the delivering pull request never ticks it in
+advance (operator ruling 2026-09-30, sd:1933).
+
 `sd-ship` owns the lines `sd_lib.OWNED_TRAILERS` names: `Item:`, `Work:`,
 `Delivers:`, `Closes:`, `Authored-with:` and `Attributes:`. `prepare` appends
-`Work:` to the body it publishes, and `merge` appends `Item:`, `Delivers:` and
-the authorship lines to the squash message, so a body written for `sd-ship`
-carries none of them. A supplied line that says what `sd-ship` would write is
+`Work:` to the body it publishes, and `merge` appends `Item:`, `Delivers:`, any
+owed `Closes:` (sd:1600) and the authorship lines to the squash message, so a
+body written for `sd-ship` carries none of them. The one exception is
+`Closes: sd:N[, sd:M]`: the body keeps it, and the merge adds `Delivers:` for
+each item it names and closes them with the claimed item (sd:1481). Only a
+column-zero line outside fenced code and HTML comments counts; `prepare`
+refuses a quoted one, which an indent keeps as an example. `Refs:` is
+not owned; its items stay open. A supplied line that says what `sd-ship` would write is
 stripped and listed in the result's `normalized`; any other owned line is
 refused by line number, with the expected value. So the body `sd-ship`
 published, fed back as `--body-file`, prepares again. Without `--body-file`,
@@ -301,6 +352,24 @@ preserves the original receipt. A missing trailer or unavailable remote leaves
 the claim unverified and reports the missing evidence; a bare merged branch or
 stale issue status cannot close the item.
 
+A whole-item merge prepared without `--deliver` carries `Item:` and no
+`Delivers:`, so `sd work deliver` refuses it. `sd work deliver <row-id>
+<full-commit-sha> --associated --reason TEXT` closes that row. It runs the same
+reachability check, accepts the `Item:` trailer for the row instead, and records
+the trailer and the reason on the receipt. A task or followup has no receipt:
+its move to done records the delivery sentence and the reason. It refuses a
+missing reason, and `sd-ship prepare --deliver` on such a record names it.
+
+A `--deliver` squash GitHub lands on a base its review did not cover is held:
+reconcile records the merge and not the delivery, and no git reader takes its
+`Delivers:`. Once the combined tree passes and the operator closes the row by
+hand, reconcile clears the hold and records `closing_owed` on the receipt. The
+next `sd-ship merge` in the same repository then writes `Closes: <item>` into
+its squash's trailer block, at most 10 per squash, and its result names each
+in `carried_closes`. Its reconcile marks them paid only if that squash is not
+held itself. Accepted gap (sd:1600): until that merge lands, a reader with no
+database still sees the item open; `closes_left` names debts past the cap.
+
 `sd work cancel <row-id> --reason TEXT` records cancellation immediately,
 without a status-file change or another pull request. It does not claim the
 work shipped. A later associated merge may carry `Closes: <item>` for context;
@@ -309,9 +378,28 @@ database can use explicit `Delivers:` or `Closes:` evidence to see that work is
 closed, while only `Delivers:` says it shipped. A shallow clone that cannot
 establish the evidence reports uncertainty.
 
+`sd task cancel <row-id> --reason TEXT` closes a task or followup nobody will
+do. It writes the same `done` status and `cancelled` receipt, through the same
+library call with the task guard (sd:1005). `sd task status <row-id> done`
+writes no receipt, so the row reads as finished work. A finding that
+`sd-review-ack` carried to a cancelled row reads `carry-dropped` and holds
+again. The guard refuses a recurring task and a row with an active assignment.
+An `sd_db` older than the guard refuses the verb by name.
+
 The item directory stays in place. Use `sd work relink <row-id> <path>` when an
 artifact moves: it preserves the row, notes and original source identity. No
 command automatically deletes or archives a completed item directory.
+
+## Mutation checks
+
+A mutation check edits the code a test covers, runs the test, and restores the
+edit; a test that passes on the mutation has not earned its place.
+Run a Python mutation check with `PYTHONDONTWRITEBYTECODE=1`, and delete the
+`__pycache__` folders first (sd:1790). Python reuses a `.pyc` whose recorded
+source size and whole-second mtime still match, so a same-size edit restored
+within a second runs stale bytecode: a mutation reads as killed or survived by
+timing, and a restored file can fail its own test. The variable stops writes,
+not reads, so a cache left from an earlier run still answers.
 
 ## Parallel work
 
@@ -354,28 +442,72 @@ which the installer places in `~/.claude/agents`.
   close each one when it merges.
 - **Iterate on the fast path; gate once before the push.** While fixing, run
   `make check CHANGED="<paths>"`, which runs only the tests those paths need
-  plus an always-run set. Before the push, run the full `make check` once.
-  Only the full gate counts as evidence; a narrowed run exits 2 to say so.
+  plus an always-run set. Before the push, run the full gate once: under
+  `repo.ci = local` that is `sd gate check --base main`, below; elsewhere
+  `make check`. Only the full gate counts as evidence; a narrowed run exits 2
+  to say so.
+- **Gate first, then review the same head (sd:2603).** `sd gate check --base
+  main` runs the full check in a clean worktree, takes a gate slot, and
+  records a pass for the head. Then review with
+  `sd-review --scope branch --gate-check main` within 30 minutes: that form reads the pass and runs no second check. Run both with
+  the same environment, since the receipt binds it; a one-off prefix such as
+  `TEST_WORKERS=6` on one of them makes the review run the full check again.
+  A fix commit moves the head, so the next round needs a new gate pass first.
+  Never run plain `sd-review --scope branch` there: it runs a second full
+  check in the checkout and reuses no pass.
 - **Gates share the machine through slots.** Every `sd-check` run, and so
   every gate `sd-ship prepare` or `merge` runs in any repository, first takes
   one of `sd.gate_slots` machine-wide slots (unset: a quarter of the cores,
   4 on 16). `SD_GATE_SLOTS` overrides it for one run, `0` lifts the cap, and
   CI takes none. A queued gate prints `waiting for a gate slot` on stderr and
-  again each minute. The wait counts against `sd-check --timeout`, and each
-  check gets the rest. A holder runs its checks with `SD_GATE_SLOTS=0`, so the
-  pack's own `make test` inside a gate takes no second slot; run directly,
-  `make test` takes one of 2. Slots are kernel locks under
+  again each minute, naming each holder's label, pid, directory and start
+  time. The wait counts against `sd-check --timeout`, and each check gets the
+  rest; with `--slot-timeout`, the wait has its own bound and each check gets
+  the whole `--timeout`. `sd gate check`, the gate `sd-review` runs for
+  `sd-ship prepare`, and the merge gate queue that way for up to 4 hours
+  (sd:2607, sd:2611); the review plan counts that bound as its own phase. A holder runs its checks with `SD_GATE_SLOTS=0`, and names its cap
+  in `SD_GATE_POOL_SIZE`, so the pack's own `make test` inside a gate takes no
+  second slot and sizes its workers to the pool; run directly, `make test`
+  takes one of the same slots. Slots are kernel locks under
   `$XDG_STATE_HOME/sd/gate-slots`, so a dead holder's slot is free at once.
+- **A precheck runs before the slot wait (sd:2604).** When the repository's
+  Makefile defines `precheck`, `sd-check` runs `make precheck` first, outside
+  the pool. A failure stops the run there: no slot, no `check`, and the report
+  names the failing check. The pack's `precheck` is `lint` plus the always-run
+  test modules, about a minute. `--only` and a docs-only scope skip it, and
+  the checks get what the precheck left of `--timeout`.
+- **Wrap every other gate in the pool (sd:2522).** The pool is one per
+  machine, not one per repository. A plain `make check` in a repository whose
+  Makefile takes no slot runs as `sd gate run -- make check`, so it queues with
+  every `sd-check` and `sd-ship` gate. A per-repository `lockf` around a lane's
+  gate is then unnecessary: the pool already orders gates across every
+  repository, and a `lockf` only orders the gates of one.
 - **Gates wait in one queue (sd:2262).** Every waiter takes a place in one
   machine-wide queue, and only the head starts: first to wait, first to
-  start. The head starts only while load1 is below `sd.gate_load_max`
-  (unset: 2.5 per core, 40 on 16). While load5 is still above it, load1 must
-  stay below it for `sd.gate_settle_seconds` (unset: 45), and two starts are
-  that far apart. `SD_GATE_LOAD_MAX` and `SD_GATE_SETTLE_SECONDS` override them
-  for one run; `0` turns either off. To gate any other command, such as
+  start, when a slot is free. Two starts are `sd.gate_settle_seconds` apart
+  (unset: 45). The slot count is the one limit (sd:2607): macOS counts threads
+  waiting on the disk in the load average, which read 124 on 2026-10-03 while
+  most cores idled. So do not wait on the load average or wrap a gate in
+  `lockf`; the queue already orders every gate. `sd.gate_load_max` still adds
+  a load1 condition where a machine sets it (unset: none). While load5 is
+  above it, load1 must then stay below it for the settle time.
+  `SD_GATE_LOAD_MAX` and `SD_GATE_SETTLE_SECONDS` override them for one run;
+  `0` turns either off. To gate any other command, such as
   another repository's `make check`, run `sd gate run -- make check`; it waits,
   runs the command, and frees the slot when the command ends.
   `sd gate status` shows who holds a slot and who waits, and since when.
+- **Ship a run of items through one lane queue (sd:2524).** `sd-ship lane
+  enqueue --item N --title T --body-file F --deliver|--associate-only
+  [--acceptance-file A] [--manual]` adds a worktree's item
+  to its repository's queue file, which outlives the session. `sd-ship lane
+  run` drains it in order under one lock per repository: head check,
+  `prepare --catch-up` with the entry's delivery claim and acceptance file,
+  then `merge` for an entry queued with `--manual`. An entry with no claim is
+  refused at enqueue, as prepare refuses it. A
+  failed entry is marked and the next one runs. A second runner exits at once
+  rather than wait. Each prepare and merge keeps its whole output under
+  `<lane>/logs/`. `list` and `cancel` read and edit the queue; `watch` prints
+  each gate end a log under `sd.lane_root` records, once.
 - **Test one version per language, the latest stable (Python 3.14, Node
   26), in CI and locally; no version matrices.**
 
@@ -411,8 +543,10 @@ the block; the file is untracked by construction.
 `sd_lib.guest_artifact_refusal` and `sd-ship`'s push check refuse
 `docs/work/`, `docs/spec/` and `docs/decisions/` in `guest` only, so a
 `minimal` repository can commit and push them unrefused. `sd-ship` also adds
-the `Work: sd:<id>` line in `minimal`, as it does in `full`. What `minimal`
-refuses is the review routing lane (R10-D5), as `guest` does.
+the `Work: sd:<id>` line in `minimal`, as it does in `full`. Only `guest`
+refuses the review routing lane (R10-D5): `minimal` is written by hand and
+never detected, so it names the operator's own quiet repository, and may
+install the lane (operator ruling 2026-09-30, sd:1292).
 
 Access decides where artifacts go, whichever namespace holds the
 repository. Without a `mode:` line, the pack asks three questions of the
@@ -551,6 +685,12 @@ retains the endpoint default. These values require support from the selected
 model: MiniMax-M3 supports disabled thinking, and Baseten's DeepSeek-V4-Pro-0813
 supports effort `none`. Lower reasoning can change finding quality; full
 subject coverage and the required reviewer count remain mandatory.
+A URL entry can also declare `response_format: json_schema`. `sd-review`
+then sends the findings schema as a strict `response_format`, in the copy
+Moonshot's strict mode takes: every property typed, `line` as `anyOf`
+integer or null, and no `minLength` or `maxItems`. The answer is still parsed
+against the full schema. Only an entry that declares the field sends it; an
+endpoint that accepts it may ignore it, as MiniMax-M3 does (sd:1827).
 Incomplete output still fails the review. A pin is changed by editing the
 registry file, never by a page.
 A `url` answer that fails the findings schema is retried once on the same
@@ -562,9 +702,16 @@ before. Temperature is not a registry field: `kimi-k3` refuses any value but
 
 Adding a provider is an entry; adding money is a bill. Both role lines are
 read in order. `author` is picked when an assignment starts and never switched
-mid-item; outside the runner, `SD_AUTHOR` or `--author` names it to
+mid-item; outside the runner, `--author` names it to
 `sd-ship`, which stamps it on each commit it makes as `Authored-with:
-<name>/<vendor>`, the vendor as the registry gave it at commit time. The
+<name>/<vendor>`, the vendor as the registry gave it at commit time.
+`SD_AUTHOR=<name>` names it to the pack's `commit-msg` hook, which writes the
+same line on a commit whose message states none (sd:1295); a name nothing
+resolves refuses the commit, and `sd attribute` never amends. Its own
+repair commit says `SD_AUTHOR`'s entry too, else `human` (sd:2009). `human` is a
+commit a person wrote; `script` is one a deterministic job wrote, with no
+model and no person in the loop (sd:1637). Both are reserved and carry no
+vendor, so any provider may review them. The
 review reads no declaration: every commit in the reviewed range is attributed
 by its own trailer, or by an `Attributes: <sha> <name>/<vendor>` trailer on a
 later commit in the range that `sd attribute` makes, and a commit with neither
@@ -657,13 +804,18 @@ The reserved `sd` namespace declares four settings:
   `sd-review` reports the effective policy, its source and the repository's say under `remote_reviews.copilot`.
   `sd-ship` resolves the decision again at dispatch, from the setting as it stands then and the tiers the
   retained passes recorded, so a setting changed after the review takes effect without another review.
-- `sd.gate_slots`: how many repository gates (`sd-check` runs) may run at once on this machine; `0` is no cap.
-  Absence reads a quarter of the cores. `SD_GATE_SLOTS` overrides it for one run. It grants nothing;
+- `sd.gate_slots`: how many gates (`sd-check` runs, `sd gate run`, the pack's `make test`) may run at once on
+  this machine; `0` is no cap. Absence reads a quarter of the cores. `SD_GATE_SLOTS` overrides it
+  for one run. It grants nothing;
   see [Parallel work](#parallel-work).
 - `sd.gate_load_max`: the gate queue starts a gate only while load1 is below this; `0` is no load condition.
-  Absence reads 2.5 per core. `SD_GATE_LOAD_MAX` overrides it for one run. It grants nothing.
+  Absence is no load condition (sd:2607). `SD_GATE_LOAD_MAX` overrides it for one run. It grants nothing.
 - `sd.gate_settle_seconds`: seconds between two gate starts, and of low load1 while load5 is high; `0` is none.
   Absence reads 45. `SD_GATE_SETTLE_SECONDS` overrides it for one run. It grants nothing.
+- `sd.gate_cache_gb`: the most gigabytes the local gate's warm Rust build folders may hold; `0` is no bound.
+  Absence reads 40. `SD_GATE_CACHE_GB` overrides it for one run. It grants nothing.
+- `sd.lane_root`: the folder that holds each repository's `sd-ship lane` queue, as `<root>/<repository>/lane/queue/`.
+  Absence reads `$XDG_STATE_HOME/sd/lanes`. `SD_LANE_ROOT` overrides it. It grants nothing.
 
 Installation supplies neither grant. A new operator must state their own policy; never copy another user's personal permission.
 These settings start no background work, enable no runner policy, and bypass no ownership, review, CI, or protection gate.
@@ -688,6 +840,7 @@ The `CLAUDE.local.md` block carries these keys, and the pack reads no others.
     test: <optional, when the repo spells its tests separately>
     lint: <optional, same>
     reviewers: <entry@recipient pairs that may receive this repository's diff, e.g. claude@claude+3f9a1c2e, baseten@inference.baseten.co>
+    guest_allow: docs/decisions   (optional; the only tree a guest repository can take out of the refusal)
 
 `check`, `test` and `lint` run in that order and are optional; one combined command can use `check` alone.
 `reviewers` restricts the effective authorization described above. Each local entry binds its destination:

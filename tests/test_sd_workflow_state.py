@@ -78,8 +78,9 @@ class WorkflowState(unittest.TestCase):
         self.assertEqual(result["state"], "success")
         self.assertIsNone(result["blocker"])
         self.assertEqual(result["next_action"],
-                         "Triage review findings and complete approved post-merge closeout. "
-                         "Confirm exact deletion targets and obtain explicit approval before deleting anything.")
+                         "Triage review findings and complete post-merge closeout. "
+                         "Remove this PR's safe branches, stashes, refs and stale worktrees "
+                         "after recording their object IDs.")
 
     def test_check_reuse_requires_an_explicit_flag_in_both_review_entrypoints(self):
         for command in ("prepare", "review"):
@@ -233,6 +234,21 @@ class PolicyReferenceBinding(unittest.TestCase):
             broken = hashed("def f(:\n")
             self.assertEqual(broken, "raw:" + hashlib.sha256(b"def f(:\n").hexdigest())
             self.assertNotEqual(hashed("def f(::\n"), broken)
+
+    def test_the_normalized_hash_parses_each_content_once_and_new_bytes_again(self):
+        """sd:1615: the parse is memoized by the bytes' digest, not by path or mtime."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "module.py"
+            parse = Mock(wraps=bindings.normalized_source)
+            with patch.object(bindings, "normalized_source", parse):
+                path.write_text("def f():\n    return 'one'\n")
+                first = bindings.normalized_hash(path)
+                self.assertEqual(bindings.normalized_hash(path), first)
+                self.assertEqual(parse.call_count, 1)
+                # Same size, same path: only the content can tell them apart.
+                path.write_text("def f():\n    return 'two'\n")
+                self.assertNotEqual(bindings.normalized_hash(path), first)
+                self.assertEqual(parse.call_count, 2)
 
     def test_cross_skill_receipt_policy_and_review_helpers_remain_required(self):
         self.assertTrue({"skills/sd-check/SKILL.md", "skills/sd-review/SKILL.md", "skills/sd-ship/SKILL.md",

@@ -83,6 +83,15 @@ DELETION = re.compile(
     r"|:refs/heads|-X\s*DELETE|--method\s+DELETE"
 )
 
+#: The only deletion commands the post-merge closeout may name: one exact
+#: target each, never a pattern, never forced (sd:2452).
+SANCTIONED_CLEANUP = frozenset({
+    "git branch -d", "git branch -D",
+    "git push --force-with-lease=<branch>:<recorded id> origin --delete <branch>",
+    "git stash drop <selector>", "git update-ref -d <ref> <recorded id>",
+    "git worktree remove <path>",
+})
+
 #: A settle step that re-asks. `--watch` is one wait; these are a loop.
 POLLING = re.compile(r"\bsleep\b|\bwhile\b|\buntil\b|\bdone\b|\bwatch\s+-n\b")
 
@@ -444,7 +453,12 @@ class AChangeWithNoWorkItem(unittest.TestCase):
 
 
 class PostMergeCloseout(unittest.TestCase):
-    """Every merge gets an inventory; deletion needs distinct scoped authority."""
+    """Every merge gets an inventory and removes only the merged PR's safe targets.
+
+    The operator authorized automatic cleanup on 2026-10-02 (sd:2452): branches,
+    stashes, refs and stale worktrees go without asking once every safety
+    condition holds, each after a recovery record.
+    """
 
     def setUp(self) -> None:
         self.closeout = referenced_procedure(steps()[9], "post-merge-closeout.md")
@@ -452,22 +466,31 @@ class PostMergeCloseout(unittest.TestCase):
     def test_every_merge_loads_closeout_without_requiring_a_cleanup_request(self) -> None:
         self.assertIn("After every confirmed in-scope merge", steps()[9])
         self.assertIn("Run this after every confirmed in-scope merge", self.closeout)
-        self.assertIn("even when the user requested no deletion", self.closeout)
+        self.assertIn("automatic cleanup of safe targets", self.closeout)
         for resource in ("refs", "branches", "stashes", "worktrees"):
             with self.subTest(resource=resource):
                 self.assertIn(resource, steps()[9])
 
-    def test_cleanup_keeps_exact_target_approval_and_recovery_boundaries(self) -> None:
-        for token in ("consolidated exact target list", "explicit approval", "full object ID",
-                      "read-back", "Drift or new activity stops", "squash merge",
+    def test_cleanup_is_automatic_only_inside_its_safety_and_recovery_boundaries(self) -> None:
+        for token in ("authorized this cleanup on 2026-10-02", "full object ID", "sd task note",
+                      "re-read it immediately before removal", "squash merge",
                       "dirty, active, locked, unrelated, primary, and serving",
                       "unique or unverified", "shared virtualenv/cache",
-                      "older reflog entries", "index and untracked parents",
-                      "concurrent stash activity", "before proposing its deletion"):
+                      "index and untracked parents", "concurrent stash activity",
+                      "another open PR", "`git status --porcelain` is empty",
+                      "only build output or caches", "not under `~/repos`",
+                      "Keep the target and report it", "Retention is not a failure",
+                      "its index parent and its untracked parent", "The lease makes the delete refuse"):
             with self.subTest(boundary=token):
                 self.assertIn(token, self.closeout)
         for command in commands(self.closeout):
-            self.assertIsNone(DELETION.search(command), command)
+            if DELETION.search(command) or "stash drop" in command or "worktree remove" in command:
+                with self.subTest(command=command):
+                    self.assertIn(command, SANCTIONED_CLEANUP)
+        for line in self.closeout.splitlines():
+            if "stash clear" in line or re.search(r"--force(?!-with-lease=<branch>:<recorded id>)", line):
+                with self.subTest(line=line):
+                    self.assertTrue(line.startswith("Never"), line)
 
     def test_threads_need_supported_dispositions_and_readback(self) -> None:
         for token in ("inline thread", "review-body", "all result pages", "late Copilot",
@@ -556,6 +579,9 @@ class ABranchAnotherPullRequestIsBasedOn(unittest.TestCase):
             len(asks), 1, f"step 6 issues {len(asks)} base queries, not one"
         )
         words = shlex.split(asks[0])
+        self.assertIn(
+            "--base <this branch> ", asks[0] + " ",
+            "the query asks about another branch's children, not this one's (sd:1002)")
         self.assertEqual(
             words[words.index("--state") + 1], "open",
             "the query is not scoped to open pull requests, so a merged or "
@@ -1017,6 +1043,18 @@ class AKilledRunIsReconciledByTheNext(unittest.TestCase):
             sentences_with(self.reconcile, "closed", "by a slice"),
             "the failure mode the boundary prevents is not named",
         )
+
+
+class AStandingRejection(unittest.TestCase):
+    """sd:1929: a rejection that survives one review pass is adjudicated before the next fix is pushed."""
+
+    RULE = "A rejection that still stands after one review pass is recorded with `sd-ship adjudicate` before the next fix is pushed."
+
+    def test_the_skill_states_the_rule_once_and_the_reference_points_back(self) -> None:
+        self.assertEqual(SKILL_TEXT.count(self.RULE), 1)
+        reference = (REPO_ROOT / "skills/sd-ship/references/adjudication.md").read_text(encoding="utf-8")
+        self.assertNotIn(self.RULE, reference, "one statement of the rule; the reference cross-references it")
+        self.assertIn("before the next fix is pushed (`skills/sd-ship/SKILL.md`", reference)
 
 
 if __name__ == "__main__":

@@ -59,6 +59,7 @@ import tempfile
 import textwrap
 import tokenize
 import unittest
+from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -954,9 +955,31 @@ class CodeHealth(unittest.TestCase):
         for key in sorted(DYNAMIC):
             if key not in found:
                 stale.append(f"{key} no longer exists; drop it from DYNAMIC")
+            elif _references()[found[key].name] > 1:
+                # The dead-code check's own count, so the two cannot disagree
+                # about what a reference is (sd:999, review-811).
+                stale.append(f"{key} is referenced now; drop it from DYNAMIC")
         self.assertEqual(stale, [], "\n".join(
             ["Fixed debt is still listed as debt. Delete these entries:", *stale]))
 
+
+    def test_a_dynamic_entry_that_gained_a_reference_is_stale(self):
+        """sd:999 (review-811). A `DYNAMIC` entry is stale once a call reaches it.
+
+        The loop above checked only that each entry still exists. An entry
+        whose function later gained a static reference stayed listed, and the
+        dead-code check went on skipping it. `DYNAMIC` is empty today, so this
+        lends it a function the corpus does reference and expects the stale
+        report the other baselines get.
+        """
+
+        referenced = next(
+            unit.key for unit in units()
+            if not unit.name.startswith("_") and unit.name not in _ambiguous()
+            and _references()[unit.name] > 1)
+        with mock.patch(f"{__name__}.DYNAMIC", frozenset({referenced})):
+            with self.assertRaisesRegex(AssertionError, f"{referenced} is referenced now"):
+                self.test_every_baseline_entry_still_earns_its_place()
 
 @functools.cache
 def _references() -> collections.Counter:
@@ -1395,6 +1418,46 @@ def lint_path_literals() -> dict[str, list[str]]:
                        if not token.startswith("$(")]
     return found
 
+
+#: The oldest git this module runs on. `tracked` passes `--deduplicate` to
+#: `ls-files`, which git 2.31 added; an older git refuses it as an unknown
+#: option, and every check here fails on that line without naming a floor.
+GIT_FLOOR = (2, 31)
+
+
+def git_version(text: str) -> tuple[int, int] | None:
+    """The `(major, minor)` of a `git --version` line, or None for any other line."""
+
+    found = re.match(r"git version (\d+)\.(\d+)", text.strip())
+    return (int(found.group(1)), int(found.group(2))) if found else None
+
+
+class GitFloor(unittest.TestCase):
+    """sd:999 (review-834). The git floor `--deduplicate` sets, named and held."""
+
+    def test_this_git_reaches_the_floor(self):
+        line = subprocess.run(["git", "--version"], capture_output=True,
+                              text=True, check=True).stdout
+        version = git_version(line)
+        self.assertIsNotNone(version, f"cannot read a version from {line!r}")
+        self.assertGreaterEqual(
+            version, GIT_FLOOR,
+            f"{line.strip()} is older than git {GIT_FLOOR[0]}.{GIT_FLOOR[1]}, which "
+            "`git ls-files --deduplicate` needs; this suite and bin/sd-ship use it")
+
+    def test_the_version_reader_reads_the_shapes_git_prints(self):
+        for line, expected in (("git version 2.54.0 (Apple Git-157)\n", (2, 54)),
+                               ("git version 2.31.1.windows.1", (2, 31)),
+                               ("git version 2.30.9", (2, 30)),
+                               ("not git", None)):
+            with self.subTest(line=line):
+                self.assertEqual(git_version(line), expected)
+        self.assertLess(git_version("git version 2.30.9"), GIT_FLOOR)
+
+    def test_contributing_states_the_floor(self):
+        text = (REPO_ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+        floor = f"Git {GIT_FLOOR[0]}.{GIT_FLOOR[1]} or later"
+        self.assertTrue(floor in text, f"CONTRIBUTING.md does not say {floor!r}")
 
 class LintPaths(unittest.TestCase):
     """The `Makefile`'s lint paths name trees that exist (sd:719 step 7).

@@ -69,6 +69,22 @@ class LaneChdirTests(unittest.TestCase):
         self.assertFalse(report.get("ok", True))
         self.assertIn(f"-C {self.missing}: not a directory", json.dumps(report))
 
+    def test_sd_ship_refuses_an_empty_directory_as_a_failure_object(self) -> None:
+        # sd:1911. LANE_COMMANDS exit 2 on stderr; sd-ship answers with its
+        # exit-3 refusal object. The cwd is a repository where `body` passes,
+        # so a `-C` that went unread would pass too rather than refuse.
+        subprocess.run(["git", "init", "-q", str(self.outside)], check=True)
+        control = run("sd-ship", "body", "--item", "1", "--json", cwd=self.outside)
+        self.assertEqual(control.returncode, 0, "the control: in the cwd repository, body passes")
+        result = run("sd-ship", "-C", str(self.empty), "body", "--item", "1", "--json", cwd=self.outside)
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        report = json.loads(result.stdout)
+        self.assertFalse(report.get("ok", True))
+        self.assertIn("not inside a git repository", report["error"].lower())
+        # sd:2499: the refusal names the -C directory, as the lane commands do.
+        self.assertIn(str(self.empty.resolve()), report["error"], "the named cwd is the -C one")
+        self.assertNotIn(str(self.outside.resolve()), report["error"])
+
     def test_sd_ship_body_resolves_the_repository_from_the_c_directory(self) -> None:
         # `body` is the one sd-ship verb with no database and no GitHub; it
         # still refuses outside a repository, so it observes where -C went.

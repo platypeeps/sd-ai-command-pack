@@ -74,7 +74,7 @@ else is. Its executables write these paths, and no others:
   `--remove-legacy` it also deletes the three files the old `sd-github-review`
   installer left. `--remove` deletes the workflow and its Dependabot guard.
 - The fleet stamp, from `sd fleet stamp`, into the checkout you stand in, which
-  must be a checkout of a `runner_merge=auto` repository: the routing lane and
+  must be a checkout of a managed `runner_merge=auto` repository (sd:1620): the routing lane and
   its Dependabot guard as `setup-github` writes them,
   `.github/workflows/sd-check.yml` where no other workflow runs on
   `pull_request` (created only: an existing one is kept as written), the `unprotected` entry in `.github/sd-status.json`
@@ -86,9 +86,16 @@ else is. Its executables write these paths, and no others:
   whose `sd-status.json` entry or `CLAUDE.md` rule forbids CI gets no workflow.
   A repository whose `repo.ci` row says `local` gets no workflow either, from
   the stamp or from `setup-github`; see [WORKFLOW.md § No-CI mode](WORKFLOW.md#no-ci-mode).
+  A repository declines any of these files once, in a tracked
+  `.github/sd-fleet.json` holding `{"exempt": ["<path>", ...]}`; the stamp
+  names each exempt path and never proposes it, and a file that does not read
+  refuses the repository.
   It also adds the template's new lines to that checkout's `CLAUDE.local.md`
   block, removing none, and creates its untracked `docs/dashboard/`. `--dry-run` prints every auto repository's diff against
-  its `origin/HEAD` and writes nothing.
+  its `origin/HEAD` and writes nothing. A repository is the operator's own
+  when its owner is in `fleet.owners` of the machine config, a JSON list of
+  GitHub logins (unset: `DEFAULT_OWNERS` in `bin/sd_fleet.py`); any other
+  owner's protection stands.
 - `docs/work/<item>/.citations.tsv` — the citation baseline, one per active work
   item, from `sd-docs-lint --update-citations`. **Tracked.**
 - `build/` — HTML from `sd-research-kit render`, into the research repository you
@@ -159,9 +166,15 @@ sd config set sd.assistant_merge controlled
 
 These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOME` overrides the configuration root.
 `sd config get`, `list`, and `unset` inspect or remove settings. No personal grant ships in this repository.
-`sd.gate_slots` is load control, not a grant: how many repository gates may run at once on the machine (unset: a quarter of the cores).
-`sd.gate_load_max` and `sd.gate_settle_seconds` are load control too: the gate queue starts its head only while load1 is below the limit (unset: 2.5 per core), with starts 45 s apart by default.
+`sd.gate_slots` is load control, not a grant: how many gates may run at once on the machine, across every repository (unset: a quarter of the cores).
+`sd.gate_load_max` and `sd.gate_settle_seconds` are load control too: the gate queue starts its head 45 s after the last start by default, and only below a load1 limit where one is set (unset: none, since macOS counts disk waits in the load average).
+`sd.gate_cache_gb` bounds the local gate's warm Rust build folders (unset: 40 GB); past it the gate removes the least recently used free folder.
+`sd-ship lane enqueue|list|cancel|run|watch` keeps a serial prepare-and-merge queue per repository in a file under `sd.lane_root` (unset: `$XDG_STATE_HOME/sd/lanes`), so a queued chain outlives the session that filled it.
 `sd gate run -- make check` queues any command the same way; `sd gate status` shows the queue.
+Wrap a plain `make check` in any repository that way, and drop a per-repository `lockf` from lane scripts: the pool orders gates across every repository.
+A waiting gate names who holds each slot and since when.
+`sd gate post --head SHA` runs the merge gate at SHA and posts `sd/local-gate`, for a merge path that is not `sd-ship merge`.
+`sd gate check` runs the same check at `HEAD` and records a pass that `sd-ship prepare` and the merge gate reuse at that head; it posts nothing.
 
 `configured` allows private code and scoped review context to the operator's eligible configured providers, including future entries.
 A local `reviewers` list restricts recipients; an explicit empty value denies review.
@@ -214,6 +227,11 @@ that reason and the item closes without it. A `followup` filed in a
 registered checkout carries that checkout since sd:809, but only a task's
 move to done records a delivering commit, so the flag is refused there too,
 on that second reason, and the item closes without it just the same.
+A row worked on its own branch, as `sd runner prepare --branch` records it,
+does not close plainly while no merge of that branch is recorded (sd:1990).
+Name the merge with `--delivered-by`, or say why no pull request is needed
+with `--reason`, which the transition records. A merge `sd-ship` recorded,
+or a row on `main` or `master`, closes as before.
 
 A task that repeats carries a rule:
 `sd task add "File the weekly report" --due 2026-01-01 --recur FREQ=WEEKLY`.
@@ -228,7 +246,9 @@ refusal: the grammar, the anchor, the due date and the kinds that may recur.
 
 `sd store items --open` lists the backlog; `sd store item 42 --json` includes
 history and a revision that edits can require with `--if-revision`.
-`sd task show 42` is an alias that prints the same thing. Notes,
+`sd task show 42` is an alias that prints the same thing.
+`sd task cancel 42 --reason TEXT` closes a task or followup nobody will do,
+with the `cancelled` receipt `sd work cancel` writes. Notes,
 priorities, due dates and task status save directly to the database. GitHub
 issues are optional external references, with their last successful sync shown
 separately from local progress.
@@ -253,7 +273,8 @@ every worker.
 
 From the writing checkout, `sd writing list`, `sd writing readiness --piece
 YEAR/slug`, and `sd writing stage` share the dashboard's writing controls.
-Import and cutover have separate preview and verification commands. Once the
+Import and cutover have separate preview and verification commands. `list`,
+`import` and `verify` refuse a checkout with no `content/` folder. Once the
 repository uses rows, routine stage, parking and metadata changes leave content
 files untouched. See the writing pack's `.claude/reference/database-workflow.md`
 for review evidence and recovery commands.
@@ -328,7 +349,13 @@ links `.git/hooks/pre-commit` to the tracked `hooks/pre-commit`, which runs
 Ruff over the staged Python and the two whole-tree test passes
 (`tests.test_code_health`, `tests.test_doc_citations`) in about five seconds
 and prints its own wall time against the budget its header states.
-`SD_SKIP_HOOKS=1 git commit` skips it with a notice. The hook is one per
+`SD_SKIP_HOOKS=1 git commit` skips it with a notice. The same target links
+`.git/hooks/commit-msg` to `hooks/commit-msg`, which refuses a message whose
+`Authored-with:`, `Needed-by:` or other checked trailer sits outside the final
+paragraph, where git does not read it; it names the line, and
+`SD_SKIP_HOOKS` does not skip it. With `SD_AUTHOR=<entry>` set (`claude`,
+`codex`, `human`, `script`), it first writes `Authored-with:` into a message
+that has none, so no `sd attribute` commit follows. The hook is one per
 clone: the link sits in the clone's common `.git/hooks`, its target is the
 relative `../../hooks/pre-commit`, so it reads the main checkout's tracked
 file and every linked worktree shares it, whichever worktree ran `make
@@ -410,10 +437,11 @@ Each prose skill has a "State of the tooling" section.
 ```bash
 make setup   # once
 make check   # test + lint + audit + docs-lint
+make precheck   # lint + the always-run test modules, about a minute
 ```
 
 This repository has `repo.ci = local`: it carries no GitHub Actions workflow.
-`sd-ship merge` runs `sd-check` (here `make check`) in a fresh worktree and
+`sd-ship merge` runs `sd-check` (here `make precheck`, then `make check`) in a fresh worktree and
 posts the result as the `sd/local-gate` status on the head commit. The gate
 installs `sd_db` at the `platypeeps/system` ref in `.sd-system-rev`.
 `sd-ship prepare` grades the pull request body with `sd-docs-lint --body-only`.

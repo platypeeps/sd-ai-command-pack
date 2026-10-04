@@ -107,3 +107,44 @@ indirectly is not detected; a repository whose docs globs could match such a
 script must keep its globs narrow. The pack does not declare a scope in this
 change: its `skills/**` Markdown is tested payload, and a narrow enough glob
 set saves little.
+
+## Log
+
+- 2026-10-03, sd:1912: operator ruling D1 (relayed by the lead) drops the agent
+  harness's session variables (`CLAUDE*`, `HERDR_*`, `ITERM_*`,
+  `TERM_SESSION_ID`, `PWD`, `OLDPWD`, `SHLVL`, `_`) from the gate child's
+  environment. The binding is still the whole environment the child sees. With
+  D1 a builder's pass and the lead's prepare bind equal, so prepare now reads a
+  receipt at the same head and binding. That read is no weaker than the merge
+  gate's read of the same receipt. The 30-minute window is unchanged (ruling
+  D2), and it counts from the run that passed. "Prepare never reads a receipt"
+  above no longer holds. `sd gate check` records a builder's pass; using it is
+  optional (ruling D3).
+- 2026-10-03, sd:1912 slice A: a repository may key gate receipts by tree
+  instead of head, through `.github/sd-gate-reuse.json` (`{"schema_version": 1,
+  "key": "tree", "reason": ...}`). The key, the binding and the `gate_inputs`
+  digest then name `HEAD^{tree}` and the merge base with the base branch, not
+  the head. Opt-in, because two heads with one tree differ in commit metadata,
+  and a commit-message lint or a `git describe` stamp can pass at one and fail
+  at the other. The merge base is bound because a check may read an old commit
+  by name; a run with no base keeps the head key. The receipt row keeps the
+  passing head, and a reuse reports it as `reused.head`. Ruling D2': a
+  tree-keyed receipt stands for 6 hours (`TREE_REUSE_WINDOW_SECONDS`); the head
+  key keeps 30 minutes. Ruling D4: no. The pack does not declare the key. Its
+  `make check` reads commit trailers and ranges: `tests/test_sd_review.py` runs
+  `sd-review --explain` at the checkout root, which reads the branch range's
+  `Authored-with:` trailers; `tests/test_sd_size_report.py` renders "this
+  change" and the last 30 days from the log; `tests/test_archive_untouched.py`
+  reads the commit that added `docs/work/.status-source`.
+- 2026-10-04, sd:2602: the merge gate already read prepare's receipt (sd:2041),
+  yet on 2026-10-03 every merge gate ran in full, most beside a prepare receipt
+  for the same head made minutes before. Cause: the installed pack sat at
+  `929b34cd` from 11:16 to 19:06 MDT and lacked `e2930c27` (ruling D1), so
+  `PWD`, `SHLVL`, `_` and `CLAUDE_*` still bound and differed between the
+  shells that ran prepare and merge. The first merge after the install of
+  `2ca892be` reused. A gate that runs in full now returns `reuse_miss`, the
+  reason no receipt stood, beside its result. Operator ruling (2026-10-04,
+  "drop it"), an addition to D1: `FNM_MULTISHELL_PATH` is dropped too, and each
+  kept `PATH` entry is resolved, so fnm's per-shell folder that leads to the
+  same real node binds the same receipt; a different real node still differs.
+  Tool paths in the binding were already resolved (`tool_identity`).

@@ -13,7 +13,8 @@
 #
 # Env:
 #   PYTHON_BIN     interpreter to run (default: python3)
-#   TEST_WORKERS   workers (default: all CPUs in CI; half the CPUs locally, min 1)
+#   TEST_WORKERS   workers (default: all CPUs in CI; locally twice the CPUs over
+#                  the machine's gate cap, at most the CPUs; half the CPUs with no cap)
 #
 # sd:1955. Locally the shards also run at `nice -n 10`. Two gates may hold the
 # two machine-wide slots at once (sd.gate_slots), and CPUs minus one each let
@@ -24,6 +25,13 @@
 # Measured on the 16-core machine before the change, 15 workers, other gates
 # sharing it: 473 s of tests, 1-minute load peak 100 and mean 63.
 # CI gets every CPU at normal priority: nothing else runs on a CI runner.
+#
+# sd:2607. The local default follows the gate cap, so the pool's full load is
+# twice the CPUs in workers whatever the cap: 8 each at the cap of 4 on 16 CPUs,
+# 16 at a cap of 2. The cap is the one the gate took its slot under:
+# SD_GATE_POOL_SIZE from a holder such as `sd-check`, else this run's own
+# SD_GATE_SLOTS. It is the cap and not the slots in use, because the shards are
+# planned once, here: a run that started alone keeps its workers when others join.
 set -uo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -67,13 +75,19 @@ else
     '' | *[!0-9]*) cores=4 ;;
   esac
   [ "$cores" -ge 1 ] || cores=1
+  pool="${SD_GATE_POOL_SIZE:-${SD_GATE_SLOTS:-0}}"
+  case "$pool" in
+    '' | *[!0-9]*) pool=0 ;;
+  esac
   if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
     TEST_WORKERS="$cores"
-  elif [ "$cores" -gt 1 ]; then
-    TEST_WORKERS=$((cores / 2))
+  elif [ "$pool" -gt 0 ]; then
+    TEST_WORKERS=$((2 * cores / pool))
+    [ "$TEST_WORKERS" -le "$cores" ] || TEST_WORKERS="$cores"
   else
-    TEST_WORKERS=1
+    TEST_WORKERS=$((cores / 2))
   fi
+  [ "$TEST_WORKERS" -ge 1 ] || TEST_WORKERS=1
 fi
 
 # Everything this run writes goes to a private directory and is published to the
@@ -354,13 +368,37 @@ reap_shards() {
 # with the exit, so a reader can tell which run a log line belongs to and
 # whether it saw their edit. `cleanup` runs on every exit and once more after a
 # signal, and the footer is printed once.
+#
+# sd:2080. `content` is the tree id of the working tree, untracked files
+# included and ignored ones not, written through a scratch copy of the index so
+# the real one is untouched. A count of dirty paths cannot tell two edits of one
+# dirty file apart; a content id can. The footer reads it when the run ends, so
+# an edit made while the shards ran shows as two different ids. The copy's
+# assume-unchanged and skip-worktree flags are cleared first: with them, `add`
+# skips a file the tests still read from disk.
 run_head=""
 footer_printed=""
+tree_content() {
+  local index content=""
+  if [ "$run_head" != "unknown" ] && index="$(mktemp)"; then
+    rm -f "$index"
+    cp "$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-path index 2>/dev/null)" "$index" 2>/dev/null
+    # One flag per call: given both, `update-index` cleared only one (git 2.54).
+    content="$(for flag in --no-assume-unchanged --no-skip-worktree; do
+        GIT_INDEX_FILE="$index" git -C "$REPO_ROOT" ls-files -z 2>/dev/null |
+          GIT_INDEX_FILE="$index" git -C "$REPO_ROOT" update-index -z "$flag" --stdin 2>/dev/null || exit 1
+      done &&
+      GIT_INDEX_FILE="$index" git -C "$REPO_ROOT" add -A 2>/dev/null &&
+      GIT_INDEX_FILE="$index" git -C "$REPO_ROOT" write-tree 2>/dev/null)" || content=""
+    rm -f "$index"
+  fi
+  printf '%s' "${content:-unknown}"
+}
 run_footer() {
   if [ -n "$run_head" ] && [ -z "$footer_printed" ]; then
     footer_printed=1
-    printf 'run-tests: end head=%s pid=%s exit=%s at=%s\n' \
-      "$run_head" "$$" "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
+    printf 'run-tests: end head=%s content=%s pid=%s exit=%s at=%s\n' \
+      "$run_head" "$(tree_content)" "$$" "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
   fi
 }
 
@@ -491,7 +529,7 @@ acquire_gate_slot() {
   fi
   stop_if_launcher_exited
   printf '%s\n' "$$" >"$gate_slot" 2>/dev/null || :
-  export SD_GATE_SLOTS=0
+  export SD_GATE_SLOTS=0 SD_GATE_POOL_SIZE="$slots"
 }
 acquire_gate_slot
 
@@ -506,8 +544,8 @@ else
   run_dirty="unknown"
 fi
 # On stderr: stdout is the run log, byte for byte (unittest-output.log).
-printf 'run-tests: start head=%s dirty=%s pid=%s at=%s\n' \
-  "$run_head" "$run_dirty" "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
+printf 'run-tests: start head=%s dirty=%s content=%s pid=%s at=%s\n' \
+  "$run_head" "$run_dirty" "$(tree_content)" "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
 
 watchdog() {
   # Stated rather than relied on: bash resets trapped signals in the subshell a
@@ -549,8 +587,12 @@ set -m
     exit 1
   }
   # Unquoted on purpose: one name per line, and a unittest name has no blanks.
+  # The start line labels the output below it: unittest prints its `Ran` line
+  # last, so with only the end line a `Ran` sat above its own label and read
+  # as the shard before it (sd:2080).
   started=$SECONDS
-  "$1" -m coverage run --parallel-mode -m unittest $ids > "$2/$3.log" 2>&1
+  printf "shard %s: start\n" "$3" > "$2/$3.log" || exit 1
+  "$1" -m coverage run --parallel-mode -m unittest $ids >> "$2/$3.log" 2>&1
   status=$?
   printf "\nshard %s: %ss exit=%s\n" "$3" "$((SECONDS - started))" "$status" >> "$2/$3.log" || exit 1
   exit "$status"

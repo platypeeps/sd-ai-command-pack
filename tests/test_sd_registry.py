@@ -20,6 +20,7 @@ import json
 import os
 import pathlib
 import shlex
+import subprocess
 import sys
 import tempfile
 import types
@@ -170,9 +171,11 @@ class TheShippedRegistry(unittest.TestCase):
     def test_the_registry_names_no_backend_the_review_lane_used_to_carry(self) -> None:
         """`prism` and `gito` pointed at the same endpoint and added limits of
         their own. The registry is the only list of providers, so their absence
-        here is what removes them."""
+        here is what removes them. `exo` was removed too (#1025); a re-added
+        `enabled: false` row would leave the reviewer chain unchanged, so its
+        absence is asserted here and not read off the chain (sd:1002)."""
         self.assertEqual(
-            {"prism", "gito"} & set(self.registry.providers), set()
+            {"prism", "gito", "exo"} & set(self.registry.providers), set()
         )
 
 
@@ -355,6 +358,73 @@ class TheReasoningControls(unittest.TestCase):
                 "messages": [{"role": "user", "content": prompt}], **additions})
             self.assertEqual(request.full_url, "http://localhost:2/v1/chat/completions")
             self.assertEqual(request.get_header("Authorization"), "Bearer fixture")
+
+
+class TheStrictResponseFormat(unittest.TestCase):
+    """sd:1827: `response_format: json_schema` is a per-entry opt-in; the file
+    reader holds it, and only an entry that opted in sends a schema."""
+
+    setUp = TheReasoningControls.setUp
+    write = TheReasoningControls.write
+    SCHEMA = {"type": "object", "required": ["items"], "properties": {
+        "items": {"type": "array", "maxItems": 3, "items": {"type": "object", "properties": {
+            "line": {"type": ["integer", "null"]}, "level": {"enum": ["high", "low"]},
+            "minLength": {"type": "string", "minLength": 1}}}}}}
+
+    def provider(self, **fields: Any) -> sd_registry.Provider:
+        provider = sd_registry.read(self.write(**fields), prefer_library=False).providers["two"]
+        return sd_registry.Provider(**{**vars(provider), "env": ("OWN_KEY",)})
+
+    def sent(self, provider: sd_registry.Provider, **options: Any) -> dict[str, Any]:
+        with unittest.mock.patch.object(sd_registry._DIRECT_OPENER, "open", return_value=_Answer("{}")) as opened:
+            sd_registry.chat_completion(provider, "prompt", {"OWN_KEY": "fixture"}, 30, **options)
+        return json.loads(opened.call_args.args[0].data)
+
+    def test_the_file_reader_preserves_the_opt_in(self) -> None:
+        self.assertEqual(self.provider(response_format="json_schema").response_format, "json_schema")
+        self.assertIsNone(self.provider().response_format)
+
+    def test_a_value_other_than_json_schema_or_a_process_entry_refuses(self) -> None:
+        for value in ("json_object", True, 1, [], {}):
+            with self.subTest(value=value), self.assertRaisesRegex(sd_registry.RegistryError, "response_format in"):
+                sd_registry.read(self.write(response_format=value), prefer_library=False)
+        self.text = self.text.replace('url: "http://localhost:2/v1"', 'start: "two -p", reader: claude-json')
+        with self.assertRaisesRegex(sd_registry.RegistryError, "needs a URL"):
+            sd_registry.read(self.write(response_format="json_schema"), prefer_library=False)
+
+    def test_a_library_without_the_field_cannot_drop_the_opt_in(self) -> None:
+        source = sd_registry.read_file(self.write())
+        old = types.SimpleNamespace(**{**vars(source), "providers": {
+            name: types.SimpleNamespace(**{key: value for key, value in vars(provider).items() if key != "response_format"})
+            for name, provider in source.providers.items()}})
+        module = types.SimpleNamespace(read=lambda *args, **kwargs: old, RegistryError=sd_registry.RegistryError)
+        with unittest.mock.patch.object(sd_registry, "library", return_value=module):
+            self.assertEqual(sd_registry.read(self.path).providers, source.providers)
+            with self.assertRaisesRegex(sd_registry.RegistryError, "cannot preserve response_format"):
+                sd_registry.read(self.write(response_format="json_schema"))
+
+    def test_the_strict_copy_is_typed_has_no_type_arrays_and_drops_what_strict_mode_rejects(self) -> None:
+        before = json.dumps(self.SCHEMA)
+        strict = sd_registry.strict_schema(self.SCHEMA)
+        self.assertEqual(json.dumps(self.SCHEMA), before)
+        self.assertEqual(sd_registry.strict_schema(strict), strict)
+        items = strict["properties"]["items"]
+        self.assertNotIn("maxItems", items)
+        self.assertEqual(items["items"]["properties"], {
+            "line": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+            "level": {"type": "string", "enum": ["high", "low"]},
+            "minLength": {"type": "string"}})
+
+    def test_an_opted_in_entry_sends_the_strict_body(self) -> None:
+        body = self.sent(self.provider(response_format="json_schema"), response_schema=self.SCHEMA, schema_name="items")
+        self.assertEqual(body.pop("response_format"), {"type": "json_schema", "json_schema": {
+            "name": "items", "strict": True, "schema": sd_registry.strict_schema(self.SCHEMA)}})
+        self.assertEqual(set(body), {"model", "max_tokens", "messages"})
+
+    def test_any_other_entry_sends_exactly_todays_body(self) -> None:
+        today = {"model": "exact-model", "max_tokens": 16384, "messages": [{"role": "user", "content": "prompt"}]}
+        self.assertEqual(self.sent(self.provider(), response_schema=self.SCHEMA), today)
+        self.assertEqual(self.sent(self.provider(response_format="json_schema")), today)
 
 
 class TheRefusals(unittest.TestCase):
@@ -1697,8 +1767,8 @@ class LoopbackNeedsNoCredentialTests(unittest.TestCase):
         self.assertNotIn("Authorization".lower().capitalize(), sent["headers"])
 
     def test_a_loopback_url_routes_past_a_configured_proxy(self):
-        """`build_opener` installs a `ProxyHandler` reading `HTTP_PROXY` at
-        import, and urllib's bypass list does not special-case loopback. On
+        """`build_opener` installs a `ProxyHandler` reading `HTTP_PROXY` when
+        it is built, and urllib's bypass list does not special-case loopback. On
         a box where `HTTP_PROXY` is set and `NO_PROXY` omits `localhost`,
         the default opener forwards a loopback request to the proxy and the
         diff leaves the machine -- the more so now that such a call carries
@@ -1714,8 +1784,8 @@ class LoopbackNeedsNoCredentialTests(unittest.TestCase):
                       sd_registry._OPENER)
 
     def test_the_two_opener_recipes_differ_under_a_configured_proxy(self):
-        """Both are built at import, so what they hold depends on the
-        environment this process was launched with -- which is why this
+        """Both are built at their first request, so what they hold depends on
+        the environment this process had then -- which is why this
         rebuilds each recipe under a forced `http_proxy` rather than reading
         the module's own two. `build_opener` drops a `ProxyHandler({})`
         entirely rather than registering an inert one, so "no ProxyHandler"
@@ -1730,6 +1800,28 @@ class LoopbackNeedsNoCredentialTests(unittest.TestCase):
             [{"http": "http://proxy.example:3128"}])
         self.assertEqual(
             [h for h in direct.handlers if isinstance(h, urllib.request.ProxyHandler)], [])
+
+    def test_importing_the_registry_reads_no_proxy_settings(self):
+        """sd:1615. The default opener's `ProxyHandler` asks the system for
+        its proxies, an IPC round trip of 0.1-0.2 s on macOS, and every
+        `sd-status`, `sd-review` and `sd-ship` process imports this module.
+        The openers are built on their first request; a process that sends
+        none never asks."""
+        probe = (
+            "import sys, urllib.request\n"
+            "asked = []\n"
+            "urllib.request.getproxies = lambda: asked.append(1) or {}\n"
+            f"sys.path.insert(0, {str(REPO_ROOT / 'bin')!r})\n"
+            "import sd_registry\n"
+            "print(len(asked))\n"
+            "opener = sd_registry._OPENER.built()\n"
+            "print(len(asked), opener is sd_registry._OPENER.built(),\n"
+            "      any(isinstance(h, sd_registry._NoRedirect) for h in opener.handlers))\n"
+        )
+        done = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=False)
+        self.assertEqual(done.stdout.split("\n")[0], "0", "the import asked for the proxies")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.split("\n")[1], "1 True True")
 
     def test_a_public_entry_with_no_variable_is_still_refused(self):
         """The half that would be a hole: no key, but not this machine."""

@@ -1952,10 +1952,25 @@ INSIDE_A_SYMBOL = (f"bin/sd_library_guard.py:"
 MUTATIONS: dict[str, Mutation] = {
     "bin/sd_setup_github.py::setup_github": Mutation(
         path="bin/sd_setup_github.py",
-        old='    if repo_mode != "full":',
+        old='    if repo_mode not in sd_setup_guard.LANE_MODES:',
         new="    if False:  # leg d: the mode guard, defeated",
         test="tests.test_mode_detection.TheInstallerGate"
              ".test_a_fork_with_no_mode_line_is_refused",
+    ),
+    "bin/sd_ship_remote.py::validate_protection": Mutation(
+        path="bin/sd_ship_remote.py",
+        old="            entry = sd_protection.matching_acceptance(acceptances or [], gap, observed)",
+        new="            entry = next((entry for entry in acceptances or [] if entry.get(\"id\") == gap), None)"
+            "  # leg d: the exact-state match, defeated",
+        test="tests.test_sd_ship_remote.RulesetCase"
+             ".test_a_declared_bypass_list_must_equal_the_live_one",
+    ),
+    "bin/sd-ship::require_copilot_clearance": Mutation(
+        path="bin/sd-ship",
+        old="        other_reviews, other_comments = self.other_review_material(number)",
+        new="        other_reviews, other_comments = [], []  # leg d: the other reviewers' gate, defeated",
+        test="tests.test_sd_ship.ShipCase"
+             ".test_another_reviewers_finding_refuses_the_merge_with_no_copilot_review",
     ),
     "tests/test_verb_inventory.py::test_no_command_accepts_a_repository_path":
         Mutation(

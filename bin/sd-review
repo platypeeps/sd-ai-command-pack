@@ -19,6 +19,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Any, Callable, Mapping, NamedTuple, Protocol, Sequence, TextIO
 
 _BIN = str(pathlib.Path(__file__).resolve().parent)
@@ -667,6 +668,14 @@ def local_conventions(root: pathlib.Path) -> str:
     )
 
 
+#: Generic defect classes for a code subject, from a manual pre-PR checklist this lane replaced (sd:1635).
+DEFECT_CLASSES = (
+    "external JSON used before its type is narrowed", "an error that reports a stage other than the one that failed",
+    "identifiers matched by substring rather than at token boundaries",
+    "tests that touch files, network or environment without isolating them",
+    "output that breaks on empty, very long, non-ASCII or markup-bearing input")
+
+
 def build_prompt(subject: Subject, challenge: bool, conventions: str) -> str:
     """The review instruction, pinned to the endpoints `resolve_subject` chose."""
 
@@ -698,10 +707,13 @@ def build_prompt(subject: Subject, challenge: bool, conventions: str) -> str:
             "adversarial stance: find the strongest reasons this change should not "
             "ship yet."
         )
+    classes = "" if subject.scope == "planning" else (
+        f" Check in particular for {'; '.join(DEFECT_CLASSES)}. When you find a defect, check every "
+        "sibling site of the same shape, not only the reported line.")
     return (
         f"{conventions}{stance} Review {target}. Report defects the change "
         "introduces: correctness bugs, security issues, data-integrity risks, and "
-        "maintainability problems that would cost real time later. Judge severity "
+        f"maintainability problems that would cost real time later.{classes} Judge severity "
         "per finding; high means it should block a merge. Do not report style, "
         "wording, or observations that are not defects. Do not report cosmetic "
         "findings, whose fix changes no behaviour or reader action (wording, "
@@ -1225,11 +1237,11 @@ def charged_call(
     with contextlib.closing(connection):
         try:
             result = calls.call(
-                connection, entry=ledger.library.Provider(**vars(provider)), prompt=prompt, environ=environ,
-                timeout=timeout, role="reviewer", repo=sd_lib.stored_repo(root),
+                connection, entry=sd_registry.library_entry(ledger.library.Provider, provider), prompt=prompt, environ=environ,
+                timeout=timeout, role="reviewer", repo=sd_lib.stored_repo(root), **sd_registry.strict_fields(provider, CODEX_OUTPUT_SCHEMA, "findings"),
                 transport=None if client is None else _wire(client, provider, prompt, environ),
             )
-        except (calls.CallRefused, ledger.library.LedgerRefused) as error:
+        except (calls.CallRefused, ledger.library.LedgerRefused, sd_registry.RegistryError) as error:
             return _outcome(provider.name, REFUSED, str(error))
     receipt = {"call_id": result.call_id, "outcome": result.outcome, "bound_usd": result.bound,
                "usd": result.usd, "reason": result.reason}
@@ -1286,7 +1298,7 @@ def _url_attempt(provider: sd_registry.Provider, subject: Subject, request_promp
     if isinstance(charged, Outcome):
         return charged
     # `None` is the road's own wire: the library's above, this seam's here.
-    response, receipt = charged or ((client or sd_registry.chat_completion)(provider, request_prompt, provider_env, timeout), None)
+    response, receipt = charged or ((client or sd_registry.strict_completion(CODEX_OUTPUT_SCHEMA, "findings"))(provider, request_prompt, provider_env, timeout), None)
     result = Completed(*response[:4])
     text, diagnostic = sd_registry.url_response(result.stdout)
     diagnostic["transport_exit_code"] = result.exit_code
@@ -1386,7 +1398,10 @@ def run_provider(
         argv = provider_argv(provider, root, workdir)
         launch_cwd = root
         if provider.reader == "opencode-json":
-            child = sd_opencode.opencode_environment(child)
+            # An empty config dir of the run's own: on 2.x no switch drops the
+            # operator's plugins and keeps the rest of its config (sd:2445).
+            (workdir / "opencode-config").mkdir()
+            child = sd_opencode.opencode_environment(child, workdir / "opencode-config")
             # opencode's project root is its launch directory: it merges that
             # root's opencode.json over our inline config and injects the root's
             # AGENTS.md as instructions. Launched inside the reviewed checkout
@@ -1477,6 +1492,10 @@ _NOT_FOUND = re.compile(
     r"(?m)^(?P<source>\S+?): (?:(?:line )?(?P<line>\d+): )?(?P<command>\S+): "
     r"(?:command not found|not found|No such file or directory)\s*$")
 _RECIPE_EXIT_127 = re.compile(r"\bError 127\b")
+#: sd-check's reason for a check it killed at `--timeout` or no gate slot admitted, and the runner's line
+#: for sd-check itself (sd:1560). Weaker than a missing program, so it is read last.
+GATE_TIMED_OUT = "timed_out"
+_TIMED_OUT = re.compile(r"\b(?:timed out after|no gate slot came free within) \d+s")
 
 
 def _spawn_failed(check: Mapping[str, Any]) -> bool:
@@ -1535,7 +1554,17 @@ def classify_gate(checks: Any) -> dict[str, Any] | None:
             found = _not_found_report(check)
         if found is not None:
             return {**found, "entrypoint": str(check.get("name", "?")), "started": started}
-    return None
+    timed = next(((check, hit) for check in records if (hit := _TIMED_OUT.search(str(check.get("reason") or "")))), None)
+    return {"reason": GATE_TIMED_OUT, "evidence": timed[1].group(0), "entrypoint": str(timed[0].get("name", "?")),
+            "started": started} if timed else None
+
+
+def gate_failure(checks: Any, detail: str) -> dict[str, Any]:
+    """`classify_gate`, or, with no record to read, the runner's own timeout line for sd-check."""
+    found = classify_gate(checks)
+    if found is None and not checks and (line := _TIMED_OUT.search(detail)):
+        found = {"reason": GATE_TIMED_OUT, "evidence": line.group(0), "entrypoint": "sd-check", "started": []}
+    return found or {}
 
 
 def gate_failed_line(check: Mapping[str, Any] | None) -> str:
@@ -1553,6 +1582,9 @@ def gate_failed_line(check: Mapping[str, Any] | None) -> str:
         where = f" at line {check['missing_line']}" if check.get("missing_line") else ""
         return (f"sd-review: the gate's {check['entrypoint']} failed: {what}{where} ({check['evidence']}); "
                 "it ran up to that point, so a check may have run; no provider was asked")
+    if check and check.get("reason") == GATE_TIMED_OUT:
+        return (f"sd-review: the gate's {check['entrypoint']} stopped at its bound ({check['evidence']}); no provider "
+                "was asked; give it longer with --timeout SECONDS (sd-ship prepare: --review-timeout SECONDS)")
     return "sd-review: the repository's own gate failed; no provider was asked"
 
 
@@ -1571,25 +1603,24 @@ def gate_seconds(args: argparse.Namespace) -> int:
     return getattr(args, "timeout", None) or sd_lib.GATE_CHECK_SECONDS
 
 
-def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeout: int, branch: str,
-                   args: argparse.Namespace) -> dict[str, Any]:
-    """Step 1 as the local gate runs it: a clean worktree at HEAD, compared with `origin/<branch>` (sd:2041).
+def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeout: int, branch: str | None,
+                   args: argparse.Namespace, head: str | None = None) -> dict[str, Any]:
+    """Step 1 in a clean worktree at `head`, HEAD by default, never the live checkout (sd:2041, sd:2077).
 
-    `sd-ship prepare` asks for this under `repo.ci = local`, so the merge gate
-    that follows finds this run's receipt at the same head and binding and does
-    not run the check a second time. It never reads a receipt itself: reuse
-    spans only the prepare-to-merge handoff.
-    The child still runs through `runner`, so the gate's deadline ends its
-    whole process group (sd:1482). Without the library there is no receipt,
-    and the check simply runs.
+    With a `branch` it runs as the local gate does, against `origin/<branch>`, for
+    `sd-ship prepare` under `repo.ci = local`; its receipt spares the merge gate and
+    a later prepare a second run (sd:1912). Without one it reviews a committed head
+    (an edit in the checkout mid-run killed a check script there, sd:2077): no
+    receipt is read or left, and exit 0 passes as in `run_check`.
+    The child runs through `runner`, so the deadline ends its process group (sd:1482).
     """
     import sd_gate_run  # noqa: PLC0415 -- the gate's run, which posts nothing; needed only here
 
-    head = sd_lib.git_output(["rev-parse", "HEAD"], root)
+    head = head or sd_lib.git_output(["rev-parse", "HEAD"], root)
     if not head:
         raise UsageError("--gate-check needs a commit at HEAD")
-    database = getattr(args, "database", None)
-    if database is None and (library := sd_lib.import_sd_db().module) is not None:
+    database = getattr(args, "database", None) if branch else None
+    if branch and database is None and (library := sd_lib.import_sd_db().module) is not None:
         database = library.default_path(env.get("HOME"))
 
     def through_runner(argv: list[str], child: dict[str, str], cwd: pathlib.Path, limit: int) -> tuple[int | None, str, str]:
@@ -1597,32 +1628,31 @@ def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], t
         return finished.exit_code, finished.stdout, finished.stderr
 
     try:
-        gate = sd_gate_run.check_in_worktree(root, head, timeout=timeout, base=sd_gate_run.base_ref(branch),
-                                             database=database, run=through_runner, environ=env,
-                                             reuse=False)
+        gate = sd_gate_run.check_in_worktree(root, head, timeout=timeout, base=sd_gate_run.base_ref(branch), database=database,
+                                             run=through_runner, environ=env, slot_timeout=sd_lib.GATE_SLOT_SECONDS)
     except sd_gate_run.GateError as error:
         gate = {"status": "failure", "exit_code": None, "stderr": str(error), "head": head}
     checks = (gate.get("report") or {}).get("checks")
     report: dict[str, Any] = {
-        "status": "pass" if gate["status"] == "success" else "fail",
+        "status": "pass" if (gate["status"] == "success" if branch else gate["exit_code"] == 0) else "fail",
         "exit_code": gate["exit_code"],
         "detail": (gate.get("stderr") or "").strip()[-2000:],
         "checks": checks,
-        "source": "gate-receipt" if gate.get("reused") else "gate",
+        "source": "gate-receipt" if gate.get("reused") else "gate" if branch else "worktree",
         "head": gate["head"],
         "summary": gate.get("summary"),
     }
     if gate.get("reused"):
         report["reused"] = gate["reused"]
     if report["status"] == "fail":
-        report.update(classify_gate(checks) or {})
+        report.update(gate_failure(checks, report["detail"]))
     return report
 
 
 def run_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeout: int) -> dict[str, Any]:
     """Step 1: the repository's own gate, through sd-check, held to the planned phase budget (sd:1475)."""
-    argv = [sys.executable, str(pathlib.Path(_BIN) / "sd-check"), "--timeout", str(timeout), "--json"]
-    result = runner(argv, env, root, timeout)
+    argv = [sys.executable, str(pathlib.Path(_BIN) / "sd-check"), "--timeout", str(timeout), "--slot-timeout", str(sd_lib.GATE_SLOT_SECONDS), "--json"]
+    result = runner(argv, env, root, timeout + sd_lib.GATE_SLOT_SECONDS)  # sd:2611: the slot wait is its own plan phase
     try:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError:
@@ -1635,7 +1665,7 @@ def run_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeou
         "checks": checks,
     }
     if result.exit_code != 0:
-        report.update(classify_gate(checks) or {})
+        report.update(gate_failure(checks, report["detail"]))
     return report
 
 
@@ -1647,11 +1677,11 @@ def run_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeou
 FLOOR_SCOPES = ("planning",)
 
 
-def _authored_report(scope: str, vendors: tuple[str, ...]) -> str:
-    """What the run may say about who wrote the change."""
+def _authored_report(scope: str, vendors: tuple[str, ...], said: Sequence[str] = ()) -> str:
+    """What the run may say about who wrote the change; `said` names `script` (sd:1637)."""
     if scope not in TRAILER_SCOPES:
         return f"not read: {scope} scope has no commits to carry a trailer"
-    return ", ".join(vendors) or "human (every commit says so)"
+    return ", ".join((*vendors, *[sd_lib.SCRIPT_AUTHOR] * (sd_lib.SCRIPT_AUTHOR in said))) or "human (every commit says so)"
 
 
 def review_depth(plan: sd_route.Plan, challenge: bool, scope: str) -> int:
@@ -1839,7 +1869,11 @@ def review(
     # lane, so this is where a `mode: guest` checkout finds out; `sd_lib` owns the rule.
     if subject.scope == "planning" and (refusal := sd_lib.guest_artifact_refusal(root, subject.paths)):
         raise UsageError(refusal)
+    # Timed for the Jev ledger's paired row only (sd:2359): the routing is the
+    # baseline Jev's tier is compared with, and this is what that baseline cost.
+    routing_started = time.monotonic()
     plan = sd_route.route(subject.paths, subject.lines, args.draft, policy)
+    routing_ms = int((time.monotonic() - routing_started) * 1000)
     # Optional and experimental, and on wherever a `jev` on PATH says it can
     # answer -- `JEV_SD_REVIEW=0` switches it off. Without one this returns the
     # routed tier untouched and no record, silently, and the result below is
@@ -1847,7 +1881,7 @@ def review(
     # exactly what leaves the machine, and which failures are loud.
     jev_choice, jev_reading = sd_jev.jev_tier(
         plan.tier, policy["tier_order"], subject.paths, subject.lines, plan.reason, env,
-        root=str(root))
+        root=str(root), baseline_ms=routing_ms)
     if jev_reading is not None:
         plan = plan._replace(
             tier=jev_choice,
@@ -1989,10 +2023,10 @@ def review(
     providers = [provider.name for provider in chosen[:depth]]
     phase, check_seconds = phase_seconds(args), gate_seconds(args)
     timing: dict[str, Any] = {"setup_seconds": SETUP_TIMEOUT_SECONDS, "phase_seconds": phase,
-              "check_seconds": check_seconds,
+              "check_seconds": check_seconds, "slot_seconds": sd_lib.GATE_SLOT_SECONDS,
               "candidates": [{"name": provider.name, "recipient": str(sd_registry.recipient(provider))}
                              for provider in chosen]}
-    timing["execution_seconds"] = SETUP_TIMEOUT_SECONDS + check_seconds + phase * len(chosen)
+    timing["execution_seconds"] = SETUP_TIMEOUT_SECONDS + timing["slot_seconds"] + check_seconds + phase * len(chosen)
     result: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "repo": str(root),
@@ -2038,7 +2072,7 @@ def review(
         "authored_with": list(vendors),
         "authorship_base": authored_subject.base,
         "authorship_refusal": authorship_refusal,
-        "authored_with_report": f"unknown: {authorship_refusal}" if authorship_refusal else _authored_report(args.scope, vendors),
+        "authored_with_report": f"unknown: {authorship_refusal}" if authorship_refusal else _authored_report(args.scope, vendors, tuple(sd_lib.attribution(root, authored_subject.base, authored_subject.head).values()) if args.scope in TRAILER_SCOPES else ()),
         "chain": [candidate.row for candidate in chain],
         "capped_bills": capped,
         "ledger_fault": ledger.fault,
@@ -2046,6 +2080,12 @@ def review(
         "codex_preflight": auth,
         "codex_skill_suppression": skills,
         "input_manifest": input_manifest,
+        # sd:1397. What the reviewers are asked, by digest, and the manifest whose
+        # `omitted_paths` decides a partial review. When a pack landing moves the
+        # binding, sd-ship replays `--explain` and keeps the receipt only while this is unchanged.
+        "request_sha256": hashlib.sha256(json.dumps(
+            {"scope": args.scope, "prompt": prompt, "material": _material, "route": plan._asdict(),
+             "providers": providers, "requested_reviews": depth, "input_manifest": input_manifest}, sort_keys=True).encode()).hexdigest(),
         "local_block_prepended": prepended,
         "scrubbed_env_names": list(scrubbed_names(env)),
         "check": None,
@@ -2090,8 +2130,8 @@ def review(
     # Legacy runner rows lack before-check/runtime identity and never grant reuse.
     check = (sd_check_receipts.reuse_checked_result(root, env, getattr(args, "database", None)) if getattr(args, "reuse_check", False) else None)
     gate_branch = getattr(args, "gate_check", None)
-    check = check or (run_gate_check(root, runner, env, check_seconds, gate_branch, args) if gate_branch
-                      else run_check(root, runner, env, check_seconds))
+    check = check or (run_gate_check(root, runner, env, check_seconds, gate_branch, args, subject.head)
+                      if gate_branch or args.scope in ("branch", "pr") else run_check(root, runner, env, check_seconds))
     result["check"] = check
     if check["status"] == "fail":
         result["status"] = "gate_failed"
@@ -2315,9 +2355,9 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
 
     if result.get("explain_only"):
         if not reachable:
-            # One line rather than six, and it says the block was suppressed
-            # rather than leaving a reader to think the tool forgot it.
-            write(f"\nno provider registry at {result['registry']}, and no reviewer resolves"
+            # One line rather than six, saying the block was suppressed, with the
+            # refusal itself: a present but unreadable registry is not absent.
+            write(f"\n{result['registry_refusal'].rstrip('.')}, and no reviewer resolves"
                   " here; the provider lines are not reported.\n")
         else:
             write(f"\nreviewer chain ({sd_registry.chain_heading(result.get('order_source') or '', result['registry'])}):\n")
@@ -2409,7 +2449,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-C", dest="chdir", metavar="DIR", action=sd_lib.DirectoryAction, help=sd_lib.DIRECTORY_OPTION_HELP)
     parser.add_argument("--scope", choices=SCOPES, default="worktree", help="what to review (default: worktree)")
     parser.add_argument("--database", type=pathlib.Path, help="explicit provider-state database for an owned runner")
-    parser.add_argument("--reuse-check", action="store_true", help="reuse a matching explicit full-check receipt; otherwise rerun")
+    parser.add_argument("--reuse-check", action="store_true",
+                        help="reuse a matching explicit full-check receipt; otherwise rerun. Never reuses in "
+                             "sd-ai-command-pack itself, which tracks no reuse declaration (.github/sd-check-reuse.json)")
     parser.add_argument("--gate-check", metavar="BRANCH",
                         help="branch scope: run the check as the local gate does, against origin/BRANCH, "
                              "leaving a gate receipt at HEAD for the merge gate")
@@ -2468,6 +2510,7 @@ def main(argv: list[str] | None = None) -> int:
         root = sd_lib.repo_root(None)
         if root is None:
             raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")
+        sd_lib.refuse_unmanaged(root, Refusal, args.database)
         result = review(root, args, subprocess_runner, os.environ)
     except (UsageError, PolicyError, sd_lib.ConfigError, sd_registry.RegistryError) as error:
         print(f"sd-review: error: {error}", file=sys.stderr)

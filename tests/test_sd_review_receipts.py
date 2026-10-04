@@ -8,6 +8,8 @@ import copy
 import io
 import json
 import os
+import pathlib
+import re
 import subprocess
 import sys
 from unittest import mock
@@ -247,7 +249,7 @@ class ReceiptTests(ReviewFixture):
             result = sd_review.review(self.root, namespace(scope="branch", reuse_check=opt_in, database=self.database),
                                       runner, self.env, self.chatgpt_home())
             self.assertEqual(sum("sd-check" in " ".join(call["argv"]) for call in runner.calls), expected_calls)
-            self.assertEqual(result["check"].get("source"), "receipt" if opt_in else None)
+            self.assertEqual(result["check"].get("source"), "receipt" if opt_in else "worktree")
 
     def test_controlled_environment_never_copies_or_hashes_credentials(self):
         env = dict(self.env, API_TOKEN="synthetic-sensitive-value")
@@ -317,3 +319,363 @@ class ReceiptTests(ReviewFixture):
         self.assertEqual(json.loads(out)["receipt_error"], "inputs changed")
         self.assertNotIn("receipt_revision", json.loads(out))
         self.assertIsNone(receipts.reuse_checked_result(self.root, self.env, self.database))
+
+    def test_a_missing_or_untracked_declaration_names_the_file_and_an_example(self):
+        # sd:1560: the refusal says which file to track and what it holds.
+        self.git("rm", "--quiet", receipts.CONTRACT)
+        self.git("commit", "--quiet", "-m", "no declaration")
+        code, _out, err = self.cli("--json", "--record-receipt", "--database", str(self.database))
+        self.assertEqual(code, 2)
+        self.assertIn(f"track {receipts.CONTRACT}, for example {receipts.EXAMPLE}", err)
+        (self.root / ".gitignore").write_text("dependency.txt\n.github/\n")
+        (self.root / ".github").mkdir(exist_ok=True)  # `git rm` took the folder with its one file
+        (self.root / receipts.CONTRACT).write_text(json.dumps(self.contract))
+        self.git("commit", "--quiet", "-am", "ignored declaration")
+        with self.assertRaisesRegex(receipts.Unavailable, "tracked dependency declaration: track " + re.escape(receipts.CONTRACT)):
+            receipts.check_binding(self.root, self.env)
+        (self.root / receipts.CONTRACT).write_text(json.dumps(dict(self.contract, complete=False)))
+        with self.assertRaisesRegex(receipts.Unavailable, "local-only dependency declaration: track .*, for example "):
+            receipts.reuse_contract(self.root)
+        # The example is itself a declaration the parser accepts.
+        (self.root / receipts.CONTRACT).write_text(receipts.EXAMPLE)
+        self.assertEqual(receipts.reuse_contract(self.root)["schema_version"], 1)
+
+    def test_recorded_checks_run_under_one_locale_whatever_the_caller_sets(self):
+        # sd:2386: an undeclared LANG/LC_ALL is fixed, so the locale cannot vary between runs.
+        fixed = {"LANG": receipts.LOCALE, "LC_ALL": receipts.LOCALE}
+        bindings = []
+        for caller in ({"LANG": "de_DE.UTF-8", "LC_ALL": "de_DE.UTF-8"}, {"LANG": "C"}, {}):
+            env = {key: value for key, value in self.env.items() if key not in fixed} | caller
+            with self.subTest(caller=caller):
+                self.assertEqual({key: receipts.receipt_environment(self.contract, env)[key] for key in fixed}, fixed)
+                bindings.append(receipts.check_binding(self.root, env))
+                self.assertEqual(bindings[-1]["locale"], fixed)
+        self.assertEqual(bindings[0], bindings[-1])
+        self.local_block(self.root, f"check: {sys.executable} -c \"import os, sys; sys.exit(os.environ.get('LC_ALL') != 'C.UTF-8')\"")
+        self.git("add", "--force", "CLAUDE.local.md")
+        self.git("commit", "--quiet", "-m", "locale check")
+        self.env.update(LANG="de_DE.UTF-8", LC_ALL="de_DE.UTF-8")
+        code, out, err = self.cli("--json", "--record-receipt", "--database", str(self.database))
+        self.assertEqual((code, err), (0, ""), out)
+        # A declaration that names a locale variable keeps the caller's value, and binds it.
+        self.commit_contract(environment=["TEST_MODE", "LANG"])
+        self.assertEqual(receipts.receipt_environment(self.contract, self.env)["LANG"], "de_DE.UTF-8")
+        self.assertEqual(receipts.check_binding(self.root, self.env)["locale"], {"LANG": "de_DE.UTF-8", "LC_ALL": receipts.LOCALE})
+
+    def test_reuse_check_help_says_the_pack_itself_never_reuses(self):
+        # sd:1296: the flag's own help says it, not only a reference file. The
+        # pack's tree is the evidence: once it tracks a declaration, this fails
+        # and the help, sd-review and sd-ship skills need the sentence removed.
+        pack = pathlib.Path(sd_review._BIN).parent
+        # ls-files-form: plain -- empty output is the claim: the pack tracks no declaration
+        self.assertNotIn(receipts.CONTRACT, subprocess.run(["git", "ls-files", "--", receipts.CONTRACT], cwd=pack,
+                                                           capture_output=True, text=True, check=True).stdout)
+        help_text = next(action.help for action in sd_review.build_parser()._actions if "--reuse-check" in action.option_strings)
+        self.assertIn(f"Never reuses in sd-ai-command-pack itself, which tracks no reuse declaration ({receipts.CONTRACT})",
+                      help_text)
+
+    def commit_contract(self, **fields):
+        self.contract.update(fields)
+        (self.root / receipts.CONTRACT).write_text(json.dumps(self.contract))
+        self.git("add", "-A")
+        self.git("commit", "--quiet", "--allow-empty", "-m", "synthetic declaration")
+
+    def test_declared_exact_paths_admit_secret_named_source_files(self):
+        # sd:2325: a Rust repository keeps credential.rs, token.rs and
+        # log_authoring.rs ('AUTH' in 'authoring') under a declared root.
+        source = self.root / "src"
+        source.mkdir()
+        allowed = ["src/credential.rs", "src/token.rs", "src/log_authoring.rs"]
+        for name in allowed:
+            (self.root / name).write_text("// synthetic fixture only\n")
+        self.git("add", "src")
+        self.commit_contract(dependencies=["dependency.txt", "src"])
+        with self.assertRaisesRegex(receipts.Unavailable, "credential.rs"):
+            receipts.check_binding(self.root, self.env)
+        self.commit_contract(secret_name_exceptions=allowed)
+        identity = receipts.check_binding(self.root, self.env)
+        self.assertTrue(set(allowed) <= set(identity["files"]))
+        self.commit_contract(dependencies=["dependency.txt", "src/token.rs"], secret_name_exceptions=["src/token.rs"])
+        self.assertIn("src/token.rs", receipts.check_binding(self.root, self.env)["files"])
+        self.commit_contract(dependencies=["dependency.txt", "src"], secret_name_exceptions=allowed)
+        self.record()
+        self.assertIsNotNone(receipts.reuse_checked_result(self.root, self.env, self.database))
+        (self.root / "src/token.rs").write_text("// changed\n")
+        self.git("commit", "--quiet", "-am", "changed allowed file")
+        self.record()
+        self.assertIsNotNone(receipts.reuse_checked_result(self.root, self.env, self.database))
+
+    def test_secret_name_exceptions_stay_exact_and_tracked(self):
+        source = self.root / "src"
+        source.mkdir()
+        (source / "credential.rs").write_text("// synthetic fixture only\n")
+        (source / "api_key.rs").write_text("// synthetic fixture only\n")
+        (self.root / ".gitignore").write_text("dependency.txt\nlocal/\n")
+        (self.root / "local").mkdir()
+        (self.root / "local/token.json").write_text("synthetic fixture only")
+        self.git("add", "-A")
+        self.git("commit", "--quiet", "-m", "fixture sources")
+        both = ["src/credential.rs", "src/api_key.rs"]
+        self.commit_contract(dependencies=["src"], secret_name_exceptions=both)
+        self.assertIn("src/api_key.rs", receipts.check_binding(self.root, self.env)["files"])
+        refused = (
+            (["src", "local"], [*both, "local/token.json"]),  # an ignored, untracked file
+            (["src"], ["src/credential.rs"]),  # src/api_key.rs is not listed
+            (["src"], [*both, "src"]),  # a directory
+            (["src"], [*both, "src/*.rs"]),  # a pattern
+            (["src"], [*both, "./src/credential.rs"]),  # not normalised
+            (["src"], [*both, "src/../src/credential.rs"]),
+            (["src"], [*both, "/src/credential.rs"]),
+            (["src"], [*both, "src/credential.rs"]),  # a duplicate
+            (["src"], [*both, "README.md"]),  # outside every declared root
+            (["src"], "src/credential.rs"),  # not a list
+        )
+        for dependencies, exceptions in refused:
+            with self.subTest(dependencies=dependencies, exceptions=exceptions):
+                self.commit_contract(dependencies=dependencies, secret_name_exceptions=exceptions)
+                with mock.patch.object(receipts, "file_digest", return_value="digest") as digest, \
+                        self.assertRaises(receipts.Unavailable):
+                    receipts.check_binding(self.root, self.env)
+                hashed = [str(call.args[0]) for call in digest.call_args_list]
+                self.assertFalse([path for path in hashed if re.search("credential|api_key|token", path)])
+
+    def test_base_environment_drift_keeps_the_receipt(self):
+        # sd:2326: PATH, HOME, TMPDIR, LANG and LC_ALL drift inside one
+        # session; tools bind by path and bytes, so the digest omits them.
+        self.env.update(TMPDIR=str(self.tmp), LANG="C", LC_ALL="C")
+        self.record()
+        drifted = dict(self.env, HOME=str(self.tmp / "elsewhere"), TMPDIR=str(self.tmp / "other-tmp"),
+                       LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8",
+                       PATH=str(self.tmp / "absent-bin") + os.pathsep + self.env["PATH"])
+        self.assertIsNotNone(receipts.reuse_checked_result(self.root, drifted, self.database))
+        self.assertIsNone(receipts.reuse_checked_result(self.root, dict(drifted, TEST_MODE="other"), self.database))
+        self.assertEqual(receipts.check_binding(self.root, drifted)["environment_sha256"],
+                         receipts.receipt_digest({"TEST_MODE": "unit"}))
+        self.assertEqual(receipts.receipt_environment(self.contract, drifted)["PATH"], drifted["PATH"])
+
+    def test_a_declared_base_variable_stays_bound(self):
+        self.commit_contract(environment=["TEST_MODE", "LANG"])
+        self.env["LANG"] = "C"
+        self.record()
+        self.assertIsNone(receipts.reuse_checked_result(self.root, dict(self.env, LANG="en_US.UTF-8"), self.database))
+
+    def fake_rustup(self, toolchain_answer):
+        """A rustup on PATH that names `toolchain_answer/bin/<tool>` for cargo and fails for the rest."""
+        rustup = self.tool_bin / "rustup"
+        rustup.write_text("#!/bin/sh\n"
+                          f'[ "$1" = which ] && [ "$2" = cargo ] && [ "$RUSTUP_AUTO_INSTALL" = 0 ] '
+                          f'&& {{ echo "{toolchain_answer}/bin/$2"; exit 0; }}\n'
+                          "echo 'error: unknown binary' >&2\nexit 1\n")
+        rustup.chmod(0o700)
+        cargo = self.tool_bin / "cargo"
+        cargo.write_text("#!/bin/sh\nexit 0\n")  # the proxy: its bytes never change
+        cargo.chmod(0o700)
+
+    def test_rustup_toolchain_binds_by_content_not_version(self):
+        # sd:2328: the same toolchain name with different contents is a different check.
+        toolchain = self.tmp / "rustup-home" / "toolchains" / "1.90.0-synthetic"
+        (toolchain / "bin").mkdir(parents=True)
+        (toolchain / "lib" / "rustlib").mkdir(parents=True)
+        (toolchain / "bin" / "cargo").write_text("synthetic cargo v1")
+        library = toolchain / "lib" / "rustlib" / "libstd.rlib"
+        library.write_text("synthetic std v1")
+        self.fake_rustup(toolchain)
+        self.commit_contract(tools=["cargo"])
+        identity = receipts.check_binding(self.root, self.env)
+        self.assertEqual([entry["path"] for entry in identity["toolchains"]], [str(toolchain.resolve())])
+        self.record()
+        self.assertIsNotNone(receipts.reuse_checked_result(self.root, self.env, self.database))
+        for change in (lambda: library.write_text("synthetic std v2"),
+                       lambda: (toolchain / "lib" / "added.rlib").write_text("new"),
+                       lambda: library.chmod(0o600)):
+            with self.subTest(change=change):
+                self.record()
+                change()
+                self.assertIsNone(receipts.reuse_checked_result(self.root, self.env, self.database))
+
+    def test_rustup_answers_outside_a_toolchain_bin_refuse(self):
+        stray = self.tmp / "not-a-toolchain"
+        stray.mkdir()
+        self.fake_rustup(stray / "nested")
+        self.commit_contract(tools=["cargo"])
+        with self.assertRaisesRegex(receipts.Unavailable, "toolchain"):
+            receipts.check_binding(self.root, self.env)
+
+    def test_no_rustup_binds_no_toolchain(self):
+        identity = receipts.check_binding(self.root, self.env)
+        self.assertEqual(identity["toolchains"], [])
+
+    def build_output_check(self, outputs, script):
+        """Commit a declaration with `outputs` and a check that runs `script` in Python."""
+        probe = self.tmp / "probe.py"
+        probe.write_text(script)
+        (self.root / ".gitignore").write_text("dependency.txt\ntarget/\ndist/\n")
+        self.local_block(self.root, f"check: {sys.executable} {probe}")
+        self.git("add", "-A")
+        self.git("add", "--force", "CLAUDE.local.md")
+        self.commit_contract(build_outputs=outputs)
+
+    def test_recorded_run_builds_into_a_fresh_folder_and_leaves_target_alone(self):
+        # sd:2327: the operator's target/ holds old binaries; a receipt never vouches for them.
+        stale = self.root / "target" / "debug" / "stale-binary"
+        stale.parent.mkdir(parents=True)
+        stale.write_text("old build")
+        seen = self.tmp / "seen-folder"
+        script = (
+            "import os, pathlib\n"
+            "folder = pathlib.Path(os.environ['CARGO_TARGET_DIR'])\n"
+            f"pathlib.Path({str(seen)!r}).write_text(str(folder))\n"
+            "assert folder.is_dir() and not any(folder.iterdir()), 'not a fresh, empty folder'\n"
+            "assert not folder.resolve().is_relative_to(pathlib.Path.cwd().resolve())\n"
+            "(folder / 'built').write_text('new build')\n"
+            f"raise SystemExit(int(pathlib.Path({str(self.tmp / 'fail')!r}).exists()))\n")
+        self.build_output_check({"target": "CARGO_TARGET_DIR"}, script)
+        code, out, err = self.cli("--json", "--record-receipt", "--database", str(self.database))
+        self.assertEqual((code, err), (0, ""), out)
+        self.assertGreater(json.loads(out)["receipt_revision"], 0)
+        self.assertFalse(pathlib.Path(seen.read_text()).exists(), "the temporary folder outlived the run")
+        self.assertEqual(stale.read_text(), "old build")
+        stale.write_text("another old build")
+        (self.root / "target" / "added").write_text("never hashed")
+        self.assertIsNotNone(receipts.reuse_checked_result(self.root, self.env, self.database))
+        (self.tmp / "fail").write_text("")
+        code, out, _ = self.cli("--json", "--record-receipt", "--database", str(self.database))
+        self.assertEqual(code, 1)
+        self.assertFalse(pathlib.Path(seen.read_text()).exists(), "a failed run left its temporary folder")
+        self.assertTrue(stale.exists())
+
+    def test_operator_build_variable_never_reaches_a_recorded_run(self):
+        own = self.tmp / "operator-target"
+        own.mkdir()
+        script = ("import os, pathlib\n"
+                  f"assert pathlib.Path(os.environ['CARGO_TARGET_DIR']) != pathlib.Path({str(own)!r})\n")
+        self.build_output_check({"target": "CARGO_TARGET_DIR"}, script)
+        self.env["CARGO_TARGET_DIR"] = str(own)
+        code, out, err = self.cli("--json", "--record-receipt", "--database", str(self.database))
+        self.assertEqual((code, err), (0, ""), out)
+
+    def test_an_output_without_a_variable_refuses_recording_while_it_exists(self):
+        script = "import pathlib\npathlib.Path('dist').mkdir(exist_ok=True)\n(pathlib.Path('dist') / 'built').write_text('x')\n"
+        self.build_output_check({"dist": None}, script)
+        (self.root / "dist").mkdir()
+        code, _, err = self.cli("--json", "--record-receipt", "--database", str(self.database))
+        self.assertEqual(code, 2)
+        self.assertIn("build output dist exists", err)
+        (self.root / "dist").rmdir()
+        code, out, err = self.cli("--json", "--record-receipt", "--database", str(self.database))
+        self.assertEqual((code, err), (0, ""), out)
+        self.assertTrue((self.root / "dist" / "built").exists())
+        self.assertIsNotNone(receipts.reuse_checked_result(self.root, self.env, self.database))
+
+    def test_build_output_declarations_stay_narrow(self):
+        (self.root / "tracked").mkdir()
+        (self.root / "tracked" / "file.txt").write_text("tracked")
+        self.git("add", "tracked")
+        self.git("commit", "--quiet", "-m", "tracked folder")
+        refused = (
+            {"dependency.txt": "OUT_DIR"},  # a declared dependency
+            {".": "OUT_DIR"}, {"../target": "OUT_DIR"}, {"/target": "OUT_DIR"}, {"target/": "OUT_DIR"},
+            {"tracked": "OUT_DIR"},  # holds a tracked file
+            {"target": "TEST_MODE"},  # a declared variable
+            {"target": "PATH"},  # a base variable
+            {"target": "BUILD_TOKEN"},  # a secret-looking name
+            {"target": "not a name"},
+            {"target": "OUT_DIR", "dist": "OUT_DIR"},  # one variable twice
+            {"target": 3},
+            ["target"],
+        )
+        for outputs in refused:
+            with self.subTest(outputs=outputs):
+                self.commit_contract(build_outputs=outputs)
+                with self.assertRaises(receipts.Unavailable):
+                    receipts.check_binding(self.root, self.env)
+        self.commit_contract(dependencies=["dependency.txt"], build_outputs={"target": "CARGO_TARGET_DIR", "dist": None})
+        self.assertNotIn("target", json.dumps(receipts.check_binding(self.root, self.env)["files"]))
+
+    def two_toolchains(self):
+        """A rustup with a default and a nightly toolchain; `which` honours `--toolchain` as rustup does."""
+        toolchains = self.tmp / "rustup-home" / "toolchains"
+        for name in ("stable-synthetic", "nightly-synthetic"):
+            (toolchains / name / "bin").mkdir(parents=True)
+            (toolchains / name / "lib").mkdir()
+            (toolchains / name / "lib" / "libstd.rlib").write_text(f"{name} v1")
+        rustup = self.tool_bin / "rustup"
+        rustup.write_text("#!/bin/sh\n"
+                          '[ "$1" = which ] || exit 1\nshift\nchain=stable-synthetic\n'
+                          'if [ "$1" = --toolchain ]; then chain="$2-synthetic"; shift 2; fi\n'
+                          f'[ -d "{toolchains}/$chain" ] || {{ echo "error: toolchain $chain is not installed" >&2; exit 1; }}\n'
+                          f'[ "$1" = cargo ] && {{ echo "{toolchains}/$chain/bin/$1"; exit 0; }}\n'
+                          "exit 1\n")
+        rustup.chmod(0o700)
+        cargo = self.tool_bin / "cargo"
+        cargo.write_text("#!/bin/sh\nexit 0\n")
+        cargo.chmod(0o700)
+        return toolchains
+
+    def test_an_explicit_plus_toolchain_binds_that_toolchain(self):
+        # A `cargo +nightly` entrypoint runs nightly; binding the default would let a nightly update reuse a pass.
+        toolchains = self.two_toolchains()
+        self.configure_cache_check("cargo +nightly check", ["dependency.txt"], "dependency.txt\n")
+        identity = receipts.check_binding(self.root, self.env)
+        self.assertIn(str((toolchains / "nightly-synthetic").resolve()), [entry["path"] for entry in identity["toolchains"]])
+        self.record()
+        (toolchains / "nightly-synthetic" / "lib" / "libstd.rlib").write_text("nightly v2")
+        self.assertIsNone(receipts.reuse_checked_result(self.root, self.env, self.database))
+
+    def test_a_declared_plus_toolchain_binds_and_an_unknown_one_refuses(self):
+        # A Makefile's `cargo +nightly` is invisible to detection; the declaration names the toolchain instead.
+        toolchains = self.two_toolchains()
+        self.commit_contract(tools=["cargo", "+nightly"])
+        self.record()
+        (toolchains / "nightly-synthetic" / "lib" / "libstd.rlib").write_text("nightly v2")
+        self.assertIsNone(receipts.reuse_checked_result(self.root, self.env, self.database))
+        self.commit_contract(tools=["cargo", "+beta"])
+        with self.assertRaisesRegex(receipts.Unavailable, "beta"):
+            receipts.check_binding(self.root, self.env)
+
+    def linked_toolchain(self):
+        toolchain = self.tmp / "rustup-home" / "toolchains" / "custom-synthetic"
+        (toolchain / "bin").mkdir(parents=True)
+        (toolchain / "lib").mkdir()
+        (toolchain / "bin" / "cargo").write_text("synthetic cargo")
+        self.fake_rustup(toolchain)
+        self.commit_contract(tools=["cargo"])
+        return toolchain
+
+    def test_a_toolchain_link_outside_its_tree_refuses_the_binding(self):
+        # A custom toolchain's lib/ link to a library elsewhere: the link text stays equal when that library changes.
+        toolchain = self.linked_toolchain()
+        outside = self.tmp / "elsewhere" / "librustc_driver.dylib"
+        outside.parent.mkdir()
+        outside.write_text("compiler v1")
+        (toolchain / "lib" / "librustc_driver.dylib").symlink_to(outside)
+        self.assertIsNone(self.reuse_after(lambda: outside.write_text("compiler v2")))
+        with self.assertRaisesRegex(receipts.Unavailable, "outside"):
+            receipts.check_binding(self.root, self.env)
+
+    def test_a_toolchain_link_inside_its_tree_binds_the_bytes_it_names(self):
+        toolchain = self.linked_toolchain()
+        real = toolchain / "lib" / "libstd-real.rlib"
+        real.write_text("std v1")
+        (toolchain / "lib" / "libstd.rlib").symlink_to("libstd-real.rlib")
+        self.assertIsNone(self.reuse_after(lambda: real.write_text("std v2")))
+
+    def test_dangling_and_looping_toolchain_links_refuse(self):
+        toolchain = self.linked_toolchain()
+        for make in (lambda: (toolchain / "lib" / "gone.rlib").symlink_to(toolchain / "lib" / "absent"),
+                     lambda: ((toolchain / "lib" / "a").symlink_to("b"), (toolchain / "lib" / "b").symlink_to("a"))):
+            with self.subTest(make=make):
+                for link in (toolchain / "lib").iterdir():
+                    link.unlink()
+                make()
+                with self.assertRaises(receipts.Unavailable):
+                    receipts.check_binding(self.root, self.env)
+
+    def reuse_after(self, change):
+        """Record, apply `change`, and answer what reuse says; a refused binding records nothing and reuses nothing."""
+        try:
+            self.record()
+        except receipts.Unavailable:
+            return None
+        change()
+        return receipts.reuse_checked_result(self.root, self.env, self.database)

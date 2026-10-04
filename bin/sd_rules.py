@@ -161,9 +161,11 @@ class Rule(NamedTuple):
 RULES: tuple[Rule, ...] = (
     Rule(
         id="R10-D5",
-        subject="only a full-mode repository installs the review routing "
-                "lane; `minimal` and `guest` refuse it, so a shared or "
-                "upstream repository can never grow the framework's workflow",
+        subject="only a full- or minimal-mode repository installs the "
+                "review routing lane; `guest` refuses it, so a repository "
+                "whose control detection could not establish can never grow "
+                "the framework's workflow, while `minimal`, written by hand "
+                "and never detected, is the operator's own quiet repository",
         checker="bin/sd_setup_github.py::setup_github",
         proof="replace the mode guard in `bin/sd_setup_github.py` with a "
               "condition that is never true; the installer then accepts a "
@@ -536,6 +538,45 @@ RULES: tuple[Rule, ...] = (
               "goes red",
         scope="prose",
         teaches="skills/sd-check/SKILL.md#Prose rules",
+    ),
+    #: sd-ship's protection-gap policy (sd:1451), registered by sd:1460 so the
+    #: skill can cite it. #1167 reworded the skill's line instead, because no
+    #: row existed for it to cite, which kept the claim count down by avoiding
+    #: the check rather than satisfying it.
+    Rule(
+        id="R14-D1",
+        subject="sd-ship's merge gate honours a declared protection gap only "
+                "for `bypass` and `strict`, only when the reviewed head's "
+                "`accepted_gaps` entry pins that gap's facts and every fact "
+                "it pins equals the live state; a ruleset bypass by any "
+                "actor but a `DeployKey` and a missing `pull_request` rule "
+                "cannot be declared at all",
+        checker="bin/sd_ship_remote.py::validate_protection",
+        proof="replace the `sd_protection.matching_acceptance` call in "
+              "`bin/sd_ship_remote.py` with the first entry carrying the "
+              "gap's id; a bypass list that no longer equals the live one is then "
+              "honoured and `test_a_declared_bypass_list_must_equal_the_live_one` "
+              "goes red",
+        scope="code",
+        teaches="skills/sd-ship/SKILL.md#Executable interface",
+    ),
+    #: sd-ship's merge-step ack gate for every reviewer (sd:998), registered
+    #: so the skill line that teaches it cites a row instead of avoiding the
+    #: claim check the way #1167 did.
+    Rule(
+        id="R14-D2",
+        subject="sd-ship's merge refuses with `review_findings_open` while any "
+                "pull-request review finding has no disposition, whoever "
+                "wrote it: a human or another bot's finding gates the merge "
+                "as a Copilot finding does, with or without a Copilot review",
+        checker="bin/sd-ship::require_copilot_clearance",
+        proof="replace the `self.other_review_material(number)` call in "
+              "`bin/sd-ship` with two empty lists; another reviewer's open "
+              "finding then merges and "
+              "`test_another_reviewers_finding_refuses_the_merge_with_no_copilot_review` "
+              "goes red",
+        scope="code",
+        teaches="skills/sd-ship/SKILL.md#Executable interface",
     ),
     #: The twelve repeals of sd:431 step 4, slice H, under one family decision
     #: team-lead took on 2026-09-17 (Dec-9, recommended on note 2665 and
