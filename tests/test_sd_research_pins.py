@@ -354,6 +354,58 @@ class FleetReportTests(unittest.TestCase):
             self.assertEqual(load().fleet(root), [])
 
 
+    def test_a_commented_out_uses_line_is_not_a_pin(self) -> None:
+        """sd:1000 (73d356fdf90f): `# - uses: x@sha` read as a live pin."""
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            old = self.upstream(root, "system-probe", commits=2)
+            flow = root / "owner" / "consumer-probe" / ".github" / "workflows"
+            flow.mkdir(parents=True)
+            (root / "owner" / "consumer-probe" / ".git").mkdir()
+            (flow / "x.yml").write_text(
+                "jobs:\n  t:\n    steps:\n      # - uses: owner/system-probe@%s\n      - run: true\n" % old
+            )
+            self.assertEqual(load().fleet(root), [])
+
+    def test_an_unreadable_workflow_is_a_row_not_silence(self) -> None:
+        """sd:1000 (73d356fdf90f): an unreadable file was skipped without a word,
+        so the report said "no fleet pins found" over a pin it never read."""
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            self.upstream(root, "system-probe", commits=1)
+            flow = root / "owner" / "consumer-probe" / ".github" / "workflows"
+            flow.mkdir(parents=True)
+            (root / "owner" / "consumer-probe" / ".git").mkdir()
+            locked = flow / "x.yml"
+            locked.write_text("jobs: {}\n")
+            locked.chmod(0)
+            try:
+                module = load()
+                rows = module.fleet(root)
+                lines = module.fleet_lines(rows)
+            finally:
+                locked.chmod(0o644)
+        self.assertEqual([(r["where"], r["status"].split(" (")[0]) for r in rows],
+                         [(".github/workflows/x.yml", "unreadable, not checked")])
+        self.assertNotIn("no fleet pins found", lines)
+        self.assertIn("0 pin site(s) across 1 repo(s); 0 behind; 1 file(s) unreadable.", lines[-1])
+
+    def test_the_document_report_names_an_unreadable_file(self) -> None:
+        with tempfile.TemporaryDirectory() as scratch:
+            repo = Path(scratch) / "research"
+            repo.mkdir()
+            locked = repo / "notes.md"
+            locked.write_text("`owner/x` @ `%s`\n" % ("a" * 40))
+            locked.chmod(0)
+            said = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(said):
+                    load().report(repo)
+            finally:
+                locked.chmod(0o644)
+        self.assertIn("unreadable, not checked: notes.md", said.getvalue())
+
+
 
 def seeded_fleet(root: Path, commits: int = 3) -> Path:
     """One consumer pinning one upstream at its first of `commits` commits."""

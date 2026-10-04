@@ -215,6 +215,8 @@ class JsonShapeTests(CheckFixture):
                     "output_truncated",
                     "output_path",
                     "failed_shards",
+                    "failed_steps",
+                    "failure",
                 },
             )
             self.assertIn(record["status"], {"pass", "fail", "skipped", "absent"})
@@ -288,6 +290,91 @@ class WholeOutputTests(CheckFixture):
         record = self.run_json(root)["checks"][0]
         self.assertIsNone(record["output_path"])
         self.assertFalse((root / ".git" / "sd-check-output").exists())
+
+
+class FailedStepTests(CheckFixture):
+    """sd:2608. A failed gate read `failed_shards: []` on every row a reader
+    looked at when the step that failed was no shard: a make target, a suite
+    of another runner, or a command that names nothing. A failed check now
+    always names its step and carries the failing part of its output."""
+
+    def run_failing(self, root: pathlib.Path, script: str, *args: str) -> dict[str, Any]:
+        (root / "run.py").write_text(script, encoding="utf-8")
+        self.declare(root, check=f"{PY} run.py")
+        result = self.run_json(root, *args)
+        self.assertEqual(result["status"], "fail")
+        return {row["name"]: row for row in result["checks"]}["check"]
+
+    def test_a_make_target_that_fails_outside_a_shard_is_the_step(self) -> None:
+        root = self.make_repo()
+        (root / "Makefile").write_text(
+            "check: docs-lint test\n"
+            "docs-lint:\n\t@echo 'docs-lint: README.md cites a missing anchor' && exit 3\n"
+            "test:\n\t@echo 'shard tests.test_fine: 1s exit=0'\n",
+            encoding="utf-8",
+        )
+        record = {row["name"]: row for row in self.run_json(root)["checks"]}["check"]
+        self.assertEqual(record["status"], "fail")
+        self.assertEqual(record["failed_shards"], [])
+        self.assertEqual(record["failed_steps"], ["make target docs-lint"])
+        self.assertIn("README.md cites a missing anchor", record["failure"])
+
+    def test_a_suite_another_runner_names_as_failed_is_the_step(self) -> None:
+        record = self.run_failing(self.make_repo(), (
+            "import sys\n"
+            "print('== shared')\nprint('FAIL: test_one (tests.test_shared.Case.test_one)')\n"
+            "print('AssertionError: 2 != 3')\n"
+            "sys.stderr.write('check.sh: failed: shared macos; logs kept in /tmp/example\\n')\n"
+            "sys.exit(1)\n"))
+        self.assertEqual(record["failed_steps"], ["suite shared", "suite macos"])
+        self.assertIn("FAIL: test_one (tests.test_shared.Case.test_one)", record["failure"])
+        self.assertIn("AssertionError: 2 != 3", record["failure"])
+
+    def test_a_failure_that_names_no_step_names_the_check_and_its_exit(self) -> None:
+        record = self.run_failing(self.make_repo(), "import sys\nprint('boom at the end')\nsys.exit(4)\n")
+        self.assertEqual(record["failed_steps"], ["check exit 4"])
+        self.assertIn("boom at the end", record["failure"])
+
+    def test_a_check_that_timed_out_names_the_timeout(self) -> None:
+        record = self.run_failing(self.make_repo(), "import time\ntime.sleep(30)\n", "--timeout", "2")
+        self.assertEqual(record["failed_steps"], ["check: timed out after 2s"])
+
+    def test_a_failed_shard_carries_its_own_failure_though_the_tail_misses_it(self) -> None:
+        record = self.run_failing(self.make_repo(), (
+            "import sys\n"
+            "print('shard tests.test_before: start')\nprint('ValueError: logged by a passing shard')\n"
+            "print('shard tests.test_before: 0s exit=0')\n"
+            "print('shard tests.test_early: start')\n"
+            "print('FAIL: test_cap (tests.test_early.Budget.test_cap)')\n"
+            "print('AssertionError: 4689 not less than or equal to 4683')\n"
+            "for index in range(40):\n"
+            "    print(f'  traceback frame {index} of the failing test')\n"
+            "print('FAILED (failures=1)')\n"
+            "print('shard tests.test_early: 0s exit=1')\n"
+            "for index in range(3000):\n"
+            "    print(f'shard tests.test_late_{index}: 0s exit=0')\n"
+            "sys.stderr.write('make: *** [test] Error 1\\n')\n"
+            "sys.exit(2)\n"))
+        self.assertNotIn("AssertionError: 4689", record["stdout"])
+        self.assertEqual(record["failed_steps"], ["shard tests.test_early: 0s exit=1", "make target test"])
+        self.assertIn("FAIL: test_cap (tests.test_early.Budget.test_cap)", record["failure"])
+        self.assertIn("AssertionError: 4689 not less than or equal to 4683", record["failure"])
+        self.assertNotIn("test_late_2999", record["failure"])
+        self.assertNotIn("logged by a passing shard", record["failure"])
+
+    def test_the_human_report_names_the_step_and_the_failure(self) -> None:
+        root = self.make_repo()
+        self.declare(root, check=f"{PY} -c \"import sys; print('it broke'); sys.exit(5)\"")
+        completed = self.run_check(root)
+        self.assertEqual(completed.returncode, 1)
+        self.assertIn("failed step: check exit 5", completed.stdout)
+        self.assertIn("[failure]\nit broke", completed.stdout)
+
+    def test_a_passing_or_skipped_check_names_no_step(self) -> None:
+        root = self.make_repo()
+        self.declare(root, check=f"{PY} -c pass", lint=f"{PY} -c pass")
+        for record in self.run_json(root)["checks"]:
+            self.assertEqual((record["failed_steps"], record["failure"]), ([], ""), record["name"])
 
 
 class AbsentTests(CheckFixture):

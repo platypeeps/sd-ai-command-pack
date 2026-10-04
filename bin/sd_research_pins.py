@@ -110,15 +110,22 @@ def slug(checkout):
     return Path(checkout).name.lower()
 
 
-def collect_pins(repo):
-    """Every (source, sha) the markdown asserts outside code fences, and who asserts it."""
+def collect_pins(repo, skipped=None):
+    """Every (source, sha) the markdown asserts outside code fences, and who asserts it.
+
+    A file that cannot be read goes to `skipped` as (path, error) when the
+    caller passes a list: a pin in it was not checked, which is not the same
+    as no pin (sd:1000).
+    """
     found: dict[tuple[str, str], set[str]] = {}
     for path in sorted(Path(repo).rglob("*.md")):
         if any(part in SKIP_DIRS for part in path.parts):
             continue
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+        except OSError as error:
+            if skipped is not None:
+                skipped.append((path.relative_to(repo).as_posix(), error.strerror or str(error)))
             continue
         in_fence = False
         for line in text.splitlines():
@@ -189,10 +196,18 @@ def describe(checkout, sha):
     return f"behind {behind}", note
 
 
+def print_skipped(skipped):
+    """Name each file `collect_pins` could not read, so "no pins" is not read as clean."""
+    for path, error in skipped:
+        print(f"  unreadable, not checked: {path} ({error})")
+
+
 def report(repo):
     repo = Path(repo).resolve()
     print(f"== {repo.name}")
-    pins = collect_pins(repo)
+    skipped: list[tuple[str, str]] = []
+    pins = collect_pins(repo, skipped)
+    print_skipped(skipped)
     if not pins:
         print("  no pinned commits found")
         return
@@ -282,7 +297,8 @@ def workflow_sites(text):
     means the command pack. The bare name is only the fallback.
     """
     sites, repository, by_env = [], None, {}
-    lines = text.splitlines()
+    # A commented-out `uses:` pins nothing, so comments go before matching (sd:1000).
+    lines = [_sd_lib().yaml_uncommented(line) for line in text.splitlines()]
     for line in lines:
         found = REPOSITORY.match(line)
         if found:
@@ -330,8 +346,12 @@ def manifest_sites(path, text):
     ]
 
 
-def pin_sites(checkout):
-    """Every pin site under one checkout's `.github/`, enumerated from disk."""
+def pin_sites(checkout, skipped=None):
+    """Every pin site under one checkout's `.github/`, enumerated from disk.
+
+    A file that cannot be read goes to `skipped` as (path, error), as in
+    `collect_pins`.
+    """
     sites: list[tuple[Path, int, str, str, str]] = []
     github = Path(checkout) / ".github"
     if not github.is_dir():
@@ -343,7 +363,9 @@ def pin_sites(checkout):
             continue
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+        except OSError as error:
+            if skipped is not None:
+                skipped.append((path, error.strerror or str(error)))
             continue
         read = workflow_sites(text) if path.suffix in WORKFLOW_SUFFIXES \
             else manifest_sites(path, text)
@@ -382,7 +404,8 @@ def fleet(root=None, trees=None):
 
     rows = []
     for checkout in trees:
-        for path, number, hint, sha, form in pin_sites(checkout):
+        skipped: list[tuple[Path, str]] = []
+        for path, number, hint, sha, form in pin_sites(checkout, skipped):
             target = index.get(hint.lower()) or index.get(hint.split("/")[-1].lower())
             if target is None or Path(target).resolve() == Path(checkout).resolve():
                 # Unresolved is third-party; self-pinned is not a fleet pin.
@@ -397,6 +420,11 @@ def fleet(root=None, trees=None):
                 "status": status,
                 "note": note,
             })
+        # An unreadable file is a row, so the report cannot say "no fleet pins
+        # found" over a pin it never read (sd:1000).
+        rows.extend({"repo": slug(checkout), "where": path.relative_to(checkout).as_posix(), "form": "-",
+                     "target": "-", "sha": "-", "status": f"unreadable, not checked ({error})", "note": ""}
+                    for path, error in skipped)
     return rows
 
 
@@ -420,9 +448,10 @@ def fleet_lines(rows):
         for row in sorted(rows, key=lambda r: (r["repo"], r["where"]))
     ]
     behind = [r for r in rows if r["status"].startswith("behind")]
+    unread = sum(r["status"].startswith("unreadable") for r in rows)
     lines.append("")
-    lines.append(f"  {len(rows)} pin site(s) across {len({r['repo'] for r in rows})} "
-                 f"repo(s); {len(behind)} behind.")
+    lines.append(f"  {len(rows) - unread} pin site(s) across {len({r['repo'] for r in rows})} "
+                 f"repo(s); {len(behind)} behind" + (f"; {unread} file(s) unreadable." if unread else "."))
     if behind:
         lines.append("  Report only — the repin stays a hand decision.")
     return lines
