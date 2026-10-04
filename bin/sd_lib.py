@@ -86,6 +86,10 @@ CORE_CONFIG = {
                   "description": "The folder holding each repository's `sd-ship lane` queue, as "
                                  "<root>/<repository>/lane/queue/. Unset reads $XDG_STATE_HOME/sd/lanes; "
                                  "SD_LANE_ROOT overrides it. It grants nothing."},
+    "gate_cache_gb": {"pattern": r"[0-9]+(\.[0-9]+)?",
+                      "description": "The most gigabytes the local gate's warm Rust build folders may hold; past it the "
+                                     "gate removes the least recently used free folders. 0 is no bound. Unset reads 40; "
+                                     "SD_GATE_CACHE_GB overrides it for one run. It grants nothing."},
     "gate_settle_seconds": {"pattern": "[0-9]+",
                             "description": "Seconds between two gate starts, and of low load1 while load5 is high; "
                                            "0 is none. Unset reads 45; SD_GATE_SETTLE_SECONDS overrides it for one run."},
