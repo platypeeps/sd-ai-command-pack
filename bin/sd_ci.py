@@ -158,6 +158,8 @@ def ci_step(root: pathlib.Path, database: pathlib.Path | None) -> Step:
         row = sd_lib.repo_row(connection, target)
         if row is None:
             raise CiRefusal(f"{target} is not a registered repository; run `sd-db.sh repo add {target}`")
+        if not sd_lib.is_managed(row):
+            raise CiRefusal(sd_lib.unmanaged_text(row["path"]))
         current = row["ci"] if "ci" in row.keys() else None
     finally:
         connection.close()

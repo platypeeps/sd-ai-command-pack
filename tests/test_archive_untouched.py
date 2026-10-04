@@ -13,10 +13,10 @@ would be the one failure this criterion exists to catch.
 Two readings of "untouched", both here, because either alone fails open.
 
 The *diff* reading is the criterion's own words: the commit that landed the
-retire names no path under `docs/work/archive/`. It is the strongest form and
-it needs the history to be present, so it fails rather than skips when the
-commit is not reachable. The local gate runs in a worktree of the full
-clone, so the history is there.
+retire names no path under `docs/work/archive/`. It is the strongest form.
+The commit is pinned by full SHA and read as an object, so the check walks no
+history: a squash, a rebase or an orphan branch with the same tree answers the
+same (sd:2593). It fails rather than skips when the object is missing.
 
 The 2026-09-17 removal changed only its reviewed first batch.
 Git history preserves the removed records.
@@ -41,6 +41,12 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 MARKER = "docs/work/.status-source"
 ARCHIVE = "docs/work/archive/"
 REMOVED_SNAPSHOT = "8ba8fa7a15fcd4783b42cbe580a04e89149be08d"
+#: The commit that landed the retire, the one commit that added `MARKER`
+#: (#767). Found with `git log --diff-filter=A -- docs/work/.status-source`
+#: once, on 2026-10-03, and pinned: asking `git log` on every run made the
+#: answer depend on this checkout's history, and an orphan commit with the
+#: same tree "added" every file, the archive included (sd:2593).
+RETIRE_COMMIT = "d369b6b10f0bf2b4e8128b41e271acd6ca602ce1"
 
 
 def git(*args: str) -> str:
@@ -113,43 +119,30 @@ class TheRetireCommit(unittest.TestCase):
     """The diff reading. What the commit that landed the retire names."""
 
     def setUp(self) -> None:
-        self.adds = lines(
-            git("log", "--diff-filter=A", "--format=%H", "--", MARKER)
-        )
+        self.touched = lines(git("show", "--format=", "--name-only", RETIRE_COMMIT))
 
-    def test_the_history_holds_the_commit_that_added_the_marker(self) -> None:
+    def test_the_pinned_commit_is_the_one_that_added_the_marker(self) -> None:
         """The control, and the reason this is not a skip.
 
-        A shallow clone is the case to name first. It does not reach the
-        retire commit, and it does not answer "no commit added the marker"
-        either -- its grafted root adds every tracked file, so the query
-        below returns HEAD and the archive check downstream fails with a
-        message about a rewritten record that never happened. Ask git
-        directly, and say what is actually wrong. If this fails in CI, the
-        checkout needs `fetch-depth: 0`, not a weaker test.
+        The pin is checked against its meaning, not only its presence: a SHA
+        that named some other commit would make the archive check below a
+        statement about that commit. `git show` raises when the object is
+        missing, which is what a shallow clone or a mistyped pin looks like.
         """
 
-        self.assertEqual(
-            git("rev-parse", "--is-shallow-repository").strip(),
-            "false",
-            "this clone is shallow, so the retire commit is unreachable and "
-            "nothing below is being asserted about it",
-        )
-        self.assertEqual(
-            len(self.adds),
-            1,
-            f"{MARKER} was added by {len(self.adds)} reachable commit(s); "
-            f"exactly one is expected, and none means the history is shallow",
+        added = lines(git("show", "--format=", "--name-only", "--diff-filter=A", RETIRE_COMMIT))
+        self.assertIn(
+            MARKER, added,
+            f"{RETIRE_COMMIT} does not add {MARKER}, so it is not the retire commit",
         )
 
     def test_the_commit_touches_work_items_outside_the_archive(self) -> None:
         """The second control: the absence below is worth nothing if the
         commit names no work item at all."""
 
-        touched = lines(git("show", "--format=", "--name-only", self.adds[0]))
         outside = [
             path
-            for path in touched
+            for path in self.touched
             if path.startswith("docs/work/") and not path.startswith(ARCHIVE)
         ]
         self.assertTrue(
@@ -159,8 +152,7 @@ class TheRetireCommit(unittest.TestCase):
         )
 
     def test_it_names_nothing_under_the_archive(self) -> None:
-        touched = lines(git("show", "--format=", "--name-only", self.adds[0]))
-        inside = [path for path in touched if path.startswith(ARCHIVE)]
+        inside = [path for path in self.touched if path.startswith(ARCHIVE)]
         self.assertEqual(
             inside,
             [],
