@@ -322,8 +322,13 @@ advance (operator ruling 2026-09-30, sd:1933).
 `sd-ship` owns the lines `sd_lib.OWNED_TRAILERS` names: `Item:`, `Work:`,
 `Delivers:`, `Closes:`, `Authored-with:` and `Attributes:`. `prepare` appends
 `Work:` to the body it publishes, and `merge` appends `Item:`, `Delivers:`, any
-owed `Closes:` and the authorship lines to the squash message, so a body written for `sd-ship`
-carries none of them. A supplied line that says what `sd-ship` would write is
+owed `Closes:` (sd:1600) and the authorship lines to the squash message, so a
+body written for `sd-ship` carries none of them. The one exception is
+`Closes: sd:N[, sd:M]`: the body keeps it, and the merge adds `Delivers:` for
+each item it names and closes them with the claimed item (sd:1481). Only a
+column-zero line outside fenced code and HTML comments counts; `prepare`
+refuses a quoted one, which an indent keeps as an example. `Refs:` is
+not owned; its items stay open. A supplied line that says what `sd-ship` would write is
 stripped and listed in the result's `normalized`; any other owned line is
 refused by line number, with the expected value. So the body `sd-ship`
 published, fed back as `--body-file`, prepares again. Without `--body-file`,

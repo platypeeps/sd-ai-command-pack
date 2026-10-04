@@ -1965,6 +1965,13 @@ MUTATIONS: dict[str, Mutation] = {
         test="tests.test_sd_ship_remote.RulesetCase"
              ".test_a_declared_bypass_list_must_equal_the_live_one",
     ),
+    "bin/sd-ship::require_copilot_clearance": Mutation(
+        path="bin/sd-ship",
+        old="        other_reviews, other_comments = self.other_review_material(number)",
+        new="        other_reviews, other_comments = [], []  # leg d: the other reviewers' gate, defeated",
+        test="tests.test_sd_ship.ShipCase"
+             ".test_another_reviewers_finding_refuses_the_merge_with_no_copilot_review",
+    ),
     "tests/test_verb_inventory.py::test_no_command_accepts_a_repository_path":
         Mutation(
             path="bin/sd_work.py",
