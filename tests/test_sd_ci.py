@@ -160,7 +160,8 @@ class CiLocal(unittest.TestCase):
         self.database = self.home / "sd.db"
         initialise(self.database)
         connection = connect(self.database)
-        upsert_repo(connection, str(self.root), remote="https://github.com/example/widget.git")
+        # Managed, or `sd ci local` refuses before reading anything (sd:1620).
+        upsert_repo(connection, str(self.root), remote="https://github.com/example/widget.git", managed=1)
         connection.close()
         self.environ = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}",
                             FAKE_GH_STATE=str(self.state_path), FAKE_GH_LOG=str(self.log))

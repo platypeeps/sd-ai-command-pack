@@ -58,6 +58,7 @@ These run without being asked.
 - `sd-status` reports. It never writes.
 - `sd-review --scope branch --challenge` runs on the machine before a push.
   Blocking findings are fixed or recorded before the branch leaves.
+  Under `repo.ci = local`, each round adds `--gate-check main` after an `sd gate check --base main` pass at that head (sd:2603).
 - CI runs on the pull request.
   Wait for required checks on the exact head; preserve review, ownership, protection, and authorization gates.
 - `sd-ship` commits enumerated paths, pushes, opens the pull request, waits
@@ -85,7 +86,9 @@ These run without being asked.
   and nothing runs the lint there otherwise. A runner has no database, so
   rule 2 reads statuses from git there, with full history, and checks
   fewer items than the machine with the rows; each run prints which source
-  it read.
+  it read. `make check` passes `--no-history`: rule 2 then fetches nothing
+  and reads no `git log`, and an item only git could answer reads `unknown`.
+  The delivery question stays with the lint `sd-ship` runs.
 - A commit to the pack, the system repository or the writing repository names
   what needed it: `Needed-by: <item id>` or `Needed-by: cost | efficiency |
   visibility`. `sd-ship` warns when the trailer is missing and ships anyway.
@@ -123,6 +126,7 @@ A repository whose `repo.ci` row says `local` runs no GitHub Actions (sd:1843).
 
 Switch a repository with `sd ci local`, run from its checkout (sd:1914).
 It is a dry run; `--apply` makes the changes, and a second run finds none.
+It refuses a repository the sd database does not mark managed (`repo.managed = no`, sd:1620).
 It needs `admin` on the repository and makes three changes, each only where it does not hold yet:
 
 - It sets `repo.ci` to `local`, as `sd-db.sh repo ci <path> local` does.
@@ -142,6 +146,13 @@ After the switch:
   It runs `sd-check` there, not in your checkout, and removes the worktree after.
 - The child drops `PYTHONPATH`, `PYTHONHOME`, `VIRTUAL_ENV`, `CONDA_PREFIX` and `PATH` entries inside your checkout.
   It also drops any `PATH` entry whose parent holds `pyvenv.cfg`: a virtualenv's `bin`, wherever it lives.
+- A Rust repository (any tracked `Cargo.toml`) builds into a warm folder the gate owns, not the worktree's `target/` (sd:2493).
+  Each repository keeps two under `${XDG_CACHE_HOME:-~/.cache}/sd/gate/`, one gate at a time in each; `CARGO_TARGET_DIR` names it.
+  A warm run gets `CARGO_INCREMENTAL=0`. When both are held, the run builds cold in its worktree.
+  Your own `CARGO_TARGET_DIR` never reaches the check.
+  `SD_GATE_CARGO_TARGETS` sets the count, `0` switches the cache off, and `SD_GATE_CACHE_DIR` moves it.
+  Cargo prunes nothing there, so the gate bounds the cache at `sd.gate_cache_gb` (sd:2598).
+  Past it, the gate removes the least recently used free folders, its own last, and names each on stderr.
 - This is a self-hosted runner, not a hermetic build.
   The gate guarantees a clean tree at the exact head, a scrubbed Python environment and no virtualenv on `PATH`.
   The rest of `PATH` and the system tools are this machine's image.
@@ -192,10 +203,12 @@ past the cap marks the item `blocked`; non-blocking findings hold nothing.
 | Development | prd and design | Scope, missing requirements, wrong assumptions | 5 |
 | Development | Code, before merge | Defects a second reader finds | 5 rounds |
 
-The code pass reads a head. A fix that changes it gets a further verification
-pass over the diff since the reviewed head, up to the cap above; `sd-ship`
-pushes only the reviewed head or a verified fix of it, and merges naming that
-head with `gh pr merge --squash --match-head-commit <the reviewed sha>` —
+The code pass reads a head. Under `repo.ci = local` a gate pass at that head
+comes first; see [Parallel work](#parallel-work). A fix that changes the head
+gets a further verification pass over the diff since the reviewed head, up
+to the cap above; `sd-ship` pushes only the reviewed head or a verified fix
+of it, and merges naming that head with
+`gh pr merge --squash --match-head-commit <the reviewed sha>` —
 equivalently `PUT /repos/{owner}/{repo}/pulls/{n}/merge`
 with `sha=` — so a head that moved after the review is refused at GitHub with
 a 405. The flag is what does the refusing: a merge that carries only a title
@@ -409,8 +422,19 @@ which the installer places in `~/.claude/agents`.
   close each one when it merges.
 - **Iterate on the fast path; gate once before the push.** While fixing, run
   `make check CHANGED="<paths>"`, which runs only the tests those paths need
-  plus an always-run set. Before the push, run the full `make check` once.
-  Only the full gate counts as evidence; a narrowed run exits 2 to say so.
+  plus an always-run set. Before the push, run the full gate once: under
+  `repo.ci = local` that is `sd gate check --base main`, below; elsewhere
+  `make check`. Only the full gate counts as evidence; a narrowed run exits 2
+  to say so.
+- **Gate first, then review the same head (sd:2603).** `sd gate check --base
+  main` runs the full check in a clean worktree, takes a gate slot, and
+  records a pass for the head. Then review with
+  `sd-review --scope branch --gate-check main` within 30 minutes: that form reads the pass and runs no second check. Run both with
+  the same environment, since the receipt binds it; a one-off prefix such as
+  `TEST_WORKERS=6` on one of them makes the review run the full check again.
+  A fix commit moves the head, so the next round needs a new gate pass first.
+  Never run plain `sd-review --scope branch` there: it runs a second full
+  check in the checkout, outside any lock around the gate, and reuses no pass.
 - **Gates share the machine through slots.** Every `sd-check` run, and so
   every gate `sd-ship prepare` or `merge` runs in any repository, first takes
   one of `sd.gate_slots` machine-wide slots (unset: a quarter of the cores,
@@ -422,6 +446,12 @@ which the installer places in `~/.claude/agents`.
   `make test` inside a gate takes no second slot; run directly, `make test`
   takes one of the same slots. Slots are kernel locks under
   `$XDG_STATE_HOME/sd/gate-slots`, so a dead holder's slot is free at once.
+- **A precheck runs before the slot wait (sd:2604).** When the repository's
+  Makefile defines `precheck`, `sd-check` runs `make precheck` first, outside
+  the pool. A failure stops the run there: no slot, no `check`, and the report
+  names the failing check. The pack's `precheck` is `lint` plus the always-run
+  test modules, about a minute. `--only` and a docs-only scope skip it, and
+  the checks get what the precheck left of `--timeout`.
 - **Wrap every other gate in the pool (sd:2522).** The pool is one per
   machine, not one per repository. A plain `make check` in a repository whose
   Makefile takes no slot runs as `sd gate run -- make check`, so it queues with
@@ -754,6 +784,8 @@ The reserved `sd` namespace declares four settings:
   Absence reads 2.5 per core. `SD_GATE_LOAD_MAX` overrides it for one run. It grants nothing.
 - `sd.gate_settle_seconds`: seconds between two gate starts, and of low load1 while load5 is high; `0` is none.
   Absence reads 45. `SD_GATE_SETTLE_SECONDS` overrides it for one run. It grants nothing.
+- `sd.gate_cache_gb`: the most gigabytes the local gate's warm Rust build folders may hold; `0` is no bound.
+  Absence reads 40. `SD_GATE_CACHE_GB` overrides it for one run. It grants nothing.
 - `sd.lane_root`: the folder that holds each repository's `sd-ship lane` queue, as `<root>/<repository>/lane/queue/`.
   Absence reads `$XDG_STATE_HOME/sd/lanes`. `SD_LANE_ROOT` overrides it. It grants nothing.
 

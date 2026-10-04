@@ -21,15 +21,21 @@ goes on seeing the values captured at registration.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.machinery
 import importlib.util
+import io
 import json
+import os
 import pathlib
 import re
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
+from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SD = REPO_ROOT / "bin" / "sd"
@@ -81,11 +87,12 @@ class PluginFixture(unittest.TestCase):
         self.config_home = self.tmp / "config"
         self.config_path = self.config_home / "sd-ai-command-pack" / "config.json"
 
-    def run_sd(self, *args: str) -> subprocess.CompletedProcess[str]:
+    def run_sd(self, *args: str, timeout: float | None = None) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, str(SD), *args],
             capture_output=True,
             text=True,
+            timeout=timeout,
             env={
                 "PATH": "/usr/bin:/bin",
                 "HOME": str(self.tmp / "home"),
@@ -930,6 +937,147 @@ class ListTests(PluginFixture):
         for args in (("plugin",), ("plugin", "sync"), ("nonesuch",)):
             with self.subTest(args=args):
                 self.assertEqual(self.run_sd(*args).returncode, 2)
+
+
+class StalledRootTests(PluginFixture):
+    """sd:2540. One plugin root that never answers must not block a lookup it does not own.
+
+    The stalled root is a FIFO named `sd-plugin.json`: opening it for reading
+    waits for a writer, the way an open() under an ungranted volume waited for
+    16 hours on 2026-10-01 (sd:2537). A lookup waits for every root listed
+    before the owner, so registry order decides what a stalled root costs:
+    nothing after the owner; before it, a refusal within ROOT_READ_SECONDS,
+    since the silent root may own the prefix.
+    """
+
+    def stalled(self) -> pathlib.Path:
+        root = self.tmp / "stalled"
+        root.mkdir()
+        fifo = root / "sd-plugin.json"
+        os.mkfifo(fifo)
+        self.addCleanup(self.release, fifo)
+        return root
+
+    @staticmethod
+    def release(fifo: pathlib.Path) -> None:
+        """Give a reader still waiting in this process its writer, so its thread ends."""
+
+        with contextlib.suppress(OSError):
+            os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+
+    def owner(self) -> pathlib.Path:
+        return self.plugin("owner", config=ConfigTests.DECLARED)
+
+    def test_the_owner_s_key_answers_while_a_later_root_hangs(self) -> None:
+        self.write_config({"plugins": [str(self.owner()), str(self.stalled())],
+                           "config": {"pp": {"google_account": "personal"}}})
+        started = time.monotonic()
+        got = self.run_sd("config", "get", "pp.google_account", timeout=30)
+        self.assertEqual((got.returncode, got.stdout.strip()), (0, "personal"), got.stderr)
+        self.assertLess(time.monotonic() - started, load_sd().ROOT_READ_SECONDS,
+                        "the lookup waited for a root listed after its owner")
+
+    def test_an_earlier_silent_root_makes_the_key_refuse_within_the_bound(self) -> None:
+        stalled, owner = self.stalled(), self.owner()
+        self.write_config({"plugins": [str(stalled), str(owner)],
+                           "config": {"pp": {"google_account": "personal"}}})
+        got = self.run_sd("config", "get", "pp.google_account", timeout=30)
+        self.assertNotEqual(got.returncode, 0, got.stdout)
+        self.assertIn(f"prefix 'pp' is ambiguous: plugin root(s) {stalled}, registered before {owner}",
+                      got.stderr)
+
+    def test_a_core_key_reads_no_plugin_root(self) -> None:
+        self.write_config({"plugins": [str(self.stalled())], "config": {"sd": {"gate_slots": "3"}}})
+        got = self.run_sd("config", "get", "sd.gate_slots", timeout=30)
+        self.assertEqual((got.returncode, got.stdout.strip(), got.stderr), (0, "3", ""))
+
+    def test_a_root_silent_past_the_bound_is_skipped_with_a_warning(self) -> None:
+        sd = load_sd()
+        sd.ROOT_READ_SECONDS = 0.3
+        stalled, owner = str(self.stalled()), str(self.owner())
+        said, found = io.StringIO(), {}
+
+        def scan() -> None:
+            with contextlib.redirect_stderr(said):
+                found.update({prefix: path for prefix, (path, _) in sd.scan([owner, stalled]).items()})
+
+        worker = threading.Thread(target=scan, daemon=True)
+        worker.start()
+        worker.join(10)
+        self.assertFalse(worker.is_alive(), "the scan waited on the stalled root past its bound")
+        self.assertEqual(list(found), ["pp"])
+        self.assertIn(f"warning: skipped plugin root {stalled}: its sd-plugin.json did not answer within 0.3s",
+                      said.getvalue())
+
+
+    def test_registration_refuses_while_a_root_is_silent(self) -> None:
+        """A silent root may own the prefix being registered; a uniqueness check cannot skip it."""
+
+        stalled = str(self.stalled())
+        self.write_config({"plugins": [stalled]})
+        newcomer = self.plugin("newcomer")
+        added = self.run_sd("plugin", "add", str(newcomer), timeout=60)
+        self.assertNotEqual(added.returncode, 0, "a plugin registered while another root was silent")
+        self.assertIn(f"plugin root(s) {stalled} did not answer within", added.stderr)
+        self.assertEqual(self.config()["plugins"], [stalled])
+
+
+class SharedPrefixTests(PluginFixture):
+    """sd:2540 review round 2. Two registered roots with one prefix: the earlier entry owns it.
+
+    A manifest edited after registration can give two roots one prefix. The
+    owner must follow the registry, never whichever manifest answers first,
+    or one store write lands in a different plugin from the next.
+    """
+
+    def owners(self, delays: dict[str, float], wanted: str | None) -> pathlib.Path:
+        sd = load_sd()
+        first, second = str(self.plugin("first")), str(self.plugin("second"))
+        read = sd.read_manifest
+
+        def slow_read(path: pathlib.Path) -> dict[str, object]:
+            time.sleep(delays[path.parent.name])
+            return read(path)
+
+        sd.read_manifest = slow_read
+        found = sd.scan([first, second], wanted=wanted)
+        return found["pp"][0].parent
+
+    def test_the_earlier_registry_entry_owns_a_shared_prefix_whatever_answers_first(self) -> None:
+        for delays in ({"first": 0.4, "second": 0.0}, {"first": 0.0, "second": 0.4}):
+            for wanted in ("pp", None):
+                with self.subTest(delays=delays, wanted=wanted):
+                    self.assertEqual(self.owners(delays, wanted).name, "first",
+                                     "the root that answered first took the prefix, not the earlier registry entry")
+
+    def test_a_later_duplicate_never_takes_a_prefix_from_an_earlier_root_past_the_bound(self) -> None:
+        """Review round 3: the earlier root timed out, so it may own the prefix; refuse, never promote."""
+
+        sd = load_sd()
+        sd.ROOT_READ_SECONDS = 0.3
+        first, second = str(self.kinded("first")), str(self.kinded("second"))
+        read = sd.read_manifest
+
+        def slow_read(path: pathlib.Path) -> dict[str, object]:
+            time.sleep(2.0 if path.parent.name == "first" else 0.0)
+            return read(path)
+
+        sd.read_manifest = slow_read
+        lookups = {
+            "scan for pp": lambda: sd.scan([first, second], wanted="pp"),
+            "full scan": lambda: sd.scan([first, second]),
+            "declared_config": lambda: sd.declared_config("pp"),
+            "resolve_kind": lambda: sd.resolve_kind("pp.tip"),
+        }
+        with mock.patch.object(sd, "registry", return_value=[first, second]), \
+                mock.patch.object(sd.sd_lib, "machine_config", return_value={}), \
+                contextlib.redirect_stderr(io.StringIO()):
+            for name, lookup in lookups.items():
+                with self.subTest(lookup=name):
+                    with self.assertRaises(sd.Refusal, msg="a later duplicate took the prefix") as refused:
+                        lookup()
+                    self.assertIn(f"prefix 'pp' is ambiguous: plugin root(s) {first}, registered before {second}",
+                                  str(refused.exception))
 
 
 class CorePolicyConfigTests(PluginFixture):

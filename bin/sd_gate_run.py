@@ -47,6 +47,7 @@ import sys
 import tempfile
 from typing import Any, Callable, Mapping
 
+import sd_gate_cache
 import sd_gate_receipts
 import sd_lib
 
@@ -63,11 +64,12 @@ REPORT_GRACE_SECONDS = 60
 #: The tail of `sd-check`'s own stderr the receipt keeps, as `sd-check` tails each check's.
 STDERR_TAIL_CHARS = 4000
 LOCAL_BLOCK = "CLAUDE.local.md"
-#: Variables that pick Python packages; the child must not inherit the caller's.
+#: Variables the child must not inherit from the caller: Python package selectors, forced colour,
+#: and the operator's Rust build folder, which `sd_gate_cache.cargo_target` replaces with the gate's own (sd:2493).
 DROPPED_ENVIRONMENT = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX", "__PYVENV_LAUNCHER__",
-                       "FORCE_COLOR", "CLICOLOR_FORCE", "PY_COLORS")
-#: Session variables, by name or prefix: dropped so two sessions' passes at one head bind equal (sd:1912, D1).
-SESSION_ENVIRONMENT = ("CLAUDECODE", "TERM_SESSION_ID", "PWD", "OLDPWD", "SHLVL", "_")
+                       "FORCE_COLOR", "CLICOLOR_FORCE", "PY_COLORS", "CARGO_TARGET_DIR")
+#: Session variables, by name or prefix: dropped so two sessions' passes at one head bind equal (sd:1912, D1; fnm's per-shell folder, sd:2602).
+SESSION_ENVIRONMENT = ("CLAUDECODE", "TERM_SESSION_ID", "PWD", "OLDPWD", "SHLVL", "_", "FNM_MULTISHELL_PATH")
 SESSION_PREFIXES = ("CLAUDE_", "HERDR_", "ITERM_")
 #: Set in the child: the gate captures output, and the caller's terminal colour must not change a result (sd:2076).
 NO_COLOUR_ENVIRONMENT = {"NO_COLOR": "1", "PYTHON_COLORS": "0"}
@@ -110,7 +112,8 @@ def gate_inputs(root: pathlib.Path, head: str, tree: str | None = None) -> str:
 
 
 def gate_environment(root: pathlib.Path, environ: dict[str, str] | None = None) -> dict[str, str]:
-    """The caller's environment without package selectors, forced colour, session variables, `PATH` entries in `root`, or venv `bin`s.
+    """The caller's environment without package selectors, forced colour, the operator's `CARGO_TARGET_DIR`,
+    session variables, `PATH` entries in `root`, or venv `bin`s; each `PATH` entry resolved.
 
     Plus `SD_LOCAL_GATE=1`, `NO_COLOR=1` and `PYTHON_COLORS=0`, whatever the caller had them set to.
     """
@@ -118,7 +121,7 @@ def gate_environment(root: pathlib.Path, environ: dict[str, str] | None = None) 
     env = {key: value for key, value in source.items()
            if key not in DROPPED_ENVIRONMENT + SESSION_ENVIRONMENT and not key.startswith(SESSION_PREFIXES)}
     top = root.resolve()
-    kept = [entry for entry in env.get("PATH", "").split(os.pathsep)
+    kept = [str(pathlib.Path(entry).resolve()) for entry in env.get("PATH", "").split(os.pathsep)
             if entry and os.path.isabs(entry) and not pathlib.Path(entry).resolve().is_relative_to(top)
             and not (pathlib.Path(entry).resolve().parent / "pyvenv.cfg").is_file()]
     env["PATH"] = os.pathsep.join(kept)
@@ -172,7 +175,7 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
             key = sd_gate_receipts.receipt_key(root, head, content)
             identity = (sd_gate_receipts.gate_binding(tree, head, gate_inputs(root, head, content), base, env, fork)
                         if database is not None else None)
-            found = sd_gate_receipts.lookup(database, key, identity) if reuse and database and identity else None
+            found, miss = sd_gate_receipts.examine(database, key, identity) if reuse and database else (None, None)
             if found is not None:
                 reading = dict(found["reading"], summary=f"{found['reading']['summary']} (reused)"[:DESCRIPTION_LIMIT],
                                reused={"revision": found["revision"], "recorded_at": found["recorded_at"],
@@ -180,7 +183,8 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
                 return {"head": gate_git(tree, "rev-parse", "HEAD"), **reading}
             argv = [sys.executable, str(BIN / "sd-check"), "--json", "--timeout", str(timeout),
                     *(["--base", base] if base else [])]
-            code, output, errors = (run or run_child)(argv, env, tree, timeout + REPORT_GRACE_SECONDS)
+            with sd_gate_cache.cargo_environment(root, tree, env) as child:
+                code, output, errors = (run or run_child)(argv, child, tree, timeout + REPORT_GRACE_SECONDS)
             checked = gate_git(tree, "rev-parse", "HEAD")
             reading = check_reading(code, output, errors)
             if record and database and identity and reading["status"] == "success" and checked == head:
@@ -195,12 +199,12 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
             # The administrative entry goes with the directory; the temporary
             # directory's own cleanup removes whatever the removal left.
             sd_lib.git_output(["worktree", "remove", "--force", str(tree)], root)
-    return {"head": checked, **reading}
+    return {"head": checked, **reading, **({"reuse_miss": miss} if miss else {})}  # sd:2602; never in the receipt
 
 
 def named_checks(report: dict[str, Any]) -> str:
-    """The checks a summary names: each that ran, or, in a docs-only run, the scope and the docs row."""
-    rows = [entry for entry in report.get("checks") or [] if isinstance(entry, dict)]
+    """The checks a summary names: any precheck (sd:2604) and each that ran, or, in a docs-only run, the scope and the docs row."""
+    rows = [entry for entry in [report.get("precheck"), *(report.get("checks") or [])] if isinstance(entry, dict)]
     scope = report.get("scope")
     if not (isinstance(scope, dict) and scope.get("mode") == "docs-only"):
         return ", ".join(f"{row.get('name')} {row.get('status')}" for row in rows if row.get("status") != "absent")
