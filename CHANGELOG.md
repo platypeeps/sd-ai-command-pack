@@ -251,6 +251,8 @@
 
 ### Fixed
 
+- **The pack's gate binds its own tree, and a pass that leaves no receipt says why (sd:2612, sd:2613).** The local gate binds a receipt to a digest of the running pack's `bin/`, taken before the run and again after it. The pack lane fast-forwards the pack checkout after each merge, so a pack item's gate that overlapped a landing passed but left no receipt, and a landing between a builder's gate and the lane's prepare made the receipt miss. The pack's `.github/sd-gate-reuse.json` now declares `"tool": "tree"`. Its gate then runs the gated tree's own `bin/sd-check` and leaves the checkout's `bin/` out of the digest, so a checkout move no longer matters there. The field counts only when the running pack belongs to the gated repository (`sd_gate_receipts.gates_itself`). Every other repository keeps the checkout binding and the after-run comparison: a pack that moves mid-run still drops the pass. A pass that leaves no receipt now says why in `receipt_skipped`, for example `moved during the run: inputs`.
+
 - **Suite fixtures that did not do what they are named (sd:1002).** Two
   `HOME` restores in `tests/test_sd_handoff_rows.py` and the `environment`
   helper in `tests/test_sd_suggest.py` now put back an unset or empty value as
@@ -277,7 +279,6 @@
   the text only as `--body`. The hint now reads `sd task note <n> --body
   "<text>"`, and a test hands each `sd` command the denial names to the real
   parser.
-
 - **One stalled plugin root no longer blocks every plugin lookup (sd:2540).**
   A prefix lives in its plugin's manifest, so `sd config get <prefix>.<key>`
   read every registered root in turn until it found the owner. On 2026-10-01
