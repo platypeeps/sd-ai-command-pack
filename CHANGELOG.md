@@ -10,7 +10,10 @@
   with `--force-with-lease`, only while the worktree's tip is the merged head
   and nothing in it is uncommitted. A worktree with any ignored entry stays
   (operator ruling on sd:2584, option a), as does one that holds the running
-  tools or was queued with the new `enqueue --keep-worktree`. It notes the
+  tools or was queued with the new `enqueue --keep-worktree`. Removal
+  deletes only tracked files a status check vouched for, each while
+  unchanged, and only empty folders, so a file written after the check
+  stays. It notes the
   item with the merge commit, the cleanup and a `git branch` recover
   command, then fast-forwards the main checkout. When that checkout holds
   the running `sd-ship`, it tries every other lane's runner lock once and

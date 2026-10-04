@@ -17,6 +17,7 @@ import tempfile
 import threading
 import time
 import unittest
+from typing import Any, Callable
 from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -364,8 +365,14 @@ class Landing(Lane):
         git(self.repo, "push", "-q", "-u", "origin", "main")
 
     def topic(self, name: str = "topic") -> tuple[pathlib.Path, str]:
+        """A pushed worktree whose commit tracks a file, a nested file and a symlink, as a real one does."""
         tree = self.worktree(name)
-        git(tree, "commit", "-q", "--allow-empty", "-m", name)
+        (tree / "pkg/mod").mkdir(parents=True)
+        (tree / "README.md").write_text("readme\n", encoding="utf-8")
+        (tree / "pkg/mod/a.py").write_text("A = 1\n", encoding="utf-8")
+        (tree / "link").symlink_to("README.md")
+        git(tree, "add", "-A")
+        git(tree, "commit", "-q", "-m", name)
         git(tree, "push", "-q", "origin", name)
         return tree, git(tree, "rev-parse", "HEAD")
 
@@ -482,6 +489,72 @@ class Landing(Lane):
                 self.assertIn("worktree kept: holds ignored entries: ", cleanup)
                 self.assertIn(next(iter(files)).split("/")[0], cleanup)
                 self.assertEqual(self.remote_branches(), ["main"])
+
+    def after_git(self, matches: Callable[[tuple[str, ...]], bool], act: Callable[[], None]) -> Any:
+        """Run `act` once, as a builder would, right after the first `lane_git` call whose arguments match returns."""
+        checked, done = sd_lane.lane_git, []
+
+        def acting(root: pathlib.Path, *args: str) -> str | None:
+            answer = checked(root, *args)
+            if not done and matches(args):
+                done.append(act())
+            return answer
+        return mock.patch.object(sd_lane, "lane_git", acting)
+
+    def test_an_ignored_file_written_after_the_last_status_check_survives(self) -> None:
+        """The sd:2568 review's race: no lock excludes the builder, so a file can appear after the check."""
+        tree, head = self.topic()
+        self.ignore("build/")
+        late = tree / "build/late.o"
+
+        def builder_writes() -> None:
+            late.parent.mkdir()
+            late.write_text("object\n", encoding="utf-8")
+        self.merge_lands(tree, 1, head)
+        with self.after_git(lambda args: "--ignored=matching" in args, builder_writes):
+            self.drain()
+        self.assertEqual(late.read_text(encoding="utf-8"), "object\n")
+        self.assertEqual(git(self.repo, "rev-parse", "refs/heads/topic"), head)
+        self.assertEqual(self.remote_branches(), ["main", "topic"])
+        cleanup = self.entries()[0]["cleanup"]
+        self.assertIn("Cleanup stopped: build/late.o appeared or changed during removal", cleanup)
+        git(tree, "checkout", "--", ".")  # the note's restore: the tracked files come back from the index
+        self.assertEqual((tree / "pkg/mod/a.py").read_text(encoding="utf-8"), "A = 1\n")
+
+    def test_a_tracked_file_rewritten_after_the_last_status_check_is_put_back(self) -> None:
+        """Same size, same inode: only the modification time tells the rewrite apart, and it must."""
+        tree, head = self.topic()
+
+        def builder_rewrites() -> None:
+            with open(tree / "README.md", "r+", encoding="utf-8") as handle:
+                handle.write("REA")
+        self.merge_lands(tree, 1, head)
+        with self.after_git(lambda args: "--ignored=matching" in args, builder_rewrites):
+            self.drain()
+        self.assertEqual((tree / "README.md").read_text(encoding="utf-8"), "REAdme\n")
+        self.assertEqual(git(self.repo, "rev-parse", "refs/heads/topic"), head)
+        self.assertIn("Cleanup stopped: README.md appeared or changed during removal", self.entries()[0]["cleanup"])
+
+    def test_a_tracked_file_rewritten_after_the_uncommitted_check_keeps_the_worktree(self) -> None:
+        """The check that vouches for each file runs after its snapshot, so it sees every kind of change."""
+        tree, head = self.topic()
+
+        def builder_rewrites() -> None:
+            (tree / "README.md").write_text("rewritten\n", encoding="utf-8")
+        self.merge_lands(tree, 1, head)
+        with self.after_git(lambda args: args == ("status", "--porcelain", "--untracked-files=all"), builder_rewrites):
+            self.drain()
+        self.assertEqual((tree / "README.md").read_text(encoding="utf-8"), "rewritten\n")
+        self.assertEqual(git(self.repo, "rev-parse", "refs/heads/topic"), head)
+        self.assertIn("worktree kept: changed after the status check: README.md", self.entries()[0]["cleanup"])
+
+    def test_a_locked_worktree_is_kept(self) -> None:
+        tree, head = self.topic()
+        git(self.repo, "worktree", "lock", str(tree))
+        self.merge_lands(tree, 1, head)
+        self.drain()
+        self.assertTrue((tree / "README.md").exists())
+        self.assertIn("worktree kept: git worktree lock holds it", self.entries()[0]["cleanup"])
 
     def test_the_kept_note_names_three_ignored_entries_then_elides(self) -> None:
         tree, head = self.topic()

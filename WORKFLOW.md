@@ -520,8 +520,11 @@ which the installer places in `~/.claude/agents`.
   worktree stays, with its branch, when it holds the running lane tools,
   when it holds any ignored entry (build output included; the entry's
   `cleanup` names the first three), or when it was queued with
-  `--keep-worktree`. The local branch goes only while it is still at the
-  checked tip. The runner then notes the item: `Landed: merged at <merge>
+  `--keep-worktree`, or when `git worktree lock` holds it. Removal deletes
+  only the tracked files a status check vouched for, each only while
+  unchanged, and folders only when empty, so a file a builder writes after
+  the check stays and cleanup stops. The local branch goes only while it is
+  still at the checked tip. The runner then notes the item: `Landed: merged at <merge>
   (head <head>). Cleanup: …. Recover: git branch <branch> <tip>.` Last, it
   fast-forwards the main checkout when it is on the default branch. When that
   checkout holds the running `sd-ship`, it first tries every other lane's
