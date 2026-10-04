@@ -228,6 +228,25 @@ class Reading(unittest.TestCase):
         self.assertEqual(sd_gate_run.check_reading(1, stopped)["summary"], "sd-check fail (precheck fail, check fail)")
 
 
+    def test_a_failure_summary_names_the_failed_step(self) -> None:
+        """sd:2608: the one line a lane log shows said `check fail` and no step."""
+        failed = json.dumps({"status": "fail", "checks": [
+            {"name": "check", "status": "fail", "failed_steps": ["shard tests.test_a: 0s exit=1", "make target test"]},
+            {"name": "test", "status": "skipped"}, {"name": "lint", "status": "skipped"}]})
+        summary = sd_gate_run.check_reading(1, failed)["summary"]
+        self.assertEqual(summary, "sd-check fail (check fail: shard tests.test_a: 0s exit=1; make target test,"
+                                  " test skipped, lint skipped)")
+        kept = "/tmp/example/.git/sd-check-output/20261004T000000Z-1-check.log"
+        many = json.dumps({"status": "fail", "checks": [
+            {"name": "check", "status": "fail", "output_path": kept,
+             "failed_steps": [f"shard tests.test_{n}: 0s exit=1" for n in range(30)]}]})
+        steps, said = sd_gate_run.check_reading(1, many)["summary"].split(" whole output: ")
+        # The steps keep a status description's bound; the path to the whole output is never cut.
+        self.assertTrue(steps.startswith("sd-check fail (check fail: shard tests.test_0: 0s exit=1; "), steps)
+        self.assertLessEqual(len(steps), sd_gate_run.DESCRIPTION_LIMIT)
+        self.assertEqual(said, kept)
+
+
 class Post(unittest.TestCase):
     HEAD = "a" * 40
 
@@ -246,6 +265,16 @@ class Post(unittest.TestCase):
         with self.assertRaisesRegex(Refusal, "no status is posted for a commit that was not checked"):
             sd_local_gate.post_gate_status(api, self.HEAD, {"head": "b" * 40, "status": "success"}, "0" * 12)
         self.assertEqual(api.posts, [])
+
+    def test_the_posted_description_leaves_out_the_local_output_path(self) -> None:
+        """sd:2608. The summary names the file with the whole output for the
+        lane log; a commit status is public and the path is a local one."""
+        api = Recorder()
+        summary = "sd-check fail (check fail: make target test) whole output: /tmp/example/.git/sd-check-output/run.log"
+        sd_local_gate.post_gate_status(api, self.HEAD, {"head": self.HEAD, "status": "failure", "summary": summary},
+                                       "0" * 12)
+        self.assertEqual(api.posts[0][1]["description"],
+                         f"{self.HEAD[:12]} inputs {'0' * 12}: sd-check fail (check fail: make target test)")
 
     def test_a_failure_posts_failure(self) -> None:
         api = Recorder()
