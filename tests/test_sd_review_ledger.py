@@ -319,14 +319,16 @@ class TheLifecycle(LedgerFixture):
                 self.assertEqual(client.sent, [])
                 self.assertEqual(self.rows(), [])
 
-    def test_a_failed_check_touches_no_row(self) -> None:
+    def test_a_failed_check_after_the_review_keeps_the_call_it_charged(self) -> None:
+        """sd:2605: the gate runs after the reviewers, so a failing gate does
+        not undo the call they made; its row stays, as for any answered call."""
         self.seed()
         self.runner = FakeRunner({"sd-check": sd_review.Completed(1, "{}", "failed")})
         client = FakeClient(default=usage_answer())
         result = self.review(client)
         self.assertEqual(result["status"], "gate_failed")
-        self.assertEqual(client.sent, [])
-        self.assertEqual(self.rows(), [])
+        self.assertEqual([call["provider"] for call in client.sent], ["paid"])
+        self.assertEqual([(row[0], row[2]) for row in self.rows()], [("paid", "run")])
 
 
 class ThePreflight(LedgerFixture):
