@@ -663,7 +663,7 @@ def apply_exemptions(plan: Plan, tree: Tree) -> None:
 
 
 def auto_rows() -> list[tuple[pathlib.Path, str | None]]:
-    """`(checkout, remote)` for every repository row whose `runner_merge` is `auto`."""
+    """`(checkout, remote)` for every managed repository row whose `runner_merge` is `auto` (sd:1620)."""
     import sd_handoff_rows  # noqa: PLC0415 - the library is optional until this verb runs
 
     sd_db = sd_handoff_rows.library()
@@ -674,7 +674,8 @@ def auto_rows() -> list[tuple[pathlib.Path, str | None]]:
         rows = registered(connection)
     finally:
         connection.close()
-    return [(sd_lib.repo_disk(row["path"]), row["remote"]) for row in rows if row["runner_merge"] == "auto"]
+    return [(sd_lib.repo_disk(row["path"]), row["remote"]) for row in sd_lib.managed_rows(rows)
+            if row["runner_merge"] == "auto"]
 
 
 def _installer() -> Any:
@@ -691,7 +692,7 @@ def selected(rows: list[tuple[pathlib.Path, str | None]], wanted: list[str]) -> 
     for name in wanted:
         match = [row for row in rows if owner_slug(row[1]) == name.lower()]
         if not match:
-            raise FleetRefusal(f"{name} is not a runner_merge=auto repository row; the stamp covers only those")
+            raise FleetRefusal(f"{name} is not a managed runner_merge=auto repository row; the stamp covers only those")
         chosen += match
     return chosen
 
@@ -700,12 +701,19 @@ def here(rows: list[tuple[pathlib.Path, str | None]], cwd: pathlib.Path) -> tupl
     """The checkout a write lands in: the one the caller stands in (R10-D6).
 
     It must be a checkout of an auto row's repository -- matched by origin,
-    so a worktree of a registered checkout qualifies. The third value says
-    whether its HEAD is a feature branch, the only place tracked files go.
+    so a worktree of a registered checkout qualifies. The checkout's own row
+    is read first, path before origin as `sd_ci.ci_step` reads it, and an
+    unmanaged one refuses: two checkouts can share an origin, and management
+    belongs to the row, not to the origin (the sd:1620 lane review). The third
+    value says whether its HEAD is a feature branch, the only place tracked
+    files go.
     """
     top = sd_lib.repo_root(cwd)
     if top is None:
         raise FleetRefusal(f"{cwd} is not inside a git repository")
+    refusal = sd_lib.unmanaged(top, warn=False)
+    if refusal:
+        raise FleetRefusal(refusal)
     slug = owner_slug(sd_lib.git_output(["config", "--get", "remote.origin.url"], top))
     match = [row for row in rows if slug and owner_slug(row[1]) == slug]
     if not match:
