@@ -284,6 +284,13 @@ class Gate(Repository):
         self.assertEqual([body["state"] for _, body in api.posts], ["success", "success"])
         self.assertTrue(api.posts[1][1]["description"].startswith(f"{head[:12]} inputs {inputs}: "))
 
+    def test_the_merge_gate_queues_on_the_slot_bound_apart_from_its_check(self) -> None:
+        """sd:2611: like `sd gate check`, so a merge queued behind other gates keeps its whole check bound."""
+        head = self.commit("check:\n\t@echo ok\n")
+        with mock.patch.object(sd_local_gate, "check_in_worktree", wraps=sd_local_gate.check_in_worktree) as checked:
+            sd_local_gate.local_gate(Recorder(), self.root, head)
+        self.assertEqual(checked.call_args.kwargs["slot_timeout"], sd_lib.GATE_SLOT_SECONDS)
+
     def test_the_digest_follows_the_local_block(self) -> None:
         head = self.commit("check:\n\t@echo ok\n")
         before = sd_local_gate.gate_inputs(self.root, head)

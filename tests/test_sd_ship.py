@@ -4601,7 +4601,8 @@ roles:
         with patch.object(ship, "review_process", side_effect=child):
             self.operation().review(_git(self.root, "rev-parse", "HEAD"))
         state = self.operation().state
-        self.assertEqual(stages, [(True, 3600), (False, 10800)])
+        # sd:2611: the execution watchdog also counts the gate-slot phase.
+        self.assertEqual(stages, [(True, 3600), (False, 10800 + sd_review.sd_lib.GATE_SLOT_SECONDS)])
         self.assertEqual(trace, ["check", "provider"])
         self.assertEqual(len(state["passes"]), 1)
         self.assertEqual(state["passes"][0]["report"]["completed_reviews"], 1)
