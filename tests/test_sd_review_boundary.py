@@ -890,11 +890,17 @@ class LineBudgetTests(unittest.TestCase):
         # say so in `gate_environment` (+1). The cache itself is
         # `bin/sd_gate_cache.py`, gate code outside the lane as
         # `sd_gate_receipts` is: `sd-review` does not import it.
+        # 4687 -> 4698 is sd:2608: `bin/sd_gate_run.py` +11 so a failed gate's
+        # one-line summary names the steps `sd-check` says failed (`summary_row`,
+        # +6 with its blank lines) within the status bound (+1), then the file
+        # with the whole output (+2) after `WHOLE_OUTPUT` (+2 with its comment),
+        # which `sd_local_gate` cuts from the public status. Reading the steps
+        # out of the output is `bin/sd-check`'s, outside the lane.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4687,
+            4698,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

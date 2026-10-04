@@ -97,6 +97,9 @@ class PrecheckTree(MakefileTree):
         check = next(row for row in report["checks"] if row["name"] == "check")
         self.assertEqual((check["status"], check["exit_code"]), ("fail", None))
         self.assertEqual(check["reason"], "precheck failed, so this did not run")
+        # sd:2608. Each failed record names a step; the unrun check names the precheck.
+        self.assertEqual(check["failed_steps"], ["check: precheck failed, so this did not run"])
+        self.assertTrue(report["precheck"]["failed_steps"])
         return report["precheck"]["stdout"] + report["precheck"]["stderr"]
 
 
@@ -109,6 +112,7 @@ class ThePrecheckGate(PrecheckTree):
         said = self.assert_stopped(report, ran, set())
         self.assertIn("F401 unused import", said)
         self.assertRegex(said, r"\*\*\* \[[^]]*\blint\] Error")
+        self.assertIn("make target lint", report["precheck"]["failed_steps"])
 
     def test_a_failing_always_run_module_stops_the_gate_and_is_named(self) -> None:
         (self.root / "tests/test_ls_files_form.py").write_text(MARKER_LINE + "\n" + FAILING_TEST)
