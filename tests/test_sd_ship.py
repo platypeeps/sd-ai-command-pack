@@ -4822,7 +4822,7 @@ roles:
         state = self.operation().state
         # sd:2611: the execution watchdog also counts the gate-slot phase.
         self.assertEqual(stages, [(True, 3600), (False, 10800 + sd_review.sd_lib.GATE_SLOT_SECONDS)])
-        self.assertEqual(trace, ["check", "provider"])
+        self.assertEqual(trace, ["provider", "check"])  # sd:2605: the reviewers run before the gate
         self.assertEqual(len(state["passes"]), 1)
         self.assertEqual(state["passes"][0]["report"]["completed_reviews"], 1)
 
