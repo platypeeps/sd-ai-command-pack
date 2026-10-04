@@ -14,6 +14,7 @@ usage accounting and provider-charge enforcement remain separate work.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import ipaddress
 import json
@@ -104,6 +105,9 @@ class Provider:
     max_tokens: int | None = None
     thinking: str | None = None
     reasoning_effort: str | None = None
+    #: `json_schema` when the endpoint holds its answer to a caller's schema
+    #: in strict mode (sd:1827); unset sends no response_format at all.
+    response_format: str | None = None
     price: dict[str, float] = field(default_factory=dict)
     env: tuple[str, ...] = ()
     roles: tuple[str, ...] = ()
@@ -206,6 +210,9 @@ def read(
         if any(not hasattr(provider, key) for provider in registry.providers.values() for key in ("thinking", "reasoning_effort")):
             if any(provider.thinking or provider.reasoning_effort for provider in read_file(target).providers.values()):
                 raise RegistryError("installed sd_db cannot preserve reasoning controls; provision the updated library")
+        if any(not hasattr(provider, "response_format") for provider in registry.providers.values()):
+            if _file_declares_response_format(target):
+                raise RegistryError("installed sd_db cannot preserve response_format; provision the updated library")
         # `meter_env` is the file's alone: no row carries it, and a library
         # whose `Bill` does not name it drops the key, so the meter step would
         # cap every metered bill for a field the operator wrote (sd:788).
@@ -310,6 +317,7 @@ def _adapt(registry: Any, meter_envs: Mapping[str, str | None] | None = None) ->
                 max_tokens=provider.max_tokens,
                 thinking=getattr(provider, "thinking", None),
                 reasoning_effort=getattr(provider, "reasoning_effort", None),
+                response_format=getattr(provider, "response_format", None),
                 price=dict(provider.price),
                 env=tuple(provider.env),
                 roles=tuple(provider.roles),
@@ -320,6 +328,19 @@ def _adapt(registry: Any, meter_envs: Mapping[str, str | None] | None = None) ->
             for name, provider in registry.providers.items()
         },
     )
+
+
+def _file_declares_response_format(target: Path) -> bool:
+    """Whether any provider in the file names `response_format`.
+
+    Read as `_file_meter_envs` reads its field, and for the same reason: the
+    library has already accepted the file, and this reader refuses other things.
+    """
+    try:
+        providers = _document(target.read_text(encoding="utf-8"), target).get("providers", {})
+    except (OSError, RegistryError):
+        return False
+    return any(isinstance(body, dict) and body.get("response_format") is not None for body in providers.values())
 
 
 def _file_meter_envs(target: Path) -> dict[str, str | None]:
@@ -619,6 +640,56 @@ def reasoning_controls(body: dict[str, Any], path: Path, name: str) -> dict[str,
     return controls
 
 
+RESPONSE_FORMATS = ("json_schema",)
+
+
+def response_format(body: dict[str, Any], path: Path, name: str) -> str | None:
+    """The entry's opt-in to a strict response_format, or None (sd:1827).
+
+    Per entry, because an endpoint that accepts the field may ignore it:
+    MiniMax-M3 did, and kimi-k3 held its answer to the schema.
+    """
+    value = body.get("response_format")
+    if value is None:
+        return None
+    if not isinstance(value, str) or value not in RESPONSE_FORMATS or not body.get("url"):
+        raise RegistryError(f"{path}: provider {name!r} needs a URL and response_format in {RESPONSE_FORMATS}")
+    return value
+
+
+#: What strict mode rejects, dropped from the copy it is sent; the answer is
+#: still parsed against the full schema, so the checks are kept, not lost.
+STRICT_DROPS = frozenset({"minLength", "maxItems"})
+#: Keys whose mapping holds property names, not keywords: a property may be
+#: called `minLength` or `type` and still be a property.
+NAMED_SCHEMAS = frozenset({"properties", "patternProperties", "$defs", "definitions"})
+
+
+def strict_schema(schema: Any) -> Any:
+    """A copy of `schema` that Moonshot's strict mode accepts (sd:1827).
+
+    It drops `STRICT_DROPS`, as `sd_db.calls` does, and adds what Moonshot
+    asks of a strict schema: a type array becomes `anyOf` one type each, and
+    an enum of strings is typed `string`. The copy is idempotent, so the
+    library's own pass over it changes nothing.
+    """
+    if isinstance(schema, list):
+        return [strict_schema(value) for value in schema]
+    if not isinstance(schema, Mapping):
+        return schema
+    copy = {key: ({name: strict_schema(sub) for name, sub in value.items()}
+                  if key in NAMED_SCHEMAS and isinstance(value, Mapping) else strict_schema(value))
+            for key, value in schema.items() if key not in STRICT_DROPS}
+    kind = copy.get("type")
+    if isinstance(kind, list):
+        del copy["type"]
+        copy = {"anyOf": [{"type": each} for each in kind], **copy}
+    elif kind is None and "anyOf" not in copy and isinstance(copy.get("enum"), list) and copy["enum"] \
+            and all(isinstance(value, str) for value in copy["enum"]):
+        copy = {"type": "string", **copy}
+    return copy
+
+
 def refuse_unbounded(name: str, bill: str, max_tokens: Any, price: Mapping[str, Any], path: Path) -> None:
     """A `url` entry on a capped bill whose bound the ledger could not hold.
 
@@ -881,6 +952,7 @@ def _provider(
         reader=body.get("reader"),
         max_tokens=body.get("max_tokens"),
         **reasoning_controls(body, path, name),
+        response_format=response_format(body, path, name),
         price=dict(body.get("price") or {}),
         env=tuple(str(variable) for variable in (body.get("env") or ())),
         roles=roles,
@@ -1258,17 +1330,39 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-_OPENER = urllib.request.build_opener(_NoRedirect)
+class _LazyOpener:
+    """`build_opener(*handlers)`, built on the first request rather than at import.
+
+    The default `ProxyHandler` asks the system for its proxies when it is
+    built, an IPC round trip of 0.1-0.2 s on macOS, and every `sd-status`,
+    `sd-review` and `sd-ship` process imports this module whether or not it
+    sends a request (sd:1615). The proxies are read once, at the first request.
+    """
+
+    def __init__(self, *handlers: Any) -> None:
+        self._handlers = handlers
+        self._built: urllib.request.OpenerDirector | None = None
+
+    def built(self) -> urllib.request.OpenerDirector:
+        if self._built is None:
+            self._built = urllib.request.build_opener(*self._handlers)
+        return self._built
+
+    def open(self, *args: Any, **kwargs: Any) -> Any:
+        return self.built().open(*args, **kwargs)
+
+
+_OPENER = _LazyOpener(_NoRedirect)
 
 #: For a recipient on this machine. `build_opener` installs a `ProxyHandler`
-#: that reads `HTTP_PROXY` at import, and urllib's bypass list does not
+#: that reads `HTTP_PROXY` when it is built, and urllib's bypass list does not
 #: special-case loopback: on a box where `HTTP_PROXY` is set and `NO_PROXY`
 #: omits `localhost`, a loopback request is forwarded to the proxy and the
 #: diff leaves the machine. An empty mapping installs no proxy at all -- and
 #: `build_opener` drops it rather than registering an inert one -- so the
 #: socket goes where the URL says. A public host keeps `_OPENER`, because a
 #: proxy is how it is reachable at all on such a box.
-_DIRECT_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
+_DIRECT_OPENER = _LazyOpener(urllib.request.ProxyHandler({}), _NoRedirect)
 
 
 def _opener(url: str):
@@ -1281,8 +1375,14 @@ def chat_completion(
     prompt: str,
     environ: Mapping[str, str],
     timeout: int,
+    *,
+    response_schema: Mapping[str, Any] | None = None,
+    schema_name: str = "response",
 ) -> tuple[int, str, str, bool, int | None]:
     """POST one review through the injected OpenAI-compatible transport.
+
+    `response_schema` goes out as a strict `response_format` only for an entry
+    that opted in, in the body `sd_db.calls.call` builds for the ledger road.
 
     Return Completed-compatible fields without importing sd-review: raw body
     in stdout, status-only HTTP errors in stderr, observed HTTP status last.
@@ -1310,6 +1410,9 @@ def chat_completion(
         request_body["thinking"] = {"type": provider.thinking}
     if provider.reasoning_effort is not None:
         request_body["reasoning_effort"] = provider.reasoning_effort
+    if provider.response_format == "json_schema" and response_schema is not None:
+        request_body["response_format"] = {"type": "json_schema", "json_schema": {
+            "name": schema_name, "strict": True, "schema": strict_schema(response_schema)}}
     payload = json.dumps(request_body).encode("utf-8")
     request = urllib.request.Request(
         endpoint(provider),
@@ -1334,6 +1437,31 @@ def chat_completion(
         # `URLError` and a timeout are both `OSError`; neither is an answer, so
         # neither may read as a quota stop however the message is worded.
         return (1, "", f"{provider.name}: {error}", False, None)
+
+
+def strict_fields(provider: Provider, schema: Mapping[str, Any], name: str) -> dict[str, Any]:
+    """`sd_db.calls.call`'s strict-schema keywords for an entry that opted in,
+    and none for any other, so a library older than sd:1827 is asked as before."""
+    if provider.response_format != "json_schema":
+        return {}
+    return {"response_schema": strict_schema(schema), "schema_name": name}
+
+
+def strict_completion(schema: Mapping[str, Any], name: str) -> Client:
+    """`chat_completion` holding `schema` for an entry that opted in (sd:1827)."""
+    return functools.partial(chat_completion, response_schema=strict_schema(schema), schema_name=name)
+
+
+def library_entry(provider_class: Any, provider: Provider) -> Any:
+    """`provider` as the library's `Provider`.
+
+    An unset `response_format` is not handed on, so a library older than
+    sd:1827 still builds every other entry; one that opted in needs it.
+    """
+    fields = {key: value for key, value in vars(provider).items() if key != "response_format" or value is not None}
+    if "response_format" in fields and not hasattr(provider_class, "response_format"):
+        raise RegistryError("installed sd_db cannot send response_format; provision the updated library")
+    return provider_class(**fields)
 
 
 # The meter: one pinned GET per metered bill at review start (sd:788 slice 4)

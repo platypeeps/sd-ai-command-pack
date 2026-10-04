@@ -82,6 +82,10 @@ CORE_CONFIG = {
     "gate_load_max": {"pattern": r"[0-9]+(\.[0-9]+)?",
                       "description": "The gate queue starts a gate only while load1 is below this; 0 is no load "
                                      "condition. Unset reads 2.5 per core; SD_GATE_LOAD_MAX overrides it for one run."},
+    "lane_root": {"pattern": r"[~/][^\x00]*",
+                  "description": "The folder holding each repository's `sd-ship lane` queue, as "
+                                 "<root>/<repository>/lane/queue/. Unset reads $XDG_STATE_HOME/sd/lanes; "
+                                 "SD_LANE_ROOT overrides it. It grants nothing."},
     "gate_settle_seconds": {"pattern": "[0-9]+",
                             "description": "Seconds between two gate starts, and of low load1 while load5 is high; "
                                            "0 is none. Unset reads 45; SD_GATE_SETTLE_SECONDS overrides it for one run."},

@@ -20,6 +20,8 @@ target is not a repository that failed lint.
 Exit 0 when nothing failed, 1 when a check failed, 2 when the invocation or the
 configuration was wrong. A controlled error prints a sentence, never a traceback.
 Only --record-receipt writes local checkpoint evidence; it never changes Git.
+A failing check's whole output is kept as a file in the Git directory, outside
+the tree (`keep_output`, sd:2558): the report holds only each stream's tail.
 The repository's check commands own their effects, including any network calls.
 
 With `--base REF`, a repository that declares a docs-only scope
@@ -41,6 +43,7 @@ import contextlib
 import json
 import os
 import pathlib
+import re
 import signal
 import sys
 import time
@@ -73,6 +76,45 @@ def _tail(text: str) -> tuple[str, bool]:
     if len(text) <= OUTPUT_TAIL_CHARS:
         return text, False
     return text[-OUTPUT_TAIL_CHARS:], True
+
+
+#: Where a failing check's whole output goes, under the Git common directory,
+#: and how many files stay there; the oldest beyond that are removed.
+OUTPUT_FOLDER = "sd-check-output"
+OUTPUT_KEEP = 20
+#: A shard the pack's `run-tests.sh` reports as failed: `shard <name>: <n>s exit=<code>`, code not 0.
+FAILED_SHARD = re.compile(r"^shard \S+: \d+s exit=(?!0$)\d+$", re.MULTILINE)
+FAILED_SHARDS_KEPT = 20
+
+
+def failed_shards(*texts: str) -> list[str]:
+    """Each failed-shard line in the whole output, in order, at most `FAILED_SHARDS_KEPT`.
+
+    A suite's summary ends a long run, so the shard that failed sits in the
+    middle, where the report's tail no longer reaches (sd:2558).
+    """
+    return [match.group(0) for text in texts for match in FAILED_SHARD.finditer(text)][:FAILED_SHARDS_KEPT]
+
+
+def keep_output(root: pathlib.Path, name: str, command: list[str], code: int | None, out: str, err: str) -> str:
+    """Write one failing check's whole output under the Git common directory; return the file's path.
+
+    The gate runs in a temporary worktree that is removed afterwards, and
+    every worktree of a repository shares its common directory, so the file
+    outlives the run. Raises OSError when it cannot be written.
+    """
+    common = sd_lib.git_output(["rev-parse", "--path-format=absolute", "--git-common-dir"], root)
+    if not common:
+        raise OSError(f"{root} has no Git directory to keep the output in")
+    folder = pathlib.Path(common) / OUTPUT_FOLDER
+    folder.mkdir(exist_ok=True)
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    path = folder / f"{stamp}-{os.getpid()}-{name}.log"
+    path.write_text(f"sd-check {name} exit {code} in {root}\ncommand: {' '.join(command)}\n"
+                    f"--- stdout ---\n{out}\n--- stderr ---\n{err}\n", encoding="utf-8")
+    for old in sorted(folder.glob("*.log"))[:-OUTPUT_KEEP]:
+        old.unlink(missing_ok=True)
+    return str(path)
 
 
 def plan(
@@ -184,6 +226,8 @@ def execute(
             "stdout": "",
             "stderr": "",
             "output_truncated": False,
+            "output_path": None,
+            "failed_shards": [],
         }
         if entry["status"] is None:
             command = entry["command"]
@@ -208,6 +252,12 @@ def execute(
                     stderr=err_tail,
                     output_truncated=out_cut or err_cut,
                 )
+                if status == FAIL and (out or err):
+                    record["failed_shards"] = failed_shards(out, err)
+                    try:
+                        record["output_path"] = keep_output(root, str(entry["name"]), command, code, out, err)
+                    except OSError as error:
+                        record["reason"] = "; ".join(filter(None, [note, f"output not kept: {error}"]))
         checks.append(record)
 
     statuses = [str(record["status"]) for record in checks]
@@ -250,13 +300,8 @@ def render(result: dict[str, object], stream: TextIO) -> None:
             f" {float(record['duration_seconds']):6.1f}s  {shown}{note}\n"
         )
     for record in checks:
-        if record["status"] != FAIL:
-            continue
-        write(f"\n--- {record['name']} (exit {record['exit_code']}) ---\n")
-        for channel in ("stdout", "stderr"):
-            text = str(record[channel])
-            if text.strip():
-                write(f"[{channel}]\n{text.rstrip()}\n")
+        if record["status"] == FAIL:
+            render_failure(record, stream)
     slot = result.get("gate_slot")
     if isinstance(slot, dict) and slot.get("slots"):
         write(f"  gate slot: cap {slot['slots']} ({slot['source']}), waited {float(slot['waited_seconds']):.1f}s\n")
@@ -266,6 +311,21 @@ def render(result: dict[str, object], stream: TextIO) -> None:
         write(f"sd-check: {result['status']}\n")
     if result.get("receipt_error"):
         write(f"sd-check: receipt unavailable: {result['receipt_error']}\n")
+
+
+def render_failure(record: dict[str, object], stream: TextIO) -> None:
+    """One failing check: its failed shards and the file with its whole output, then each stream's tail."""
+    write = stream.write
+    write(f"\n--- {record['name']} (exit {record['exit_code']}) ---\n")
+    shards = record.get("failed_shards")
+    for line in shards if isinstance(shards, list) else []:
+        write(f"failed {line}\n")
+    if record.get("output_path"):
+        write(f"whole output: {record['output_path']}\n")
+    for channel in ("stdout", "stderr"):
+        text = str(record[channel])
+        if text.strip():
+            write(f"[{channel}]\n{text.rstrip()}\n")
 
 
 def build_parser() -> argparse.ArgumentParser:

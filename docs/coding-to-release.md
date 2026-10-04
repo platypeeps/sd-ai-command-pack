@@ -25,6 +25,9 @@ In Codex, invoke skills with `$sd-plan`, `$sd-review`, or `$sd-ship`.
 Their absence from the `/` menu does not establish that skills or shell commands are missing.
 The `sd-ship` skill coordinates the sequence; its executable has separate prepare, merge, observe, and reconcile operations.
 For itemless changes, use `--no-item --review-id ID` instead of `--item ID` throughout those operations.
+Get the ID once, from `sd-ship review --no-item --create-record --assert-new-work`: its result prints it as `review_id`.
+An ID is allocated, never chosen; a made-up ID is refused as a missing record.
+A merged record reconciles and closes from the default branch; it needs no recreated feature branch.
 Reuse the stable review record; do not create another record to escape review history.
 Itemless merge remains manual and retains the same protection, ownership, review, and exact-head gates.
 Do not run every listed check twice: the local review also invokes the repository gate.
