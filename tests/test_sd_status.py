@@ -550,6 +550,20 @@ class GapVocabularyTests(unittest.TestCase):
             "(pack only, system only) merge flag ids",
         )
 
+    def test_the_baseline_flags_are_the_systems_ids_and_sentences(self) -> None:
+        """sd:1807. Same ids, values and sentences as `sd_db.protection.baseline_flags`."""
+        import sd_db.protection as system  # noqa: PLC0415 - provisioned by `make setup`
+
+        self.assertEqual(status.BASELINE_FLAG_IDS, system.BASELINE_FLAG_IDS)
+        ruleset = {"source": "ruleset", "required_status_checks": {"contexts": ["ci", "body-lint"]}}
+        classic = {"required_status_checks": {"contexts": ["CI Result"]}}
+        for protection, classic_present, ci in [(None, False, None), (classic, True, None), (ruleset, False, None),
+                                                (ruleset, True, None), (ruleset, False, "local"),
+                                                ({"source": "combined"}, True, "local")]:
+            with self.subTest(protection=protection, classic_present=classic_present, ci=ci):
+                self.assertEqual(status._baseline_flags(protection, True, classic_present, ci),
+                                 system.baseline_flags(protection, "platypeeps", classic_present, ci))
+
 
 class AcknowledgementTests(unittest.TestCase):
     """`.github/sd-status.json`: what it accepts, and when it stops accepting.
@@ -6174,6 +6188,92 @@ class RulesetProtectionCase(unittest.TestCase):
         self.assertIn("gh: Not Found (HTTP 404)", result["reason"])
         self.assertEqual(result["detail"]["rules_read_error"], "gh: Not Found (HTTP 404)")
 
+
+
+class BaselineFlagCase(unittest.TestCase):
+    """The fleet baseline's two flags, as `sd_db.protection` writes them (sd:1807).
+
+    The dashboard showed `protection_source` (rulesets alone, no classic
+    object) and `required_check` (`ci`, or `sd/local-gate` under `repo.ci =
+    local`) for every owned repository; `sd-status` printed neither. They ride
+    in `merge_settings` beside the merge flags, so no acknowledgement reaches
+    them, and a repository outside the configured owners carries neither.
+    """
+
+    SLUG = "platypeeps/widget"
+    GH = {"available": True, "slug": SLUG, "reason": ""}
+    REPO = RulesetProtectionCase.REPO
+    CLASSIC = {"enforce_admins": {"enabled": True},
+               "required_status_checks": {"strict": True, "contexts": ["CI Result"]},
+               "required_pull_request_reviews": {"required_approving_review_count": 1}}
+
+    @staticmethod
+    def rules(context: str) -> list[dict[str, Any]]:
+        return [{"type": "pull_request", "ruleset_id": 42, "parameters": {"required_approving_review_count": 1}},
+                {"type": "required_status_checks", "ruleset_id": 42,
+                 "parameters": {"strict_required_status_checks_policy": True,
+                                "required_status_checks": [{"context": context}]}}]
+
+    def flags(self, classic: dict[str, Any] | None, rules: list[dict[str, Any]], *, ci: str = "github",
+              owners: tuple[str, ...] = ("platypeeps",), admin: bool = True) -> dict[str, dict[str, Any]]:
+        repo = dict(self.REPO, permissions={"admin": admin})
+
+        def answer(args: list[str], root: pathlib.Path) -> tuple[Any, str]:
+            path = urlsplit(args[1]).path
+            if path == f"repos/{self.SLUG}":
+                return dict(repo), ""
+            if path.endswith("/branches/main/protection"):
+                return (classic, "") if classic is not None else (None, "gh: Branch not protected (HTTP 404)")
+            if path.endswith("/rules/branches/main"):
+                return rules, ""
+            if path.endswith("/rulesets/42"):
+                return RulesetProtectionCase.RULESET, ""
+            raise AssertionError(f"unexpected read {path}")
+
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(status.pr_state, "gh_json", answer), \
+                mock.patch.object(status.sd_lib, "ci_mode", lambda root: ci), \
+                mock.patch.object(status, "_baseline_owners", lambda: (owners, "")):
+            section = status.protection_section(pathlib.Path(directory), self.GH)
+        return {flag["id"]: flag for flag in section["merge_settings"]}
+
+    def test_a_ruleset_alone_requiring_ci_raises_neither_flag(self) -> None:
+        flags = self.flags(None, self.rules("ci"))
+        self.assertEqual({key: (flags[key]["value"], flags[key]["flagged"]) for key in status.BASELINE_FLAG_IDS},
+                         {"protection_source": ("ruleset", False), "required_check": ("ci", False)})
+
+    def test_classic_protection_without_ci_raises_both(self) -> None:
+        flags = self.flags(self.CLASSIC, [])
+        self.assertEqual((flags["protection_source"]["value"], flags["protection_source"]["flagged"]), ("classic", True))
+        self.assertEqual((flags["required_check"]["value"], flags["required_check"]["flagged"]), ("CI Result", True))
+        self.assertIn("`ci` is not a required check", flags["required_check"]["gap"])
+
+    def test_a_classic_object_that_gates_nothing_beside_a_ruleset_still_raises_the_source(self) -> None:
+        """The layered result reads `ruleset`, but the classic object still stands."""
+        flag = self.flags({"enforce_admins": {"enabled": True}}, self.rules("ci"))["protection_source"]
+        self.assertEqual((flag["value"], flag["flagged"]), ("ruleset, beside a classic object", True))
+
+    def test_a_local_ci_repository_is_judged_on_the_local_gate(self) -> None:
+        self.assertTrue(self.flags(None, self.rules("ci"), ci="local")["required_check"]["flagged"])
+        flag = self.flags(None, self.rules("sd/local-gate"), ci="local")["required_check"]
+        self.assertFalse(flag["flagged"])
+        self.assertIn("`sd/local-gate`", flag["gap"])
+
+    def test_an_unprotected_branch_raises_both_with_none(self) -> None:
+        flags = self.flags(None, [])
+        self.assertEqual({key: (flags[key]["value"], flags[key]["flagged"]) for key in status.BASELINE_FLAG_IDS},
+                         {"protection_source": ("none", True), "required_check": ("none", True)})
+
+    def test_another_owners_repository_carries_neither(self) -> None:
+        flags = self.flags(self.CLASSIC, [], owners=("example-corp",))
+        self.assertEqual(sorted(flags), ["rebase_merge", "squash_message"])
+
+    def test_unknown_protection_carries_neither(self) -> None:
+        """A classic 404 to a token without admin is unknown: no verdict on the baseline either."""
+        self.assertEqual(sorted(self.flags(None, [], admin=False)), ["rebase_merge", "squash_message"])
+
+    def test_neither_flag_is_acknowledgeable(self) -> None:
+        self.assertEqual(sorted(set(status.BASELINE_FLAG_IDS) & set(status.ACKNOWLEDGEABLE_GAPS)), [])
 
 
 class ClassicAndRulesetProtectionCase(unittest.TestCase):

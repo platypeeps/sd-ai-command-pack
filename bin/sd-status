@@ -786,6 +786,50 @@ def _merge_settings(repo: dict[str, Any]) -> list[dict[str, Any]]:
     return flags
 
 
+#: The fleet baseline's two flags (sd:1741), with the ids, values and
+#: sentences `sd_db.protection.baseline_flags` writes for the dashboard
+#: (sd:1807). Like the merge flags they ride in `merge_settings`, so no
+#: acknowledgement reaches them; `GapVocabularyTests` binds them to the system's.
+BASELINE_FLAG_IDS = ("protection_source", "required_check")
+
+
+def _baseline_owners() -> tuple[tuple[str, ...], str]:
+    """The owners whose repositories carry the baseline, `fleet.owners` as `sd fleet stamp` reads it, and why not."""
+    import sd_fleet  # noqa: PLC0415 - only the baseline flags read the fleet config
+
+    try:
+        return sd_fleet.configured_owners(), ""
+    except sd_fleet.FleetRefusal as error:
+        return (), str(error)
+
+
+def _baseline_flags(protection: dict[str, Any] | None, owned: bool, classic_present: bool,
+                    ci: str | None) -> list[dict[str, Any]]:
+    """The two baseline flags for an owned repository, else none: another owner's baseline is not the fleet's.
+
+    `protection_source` is raised unless rulesets alone protect the branch;
+    `classic_present` says a classic object stood though the layered result
+    reads `ruleset`. `required_check` is raised unless the baseline check is
+    required: `ci`, or `sd/local-gate` under `repo.ci = local`.
+    """
+    if not owned:
+        return []
+    source = "none" if protection is None else str(protection.get("source") or sd_protection.CLASSIC_SOURCE)
+    if source == sd_protection.RULESET_SOURCE and classic_present:
+        source = f"{sd_protection.RULESET_SOURCE}, beside a classic object"
+    checks = (protection or {}).get("required_status_checks")
+    contexts = [str(name) for name in checks.get("contexts") or []] if isinstance(checks, dict) else []
+    check = sd_lib.LOCAL_GATE_CONTEXT if ci == "local" else "ci"
+    return [
+        {"id": "protection_source", "value": source, "flagged": source != sd_protection.RULESET_SOURCE,
+         "gap": (f"the default branch is protected by {source}, not by rulesets alone; "
+                 "the fleet baseline is one repository ruleset and no classic protection")},
+        {"id": "required_check", "value": ", ".join(contexts) or "none", "flagged": check not in contexts,
+         "gap": (f"`{check}` is not a required check; the fleet baseline requires "
+                 f"one aggregate check named `{check}`, and other names may stand beside it")},
+    ]
+
+
 def produced_contexts(root: pathlib.Path) -> tuple[set[str], list[str]]:
     """The contexts this repository produces: its workflows', or the local gate.
 
@@ -801,6 +845,32 @@ def produced_contexts(root: pathlib.Path) -> tuple[set[str], list[str]]:
 
 
 def protection_section(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any]:
+    """The branch's protection, its gaps, and its merge-settings and baseline flags."""
+    section = _protection_reading(root, gh)
+    section["merge_settings"] += _baseline_for(root, str(gh.get("slug") or ""), section)
+    return section
+
+
+def _baseline_for(root: pathlib.Path, slug: str, section: dict[str, Any]) -> list[dict[str, Any]]:
+    """The baseline flags, read off a finished section; none while protection is unknown (sd:1807).
+
+    `detail` already carries what `_baseline_flags` reads: the layered
+    `source` (absent for classic alone), the required contexts, and
+    `classic_visibility`, `present` where a classic object stood beside rulesets.
+    """
+    if section["protected"] is None:
+        return []
+    owners, problem = _baseline_owners()
+    detail = section["detail"]
+    if problem:
+        detail.setdefault("workflow_notes", []).append(f"baseline flags not judged: {problem}")
+    protection = {"source": detail.get("source"),
+                  "required_status_checks": {"contexts": detail.get("required_contexts") or []}}
+    return _baseline_flags(protection if section["protected"] else None, slug.split("/")[0].lower() in owners,
+                           detail.get("classic_visibility") == "present", sd_lib.ci_mode(root))
+
+
+def _protection_reading(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any]:
     produced, notes = produced_contexts(root)
     acknowledgements, problems = load_acknowledgements(root)
     # A file that exists and is wrong is itself a finding, reported wherever

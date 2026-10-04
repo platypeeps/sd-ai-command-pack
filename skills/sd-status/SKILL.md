@@ -48,7 +48,7 @@ opens with fifteen top-level lines; the fourteen below are the sections.
 | `detected setup` | mode, lowering reason, shared-tree paths to move, and detected check entrypoints |
 | `issues (this repo, from the index)` | indexed issues for this repository, split into the ones the index says need you and the rest |
 | `jira (shared database, all repositories)` | the operator's Jira involvement from the shared database, across every repository: one line per ticket, key and state, open rows first, then rows closed within seven days. Not scoped to the checkout |
-| `protection` | branch-protection **enforcement**, gap by gap, plus the two merge-settings flags |
+| `protection` | branch-protection **enforcement**, gap by gap, plus the merge-settings and fleet-baseline flags |
 | `resumable handoffs` | the pending local packet for this directory (**read, never consumed**) |
 | `backends` | the review lanes the provider registry declares, plus `copilot`, which no entry names — names and states only, enumerated at runtime |
 | `legacy residue` | legacy leftovers, each with the exact command that removes it |
@@ -322,6 +322,10 @@ missing leg prints as a named gap:
 - `reviews` — no PR review required, or zero required approvals
 - the two r7 merge-settings flags: squash title/message source (a `wip:`
   subject reaching main) and whether rebase-merge is allowed
+- the two fleet-baseline flags, for a repository whose owner is in
+  `fleet.owners` (sd:1807): `protection_source`, raised unless rulesets alone
+  protect the branch, and `required_check`, raised unless `ci` is required
+  (`sd/local-gate` under `repo.ci = local`). The dashboard shows the same ids.
 
 **A finding is a report, not a failure.** The command exits 0 whether or not it
 found gaps or abnormalities. Exit 2 is reserved for an invocation or
