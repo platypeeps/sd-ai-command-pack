@@ -2399,6 +2399,22 @@ def validate_identity(args) -> None:
         raise review_identity_required()
 
 
+def whole_option_names(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    """`parser` and every subcommand under it, with argparse's prefix matching off (sd:2646).
+
+    With it on, `prepare --pr 207` parsed as `--provider 207`: prepare has no
+    `--pr`, and `--pr` is a prefix of exactly one option. The review then asked
+    for a provider named 207 and refused on every run. An option is now its
+    whole name, and an unknown one is an error.
+    """
+    parser.allow_abbrev = False
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            for child in action.choices.values():
+                whole_option_names(child)
+    return parser
+
+
 def parser():
     command = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
                                       epilog=BODY_EPILOG)
@@ -2455,7 +2471,7 @@ def parser():
             action.add_argument("--expected-head", required=True)
         if name == "adjudicate":
             adjudication_flags(action)
-    return command
+    return whole_option_names(command)
 
 
 BODY_EPILOG = """\
