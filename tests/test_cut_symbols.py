@@ -213,12 +213,18 @@ FROZEN_FIELD_READERS = frozenset({
     ("bin/sd-status", 'live = [entry for entry in work["items"] if not entry["archived"]]'),
 })
 
-#: An attribute or key read of either field. `git grep -E` on this platform
-#: has no `\b`, so the attribute form is bounded by hand. `parked` stays in
-#: the pattern after its cut: the pattern is what proves the cut held, and a
-#: read of the gone field anywhere under `bin` must fail rather than pass
-#: silently because the grep stopped looking for it.
-FIELD_READ = r'\.(parked|archived)([^A-Za-z_]|$)|\["(parked|archived)"\]'
+#: An attribute or key read of either field: `.archived`, a subscript in
+#: either quote, `.get("archived")` and `getattr(x, "archived")`. The last
+#: three were invisible until sd:999 (review-995), so a reader spelled that way
+#: grew the set past both tests. `git grep -E` on this platform has no `\b`,
+#: so the attribute form is bounded by hand. `parked` stays in the pattern
+#: after its cut: the pattern is what proves the cut held, and a read of the
+#: gone field anywhere under `bin` must fail rather than pass silently because
+#: the grep stopped looking for it.
+FIELD_READ = (r"""\.(parked|archived)([^A-Za-z_]|$)"""
+              r"""|\[["'](parked|archived)["']\]"""
+              r"""|\.get\(["'](parked|archived)["']"""
+              r"""|getattr\([^,]+,[[:space:]]*["'](parked|archived)["']""")
 
 
 def field_readers() -> list[tuple[str, str]]:
@@ -269,6 +275,25 @@ class ParkedAndArchivedReaders(unittest.TestCase):
     def test_the_readers_are_the_frozen_set_and_no_more(self) -> None:
         unexpected = [site for site in field_readers() if site not in FROZEN_FIELD_READERS]
         self.assertEqual(unexpected, [], "a new reader of parked/archived appeared")
+
+    def test_the_pattern_reads_every_spelling_of_a_read(self) -> None:
+        """sd:999 (review-995). A reader the pattern cannot see grows the set unseen.
+
+        The pattern read `.archived` and `["archived"]` only, so
+        `entry.get("archived")`, `entry['archived']` and
+        `getattr(entry, "archived")` would each pass both frozen-set tests.
+        The near misses are field names that only begin with the word.
+        """
+        for line in ('entry.get("parked")', "entry.get('archived', False)",
+                     "entry['archived']", 'getattr(entry, "parked")',
+                     "getattr(item, 'archived', None)", "item.archived,",
+                     'entry["parked"]'):
+            with self.subTest(line=line):
+                self.assertTrue(_matches(FIELD_READ, line), line)
+        for line in ('entry.get("parked_at")', "entry['archived_by']",
+                     "self.archive_dir", 'getattr(entry, "parkedness")'):
+            with self.subTest(line=line):
+                self.assertFalse(_matches(FIELD_READ, line), line)
 
     def test_the_grep_reaches_the_sites_it_freezes(self) -> None:
         """The control: a frozen site the grep no longer finds is either cut,
