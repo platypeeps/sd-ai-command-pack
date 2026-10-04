@@ -2336,6 +2336,12 @@ def body_diff(root: pathlib.Path, api: GitHub | None, number: int | None) -> tup
     return changed, (f"{base}...HEAD" if changed is not None else base)
 
 
+def unmanaged_refusal(why: str) -> Refusal:
+    """A checkout the sd database marks unmanaged (sd:2566): no prepare, merge or record runs there."""
+    return Refusal(why, code="unmanaged_repository", boundary="policy", state="operator_decision",
+                   next_action="Mark the repository managed with sd-db.sh repo managed, or ship it without the pack.")
+
+
 def outside_repository() -> Refusal:
     """Name the directory, as the other lane commands do: under `-C` it is the -C one (sd:2499)."""
     return Refusal(f"{pathlib.Path.cwd()} is not inside a Git repository")
@@ -2513,6 +2519,7 @@ def main(argv=None) -> int:
         root = sd_lib.repo_root(None)
         if root is None:
             raise outside_repository()
+        sd_lib.refuse_unmanaged(root, unmanaged_refusal, args.database)
         database = args.database or default_path()
         readonly = args.command in ("observe", "verify-review") or (args.command == "adjudicate" and args.accept_dispositions is None)
         connection = connect(database, write=not readonly)

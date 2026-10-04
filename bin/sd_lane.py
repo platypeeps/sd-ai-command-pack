@@ -141,6 +141,7 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
     reach prepare unchanged.
     """
     worktree = worktree.resolve()
+    sd_lib.refuse_unmanaged(worktree, LaneError)  # its prepare would refuse; do not queue it
     if claim not in CLAIMS:
         raise LaneError("name the delivery claim prepare needs: --deliver for the item's last pull request, "
                         "or --associate-only for an earlier one")

@@ -55,6 +55,10 @@ Do not replace required approval with a proposal that the user can veto afterwar
 
 These run without being asked.
 
+- No pack command runs in a checkout whose `repo.managed` is no (sd:1620, sd:2566).
+  `sd-ship`, `sd-review`, `sd-check`, `sd-status` and `sd-ship lane enqueue` refuse there, dry runs included.
+  The refusal names the remedy: `sd-db.sh repo managed <path> yes`.
+  A checkout with no row proceeds; only a row marked unmanaged refuses.
 - `sd-status` reports. It never writes.
 - `sd-review --scope branch --challenge` runs on the machine before a push.
   Blocking findings are fixed or recorded before the branch leaves.
