@@ -780,6 +780,19 @@
 
 ### Changed
 
+- **The gate-slot count is the one limit on concurrent gates (sd:2607).**
+  On 2026-10-03 three gates read a load average of 124 while most cores idled,
+  because macOS counts threads waiting on the disk in it. The gate queue's
+  load rule is now off unless `sd.gate_load_max` sets it; starts stay 45 s apart.
+  `sd-check --slot-timeout` bounds the queue apart from `--timeout`, so a
+  queued gate's checks keep their whole bound. `sd gate check` queues for up to
+  4 hours. A holder exports its cap as `SD_GATE_POOL_SIZE`, and `run-tests.sh`
+  sizes its local workers to twice the CPUs over that cap: 8 at the cap of 4 on
+  16 CPUs, as before. The builder brief and `WORKFLOW.md` drop the advice to
+  wait on the load average or wrap a gate in `lockf`. `sd-review --gate-check`
+  and `sd-ship prepare`/`merge` keep the old bound; their watchdog plans do not
+  count a separate queue time yet.
+
 - **Builders gate first, then review the gated head (sd:2603, slice 1).** The `sd-slice-builder` agent, the `sd-review` skill and `WORKFLOW.md` (Parallel work, Reviews, Defaults) now order each branch round under `repo.ci = local`: `sd gate check --base main` at the head, then `sd-review --scope branch --gate-check main` within the 30-minute reuse window, with the same environment, so the round reads the gate's pass instead of running a second full check. A fix commit needs a new gate pass before the next round. The plain `sd-review --scope branch` form is ruled out there: it runs a full check in the checkout, outside any lock around the gate, and reuses no pass. Docs only; `bin/sd-review` is unchanged.
 
 - **A task or followup merged associate-only can be delivered afterwards
