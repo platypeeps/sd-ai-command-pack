@@ -199,7 +199,7 @@ class SuggestCase(unittest.TestCase):
         for key, value in values.items():
             was = os.environ.get(key)
             os.environ[key] = value
-            self.addCleanup(lambda k=key, v=was: os.environ.__setitem__(k, v) if v
+            self.addCleanup(lambda k=key, v=was: os.environ.__setitem__(k, v) if v is not None
                             else os.environ.pop(k, None))
 
     def unset_environment(self, *keys: str) -> None:
@@ -251,6 +251,19 @@ class SuggestCase(unittest.TestCase):
             "SELECT url, kind, state, title, repo FROM shadow ORDER BY url")
         return [dict(row) for row in rows]
 
+
+
+class EnvironmentHelperTests(unittest.TestCase):
+    """sd:1002: the fixture's own environment helpers put back exactly what was there."""
+
+    def test_a_value_that_was_empty_comes_back_empty_and_an_absent_one_absent(self) -> None:
+        with patch.dict(os.environ, {"SD_SUGGEST_PROBE_EMPTY": ""}):
+            os.environ.pop("SD_SUGGEST_PROBE_ABSENT", None)
+            probe = SuggestCase("environment")  # setUp is not run, so only the helper's cleanups are registered
+            probe.environment(SD_SUGGEST_PROBE_EMPTY="x", SD_SUGGEST_PROBE_ABSENT="y")
+            probe.doCleanups()
+            self.assertEqual(os.environ.get("SD_SUGGEST_PROBE_EMPTY"), "")
+            self.assertNotIn("SD_SUGGEST_PROBE_ABSENT", os.environ)
 
 class TheCriterion(SuggestCase):
     """The four clauses, each as one assertion about what actually happened."""

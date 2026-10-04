@@ -249,7 +249,7 @@ class ReceiptTests(ReviewFixture):
             result = sd_review.review(self.root, namespace(scope="branch", reuse_check=opt_in, database=self.database),
                                       runner, self.env, self.chatgpt_home())
             self.assertEqual(sum("sd-check" in " ".join(call["argv"]) for call in runner.calls), expected_calls)
-            self.assertEqual(result["check"].get("source"), "receipt" if opt_in else None)
+            self.assertEqual(result["check"].get("source"), "receipt" if opt_in else "worktree")
 
     def test_controlled_environment_never_copies_or_hashes_credentials(self):
         env = dict(self.env, API_TOKEN="synthetic-sensitive-value")

@@ -133,6 +133,54 @@ class GateCheck(GateRepo):
         self.assertEqual(pathlib.Path(taken["path"]).parent, slots)
 
 
+class BranchReviewCheck(ReviewFixture):
+    """sd:2077: a branch review checks the committed head in a clean worktree, never the live checkout.
+
+    `sd-ship review` ran `sd-check` in the operator's checkout; an edit to the
+    check script mid-run killed it with half a word as a command, and the tree
+    it judged was no longer the head under review.
+    """
+
+    def repo(self) -> pathlib.Path:
+        root = self.make_repo()
+        self.trace = self.tmp / "ran"
+        self.local_block(root, "check: sh check.sh")
+        (root / "check.sh").write_text(f"echo committed >> {self.trace}\n", encoding="utf-8")
+        git(root, "add", "-A")
+        git(root, "commit", "-q", "-m", "check")
+        git(root, "checkout", "-q", "-b", "topic")
+        (root / "src.py").write_text("x = 1\n", encoding="utf-8")
+        git(root, "add", "src.py")
+        git(root, "commit", "-q", "-m", "change\n\nAuthored-with: human")
+        # The operator keeps editing while the review runs.
+        (root / "check.sh").write_text(f"echo live >> {self.trace}\nexit 1\n", encoding="utf-8")
+        return root
+
+    def runner(self) -> FakeRunner:
+        return FakeRunner({"sd-check": lambda argv, env, cwd, limit: sd_review.subprocess_runner(argv, env, cwd, limit)})
+
+    def test_a_branch_review_checks_the_committed_head_not_the_live_checkout(self) -> None:
+        root = self.repo()
+        for scope in ("branch", "pr"):
+            with self.subTest(scope=scope):
+                self.trace.unlink(missing_ok=True)
+                runner = self.runner()
+                report = sd_review.review(root, namespace(scope=scope), runner, self.environment(), self.chatgpt_home())
+                self.assertEqual(self.trace.read_text().split(), ["committed"], json.dumps(report.get("check"))[:2000])
+                self.assertEqual((report["check"]["status"], report["check"]["head"]),
+                                 ("pass", git(root, "rev-parse", "HEAD")))
+                [call] = [call for call in runner.calls if any("sd-check" in word for word in call["argv"])]
+                self.assertNotEqual(call["cwd"], root)
+                self.assertIn("exit 1", (root / "check.sh").read_text(), "the operator's edit is left alone")
+
+    def test_a_worktree_review_still_checks_the_live_checkout(self) -> None:
+        """The uncommitted change is a worktree review's subject, so its check runs where it is."""
+        root = self.repo()
+        runner = self.runner()
+        report = sd_review.review(root, namespace(scope="worktree"), runner, self.environment(), self.chatgpt_home())
+        self.assertEqual((report["status"], self.trace.read_text().split()), ("gate_failed", ["live"]))
+
+
 class BuilderFixture(GateRepo):
     """`GateRepo` plus a builder's `sd gate check` and a count of the check's runs."""
 
