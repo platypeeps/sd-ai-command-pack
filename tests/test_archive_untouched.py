@@ -225,7 +225,9 @@ class TheArchiveBoundary(unittest.TestCase):
 #: cut removed was never among them. Requirement 13 cuts the
 #: `RESIDUE` tuple after one clean fleet run, which takes five: the assertion
 #: is a subset, so that cut lowers the count without touching this file, and
-#: a ninth site fails it.
+#: an unlisted site fails it. The ninth, added for sd:2598, removes a warm Rust
+#: build folder of the local gate's cache under that folder's lock: a build
+#: cache, never a work item.
 FROZEN_DELETION_SITES = frozenset({
     ("bin/sd-status", "git rm -r --cached --ignore-unmatch .trellis && rm -rf .trellis"),
     ("bin/sd-status", "git config --unset core.hooksPath; git rm -r --ignore-unmatch .githooks"),
@@ -235,6 +237,7 @@ FROZEN_DELETION_SITES = frozenset({
     ("bin/sd_install.py", "Bounded by `rmdir` refusing a non-empty directory: the loop cannot escape"),
     ("bin/sd_install.py", "current.rmdir()"),
     ("bin/sd_install.py", "tracked file. Untrack it (git rm --cached) and re-run."),
+    ("bin/sd_gate_cache.py", "shutil.rmtree(folder, ignore_errors=True)"),
 })
 
 DELETION_VERBS = r"git rm|rmtree|rmdir"
