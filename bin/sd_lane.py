@@ -84,7 +84,6 @@ CLAIMS = ("deliver", "associate-only")
 Ship = Callable[[list[str], pathlib.Path], dict[str, Any]]
 #: `(root, head, base) -> the gate's result`: the next entry's gate on a predicted landing (sd:2586).
 Gate = Callable[[pathlib.Path, str, str], dict[str, Any]]
-SCRATCH_GIT_SECONDS = 60
 
 
 class LaneError(RuntimeError):
@@ -261,15 +260,14 @@ def scratch_git(tree: pathlib.Path, *args: str) -> str | None:
     """`git` for a speculation: stripped stdout, or None on any failure.
 
     No hook runs, since what a hook does is not what prepare's merge makes.
-    The bound is `SCRATCH_GIT_SECONDS`, not `sd_lib`'s 15: a worktree of the
-    whole tree, or a fetch, outlasts that on a loaded machine.
+    It runs through the gate's `gate_git`, whose bound a worktree of the whole
+    tree, or a fetch, needs on a loaded machine; `sd_lib`'s 15 s is too short.
     """
+    import sd_gate_run  # noqa: PLC0415 -- the gate loads only for a speculation
     try:
-        done = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", *args], cwd=tree, capture_output=True, text=True,
-                              timeout=SCRATCH_GIT_SECONDS, check=False)
-    except (OSError, subprocess.SubprocessError):
+        return sd_gate_run.gate_git(tree, "-c", "core.hooksPath=/dev/null", *args)
+    except sd_gate_run.GateError:
         return None
-    return done.stdout.strip() if done.returncode == 0 else None
 
 
 def catch_up_in(tree: pathlib.Path, ref: str, message: str) -> bool:
