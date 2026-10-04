@@ -58,7 +58,7 @@ def cargo_pool(environ: Mapping[str, str]) -> int:
 
 def uses_cargo(tree: pathlib.Path) -> bool:
     """Whether the commit tracks a `Cargo.toml`, at the top or below it."""
-    listed = sd_lib.git_output(["ls-files", "-z", "--", "*Cargo.toml"], tree) or ""
+    listed = sd_lib.git_output(["ls-files", "-z", "--deduplicate", "--", "*Cargo.toml"], tree) or ""
     return any(pathlib.PurePosixPath(name).name == "Cargo.toml" for name in listed.split("\0") if name)
 
 
