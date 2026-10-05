@@ -99,6 +99,8 @@ class OffloadRows(SatelliteFixture):
         self.assertEqual(row["pack_bin"], sd_gate_receipts.pack_bin())
         self.assertEqual(row["local_block"], "absent")
         self.assertIn("make", row["offload_view"]["tools"])
+        self.assertEqual(row["offload_view"]["python"], {
+            "sha256": sd_gate_receipts._content_digest(pathlib.Path(sys.executable).resolve()), "version": sys.version})
         self.assertNotIn("receipt_revision", row["reading"])
 
     def test_the_offload_row_holds_no_variable_value(self) -> None:

@@ -83,6 +83,14 @@ class GateCompare(rows.SatelliteFixture):
                 offload_view={**view, "variables": {**view["variables"], "LANG": "xx_XX.UTF-8"}})
         self.assertIn("LANG", self.refused("satellite_binding")["offload_refused"]["reason"])
 
+    def test_clause_5_another_interpreter_running_sd_check_refuses_as_binding(self) -> None:
+        """The view binds the interpreter that runs `sd-check` (`sys.executable`), not only `PATH`'s `python3`."""
+        view = self.row(self.key)["offload_view"]
+        rewrite(self.database, self.key, offload_view={**view, "python": {**view.get("python", {}), "sha256": "0" * 64}})
+        self.assertIn("python at sha256", self.refused("satellite_binding")["offload_refused"]["reason"])
+        rewrite(self.database, self.key, offload_view={name: part for name, part in view.items() if name != "python"})
+        self.assertIn("part python", self.refused("satellite_binding")["offload_refused"]["reason"])
+
     def test_clause_6_another_pack_refuses_as_pack_mismatch(self) -> None:
         rewrite(self.database, self.key, pack_bin="0" * 64)
         self.refused("satellite_pack_mismatch")

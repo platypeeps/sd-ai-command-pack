@@ -133,7 +133,7 @@ once step 2a lands.
 | `inputs` | yes | Hashes the head or tree, `CLAUDE.local.md` and the pack `bin/`. Equal inputs mean the same pack and the same local block. `pack_bin` and `local_block` name which part differs |
 | `scope`, `detection` | yes | Pack code over the tree, the local block and the base. A difference means another command ran |
 | `tools` | through `offload_view`, after step 2a | Paths may differ between logins; bytes must not. A tool the hub cannot resolve is recorded, not compared, and named in the merge's provenance |
-| `python` | through `offload_view`, after step 2a: `python3` is in `OFFLOAD_TOOLS` | sd:2724 measured equal digests on both machines |
+| `python` | through `offload_view`'s `python` part: the bytes and version of `sys.executable`, which runs `sd-check`; `python3` on `PATH` stays in `OFFLOAD_TOOLS` | sd:2724 measured equal digests on both machines. On 2026-10-05 all 155 gate receipts in the hub's database since id 29000, the satellite's revision 29982 among them, named one `sys.executable`: Homebrew `python@3.14` 3.14.8, one sha256 |
 | `environment` | no; `offload_view` stands in for it, after step 2a | The digest holds `HOME`, `USER` and absolute `PATH` entries, so it never matches across logins |
 | `satellite` | no, recorded | `serve` admitted only the operator's untagged node (sd:1335 step 7). A second check reads the same claim |
 
@@ -154,12 +154,13 @@ tool configuration.
 
 The satellite writes `offload_view` from the run's own environment. Only the
 hub reads it, only on the offload path, and only when `repo.satellite_gate`
-is `accept`. It has four parts:
+is `accept`. It has five parts:
 
 | Part | Content | What it covers |
 |---|---|---|
 | `path` | the gate's `PATH` entries in order, each `$HOME` prefix written as `~` | Equal order: a name resolves through the same directory on both sides |
 | `tools` | sha256 of each name in `OFFLOAD_TOOLS`, resolved on that `PATH`, and of each tool `gate_binding` resolves | A name the check reaches through `make` or a script has equal bytes |
+| `python` | sha256 of the bytes of `sys.executable`, resolved, and `sys.version` | The interpreter that runs `sd-check` is equal, even when the gate was started through a virtualenv or an explicit path that `PATH`'s `python3` does not name |
 | `home_files` | sha256 of each file in `OFFLOAD_HOME_FILES` under `HOME`, or `"absent"` | Named tool configuration under `HOME` is equal |
 | `variables` | sha256 of the value of every other variable `gate_environment` keeps, with the `$HOME` prefix written as `~` first, so a row holds no credential | A variable that steers the check is equal. A variable present on one side only misses |
 
@@ -182,6 +183,9 @@ Residual risk on the offload path:
 - tool configuration under `HOME` outside `OFFLOAD_HOME_FILES`, and outside
   `HOME`, such as `/etc` or the package manager's prefix;
 - shared libraries that the compared tools load.
+- the packages installed for the interpreter: a virtualenv's `python` resolves to
+  its base interpreter, so the `python` part binds that binary, not the
+  virtualenv's `site-packages`.
 
 A repository whose check depends on one of these leaves `repo.satellite_gate`
 off.

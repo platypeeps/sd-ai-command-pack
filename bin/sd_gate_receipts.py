@@ -258,7 +258,8 @@ def offload_view(environment: Mapping[str, str], names: Iterable[str] = ()) -> d
     Local reuse never reads it: `gate_binding` binds the whole environment (C-17). The view leaves out
     `OFFLOAD_LEFT_OUT` and writes each `$HOME` prefix as `~`, so two logins can compare equal, and binds what they
     select instead: `path`, the `PATH` entries in order; `tools`, the bytes of each name in `OFFLOAD_TOOLS`
-    and `names` resolved on that `PATH`, or None for one that does not resolve; `home_files`, the bytes of
+    and `names` resolved on that `PATH`, or None for one that does not resolve; `python`, the bytes and version of
+    `sys.executable`, the interpreter that runs `sd-check` whatever `PATH` says; `home_files`, the bytes of
     each `OFFLOAD_HOME_FILES` entry under `HOME`, or "absent"; `variables`, the sha256 of every other variable's
     value, so a row on the hub holds no credential the gate environment keeps.
     `names` are the check's own executables; one with a relative folder lives in the tree, which `inputs` binds.
@@ -280,6 +281,7 @@ def offload_view(environment: Mapping[str, str], names: Iterable[str] = ()) -> d
                 found = shutil.which(name, path=search)
                 tools[name] = _content_digest(found) if found else None
         return {"path": [portable(entry) for entry in search.split(os.pathsep) if entry], "tools": tools,
+                "python": {"sha256": _content_digest(pathlib.Path(sys.executable).resolve()), "version": sys.version},
                 "home_files": {name: _content_digest(pathlib.Path(home, name)) if home and pathlib.Path(home, name).is_file()
                                else "absent" for name in OFFLOAD_HOME_FILES},
                 "variables": {key: hashlib.sha256(portable(value).encode()).hexdigest() for key, value in environment.items()
@@ -291,14 +293,14 @@ def offload_view(environment: Mapping[str, str], names: Iterable[str] = ()) -> d
 def offload_miss(theirs: Any, ours: Any) -> dict[str, Any] | None:
     """None when a satellite's offload view (`theirs`) stands for the hub's (`ours`), else the first difference.
 
-    The difference is `{"part", "name"}`: parts compare in the order `path`, `tools`, `home_files`, `variables`,
-    and `name` is the first differing `PATH` entry (the satellite's, or the hub's past the satellite's end), tool,
+    The difference is `{"part", "name"}`: parts compare in the order `path`, `tools`, `python`, `home_files`, `variables`,
+    and `name` is the first differing `PATH` entry (the satellite's, or the hub's past the satellite's end), tool, `python` field,
     file or variable. A tool the hub cannot resolve is recorded, not compared; one only the hub resolves
     misses. A view that is not one, or a part of the wrong shape, misses with no name.
     """
     if not (isinstance(theirs, dict) and isinstance(ours, dict)):
         return {"part": "view", "name": None}
-    for part in ("path", "tools", "home_files", "variables"):
+    for part in ("path", "tools", "python", "home_files", "variables"):
         other: Any = theirs.get(part)
         mine: Any = ours.get(part)
         if not isinstance(other, (list, dict)) or not isinstance(other, type(mine)):
