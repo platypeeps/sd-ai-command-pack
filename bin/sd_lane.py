@@ -480,7 +480,20 @@ def take_in(hub: Hub, path: pathlib.Path, key: str, revision: int, row: dict[str
     if entry is None:
         return {"request": key, "revision": revision, "status": "requested",
                 "reason": f"sd:{item} is running; the next intake takes the request in"}
-    return answer("queued", entry={"enqueued_at": entry["enqueued_at"], "revision": revision})
+    try:
+        return answer("queued", entry={"enqueued_at": entry["enqueued_at"], "revision": revision})
+    except Exception:
+        # The satellite asked again while intake decided: the newer request decides, never this entry's
+        # authority, so it must not be claimed (review round 5). Any other failed write keeps the entry.
+        newest, _ = hub.store.read(hub.connection, key)
+        if newest != revision:
+            def supersede(entries: list[dict[str, Any]]) -> None:
+                for queued in entries:
+                    if queued.get("request") == taken and queued.get("status") == "pending":
+                        queued.update(status="cancelled", finished_at=stamp_now(),
+                                      superseded_by={"key": key, "revision": newest})
+            update(path, supersede)
+        raise
 
 
 def intake(hub: Hub, path: pathlib.Path) -> list[dict[str, Any]]:

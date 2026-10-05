@@ -399,6 +399,25 @@ class SatelliteEntry(requests_suite.Requests):
                                                 "topic;echo", "--expected-head", self.head, "--manual",
                                                 "--satellite-gate"])
 
+    def test_a_request_replaced_while_intake_decides_does_not_run_on_the_old_authority(self):
+        """Review round 5: the satellite asked again without --manual; the queued entry kept `manual` and merged."""
+        self.ask()
+        raced: list[int] = []
+
+        def satellite_asks_again(connection, key, previous, value):
+            if value.get("status") == "queued" and not raced:
+                raced.append(self.ask(authority=None))
+            return receipts.save(connection, key, previous, value)
+        store = requests_suite.types.SimpleNamespace(read=receipts.read, receipt_key=receipts.receipt_key,
+                                                     save=satellite_asks_again)
+        self.run_lane(hub=sd_lane.Hub(self.connection, store, requests_suite.SLUG, self.repo))
+        self.assertEqual(self.calls, [])
+        self.assertEqual({entry["status"] for entry in self.entries()}, {"cancelled"})
+        self.assertEqual(self.entries()[-1]["superseded_by"]["revision"], raced[0])
+        self.assertEqual(self.row()["status"], "requested")
+        self.run_lane()  # the newer request decides: no --manual, so no merge
+        self.assertEqual((self.calls, self.entries()[-1]["status"]), ([], "prepared"))
+
     def failing_hub(self, *statuses):
         """The hub's rows, but a row write with one of `statuses` fails as a stopped database would."""
         def save(connection, key, previous, value):

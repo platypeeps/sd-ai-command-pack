@@ -388,7 +388,10 @@ each request, in order:
    Then write `queued`.
 
 Queue first, row second, so a crash leaves a queue entry that step 4
-recognises, never a `queued` row with no entry.
+recognises, never a `queued` row with no entry. When the `queued` write fails because the
+satellite asked again in between, intake cancels the entry it just added,
+superseded by the newer revision, so the runner never claims it on the older
+request's authority; the next intake takes the newer request in.
 
 ### Scheduling
 
