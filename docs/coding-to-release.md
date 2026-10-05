@@ -53,7 +53,8 @@ An active-session agent remains the coordinator.
 - Shipping's additive `workflow` object names state, blocker, and next action without replacing existing results or exit codes.
 - Explicit local check reuse requires a tracked complete local-only declaration and unchanged full-check identity.
   Read the [receipt contract](../skills/sd-check/references/check-receipts.md) before enabling it.
-  Unknown dependencies, dirty inputs, and legacy receipts rerun checks; the pack's network-dependent full gate remains ineligible.
+  Unknown dependencies, dirty inputs, and legacy receipts rerun checks.
+  The pack declares no `sd-check` reuse; its merge gate reuses gate receipts instead (`sd gate check`, `.github/sd-gate-reuse.json`).
 - The pack's `main` is protected; `.github/sd-status.json` accepts only its zero-approval `reviews` gap.
   `sd-ship merge` is the merge path; it refuses absent or weaker protection.
 - Each reviewing tier requires one independent local review under the revised policy.
