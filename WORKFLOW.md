@@ -471,6 +471,17 @@ which the installer places in `~/.claude/agents`.
   second slot and sizes its workers to the pool; run directly, `make test`
   takes one of the same slots. Slots are kernel locks under
   `$XDG_STATE_HOME/sd/gate-slots`, so a dead holder's slot is free at once.
+- **Each gate gets its share of the cores (sd:2726).** The slot count bounds
+  how many gates run, not the CPU each uses. Under a cap, a holder sets
+  `CARGO_BUILD_JOBS` and `RUST_TEST_THREADS` in its checks to the cores over
+  `sd.gate_slots`, at least 1: 8 for 2 slots on 16 cores. A positive value the
+  caller set wins when it is lower; a higher one is lowered. The
+  `sd gate check` receipt binds these values, because a suite can pass on
+  one test thread and fail on eight. So a slot count that
+  changes the share misses reuse once and runs the check again. `MAKEFLAGS`
+  gets no `-j`, since it would run a Makefile's prerequisites at once; a
+  repository caps its own `make` pool, as the system repository's
+  `make check` does (sd:2719).
 - **A precheck runs before the slot wait (sd:2604).** When the repository's
   Makefile defines `precheck`, `sd-check` runs `make precheck` first, outside
   the pool. A failure stops the run there: no slot, no `check`, and the report

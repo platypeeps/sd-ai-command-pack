@@ -386,6 +386,18 @@ class SlotCount(unittest.TestCase):
             with self.subTest(value=bad), self.assertRaises(ValueError):
                 configured({"SD_GATE_SLOTS": bad}, None)
 
+    def test_a_holder_caps_each_gate_at_its_share_of_the_cores(self):
+        """sd:2726: 2 slots on 16 cores let one Rust gate drive the load to 185; the slot count bounds no gate's CPU."""
+        self.assertEqual([sd_gate_slots.cpu_share(slots, 16) for slots in (1, 2, 3, 16, 32)], [16, 8, 5, 1, 1])
+        share = sd_gate_slots.cpu_share(2)
+        held = sd_gate_slots.holder_environment({"CARGO_BUILD_JOBS": "1", "RUST_TEST_THREADS": str(share + 1)}, 2)
+        self.assertEqual((held["CARGO_BUILD_JOBS"], held["RUST_TEST_THREADS"]), ("1", str(share)))
+        unset = sd_gate_slots.holder_environment({}, 2)
+        self.assertEqual((unset["CARGO_BUILD_JOBS"], unset["RUST_TEST_THREADS"]), (str(share), str(share)))
+        for value in ("0", "-1", "", "two", "٣", str(share)):
+            with self.subTest(value=value):
+                self.assertEqual(sd_gate_slots.thread_cap(value, share), value if value == str(share) else str(share))
+
     def test_the_machine_setting_is_a_declared_core_setting(self):
         with tempfile.TemporaryDirectory() as tmp:
             config = pathlib.Path(tmp) / "sd-ai-command-pack" / "config.json"

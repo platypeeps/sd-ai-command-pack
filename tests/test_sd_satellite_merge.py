@@ -98,7 +98,7 @@ class GateCompare(rows.SatelliteFixture):
         """C-17: a satellite's own environment digest and python differ from the hub's, and the receipt stands."""
         row = self.row(self.key)
         rewrite(self.database, self.key, binding={**row["binding"], "environment_sha256": "0" * 64,
-                                                  "python": "/elsewhere/python3"})
+                                                  "python": "/elsewhere/python3", "threads": {"RUST_TEST_THREADS": "1"}})
         self.assertEqual(self.compare()["status"], "success")
 
     def test_a_hub_path_that_lacks_the_repositorys_tool_still_accepts(self) -> None:

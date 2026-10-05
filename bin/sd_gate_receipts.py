@@ -25,7 +25,11 @@ The binding is what this module can name about a run, and nothing weaker:
   python       the interpreter that runs `sd-check`;
   environment  every variable the check's child is given, by name and
                value: `sd_gate_run.gate_environment`'s whole output, so a
-               `MAKEFLAGS` or a `CARGO_HOME` that chose what ran is bound too.
+               `MAKEFLAGS` or a `CARGO_HOME` that chose what ran is bound too;
+  threads      the thread counts `sd-check` sets for its checks under the
+               machine's slot count (`sd_gate_slots.thread_caps`, sd:2726).
+               The precheck runs on the environment as given, so both bind:
+               a new slot count that changes the caps runs the check once more.
 
 The environment is bound whole because the gate forwards it whole: any
 variable may choose what a check runs, and a hand-kept list of the ones that
@@ -88,6 +92,7 @@ from typing import Any, Iterable, Mapping
 
 import sd_check_receipts
 import sd_check_scope
+import sd_gate_slots
 import sd_lib
 
 KEY_PREFIX = "sd-gate-receipt:v1:"
@@ -235,7 +240,7 @@ def binding_commands(part: Mapping[str, Any]) -> list[list[str]]:
 
 
 def machine_binding(tree: pathlib.Path, commands: list[list[str]], env: Mapping[str, str]) -> dict[str, Any]:
-    """`tools`, `python` and `environment_sha256`: this machine's half of `gate_binding`; raises when a tool does not resolve."""
+    """`tools`, `python`, `environment_sha256` and `threads`: this machine's half of `gate_binding`; raises when a tool does not resolve."""
     tools = [sd_check_receipts.tool_identity(argv[0], env, tree) for argv in commands]
     for tool in tools:  # the worktree is temporary; name a tool inside it by its place in the tree
         path = pathlib.Path(tool["path"])
@@ -244,7 +249,7 @@ def machine_binding(tree: pathlib.Path, commands: list[list[str]], env: Mapping[
     python = pathlib.Path(sys.executable).resolve()
     return {"tools": tools, "python": {"path": str(python), "version": sys.version,
                                        "sha256": sd_check_receipts.file_digest(python)},
-            "environment_sha256": _digest(dict(env))}
+            "environment_sha256": _digest(dict(env)), "threads": sd_gate_slots.thread_caps(env)}
 
 
 def offload_view(environment: Mapping[str, str], names: Iterable[str] = ()) -> dict[str, Any] | None:
