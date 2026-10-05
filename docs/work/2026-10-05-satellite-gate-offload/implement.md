@@ -22,26 +22,31 @@ names its check and the result that means failure.
         reader beside `repo_ci`.
       - Check: `sd-db.sh test` passes; a new test shows an unset row reads
         `off` and a set row reads `accept`. On `main` that test fails.
-- [ ] 2a. Pack: portable receipt binding (sd:2724 point 1). Size M, 4–5 h.
-        Own PR.
-      - `gate_binding`'s machine part binds tools by invocation and sha256,
-        python by sha256 and version, and a named allow-list of variables
-        from `gate_environment`. `HOME`, `USER` and `PATH` leave the digest;
-        `PATH` still chooses the tools, whose bytes are bound.
-      - `reuse_miss` names the differing field.
-      - Rewrite the "bound whole" paragraph of the `sd_gate_receipts`
-        docstring: the allow-list is now the contract.
-      - Check: two environments that differ only in `HOME`, `USER`, `PATH`
-        order and session variables bind equal. Another python, `make` or an
-        allow-listed variable binds unequal and names the field. Each test
-        fails on `main`.
+- [ ] 2a. Pack: the offload view (sd:2724 point 1, narrowed by C-17).
+        Size M, 4–5 h. Own PR.
+      - `gate_binding` and `gate_environment` do not change. Local reuse
+        keeps the whole environment, and the "bound whole" paragraph of the
+        `sd_gate_receipts` docstring stays.
+      - `offload_view(environment)` in `sd_gate_receipts` returns the four
+        parts of "The offload view" in `design.md`. `OFFLOAD_TOOLS` and
+        `OFFLOAD_HOME_FILES` are pack constants.
+      - `offload_miss(theirs, ours)` returns the first differing part and
+        name, for `reuse_miss`.
+      - Nothing calls them yet: step 3 writes the view, step 4 compares it.
+      - Check: two views that differ only in `HOME`, `USER` and the home
+        prefix of `PATH` entries compare equal. Another `PATH` order, a
+        named tool's bytes, a named `HOME` file and another variable value
+        each compare unequal and name the part. The existing local reuse
+        suites pass unchanged, and a local receipt from a session with
+        another `HOME` still misses on `environment`. Each new test fails
+        on `main`.
 - [ ] 3. Pack: the reader and the offload row, satellite side. Size M, 4–5 h.
       - `sd_lib.repo_satellite_gate`, which answers `off` on every fault,
         as `repo_ci` does.
       - In `bin/sd_gate_receipts.py`: `offload_key`, `pack_bin`,
         `record_offload`, `read_offload`.
-      - In `check_in_worktree`: write the row after a recorded pass on a
-        satellite, or from a reuse with no row; set `offload_error` on a
+      - In `check_in_worktree`: write the row, with `offload_view`, after a
+        recorded pass on a satellite, or from a reuse with no row; set `offload_error` on a
         failed write, and keep the pass.
       - The pre-gate warning against `sd-lane-pack:v1:<slug>`.
       - Check: tests with `served_by` patched, as `SatellitePrepare` does.
@@ -63,7 +68,7 @@ names its check and the result that means failure.
         provenance.
       - A plain merge in an opted-in repository tries the offload receipt
         after its own, and runs the gate on a miss (sd:2724 point 2).
-      - Compare the machine part when step 2a has landed.
+      - Compare `offload_view`, never the local `environment_sha256`.
       - Check: a plain merge with a valid offload receipt runs no `sd-check`;
         with a broken one it runs and names the miss.
         One test per clause, each asserting its code and that the
@@ -153,8 +158,8 @@ Pull requests:
 
 1. Step 2, in the system repository. It lands first; the pack reads `off`
    until it does.
-2. Step 2a, in its own pack PR. It changes every local reuse, so it ships
-   and settles alone.
+2. Step 2a, in its own pack PR. It changes no local reuse. It ships alone so
+   the review reads the offload comparison by itself.
 3. Steps 3 to 5, in one pack PR. They touch the same gate files.
 4. Steps 6 and 7, in another pack PR. They touch the lane.
 5. Step 8's system documentation and `local-cron-jobs` example, in the

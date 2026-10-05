@@ -71,7 +71,8 @@ R1. A satellite gate pass writes a second receipt, the offload receipt, to the
 
 R2. The offload receipt binds the head, the pack `bin/` digest and the
     `CLAUDE.local.md` digest. It also binds the tree-derived binding fields
-    and the satellite's tools, interpreter and environment digest.
+    and the satellite's tools, interpreter and environment digest. It also
+    holds the offload view of R12.
 
 R3. The hub's merge gate accepts an offload receipt in place of `sd-check`
     only when every trust-rule clause holds (design.md, "The trust rule").
@@ -110,10 +111,12 @@ R11. `lane run --satellite-only` claims only satellite entries and starts no
      speculative gate. A hub entry stays pending for an integrator's plain
      `lane run` (Decision Q4).
 
-R12. The receipt binding is portable (sd:2724, folded in). It binds tools by
-     invocation and sha256, python by sha256, and a named allow-list of
-     variables. It does not bind `HOME`, `USER` or the whole `PATH`. A
-     mismatch on a bound field still misses, and `reuse_miss` names it.
+R12. Local reuse keeps today's binding, the whole environment included, in
+     every repository. Only the hub's offload comparison is portable, and
+     only for an opted-in repository. It compares the `PATH` order, named
+     tools by sha256, named `HOME` configuration files by sha256, and every
+     other kept variable by value. `HOME`, `USER` and the home prefix are
+     normalized. A mismatch misses, and `reuse_miss` names the part (C-17).
 
 R13. A plain `sd-ship merge` in an opted-in repository reuses an offload
      receipt first, and runs the gate only on a miss (sd:2724).
@@ -138,9 +141,12 @@ R13. A plain `sd-ship merge` in an opted-in repository reuses an offload
 6. `lane run --satellite-only` over a queue holding a hub entry ahead of a
    satellite entry merges the satellite entry only. The hub entry stays
    `pending` and in place, and no prepare or speculative gate starts.
-7. Portable binding: two hub sessions whose environments differ only in
-   session and login variables reuse each other's receipt at one head. A
-   receipt from another python, `make` or tree misses, naming the field.
+7. Offload view: a satellite receipt whose environment differs from the
+   hub's only in `HOME`, `USER` and the home prefix of `PATH` entries passes
+   clause 5. Another `PATH` order, a named tool's bytes, a named `HOME` file
+   or another variable value each miss and name the part. A local receipt
+   from a session with another `HOME` or `PATH` still misses on
+   `environment`, as today.
 8. A plain `sd-ship merge` in an opted-in repository with a valid offload
    receipt runs no `sd-check`. With the receipt broken it runs the gate and
    names the miss.
