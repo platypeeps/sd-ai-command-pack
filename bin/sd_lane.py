@@ -150,7 +150,7 @@ REFUSAL_ACTIONS = {
     "invalid_request": "Request again from the item's worktree with sd-ship lane request.",
     "satellite_not_prepared": "On the satellite: sd-ship prepare at the pushed head, then sd-ship lane request again.",
 }
-HEAD = re.compile(r"[0-9a-f]{40}")
+COMMIT_ID = re.compile(r"[0-9a-f]{40}")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -450,7 +450,7 @@ def malformed(hub: Hub, key: str, row: dict[str, Any]) -> str | None:
         return "the request's item or repository does not match its key"
     if not git_name(hub.main, row.get("branch")) or not git_name(hub.main, row.get("base")):
         return "the request's branch or base is not a branch name"
-    if not (isinstance(head, str) and HEAD.fullmatch(head)):
+    if not (isinstance(head, str) and COMMIT_ID.fullmatch(head)):
         return "the request's head is not a full commit id"
     if row.get("authority") not in (None, "manual"):
         return "the request's authority is neither manual nor none"
@@ -501,8 +501,12 @@ def take_in(hub: Hub, path: pathlib.Path, key: str, revision: int, row: dict[str
 
 def intake(hub: Hub, path: pathlib.Path) -> list[dict[str, Any]]:
     """Take this lane's requests in, oldest first; a request that cannot be decided now waits for the next intake."""
-    done = []
-    for key, revision, row in requests(hub):
+    done: list[dict[str, Any]] = []
+    try:
+        found = requests(hub)
+    except Exception as error:  # the database would not answer; hub entries still run, and the next intake reads again
+        return [{"status": "unread", "error": f"{type(error).__name__}: {error}"[:300]}]
+    for key, revision, row in found:
         try:
             done.append(take_in(hub, path, key, revision, row))
         except Exception as error:  # e.g. the row changed under intake: its newest revision is read again next time

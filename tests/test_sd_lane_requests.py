@@ -200,6 +200,14 @@ class Intake(Requests):
         self.assertEqual((old["status"], new["status"], new["request"]["revision"]), ("cancelled", "pending", raced[0]))
         self.assertEqual((self.row()["status"], self.row()["entry"]["revision"]), ("queued", raced[0]))
 
+    def test_a_database_that_will_not_answer_leaves_the_queue_alone(self) -> None:
+        def refuse(*args):
+            raise OSError("the database is locked")
+        silent = sd_lane.Hub(types.SimpleNamespace(execute=refuse), receipts, SLUG, self.repo)
+        [answer] = self.intake(silent)
+        self.assertEqual((answer["status"], self.entries()), ("unread", []))
+        self.assertIn("the database is locked", answer["error"])
+
     def test_another_repositorys_requests_are_not_read(self) -> None:
         self.prepared()
         key = sd_lane.request_key("fixture/other", 7)
