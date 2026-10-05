@@ -1582,7 +1582,9 @@ def note_paths(base: pathlib.Path) -> list[pathlib.Path]:
         return sorted(
             path for path in base.iterdir() if path.suffix == ".md" and path.is_file())
     except FileNotFoundError:
-        raise Refusal(f"{base} does not exist; the vault does not hold this kind") from None
+        # A declared kind whose folder nobody has made yet holds no notes;
+        # `store_root` has already refused a vault that is not there (sd:2688).
+        return []
     except OSError as error:
         raise Refusal(f"cannot list {base}: {error}") from None
 
@@ -1972,14 +1974,6 @@ def refuse_duplicate_unique(
     assert isinstance(unique, list)
     wanted = {field: values[field] for field in unique if values.get(field)}
     if not wanted:
-        return
-    # A kind directory that does not exist yet holds no notes, so nothing can
-    # collide. `note_paths` refuses a missing base, which is right for the read
-    # verbs -- asking to list a kind the vault does not have is a mistake worth
-    # reporting -- and wrong here, where `store_add` creates the directory a few
-    # lines later. Before this, the first `add` into a new kind failed, and the
-    # failure came out of a uniqueness check and named the vault.
-    if not base.is_dir():
         return
     for path in note_paths(base):
         if skip is not None and path == skip:

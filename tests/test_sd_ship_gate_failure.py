@@ -100,6 +100,28 @@ class GateFailureSpendsNoPass(unittest.TestCase):
         kept = review.state["review_preflight_error"]["checks"][0]
         self.assertEqual((kept["failed_steps"], kept["failure"]), (rows[0]["failed_steps"], rows[0]["failure"]))
 
+    def test_the_refusal_leads_with_the_failing_suite_and_keeps_the_slot_wait_as_context(self):
+        """sd:2687. sd:2671's refusal opened with the gate-slot wait line, and the
+        lane, which keeps the refusal's head, recorded that as the failure."""
+        wait = ("waiting for a gate slot: the last gate started 13s ago; starts are 45s apart under /tmp/slots; "
+                "slot 1 held by sd-check tree (pid 31023) since 2026-10-05T07:28:35Z\n"
+                "gate slot taken after 35s under /tmp/slots")
+        summary = "sd-check fail (check fail: suite tools-3; make target check) whole output: /tmp/run-check.log"
+        row = {"name": "check", "status": "fail", "exit_code": 2, "stdout": "", "stderr": "c" * 2000,
+               "output_path": "/tmp/run-check.log", "failed_shards": [],
+               "failed_steps": ["suite tools-3", "make target check"],
+               "failure": "FAIL: test_sd2687_marker (tests.test_obsidian_review.DigestTest)\nFAILED (failures=1)"}
+        cleared = {**GATE_FAILED, "outcomes": [{"backend": "automatic", "status": "clean"}],
+                   "reviewed_by": ["automatic"], "completed_reviews": 1,
+                   "check": {"status": "fail", "exit_code": 1, "detail": wait, "summary": summary, "checks": [row]}}
+        review, _process = self.context(report_changes=cleared)
+        with self.assertRaises(ship.Refusal) as caught:
+            review.review(HEAD)
+        message = str(caught.exception)
+        self.assertIn(f"so the next prepare reviews again: {summary}\ncheck (exit 2): ", message)
+        self.assertLess(message.index("FAIL: test_sd2687_marker"), message.index("waiting for a gate slot"))
+        self.assertIn("gate output: waiting for a gate slot", message)
+
     def test_the_refusal_leaves_out_failing_lines_the_tails_already_hold(self):
         """sd:2608. A short run's failure lines are its tails; saying them twice only lengthens the refusal."""
         row = {"name": "check", "status": "fail", "exit_code": 2, "stdout": "sd2066-out",
