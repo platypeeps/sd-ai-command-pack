@@ -513,6 +513,12 @@ which the installer places in `~/.claude/agents`.
   predicted landing in the background, and waits for that gate after the
   merge, so the next prepare reuses its receipt (sd:2586). That needs the
   tree key above; the next entry's `speculation` field says what ran.
+- **Reorder a lane queue between items (sd:2584).** `sd-ship lane move <item>
+  up|down|top|<position>` reorders the pending entries; `hold <item>` keeps an
+  entry in place but skips it, and its speculative gate, until `release
+  <item>`. These verbs edit the queue under its lock and refuse a running
+  entry. The runner reads the queue's top before each item, so a change takes
+  effect at the next item, never mid-merge.
 - **After a lane merge, the runner lands the entry (sd:2568).** It deletes
   the remote branch with `--force-with-lease` while the worktree's tip is
   the merged head. It never removes the worktree or its local branch: no

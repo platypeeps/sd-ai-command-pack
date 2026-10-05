@@ -4,6 +4,13 @@
 
 ### Added
 
+- **`sd-ship lane`: a reorderable queue (sd:2584).** `move <item>
+  up|down|top|<position>`, `hold <item>` and `release <item>` edit the
+  pending entries under the queue's lock; a running entry refuses every edit.
+  The runner takes the first pending entry that is not held, read again
+  before each item, so a change takes effect at the next item and never
+  mid-merge. The speculative gate skips a held entry too.
+
 - **`sd-ship lane run` lands each merged entry (sd:2568).** After a merge
   the runner deletes the remote branch with `--force-with-lease` while the
   worktree's tip is the merged head. It leaves the worktree and its local

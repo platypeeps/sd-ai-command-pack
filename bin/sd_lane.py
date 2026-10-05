@@ -9,13 +9,20 @@ runs it under one lock per repository:
            and a body file to the repository's queue;
   list     print the queue;
   cancel   mark a pending entry cancelled;
-  run      pop pending entries in order: head check, `prepare --catch-up`,
+  move     put a pending entry up, down, on top or at a position (sd:2584);
+  hold     keep a pending entry in place but skip it; `release` ends that;
+  run      take the queue's first pending entry that is not held, read again
+           before each item: head check, `prepare --catch-up`,
            then `merge`; a failed entry is marked and the runner goes on.
            While one entry ships, the next one's gate runs on its predicted
            landing (sd:2586, below). After a merge it deletes the remote
            branch, notes the item with the worktree's removal command and
            fast-forwards the main checkout (sd:2568, below);
   watch    print each gate end a lane or builder log records, once.
+
+The verbs are the queue's only writers, each under the queue file's lock, so
+a terminal and a dashboard reorder it the same way. A change takes effect at
+the next item boundary, never mid-merge; a running entry refuses every edit.
 
 The queue is `<lane root>/<repository>/lane/queue/queue.json`. The lane root
 is `SD_LANE_ROOT`, else `sd.lane_root`, else `$XDG_STATE_HOME/sd/lanes`.
@@ -94,6 +101,8 @@ GATE_END = re.compile(r"run-tests: end head=|check\.sh: every suite passed|make:
 WATCH_MINUTES = 3
 #: Prepare's delivery choices; an entry carries one and forwards it unchanged.
 CLAIMS = ("deliver", "associate-only")
+#: The relative places `move` takes besides a 1-based position among pending entries.
+PLACES = ("up", "down", "top")
 #: `(argv, log) -> sd-ship's JSON answer`; the log receives the step's whole output.
 Ship = Callable[[list[str], pathlib.Path], dict[str, Any]]
 #: `(root, head, base) -> the gate's result`: the next entry's gate on a predicted landing (sd:2586).
@@ -203,14 +212,56 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
     return update(queue_path(worktree, environ), add_entry)
 
 
+def pending_entry(entries: list[dict[str, Any]], item: int) -> dict[str, Any]:
+    for row in entries:
+        if row.get("item") == item and row.get("status") == "pending":
+            return row
+    if any(row.get("item") == item and row.get("status") == "running" for row in entries):
+        raise LaneError(f"sd:{item} is running; the queue changes only between items")
+    raise LaneError(f"sd:{item} has no pending entry in this lane")
+
+
 def cancel(root: pathlib.Path, item: int, environ: dict[str, str]) -> dict[str, Any]:
     def mark(entries: list[dict[str, Any]]) -> dict[str, Any]:
-        for row in entries:
-            if row.get("item") == item and row.get("status") == "pending":
-                row.update(status="cancelled", finished_at=stamp_now())
-                return row
-        raise LaneError(f"sd:{item} has no pending entry in this lane")
+        row = pending_entry(entries, item)
+        row.update(status="cancelled", finished_at=stamp_now())
+        return row
     return update(queue_path(root, environ), mark)
+
+
+def position(where: str) -> str:
+    """`up`, `down`, `top`, or a 1-based position among the pending entries."""
+    if where in PLACES or (where.isdigit() and int(where) >= 1):
+        return where
+    raise ValueError(f"name up, down, top or a position from 1, not {where!r}")
+
+
+def move(root: pathlib.Path, item: int, where: str, environ: dict[str, str]) -> dict[str, Any]:
+    """Reorder the pending entries; finished entries keep their place as history."""
+    where = position(where)
+
+    def reorder(entries: list[dict[str, Any]]) -> dict[str, Any]:
+        row = pending_entry(entries, item)
+        slots = [index for index, entry in enumerate(entries) if entry.get("status") == "pending"]
+        rows = [entries[index] for index in slots]
+        now = rows.index(row)
+        target = {"top": 0, "up": now - 1, "down": now + 1}[where] if where in PLACES else int(where) - 1
+        rows.insert(max(0, min(target, len(rows) - 1)), rows.pop(now))
+        for index, entry in zip(slots, rows, strict=True):
+            entries[index] = entry
+        return {"item": item, "position": rows.index(row) + 1, "pending": [entry.get("item") for entry in rows]}
+    return update(queue_path(root, environ), reorder)
+
+
+def set_hold(root: pathlib.Path, item: int, environ: dict[str, str], *, held: bool) -> dict[str, Any]:
+    """Hold a pending entry in place, so the runner and its speculation skip it, or release it."""
+    def toggle_hold(entries: list[dict[str, Any]]) -> dict[str, Any]:
+        row = pending_entry(entries, item)
+        if bool(row.get("held")) == held:
+            raise LaneError(f"sd:{item} is {'already' if held else 'not'} held")
+        row.update(held=held, held_at=stamp_now() if held else None)
+        return row
+    return update(queue_path(root, environ), toggle_hold)
 
 
 def ship_process(argv: list[str], log: pathlib.Path, timeout: int) -> dict[str, Any]:
@@ -344,7 +395,7 @@ def speculate(entry: dict[str, Any], path: pathlib.Path, gate: Gate, busy: bool 
     still runs; one at a time. What happened goes on the next entry as
     `speculation`, and the gate's whole result to a log beside the others.
     """
-    following = next((row for row in read_queue(path) if row.get("status") == "pending"), None)
+    following = next((row for row in read_queue(path) if row.get("status") == "pending" and not row.get("held")), None)
     if entry.get("authority") != "manual" or following is None:
         return None
 
@@ -497,7 +548,7 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
         while True:
             def claim_next(entries: list[dict[str, Any]]) -> dict[str, Any] | None:
                 for row in entries:
-                    if row.get("status") == "pending":
+                    if row.get("status") == "pending" and not row.get("held"):
                         row.update(status="running", started_at=stamp_now(), runner_pid=os.getpid())
                         return dict(row)
                 return None
@@ -575,6 +626,12 @@ def add_lane_verbs(commands: Any) -> None:
     verbs.add_parser("list", help="print this repository's queue")
     canceller = verbs.add_parser("cancel", help="mark a pending entry cancelled")
     canceller.add_argument("item", type=int)
+    mover = verbs.add_parser("move", help="move a pending entry; the runner reads the new order at the next item")
+    mover.add_argument("item", type=int)
+    mover.add_argument("where", type=position, help="up, down, top, or a position from 1 among the pending entries")
+    for name, text in (("hold", "skip a pending entry, keeping its place, until it is released"),
+                       ("release", "let a held entry run again")):
+        verbs.add_parser(name, help=text).add_argument("item", type=int)
     verbs.add_parser("run", help="drain the queue in order; exits at once if another runner holds the lane")
     watcher = verbs.add_parser("watch", help="print each gate end a log under the lane root records, once")
     watcher.add_argument("--once", action="store_true", help="scan once and exit")
@@ -598,6 +655,10 @@ def lane_main(args: Any) -> int:
             result = {"queue": str(path), "entries": read_queue(path)}
         elif args.lane_command == "cancel":
             result = cancel(root, args.item, environ)
+        elif args.lane_command == "move":
+            result = move(root, args.item, args.where, environ)
+        elif args.lane_command in ("hold", "release"):
+            result = set_hold(root, args.item, environ, held=args.lane_command == "hold")
         else:
             result = run_lane(root, environ)
     except (LaneError, sd_lib.ConfigError, OSError) as error:
