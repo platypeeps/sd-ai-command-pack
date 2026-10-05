@@ -4838,7 +4838,7 @@ roles:
         state = self.operation().state
         # sd:2611: the execution watchdog also counts the gate-slot phase.
         self.assertEqual(stages, [(True, 3600), (False, 10800 + sd_review.sd_lib.GATE_SLOT_SECONDS)])
-        self.assertEqual(trace, ["check", "provider"])
+        self.assertEqual(trace, ["provider", "check"])  # sd:2605: the reviewers run before the gate
         self.assertEqual(len(state["passes"]), 1)
         self.assertEqual(state["passes"][0]["report"]["completed_reviews"], 1)
 
@@ -5732,11 +5732,11 @@ class DeclaredGapCase(unittest.TestCase):
 
     def test_ci_local_prepare_runs_its_check_in_the_gates_worktree(self):
         """sd:2041. Under `repo.ci = local` prepare's check is the gate's, so the
-        same Makefile fails at prepare, before any reviewer, and not first at merge."""
+        same Makefile fails at prepare, after the review cleared (sd:2605), and not first at merge."""
         self.commit({"Makefile": "check:\n\t@test -d .git\n"})
         self.declare()
         self.local_ci()
-        with self.assertRaisesRegex(ship.Refusal, "the repository gate failed before any reviewer was asked"):
+        with self.assertRaisesRegex(ship.Refusal, "the repository gate failed after the review cleared"):
             self.local_green()
 
     def test_ci_local_merge_reuses_prepares_passing_gate(self):

@@ -4,6 +4,19 @@
 
 ### Added
 
+- **`sd-ship lane run` gates the next entry while this one ships (sd:2586).**
+  Each prepare caught up with the base after the entry ahead merged, then
+  ran a 10 to 20 minute gate on the new tree. When the runner claims an
+  entry queued with `--manual`, it now predicts that entry's landing (its
+  catch-up tree, as a commit on the fetched base), merges the next entry onto
+  it as `--catch-up` would, CHANGELOG resolver included, and runs `sd gate
+  check`'s gate there in the background. After the merge it waits for that
+  gate, and the next prepare reuses the receipt. A tree-keyed receipt now
+  binds the merge base by its tree, not its commit (operator ruling
+  2026-10-04), since the predicted and the real landing are two commits with
+  one tree. A conflict, a missing tree key or a wrong prediction gates
+  nothing that prepare reads; the next entry's `speculation` field says why.
+
 - **`sd-ship prepare` names other work on the same item or files (sd:1151).**
   Two sessions fixed one defect in the same files forty minutes apart (#1120,
   #1122); both branches were on origin first. Before the review, prepare
@@ -864,6 +877,8 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **The review runs before the gate, and a blocking review runs no gate (sd:2605).** `sd-review` ran the repository gate first, so a blocking finding arrived only after a full `make check`; four prepares lost a 45-minute gate that way in one night. The reviewers now run first. The gate runs only after a clean, advisory or skipped review. A blocking or incomplete review records `check: {"status": "not_run"}`, and `sd-ship prepare`'s refusal says the gate did not run and carries that `check`. A `--reuse-check` receipt is still read first and still runs no gate. A gate that fails after a review that cleared releases the review pass, so the next prepare reviews the fixed branch again. `sd-ship adjudicate` accepts a blocking report whose gate did not run; the prepare that reads the accepted dispositions then runs the gate at that head before clearance and records it as `adjudicated_gate`, and publication, merge and `verify-review` refuse (`gate_not_run`) until a pass is recorded there. A gate that fails on that path refuses clearance and keeps the pass, since its review found blocking findings.
 
 - **Prepare's and merge's gates queue on their own bound too (sd:2611).** `sd-review` plans the gate-slot wait as its own phase, `timing.slot_seconds` (`sd_lib.GATE_SLOT_SECONDS`, 4 hours), and passes `--slot-timeout` to the check it runs; `execution_seconds` counts it, so the `sd-ship` watchdog no longer kills a gate that is still queued. `sd-ship` accepts a plan without the key as one with no slot phase. The merge gate passes the same bound, and the lane's prepare and merge limits grow by it. A queued gate's checks keep their whole bound; the price is that the outer limits, the runner's and the watchdog's, fire up to 4 hours later when `sd-check` does not honour its own bounds.
 
