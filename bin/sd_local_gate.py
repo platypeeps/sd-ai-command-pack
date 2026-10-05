@@ -18,7 +18,9 @@ head that was never checked.
 
 Every merge attempt posts a fresh status, from a run or from a receipt; a
 reused pass says so in its description, and a run in full keeps `reuse_miss`,
-why no receipt stood (sd:2602). The description carries
+why no receipt stood (sd:2602). The one exception is an accepted offload
+receipt (sd:2704): the satellite's prepare posted the status, and the hub's
+merge checks it instead of posting its own. The description carries
 `inputs <digest>` as provenance: a digest of the head, the copied
 `CLAUDE.local.md` (or its absence) and the pack's own `bin/` files. Anyone
 with write access can post a status, so `local_gate_passed` trusts only one
@@ -55,6 +57,24 @@ from sd_ship_remote import GitHub, Refusal, git, slug
 from sd_ship_review import FAILING_TAIL_CHARS, failing_check_tails
 
 CONTEXT = sd_lib.LOCAL_GATE_CONTEXT
+#: Who acts after the hub refuses a satellite's receipt, and what they run (sd:2704, design.md "Freshness").
+HAND_BACK = ("On the satellite: git merge origin/{base} on the branch (or sd-ship prepare --catch-up), "
+             "then sd gate check --base {base}, sd-ship prepare, and sd-ship lane request again.")
+#: The trust rule's refusal codes, in clause order (design.md, "The trust rule"), each with its next action.
+SATELLITE_REFUSALS = {
+    "satellite_gate_off": "On the hub: opt the repository in with sd-db.sh repo satellite-gate <path> accept, "
+                          "or merge without --satellite-gate, which runs the hub's own gate.",
+    "base_moved": HAND_BACK,
+    "satellite_receipt_missing": HAND_BACK,
+    "satellite_receipt_invalid": HAND_BACK,
+    "satellite_binding": HAND_BACK,
+    "satellite_pack_mismatch": "Bring the satellite's pack checkout to the hub's revision. " + HAND_BACK,
+    "satellite_receipt_expired": HAND_BACK,
+    "satellite_status_missing": "On the satellite: sd-ship prepare again, which posts sd/local-gate from the "
+                                "offload receipt, then sd-ship lane request again.",
+    "local_gate_foreign": "On the satellite: authenticate gh as the hub's GitHub account, then sd-ship prepare "
+                          "and sd-ship lane request again.",
+}
 
 
 def post_gate_status(api: Any, head: str, result: dict[str, Any], inputs: str) -> dict[str, Any]:
@@ -73,18 +93,67 @@ def post_gate_status(api: Any, head: str, result: dict[str, Any], inputs: str) -
 
 
 def local_gate(api: Any, root: pathlib.Path, head: str, *, base: str | None = None,
-               database: pathlib.Path | None = None) -> dict[str, Any]:
-    """Run `sd-check` at `head`, or reuse its receipt, and post the result; `base` is the base branch."""
+               database: pathlib.Path | None = None, offload: str | None = None) -> dict[str, Any]:
+    """Run `sd-check` at `head`, or reuse its receipt, and post the result; `base` is the base branch.
+
+    `offload` is the hub's use of a satellite's offload receipt (sd:2704). `require`, the merge's
+    `--satellite-gate`, accepts one under clauses 3 to 8 of the trust rule and posts nothing, since the
+    satellite's status stands; a failed clause refuses with its code and runs nothing. `fallback`, a
+    plain merge in an opted-in repository, tries one after this machine's own receipt and runs the gate
+    on any miss, which `reuse_miss` names.
+    """
     inputs = gate_inputs(root, head)
+    # The merge gate only reads prepare's receipt; its own pass records none (sd:2041).
+    result = merge_gate_run(root, head, base, database, offload)
+    if "offload_refused" in result:
+        raise satellite_refusal(result["offload_refused"], base)
+    if "satellite" in result:
+        refused = status_refusal(api, head, inputs)
+        if refused is None:
+            return {**result, "inputs": inputs}
+        if offload == "require":
+            raise satellite_refusal(refused, base)
+        result = merge_gate_run(root, head, base, database, None)
+        result["reuse_miss"] = {**(result.get("reuse_miss") or {}), "offload": refused}
+    post_gate_status(api, head, result, inputs)
+    return {**result, "inputs": inputs}
+
+
+def merge_gate_run(root: pathlib.Path, head: str, base: str | None, database: pathlib.Path | None,
+                   offload: str | None) -> dict[str, Any]:
+    """The merge gate's `check_in_worktree`: it reads receipts and records none."""
     try:
-        # The merge gate only reads prepare's receipt; its own pass records none (sd:2041).
-        result = check_in_worktree(root, head, base=base_ref(base), database=database, record=False,
-                                   slot_timeout=sd_lib.GATE_SLOT_SECONDS)  # sd:2611: queue apart from the check
+        return check_in_worktree(root, head, base=base_ref(base), database=database, record=False,
+                                 slot_timeout=sd_lib.GATE_SLOT_SECONDS, offload=offload)  # sd:2611: queue apart
     except GateError as error:
         raise Refusal(str(error), code="command_failed", boundary="runtime", state="retryable_failure",
                       next_action="Inspect the command error, resolve its cause, then retry.") from None
-    post_gate_status(api, head, result, inputs)
-    return {**result, "inputs": inputs}
+
+
+def status_refusal(api: Any, head: str, inputs: str) -> dict[str, str] | None:
+    """Clause 8: the newest `sd/local-gate` at `head` is this account's success, at this hub's `inputs`.
+
+    The description must start `head[:12] inputs <inputs>`, the digest this hub would post itself, so a
+    status from a run with another pack or another `CLAUDE.local.md` does not count.
+    """
+    statuses = api.pages(f"{api.prefix}/commits/{head}/statuses")
+    try:
+        api.local_gate_passed(head, statuses)
+    except Refusal as refusal:
+        foreign = refusal.workflow["blocker"]["code"] == "local_gate_foreign"
+        return {"code": "local_gate_foreign" if foreign else "satellite_status_missing", "reason": str(refusal)}
+    current = next(entry for entry in statuses if isinstance(entry, dict) and entry.get("context") == CONTEXT)
+    if str(current.get("description") or "").startswith(f"{head[:12]} inputs {inputs}"):
+        return None
+    return {"code": "satellite_status_missing", "reason": f"{CONTEXT} at {head[:12]} says "
+            f"{current.get('description')!r}, not this hub's inputs {inputs}"}
+
+
+def satellite_refusal(refused: dict[str, str], base: str | None) -> Refusal:
+    """A trust-rule refusal (sd:2704): its code, and the next action `SATELLITE_REFUSALS` gives it."""
+    return Refusal(f"the hub does not accept the satellite's gate: {refused['reason']}", code=refused["code"],
+                   boundary="ci", state="retryable_failure",
+                   next_action=SATELLITE_REFUSALS[refused["code"]].format(base=base))
 
 
 def post_head(root: pathlib.Path, head: str, *, base: str | None = None, api: Any = None) -> dict[str, Any]:

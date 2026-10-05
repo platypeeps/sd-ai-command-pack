@@ -588,7 +588,7 @@ RULES: tuple[Rule, ...] = (
                 "of running the check again, only at the receipt's head, or at "
                 "its tree where `.github/sd-gate-reuse.json` declares tree "
                 "keying, and only under the same binding",
-        checker="bin/sd_gate_run.py::check_in_worktree",
+        checker="bin/sd_gate_run.py::from_receipts",
         proof="replace the `sd_gate_receipts.examine` call in "
               "`bin/sd_gate_run.py` with `(None, None)`; prepare then runs the "
               "check again after a builder's pass at the same head and "

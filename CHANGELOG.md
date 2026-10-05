@@ -17,6 +17,20 @@
   reads the opt-in and answers `off` on every fault;
   `sd_gate_receipts.pack_bin` is the digest the lane publishes. The offload
   view also leaves out `LOGNAME` and `TMPDIR`, which name the login.
+- **The hub accepts a satellite's gate under the trust rule (sd:2704 step 4).**
+  `sd-ship merge --satellite-gate` merges on the satellite's offload receipt
+  and runs no `sd-check`, or refuses with the failed clause's code:
+  `satellite_gate_off`, `base_moved`, `satellite_receipt_missing`,
+  `satellite_receipt_invalid`, `satellite_binding`, `satellite_pack_mismatch`,
+  `satellite_receipt_expired`, `satellite_status_missing` or
+  `local_gate_foreign`. Each code's `next_action` comes from
+  `sd_local_gate.SATELLITE_REFUSALS`; the hand-back sends the work to the
+  satellite. The hub compares the tree part of the binding, the offload view
+  and the pack digest, never the satellite's machine part. On acceptance it
+  posts no status and saves `local_gate` with `satellite` provenance. A plain
+  merge in an opted-in repository tries the offload receipt after its own,
+  and runs the gate on a miss that `reuse_miss.offload` names. `ready`'s
+  behind refusal now carries `base_moved`.
 - **The offload view of a gate's environment (sd:2724, sd:2704 step 2a).**
   `sd_gate_receipts.offload_view` gives the portable view a hub will compare
   with a satellite's receipt: `PATH` entries in order with each `$HOME` prefix

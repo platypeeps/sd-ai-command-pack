@@ -221,8 +221,8 @@ def from_receipts(database: pathlib.Path | None, gated: sd_gate_receipts.Worktre
     This machine's own receipt first, then, under `offload`, a satellite's (sd:2704). A reuse on a
     satellite writes the offload row it lacks. Under `require` the answer is the refusal when none stands.
     """
-    found, miss = (sd_gate_receipts.examine(database, sd_gate_receipts.receipt_key(gated.root, gated.head, gated.content),
-                                            identity) if reuse and database and offload != "require" else (None, None))
+    key = sd_gate_receipts.receipt_key(gated.root, gated.head, gated.content)
+    found, miss = sd_gate_receipts.examine(database, key, identity) if reuse and database and offload != "require" else (None, None)
     if found is not None:
         reading = dict(found["reading"], summary=f"{found['reading']['summary']} (reused)"[:DESCRIPTION_LIMIT],
                        reused={"revision": found["revision"], "recorded_at": found["recorded_at"],

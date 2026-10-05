@@ -2033,6 +2033,7 @@ class Ship(SharedReview):
             raise Refusal("guest mode has no merge authority")
         self.assert_scope()
         self.api.ci = sd_lib.repo_ci(self.connection, self.root)
+        offload = self.offload_mode()
         # Under `repo.ci = local` no remote check is coming, and `gh pr checks
         # --watch` fails on a pull request that has none; the local gate
         # below runs to completion in this process, so it is the wait (sd:1875).
@@ -2049,14 +2050,7 @@ class Ship(SharedReview):
         # `repo.ci = local` (sd:1843): no Actions run, so the checks run here,
         # at the reviewed head in a clean worktree, before readiness reads them.
         if self.api.ci == "local":
-            # A BEHIND branch cannot merge whatever the gate says, and the gate
-            # takes minutes: name it first (sd:2023).
-            refuse_behind(observed, base)
-            # Prepare ran this same gate and left a receipt at this head; a
-            # matching one answers instead of a second run (sd:2041).
-            gate = sd_local_gate.local_gate(self.api, self.root, head, base=base, database=self.database)
-            self.save(local_gate=gate)
-            sd_local_gate.refuse_failure(gate, head, f"the ship receipt's local_gate; `{self.observe_command()}` prints it")
+            self.merge_local_gate(observed, base, head, offload)
         observed = self.settled_ready(observed["number"], head, base, protection)
         self.abandon_copilot_review(observed["number"], head)
         self.require_copilot_clearance(observed["number"], observed, head)
@@ -2107,6 +2101,33 @@ class Ship(SharedReview):
             # PR once; never call merge again to discover what happened.
             return self.reconcile()
         return self.reconcile()
+
+    def merge_local_gate(self, observed: dict, base: str, head: str, offload: str | None) -> None:
+        """The merge's `sd/local-gate` at `head` under `repo.ci = local`, saved on the receipt; refuse a failure."""
+        # A BEHIND branch cannot merge whatever the gate says, and the gate
+        # takes minutes: name it first (sd:2023). Clause 2 of the trust rule (sd:2704).
+        refuse_behind(observed, base, next_action=sd_local_gate.HAND_BACK.format(base=base) if offload == "require" else None)
+        # Prepare ran this same gate and left a receipt at this head; a
+        # matching one answers instead of a second run (sd:2041).
+        gate = sd_local_gate.local_gate(self.api, self.root, head, base=base, database=self.database, offload=offload)
+        self.save(local_gate=gate)
+        sd_local_gate.refuse_failure(gate, head, f"the ship receipt's local_gate; `{self.observe_command()}` prints it")
+
+    def offload_mode(self) -> str | None:
+        """How this merge reads a satellite's offload receipt (sd:2704), after `repo.ci` is read.
+
+        `require` under `--satellite-gate`, which refuses as clause 1 of the trust rule unless the
+        repository runs `repo.ci = local` and opted in with `repo.satellite_gate = accept`; `fallback`
+        for a plain merge in an opted-in repository; None elsewhere, which is today's merge.
+        """
+        opted = self.api.ci == "local" and sd_lib.repo_satellite_gate(self.connection, self.root) == "accept"
+        if not getattr(self.args, "satellite_gate", False):
+            return "fallback" if opted else None
+        if not opted:
+            raise sd_local_gate.satellite_refusal({"code": "satellite_gate_off", "reason": (
+                f"--satellite-gate needs repo.ci = local and repo.satellite_gate = accept; repo.ci is {self.api.ci} and "
+                f"repo.satellite_gate is {sd_lib.repo_satellite_gate(self.connection, self.root)}")}, self.state.get("base"))
+        return "require"
 
     def observe(self) -> dict:
         reference = self.state.get("pull_request")
@@ -2361,6 +2382,8 @@ def merge_flags(action) -> None:
     action.add_argument("--wait-seconds", type=int, default=900)
     action.add_argument("--abandon-copilot-review", metavar="REASON",
                         help="stop waiting for the locally requested Copilot review on this exact PR and head")
+    action.add_argument("--satellite-gate", action="store_true",
+                        help="merge on the satellite's offload receipt under the trust rule, or refuse; never run the gate here (sd:2704)")
 
 
 def hold_commands(commands) -> None:
