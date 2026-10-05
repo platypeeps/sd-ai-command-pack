@@ -1330,7 +1330,10 @@ class Ship(SharedReview):
         git(self.root, "push", "origin", f"{head}:refs/heads/{self.branch}")
         if current_head(self.root) != head:
             raise Refusal("HEAD moved during push; remote still contains only the reviewed commit")
-        pulls = self.api.pages(f"{self.api.prefix}/pulls?state=all&head={quote_branch(self.repository, self.branch)}&base={base}")
+        # Only an open pull request binds. A merged or closed one that once
+        # used this branch name keeps its frozen head, so binding it refused
+        # every later push as a changed head (sd:2656).
+        pulls = self.api.pages(f"{self.api.prefix}/pulls?state=open&head={quote_branch(self.repository, self.branch)}&base={base}")
         candidates = [pull for pull in pulls if pull.get("head", {}).get("ref") == self.branch
                       and str(pull.get("head", {}).get("repo", {}).get("full_name", "")).lower() == self.repository
                       and pull.get("base", {}).get("ref") == base]
