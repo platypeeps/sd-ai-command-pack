@@ -3707,6 +3707,12 @@ def acknowledgement_problems(label: str, entry: Any) -> list[str]:
             f"known facts are {', '.join(ACKNOWLEDGED_FACTS)}"
             for fact in sorted(set(state) - set(ACKNOWLEDGED_FACTS))
         )
+        # `null` is what an unknown fact observes, so a pin of it would
+        # accept exactly the state nobody could see (sd:2755).
+        problems.extend(
+            f"{label}.state.{fact} is null; a pin names an observed value, and unknown is not one"
+            for fact in sorted(state) if state[fact] is None
+        )
     return problems
 
 
