@@ -4,6 +4,17 @@
 
 ### Added
 
+- **`sd-ship prepare` runs on an sd satellite (sd:2679).** When `sd_db`
+  reports the database served by a hub, `prepare` skips the ship lock, a file
+  on the hub, and the hold check beside it. It reviews, pushes, binds or opens
+  the pull request and writes the `ship:` row over the wire; each save is
+  checked against the row's revision. The receipt's `invoker` names the hub
+  under `served_by` and no lock holder. `merge`, and `prepare` on a merged
+  record, still take the lock and refuse as hub-only. Over the wire `sd-review`
+  reports each `url` lane refused by the ledger and runs the CLI lanes. The
+  registry read takes the `--database` `sd-ship` hands down as the hub's
+  database when it names the default, as it does on a satellite.
+
 - **`sd-ship lane`: a reorderable queue (sd:2584).** `move <item>
   up|down|top|<position>`, `hold <item>` and `release <item>` edit the
   pending entries under the queue's lock; a running entry refuses every edit.

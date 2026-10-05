@@ -434,6 +434,8 @@ class Ship(SharedReview):
     #: That ancestor cleared because the commits since it are clean merge-ins
     #: of the base and the branch's own patch-id is unchanged (sd:1485).
     copilot_carried: bool = False
+    #: The sd hub a satellite prepare reached, unlocked (sd:2679); None on the hub.
+    served_by: str | None = None
     #: The warning that ancestor clearance earns, held until dispatch. It says
     #: the gate cleared a merge, so the step that sends the merge writes it;
     #: written when the gate cleared, it outlived every later refusal and each
@@ -1710,7 +1712,8 @@ class Ship(SharedReview):
         return {"pid": os.getpid(), "ppid": os.getppid(), "started_at": PROCESS_STARTED,
                 "checkout": str(self.root), "chdir": getattr(self.args, "chdir", None),
                 "authority": f"--run {run}" if run else "--manual" if manual else None,
-                "lock_holder": lock_options(self.args, self.store).get("holder")}
+                "lock_holder": None if self.served_by else lock_options(self.args, self.store).get("holder"),
+                **({"served_by": self.served_by} if self.served_by else {})}
 
     def merge_authority(self, head: str) -> None:
         from sd_db import runner
@@ -2591,6 +2594,17 @@ def lock_options(args, store) -> dict:
             "wait": wait}
 
 
+def hub_serving(database) -> str | None:
+    """The sd hub serving `database` to this satellite, or None on the hub (sd:2679).
+
+    The test `repository_lock` refuses by. An `sd_db` older than satellites
+    has no `served_by`, and no remote connection either.
+    """
+    from sd_db import database as library
+    served_by = getattr(library, "served_by", None)
+    return served_by(database) if served_by is not None else None
+
+
 def dispatch(root, connection, database, args, store, readonly):
     if args.no_item and args.command in ("review", "verify-review", "adjudicate"):
         import sd_ship_no_item
@@ -2598,6 +2612,13 @@ def dispatch(root, connection, database, args, store, readonly):
     delivery = Ship(root, connection, database, args)
     if readonly:
         return getattr(delivery, args.command)()
+    # sd:2679. The ship lock is a file on the hub, so a satellite prepares
+    # without it: each save is checked against the row's revision. Merge, and
+    # a merged record's prepare, which reconciles, still meet HubOnly at the lock.
+    if args.command == "prepare" and delivery.state.get("phase") not in ("merged", "merge_dispatch"):
+        delivery.served_by = hub_serving(database)
+        if delivery.served_by:
+            return delivery.prepare()
     # A hold for another item refuses before the lock, so a held lane's lock
     # is not contended, and again under it, where the answer holds (sd:2035).
     held = args.command in ("prepare", "merge")
