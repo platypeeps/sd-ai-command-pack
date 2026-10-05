@@ -406,6 +406,17 @@ class SatelliteEntry(requests_suite.Requests):
         self.assertEqual((self.entries()[-1]["status"], self.entries()[-1]["request_row"]), ("merged", "written"))
         self.assertEqual((self.row()["status"], self.row()["merge_commit"]), ("merged", "merged-7"))
 
+    def test_a_failed_outcome_write_is_written_at_the_next_intake(self):
+        """Review round 2: the row was `queued` and its outcome write failed, so it read `queued` for good."""
+        queued = sd_lane.request_key(requests_suite.SLUG, 7)
+        before = receipts.read(self.connection, queued)[0]
+        self.assertEqual(requests_suite.sd_lane.intake(self.hub, self.path), [])  # a pending entry: nothing to write
+        self.run_lane(hub=self.failing_hub("merged"))
+        self.assertEqual((receipts.read(self.connection, queued)[0], self.row()["status"]), (before, "queued"))
+        [answer] = requests_suite.sd_lane.intake(self.hub, self.path)
+        self.assertEqual((answer["status"], answer["request_row"]), ("merged", "written"))
+        self.assertEqual((self.row()["status"], self.row()["merge_commit"]), ("merged", "merged-7"))
+
     def test_a_finished_entry_writes_its_outcome_though_its_ship_row_moved_on(self):
         """Review round 1: with both row writes failed, the next intake must not refuse a merged item as unprepared."""
         self.ask()

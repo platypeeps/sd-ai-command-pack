@@ -15,7 +15,8 @@
   trust rule's next action for its code (`sd_local_gate.SATELLITE_REFUSALS`). The lane starts no speculative gate for a satellite
   follower, and predicts past a satellite entry ahead from its branch on
   origin. After the merge it deletes `origin/<branch>` with a lease on the
-  merged head and writes `merged` to the request row.
+  merged head and writes `merged` to the request row; a row write that
+  failed is retried at the next intake.
 - **A satellite asks the hub's lane to merge: `sd-ship lane request` (sd:2704).**
   On a satellite, `lane request --item N [--manual]` writes the row
   `lane-request:v1:<slug>:<item>` over the wire. It refuses on the hub

@@ -396,7 +396,7 @@ def request(root: pathlib.Path, item: int, *, manual: bool, database: pathlib.Pa
 
 
 def requests(hub: Hub) -> list[tuple[str, int, dict[str, Any]]]:
-    """This lane's request rows whose newest revision is `requested`, oldest request first."""
+    """This lane's request rows whose newest revision is `requested` or `queued`, oldest first."""
     prefix = f"{REQUEST_PREFIX}{hub.slug}:"
     keys = hub.connection.execute("SELECT DISTINCT key FROM state WHERE kind = 'checkpoint' AND substr(key, 1, ?) = ?",
                                   (len(prefix), prefix)).fetchall()
@@ -406,7 +406,7 @@ def requests(hub: Hub) -> list[tuple[str, int, dict[str, Any]]]:
             revision, row = hub.store.read(hub.connection, key)
         except Exception:  # an unreadable row is not a request; nothing here can repair it
             continue
-        if row.get("status") == "requested":
+        if row.get("status") in ("requested", "queued"):
             found.append((key, revision, row))
     return sorted(found, key=lambda request: request[1])
 
@@ -478,17 +478,28 @@ def take_in(hub: Hub, path: pathlib.Path, key: str, revision: int, row: dict[str
 
 
 def intake(hub: Hub, path: pathlib.Path) -> list[dict[str, Any]]:
-    """Take this lane's requests in, oldest first; a request that cannot be decided now waits for the next intake."""
+    """Take this lane's requests in, oldest first; a request that cannot be decided now waits for the next intake.
+
+    A `queued` row whose entry finished gets the outcome a failed `write_outcome` left unwritten (review round 2).
+    """
     done: list[dict[str, Any]] = []
     try:
-        found = requests(hub)
+        found, entries = requests(hub), read_queue(path)
     except Exception as error:  # the database would not answer; hub entries still run, and the next intake reads again
         return [{"status": "unread", "error": f"{type(error).__name__}: {error}"[:300]}]
     for key, revision, row in found:
         try:
-            done.append(take_in(hub, path, key, revision, row))
+            if row["status"] == "requested":
+                done.append(take_in(hub, path, key, revision, row))
+                continue
+            taken = {"key": key, "revision": (row.get("entry") or {}).get("revision")}
+            finished = next((entry for entry in entries if entry.get("request") == taken
+                             and entry.get("status") not in ("pending", "running")), None)
+            if finished is not None:
+                done.append({"request": key, "status": finished["status"],
+                             "request_row": write_outcome(hub, finished, finished)})
         except Exception as error:  # e.g. the row changed under intake: its newest revision is read again next time
-            done.append({"request": key, "revision": revision, "status": "requested",
+            done.append({"request": key, "revision": revision, "status": row.get("status"),
                          "error": f"{type(error).__name__}: {error}"[:300]})
     return done
 
