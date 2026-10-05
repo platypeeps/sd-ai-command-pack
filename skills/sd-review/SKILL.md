@@ -59,22 +59,23 @@ Do not substitute another diff or copy a cap into this procedure.
 
 ## Ordinary review
 
-1. Run the repository's deterministic gate through `sd-check`.
-   A failing gate stops the review before provider dispatch.
-   Branch and `pr` scope run it in a clean detached worktree at the reviewed head, so an edit in the checkout during the run is not what passes.
-   Explicit `--reuse-check` can reuse eligible full-check evidence; missing or stale evidence runs the gate normally.
-   Under `repo.ci = local`, follow the round order below instead.
-2. Use the routing decision from `sd_route.route`.
+1. Use the routing decision from `sd_route.route`.
    Repository policy determines risk and depth; the registry determines eligible reviewers.
-3. Review the exact resolved subject.
+2. Review the exact resolved subject.
    Only consented, enabled, supported, independent reviewers qualify.
    Automatic fallback follows ranked registry order.
    Rate limits, missing executables, authentication failures, failed runs, and timeouts can advance that chain.
    An exhausted chain with insufficient completed coverage fails.
-4. Disposition findings locally against the repository's severity floor.
+3. Disposition findings locally against the repository's severity floor.
    Preserve each provider's findings and attempt outcome.
    A completed adverse review counts; it does not trigger replacement.
    A clean fallback cannot erase earlier findings.
+4. Run the repository's deterministic gate through `sd-check`, after a review that does not block.
+   A blocking or incomplete review runs no gate and records `check.status: not_run`; no test passed.
+   Branch and `pr` scope run it in a clean detached worktree at the reviewed head, so an edit in the checkout during the run is not what passes.
+   Explicit `--reuse-check` can reuse eligible full-check evidence; a reused receipt runs no gate.
+   A failing gate fails the review.
+   Under `repo.ci = local`, follow the round order below instead.
 
 Reviewing tiers require one completed independent local review.
 Skip requires none, subject to planning and challenge minimums.

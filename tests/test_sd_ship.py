@@ -167,7 +167,10 @@ class ShipDouble(GitHubDouble):
                 if self.lose_create:
                     raise RemoteRefusal(503, "create response lost")
                 return 201, self._pull(pull)
-            return 200, [self._pull(pull) for pull in self.remote.pull_requests.values()]
+            # GitHub filters by `state` and defaults to open (sd:2656).
+            wanted = query.get("state", ["open"])[0]
+            pulls = [self._pull(pull) for pull in self.remote.pull_requests.values()]
+            return 200, [pull for pull in pulls if wanted == "all" or pull["state"] == wanted]
         if method == "POST" and path.startswith(f"{prefix}/pulls/") and path.endswith("/requested_reviewers"):
             number = int(path.split("/")[-2])
             if self.lose_copilot_request:
@@ -1086,6 +1089,19 @@ roles:
         # The rerun adopts the PR the push already updated.
         with patch.object(ship.time, "sleep"):
             self.assertEqual(self.prepare()["phase"], "ready_to_send")
+
+    def test_a_merged_pull_request_on_the_branch_name_is_not_bound(self):
+        # sd:2656, live on sd:1912: the item's recorded branch had carried #1242,
+        # merged on 2026-09-28. The lookup read closed pulls too, bound #1242,
+        # and its frozen head refused the push as "PR head changed after push".
+        merged = self.remote.open_pull_request("topic", base="main", title="Earlier work (sd:1912)", body="")
+        merged.state, merged.merged_head = "MERGED", "b1e4a7c0" * 5
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        number = self.operation().state["pull_request"]["number"]
+        self.assertNotEqual(number, merged.number)
+        self.assertEqual(self.remote.pull(number).state, "OPEN")
+        self.assertEqual(merged.state, "MERGED")
 
     def test_prepare_hands_the_pull_request_body_to_the_docs_lint(self):
         # Rule 5 only runs with a body. The skill says the PR link is checked
@@ -4822,7 +4838,7 @@ roles:
         state = self.operation().state
         # sd:2611: the execution watchdog also counts the gate-slot phase.
         self.assertEqual(stages, [(True, 3600), (False, 10800 + sd_review.sd_lib.GATE_SLOT_SECONDS)])
-        self.assertEqual(trace, ["check", "provider"])
+        self.assertEqual(trace, ["provider", "check"])  # sd:2605: the reviewers run before the gate
         self.assertEqual(len(state["passes"]), 1)
         self.assertEqual(state["passes"][0]["report"]["completed_reviews"], 1)
 
@@ -5716,11 +5732,11 @@ class DeclaredGapCase(unittest.TestCase):
 
     def test_ci_local_prepare_runs_its_check_in_the_gates_worktree(self):
         """sd:2041. Under `repo.ci = local` prepare's check is the gate's, so the
-        same Makefile fails at prepare, before any reviewer, and not first at merge."""
+        same Makefile fails at prepare, after the review cleared (sd:2605), and not first at merge."""
         self.commit({"Makefile": "check:\n\t@test -d .git\n"})
         self.declare()
         self.local_ci()
-        with self.assertRaisesRegex(ship.Refusal, "the repository gate failed before any reviewer was asked"):
+        with self.assertRaisesRegex(ship.Refusal, "the repository gate failed after the review cleared"):
             self.local_green()
 
     def test_ci_local_merge_reuses_prepares_passing_gate(self):

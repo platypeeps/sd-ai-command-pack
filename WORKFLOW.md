@@ -176,6 +176,7 @@ After the switch:
   The status then says `(reused)`. The merge gate never writes a receipt.
   Prepare reads one too: a pass that `sd gate check` or an earlier prepare left at the same head and binding (sd:1912).
   A repository that tracks `.github/sd-gate-reuse.json` keys receipts by tree and merge base instead of head, for 6 hours (sd:1912).
+  The merge base binds by its tree, not its commit (sd:2586).
   The pack's own declaration adds `"tool": "tree"`: its gate runs the gated tree's own `bin/sd-check` and binds that tree, not the checkout's `bin/` (sd:2613).
   A pack landing between a builder's gate and the lane's prepare then keeps the pack item's receipt.
   The field counts only when the running pack belongs to the gated repository; any other repository's gate keeps the checkout binding.
@@ -507,7 +508,11 @@ which the installer places in `~/.claude/agents`.
   failed entry is marked and the next one runs. A second runner exits at once
   rather than wait. Each prepare and merge keeps its whole output under
   `<lane>/logs/`. `list` and `cancel` read and edit the queue; `watch` prints
-  each gate end a log under `sd.lane_root` records, once.
+  each gate end a log under `sd.lane_root` records, once. While an entry
+  queued with `--manual` ships, the runner gates the next entry on its
+  predicted landing in the background, and waits for that gate after the
+  merge, so the next prepare reuses its receipt (sd:2586). That needs the
+  tree key above; the next entry's `speculation` field says what ran.
 - **Test one version per language, the latest stable (Python 3.14, Node
   26), in CI and locally; no version matrices.**
 
