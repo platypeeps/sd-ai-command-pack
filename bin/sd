@@ -978,9 +978,43 @@ def describe(root: str) -> dict[str, object]:
     return entry
 
 
+def described(roots: list[str]) -> list[dict[str, object]]:
+    """`describe` for every root, each in its own daemon thread, as `scan` reads (sd:2555).
+
+    A root still silent after ROOT_READ_SECONDS is listed unreadable, with a
+    warning, instead of holding the whole list behind one stalled open().
+    """
+
+    answers: queue.Queue[tuple[int, dict[str, object] | BaseException]] = queue.Queue()
+
+    def describe_root(index: int, root: str) -> None:
+        try:
+            answers.put((index, describe(root)))
+        except BaseException as error:  # noqa: BLE001 - raised again on the caller's thread
+            answers.put((index, error))
+
+    for index, root in enumerate(roots):
+        threading.Thread(target=describe_root, args=(index, root), daemon=True, name=f"sd plugin root {root}").start()
+    entries: dict[int, dict[str, object]] = {}
+    deadline = time.monotonic() + ROOT_READ_SECONDS
+    while len(entries) < len(roots):
+        try:
+            index, entry = answers.get(timeout=max(0.0, deadline - time.monotonic()))
+        except queue.Empty:
+            break
+        if isinstance(entry, BaseException):
+            raise entry
+        entries[index] = entry
+    silent = f"its {MANIFEST_NAME} did not answer within {ROOT_READ_SECONDS:g}s"
+    for index, root in enumerate(roots):
+        if index not in entries:
+            print(f"warning: skipped plugin root {root}: {silent}", file=sys.stderr)
+            entries[index] = {"root": root, "readable": False, "why": silent}
+    return [entries[index] for index in range(len(roots))]
+
+
 def plugin_list(args: argparse.Namespace) -> int:
-    roots = registry(sd_lib.machine_config())
-    entries = [describe(root) for root in roots]
+    entries = described(registry(sd_lib.machine_config()))
     if args.json:
         json.dump(entries, sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
@@ -2891,8 +2925,8 @@ def cmd_attribute(args: argparse.Namespace) -> int:
     registry, reason = sd_registry.read_or_report()
     if reason and args.entry.strip() not in sd_lib.RESERVED_AUTHORS:
         raise Refusal(f"{reason}; an attribution names an entry the registry has")
-    # The repair commit says who made it: `SD_AUTHOR`'s entry, else `human` (sd:2009).
-    invoker = os.environ.get(sd_lib.AUTHOR_VARIABLE, "").strip()
+    # The repair commit says who made it: `SD_AUTHOR`, else a harness marker, else `human` (sd:2009, sd:2689).
+    invoker = sd_lib.invoking_author(os.environ, registry)
     writer = sd_lib.commit_author(invoker, lambda: (registry, reason)) if invoker else sd_lib.HUMAN_AUTHOR
     sha, value, covered = sd_lib.attribute(root, args.commits, args.entry, registry, writer)
     print(f"{sha[:12]} attributes {len(covered)} commit(s) to {value}")
@@ -3261,7 +3295,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="record who wrote commits that did not say, as one empty commit")
     attributer.add_argument("commits", help="a commit, or a `<from>..<to>` range, on this branch")
     attributer.add_argument(
-        "entry", help=f"a registry entry, `{sd_lib.HUMAN_AUTHOR}` for the operator, `{sd_lib.SCRIPT_AUTHOR}` "
+        "entry", help=f"a registry entry or its `<entry>/<vendor>` value, `{sd_lib.HUMAN_AUTHOR}` for the operator, `{sd_lib.SCRIPT_AUTHOR}` "
                       f"for an unattended job, or `{sd_lib.DEPENDABOT_ENTRY}` for a bump rewritten after GitHub made it")
     attributer.set_defaults(handler=cmd_attribute)
 
