@@ -108,14 +108,9 @@ def gate_inputs(root: pathlib.Path, head: str, tree: str | None = None, own: boo
     digest = hashlib.sha256((f"head {head}" if tree is None else f"tree {tree}").encode() + b"\n")
     local = untracked_local_block(root)
     digest.update(b"local " + (local.read_bytes() if local else b"absent") + b"\n" + b"pack tree\n" * own)
-    for path in [] if own else pack_files():
+    for path in [] if own else sd_gate_receipts.pack_files(BIN):
         digest.update(f"pack {path.name}\n".encode() + path.read_bytes())
     return digest.hexdigest()[:12]
-
-
-def pack_files() -> list[pathlib.Path]:
-    """The pack `bin/` files a run depends on; `gate_inputs` and `sd_gate_receipts.pack_bin` hash these."""
-    return [path for path in sorted(BIN.iterdir()) if path.is_file() and (path.suffix == ".py" or path.name.startswith("sd-"))]
 
 
 def gate_environment(root: pathlib.Path, environ: dict[str, str] | None = None) -> dict[str, str]:
@@ -171,13 +166,7 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
     passing run leaves one when its binding held from before the run to after;
     otherwise the result's `receipt_skipped` names what moved (sd:2612).
     `reuse=False` never reads one and `record=False` never writes one (the merge gate).
-
-    On a satellite (sd:2704) a recorded pass, or a reuse, also writes the offload
-    receipt the hub reads (`sd_gate_receipts.record_offload`), and a run first
-    warns when the hub's published pack digest is another. `offload` is the
-    hub's: `require` answers from a satellite's offload receipt or refuses with
-    `offload_refused`, and never runs; `fallback` tries one after its own
-    receipt misses, and runs on a miss. An accepted one carries `satellite`.
+    `offload` and a satellite's offload receipt (sd:2704): `sd_gate_receipts.from_receipts`.
     """
     with tempfile.TemporaryDirectory(prefix="sd-local-gate-") as parent:
         tree = pathlib.Path(parent) / "tree"
@@ -192,12 +181,10 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
                                               gate_inputs(root, head, content, own))
             identity = (sd_gate_receipts.gate_binding(tree, head, gated.inputs, base, env, fork)
                         if database is not None and offload != "require" else None)
-            answer, miss = from_receipts(database, gated, identity, reuse=reuse, record=record, offload=offload)
+            answer, miss = sd_gate_receipts.from_receipts(database, gated, identity, reuse=reuse, record=record, offload=offload)
             if answer is not None:
                 return {"head": gate_git(tree, "rev-parse", "HEAD"), **answer}
             warning = sd_gate_receipts.pack_warning(database, root, own) if record and database else None
-            if warning:
-                print(f"sd gate: warning: {warning}", file=sys.stderr)
             argv = [sys.executable, str((tree / "bin" if own else BIN) / "sd-check"), "--json", "--timeout", str(timeout),
                     *(["--base", base] if base else []), *(["--slot-timeout", str(slot_timeout)] * (slot_timeout > 0))]
             with sd_gate_cache.cargo_environment(root, tree, env) as child:
@@ -205,62 +192,13 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
             checked = gate_git(tree, "rev-parse", "HEAD")
             reading = check_reading(code, output, errors)
             if record and database and identity and reading["status"] == "success" and checked == head:
-                record_gate_pass(database, gated, identity, reading)
+                sd_gate_receipts.record_gate_pass(database, gated, identity, reading)
             reading.update({"pack_warning": warning} if warning else {})
         finally:
             # The administrative entry goes with the directory; the temporary
             # directory's own cleanup removes whatever the removal left.
             sd_lib.git_output(["worktree", "remove", "--force", str(tree)], root)
     return {"head": checked, **reading, **({"reuse_miss": miss} if miss else {})}  # sd:2602; never in the receipt
-
-
-def from_receipts(database: pathlib.Path | None, gated: sd_gate_receipts.Worktree, identity: dict[str, Any] | None, *,
-                  reuse: bool, record: bool, offload: str | None) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    """`(answer, None)` when a receipt answers instead of a run, else `(None, miss)`: why none stood (sd:2602).
-
-    This machine's own receipt first, then, under `offload`, a satellite's (sd:2704). A reuse on a
-    satellite writes the offload row it lacks. Under `require` the answer is the refusal when none stands.
-    """
-    key = sd_gate_receipts.receipt_key(gated.root, gated.head, gated.content)
-    found, miss = sd_gate_receipts.examine(database, key, identity) if reuse and database and offload != "require" else (None, None)
-    if found is not None:
-        reading = dict(found["reading"], summary=f"{found['reading']['summary']} (reused)"[:DESCRIPTION_LIMIT],
-                       reused={"revision": found["revision"], "recorded_at": found["recorded_at"],
-                               "age_seconds": found["age_seconds"], "head": found["head"]})
-        if record and identity:
-            reading.update(sd_gate_receipts.record_offload(database, gated, identity, found["reading"], found["recorded_at"]))
-        return reading, None
-    if not offload:
-        return None, miss
-    accepted, refused = sd_gate_receipts.examine_offload(database, gated)
-    if accepted is not None:
-        return satellite_reading(accepted), None
-    if offload == "require":
-        return {"status": "refused", "offload_refused": refused}, None
-    return None, {**(miss or {}), "offload": refused}
-
-
-def record_gate_pass(database: pathlib.Path, gated: sd_gate_receipts.Worktree, identity: dict[str, Any],
-               reading: dict[str, Any]) -> None:
-    """Record a pass at the head it ran on, and on a satellite its offload row, unless the binding moved."""
-    after = sd_gate_receipts.gate_binding(gated.tree, gated.head, gate_inputs(gated.root, gated.head, gated.content, gated.own),
-                                          gated.base, gated.environment, gated.fork)
-    key = sd_gate_receipts.receipt_key(gated.root, gated.head, gated.content)
-    sd_gate_receipts.record_unless_moved(database, key, identity, after, reading, gated.head)
-    if "receipt_skipped" not in reading:
-        reading.update(sd_gate_receipts.record_offload(database, gated, identity, {
-            name: value for name, value in reading.items() if name not in ("receipt_revision", "receipt_error")}))
-
-
-def satellite_reading(accepted: dict[str, Any]) -> dict[str, Any]:
-    """A satellite's pass the hub accepted (sd:2704), as a gate result: its reading, and `satellite` provenance."""
-    satellite = accepted["satellite"]
-    summary = f"{accepted['reading'].get('summary')} (satellite {satellite.get('hostname')})"[:DESCRIPTION_LIMIT]
-    return dict(accepted["reading"], summary=summary, satellite={
-        "revision": accepted["revision"], "login": satellite.get("login"), "address": satellite.get("address"),
-        "hostname": satellite.get("hostname"), "hub": accepted["hub"], "head": accepted["head"],
-        "recorded_at": accepted["recorded_at"], "age_seconds": accepted["age_seconds"],
-        "unresolved_tools": accepted["unresolved_tools"]})
 
 
 def named_checks(report: dict[str, Any]) -> str:

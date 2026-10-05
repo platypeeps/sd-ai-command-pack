@@ -368,9 +368,14 @@ def pack_bin(own: bool = False) -> str:
     if own:
         return "tree"
     digest = hashlib.sha256()
-    for path in sd_gate_run.pack_files():
+    for path in pack_files(sd_gate_run.BIN):
         digest.update(f"pack {path.name}\n".encode() + path.read_bytes())
     return digest.hexdigest()
+
+
+def pack_files(folder: pathlib.Path) -> list[pathlib.Path]:
+    """The pack `bin/` files in `folder` a run depends on; `gate_inputs` and `pack_bin` hash these."""
+    return [path for path in sorted(folder.iterdir()) if path.is_file() and (path.suffix == ".py" or path.name.startswith("sd-"))]
 
 
 def pack_rev() -> str | None:
@@ -388,6 +393,7 @@ def satellite_identity() -> dict[str, Any]:
     """This machine as an offload row names it: the tailnet owner login and IPv4 address, and the host name."""
     node: dict[str, Any] = {"hostname": socket.gethostname()}
     try:
+        sd_lib.import_sd_db()
         from sd_db.tailnet import this_node  # noqa: PLC0415
 
         this = this_node()
@@ -406,7 +412,7 @@ def read_offload(database: pathlib.Path | None, key: str) -> tuple[int, dict[str
 
 
 def pack_warning(database: pathlib.Path | None, root: pathlib.Path, own: bool) -> str | None:
-    """On an opted-in satellite, why the hub's merge would refuse this run's receipt as another pack, or None.
+    """On an opted-in satellite, warn on stderr why the hub's merge would refuse this run's receipt as another pack.
 
     It compares with the digest the hub's lane last published. A warning only: the hub's pack can still
     move after the run, and its merge compares again (clause 6). Any fault warns of nothing.
@@ -424,9 +430,11 @@ def pack_warning(database: pathlib.Path | None, root: pathlib.Path, own: bool) -
     theirs, ours = (published or {}).get("pack_bin"), pack_bin(own)
     if not theirs or theirs == ours:
         return None
-    return (f"this pack's bin/ digest {ours[:12]} (rev {str(pack_rev())[:12]}) is not the hub's {str(theirs)[:12]} "
-            f"(rev {str(published.get('pack_rev'))[:12]}, published {published.get('published_at')}): the hub will refuse "
-            "this receipt as satellite_pack_mismatch. Bring both packs to one revision, then run sd gate check again")
+    warning = (f"this pack's bin/ digest {ours[:12]} (rev {str(pack_rev())[:12]}) is not the hub's {str(theirs)[:12]} "
+               f"(rev {str(published.get('pack_rev'))[:12]}, published {published.get('published_at')}): the hub will refuse "
+               "this receipt as satellite_pack_mismatch. Bring both packs to one revision, then run sd gate check again")
+    print(f"sd gate: warning: {warning}", file=sys.stderr)
+    return warning
 
 
 def record_offload(database: pathlib.Path | None, run: Worktree, identity: Mapping[str, Any], reading: Mapping[str, Any],
@@ -538,6 +546,63 @@ def expired_offload(row: Mapping[str, Any], now: float) -> dict[str, str] | None
     return {"code": "satellite_receipt_expired", "reason": f"the offload receipt was recorded at {row.get('recorded_at')} "
             f"on the satellite's clock and it is {now:.0f} on the hub's: {age:.0f} s, outside "
             f"-{OFFLOAD_SKEW_SECONDS} to {OFFLOAD_WINDOW_SECONDS} s"}
+
+
+def from_receipts(database: pathlib.Path | None, gated: Worktree, identity: dict[str, Any] | None, *,
+                  reuse: bool, record: bool, offload: str | None) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """`(answer, None)` when a receipt answers `check_in_worktree` instead of a run, else `(None, miss)`: why none stood (sd:2602).
+
+    This machine's own receipt first; a reuse on a satellite writes the offload row it lacks (sd:2704).
+    Then `offload`, the hub's: `require` answers from a satellite's offload receipt or with
+    `offload_refused`, and never runs; `fallback` tries one after its own receipt and names its miss.
+    An accepted one carries `satellite`. A recorded pass writes the offload row too (`record_gate_pass`).
+    """
+    import sd_gate_run  # noqa: PLC0415 -- it imports this module
+
+    key = receipt_key(gated.root, gated.head, gated.content)
+    found, miss = examine(database, key, identity) if reuse and database and offload != "require" else (None, None)
+    if found is not None:
+        reading = dict(found["reading"], summary=f"{found['reading']['summary']} (reused)"[:sd_gate_run.DESCRIPTION_LIMIT],
+                       reused={"revision": found["revision"], "recorded_at": found["recorded_at"],
+                               "age_seconds": found["age_seconds"], "head": found["head"]})
+        if record and identity:
+            reading.update(record_offload(database, gated, identity, found["reading"], found["recorded_at"]))
+        return reading, None
+    if not offload:
+        return None, miss
+    accepted, refused = examine_offload(database, gated)
+    if accepted is not None:
+        return satellite_reading(accepted), None
+    if offload == "require":
+        return {"status": "refused", "offload_refused": refused}, None
+    return None, {**(miss or {}), "offload": refused}
+
+
+def record_gate_pass(database: pathlib.Path, gated: Worktree, identity: dict[str, Any],
+               reading: dict[str, Any]) -> None:
+    """Record a pass at the head it ran on, and on a satellite its offload row, unless the binding moved."""
+    import sd_gate_run  # noqa: PLC0415 -- it imports this module
+
+    after = gate_binding(gated.tree, gated.head, sd_gate_run.gate_inputs(gated.root, gated.head, gated.content, gated.own),
+                                          gated.base, gated.environment, gated.fork)
+    key = receipt_key(gated.root, gated.head, gated.content)
+    record_unless_moved(database, key, identity, after, reading, gated.head)
+    if "receipt_skipped" not in reading:
+        reading.update(record_offload(database, gated, identity, {
+            name: value for name, value in reading.items() if name not in ("receipt_revision", "receipt_error")}))
+
+
+def satellite_reading(accepted: dict[str, Any]) -> dict[str, Any]:
+    """A satellite's pass the hub accepted (sd:2704), as a gate result: its reading, and `satellite` provenance."""
+    import sd_gate_run  # noqa: PLC0415 -- it imports this module
+
+    satellite = accepted["satellite"]
+    summary = f"{accepted['reading'].get('summary')} (satellite {satellite.get('hostname')})"[:sd_gate_run.DESCRIPTION_LIMIT]
+    return dict(accepted["reading"], summary=summary, satellite={
+        "revision": accepted["revision"], "login": satellite.get("login"), "address": satellite.get("address"),
+        "hostname": satellite.get("hostname"), "hub": accepted["hub"], "head": accepted["head"],
+        "recorded_at": accepted["recorded_at"], "age_seconds": accepted["age_seconds"],
+        "unresolved_tools": accepted["unresolved_tools"]})
 
 
 def record_unless_moved(database: pathlib.Path, key: str, identity: Mapping[str, Any], after: Mapping[str, Any] | None,
