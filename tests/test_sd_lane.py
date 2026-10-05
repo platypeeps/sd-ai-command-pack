@@ -17,7 +17,6 @@ import tempfile
 import threading
 import time
 import unittest
-from typing import Any, Callable
 from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -376,8 +375,8 @@ class Landing(Lane):
         git(tree, "push", "-q", "origin", name)
         return tree, git(tree, "rev-parse", "HEAD")
 
-    def merge_lands(self, tree: pathlib.Path, item: int, head: str, **options) -> None:
-        sd_lane.enqueue_entry(tree, item, "t", self.body, self.environ, manual=True, claim="deliver", **options)
+    def merge_lands(self, tree: pathlib.Path, item: int, head: str) -> None:
+        sd_lane.enqueue_entry(tree, item, "t", self.body, self.environ, manual=True, claim="deliver")
         self.answers[(item, "prepare")] = {"ok": True, "phase": "ready_to_send", "head": head}
         self.answers[(item, "merge")] = {"ok": True, "phase": "merged", "merge_commit": "c0ffee" * 6 + "c0ff"}
 
@@ -387,12 +386,6 @@ class Landing(Lane):
     def remote_branches(self) -> list[str]:
         return git(self.origin, "for-each-ref", "--format=%(refname:short)", "refs/heads").split()
 
-    def ignore(self, *patterns: str) -> None:
-        """Ignore `patterns` in every worktree of the fixture repository, as a `.gitignore` would."""
-        exclude = pathlib.Path(git(self.repo, "rev-parse", "--path-format=absolute", "--git-common-dir")) / "info/exclude"
-        exclude.parent.mkdir(parents=True, exist_ok=True)
-        exclude.write_text("".join(f"{pattern}\n" for pattern in patterns), encoding="utf-8")
-
     def advance_origin_main(self) -> str:
         upstream = self.tmp / "upstream"
         subprocess.run(["git", "clone", "-q", str(self.origin), str(upstream)], check=True)
@@ -400,18 +393,35 @@ class Landing(Lane):
         git(upstream, "push", "-q", "origin", "main")
         return git(upstream, "rev-parse", "HEAD")
 
-    def test_a_clean_merged_worktree_is_removed_and_the_item_noted(self) -> None:
+    def test_a_merged_worktree_stays_and_the_note_names_its_removal_command(self) -> None:
+        """The review's race (sd:2568): removal can race a live builder, so the runner never removes the worktree."""
         tree, head = self.topic()
         self.merge_lands(tree, 1, head)
         self.drain()
-        self.assertFalse(tree.exists())
-        self.assertEqual(git(self.repo, "branch", "--list", "topic"), "")
+        self.assertEqual((tree / "pkg/mod/a.py").read_text(encoding="utf-8"), "A = 1\n")
+        self.assertEqual(os.readlink(tree / "link"), "README.md")
+        self.assertEqual(git(self.repo, "rev-parse", "refs/heads/topic"), head)
         self.assertEqual(self.remote_branches(), ["main"])
+        remove = f"git -C {self.repo} worktree remove {tree} && git -C {self.repo} update-ref -d refs/heads/topic {head}"
         [(item, body, main)] = self.notes
         self.assertEqual((item, main), (1, self.repo))
-        self.assertEqual(body, f"Landed: merged at c0ffeec0ffee (head {head[:12]}). Cleanup: removed worktree {tree}, "
-                               f"removed branch topic, removed origin/topic. Recover: git branch topic {head}.")
-        self.assertEqual(self.entries()[0]["status"], "merged")
+        self.assertEqual(body, f"Landed: merged at c0ffeec0ffee (head {head[:12]}). Cleanup: removed origin/topic, "
+                               f"worktree {tree} and branch topic kept for removal once the builder stops. "
+                               f"Recover: git branch topic {head}. Remove: {remove}")
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], entry["remove"]), ("merged", remove))
+        subprocess.run(remove, shell=True, check=True, capture_output=True)  # the printed command works as printed
+        self.assertFalse(tree.exists())
+        self.assertEqual(git(self.repo, "branch", "--list", "topic"), "")
+
+    def test_a_builder_write_through_an_open_handle_survives_the_landing(self) -> None:
+        """The second review's case: a handle opened before the landing, written after it."""
+        tree, head = self.topic()
+        self.merge_lands(tree, 1, head)
+        with open(tree / "README.md", "a", encoding="utf-8") as handle:
+            self.drain()
+            handle.write("late\n")
+        self.assertEqual((tree / "README.md").read_text(encoding="utf-8"), "readme\nlate\n")
 
     def test_the_runner_notes_through_default_note_when_given_none(self) -> None:
         """The fixture replaces `default_note`; `run_lane` must read it at the call, or a suite writes real notes."""
@@ -420,25 +430,6 @@ class Landing(Lane):
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual([item for item, _, _ in self.notes], [1])
         self.assertEqual(self.entries()[0]["note"], "written")
-
-    def test_a_dirty_worktree_is_kept_and_the_note_says_why(self) -> None:
-        tree, head = self.topic()
-        (tree / "work.txt").write_text("uncommitted\n", encoding="utf-8")
-        self.merge_lands(tree, 1, head)
-        self.drain()
-        self.assertTrue(tree.exists())
-        self.assertEqual(self.remote_branches(), ["main", "topic"])
-        self.assertIn("Cleanup skipped: the worktree has uncommitted changes", self.notes[0][1])
-        self.assertIn(f"Recover: git branch topic {head}", self.notes[0][1])
-
-    def test_an_untracked_file_hidden_by_the_status_setting_still_keeps_the_worktree(self) -> None:
-        tree, head = self.topic()
-        git(self.repo, "config", "status.showUntrackedFiles", "no")
-        (tree / "notes.txt").write_text("scratch\n", encoding="utf-8")
-        self.merge_lands(tree, 1, head)
-        self.drain()
-        self.assertTrue((tree / "notes.txt").exists())
-        self.assertIn("uncommitted", self.entries()[0]["cleanup"])
 
     def test_a_tip_past_the_merged_head_is_kept(self) -> None:
         tree, head = self.topic()
@@ -454,135 +445,6 @@ class Landing(Lane):
         self.assertEqual(self.remote_branches(), ["main", "topic"])
         self.assertIn("is not the merged head", self.entries()[0]["cleanup"])
 
-    def test_a_commit_after_the_tip_check_keeps_the_branch_at_the_newer_tip(self) -> None:
-        tree, head = self.topic()
-        self.merge_lands(tree, 1, head)
-        checked = sd_lane.lane_git
-
-        def builder_commits_during_ls_remote(root: pathlib.Path, *args: str) -> str | None:
-            if args[:1] == ("ls-remote",):
-                git(tree, "commit", "-q", "--allow-empty", "-m", "newer")
-            return checked(root, *args)
-        with mock.patch.object(sd_lane, "lane_git", builder_commits_during_ls_remote):
-            self.drain()
-        newer = git(self.repo, "for-each-ref", "--format=%(objectname)", "refs/heads/topic")
-        self.assertNotIn(newer, ("", head))
-        self.assertIn(f"Cleanup stopped: branch topic moved to {newer}", self.entries()[0]["cleanup"])
-        self.assertEqual(self.remote_branches(), ["main", "topic"])
-
-    def test_any_ignored_entry_keeps_the_worktree_and_its_branch(self) -> None:
-        """Operator ruling (sd:2584 option a): removal deletes ignored files, build output included."""
-        for files in ({".env": "TOKEN=change-me\n"}, {"pkg/__pycache__/m.cpython-314.pyc": ""},
-                      {"build/credentials.env": "x\n"}):
-            with self.subTest(files=sorted(files)):
-                self.setUp()
-                tree, head = self.topic()
-                self.ignore(".env", "__pycache__/", "build/")
-                for name, text in files.items():
-                    (tree / name).parent.mkdir(parents=True, exist_ok=True)
-                    (tree / name).write_text(text, encoding="utf-8")
-                self.merge_lands(tree, 1, head)
-                self.drain()
-                self.assertTrue(all((tree / name).exists() for name in files))
-                self.assertEqual(git(self.repo, "rev-parse", "refs/heads/topic"), head)
-                cleanup = self.entries()[0]["cleanup"]
-                self.assertIn("worktree kept: holds ignored entries: ", cleanup)
-                self.assertIn(next(iter(files)).split("/")[0], cleanup)
-                self.assertEqual(self.remote_branches(), ["main"])
-
-    def after_git(self, matches: Callable[[tuple[str, ...]], bool], act: Callable[[], None]) -> Any:
-        """Run `act` once, as a builder would, right after the first `lane_git` call whose arguments match returns."""
-        checked, done = sd_lane.lane_git, []
-
-        def acting(root: pathlib.Path, *args: str) -> str | None:
-            answer = checked(root, *args)
-            if not done and matches(args):
-                done.append(act())
-            return answer
-        return mock.patch.object(sd_lane, "lane_git", acting)
-
-    def test_an_ignored_file_written_after_the_last_status_check_survives(self) -> None:
-        """The sd:2568 review's race: no lock excludes the builder, so a file can appear after the check."""
-        tree, head = self.topic()
-        self.ignore("build/")
-        late = tree / "build/late.o"
-
-        def builder_writes() -> None:
-            late.parent.mkdir()
-            late.write_text("object\n", encoding="utf-8")
-        self.merge_lands(tree, 1, head)
-        with self.after_git(lambda args: "--ignored=matching" in args, builder_writes):
-            self.drain()
-        self.assertEqual(late.read_text(encoding="utf-8"), "object\n")
-        self.assertEqual(git(self.repo, "rev-parse", "refs/heads/topic"), head)
-        self.assertEqual(self.remote_branches(), ["main", "topic"])
-        cleanup = self.entries()[0]["cleanup"]
-        self.assertIn("Cleanup stopped: build/late.o appeared or changed during removal", cleanup)
-        git(tree, "checkout", "--", ".")  # the note's restore: the tracked files come back from the index
-        self.assertEqual((tree / "pkg/mod/a.py").read_text(encoding="utf-8"), "A = 1\n")
-
-    def test_a_tracked_file_rewritten_after_the_last_status_check_is_put_back(self) -> None:
-        """Same size, same inode: only the modification time tells the rewrite apart, and it must."""
-        tree, head = self.topic()
-
-        def builder_rewrites() -> None:
-            with open(tree / "README.md", "r+", encoding="utf-8") as handle:
-                handle.write("REA")
-        self.merge_lands(tree, 1, head)
-        with self.after_git(lambda args: "--ignored=matching" in args, builder_rewrites):
-            self.drain()
-        self.assertEqual((tree / "README.md").read_text(encoding="utf-8"), "REAdme\n")
-        self.assertEqual(git(self.repo, "rev-parse", "refs/heads/topic"), head)
-        self.assertIn("Cleanup stopped: README.md appeared or changed during removal", self.entries()[0]["cleanup"])
-
-    def test_a_tracked_file_rewritten_after_the_uncommitted_check_keeps_the_worktree(self) -> None:
-        """The check that vouches for each file runs after its snapshot, so it sees every kind of change."""
-        tree, head = self.topic()
-
-        def builder_rewrites() -> None:
-            (tree / "README.md").write_text("rewritten\n", encoding="utf-8")
-        self.merge_lands(tree, 1, head)
-        with self.after_git(lambda args: args == ("status", "--porcelain", "--untracked-files=all"), builder_rewrites):
-            self.drain()
-        self.assertEqual((tree / "README.md").read_text(encoding="utf-8"), "rewritten\n")
-        self.assertEqual(git(self.repo, "rev-parse", "refs/heads/topic"), head)
-        self.assertIn("worktree kept: changed after the status check: README.md", self.entries()[0]["cleanup"])
-
-    def test_a_locked_worktree_is_kept(self) -> None:
-        tree, head = self.topic()
-        git(self.repo, "worktree", "lock", str(tree))
-        self.merge_lands(tree, 1, head)
-        self.drain()
-        self.assertTrue((tree / "README.md").exists())
-        self.assertIn("worktree kept: git worktree lock holds it", self.entries()[0]["cleanup"])
-
-    def test_the_kept_note_names_three_ignored_entries_then_elides(self) -> None:
-        tree, head = self.topic()
-        self.ignore("*.local")
-        for name in ("a", "b", "c", "my d"):
-            (tree / f"{name}.local").write_text("x\n", encoding="utf-8")
-        self.merge_lands(tree, 1, head)
-        self.drain()
-        self.assertIn("holds ignored entries: a.local, b.local, c.local…", self.entries()[0]["cleanup"])
-
-    def test_a_worktree_queued_to_keep_keeps_it_and_its_branch_and_drops_the_remote(self) -> None:
-        tree, head = self.topic()
-        self.merge_lands(tree, 1, head, keep_worktree=True)
-        self.drain()
-        self.assertTrue(tree.exists())
-        self.assertEqual(git(self.repo, "rev-parse", "refs/heads/topic"), head)
-        self.assertEqual(self.remote_branches(), ["main"])
-        self.assertEqual(self.entries()[0]["cleanup"],
-                         "Cleanup: worktree and branch kept: queued with --keep-worktree, removed origin/topic")
-
-    def test_a_worktree_that_holds_the_running_tools_is_kept(self) -> None:
-        tree, head = self.topic()
-        self.merge_lands(tree, 1, head)
-        with mock.patch.object(sd_lane, "BIN", tree / "bin"):
-            self.drain()
-        self.assertTrue(tree.exists())
-        self.assertIn("worktree kept: holds the running lane tools", self.entries()[0]["cleanup"])
-
     def test_a_remote_branch_that_moved_is_not_deleted(self) -> None:
         tree, head = self.topic()
         other = self.tmp / "other"
@@ -591,7 +453,6 @@ class Landing(Lane):
         git(other, "push", "-q", "origin", "topic")
         self.merge_lands(tree, 1, head)
         self.drain()
-        self.assertFalse(tree.exists())
         self.assertEqual(self.remote_branches(), ["main", "topic"])
         self.assertIn("origin/topic kept: it is at", self.entries()[0]["cleanup"])
 
@@ -663,16 +524,6 @@ class Landing(Lane):
         self.assertEqual(entry["status"], "merged")
         self.assertIn("the store is locked", entry["note"])
         self.assertIn("fast-forward", entry["fast_forward"])
-
-    def test_keep_worktree_reaches_the_queue_through_sd_ship(self) -> None:
-        tree, _ = self.topic()
-        env = {**os.environ, **self.environ}
-        done = subprocess.run([sys.executable, str(REPO_ROOT / "bin/sd-ship"), "lane", "enqueue", "--item", "3",
-                               "--title", "t", "--body-file", str(self.body), "--deliver", "--keep-worktree"],
-                              cwd=tree, env=env, capture_output=True, text=True, timeout=120)
-        self.assertEqual(done.returncode, 0, done.stderr + done.stdout)
-        self.assertIs(self.entries()[0]["keep_worktree"], True)
-
 
 class ShipProcess(Lane):
     def test_the_answer_is_parsed_and_the_whole_output_kept(self) -> None:

@@ -12,8 +12,9 @@ runs it under one lock per repository:
   run      pop pending entries in order: head check, `prepare --catch-up`,
            then `merge`; a failed entry is marked and the runner goes on.
            While one entry ships, the next one's gate runs on its predicted
-           landing (sd:2586, below). After a merge it cleans up, notes the
-           item and fast-forwards the main checkout (sd:2568, below);
+           landing (sd:2586, below). After a merge it deletes the remote
+           branch, notes the item with the worktree's removal command and
+           fast-forwards the main checkout (sd:2568, below);
   watch    print each gate end a lane or builder log records, once.
 
 The queue is `<lane root>/<repository>/lane/queue/queue.json`. The lane root
@@ -50,21 +51,17 @@ before the next prepare. A wrong prediction costs only the machine time: the
 receipt names a tree that prepare never gates, and prepare runs its own check.
 The next entry records what happened as its `speculation`.
 
-After a merge the runner lands the entry (sd:2568), as the integrator's
-scratch helper did by hand. It removes the worktree and its local branch, and
-deletes the remote branch with `--force-with-lease`, only while the
-worktree's tip is the merged head and nothing in it is uncommitted. A
-worktree that holds any ignored entry stays (operator ruling, sd:2584 option
-a): removal deletes ignored files, and no recover command brings them back.
-No lock excludes the worktree's builder, so removal deletes only the tracked
-files a status check vouched for, each only while unchanged, and folders only
-when empty: a file written after the check stays, and cleanup stops.
-It notes the item with the merge commit, what the cleanup did, and a `git
-branch` recover command. Then it fast-forwards the main checkout. When that
-checkout holds the running `sd-ship`, as the pack's does for every lane, it
-tries each other lane's runner lock once and skips if one is held: a lane
-mid-prepare must not have its tools change under it, and no lane waits on
-another's lock. The next landing retries.
+After a merge the runner lands the entry (sd:2568). It deletes the remote
+branch with `--force-with-lease` while the worktree's tip is the merged head.
+It never removes the worktree: no lock excludes its builder, and a write
+through a handle opened before removal is lost. The entry's `remove` holds
+the command that removes the worktree and its branch once the builder stops.
+It notes the item with the merge commit, what the cleanup did, a `git
+branch` recover command and that command. Then it fast-forwards the main
+checkout. When that checkout holds the running `sd-ship`, as the pack's does
+for every lane, it tries each other lane's runner lock once and skips if one
+is held: a lane mid-prepare must not have its tools change under it, and no
+lane waits on another's lock. The next landing retries.
 """
 
 from __future__ import annotations
@@ -75,7 +72,6 @@ import json
 import os
 import pathlib
 import re
-import stat
 import subprocess
 import sys
 import tempfile
@@ -175,13 +171,12 @@ def stamp_now() -> str:
 
 def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: pathlib.Path, environ: dict[str, str], *,
                   expected_head: str | None = None, manual: bool = False, claim: str | None = None,
-                  acceptance_file: pathlib.Path | None = None, keep_worktree: bool = False) -> dict[str, Any]:
+                  acceptance_file: pathlib.Path | None = None) -> dict[str, Any]:
     """Add one entry; the head defaults to the worktree's, and must name a commit there.
 
     `claim` is prepare's delivery choice, `deliver` or `associate-only`, and
     is refused when absent as prepare refuses it; it and `acceptance_file`
-    reach prepare unchanged. `keep_worktree` keeps the worktree and its
-    branch after the merge; the remote branch still goes.
+    reach prepare unchanged.
     """
     worktree = worktree.resolve()
     sd_lib.refuse_unmanaged(worktree, LaneError)  # its prepare would refuse; do not queue it
@@ -198,7 +193,7 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
     entry = {"worktree": str(worktree), "item": item, "expected_head": head, "title": title,
              "body_file": str(body_file.resolve()), "authority": "manual" if manual else None, "claim": claim,
              "acceptance_file": str(acceptance_file.resolve()) if acceptance_file else None,
-             "keep_worktree": keep_worktree, "status": "pending", "enqueued_at": stamp_now()}
+             "status": "pending", "enqueued_at": stamp_now()}
 
     def add_entry(entries: list[dict[str, Any]]) -> dict[str, Any]:
         if any(row.get("item") == item and row.get("status") in ("pending", "running") for row in entries):
@@ -393,151 +388,34 @@ def default_note(item: int, body: str, main: pathlib.Path) -> str:
     return "written" if done.returncode == 0 else f"failed: {(done.stderr or done.stdout).strip()[-300:]}"
 
 
-#: Porcelain v2 fields before the path, by line kind; no v2 line starts with a blank `strip` could eat.
-STATUS_FIELDS = {"1": 8, "2": 9, "u": 10}
+def clean_up(entry: dict[str, Any], head: str | None, main: pathlib.Path, branch: str,
+             tip: str | None) -> tuple[str, str | None]:
+    """Delete the merged remote branch; what happened, and the command that removes the worktree and its branch.
 
-
-def status_entries(worktree: pathlib.Path) -> list[tuple[str, str]] | None:
-    """`(kind, path)` for each changed, untracked or ignored path; `!` is ignored. None when `git status` fails."""
-    listed = lane_git(worktree, "status", "--porcelain=v2", "-z", "--untracked-files=all", "--ignored=matching")
-    if listed is None:
-        return None
-    entries, parts = [], iter(filter(None, listed.split("\0")))
-    for part in parts:
-        entries.append((part[:1], part.split(" ", STATUS_FIELDS.get(part[:1], 1))[-1]))
-        if part[:1] == "2":
-            next(parts, None)  # a rename's source path
-    return entries
-
-
-def tracked_files(worktree: pathlib.Path) -> dict[str, tuple[int, int, int]] | None:
-    """Inode, size and modification time of each tracked file on disk; None when `git ls-files` fails."""
-    listed = lane_git(worktree, "ls-files", "-z", "--deduplicate")
-    if listed is None:
-        return None
-    files = {}
-    for name in filter(None, listed.split("\0")):
-        try:
-            seen = os.lstat(worktree / name)
-        except FileNotFoundError:  # sparse or skip-worktree: nothing on disk to delete
-            continue
-        if not stat.S_ISDIR(seen.st_mode):  # a submodule's folder stays, so its removal stops
-            files[name] = (seen.st_ino, seen.st_size, seen.st_mtime_ns)
-    return files
-
-
-def delete_tree(worktree: pathlib.Path, files: dict[str, tuple[int, int, int]]) -> list[str]:
-    """Delete `worktree` without deleting anything unseen; the paths that stay, empty when it is gone.
-
-    No lock excludes the builder, so nothing here deletes by a check made
-    earlier. Each file in `files` moves into a trash folder first, and goes only
-    while its inode, size and modification time are as `tracked_files` saw them
-    before the status check: a write by path after the move makes a new file,
-    and one before it changes the file, which is linked back unless something
-    new took its place. A folder goes only while it is empty, so an entry
-    created at any moment stays. A write through a handle
-    opened earlier and made after the comparison is lost, as under any removal.
+    The runner never removes a worktree itself: no lock excludes its builder,
+    and a write through a file handle opened before removal reaches an unlinked
+    file and is lost. Whoever stops the builder runs the command;
+    `git worktree remove` refuses uncommitted or untracked files on its own,
+    and `update-ref -d` refuses a branch that moved past the merged head.
     """
-    trash = pathlib.Path(tempfile.mkdtemp(prefix=".sd-lane-removing-", dir=worktree))
-    changed = []
-    for number, (name, seen) in enumerate(sorted(files.items())):
-        moved = trash / str(number)
-        try:
-            os.rename(worktree / name, moved)
-        except FileNotFoundError:
-            continue
-        except OSError:
-            changed.append(name)
-            continue
-        now = os.lstat(moved)
-        if (now.st_ino, now.st_size, now.st_mtime_ns) == seen:
-            os.unlink(moved)
-            continue
-        with contextlib.suppress(OSError):
-            os.link(moved, worktree / name, follow_symlinks=False)  # never over a newer entry
-            os.unlink(moved)
-        changed.append(name if not moved.exists() else f"{name} (as {moved})")
-    for folder, _, _ in os.walk(worktree, topdown=False):
-        with contextlib.suppress(OSError):
-            os.rmdir(folder)  # only an empty folder goes
-    rest = [str(path.relative_to(worktree)) for path in sorted(worktree.rglob("*"))
-            if path != worktree / ".git" and not path.is_dir() and not path.is_relative_to(trash)]
-    if changed or rest:
-        return changed + [name for name in rest if name not in changed]
-    (worktree / ".git").unlink()
-    try:
-        worktree.rmdir()
-    except OSError:
-        return sorted(path.name for path in worktree.iterdir()) or [worktree.name]
-    return []
-
-
-def remove_local(worktree: pathlib.Path, main: pathlib.Path, branch: str, tip: str) -> tuple[list[str], str | None]:
-    """Remove the worktree, then its branch only while it is still at `tip`; what went, or why cleanup stopped.
-
-    A worktree that holds the running tools stays: the runner still needs its
-    `sd-ship` and `sd`. So does a locked one, and one with any ignored entry,
-    build output included: removal deletes it for good. The tracked files are
-    read before the status check that vouches for them, and `delete_tree`
-    deletes only those, unchanged. The branch is deleted against the verified
-    tip, so a builder commit made after the tip check keeps it.
-    """
-    if BIN.is_relative_to(worktree):
-        return ["worktree kept: holds the running lane tools"], None
-    admin = lane_git(worktree, "rev-parse", "--absolute-git-dir")
-    if not admin or (pathlib.Path(admin) / "locked").exists():
-        return ["worktree kept: git worktree lock holds it" if admin else "worktree kept: git rev-parse failed"], None
-    files = tracked_files(worktree)
-    entries = status_entries(worktree)
-    if files is None or entries is None:
-        return ["worktree kept: git ls-files or git status --ignored failed"], None
-    ignored = [path for kind, path in entries if kind == "!"]
-    if ignored:
-        return [f"worktree kept: holds ignored entries: {', '.join(ignored[:3])}{'…' * (len(ignored) > 3)}"], None
-    if entries:
-        return [f"worktree kept: changed after the status check: {', '.join(path for _, path in entries[:3])}"], None
-    stays = delete_tree(worktree, files)
-    if stays:
-        return [], (f"Cleanup stopped: {', '.join(stays[:3])}{'…' * (len(stays) > 3)} appeared or changed during "
-                    f"removal and stays; git -C {worktree} checkout -- . restores the rest; "
-                    f"branch {branch} and origin/{branch} kept")
-    if lane_git(main, "worktree", "remove", str(worktree)) is None:  # the folder is gone: this drops git's record
-        return [], f"Cleanup stopped: git worktree remove {worktree} failed after its files were removed"
-    if lane_git(main, "update-ref", "-d", f"refs/heads/{branch}", tip) is not None:
-        return [f"removed worktree {worktree}", f"removed branch {branch}"], None
-    newer = lane_git(main, "rev-parse", "--verify", "-q", f"refs/heads/{branch}")
-    return [], (f"Cleanup stopped: branch {branch} moved to {newer or 'an unreadable ref'}, not {tip}; "
-                f"worktree {worktree} removed, branch {branch} and origin/{branch} kept")
-
-
-def clean_up(entry: dict[str, Any], head: str | None, main: pathlib.Path, branch: str, tip: str | None) -> str:
-    """Remove a merged worktree, its branch and the remote branch, only while nothing else is on them."""
     worktree = pathlib.Path(entry["worktree"]).resolve()
     if worktree == main:
-        return f"Cleanup skipped: {worktree} is the main checkout"
+        return f"Cleanup skipped: {worktree} is the main checkout", None
     if not branch:
-        return "Cleanup skipped: the worktree has no branch checked out"
+        return "Cleanup skipped: the worktree has no branch checked out", None
     if not tip or tip != head:
-        return f"Cleanup skipped: the worktree's tip {tip} is not the merged head {head}"
-    # Explicit, so `status.showUntrackedFiles=no` cannot hide an untracked file.
-    dirty = lane_git(worktree, "status", "--porcelain", "--untracked-files=all")
-    if dirty is None or dirty:
-        return "Cleanup skipped: the worktree has uncommitted changes" if dirty else "Cleanup skipped: git status failed"
+        return f"Cleanup skipped: the worktree's tip {tip} is not the merged head {head}", None
     listed = lane_git(main, "ls-remote", "origin", f"refs/heads/{branch}")
     remote = listed.split()[0] if listed else None
-    done: list[str] = []
-    if entry.get("keep_worktree"):
-        done.append("worktree and branch kept: queued with --keep-worktree")
-    else:
-        done, stopped = remove_local(worktree, main, branch, tip)
-        if stopped:
-            return stopped
+    done = []
     if remote == tip:
         deleted = lane_git(main, "push", "-q", f"--force-with-lease=refs/heads/{branch}:{tip}", "origin", "--delete", branch)
         done.append(f"removed origin/{branch}" if deleted is not None else f"origin/{branch} kept: the delete failed")
     elif remote:
         done.append(f"origin/{branch} kept: it is at {remote}, not the merged head")
-    return "Cleanup: " + ", ".join(done) if done else "Cleanup: nothing to remove"
+    remove = f"git -C {main} worktree remove {worktree} && git -C {main} update-ref -d refs/heads/{branch} {tip}"
+    done.append(f"worktree {worktree} and branch {branch} kept for removal once the builder stops")
+    return "Cleanup: " + ", ".join(done), remove
 
 
 @contextlib.contextmanager
@@ -576,16 +454,19 @@ def fast_forward(main: pathlib.Path, environ: dict[str, str], own_lock: pathlib.
 
 def land(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, str], note: Note,
          own_lock: pathlib.Path) -> dict[str, Any]:
-    """After a merge: clean up, note the item with a recover command, fast-forward the main checkout."""
+    """After a merge: delete the remote branch, note the item with the removal and recover commands, fast-forward."""
     worktree = pathlib.Path(entry["worktree"])
     main = sd_lib.main_worktree_root(worktree).resolve()
     head, merged = outcome.get("head"), str(outcome.get("merge_commit") or "")
     branch = lane_git(worktree, "branch", "--show-current") or ""
     tip = lane_git(worktree, "rev-parse", "HEAD")
-    fields: dict[str, Any] = {"cleanup": clean_up(entry, head, main, branch, tip)}
-    body = f"Landed: merged at {merged[:12]} (head {str(head)[:12]}). {fields['cleanup']}."
+    cleanup, remove = clean_up(entry, head, main, branch, tip)
+    fields: dict[str, Any] = {"cleanup": cleanup, "remove": remove}
+    body = f"Landed: merged at {merged[:12]} (head {str(head)[:12]}). {cleanup}."
     if branch and tip:
         body += f" Recover: git branch {branch} {tip}."
+    if remove:
+        body += f" Remove: {remove}"  # last and bare, so it copies whole
     try:
         fields["note"] = note(entry["item"], body, main)
     except Exception as error:  # the merge stands; the record says the note did not land
@@ -691,8 +572,6 @@ def add_lane_verbs(commands: Any) -> None:
                                     "an earlier pull request of the item, as prepare --associate-only"), strict=True):
         choice.add_argument(f"--{claim}", dest="claim", action="store_const", const=claim, help=text)
     adder.add_argument("--acceptance-file", type=pathlib.Path, help="forwarded to prepare unchanged")
-    adder.add_argument("--keep-worktree", action="store_true",
-                       help="keep the worktree and its branch after the merge; the remote branch still goes")
     verbs.add_parser("list", help="print this repository's queue")
     canceller = verbs.add_parser("cancel", help="mark a pending entry cancelled")
     canceller.add_argument("item", type=int)
@@ -713,7 +592,7 @@ def lane_main(args: Any) -> int:
         if args.lane_command == "enqueue":
             result: Any = enqueue_entry(root, args.item, args.title, args.body_file, environ,
                                         expected_head=args.expected_head, manual=args.manual, claim=args.claim,
-                                        acceptance_file=args.acceptance_file, keep_worktree=args.keep_worktree)
+                                        acceptance_file=args.acceptance_file)
         elif args.lane_command == "list":
             path = queue_path(root, environ)
             result = {"queue": str(path), "entries": read_queue(path)}
