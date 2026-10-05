@@ -579,17 +579,17 @@ def holder_environment(environ: Mapping[str, str], slots: int) -> dict[str, str]
 
 
 def thread_caps(environ: Mapping[str, str]) -> dict[str, str]:
-    """`environ` plus the `CPU_VARIABLES` a holder under the machine's slot count hands its checks.
+    """The `CPU_VARIABLES` a holder under the machine's slot count hands the checks it runs from `environ`.
 
-    `sd_gate_receipts` binds these, since a suite can pass on one test thread
-    and fail on eight. A slot count that cannot be read adds nothing.
+    `sd_gate_receipts` binds these beside the environment, since a suite can
+    pass on one test thread and fail on eight. A slot count that cannot be read gives none.
     """
     try:
         slots, _ = configured(environ, machine_settings(environ)["gate_slots"])
     except ValueError:
-        return dict(environ)
+        return {}
     held = holder_environment(environ, slots)
-    return {**environ, **{name: held[name] for name in CPU_VARIABLES if name in held}}
+    return {name: held[name] for name in CPU_VARIABLES if name in held}
 
 
 def run_gated(command: Sequence[str], environ: Mapping[str, str], *, slots: int, rule: LoadRule, stream: TextIO,

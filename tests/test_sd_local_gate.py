@@ -473,7 +473,17 @@ class Receipts(ReceiptFixture):
                 os.environ.pop(name, None)
             raised = self.gate(self.counted("true # another commit"), run=self.passing(
                 lambda: config.write_text(json.dumps({"config": {"sd": {"gate_slots": "4"}}}), encoding="utf-8")))
-        self.assertEqual(raised["receipt_skipped"], "moved during the run: environment_sha256")
+        self.assertEqual(raised["receipt_skipped"], "moved during the run: threads")
+
+    def test_the_binding_keeps_the_caller_thread_counts_the_precheck_runs_on(self) -> None:
+        """sd:2726 review: the precheck gets the caller's values, so 16 and 32 bind apart though both cap to 8."""
+        head = self.counted()
+        with mock.patch.object(os, "cpu_count", return_value=16):
+            one, two = (sd_gate_receipts.gate_binding(self.root, head, "0" * 12, None, {
+                "SD_GATE_SLOTS": "2", "CARGO_BUILD_JOBS": jobs, "RUST_TEST_THREADS": jobs}) for jobs in ("16", "32"))
+        assert one is not None and two is not None
+        self.assertEqual((one["threads"], two["threads"]), ({"CARGO_BUILD_JOBS": "8", "RUST_TEST_THREADS": "8"},) * 2)
+        self.assertNotEqual(one["environment_sha256"], two["environment_sha256"])
 
     def test_a_receipt_older_than_the_window_is_not_reused(self) -> None:
         """The window is one prepare-to-merge handoff: 30 minutes, not hours.
