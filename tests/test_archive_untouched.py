@@ -227,7 +227,10 @@ class TheArchiveBoundary(unittest.TestCase):
 #: is a subset, so that cut lowers the count without touching this file, and
 #: an unlisted site fails it. The ninth, added for sd:2598, removes a warm Rust
 #: build folder of the local gate's cache under that folder's lock: a build
-#: cache, never a work item.
+#: cache, never a work item. The tenth and eleventh, added for sd:2568, are
+#: the lane runner removing a merged worktree's emptied folders: `rmdir`
+#: refuses one that is not empty, so a file a builder writes during removal
+#: stays.
 FROZEN_DELETION_SITES = frozenset({
     ("bin/sd-status", "git rm -r --cached --ignore-unmatch .trellis && rm -rf .trellis"),
     ("bin/sd-status", "git config --unset core.hooksPath; git rm -r --ignore-unmatch .githooks"),
@@ -238,6 +241,8 @@ FROZEN_DELETION_SITES = frozenset({
     ("bin/sd_install.py", "current.rmdir()"),
     ("bin/sd_install.py", "tracked file. Untrack it (git rm --cached) and re-run."),
     ("bin/sd_gate_cache.py", "shutil.rmtree(folder, ignore_errors=True)"),
+    ("bin/sd_lane.py", "os.rmdir(folder)  # only an empty folder goes"),
+    ("bin/sd_lane.py", "worktree.rmdir()"),
 })
 
 DELETION_VERBS = r"git rm|rmtree|rmdir"

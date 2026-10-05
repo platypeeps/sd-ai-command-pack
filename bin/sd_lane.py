@@ -434,8 +434,8 @@ def delete_tree(worktree: pathlib.Path, files: dict[str, tuple[int, int, int]]) 
     while its inode, size and modification time are as `tracked_files` saw them
     before the status check: a write by path after the move makes a new file,
     and one before it changes the file, which is linked back unless something
-    new took its place. Folders go with `rmdir`, which refuses one that is not
-    empty, so an entry created at any moment stays. A write through a handle
+    new took its place. A folder goes only while it is empty, so an entry
+    created at any moment stays. A write through a handle
     opened earlier and made after the comparison is lost, as under any removal.
     """
     trash = pathlib.Path(tempfile.mkdtemp(prefix=".sd-lane-removing-", dir=worktree))
