@@ -30,7 +30,7 @@ A merge lane that ships one item across several commands holds the lane: `sd-shi
 The hold is taken under the ship lock and lasts `--for` seconds, 3600 by default and 86400 at most; rerun it to renew.
 While it stands, `prepare` and `merge` for any other item refuse as `lane_held`, naming the item, holder and expiry.
 The held item's merge ends it; `sd-ship release --item ID` ends it sooner, and only for the held item.
-`sd-ship lane run` never removes a merged worktree: removal can race a live builder's open file handles.
+`sd-ship lane run` leaves a merged worktree and its branch in place: removal can race a live builder's open file handles.
 Stop the builder, then run the entry's `remove` command, also in the item note.
 Do not change gates to obtain a merge.
 An existing manual operator path needs separate authorization; a gate refusal does not grant it.
