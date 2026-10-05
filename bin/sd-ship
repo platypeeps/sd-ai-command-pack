@@ -2600,8 +2600,7 @@ def hub_serving(database) -> str | None:
     The test `repository_lock` refuses by. An `sd_db` older than satellites
     has no `served_by`, and no remote connection either.
     """
-    from sd_db import database as library
-    served_by = getattr(library, "served_by", None)
+    served_by = getattr(getattr(sd_lib.import_sd_db().module, "database", None), "served_by", None)
     return served_by(database) if served_by is not None else None
 
 
