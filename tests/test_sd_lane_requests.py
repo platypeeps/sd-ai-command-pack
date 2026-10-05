@@ -275,6 +275,27 @@ class PackDigest(Requests):
         self.assertEqual(self.pack_row(), {})
 
 
+class SatelliteRun(Requests):
+    """Prepare review at 9cbbbec5: `lane run` on a satellite took the hub's requests into its own queue."""
+
+    def test_a_run_on_a_satellite_refuses_before_intake_or_publication(self) -> None:
+        self.prepared()
+        revision = self.ask()
+        pack = receipts.read(self.connection, sd_lane_receipts().PACK_PREFIX + SLUG)
+        for satellite_only in (False, True):
+            with self.subTest(satellite_only=satellite_only), \
+                    mock.patch("sd_db.database.served_by", lambda target, home=None: HUB, create=True):
+                with self.assertRaises(sd_lane.LaneError) as refused:
+                    sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate, hub=self.hub,
+                                     satellite_only=satellite_only)
+                self.assertEqual(refused.exception.code, "hub_only")
+                self.assertIn(HUB, str(refused.exception))
+        key = sd_lane.request_key(SLUG, 7)
+        self.assertEqual((receipts.read(self.connection, key)[0], self.row()["status"]), (revision, "requested"))
+        self.assertEqual(receipts.read(self.connection, sd_lane_receipts().PACK_PREFIX + SLUG), pack)
+        self.assertEqual((self.entries(), self.calls), ([], []))
+
+
 class RequestVerb(Requests):
     """`sd-ship lane request`, on the satellite's worktree of the item."""
 

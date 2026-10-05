@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import importlib.util
 import json
 import os
 import pathlib
@@ -52,6 +53,11 @@ class Lane(unittest.TestCase):
         # Nor does a run read requests from one (sd:2704): a suite passes its own `hub`.
         for name, double in (("default_note", self.note), ("default_hub", lambda root: contextlib.nullcontext())):
             patcher = mock.patch.object(sd_lane, name, double)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        # And each runs as the hub would: `lane run` refuses on a satellite (sd:2704).
+        if importlib.util.find_spec("sd_db") is not None:
+            patcher = mock.patch("sd_db.database.served_by", lambda target, home=None: None, create=True)
             patcher.start()
             self.addCleanup(patcher.stop)
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import shlex
 import subprocess
 import sys
 import unittest
@@ -389,6 +390,14 @@ class SatelliteEntry(requests_suite.Requests):
         entry = self.entries()[-1]
         self.assertEqual((entry["status"], self.row()["status"]), ("prepared", "prepared"))
         self.assertIn("--satellite-gate", entry["next_action"])
+
+    def test_the_hand_merge_command_is_quoted_for_a_shell(self):
+        """Prepare review at 9cbbbec5: a path with a space or a branch with `;` broke the copied command."""
+        entry = {"worktree": "/hub/my pack", "item": 7, "branch": "topic;echo", "expected_head": self.head}
+        command = sd_lane.hand_merge(entry).removeprefix("On the hub: ")
+        self.assertEqual(shlex.split(command), ["sd-ship", "-C", "/hub/my pack", "merge", "--item", "7", "--branch",
+                                                "topic;echo", "--expected-head", self.head, "--manual",
+                                                "--satellite-gate"])
 
     def failing_hub(self, *statuses):
         """The hub's rows, but a row write with one of `statuses` fails as a stopped database would."""

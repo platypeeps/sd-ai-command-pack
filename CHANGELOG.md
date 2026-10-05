@@ -32,7 +32,8 @@
   before it writes `queued`, so a crash between the two takes the request in
   once. `lane run --satellite-only` claims satellite entries only, starts no
   speculative gate and exits when none is pending; hub entries keep their
-  place. Each run publishes the hub's pack digest to `sd-lane-pack:v1:<slug>`
+  place. Either mode refuses on a satellite (`hub_only`) before it reads a
+  request or writes a row. Each run publishes the hub's pack digest to `sd-lane-pack:v1:<slug>`
   at its start and after a fast-forward of the pack checkout; a pack that
   gates itself publishes `tree`, as its receipts bind (sd:2613).
 - **A satellite's gate writes an offload receipt for the hub (sd:2704 step 3).**

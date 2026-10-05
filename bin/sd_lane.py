@@ -107,6 +107,7 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -606,6 +607,13 @@ def handed_back(entry: dict[str, Any], code: str, reason: str) -> dict[str, Any]
             "next_action": SATELLITE_REFUSALS.get(code, HAND_BACK).format(base=entry["base"])}
 
 
+def hand_merge(entry: dict[str, Any]) -> str:
+    """The hub's merge of a satellite entry for a person to run, quoted: the path and branch reach a shell."""
+    return "On the hub: " + shlex.join(["sd-ship", "-C", entry["worktree"], "merge", "--item", str(entry["item"]),
+                                        "--branch", entry["branch"], "--expected-head", entry["expected_head"],
+                                        "--manual", "--satellite-gate"])
+
+
 def process_satellite(entry: dict[str, Any], logs: pathlib.Path, ship: Ship) -> dict[str, Any]:
     """A satellite entry: fetch, the head and base checks of design.md "Freshness", then merge; no prepare."""
     main, branch, base, head = pathlib.Path(entry["worktree"]), entry["branch"], entry["base"], entry["expected_head"]
@@ -620,8 +628,7 @@ def process_satellite(entry: dict[str, Any], logs: pathlib.Path, ship: Ship) -> 
         return {"head": head, **handed_back(entry, "base_moved", f"{head[:12]} does not contain origin/{base}")}
     if entry.get("authority") != "manual":
         return {"head": head, "status": "prepared", "reason": "requested without --manual; merge by hand",
-                "next_action": f"On the hub: sd-ship -C {main} merge --item {entry['item']} --branch {branch} "
-                               f"--expected-head {head} --manual --satellite-gate"}
+                "next_action": hand_merge(entry)}
     log = logs / f"merge-{entry['item']}-{time.strftime('%Y%m%dT%H%M%S', time.gmtime())}.log"
     merged = ship(satellite_merge_argv(entry), log)
     fields = {"head": head, "merge_log": str(log)}
@@ -915,6 +922,19 @@ def settle(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, st
     return fields
 
 
+def refuse_on_satellite(verb: str) -> None:
+    """Refuse a hub-only verb on a satellite, as `sd_db`'s `HubOnly` does, before it reads or writes a row."""
+    if sd_lib.import_sd_db().module is None:
+        return  # no database: no request or pack row to reach
+    import sd_gate_receipts  # noqa: PLC0415
+    from sd_db.database import default_path  # noqa: PLC0415
+
+    served = sd_gate_receipts.served_hub(default_path())
+    if served:
+        raise LaneError(f"{verb} runs on the sd hub only; this machine reaches the database on {served}. "
+                        "Run it on the hub", code="hub_only")
+
+
 def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_ship,
              gate: Gate = default_gate, note: Note | None = None, *, satellite_only: bool = False,
              hub: Hub | None = None) -> dict[str, Any]:
@@ -926,8 +946,10 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
     call, so a suite can replace it; `hub` defaults to `default_hub`'s, the
     same way. Before each claim the runner takes in satellite requests
     (`intake`). `satellite_only` claims only satellite entries and starts no
-    speculative gate (ruling Q4).
+    speculative gate (ruling Q4). On a satellite it refuses before any of
+    that: the requests and the pack row are the hub's (prepare review).
     """
+    refuse_on_satellite("lane run")
     path = queue_path(root, environ)
     path.parent.mkdir(parents=True, exist_ok=True)
     own_lock = path.parent / "runner.lock"
