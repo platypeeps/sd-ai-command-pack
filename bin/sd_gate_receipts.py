@@ -25,7 +25,11 @@ The binding is what this module can name about a run, and nothing weaker:
   python       the interpreter that runs `sd-check`;
   environment  every variable the check's child is given, by name and
                value: `sd_gate_run.gate_environment`'s whole output, so a
-               `MAKEFLAGS` or a `CARGO_HOME` that chose what ran is bound too.
+               `MAKEFLAGS` or a `CARGO_HOME` that chose what ran is bound too;
+  threads      the thread counts `sd-check` sets for its checks under the
+               machine's slot count (`sd_gate_slots.thread_caps`, sd:2726).
+               The precheck runs on the environment as given, so both bind:
+               a new slot count that changes the caps runs the check once more.
 
 The environment is bound whole because the gate forwards it whole: any
 variable may choose what a check runs, and a hand-kept list of the ones that
@@ -86,6 +90,7 @@ from typing import Any, Iterable, Mapping
 
 import sd_check_receipts
 import sd_check_scope
+import sd_gate_slots
 import sd_lib
 
 KEY_PREFIX = "sd-gate-receipt:v1:"
@@ -211,7 +216,7 @@ def gate_binding(tree: pathlib.Path, head: str, inputs: str, base: str | None, e
                 "detection": {"source": detection.source, "commands": detection.commands},
                 "tools": tools, "python": {"path": str(python), "version": sys.version,
                                            "sha256": sd_check_receipts.file_digest(python)},
-                "environment_sha256": _digest(dict(env))}
+                "environment_sha256": _digest(dict(env)), "threads": sd_gate_slots.thread_caps(env)}
     except Exception:  # an input that cannot be named binds nothing; the check runs
         return None
 
