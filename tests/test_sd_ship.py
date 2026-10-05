@@ -167,7 +167,10 @@ class ShipDouble(GitHubDouble):
                 if self.lose_create:
                     raise RemoteRefusal(503, "create response lost")
                 return 201, self._pull(pull)
-            return 200, [self._pull(pull) for pull in self.remote.pull_requests.values()]
+            # GitHub filters by `state` and defaults to open (sd:2656).
+            wanted = query.get("state", ["open"])[0]
+            pulls = [self._pull(pull) for pull in self.remote.pull_requests.values()]
+            return 200, [pull for pull in pulls if wanted == "all" or pull["state"] == wanted]
         if method == "POST" and path.startswith(f"{prefix}/pulls/") and path.endswith("/requested_reviewers"):
             number = int(path.split("/")[-2])
             if self.lose_copilot_request:
@@ -1086,6 +1089,19 @@ roles:
         # The rerun adopts the PR the push already updated.
         with patch.object(ship.time, "sleep"):
             self.assertEqual(self.prepare()["phase"], "ready_to_send")
+
+    def test_a_merged_pull_request_on_the_branch_name_is_not_bound(self):
+        # sd:2656, live on sd:1912: the item's recorded branch had carried #1242,
+        # merged on 2026-09-28. The lookup read closed pulls too, bound #1242,
+        # and its frozen head refused the push as "PR head changed after push".
+        merged = self.remote.open_pull_request("topic", base="main", title="Earlier work (sd:1912)", body="")
+        merged.state, merged.merged_head = "MERGED", "b1e4a7c0" * 5
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        number = self.operation().state["pull_request"]["number"]
+        self.assertNotEqual(number, merged.number)
+        self.assertEqual(self.remote.pull(number).state, "OPEN")
+        self.assertEqual(merged.state, "MERGED")
 
     def test_prepare_hands_the_pull_request_body_to_the_docs_lint(self):
         # Rule 5 only runs with a body. The skill says the PR link is checked
