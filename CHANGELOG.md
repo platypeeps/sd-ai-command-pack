@@ -12,6 +12,23 @@
   values in its receipt, so a new slot count runs the check once more rather
   than reuse a pass made with other thread counts. `MAKEFLAGS` gets no `-j`: it would run a Makefile's
   prerequisites at once.
+- **The offload view of a gate's environment (sd:2724, sd:2704 step 2a).**
+  `sd_gate_receipts.offload_view` gives the portable view a hub will compare
+  with a satellite's receipt: `PATH` entries in order with each `$HOME` prefix
+  written as `~`, the bytes of each `OFFLOAD_TOOLS` name on that `PATH`, the
+  bytes of each `OFFLOAD_HOME_FILES` entry or `absent`, and every other
+  variable by value, without `HOME` and `USER`. `offload_miss` names the first
+  differing part and name; a tool the hub cannot resolve is recorded, not
+  compared. Nothing calls them yet. Local reuse does not change: a receipt
+  still binds the whole environment, so another `HOME` still misses on
+  `environment_sha256`.
+
+- **`sd-ship lane move|hold|release` take `--expected-revision` (sd:2717).**
+  `lane list` prints the queue's `revision`, a digest of the pending order
+  and holds. A verb given that revision compares it under the queue's lock
+  and refuses with exit 3 and `code: stale_revision` when the queue changed
+  since, so a caller such as the dashboard's Queue page gets an atomic
+  stale-write refusal. Without the flag the verbs behave as before.
 - **`sd-ship prepare` runs on an sd satellite (sd:2679).** When `sd_db`
   reports the database served by a hub, `prepare` skips the ship lock, a file
   on the hub, and the hold check beside it. It reviews, pushes, binds or opens
@@ -350,6 +367,19 @@
 
 ### Fixed
 
+- **A failed repository gate leads with what failed, not the slot wait (sd:2687).**
+  `sd-ship prepare`'s `gate_failed` refusal opened with the gate's own
+  stderr, which starts with `waiting for a gate slot ... slot 1 held by pid
+  N`. The lane keeps the head of a refusal, so sd:2671's failure in an
+  Obsidian test was recorded as the wait line. The refusal now opens with the
+  gate's summary, which names each failed suite or make target, then each
+  failing check with its tails. The gate's own stderr follows as `gate
+  output:` context.
+- **`sd store list` on a kind with no folder yet lists nothing (sd:2688).**
+  A declared kind nobody had written to has no folder in the vault, and
+  `list` refused with `does not exist; the vault does not hold this kind`.
+  An absent folder now reads as an empty list and exits 0. A vault root that
+  is not there still refuses, as before.
 - **An agent's `sd attribute` repair no longer says `human` (sd:2689, sd:2009).**
   `sd attribute` and `SD_AUTHOR` accept `<entry>/<vendor>`, the value every
   trailer carries, when the registry gives the entry that vendor; another
