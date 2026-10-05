@@ -353,6 +353,11 @@
   writes nothing when `SD_AUTHOR` is unset.
 
 - **Seven findings where the output said one state and the code held another (sd:2631, sd:1000).** `make hooks` outside a git checkout ignored the failed `git rev-parse` and tried to write `/hooks/pre-commit`; it now refuses and names the directory. A merge-time demotion note on an item said the branch's planning artifacts "were not pushed", though the branch was pushed before that answer; the merge-time note now says the answer came after the push. The guest-artifact refusal is one sentence, as its docstring says. `sd task add --kind` help says the kinds come from the installed `sd_db`, and that one older than sd:809 files a followup with no repository. `sd-status` reading a ledger row that declares `Addressed:` before naming the defect's own words gains a regression test; the fix (efa996d6) had none. Two triple blank lines in `bin/sd_lib.py` are gone, and the `sd-research-kit review` docstring names all its checks; a test reads the checks off `check()`, so a new one fails until the docstring names it.
+- **`sd plugin list` no longer waits on a stalled plugin root (sd:2555).**
+  It read each registered root in turn, so one root that never answered held
+  the whole list. Each root now reads in its own daemon thread, as lookups do
+  since sd:2540. A root silent after 5 s is listed unreadable, with a
+  `warning: skipped plugin root` line on stderr.
 
 - **`sd-ship prepare` binds only an open pull request (sd:2656).** sd:1912's
   recorded branch had carried #1242, merged on 2026-09-28. Prepare pushed to
@@ -946,6 +951,11 @@
   `git` calls for one run; any other call empties it first. `sd-review-ack`
   answers ancestry from one `git rev-list` per ref while that memo is open,
   and `delivered` fetches each ref once. The output does not change.
+- **`sd.fleet_owners` replaces `fleet.owners` (sd:2502).** `sd fleet stamp`
+  reads the operator's owner logins from the core setting `sd.fleet_owners`,
+  comma-separated, set with `sd config set`. Unset, it still reads the
+  `fleet.owners` list in `config.json` and prints a deprecation warning with
+  the command that moves it; with neither, the pack's default pair applies.
 
 - **The review runs before the gate, and a blocking review runs no gate (sd:2605).** `sd-review` ran the repository gate first, so a blocking finding arrived only after a full `make check`; four prepares lost a 45-minute gate that way in one night. The reviewers now run first. The gate runs only after a clean, advisory or skipped review. A blocking or incomplete review records `check: {"status": "not_run"}`, and `sd-ship prepare`'s refusal says the gate did not run and carries that `check`. A `--reuse-check` receipt is still read first and still runs no gate. A gate that fails after a review that cleared releases the review pass, so the next prepare reviews the fixed branch again. `sd-ship adjudicate` accepts a blocking report whose gate did not run; the prepare that reads the accepted dispositions then runs the gate at that head before clearance and records it as `adjudicated_gate`, and publication, merge and `verify-review` refuse (`gate_not_run`) until a pass is recorded there. A gate that fails on that path refuses clearance and keeps the pass, since its review found blocking findings.
 

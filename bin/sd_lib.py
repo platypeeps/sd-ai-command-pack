@@ -101,6 +101,10 @@ CORE_CONFIG = {
     "gate_settle_seconds": {"pattern": "[0-9]+",
                             "description": "Seconds between two gate starts, and of low load1 while load5 is high; "
                                            "0 is none. Unset reads 45; SD_GATE_SETTLE_SECONDS overrides it for one run."},
+    "fleet_owners": {"pattern": r"[A-Za-z0-9](-?[A-Za-z0-9])*(,[A-Za-z0-9](-?[A-Za-z0-9])*)*",
+                     "description": "Comma-separated GitHub logins whose repositories `sd fleet stamp` treats as the "
+                                    "operator's own; any other owner's protection stands. Unset reads the deprecated "
+                                    "fleet.owners list, then the pack's default pair. It grants nothing."},
 }
 
 #: `{current name: the name it was stored under before 1.1.0}`. A rename must

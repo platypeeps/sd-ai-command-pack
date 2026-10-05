@@ -9,6 +9,7 @@ workflow database.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import io
 import json
 import os
@@ -486,7 +487,7 @@ class Owners(Fleet):
         self.addCleanup(patcher.stop)
 
     def test_a_configured_owner_is_owned_and_the_default_pair_is_not(self) -> None:
-        self.config({"fleet": {"owners": ["Example-Org"]}})
+        self.config({"config": {"sd": {"fleet_owners": "Example-Org"}}})
         mine, mine_url = self.repo("mine", owner="example-org")
         theirs, theirs_url = self.repo("theirs", owner="platypeeps")
         first, second = self.plan([(mine, mine_url), (theirs, theirs_url)])
@@ -505,6 +506,26 @@ class Owners(Fleet):
             with self.subTest(bad=bad):
                 self.config({"fleet": bad if isinstance(bad, dict) else {"owners": bad}})
                 with self.assertRaisesRegex(sd_fleet.FleetRefusal, "fleet.owners"):
+                    sd_fleet.configured_owners()
+
+    def test_the_core_key_wins_and_the_old_key_still_reads_with_a_warning(self) -> None:
+        """sd:2502: `sd.fleet_owners` replaces `fleet.owners`, which reads until a machine moves."""
+        self.config({"config": {"sd": {"fleet_owners": "Example-Org,example-user"}},
+                     "fleet": {"owners": ["other-org"]}})
+        said = io.StringIO()
+        with contextlib.redirect_stderr(said):
+            self.assertEqual(sd_fleet.configured_owners(), ("example-org", "example-user"))
+        self.assertEqual(said.getvalue(), "")
+        self.config({"fleet": {"owners": ["Other-Org"]}})
+        with contextlib.redirect_stderr(said):
+            self.assertEqual(sd_fleet.configured_owners(), ("other-org",))
+        self.assertIn("is deprecated; run `sd config set sd.fleet_owners Other-Org`", said.getvalue())
+
+    def test_a_malformed_core_key_refuses(self) -> None:
+        for bad in ("", "example org", "a,,b", ",a", "-a"):
+            with self.subTest(bad=bad):
+                self.config({"config": {"sd": {"fleet_owners": bad}}})
+                with self.assertRaisesRegex(sd_fleet.FleetRefusal, "sd.fleet_owners"):
                     sd_fleet.configured_owners()
 
 
