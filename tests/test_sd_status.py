@@ -3804,6 +3804,25 @@ class ConcernLedgerTests(InventoryFixture):
         )
         self.assertNotIn("C-3", str(found))
 
+    def test_a_row_that_declares_addressed_is_read_by_its_declaration(self) -> None:
+        """sd:1000 (note #2752): C-6 and C-33 in the system ledgers said
+        `Addressed:` and then named the defect's own words, `open means
+        unresolved` and `an unresolved merge`, so they read as unresolved.
+        `_declared_verdict` reads the declaration; a lower-case mention is
+        not one, so the control row stays open.
+        """
+        self.ledger("2026-09-05-declared/prd.md", (
+            "# declared\n\n"
+            "- C-6, requirement 7: notes had no resolution state. Addressed: notes carry "
+            "`resolved_at`, and open means unresolved.\n"
+            "- C-33: Addressed: the fixture restores an unresolved merge before the run.\n"
+            "- C-34: the reader still treats an unresolved merge as clean; addressed: later.\n"
+        ))
+        found = self.checks(self.scan())
+        self.assertEqual(
+            {"unresolved-concern": ["docs/work/2026-09-05-declared/prd.md#C-34"]}, found
+        )
+
     def test_a_table_row_outranks_a_prose_mention_of_the_same_concern(self) -> None:
         """Shape precedence, and what it stops.
 

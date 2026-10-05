@@ -3,9 +3,11 @@
 
 This checks the things a script can decide: that every rendered document carries
 a provenance block, closes with a Status section separating what was verified
-from what was not, and is rendered from a source no newer than its build. It
-cannot judge whether a claim is true — that is the other half, and it is
-printed as a checklist rather than pretending the green ticks cover it.
+from what was not, and is rendered from a source no newer than its build; that
+exactly one configured document carries the `START HERE — ` title; and that the
+repository's `CLAUDE.md` has not drifted from the pack's template. It cannot
+judge whether a claim is true — that is the other half, and it is printed as a
+checklist rather than pretending the green ticks cover it.
 
 Deliberately not checked: citations of `90-scratch/`. The first cut flagged
 them, and every hit was correct work — layout tables describing the folder, and

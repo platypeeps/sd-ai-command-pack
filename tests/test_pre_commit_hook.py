@@ -530,6 +530,19 @@ class TheLayout(unittest.TestCase):
         self.assertFalse(link.is_symlink(), "the stranger was replaced")
         self.assertEqual(link.read_text(encoding="utf-8"), "#!/bin/sh\nexit 0\n")
 
+    def test_make_hooks_outside_a_checkout_refuses_instead_of_writing_slash_hooks(self):
+        """sd:1000 (ffce7b6dfa55): an ignored rev-parse failure left `dir` as `/hooks`."""
+        outside = pathlib.Path(tempfile.mkdtemp(prefix="sd-1000-nogit-"))
+        self.addCleanup(subprocess.run, ["rm", "-rf", str(outside)], check=False)
+        shutil.copy2(REPO_ROOT / "Makefile", outside / "Makefile")
+        env = dict(os.environ, GIT_CEILING_DIRECTORIES=str(outside.parent))
+        result = subprocess.run(
+            ["make", "hooks"], cwd=outside, capture_output=True, text=True, check=False, env=env
+        )
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("is not a git checkout", result.stderr)
+        self.assertNotIn("/hooks/pre-commit", result.stdout + result.stderr)
+
     def test_make_hooks_refuses_while_core_hooks_path_is_set(self):
         git("config", "core.hooksPath", ".githooks", cwd=self.root)
         result = self.make_hooks()
