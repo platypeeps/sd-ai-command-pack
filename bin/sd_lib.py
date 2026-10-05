@@ -2595,8 +2595,20 @@ def attribution_value(name: str, registry: Any) -> str:
     `attribution` drops an `Attributes:` line that does not split into two
     fields, a commit with no claim keeps its vendor out of the author set, and
     the author's own vendor stays on the reviewer chain, open and in silence.
+
+    `<entry>/<vendor>`, the value itself, names `<entry>` when the registry
+    gives it that vendor (sd:2689); another vendor refuses, naming both forms.
     """
-    entry = name.strip()
+    entry, slash, vendor = name.strip().partition("/")
+    if slash:
+        value = attribution_value(entry, registry)
+        if value != f"{entry.strip()}/{vendor.strip().lower()}":
+            raise TrailerError(
+                f"{name.strip()!r} names vendor {vendor.strip()!r}, and {registry.path} "
+                f"resolves {entry.strip()!r} to {value!r}. Name {entry.strip()!r} or "
+                f"{value!r}: a claimed vendor the registry does not give is not a claim.")
+        return value
+    entry = entry.strip()
     provider = registry.providers.get(entry)
     if entry in RESERVED_AUTHORS:
         if provider is not None:
@@ -2627,10 +2639,41 @@ def attribution_value(name: str, registry: Any) -> str:
 
 
 #: Names who is committing, for `hooks/commit-msg` to write as `Authored-with:`
-#: on a message that states none (sd:1295): a registry entry, `human` or
-#: `script`. A harness sets it for its session and a job for its run, so the
-#: trailer lands at commit time and no `sd attribute` commit follows.
+#: on a message that states none (sd:1295): a registry entry, its
+#: `<entry>/<vendor>` value, `human` or `script`. A harness sets it for its
+#: session and a job for its run, so the trailer lands at commit time and no
+#: `sd attribute` commit follows.
 AUTHOR_VARIABLE = "SD_AUTHOR"
+
+#: The variable Claude Code sets to `1` in every tool shell, and the entry and
+#: vendor it stands for when `SD_AUTHOR` is unset (sd:2689). An entry name is
+#: the operator's choice, so the marker resolves only while the registry gives
+#: that entry that vendor. Only a marker a harness is seen to set belongs
+#: here; Codex documents none, so it has no line.
+HARNESS_MARKERS = (("CLAUDECODE", "1", "claude", "anthropic"),)
+
+
+def invoking_author(environ: Mapping[str, str], registry: Any) -> str:
+    """Who runs this: `SD_AUTHOR`, else a harness marker's entry, else "".
+
+    A marker the registry cannot resolve refuses rather than reading as
+    `human`: `human` would let the harness's own vendor review its repair.
+    """
+    named = environ.get(AUTHOR_VARIABLE, "").strip()
+    if named:
+        return named
+    providers = getattr(registry, "providers", {})
+    for variable, mark, entry, vendor in HARNESS_MARKERS:
+        if environ.get(variable) != mark:
+            continue
+        if entry in providers and providers[entry].vendor.strip().lower() == vendor:
+            return entry
+        raise TrailerError(
+            f"{variable}={mark} stands for entry {entry!r} of vendor {vendor!r}, and the "
+            f"registry has no such entry, so this repair cannot name who made it. "
+            f"Set {AUTHOR_VARIABLE}=<the registry entry of vendor {vendor}> or "
+            f"{AUTHOR_VARIABLE}={HUMAN_AUTHOR}.")
+    return ""
 
 
 def states_author(message: str) -> bool:
@@ -2647,7 +2690,7 @@ def commit_author(name: str, read_registry: Callable[[], tuple[Any, str]]) -> st
     local commit does not carry it.
     """
     entry = name.strip()
-    if entry == DEPENDABOT_ENTRY:
+    if entry.partition("/")[0].strip() == DEPENDABOT_ENTRY:
         raise TrailerError(f"{AUTHOR_VARIABLE}={entry!r}: a local commit is never "
                            f"Dependabot's; GitHub's identity on its own commits says that")
     if entry in VENDORLESS_AUTHORS:
