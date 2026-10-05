@@ -4,6 +4,16 @@
 
 ### Added
 
+- **The offload view of a gate's environment (sd:2724, sd:2704 step 2a).**
+  `sd_gate_receipts.offload_view` gives the portable view a hub will compare
+  with a satellite's receipt: `PATH` entries in order with each `$HOME` prefix
+  written as `~`, the bytes of each `OFFLOAD_TOOLS` name on that `PATH`, the
+  bytes of each `OFFLOAD_HOME_FILES` entry or `absent`, and every other
+  variable by value, without `HOME` and `USER`. `offload_miss` names the first
+  differing part and name; a tool the hub cannot resolve is recorded, not
+  compared. Nothing calls them yet. Local reuse does not change: a receipt
+  still binds the whole environment, so another `HOME` still misses on
+  `environment_sha256`.
 - **`sd-ship prepare` runs on an sd satellite (sd:2679).** When `sd_db`
   reports the database served by a hub, `prepare` skips the ship lock, a file
   on the hub, and the hold check beside it. It reviews, pushes, binds or opens

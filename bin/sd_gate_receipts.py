@@ -74,12 +74,15 @@ cannot be read never grants a pass.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
+import os
 import pathlib
+import shutil
 import sys
 import time
 from contextlib import closing
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 import sd_check_receipts
 import sd_check_scope
@@ -101,10 +104,21 @@ REUSE_DECLARATION = ".github/sd-gate-reuse.json"
 REUSE_FIELDS = {"schema_version", "key", "reason"}
 #: Optional in the declaration: `"tool": "tree"` says the gate runs this tree's own `bin/sd-check` (sd:2613).
 TOOL_FIELD = "tool"
+#: Names whose bytes an offload view binds (sd:2704): what a check reaches through `make` or a script.
+OFFLOAD_TOOLS = ("sh", "bash", "make", "python3", "git", "cc", "c++", "clang", "cargo", "rustc", "node", "npm", "uv")
+#: Tool configuration under `HOME` that an offload view binds, by path relative to `HOME`.
+OFFLOAD_HOME_FILES = (".gitconfig", ".config/git/config", ".cargo/config.toml", ".npmrc", ".config/pip/pip.conf",
+                      ".config/uv/uv.toml")
 
 
 def _digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+
+
+def _content_digest(path: str | pathlib.Path) -> str:
+    """sha256 of the bytes at `path`; unlike `sd_check_receipts.file_digest`, not of its mode."""
+    with open(path, "rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def keyed_by_tree(tree: pathlib.Path) -> bool:
@@ -200,6 +214,69 @@ def gate_binding(tree: pathlib.Path, head: str, inputs: str, base: str | None, e
                 "environment_sha256": _digest(dict(env))}
     except Exception:  # an input that cannot be named binds nothing; the check runs
         return None
+
+
+def offload_view(environment: Mapping[str, str], names: Iterable[str] = ()) -> dict[str, Any] | None:
+    """The portable view of a gate's `environment` that a hub compares with a satellite's (sd:2704), or None.
+
+    Local reuse never reads it: `gate_binding` binds the whole environment (C-17). The view leaves out `HOME`
+    and `USER` and writes each `$HOME` prefix as `~`, so two logins can compare equal, and binds what they
+    select instead: `path`, the `PATH` entries in order; `tools`, the bytes of each name in `OFFLOAD_TOOLS`
+    and `names` resolved on that `PATH`, or None for one that does not resolve; `home_files`, the bytes of
+    each `OFFLOAD_HOME_FILES` entry under `HOME`, or "absent"; `variables`, every other variable by value.
+    `names` are the check's own executables; one with a relative folder lives in the tree, which `inputs` binds.
+    """
+    try:
+        home = os.path.normpath(environment["HOME"]) if environment.get("HOME") else None
+        prefixes = sorted({home, str(pathlib.Path(home).resolve())}, key=len, reverse=True) if home else []
+
+        def portable(value: str) -> str:
+            for prefix in prefixes:
+                if value == prefix or value.startswith(prefix + os.sep):
+                    return "~" + value[len(prefix):]
+            return value
+
+        search = environment.get("PATH", "")
+        tools = {}
+        for name in (*OFFLOAD_TOOLS, *names):
+            if os.path.isabs(name) or not os.path.dirname(name):
+                found = shutil.which(name, path=search)
+                tools[name] = _content_digest(found) if found else None
+        return {"path": [portable(entry) for entry in search.split(os.pathsep) if entry], "tools": tools,
+                "home_files": {name: _content_digest(pathlib.Path(home, name)) if home and pathlib.Path(home, name).is_file()
+                               else "absent" for name in OFFLOAD_HOME_FILES},
+                "variables": {key: portable(value) for key, value in environment.items()
+                              if key not in ("PATH", "HOME", "USER")}}
+    except Exception:  # a view that cannot be named matches nothing; the hub runs the check
+        return None
+
+
+def offload_miss(theirs: Any, ours: Any) -> dict[str, Any] | None:
+    """None when a satellite's offload view (`theirs`) stands for the hub's (`ours`), else the first difference.
+
+    The difference is `{"part", "name"}`: parts compare in the order `path`, `tools`, `home_files`, `variables`,
+    and `name` is the first differing `PATH` entry (the satellite's, or the hub's past the satellite's end), tool,
+    file or variable. A tool the hub cannot resolve is recorded, not compared; one only the hub resolves
+    misses. A view that is not one, or a part of the wrong shape, misses with no name.
+    """
+    if not (isinstance(theirs, dict) and isinstance(ours, dict)):
+        return {"part": "view", "name": None}
+    for part in ("path", "tools", "home_files", "variables"):
+        other: Any = theirs.get(part)
+        mine: Any = ours.get(part)
+        if not isinstance(other, (list, dict)) or not isinstance(other, type(mine)):
+            return {"part": part, "name": None}
+        if isinstance(other, list):
+            if other != mine:
+                return {"part": part, "name": next(entry if entry is not None else own for entry, own
+                                                   in itertools.zip_longest(other, mine) if entry != own)}
+            continue
+        for name in sorted(set(other) | set(mine)):
+            if part == "tools" and mine.get(name) is None:
+                continue
+            if other.get(name) != mine.get(name):
+                return {"part": part, "name": name}
+    return None
 
 
 def record_unless_moved(database: pathlib.Path, key: str, identity: Mapping[str, Any], after: Mapping[str, Any] | None,
