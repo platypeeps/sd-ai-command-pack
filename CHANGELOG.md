@@ -4,6 +4,16 @@
 
 ### Added
 
+- **`sd commit-hook` arms a repository outside the pack (sd:2546).** The
+  commit-msg hook writes `Authored-with:` from `SD_AUTHOR`, but it imported
+  `sd_lib` from the repository it ran in, so only a clone of the pack could
+  run it. It now reads `sd_lib` beside its own real path. `sd commit-hook`,
+  run inside another repository, links that clone's common
+  `.git/hooks/commit-msg` to this checkout's hook by absolute path. It refuses
+  while `core.hooksPath` is set and refuses any other file at that path; a
+  second run changes nothing. In the pack's own worktrees the hook now reads
+  the main checkout's `sd_lib`, the same checkout its own file comes from.
+
 - **`sd-ship lane`: a reorderable queue (sd:2584).** `move <item>
   up|down|top|<position>`, `hold <item>` and `release <item>` edit the
   pending entries under the queue's lock; a running entry refuses every edit.
