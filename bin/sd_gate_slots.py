@@ -43,6 +43,15 @@ room. The load rule is now off unless `sd.gate_load_max` sets it; the starts
 stay `sd.gate_settle_seconds` apart. A holder also exports the cap as
 `SD_GATE_POOL_SIZE`, so the tests it runs size their workers to the pool.
 
+The count does not bound one gate's CPU (sd:2726). On 2026-10-05 one Rust
+gate under 2 slots drove the load to 185 on 16 cores: cargo builds and tests
+on every core. A holder under a cap now sets `CARGO_BUILD_JOBS` and
+`RUST_TEST_THREADS` to its share, the cores over the cap; a lower value the
+caller set wins. The holder sets them in its children only, after the gate
+bound its environment, so a pass binds the same whatever the cap.
+`MAKEFLAGS` gets no `-j`: a Makefile that orders prerequisites by their
+listing, as the pack's own `check` does, would run them at once.
+
 Stdlib only: the harness runs this file from a bare fixture copy.
 """
 
@@ -88,6 +97,8 @@ DEFAULT_LOAD_MAX = 0.0
 DEFAULT_SETTLE_SECONDS = 45.0
 #: The cap a holder hands the commands it starts, beside `SD_GATE_SLOTS=0` (sd:2607).
 POOL_VARIABLE = "SD_GATE_POOL_SIZE"
+#: Thread counts a holder caps at its share of the cores (sd:2726): cargo and Rust's test harness default to every core.
+CPU_VARIABLES = ("CARGO_BUILD_JOBS", "RUST_TEST_THREADS")
 #: A gap between two load samples longer than this, or than the settle time,
 #: restarts the low-load record: nobody watched the load in between.
 STALE_SAMPLE_SECONDS = 15.0
@@ -547,9 +558,24 @@ def acquire(slots: int, environ: Mapping[str, str], *, stream: TextIO, timeout: 
     return Slot(held, lock, time.monotonic() - started)
 
 
+def cpu_share(slots: int, cores: int | None = None) -> int:
+    """One gate's share of the cores under a cap of `slots`, and at least one: 8 for 2 slots on 16 cores."""
+    return max(1, (cores if cores is not None else (os.cpu_count() or 1)) // slots)
+
+
+def thread_cap(value: str | None, share: int) -> str:
+    """`value` when it is a positive integer no higher than `share`, else `share`: a lower value wins (sd:2726)."""
+    return value if value and value.isascii() and value.isdigit() and 0 < int(value) <= share else str(share)
+
+
 def holder_environment(environ: Mapping[str, str], slots: int) -> dict[str, str]:
-    """What a holder's commands run with: no slot of their own, and the cap it took one under (sd:2607)."""
-    return {**environ, SLOTS_VARIABLE: "0", **({POOL_VARIABLE: str(slots)} if slots > 0 else {})}
+    """What a holder's commands run with: no slot of their own, the cap it took one under (sd:2607),
+    and under a cap, each of `CPU_VARIABLES` at most the gate's share of the cores (sd:2726)."""
+    if slots <= 0:
+        return {**environ, SLOTS_VARIABLE: "0"}
+    share = cpu_share(slots)
+    return {**environ, SLOTS_VARIABLE: "0", POOL_VARIABLE: str(slots),
+            **{name: thread_cap(environ.get(name), share) for name in CPU_VARIABLES}}
 
 
 def run_gated(command: Sequence[str], environ: Mapping[str, str], *, slots: int, rule: LoadRule, stream: TextIO,

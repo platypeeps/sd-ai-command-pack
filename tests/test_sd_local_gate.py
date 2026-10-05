@@ -26,6 +26,7 @@ if str(REPO_ROOT / "bin") not in sys.path:
 import sd_gate_cache  # noqa: E402
 import sd_gate_receipts  # noqa: E402
 import sd_gate_run  # noqa: E402
+import sd_gate_slots  # noqa: E402
 import sd_lib  # noqa: E402
 import sd_local_gate  # noqa: E402
 from sd_ship_remote import Refusal  # noqa: E402
@@ -446,6 +447,25 @@ class Receipts(ReceiptFixture):
             os.environ.pop("MAKEFLAGS", None)
             merged = self.gate(head)
         self.assertEqual((merged["status"], "reused" in merged, self.runs()), ("failure", False, 2))
+
+    def test_the_cpu_cap_reaches_the_check_and_a_new_slot_count_reuses_the_pass(self) -> None:
+        """sd:2726: `sd-check` sets the cap in its children, after the gate bound its environment."""
+        seen = self.root.parent / "seen"
+        head = self.counted(f'echo "$$CARGO_BUILD_JOBS $$RUST_TEST_THREADS" > {seen}')
+        config = self.root.parent / "config" / "sd-ai-command-pack" / "config.json"
+        config.parent.mkdir(parents=True)
+        machine = {"SD_GATE_SLOTS_DIR": str(self.root.parent / "slots"), "SD_GATE_SLOT_POLL": "0.1",
+                   "SD_GATE_LOAD_MAX": "0", "SD_GATE_SETTLE_SECONDS": "0", "XDG_CONFIG_HOME": str(config.parents[1])}
+        with mock.patch.dict(os.environ, machine):
+            for name in ("SD_GATE_SLOTS", "CI", "GITHUB_ACTIONS"):
+                os.environ.pop(name, None)
+            config.write_text(json.dumps({"config": {"sd": {"gate_slots": "2"}}}), encoding="utf-8")
+            first = self.gate(head)
+            config.write_text(json.dumps({"config": {"sd": {"gate_slots": "4"}}}), encoding="utf-8")
+            second = self.gate(head)
+        self.assertEqual((first["status"], second["status"], "reused" in second, self.runs()), ("success", "success", True, 1))
+        share = str(sd_gate_slots.cpu_share(2))
+        self.assertEqual(seen.read_text().split(), [share, share])
 
     def test_a_receipt_older_than_the_window_is_not_reused(self) -> None:
         """The window is one prepare-to-merge handoff: 30 minutes, not hours.
