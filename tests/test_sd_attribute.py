@@ -553,14 +553,17 @@ class TheWriterTests(CommandFixture):
         code, _, err = self.run_as(None, "attribute", silent, "codex", marker="1")
         self.assertEqual((code, self.own()), (0, "claude/anthropic"), err)
 
-    def test_the_marker_needs_the_registry_to_give_claude_its_vendor(self) -> None:
-        """An entry name is the operator's: a `claude` of another vendor is not Claude Code's."""
+    def test_a_marker_the_registry_cannot_resolve_refuses(self) -> None:
+        """A `claude` of another vendor is not Claude Code's, and `human` would let anthropic review the repair."""
         seeded = self.home / sd_registry.REGISTRY_RELATIVE
         seeded.write_text(seeded.read_text(encoding="utf-8").replace(
             "vendor: anthropic", "vendor: openai"), encoding="utf-8")
         silent = self.commit("feat: something")
+        before = self.git("rev-parse", "HEAD")
         code, _, err = self.run_as(None, "attribute", silent, "codex", marker="1")
-        self.assertEqual((code, self.own()), (0, "human"), err)
+        self.assertEqual(code, 1)
+        self.assertIn("SD_AUTHOR=human", err)
+        self.assertEqual(self.git("rev-parse", "HEAD"), before)
 
     def test_an_explicit_sd_author_outranks_the_marker(self) -> None:
         silent = self.commit("feat: something")

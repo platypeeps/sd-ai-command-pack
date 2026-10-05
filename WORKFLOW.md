@@ -745,8 +745,10 @@ same line on a commit whose message states none (sd:1295); a name nothing
 resolves refuses the commit, and `sd attribute` never amends. `make hooks`
 arms the pack's own clone, and `sd commit-hook` arms any other (sd:2546). Its own
 repair commit says `SD_AUTHOR`'s entry too, else `claude` under `CLAUDECODE=1`
-while the registry gives `claude` the vendor `anthropic`, else `human` (sd:2009, sd:2689). Both places take `<name>/<vendor>` as well when
-the registry gives `<name>` that vendor. `human` is a
+while the registry gives `claude` the vendor `anthropic` (another vendor
+refuses and asks for `SD_AUTHOR`), else `human` (sd:2009, sd:2689). Both
+places take `<name>/<vendor>` as well when the registry gives `<name>` that
+vendor. `human` is a
 commit a person wrote; `script` is one a deterministic job wrote, with no
 model and no person in the loop (sd:1637). Both are reserved and carry no
 vendor, so any provider may review them. The

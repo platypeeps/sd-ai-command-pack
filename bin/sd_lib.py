@@ -2647,21 +2647,33 @@ AUTHOR_VARIABLE = "SD_AUTHOR"
 
 #: The variable Claude Code sets to `1` in every tool shell, and the entry and
 #: vendor it stands for when `SD_AUTHOR` is unset (sd:2689). An entry name is
-#: the operator's choice, so the marker counts only while the registry gives
+#: the operator's choice, so the marker resolves only while the registry gives
 #: that entry that vendor. Only a marker a harness is seen to set belongs
 #: here; Codex documents none, so it has no line.
 HARNESS_MARKERS = (("CLAUDECODE", "1", "claude", "anthropic"),)
 
 
 def invoking_author(environ: Mapping[str, str], registry: Any) -> str:
-    """Who runs this: `SD_AUTHOR`, else a harness marker's entry, else ""."""
+    """Who runs this: `SD_AUTHOR`, else a harness marker's entry, else "".
+
+    A marker the registry cannot resolve refuses rather than reading as
+    `human`: `human` would let the harness's own vendor review its repair.
+    """
     named = environ.get(AUTHOR_VARIABLE, "").strip()
     if named:
         return named
     providers = getattr(registry, "providers", {})
-    return next((entry for variable, mark, entry, vendor in HARNESS_MARKERS
-                 if environ.get(variable) == mark and entry in providers
-                 and providers[entry].vendor.strip().lower() == vendor), "")
+    for variable, mark, entry, vendor in HARNESS_MARKERS:
+        if environ.get(variable) != mark:
+            continue
+        if entry in providers and providers[entry].vendor.strip().lower() == vendor:
+            return entry
+        raise TrailerError(
+            f"{variable}={mark} stands for entry {entry!r} of vendor {vendor!r}, and the "
+            f"registry has no such entry, so this repair cannot name who made it. "
+            f"Set {AUTHOR_VARIABLE}=<the registry entry of vendor {vendor}> or "
+            f"{AUTHOR_VARIABLE}={HUMAN_AUTHOR}.")
+    return ""
 
 
 def states_author(message: str) -> bool:
