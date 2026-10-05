@@ -97,6 +97,8 @@ import sd_writing  # noqa: E402
 
 MANIFEST_NAME = "sd-plugin.json"
 LOCK_NAME = "sd-plugin.lock"
+#: What `sd commit-hook` links a clone's commit-msg hook to: this checkout's, by real path.
+PACK_COMMIT_HOOK = pathlib.Path(__file__).resolve().parents[1] / "hooks" / "commit-msg"
 
 # The closed vocabulary a plugin may use to describe one kind (R11-D14). Eight
 # keys, and a ninth is a decision record rather than a commit. The invariant
@@ -2899,6 +2901,36 @@ def cmd_attribute(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_commit_hook(args: argparse.Namespace) -> int:
+    """`sd commit-hook` -- arm a clone outside the pack with the pack's commit-msg hook (sd:2546).
+
+    One absolute link in the clone's common `.git/hooks`, shared by its
+    worktrees, to the `hooks/commit-msg` of the checkout this `sd` runs from.
+    `make hooks` stays the pack's own path. A set `core.hooksPath` and any
+    other file at the link's path are refused, not replaced.
+    """
+    root = sd_lib.repo_root()
+    if root is None:
+        raise Refusal("not inside a git repository")
+    hooks_path = sd_lib.git_output(["config", "--get", "core.hooksPath"], root)
+    if hooks_path:
+        raise Refusal(f"core.hooksPath is set to {hooks_path}, so git would not run a hook in .git/hooks; "
+                      f"unset it, or call {PACK_COMMIT_HOOK} from the hook in {hooks_path}")
+    common = sd_lib.git_output(["rev-parse", "--path-format=absolute", "--git-common-dir"], root)
+    if not common:
+        raise Refusal("git could not name this clone's common git directory")
+    link = pathlib.Path(common) / "hooks" / "commit-msg"
+    if link.is_symlink() and link.resolve() == PACK_COMMIT_HOOK.resolve():
+        print(f"git hooks: {link} already links to {PACK_COMMIT_HOOK}")
+        return 0
+    if link.exists() or link.is_symlink():
+        raise Refusal(f"{link} exists and is not a link to {PACK_COMMIT_HOOK}; move it aside first")
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(PACK_COMMIT_HOOK)
+    print(f"git hooks: {link} -> {PACK_COMMIT_HOOK}")
+    return 0
+
+
 def cmd_gate(args: argparse.Namespace) -> int:
     """`sd gate run|status` -- the sd:2262 gate queue, with the machine's `sd.gate_*` settings.
 
@@ -3232,6 +3264,11 @@ def build_parser() -> argparse.ArgumentParser:
         "entry", help=f"a registry entry, `{sd_lib.HUMAN_AUTHOR}` for the operator, `{sd_lib.SCRIPT_AUTHOR}` "
                       f"for an unattended job, or `{sd_lib.DEPENDABOT_ENTRY}` for a bump rewritten after GitHub made it")
     attributer.set_defaults(handler=cmd_attribute)
+
+    hooker = groups.add_parser(
+        "commit-hook",
+        help="link this clone's commit-msg hook to the pack's, which writes `Authored-with:` from SD_AUTHOR")
+    hooker.set_defaults(handler=cmd_commit_hook)
 
     gate = groups.add_parser("gate", help="the machine-wide gate queue: run a command in it, or show it; "
                                  "post the local gate at a commit")
