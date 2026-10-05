@@ -86,6 +86,22 @@ def missing_record(review_id: str) -> Refusal:
                    next_action=f"Check the ID against the `review_id` an earlier --create-record printed. {ALLOCATE_HINT}")
 
 
+def foreign_item(item: int, item_repository: str, repository: str, command: str) -> Refusal:
+    """The refusal for `--item N` from a checkout of another repository, naming the way on (sd:2576).
+
+    The PR still ships here, as an itemless record; only `hold` has no itemless form.
+    """
+    where = f"To ship under sd:{item}, run from a checkout of {item_repository}."
+    if command not in ("hold", "release"):
+        where += (f" To ship this checkout's PR without an item, run `{CREATE_RECORD_COMMAND}`, then "
+                  f"`sd-ship {command} --no-item --review-id <review_id>` with the review_id it prints"
+                  f"{'; an itemless merge also needs --manual --expected-head SHA' if command == 'merge' else ''}. "
+                  f"That records nothing on sd:{item}; record the PR there with `sd task note {item}`.")
+    return Refusal(f"item repository does not match this checkout's origin: item sd:{item} belongs to "
+                   f"{item_repository}, not {repository}",
+                   code="item_repository_mismatch", boundary="input", state="operator_decision", next_action=where)
+
+
 def observed_at() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -260,6 +276,9 @@ class GitFacts:
     base: str
     commits: tuple[str, ...]
     trees: tuple[str, ...]
+    #: The refreshed base's tree. A commit that changes nothing has it too, and
+    #: so does every record that landed there (sd:2009).
+    base_tree: str = ""
 
 
 def committed_facts(root: pathlib.Path, *, require_diff: bool = True) -> GitFacts:
@@ -293,7 +312,8 @@ def committed_facts(root: pathlib.Path, *, require_diff: bool = True) -> GitFact
             "commit the proposed change before allocating a record"
         )
     trees = tuple(git(root, "rev-parse", f"{commit}^{{tree}}") for commit in commits)
-    return GitFacts(repository, branch, head, git(root, "rev-parse", "HEAD^{tree}"), base, commits, trees)
+    return GitFacts(repository, branch, head, git(root, "rev-parse", "HEAD^{tree}"), base, commits, trees,
+                    git(root, "rev-parse", f"{base}^{{tree}}"))
 
 
 def receipt_covers(receipt: dict, facts: GitFacts) -> bool:
@@ -326,10 +346,17 @@ def index_owner(connection: sqlite3.Connection, store, facts: GitFacts, family: 
 
 
 def index_claims(facts: GitFacts) -> tuple[tuple[str, str], ...]:
+    """The identities a record claims. The base's own tree is not one of them.
+
+    An empty commit, such as an `sd attribute` repair, has the tree the base
+    already holds, which is the tree the last merged record landed. Claiming it
+    refused every attribution repair as a continuation of that record (sd:2009);
+    its commit is still claimed, so the same empty commit cannot allocate twice.
+    """
     claims = [("branch", facts.branch), ("tree", facts.tree)]
     claims += [("head", commit) for commit in facts.commits]
     claims += [("tree", tree) for tree in facts.trees]
-    return tuple(dict.fromkeys(claims))
+    return tuple(claim for claim in dict.fromkeys(claims) if claim != ("tree", facts.base_tree))
 
 
 def check_no_item_records(connection: sqlite3.Connection, store, facts: GitFacts) -> None:

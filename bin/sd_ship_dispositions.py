@@ -62,6 +62,25 @@ def key(operation: Any) -> str:
     return operation.identity.acceptance_key(operation.key)
 
 
+#: `check.status` of a review that blocked before the gate ran (sd:2605).
+GATE_NOT_RUN = "not_run"
+
+
+def gate_waivable(check: Any) -> bool:
+    """A gate that passed, or one a blocking review never ran (sd:2605).
+
+    sd-review runs the gate only after a review that does not block, so a
+    blocking report carries `not_run`. Adjudication accepts it only because the
+    prepare that reads the accepted dispositions runs the gate itself before
+    clearance (`SharedReview.adjudicated_gate`); a failed or partial check is
+    never waived.
+    """
+    if not isinstance(check, dict):
+        return False
+    code = check.get("exit_code")
+    return (type(code) is int and code == 0) or (check.get("status") == GATE_NOT_RUN and code is None)
+
+
 def context(operation: Any, head: str) -> tuple[dict, list[dict]]:
     if git(operation.root, "status", "--porcelain", "--untracked-files=all") or git(operation.root, "rev-parse", "HEAD") != head:
         raise Refusal("adjudication requires the clean exact reviewed head")
@@ -72,10 +91,9 @@ def context(operation: Any, head: str) -> tuple[dict, list[dict]]:
     if not isinstance(outcomes, list) or any(not isinstance(row, dict) for row in outcomes):
         raise Refusal("adjudication requires complete outcome evidence")
     completed = [row.get("backend") for row in outcomes if row.get("status") in ("clean", "findings")]
-    check_exit = report.get("check", {}).get("exit_code")
     if (any(not isinstance(name, str) or not name for name in completed) or len(set(completed)) != len(completed)
             or reviewed != completed or len(completed) != report["completed_reviews"]
-            or type(check_exit) is not int or check_exit != 0):
+            or not gate_waivable(report.get("check"))):
         raise Refusal("adjudication cannot waive incomplete transport or deterministic checks")
     rows = [{"index": index, "finding_digest": digest(row), "raw_finding": row}
             for index, row in enumerate(report["findings"], 1) if row["disposition"] == "blocking"]
@@ -122,7 +140,7 @@ def blocking_refusal(operation: Any, head: str, report: dict, lead: str) -> Refu
     return Refusal(f"{lead}: {named}{more}", code="review_blocking", boundary="review", state="operator_decision",
                    next_action=f"Run `{command}` to print each blocking finding in full; fix them and prepare "
                                "again, or rebut or park each one through that adjudication.",
-                   details={"findings": findings})
+                   details={"findings": findings, "check": report.get("check")})
 
 
 def place(row: dict) -> str:

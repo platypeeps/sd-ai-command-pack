@@ -18,9 +18,13 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Iterable, NamedTuple
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping, NamedTuple
+
+if TYPE_CHECKING:  # `sd_review_slots` imports this module; see `review_slot`.
+    import sd_review_slots
 
 LOCAL_FILE_NAME = "CLAUDE.local.md"
 LOCAL_BLOCK_START = "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->"
@@ -82,6 +86,9 @@ CORE_CONFIG = {
     "gate_load_max": {"pattern": r"[0-9]+(\.[0-9]+)?",
                       "description": "The gate queue starts a gate only while load1 is below this; 0 is no load "
                                      "condition. Unset is none; SD_GATE_LOAD_MAX overrides it for one run."},
+    "review_slots": {"pattern": "[0-9]+",
+                     "description": "How many reviews may run their reviewers at once on this machine; 0 is no cap. "
+                                    "Unset reads 2; SD_REVIEW_SLOTS overrides it for one run."},
     "lane_root": {"pattern": r"[~/][^\x00]*",
                   "description": "The folder holding each repository's `sd-ship lane` queue, as "
                                  "<root>/<repository>/lane/queue/. Unset reads $XDG_STATE_HOME/sd/lanes; "
@@ -471,6 +478,25 @@ def machine_config_path(environ: dict[str, str] | None = None) -> pathlib.Path:
     env = os.environ if environ is None else environ
     home = pathlib.Path(env.get("XDG_CONFIG_HOME") or pathlib.Path(env.get("HOME") or pathlib.Path.home()) / ".config")
     return home / CONFIG_RELATIVE_PATH
+
+
+#: When this process imported sd_lib: `sd-review` imports it first, so its
+#: review slot wait counts its check bound from here (sd:2523).
+STARTED = time.monotonic()
+
+
+def review_slot(result: dict[str, Any], environ: Mapping[str, str], root: pathlib.Path,
+                bound_seconds: float) -> sd_review_slots.Slot | None:
+    """Hold a machine-wide review slot for `sd-review`, or refuse the review in `result`.
+
+    A thin door: the slot logic is `sd_review_slots.hold_review_slot`, which
+    `sd-review` does not import, so it stays outside the review lane's line
+    budget the way `sd_gate_receipts` does. Imported here on first use,
+    because `sd_review_slots` imports this module.
+    """
+    import sd_review_slots
+
+    return sd_review_slots.hold_review_slot(result, environ, root, bound_seconds)
 
 
 def core_setting(key: str, environ: dict[str, str] | None = None) -> str | None:
@@ -2744,8 +2770,9 @@ ITEM_TRAILER = "Item:"
 WORK_TRAILER = "Work:"
 #: The trailer lines `sd-ship` owns in a pull-request body (sd:1870). It
 #: writes `Work:` into the body it publishes and `Item:`, `Delivers:` and the
-#: authorship lines into the squash message; `Closes:` rides a later merge or
-#: an empty commit, never a body `sd-ship` publishes. `sd_ship_body` reads a
+#: authorship lines into the squash message. `Closes:` rides a later merge or
+#: an empty commit, and in a body names the items a pull request co-delivers,
+#: which the merge closes with a `Delivers:` each (sd:1481). `sd_ship_body` reads a
 #: supplied body against this tuple, and the template test holds the
 #: template's closing block to it.
 OWNED_TRAILERS = (ITEM_TRAILER, WORK_TRAILER, DELIVERS_TRAILER, CLOSES_TRAILER,

@@ -30,6 +30,8 @@ A merge lane that ships one item across several commands holds the lane: `sd-shi
 The hold is taken under the ship lock and lasts `--for` seconds, 3600 by default and 86400 at most; rerun it to renew.
 While it stands, `prepare` and `merge` for any other item refuse as `lane_held`, naming the item, holder and expiry.
 The held item's merge ends it; `sd-ship release --item ID` ends it sooner, and only for the held item.
+`sd-ship lane run` leaves a merged worktree and its branch in place: removal can race a live builder's open file handles.
+Stop the builder, then run the entry's `remove` command, also in the item note.
 Do not change gates to obtain a merge.
 An existing manual operator path needs separate authorization; a gate refusal does not grant it.
 Standing permission starts no background work and does not enable `runner_merge: auto` on the repository row.
@@ -57,6 +59,8 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    A present trailer produces no warning.
    A missing trailer warns; the sequence continues with the commit.
 2. **Review locally before publication.**
+   Before the review, `sd-ship prepare` warns about open PRs and origin branches that name the item or change the same files (sd:1151).
+   The warning refuses nothing; read it before the review spends a pass.
    Use `sd-review --scope branch --challenge` for the *code, before merge* point.
    Read its cap on that row in the sd-ai-command-pack checkout's `.claude/rules/sd-planning-adversarial-review.md`.
    Run `sd-docs-lint` against the built PR body.
@@ -99,6 +103,9 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    Missing protection remains a refusal; this workflow adds no exception.
 8. **Record verified delivery.**
    An associated merge carries `Item:`; only whole-item delivery adds `Delivers:`.
+   A body `Closes: sd:N[, sd:M]` line names co-delivered items; each gets `Delivers:` and closes on the merge (sd:1481).
+   Prepare refuses one inside a code fence or HTML comment; indent an example.
+   A body `Refs: sd:N` line names a related or partial item; the merge leaves it open.
    Record the row only after the remote confirms the merge.
    Read `skills/sd-ship/references/delivery.md` in the sd-ai-command-pack checkout before delivery, cancellation, or completion reporting.
    A slice leaves its item open.
@@ -122,6 +129,7 @@ subcommand changes cwd first, as `git -C` does (R10-D6 names it).
 Use the matching installed `sd_db` library.
 `--database PATH` selects an explicitly provisioned receipt/provider database; otherwise use operator HOME.
 The runner uses its provisioned interpreter.
+Before a head goes to the lane, run `sd gate check` on it under the repository's gate lock; prepare's gate reuses that pass instead of running the check again (R15-D1).
 
 For itemless work, reuse its stable review ID.
 For genuinely new work, allocate it with `sd-ship review --no-item --create-record --assert-new-work --json`.
@@ -139,6 +147,7 @@ Never allocate another review ID to reset spent passes or discard history.
   `--title` and `--body-file` supply the PR description.
   Without `--title` or a stored title, a one-commit branch uses its subject; a longer branch is refused.
   Without `--body-file`, an open PR's live body is the description, found by branch when no receipt names one; reprepare preserves the delivery claim.
+  Only an open PR binds: a merged or closed one that used the branch name is ignored, and prepare opens a new PR (sd:2656).
   The sd-ai-command-pack checkout's `WORKFLOW.md`, section **The path for a change**, lists the body lines sd-ship owns.
 - `sd-ship body --item ID [--body-file FILE] [--pr N]` prints the body prepare would publish and its body lint.
   Its `scope` says whether the diff demands a scope line, such as `CI/review scope:` for `.github/**`, and whether the body has it.
@@ -222,6 +231,7 @@ No local receipt means there is nothing to abandon, and the command refuses.
 It preserves request history and records a separate abandonment.
 Only submitted, non-pending reviews mark matching request heads complete.
 Published Copilot findings still require disposition.
+Every other reviewer's findings require disposition too; the merge refuses with `review_findings_open` before it merges (R14-D2, sd:998).
 
 The additive `workflow` object reports `schema_version`, `phase`, `state`, `blocker`, and `next_action`.
 States are `success`, `retryable_failure`, `operator_decision`, and `policy_block`.

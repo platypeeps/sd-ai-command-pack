@@ -62,7 +62,8 @@ The receipt includes typed check output; do not run a command that prints secret
 This declaration is an operator assertion, not enforced hermeticity or OS read confinement.
 Never enable reuse when the command reads undeclared ignored files, environment, or external dependencies, or requires network access.
 Unknown dependency completeness disables reuse.
-Do not enable it for this pack's network-dependent full gate.
+This pack declares no reuse here: nobody audited its full gate's dependencies against this contract.
+Its merge gate reuses gate receipts instead (`sd gate check`, `.github/sd-gate-reuse.json`, R15-D1).
 
 ## Record and reuse
 

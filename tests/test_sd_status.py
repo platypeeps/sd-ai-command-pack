@@ -4971,6 +4971,46 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
         return status.actionable_inventory(
             self.repo, self.sections(merged_pull_requests=merged), self.TODAY)
 
+    def test_a_finding_that_left_the_window_unanswered_counts_as_expired(self) -> None:
+        """sd:998: past day fourteen a finding lost its row and read as nothing,
+        so expiry looked like resolution. Days fifteen to twenty-eight are
+        counted; the window's own days and day twenty-nine are not."""
+        merged = {"pull_requests": [self.merged(14, 14, ["d14"]), self.merged(15, 15, ["a15", "b15"]),
+                                    self.merged(28, 28, ["c28"]), self.merged(29, 29, ["e29"])]}
+        expired = status.expired_reviews(self.repo, merged, self.TODAY)
+        self.assertEqual({"days": [15, 28], "findings": 3, "pull_requests": [15, 28], "unchecked": ""}, expired)
+        stopped = status.expired_reviews(self.repo, dict(merged, truncated=True, limit=500), self.TODAY)
+        self.assertIn("stopped at its limit of 500", stopped["unchecked"])
+        out = io.StringIO()
+        status._render_threads([], out.write, expired)
+        self.assertIn("  expired: 3 review finding(s) on 2 pull request(s) merged 15-28 days ago "
+                      "expired unanswered: #15, #28\n", out.getvalue())
+
+    def test_unread_findings_on_pull_requests_merged_in_the_window_count_as_late(self) -> None:
+        """sd:1178, operator ruling 2026-10-03 (go D). A review posted after the
+        merge reaches no merge gate, so the report totals the unread findings on
+        pull requests merged in the last fourteen days. Day fifteen is
+        `expired:`'s, and a finding `sd-review-ack` dismissed counts nowhere."""
+        ack = status.sd_lib.sibling("sd_review_ack_late", "sd-review-ack")
+        rows = ack.findings(2, [{"author": "bot", "commit_id": "", "body":
+                                 "| File | Summary |\n|---|---|\n"
+                                 "| `bin/a.py` | Moderate finding (1 vote): wrong. |\n"
+                                 "| `bin/b.py` | Moderate finding (1 vote): also wrong. |\n"}], [])
+        ack.acknowledge(self.repo, rows[1], "dismissed", "the reviewer misread the diff")
+        merged = {"pull_requests": [self.merged(0, 0, ["z0"]), self.merged(2, 2, [row["id"] for row in rows]),
+                                    self.merged(14, 14, ["d14", "e14"]), self.merged(15, 15, ["a15"])]}
+        late = status.late_reviews(self.repo, merged, self.TODAY)
+        self.assertEqual({"days": [0, 14], "findings": 4, "pull_requests": [0, 2, 14], "unchecked": ""}, late)
+        unread = status.late_reviews(self.repo, {"available": False, "reason": "gh is not signed in"}, self.TODAY)
+        self.assertEqual("gh is not signed in", unread["unchecked"])
+        timed_out = {"pull_requests": [self.merged(n, 1, [], unreadable="gh timed out after 60s") for n in (5, 6, 7)]}
+        self.assertEqual("3 pull request(s) unreadable, first #5: gh timed out after 60s",
+                         status.late_reviews(self.repo, timed_out, self.TODAY)["unchecked"])
+        out = io.StringIO()
+        status._render_threads([], out.write, late=late)
+        self.assertIn("  late: 4 review finding(s) on 3 pull request(s) merged in the last 14 days "
+                      "are unread: #0, #2, #14\n", out.getvalue())
+
     def test_the_window_holds_day_thirteen_and_fourteen_and_drops_day_fifteen(self) -> None:
         inventory = self.found(self.merged(13, 13, ["a13"]), self.merged(14, 14, ["a14"]),
                                self.merged(15, 15, ["a15"]))
@@ -5219,7 +5259,10 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
         # Pinned from its sentence's start, which the bound requires (sd:1002).
         _skill_says("Beyond the section keys it carries `merged_pull_requests` (the pull "
                     "requests merged inside the review window, with the findings each "
-                    "carries), `inventory` (`rows` plus the `unchecked` map), `abnormalities`, "
+                    "carries), `expired_reviews` (the `expired:` count, its days, its pull "
+                    "requests and why it is short, if it is), `late_reviews` (the `late:` "
+                    "count, in the same shape), `inventory` (`rows` plus the `unchecked` map), "
+                    "`abnormalities`, "
                     "`actions` — the uncapped inventory, of which `pending` is the first "
                     f"{_word(limit)} after each class's `pending_cap` (`pending_rows`) — and "
                     "`next`.")
@@ -5324,10 +5367,14 @@ class MergedQueryWindowTests(StatusFixture):
         after = datetime.date.today()
         asked = [line for line in log.read_text(encoding="utf-8").splitlines()
                  if "--state merged" in line]
-        self.assertEqual(1, len(asked), asked)
+        self.assertEqual(2, len(asked), asked)
         allowed = {f"merged:>={(day - datetime.timedelta(days=15)).isoformat()}"
                    for day in (before, after)}
         self.assertTrue(any(token in asked[0] for token in allowed), (asked, allowed))
+        # The expired count's own read, a day wider at each end (sd:998).
+        allowed = {f"merged:{(day - datetime.timedelta(days=29)).isoformat()}.."
+                   f"{(day - datetime.timedelta(days=14)).isoformat()}" for day in (before, after)}
+        self.assertTrue(any(token in asked[1] for token in allowed), (asked, allowed))
 
 
 class CollectMergedTests(unittest.TestCase):
