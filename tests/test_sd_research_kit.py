@@ -107,6 +107,38 @@ class VerbSurfaceTests(unittest.TestCase):
         self.assertEqual(run().returncode, 1)
 
 
+class ReviewDocstringTests(unittest.TestCase):
+    """sd:1000 (eb35682afbb4): the module docstring left out two of `review`'s checks.
+
+    The checks are read off `check()`'s own calls, so a check added there fails
+    here until the docstring names it.
+    """
+
+    #: The words the docstring uses for each check `check()` calls.
+    NAMED = {
+        "provenance": "provenance block",
+        "status_section": "Status section",
+        "main_document": "`START HERE — ` title",
+        "template_drift": "`CLAUDE.md` has not drifted",
+        "work_items": "work items under `docs/work/`",
+    }
+
+    def test_the_docstring_names_every_check_review_runs(self) -> None:
+        import ast
+        import inspect
+
+        load_publish()  # puts `bin/` on the path, so the class runs on its own
+        module = load_kit().load("sd_research_review")
+        tree = ast.parse(inspect.getsource(module.check))
+        called = {node.func.id for node in ast.walk(tree)
+                  if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                  and inspect.isfunction(getattr(module, node.func.id, None))}
+        self.assertEqual(set(self.NAMED), called - {"load_docs"})
+        text = " ".join(module.__doc__.split())
+        for check, words in self.NAMED.items():
+            self.assertIn(words, text, check)
+
+
 class SecondReaderCommandTests(unittest.TestCase):
     """Step 9 of the printed checklist routes the second reader through `sd-review`.
 
