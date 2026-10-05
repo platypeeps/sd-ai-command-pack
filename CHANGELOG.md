@@ -14,6 +14,15 @@
   reports each `url` lane refused by the ledger and runs the CLI lanes. The
   registry read takes the `--database` `sd-ship` hands down as the hub's
   database when it names the default, as it does on a satellite.
+- **`sd commit-hook` arms a repository outside the pack (sd:2546).** The
+  commit-msg hook writes `Authored-with:` from `SD_AUTHOR`, but it imported
+  `sd_lib` from the repository it ran in, so only a clone of the pack could
+  run it. It now reads `sd_lib` beside its own real path. `sd commit-hook`,
+  run inside another repository, links that clone's common
+  `.git/hooks/commit-msg` to this checkout's hook by absolute path. It refuses
+  while `core.hooksPath` is set and refuses any other file at that path; a
+  second run changes nothing. In the pack's own worktrees the hook now reads
+  the main checkout's `sd_lib`, the same checkout its own file comes from.
 
 - **`sd-ship lane`: a reorderable queue (sd:2584).** `move <item>
   up|down|top|<position>`, `hold <item>` and `release <item>` edit the
@@ -926,6 +935,12 @@
 
 ### Changed
 
+- **`sd-status` asks each `git` question once per run (sd:2677).** One run on
+  a working checkout started 2,079 subprocesses, and 1,750 of them repeated a
+  question already answered. `sd_lib.git_read_memo()` remembers read-only
+  `git` calls for one run; any other call empties it first. `sd-review-ack`
+  answers ancestry from one `git rev-list` per ref while that memo is open,
+  and `delivered` fetches each ref once. The output does not change.
 - **`sd.fleet_owners` replaces `fleet.owners` (sd:2502).** `sd fleet stamp`
   reads the operator's owner logins from the core setting `sd.fleet_owners`,
   comma-separated, set with `sd config set`. Unset, it still reads the

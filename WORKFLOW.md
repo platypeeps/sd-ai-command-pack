@@ -742,7 +742,8 @@ mid-item; outside the runner, `--author` names it to
 <name>/<vendor>`, the vendor as the registry gave it at commit time.
 `SD_AUTHOR=<name>` names it to the pack's `commit-msg` hook, which writes the
 same line on a commit whose message states none (sd:1295); a name nothing
-resolves refuses the commit, and `sd attribute` never amends. Its own
+resolves refuses the commit, and `sd attribute` never amends. `make hooks`
+arms the pack's own clone, and `sd commit-hook` arms any other (sd:2546). Its own
 repair commit says `SD_AUTHOR`'s entry too, else `human` (sd:2009). `human` is a
 commit a person wrote; `script` is one a deterministic job wrote, with no
 model and no person in the loop (sd:1637). Both are reserved and carry no

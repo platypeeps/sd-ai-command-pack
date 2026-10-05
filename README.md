@@ -370,6 +370,12 @@ a setting of the clone, not a render, so `--user` does not make it and
 `--uninstall` does not remove it; `bin/sd_install.py` is unchanged, and folding
 the hook into `--user` is the owner's call.
 
+Another repository gets the commit-msg hook alone from `sd commit-hook`, run
+inside it. It links that clone's common `.git/hooks/commit-msg` to this
+checkout's `hooks/commit-msg` by absolute path, and the hook reads `sd_lib`
+from the `bin/` beside its own real path. It refuses while `core.hooksPath` is
+set, and it refuses any other file already at the link's path.
+
 ### What it owns, and what it will not touch
 
 The receipt at `~/.local/state/sd-ai-command-pack/installed.json` records every
