@@ -10,8 +10,8 @@
   --gate-check`) also writes `sd-gate-offload:v1:<sha256 of slug and head>`
   (or of the tree) to the hub: the writer, the satellite's identity, the
   whole binding, the offload view, the pack `bin/` digest and revision, the
-  `CLAUDE.local.md` digest and the reading. A reuse writes the row unless the
-  row of that same pass stands, with the pass's time. A failed write sets `offload_error` and
+  `CLAUDE.local.md` digest and the reading. A reuse writes the row unless that
+  same row stands field for field, with the pass's time. A failed write sets `offload_error` and
   the pass stands. Before a run the gate warns when the hub's published pack
   digest (`sd-lane-pack:v1:<slug>`) is another. `sd_lib.repo_satellite_gate`
   reads the opt-in and answers `off` on every fault;

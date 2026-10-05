@@ -139,7 +139,7 @@ class OffloadRows(SatelliteFixture):
                          reused["offload"]["revision"])
 
     def test_a_reuse_replaces_a_row_another_pass_left(self) -> None:
-        """A stale row (another pass's time, inputs or pack) does not stand for the reused pass: the reuse writes its own."""
+        """A row the hub would refuse (another pass's time, inputs or pack, another writer, a failure, another view) does not stand: the reuse writes its own."""
         from contextlib import closing
 
         from sd_db import connect, ship
@@ -148,7 +148,8 @@ class OffloadRows(SatelliteFixture):
         self.gate()  # the reuse's own row: the reused pass's binding and pack, at its receipt's time
         key, current = sd_gate_receipts.offload_key(SLUG, self.head), self.offload_row()
         for fields in ({"recorded_at": current["recorded_at"] - 60}, {"binding": {**current["binding"], "inputs": "0" * 12}},
-                       {"pack_bin": "0" * 64}):
+                       {"pack_bin": "0" * 64}, {"writer": "sd-lane"}, {"reading": {**current["reading"], "status": "failure"}},
+                       {"offload_view": {**current["offload_view"], "tools": {}}}):
             with self.subTest(fields=sorted(fields)):
                 with closing(connect(self.database)) as connection:
                     ship.save(connection, key, ship.read(connection, key)[0], {**current, **fields})

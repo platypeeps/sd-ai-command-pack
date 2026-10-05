@@ -462,14 +462,14 @@ def record_offload(database: pathlib.Path | None, run: Worktree, identity: Mappi
                 return {"offload_skipped": "repo.satellite_gate is not accept for this repository"}
             from sd_db import ship  # noqa: PLC0415
             revision, existing = ship.read(connection, key)
-            if (recorded_at is not None and isinstance(existing, dict) and existing.get("recorded_at") == recorded_at
-                    and existing.get("binding") == dict(identity) and existing.get("pack_bin") == pack_bin(run.own)):
+            row = {"writer": OFFLOAD_WRITER, "satellite": satellite_identity(), "hub": hub, "binding": dict(identity),
+                   "offload_view": run.view(identity), "pack_bin": pack_bin(run.own), "pack_rev": pack_rev(),
+                   "local_block": _content_digest(local) if local else "absent", "reading": dict(reading),
+                   "head": run.head, "recorded_at": time.time() if recorded_at is None else recorded_at}
+            # Only the same row stands; any other is one the hub may refuse. The store adds `protocol`.
+            if recorded_at is not None and isinstance(existing, dict) and {name: existing.get(name) for name in row} == row:
                 return {"offload": {"key": key, "revision": revision, "hub": hub, "written": False}}
-            written = int(ship.save(connection, key, revision, {
-                "writer": OFFLOAD_WRITER, "satellite": satellite_identity(), "hub": hub, "binding": dict(identity),
-                "offload_view": run.view(identity), "pack_bin": pack_bin(run.own), "pack_rev": pack_rev(),
-                "local_block": _content_digest(local) if local else "absent", "reading": dict(reading), "head": run.head,
-                "recorded_at": time.time() if recorded_at is None else recorded_at}))
+            written = int(ship.save(connection, key, revision, row))
     except Exception as error:  # the pass stands; only the hub's use of it is lost
         return {"offload_error": f"{type(error).__name__}: {error}"[:300]}
     return {"offload": {"key": key, "revision": written, "hub": hub, "written": True}}
