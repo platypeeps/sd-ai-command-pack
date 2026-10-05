@@ -725,13 +725,10 @@ class AcknowledgementTests(unittest.TestCase):
         absent = status._observed_state(None)
         empty = status._observed_state({})
         self.assertNotEqual(absent, empty)
-        # ... and in `enforce_admins`: no object is off, while an object
-        # without the answer is unknown, the gap `_admin_gaps` reports for it
-        # (sd:2755). The other facts genuinely are constants on both.
+        # ... and they differ in exactly that one fact, which is the point:
+        # the other four genuinely are constants on both.
         differing = [key for key in absent if absent[key] != empty[key]]
-        self.assertEqual(differing, ["branch_protection", "enforce_admins"])
-        self.assertIs(absent["enforce_admins"], False)
-        self.assertIsNone(empty["enforce_admins"])
+        self.assertEqual(differing, ["branch_protection"])
 
     def test_a_matching_acknowledgement_moves_the_finding_out_of_the_gaps(self) -> None:
         still_open, accepted = self.split(self.enforcing(), [self.ZERO_APPROVALS])

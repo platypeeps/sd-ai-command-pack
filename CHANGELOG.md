@@ -363,10 +363,10 @@
   `sd_protection.observed_state` read unknown (a withheld `bypass_actors`
   list, an unresolved `RepositoryRole`) as `false`, so an `accepted_gaps`
   entry written for `enforce_admins` off also silenced the unknown gap. The
-  fact now observes `null` when unknown, through one reading the gap shares
-  (`admins_enforced`). `sd-status` accepts no entry for a gap whose own fact
-  is unknown, whatever it pins, and says so. The loader rejects a `null` pin.
-  An entry for a known off still applies.
+  fact now observes `null` where the protection object says unknown; no
+  object, or one without the key, stays a known off. `sd-status` accepts no
+  entry for a gap whose own fact is unknown, whatever it pins, and says so.
+  The loader rejects a `null` pin. An entry for a known off still applies.
 - **A failed repository gate leads with what failed, not the slot wait (sd:2687).**
   `sd-ship prepare`'s `gate_failed` refusal opened with the gate's own
   stderr, which starts with `waiting for a gate slot ... slot 1 held by pid

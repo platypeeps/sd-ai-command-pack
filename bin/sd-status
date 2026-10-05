@@ -705,8 +705,9 @@ def _admin_gaps(protection: dict[str, Any], default_branch: str) -> tuple[list[d
     detail carries: the one decision of `_protection_gaps` with more than
     two answers, kept out of it so that function stays under the ceiling."""
     gaps: list[dict[str, str]] = []
-    enabled = sd_protection.admins_enforced(protection)
-    if enabled is None:
+    admins = protection.get("enforce_admins") or {}
+    enabled = admins.get("enabled") if isinstance(admins, dict) else admins
+    if enabled is None and isinstance(admins, dict):
         # Unknown, reported as not enforced and never as enforced, for one
         # of two reasons, each named: a ruleset whose `bypass_actors` GitHub
         # withheld (it shows that list only to a caller who can edit the
