@@ -4,6 +4,14 @@
 
 ### Added
 
+- **Each gate gets its share of the cores (sd:2726).** On 2026-10-05 one
+  Rust gate under `sd.gate_slots=2` drove the load to 185 on 16 cores: cargo
+  builds and tests on every core. A slot holder now sets `CARGO_BUILD_JOBS`
+  and `RUST_TEST_THREADS` in its checks to the cores over the slot count, at
+  least 1; a lower positive value the caller set wins. The gate binds the
+  values in its receipt, so a new slot count runs the check once more rather
+  than reuse a pass made with other thread counts. `MAKEFLAGS` gets no `-j`: it would run a Makefile's
+  prerequisites at once.
 - **The offload view of a gate's environment (sd:2724, sd:2704 step 2a).**
   `sd_gate_receipts.offload_view` gives the portable view a hub will compare
   with a satellite's receipt: `PATH` entries in order with each `$HOME` prefix
