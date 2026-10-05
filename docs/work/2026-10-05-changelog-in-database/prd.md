@@ -6,6 +6,11 @@ item: sd:2783
 ---
 # PRD — changelog entries in the database
 
+## Status
+
+Accepted. The operator ruled Q1 to Q7 on 2026-10-05; the log is in
+[design.md](design.md), "Decision log".
+
 ## Problem
 
 Almost every pack pull request adds an entry at the top of `CHANGELOG.md`.
@@ -121,7 +126,7 @@ R9. The existing `CHANGELOG.md` text stays byte for byte. Rendered entries
 
 ## Out of scope
 
-- A release train, version bumps, or tags. Q4 in `design.md` asks the
-  operator whether releases resume.
+- A release train, version bumps, or tags. The operator ruled Q4 on
+  2026-10-05: `--release` stays unused until a release is cut.
 - Moving the 2,193 hand-written Unreleased lines into rows.
 - Other repositories. The opt-in is per repository; the pack is first.

@@ -19,11 +19,29 @@ One new module, `bin/sd_changelog.py`, owns the section parser, the row key,
 the row writer, the reader and the renderer. `sd-ship` and `bin/sd` call it.
 The system repository does not change.
 
-## Decisions and open questions
+## Status
+
+Design accepted. The operator ruled Q1 to Q7 on 2026-10-05 at about
+17:25 MDT, through the team lead. Each ruling took the recommendation.
+The ruling is recorded on sd:2783. Implementation has not started.
+
+## Decision log
+
+| Question | Ruling (Operator 2026-10-05 ~17:25 MDT) |
+| --- | --- |
+| Q1, a no-entry answer | Accept `none` as the explicit no-entry answer. |
+| Q2, the store | The database holds the entries; git is the cross-check. |
+| Q3, render cadence | On demand, plus a daily lane render when unrendered rows wait. |
+| Q4, releases | Fix the `CONTRIBUTING.md` terminal-release line; leave `--release` unused until a release is cut. |
+| Q5, the hand-written Unreleased lines | Keep them below the rendered region; no release heading now. |
+| Q6, a merged PR with no row | Render refuses and names the pull request; `sd changelog import` repairs it. |
+| Q7, no privacy-pattern file | Refuse at render; warn at prepare. |
+
+## Decisions
 
 Each numbered point below answers one of the six questions in the brief.
-A point marked **Open** needs the operator; it carries a recommendation.
-The design text follows the recommendation.
+Each **Decided** paragraph closes one operator question; the log above
+lists them.
 
 ### 1. Entry text source, and who sees it
 
@@ -62,7 +80,7 @@ file uses four of them: Added, Fixed, Changed and Deprecated.
 `.github/PULL_REQUEST_TEMPLATE.md` gains the section with a comment that
 names `none`.
 
-**Open, Q1:** accept `none` as an explicit no-entry answer? Recommendation:
+**Decided, Q1 (Operator 2026-10-05 ~17:25 MDT):** accept `none` as an explicit no-entry answer? Ruling, as recommended:
 yes. Without it, a test-only change must invent prose, and an absent section
 cannot tell "forgot" from "nothing to say".
 
@@ -101,9 +119,9 @@ Row (`protocol: 1` is added by `ship.save`):
 A correction after merge is a new revision of the same key. `ship.save`
 appends, so the history stays.
 
-**Open, Q2:** keep the database as the store, or render straight from the
+**Decided, Q2 (Operator 2026-10-05 ~17:25 MDT):** keep the database as the store, or render straight from the
 squash messages in git? The squash message already carries the section, so
-git alone could render. Recommendation: the database, as the item says.
+git alone could render. Ruling, as recommended: the database, as the item says.
 Reasons: a correction is a new row revision, not a rewrite of `main`. sd
 surfaces such as the dashboard can list unreleased entries without a
 checkout. Git stays the cross-check (point 5).
@@ -137,14 +155,14 @@ render pull request.**
 Between render pull requests, `main`'s `CHANGELOG.md` lags the merged
 entries. The squash messages and `sd changelog show` hold them.
 
-**Open, Q3:** when does a render pull request run? Recommendation: on
+**Decided, Q3 (Operator 2026-10-05 ~17:25 MDT):** when does a render pull request run? Ruling, as recommended: on
 demand, plus once a day from the integrator's lane when at least one
 unrendered row exists. Only the render branch edits the file, so its catch-up
 never conflicts with a feature branch.
 
-**Open, Q4:** do releases resume? `CONTRIBUTING.md` says `v0.72.0` is the
+**Decided, Q4 (Operator 2026-10-05 ~17:25 MDT):** do releases resume? `CONTRIBUTING.md` says `v0.72.0` is the
 terminal release and forbids tags and headings, yet `v1.0.0` exists and its
-heading is in the file. Recommendation: fix that line to name `v1.0.0`, and
+heading is in the file. Ruling, as recommended: fix that line to name `v1.0.0`, and
 keep `--release` unused until the operator cuts a release. The design does
 not need a release to remove the conflicts.
 
@@ -157,8 +175,8 @@ The 2,193 hand-written Unreleased lines stay below the region. Parsing them
 into rows would need a parser for free prose with nested lists, and nothing
 reads them as rows.
 
-**Open, Q5:** cut those lines into a release heading now, for example
-`## 1.1.0 - 2026-10-05`? Recommendation: no; wait for Q4.
+**Decided, Q5 (Operator 2026-10-05 ~17:25 MDT):** cut those lines into a release heading now, for example
+`## 1.1.0 - 2026-10-05`? Ruling, as recommended: no. They stay until a release is cut (Q4).
 
 The opt-in is a tracked file, `.github/sd-changelog.json`:
 
@@ -219,8 +237,8 @@ silently.**
   needs a row. A missing row refuses the render and names the pull request.
   `sd changelog import <pr>` writes the row from that squash message.
 
-**Open, Q6:** should a missing row refuse the render, or render from the
-squash message and warn? Recommendation: refuse. The refusal names the fix,
+**Decided, Q6 (Operator 2026-10-05 ~17:25 MDT):** should a missing row refuse the render, or render from the
+squash message and warn? Ruling, as recommended: refuse. The refusal names the fix,
 and a render pull request is never urgent.
 
 ### 6. Privacy
@@ -239,7 +257,7 @@ The repository is public. The `## Changelog` text is public as soon as
   system repository reads. The pack does not import that tool.
 - Tests use a synthetic pattern file in a temporary home.
 
-**Open, Q7:** with no pattern file, warn or refuse? Recommendation: refuse
+**Decided, Q7 (Operator 2026-10-05 ~17:25 MDT):** with no pattern file, warn or refuse? Ruling, as recommended: refuse
 at render, warn at prepare. Render is the last step before the file changes;
 prepare on a fresh satellite should not block on missing local config. The
 pre-push leak guard does not cover the pack clone today.

@@ -1,9 +1,8 @@
 # Implement — changelog entries in the database
 
 One repository, the pack. Six pull requests; the system repository does not
-change. The design is in [design.md](design.md). Open questions Q1 to Q7 are
-in its "Decisions and open questions" section. The steps follow the
-recommendations; a different ruling changes the step it names.
+change. The design is in [design.md](design.md). The operator ruled Q1 to Q7
+on 2026-10-05 (design.md, "Decision log"). The steps follow those rulings.
 
 Each step names its check and the result that means failure. Each check must
 fail on `main` before the step's code lands.
@@ -69,8 +68,8 @@ fail on `main` before the step's code lands.
       - Check: prepare passes `render --check`; a feature branch prepared in
         the same hour that edits `CHANGELOG.md` refuses with
         `changelog_edited`.
-      - Q3: if the operator rules for a daily render, add the lane job here,
-        plus 1 h.
+      - Q3 ruled a daily render: add the lane job that opens a render pull
+        request when unrendered rows wait, plus 1 h.
 - [ ] 7. Delete the keep-both resolver. Size S, 2 h. Own PR.
       - Precondition: no open pack branch changes `CHANGELOG.md` against
         `origin/main` (`git diff --name-only origin/main...<branch>` over
@@ -89,12 +88,12 @@ fail on `main` before the step's code lands.
 | 3 | 3 |
 | 4 | 2 |
 | 5 | 2 |
-| 6 | 1 (2 with a daily lane job) |
+| 6 | 2, the daily lane job included |
 | 7 | 2 |
-| Total | 18, or 19 with the daily job |
+| Total | 19 |
 
 Review rounds are not included. At an assumed 1 h per pull request, the
-total is about 24 h.
+total is about 25 h.
 
 ## After step 7
 
