@@ -178,7 +178,15 @@ class PackDigest(unittest.TestCase):
         self.assertEqual(sd_gate_receipts.pack_bin(own=True), "tree")
 
     def test_the_offload_key_is_the_same_for_any_checkout_of_one_slug(self) -> None:
-        self.assertEqual(sd_gate_receipts.offload_key(SLUG, "a" * 40), sd_gate_receipts.offload_key(SLUG, "a" * 40))
+        keys = []
+        with tempfile.TemporaryDirectory() as folder:
+            for name, origin in (("https", f"https://github.com/{SLUG}.git"), ("ssh", "git@github.com:Fixture/Repo.git")):
+                checkout = pathlib.Path(folder) / name
+                checkout.mkdir()
+                git(checkout, "init", "-q")
+                git(checkout, "remote", "add", "origin", origin)
+                keys.append(sd_gate_receipts.offload_key(sd_gate_receipts.repository_slug(checkout) or "", "a" * 40))
+        self.assertEqual(keys, [sd_gate_receipts.offload_key(SLUG, "a" * 40)] * 2)
         self.assertNotEqual(sd_gate_receipts.offload_key(SLUG, "a" * 40), sd_gate_receipts.offload_key(SLUG, "b" * 40))
         self.assertNotEqual(sd_gate_receipts.offload_key(SLUG, "a" * 40, "c" * 40),
                             sd_gate_receipts.offload_key(SLUG, "a" * 40))
