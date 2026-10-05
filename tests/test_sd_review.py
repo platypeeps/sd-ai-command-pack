@@ -804,13 +804,39 @@ class PipelineTests(ReviewFixture):
         self.assertEqual(result["remote_reviews"]["copilot"], {
             "automatic": True, "tier": "deep", "policy": "deep", "source": "repository", "repository": True})
 
-    def test_a_failing_gate_stops_before_any_provider(self) -> None:
+    @staticmethod
+    def programs(runner: FakeRunner) -> list[str]:
+        """Each call by what it ran: `sd-check` for the gate, else the program's name."""
+        return ["sd-check" if "sd-check" in " ".join(call["argv"]) else pathlib.Path(call["argv"][0]).name
+                for call in runner.calls]
+
+    def test_a_failing_gate_after_a_clean_review_is_gate_failed(self) -> None:
+        """sd:2605. The gate runs once the review has cleared, and its failure is the answer."""
         root = self.make_repo()
         self.prepare(root)
         runner = FakeRunner({"sd-check": sd_review.Completed(1, "{}", "lint failed")})
         result = self.run_review(root, runner)
         self.assertEqual(result["status"], "gate_failed")
-        self.assertEqual([call["argv"][0] for call in runner.calls[1:]], [])
+        self.assertEqual(self.programs(runner)[-1], "sd-check")
+        self.assertIn("codex", self.programs(runner)[:-1])
+
+    def test_a_blocking_review_never_starts_the_gate(self) -> None:
+        """sd:2605. A blocking finding refuses the head whatever the gate says, so
+        the gate, the longest step, does not run, and the report says it did not."""
+        root = self.make_repo()
+        self.prepare(root)
+        payload = json.dumps(
+            {"findings": [{"path": "src.py", "line": 1, "severity": "high", "summary": "bad", "family": "correctness"}]}
+        )
+        runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", ""), "codex": sd_review.Completed(0, payload, "")})
+        result = self.run_review(root, runner)
+        self.assertEqual(result["status"], "blocking")
+        self.assertNotIn("sd-check", self.programs(runner))
+        self.assertEqual(result["check"]["status"], "not_run")
+        self.assertIn("the review is blocking", result["check"]["reason"])
+        stream = io.StringIO()
+        sd_review.render(result, stream)
+        self.assertIn("check: not run -- the review is blocking", stream.getvalue())
 
     # sd:1343 -- a worktree of this pack has no .venv, and `make check` died
     # on the toolchain before any reviewer ran. The receipt has to say what is
@@ -833,7 +859,7 @@ class PipelineTests(ReviewFixture):
         self.assertEqual(result["check"]["missing_command"], ".venv/bin/python")
         self.assertIsNone(result["check"]["missing_line"])
         self.assertNotIn("interpreter", result["check"])
-        self.assertEqual([call["argv"][0] for call in runner.calls[1:]], [])
+        self.assertEqual(self.programs(runner)[-1], "sd-check")
         stream = io.StringIO()
         sd_review.render(result, stream)
         self.assertIn(".venv/bin/python was not found", stream.getvalue())
@@ -986,7 +1012,7 @@ class PipelineTests(ReviewFixture):
                 line = sd_review.gate_failed_line(result["check"])
                 self.assertIn("--timeout SECONDS", line)
                 self.assertIn("--review-timeout", line)
-                self.assertIn("no provider was asked", line)
+                self.assertIn("the review had cleared before it ran", line)
         # A spawn failure beside a timeout is still the stronger evidence.
         spawn = [killed[0], {"name": "lint", "command": ["/no/python"], "status": "fail", "exit_code": None,
                              "reason": "cannot run /no/python: [Errno 2] No such file or directory"}]
@@ -2230,11 +2256,14 @@ class TimingPlanTests(ReviewFixture):
         args.explain = False
         args.expected_timing = sd_review.hashlib.sha256(json.dumps(report["timing"], sort_keys=True).encode()).hexdigest()
         args.challenge = True
-        runner = FakeRunner({"sd-check": sd_review.Completed(1, "{}", "fixture gate failure")})
+        runner = FakeRunner({"sd-check": sd_review.Completed(1, "{}", "fixture gate failure")},
+                            default=sd_review.Completed(0, json.dumps({"type": "result", "subtype": "success", "structured_output": {"findings": []}}), ""))
         actual = sd_review.review(root, args, runner, self.environment(), self.chatgpt_home())
         self.assertEqual(actual["timing"], report["timing"])
         self.assertEqual(actual["status"], "gate_failed")
-        self.assertEqual(len(runner.calls), 1)
+        # sd:2605: the reviewers ran first, and the gate once, last.
+        gate = [index for index, call in enumerate(runner.calls) if "sd-check" in " ".join(call["argv"])]
+        self.assertEqual(gate, [len(runner.calls) - 1])
 
 
 class CopilotPolicyTests(ReviewFixture):

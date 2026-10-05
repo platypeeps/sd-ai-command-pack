@@ -896,11 +896,19 @@ class LineBudgetTests(unittest.TestCase):
         # with the whole output (+2) after `WHOLE_OUTPUT` (+2 with its comment),
         # which `sd_local_gate` cuts from the public status. Reading the steps
         # out of the output is `bin/sd-check`'s, outside the lane.
+        #
+        # 4698 -> 4718 is sd:2605, under the operator's 4900 ceiling (ruling of
+        # 2026-10-04): `bin/sd-review` +21 (2545 -> 2566 lines; the lane sat at
+        # 4697) runs the reviewers before the gate. The gate step moved below
+        # dispatch into `after_gate`, with the input-change refusal it took
+        # along; a blocked review records `check: not_run` instead of running
+        # it; and `render` prints that check. The gate that adjudicated
+        # findings still need runs in `sd_ship_review`, outside the lane.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4698,
+            4718,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

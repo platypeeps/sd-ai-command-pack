@@ -33,7 +33,9 @@ class OversizeTests(ReviewFixture):
 
                 runner = FakeRunner({"sd-check": change_during_gate})
                 result = sd_review.review(root, namespace(), runner, self.environment(), self.chatgpt_home())
-                self.assertEqual(len(runner.calls), 1, "a changed subject must stop before provider dispatch")
+                # sd:2605: the reviewers run before the gate, so a change made during the gate
+                # lands after dispatch; it still refuses the result.
+                self.assertTrue(runner.calls[-1]["argv"][1].endswith("sd-check"), runner.calls[-1]["argv"])
                 self.assertEqual(result["status"], "refused")
                 self.assertEqual(result["input_manifest"]["status"], "within_limit")
                 self.assertIn("input_changed", [row["code"] for row in result["readiness"]["blockers"]])
@@ -54,7 +56,7 @@ class OversizeTests(ReviewFixture):
 
                 runner = FakeRunner({"sd-check": change_during_gate})
                 result = sd_review.review(root, namespace(), runner, self.environment(), self.chatgpt_home())
-                self.assertEqual(len(runner.calls), 1)
+                self.assertTrue(runner.calls[-1]["argv"][1].endswith("sd-check"), runner.calls[-1]["argv"])
                 self.assertEqual(result["status"], "refused")
                 self.assertIn("input_changed", [row["code"] for row in result["readiness"]["blockers"]])
 
@@ -104,7 +106,8 @@ class OversizeTests(ReviewFixture):
                     result = sd_review.review(root, namespace(provider=provider), runner, self.environment(), self.chatgpt_home())
                     calls = codex_sessions(runner)
                     self.assertEqual(len(calls), 1)
-                    self.assertEqual(len(runner.calls), 3, "oversized fallback must never dispatch")
+                    # The gate runs only after a review that cleared (sd:2605).
+                    self.assertEqual(len(runner.calls), 2 if failed else 3, "oversized fallback must never dispatch")
                     self.assertEqual(result["readiness"]["status"], "ready")
                     self.assertEqual(result["input_manifest"]["transport_bytes"]["codex"], len(calls[0]["stdin"].encode()))
                     self.assertLess(len(calls[0]["stdin"].encode()), sd_review.MAX_OUTPUT_BYTES)
