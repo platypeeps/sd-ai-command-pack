@@ -181,6 +181,7 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
                                               gate_inputs(root, head, content, own))
             identity = (sd_gate_receipts.gate_binding(tree, head, gated.inputs, base, env, fork)
                         if database is not None and offload != "require" else None)
+            before = sd_gate_receipts.start_view(database, gated, identity) if record else None  # sd:2704
             answer, miss = sd_gate_receipts.from_receipts(database, gated, identity, reuse=reuse, record=record, offload=offload)
             if answer is not None:
                 return {"head": gate_git(tree, "rev-parse", "HEAD"), **answer}
@@ -192,7 +193,7 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
             checked = gate_git(tree, "rev-parse", "HEAD")
             reading = check_reading(code, output, errors)
             if record and database and identity and reading["status"] == "success" and checked == head:
-                sd_gate_receipts.record_gate_pass(database, gated, identity, reading)
+                sd_gate_receipts.record_gate_pass(database, gated, identity, reading, before)
             reading.update({"pack_warning": warning} if warning else {})
         finally:
             # The administrative entry goes with the directory; the temporary

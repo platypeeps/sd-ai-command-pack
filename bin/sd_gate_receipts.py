@@ -440,12 +440,13 @@ def pack_warning(database: pathlib.Path | None, root: pathlib.Path, own: bool) -
 
 
 def record_offload(database: pathlib.Path | None, run: Worktree, identity: Mapping[str, Any], reading: Mapping[str, Any],
-                   recorded_at: float | None = None) -> dict[str, Any]:
+                   view: dict[str, Any] | None, recorded_at: float | None = None) -> dict[str, Any]:
     """On a satellite, write this pass's offload row to the hub; the fields the gate's result carries.
 
     Nothing on the hub, `{"offload_skipped"}` where `repo.satellite_gate` is not `accept`, `{"offload"}`
     naming the row, or `{"offload_error"}` when the hub did not take it: the pass stands either way.
-    `recorded_at` is a reused pass's own time; a reuse leaves alone only the row of that same pass.
+    `view` is the offload view the pass started from (`start_view`), never one taken now: a reuse writes the
+    one its receipt kept. `recorded_at` is a reused pass's own time; a reuse leaves alone only the same row.
     """
     hub = served_hub(database)
     if hub is None:
@@ -460,10 +461,12 @@ def record_offload(database: pathlib.Path | None, run: Worktree, identity: Mappi
         with closing(_connect(database, write=True)) as connection:
             if sd_lib.repo_satellite_gate(connection, run.root) != "accept":
                 return {"offload_skipped": "repo.satellite_gate is not accept for this repository"}
+            if view is None:
+                raise LookupError("the pass kept no offload view, so it stands for no hub; run the check again")
             from sd_db import ship  # noqa: PLC0415
             revision, existing = ship.read(connection, key)
             row = {"writer": OFFLOAD_WRITER, "satellite": satellite_identity(), "hub": hub, "binding": dict(identity),
-                   "offload_view": run.view(identity), "pack_bin": pack_bin(run.own), "pack_rev": pack_rev(),
+                   "offload_view": view, "pack_bin": pack_bin(run.own), "pack_rev": pack_rev(),
                    "local_block": _content_digest(local) if local else "absent", "reading": dict(reading),
                    "head": run.head, "recorded_at": time.time() if recorded_at is None else recorded_at}
             # Only the same row stands; any other is one the hub may refuse. The store adds `protocol`.
@@ -601,7 +604,7 @@ def from_receipts(database: pathlib.Path | None, gated: Worktree, identity: dict
                        reused={"revision": found["revision"], "recorded_at": found["recorded_at"],
                                "age_seconds": found["age_seconds"], "head": found["head"]})
         if record and identity:
-            reading.update(record_offload(database, gated, identity, found["reading"], found["recorded_at"]))
+            reading.update(record_offload(database, gated, identity, found["reading"], found["view"], found["recorded_at"]))
         return reading, None
     if not offload:
         return None, miss
@@ -613,18 +616,27 @@ def from_receipts(database: pathlib.Path | None, gated: Worktree, identity: dict
     return None, {**(miss or {}), "offload": refused}
 
 
+def start_view(database: pathlib.Path | None, gated: Worktree, identity: dict[str, Any] | None) -> dict[str, Any] | None:
+    """On a satellite, the offload view a run starts from, which its receipts keep; None on a hub."""
+    return gated.view(identity) if identity and served_hub(database) is not None else None
+
+
 def record_gate_pass(database: pathlib.Path, gated: Worktree, identity: dict[str, Any],
-               reading: dict[str, Any]) -> None:
-    """Record a pass at the head it ran on, and on a satellite its offload row, unless the binding moved."""
+               reading: dict[str, Any], before: dict[str, Any] | None = None) -> None:
+    """Record a pass at the head it ran on, and on a satellite its offload row, unless the binding or `before` moved."""
     import sd_gate_run  # noqa: PLC0415 -- it imports this module
 
     after = gate_binding(gated.tree, gated.head, sd_gate_run.gate_inputs(gated.root, gated.head, gated.content, gated.own),
                                           gated.base, gated.environment, gated.fork)
     key = receipt_key(gated.root, gated.head, gated.content)
-    record_unless_moved(database, key, identity, after, reading, gated.head)
-    if "receipt_skipped" not in reading:
-        reading.update(record_offload(database, gated, identity, {
-            name: value for name, value in reading.items() if name not in ("receipt_revision", "receipt_error")}))
+    record_unless_moved(database, key, identity, after, reading, gated.head, before)
+    if "receipt_skipped" in reading:
+        return
+    if before is not None and (moved := offload_miss(before, gated.view(identity))):
+        reading["offload_error"] = f"the offload view moved during the run: {moved['part']} {moved['name']}"
+        return
+    reading.update(record_offload(database, gated, identity, {
+        name: value for name, value in reading.items() if name not in ("receipt_revision", "receipt_error")}, before))
 
 
 def satellite_reading(accepted: dict[str, Any]) -> dict[str, Any]:
@@ -641,7 +653,7 @@ def satellite_reading(accepted: dict[str, Any]) -> dict[str, Any]:
 
 
 def record_unless_moved(database: pathlib.Path, key: str, identity: Mapping[str, Any], after: Mapping[str, Any] | None,
-                        reading: dict[str, Any], head: str) -> None:
+                        reading: dict[str, Any], head: str, view: dict[str, Any] | None = None) -> None:
     """Record `reading`'s pass when the binding held from before the run (`identity`) to after it (`after`).
 
     Otherwise `reading["receipt_skipped"]` names what moved (sd:2612), so a
@@ -654,7 +666,7 @@ def record_unless_moved(database: pathlib.Path, key: str, identity: Mapping[str,
         reading["receipt_skipped"] = "moved during the run: " + ", ".join(moved)
         return
     try:
-        reading["receipt_revision"] = record_pass(database, key, identity, reading, head)
+        reading["receipt_revision"] = record_pass(database, key, identity, reading, head, view=view)
     except Exception as error:  # the pass stands; only its reuse is lost
         reading["receipt_error"] = str(error)
 
@@ -701,16 +713,17 @@ def examine(database: pathlib.Path, key: str, identity: Mapping[str, Any] | None
         if not 0 <= age <= window:
             return None, {"reason": "expired", "age_seconds": round(age), "window_seconds": window}
         return {"reading": reading, "revision": revision, "recorded_at": row["recorded_at"], "age_seconds": round(age),
-                "head": row.get("head")}, None
+                "head": row.get("head"), "view": row.get("offload_view")}, None
     except Exception as error:
         return None, {"reason": "unreadable", "error": str(error)[:200]}
 
 
 def record_pass(database: pathlib.Path, key: str, identity: Mapping[str, Any], reading: Mapping[str, Any],
-                head: str | None = None, now: float | None = None) -> int:
+                head: str | None = None, now: float | None = None, view: dict[str, Any] | None = None) -> int:
     """Store a success under `key`; anything but a success is refused, and raises.
 
     `head` is the commit that passed, kept for provenance: under a tree key the binding does not name it.
+    `view` is a satellite run's starting offload view (sd:2704); local reuse never compares it.
     """
     if reading.get("status") != "success":
         raise ValueError("only a passing gate run leaves a receipt")
@@ -719,4 +732,4 @@ def record_pass(database: pathlib.Path, key: str, identity: Mapping[str, Any], r
         revision, _ = ship.read(connection, key)
         return int(ship.save(connection, key, revision, {
             "writer": WRITER, "binding": dict(identity), "reading": dict(reading), "head": head,
-            "recorded_at": time.time() if now is None else now}))
+            "recorded_at": time.time() if now is None else now, **({"offload_view": view} if view else {})}))

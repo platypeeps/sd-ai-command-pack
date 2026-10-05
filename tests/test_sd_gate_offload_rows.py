@@ -157,6 +157,47 @@ class OffloadRows(SatelliteFixture):
                 self.assertEqual({name: self.offload_row()[name] for name in fields}, {name: current[name] for name in fields})
         self.assertEqual((self.runs, self.gate()["offload"]["written"]), (1, False))
 
+    def home(self) -> pathlib.Path:
+        """A `HOME` of the test's own: `gate_binding` does not hash its files, the offload view does."""
+        home = self.root.parent / "home"
+        home.mkdir(exist_ok=True)
+        patcher = mock.patch.dict(os.environ, {"HOME": str(home)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return home
+
+    def test_a_reuse_writes_the_view_its_pass_kept_not_one_taken_now(self) -> None:
+        """A home file that changed after the pass does not bind the old pass on the hub."""
+        home = self.home()
+        self.opted = "off"
+        self.gate()
+        (home / ".npmrc").write_text("registry=https://registry.example.test/\n", encoding="utf-8")
+        self.opted = "accept"
+        reused = self.gate()
+        self.assertEqual((self.runs, reused["offload"]["written"]), (1, True))
+        self.assertEqual(self.offload_row()["offload_view"]["home_files"][".npmrc"], "absent")
+
+    def test_a_reuse_of_a_pass_that_kept_no_view_writes_no_row(self) -> None:
+        self.hub = None
+        self.gate()
+        self.hub = HUB
+        reused = self.gate()
+        self.assertEqual(self.runs, 1)
+        self.assertIn("kept no offload view", reused["offload_error"])
+        self.assertEqual(self.offload_row(), {})
+
+    def test_a_view_that_moves_during_the_run_writes_no_row(self) -> None:
+        home = self.home()
+
+        def moving(argv, env, tree, timeout):  # type: ignore[no-untyped-def]
+            (home / ".npmrc").write_text("registry=https://registry.example.test/\n", encoding="utf-8")
+            return self.passing(argv, env, tree, timeout)
+
+        result = sd_gate_run.check_in_worktree(self.root, self.head, database=self.database, run=moving)
+        self.assertEqual(result["offload_error"], "the offload view moved during the run: home_files .npmrc")
+        self.assertIn("receipt_revision", result)
+        self.assertEqual(self.offload_row(), {})
+
     def test_an_unreachable_hub_still_runs_the_check_and_reports_offload_error(self) -> None:
         with mock.patch.object(sd_gate_receipts, "_connect", side_effect=ConnectionError("HubUnreachable: no answer")):
             result = self.gate()

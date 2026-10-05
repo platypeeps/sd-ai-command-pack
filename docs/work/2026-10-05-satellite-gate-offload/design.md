@@ -107,7 +107,7 @@ request-id protocol of sd:1335 step 5 apply as for every `ship:` row.
 | `satellite` | `{"login", "address", "hostname"}`: `sd_db.tailnet.this_node()` gives the owner login and the Tailscale IPv4 address; `socket.gethostname()` is for display only |
 | `hub` | `served_by(database)`, the `host:port` the row went to |
 | `binding` | the satellite's whole `gate_binding` output, unchanged |
-| `offload_view` | the portable view of the run's environment (step 2a; "The offload view" below) |
+| `offload_view` | the portable view of the run's environment (step 2a; "The offload view" below), taken before the run; the satellite's own receipt keeps it, a reuse writes the kept one, and a view that moves during the run writes no row |
 | `pack_bin` | sha256 of the pack `bin/` files that `gate_inputs` hashes, or `"tree"` when the run gated its own tree (`gates_itself`) |
 | `pack_rev` | `git rev-parse HEAD` of the pack checkout, for the refusal text only |
 | `local_block` | sha256 of the copied `CLAUDE.local.md`, or `"absent"` |
