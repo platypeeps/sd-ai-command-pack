@@ -457,7 +457,8 @@ class Receipts(ReceiptFixture):
         machine = {"SD_GATE_SLOTS_DIR": str(self.root.parent / "slots"), "SD_GATE_SLOT_POLL": "0.1",
                    "SD_GATE_LOAD_MAX": "0", "SD_GATE_SETTLE_SECONDS": "0", "XDG_CONFIG_HOME": str(config.parents[1])}
         with mock.patch.dict(os.environ, machine):
-            for name in ("SD_GATE_SLOTS", "CI", "GITHUB_ACTIONS"):
+            # A gate running this suite hands it its own caps; a lower inherited one would win both times.
+            for name in ("SD_GATE_SLOTS", "CI", "GITHUB_ACTIONS", *sd_gate_slots.CPU_VARIABLES):
                 os.environ.pop(name, None)
             config.write_text(json.dumps({"config": {"sd": {"gate_slots": "1"}}}), encoding="utf-8")
             first = self.gate(head)
@@ -468,7 +469,8 @@ class Receipts(ReceiptFixture):
         whole, half = (str(sd_gate_slots.cpu_share(slots)) for slots in (1, 2))  # they differ on two or more cores
         self.assertEqual(seen.read_text().splitlines(), [f"{whole} {whole}", f"{half} {half}"])
         with mock.patch.dict(os.environ, machine):
-            os.environ.pop("SD_GATE_SLOTS", None)
+            for name in ("SD_GATE_SLOTS", "CI", "GITHUB_ACTIONS", *sd_gate_slots.CPU_VARIABLES):
+                os.environ.pop(name, None)
             raised = self.gate(self.counted("true # another commit"), run=self.passing(
                 lambda: config.write_text(json.dumps({"config": {"sd": {"gate_slots": "4"}}}), encoding="utf-8")))
         self.assertEqual(raised["receipt_skipped"], "moved during the run: environment_sha256")
