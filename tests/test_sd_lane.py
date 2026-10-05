@@ -206,6 +206,89 @@ class Runner(Lane):
         self.assertEqual([entry["status"] for entry in self.entries()], ["prepared", "prepared"])
 
 
+class Reorder(Lane):
+    """sd:2584: the runner reads the queue's top before each item, and the verbs reorder it."""
+
+    def queue(self, *items: int, manual: bool = False) -> None:
+        for item in items:
+            sd_lane.enqueue_entry(self.worktree(f"t{item}"), item, f"t{item}", self.body, self.environ,
+                                  manual=manual, claim="deliver")
+
+    def items_run(self) -> list[int]:
+        return [int(c[c.index("--item") + 1]) for c in self.calls if c[2] == "prepare"]
+
+    def pending(self) -> list[int]:
+        return [row["item"] for row in self.entries() if row["status"] == "pending"]
+
+    def test_a_move_while_the_first_merges_runs_the_moved_item_second_and_a_hold_skips(self) -> None:
+        self.queue(1, 2, 3, 4, manual=True)
+        sd_lane.set_hold(self.repo, 2, self.environ, held=True)
+        ship = self.ship
+
+        def move_during_the_first_merge(argv: list[str], log: pathlib.Path) -> dict:
+            if argv[2] == "merge" and argv[argv.index("--item") + 1] == "1":
+                sd_lane.move(self.repo, 4, "top", self.environ)
+            return ship(argv, log)
+        sd_lane.run_lane(self.repo, self.environ, move_during_the_first_merge)
+        self.assertEqual((self.items_run(), self.pending()), ([1, 4, 3], [2]))
+        sd_lane.set_hold(self.repo, 2, self.environ, held=False)
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(self.items_run(), [1, 4, 3, 2])
+
+    def test_up_down_and_a_position_move_among_pending_entries_only(self) -> None:
+        self.queue(1, 2, 3, 4)
+        sd_lane.cancel(self.repo, 1, self.environ)
+        self.assertEqual(sd_lane.move(self.repo, 4, "up", self.environ)["pending"], [2, 4, 3])
+        self.assertEqual(sd_lane.move(self.repo, 2, "down", self.environ)["pending"], [4, 2, 3])
+        self.assertEqual(sd_lane.move(self.repo, 3, "1", self.environ)["pending"], [3, 4, 2])
+        self.assertEqual(sd_lane.move(self.repo, 3, "9", self.environ)["pending"], [4, 2, 3])
+        self.assertEqual(sd_lane.move(self.repo, 4, "up", self.environ)["pending"], [4, 2, 3])
+        # The cancelled entry keeps its place in the history at the front.
+        self.assertEqual([row["item"] for row in self.entries()], [1, 4, 2, 3])
+
+    def test_a_running_entry_is_not_edited_and_an_absent_or_unheld_one_is_refused(self) -> None:
+        self.queue(1)
+        sd_lane.update(sd_lane.queue_path(self.repo, self.environ), lambda rows: rows[0].update(status="running"))
+        for verb in (lambda: sd_lane.move(self.repo, 1, "top", self.environ),
+                     lambda: sd_lane.set_hold(self.repo, 1, self.environ, held=True)):
+            with self.assertRaisesRegex(sd_lane.LaneError, "between items"):
+                verb()
+        with self.assertRaisesRegex(sd_lane.LaneError, "no pending entry"):
+            sd_lane.move(self.repo, 5, "top", self.environ)
+        self.queue(2)
+        with self.assertRaisesRegex(sd_lane.LaneError, "not held"):
+            sd_lane.set_hold(self.repo, 2, self.environ, held=False)
+
+    def test_a_position_must_be_up_down_top_or_a_positive_number(self) -> None:
+        for where in ("0", "-1", "sideways"):
+            with self.assertRaises(ValueError):
+                sd_lane.position(where)
+
+    def test_the_speculative_gate_skips_a_held_entry(self) -> None:
+        self.queue(1, 2, 3, manual=True)
+        sd_lane.set_hold(self.repo, 2, self.environ, held=True)
+        sd_lane.update(sd_lane.queue_path(self.repo, self.environ), lambda rows: rows[0].update(status="running"))
+        followers: list[int] = []
+        with mock.patch.object(sd_lane, "predict", lambda entry, following: followers.append(following["item"]) or
+                               {"skipped": "recorded"}):
+            sd_lane.speculate(self.entries()[0], sd_lane.queue_path(self.repo, self.environ), lambda *a: {})
+        self.assertEqual(followers, [3])
+
+    def test_the_verbs_reorder_through_sd_ship(self) -> None:
+        self.queue(1, 2)
+        env = {**os.environ, **self.environ}
+
+        def lane(*args: str) -> dict:
+            done = subprocess.run([sys.executable, str(REPO_ROOT / "bin/sd-ship"), "-C", str(self.repo), "lane", *args],
+                                  env=env, capture_output=True, text=True, timeout=120)
+            self.assertEqual(done.returncode, 0, done.stderr + done.stdout)
+            return json.loads(done.stdout)
+        self.assertEqual(lane("move", "2", "top")["pending"], [2, 1])
+        self.assertTrue(lane("hold", "1")["held"])
+        self.assertEqual([(row["item"], bool(row.get("held"))) for row in lane("list")["entries"]], [(2, False), (1, True)])
+        self.assertFalse(lane("release", "1")["held"])
+
+
 class Speculation(Lane):
     """sd:2586: while one entry ships, the next one's gate runs on the predicted landing.
 
