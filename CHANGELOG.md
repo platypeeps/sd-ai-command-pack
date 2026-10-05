@@ -4,6 +4,24 @@
 
 ### Added
 
+- **A satellite asks the hub's lane to merge: `sd-ship lane request` (sd:2704).**
+  On a satellite, `lane request --item N [--manual]` writes the row
+  `lane-request:v1:<slug>:<item>` over the wire. It refuses on the hub
+  (`hub_request`, naming `lane enqueue`) and when the item's `ship:` row is
+  not `ready_to_send` at the branch's pushed head. Before each claim
+  `lane run` takes in this repository's requests, oldest first: it refuses a
+  repository without `repo.ci = local` and `repo.satellite_gate = accept`
+  (`satellite_gate_off`), a malformed branch, base, head or item
+  (`invalid_request`), and a request whose `ship:` row is not ready at its
+  head (`satellite_not_prepared`), each with the reason on the row and no
+  queue entry. It supersedes the item's pending entry, leaves a request whose
+  item is running for the next intake, and queues a `gate: satellite` entry
+  before it writes `queued`, so a crash between the two takes the request in
+  once. `lane run --satellite-only` claims satellite entries only, starts no
+  speculative gate and exits when none is pending; hub entries keep their
+  place. Each run publishes the hub's pack digest to `sd-lane-pack:v1:<slug>`
+  once the pack computes one. Until the pack reads `repo.satellite_gate`,
+  intake reads it as `off` and refuses every request.
 - **`sd-ship lane move|hold|release` take `--expected-revision` (sd:2717).**
   `lane list` prints the queue's `revision`, a digest of the pending order
   and holds. A verb given that revision compares it under the queue's lock

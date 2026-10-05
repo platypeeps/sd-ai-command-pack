@@ -7,6 +7,7 @@ so nothing reaches GitHub or a review.
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import json
 import os
@@ -48,9 +49,11 @@ class Lane(unittest.TestCase):
         self.answers: dict[tuple[int, str], dict] = {}
         # A landing notes its item (sd:2568); no test writes to a real workflow database.
         self.notes: list[tuple[int, str, pathlib.Path]] = []
-        patcher = mock.patch.object(sd_lane, "default_note", self.note)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        # Nor does a run read requests from one (sd:2704): a suite passes its own `hub`.
+        for name, double in (("default_note", self.note), ("default_hub", lambda root: contextlib.nullcontext())):
+            patcher = mock.patch.object(sd_lane, name, double)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def note(self, item: int, body: str, main: pathlib.Path) -> str:
         self.notes.append((item, body, main))
