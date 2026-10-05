@@ -197,6 +197,11 @@ class OffloadRows(SatelliteFixture):
         self.assertEqual(result["offload_error"], "the offload view moved during the run: home_files .npmrc")
         self.assertIn("receipt_revision", result)
         self.assertEqual(self.offload_row(), {})
+        # The receipt keeps no view it did not hold through the run, so a reuse cannot export it.
+        reused = self.gate()
+        self.assertEqual(self.runs, 1)
+        self.assertIn("kept no offload view", reused["offload_error"])
+        self.assertEqual(self.offload_row(), {})
 
     def test_an_unreachable_hub_still_runs_the_check_and_reports_offload_error(self) -> None:
         with mock.patch.object(sd_gate_receipts, "_connect", side_effect=ConnectionError("HubUnreachable: no answer")):

@@ -629,10 +629,11 @@ def record_gate_pass(database: pathlib.Path, gated: Worktree, identity: dict[str
     after = gate_binding(gated.tree, gated.head, sd_gate_run.gate_inputs(gated.root, gated.head, gated.content, gated.own),
                                           gated.base, gated.environment, gated.fork)
     key = receipt_key(gated.root, gated.head, gated.content)
-    record_unless_moved(database, key, identity, after, reading, gated.head, before)
+    moved = offload_miss(before, gated.view(identity)) if before is not None else None
+    record_unless_moved(database, key, identity, after, reading, gated.head, None if moved else before)  # no reuse exports it
     if "receipt_skipped" in reading:
         return
-    if before is not None and (moved := offload_miss(before, gated.view(identity))):
+    if moved:
         reading["offload_error"] = f"the offload view moved during the run: {moved['part']} {moved['name']}"
         return
     reading.update(record_offload(database, gated, identity, {
