@@ -194,6 +194,15 @@ class TheRule(Fixture):
             ),
         )
 
+    def test_the_refusal_is_one_sentence_as_its_docstring_says(self) -> None:
+        """sd:1000 (16bf4688292a): the refusal carried a second sentence."""
+        root = self.make_repo()
+        self.write_mode(root, "full")
+        said = sd_lib.guest_artifact_refusal(root, ["docs/work/i/prd.md"], ask=Asker(answers(full=False)))
+        self.assertTrue(said.endswith("."), said)
+        self.assertNotIn(". ", said[:-1], said)
+        self.assertIn("detection is a ceiling", said)
+
     def test_prefixes_that_only_look_like_the_refused_trees_pass(self) -> None:
         root = self.make_repo()
         self.write_mode(root, "guest")
@@ -688,6 +697,10 @@ class TheDemotionNote(ShipMergeFixture):
         with self.assertRaisesRegex(self.ship.Refusal, "mallory"):
             delivery.merge_ownership()
         self.assertEqual(len(self.notes()), 1, self.notes())
+        # sd:1000 (3057e71978d9): the branch was pushed before this answer, so
+        # the note must not say artifacts were held back.
+        self.assertNotIn("were not pushed", self.notes()[0])
+        self.assertIn("came at merge time", self.notes()[0])
         # The push-time lowering and the merge-time one are the same demotion.
         self.assertEqual(delivery.resolve_mode(), "guest")
         self.assertEqual(len(self.notes()), 1, self.notes())

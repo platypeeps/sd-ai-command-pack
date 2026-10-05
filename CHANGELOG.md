@@ -333,6 +333,8 @@
 
 ### Fixed
 
+- **Seven findings where the output said one state and the code held another (sd:2631, sd:1000).** `make hooks` outside a git checkout ignored the failed `git rev-parse` and tried to write `/hooks/pre-commit`; it now refuses and names the directory. A merge-time demotion note on an item said the branch's planning artifacts "were not pushed", though the branch was pushed before that answer; the merge-time note now says the answer came after the push. The guest-artifact refusal is one sentence, as its docstring says. `sd task add --kind` help says the kinds come from the installed `sd_db`, and that one older than sd:809 files a followup with no repository. `sd-status` reading a ledger row that declares `Addressed:` before naming the defect's own words gains a regression test; the fix (efa996d6) had none. Two triple blank lines in `bin/sd_lib.py` are gone, and the `sd-research-kit review` docstring names all its checks; a test reads the checks off `check()`, so a new one fails until the docstring names it.
+
 - **`sd-ship prepare` binds only an open pull request (sd:2656).** sd:1912's
   recorded branch had carried #1242, merged on 2026-09-28. Prepare pushed to
   that branch, then its lookup read merged and closed pull requests too and
