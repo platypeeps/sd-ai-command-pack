@@ -446,7 +446,7 @@ def take_in(hub: Hub, path: pathlib.Path, key: str, revision: int, row: dict[str
     if found is not None and found.get("status") in ("pending", "running"):
         return answer("queued", entry={"enqueued_at": found.get("enqueued_at"), "revision": revision})
     if found is not None:
-        return answer(found.get("status"), **outcome_fields(found))
+        return answer(str(found["status"]), **outcome_fields(found))
     if sd_lib.repo_ci(hub.connection, hub.main) != "local" or sd_lib.repo_satellite_gate(hub.connection, hub.main) != "accept":
         return refuse("satellite_gate_off", "the repository does not take satellite gates: "
                                             "repo.ci must be local and repo.satellite_gate accept")
