@@ -8,9 +8,9 @@
   Rust gate under `sd.gate_slots=2` drove the load to 185 on 16 cores: cargo
   builds and tests on every core. A slot holder now sets `CARGO_BUILD_JOBS`
   and `RUST_TEST_THREADS` in its checks to the cores over the slot count, at
-  least 1; a lower positive value the caller set wins. The holder sets them
-  after the gate binds its environment, so a pass binds the same under any
-  slot count. `MAKEFLAGS` gets no `-j`: it would run a Makefile's
+  least 1; a lower positive value the caller set wins. The gate binds the
+  values in its receipt, so a new slot count runs the check once more rather
+  than reuse a pass made with other thread counts. `MAKEFLAGS` gets no `-j`: it would run a Makefile's
   prerequisites at once.
 - **`sd-ship prepare` runs on an sd satellite (sd:2679).** When `sd_db`
   reports the database served by a hub, `prepare` skips the ship lock, a file

@@ -47,8 +47,8 @@ The count does not bound one gate's CPU (sd:2726). On 2026-10-05 one Rust
 gate under 2 slots drove the load to 185 on 16 cores: cargo builds and tests
 on every core. A holder under a cap now sets `CARGO_BUILD_JOBS` and
 `RUST_TEST_THREADS` to its share, the cores over the cap; a lower value the
-caller set wins. The holder sets them in its children only, after the gate
-bound its environment, so a pass binds the same whatever the cap.
+caller set wins. `sd gate check` sets the same values in the `sd-check` child
+and binds them, since a suite can pass on one thread and fail on eight.
 `MAKEFLAGS` gets no `-j`: a Makefile that orders prerequisites by their
 listing, as the pack's own `check` does, would run them at once.
 

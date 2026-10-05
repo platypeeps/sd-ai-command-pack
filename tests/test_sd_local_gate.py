@@ -448,10 +448,10 @@ class Receipts(ReceiptFixture):
             merged = self.gate(head)
         self.assertEqual((merged["status"], "reused" in merged, self.runs()), ("failure", False, 2))
 
-    def test_the_cpu_cap_reaches_the_check_and_a_new_slot_count_reuses_the_pass(self) -> None:
-        """sd:2726: `sd-check` sets the cap in its children, after the gate bound its environment."""
+    def test_the_cpu_cap_reaches_the_check_and_the_receipt_binds_it(self) -> None:
+        """sd:2726: a suite can pass on one test thread and fail on eight, so another cap runs the check again."""
         seen = self.root.parent / "seen"
-        head = self.counted(f'echo "$$CARGO_BUILD_JOBS $$RUST_TEST_THREADS" > {seen}')
+        head = self.counted(f'echo "$$CARGO_BUILD_JOBS $$RUST_TEST_THREADS" >> {seen}')
         config = self.root.parent / "config" / "sd-ai-command-pack" / "config.json"
         config.parent.mkdir(parents=True)
         machine = {"SD_GATE_SLOTS_DIR": str(self.root.parent / "slots"), "SD_GATE_SLOT_POLL": "0.1",
@@ -459,13 +459,19 @@ class Receipts(ReceiptFixture):
         with mock.patch.dict(os.environ, machine):
             for name in ("SD_GATE_SLOTS", "CI", "GITHUB_ACTIONS"):
                 os.environ.pop(name, None)
-            config.write_text(json.dumps({"config": {"sd": {"gate_slots": "2"}}}), encoding="utf-8")
+            config.write_text(json.dumps({"config": {"sd": {"gate_slots": "1"}}}), encoding="utf-8")
             first = self.gate(head)
-            config.write_text(json.dumps({"config": {"sd": {"gate_slots": "4"}}}), encoding="utf-8")
-            second = self.gate(head)
-        self.assertEqual((first["status"], second["status"], "reused" in second, self.runs()), ("success", "success", True, 1))
-        share = str(sd_gate_slots.cpu_share(2))
-        self.assertEqual(seen.read_text().split(), [share, share])
+            config.write_text(json.dumps({"config": {"sd": {"gate_slots": "2"}}}), encoding="utf-8")
+            second, third = self.gate(head), self.gate(head)
+        self.assertEqual([first["status"], second["status"], "reused" in second, "reused" in third, self.runs()],
+                         ["success", "success", False, True, 2])
+        whole, half = (str(sd_gate_slots.cpu_share(slots)) for slots in (1, 2))  # they differ on two or more cores
+        self.assertEqual(seen.read_text().splitlines(), [f"{whole} {whole}", f"{half} {half}"])
+        with mock.patch.dict(os.environ, machine):
+            os.environ.pop("SD_GATE_SLOTS", None)
+            raised = self.gate(self.counted("true # another commit"), run=self.passing(
+                lambda: config.write_text(json.dumps({"config": {"sd": {"gate_slots": "4"}}}), encoding="utf-8")))
+        self.assertEqual(raised["receipt_skipped"], "moved during the run: environment_sha256")
 
     def test_a_receipt_older_than_the_window_is_not_reused(self) -> None:
         """The window is one prepare-to-merge handoff: 30 minutes, not hours.
