@@ -223,6 +223,11 @@ class SatelliteMerge(unittest.TestCase):
         self.status(f"{self.head()[:12]} inputs {self.inputs}: sat satellite.example.test: pass", login="someone-else")
         self.refuse("local_gate_foreign", "--satellite-gate")
 
+    def test_clause_8_a_longer_inputs_token_refuses_as_satellite_status_missing(self) -> None:
+        self.satellite_pass()
+        self.status(f"{self.head()[:12]} inputs {self.inputs}EXTRA: sat satellite.example.test: sd-check pass")
+        self.refuse("satellite_status_missing", "--satellite-gate")
+
     def test_a_refused_receipt_refuses_the_flagged_merge_with_its_code(self) -> None:
         rewrite(self.database, self.satellite_pass(), pack_bin="0" * 64)
         self.satellite_status()
@@ -273,7 +278,21 @@ class SatelliteMerge(unittest.TestCase):
     def test_a_satellite_prepare_with_no_row_posts_nothing_and_says_why(self) -> None:
         result = self.satellite_prepare()
         self.assertEqual(self.gate_posts(), [])
-        self.assertIn("no sd-satellite-gate success", result["offload_error"])
+        self.assertIn("no standing offload receipt", result["offload_error"])
+
+    def test_a_satellite_prepare_posts_nothing_from_a_row_that_no_longer_stands(self) -> None:
+        """Expired, another pack, or other inputs (a changed `CLAUDE.local.md`): no status names inputs nobody checked."""
+        key = self.satellite_pass()
+        row = rows.sd_gate_receipts.read_offload(self.database, key)[1]
+        broken = {"outside": {"recorded_at": row["recorded_at"] - sd_gate_receipts.OFFLOAD_WINDOW_SECONDS - 60},
+                  "not the hub's": {"pack_bin": "0" * 64},
+                  "not this checkout's": {"binding": {**row["binding"], "inputs": "0" * 12}}}
+        for reason, fields in broken.items():
+            with self.subTest(reason=reason):
+                rewrite(self.database, key, **fields)
+                self.assertIn(reason, self.satellite_prepare()["offload_error"])
+                self.assertEqual(self.gate_posts(), [])
+                rewrite(self.database, key, **{name: row[name] for name in fields})
 
     def test_a_hub_prepare_posts_nothing_new(self) -> None:
         self.satellite_pass()

@@ -162,6 +162,20 @@ class OffloadRows(SatelliteFixture):
                       {"writer": "sd-lane", "pack_bin": sd_gate_receipts.pack_bin(), "published_at": "now"})
         self.assertNotIn("pack_warning", self.gate())
 
+    def test_a_publication_that_is_not_an_object_warns_of_nothing_and_the_check_runs(self) -> None:
+        from sd_db import ship
+
+        real = ship.read
+
+        def read(connection, key):  # type: ignore[no-untyped-def]
+            # `ship.save` writes objects only; a body written by other means can be anything.
+            return (1, ["not", "an", "object"]) if key == sd_gate_receipts.PACK_PREFIX + SLUG else real(connection, key)
+
+        with mock.patch.object(ship, "read", read):
+            result = self.gate()
+        self.assertEqual((result["status"], self.runs), ("success", 1))
+        self.assertNotIn("pack_warning", result)
+
 
 class PackDigest(unittest.TestCase):
     def test_pack_bin_hashes_the_files_gate_inputs_hashes(self) -> None:

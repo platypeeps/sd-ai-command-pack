@@ -427,7 +427,8 @@ def pack_warning(database: pathlib.Path | None, root: pathlib.Path, own: bool) -
             _, published = ship.read(connection, PACK_PREFIX + slug)
     except Exception:
         return None
-    theirs, ours = (published or {}).get("pack_bin"), pack_bin(own)
+    published = published if isinstance(published, dict) else {}
+    theirs, ours = published.get("pack_bin"), pack_bin(own)
     if not theirs or theirs == ours:
         return None
     warning = (f"this pack's bin/ digest {ours[:12]} (rev {str(pack_rev())[:12]}) is not the hub's {str(theirs)[:12]} "
@@ -498,6 +499,38 @@ def examine_offload(database: pathlib.Path | None, run: Worktree,
     return {"reading": row["reading"], "revision": revision, "satellite": row["satellite"], "hub": row.get("hub"),
             "recorded_at": row["recorded_at"], "age_seconds": round(hub_now - float(row["recorded_at"])),
             "head": row.get("head"), "unresolved_tools": unresolved}, None
+
+
+def standing_offload(database: pathlib.Path | None, root: pathlib.Path, head: str,
+                     now: float | None = None) -> tuple[str, int, dict[str, Any]]:
+    """On a satellite, the offload row its prepare may post `sd/local-gate` from: `(key, revision, row)`.
+
+    The row stands when it is a success (clause 4), made by this pack (clause 6), within its window
+    (clause 7), and bound to the inputs of `root` at `head`, which carry `CLAUDE.local.md` and the pack.
+    The tree key counts only while `root` declares it. Raises LookupError naming why no row stands.
+    """
+    import sd_gate_run  # noqa: PLC0415 -- it imports this module
+
+    slug = repository_slug(root)
+    if slug is None:
+        raise LookupError("origin names no github.com repository")
+    tree = sd_lib.git_output(["rev-parse", f"{head}^{{tree}}"], root) if keyed_by_tree(root) else None
+    reasons = []
+    for content in (None, tree) if tree else (None,):
+        key = offload_key(slug, head, content)
+        revision, row = read_offload(database, key)
+        own = row.get("pack_bin") == "tree"
+        binding = row.get("binding")
+        binding = binding if isinstance(binding, dict) else {}
+        inputs = sd_gate_run.gate_inputs(root, head, content, own)
+        refused = (({"reason": f"no row at {key}"} if not row else None) or invalid_offload(row, revision)
+                   or pack_mismatch(row, own) or expired_offload(row, time.time() if now is None else now)
+                   or (None if binding.get("inputs") == inputs else
+                       {"reason": f"the row binds inputs {binding.get('inputs')}, not this checkout's {inputs}"}))
+        if refused is None:
+            return key, revision, row
+        reasons.append(refused["reason"])
+    raise LookupError("; ".join(reasons))
 
 
 def invalid_offload(row: Mapping[str, Any], revision: int) -> dict[str, str] | None:

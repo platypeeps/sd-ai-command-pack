@@ -96,26 +96,18 @@ def post_gate_status(api: Any, head: str, result: dict[str, Any], inputs: str) -
 def post_offload_status(api: Any, root: pathlib.Path, head: str, database: pathlib.Path | None) -> dict[str, Any]:
     """On a satellite, post `sd/local-gate` at `head` from its offload receipt (sd:2704 step 5).
 
-    The hub's clause 8 reads this status: this account's, at this pack's inputs. The row is read at the
-    head key, then the tree key. `{"offload_status"}` names the post; no standing row, or a fault, posts
-    nothing and answers `{"offload_error"}`, since the prepare itself stands.
+    The hub's clause 8 reads this status: this account's, at this pack's inputs. It is posted only from a
+    row that still stands here (`sd_gate_receipts.standing_offload`). `{"offload_status"}` names the post;
+    no standing row, or a fault, posts nothing and answers `{"offload_error"}`, since the prepare stands.
     """
     try:
-        slug_ = sd_gate_receipts.repository_slug(root)
-        if slug_ is None:
-            raise LookupError("origin names no github.com repository")
-        keys = [sd_gate_receipts.offload_key(slug_, head),
-                sd_gate_receipts.offload_key(slug_, head, git(root, "rev-parse", f"{head}^{{tree}}"))]
-        for key in keys:
-            revision, row = sd_gate_receipts.read_offload(database, key)
-            if row and sd_gate_receipts.invalid_offload(row, revision) is None:
-                break
-        else:
-            return {"offload_error": f"no {sd_gate_receipts.OFFLOAD_WRITER} success at {head[:12]} or its tree; "
-                                     "run sd gate check, then sd-ship prepare again"}
+        key, revision, row = sd_gate_receipts.standing_offload(database, root, head)
         summary = f"sat {row['satellite']['hostname']}: {row['reading'].get('summary') or 'success'}"
         posted = post_gate_status(api, head, {"head": head, "status": "success", "summary": summary},
                                   gate_inputs(root, head))
+    except LookupError as error:
+        return {"offload_error": f"no standing offload receipt at {head[:12]}: {error}. "
+                                "Run sd gate check, then sd-ship prepare again"[:600]}
     except Exception as error:  # the prepare stands; the hub refuses the merge as satellite_status_missing
         return {"offload_error": f"{type(error).__name__}: {error}"[:300]}
     return {"offload_status": {"key": key, "revision": revision, "description": posted.get("description")}}
@@ -162,7 +154,7 @@ def merge_gate_run(root: pathlib.Path, head: str, base: str | None, database: pa
 def status_refusal(api: Any, head: str, inputs: str) -> dict[str, str] | None:
     """Clause 8: the newest `sd/local-gate` at `head` is this account's success, at this hub's `inputs`.
 
-    The description must start `head[:12] inputs <inputs>`, the digest this hub would post itself, so a
+    The description must start `head[:12] inputs <inputs>:`, the digest this hub would post itself, so a
     status from a run with another pack or another `CLAUDE.local.md` does not count.
     """
     statuses = api.pages(f"{api.prefix}/commits/{head}/statuses")
@@ -172,7 +164,7 @@ def status_refusal(api: Any, head: str, inputs: str) -> dict[str, str] | None:
         foreign = refusal.workflow["blocker"]["code"] == "local_gate_foreign"
         return {"code": "local_gate_foreign" if foreign else "satellite_status_missing", "reason": str(refusal)}
     current = next(entry for entry in statuses if isinstance(entry, dict) and entry.get("context") == CONTEXT)
-    if str(current.get("description") or "").startswith(f"{head[:12]} inputs {inputs}"):
+    if str(current.get("description") or "").startswith(f"{head[:12]} inputs {inputs}:"):
         return None
     return {"code": "satellite_status_missing", "reason": f"{CONTEXT} at {head[:12]} says "
             f"{current.get('description')!r}, not this hub's inputs {inputs}"}
