@@ -620,6 +620,17 @@ class Landing(Lane):
         self.assertEqual(git(self.repo, "rev-parse", "HEAD"), before)
         self.assertIn("on elsewhere, not the default branch", self.entries()[0]["fast_forward"])
 
+    def test_origin_head_names_the_default_branch_over_the_usual_names(self) -> None:
+        tree, head = self.topic()
+        git(self.repo, "remote", "set-head", "origin", "main")
+        git(self.repo, "switch", "-q", "-c", "master")
+        before = git(self.repo, "rev-parse", "HEAD")
+        self.advance_origin_main()
+        self.merge_lands(tree, 1, head)
+        self.drain()
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), before)
+        self.assertIn("on master, not the default branch", self.entries()[0]["fast_forward"])
+
     def test_the_tools_checkout_tries_another_lanes_lock_once_and_never_waits(self) -> None:
         """The pack checkout runs every lane's `sd-ship`; move it only while no other lane runs."""
         tree, head = self.topic()
