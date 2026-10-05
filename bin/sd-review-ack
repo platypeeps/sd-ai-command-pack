@@ -123,6 +123,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import fcntl
+import functools
 import hashlib
 import json
 import os
@@ -1245,8 +1246,27 @@ def landing_evidence(payload: dict) -> dict[str, str]:
     return {"head": landed, "merge": merged} if merged and landed else {}
 
 
+#: A whole commit id, the only spelling `rev-list` prints.
+FULL_SHA = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+
 def _is_ancestor(root: pathlib.Path, commit: str, ref: str) -> bool:
-    return bool(commit and ref) and sd_lib.git_output(["merge-base", "--is-ancestor", commit, ref], root) is not None
+    if not (commit and ref):
+        return False
+    if sd_lib.git_reads_memoized() and FULL_SHA.fullmatch(commit):
+        # One `rev-list` per ref, memoized, answers every commit asked of it
+        # (sd:2677). An unknown sha is in no list. The one gap: a tag object's
+        # id reads False here where merge-base peels it, and every id asked is
+        # a commit's, from GitHub or from `^{commit}` at record time.
+        listed = sd_lib.git_output(["rev-list", ref], root)
+        if listed is not None:
+            return commit in _lines(listed)
+    return sd_lib.git_output(["merge-base", "--is-ancestor", commit, ref], root) is not None
+
+
+@functools.lru_cache(maxsize=8)
+def _lines(text: str) -> frozenset[str]:
+    return frozenset(text.split("\n"))
 
 
 def fix_verdict(root: pathlib.Path, commit: str, ref: str, merge: dict[str, str] | None = None) -> str:
