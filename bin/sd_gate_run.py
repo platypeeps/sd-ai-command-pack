@@ -33,11 +33,6 @@ contract with the repository under test: this run is the gate, so build what
 the check needs here and borrow nothing from the operator. The pack's own
 Makefile reads it to provision a pinned in-tree virtualenv (sd:1918); a
 repository that does not read it runs as it always did.
-
-Under a slot count it also gets `CARGO_BUILD_JOBS` and `RUST_TEST_THREADS` at
-the share `sd-check` would set (`thread_caps`, sd:2726), and the receipt binds
-them: a new slot count runs the check once more rather than reuse a pass made
-with other thread counts.
 """
 
 from __future__ import annotations
@@ -54,7 +49,6 @@ from typing import Any, Callable, Mapping
 
 import sd_gate_cache
 import sd_gate_receipts
-import sd_gate_slots
 import sd_lib
 
 BIN = pathlib.Path(__file__).resolve().parent
@@ -138,21 +132,6 @@ def gate_environment(root: pathlib.Path, environ: dict[str, str] | None = None) 
     return env
 
 
-def thread_caps(env: dict[str, str]) -> dict[str, str]:
-    """`env` plus the thread counts `sd-check` hands the check under the machine's slot count (sd:2726).
-
-    The gate passes them to the child and binds them, so a pass under one cap is
-    not reused under another: a suite can pass on one test thread and fail on eight.
-    A slot count that cannot be read adds nothing; `sd-check` then reports it.
-    """
-    try:
-        slots, _ = sd_gate_slots.configured(env, sd_lib.core_setting("gate_slots", env))
-    except (ValueError, sd_lib.ConfigError):
-        return env
-    held = sd_gate_slots.holder_environment(env, slots)
-    return {**env, **{name: held[name] for name in sd_gate_slots.CPU_VARIABLES if name in held}}
-
-
 #: How a caller runs the `sd-check` child: `(argv, env, cwd, timeout)` to `(exit code or None, stdout, stderr)`.
 Run = Callable[[list[str], dict[str, str], pathlib.Path, int], tuple[int | None, str, str]]
 
@@ -195,7 +174,7 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
         try:
             if local := untracked_local_block(root):
                 shutil.copyfile(local, tree / LOCAL_BLOCK)
-            env = thread_caps(gate_environment(root, None if environ is None else dict(environ)))
+            env = gate_environment(root, None if environ is None else dict(environ))
             content, fork = sd_gate_receipts.tree_key(tree, base)
             key = sd_gate_receipts.receipt_key(root, head, content)
             own = sd_gate_receipts.gates_itself(root, tree, BIN)
@@ -214,9 +193,7 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
             checked = gate_git(tree, "rev-parse", "HEAD")
             reading = check_reading(code, output, errors)
             if record and database and identity and reading["status"] == "success" and checked == head:
-                # The caps read again: a slot count raised mid-run lowered the child's share, so the binding moved.
-                after = sd_gate_receipts.gate_binding(tree, head, gate_inputs(root, head, content, own), base,
-                                                      thread_caps(env), fork)
+                after = sd_gate_receipts.gate_binding(tree, head, gate_inputs(root, head, content, own), base, env, fork)
                 sd_gate_receipts.record_unless_moved(database, key, identity, after, reading, head)
         finally:
             # The administrative entry goes with the directory; the temporary
