@@ -21,6 +21,7 @@ goes on seeing the values captured at registration.
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import importlib.machinery
 import importlib.util
@@ -1009,6 +1010,29 @@ class StalledRootTests(PluginFixture):
         self.assertIn(f"warning: skipped plugin root {stalled}: its sd-plugin.json did not answer within 0.3s",
                       said.getvalue())
 
+    def test_the_list_returns_within_the_bound_and_names_the_silent_root(self) -> None:
+        """sd:2555: `plugin list` read each root in turn, so the stalled one held the whole list."""
+
+        sd = load_sd()
+        sd.ROOT_READ_SECONDS = 0.3
+        stalled, owner = str(self.stalled()), str(self.owner())
+        said, shown, done = io.StringIO(), io.StringIO(), []
+        args = argparse.Namespace(json=True)
+
+        def listing() -> None:
+            with mock.patch.object(sd.sd_lib, "machine_config", return_value={"plugins": [stalled, owner]}), \
+                    contextlib.redirect_stderr(said), contextlib.redirect_stdout(shown):
+                done.append(sd.plugin_list(args))
+
+        worker = threading.Thread(target=listing, daemon=True)
+        worker.start()
+        worker.join(10)
+        self.assertFalse(worker.is_alive(), "the list waited on the stalled root past its bound")
+        self.assertEqual(done, [0])
+        silent = "its sd-plugin.json did not answer within 0.3s"
+        self.assertEqual([(e["root"], e["readable"], e.get("prefix")) for e in json.loads(shown.getvalue())],
+                         [(stalled, False, None), (owner, True, "pp")])
+        self.assertIn(f"warning: skipped plugin root {stalled}: {silent}", said.getvalue())
 
     def test_registration_refuses_while_a_root_is_silent(self) -> None:
         """A silent root may own the prefix being registered; a uniqueness check cannot skip it."""

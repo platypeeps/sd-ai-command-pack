@@ -978,9 +978,43 @@ def describe(root: str) -> dict[str, object]:
     return entry
 
 
+def described(roots: list[str]) -> list[dict[str, object]]:
+    """`describe` for every root, each in its own daemon thread, as `scan` reads (sd:2555).
+
+    A root still silent after ROOT_READ_SECONDS is listed unreadable, with a
+    warning, instead of holding the whole list behind one stalled open().
+    """
+
+    answers: queue.Queue[tuple[int, dict[str, object] | BaseException]] = queue.Queue()
+
+    def describe_root(index: int, root: str) -> None:
+        try:
+            answers.put((index, describe(root)))
+        except BaseException as error:  # noqa: BLE001 - raised again on the caller's thread
+            answers.put((index, error))
+
+    for index, root in enumerate(roots):
+        threading.Thread(target=describe_root, args=(index, root), daemon=True, name=f"sd plugin root {root}").start()
+    entries: dict[int, dict[str, object]] = {}
+    deadline = time.monotonic() + ROOT_READ_SECONDS
+    while len(entries) < len(roots):
+        try:
+            index, entry = answers.get(timeout=max(0.0, deadline - time.monotonic()))
+        except queue.Empty:
+            break
+        if isinstance(entry, BaseException):
+            raise entry
+        entries[index] = entry
+    silent = f"its {MANIFEST_NAME} did not answer within {ROOT_READ_SECONDS:g}s"
+    for index, root in enumerate(roots):
+        if index not in entries:
+            print(f"warning: skipped plugin root {root}: {silent}", file=sys.stderr)
+            entries[index] = {"root": root, "readable": False, "why": silent}
+    return [entries[index] for index in range(len(roots))]
+
+
 def plugin_list(args: argparse.Namespace) -> int:
-    roots = registry(sd_lib.machine_config())
-    entries = [describe(root) for root in roots]
+    entries = described(registry(sd_lib.machine_config()))
     if args.json:
         json.dump(entries, sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
