@@ -59,7 +59,7 @@ class GateCompare(rows.SatelliteFixture):
     def test_a_valid_receipt_is_accepted_and_nothing_runs(self) -> None:
         result = self.compare()
         self.assertEqual((result["status"], result["head"], self.runs), ("success", self.head, 1))
-        self.assertTrue(result["satellite"]["hostname"])
+        self.assertEqual(result["satellite"]["hostname"], rows.SATELLITE["hostname"])
         self.assertIn("(satellite ", result["summary"])
         self.assertEqual(result["satellite"]["unresolved_tools"], [])
 
@@ -140,6 +140,7 @@ class SatelliteMerge(unittest.TestCase):
 
     def setUp(self) -> None:
         fixture.DeclaredGapCase.setUp(self)
+        rows.no_real_tailscale(self, self.directory)
         self.runs = 0
         self.opted = "accept"
         self.served: str | None = None
