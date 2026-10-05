@@ -33,7 +33,7 @@ BIN = pathlib.Path(__file__).resolve().parent
 # `sd_opencode.py` for longer (sd:1834).
 VERDICT_FILES = (
     "sd-review", "sd_lib.py", "sd_registry.py", "sd_route.py", "sd_codex.py",
-    "sd_review_material.py", "sd_review_readiness.py", "sd_review_request.py", "sd_jev.py", "sd_opencode.py",
+    "sd_review_material.py", "sd_review_readiness.py", "sd_review_request.py", "sd_review_slots.py", "sd_jev.py", "sd_opencode.py",
 )
 GATE_FILES = (
     "sd-ship", "sd-docs-lint", "sd_ship_dispositions.py", "sd_ship_remote.py", "sd_ship_review.py",
