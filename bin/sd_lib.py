@@ -483,7 +483,7 @@ STARTED = time.monotonic()
 
 
 def review_slot(result: dict[str, Any], environ: Mapping[str, str], root: pathlib.Path,
-                check_seconds: float) -> object | None:
+                bound_seconds: float) -> object | None:
     """Hold a machine-wide review slot for `sd-review`, or refuse the review in `result`.
 
     A thin door: the slot logic is `sd_review_slots.hold_review_slot`, which
@@ -493,7 +493,7 @@ def review_slot(result: dict[str, Any], environ: Mapping[str, str], root: pathli
     """
     import sd_review_slots
 
-    return sd_review_slots.hold_review_slot(result, environ, root, check_seconds)
+    return sd_review_slots.hold_review_slot(result, environ, root, bound_seconds)
 
 
 def core_setting(key: str, environ: dict[str, str] | None = None) -> str | None:
@@ -2767,8 +2767,9 @@ ITEM_TRAILER = "Item:"
 WORK_TRAILER = "Work:"
 #: The trailer lines `sd-ship` owns in a pull-request body (sd:1870). It
 #: writes `Work:` into the body it publishes and `Item:`, `Delivers:` and the
-#: authorship lines into the squash message; `Closes:` rides a later merge or
-#: an empty commit, never a body `sd-ship` publishes. `sd_ship_body` reads a
+#: authorship lines into the squash message. `Closes:` rides a later merge or
+#: an empty commit, and in a body names the items a pull request co-delivers,
+#: which the merge closes with a `Delivers:` each (sd:1481). `sd_ship_body` reads a
 #: supplied body against this tuple, and the template test holds the
 #: template's closing block to it.
 OWNED_TRAILERS = (ITEM_TRAILER, WORK_TRAILER, DELIVERS_TRAILER, CLOSES_TRAILER,

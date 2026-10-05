@@ -123,7 +123,7 @@ class TheCap(unittest.TestCase):
 
 
 class TheReviewHoldsASlot(ReviewFixture):
-    """`sd-review` takes a slot after its check and before its first reviewer."""
+    """`sd-review` takes a slot before its first reviewer and gives it back before the gate."""
 
     def change(self) -> pathlib.Path:
         root = self.make_repo()
@@ -147,6 +147,26 @@ class TheReviewHoldsASlot(ReviewFixture):
                                        deadline=slots.clock(), poll=0.01)
         self.assertIsNotNone(after, "the review kept its slot after it returned")
         after.give_back()
+
+    def test_the_slot_is_free_while_the_gate_runs(self) -> None:
+        """The reviewers run before the gate (sd:2605); the gate queues in its own pool, not in a review slot."""
+
+        where = self.tmp / "review-slots"
+        cap = {"SD_REVIEW_SLOTS": "1", "SD_REVIEW_SLOTS_DIR": str(where)}
+        free: list[bool] = []
+
+        def gate(*_args: object) -> object:
+            during = slots.take_review_slot(cap, lambda: None, stream=io.StringIO(), label="during the gate",
+                                            deadline=slots.clock(), poll=0.01)
+            free.append(during is not None)
+            if during is not None:
+                during.give_back()
+            return sd_review.Completed(0, "{}", "")
+
+        report = sd_review.review(self.change(), namespace(), FakeRunner({"sd-check": gate}),
+                                  self.environment(**cap), self.chatgpt_home())
+        self.assertEqual(report["review_slot"]["slot"], 1, json.dumps(report)[:2000])
+        self.assertEqual(free, [True], "the review held its slot while the gate ran")
 
     def test_the_slot_is_free_once_main_s_handler_catches_what_the_review_raised(self) -> None:
         """The raising path: `main` catches a Refusal `as error`, and the clause's end drops the frame and the slot.
@@ -180,12 +200,15 @@ class TheReviewHoldsASlot(ReviewFixture):
         self.addCleanup(child.kill)
         self.assertTrue(child.stdout.readline().strip())
         runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", "")})
-        report = sd_review.review(self.change(), namespace(timeout=1), runner,
-                                  self.environment(SD_REVIEW_SLOTS="1", SD_REVIEW_SLOTS_DIR=str(where)),
-                                  self.chatgpt_home())
+        # The wait spends the setup bound from the process start; a start long
+        # past leaves none of it, so the review refuses at once.
+        with mock.patch.object(sd_lib, "STARTED", slots.clock() - 10 * sd_review.SETUP_TIMEOUT_SECONDS):
+            report = sd_review.review(self.change(), namespace(), runner,
+                                      self.environment(SD_REVIEW_SLOTS="1", SD_REVIEW_SLOTS_DIR=str(where)),
+                                      self.chatgpt_home())
         self.assertEqual(report["status"], "refused")
         self.assertIn("review_slot_busy", [row["code"] for row in report["readiness"]["blockers"]])
-        self.assertEqual([call for call in runner.calls if "sd-check" not in " ".join(call["argv"])], [])
+        self.assertEqual(runner.calls, [], "a reviewer or the gate ran without a slot")
 
 
 if __name__ == "__main__":

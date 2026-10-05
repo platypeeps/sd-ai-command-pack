@@ -890,15 +890,32 @@ class LineBudgetTests(unittest.TestCase):
         # say so in `gate_environment` (+1). The cache itself is
         # `bin/sd_gate_cache.py`, gate code outside the lane as
         # `sd_gate_receipts` is: `sd-review` does not import it.
-        # sd:2523 adds 1 line to `bin/sd-review` (4686 -> 4687): it holds a
-        # review slot through `sd_lib.review_slot`. The slot logic is
-        # `bin/sd_review_slots.py`, outside the lane: `sd-review` does not
-        # import it.
+        # 4687 -> 4698 is sd:2608: `bin/sd_gate_run.py` +11 so a failed gate's
+        # one-line summary names the steps `sd-check` says failed (`summary_row`,
+        # +6 with its blank lines) within the status bound (+1), then the file
+        # with the whole output (+2) after `WHOLE_OUTPUT` (+2 with its comment),
+        # which `sd_local_gate` cuts from the public status. Reading the steps
+        # out of the output is `bin/sd-check`'s, outside the lane.
+        #
+        # 4698 -> 4718 is sd:2605, under the operator's 4900 ceiling (ruling of
+        # 2026-10-04): `bin/sd-review` +21 (2545 -> 2566 lines; the lane sat at
+        # 4697) runs the reviewers before the gate. The gate step moved below
+        # dispatch into `after_gate`, with the input-change refusal it took
+        # along; a blocked review records `check: not_run` instead of running
+        # it; and `render` prints that check. The gate that adjudicated
+        # findings still need runs in `sd_ship_review`, outside the lane.
+        #
+        # 4718 -> 4721 is sd:2523, under the operator's 4900 ceiling (ruling of
+        # 2026-10-04): `bin/sd-review` +3 holds a machine-wide review slot
+        # through `sd_lib.review_slot` from the first reviewer to the last,
+        # refuses when none comes free, and gives it back before the gate. The
+        # slot logic is `bin/sd_review_slots.py`, outside the lane: `sd-review`
+        # does not import it.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4687,
+            4721,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

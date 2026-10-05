@@ -14,8 +14,10 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
+from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "bin"))
@@ -44,6 +46,15 @@ class Lane(unittest.TestCase):
         self.body.write_text("Item: sd:1\n", encoding="utf-8")
         self.calls: list[list[str]] = []
         self.answers: dict[tuple[int, str], dict] = {}
+        # A landing notes its item (sd:2568); no test writes to a real workflow database.
+        self.notes: list[tuple[int, str, pathlib.Path]] = []
+        patcher = mock.patch.object(sd_lane, "default_note", self.note)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def note(self, item: int, body: str, main: pathlib.Path) -> str:
+        self.notes.append((item, body, main))
+        return "written"
 
     def worktree(self, name: str) -> pathlib.Path:
         path = self.tmp / name
@@ -194,6 +205,325 @@ class Runner(Lane):
         sd_lane.run_lane(self.repo, self.environ, enqueue_during)
         self.assertEqual([entry["status"] for entry in self.entries()], ["prepared", "prepared"])
 
+
+class Speculation(Lane):
+    """sd:2586: while one entry ships, the next one's gate runs on the predicted landing.
+
+    A bare `origin` holds main; two worktrees each add a file and a CHANGELOG
+    entry, and main moves after they fork. The recorder lands entry 1 as
+    GitHub's squash would: its catch-up tree as a new commit on main.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.origin = self.tmp / "origin.git"
+        git(self.tmp, "init", "-q", "--bare", "-b", "main", str(self.origin))
+        self.commit_files(self.repo, {".github/sd-gate-reuse.json": json.dumps(
+            {"schema_version": 1, "key": "tree", "reason": "the check reads no history"}),
+            "CHANGELOG.md": "# Changelog\n\n## Unreleased\n\n- base\n"}, "declare")
+        git(self.repo, "remote", "add", "origin", str(self.origin))
+        git(self.repo, "push", "-q", "origin", "main")
+        git(self.repo, "remote", "set-head", "origin", "main")
+        self.first = self.branch("first", {"one.txt": "1\n"}, "- one\n")
+        self.second = self.branch("second", {"two.txt": "2\n"}, "- two\n")
+        self.commit_files(self.repo, {"base.txt": "b\n"}, "main moved")
+        git(self.repo, "push", "-q", "origin", "main")
+        self.gates: list[tuple[pathlib.Path, str, str]] = []
+        self.events = {name: threading.Event() for name in ("landed", "gated")}
+        self.seen: dict[str, bool] = {}
+
+    def commit_files(self, tree: pathlib.Path, files: dict[str, str], message: str) -> None:
+        for name, text in files.items():
+            (tree / name).parent.mkdir(parents=True, exist_ok=True)
+            (tree / name).write_text(text, encoding="utf-8")
+        git(tree, "add", "-A")
+        git(tree, "commit", "-q", "-m", message)
+
+    def branch(self, name: str, files: dict[str, str], entry: str) -> pathlib.Path:
+        path = self.tmp / name
+        git(self.repo, "worktree", "add", "-q", "-b", name, str(path), "origin/main")
+        changelog = (path / "CHANGELOG.md").read_text(encoding="utf-8").replace("## Unreleased\n\n", f"## Unreleased\n\n{entry}")
+        self.commit_files(path, {**files, "CHANGELOG.md": changelog}, name)
+        return path
+
+    def caught_up(self, head: str, ref: str) -> str:
+        """The tree `sd-ship prepare --catch-up` makes at `head` against `ref`, built apart from the lane's code."""
+        import sd_changelog_merge
+
+        scratch = self.tmp / f"scratch-{len(list(self.tmp.iterdir()))}"
+        git(self.repo, "worktree", "add", "-q", "--detach", str(scratch), head)
+        try:
+            merged = subprocess.run(["git", "-C", str(scratch), "merge", "--no-ff", "--no-edit", "-m", "catch up", ref],
+                                    capture_output=True, text=True, check=False)
+            if merged.returncode:
+                self.assertTrue(sd_changelog_merge.resolve_keep_both(scratch))
+                git(scratch, "commit", "-q", "--no-verify", "-m", "catch up")
+            return git(scratch, "rev-parse", "HEAD^{tree}")
+        finally:
+            git(self.repo, "worktree", "remove", "--force", str(scratch))
+
+    def ship(self, argv: list[str], log: pathlib.Path) -> dict:
+        verb, item = argv[2], int(argv[argv.index("--item") + 1])
+        if (item, verb) == (1, "merge"):
+            git(self.repo, "fetch", "-q", "origin")
+            tree = self.caught_up(git(self.first, "rev-parse", "HEAD"), "origin/main")
+            landed = git(self.repo, "commit-tree", tree, "-p", "origin/main", "-m", "one (#1)")
+            git(self.repo, "push", "-q", "origin", f"{landed}:refs/heads/main")
+            self.events["landed"].set()
+        if (item, verb) == (2, "prepare"):
+            self.seen["gate done before prepare 2"] = self.events["gated"].is_set()
+        return super().ship(argv, log)
+
+    def gate(self, root: pathlib.Path, head: str, base: str) -> dict:
+        """Still running when entry 1 lands, and ends half a second after."""
+        self.gates.append((root, head, base))
+        self.seen["gate ran while entry 1 shipped"] = self.events["landed"].wait(10)
+        time.sleep(0.5)
+        self.events["gated"].set()
+        return {"status": "success", "summary": "sd-check pass (check pass)", "receipt_revision": 1}
+
+    def queue_both(self, *, manual: bool = True) -> None:
+        sd_lane.enqueue_entry(self.first, 1, "one", self.body, self.environ, manual=manual, claim="deliver")
+        sd_lane.enqueue_entry(self.second, 2, "two", self.body, self.environ, manual=True, claim="deliver")
+
+    def test_the_next_entry_is_gated_on_the_predicted_landing_while_this_one_ships(self) -> None:
+        self.queue_both()
+        fork = git(self.repo, "rev-parse", "origin/main")
+        sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate)
+        [(root, head, base)] = self.gates
+        self.assertEqual(root, self.second)
+        git(self.repo, "fetch", "-q", "origin")
+        landed = git(self.repo, "rev-parse", "origin/main")
+        # The predicted landing is another commit than the real one, on the same base, with the same tree.
+        self.assertNotEqual(base, landed)
+        self.assertEqual(git(self.repo, "rev-parse", f"{base}^"), fork)
+        self.assertEqual(git(self.repo, "rev-parse", f"{base}^{{tree}}"), git(self.repo, "rev-parse", "origin/main^{tree}"))
+        # The gated tree is the one entry 2's catch-up makes after the real landing, CHANGELOG resolved.
+        self.assertEqual(git(self.repo, "rev-parse", f"{head}^{{tree}}"),
+                         self.caught_up(git(self.second, "rev-parse", "HEAD"), "origin/main"))
+        self.assertTrue(self.seen["gate ran while entry 1 shipped"])
+
+    def test_the_next_prepare_starts_after_the_speculative_gate_ends(self) -> None:
+        self.queue_both()
+        sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate)
+        self.assertTrue(self.seen["gate done before prepare 2"])
+
+    def test_the_next_entry_records_the_speculation(self) -> None:
+        self.queue_both()
+        sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate)
+        [(_, head, base)] = self.gates
+        speculation = self.entries()[1]["speculation"]
+        self.assertEqual({key: speculation[key] for key in ("after", "head", "base", "status", "receipt")},
+                         {"after": 1, "head": head, "base": base, "status": "success", "receipt": "recorded"})
+        self.assertIn('"status": "success"', pathlib.Path(speculation["log"]).read_text(encoding="utf-8"))
+
+    def test_an_entry_queued_without_manual_is_not_predicted(self) -> None:
+        """It stops prepared and never lands, so the next entry's gate would name a tree no prepare makes."""
+        self.queue_both(manual=False)
+        sd_lane.run_lane(self.repo, self.environ, super().ship, self.gate)
+        self.assertEqual(self.gates, [])
+        self.assertNotIn("speculation", self.entries()[1])
+
+    def test_without_the_tree_key_nothing_is_gated(self) -> None:
+        for tree in (self.first, self.second):
+            git(tree, "rm", "-q", ".github/sd-gate-reuse.json")
+            git(tree, "commit", "-q", "-m", "no tree key")
+        self.queue_both()
+        sd_lane.run_lane(self.repo, self.environ, super().ship, self.gate)
+        self.assertEqual(self.gates, [])
+        self.assertEqual(self.entries()[1]["speculation"]["status"], "skipped")
+        self.assertIn("no tree key", self.entries()[1]["speculation"]["reason"])
+
+    def test_a_conflict_with_the_predicted_landing_gates_nothing_and_both_entries_still_run(self) -> None:
+        self.commit_files(self.second, {"one.txt": "not 1\n"}, "conflicts with first")
+        worktrees = git(self.repo, "worktree", "list", "--porcelain").count("worktree ")
+        self.queue_both()
+        sd_lane.run_lane(self.repo, self.environ, super().ship, self.gate)
+        self.assertEqual(self.gates, [])
+        self.assertEqual([entry["status"] for entry in self.entries()], ["merged", "merged"])
+        self.assertIn("conflicts with sd:1", self.entries()[1]["speculation"]["reason"])
+        self.assertEqual(git(self.repo, "worktree", "list", "--porcelain").count("worktree "), worktrees)
+
+    def test_a_gate_that_raises_does_not_stop_the_lane(self) -> None:
+        def broken(root: pathlib.Path, head: str, base: str) -> dict:
+            raise RuntimeError("the gate broke")
+        self.queue_both()
+        sd_lane.run_lane(self.repo, self.environ, super().ship, broken)
+        self.assertEqual([entry["status"] for entry in self.entries()], ["merged", "merged"])
+        self.assertEqual(self.entries()[1]["speculation"]["status"], "error")
+
+
+class Landing(Lane):
+    """sd:2568: after a merge, clean up, note the item and fast-forward the main checkout."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.origin = self.tmp / "origin.git"
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(self.origin)], check=True)
+        git(self.repo, "remote", "add", "origin", str(self.origin))
+        git(self.repo, "push", "-q", "-u", "origin", "main")
+
+    def topic(self, name: str = "topic") -> tuple[pathlib.Path, str]:
+        """A pushed worktree whose commit tracks a file, a nested file and a symlink, as a real one does."""
+        tree = self.worktree(name)
+        (tree / "pkg/mod").mkdir(parents=True)
+        (tree / "README.md").write_text("readme\n", encoding="utf-8")
+        (tree / "pkg/mod/a.py").write_text("A = 1\n", encoding="utf-8")
+        (tree / "link").symlink_to("README.md")
+        git(tree, "add", "-A")
+        git(tree, "commit", "-q", "-m", name)
+        git(tree, "push", "-q", "origin", name)
+        return tree, git(tree, "rev-parse", "HEAD")
+
+    def merge_lands(self, tree: pathlib.Path, item: int, head: str) -> None:
+        sd_lane.enqueue_entry(tree, item, "t", self.body, self.environ, manual=True, claim="deliver")
+        self.answers[(item, "prepare")] = {"ok": True, "phase": "ready_to_send", "head": head}
+        self.answers[(item, "merge")] = {"ok": True, "phase": "merged", "merge_commit": "c0ffee" * 6 + "c0ff"}
+
+    def drain(self, ship=None) -> dict:
+        return sd_lane.run_lane(self.repo, self.environ, ship or self.ship)
+
+    def remote_branches(self) -> list[str]:
+        return git(self.origin, "for-each-ref", "--format=%(refname:short)", "refs/heads").split()
+
+    def advance_origin_main(self) -> str:
+        upstream = self.tmp / "upstream"
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(upstream)], check=True)
+        git(upstream, "-c", "user.email=t@example.test", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "landed")
+        git(upstream, "push", "-q", "origin", "main")
+        return git(upstream, "rev-parse", "HEAD")
+
+    def test_a_merged_worktree_stays_and_the_note_names_its_removal_command(self) -> None:
+        """The review's race (sd:2568): removal can race a live builder, so the runner never removes the worktree."""
+        tree, head = self.topic()
+        self.merge_lands(tree, 1, head)
+        self.drain()
+        self.assertEqual((tree / "pkg/mod/a.py").read_text(encoding="utf-8"), "A = 1\n")
+        self.assertEqual(os.readlink(tree / "link"), "README.md")
+        self.assertEqual(git(self.repo, "rev-parse", "refs/heads/topic"), head)
+        self.assertEqual(self.remote_branches(), ["main"])
+        remove = f"git -C {self.repo} worktree remove {tree} && git -C {self.repo} update-ref -d refs/heads/topic {head}"
+        [(item, body, main)] = self.notes
+        self.assertEqual((item, main), (1, self.repo))
+        self.assertEqual(body, f"Landed: merged at c0ffeec0ffee (head {head[:12]}). Cleanup: removed origin/topic, "
+                               f"worktree {tree} and branch topic kept for removal once the builder stops. "
+                               f"Recover: git branch topic {head}. Remove: {remove}")
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], entry["remove"]), ("merged", remove))
+        subprocess.run(remove, shell=True, check=True, capture_output=True)  # the printed command works as printed
+        self.assertFalse(tree.exists())
+        self.assertEqual(git(self.repo, "branch", "--list", "topic"), "")
+
+    def test_a_builder_write_through_an_open_handle_survives_the_landing(self) -> None:
+        """The second review's case: a handle opened before the landing, written after it."""
+        tree, head = self.topic()
+        self.merge_lands(tree, 1, head)
+        with open(tree / "README.md", "a", encoding="utf-8") as handle:
+            self.drain()
+            handle.write("late\n")
+        self.assertEqual((tree / "README.md").read_text(encoding="utf-8"), "readme\nlate\n")
+
+    def test_the_runner_notes_through_default_note_when_given_none(self) -> None:
+        """The fixture replaces `default_note`; `run_lane` must read it at the call, or a suite writes real notes."""
+        tree, head = self.topic()
+        self.merge_lands(tree, 1, head)
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual([item for item, _, _ in self.notes], [1])
+        self.assertEqual(self.entries()[0]["note"], "written")
+
+    def test_a_tip_past_the_merged_head_is_kept(self) -> None:
+        tree, head = self.topic()
+        self.merge_lands(tree, 1, head)
+        ship = self.ship
+
+        def commit_after_prepare(argv: list[str], log: pathlib.Path) -> dict:
+            if argv[2] == "merge":
+                git(tree, "commit", "-q", "--allow-empty", "-m", "later")
+            return ship(argv, log)
+        self.drain(commit_after_prepare)
+        self.assertTrue(tree.exists())
+        self.assertEqual(self.remote_branches(), ["main", "topic"])
+        self.assertIn("is not the merged head", self.entries()[0]["cleanup"])
+
+    def test_a_remote_branch_that_moved_is_not_deleted(self) -> None:
+        tree, head = self.topic()
+        other = self.tmp / "other"
+        subprocess.run(["git", "clone", "-q", "-b", "topic", str(self.origin), str(other)], check=True)
+        git(other, "-c", "user.email=t@example.test", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x")
+        git(other, "push", "-q", "origin", "topic")
+        self.merge_lands(tree, 1, head)
+        self.drain()
+        self.assertEqual(self.remote_branches(), ["main", "topic"])
+        self.assertIn("origin/topic kept: it is at", self.entries()[0]["cleanup"])
+
+    def test_the_main_checkout_is_never_removed(self) -> None:
+        head = git(self.repo, "rev-parse", "HEAD")
+        self.merge_lands(self.repo, 1, head)
+        self.drain()
+        self.assertTrue((self.repo / ".git").exists())
+        self.assertIn("is the main checkout", self.entries()[0]["cleanup"])
+
+    def test_the_main_checkout_fast_forwards_to_the_merged_base(self) -> None:
+        tree, head = self.topic()
+        landed = self.advance_origin_main()
+        self.merge_lands(tree, 1, head)
+        self.drain()
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), landed)
+        self.assertIn("fast-forwarded", self.entries()[0]["fast_forward"])
+
+    def test_a_checkout_off_the_default_branch_is_not_moved(self) -> None:
+        tree, head = self.topic()
+        git(self.repo, "switch", "-q", "-c", "elsewhere")
+        before = git(self.repo, "rev-parse", "HEAD")
+        self.advance_origin_main()
+        self.merge_lands(tree, 1, head)
+        self.drain()
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), before)
+        self.assertIn("on elsewhere, not the default branch", self.entries()[0]["fast_forward"])
+
+    def test_origin_head_names_the_default_branch_over_the_usual_names(self) -> None:
+        tree, head = self.topic()
+        git(self.repo, "remote", "set-head", "origin", "main")
+        git(self.repo, "switch", "-q", "-c", "master")
+        before = git(self.repo, "rev-parse", "HEAD")
+        self.advance_origin_main()
+        self.merge_lands(tree, 1, head)
+        self.drain()
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), before)
+        self.assertIn("on master, not the default branch", self.entries()[0]["fast_forward"])
+
+    def test_the_tools_checkout_tries_another_lanes_lock_once_and_never_waits(self) -> None:
+        """The pack checkout runs every lane's `sd-ship`; move it only while no other lane runs."""
+        tree, head = self.topic()
+        before = git(self.repo, "rev-parse", "HEAD")
+        self.advance_origin_main()
+        self.merge_lands(tree, 1, head)
+        other = self.root / "system/lane/queue/runner.lock"
+        other.parent.mkdir(parents=True)
+        with open(other, "a", encoding="utf-8") as held, mock.patch.object(sd_lane, "BIN", self.repo / "bin"):
+            fcntl.flock(held, fcntl.LOCK_EX)
+            started = time.monotonic()
+            self.drain()
+        self.assertLess(time.monotonic() - started, 30)
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), before)
+        self.assertIn("the system lane is running from this checkout", self.entries()[0]["fast_forward"])
+        tree, head = self.topic("later")
+        self.merge_lands(tree, 2, head)
+        with mock.patch.object(sd_lane, "BIN", self.repo / "bin"):
+            self.drain()  # the other lane is idle now: the next landing catches up
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), git(self.origin, "rev-parse", "main"))
+
+    def test_a_failing_note_does_not_undo_the_merge(self) -> None:
+        tree, head = self.topic()
+        self.merge_lands(tree, 1, head)
+
+        def broken(item: int, body: str, main: pathlib.Path) -> str:
+            raise OSError("the store is locked")
+        sd_lane.run_lane(self.repo, self.environ, self.ship, note=broken)
+        entry = self.entries()[0]
+        self.assertEqual(entry["status"], "merged")
+        self.assertIn("the store is locked", entry["note"])
+        self.assertIn("fast-forward", entry["fast_forward"])
 
 class ShipProcess(Lane):
     def test_the_answer_is_parsed_and_the_whole_output_kept(self) -> None:

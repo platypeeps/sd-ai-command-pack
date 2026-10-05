@@ -176,6 +176,7 @@ After the switch:
   The status then says `(reused)`. The merge gate never writes a receipt.
   Prepare reads one too: a pass that `sd gate check` or an earlier prepare left at the same head and binding (sd:1912).
   A repository that tracks `.github/sd-gate-reuse.json` keys receipts by tree and merge base instead of head, for 6 hours (sd:1912).
+  The merge base binds by its tree, not its commit (sd:2586).
   The pack's own declaration adds `"tool": "tree"`: its gate runs the gated tree's own `bin/sd-check` and binds that tree, not the checkout's `bin/` (sd:2613).
   A pack landing between a builder's gate and the lane's prepare then keeps the pack item's receipt.
   The field counts only when the running pack belongs to the gated repository; any other repository's gate keeps the checkout binding.
@@ -322,8 +323,13 @@ advance (operator ruling 2026-09-30, sd:1933).
 `sd-ship` owns the lines `sd_lib.OWNED_TRAILERS` names: `Item:`, `Work:`,
 `Delivers:`, `Closes:`, `Authored-with:` and `Attributes:`. `prepare` appends
 `Work:` to the body it publishes, and `merge` appends `Item:`, `Delivers:`, any
-owed `Closes:` and the authorship lines to the squash message, so a body written for `sd-ship`
-carries none of them. A supplied line that says what `sd-ship` would write is
+owed `Closes:` (sd:1600) and the authorship lines to the squash message, so a
+body written for `sd-ship` carries none of them. The one exception is
+`Closes: sd:N[, sd:M]`: the body keeps it, and the merge adds `Delivers:` for
+each item it names and closes them with the claimed item (sd:1481). Only a
+column-zero line outside fenced code and HTML comments counts; `prepare`
+refuses a quoted one, which an indent keeps as an example. `Refs:` is
+not owned; its items stay open. A supplied line that says what `sd-ship` would write is
 stripped and listed in the result's `normalized`; any other owned line is
 refused by line number, with the expected value. So the body `sd-ship`
 published, fed back as `--body-file`, prepares again. Without `--body-file`,
@@ -491,12 +497,13 @@ which the installer places in `~/.claude/agents`.
   another repository's `make check`, run `sd gate run -- make check`; it waits,
   runs the command, and frees the slot when the command ends.
   `sd gate status` shows who holds a slot and who waits, and since when.
-- **Reviews share the machine through their own slots (sd:2523).** After its
-  check, every review takes one of `sd.review_slots` machine-wide review slots
-  (unset: 2) before its first reviewer starts, and frees it after the last.
+- **Reviews share the machine through their own slots (sd:2523).** Every
+  review takes one of `sd.review_slots` machine-wide review slots (unset: 2)
+  before its first reviewer starts, and frees it after the last, before the
+  gate.
   `SD_REVIEW_SLOTS` overrides it for one run, and `0` lifts the cap. A waiting
   review prints one `waiting for a review slot` line on stderr, naming each
-  holder. The wait spends what is left of the check's bound, counted from
+  holder. The wait spends what is left of the setup bound, counted from
   the review's start; when that runs out, the review refuses with
   `review_slot_busy`. Slots are kernel locks
   under `$XDG_STATE_HOME/sd/review-slots`, so a dead holder's slot is free.
@@ -511,7 +518,25 @@ which the installer places in `~/.claude/agents`.
   failed entry is marked and the next one runs. A second runner exits at once
   rather than wait. Each prepare and merge keeps its whole output under
   `<lane>/logs/`. `list` and `cancel` read and edit the queue; `watch` prints
-  each gate end a log under `sd.lane_root` records, once.
+  each gate end a log under `sd.lane_root` records, once. While an entry
+  queued with `--manual` ships, the runner gates the next entry on its
+  predicted landing in the background, and waits for that gate after the
+  merge, so the next prepare reuses its receipt (sd:2586). That needs the
+  tree key above; the next entry's `speculation` field says what ran.
+- **After a lane merge, the runner lands the entry (sd:2568).** It deletes
+  the remote branch with `--force-with-lease` while the worktree's tip is
+  the merged head. It never removes the worktree or its local branch: no
+  lock excludes the builder, and a write through a file handle opened before
+  removal reaches an unlinked file and is lost. The entry's `remove` holds
+  the command to run once the builder stops: `git -C <main> worktree remove
+  <worktree> && git -C <main> update-ref -d refs/heads/<branch> <tip>`.
+  `git worktree remove` refuses uncommitted or untracked files, and
+  `update-ref -d` refuses a branch that moved. The runner then notes the
+  item: `Landed: merged at <merge> (head <head>). Cleanup: …. Recover: git
+  branch <branch> <tip>. Remove: <command>` Last, it fast-forwards the main
+  checkout when it is on the default branch. When that checkout holds the
+  running `sd-ship`, it first tries every other lane's runner lock once and
+  skips if one is held; the next landing retries.
 - **Test one version per language, the latest stable (Python 3.14, Node
   26), in CI and locally; no version matrices.**
 

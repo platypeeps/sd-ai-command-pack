@@ -1574,18 +1574,18 @@ def gate_failed_line(check: Mapping[str, Any] | None) -> str:
         started = check.get("started") or []
         if not started:
             return (f"sd-review: the gate could not start {check['interpreter']} for {check['entrypoint']} "
-                    f"({check['evidence']}); no check ran and no provider was asked")
+                    f"({check['evidence']}); no check ran and the review had cleared before it ran")
         return (f"sd-review: the gate's {check['entrypoint']} could not start {check['interpreter']} "
-                f"({check['evidence']}); {', '.join(started)} ran; no provider was asked")
+                f"({check['evidence']}); {', '.join(started)} ran; the review had cleared before it ran")
     if check and check.get("reason") == COMMAND_NOT_FOUND:
         what = f"{check['missing_command']} was not found" if check.get("missing_command") else "a command was not found"
         where = f" at line {check['missing_line']}" if check.get("missing_line") else ""
         return (f"sd-review: the gate's {check['entrypoint']} failed: {what}{where} ({check['evidence']}); "
-                "it ran up to that point, so a check may have run; no provider was asked")
+                "it ran up to that point, so a check may have run; the review had cleared before it ran")
     if check and check.get("reason") == GATE_TIMED_OUT:
-        return (f"sd-review: the gate's {check['entrypoint']} stopped at its bound ({check['evidence']}); no provider "
-                "was asked; give it longer with --timeout SECONDS (sd-ship prepare: --review-timeout SECONDS)")
-    return "sd-review: the repository's own gate failed; no provider was asked"
+        return (f"sd-review: the gate's {check['entrypoint']} stopped at its bound ({check['evidence']}); the review had cleared before it ran; "
+                "give it longer with --timeout SECONDS (sd-ship prepare: --review-timeout SECONDS)")
+    return "sd-review: the repository's own gate failed; the review had cleared before it ran"
 
 
 def phase_seconds(args: argparse.Namespace) -> int:
@@ -1605,7 +1605,7 @@ def gate_seconds(args: argparse.Namespace) -> int:
 
 def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeout: int, branch: str | None,
                    args: argparse.Namespace, head: str | None = None) -> dict[str, Any]:
-    """Step 1 in a clean worktree at `head`, HEAD by default, never the live checkout (sd:2041, sd:2077).
+    """The gate step in a clean worktree at `head`, HEAD by default, never the live checkout (sd:2041, sd:2077).
 
     With a `branch` it runs as the local gate does, against `origin/<branch>`, for
     `sd-ship prepare` under `repo.ci = local`; its receipt spares the merge gate and
@@ -1650,7 +1650,7 @@ def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], t
 
 
 def run_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeout: int) -> dict[str, Any]:
-    """Step 1: the repository's own gate, through sd-check, held to the planned phase budget (sd:1475)."""
+    """The gate step, after a review that does not block (sd:2605): sd-check, held to the planned phase budget (sd:1475)."""
     argv = [sys.executable, str(pathlib.Path(_BIN) / "sd-check"), "--timeout", str(timeout), "--slot-timeout", str(sd_lib.GATE_SLOT_SECONDS), "--json"]
     result = runner(argv, env, root, timeout + sd_lib.GATE_SLOT_SECONDS)  # sd:2611: the slot wait is its own plan phase
     try:
@@ -2128,24 +2128,10 @@ def review(
         return result
 
     # Legacy runner rows lack before-check/runtime identity and never grant reuse.
-    check = (sd_check_receipts.reuse_checked_result(root, env, getattr(args, "database", None)) if getattr(args, "reuse_check", False) else None)
-    gate_branch = getattr(args, "gate_check", None)
-    check = check or (run_gate_check(root, runner, env, check_seconds, gate_branch, args, subject.head)
-                      if gate_branch or args.scope in ("branch", "pr") else run_check(root, runner, env, check_seconds))
-    result["check"] = check
-    if check["status"] == "fail":
-        result["status"] = "gate_failed"
+    # Read first: a receipt at this head stands for the gate whatever the review says.
+    reused = (sd_check_receipts.reuse_checked_result(root, env, getattr(args, "database", None)) if getattr(args, "reuse_check", False) else None)
+    if not (slot := sd_lib.review_slot(result, env, root, SETUP_TIMEOUT_SECONDS)):
         return result
-    changed = changed_review_input(root, args, previous, env, (subject, prompt, _material), transport_overheads)
-    if changed is not None:
-        result["input_manifest"] = changed
-        result["readiness"] = sd_review_readiness.review_readiness(result, chosen, env)
-        result["readiness"]["status"] = "blocked"
-        result["readiness"]["blockers"].append(sd_review_readiness.blocker(
-            "input_changed", "input", "Review inputs changed during checks; rerun readiness and the full check."))
-        result["status"] = "refused"
-        return result
-    if not (slot := sd_lib.review_slot(result, env, root, check_seconds)): return result  # noqa: E701, F841 -- sd:2523: slot held till return
 
     outcomes: list[Outcome] = []
     reviewed: list[str] = []
@@ -2165,7 +2151,42 @@ def review(
             outcomes.append(outcome)
             if outcome.status in (CLEAN, FINDINGS):
                 reviewed.append(outcome.backend)
-    return finish_review(result, outcomes, reviewed)
+    finish_review(result, outcomes, reviewed)
+    slot.give_back()  # sd:2523: the gate below queues in its own pool
+    if reused is not None or result["status"] not in GATED_STATUSES:
+        result["check"] = reused or {"status": NOT_RUN_CHECK, "exit_code": None,
+                                     "reason": f"the review is {result['status']}; the gate runs on a head it does not block"}
+        return result
+    gate_branch = getattr(args, "gate_check", None)
+    result["check"] = (run_gate_check(root, runner, env, check_seconds, gate_branch, args, subject.head)
+                       if gate_branch or args.scope in ("branch", "pr") else run_check(root, runner, env, check_seconds))
+    return after_gate(result, root, args, previous, env, (subject, prompt, _material), transport_overheads, chosen)
+
+
+#: The review statuses the repository gate runs after (sd:2605). A blocking or
+#: incomplete review refuses the head whatever the gate says, so the gate, the
+#: longest step by far, runs only once the review has cleared it.
+GATED_STATUSES = ("clean", "advisory", "skipped")
+#: `check.status` when the review blocked and the gate never ran: not a pass.
+NOT_RUN_CHECK = "not_run"
+
+
+def after_gate(result: dict[str, Any], root: pathlib.Path, args: argparse.Namespace, previous: dict[str, Any] | None,
+               env: Mapping[str, str], before: tuple[Subject, str, str], overheads: dict[str, str | None],
+               chosen: Sequence[sd_registry.Provider]) -> dict[str, Any]:
+    """The gate's verdict over a review that cleared: a failure, inputs it changed, or the review as it stands."""
+    if result["check"]["status"] == "fail":
+        result["status"] = "gate_failed"
+        return result
+    changed = changed_review_input(root, args, previous, env, before, overheads)
+    if changed is not None:
+        result["input_manifest"] = changed
+        result["readiness"] = sd_review_readiness.review_readiness(result, chosen, env)
+        result["readiness"]["status"] = "blocked"
+        result["readiness"]["blockers"].append(sd_review_readiness.blocker(
+            "input_changed", "input", "Review inputs changed during checks; rerun readiness and the full check."))
+        result["status"] = "refused"
+    return result
 
 
 def provider_preflight(result: dict[str, Any], chosen: Sequence[sd_registry.Provider], root: pathlib.Path,
@@ -2389,7 +2410,9 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
         return
 
     check = result.get("check")
-    if check:
+    if check and check["status"] == NOT_RUN_CHECK:
+        write(f"\ncheck: not run -- {check['reason']}\n")
+    elif check:
         reason = f" reason={check['reason']}" if check.get("reason") else ""
         write(f"\ncheck: {check['status']} (exit {check['exit_code']}){reason}\n")
     if result["status"] == "gate_failed":

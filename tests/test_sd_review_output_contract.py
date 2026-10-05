@@ -91,7 +91,9 @@ class URLContractTests(ReviewFixture):
         args.explain = False
         failed = self.run_review(root, args, client, FakeRunner({"sd-check": sd_review.Completed(1, "{}", "failed")}))
         self.assertEqual(failed["status"], "gate_failed")
-        self.assertEqual(client.sent, [])
+        # sd:2605: the reviewers run first, and a gate that fails after them still fails the review.
+        self.assertEqual([call["provider"] for call in client.sent], planned["providers"])
+        client.sent.clear()
         actual = self.run_review(root, args, client)
         for key in ("providers", "fallback_candidates", "timing", "requested_reviews"):
             self.assertEqual(actual[key], planned[key])
