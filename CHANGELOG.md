@@ -322,6 +322,12 @@
 
 ### Fixed
 
+- **`sd plugin list` no longer waits on a stalled plugin root (sd:2555).**
+  It read each registered root in turn, so one root that never answered held
+  the whole list. Each root now reads in its own daemon thread, as lookups do
+  since sd:2540. A root silent after 5 s is listed unreadable, with a
+  `warning: skipped plugin root` line on stderr.
+
 - **`sd-ship prepare` binds only an open pull request (sd:2656).** sd:1912's
   recorded branch had carried #1242, merged on 2026-09-28. Prepare pushed to
   that branch, then its lookup read merged and closed pull requests too and
