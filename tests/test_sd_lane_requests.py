@@ -50,9 +50,7 @@ class Requests(lane_suite.Lane):
         self.path = sd_lane.queue_path(self.repo, self.environ)
         self.opt_in = "accept"
         self.gates: list[tuple] = []
-        # `create=True`: the pinned pack reads no `repo.satellite_gate` before step 3.
-        patcher = mock.patch.object(sd_lane.sd_lib, "repo_satellite_gate", lambda connection, root: self.opt_in,
-                                    create=True)
+        patcher = mock.patch.object(sd_lane.sd_lib, "repo_satellite_gate", lambda connection, root: self.opt_in)
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -255,20 +253,25 @@ class SatelliteOnly(Requests):
 
 class PackDigest(Requests):
     def pack_row(self) -> dict:
-        return receipts.read(self.connection, sd_lane.PACK_PREFIX + SLUG)[1]
+        return receipts.read(self.connection, sd_lane_receipts().PACK_PREFIX + SLUG)[1]
 
     def test_a_run_publishes_the_hubs_pack_digest_at_its_start(self) -> None:
-        with mock.patch.object(sd_lane_receipts(), "pack_bin", lambda: "f" * 64, create=True):
+        with mock.patch.object(sd_lane_receipts(), "pack_bin", lambda own=False: "tree" if own else "f" * 64):
             answer = sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate, hub=self.hub)
         self.assertEqual(answer["pack"], "published")
         row = self.pack_row()
         self.assertEqual((row["writer"], row["pack_bin"]), ("sd-lane", "f" * 64))
         self.assertEqual(row["pack_rev"], git(sd_lane.BIN.parent, "rev-parse", "HEAD"))
 
-    def test_without_a_pack_digest_nothing_is_published(self) -> None:
-        with mock.patch.object(sd_lane_receipts(), "pack_bin", None, create=True):
+    def test_a_pack_gating_itself_publishes_tree_as_its_receipts_bind(self) -> None:
+        with mock.patch.object(sd_lane_receipts(), "gates_itself", lambda root, tree, pack: True):
             answer = sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate, hub=self.hub)
-        self.assertIn("skipped", answer["pack"])
+        self.assertEqual((answer["pack"], self.pack_row()["pack_bin"]), ("published", "tree"))
+
+    def test_a_failed_digest_publishes_nothing_and_the_run_goes_on(self) -> None:
+        with mock.patch.object(sd_lane_receipts(), "pack_bin", mock.Mock(side_effect=OSError("bin/ unreadable"))):
+            answer = sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate, hub=self.hub)
+        self.assertEqual(answer["pack"], "failed: OSError: bin/ unreadable")
         self.assertEqual(self.pack_row(), {})
 
 
@@ -277,7 +280,7 @@ class RequestVerb(Requests):
 
     def request(self, served_by: str | None = HUB) -> dict:
         with mock.patch("sd_db.database.served_by", lambda target, home=None: served_by, create=True), \
-                mock.patch.object(sd_lane, "satellite_identity", lambda: {"hostname": "satellite.example.test"}):
+                mock.patch.object(sd_lane_receipts(), "satellite_identity", lambda: {"hostname": "satellite.example.test"}):
             return sd_lane.request(self.topic, 7, manual=True, database=self.database)
 
     def test_a_prepared_item_writes_its_request_row(self) -> None:

@@ -115,7 +115,7 @@ R12. Local reuse keeps today's binding, the whole environment included, in
      every repository. Only the hub's offload comparison is portable, and
      only for an opted-in repository. It compares the `PATH` order, named
      tools by sha256, named `HOME` configuration files by sha256, and every
-     other kept variable by value. `HOME`, `USER` and the home prefix are
+     other kept variable by the sha256 of its value. `HOME`, `USER` and the home prefix are
      normalized. A mismatch misses, and `reuse_miss` names the part (C-17).
 
 R13. A plain `sd-ship merge` in an opted-in repository reuses an offload

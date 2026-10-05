@@ -102,7 +102,6 @@ import json
 import os
 import pathlib
 import re
-import socket
 import subprocess
 import sys
 import tempfile
@@ -138,11 +137,6 @@ SATELLITE = "satellite"
 #: The request row a satellite writes, one per repository and item; `<slug>:<item>` follows.
 REQUEST_PREFIX = "lane-request:v1:"
 REQUEST_WRITER = "sd-lane-request"
-#: The hub's pack digest, which a satellite's `sd gate check` compares before it runs; `<slug>` follows.
-PACK_PREFIX = "sd-lane-pack:v1:"
-#: Who acts after a hand-back: the satellite, on its own branch (design.md, "Freshness").
-HAND_BACK = ("On the satellite: git merge origin/{base} on the branch (or sd-ship prepare --catch-up), "
-             "then sd gate check --base {base}, sd-ship prepare, and sd-ship lane request again.")
 #: What a refused request's row says to do, by refusal code.
 REFUSAL_ACTIONS = {
     "satellite_gate_off": "Opt the repository in on the hub with sd-db.sh repo satellite-gate <path> accept, "
@@ -349,20 +343,6 @@ def request_key(slug: str, item: int) -> str:
     return f"{REQUEST_PREFIX}{slug}:{item}"
 
 
-def satellite_identity() -> dict[str, Any]:
-    """This machine as a request names it: the tailnet's owner login and IPv4 address, and the host name for display."""
-    node: dict[str, Any] = {"hostname": socket.gethostname()}
-    try:
-        # An `sd_db` older than satellites has no `tailnet`; a missing module is what mypy's override covers.
-        from sd_db.tailnet import this_node  # noqa: PLC0415
-
-        this = this_node()
-        node.update(login=this.login, address=str(this.address))
-    except Exception as error:  # the request still stands; the row says why it names no node
-        node["error"] = f"{type(error).__name__}: {error}"[:300]
-    return node
-
-
 def request(root: pathlib.Path, item: int, *, manual: bool, database: pathlib.Path | None = None) -> dict[str, Any]:
     """`lane request` on a satellite: write the item's request row for the hub's lane (sd:2704).
 
@@ -373,14 +353,14 @@ def request(root: pathlib.Path, item: int, *, manual: bool, database: pathlib.Pa
     imported = sd_lib.import_sd_db()
     if imported.module is None:
         raise LaneError(str(imported.problem))
+    import sd_gate_receipts  # noqa: PLC0415
     from sd_db import ship as store  # noqa: PLC0415
     from sd_db.database import connect, default_path  # noqa: PLC0415
     from sd_db.errors import SdDbError  # noqa: PLC0415 -- a revision conflict is one
     from sd_ship_remote import Refusal, slug  # noqa: PLC0415
 
     database = database or default_path()
-    served_by = getattr(imported.module.database, "served_by", None)
-    hub = served_by(database) if served_by is not None else None
+    hub = sd_gate_receipts.served_hub(database)
     if not hub:
         raise LaneError("this machine is the sd hub: a request asks the hub to merge what a satellite gated; "
                         "queue a hub item with sd-ship lane enqueue", code="hub_request")
@@ -406,19 +386,13 @@ def request(root: pathlib.Path, item: int, *, manual: bool, database: pathlib.Pa
         revision, _ = store.read(connection, key)
         value = {"writer": REQUEST_WRITER, "repository": own, "item": item, "branch": branch, "head": pushed,
                  "base": shipped.get("base"), "authority": "manual" if manual else None,
-                 "satellite": satellite_identity(), "requested_at": stamp_now(), "status": "requested"}
+                 "satellite": sd_gate_receipts.satellite_identity(), "requested_at": stamp_now(), "status": "requested"}
         written = store.save(connection, key, revision, value)
     except SdDbError as error:
         raise LaneError(f"the request was not written to the hub {hub}; rerun sd-ship lane request: {error}") from None
     finally:
         connection.close()
     return {"request": key, "revision": written, **value}
-
-
-def satellite_gate(hub: Hub) -> str:
-    """`repo.satellite_gate` for the lane's repository; `off` while the pack has no reader for it (sd:2704 step 3)."""
-    reader = getattr(sd_lib, "repo_satellite_gate", None)
-    return reader(hub.connection, hub.main) if reader is not None else "off"
 
 
 def requests(hub: Hub) -> list[tuple[str, int, dict[str, Any]]]:
@@ -465,7 +439,7 @@ def take_in(hub: Hub, path: pathlib.Path, key: str, revision: int, row: dict[str
 
     def refuse(code: str, reason: str) -> dict[str, Any]:
         return answer("refused", code=code, reason=reason, next_action=REFUSAL_ACTIONS[code])
-    if sd_lib.repo_ci(hub.connection, hub.main) != "local" or satellite_gate(hub) != "accept":
+    if sd_lib.repo_ci(hub.connection, hub.main) != "local" or sd_lib.repo_satellite_gate(hub.connection, hub.main) != "accept":
         return refuse("satellite_gate_off", "the repository does not take satellite gates: "
                                             "repo.ci must be local and repo.satellite_gate accept")
     why = malformed(hub, key, row)
@@ -535,13 +509,12 @@ def publish_pack(hub: Hub) -> str:
     """Publish the pack digest this hub's merges compare, for a satellite's warning before its gate."""
     import sd_gate_receipts  # noqa: PLC0415
 
-    digest = getattr(sd_gate_receipts, "pack_bin", None)  # sd:2704 step 3 adds it
-    if digest is None:
-        return "skipped: this pack computes no pack_bin digest"
-    key = PACK_PREFIX + hub.slug
+    key = sd_gate_receipts.PACK_PREFIX + hub.slug
     try:
+        # A pack gating itself binds its tree, not this bin/, so it publishes what its receipts hold (sd:2613).
+        digest = sd_gate_receipts.pack_bin(sd_gate_receipts.gates_itself(hub.main, hub.main, BIN))
         revision, _ = hub.store.read(hub.connection, key)
-        hub.store.save(hub.connection, key, revision, {"writer": "sd-lane", "pack_bin": digest(), "published_at": stamp_now(),
+        hub.store.save(hub.connection, key, revision, {"writer": "sd-lane", "pack_bin": digest, "published_at": stamp_now(),
                                                        "pack_rev": lane_git(BIN.parent, "rev-parse", "HEAD")})
     except Exception as error:  # a satellite only loses its early warning; the merge still compares
         return f"failed: {type(error).__name__}: {error}"[:300]
@@ -603,8 +576,10 @@ def satellite_merge_argv(entry: dict[str, Any]) -> list[str]:
 
 def handed_back(entry: dict[str, Any], code: str, reason: str) -> dict[str, Any]:
     """The satellite acts next: its branch moved, the base moved, or the hub would not take its receipt."""
+    from sd_local_gate import HAND_BACK, SATELLITE_REFUSALS  # noqa: PLC0415
+
     return {"status": "handed_back", "code": code, "reason": reason[:600],
-            "next_action": HAND_BACK.format(base=entry["base"])}
+            "next_action": SATELLITE_REFUSALS.get(code, HAND_BACK).format(base=entry["base"])}
 
 
 def process_satellite(entry: dict[str, Any], logs: pathlib.Path, ship: Ship) -> dict[str, Any]:

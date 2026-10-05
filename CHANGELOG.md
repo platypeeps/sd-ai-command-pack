@@ -12,12 +12,10 @@
   `sd-ship merge --item N --branch B --expected-head H --manual --satellite-gate`.
   A merge refusal coded `head_moved`, `base_moved` or `satellite_*` also hands
   back; the entry, the request row and an item note carry the reason and the
-  satellite's next steps. The lane starts no speculative gate for a satellite
+  trust rule's next action for its code (`sd_local_gate.SATELLITE_REFUSALS`). The lane starts no speculative gate for a satellite
   follower, and predicts past a satellite entry ahead from its branch on
   origin. After the merge it deletes `origin/<branch>` with a lease on the
-  merged head and writes `merged` to the request row. `sd-ship merge` takes
-  `--satellite-gate` once the hub's acceptance lands (step 4); until then the
-  merge refuses the flag and the entry ends `failed`.
+  merged head and writes `merged` to the request row.
 - **A satellite asks the hub's lane to merge: `sd-ship lane request` (sd:2704).**
   On a satellite, `lane request --item N [--manual]` writes the row
   `lane-request:v1:<slug>:<item>` over the wire. It refuses on the hub
@@ -34,8 +32,65 @@
   once. `lane run --satellite-only` claims satellite entries only, starts no
   speculative gate and exits when none is pending; hub entries keep their
   place. Each run publishes the hub's pack digest to `sd-lane-pack:v1:<slug>`
-  once the pack computes one. Until the pack reads `repo.satellite_gate`,
-  intake reads it as `off` and refuses every request.
+  at its start and after a fast-forward of the pack checkout; a pack that
+  gates itself publishes `tree`, as its receipts bind (sd:2613).
+- **A satellite's gate writes an offload receipt for the hub (sd:2704 step 3).**
+  On an sd satellite, in a repository with `repo.satellite_gate = accept`, a
+  recorded pass of `check_in_worktree` (`sd gate check`, `sd-review
+  --gate-check`) also writes `sd-gate-offload:v1:<sha256 of slug and head>`
+  (or of the tree) to the hub: the writer, the satellite's identity, the
+  whole binding, the offload view, the pack `bin/` digest and revision, the
+  `CLAUDE.local.md` digest and the reading. A reuse writes the row unless that
+  same row stands field for field, with the pass's time and the offload view
+  its own receipt kept from before the run. The offload view's
+  `python` part binds the bytes and version of `sys.executable`, the
+  interpreter that runs `sd-check`. A failed write sets `offload_error` and
+  the pass stands. Before a run the gate warns when the hub's published pack
+  digest (`sd-lane-pack:v1:<slug>`) is another. `sd_lib.repo_satellite_gate`
+  reads the opt-in and answers `off` on every fault;
+  `sd_gate_receipts.pack_bin` is the digest the lane publishes. The offload
+  view also leaves out `LOGNAME` and `TMPDIR`, which name the login, and now
+  holds the sha256 of each variable's value, so no credential reaches the hub.
+- **The hub accepts a satellite's gate under the trust rule (sd:2704 step 4).**
+  `sd-ship merge --satellite-gate` merges on the satellite's offload receipt
+  and runs no `sd-check`, or refuses with the failed clause's code:
+  `satellite_gate_off`, `base_moved`, `satellite_receipt_missing`,
+  `satellite_receipt_invalid`, `satellite_binding`, `satellite_pack_mismatch`,
+  `satellite_receipt_expired`, `satellite_status_missing` or
+  `local_gate_foreign`. Each code's `next_action` comes from
+  `sd_local_gate.SATELLITE_REFUSALS`; the hand-back sends the work to the
+  satellite. The hub compares the tree part of the binding, the offload view
+  and the pack digest, never the satellite's machine part. On acceptance it
+  posts no status and saves `local_gate` with `satellite` provenance. A plain
+  merge in an opted-in repository tries the offload receipt after its own,
+  and runs the gate on a miss that `reuse_miss.offload` names. `ready`'s
+  behind refusal now carries `base_moved`.
+- **A satellite's prepare posts `sd/local-gate` from its offload receipt
+  (sd:2704 step 5).** In an opted-in `repo.ci = local` repository the status
+  reads `<head> inputs <digest>: sat <hostname>: <summary>`, which the hub's
+  clause 8 checks. Both sides derive the digest from the row, so a pack that
+  gates itself leaves the installed `bin/` out. It posts only from a row that
+  still stands here. With no receipt it posts nothing and reports
+  `offload_error`.
+- **Each gate gets its share of the cores (sd:2726).** On 2026-10-05 one
+  Rust gate under `sd.gate_slots=2` drove the load to 185 on 16 cores: cargo
+  builds and tests on every core. A slot holder now sets `CARGO_BUILD_JOBS`
+  and `RUST_TEST_THREADS` in its checks to the cores over the slot count, at
+  least 1; a lower positive value the caller set wins. The gate binds the
+  values in its receipt, so a new slot count runs the check once more rather
+  than reuse a pass made with other thread counts. `MAKEFLAGS` gets no `-j`: it would run a Makefile's
+  prerequisites at once.
+- **The offload view of a gate's environment (sd:2724, sd:2704 step 2a).**
+  `sd_gate_receipts.offload_view` gives the portable view a hub will compare
+  with a satellite's receipt: `PATH` entries in order with each `$HOME` prefix
+  written as `~`, the bytes of each `OFFLOAD_TOOLS` name on that `PATH`, the
+  bytes of each `OFFLOAD_HOME_FILES` entry or `absent`, and every other
+  variable by value, without `HOME` and `USER`. `offload_miss` names the first
+  differing part and name; a tool the hub cannot resolve is recorded, not
+  compared. Nothing calls them yet. Local reuse does not change: a receipt
+  still binds the whole environment, so another `HOME` still misses on
+  `environment_sha256`.
+
 - **`sd-ship lane move|hold|release` take `--expected-revision` (sd:2717).**
   `lane list` prints the queue's `revision`, a digest of the pending order
   and holds. A verb given that revision compares it under the queue's lock
@@ -380,6 +435,14 @@
 
 ### Fixed
 
+- **An acknowledgement no longer accepts an unknown `enforce_admins` (sd:2755).**
+  `sd_protection.observed_state` read unknown (a withheld `bypass_actors`
+  list, an unresolved `RepositoryRole`) as `false`, so an `accepted_gaps`
+  entry written for `enforce_admins` off also silenced the unknown gap. The
+  fact now observes `null` when unknown, through one reading the gap shares
+  (`admins_enforced`). `sd-status` accepts no entry for a gap whose own fact
+  is unknown, whatever it pins, and says so. The loader rejects a `null` pin.
+  An entry for a known off still applies.
 - **A failed repository gate leads with what failed, not the slot wait (sd:2687).**
   `sd-ship prepare`'s `gate_failed` refusal opened with the gate's own
   stderr, which starts with `waiting for a gate slot ... slot 1 held by pid

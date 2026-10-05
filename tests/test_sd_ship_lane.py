@@ -319,13 +319,15 @@ class SatelliteEntry(requests_suite.Requests):
         self.assertEqual((row["status"], row["merge_commit"]), ("merged", "merged-7"))
 
     def test_a_moved_base_hands_back_with_no_merge_call(self):
+        from sd_local_gate import HAND_BACK  # noqa: PLC0415
+
         self.advance("main")
         self.run_lane()
         self.assertEqual(self.calls, [])
         entry, row = self.entries()[0], self.row()
         self.assertEqual((entry["status"], entry["code"]), ("handed_back", "base_moved"))
         self.assertEqual((row["status"], row["code"], row["next_action"]),
-                         ("handed_back", "base_moved", sd_lane.HAND_BACK.format(base="main")))
+                         ("handed_back", "base_moved", HAND_BACK.format(base="main")))
         [(item, body, _)] = self.notes
         self.assertEqual(item, 7)
         self.assertIn("handed_back (base_moved)", body)
@@ -350,6 +352,8 @@ class SatelliteEntry(requests_suite.Requests):
                 entry, row = self.entries()[-1], self.row()
                 self.assertEqual((entry["status"], entry["code"], row["status"]), (status, code, status))
                 self.assertIn(f"Lane: {status} ({code})", self.notes[-1][1])
+                if code == "satellite_pack_mismatch":  # the trust rule's own next action, not the generic hand-back
+                    self.assertTrue(row["next_action"].startswith("Bring the satellite's pack checkout"), row["next_action"])
 
     def test_no_speculative_gate_starts_for_a_satellite_follower(self):
         hub_tree = self.worktree("hubitem")
