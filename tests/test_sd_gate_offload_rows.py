@@ -101,6 +101,14 @@ class OffloadRows(SatelliteFixture):
         self.assertIn("make", row["offload_view"]["tools"])
         self.assertNotIn("receipt_revision", row["reading"])
 
+    def test_the_offload_row_holds_no_variable_value(self) -> None:
+        """A credential the gate environment keeps reaches the hub's database as a digest only."""
+        with mock.patch.dict(os.environ, {"GH_TOKEN": "synthetic-secret-0001"}):
+            self.gate()
+        row = self.offload_row()
+        self.assertIn("GH_TOKEN", row["offload_view"]["variables"])
+        self.assertNotIn("synthetic-secret-0001", json.dumps(row))
+
     def test_a_hub_run_writes_no_offload_row(self) -> None:
         self.hub = None
         result = self.gate()

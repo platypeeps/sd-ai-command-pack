@@ -161,7 +161,7 @@ is `accept`. It has four parts:
 | `path` | the gate's `PATH` entries in order, each `$HOME` prefix written as `~` | Equal order: a name resolves through the same directory on both sides |
 | `tools` | sha256 of each name in `OFFLOAD_TOOLS`, resolved on that `PATH`, and of each tool `gate_binding` resolves | A name the check reaches through `make` or a script has equal bytes |
 | `home_files` | sha256 of each file in `OFFLOAD_HOME_FILES` under `HOME`, or `"absent"` | Named tool configuration under `HOME` is equal |
-| `variables` | every other variable `gate_environment` keeps, by value, with the `$HOME` prefix written as `~` | A variable that steers the check is equal. A variable present on one side only misses |
+| `variables` | sha256 of the value of every other variable `gate_environment` keeps, with the `$HOME` prefix written as `~` first, so a row holds no credential | A variable that steers the check is equal. A variable present on one side only misses |
 
 `OFFLOAD_TOOLS` is one pack constant: `sh`, `bash`, `make`, `python3`,
 `git`, `cc`, `c++`, `clang`, `cargo`, `rustc`, `node`, `npm`, `uv`.

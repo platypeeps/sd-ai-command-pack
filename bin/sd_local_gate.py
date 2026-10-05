@@ -104,13 +104,22 @@ def post_offload_status(api: Any, root: pathlib.Path, head: str, database: pathl
         key, revision, row = sd_gate_receipts.standing_offload(database, root, head)
         summary = f"sat {row['satellite']['hostname']}: {row['reading'].get('summary') or 'success'}"
         posted = post_gate_status(api, head, {"head": head, "status": "success", "summary": summary},
-                                  gate_inputs(root, head))
+                                  offload_status_inputs(root, head, row))
     except LookupError as error:
         return {"offload_error": f"no standing offload receipt at {head[:12]}: {error}. "
                                 "Run sd gate check, then sd-ship prepare again"[:600]}
     except Exception as error:  # the prepare stands; the hub refuses the merge as satellite_status_missing
         return {"offload_error": f"{type(error).__name__}: {error}"[:300]}
     return {"offload_status": {"key": key, "revision": revision, "description": posted.get("description")}}
+
+
+def offload_status_inputs(root: pathlib.Path, head: str, row: dict[str, Any]) -> str:
+    """The inputs a satellite's status names and the hub's clause 8 reads: both sides derive them from the row.
+
+    A row whose pack gates itself (`pack_bin` "tree") leaves the installed `bin/` out, as its binding does, so
+    two machines with another installed pack revision still agree (sd:2613); clause 6 checked `pack_bin` on each.
+    """
+    return gate_inputs(root, head, own=row.get("pack_bin") == "tree")
 
 
 def local_gate(api: Any, root: pathlib.Path, head: str, *, base: str | None = None,
@@ -129,9 +138,10 @@ def local_gate(api: Any, root: pathlib.Path, head: str, *, base: str | None = No
     if "offload_refused" in result:
         raise satellite_refusal(result["offload_refused"], base)
     if "satellite" in result:
-        refused = status_refusal(api, head, inputs)
+        accepted_inputs = offload_status_inputs(root, head, result["satellite"])
+        refused = status_refusal(api, head, accepted_inputs)
         if refused is None:
-            return {**result, "inputs": inputs}
+            return {**result, "inputs": accepted_inputs}
         if offload == "require":
             raise satellite_refusal(refused, base)
         result = merge_gate_run(root, head, base, database, None)

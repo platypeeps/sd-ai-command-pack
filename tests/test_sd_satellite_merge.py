@@ -195,6 +195,16 @@ class SatelliteMerge(unittest.TestCase):
         self.assertEqual(gate["satellite"]["hub"], self.HUB)
         self.assertIn("(satellite ", gate["summary"])
 
+    def test_a_self_gating_pack_merges_from_a_satellite_with_another_installed_pack(self) -> None:
+        """Clause 8 under sd:2613: the row binds the tree, so the status inputs leave the installed `bin/` out."""
+        with patch.object(sd_gate_receipts, "gates_itself", lambda *_: True):
+            self.satellite_pass()
+            posted = self.satellite_prepare()["offload_status"]["description"]
+            with patch.object(sd_gate_receipts, "pack_files", lambda folder: []):  # the hub's installed pack differs
+                self.merge("--satellite-gate")
+        self.assertTrue(posted.startswith(f"{self.head()[:12]} inputs {sd_gate_run.gate_inputs(self.root, self.head(), own=True)}:"))
+        self.assertEqual((self.puts(), self.runs), (1, 0))
+
     def test_clause_1_a_repository_not_opted_in_refuses_as_satellite_gate_off(self) -> None:
         self.satellite_pass()
         self.satellite_status()

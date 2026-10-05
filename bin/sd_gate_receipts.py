@@ -259,7 +259,8 @@ def offload_view(environment: Mapping[str, str], names: Iterable[str] = ()) -> d
     `OFFLOAD_LEFT_OUT` and writes each `$HOME` prefix as `~`, so two logins can compare equal, and binds what they
     select instead: `path`, the `PATH` entries in order; `tools`, the bytes of each name in `OFFLOAD_TOOLS`
     and `names` resolved on that `PATH`, or None for one that does not resolve; `home_files`, the bytes of
-    each `OFFLOAD_HOME_FILES` entry under `HOME`, or "absent"; `variables`, every other variable by value.
+    each `OFFLOAD_HOME_FILES` entry under `HOME`, or "absent"; `variables`, the sha256 of every other variable's
+    value, so a row on the hub holds no credential the gate environment keeps.
     `names` are the check's own executables; one with a relative folder lives in the tree, which `inputs` binds.
     """
     try:
@@ -281,7 +282,7 @@ def offload_view(environment: Mapping[str, str], names: Iterable[str] = ()) -> d
         return {"path": [portable(entry) for entry in search.split(os.pathsep) if entry], "tools": tools,
                 "home_files": {name: _content_digest(pathlib.Path(home, name)) if home and pathlib.Path(home, name).is_file()
                                else "absent" for name in OFFLOAD_HOME_FILES},
-                "variables": {key: portable(value) for key, value in environment.items()
+                "variables": {key: hashlib.sha256(portable(value).encode()).hexdigest() for key, value in environment.items()
                               if key not in OFFLOAD_LEFT_OUT}}
     except Exception:  # a view that cannot be named matches nothing; the hub runs the check
         return None
@@ -499,7 +500,7 @@ def examine_offload(database: pathlib.Path | None, run: Worktree,
                         if digest is None and row["offload_view"]["tools"].get(name) is not None)
     return {"reading": row["reading"], "revision": revision, "satellite": row["satellite"], "hub": row.get("hub"),
             "recorded_at": row["recorded_at"], "age_seconds": round(hub_now - float(row["recorded_at"])),
-            "head": row.get("head"), "unresolved_tools": unresolved}, None
+            "head": row.get("head"), "unresolved_tools": unresolved, "pack_bin": row["pack_bin"]}, None
 
 
 def standing_offload(database: pathlib.Path | None, root: pathlib.Path, head: str,
@@ -636,7 +637,7 @@ def satellite_reading(accepted: dict[str, Any]) -> dict[str, Any]:
         "revision": accepted["revision"], "login": satellite.get("login"), "address": satellite.get("address"),
         "hostname": satellite.get("hostname"), "hub": accepted["hub"], "head": accepted["head"],
         "recorded_at": accepted["recorded_at"], "age_seconds": accepted["age_seconds"],
-        "unresolved_tools": accepted["unresolved_tools"]})
+        "unresolved_tools": accepted["unresolved_tools"], "pack_bin": accepted["pack_bin"]})
 
 
 def record_unless_moved(database: pathlib.Path, key: str, identity: Mapping[str, Any], after: Mapping[str, Any] | None,

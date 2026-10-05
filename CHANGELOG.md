@@ -10,13 +10,14 @@
   --gate-check`) also writes `sd-gate-offload:v1:<sha256 of slug and head>`
   (or of the tree) to the hub: the writer, the satellite's identity, the
   whole binding, the offload view, the pack `bin/` digest and revision, the
-  `CLAUDE.local.md` digest and the reading. A reuse writes the row when it is
-  missing, with the original time. A failed write sets `offload_error` and
+  `CLAUDE.local.md` digest and the reading. A reuse writes the row unless the
+  row of that same pass stands, with the pass's time. A failed write sets `offload_error` and
   the pass stands. Before a run the gate warns when the hub's published pack
   digest (`sd-lane-pack:v1:<slug>`) is another. `sd_lib.repo_satellite_gate`
   reads the opt-in and answers `off` on every fault;
   `sd_gate_receipts.pack_bin` is the digest the lane publishes. The offload
-  view also leaves out `LOGNAME` and `TMPDIR`, which name the login.
+  view also leaves out `LOGNAME` and `TMPDIR`, which name the login, and now
+  holds the sha256 of each variable's value, so no credential reaches the hub.
 - **The hub accepts a satellite's gate under the trust rule (sd:2704 step 4).**
   `sd-ship merge --satellite-gate` merges on the satellite's offload receipt
   and runs no `sd-check`, or refuses with the failed clause's code:
@@ -34,7 +35,9 @@
 - **A satellite's prepare posts `sd/local-gate` from its offload receipt
   (sd:2704 step 5).** In an opted-in `repo.ci = local` repository the status
   reads `<head> inputs <digest>: sat <hostname>: <summary>`, which the hub's
-  clause 8 checks. With no receipt it posts nothing and reports
+  clause 8 checks. Both sides derive the digest from the row, so a pack that
+  gates itself leaves the installed `bin/` out. It posts only from a row that
+  still stands here. With no receipt it posts nothing and reports
   `offload_error`.
 - **Each gate gets its share of the cores (sd:2726).** On 2026-10-05 one
   Rust gate under `sd.gate_slots=2` drove the load to 185 on 16 cores: cargo
