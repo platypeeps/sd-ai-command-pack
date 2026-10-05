@@ -443,6 +443,34 @@ class TheBoundaries(LedgerFixture):
         self.assertEqual(result["capped_bills"], {"paid": result["ledger_fault"]})
 
 
+class OverTheWire(LedgerFixture):
+    """sd:2679. On a satellite the ledger refuses every reservation, naming the
+    hub (`LedgerRefused`); each `url` lane reports refused and a CLI lane runs."""
+
+    def test_url_lanes_report_refused_and_the_cli_lane_still_runs(self) -> None:
+        from sd_db import calls
+        from sd_db.ledger import LedgerRefused
+        self.registry_path.write_text(REGISTRY.replace(
+            "  free:", "  claude: { start: 'claude exec', vendor: anthropic, bill: fixture, roles: [reviewer], "
+            "reader: claude-json }\n  free:").replace("[paid, free]", "[paid, free, claude]"), encoding="utf-8")
+        (self.root / "CLAUDE.local.md").write_text(
+            "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->\n"
+            "reviewers: paid@paid.example.test, free@free.example.test, claude@claude\n"
+            "<!-- SD-AI-COMMAND-PACK:LOCAL:END -->\n")
+        self.seed()
+        self.runner.default = sd_review.Completed(
+            0, json.dumps({"type": "result", "subtype": "success", "structured_output": {"findings": []}}), "")
+        hub = "provider calls are charged on the sd hub only; this machine reaches the database on hub.example.test:8769"
+        client = FakeClient(default=usage_answer())
+        with mock.patch.object(calls, "call", side_effect=LedgerRefused(hub, scope="hub")):
+            result = self.review(client)
+        self.assertEqual([(row["backend"], row["status"]) for row in result["outcomes"]],
+                         [("paid", sd_review.REFUSED), ("free", sd_review.REFUSED), ("claude", sd_review.CLEAN)])
+        self.assertIn(hub, result["outcomes"][0]["detail"])
+        self.assertEqual(result["reviewed_by"], ["claude"])
+        self.assertEqual(client.sent, [])
+
+
 class TheShippedBounds(unittest.TestCase):
     """sd:1805 raised the shipped reviewers' `max_tokens`; the reservation
     must move with it, or a cap is held against a bound the call can exceed.
