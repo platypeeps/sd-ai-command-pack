@@ -795,8 +795,13 @@ class SharedReview:
                                    "exit_code": check.get("exit_code"), "detail": detail, "checks": checks})
         # Each failing check by name with its own tail; the last 500 characters
         # of one stream dropped the failing test's assertion (sd:2021).
+        # The gate's summary and the failing checks lead; the gate's own
+        # stderr, such as its slot wait, follows as context: a reader that
+        # cuts the refusal's head read the wait line as the failure (sd:2687).
         said = detail.strip()[-FAILING_TAIL_CHARS:]
-        evidence = "\n".join([said] * bool(said) + failing_check_tails(checks))
+        summary = str(check.get("summary") or "").strip()
+        failed = [summary] * bool(summary) + failing_check_tails(checks)
+        evidence = "\n".join(failed + [f"gate output: {said}" if failed else said] * bool(said))
         # sd:2605. The gate now runs after a review that cleared, so a pass
         # that asked reviewers is released too, and the next prepare reviews
         # the fixed branch again.

@@ -348,6 +348,14 @@
 
 ### Fixed
 
+- **A failed repository gate leads with what failed, not the slot wait (sd:2687).**
+  `sd-ship prepare`'s `gate_failed` refusal opened with the gate's own
+  stderr, which starts with `waiting for a gate slot ... slot 1 held by pid
+  N`. The lane keeps the head of a refusal, so sd:2671's failure in an
+  Obsidian test was recorded as the wait line. The refusal now opens with the
+  gate's summary, which names each failed suite or make target, then each
+  failing check with its tails. The gate's own stderr follows as `gate
+  output:` context.
 - **`sd store list` on a kind with no folder yet lists nothing (sd:2688).**
   A declared kind nobody had written to has no folder in the vault, and
   `list` refused with `does not exist; the vault does not hold this kind`.
