@@ -62,6 +62,17 @@
 
 - **A registry rule for gate receipt reuse, and the skill line that cites it (sd:1912).** `R15-D1` registers that prepare's gate reuses a passing gate receipt only at its head, or at its tree where `.github/sd-gate-reuse.json` declares tree keying, and only under the same binding. `skills/sd-ship/SKILL.md` tells a builder to run `sd gate check` on the head it hands to the lane. `docs/coding-to-release.md` and the `sd-check` receipt contract no longer call the pack's gate network-dependent, which nothing had audited. They now name the gate-receipt route, which the operator ruled on 2026-10-04 supersedes the planned `sd-check --reuse-check` declaration.
 
+- **Reviews take a machine-wide review slot (sd:2523).** Lanes in several
+  repositories each started a Codex review at once, with no shared limit, so
+  load and quota spiked together. A review now holds one of
+  `sd.review_slots` slots (unset: 2; `SD_REVIEW_SLOTS` for one run, `0` no
+  cap) from its first reviewer to its last, and gives it back before the gate. A waiting review prints one line
+  naming each holder, and a dead holder frees its slot. The wait spends what
+  is left of the check's bound, counted from the review's start, then
+  refuses with `review_slot_busy`. The
+  result records `review_slot`. `make test` runs with `SD_REVIEW_SLOTS=0`, so
+  a test review never waits on a real one.
+
 - **`sd-ship` re-provisions `sd_db` after a library merge (sd:2108).** A verified merge into the system checkout, or one of its worktrees, whose squash changes `local-sd-db` now installs `sd_db` at the merge commit into the pack's main-checkout virtualenv. Before, the installed copy lagged the merge, and the next dashboard restart refused until `make setup` ran in the pack. `provision_library` takes the commit as `ref`, and keeps its downgrade guard. An installed copy that is not an ancestor of the merge commit is kept, so a late reconcile of an older merge cannot replace newer library code under the same schema. Every install, this one and `provision-library`, goes through `provision_guarded`, which holds one machine-wide lock across reading the installed commit, the ancestry check and pip, so two concurrent reconciles cannot interleave. On both paths a commit that is an ancestor of the installed one is refused, naming both, so `make setup` from a stale system checkout cannot undo a newer reconcile. A failed install is reported in the receipt's `library` field and does not undo the merge.
 
 - **`sd-ship prepare --restart-review REASON`: a fresh review after a rewrite that must stay (sd:2600).** An amend or a rebase after review orphans the reviewed head, and prepare refuses with `reviewed_head_orphaned`. Its only remedy was `git reset --soft` onto the reviewed head, which publishes that commit, so a privacy amend had no way back on the item path. The new flag applies only while a reviewed head is orphaned and needs a reason. It moves the orphaned passes, with the reason and heads, to `superseded_reviews` in the ship receipt, then reviews the whole branch from nothing. Set-aside passes still count against the automatic cap, and the restart spends one more. It does not combine with `--retry-review`, `--additional-review-for` or `--catch-up`, and a no-item record refuses it. The refusal's next action now names it first.

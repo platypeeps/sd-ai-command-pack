@@ -173,6 +173,7 @@ These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOM
 `sd gate run -- make check` queues any command the same way; `sd gate status` shows the queue.
 Wrap a plain `make check` in any repository that way, and drop a per-repository `lockf` from lane scripts: the pool orders gates across every repository.
 A waiting gate names who holds each slot and since when.
+`sd.review_slots` is load control too: how many reviews may run their reviewers at once on the machine (unset: 2).
 `sd gate post --head SHA` runs the merge gate at SHA and posts `sd/local-gate`, for a merge path that is not `sd-ship merge`.
 `sd gate check` runs the same check at `HEAD` and records a pass that `sd-ship prepare` and the merge gate reuse at that head; it posts nothing.
 

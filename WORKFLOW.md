@@ -497,6 +497,16 @@ which the installer places in `~/.claude/agents`.
   another repository's `make check`, run `sd gate run -- make check`; it waits,
   runs the command, and frees the slot when the command ends.
   `sd gate status` shows who holds a slot and who waits, and since when.
+- **Reviews share the machine through their own slots (sd:2523).** Every
+  review takes one of `sd.review_slots` machine-wide review slots (unset: 2)
+  before its first reviewer starts, and frees it after the last, before the
+  gate.
+  `SD_REVIEW_SLOTS` overrides it for one run, and `0` lifts the cap. A waiting
+  review prints one `waiting for a review slot` line on stderr, naming each
+  holder. The wait spends what is left of the setup bound, counted from
+  the review's start; when that runs out, the review refuses with
+  `review_slot_busy`. Slots are kernel locks
+  under `$XDG_STATE_HOME/sd/review-slots`, so a dead holder's slot is free.
 - **Ship a run of items through one lane queue (sd:2524).** `sd-ship lane
   enqueue --item N --title T --body-file F --deliver|--associate-only
   [--acceptance-file A] [--manual]` adds a worktree's item
@@ -833,6 +843,8 @@ The reserved `sd` namespace declares four settings:
   this machine; `0` is no cap. Absence reads a quarter of the cores. `SD_GATE_SLOTS` overrides it
   for one run. It grants nothing;
   see [Parallel work](#parallel-work).
+- `sd.review_slots`: how many reviews may run their reviewers at once on this machine; `0` is no cap.
+  Absence reads 2. `SD_REVIEW_SLOTS` overrides it for one run. It grants nothing.
 - `sd.gate_load_max`: the gate queue starts a gate only while load1 is below this; `0` is no load condition.
   Absence is no load condition (sd:2607). `SD_GATE_LOAD_MAX` overrides it for one run. It grants nothing.
 - `sd.gate_settle_seconds`: seconds between two gate starts, and of low load1 while load5 is high; `0` is none.
