@@ -353,10 +353,10 @@ def satellite_identity() -> dict[str, Any]:
     """This machine as a request names it: the tailnet's owner login and IPv4 address, and the host name for display."""
     node: dict[str, Any] = {"hostname": socket.gethostname()}
     try:
-        # An `sd_db` older than satellites has no `tailnet`.
-        from sd_db import tailnet  # noqa: PLC0415
+        # An `sd_db` older than satellites has no `tailnet`; a missing module is what mypy's override covers.
+        from sd_db.tailnet import this_node  # noqa: PLC0415
 
-        this = tailnet.this_node()
+        this = this_node()
         node.update(login=this.login, address=str(this.address))
     except Exception as error:  # the request still stands; the row says why it names no node
         node["error"] = f"{type(error).__name__}: {error}"[:300]
