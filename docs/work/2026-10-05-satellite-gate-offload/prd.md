@@ -32,6 +32,12 @@ A satellite gate does not help the hub today. The code shows two reasons:
    binding never equals the satellite's, so `examine` answers `binding` and
    the merge gate runs the check again.
 
+sd:2724 measured both on 2026-10-05. A satellite receipt (revision 29982)
+landed on the hub and was not reused: `gate_environment` keeps `HOME`,
+`USER` and the whole `PATH`, and the satellite runs as another login. The hub
+alone produced 8 distinct environment digests that day. It counted 894
+passing `make check` runs since 2026-09-28, median 6 minutes, p90 15.
+
 A third gap is in the handoff. The lane queue is a file on the hub, and
 `lane run` drains it and exits. Nothing on a satellite can add an entry to it.
 
@@ -104,6 +110,14 @@ R11. `lane run --satellite-only` claims only satellite entries and starts no
      speculative gate. A hub entry stays pending for an integrator's plain
      `lane run` (Decision Q4).
 
+R12. The receipt binding is portable (sd:2724, folded in). It binds tools by
+     invocation and sha256, python by sha256, and a named allow-list of
+     variables. It does not bind `HOME`, `USER` or the whole `PATH`. A
+     mismatch on a bound field still misses, and `reuse_miss` names it.
+
+R13. A plain `sd-ship merge` in an opted-in repository reuses an offload
+     receipt first, and runs the gate only on a miss (sd:2724).
+
 ## Acceptance criteria
 
 1. A test drives `sd-ship merge --satellite-gate` on a fixture hub with a
@@ -112,8 +126,7 @@ R11. `lane run --satellite-only` claims only satellite entries and starts no
 2. One test per trust-rule clause: with that clause broken, the merge refuses
    with its own code, and no `sd-check` child starts.
 3. With `repo.satellite_gate` unset, `--satellite-gate` refuses as not opted
-   in. Without the flag the merge path is today's: the existing suites pass
-   unchanged.
+   in, and a plain merge is today's: the existing suites pass unchanged.
 4. A lane request whose base moved ends `handed_back`, on the queue entry and
    on the request row. The lane runs no prepare, no catch-up and no
    speculative gate for it.
@@ -125,7 +138,13 @@ R11. `lane run --satellite-only` claims only satellite entries and starts no
 6. `lane run --satellite-only` over a queue holding a hub entry ahead of a
    satellite entry merges the satellite entry only. The hub entry stays
    `pending` and in place, and no prepare or speculative gate starts.
-7. End to end on a fixture: a satellite home with `hub.json` names a scratch
+7. Portable binding: two hub sessions whose environments differ only in
+   session and login variables reuse each other's receipt at one head. A
+   receipt from another python, `make` or tree misses, naming the field.
+8. A plain `sd-ship merge` in an opted-in repository with a valid offload
+   receipt runs no `sd-check`. With the receipt broken it runs the gate and
+   names the miss.
+9. End to end on a fixture: a satellite home with `hub.json` names a scratch
    `sd_db.serve --loopback`. `sd gate check` writes both receipt rows,
    `sd-ship prepare` posts the status to the suite's GitHub double, and
    `sd-ship lane request` writes the request row. A hub-side
@@ -145,7 +164,10 @@ R11. `lane run --satellite-only` claims only satellite entries and starts no
   self-reported name is enough under the sd:1335 Q3 ruling.
 - **A long-running lane daemon.** The scheduled job starts `lane run`; the
   runner stays a drain-and-exit process.
-- **Multi-operator access.** One login on both machines.
+- **Multi-operator access.** One operator on both machines, under one
+  GitHub account and one Tailscale login.
+- **sd:2722.** Hashing only `sd-check`'s import closure is its own item;
+  design.md, "Overlap", says why.
 
 ## Not verified
 
@@ -154,3 +176,6 @@ R11. `lane run --satellite-only` claims only satellite entries and starts no
   satellite entry skips the hub's prepare. Implement step 1 measures it.
 - The load reduction itself. It depends on the share of items built on the
   satellite. Implement step 8 measures the hub's gate count per merged item.
+- Whether the satellite's `gh` authenticates as the same GitHub account as
+  the hub. sd:2724 shows another local login on the satellite. Clause 8 needs
+  the same account. Implement step 1 checks it.

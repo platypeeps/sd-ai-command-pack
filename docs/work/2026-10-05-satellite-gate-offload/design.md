@@ -43,6 +43,38 @@ the recommendation the first draft of this page gave, except Q2.
   satellite entries only. Hub entries still wait for an integrator's
   `lane run`. This replaces the first review's rebuttal of C-11.
 
+## Overlap with sd:2724 and sd:2722
+
+**sd:2724, folded in.** It was filed at 08:14 MDT on 2026-10-05: "Hub merge
+reuses the satellite's gate receipt: portable receipt binding, reuse-first
+merge". It has the same goal as this item and adds measured evidence:
+
+- A satellite `sd gate check` passed, and its receipt (revision 29982)
+  landed on the hub over the wire. The hub could not reuse it.
+- The satellite runs as another local login than the hub. Its python and
+  `make` digests matched the hub's. Its `environment_sha256` did not:
+  `gate_environment` keeps `HOME`, `USER` and the whole `PATH`.
+- The hub alone produced 8 distinct `environment_sha256` values for
+  `make check` repositories that day, so same-machine reuse breaks too.
+
+Its three work points map onto this record:
+
+| sd:2724 point | Here |
+|---|---|
+| 1. Portable binding: bind tools, python and a named allow-list of variables, not `HOME`, `USER` or the whole `PATH` | Implement step 2a. The hub then compares the machine part as well (table below) |
+| 2. Hub reuses first and runs the gate only on a real miss | "Plain merge reuses first" under the trust rule, implement step 4 |
+| 3. Docs: a "who does the work" table and one rule line in the system repository | Implement step 8 |
+
+This record does not edit sd:2724. Whether to close it as absorbed or keep it
+as the item for step 2a is the operator's call.
+
+**sd:2722, separate.** "Gate receipts: for a repository other than the pack,
+hash only sd-check's import closure, not every pack bin/ file." It shrinks
+what `gate_inputs` hashes. Clause 6 compares whatever `gate_inputs` hashes,
+so `pack_bin` follows sd:2722 with no change here. sd:2722 makes
+`satellite_pack_mismatch` rarer, and helps hub-only reuse too. It needs no
+part of this item, and this item needs no part of it.
+
 ## The offload receipt
 
 ### Why a second row
@@ -91,15 +123,16 @@ tree-derived part of the binding. That part does not resolve a single tool:
 the hub's `PATH`, and a hub without `cargo` must still compare a Rust
 repository's receipt. So implement step 4 splits `gate_binding` into a
 tree part and a machine part, and `gate_binding` returns their union as today.
+Before step 2a lands, the machine part is recorded and not compared.
 
 | Binding field | Hub compares | Why |
 |---|---|---|
 | `schema`, `reuse`, `head`, `tree`, `fork` | yes | The commit, or the tree and the merge base's tree, that passed |
 | `inputs` | yes | Hashes the head or tree, `CLAUDE.local.md` and the pack `bin/`. Equal inputs mean the same pack and the same local block. `pack_bin` and `local_block` name which part differs |
 | `scope`, `detection` | yes | Pack code over the tree, the local block and the base. A difference means another command ran |
-| `tools` | no, recorded | Paths and bytes of the satellite's `make`, `python3` and others. The hub's differ by construction |
-| `python` | no, recorded | The satellite's interpreter |
-| `environment_sha256` | no, recorded | The satellite's whole gate environment |
+| `tools` | yes, by invocation and sha256, after step 2a | Paths may differ between logins; bytes must not. A tool the hub cannot resolve is recorded, not compared, and named in the merge's provenance |
+| `python` | yes, by sha256 and version, after step 2a | sd:2724 measured equal digests on both machines |
+| `environment` | yes, the allow-listed variables, after step 2a | Variables that choose what a check runs. `HOME`, `USER`, session variables and the whole `PATH` are left out |
 | `satellite` | no, recorded | `serve` admitted only the operator's untagged node (sd:1335 step 7). A second check reads the same claim |
 
 The first brief asked for the pack `bin/` digest as the one compared field.
@@ -137,17 +170,32 @@ posts no status, because the satellite's status already stands at the head.
 Then `settled_ready` runs as today. `ready` still calls `local_gate_passed`,
 and still refuses a head behind the base.
 
-Without `--satellite-gate` the merge is today's merge. A hub-built item in an
-opted-in repository runs its gate on the hub as before. The lane passes the
-flag for an entry marked `gate: satellite`; a person may pass it by hand.
+The lane passes `--satellite-gate` for an entry marked `gate: satellite`; a
+person may pass it by hand.
+
+### Plain merge reuses first (sd:2724)
+
+A plain `sd-ship merge`, without the flag, in a repository with
+`repo.satellite_gate = accept`, looks for an offload receipt after its own
+receipt misses. When clauses 3 to 8 hold, it merges with no run, as the flag
+does. On any miss it runs the gate as today, and `reuse_miss` names the
+clause and field. In a repository that did not opt in, a plain merge is
+today's merge.
+
+The two differ only on a miss. A plain merge falls back to a hub run; a
+`--satellite-gate` merge refuses and hands back. The fallback is right for a
+person merging by hand. The refusal is right for the lane, because the
+operator's goal is that the hub runs no check for a satellite item.
 
 ### What the hub no longer guarantees
 
 Under an accepted offload receipt the hub does not run the check. It no longer
 guarantees that the check passes on the hub's own image:
 
-- the satellite's `make`, interpreter, compilers and system libraries;
-- the satellite's environment, which is bound whole there but compared nowhere;
+- system libraries and tools the check reaches through another tool;
+- a tool the hub cannot resolve, which is recorded but not compared;
+- variables outside the allow-list (step 2a), and before step 2a the whole
+  environment;
 - inputs outside the repository on the satellite: an external makefile, a
   tool's own files, machine state, a network answer.
 
@@ -396,14 +444,14 @@ offload, request and pack rows are checkpoints no older reader looks for.
 
 ## Alternatives rejected
 
-- **Relax the binding until satellite and hub agree.** Dropping `tools`,
-  `python` and the environment from every receipt weakens every local reuse
-  to buy one remote case.
+- **Drop the machine part from every receipt.** It would weaken every local
+  reuse to buy one remote case. Step 2a keeps tools and python, by bytes,
+  and drops only the login and session variables that choose nothing.
 - **Key every receipt by slug.** Hub and satellite rows would share a key, and
   each write would append over the other's revision.
-- **Hub falls back to its own run on a miss.** It defeats the goal, and a
-  silent fallback hides a broken handoff. A hub-built item already takes the
-  path without the flag.
+- **The lane falls back to a hub run on a miss.** It defeats the goal, and
+  a silent fallback hides a broken handoff. A plain merge by hand does fall
+  back (sd:2724); the lane's `--satellite-gate` does not.
 - **SSH enqueue from the satellite.** The first draft's recommendation;
   the operator chose the request row (Q2).
 - **A lane-owned worktree per satellite branch.** Not needed: merge already
@@ -435,6 +483,9 @@ record.
 | C-11 | minor | The scheduled job also merges hub entries sooner than an integrator would | `run_lane` drains every pending entry | first rebutted; then ruled by the operator (Q4): addressed by `--satellite-only` |
 | C-12 | minor | Satellite repository resolution: its checkout path is not the hub's registered path | `registered_for` falls back to the origin | rebutted: resolution by origin already works for `repo_ci` on a satellite |
 | C-13 | minor | No rollback was stated | — | addressed: "Rollout and rollback" |
+| C-14 | blocking | The environment digest keeps `HOME`, `USER` and `PATH`, so neither a satellite receipt nor many hub receipts ever match (sd:2724's evidence) | `gate_environment`; sd:2724: revision 29982, 8 hub digests in a day | addressed: sd:2724 folded in as step 2a; the hub compares the portable machine part |
+| C-15 | major | The satellite runs as another local login, and clause 8 needs its `gh` to be the hub's GitHub account | sd:2724 names two logins | parked: implement step 1 reads both; two accounts block step 5. Owner: the operator |
+| C-16 | minor | sd:2722 changes what `gate_inputs` hashes | sd:2722's title | rebutted: clause 6 compares whatever `gate_inputs` hashes; the items are independent |
 
 Round 2 swept the three artifacts for each value they share: the window,
 the skew bound, step numbers, refusal codes, the request key and the
@@ -448,3 +499,8 @@ After ruling Q4 a third sweep read every `lane run` in the three artifacts.
 Each scheduled run now names `--satellite-only`; each integrator run stays
 plain. The estimate, the criterion numbers and C-11 moved with the ruling.
 No new concern was found.
+
+Round 4 folded in sd:2724 and swept the step numbers, the estimate, the PR
+count and the criterion numbers. The sweep moved "criterion 7" to 9 in
+implement step 8. C-15 is parked, not open: it blocks only step 5, and step 1
+settles it.
