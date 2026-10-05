@@ -930,6 +930,13 @@
 
 ### Changed
 
+- **`sd-status` asks each `git` question once per run (sd:2677).** One run on
+  a working checkout started 2,079 subprocesses, and 1,750 of them repeated a
+  question already answered. `sd_lib.git_read_memo()` remembers read-only
+  `git` calls for one run; any other call empties it first. `sd-review-ack`
+  answers ancestry from one `git rev-list` per ref while that memo is open,
+  and `delivered` fetches each ref once. The output does not change.
+
 - **The review runs before the gate, and a blocking review runs no gate (sd:2605).** `sd-review` ran the repository gate first, so a blocking finding arrived only after a full `make check`; four prepares lost a 45-minute gate that way in one night. The reviewers now run first. The gate runs only after a clean, advisory or skipped review. A blocking or incomplete review records `check: {"status": "not_run"}`, and `sd-ship prepare`'s refusal says the gate did not run and carries that `check`. A `--reuse-check` receipt is still read first and still runs no gate. A gate that fails after a review that cleared releases the review pass, so the next prepare reviews the fixed branch again. `sd-ship adjudicate` accepts a blocking report whose gate did not run; the prepare that reads the accepted dispositions then runs the gate at that head before clearance and records it as `adjudicated_gate`, and publication, merge and `verify-review` refuse (`gate_not_run`) until a pass is recorded there. A gate that fails on that path refuses clearance and keeps the pass, since its review found blocking findings.
 
 - **Prepare's and merge's gates queue on their own bound too (sd:2611).** `sd-review` plans the gate-slot wait as its own phase, `timing.slot_seconds` (`sd_lib.GATE_SLOT_SECONDS`, 4 hours), and passes `--slot-timeout` to the check it runs; `execution_seconds` counts it, so the `sd-ship` watchdog no longer kills a gate that is still queued. `sd-ship` accepts a plan without the key as one with no slot phase. The merge gate passes the same bound, and the lane's prepare and merge limits grow by it. A queued gate's checks keep their whole bound; the price is that the outer limits, the runner's and the watchdog's, fire up to 4 hours later when `sd-check` does not honour its own bounds.

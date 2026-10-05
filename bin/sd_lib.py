@@ -10,6 +10,7 @@ Stdlib only, Python 3.10+, no network. A caller that cannot proceed gets a
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
 import json
 import os
@@ -251,8 +252,56 @@ def parse_frontmatter(text: str) -> dict[str, str] | None:
 # --------------------------------------------------------------------------
 
 
+#: Answers to read-only `git` calls, by cwd and argv, while `git_read_memo()`
+#: is open, and the tip each `_fetched` ref came back at; None otherwise.
+_GIT_READS: dict[tuple[str, ...], str | None] | None = None
+_FETCHED: dict[tuple[str, ...], str] | None = None
+
+#: The verbs that cannot change what a read answers. `config`, `remote` and
+#: `symbolic-ref` count only in the reading forms `_reads_only` names.
+_READ_VERBS = frozenset({"rev-parse", "merge-base", "rev-list", "log", "cat-file", "for-each-ref",
+                         "status", "grep"})
+
+
+def _reads_only(args: list[str]) -> bool:
+    while args[:1] in (["--no-optional-locks"], ["-C"]):
+        args = args[2:] if args[0] == "-C" else args[1:]
+    head = args[:2]
+    return (bool(args) and args[0] in _READ_VERBS) or args == ["remote"] or head in (
+        ["config", "--get"], ["config", "--get-regexp"], ["remote", "-v"], ["remote", "get-url"],
+    ) or (head == ["symbolic-ref", "--short"] and len(args) == 3)
+
+
+@contextlib.contextmanager
+def git_read_memo() -> Iterator[None]:
+    """Answer a repeated read-only `git` call from memory until the block ends.
+
+    `sd-status` opens one per run: a report asked the same 400 questions
+    2,162 times (sd:2677). Any other call through `_git` empties the memo
+    first, so no answer outlives a change the run itself made.
+    """
+    global _GIT_READS, _FETCHED
+    saved = _GIT_READS, _FETCHED
+    _GIT_READS, _FETCHED = {}, {}
+    try:
+        yield
+    finally:
+        _GIT_READS, _FETCHED = saved
+
+
+def git_reads_memoized() -> bool:
+    """Whether a `git_read_memo()` block is open."""
+    return _GIT_READS is not None
+
+
 def _git(args: list[str], cwd: pathlib.Path) -> str | None:
     """Run one `git` command; None when git cannot answer."""
+    key = (str(cwd), *args)
+    memo = _GIT_READS if _GIT_READS is not None and _reads_only(args) else None
+    if memo is not None and key in memo:
+        return memo[key]
+    if memo is None and _GIT_READS is not None:
+        _GIT_READS.clear()
     try:
         completed = subprocess.run(  # fixed argv, no shell
             ["git", *args],
@@ -264,9 +313,10 @@ def _git(args: list[str], cwd: pathlib.Path) -> str | None:
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    if completed.returncode != 0:
-        return None
-    return completed.stdout.strip()
+    answer = completed.stdout.strip() if completed.returncode == 0 else None
+    if memo is not None:
+        memo[key] = answer
+    return answer
 
 
 def sibling(module_name: str, filename: str):
@@ -2881,6 +2931,26 @@ def upstream(root: pathlib.Path) -> tuple[str, str]:
     return remote, "main"
 
 
+def _fetched(root: pathlib.Path, remote: str, ref: str) -> str | None:
+    """`git fetch <remote> <ref>`, then what to read the fetched tip as; None when it fails.
+
+    `FETCH_HEAD`, unless a `git_read_memo()` block is open: then the tip's sha,
+    kept for the block, so the next item asks no second fetch (sd:2677). A
+    later write does not drop it, since a sha names the same commit after one.
+    """
+    key = (str(root), remote, ref)
+    if _FETCHED is not None and key in _FETCHED:
+        return _FETCHED[key]
+    if git_output(["fetch", remote, ref], root) is None:
+        return None
+    if _FETCHED is None:
+        return "FETCH_HEAD"
+    tip = git_output(["rev-parse", "--verify", "--quiet", "FETCH_HEAD^{commit}"], root)
+    if tip:
+        _FETCHED[key] = tip
+    return tip or "FETCH_HEAD"
+
+
 def delivered(root: pathlib.Path, item: "str | tuple[str, ...]") -> Answer:
     """`yes`, `no` or `unknown`: is `item` delivered, asked of git and nothing else.
 
@@ -2908,19 +2978,21 @@ def delivered(root: pathlib.Path, item: "str | tuple[str, ...]") -> Answer:
     remote, default = upstream(root)
     if not remote:
         return Answer(YES if any(_closed_by(root, r, item) for r in ("HEAD", default)) else NO)
-    if git_output(["fetch", remote, default], root) is None:
+    fetched = _fetched(root, remote, default)
+    if fetched is None:
         return Answer(UNKNOWN, f"git fetch {remote} {default}")
-    if _closed_by(root, "FETCH_HEAD", item):
+    if _closed_by(root, fetched, item):
         return Answer(YES)
     branch = git_output(["rev-parse", "--abbrev-ref", "HEAD"], root) or ""
     if branch not in ("", "HEAD", default):
-        if git_output(["fetch", remote, branch], root) is None:
+        fetched = _fetched(root, remote, branch)
+        if fetched is None:
             # The remote answered a moment ago, so a refusal here is about the
             # ref -- unless it is still published, and then the tip is missing.
             listed = git_output(["ls-remote", "--heads", remote, branch], root)
             if listed is None or listed:
                 return Answer(UNKNOWN, f"git fetch {remote} {branch}")
-        elif _closed_by(root, "FETCH_HEAD", item):
+        elif _closed_by(root, fetched, item):
             return Answer(YES)
     return Answer(YES if _closed_by(root, "HEAD", item) else NO)
 
