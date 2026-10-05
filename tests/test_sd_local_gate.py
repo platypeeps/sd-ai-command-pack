@@ -588,6 +588,19 @@ class MergeReuse(ReceiptFixture):
         self.assertEqual(merged["reuse_miss"], {"reason": "binding", "fields": ["environment_sha256"]})
         self.assertEqual(json.loads(json.dumps(merged))["reuse_miss"], merged["reuse_miss"])
 
+    def test_a_session_with_another_home_still_misses_on_the_environment(self) -> None:
+        """C-17 (sd:2704): the offload view leaves `HOME` out; local reuse still binds the whole environment."""
+        head = self.declare()
+        homes = [self.root.parent / name for name in ("one", "two")]
+        for home in homes:
+            home.mkdir()
+        with mock.patch.dict(os.environ, {"HOME": str(homes[0])}):
+            self.prepare(head)
+        with mock.patch.dict(os.environ, {"HOME": str(homes[1])}):
+            merged = self.merge(head)
+        self.assertEqual((merged["reuse_miss"], self.runs()),
+                         ({"reason": "binding", "fields": ["environment_sha256"]}, 2))
+
 
 class FnmShells(ReceiptFixture):
     """fnm gives every shell its own folder (operator ruling, 2026-10-04, sd:2602).
