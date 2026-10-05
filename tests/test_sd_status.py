@@ -66,7 +66,7 @@ def _skill_prose() -> str:
 
 
 def _skill_says(*sentences: str) -> str:
-    """The page's prose, once each of `sentences` is in it verbatim and once.
+    """The page's prose, once each of `sentences` is in it verbatim, once, at a sentence start.
 
     A rule stated in prose has no slot to extract. "every row of the class,
     not just the rows past the cap" and "only the rows past the cap, never
@@ -79,11 +79,49 @@ def _skill_says(*sentences: str) -> str:
     after re-reading the assertions under it; a change that does not keeps
     failing, which is the point.
     """
-    prose = _skill_prose()
+    prose, starts = _skill_prose(), _skill_starts()
     for sentence in sentences:
-        count = prose.count(" ".join(sentence.split()))
-        assert count == 1, f"{SKILL_MD.name} says this {count} times, not once: {sentence!r}"
+        pinned = " ".join(sentence.split())
+        found = [match.start() for match in re.finditer(re.escape(pinned), prose)]
+        assert len(found) == 1, \
+            f"{SKILL_MD.name} says this {len(found)} times, not once: {sentence!r}"
+        # Bound at a sentence or list-item start, so a "never" put in front of
+        # a pinned rule does not count as the rule (sd:1002, 11b348a64abb).
+        assert found[0] in starts, \
+            f"{SKILL_MD.name} says this, but not at a sentence start: {sentence!r}"
     return prose
+
+
+#: A list item's marker: "- ", "* " or "1. " at the start of a line.
+_ITEM = re.compile(r"(?:[-*]|\d+\.)$")
+#: What may close a sentence after its stop: emphasis, code, quotes, brackets.
+_SENTENCE_END = re.compile(r"[.!?][*_`\"')\]]*$")
+
+
+def _skill_starts() -> set[int]:
+    """Where in `_skill_prose()` a sentence or a list item begins.
+
+    Read from the page's lines, since the one-line prose has none: the first
+    word of a paragraph, a heading, a table row or a list item (its marker and
+    the word after it), and every word after a sentence's stop.
+    """
+    starts, offset, previous, block = set(), 0, None, True
+    for line in SKILL_MD.read_text(encoding="utf-8").splitlines():
+        words = line.split()
+        if not words:
+            block = True
+            continue
+        if words[0].startswith(("#", "|")) or _ITEM.match(words[0]):
+            block = True
+        for index, word in enumerate(words):
+            item_text = index == 1 and _ITEM.match(words[0])
+            after_stop = previous is not None and _SENTENCE_END.search(previous)
+            if (index == 0 and block) or item_text or after_stop:
+                starts.add(offset)
+            offset += len(word) + 1
+            previous = word
+        block = words[0].startswith("#")
+    return starts
 
 
 def _number(word: str) -> int | None:
@@ -158,6 +196,37 @@ created: 2026-08-01
 
 # {title}
 """
+
+
+class SkillSaysTests(unittest.TestCase):
+    """sd:1002, 11b348a64abb: a pin counts only where a sentence or list item starts."""
+
+    def says(self, page: str, sentence: str) -> str:
+        with tempfile.TemporaryDirectory() as root:
+            path = pathlib.Path(root) / "SKILL.md"
+            path.write_text(page, encoding="utf-8")
+            with mock.patch.object(sys.modules[__name__], "SKILL_MD", path):
+                return _skill_says(sentence)
+
+    def test_a_negation_in_front_of_a_pinned_rule_fails_the_pin(self) -> None:
+        rule = "It is capped at ten and says so."
+        for page in ("# Rules\n\nNobody believes that\nIt is capped at ten and says so.\n",
+                     "- **Never read it whole.** Never say It is capped at ten and says so.\n"):
+            with self.subTest(page=page), \
+                    self.assertRaisesRegex(AssertionError, "not at a sentence start"):
+                self.says(page, rule)
+
+    def test_a_rule_at_a_sentence_or_item_start_passes(self) -> None:
+        rule = "It is capped at ten and says so."
+        for page in ("# Rules\n\nIt is capped at ten and says so.\n",
+                     "# Rules\nIt is capped at ten\nand says so.\n",
+                     "- **Never read it whole.** It is capped at ten and says so.\n",
+                     "Read the list. It is capped at ten and says so.\n",
+                     "- It is capped at ten and says so.\n"):
+            with self.subTest(page=page):
+                self.assertIn(rule, self.says(page, rule))
+        self.assertIn("- **Rank 3**, below the rest.",
+                      self.says("- **Rank 3**, below the rest.\n", "- **Rank 3**, below the rest."))
 
 
 class WorkflowCheckNameTests(unittest.TestCase):
@@ -3735,6 +3804,25 @@ class ConcernLedgerTests(InventoryFixture):
         )
         self.assertNotIn("C-3", str(found))
 
+    def test_a_row_that_declares_addressed_is_read_by_its_declaration(self) -> None:
+        """sd:1000 (note #2752): C-6 and C-33 in the system ledgers said
+        `Addressed:` and then named the defect's own words, `open means
+        unresolved` and `an unresolved merge`, so they read as unresolved.
+        `_declared_verdict` reads the declaration; a lower-case mention is
+        not one, so the control row stays open.
+        """
+        self.ledger("2026-09-05-declared/prd.md", (
+            "# declared\n\n"
+            "- C-6, requirement 7: notes had no resolution state. Addressed: notes carry "
+            "`resolved_at`, and open means unresolved.\n"
+            "- C-33: Addressed: the fixture restores an unresolved merge before the run.\n"
+            "- C-34: the reader still treats an unresolved merge as clean; addressed: later.\n"
+        ))
+        found = self.checks(self.scan())
+        self.assertEqual(
+            {"unresolved-concern": ["docs/work/2026-09-05-declared/prd.md#C-34"]}, found
+        )
+
     def test_a_table_row_outranks_a_prose_mention_of_the_same_concern(self) -> None:
         """Shape precedence, and what it stops.
 
@@ -5188,9 +5276,16 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
 
         # The `--json` paragraph names the function that applies that rule,
         # and #946's review renamed it to `rollup_buckets` unnoticed (E-W2).
-        _skill_says(f"`actions` — the uncapped inventory, of which `pending` is the first "
-                    f"{_word(limit)} after each class's `pending_cap` (`pending_rows`) "
-                    "— and `next`.")
+        # Pinned from its sentence's start, which the bound requires (sd:1002).
+        _skill_says("Beyond the section keys it carries `merged_pull_requests` (the pull "
+                    "requests merged inside the review window, with the findings each "
+                    "carries), `expired_reviews` (the `expired:` count, its days, its pull "
+                    "requests and why it is short, if it is), `late_reviews` (the `late:` "
+                    "count, in the same shape), `inventory` (`rows` plus the `unchecked` map), "
+                    "`abnormalities`, "
+                    "`actions` — the uncapped inventory, of which `pending` is the first "
+                    f"{_word(limit)} after each class's `pending_cap` (`pending_rows`) — and "
+                    "`next`.")
         self.assertEqual(limit, len(status.pending_rows([{"check": below}] * (limit + 3))[0]))
 
         # "`--actions` and `--json` still carry every row": the text list

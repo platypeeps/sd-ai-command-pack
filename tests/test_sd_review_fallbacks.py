@@ -311,6 +311,30 @@ class DatabaseProviderStateTests(ReviewRunFixture):
         registry = sd_review.sd_registry.read_runtime(alternate, home=self.registry_home)
         self.assertFalse(registry.providers["third"].enabled)
 
+    def test_a_satellites_default_database_handed_down_as_a_string_is_read_on_the_hub(self) -> None:
+        """sd:2679. `sd-ship` passes `--database` as the default's string; on a
+        satellite only the default `HubPath` knows the database is on the hub."""
+        from unittest import mock
+
+        from sd_db import database as library
+        _, hub = self.prepare_state()
+        connection = connect(hub)
+        try:
+            connection.execute("UPDATE provider SET enabled=0 WHERE name='third'")
+        finally:
+            connection.close()
+
+        class OnTheHub(type(pathlib.Path())):
+            def exists(self, **_: Any) -> bool:
+                return True
+
+        satellite = OnTheHub(self.tmp / "satellite/.local/share/sd/sd.db")
+        with mock.patch.object(library, "default_path", lambda home=None: satellite), \
+                mock.patch.object(library, "connect", lambda target, write=False, **_: connect(hub, write=write)):
+            registry = sd_review.sd_registry.read_runtime(self.registry_home / ".local/share/sd/providers.yaml",
+                                                          home=self.registry_home, database_path=str(satellite))
+        self.assertFalse(registry.providers["third"].enabled)
+
     def test_unreadable_database_refuses_instead_of_ignoring_its_controls(self) -> None:
         root = self.prepare()
         (self.registry_home / ".local/share/sd/sd.db").write_bytes(b"invalid fixture database")
