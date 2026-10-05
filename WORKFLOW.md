@@ -475,9 +475,9 @@ which the installer places in `~/.claude/agents`.
   how many gates run, not the CPU each uses. Under a cap, a holder sets
   `CARGO_BUILD_JOBS` and `RUST_TEST_THREADS` in its checks to the cores over
   `sd.gate_slots`, at least 1: 8 for 2 slots on 16 cores. A positive value the
-  caller set wins when it is lower; a higher one is lowered. `sd gate check`
-  sets the same values in its child and binds them in the receipt, because a
-  suite can pass on one test thread and fail on eight. So a slot count that
+  caller set wins when it is lower; a higher one is lowered. The
+  `sd gate check` receipt binds these values, because a suite can pass on
+  one test thread and fail on eight. So a slot count that
   changes the share misses reuse once and runs the check again. `MAKEFLAGS`
   gets no `-j`, since it would run a Makefile's prerequisites at once; a
   repository caps its own `make` pool, as the system repository's
