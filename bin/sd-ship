@@ -1363,7 +1363,18 @@ class Ship(SharedReview):
         if copilot.get("warning"):
             self.save(warnings=list(self.state.get("warnings") or []) + [copilot["warning"]])
         return self.result("ready_to_send", copilot_review=copilot, invoker=self.state["invoker"],
-                           body_source=self.body_source, normalized=list(self.body_normalized))
+                           body_source=self.body_source, normalized=list(self.body_normalized),
+                           **self.satellite_status(head))
+
+    def satellite_status(self, head: str) -> dict:
+        """On a satellite in an opted-in `repo.ci = local` repository, post the offload receipt's status (sd:2704).
+
+        The hub's `--satellite-gate` merge accepts only a status this account posted (clause 8).
+        """
+        if not (self.served_by and sd_lib.repo_ci(self.connection, self.root) == "local"
+                and sd_lib.repo_satellite_gate(self.connection, self.root) == "accept"):
+            return {}
+        return sd_local_gate.post_offload_status(self.api, self.root, head, self.database)
 
     def claim_lines(self, base: str, head: str) -> list[str]:
         """Open pull requests and origin branches on this item or these files; advisory only."""

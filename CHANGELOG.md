@@ -31,6 +31,11 @@
   merge in an opted-in repository tries the offload receipt after its own,
   and runs the gate on a miss that `reuse_miss.offload` names. `ready`'s
   behind refusal now carries `base_moved`.
+- **A satellite's prepare posts `sd/local-gate` from its offload receipt
+  (sd:2704 step 5).** In an opted-in `repo.ci = local` repository the status
+  reads `<head> inputs <digest>: sat <hostname>: <summary>`, which the hub's
+  clause 8 checks. With no receipt it posts nothing and reports
+  `offload_error`.
 - **The offload view of a gate's environment (sd:2724, sd:2704 step 2a).**
   `sd_gate_receipts.offload_view` gives the portable view a hub will compare
   with a satellite's receipt: `PATH` entries in order with each `$HOME` prefix

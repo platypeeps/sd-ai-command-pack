@@ -251,6 +251,37 @@ class SatelliteMerge(unittest.TestCase):
         self.merge()
         self.assertEqual((self.puts(), self.runs, len(self.gate_posts())), (1, 1, 1))
 
+    # -- step 5: the satellite's prepare posts the status the hub's clause 8 reads --
+
+    def satellite_prepare(self) -> dict:
+        operation = self.operation("prepare")
+        operation.served_by = self.HUB
+        return operation.prepare()
+
+    def test_a_satellite_prepare_posts_one_status_from_its_offload_row(self) -> None:
+        self.satellite_pass()
+        before = len(self.gate_posts())
+        result = self.satellite_prepare()
+        posts = self.gate_posts()
+        self.assertEqual(len(posts) - before, 1)
+        description = posts[-1].body["description"]
+        self.assertTrue(description.startswith(f"{self.head()[:12]} inputs {self.inputs}: sat "), description)
+        self.assertEqual(result["offload_status"]["description"], description)
+        self.merge("--satellite-gate")
+        self.assertEqual((self.puts(), self.runs), (1, 0))
+
+    def test_a_satellite_prepare_with_no_row_posts_nothing_and_says_why(self) -> None:
+        result = self.satellite_prepare()
+        self.assertEqual(self.gate_posts(), [])
+        self.assertIn("no sd-satellite-gate success", result["offload_error"])
+
+    def test_a_hub_prepare_posts_nothing_new(self) -> None:
+        self.satellite_pass()
+        result = self.operation("prepare").prepare()
+        self.assertEqual(self.gate_posts(), [])
+        self.assertFalse({"offload_status", "offload_error"} & set(result))
+
+
 
 if __name__ == "__main__":
     unittest.main()
