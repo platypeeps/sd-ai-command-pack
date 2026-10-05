@@ -676,6 +676,18 @@ class AcknowledgementTests(unittest.TestCase):
         self.assertEqual([gap["id"] for gap in accepted], ["enforce_admins"])
         self.assertEqual([gap["id"] for gap in still_open], ["reviews"])
 
+    def test_an_object_without_enforce_admins_keeps_its_unknown_gap(self) -> None:
+        """`_admin_gaps` reports an object without `enforce_admins` as
+        unknown, so `observed_state` reads it unknown too, and an entry for
+        off does not accept it (sd:2755)."""
+        entry = {"id": "enforce_admins", "state": {"enforce_admins": False},
+                 "because": "admins ship the release bump", "since": "2026-10-05", "until": "never"}
+        protection = self.enforcing()
+        del protection["enforce_admins"]
+        still_open, accepted = self.split(protection, [entry])
+        self.assertEqual(accepted, [])
+        self.assertEqual([gap["id"] for gap in still_open], ["enforce_admins", "reviews"])
+
     def test_a_pinned_fact_cannot_be_null(self) -> None:
         """`enforce_admins` observes `None` when it is unknown; a `null` pin
         would accept exactly that, on any gap's entry (sd:2755)."""
@@ -725,10 +737,13 @@ class AcknowledgementTests(unittest.TestCase):
         absent = status._observed_state(None)
         empty = status._observed_state({})
         self.assertNotEqual(absent, empty)
-        # ... and they differ in exactly that one fact, which is the point:
-        # the other four genuinely are constants on both.
+        # ... and in `enforce_admins`: no object is off, while an object
+        # without the answer is unknown, the gap `_admin_gaps` reports for it
+        # (sd:2755). The other facts genuinely are constants on both.
         differing = [key for key in absent if absent[key] != empty[key]]
-        self.assertEqual(differing, ["branch_protection"])
+        self.assertEqual(differing, ["branch_protection", "enforce_admins"])
+        self.assertIs(absent["enforce_admins"], False)
+        self.assertIsNone(empty["enforce_admins"])
 
     def test_a_matching_acknowledgement_moves_the_finding_out_of_the_gaps(self) -> None:
         still_open, accepted = self.split(self.enforcing(), [self.ZERO_APPROVALS])

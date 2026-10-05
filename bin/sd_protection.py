@@ -178,6 +178,16 @@ def _parameters(rule: dict) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
+def admins_enforced(protection: dict[str, Any]) -> bool | None:
+    """`enforce_admins` of a protection object: `None` when unknown -- an
+    object without the answer, or `synthesize` unable to give one (a
+    withheld bypass list, an unresolved role) -- else whether it is on.
+    The one reading `sd-status`'s gap and `observed_state` share."""
+    admins = protection.get("enforce_admins") or {}
+    enabled = admins.get("enabled") if isinstance(admins, dict) else admins
+    return None if enabled is None else bool(enabled)
+
+
 def observed_state(protection: dict[str, Any] | None) -> dict[str, Any]:
     """The live protection object reduced to the facts an acknowledgement pins.
 
@@ -194,7 +204,6 @@ def observed_state(protection: dict[str, Any] | None) -> dict[str, Any]:
     """
     protection = protection if isinstance(protection, dict) else None
     reviews = (protection or {}).get("required_pull_request_reviews")
-    admins = (protection or {}).get("enforce_admins") or {}
     checks = (protection or {}).get("required_status_checks") or {}
     return {
         "branch_protection": protection is not None,
@@ -205,14 +214,9 @@ def observed_state(protection: dict[str, Any] | None) -> dict[str, Any]:
         # reaches: an acknowledgement of `enforce_admins` off that pins them
         # stops applying when a second ruleset grows one.
         "admin_bypass": bypass_words(protection or {}, True),
-        # `None` only where `synthesize` or `combine` said unknown (a withheld
-        # bypass list, an unresolved role), kept apart from off so an entry
-        # accepting off never accepts what nobody could see (sd:2755). No
-        # object, or one without the key, is a known off.
-        "enforce_admins": (
-            None if isinstance(admins, dict) and "enabled" in admins and admins["enabled"] is None
-            else bool(admins.get("enabled")) if isinstance(admins, dict) else bool(admins)
-        ),
+        # `None` is unknown, kept apart from off so that an entry accepting
+        # off never accepts what nobody could see (sd:2755).
+        "enforce_admins": admins_enforced(protection) if protection is not None else False,
         "required_approving_review_count": (
             int(reviews.get("required_approving_review_count") or 0)
             if isinstance(reviews, dict)
