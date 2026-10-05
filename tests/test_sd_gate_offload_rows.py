@@ -130,6 +130,24 @@ class OffloadRows(SatelliteFixture):
         self.assertEqual(sd_gate_receipts.read_offload(self.database, reused["offload"]["key"])[0],
                          reused["offload"]["revision"])
 
+    def test_a_reuse_replaces_a_row_another_pass_left(self) -> None:
+        """A stale row (another pass's time, inputs or pack) does not stand for the reused pass: the reuse writes its own."""
+        from contextlib import closing
+
+        from sd_db import connect, ship
+
+        self.gate()
+        self.gate()  # the reuse's own row: the reused pass's binding and pack, at its receipt's time
+        key, current = sd_gate_receipts.offload_key(SLUG, self.head), self.offload_row()
+        for fields in ({"recorded_at": current["recorded_at"] - 60}, {"binding": {**current["binding"], "inputs": "0" * 12}},
+                       {"pack_bin": "0" * 64}):
+            with self.subTest(fields=sorted(fields)):
+                with closing(connect(self.database)) as connection:
+                    ship.save(connection, key, ship.read(connection, key)[0], {**current, **fields})
+                self.assertEqual(self.gate()["offload"]["written"], True)
+                self.assertEqual({name: self.offload_row()[name] for name in fields}, {name: current[name] for name in fields})
+        self.assertEqual((self.runs, self.gate()["offload"]["written"]), (1, False))
+
     def test_an_unreachable_hub_still_runs_the_check_and_reports_offload_error(self) -> None:
         with mock.patch.object(sd_gate_receipts, "_connect", side_effect=ConnectionError("HubUnreachable: no answer")):
             result = self.gate()

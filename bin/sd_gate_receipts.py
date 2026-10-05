@@ -444,7 +444,7 @@ def record_offload(database: pathlib.Path | None, run: Worktree, identity: Mappi
 
     Nothing on the hub, `{"offload_skipped"}` where `repo.satellite_gate` is not `accept`, `{"offload"}`
     naming the row, or `{"offload_error"}` when the hub did not take it: the pass stands either way.
-    `recorded_at` is a reused pass's own time; a reuse writes only a missing row.
+    `recorded_at` is a reused pass's own time; a reuse leaves alone only the row of that same pass.
     """
     hub = served_hub(database)
     if hub is None:
@@ -461,7 +461,8 @@ def record_offload(database: pathlib.Path | None, run: Worktree, identity: Mappi
                 return {"offload_skipped": "repo.satellite_gate is not accept for this repository"}
             from sd_db import ship  # noqa: PLC0415
             revision, existing = ship.read(connection, key)
-            if recorded_at is not None and existing:
+            if (recorded_at is not None and isinstance(existing, dict) and existing.get("recorded_at") == recorded_at
+                    and existing.get("binding") == dict(identity) and existing.get("pack_bin") == pack_bin(run.own)):
                 return {"offload": {"key": key, "revision": revision, "hub": hub, "written": False}}
             written = int(ship.save(connection, key, revision, {
                 "writer": OFFLOAD_WRITER, "satellite": satellite_identity(), "hub": hub, "binding": dict(identity),
