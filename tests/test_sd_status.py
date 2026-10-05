@@ -201,12 +201,12 @@ created: 2026-08-01
 class SkillSaysTests(unittest.TestCase):
     """sd:1002, 11b348a64abb: a pin counts only where a sentence or list item starts."""
 
-    def says(self, page: str, sentence: str) -> None:
+    def says(self, page: str, sentence: str) -> str:
         with tempfile.TemporaryDirectory() as root:
             path = pathlib.Path(root) / "SKILL.md"
             path.write_text(page, encoding="utf-8")
             with mock.patch.object(sys.modules[__name__], "SKILL_MD", path):
-                _skill_says(sentence)
+                return _skill_says(sentence)
 
     def test_a_negation_in_front_of_a_pinned_rule_fails_the_pin(self) -> None:
         rule = "It is capped at ten and says so."
@@ -224,8 +224,9 @@ class SkillSaysTests(unittest.TestCase):
                      "Read the list. It is capped at ten and says so.\n",
                      "- It is capped at ten and says so.\n"):
             with self.subTest(page=page):
-                self.says(page, rule)
-        self.says("- **Rank 3**, below the rest.\n", "- **Rank 3**, below the rest.")
+                self.assertIn(rule, self.says(page, rule))
+        self.assertIn("- **Rank 3**, below the rest.",
+                      self.says("- **Rank 3**, below the rest.\n", "- **Rank 3**, below the rest."))
 
 
 class WorkflowCheckNameTests(unittest.TestCase):
