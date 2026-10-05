@@ -493,6 +493,19 @@ class Speculation(Lane):
         self.assertEqual([entry["status"] for entry in self.entries()], ["merged", "merged"])
         self.assertEqual(self.entries()[1]["speculation"]["status"], "error")
 
+    def test_a_satellite_entry_ahead_is_predicted_from_its_branch_on_origin(self) -> None:
+        """sd:2704. Its worktree is the main checkout, whose HEAD is not its head; the branch on origin is."""
+        git(self.first, "push", "-q", "origin", "first")
+        sd_lane.update(sd_lane.queue_path(self.repo, self.environ), lambda rows: rows.append({
+            "worktree": str(self.repo), "item": 1, "gate": "satellite", "branch": "first", "base": "main",
+            "expected_head": git(self.first, "rev-parse", "HEAD"), "authority": "manual", "status": "pending",
+            "enqueued_at": sd_lane.stamp_now()}))
+        sd_lane.enqueue_entry(self.second, 2, "two", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.run_lane(self.repo, self.environ, super().ship, lambda root, head, base: self.gates.append(
+            (root, head, base)) or {"status": "success"})
+        [(root, _, _)] = self.gates
+        self.assertEqual((root, self.entries()[1]["speculation"]["status"]), (self.second, "success"))
+
 
 class Landing(Lane):
     """sd:2568: after a merge, clean up, note the item and fast-forward the main checkout."""

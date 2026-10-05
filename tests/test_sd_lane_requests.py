@@ -223,7 +223,8 @@ class SatelliteOnly(Requests):
         hub_entry, satellite = self.entries()
         self.assertEqual((hub_entry["item"], hub_entry["status"]), (3, "pending"))
         self.assertNotIn("speculation", hub_entry)
-        self.assertEqual((satellite["item"], [row["item"] for row in answer["ran"]]), (7, [7]))
+        self.assertEqual((satellite["item"], satellite["status"], [row["item"] for row in answer["ran"]]),
+                         (7, "merged", [7]))
         self.assertNotIn("prepare", [call[2] for call in self.calls])
         self.assertEqual(self.gates, [])
         self.assertEqual([row["status"] for row in answer["intake"]], ["queued"])
@@ -231,8 +232,7 @@ class SatelliteOnly(Requests):
     def test_a_plain_run_still_runs_both(self) -> None:
         self.queue_hub_then_satellite()
         answer = sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate, hub=self.hub)
-        self.assertEqual([row["item"] for row in answer["ran"]], [3, 7])
-        self.assertEqual(self.entries()[0]["status"], "merged")
+        self.assertEqual([(row["item"], row["status"]) for row in answer["ran"]], [(3, "merged"), (7, "merged")])
 
     def test_a_satellite_only_run_with_only_hub_entries_exits_at_once(self) -> None:
         sd_lane.enqueue_entry(self.worktree("hubitem"), 3, "hub item", self.body, self.environ, manual=True,

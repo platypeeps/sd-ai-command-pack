@@ -21,10 +21,13 @@ from sd_db import create_item
 from sd_db import ship as receipts
 from sd_db.testing.remote import _git
 
+from tests import test_sd_lane_requests as requests_suite
 from tests import test_sd_ship as fixture
 
 ship = fixture.ship
 ROOT = fixture.ROOT
+sd_lane = requests_suite.sd_lane
+lane_git = requests_suite.git
 
 
 class LaneCase(unittest.TestCase):
@@ -273,6 +276,115 @@ class MergeFromTheLane(LaneCase):
                                     "--expected-head", self.head(), cwd=self.directory)
         self.assertEqual(code, 0, merged)
         self.assertEqual(merged["phase"], "merged")
+
+
+class SatelliteEntry(requests_suite.Requests):
+    """sd:2704 step 7. A satellite entry runs no prepare and no catch-up: fetch, head and base checks,
+    then one `merge --satellite-gate`; `sd-ship` is the lane suite's recorder."""
+
+    def setUp(self):
+        super().setUp()
+        self.prepared()
+        self.ask()
+        requests_suite.sd_lane.intake(self.hub, self.path)
+
+    def run_lane(self, ship=None, **options):
+        return sd_lane.run_lane(self.repo, self.environ, ship or self.ship, self.gate, hub=self.hub, **options)
+
+    def advance(self, branch: str) -> str:
+        """Another machine pushes to `branch` on origin."""
+        other = self.tmp / f"other-{branch}"
+        if not other.exists():
+            subprocess.run(["git", "clone", "-q", str(self.origin), str(other)], check=True)
+        lane_git(other, "fetch", "-q", "origin")
+        lane_git(other, "checkout", "-q", "-B", branch, f"origin/{branch}")
+        lane_git(other, "-c", "user.email=t@example.test", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x")
+        lane_git(other, "push", "-q", "origin", branch)
+        return lane_git(other, "rev-parse", "HEAD")
+
+    def remote_branches(self):
+        return lane_git(self.origin, "for-each-ref", "--format=%(refname:short)", "refs/heads").split()
+
+    def test_a_satellite_entry_merges_with_its_receipt_and_no_prepare_or_catch_up(self):
+        self.run_lane()
+        [merge] = self.calls
+        self.assertEqual(merge, sd_lane.satellite_merge_argv(self.entries()[0]))
+        self.assertNotIn("prepare", merge)
+        self.assertNotIn("--catch-up", merge)
+        for flag, value in (("--branch", "topic"), ("--expected-head", self.head), ("-C", str(self.repo))):
+            self.assertEqual(merge[merge.index(flag) + 1], value)
+        self.assertIn("--satellite-gate", merge)
+        entry, row = self.entries()[0], self.row()
+        self.assertEqual((entry["status"], entry["request_row"]), ("merged", "written"))
+        self.assertEqual((row["status"], row["merge_commit"]), ("merged", "merged-7"))
+
+    def test_a_moved_base_hands_back_with_no_merge_call(self):
+        self.advance("main")
+        self.run_lane()
+        self.assertEqual(self.calls, [])
+        entry, row = self.entries()[0], self.row()
+        self.assertEqual((entry["status"], entry["code"]), ("handed_back", "base_moved"))
+        self.assertEqual((row["status"], row["code"], row["next_action"]),
+                         ("handed_back", "base_moved", sd_lane.HAND_BACK.format(base="main")))
+        [(item, body, _)] = self.notes
+        self.assertEqual(item, 7)
+        self.assertIn("handed_back (base_moved)", body)
+        self.assertIn("sd-ship lane request again", body)
+
+    def test_a_moved_branch_hands_back_with_no_merge_call(self):
+        self.advance("topic")
+        self.run_lane()
+        self.assertEqual(self.calls, [])
+        self.assertEqual((self.entries()[0]["code"], self.row()["status"]), ("head_moved", "handed_back"))
+
+    def test_a_satellite_refusal_from_merge_hands_back_and_another_fails(self):
+        for code, status in (("satellite_pack_mismatch", "handed_back"), ("base_moved", "handed_back"),
+                             ("checks_failed", "failed")):
+            with self.subTest(code=code):
+                self.answers[(7, "merge")] = {"ok": False, "error": f"refused: {code}", "workflow": {
+                    "blocker": {"code": code}, "next_action": "the merge's own next step"}}
+                if self.entries()[-1]["status"] != "pending":
+                    self.ask()
+                    requests_suite.sd_lane.intake(self.hub, self.path)
+                self.run_lane()
+                entry, row = self.entries()[-1], self.row()
+                self.assertEqual((entry["status"], entry["code"], row["status"]), (status, code, status))
+                self.assertIn(f"Lane: {status} ({code})", self.notes[-1][1])
+
+    def test_no_speculative_gate_starts_for_a_satellite_follower(self):
+        hub_tree = self.worktree("hubitem")
+        sd_lane.enqueue_entry(hub_tree, 3, "hub item", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.move(self.repo, 3, "top", self.environ)
+        self.run_lane()
+        self.assertEqual(self.gates, [])
+        satellite = next(entry for entry in self.entries() if entry["item"] == 7)
+        self.assertEqual(satellite["status"], "merged")
+        self.assertNotIn("speculation", satellite)
+
+    def test_the_remote_branch_is_deleted_at_the_merged_head_only(self):
+        self.run_lane()
+        self.assertEqual(self.remote_branches(), ["main"])
+        self.assertIn("removed origin/topic", self.entries()[0]["cleanup"])
+        self.assertIsNone(self.entries()[0]["remove"])
+
+    def test_a_remote_branch_pushed_past_the_merged_head_is_kept(self):
+        ship = self.ship
+
+        def push_during_merge(argv, log):
+            self.advance("topic")
+            return ship(argv, log)
+        self.run_lane(push_during_merge)
+        self.assertEqual(self.remote_branches(), ["main", "topic"])
+        self.assertIn("origin/topic kept: it is at", self.entries()[0]["cleanup"])
+
+    def test_a_request_without_manual_stops_before_the_merge(self):
+        self.ask(authority=None)
+        requests_suite.sd_lane.intake(self.hub, self.path)
+        self.run_lane()
+        self.assertEqual(self.calls, [])
+        entry = self.entries()[-1]
+        self.assertEqual((entry["status"], self.row()["status"]), ("prepared", "prepared"))
+        self.assertIn("--satellite-gate", entry["next_action"])
 
 
 if __name__ == "__main__":

@@ -590,8 +590,53 @@ def default_ship(argv: list[str], log: pathlib.Path) -> dict[str, Any]:
     return ship_process(argv, log, MERGE_SECONDS if "merge" in argv[2:4] else PREPARE_SECONDS)
 
 
+def satellite_merge_argv(entry: dict[str, Any]) -> list[str]:
+    """The one `sd-ship merge` a satellite entry runs: the satellite's receipt in place of a gate (sd:2704 step 4)."""
+    return ["-C", entry["worktree"], "merge", "--item", str(entry["item"]), "--branch", entry["branch"],
+            "--expected-head", entry["expected_head"], "--manual", "--satellite-gate",
+            "--watch", "--wait-seconds", str(MERGE_WAIT_SECONDS), "--json"]
+
+
+def handed_back(entry: dict[str, Any], code: str, reason: str) -> dict[str, Any]:
+    """The satellite acts next: its branch moved, the base moved, or the hub would not take its receipt."""
+    return {"status": "handed_back", "code": code, "reason": reason[:600],
+            "next_action": HAND_BACK.format(base=entry["base"])}
+
+
+def process_satellite(entry: dict[str, Any], logs: pathlib.Path, ship: Ship) -> dict[str, Any]:
+    """A satellite entry: fetch, the head and base checks of design.md "Freshness", then merge; no prepare."""
+    main, branch, base, head = pathlib.Path(entry["worktree"]), entry["branch"], entry["base"], entry["expected_head"]
+    remote, onto = f"refs/remotes/origin/{branch}", f"refs/remotes/origin/{base}"
+    if scratch_git(main, "fetch", "--quiet", "--no-tags", "origin", f"+refs/heads/{branch}:{remote}",
+                   f"+refs/heads/{base}:{onto}") is None:
+        return {"status": "failed", "step": "fetch", "reason": f"origin/{branch} or origin/{base} could not be fetched"}
+    tip = lane_git(main, "rev-parse", "--verify", "--quiet", remote)
+    if tip != head:
+        return {"head": head, **handed_back(entry, "head_moved", f"origin/{branch} is at {tip}, not the requested head")}
+    if lane_git(main, "merge-base", "--is-ancestor", onto, head) is None:
+        return {"head": head, **handed_back(entry, "base_moved", f"{head[:12]} does not contain origin/{base}")}
+    if entry.get("authority") != "manual":
+        return {"head": head, "status": "prepared", "reason": "requested without --manual; merge by hand",
+                "next_action": f"On the hub: sd-ship -C {main} merge --item {entry['item']} --branch {branch} "
+                               f"--expected-head {head} --manual --satellite-gate"}
+    log = logs / f"merge-{entry['item']}-{time.strftime('%Y%m%dT%H%M%S', time.gmtime())}.log"
+    merged = ship(satellite_merge_argv(entry), log)
+    fields = {"head": head, "merge_log": str(log)}
+    if merged.get("ok") and merged.get("phase") == "merged":
+        return {**fields, "status": "merged", "merge_commit": merged.get("merge_commit")}
+    workflow = merged.get("workflow") or {}
+    code = str((workflow.get("blocker") or {}).get("code") or merged.get("code") or "")
+    reason = str(merged.get("error") or code or "merge did not confirm")
+    if code in ("head_moved", "base_moved") or code.startswith("satellite_"):
+        return {**fields, **handed_back(entry, code, reason)}
+    return {**fields, "status": "failed", "step": "merge", "phase": merged.get("phase"), "code": code or None,
+            "reason": reason[:600], "next_action": workflow.get("next_action")}
+
+
 def process(entry: dict[str, Any], logs: pathlib.Path, ship: Ship) -> dict[str, Any]:
     """One entry, start to end; the fields to record on it."""
+    if entry.get("gate") == SATELLITE:
+        return process_satellite(entry, logs, ship)
     worktree, item = pathlib.Path(entry["worktree"]), entry["item"]
     if lane_git(worktree, "rev-parse", "HEAD") != entry["expected_head"]:
         return {"status": "skipped", "reason": "the worktree's HEAD moved from the queued head"}
@@ -660,13 +705,15 @@ def predict(entry: dict[str, Any], following: dict[str, Any]) -> dict[str, Any]:
     import sd_gate_receipts  # noqa: PLC0415 -- the declaration reader loads only for a speculation
     root = pathlib.Path(following["worktree"])
     for row, whose in ((entry, f"sd:{entry['item']}'s"), (following, "its")):
-        if lane_git(pathlib.Path(row["worktree"]), "rev-parse", "HEAD") != row["expected_head"]:
+        if row.get("gate") != SATELLITE and lane_git(pathlib.Path(row["worktree"]), "rev-parse", "HEAD") != row["expected_head"]:
             return {"skipped": f"{whose} worktree's HEAD moved from the queued head"}
     remote = lane_git(root, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD") or ""
     branch = remote.removeprefix("refs/remotes/origin/")
     if not branch or branch == remote:
         return {"skipped": "origin/HEAD names no base branch"}
-    if scratch_git(root, "fetch", "--quiet", "--no-tags", "origin", f"refs/heads/{branch}:{remote}") is None:
+    # A satellite entry ahead has no worktree here: its head comes from its branch on origin.
+    ahead = [f"+refs/heads/{entry['branch']}:refs/remotes/origin/{entry['branch']}"] if entry.get("gate") == SATELLITE else []
+    if scratch_git(root, "fetch", "--quiet", "--no-tags", "origin", f"refs/heads/{branch}:{remote}", *ahead) is None:
         return {"skipped": f"origin/{branch} could not be fetched"}
     fork, message = lane_git(root, "rev-parse", "--verify", "--quiet", remote), f"Merge origin/{branch}"
     with tempfile.TemporaryDirectory(prefix="sd-lane-speculate-") as parent:
@@ -699,8 +746,8 @@ def speculate(entry: dict[str, Any], path: pathlib.Path, gate: Gate, busy: bool 
     `speculation`, and the gate's whole result to a log beside the others.
     """
     following = next((row for row in read_queue(path) if row.get("status") == "pending" and not row.get("held")), None)
-    if entry.get("authority") != "manual" or following is None:
-        return None
+    if entry.get("authority") != "manual" or following is None or following.get("gate") == SATELLITE:
+        return None  # a satellite entry gated on the satellite, and its merge runs no gate here
 
     def record_speculation(fields: dict[str, Any]) -> None:
         def on_follower(entries: list[dict[str, Any]]) -> None:
@@ -753,7 +800,8 @@ def clean_up(entry: dict[str, Any], head: str | None, main: pathlib.Path, branch
     and `update-ref -d` refuses a branch that moved past the merged head.
     """
     worktree = pathlib.Path(entry["worktree"]).resolve()
-    if worktree == main:
+    satellite = entry.get("gate") == SATELLITE  # merged from the main checkout; the satellite removes its own worktree
+    if worktree == main and not satellite:
         return f"Cleanup skipped: {worktree} is the main checkout", None
     if not branch:
         return "Cleanup skipped: the worktree has no branch checked out", None
@@ -767,6 +815,8 @@ def clean_up(entry: dict[str, Any], head: str | None, main: pathlib.Path, branch
         done.append(f"removed origin/{branch}" if deleted is not None else f"origin/{branch} kept: the delete failed")
     elif remote:
         done.append(f"origin/{branch} kept: it is at {remote}, not the merged head")
+    if satellite:
+        return "Cleanup: " + (", ".join(done) or f"origin/{branch} was already gone"), None
     remove = f"git -C {main} worktree remove {worktree} && git -C {main} update-ref -d refs/heads/{branch} {tip}"
     done.append(f"worktree {worktree} and branch {branch} kept for removal once the builder stops")
     return "Cleanup: " + ", ".join(done), remove
@@ -812,8 +862,10 @@ def land(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, str]
     worktree = pathlib.Path(entry["worktree"])
     main = sd_lib.main_worktree_root(worktree).resolve()
     head, merged = outcome.get("head"), str(outcome.get("merge_commit") or "")
-    branch = lane_git(worktree, "branch", "--show-current") or ""
-    tip = lane_git(worktree, "rev-parse", "HEAD")
+    if entry.get("gate") == SATELLITE:  # the branch is open on the satellite; its tip here is the merged head
+        branch, tip = entry["branch"], head
+    else:
+        branch, tip = lane_git(worktree, "branch", "--show-current") or "", lane_git(worktree, "rev-parse", "HEAD")
     cleanup, remove = clean_up(entry, head, main, branch, tip)
     fields: dict[str, Any] = {"cleanup": cleanup, "remove": remove}
     body = f"Landed: merged at {merged[:12]} (head {str(head)[:12]}). {cleanup}."

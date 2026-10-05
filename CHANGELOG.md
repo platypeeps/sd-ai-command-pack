@@ -4,6 +4,20 @@
 
 ### Added
 
+- **The lane merges a satellite entry without a prepare or a gate (sd:2704).**
+  For a `gate: satellite` entry `lane run` fetches the branch and the base
+  into its main checkout, hands the entry back with `head_moved` when
+  `origin/<branch>` is not the requested head and with `base_moved` when the
+  head lacks `origin/<base>`, and only then runs
+  `sd-ship merge --item N --branch B --expected-head H --manual --satellite-gate`.
+  A merge refusal coded `head_moved`, `base_moved` or `satellite_*` also hands
+  back; the entry, the request row and an item note carry the reason and the
+  satellite's next steps. The lane starts no speculative gate for a satellite
+  follower, and predicts past a satellite entry ahead from its branch on
+  origin. After the merge it deletes `origin/<branch>` with a lease on the
+  merged head and writes `merged` to the request row. `sd-ship merge` takes
+  `--satellite-gate` once the hub's acceptance lands (step 4); until then the
+  merge refuses the flag and the entry ends `failed`.
 - **A satellite asks the hub's lane to merge: `sd-ship lane request` (sd:2704).**
   On a satellite, `lane request --item N [--manual]` writes the row
   `lane-request:v1:<slug>:<item>` over the wire. It refuses on the hub
