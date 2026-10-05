@@ -75,8 +75,8 @@ class Slot:
             self.handle = None
 
     def __del__(self) -> None:
-        # `sd-review` holds the slot in a local of `review`, so the slot frees
-        # when that call returns or raises, as a `finally` would free it.
+        # A backstop: `sd-review` gives the slot back in a `finally`. A holder
+        # that forgets to frees it when the last reference goes.
         self.give_back()
 
 
@@ -132,9 +132,9 @@ def hold_review_slot(result: dict[str, Any], environ: Mapping[str, str], root: p
     gate's bound: the gate after it still needs all of it. `sd-review` passes
     its setup bound, counted from the process start that `sd_lib.STARTED`
     records, so setup and the wait share that one term of sd-ship's watchdog
-    plan. Kept here, outside the review lane, so `sd-review` spends three
-    lines on it (sd:2523): take the slot, refuse, give it back before the
-    gate. None means the review refused.
+    plan. Kept here, outside the review lane, so `sd-review` spends five
+    lines on it (sd:2523): take the slot, refuse, and give it back in a
+    `try`/`finally` before the gate. None means the review refused.
     """
     slot = take_review_slot(environ, lambda: sd_lib.core_setting("review_slots", dict(environ)), stream=sys.stderr,
                             label=f"sd-review {root}", deadline=sd_lib.STARTED + bound_seconds)

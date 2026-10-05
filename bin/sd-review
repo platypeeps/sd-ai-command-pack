@@ -2133,26 +2133,28 @@ def review(
     if not (slot := sd_lib.review_slot(result, env, root, SETUP_TIMEOUT_SECONDS)):
         return result
 
-    outcomes: list[Outcome] = []
-    reviewed: list[str] = []
-    cited = reviewed_paths(root, subject, previous)
-    omitted = tuple(input_manifest.get("omitted_paths", ()))
-    for provider in chosen:
-        if len(reviewed) >= depth:
-            break
-        # Measured against the binary about to run, so each entry answers for
-        # itself. The result key carries the last; each outcome carries its own.
-        if provider.reader == "codex-json" and auth["ok"]:
-            skills = result["codex_skill_suppression"] = codex_skill_state(provider, root, runner, env, auth_home)
-        unread = omitted if provider.url or provider.reader in MATERIAL_READERS else ()
-        for outcome in _attempts(provider, lambda: partial(unlocated(run_provider(
-                provider, root, subject, prompt, runner, env, phase,  # noqa: B023 -- run in this iteration
-                codex_auth_home, client, ledger, skills), cited, result["severity_floor"]), unread)):  # noqa: B023
-            outcomes.append(outcome)
-            if outcome.status in (CLEAN, FINDINGS):
-                reviewed.append(outcome.backend)
-    finish_review(result, outcomes, reviewed)
-    slot.give_back()  # sd:2523: the gate below queues in its own pool
+    try:
+        outcomes: list[Outcome] = []
+        reviewed: list[str] = []
+        cited = reviewed_paths(root, subject, previous)
+        omitted = tuple(input_manifest.get("omitted_paths", ()))
+        for provider in chosen:
+            if len(reviewed) >= depth:
+                break
+            # Measured against the binary about to run, so each entry answers for
+            # itself. The result key carries the last; each outcome carries its own.
+            if provider.reader == "codex-json" and auth["ok"]:
+                skills = result["codex_skill_suppression"] = codex_skill_state(provider, root, runner, env, auth_home)
+            unread = omitted if provider.url or provider.reader in MATERIAL_READERS else ()
+            for outcome in _attempts(provider, lambda: partial(unlocated(run_provider(
+                    provider, root, subject, prompt, runner, env, phase,  # noqa: B023 -- run in this iteration
+                    codex_auth_home, client, ledger, skills), cited, result["severity_floor"]), unread)):  # noqa: B023
+                outcomes.append(outcome)
+                if outcome.status in (CLEAN, FINDINGS):
+                    reviewed.append(outcome.backend)
+        finish_review(result, outcomes, reviewed)
+    finally:
+        slot.give_back()  # sd:2523: on every exit; the gate below queues in its own pool
     if reused is not None or result["status"] not in GATED_STATUSES:
         result["check"] = reused or {"status": NOT_RUN_CHECK, "exit_code": None,
                                      "reason": f"the review is {result['status']}; the gate runs on a head it does not block"}

@@ -7,6 +7,7 @@ a release was called.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import os
@@ -15,6 +16,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -168,6 +170,32 @@ class TheReviewHoldsASlot(ReviewFixture):
         self.assertEqual(report["review_slot"]["slot"], 1, json.dumps(report)[:2000])
         self.assertEqual(free, [True], "the review held its slot while the gate ran")
 
+    def test_the_slot_is_free_after_a_reviewer_raises_while_the_error_lives(self) -> None:
+        """The `finally` gives the slot back on the raising path, not the frame's end.
+
+        The error is kept past its `except` clause, so its traceback keeps the
+        `review` frame and its locals alive: a slot freed only by `__del__`
+        would still be held here.
+        """
+
+        where = self.tmp / "review-slots"
+        cap = {"SD_REVIEW_SLOTS": "1", "SD_REVIEW_SLOTS_DIR": str(where)}
+        kept: list[BaseException] = []
+
+        def crash(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("the reviewer crashed")
+
+        with mock.patch.object(sd_review, "run_provider", crash):
+            try:
+                sd_review.review(self.change(), namespace(), FakeRunner(), self.environment(**cap), self.chatgpt_home())
+            except RuntimeError as error:
+                kept.append(error)
+        self.assertEqual([str(error) for error in kept], ["the reviewer crashed"])
+        after = slots.take_review_slot(cap, lambda: None, stream=io.StringIO(), label="after",
+                                       deadline=slots.clock(), poll=0.01)
+        self.assertIsNotNone(after, "the slot stayed held after a reviewer raised")
+        after.give_back()
+
     def test_the_slot_is_free_once_main_s_handler_catches_what_the_review_raised(self) -> None:
         """The raising path: `main` catches a Refusal `as error`, and the clause's end drops the frame and the slot.
 
@@ -192,7 +220,7 @@ class TheReviewHoldsASlot(ReviewFixture):
         self.assertIsNotNone(after, "the slot stayed held after the handler that caught the review's error")
         after.give_back()
 
-    def test_with_every_slot_held_the_review_refuses_before_any_reviewer(self) -> None:
+    def test_with_every_slot_held_the_review_waits_out_the_bound_and_refuses_before_any_reviewer(self) -> None:
         where = self.tmp / "review-slots"
         child = subprocess.Popen([sys.executable, "-c", HOLDER, str(BIN), "another lane"], stdout=subprocess.PIPE,
                                  text=True, env={**os.environ, "SD_REVIEW_SLOTS": "1", "SD_REVIEW_SLOTS_DIR": str(where)})
@@ -200,14 +228,23 @@ class TheReviewHoldsASlot(ReviewFixture):
         self.addCleanup(child.kill)
         self.assertTrue(child.stdout.readline().strip())
         runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", "")})
-        # The wait spends the setup bound from the process start; a start long
-        # past leaves none of it, so the review refuses at once.
-        with mock.patch.object(sd_lib, "STARTED", slots.clock() - 10 * sd_review.SETUP_TIMEOUT_SECONDS):
+        # The wait spends the setup bound from the process start; a start that
+        # far past leaves one second of it, which the busy slot outlasts.
+        said, started = io.StringIO(), time.monotonic()
+        with (mock.patch.object(sd_lib, "STARTED", slots.clock() - sd_review.SETUP_TIMEOUT_SECONDS + 1),
+              contextlib.redirect_stderr(said)):
             report = sd_review.review(self.change(), namespace(), runner,
                                       self.environment(SD_REVIEW_SLOTS="1", SD_REVIEW_SLOTS_DIR=str(where)),
                                       self.chatgpt_home())
+        waited = time.monotonic() - started
         self.assertEqual(report["status"], "refused")
-        self.assertIn("review_slot_busy", [row["code"] for row in report["readiness"]["blockers"]])
+        self.assertIn("waiting for a review slot: 1 of 1 in use", said.getvalue())
+        self.assertIn("slot 1: another lane", said.getvalue())
+        busy = [row for row in report["readiness"]["blockers"] if row["code"] == "review_slot_busy"]
+        self.assertEqual(len(busy), 1, json.dumps(report["readiness"])[:2000])
+        self.assertIn("within the setup bound", json.dumps(busy[0]))
+        self.assertGreaterEqual(waited, 0.9, "the review refused without waiting for its bound")
+        self.assertLess(waited, 15, "the wait outlasted its bound")
         self.assertEqual(runner.calls, [], "a reviewer or the gate ran without a slot")
 
 

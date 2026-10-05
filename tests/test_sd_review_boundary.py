@@ -905,17 +905,18 @@ class LineBudgetTests(unittest.TestCase):
         # it; and `render` prints that check. The gate that adjudicated
         # findings still need runs in `sd_ship_review`, outside the lane.
         #
-        # 4718 -> 4721 is sd:2523, under the operator's 4900 ceiling (ruling of
-        # 2026-10-04): `bin/sd-review` +3 holds a machine-wide review slot
-        # through `sd_lib.review_slot` from the first reviewer to the last,
-        # refuses when none comes free, and gives it back before the gate. The
+        # 4718 -> 4723 is sd:2523, under the operator's 4900 ceiling (ruling of
+        # 2026-10-04): `bin/sd-review` +5 holds a machine-wide review slot
+        # through `sd_lib.review_slot` from the first reviewer to the last
+        # (+1), refuses when none comes free (+1), and gives it back in a
+        # `try`/`finally` (+3) on every exit, before the gate. The
         # slot logic is `bin/sd_review_slots.py`, outside the lane: `sd-review`
         # does not import it.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4721,
+            4723,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
