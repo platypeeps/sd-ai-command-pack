@@ -21,7 +21,10 @@ import sys
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Iterable, Mapping, NamedTuple
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping, NamedTuple
+
+if TYPE_CHECKING:  # `sd_review_slots` imports this module; see `review_slot`.
+    import sd_review_slots
 
 LOCAL_FILE_NAME = "CLAUDE.local.md"
 LOCAL_BLOCK_START = "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->"
@@ -483,7 +486,7 @@ STARTED = time.monotonic()
 
 
 def review_slot(result: dict[str, Any], environ: Mapping[str, str], root: pathlib.Path,
-                bound_seconds: float) -> object | None:
+                bound_seconds: float) -> sd_review_slots.Slot | None:
     """Hold a machine-wide review slot for `sd-review`, or refuse the review in `result`.
 
     A thin door: the slot logic is `sd_review_slots.hold_review_slot`, which
