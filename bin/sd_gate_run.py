@@ -108,9 +108,8 @@ def gate_inputs(root: pathlib.Path, head: str, tree: str | None = None, own: boo
     digest = hashlib.sha256((f"head {head}" if tree is None else f"tree {tree}").encode() + b"\n")
     local = untracked_local_block(root)
     digest.update(b"local " + (local.read_bytes() if local else b"absent") + b"\n" + b"pack tree\n" * own)
-    for path in sorted(BIN.iterdir()) if not own else []:
-        if path.is_file() and (path.suffix == ".py" or path.name.startswith("sd-")):
-            digest.update(f"pack {path.name}\n".encode() + path.read_bytes())
+    for path in [] if own else sd_gate_receipts.pack_files(BIN):
+        digest.update(f"pack {path.name}\n".encode() + path.read_bytes())
     return digest.hexdigest()[:12]
 
 
@@ -152,7 +151,7 @@ def base_ref(branch: str | None) -> str | None:
 def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SECONDS, base: str | None = None,
                       database: pathlib.Path | None = None, run: Run | None = None,
                       environ: Mapping[str, str] | None = None, reuse: bool = True,
-                      record: bool = True, slot_timeout: int = 0) -> dict[str, Any]:
+                      record: bool = True, slot_timeout: int = 0, offload: str | None = None) -> dict[str, Any]:
     """`sd-check --json` in a clean detached worktree of `head`; the worktree is removed after.
 
     Returns `{"head", "status", "exit_code", "summary", "report", "stderr"}`,
@@ -167,6 +166,7 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
     passing run leaves one when its binding held from before the run to after;
     otherwise the result's `receipt_skipped` names what moved (sd:2612).
     `reuse=False` never reads one and `record=False` never writes one (the merge gate).
+    `offload` and a satellite's offload receipt (sd:2704): `sd_gate_receipts.from_receipts`.
     """
     with tempfile.TemporaryDirectory(prefix="sd-local-gate-") as parent:
         tree = pathlib.Path(parent) / "tree"
@@ -176,16 +176,16 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
                 shutil.copyfile(local, tree / LOCAL_BLOCK)
             env = gate_environment(root, None if environ is None else dict(environ))
             content, fork = sd_gate_receipts.tree_key(tree, base)
-            key = sd_gate_receipts.receipt_key(root, head, content)
             own = sd_gate_receipts.gates_itself(root, tree, BIN)
-            identity = (sd_gate_receipts.gate_binding(tree, head, gate_inputs(root, head, content, own), base, env, fork)
-                        if database is not None else None)
-            found, miss = sd_gate_receipts.examine(database, key, identity) if reuse and database else (None, None)
-            if found is not None:
-                reading = dict(found["reading"], summary=f"{found['reading']['summary']} (reused)"[:DESCRIPTION_LIMIT],
-                               reused={"revision": found["revision"], "recorded_at": found["recorded_at"],
-                                       "age_seconds": found["age_seconds"], "head": found["head"]})
-                return {"head": gate_git(tree, "rev-parse", "HEAD"), **reading}
+            gated = sd_gate_receipts.Worktree(root, tree, head, base, env, content, fork, own,
+                                              gate_inputs(root, head, content, own))
+            identity = (sd_gate_receipts.gate_binding(tree, head, gated.inputs, base, env, fork)
+                        if database is not None and offload != "require" else None)
+            before = sd_gate_receipts.start_view(database, gated, identity) if record else None  # sd:2704
+            answer, miss = sd_gate_receipts.from_receipts(database, gated, identity, reuse=reuse, record=record, offload=offload)
+            if answer is not None:
+                return {"head": gate_git(tree, "rev-parse", "HEAD"), **answer}
+            warning = sd_gate_receipts.pack_warning(database, root, own) if record and database else None
             argv = [sys.executable, str((tree / "bin" if own else BIN) / "sd-check"), "--json", "--timeout", str(timeout),
                     *(["--base", base] if base else []), *(["--slot-timeout", str(slot_timeout)] * (slot_timeout > 0))]
             with sd_gate_cache.cargo_environment(root, tree, env) as child:
@@ -193,8 +193,8 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
             checked = gate_git(tree, "rev-parse", "HEAD")
             reading = check_reading(code, output, errors)
             if record and database and identity and reading["status"] == "success" and checked == head:
-                after = sd_gate_receipts.gate_binding(tree, head, gate_inputs(root, head, content, own), base, env, fork)
-                sd_gate_receipts.record_unless_moved(database, key, identity, after, reading, head)
+                sd_gate_receipts.record_gate_pass(database, gated, identity, reading, before)
+            reading.update({"pack_warning": warning} if warning else {})
         finally:
             # The administrative entry goes with the directory; the temporary
             # directory's own cleanup removes whatever the removal left.

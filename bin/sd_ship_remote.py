@@ -64,13 +64,21 @@ def git(root: Path, *args: str) -> str:
     return run(root, ["git", *args])
 
 
-def refuse_behind(pull: dict, base: str) -> None:
-    """Name GitHub's BEHIND answer, which strict protection gives a branch missing `base` (sd:2023)."""
+def refuse_behind(pull: dict, base: str, next_action: str | None = None) -> None:
+    """Name GitHub's BEHIND answer, which strict protection gives a branch missing `base` (sd:2023).
+
+    `next_action` replaces the catch-up for a satellite's merge, which hands the entry back (sd:2704).
+    """
     if pull.get("mergeable_state") == "behind":
         raise Refusal(f"the pull request is BEHIND {base}: strict branch protection requires the branch "
                       f"to contain the current {base}", code="base_moved", boundary="ci", state="retryable_failure",
-                      next_action=f"Run sd-ship prepare --catch-up, which merges origin/{base} into the branch and "
-                                  "reviews the new head, then merge with the new --expected-head.")
+                      next_action=next_action or catch_up_action(base))
+
+
+def catch_up_action(base: str) -> str:
+    """What a branch behind `base` does next, on the machine that prepared it."""
+    return (f"Run sd-ship prepare --catch-up, which merges origin/{base} into the branch and "
+            "reviews the new head, then merge with the new --expected-head.")
 
 
 #: The `mergeable_state` answers under which GitHub allows the merge (sd:2075).
@@ -622,7 +630,9 @@ class GitHub:
                           code="merge_rules_unconfirmed", boundary="ci", state="retryable_failure",
                           next_action="Read the pull request's merge box for the unmet rule, resolve it, then retry merge.")
         if self.commits_behind(base, head) != 0:
-            raise Refusal("the reviewed branch is behind the current default branch")
+            # `base_moved`, as `refuse_behind` names it: a lane hands a satellite's entry back on it (sd:2704).
+            raise Refusal("the reviewed branch is behind the current default branch", code="base_moved", boundary="ci",
+                          state="retryable_failure", next_action=catch_up_action(base))
         if "declared_gap" in protection:
             self.every_check(head)
             return

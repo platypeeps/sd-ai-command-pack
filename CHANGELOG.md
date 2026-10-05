@@ -4,6 +4,44 @@
 
 ### Added
 
+- **A satellite's gate writes an offload receipt for the hub (sd:2704 step 3).**
+  On an sd satellite, in a repository with `repo.satellite_gate = accept`, a
+  recorded pass of `check_in_worktree` (`sd gate check`, `sd-review
+  --gate-check`) also writes `sd-gate-offload:v1:<sha256 of slug and head>`
+  (or of the tree) to the hub: the writer, the satellite's identity, the
+  whole binding, the offload view, the pack `bin/` digest and revision, the
+  `CLAUDE.local.md` digest and the reading. A reuse writes the row unless that
+  same row stands field for field, with the pass's time and the offload view
+  its own receipt kept from before the run. The offload view's
+  `python` part binds the bytes and version of `sys.executable`, the
+  interpreter that runs `sd-check`. A failed write sets `offload_error` and
+  the pass stands. Before a run the gate warns when the hub's published pack
+  digest (`sd-lane-pack:v1:<slug>`) is another. `sd_lib.repo_satellite_gate`
+  reads the opt-in and answers `off` on every fault;
+  `sd_gate_receipts.pack_bin` is the digest the lane publishes. The offload
+  view also leaves out `LOGNAME` and `TMPDIR`, which name the login, and now
+  holds the sha256 of each variable's value, so no credential reaches the hub.
+- **The hub accepts a satellite's gate under the trust rule (sd:2704 step 4).**
+  `sd-ship merge --satellite-gate` merges on the satellite's offload receipt
+  and runs no `sd-check`, or refuses with the failed clause's code:
+  `satellite_gate_off`, `base_moved`, `satellite_receipt_missing`,
+  `satellite_receipt_invalid`, `satellite_binding`, `satellite_pack_mismatch`,
+  `satellite_receipt_expired`, `satellite_status_missing` or
+  `local_gate_foreign`. Each code's `next_action` comes from
+  `sd_local_gate.SATELLITE_REFUSALS`; the hand-back sends the work to the
+  satellite. The hub compares the tree part of the binding, the offload view
+  and the pack digest, never the satellite's machine part. On acceptance it
+  posts no status and saves `local_gate` with `satellite` provenance. A plain
+  merge in an opted-in repository tries the offload receipt after its own,
+  and runs the gate on a miss that `reuse_miss.offload` names. `ready`'s
+  behind refusal now carries `base_moved`.
+- **A satellite's prepare posts `sd/local-gate` from its offload receipt
+  (sd:2704 step 5).** In an opted-in `repo.ci = local` repository the status
+  reads `<head> inputs <digest>: sat <hostname>: <summary>`, which the hub's
+  clause 8 checks. Both sides derive the digest from the row, so a pack that
+  gates itself leaves the installed `bin/` out. It posts only from a row that
+  still stands here. With no receipt it posts nothing and reports
+  `offload_error`.
 - **Each gate gets its share of the cores (sd:2726).** On 2026-10-05 one
   Rust gate under `sd.gate_slots=2` drove the load to 185 on 16 cores: cargo
   builds and tests on every core. A slot holder now sets `CARGO_BUILD_JOBS`

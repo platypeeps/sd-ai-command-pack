@@ -61,7 +61,7 @@ class OffloadView(unittest.TestCase):
         theirs, ours = self.view("sat"), self.view("hub")
         self.assertIsNone(sd_gate_receipts.offload_miss(theirs, ours))
         self.assertEqual(theirs["path"][0], "~/bin")
-        self.assertEqual(theirs["variables"]["CARGO_HOME"], "~/.cargo")
+        self.assertEqual(theirs["variables"]["CARGO_HOME"], ours["variables"]["CARGO_HOME"])
         self.assertNotIn("HOME", theirs["variables"])
         self.assertNotIn("USER", theirs["variables"])
         self.assertIsNotNone(theirs["tools"]["make"])
