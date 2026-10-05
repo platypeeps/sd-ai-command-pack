@@ -439,6 +439,14 @@ def take_in(hub: Hub, path: pathlib.Path, key: str, revision: int, row: dict[str
 
     def refuse(code: str, reason: str) -> dict[str, Any]:
         return answer("refused", code=code, reason=reason, next_action=REFUSAL_ACTIONS[code])
+    taken = {"key": key, "revision": revision}
+    # Step 4 first: an entry naming this revision means its `queued` write failed. It may have run since,
+    # and its merge moved the ship: row on, so the checks below would misjudge it (review round 1).
+    found = next((entry for entry in read_queue(path) if entry.get("request") == taken), None)
+    if found is not None and found.get("status") in ("pending", "running"):
+        return answer("queued", entry={"enqueued_at": found.get("enqueued_at"), "revision": revision})
+    if found is not None:
+        return answer(found.get("status"), **outcome_fields(found))
     if sd_lib.repo_ci(hub.connection, hub.main) != "local" or sd_lib.repo_satellite_gate(hub.connection, hub.main) != "accept":
         return refuse("satellite_gate_off", "the repository does not take satellite gates: "
                                             "repo.ci must be local and repo.satellite_gate accept")
@@ -450,12 +458,8 @@ def take_in(hub: Hub, path: pathlib.Path, key: str, revision: int, row: dict[str
     if shipped.get("phase") != "ready_to_send" or shipped.get("head") != head:
         return refuse("satellite_not_prepared", f"the ship: row for {branch} is {shipped.get('phase') or 'absent'} "
                                                 f"at {str(shipped.get('head'))[:12]}, not ready_to_send at {head[:12]}")
-    taken = {"key": key, "revision": revision}
 
     def queue_request(entries: list[dict[str, Any]]) -> dict[str, Any] | None:
-        for entry in entries:
-            if entry.get("request") == taken:
-                return entry  # a crash came between this queue write and the row's
         if any(entry.get("item") == item and entry.get("status") == "running" for entry in entries):
             return None
         for entry in entries:
@@ -489,17 +493,21 @@ def intake(hub: Hub, path: pathlib.Path) -> list[dict[str, Any]]:
     return done
 
 
+def outcome_fields(outcome: dict[str, Any]) -> dict[str, Any]:
+    """What a request row keeps of its entry's outcome."""
+    return {name: outcome.get(name) for name in ("code", "reason", "next_action", "merge_commit")}
+
+
 def write_outcome(hub: Hub, entry: dict[str, Any], outcome: dict[str, Any]) -> str:
     """Write a satellite entry's outcome to its request row, unless a newer request replaced the one it took in."""
     taken = entry.get("request") or {}
     try:
         revision, row = hub.store.read(hub.connection, taken.get("key"))
-        if row.get("status") != "queued" or (row.get("entry") or {}).get("revision") != taken.get("revision"):
+        acknowledged = row.get("status") == "queued" and (row.get("entry") or {}).get("revision") == taken.get("revision")
+        if not (acknowledged or revision == taken.get("revision")):  # the second: its `queued` write failed
             return "skipped: the request row moved on from this entry"
         hub.store.save(hub.connection, taken["key"], revision, {
-            **row, "status": outcome.get("status"), "code": outcome.get("code"), "reason": outcome.get("reason"),
-            "next_action": outcome.get("next_action"), "merge_commit": outcome.get("merge_commit"),
-            "decided_at": stamp_now()})
+            **row, "status": outcome.get("status"), **outcome_fields(outcome), "decided_at": stamp_now()})
     except Exception as error:  # the outcome stands on the entry; the row says what it last knew
         return f"failed: {type(error).__name__}: {error}"[:300]
     return "written"

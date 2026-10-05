@@ -289,7 +289,7 @@ class SatelliteEntry(requests_suite.Requests):
         requests_suite.sd_lane.intake(self.hub, self.path)
 
     def run_lane(self, ship=None, **options):
-        return sd_lane.run_lane(self.repo, self.environ, ship or self.ship, self.gate, hub=self.hub, **options)
+        return sd_lane.run_lane(self.repo, self.environ, ship or self.ship, self.gate, **{"hub": self.hub, **options})
 
     def advance(self, branch: str) -> str:
         """Another machine pushes to `branch` on origin."""
@@ -389,6 +389,30 @@ class SatelliteEntry(requests_suite.Requests):
         entry = self.entries()[-1]
         self.assertEqual((entry["status"], self.row()["status"]), ("prepared", "prepared"))
         self.assertIn("--satellite-gate", entry["next_action"])
+
+    def failing_hub(self, *statuses):
+        """The hub's rows, but a row write with one of `statuses` fails as a stopped database would."""
+        def save(connection, key, previous, value):
+            if value.get("status") in statuses:
+                raise RuntimeError("the database stopped here")
+            return receipts.save(connection, key, previous, value)
+        store = requests_suite.types.SimpleNamespace(read=receipts.read, receipt_key=receipts.receipt_key, save=save)
+        return sd_lane.Hub(self.connection, store, requests_suite.SLUG, self.repo)
+
+    def test_an_entry_whose_queued_write_failed_still_writes_its_outcome(self):
+        """Review round 1: the row stayed `requested` while its entry merged, and later read `queued` for good."""
+        self.ask()
+        self.run_lane(hub=self.failing_hub("queued"))
+        self.assertEqual((self.entries()[-1]["status"], self.entries()[-1]["request_row"]), ("merged", "written"))
+        self.assertEqual((self.row()["status"], self.row()["merge_commit"]), ("merged", "merged-7"))
+
+    def test_a_finished_entry_writes_its_outcome_though_its_ship_row_moved_on(self):
+        """Review round 1: with both row writes failed, the next intake must not refuse a merged item as unprepared."""
+        self.ask()
+        self.run_lane(hub=self.failing_hub("queued", "merged"))
+        self.prepared(phase="merged")
+        requests_suite.sd_lane.intake(self.hub, self.path)
+        self.assertEqual((self.row()["status"], self.row()["merge_commit"]), ("merged", "merged-7"))
 
 
 if __name__ == "__main__":

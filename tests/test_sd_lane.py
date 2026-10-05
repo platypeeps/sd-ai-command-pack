@@ -494,11 +494,17 @@ class Speculation(Lane):
         self.assertEqual(self.entries()[1]["speculation"]["status"], "error")
 
     def test_a_satellite_entry_ahead_is_predicted_from_its_branch_on_origin(self) -> None:
-        """sd:2704. Its worktree is the main checkout, whose HEAD is not its head; the branch on origin is."""
-        git(self.first, "push", "-q", "origin", "first")
+        """sd:2704. Its worktree is the main checkout, whose HEAD is not its head; the branch on origin is.
+
+        The satellite commits in its own clone, so the hub holds the head only once it fetches the branch.
+        """
+        satellite = self.tmp / "satellite"
+        git(self.tmp, "clone", "-q", str(self.origin), str(satellite))
+        self.commit_files(satellite, {"sat.txt": "s\n"}, "satellite")
+        git(satellite, "push", "-q", "origin", "HEAD:refs/heads/sat")
         sd_lane.update(sd_lane.queue_path(self.repo, self.environ), lambda rows: rows.append({
-            "worktree": str(self.repo), "item": 1, "gate": "satellite", "branch": "first", "base": "main",
-            "expected_head": git(self.first, "rev-parse", "HEAD"), "authority": "manual", "status": "pending",
+            "worktree": str(self.repo), "item": 1, "gate": "satellite", "branch": "sat", "base": "main",
+            "expected_head": git(satellite, "rev-parse", "HEAD"), "authority": "manual", "status": "pending",
             "enqueued_at": sd_lane.stamp_now()}))
         sd_lane.enqueue_entry(self.second, 2, "two", self.body, self.environ, manual=True, claim="deliver")
         sd_lane.run_lane(self.repo, self.environ, super().ship, lambda root, head, base: self.gates.append(

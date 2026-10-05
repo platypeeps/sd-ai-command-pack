@@ -369,7 +369,9 @@ each request, in order:
    `ready_to_send` at `head`. Otherwise `refused`, `satellite_not_prepared`.
 4. **Taken in already.** A queue entry that names this request's revision
    means a crash came between the queue write and the row write. Write
-   `queued` and go on; add nothing.
+   `queued` and go on; add nothing. Intake checks this before step 1: the
+   entry may have run since, and its merge moves the `ship:` row past step 3.
+   A finished entry writes its outcome instead of `queued`.
 5. **Pending entry for the item.** Cancel it, marked `superseded` by this
    revision. The row needs no extra write: its older revision stays in its
    history. A `running` entry for the item leaves the request `requested`
