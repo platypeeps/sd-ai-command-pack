@@ -1,7 +1,7 @@
 # Implement — satellite gate offload
 
 Two repositories, four pull requests. The design is in [design.md](design.md).
-The operator ruled Q1 to Q3 on 2026-10-05 (design.md, "Decisions"). Each step
+The operator ruled Q1 to Q4 on 2026-10-05 (design.md, "Decisions"). Each step
 names its check and the result that means failure.
 
 ## Step checklist
@@ -58,7 +58,7 @@ names its check and the result that means failure.
       - Check: a satellite prepare posts one `sd/local-gate` to the GitHub
         double. With no row it posts nothing and reports `offload_error`.
         A hub prepare posts nothing new.
-- [ ] 6. Pack: the request row and intake (Q2). Size L, 6–7 h.
+- [ ] 6. Pack: the request row, intake (Q2) and the satellite-only run (Q4). Size L, 6.5–8 h.
       - `sd-ship lane request --item N [--manual]`: refuses on the hub and on
         an item not `ready_to_send` at the pushed head; writes
         `lane-request:v1:<slug>:<item>`.
@@ -66,6 +66,8 @@ names its check and the result that means failure.
         claim: the six steps of design.md, "Intake".
       - Outcome write-back from `finish`; the item note for `handed_back`
         and `failed`.
+      - `lane run --satellite-only` (ruling Q4): `claim_next` claims only
+        `gate: satellite` entries; no speculation; exit when none is pending.
       - `lane run` publishes `sd-lane-pack:v1:<slug>` at start and after a
         pack fast-forward.
       - Check: tests in a new `tests/test_sd_lane_requests.py`. One per
@@ -73,7 +75,11 @@ names its check and the result that means failure.
         supersedes a pending entry. A running entry leaves the request
         `requested`. A crash injected between the queue write and the row
         write takes the request in once. A revision conflict on the row is
-        retried at the next intake. Each fails with its step removed.
+        retried at the next intake. With `--satellite-only`, a hub entry
+        ahead of a satellite entry stays `pending` in place, the satellite
+        entry merges, and the `ship` double sees no `prepare` and the `gate`
+        double no call. A plain `lane run` still runs both. Each fails with
+        its step or filter removed.
 - [ ] 7. Pack: processing a satellite entry. Size M, 3–4 h.
       - `process` for `gate: satellite`: fetch, head check, base check, merge
         with `--branch` and `--satellite-gate`; no prepare.
@@ -93,8 +99,8 @@ names its check and the result that means failure.
         accepted offload receipt, and intake.
       - `CHANGELOG.md`, plus the satellite section of the system repository's
         `local-sd-db/README.md` and a `local-cron-jobs` example for the
-        scheduled `lane run`.
-      - Run acceptance criterion 6 of `prd.md` once, not committed.
+        scheduled `lane run --satellite-only`.
+      - Run acceptance criterion 7 of `prd.md` once, not committed.
       - Check: `sd-docs-lint` passes; the end-to-end run's merge log shows
         `satellite` provenance and no gate run. After a week, the hub's
         `sd-check` count per merged satellite item is 0. A count above 0
@@ -109,14 +115,15 @@ names its check and the result that means failure.
 | 3 | 4–5 |
 | 4 | 5–6 |
 | 5 | 1.5–2 |
-| 6 | 6–7 |
+| 6 | 6.5–8 |
 | 7 | 3–4 |
 | 8 | 2.5–3.5 |
-| Total | 26–32.5, before review rounds |
+| Total | 26.5–33.5, before review rounds |
 
 The first draft estimated 18.5–24 h with SSH enqueue. The request row (Q2)
 adds the request verb, intake and its crash recovery, outcome write-back and
-the scheduled job. The planning review added the binding split, the pre-gate
+the scheduled job. Ruling Q4 adds the `--satellite-only` filter, 0.5–1 h.
+The planning review added the binding split, the pre-gate
 warning and the base check.
 
 Pull requests:

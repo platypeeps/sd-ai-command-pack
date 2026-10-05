@@ -14,7 +14,7 @@ database, which the hub's lane takes in.
 | 2 | satellite | `sd gate check --base main` | Runs `sd-check`; writes the satellite's own receipt and the offload receipt over the wire |
 | 3 | satellite | `sd-ship prepare --item N --title T --body-file F` | Reviews (its gate reuses step 2), pushes, binds the PR, writes `ship:`, posts `sd/local-gate` from the offload receipt |
 | 4 | satellite | `sd-ship lane request --item N --manual` | Writes the lane request row for this repository and item over the wire |
-| 5 | hub | the scheduled job: `sd-ship -C <hub checkout> lane run`, every 5 minutes | Starts the lane runner; exits at once when a runner already holds the lock |
+| 5 | hub | the scheduled job: `sd-ship -C <hub checkout> lane run --satellite-only`, every 5 minutes | Starts the lane runner for satellite entries only; exits at once when a runner already holds the lock |
 | 6 | hub | `lane run` intake, before each claim | Validates each new request, adds a queue entry marked `gate: satellite`, writes `queued` to the row |
 | 7 | hub | `lane run` processing the entry | Fetches the branch; head and base checks; no prepare, no catch-up, no speculation; then `sd-ship merge --item N --branch B --expected-head H --manual --satellite-gate` |
 | 8 | hub | `sd-ship merge --satellite-gate` | Accepts the offload receipt under the trust rule; posts no status; merges |
@@ -38,6 +38,10 @@ the recommendation the first draft of this page gave, except Q2.
   is the design for it.
 - **Q3 — an offload receipt stands for 6 hours.** `OFFLOAD_WINDOW_SECONDS`
   equals `TREE_REUSE_WINDOW_SECONDS`, for either key.
+- **Q4 — the scheduled run is for satellite requests only.** Ruled about
+  04:25 MDT on 2026-10-05. The scheduled `lane run` takes in and merges
+  satellite entries only. Hub entries still wait for an integrator's
+  `lane run`. This replaces the first review's rebuttal of C-11.
 
 ## The offload receipt
 
@@ -288,14 +292,32 @@ recognises, never a `queued` row with no entry.
 only when something on the hub starts it. The hub runs one scheduled job per
 opted-in repository:
 
-    */5 * * * *  sd-ship -C <hub checkout> lane run
+    */5 * * * *  sd-ship -C <hub checkout> lane run --satellite-only
 
 It is operator configuration in the system repository's `local-cron-jobs`
 folder for the hub host, not code. A start that finds the runner lock held
 exits at once ("another runner holds ..."), so overlapping starts cost
-nothing. One consequence: the job also drains hub entries that wait in that
-queue. Each was enqueued on purpose, and only an entry enqueued with
-`--manual` merges.
+nothing.
+
+`--satellite-only` (ruling Q4) filters the run:
+
+- Intake runs as in a plain `lane run`.
+- `claim_next` claims only a pending entry with `gate: satellite`. A hub
+  entry stays `pending`, in its place, for an integrator's plain `lane run`.
+- No speculative gate starts. A satellite follower never gets one, and a hub
+  entry is not this run's to prepare.
+- The run exits when no satellite entry is pending, even when hub entries
+  wait.
+
+A plain `lane run` is unchanged and also takes in and runs satellite entries.
+
+Two consequences, accepted:
+
+- A satellite entry can merge ahead of an older hub entry in the same queue.
+  The hub entry was waiting for an integrator anyway.
+- While the scheduled run holds the runner lock, an integrator's `lane run`
+  exits at once as busy and must start again. The scheduled run holds the
+  lock only while satellite entries remain; it runs no gate.
 
 ## Lane changes
 
@@ -347,7 +369,8 @@ queue. Each was enqueued on purpose, and only an entry enqueued with
 |---|---|---|
 | Hub offline when the satellite gates | The check runs; no row is written; `offload_error` names `HubUnreachable`. Rerun `sd gate check` once the hub answers: it reuses nothing (the satellite's own receipt lives on the hub too) and runs again | sd:1335 R4 |
 | Hub offline at prepare or request | Prepare cannot write `ship:`; the request verb cannot write its row. Both exit non-zero naming the hub. Rerun them | sd:2679 |
-| No hub process runs `lane run` | The request stays `requested`. The scheduled job bounds the wait to its period plus the queue ahead | R10 |
+| No hub process runs `lane run` | The request stays `requested`. The scheduled job bounds the wait to its period plus the satellite entries ahead | R10 |
+| Integrator starts `lane run` while the scheduled run holds the lock | It exits as busy; start it again once the scheduled run ends | Q4 ruling |
 | Satellite on another pack revision | Warned before the gate; clause 6 refuses at merge with both digests and revisions. Remedy: fast-forward the satellite's pack, `sd gate check` again (inputs changed, so it runs), request again | R6 |
 | Satellite on another `sd_db` build | The session refuses at the handshake with `BuildMismatch`, before any SQL. No row is written | sd:1335 design, A2 |
 | Receipt for a moved head | Intake refuses `satellite_not_prepared`, or the lane hands back `head_moved`, or clause 3 refuses `satellite_receipt_missing`. The old row stays under the old key, unread | Intake 3; Freshness 1; clause 3 |
@@ -409,7 +432,7 @@ record.
 | C-8 | major | Queue file and request row are two stores; a crash between writes could double-enqueue | intake writes both | addressed: queue first, revision on the entry, intake step 4 |
 | C-9 | minor | A per-branch hub worktree is needless and can collide with a hub checkout | `merge_branch`, `merge_head` (sd:2037) | addressed: merge from the main checkout with `--branch` |
 | C-10 | minor | A request carries `manual` authority from a satellite process | `merge_authority` reads only `--manual` | rebutted: same grant as `lane enqueue --manual`, inside the sd:1335 Q3 boundary; `manual_merge_guard` still runs on the hub |
-| C-11 | minor | The scheduled job also merges hub entries sooner than an integrator would | `run_lane` drains every pending entry | rebutted: each entry was enqueued on purpose, and only `--manual` entries merge |
+| C-11 | minor | The scheduled job also merges hub entries sooner than an integrator would | `run_lane` drains every pending entry | first rebutted; then ruled by the operator (Q4): addressed by `--satellite-only` |
 | C-12 | minor | Satellite repository resolution: its checkout path is not the hub's registered path | `registered_for` falls back to the origin | rebutted: resolution by origin already works for `repo_ci` on a satellite |
 | C-13 | minor | No rollback was stated | — | addressed: "Rollout and rollback" |
 
@@ -420,3 +443,8 @@ estimate. It found two references that named the wrong step, both fixed:
 implement steps 6 and 8. It found no new concern. No finding is open.
 Implementation is unblocked on the planning side; the item still needs its
 move out of `planning`.
+
+After ruling Q4 a third sweep read every `lane run` in the three artifacts.
+Each scheduled run now names `--satellite-only`; each integrator run stays
+plain. The estimate, the criterion numbers and C-11 moved with the ruling.
+No new concern was found.

@@ -53,6 +53,9 @@ Ruled by the operator on 2026-10-05, through the team lead:
   used.
 - **Q3, the window: 6 hours.** An offload receipt stands for 6 hours under
   either key.
+- **Q4, satellite only: about 04:25 MDT.** The scheduled `lane run` takes in
+  and merges satellite requests only. Hub entries still wait for an
+  integrator.
 
 ## Requirements
 
@@ -94,8 +97,12 @@ R9. A satellite asks for a merge with `sd-ship lane request`, which writes a
     notes the item.
 
 R10. Some hub process must run `lane run` for a request to move. A scheduled
-     hub job runs it for each opted-in repository; overlapping starts exit at
-     once on the runner lock.
+     hub job runs `lane run --satellite-only` for each opted-in repository.
+     Overlapping starts exit at once on the runner lock.
+
+R11. `lane run --satellite-only` claims only satellite entries and starts no
+     speculative gate. A hub entry stays pending for an integrator's plain
+     `lane run` (Decision Q4).
 
 ## Acceptance criteria
 
@@ -115,11 +122,14 @@ R10. Some hub process must run `lane run` for a request to move. A scheduled
    second request for a pending item supersedes the first. A request already
    taken in is not taken in twice after a crash between the queue write and
    the row write.
-6. End to end on a fixture: a satellite home with `hub.json` names a scratch
+6. `lane run --satellite-only` over a queue holding a hub entry ahead of a
+   satellite entry merges the satellite entry only. The hub entry stays
+   `pending` and in place, and no prepare or speculative gate starts.
+7. End to end on a fixture: a satellite home with `hub.json` names a scratch
    `sd_db.serve --loopback`. `sd gate check` writes both receipt rows,
    `sd-ship prepare` posts the status to the suite's GitHub double, and
-   `sd-ship lane request` writes the request row. A hub-side `sd-ship lane run`
-   takes it in and merges with no gate run.
+   `sd-ship lane request` writes the request row. A hub-side
+   `sd-ship lane run --satellite-only` takes it in and merges with no gate run.
 
 ## Out of scope
 
