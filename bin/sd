@@ -2926,7 +2926,7 @@ def cmd_attribute(args: argparse.Namespace) -> int:
     if reason and args.entry.strip() not in sd_lib.RESERVED_AUTHORS:
         raise Refusal(f"{reason}; an attribution names an entry the registry has")
     # The repair commit says who made it: `SD_AUTHOR`, else a harness marker, else `human` (sd:2009, sd:2689).
-    invoker = sd_lib.invoking_author(os.environ)
+    invoker = sd_lib.invoking_author(os.environ, registry)
     writer = sd_lib.commit_author(invoker, lambda: (registry, reason)) if invoker else sd_lib.HUMAN_AUTHOR
     sha, value, covered = sd_lib.attribute(root, args.commits, args.entry, registry, writer)
     print(f"{sha[:12]} attributes {len(covered)} commit(s) to {value}")

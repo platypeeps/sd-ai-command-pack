@@ -348,7 +348,8 @@
   vendor refuses and names both accepted forms. `claude/anthropic` had been
   refused, which pushed agents to write `human`. With `SD_AUTHOR` unset, the
   repair commit reads the invoker from `CLAUDECODE=1`, which Claude Code sets
-  in its tool shells, and says `claude`; with no marker it still says `human`.
+  in its tool shells, and says `claude` while the registry gives `claude` the
+  vendor `anthropic`; otherwise, or with no marker, it still says `human`.
   Codex documents no marker, so it has none. The `commit-msg` hook still
   writes nothing when `SD_AUTHOR` is unset.
 

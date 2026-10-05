@@ -2645,19 +2645,23 @@ def attribution_value(name: str, registry: Any) -> str:
 #: `sd attribute` commit follows.
 AUTHOR_VARIABLE = "SD_AUTHOR"
 
-#: The variable Claude Code sets to `1` in every tool shell, and the entry it
-#: stands for when `SD_AUTHOR` is unset (sd:2689). Only a marker a harness is
-#: seen to set belongs here; Codex documents none, so it has no line.
-HARNESS_MARKERS = (("CLAUDECODE", "1", "claude"),)
+#: The variable Claude Code sets to `1` in every tool shell, and the entry and
+#: vendor it stands for when `SD_AUTHOR` is unset (sd:2689). An entry name is
+#: the operator's choice, so the marker counts only while the registry gives
+#: that entry that vendor. Only a marker a harness is seen to set belongs
+#: here; Codex documents none, so it has no line.
+HARNESS_MARKERS = (("CLAUDECODE", "1", "claude", "anthropic"),)
 
 
-def invoking_author(environ: Mapping[str, str]) -> str:
+def invoking_author(environ: Mapping[str, str], registry: Any) -> str:
     """Who runs this: `SD_AUTHOR`, else a harness marker's entry, else ""."""
     named = environ.get(AUTHOR_VARIABLE, "").strip()
     if named:
         return named
-    return next((entry for variable, mark, entry in HARNESS_MARKERS
-                 if environ.get(variable) == mark), "")
+    providers = getattr(registry, "providers", {})
+    return next((entry for variable, mark, entry, vendor in HARNESS_MARKERS
+                 if environ.get(variable) == mark and entry in providers
+                 and providers[entry].vendor.strip().lower() == vendor), "")
 
 
 def states_author(message: str) -> bool:
