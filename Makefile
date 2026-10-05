@@ -222,7 +222,11 @@ hooks:
 		printf '%s\n' "error: core.hooksPath is set to $$set; the pack's hook lives in .git/hooks -- run 'git config --unset core.hooksPath' (bin/sd-status names it as residue) and retry" >&2; \
 		exit 1; \
 	fi; \
-	dir="$$(git rev-parse --path-format=absolute --git-common-dir)/hooks"; \
+	common="$$(git rev-parse --path-format=absolute --git-common-dir)" || { \
+		printf '%s\n' "error: $$(pwd) is not a git checkout; run 'make hooks' from the pack's clone" >&2; \
+		exit 1; \
+	}; \
+	dir="$$common/hooks"; \
 	for hook in pre-commit commit-msg; do \
 		link="$$dir/$$hook"; target="../../hooks/$$hook"; \
 		if { [ -e "$$link" ] || [ -L "$$link" ]; } && [ "$$(readlink "$$link")" != "$$target" ]; then \

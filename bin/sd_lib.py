@@ -796,7 +796,7 @@ def mode(root: pathlib.Path, *, ask: Asker = gh_api) -> str:
 DEMOTION_NOTE_KIND = "comment"
 
 
-def demotion_note(repository: str, answer: RemoteAnswer) -> tuple[str, str]:
+def demotion_note(repository: str, answer: RemoteAnswer, *, at_push: bool = True) -> tuple[str, str]:
     """The note `sd-ship` writes on an item when `repository` lowered its mode.
 
     Returns `(marker, body)`. The marker is the body's first line, and
@@ -809,6 +809,10 @@ def demotion_note(repository: str, answer: RemoteAnswer) -> tuple[str, str]:
     as `RemoteAnswer` keeps it, and what the operator is left holding: the
     written line stays, and the mode is `full` again the day the remote says
     yes, with no edit to the line.
+
+    `at_push=False` is the merge-time ownership check: the branch was pushed
+    before that answer, so the body must not claim artifacts were held back
+    (sd:1000, 3057e71978d9).
     """
     marker = f"Mode demoted to guest on {repository}"
     said = ("the remote answered: " if answer.answered else "the remote could not be asked: ") + (
@@ -816,9 +820,11 @@ def demotion_note(repository: str, answer: RemoteAnswer) -> tuple[str, str]:
     )
     body = (
         f"{marker}\n{said}. The written mode stays as it is: detection is a ceiling, and the next run "
-        "is full again once the remote says yes to all three questions. Planning artifacts this branch "
-        "carries under docs/work/, docs/spec/ or docs/decisions/ were not pushed to that remote; what is "
-        "already in its shared tree from before the answer changed is yours to move."
+        "is full again once the remote says yes to all three questions. "
+        + ("Planning artifacts this branch carries under docs/work/, docs/spec/ or docs/decisions/ were "
+           "not pushed to that remote; what is " if at_push else
+           "The answer came at merge time, after the branch was pushed, so it held nothing back; what is ")
+        + "already in its shared tree from before the answer changed is yours to move."
     )
     return marker, body
 
@@ -838,7 +844,6 @@ def demotion_note_key(marker: str) -> str:
     a newline, so one key matches one marker and no other.
     """
     return marker + "\n"
-
 
 
 # --------------------------------------------------------------------------
@@ -1071,8 +1076,6 @@ def ci_mode(root: pathlib.Path | str) -> str:
         return repo_ci(connection, root)
     finally:
         connection.close()
-
-
 
 
 def is_managed(row: Any) -> bool:
@@ -3070,8 +3073,8 @@ def guest_artifact_refusal(root: pathlib.Path, paths: Any, *, ask: Asker = gh_ap
     return (
         f"this repository is in guest mode, so {shown} cannot be written into the "
         "upstream tree; planning artifacts live on the fork's integration branch "
-        "(WORKFLOW.md, `mode: guest`). Detection is a ceiling: a `mode: full` line "
-        "the remote lowers, and a remote that cannot be asked, both resolve guest here."
+        "(WORKFLOW.md, `mode: guest`), and detection is a ceiling, so a `mode: full` line "
+        "the remote lowers, or a remote that cannot be asked, resolves guest here too."
     )
 
 

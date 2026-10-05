@@ -162,6 +162,62 @@ class HeldLane(LaneCase):
                 ship.parser().parse_args(["hold", "--item", "1", "--for", value])
 
 
+class SatellitePrepare(LaneCase):
+    """sd:2679. Over a remote connection prepare binds the pull request and writes
+    the ship: row without the ship lock; merge still meets the lock's HubOnly."""
+
+    HUB = "hub.example.test:8769"
+
+    def setUp(self):
+        LaneCase.setUp(self)
+        self.entered = []
+
+        @contextlib.contextmanager
+        def lock_on_a_satellite(database, repository, **options):
+            # What `repository_lock` does over the wire.
+            self.entered.append(repository)
+            raise ship.Refusal(f"the sd-ship repository lock runs on the sd hub only; this machine reaches "
+                               f"the database on {self.HUB}. Run it on the hub")
+            yield
+
+        def served_by(target, home=None):
+            return self.HUB if str(target) == str(self.database) else None
+
+        # `create=True`: the pinned sd_db predates `served_by`.
+        for patcher in (patch.object(receipts, "repository_lock", lock_on_a_satellite),
+                        patch("sd_db.database.served_by", served_by, create=True)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_prepare_binds_the_pull_request_and_writes_the_ship_row_without_the_lock(self):
+        prepared = self.dispatch("prepare")
+        self.assertEqual(prepared["phase"], "ready_to_send")
+        self.assertEqual(self.entered, [])
+        number = prepared["pull_request"]["number"]
+        self.assertIn(number, self.remote.pull_requests)
+        key = receipts.receipt_key("fixture/repo", "topic", self.item)
+        self.assertTrue(key.startswith("ship:"))
+        row = receipts.read(self.connection, key)[1]
+        self.assertEqual((row["phase"], row["pull_request"]["number"]), ("ready_to_send", number))
+        self.assertEqual((row["invoker"]["lock_holder"], row["invoker"]["served_by"]), (None, self.HUB))
+
+    def test_merge_still_refuses_at_the_lock(self):
+        self.assertEqual(self.dispatch("prepare")["phase"], "ready_to_send")
+        with self.assertRaisesRegex(ship.Refusal, "runs on the sd hub only"):
+            self.dispatch("merge", "--manual", "--expected-head", self.head())
+        self.assertEqual(self.entered, ["fixture/repo"])
+        self.assertEqual(self.puts(), [])
+
+    def test_a_merged_records_prepare_reconciles_on_the_hub_only(self):
+        self.assertEqual(self.dispatch("prepare")["phase"], "ready_to_send")
+        key = receipts.receipt_key("fixture/repo", "topic", self.item)
+        revision, row = receipts.read(self.connection, key)
+        receipts.save(self.connection, key, revision, {**row, "phase": "merged"})
+        with self.assertRaisesRegex(ship.Refusal, "runs on the sd hub only"):
+            self.dispatch("prepare")
+        self.assertEqual(self.entered, ["fixture/repo"])
+
+
 class MergeFromTheLane(LaneCase):
     """sd:2037. Merge resolves the item's branch from its receipt, not from the checkout."""
 
