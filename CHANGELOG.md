@@ -4,6 +4,12 @@
 
 ### Added
 
+- **`sd-ship lane move|hold|release` take `--expected-revision` (sd:2717).**
+  `lane list` prints the queue's `revision`, a digest of the pending order
+  and holds. A verb given that revision compares it under the queue's lock
+  and refuses with exit 3 and `code: stale_revision` when the queue changed
+  since, so a caller such as the dashboard's Queue page gets an atomic
+  stale-write refusal. Without the flag the verbs behave as before.
 - **`sd-ship prepare` runs on an sd satellite (sd:2679).** When `sd_db`
   reports the database served by a hub, `prepare` skips the ship lock, a file
   on the hub, and the hold check beside it. It reviews, pushes, binds or opens

@@ -11,6 +11,8 @@ runs it under one lock per repository:
   cancel   mark a pending entry cancelled;
   move     put a pending entry up, down, on top or at a position (sd:2584);
   hold     keep a pending entry in place but skip it; `release` ends that;
+           these three take `--expected-revision`, the `revision` `list`
+           prints, and refuse a queue that changed since (sd:2717);
   run      take the queue's first pending entry that is not held, read again
            before each item: head check, `prepare --catch-up`,
            then `merge`; a failed entry is marked and the runner goes on.
@@ -75,6 +77,7 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import hashlib
 import json
 import os
 import pathlib
@@ -112,7 +115,15 @@ Note = Callable[[int, str, pathlib.Path], str]
 
 
 class LaneError(RuntimeError):
-    """A lane command that cannot do what it was asked; nothing was changed."""
+    """A lane command that cannot do what it was asked; nothing was changed. `code` is a stable refusal name, or None."""
+
+    def __init__(self, message: str, code: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+#: The refusal code of a move, hold or release whose `--expected-revision` no longer matches (sd:2717).
+STALE_REVISION = "stale_revision"
 
 
 def lane_root(environ: dict[str, str]) -> pathlib.Path:
@@ -221,6 +232,23 @@ def pending_entry(entries: list[dict[str, Any]], item: int) -> dict[str, Any]:
     raise LaneError(f"sd:{item} has no pending entry in this lane")
 
 
+def queue_revision(entries: list[dict[str, Any]]) -> str:
+    """The pending order and holds, which is everything a reorder reads; `lane list` prints it (sd:2717).
+
+    The same digest the system dashboard's Queue page computed for itself, so
+    a revision it already holds still compares equal.
+    """
+    pending = [[row.get("item"), bool(row.get("held"))] for row in entries if row.get("status") == "pending"]
+    return hashlib.sha256(json.dumps(pending).encode()).hexdigest()[:16]
+
+
+def check_revision(entries: list[dict[str, Any]], expected: str | None) -> None:
+    """Refuse a reorder made against a queue that changed since the caller read it; None checks nothing."""
+    if expected is not None and queue_revision(entries) != expected:
+        raise LaneError(f"the queue changed since revision {expected}; it is at {queue_revision(entries)}; "
+                        "read it again with `sd-ship lane list`", code=STALE_REVISION)
+
+
 def cancel(root: pathlib.Path, item: int, environ: dict[str, str]) -> dict[str, Any]:
     def mark(entries: list[dict[str, Any]]) -> dict[str, Any]:
         row = pending_entry(entries, item)
@@ -236,11 +264,13 @@ def position(where: str) -> str:
     raise ValueError(f"name up, down, top or a position from 1, not {where!r}")
 
 
-def move(root: pathlib.Path, item: int, where: str, environ: dict[str, str]) -> dict[str, Any]:
+def move(root: pathlib.Path, item: int, where: str, environ: dict[str, str], *,
+         expected_revision: str | None = None) -> dict[str, Any]:
     """Reorder the pending entries; finished entries keep their place as history."""
     where = position(where)
 
     def reorder(entries: list[dict[str, Any]]) -> dict[str, Any]:
+        check_revision(entries, expected_revision)
         row = pending_entry(entries, item)
         slots = [index for index, entry in enumerate(entries) if entry.get("status") == "pending"]
         rows = [entries[index] for index in slots]
@@ -253,9 +283,11 @@ def move(root: pathlib.Path, item: int, where: str, environ: dict[str, str]) -> 
     return update(queue_path(root, environ), reorder)
 
 
-def set_hold(root: pathlib.Path, item: int, environ: dict[str, str], *, held: bool) -> dict[str, Any]:
+def set_hold(root: pathlib.Path, item: int, environ: dict[str, str], *, held: bool,
+             expected_revision: str | None = None) -> dict[str, Any]:
     """Hold a pending entry in place, so the runner and its speculation skip it, or release it."""
     def toggle_hold(entries: list[dict[str, Any]]) -> dict[str, Any]:
+        check_revision(entries, expected_revision)
         row = pending_entry(entries, item)
         if bool(row.get("held")) == held:
             raise LaneError(f"sd:{item} is {'already' if held else 'not'} held")
@@ -629,9 +661,14 @@ def add_lane_verbs(commands: Any) -> None:
     mover = verbs.add_parser("move", help="move a pending entry; the runner reads the new order at the next item")
     mover.add_argument("item", type=int)
     mover.add_argument("where", type=position, help="up, down, top, or a position from 1 among the pending entries")
+    editors = [mover]
     for name, text in (("hold", "skip a pending entry, keeping its place, until it is released"),
                        ("release", "let a held entry run again")):
-        verbs.add_parser(name, help=text).add_argument("item", type=int)
+        editors.append(verbs.add_parser(name, help=text))
+        editors[-1].add_argument("item", type=int)
+    for editor in editors:
+        editor.add_argument("--expected-revision", help=f"refuse with {STALE_REVISION} unless `lane list` still prints "
+                                                        "this revision, checked under the queue's lock")
     verbs.add_parser("run", help="drain the queue in order; exits at once if another runner holds the lane")
     watcher = verbs.add_parser("watch", help="print each gate end a log under the lane root records, once")
     watcher.add_argument("--once", action="store_true", help="scan once and exit")
@@ -652,17 +689,20 @@ def lane_main(args: Any) -> int:
                                         acceptance_file=args.acceptance_file)
         elif args.lane_command == "list":
             path = queue_path(root, environ)
-            result = {"queue": str(path), "entries": read_queue(path)}
+            entries = read_queue(path)
+            result = {"queue": str(path), "revision": queue_revision(entries), "entries": entries}
         elif args.lane_command == "cancel":
             result = cancel(root, args.item, environ)
         elif args.lane_command == "move":
-            result = move(root, args.item, args.where, environ)
+            result = move(root, args.item, args.where, environ, expected_revision=args.expected_revision)
         elif args.lane_command in ("hold", "release"):
-            result = set_hold(root, args.item, environ, held=args.lane_command == "hold")
+            result = set_hold(root, args.item, environ, held=args.lane_command == "hold",
+                              expected_revision=args.expected_revision)
         else:
             result = run_lane(root, environ)
     except (LaneError, sd_lib.ConfigError, OSError) as error:
-        print(json.dumps({"ok": False, "error": str(error)}, indent=2, sort_keys=True))
+        code = {"code": error.code} if isinstance(error, LaneError) and error.code else {}
+        print(json.dumps({"ok": False, "error": str(error), **code}, indent=2, sort_keys=True))
         return 3
     print(json.dumps({"ok": True, **(result if isinstance(result, dict) else {"result": result})}, indent=2,
                      sort_keys=True))
