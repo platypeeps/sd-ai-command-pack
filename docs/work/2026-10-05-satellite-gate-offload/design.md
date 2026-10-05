@@ -2,22 +2,42 @@
 
 ## The shape
 
-The satellite gates; the hub merges. Nothing else moves. The merge still runs
-under the hub's `repository_lock`, in the hub's lane, as the sd:1335 Decision
-requires. What changes is the evidence that the merge gate reads: a receipt
-from the satellite in place of a run on the hub.
+The satellite gates; the hub merges. The merge still runs under the hub's
+`repository_lock`, in the hub's lane, as the sd:1335 Decision requires. Two
+things change. The merge gate reads a receipt from the satellite in place of a
+run on the hub. And the satellite asks for the merge with a row in the hub's
+database, which the hub's lane takes in.
 
 | Step | Machine | Command | What it does |
 |---|---|---|---|
 | 1 | satellite | `git merge origin/main` on the branch, or `sd-ship prepare --catch-up` | The head contains the current base before any gate |
 | 2 | satellite | `sd gate check --base main` | Runs `sd-check`; writes the satellite's own receipt and the offload receipt over the wire |
 | 3 | satellite | `sd-ship prepare --item N --title T --body-file F` | Reviews (its gate reuses step 2), pushes, binds the PR, writes `ship:`, posts `sd/local-gate` from the offload receipt |
-| 4 | satellite → hub | `ssh <hub> sd-ship -C <hub checkout> lane enqueue --satellite --item N --branch B --manual` | Adds a hub worktree of `origin/B` and a lane entry marked `gate: satellite` |
-| 5 | hub | `sd-ship lane run` (the lane's runner, unchanged) | Head check; no prepare, no catch-up, no speculation; then `sd-ship merge --satellite-gate` |
-| 6 | hub | `sd-ship merge --item N --expected-head H --manual --satellite-gate` | Accepts the offload receipt under the trust rule; posts no status; merges |
+| 4 | satellite | `sd-ship lane request --item N --manual` | Writes the lane request row for this repository and item over the wire |
+| 5 | hub | the scheduled job: `sd-ship -C <hub checkout> lane run`, every 5 minutes | Starts the lane runner; exits at once when a runner already holds the lock |
+| 6 | hub | `lane run` intake, before each claim | Validates each new request, adds a queue entry marked `gate: satellite`, writes `queued` to the row |
+| 7 | hub | `lane run` processing the entry | Fetches the branch; head and base checks; no prepare, no catch-up, no speculation; then `sd-ship merge --item N --branch B --expected-head H --manual --satellite-gate` |
+| 8 | hub | `sd-ship merge --satellite-gate` | Accepts the offload receipt under the trust rule; posts no status; merges |
+| 9 | hub | `lane run` landing | Deletes `origin/B` with a lease on the merged head; writes the outcome to the row; notes the item |
 
 Step 3 alone also gates when step 2 was skipped: `sd-review --gate-check`
 runs the same `check_in_worktree` and writes the same rows.
+
+## Decisions
+
+Ruled by the operator on 2026-10-05, through the team lead. Each ruling took
+the recommendation the first draft of this page gave, except Q2.
+
+- **Q1 — the opt-in lives in a `repo` column.** `repo.satellite_gate`,
+  `off|accept`, default `off`, set by
+  `sd-db.sh repo satellite-gate <path> off|accept`, like `runner_merge`. A
+  library older than the column reads `off`. The grant is the operator's, per
+  repository, outside the tree.
+- **Q2 — the handoff is a request row that `lane run` polls.** The first
+  draft recommended SSH enqueue; the operator chose the row. "Handoff" below
+  is the design for it.
+- **Q3 — an offload receipt stands for 6 hours.** `OFFLOAD_WINDOW_SECONDS`
+  equals `TREE_REUSE_WINDOW_SECONDS`, for either key.
 
 ## The offload receipt
 
@@ -37,9 +57,8 @@ would then refuse the next writer as a concurrent change.
 
 `slug` is `owner/name` from `remote.origin.url`, lower case, as `sd-ship`
 derives `self.repository`. The `ship:` key already names a repository this
-way (`ship.receipt_key(self.repository, self.branch, args.item)`), and that
-is why a hub lane finds a satellite's `ship:` row today. The tree key follows
-`tree_key` in `bin/sd_gate_receipts.py` unchanged.
+way, and that is why a hub lane finds a satellite's `ship:` row today. The
+tree key follows `tree_key` in `bin/sd_gate_receipts.py` unchanged.
 
 ### Row
 
@@ -55,16 +74,19 @@ request-id protocol of sd:1335 step 5 apply as for every `ship:` row.
 | `pack_bin` | sha256 of the pack `bin/` files that `gate_inputs` hashes, or `"tree"` when the run gated its own tree (`gates_itself`) |
 | `pack_rev` | `git rev-parse HEAD` of the pack checkout, for the refusal text only |
 | `local_block` | sha256 of the copied `CLAUDE.local.md`, or `"absent"` |
-| `posted_inputs` | `gate_inputs(root, head)`: the digest the status description carries |
 | `reading` | the passing reading, as `record_pass` stores it |
 | `head` | the commit that passed |
 | `recorded_at` | the run's time on the satellite's clock; a reuse keeps the original run's time |
 
 ### What the hub compares, and what it only records
 
-The hub builds its own binding for the head in its worktree, exactly as the
-merge gate does now before `examine`. That needs a checkout, not a run. Then
-it compares field by field:
+The hub checks the head out into a temporary worktree, as the merge gate does
+now before `examine`. That needs a checkout, not a run. It then computes the
+tree-derived part of the binding. That part does not resolve a single tool:
+`gate_binding` returns `None` whenever `tool_identity` cannot find a tool on
+the hub's `PATH`, and a hub without `cargo` must still compare a Rust
+repository's receipt. So implement step 4 splits `gate_binding` into a
+tree part and a machine part, and `gate_binding` returns their union as today.
 
 | Binding field | Hub compares | Why |
 |---|---|---|
@@ -76,7 +98,7 @@ it compares field by field:
 | `environment_sha256` | no, recorded | The satellite's whole gate environment |
 | `satellite` | no, recorded | `serve` admitted only the operator's untagged node (sd:1335 step 7). A second check reads the same claim |
 
-The brief asked for the pack `bin/` digest as the one compared field.
+The first brief asked for the pack `bin/` digest as the one compared field.
 Comparing `inputs` covers it and adds the `CLAUDE.local.md` digest. That file
 can spell the repository's check, so a different copy means a different
 command. Under the pack's own tree key with `"tool": "tree"`, `inputs` leaves
@@ -98,11 +120,12 @@ the first that fails refuses with its code. No clause failure starts a run.
 | 5 | The compared binding fields equal the hub's (table above); the refusal names each differing field | `satellite_binding` |
 | 6 | Within that, `pack_bin` equals the hub's; the refusal names both digests and both `pack_rev` values | `satellite_pack_mismatch` |
 | 7 | Age on the hub's clock is at most `OFFLOAD_WINDOW_SECONDS`, and `recorded_at` is at most 300 s in the hub's future | `satellite_receipt_expired` |
-| 8 | The newest `sd/local-gate` status at the head is `success`, posted by `viewer_login()`, and its description starts with `head[:12] inputs <posted_inputs>` | `satellite_status_missing` or `local_gate_foreign` |
+| 8 | The newest `sd/local-gate` status at the head is `success`, posted by `viewer_login()`, and its description starts with `head[:12] inputs <digest>`, where the digest is the hub's own `gate_inputs(root, head)` | `satellite_status_missing` or `local_gate_foreign` |
 
 Clause 6 is a named case of clause 5, so a pack mismatch gets its own
-remedy. Clause 8 reuses `local_gate_passed` and adds the description test, so
-a status from a run at another inputs digest does not count.
+remedy. Clause 8 reuses `local_gate_passed` and adds the description test.
+The digest is the one `local_gate` would post on the hub for this head, so a
+status from a run with another pack or local block does not count.
 
 On a pass the merge saves `local_gate` with `satellite` provenance: the
 row's revision, the satellite's login, address and hostname, and the age. It
@@ -111,9 +134,8 @@ Then `settled_ready` runs as today. `ready` still calls `local_gate_passed`,
 and still refuses a head behind the base.
 
 Without `--satellite-gate` the merge is today's merge. A hub-built item in an
-opted-in repository runs its gate on the hub as before. The flag is what the
-lane passes for an entry enqueued with `--satellite`; a person may pass it by
-hand.
+opted-in repository runs its gate on the hub as before. The lane passes the
+flag for an entry marked `gate: satellite`; a person may pass it by hand.
 
 ### What the hub no longer guarantees
 
@@ -130,18 +152,20 @@ receipt. This item widens that boundary from one machine to two. A head can
 pass on the satellite and fail on the hub. That is the accepted residual risk.
 A repository that cannot accept it leaves `repo.satellite_gate` off.
 
-### A forged receipt
+### A forged receipt or request
 
 One operator runs both machines under one GitHub account. sd:1335 Q3 ruled
 that the whole satellite machine is the trust boundary. Any process there
 passes `whois`, and the wire accepts any statement it sends. The same process
 can post `sd/local-gate` with the operator's `gh` token. So any process on
 the satellite can write an offload row and a matching status for a head that
-never ran. No clause here can tell that apart from a real pass.
+never ran. No clause here can tell that apart from a real pass. The same holds
+for a request row that asks for a merge with `manual` authority.
 
 This is the same trust that a local receipt has today: any hub process can
-write a row at the hub's key. The trust rule defends against accidents: a
-stale head, another pack, a moved base, a half-written handoff, a status from
+write a row at the hub's key, and any hub session can run
+`lane enqueue --manual`. The trust rule defends against accidents: a stale
+head, another pack, a moved base, a half-written handoff, a status from
 another account. It does not defend against the operator's own processes. A
 process the operator does not trust must not run on the satellite (sd:1335 Q3).
 
@@ -166,45 +190,130 @@ So an offload receipt for a head behind the base can never merge. What the
 hub must stop doing is its own catch-up. The lane runs
 `sd-ship prepare --catch-up` for each entry, and a catch-up makes a new head,
 which needs a gate at that head. For a satellite entry the lane runs no
-prepare at all:
+prepare at all. Instead, after it fetches the branch and the base:
 
-- The satellite's prepare already reached `ready_to_send` at the head; the
-  lane reads that from the `ship:` row and skips the entry if it does not hold.
-- Merge refuses `base_moved` when the base moved. The lane marks the entry
-  `handed_back` instead of `failed`, and notes the item.
+1. The fetched `origin/B` must equal the entry's head. Otherwise the entry is
+   `handed_back` with `head_moved`: the satellite pushed again and must
+   request again.
+2. `git merge-base --is-ancestor origin/<base> <head>` must hold. Otherwise
+   the entry is `handed_back` with `base_moved`, and merge never starts.
+3. Merge runs. A `base_moved` or `satellite_*` refusal there, from a base
+   that moved in between, also ends `handed_back`.
 
-The hand-back `next_action`, for both `base_moved` and every
-`satellite_*` refusal under `--satellite-gate`:
+Step 2 is needed, not only tidy. `ready`'s behind refusal carries no code
+today (`Refusal("the reviewed branch is behind the current default branch")`),
+so the lane could not tell it from any other failure. Implement step 4 gives
+it `base_moved` for the race that check 2 above cannot close.
+
+The hand-back `next_action`, on the queue entry, the request row and the item
+note:
 
     On the satellite: git merge origin/<base> on the branch (or sd-ship prepare --catch-up),
-    then sd gate check --base <base> and sd-ship prepare, then enqueue on the hub again.
+    then sd gate check --base <base>, sd-ship prepare, and sd-ship lane request again.
 
 **Cost.** Two satellite entries queued together cannot both merge without a
 round trip. The first merge moves the base, so the second hands back. Each
-extra entry costs one satellite gate and one enqueue. The hub runs no check
-for any of them. Out of scope above names the later row that removes the
+extra entry costs one satellite gate and one request. The hub runs no check
+for any of them. Out of scope in `prd.md` names the later row that removes the
 round trip.
 
-`OFFLOAD_WINDOW_SECONDS` is 6 hours, as `TREE_REUSE_WINDOW_SECONDS` (open
-question 3). The window does not guard base freshness; the three reads above
-do. It bounds how long the hub trusts the satellite's machine state, which the
-hub cannot observe at any age.
+The 6-hour window (Q3) does not guard base freshness; the reads above do. It
+bounds how long the hub trusts the satellite's machine state, which the hub
+cannot observe at any age.
+
+## Handoff: the lane request row
+
+### Row
+
+One row per repository and item, in the `state` table as a checkpoint,
+written through `sd_db.ship.save`. No schema change is needed.
+
+    lane-request:v1:<slug>:<item>
+
+| Field | Written by | Value |
+|---|---|---|
+| `writer` | satellite | `sd-lane-request` |
+| `repository`, `item`, `branch`, `head`, `base` | satellite | what to merge; `head` is the satellite's pushed head |
+| `authority` | satellite | `manual` or none, as `lane enqueue --manual` |
+| `satellite` | satellite | the same identity as the offload receipt |
+| `requested_at` | satellite | satellite clock, for display |
+| `status` | both | `requested` by the satellite; then `queued`, `refused`, `handed_back`, `merged` or `failed` by the hub |
+| `reason`, `next_action`, `code` | hub | why the status, and who acts next |
+| `entry` | hub | the queue's `enqueued_at` and the request revision it took in |
+
+`sd-ship lane request` refuses on the hub, naming `lane enqueue`: a request
+means "the satellite gated this", which a hub item is not. It also refuses
+when the item's `ship:` row is not `ready_to_send` at the branch's pushed
+head, so a request that intake would refuse is not written.
+
+Every write is revision-checked. When the satellite writes a new request while
+the hub writes an outcome, one of them meets "ship receipt changed
+concurrently". The satellite reruns its verb; the hub retries at its next
+intake.
+
+### Intake
+
+`run_lane` calls `intake` before each `claim_next`, under the runner lock.
+It reads every `lane-request:v1:<own slug>:*` row whose newest status is
+`requested`, oldest first. The slug is the lane's own, from its main
+checkout's origin, so each repository's lane reads only its own requests. For
+each request, in order:
+
+1. **Opt-in.** `repo.ci = local` and `repo.satellite_gate = accept`.
+   Otherwise `refused`, `satellite_gate_off`.
+2. **Shape.** `branch` passes `git check-ref-format --branch` and does not
+   start with `-`; `head` is 40 hex digits; `item` is an integer. Otherwise
+   `refused`, `invalid_request`. The branch reaches `git fetch` and
+   `git push` argv, so this is input validation at a trust boundary.
+3. **Prepared.** The `ship:` row for the slug, branch and item is
+   `ready_to_send` at `head`. Otherwise `refused`, `satellite_not_prepared`.
+4. **Taken in already.** A queue entry that names this request's revision
+   means a crash came between the queue write and the row write. Write
+   `queued` and go on; add nothing.
+5. **Pending entry for the item.** Cancel it, marked `superseded` by this
+   revision. The row needs no extra write: its older revision stays in its
+   history. A `running` entry for the item leaves the request `requested`
+   for the next intake.
+6. **Enqueue.** Add an entry: `worktree` is the lane's main checkout,
+   `gate: satellite`, `branch`, `expected_head`, `authority`, and the
+   request's revision. No title or body file: the `ship:` row holds both.
+   Then write `queued`.
+
+Queue first, row second, so a crash leaves a queue entry that step 4
+recognises, never a `queued` row with no entry.
+
+### Scheduling
+
+`lane run` drains its queue and exits; it is not a poller. A request moves
+only when something on the hub starts it. The hub runs one scheduled job per
+opted-in repository:
+
+    */5 * * * *  sd-ship -C <hub checkout> lane run
+
+It is operator configuration in the system repository's `local-cron-jobs`
+folder for the hub host, not code. A start that finds the runner lock held
+exits at once ("another runner holds ..."), so overlapping starts cost
+nothing. One consequence: the job also drains hub entries that wait in that
+queue. Each was enqueued on purpose, and only an entry enqueued with
+`--manual` merges.
 
 ## Lane changes
 
-- `lane enqueue --satellite --branch B`: fetches `origin/B` into the main
-  checkout, adds a worktree at `<lane dir>/worktrees/<item>-<B>` on a local
-  branch `B` at `origin/B`, and refuses when a local `B` exists at another
-  commit. The branch name must match, because the `ship:` key names it. Title
-  and body come from the `ship:` row, so `--title` and `--body-file` are not
-  needed. The entry records `gate: satellite`.
-- `process`: for `gate: satellite`, head check, then the `ship:` phase check,
-  then merge with `--satellite-gate`. No prepare.
+- `process`, for `gate: satellite`: fetch `refs/heads/B` and the base, then
+  the head and base checks of "Freshness", then merge with `--branch B` and
+  `--satellite-gate`. No prepare. The hub needs no worktree of the branch:
+  `merge_branch` and `merge_head` already let a lane merge from its own
+  checkout while the branch stays open elsewhere (sd:2037).
 - `speculate`: no predicted-landing gate for a following entry with
   `gate: satellite`. An entry ahead that is a satellite entry predicts as now:
   its head already contains the base, so its catch-up is a no-op.
-- `land`: unchanged. The worktree is under the lane directory, outside
-  `~/repos`, and the note carries its removal command as for any entry.
+- `clean_up`, for `gate: satellite`: the worktree is the main checkout, so the
+  worktree branch is skipped. It deletes `origin/B` with
+  `--force-with-lease=refs/heads/B:<merged head>` when the remote is still at
+  that head. The satellite removes its own worktree.
+- `finish`: a satellite entry also writes its outcome to its request row. A
+  `handed_back` or `failed` entry notes the item with the reason and the
+  `next_action`, as a merge already notes it.
 
 ## Satellite-side changes
 
@@ -212,15 +321,23 @@ hub cannot observe at any age.
   `served_by(database)` names a hub and `repo.satellite_gate` is `accept`,
   write the offload row. On a reuse of the satellite's own receipt with no
   offload row at the key, write it from the reused reading, keeping its
-  `recorded_at`. A failed write sets `offload_error`; the pass stands.
-- `sd gate check` refuses before the run when the repository is opted in
-  and the hub does not answer. The check then cannot leave the receipt it
-  exists for.
+  `recorded_at`. A failed write sets `offload_error`; the pass stands. The
+  repository resolves by origin (`registered_for`), as `repo_ci` does on a
+  satellite.
+- `sd gate check` keeps running when the hub does not answer. The check still
+  tells the builder whether the code passes; the result carries
+  `offload_error` instead of a row.
+- `sd gate check` warns, before the run, when its `pack_bin` differs from the
+  hub's last published digest. `lane run` writes that digest to
+  `sd-lane-pack:v1:<slug>` at each start and after each fast-forward of the
+  pack checkout. It is a warning: the hub's pack can still move after the
+  gate, and clause 6 is the check.
 - `sd-ship prepare` on a satellite, opted in, at `ready_to_send`: post
   `sd/local-gate` from the offload row through `post_gate_status`. That
   function refuses a head the run did not check. The description is
-  `head[:12] inputs <posted_inputs>: sat <hostname>: <summary>`, cut to 140
-  characters. No row, no post; prepare reports `offload_error`.
+  `head[:12] inputs <gate_inputs(root, head)>: sat <hostname>: <summary>`,
+  cut to 140 characters. No row, no post; prepare reports `offload_error`.
+- `sd-ship lane request`: the new verb above.
 - `sd_gate_run` keeps its contract that it posts nothing. Only `sd-ship`
   posts.
 
@@ -228,19 +345,31 @@ hub cannot observe at any age.
 
 | Condition | Behaviour | Named by |
 |---|---|---|
-| Hub offline when the satellite gates | `sd gate check` refuses before the run for an opted-in repository: `HubUnreachable` names host and port. Nothing runs, nothing posts | sd:1335 R4 |
-| Hub offline after the gate | Prepare cannot write `ship:` and posts nothing. Rerun prepare; the gate reuses the satellite's own receipt | sd:2679 |
-| Satellite on another pack revision | Clause 6: `satellite_pack_mismatch` names both `bin/` digests and both revisions. Remedy: fast-forward the satellite's pack, then `sd gate check` again (inputs changed, so it runs) | R6 |
+| Hub offline when the satellite gates | The check runs; no row is written; `offload_error` names `HubUnreachable`. Rerun `sd gate check` once the hub answers: it reuses nothing (the satellite's own receipt lives on the hub too) and runs again | sd:1335 R4 |
+| Hub offline at prepare or request | Prepare cannot write `ship:`; the request verb cannot write its row. Both exit non-zero naming the hub. Rerun them | sd:2679 |
+| No hub process runs `lane run` | The request stays `requested`. The scheduled job bounds the wait to its period plus the queue ahead | R10 |
+| Satellite on another pack revision | Warned before the gate; clause 6 refuses at merge with both digests and revisions. Remedy: fast-forward the satellite's pack, `sd gate check` again (inputs changed, so it runs), request again | R6 |
 | Satellite on another `sd_db` build | The session refuses at the handshake with `BuildMismatch`, before any SQL. No row is written | sd:1335 design, A2 |
-| Receipt for a moved head | No row at the new head's key: `satellite_receipt_missing`, handed back. The old row stays, under the old key, unread | Clause 3 |
+| Receipt for a moved head | Intake refuses `satellite_not_prepared`, or the lane hands back `head_moved`, or clause 3 refuses `satellite_receipt_missing`. The old row stays under the old key, unread | Intake 3; Freshness 1; clause 3 |
 | Base moved after the gate | `base_moved`, handed back; the lane does not catch up | Freshness |
-| Forged receipt | Not detected; the operator's own process is inside the boundary (above) | sd:1335 Q3 |
+| Forged receipt or request | Not detected; the operator's own process is inside the boundary | sd:1335 Q3 |
 | Status from another account | `local_gate_foreign`, as today | Clause 8 |
 | Status at another inputs digest | `satellite_status_missing` | Clause 8 |
-| Connection drops during the row write | One `ship.save` transaction with a request id. `recorded`: the row exists. `TransactionLost`: nothing was written; `offload_error` is set and no status posts. Rerun `sd gate check`: it reuses the satellite's own receipt and writes the offload row from it | sd:1335 step 5 |
-| Connection drops between the row and the status | Row present, no status: clause 8 refuses. Rerun the satellite's prepare; it posts | Clause 8 |
+| Connection drops during a row write | One `ship.save` transaction with a request id. `recorded`: the row exists. `TransactionLost`: nothing was written. For the offload row, `offload_error` is set and no status posts; rerun `sd gate check`, which reuses the satellite's own receipt and writes the offload row from it. For the request row, rerun the verb | sd:1335 step 5 |
+| Connection drops between the offload row and the status | Row present, no status: clause 8 refuses and the entry hands back. Rerun the satellite's prepare; it posts | Clause 8 |
+| Hub crashes between the queue write and the row write | The next intake finds the entry by revision and writes `queued` | Intake 4 |
 | Satellite clock ahead | Up to 300 s accepted; beyond that `satellite_receipt_expired` names both clocks | Clause 7 |
-| Opt-in turned off while an entry waits | Clause 1 refuses; the entry hands back; enqueue it without `--satellite` to gate on the hub | R4 |
+| Opt-in turned off while an entry waits | Clause 1 refuses; the entry hands back; new requests are refused at intake | R4 |
+| A malicious branch name in a request | Intake refuses it before any git call | Intake 2 |
+
+## Rollout and rollback
+
+Rollout is per repository: set `repo.satellite_gate = accept`, add the hub's
+scheduled job, and request from the satellite. Rollback is the reverse:
+`sd-db.sh repo satellite-gate <path> off`. Intake then refuses new requests,
+and clause 1 hands back any waiting entry. Hub-built items never took the new
+path, so nothing else changes. Code rollback needs no data migration: the
+offload, request and pack rows are checkpoints no older reader looks for.
 
 ## Alternatives rejected
 
@@ -252,40 +381,42 @@ hub cannot observe at any age.
 - **Hub falls back to its own run on a miss.** It defeats the goal, and a
   silent fallback hides a broken handoff. A hub-built item already takes the
   path without the flag.
-- **Satellite enqueues by a request row the hub polls.** It needs a new row
-  kind, a poller and its own lock. SSH runs today's verb where it already
-  works (open question 2).
+- **SSH enqueue from the satellite.** The first draft's recommendation;
+  the operator chose the request row (Q2).
+- **A lane-owned worktree per satellite branch.** Not needed: merge already
+  merges a branch from the lane's own checkout (sd:2037), and a worktree would
+  collide with any hub checkout of the same branch.
 
-## Questions for the operator
+## Planning review, 2026-10-05
 
-**Q1 — where does the opt-in live?**
+The pack's planning review contract
+(`.claude/sd-ai-command-pack/planning-adversarial-review.md`) ran once on
+this artifact set, as the host lane; the pack defines no other lane. No
+artifact touches a path the pack's `sensitive` list names. The contract then
+needs no stable-id ledger or cross-artifact sweep. Both are kept here
+anyway, because the team lead asked for every finding to be answered in the
+record.
 
-- A. A `repo` column, `satellite_gate` `off|accept`, set by
-  `sd-db.sh repo satellite-gate <path> off|accept`, like `runner_merge`. A
-  system-repository migration comes first. An older library reads `off`.
-- B. A pack core key, `sd.satellite_gate`. It needs no migration, but it is
-  per machine, not per repository.
-- C. A field in `.github/sd-gate-reuse.json`. It is reviewed, but a branch
-  could opt itself in under its own gate.
+| ID | Severity | Concern | Evidence | Disposition |
+|---|---|---|---|---|
+| C-1 | blocking | `lane run` drains and exits, so a request row is never read without a hub process | `run_lane` returns when `claim_next` finds nothing | addressed: R10, "Scheduling", implement steps 6 and 8 |
+| C-2 | blocking | The hub cannot build a binding when a tool is missing on its `PATH`, so clause 5 could not compare | `tool_identity` raises `Unavailable`; `gate_binding` returns `None` | addressed: tree part and machine part split; implement step 4 |
+| C-3 | blocking | The lane cannot classify `ready`'s behind refusal: it carries no code | `Refusal("the reviewed branch is behind the current default branch")` in `ready` | addressed: lane checks the base before merge; that refusal gets `base_moved` |
+| C-4 | major | Clause 8 compared the status with a satellite-written digest, which proves nothing the hub knows | `post_gate_status` writes `head[:12] inputs <digest>` | addressed: clause 8 uses the hub's own `gate_inputs(root, head)`; `posted_inputs` dropped from the row |
+| C-5 | major | A branch name from a request reaches git argv on the hub | intake's fetch and the lease delete | addressed: intake step 2 |
+| C-6 | major | Frequent pack landings make `satellite_pack_mismatch` common, each costing a satellite gate | the lane fast-forwards the pack checkout after its merges | addressed: published hub digest and a pre-gate warning; clause 6 stays the check |
+| C-7 | major | A pre-run refusal when the hub is down blocked a builder's plain check for every repository | the first draft's "refuses before the run" | addressed: the check runs and reports `offload_error` |
+| C-8 | major | Queue file and request row are two stores; a crash between writes could double-enqueue | intake writes both | addressed: queue first, revision on the entry, intake step 4 |
+| C-9 | minor | A per-branch hub worktree is needless and can collide with a hub checkout | `merge_branch`, `merge_head` (sd:2037) | addressed: merge from the main checkout with `--branch` |
+| C-10 | minor | A request carries `manual` authority from a satellite process | `merge_authority` reads only `--manual` | rebutted: same grant as `lane enqueue --manual`, inside the sd:1335 Q3 boundary; `manual_merge_guard` still runs on the hub |
+| C-11 | minor | The scheduled job also merges hub entries sooner than an integrator would | `run_lane` drains every pending entry | rebutted: each entry was enqueued on purpose, and only `--manual` entries merge |
+| C-12 | minor | Satellite repository resolution: its checkout path is not the hub's registered path | `registered_for` falls back to the origin | rebutted: resolution by origin already works for `repo_ci` on a satellite |
+| C-13 | minor | No rollback was stated | — | addressed: "Rollout and rollback" |
 
-Recommendation: **A**. The grant is the operator's, per repository, outside
-the tree, and it fails closed the way `repo_ci` does.
-
-**Q2 — how does the entry reach the hub's lane?**
-
-- A. SSH from the satellite runs `sd-ship lane enqueue --satellite` on the
-  hub. sd:1335 kept SSH (option B) for hub-only verbs.
-- B. A lane request row in the hub's database, which `lane run` picks up.
-
-Recommendation: **A** now. It reuses the hub's verb and lock as they are. B
-becomes worth building if satellite items arrive while no hub session runs
-the lane.
-
-**Q3 — how long does an offload receipt stand?**
-
-- A. 6 hours for both keys, the tree-key window.
-- B. 30 minutes for a head key, as the hub's own head receipts.
-
-Recommendation: **A**. A lane wait often passes 30 minutes, and an expired
-receipt costs a full satellite gate and a round trip. Base freshness is
-guarded by the strict rule, not by the window.
+Round 2 swept the three artifacts for each value they share: the window,
+the skew bound, step numbers, refusal codes, the request key and the
+estimate. It found two references that named the wrong step, both fixed:
+"step 2" in "Freshness" now reads "check 2 above", and C-1 now names
+implement steps 6 and 8. It found no new concern. No finding is open.
+Implementation is unblocked on the planning side; the item still needs its
+move out of `planning`.
