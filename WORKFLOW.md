@@ -513,6 +513,20 @@ which the installer places in `~/.claude/agents`.
   predicted landing in the background, and waits for that gate after the
   merge, so the next prepare reuses its receipt (sd:2586). That needs the
   tree key above; the next entry's `speculation` field says what ran.
+- **After a lane merge, the runner lands the entry (sd:2568).** It deletes
+  the remote branch with `--force-with-lease` while the worktree's tip is
+  the merged head. It never removes the worktree or its local branch: no
+  lock excludes the builder, and a write through a file handle opened before
+  removal reaches an unlinked file and is lost. The entry's `remove` holds
+  the command to run once the builder stops: `git -C <main> worktree remove
+  <worktree> && git -C <main> update-ref -d refs/heads/<branch> <tip>`.
+  `git worktree remove` refuses uncommitted or untracked files, and
+  `update-ref -d` refuses a branch that moved. The runner then notes the
+  item: `Landed: merged at <merge> (head <head>). Cleanup: …. Recover: git
+  branch <branch> <tip>. Remove: <command>` Last, it fast-forwards the main
+  checkout when it is on the default branch. When that checkout holds the
+  running `sd-ship`, it first tries every other lane's runner lock once and
+  skips if one is held; the next landing retries.
 - **Test one version per language, the latest stable (Python 3.14, Node
   26), in CI and locally; no version matrices.**
 

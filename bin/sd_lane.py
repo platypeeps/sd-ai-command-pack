@@ -12,7 +12,9 @@ runs it under one lock per repository:
   run      pop pending entries in order: head check, `prepare --catch-up`,
            then `merge`; a failed entry is marked and the runner goes on.
            While one entry ships, the next one's gate runs on its predicted
-           landing (sd:2586, below);
+           landing (sd:2586, below). After a merge it deletes the remote
+           branch, notes the item with the worktree's removal command and
+           fast-forwards the main checkout (sd:2568, below);
   watch    print each gate end a lane or builder log records, once.
 
 The queue is `<lane root>/<repository>/lane/queue/queue.json`. The lane root
@@ -48,6 +50,18 @@ on a conflict, nothing is gated. After a merge the runner waits for that gate
 before the next prepare. A wrong prediction costs only the machine time: the
 receipt names a tree that prepare never gates, and prepare runs its own check.
 The next entry records what happened as its `speculation`.
+
+After a merge the runner lands the entry (sd:2568). It deletes the remote
+branch with `--force-with-lease` while the worktree's tip is the merged head.
+It never removes the worktree: no lock excludes its builder, and a write
+through a handle opened before removal is lost. The entry's `remove` holds
+the command that removes the worktree and its branch once the builder stops.
+It notes the item with the merge commit, what the cleanup did, a `git
+branch` recover command and that command. Then it fast-forwards the main
+checkout. When that checkout holds the running `sd-ship`, as the pack's does
+for every lane, it tries each other lane's runner lock once and skips if one
+is held: a lane mid-prepare must not have its tools change under it, and no
+lane waits on another's lock. The next landing retries.
 """
 
 from __future__ import annotations
@@ -84,6 +98,8 @@ CLAIMS = ("deliver", "associate-only")
 Ship = Callable[[list[str], pathlib.Path], dict[str, Any]]
 #: `(root, head, base) -> the gate's result`: the next entry's gate on a predicted landing (sd:2586).
 Gate = Callable[[pathlib.Path, str, str], dict[str, Any]]
+#: `(item, body, main checkout) -> what happened`: the landing's item note (sd:2568).
+Note = Callable[[int, str, pathlib.Path], str]
 
 
 class LaneError(RuntimeError):
@@ -365,20 +381,117 @@ def speculate(entry: dict[str, Any], path: pathlib.Path, gate: Gate, busy: bool 
     return thread
 
 
+def default_note(item: int, body: str, main: pathlib.Path) -> str:
+    """`sd task note`, run from the main checkout as a person would."""
+    done = subprocess.run([sys.executable, str(BIN / "sd"), "task", "note", str(item), "--body", body], cwd=main,
+                          capture_output=True, text=True, timeout=120, check=False)
+    return "written" if done.returncode == 0 else f"failed: {(done.stderr or done.stdout).strip()[-300:]}"
+
+
+def clean_up(entry: dict[str, Any], head: str | None, main: pathlib.Path, branch: str,
+             tip: str | None) -> tuple[str, str | None]:
+    """Delete the merged remote branch; what happened, and the command that removes the worktree and its branch.
+
+    The runner never removes a worktree itself: no lock excludes its builder,
+    and a write through a file handle opened before removal reaches an unlinked
+    file and is lost. Whoever stops the builder runs the command;
+    `git worktree remove` refuses uncommitted or untracked files on its own,
+    and `update-ref -d` refuses a branch that moved past the merged head.
+    """
+    worktree = pathlib.Path(entry["worktree"]).resolve()
+    if worktree == main:
+        return f"Cleanup skipped: {worktree} is the main checkout", None
+    if not branch:
+        return "Cleanup skipped: the worktree has no branch checked out", None
+    if not tip or tip != head:
+        return f"Cleanup skipped: the worktree's tip {tip} is not the merged head {head}", None
+    listed = lane_git(main, "ls-remote", "origin", f"refs/heads/{branch}")
+    remote = listed.split()[0] if listed else None
+    done = []
+    if remote == tip:
+        deleted = lane_git(main, "push", "-q", f"--force-with-lease=refs/heads/{branch}:{tip}", "origin", "--delete", branch)
+        done.append(f"removed origin/{branch}" if deleted is not None else f"origin/{branch} kept: the delete failed")
+    elif remote:
+        done.append(f"origin/{branch} kept: it is at {remote}, not the merged head")
+    remove = f"git -C {main} worktree remove {worktree} && git -C {main} update-ref -d refs/heads/{branch} {tip}"
+    done.append(f"worktree {worktree} and branch {branch} kept for removal once the builder stops")
+    return "Cleanup: " + ", ".join(done), remove
+
+
+@contextlib.contextmanager
+def other_lanes_idle(lanes: pathlib.Path, own: pathlib.Path) -> Iterator[str | None]:
+    """Hold every other lane's runner lock for one step, trying each once; yields the busy lane, or None."""
+    with contextlib.ExitStack() as held:
+        for lock in sorted(lanes.glob("*/lane/queue/runner.lock")):
+            if lock.resolve() == own.resolve():
+                continue
+            handle = held.enter_context(open(lock, "a", encoding="utf-8"))
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                yield lock.parent.parent.parent.name
+                return
+        yield None
+
+
+def fast_forward(main: pathlib.Path, environ: dict[str, str], own_lock: pathlib.Path) -> str:
+    """Bring the main checkout to its merged base, never waiting on another lane."""
+    branch = lane_git(main, "branch", "--show-current")
+    default = (lane_git(main, "symbolic-ref", "--short", "refs/remotes/origin/HEAD") or "").removeprefix("origin/")
+    if not branch or branch != (default or branch) or (not default and branch not in ("main", "master")):
+        return f"fast-forward skipped: the main checkout is on {branch or 'a detached HEAD'}, not the default branch"
+    lane_git(main, "fetch", "-q", "origin")
+    # Every lane runs the tools from wherever `sd-ship` resolves; moving that
+    # checkout under another lane's running prepare changes its code mid-step.
+    guarded = BIN.is_relative_to(main)
+    with other_lanes_idle(lane_root(environ), own_lock) if guarded else contextlib.nullcontext() as busy:
+        if busy:
+            return f"fast-forward skipped: the {busy} lane is running from this checkout; the next landing retries"
+        moved = lane_git(main, "merge", "-q", "--ff-only", f"origin/{branch}")
+    return (f"fast-forwarded {main} to {lane_git(main, 'rev-parse', '--short', 'HEAD')}" if moved is not None
+            else f"fast-forward skipped: git merge --ff-only origin/{branch} failed")
+
+
+def land(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, str], note: Note,
+         own_lock: pathlib.Path) -> dict[str, Any]:
+    """After a merge: delete the remote branch, note the item with the removal and recover commands, fast-forward."""
+    worktree = pathlib.Path(entry["worktree"])
+    main = sd_lib.main_worktree_root(worktree).resolve()
+    head, merged = outcome.get("head"), str(outcome.get("merge_commit") or "")
+    branch = lane_git(worktree, "branch", "--show-current") or ""
+    tip = lane_git(worktree, "rev-parse", "HEAD")
+    cleanup, remove = clean_up(entry, head, main, branch, tip)
+    fields: dict[str, Any] = {"cleanup": cleanup, "remove": remove}
+    body = f"Landed: merged at {merged[:12]} (head {str(head)[:12]}). {cleanup}."
+    if branch and tip:
+        body += f" Recover: git branch {branch} {tip}."
+    if remove:
+        body += f" Remove: {remove}"  # last and bare, so it copies whole
+    try:
+        fields["note"] = note(entry["item"], body, main)
+    except Exception as error:  # the merge stands; the record says the note did not land
+        fields["note"] = f"failed: {type(error).__name__}: {error}"[:400]
+    fields["fast_forward"] = fast_forward(main, environ, own_lock)
+    return fields
+
+
 def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_ship,
-             gate: Gate = default_gate) -> dict[str, Any]:
+             gate: Gate = default_gate, note: Note | None = None) -> dict[str, Any]:
     """Drain this repository's queue in order under its lane lock; never wait for the lock.
 
     One speculative gate runs at a time (`speculate`); after a merge the
-    runner waits for it, so the next prepare finds its receipt.
+    runner lands the entry (`land`), then waits for that gate, so the next
+    prepare finds its receipt. `note` defaults to `default_note`, read at the
+    call, so a suite can replace it.
     """
     path = queue_path(root, environ)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path.parent / "runner.lock", "a", encoding="utf-8") as handle:
+    own_lock = path.parent / "runner.lock"
+    with open(own_lock, "a", encoding="utf-8") as handle:
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            return {"ran": [], "busy": f"another runner holds {path.parent / 'runner.lock'}"}
+            return {"ran": [], "busy": f"another runner holds {own_lock}"}
         ran: list[dict[str, Any]] = []
         ahead: threading.Thread | None = None
         while True:
@@ -401,6 +514,11 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
                 outcome = process(entry, path.parent.parent / "logs", ship)
             except Exception as error:  # a broken entry is marked; the next one still runs
                 outcome = {"status": "failed", "reason": f"{type(error).__name__}: {error}"[:600]}
+            if outcome.get("status") == "merged":
+                try:
+                    outcome.update(land(entry, outcome, environ, note or default_note, own_lock))
+                except Exception as error:  # the merge stands; the entry says what did not follow it
+                    outcome["cleanup"] = f"failed: {type(error).__name__}: {error}"[:600]
 
             def finish(entries: list[dict[str, Any]], entry=entry, outcome=outcome) -> None:
                 for row in entries:

@@ -4,6 +4,18 @@
 
 ### Added
 
+- **`sd-ship lane run` lands each merged entry (sd:2568).** After a merge
+  the runner deletes the remote branch with `--force-with-lease` while the
+  worktree's tip is the merged head. It leaves the worktree and its local
+  branch in place: removal can race a live builder, and a write through a
+  file handle opened before removal is lost. The entry's `remove` field
+  holds the command that removes both once the builder stops. It notes the
+  item with the merge commit, the cleanup, a `git branch` recover command
+  and that removal command, then fast-forwards the main checkout. When that
+  checkout holds the running `sd-ship`, it tries every other lane's runner
+  lock once and skips if one is held. The entry records `cleanup`, `remove`,
+  `note` and `fast_forward`.
+
 - **`sd-ship lane run` gates the next entry while this one ships (sd:2586).**
   Each prepare caught up with the base after the entry ahead merged, then
   ran a 10 to 20 minute gate on the new tree. When the runner claims an
