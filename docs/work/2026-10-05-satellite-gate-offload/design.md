@@ -337,9 +337,14 @@ written through `sd_db.ship.save`. No schema change is needed.
 | `authority` | satellite | `manual` or none, as `lane enqueue --manual` |
 | `satellite` | satellite | the same identity as the offload receipt |
 | `requested_at` | satellite | satellite clock, for display |
-| `status` | both | `requested` by the satellite; then `queued`, `refused`, `handed_back`, `merged` or `failed` by the hub |
+| `status` | both | `requested` by the satellite; then `queued`, `refused`, `handed_back`, `prepared`, `merged` or `failed` by the hub |
 | `reason`, `next_action`, `code` | hub | why the status, and who acts next |
 | `entry` | hub | the queue's `enqueued_at` and the request revision it took in |
+
+`prepared` ends a request without `manual` authority, as a hub entry queued
+without `--manual` ends: the lane's checks passed, and the merge waits for a
+person. Its `next_action` names the hub's
+`sd-ship merge --item N --branch B --expected-head H --manual --satellite-gate`.
 
 `sd-ship lane request` refuses on the hub, naming `lane enqueue`: a request
 means "the satellite gated this", which a hub item is not. It also refuses
@@ -355,7 +360,8 @@ intake.
 
 `run_lane` calls `intake` before each `claim_next`, under the runner lock.
 It reads every `lane-request:v1:<own slug>:*` row whose newest status is
-`requested`, oldest first. The slug is the lane's own, from its main
+`requested`, oldest first. A row that is `queued` while its entry has finished
+gets that entry's outcome, so an outcome write that failed is retried. The slug is the lane's own, from its main
 checkout's origin, so each repository's lane reads only its own requests. For
 each request, in order:
 

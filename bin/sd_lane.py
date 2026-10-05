@@ -76,17 +76,22 @@ lane waits on another's lock. The next landing retries.
 
 A satellite gates on its own machine and asks the hub to merge (sd:2704).
 `lane request` writes `lane-request:v1:<slug>:<item>` over the wire. Before
-each claim the runner takes in this repository's requests (`intake`): it
-refuses one the repository did not opt into, one whose branch or head is
-malformed, and one whose `ship:` row is not `ready_to_send` at its head; it
-supersedes the item's pending entry, leaves a request whose item is running
-for the next intake, and adds a `gate: satellite` entry, the queue before
-the row, so a crash between the two is recognised by the request revision
-the entry names. A satellite entry runs no prepare and no catch-up: the
+each claim the runner takes in this repository's requests (`intake`). It
+first looks for an entry that names the request's revision: one is there when
+the row's `queued` write failed, and a finished one gives the row its outcome.
+It then refuses a request the repository did not opt into, one whose branch
+or head is malformed, and one whose `ship:` row is not `ready_to_send` at its
+head; it supersedes the item's pending entry, leaves a request whose item is
+running for the next intake, and adds a `gate: satellite` entry, the queue
+before the row. A `queued` row whose entry finished gets the outcome a failed
+write left out. A satellite entry runs no prepare and no catch-up: the
 runner fetches the branch and the base, hands the entry back when the branch
-moved or the head lacks the base, and merges with `--satellite-gate`. Its
-outcome goes back to the request row, and a hand-back or failure notes the
-item. `lane run --satellite-only` claims satellite entries only, starts no
+moved or the head lacks the base, and merges with `--satellite-gate`, which
+accepts the satellite's receipt under the trust rule in `sd_local_gate`
+instead of a gate on the hub. A request without `--manual` stops there as
+`prepared`, as a hub entry queued without it does. Its outcome goes back to
+the request row, and a hand-back or failure notes the item, with the trust
+rule's next action for its code. `lane run --satellite-only` claims satellite entries only, starts no
 speculative gate, and exits when none is pending; a scheduled job on the hub
 runs it. Each run publishes the hub's pack digest to `sd-lane-pack:v1:<slug>`
 at its start and after a fast-forward of the pack checkout.
