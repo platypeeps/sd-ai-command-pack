@@ -348,6 +348,11 @@
 
 ### Fixed
 
+- **`sd store list` on a kind with no folder yet lists nothing (sd:2688).**
+  A declared kind nobody had written to has no folder in the vault, and
+  `list` refused with `does not exist; the vault does not hold this kind`.
+  An absent folder now reads as an empty list and exits 0. A vault root that
+  is not there still refuses, as before.
 - **An agent's `sd attribute` repair no longer says `human` (sd:2689, sd:2009).**
   `sd attribute` and `SD_AUTHOR` accept `<entry>/<vendor>`, the value every
   trailer carries, when the registry gives the entry that vendor; another
