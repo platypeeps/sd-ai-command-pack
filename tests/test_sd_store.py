@@ -241,7 +241,8 @@ class ReadTests(StoreFixture):
         self.assertEqual(done.returncode, 1, done.stdout)
         self.assertIn("declares no `status` field", done.stderr)
 
-    def test_a_missing_note_and_a_missing_base_refuse_differently(self) -> None:
+    def test_a_missing_note_refuses_and_a_kind_with_no_folder_yet_lists_empty(self) -> None:
+        """sd:2688. A declared kind nobody has written to has no folder; that is an empty list, not an error."""
         self.plugin()
         absent = self.run_sd("store", "get", "pp.tip", "Nothing")
         self.assertEqual(absent.returncode, 1, absent.stdout)
@@ -249,9 +250,9 @@ class ReadTests(StoreFixture):
         for child in self.tips.iterdir():
             child.unlink()
         self.tips.rmdir()
-        gone = self.run_sd("store", "list", "pp.tip")
-        self.assertEqual(gone.returncode, 1, gone.stdout)
-        self.assertIn("does not exist", gone.stderr)
+        gone = self.run_sd("store", "list", "pp.tip", "--json")
+        self.assertEqual(gone.returncode, 0, gone.stderr)
+        self.assertEqual(json.loads(gone.stdout), [])
 
     def test_one_strange_entry_does_not_take_out_the_whole_listing(self) -> None:
         """A directory and a dangling link both end in `.md` and are not notes.
@@ -431,8 +432,8 @@ class ManifestTests(StoreFixture):
         The pack's gates run under macOS bash 3.2 locally and Ubuntu in CI,
         so there is no Windows path to protect -- but the last thing declined on reasoning
         alone turned out to be real on an interpreter the reasoning never ran,
-        so this one is a test: the base registers, and the path the driver then
-        fails to find is under the vault root.
+        so this one is a test: the base registers, and the driver lists the
+        note it finds in a folder of that name under the vault root.
         """
 
         root = self.plugin()
@@ -441,10 +442,11 @@ class ManifestTests(StoreFixture):
                 manifest = json.loads((root / "sd-plugin.json").read_text(encoding="utf-8"))
                 manifest["store"]["bases"]["tip"] = base
                 (root / "sd-plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
-                done = self.run_sd("store", "list", "pp.tip")
-                self.assertEqual(done.returncode, 1, done.stdout)
-                self.assertIn("does not exist", done.stderr)
-                self.assertIn(str(self.vault), done.stderr)
+                (self.vault / base).mkdir()
+                (self.vault / base / "Inside.md").write_text("---\nstatus: inbox\n---\n", encoding="utf-8")
+                done = self.run_sd("store", "list", "pp.tip", "--json")
+                self.assertEqual(done.returncode, 0, done.stderr)
+                self.assertEqual([row["title"] for row in json.loads(done.stdout)], ["Inside"])
 
     def test_a_store_with_no_kinds_refuses(self) -> None:
         root = self.tmp / "pack"

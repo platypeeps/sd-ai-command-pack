@@ -288,6 +288,61 @@ class Reorder(Lane):
         self.assertEqual([(row["item"], bool(row.get("held"))) for row in lane("list")["entries"]], [(2, False), (1, True)])
         self.assertFalse(lane("release", "1")["held"])
 
+    def test_an_expected_revision_refuses_a_queue_that_changed_and_writes_nothing(self) -> None:
+        """sd:2717. A caller that read the queue names its revision; a move between its read and its edit is caught."""
+        self.queue(1, 2, 3)
+        read = sd_lane.queue_revision(self.entries())
+        self.assertEqual(sd_lane.move(self.repo, 3, "top", self.environ, expected_revision=read)["pending"], [3, 1, 2])
+        before = self.entries()
+        for verb in (lambda: sd_lane.move(self.repo, 2, "top", self.environ, expected_revision=read),
+                     lambda: sd_lane.set_hold(self.repo, 2, self.environ, held=True, expected_revision=read)):
+            with self.assertRaises(sd_lane.LaneError) as caught:
+                verb()
+            self.assertEqual(caught.exception.code, sd_lane.STALE_REVISION)
+        self.assertEqual(self.entries(), before)
+        held = sd_lane.set_hold(self.repo, 2, self.environ, held=True, expected_revision=sd_lane.queue_revision(before))
+        self.assertTrue(held["held"])
+        with self.assertRaises(sd_lane.LaneError) as caught:
+            sd_lane.set_hold(self.repo, 2, self.environ, held=False, expected_revision=sd_lane.queue_revision(before))
+        self.assertEqual((caught.exception.code, self.pending()), (sd_lane.STALE_REVISION, [3, 1, 2]))
+
+    def test_the_revision_is_compared_under_the_queue_lock(self) -> None:
+        """A write that lands while the verb waits for the lock is caught; a check before the lock would miss it."""
+        self.queue(1, 2)
+        path = sd_lane.queue_path(self.repo, self.environ)
+        read = sd_lane.queue_revision(self.entries())
+        refused: list[str | None] = []
+
+        def stale_move() -> None:
+            try:
+                sd_lane.move(self.repo, 2, "top", self.environ, expected_revision=read)
+            except sd_lane.LaneError as error:
+                refused.append(error.code)
+        with sd_lane.queue_lock(path):
+            mover = threading.Thread(target=stale_move)
+            mover.start()
+            time.sleep(0.5)  # the mover reaches the lock; this writer holds it
+            entries = sd_lane.read_queue(path)
+            entries.reverse()
+            sd_lane.write_queue(path, entries)
+        mover.join(30)
+        self.assertEqual((refused, self.pending()), ([sd_lane.STALE_REVISION], [2, 1]))
+
+    def test_list_prints_the_revision_and_a_stale_one_exits_3_with_its_code(self) -> None:
+        self.queue(1, 2)
+        env = {**os.environ, **self.environ}
+
+        def lane(*args: str) -> tuple[int, dict]:
+            done = subprocess.run([sys.executable, str(REPO_ROOT / "bin/sd-ship"), "-C", str(self.repo), "lane", *args],
+                                  env=env, capture_output=True, text=True, timeout=120)
+            return done.returncode, json.loads(done.stdout)
+        _, listed = lane("list")
+        self.assertEqual(listed["revision"], sd_lane.queue_revision(listed["entries"]))
+        self.assertEqual(lane("hold", "2", "--expected-revision", listed["revision"])[0], 0)
+        code, refused = lane("release", "2", "--expected-revision", listed["revision"])
+        self.assertEqual((code, refused["code"]), (3, sd_lane.STALE_REVISION))
+        self.assertEqual(lane("move", "2", "top")[1]["pending"], [2, 1])  # unset keeps today's behaviour
+
 
 class Speculation(Lane):
     """sd:2586: while one entry ships, the next one's gate runs on the predicted landing.
