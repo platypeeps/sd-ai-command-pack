@@ -583,7 +583,10 @@ def _apply_acknowledgements(
     accepted: list[dict[str, Any]] = []
     for gap in gaps:
         candidates = [entry for entry in acknowledgements if entry["id"] == gap["id"]]
-        matched = next(
+        # A gap whose own fact is unknown is accepted by no entry, whatever
+        # it pins: what nobody could see is not what the entry decided (sd:2755).
+        unknown = gap["id"] in observed and observed[gap["id"]] is None
+        matched = None if unknown else next(
             (
                 entry
                 for entry in candidates
@@ -601,7 +604,7 @@ def _apply_acknowledgements(
                 for entry in candidates
                 for fact, value in sorted(entry["state"].items())
                 if observed.get(fact) != value
-            ]
+            ] + ([f"{gap['id']} is unknown, which no acknowledgement accepts"] if unknown else [])
             row["acknowledgement_stale"] = (
                 f"an acknowledgement recorded {candidates[0]['since']} no longer matches "
                 f"the live protection state: {'; '.join(drift)}"
@@ -702,9 +705,8 @@ def _admin_gaps(protection: dict[str, Any], default_branch: str) -> tuple[list[d
     detail carries: the one decision of `_protection_gaps` with more than
     two answers, kept out of it so that function stays under the ceiling."""
     gaps: list[dict[str, str]] = []
-    admins = protection.get("enforce_admins") or {}
-    enabled = admins.get("enabled") if isinstance(admins, dict) else admins
-    if enabled is None and isinstance(admins, dict):
+    enabled = sd_protection.admins_enforced(protection)
+    if enabled is None:
         # Unknown, reported as not enforced and never as enforced, for one
         # of two reasons, each named: a ruleset whose `bypass_actors` GitHub
         # withheld (it shows that list only to a caller who can edit the

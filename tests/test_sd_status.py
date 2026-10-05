@@ -667,6 +667,35 @@ class AcknowledgementTests(unittest.TestCase):
             (root / ".github" / "sd-status.json").write_text(body, encoding="utf-8")
             return status.load_acknowledgements(root)
 
+    def test_an_enforce_admins_off_acknowledgement_still_accepts_a_known_off(self) -> None:
+        """sd:2755's other half: keeping unknown apart from `False` must not
+        stop an entry for `enforce_admins` off accepting the known state."""
+        entry = {"id": "enforce_admins", "state": {"enforce_admins": False},
+                 "because": "admins ship the release bump", "since": "2026-10-05", "until": "never"}
+        still_open, accepted = self.split(self.enforcing(enforce_admins={"enabled": False}), [entry])
+        self.assertEqual([gap["id"] for gap in accepted], ["enforce_admins"])
+        self.assertEqual([gap["id"] for gap in still_open], ["reviews"])
+
+    def test_an_object_without_enforce_admins_keeps_its_unknown_gap(self) -> None:
+        """`_admin_gaps` reports an object without `enforce_admins` as
+        unknown, so `observed_state` reads it unknown too, and an entry for
+        off does not accept it (sd:2755)."""
+        entry = {"id": "enforce_admins", "state": {"enforce_admins": False},
+                 "because": "admins ship the release bump", "since": "2026-10-05", "until": "never"}
+        protection = self.enforcing()
+        del protection["enforce_admins"]
+        still_open, accepted = self.split(protection, [entry])
+        self.assertEqual(accepted, [])
+        self.assertEqual([gap["id"] for gap in still_open], ["enforce_admins", "reviews"])
+
+    def test_a_pinned_fact_cannot_be_null(self) -> None:
+        """`enforce_admins` observes `None` when it is unknown; a `null` pin
+        would accept exactly that, on any gap's entry (sd:2755)."""
+        entry = dict(self.ZERO_APPROVALS, state={"required_pull_request_reviews": True, "enforce_admins": None})
+        entries, problems = self.written(json.dumps({"accepted_gaps": [entry]}))
+        self.assertEqual(entries, [])
+        self.assertIn("accepted_gaps[0].state.enforce_admins is null", problems[0])
+
     def test_the_schema_and_the_readers_vocabulary_name_the_same_facts(self) -> None:
         """Two recitations of one list, so this enumerates both rather than a third.
 
@@ -708,10 +737,13 @@ class AcknowledgementTests(unittest.TestCase):
         absent = status._observed_state(None)
         empty = status._observed_state({})
         self.assertNotEqual(absent, empty)
-        # ... and they differ in exactly that one fact, which is the point:
-        # the other four genuinely are constants on both.
+        # ... and in `enforce_admins`: no object is off, while an object
+        # without the answer is unknown, the gap `_admin_gaps` reports for it
+        # (sd:2755). The other facts genuinely are constants on both.
         differing = [key for key in absent if absent[key] != empty[key]]
-        self.assertEqual(differing, ["branch_protection"])
+        self.assertEqual(differing, ["branch_protection", "enforce_admins"])
+        self.assertIs(absent["enforce_admins"], False)
+        self.assertIsNone(empty["enforce_admins"])
 
     def test_a_matching_acknowledgement_moves_the_finding_out_of_the_gaps(self) -> None:
         still_open, accepted = self.split(self.enforcing(), [self.ZERO_APPROVALS])
@@ -6223,6 +6255,26 @@ class RulesetProtectionCase(unittest.TestCase):
         shown = self.section(self.gating_rules())
         self.assertNotIn("enforce_admins", [gap["id"] for gap in shown["gaps"]])
         self.assertTrue(shown["detail"]["enforce_admins"])
+
+    def test_no_acknowledgement_accepts_an_unknown_enforce_admins(self) -> None:
+        """sd:2755: `observed_state` read unknown as `False`, so an entry
+        written for `enforce_admins` off also silenced the unknown gap. No
+        entry for the gap applies while its fact is unknown, by any pin: off,
+        the admin exemptions alone, or a fact unrelated to admins."""
+        withheld = {"id": 42, "name": "main", "enforcement": "active"}
+        role = dict(self.RULESET, bypass_actors=[
+            {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}])
+        pins = {"off": {"enforce_admins": False, "admin_bypass": []},
+                "exemptions only": {"admin_bypass": []}, "unrelated": {"strict": True}}
+        for unknown, ruleset in (("withheld", withheld), ("role", role)):
+            for pinned, state in pins.items():
+                with self.subTest(unknown=unknown, pinned=pinned):
+                    entry = {"id": "enforce_admins", "state": state, "because": "admins ship the release bump",
+                             "since": "2026-10-05", "until": "the bypass is gone"}
+                    result = self.section(self.gating_rules(), ruleset, accepted=(entry,))
+                    self.assertEqual(result["accepted"], [])
+                    stale = [gap for gap in result["gaps"] if gap["id"] == "enforce_admins"][0]
+                    self.assertIn("unknown", stale["acknowledgement_stale"])
 
     def test_a_ruleset_that_gates_no_merge_keeps_the_unprotected_finding(self) -> None:
         rules = [{"type": "deletion", "ruleset_id": 42}, {"type": "non_fast_forward", "ruleset_id": 42}]
