@@ -73,12 +73,14 @@ cannot be read never grants a pass.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import itertools
 import json
 import os
 import pathlib
 import shutil
+import socket
 import sys
 import time
 from contextlib import closing
@@ -109,6 +111,9 @@ OFFLOAD_TOOLS = ("sh", "bash", "make", "python3", "git", "cc", "c++", "clang", "
 #: Tool configuration under `HOME` that an offload view binds, by path relative to `HOME`.
 OFFLOAD_HOME_FILES = (".gitconfig", ".config/git/config", ".cargo/config.toml", ".npmrc", ".config/pip/pip.conf",
                       ".config/uv/uv.toml")
+#: Variables an offload view leaves out: `PATH` is its own part; `HOME`, `USER` and `LOGNAME` name the login;
+#: `TMPDIR` is a per-login scratch folder, which says where temporary files go, not what the check does (sd:2704).
+OFFLOAD_LEFT_OUT = ("PATH", "HOME", "USER", "LOGNAME", "TMPDIR")
 
 
 def _digest(value: Any) -> str:
@@ -190,37 +195,63 @@ def gate_binding(tree: pathlib.Path, head: str, inputs: str, base: str | None, e
     """What a run in `tree` would be bound to, or None when something in it cannot be named.
 
     `fork` is the merge base's tree under a tree key (`tree_key`); the binding then names it in place of
-    `head`, and names the scope's merge base by its tree too.
+    `head`, and names the scope's merge base by its tree too. It is the union of `tree_binding`, which a
+    hub compares with a satellite's (sd:2704), and `machine_binding`, which it does not.
     """
+    part = tree_binding(tree, head, inputs, base, fork)
+    if part is None:
+        return None
+    try:
+        return {**part, **machine_binding(tree, binding_commands(part), env)}
+    except Exception:  # an input that cannot be named binds nothing; the check runs
+        return None
+
+
+#: The binding fields `tree_binding` names: what a hub compares with a satellite's offload receipt.
+TREE_FIELDS = ("schema", "reuse", "head", "fork", "tree", "inputs", "scope", "detection")
+
+
+def tree_binding(tree: pathlib.Path, head: str, inputs: str, base: str | None,
+                 fork: str | None = None) -> dict[str, Any] | None:
+    """The `TREE_FIELDS` of `gate_binding`: pack code over the tree, no tool resolved; None as there."""
     try:
         detection = sd_lib.detect_entrypoints(tree)
         scope = sd_check_scope.decide(tree, base, detection)
-        commands = [list(scope.command)] if scope.mode == sd_check_scope.DOCS_ONLY else list(detection.commands.values())
-        if not commands:
-            return None
-        tools = [sd_check_receipts.tool_identity(argv[0], env, tree) for argv in commands]
-        for tool in tools:  # the worktree is temporary; name a tool inside it by its place in the tree
-            path = pathlib.Path(tool["path"])
-            if path.is_relative_to(tree.resolve()):
-                tool["path"] = "tree:" + str(path.relative_to(tree.resolve()))
-        python = pathlib.Path(sys.executable).resolve()
-        return {"schema": 2, "reuse": "tree" if fork else "head", "head": None if fork else head, "fork": fork,
+        part = {"schema": 2, "reuse": "tree" if fork else "head", "head": None if fork else head, "fork": fork,
                 "tree": sd_lib.git_output(["rev-parse", "HEAD^{tree}"], tree),
                 "inputs": inputs, "scope": {"mode": scope.mode, "fork": fork_tree(tree, scope.fork) if fork else scope.fork,
                                              "command": list(scope.command)},
-                "detection": {"source": detection.source, "commands": detection.commands},
-                "tools": tools, "python": {"path": str(python), "version": sys.version,
-                                           "sha256": sd_check_receipts.file_digest(python)},
-                "environment_sha256": _digest(dict(env))}
+                "detection": {"source": detection.source, "commands": detection.commands}}
     except Exception:  # an input that cannot be named binds nothing; the check runs
         return None
+    return part if binding_commands(part) else None
+
+
+def binding_commands(part: Mapping[str, Any]) -> list[list[str]]:
+    """The argv of each command a binding's run executes: the docs command alone in a docs-only scope."""
+    if part["scope"]["mode"] == sd_check_scope.DOCS_ONLY:
+        return [list(part["scope"]["command"])]
+    return [list(argv) for argv in part["detection"]["commands"].values()]
+
+
+def machine_binding(tree: pathlib.Path, commands: list[list[str]], env: Mapping[str, str]) -> dict[str, Any]:
+    """`tools`, `python` and `environment_sha256`: this machine's half of `gate_binding`; raises when a tool does not resolve."""
+    tools = [sd_check_receipts.tool_identity(argv[0], env, tree) for argv in commands]
+    for tool in tools:  # the worktree is temporary; name a tool inside it by its place in the tree
+        path = pathlib.Path(tool["path"])
+        if path.is_relative_to(tree.resolve()):
+            tool["path"] = "tree:" + str(path.relative_to(tree.resolve()))
+    python = pathlib.Path(sys.executable).resolve()
+    return {"tools": tools, "python": {"path": str(python), "version": sys.version,
+                                       "sha256": sd_check_receipts.file_digest(python)},
+            "environment_sha256": _digest(dict(env))}
 
 
 def offload_view(environment: Mapping[str, str], names: Iterable[str] = ()) -> dict[str, Any] | None:
     """The portable view of a gate's `environment` that a hub compares with a satellite's (sd:2704), or None.
 
-    Local reuse never reads it: `gate_binding` binds the whole environment (C-17). The view leaves out `HOME`
-    and `USER` and writes each `$HOME` prefix as `~`, so two logins can compare equal, and binds what they
+    Local reuse never reads it: `gate_binding` binds the whole environment (C-17). The view leaves out
+    `OFFLOAD_LEFT_OUT` and writes each `$HOME` prefix as `~`, so two logins can compare equal, and binds what they
     select instead: `path`, the `PATH` entries in order; `tools`, the bytes of each name in `OFFLOAD_TOOLS`
     and `names` resolved on that `PATH`, or None for one that does not resolve; `home_files`, the bytes of
     each `OFFLOAD_HOME_FILES` entry under `HOME`, or "absent"; `variables`, every other variable by value.
@@ -246,7 +277,7 @@ def offload_view(environment: Mapping[str, str], names: Iterable[str] = ()) -> d
                 "home_files": {name: _content_digest(pathlib.Path(home, name)) if home and pathlib.Path(home, name).is_file()
                                else "absent" for name in OFFLOAD_HOME_FILES},
                 "variables": {key: portable(value) for key, value in environment.items()
-                              if key not in ("PATH", "HOME", "USER")}}
+                              if key not in OFFLOAD_LEFT_OUT}}
     except Exception:  # a view that cannot be named matches nothing; the hub runs the check
         return None
 
@@ -279,6 +310,231 @@ def offload_miss(theirs: Any, ours: Any) -> dict[str, Any] | None:
     return None
 
 
+# The offload receipt (sd:2704): a satellite's pass, keyed so the hub computes the same key.
+
+OFFLOAD_PREFIX = "sd-gate-offload:v1:"
+OFFLOAD_WRITER = "sd-satellite-gate"
+#: How long an offload receipt stands, under either key (ruling Q3).
+OFFLOAD_WINDOW_SECONDS = TREE_REUSE_WINDOW_SECONDS
+#: How far ahead of the hub's clock a satellite's `recorded_at` may be.
+OFFLOAD_SKEW_SECONDS = 300
+#: The pack digest the hub's lane publishes, which a satellite compares before its run; `<slug>` follows.
+PACK_PREFIX = "sd-lane-pack:v1:"
+
+
+@dataclasses.dataclass(frozen=True)
+class Worktree:
+    """A gate's worktree `tree` of `head` in `root`, and what keys and binds its receipts.
+
+    `content` and `fork` are `tree_key`'s answer, `own` is `gates_itself`'s, `inputs` is `gate_inputs`'s,
+    and `environment` is the gate's own (`sd_gate_run.gate_environment`).
+    """
+
+    root: pathlib.Path
+    tree: pathlib.Path
+    head: str
+    base: str | None
+    environment: Mapping[str, str]
+    content: str | None
+    fork: str | None
+    own: bool
+    inputs: str
+
+    def view(self, part: Mapping[str, Any]) -> dict[str, Any] | None:
+        """This environment's offload view, binding the executables of `part`'s commands too."""
+        return offload_view(self.environment, [argv[0] for argv in binding_commands(part)])
+
+
+def repository_slug(root: pathlib.Path) -> str | None:
+    """`owner/name` of `root`'s origin, lower case, as `sd-ship` names the repository; None off GitHub."""
+    match = sd_lib.GITHUB_ORIGIN.fullmatch(sd_lib.git_output(["config", "--get", "remote.origin.url"], root) or "")
+    return f"{match[1]}/{match[2]}".lower() if match else None
+
+
+def offload_key(slug: str, head: str, tree: str | None = None) -> str:
+    """One key per repository slug and head, or slug and `tree` under a tree key: the same on every machine."""
+    return OFFLOAD_PREFIX + _digest([slug, head] if tree is None else [slug, "tree", tree])
+
+
+def pack_bin(own: bool = False) -> str:
+    """sha256 of the pack `bin/` files `gate_inputs` hashes, or "tree" when the run gates its own tree (sd:2613)."""
+    import sd_gate_run  # noqa: PLC0415 -- it imports this module
+
+    if own:
+        return "tree"
+    digest = hashlib.sha256()
+    for path in sd_gate_run.pack_files():
+        digest.update(f"pack {path.name}\n".encode() + path.read_bytes())
+    return digest.hexdigest()
+
+
+def pack_rev() -> str | None:
+    """The running pack checkout's commit, for a refusal's text only."""
+    return sd_lib.git_output(["rev-parse", "HEAD"], pathlib.Path(__file__).resolve().parent)
+
+
+def served_hub(database: pathlib.Path | None) -> str | None:
+    """The hub serving `database` to this satellite as `host:port`, or None on the hub or with an older `sd_db`."""
+    served_by = getattr(getattr(sd_lib.import_sd_db().module, "database", None), "served_by", None)
+    return served_by(database) if served_by is not None and database is not None else None
+
+
+def satellite_identity() -> dict[str, Any]:
+    """This machine as an offload row names it: the tailnet owner login and IPv4 address, and the host name."""
+    node: dict[str, Any] = {"hostname": socket.gethostname()}
+    try:
+        from sd_db.tailnet import this_node  # noqa: PLC0415
+
+        this = this_node()
+        node.update(login=this.login, address=str(this.address))
+    except Exception as error:  # the row still stands; it says why it names no node
+        node["error"] = f"{type(error).__name__}: {error}"[:300]
+    return node
+
+
+def read_offload(database: pathlib.Path | None, key: str) -> tuple[int, dict[str, Any]]:
+    """`(revision, row)` at `key`; the row is empty when none was written. Raises on a read fault."""
+    with closing(_connect(database, write=False)) as connection:
+        from sd_db import ship  # noqa: PLC0415
+        revision, row = ship.read(connection, key)
+    return revision, row if isinstance(row, dict) else {}
+
+
+def pack_warning(database: pathlib.Path | None, root: pathlib.Path, own: bool) -> str | None:
+    """On an opted-in satellite, why the hub's merge would refuse this run's receipt as another pack, or None.
+
+    It compares with the digest the hub's lane last published. A warning only: the hub's pack can still
+    move after the run, and its merge compares again (clause 6). Any fault warns of nothing.
+    """
+    if served_hub(database) is None or (slug := repository_slug(root)) is None:
+        return None
+    try:
+        with closing(_connect(database, write=False)) as connection:
+            if sd_lib.repo_satellite_gate(connection, root) != "accept":
+                return None
+            from sd_db import ship  # noqa: PLC0415
+            _, published = ship.read(connection, PACK_PREFIX + slug)
+    except Exception:
+        return None
+    theirs, ours = (published or {}).get("pack_bin"), pack_bin(own)
+    if not theirs or theirs == ours:
+        return None
+    return (f"this pack's bin/ digest {ours[:12]} (rev {str(pack_rev())[:12]}) is not the hub's {str(theirs)[:12]} "
+            f"(rev {str(published.get('pack_rev'))[:12]}, published {published.get('published_at')}): the hub will refuse "
+            "this receipt as satellite_pack_mismatch. Bring both packs to one revision, then run sd gate check again")
+
+
+def record_offload(database: pathlib.Path | None, run: Worktree, identity: Mapping[str, Any], reading: Mapping[str, Any],
+                   recorded_at: float | None = None) -> dict[str, Any]:
+    """On a satellite, write this pass's offload row to the hub; the fields the gate's result carries.
+
+    Nothing on the hub, `{"offload_skipped"}` where `repo.satellite_gate` is not `accept`, `{"offload"}`
+    naming the row, or `{"offload_error"}` when the hub did not take it: the pass stands either way.
+    `recorded_at` is a reused pass's own time; a reuse writes only a missing row.
+    """
+    hub = served_hub(database)
+    if hub is None:
+        return {}
+    import sd_gate_run  # noqa: PLC0415 -- it imports this module
+
+    try:
+        slug = repository_slug(run.root)
+        if slug is None:
+            raise LookupError("origin names no github.com repository, so no hub can compute the key")
+        key, local = offload_key(slug, run.head, run.content), sd_gate_run.untracked_local_block(run.root)
+        with closing(_connect(database, write=True)) as connection:
+            if sd_lib.repo_satellite_gate(connection, run.root) != "accept":
+                return {"offload_skipped": "repo.satellite_gate is not accept for this repository"}
+            from sd_db import ship  # noqa: PLC0415
+            revision, existing = ship.read(connection, key)
+            if recorded_at is not None and existing:
+                return {"offload": {"key": key, "revision": revision, "hub": hub, "written": False}}
+            written = int(ship.save(connection, key, revision, {
+                "writer": OFFLOAD_WRITER, "satellite": satellite_identity(), "hub": hub, "binding": dict(identity),
+                "offload_view": run.view(identity), "pack_bin": pack_bin(run.own), "pack_rev": pack_rev(),
+                "local_block": _content_digest(local) if local else "absent", "reading": dict(reading), "head": run.head,
+                "recorded_at": time.time() if recorded_at is None else recorded_at}))
+    except Exception as error:  # the pass stands; only the hub's use of it is lost
+        return {"offload_error": f"{type(error).__name__}: {error}"[:300]}
+    return {"offload": {"key": key, "revision": written, "hub": hub, "written": True}}
+
+
+def examine_offload(database: pathlib.Path | None, run: Worktree,
+                    now: float | None = None) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """The hub's clauses 3 to 7 of the trust rule (design.md), in order: `(accepted, None)` or `(None, refusal)`.
+
+    `refusal` is `{"code", "reason"}`. The hub compares the tree part of the binding, the offload view and
+    the pack digest, never the satellite's machine part or its `environment_sha256` (C-17), and runs nothing.
+    """
+    slug = repository_slug(run.root)
+    try:
+        revision, row = read_offload(database, offload_key(slug or "", run.head, run.content))
+    except Exception as error:
+        return None, {"code": "satellite_receipt_missing", "reason": f"the offload receipt could not be read: {error}"[:300]}
+    if slug is None or not row:
+        return None, {"code": "satellite_receipt_missing", "reason": f"no offload receipt at {run.head[:12]} for {slug}"}
+    part = tree_binding(run.tree, run.head, run.inputs, run.base, run.fork)
+    view = run.view(part) if part else None
+    hub_now = time.time() if now is None else now
+    refused = (invalid_offload(row, revision) or pack_mismatch(row, run.own) or binding_mismatch(row, part, view)
+               or expired_offload(row, hub_now))
+    if refused:
+        return None, refused
+    unresolved = sorted(name for name, digest in (view or {})["tools"].items()
+                        if digest is None and row["offload_view"]["tools"].get(name) is not None)
+    return {"reading": row["reading"], "revision": revision, "satellite": row["satellite"], "hub": row.get("hub"),
+            "recorded_at": row["recorded_at"], "age_seconds": round(hub_now - float(row["recorded_at"])),
+            "head": row.get("head"), "unresolved_tools": unresolved}, None
+
+
+def invalid_offload(row: Mapping[str, Any], revision: int) -> dict[str, str] | None:
+    """Clause 4: the row is a `sd-satellite-gate` success that names its satellite."""
+    reading, satellite = row.get("reading"), row.get("satellite")
+    if (row.get("writer") == OFFLOAD_WRITER and isinstance(reading, dict) and reading.get("status") == "success"
+            and isinstance(satellite, dict) and satellite.get("hostname")):
+        return None
+    return {"code": "satellite_receipt_invalid",
+            "reason": f"the offload receipt at revision {revision} is not a {OFFLOAD_WRITER} success that names its satellite"}
+
+
+def pack_mismatch(row: Mapping[str, Any], own: bool) -> dict[str, str] | None:
+    """Clause 6, the named case of clause 5: the satellite's pack `bin/` digest is the hub's."""
+    ours, theirs = pack_bin(own), row.get("pack_bin")
+    if theirs == ours:
+        return None
+    return {"code": "satellite_pack_mismatch", "reason": f"the satellite's pack bin/ digest {theirs} "
+            f"(rev {row.get('pack_rev')}) is not the hub's {ours} (rev {pack_rev()})"}
+
+
+def binding_mismatch(row: Mapping[str, Any], part: Mapping[str, Any] | None,
+                     view: Mapping[str, Any] | None) -> dict[str, str] | None:
+    """Clause 5: each of `TREE_FIELDS` equals the hub's `part`, and the offload views compare equal."""
+    stored = row.get("binding")
+    stored = stored if isinstance(stored, dict) else {}
+    fields = list(TREE_FIELDS) if part is None else [name for name in TREE_FIELDS if stored.get(name) != part.get(name)]
+    miss = offload_miss(row.get("offload_view"), view)
+    if fields:
+        named = f"binding fields {', '.join(fields)}"
+    elif miss is not None:
+        named = f"offload view part {miss['part']} at {miss['name']}"
+    else:
+        return None
+    return {"code": "satellite_binding", "reason": f"the satellite's receipt differs from the hub's in {named}"}
+
+
+def expired_offload(row: Mapping[str, Any], now: float) -> dict[str, str] | None:
+    """Clause 7: the row's age on the hub's clock is within the window, and at most the skew in the future."""
+    try:
+        age = now - float(row.get("recorded_at", "nan"))
+    except (TypeError, ValueError):
+        age = float("nan")
+    if -OFFLOAD_SKEW_SECONDS <= age <= OFFLOAD_WINDOW_SECONDS:
+        return None
+    return {"code": "satellite_receipt_expired", "reason": f"the offload receipt was recorded at {row.get('recorded_at')} "
+            f"on the satellite's clock and it is {now:.0f} on the hub's: {age:.0f} s, outside "
+            f"-{OFFLOAD_SKEW_SECONDS} to {OFFLOAD_WINDOW_SECONDS} s"}
+
+
 def record_unless_moved(database: pathlib.Path, key: str, identity: Mapping[str, Any], after: Mapping[str, Any] | None,
                         reading: dict[str, Any], head: str) -> None:
     """Record `reading`'s pass when the binding held from before the run (`identity`) to after it (`after`).
@@ -298,7 +554,7 @@ def record_unless_moved(database: pathlib.Path, key: str, identity: Mapping[str,
         reading["receipt_error"] = str(error)
 
 
-def _connect(database: pathlib.Path, *, write: bool) -> Any:
+def _connect(database: pathlib.Path | None, *, write: bool) -> Any:
     imported = sd_lib.import_sd_db()
     if imported.module is None:
         raise LookupError(imported.problem or "no sd_db library")

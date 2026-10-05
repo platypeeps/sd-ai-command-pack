@@ -1061,6 +1061,36 @@ def repo_ci(connection: Any, root: pathlib.Path | str) -> str:
     return value if value in CI_MODES else "github"
 
 
+#: The values `repo.satellite_gate` takes (sd:2704), default first: `accept`
+#: lets the hub merge on a satellite's offload receipt.
+SATELLITE_GATE_MODES = ("off", "accept")
+
+
+def repo_satellite_gate(connection: Any, root: pathlib.Path | str) -> str:
+    """`repo.satellite_gate` for the repository `root` is a checkout of, else `off`.
+
+    Resolved as `repo_ci` resolves, and fail-closed the same way: an older
+    library or schema without the column, no row, or a read fault answers
+    `off`, and `off` grants nothing, so the hub runs its own gate.
+    """
+    if import_sd_db().module is None:
+        return "off"
+    try:
+        from sd_db import repos  # noqa: PLC0415
+
+        origin = git_output(["config", "--get", "remote.origin.url"], pathlib.Path(root))
+        path = repos.registered_for(connection, str(pathlib.Path(root).resolve()), origin)
+        reader = getattr(repos, "repo_satellite_gate", None)
+        if reader is not None:
+            value = reader(connection, path)
+        else:
+            row = repo_row(connection, path)
+            value = row["satellite_gate"] if row is not None and "satellite_gate" in row.keys() else "off"
+    except Exception:  # every fault is "not said"; see the docstring
+        return "off"
+    return value if value in SATELLITE_GATE_MODES else "off"
+
+
 def ci_mode(root: pathlib.Path | str) -> str:
     """`repo_ci` over a read-only connection this call opens and closes.
 

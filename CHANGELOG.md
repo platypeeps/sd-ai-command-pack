@@ -4,6 +4,19 @@
 
 ### Added
 
+- **A satellite's gate writes an offload receipt for the hub (sd:2704 step 3).**
+  On an sd satellite, in a repository with `repo.satellite_gate = accept`, a
+  recorded pass of `check_in_worktree` (`sd gate check`, `sd-review
+  --gate-check`) also writes `sd-gate-offload:v1:<sha256 of slug and head>`
+  (or of the tree) to the hub: the writer, the satellite's identity, the
+  whole binding, the offload view, the pack `bin/` digest and revision, the
+  `CLAUDE.local.md` digest and the reading. A reuse writes the row when it is
+  missing, with the original time. A failed write sets `offload_error` and
+  the pass stands. Before a run the gate warns when the hub's published pack
+  digest (`sd-lane-pack:v1:<slug>`) is another. `sd_lib.repo_satellite_gate`
+  reads the opt-in and answers `off` on every fault;
+  `sd_gate_receipts.pack_bin` is the digest the lane publishes. The offload
+  view also leaves out `LOGNAME` and `TMPDIR`, which name the login.
 - **The offload view of a gate's environment (sd:2724, sd:2704 step 2a).**
   `sd_gate_receipts.offload_view` gives the portable view a hub will compare
   with a satellite's receipt: `PATH` entries in order with each `$HOME` prefix
