@@ -32,6 +32,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "bin"))
 
 import sd_lib  # noqa: E402
+import sd_registry  # noqa: E402
 
 HOOK = REPO_ROOT / "hooks" / "commit-msg"
 
@@ -165,6 +166,16 @@ class CommitAuthor(unittest.TestCase):
     def test_an_unreadable_registry_refuses_naming_the_variable(self):
         with self.assertRaisesRegex(sd_lib.TrailerError, "SD_AUTHOR='claude'.*no such file"):
             sd_lib.commit_author("claude", lambda: (None, "no such file"))
+
+    def test_the_value_itself_names_its_entry_and_a_slash_hides_no_dependabot(self):
+        registry = sd_registry.Registry(pathlib.Path("/fixture/providers.yaml"), {}, {
+            "claude": sd_registry.Provider(name="claude", vendor="anthropic", bill="b", start="x")})
+        self.assertEqual(sd_lib.commit_author("claude/anthropic", lambda: (registry, "")), "claude/anthropic")
+        for name in ("claude/openai", "human/anthropic"):
+            with self.subTest(name), self.assertRaises(sd_lib.TrailerError):
+                sd_lib.commit_author(name, lambda: (registry, ""))
+        with self.assertRaisesRegex(sd_lib.TrailerError, "never Dependabot"):
+            sd_lib.commit_author("dependabot/github", self.unread)
 
     def test_only_an_unindented_line_states_the_author(self):
         self.assertTrue(sd_lib.states_author("x\n\nAuthored-with: human\n"))
