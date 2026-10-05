@@ -286,8 +286,9 @@ endif
 # plain `make test` and every gate share one pool; a helper that cannot answer still caps.
 SD_GATE_SLOTS ?= $(shell "$(PYTHON)" bin/sd_gate_slots.py count 2>/dev/null || echo 1)
 
+# sd:2523. A test review must not wait on this machine's real reviews for a review slot.
 test:
-	PYTHON_BIN="$(VENV_PYTHON)" SD_GATE_SLOTS="$(SD_GATE_SLOTS)" $(TEST_RUNNER_ENV) bash .github/scripts/run-tests.sh
+	PYTHON_BIN="$(VENV_PYTHON)" SD_GATE_SLOTS="$(SD_GATE_SLOTS)" SD_REVIEW_SLOTS=0 $(TEST_RUNNER_ENV) bash .github/scripts/run-tests.sh
 	@if grep -Eq 'skipped=[1-9][0-9]*' unittest-output.log; then printf '%s\n' "Tests skipped locally; install required tools or make the skip explicit."; exit 1; fi
 	@if head -n 1 unittest-output.log | grep -q '^test selection: changed files'; then \
 		printf '%s\n' "Changed-files fast path: coverage combine and the installer gate were not run. Run make check without CHANGED before a push."; \

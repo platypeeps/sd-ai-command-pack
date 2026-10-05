@@ -560,6 +560,42 @@ RULES: tuple[Rule, ...] = (
         scope="code",
         teaches="skills/sd-ship/SKILL.md#Executable interface",
     ),
+    #: sd-ship's merge-step ack gate for every reviewer (sd:998), registered
+    #: so the skill line that teaches it cites a row instead of avoiding the
+    #: claim check the way #1167 did.
+    Rule(
+        id="R14-D2",
+        subject="sd-ship's merge refuses with `review_findings_open` while any "
+                "pull-request review finding has no disposition, whoever "
+                "wrote it: a human or another bot's finding gates the merge "
+                "as a Copilot finding does, with or without a Copilot review",
+        checker="bin/sd-ship::require_copilot_clearance",
+        proof="replace the `self.other_review_material(number)` call in "
+              "`bin/sd-ship` with two empty lists; another reviewer's open "
+              "finding then merges and "
+              "`test_another_reviewers_finding_refuses_the_merge_with_no_copilot_review` "
+              "goes red",
+        scope="code",
+        teaches="skills/sd-ship/SKILL.md#Executable interface",
+    ),
+    #: Gate receipt reuse (sd:1912), registered so the skill line that tells a
+    #: builder to run `sd gate check` can cite what prepare does with the pass.
+    #: The operator ruled on 2026-10-04 that this route supersedes the
+    #: `sd-check --reuse-check` contract the item first planned.
+    Rule(
+        id="R15-D1",
+        subject="sd-ship prepare's gate reuses a passing gate receipt instead "
+                "of running the check again, only at the receipt's head, or at "
+                "its tree where `.github/sd-gate-reuse.json` declares tree "
+                "keying, and only under the same binding",
+        checker="bin/sd_gate_run.py::check_in_worktree",
+        proof="replace the `sd_gate_receipts.examine` call in "
+              "`bin/sd_gate_run.py` with `(None, None)`; prepare then runs the "
+              "check again after a builder's pass at the same head and "
+              "`test_prepare_reuses_the_builders_pass_at_the_same_head` goes red",
+        scope="code",
+        teaches="skills/sd-ship/SKILL.md#Executable interface",
+    ),
     #: The twelve repeals of sd:431 step 4, slice H, under one family decision
     #: team-lead took on 2026-09-17 (Dec-9, recommended on note 2665 and
     #: reversible by the owner by deleting these rows' `REPEALED` state).

@@ -169,10 +169,11 @@ These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOM
 `sd.gate_slots` is load control, not a grant: how many gates may run at once on the machine, across every repository (unset: a quarter of the cores).
 `sd.gate_load_max` and `sd.gate_settle_seconds` are load control too: the gate queue starts its head 45 s after the last start by default, and only below a load1 limit where one is set (unset: none, since macOS counts disk waits in the load average).
 `sd.gate_cache_gb` bounds the local gate's warm Rust build folders (unset: 40 GB); past it the gate removes the least recently used free folder.
-`sd-ship lane enqueue|list|cancel|run|watch` keeps a serial prepare-and-merge queue per repository in a file under `sd.lane_root` (unset: `$XDG_STATE_HOME/sd/lanes`), so a queued chain outlives the session that filled it.
+`sd-ship lane enqueue|list|cancel|move|hold|release|run|watch` keeps a serial prepare-and-merge queue per repository in a file under `sd.lane_root` (unset: `$XDG_STATE_HOME/sd/lanes`), so a queued chain outlives the session that filled it. After a merge the runner deletes the remote branch, notes the item with the command that removes the worktree, and fast-forwards the main checkout; it never removes a worktree, since removal can race a live builder.
 `sd gate run -- make check` queues any command the same way; `sd gate status` shows the queue.
 Wrap a plain `make check` in any repository that way, and drop a per-repository `lockf` from lane scripts: the pool orders gates across every repository.
 A waiting gate names who holds each slot and since when.
+`sd.review_slots` is load control too: how many reviews may run their reviewers at once on the machine (unset: 2).
 `sd gate post --head SHA` runs the merge gate at SHA and posts `sd/local-gate`, for a merge path that is not `sd-ship merge`.
 `sd gate check` runs the same check at `HEAD` and records a pass that `sd-ship prepare` and the merge gate reuse at that head; it posts nothing.
 

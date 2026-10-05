@@ -1,7 +1,8 @@
 # Evidence-backed disposition acceptance
 
 Read this before proposing or accepting dispositions for blocking findings.
-Use it only for a complete review of the exact clean head with passing deterministic checks.
+Use it only for a complete review of the exact clean head whose deterministic checks passed or did not run.
+A blocking review runs no gate, so its `check.status` is `not_run` (sd:2605).
 It permits supported rebuttals or explicitly accepted risks.
 It waives no missing depth, incomplete transport, failed check, or source change.
 A fix needs verification on its new head.
@@ -30,6 +31,9 @@ For itemless records, replace `--item ID` below with `--no-item --review-id ID`.
    Use the validated digest.
 5. Resume `sd-ship prepare --item ID --json`.
    Valid acceptance reuses completed coverage without another review reservation.
+   When the report's gate did not run, this prepare runs it at the head before clearance and records `adjudicated_gate`.
+   A failing gate refuses clearance and keeps the spent pass; fix it and prepare again, which reviews the fix.
+   For itemless records, `sd-ship review --no-item --review-id ID` runs it; `verify-review` only reads the record.
 
 The acceptance binds repository, branch, review identity, head, complete history, raw report, finding indices, and evidence hashes.
 It separately binds review tools/policy and disposition tools/policy.
