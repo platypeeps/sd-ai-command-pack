@@ -1209,8 +1209,8 @@ def register(groups: Any, store: Any) -> None:
     kind = add.add_argument(
         "--kind", default="task",
         help="what the item is (default: task), from the kinds the installed sd_db offers; a "
-             "followup takes a checkout as a task does, and personal, work-idea and "
-             "personal-idea carry no repository")
+             "followup takes a checkout as a task does (an sd_db older than sd:809 files it "
+             "with none), and personal, work-idea and personal-idea carry no repository")
     kind.choices = LibraryKinds()  # after add_argument: see `LibraryKinds`
     _recurrence_flags(add)
     where = add.add_mutually_exclusive_group()

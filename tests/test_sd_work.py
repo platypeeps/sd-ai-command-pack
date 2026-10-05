@@ -622,9 +622,10 @@ class TaskCLI(unittest.TestCase):
                       self.call("task", "edit", state["item"]["id"], code=1).stderr)
 
     def test_kind_help_says_the_kinds_come_from_the_installed_library(self):
-        """sd:1000 (0f93e3b2bf82): an older sd_db offers fewer kinds than the help named."""
+        """sd:1000 (0f93e3b2bf82): a followup takes a checkout only on an sd_db from sd:809 on."""
         said = " ".join(self.call("task", "add", "--help").stdout.split())
         self.assertIn("from the kinds the installed sd_db offers", said)
+        self.assertIn("(an sd_db older than sd:809 files it with none)", said)
 
     def test_the_kind_lists_are_the_library_s_and_the_pack_keeps_no_copy(self):
         """sd:743. `add` and `edit` offer exactly `workflow.HAND_KINDS`.
