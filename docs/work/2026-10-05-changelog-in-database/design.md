@@ -22,8 +22,9 @@ The system repository does not change.
 ## Status
 
 Design accepted. The operator ruled Q1 to Q7 on 2026-10-05 at about
-17:25 MDT, through the team lead. Each ruling took the recommendation.
-The ruling is recorded on sd:2783. Implementation has not started.
+17:25 MDT, through the team lead. Each 17:25 ruling took the recommendation.
+The ruling is recorded on sd:2783. At about 17:40 MDT the operator revised
+Q7 after the prepare review at `ffec19a9`. Implementation has not started.
 
 ## Decision log
 
@@ -35,7 +36,7 @@ The ruling is recorded on sd:2783. Implementation has not started.
 | Q4, releases | Fix the `CONTRIBUTING.md` terminal-release line; leave `--release` unused until a release is cut. |
 | Q5, the hand-written Unreleased lines | Keep them below the rendered region; no release heading now. |
 | Q6, a merged PR with no row | Render refuses and names the pull request; `sd changelog import` repairs it. |
-| Q7, no privacy-pattern file | Refuse at render; warn at prepare. |
+| Q7, no privacy-pattern file | Revised ~17:40 MDT: prepare refuses before it pushes or opens a pull request; render also refuses. The 17:25 ruling (warn at prepare) let unchecked text reach a public pull request and its squash commit. |
 
 ## Decisions
 
@@ -247,7 +248,7 @@ The repository is public. The `## Changelog` text is public as soon as
 `prepare` publishes the body, so the check must run before publication.
 
 - Prepare checks the section against the operator's privacy patterns before
-  it creates or edits the pull request. A match refuses and names the line
+  it pushes the branch or creates or edits the pull request. A match refuses and names the line
   number, not the matched text.
 - Render checks every row again, because a correction or an import can
   bring new text.
@@ -257,10 +258,19 @@ The repository is public. The `## Changelog` text is public as soon as
   system repository reads. The pack does not import that tool.
 - Tests use a synthetic pattern file in a temporary home.
 
-**Decided, Q7 (Operator 2026-10-05 ~17:25 MDT):** with no pattern file, warn or refuse? Ruling, as recommended: refuse
-at render, warn at prepare. Render is the last step before the file changes;
-prepare on a fresh satellite should not block on missing local config. The
-pre-push leak guard does not cover the pack clone today.
+**Decided, Q7 (Operator 2026-10-05 ~17:25 MDT; revised ~17:40 MDT):**
+with no pattern file, warn or refuse? Revised ruling: refuse at prepare and
+at render. With no pattern file, prepare refuses with
+`changelog_patterns_missing` before it pushes or opens a pull request.
+
+The 17:25 ruling warned at prepare and refused at render. The prepare
+review at `ffec19a9` rejected it, finding high. Publication happens at
+prepare: the body goes public in the pull request and later in the squash
+commit. A refusal at render cannot undo either disclosure. A satellite
+without the pattern file therefore cannot prepare in an opted-in
+repository until the operator copies the file there. The pre-push leak
+guard does not cover the pack clone today, so prepare is the only check
+before publication.
 
 ## Failure modes
 
@@ -269,6 +279,7 @@ pre-push leak guard does not cover the pack clone today.
 | Body lacks the section | prepare refuses, `code=changelog_missing` | the builder |
 | Section has an unknown subsection or no bullets | prepare refuses, `changelog_invalid` | the builder |
 | Privacy pattern match | prepare refuses, `changelog_private`, line number only | the builder |
+| No privacy-pattern file | prepare refuses before push, `changelog_patterns_missing`; render refuses | the builder, or whoever renders |
 | Feature branch edits `CHANGELOG.md` | prepare refuses, `changelog_edited` | the builder |
 | Row write fails after the squash | reconcile raises; phase stays `merge_dispatch` | the lane log and the integrator |
 | Merge outside `sd-ship` | render refuses, names the pull request | whoever renders |

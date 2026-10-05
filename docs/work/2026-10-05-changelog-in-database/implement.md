@@ -39,12 +39,16 @@ fail on `main` before the step's code lands.
       - Only when `.github/sd-changelog.json` reads `{"mode": "database"}`
         at the head; otherwise nothing changes (R8).
       - Refuse a missing or invalid section, a privacy match (line numbers
-        only; Q7: warn with no pattern file), and a diff that changes
+        only), a missing pattern file (Q7, revised:
+        `changelog_patterns_missing`), and a diff that changes
         `CHANGELOG.md`, except a render branch that passes
         `sd changelog render --check`.
+      - Run these checks before the push and before any pull-request call.
       - Save the parsed entries in the ship row.
-      - Check: tests for PRD acceptance criteria 1, 2 and 7 pass in
+      - Check: tests for PRD acceptance criteria 1, 2, 7 and 8 pass in
         `tests/test_sd_ship.py`. Each fails with the new branch removed.
+        In criterion 8, any recorded push or pull-request call fails the
+        test. Moving the pattern check after the push fails it too.
 - [ ] 4. `sd-ship reconcile` writes the row. Size S, 2 h. Own PR.
       - In `reconcile`, after the merge evidence checks and before
         `self.save(phase="merged")`. Opted-in repositories only.

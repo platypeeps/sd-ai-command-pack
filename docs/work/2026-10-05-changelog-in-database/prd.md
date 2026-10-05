@@ -80,6 +80,8 @@ R1. An opted-in repository declares its entry in the pull request body, in a
 
 R2. `sd-ship prepare` in an opted-in repository refuses a body without a
     valid section. It refuses a section that matches a privacy pattern.
+    With no privacy-pattern file it refuses (Q7, revised). Each of these
+    refusals comes before it pushes the branch or opens the pull request.
     It refuses a branch whose diff changes `CHANGELOG.md`, unless the branch
     is a render pull request (R6).
 
@@ -121,6 +123,9 @@ R9. The existing `CHANGELOG.md` text stays byte for byte. Rendered entries
    pull request number.
 6. A row whose text matches a synthetic privacy pattern makes render refuse.
    The test uses a pattern file in a temporary home, never the real one.
+8. With no pattern file, prepare refuses with `changelog_patterns_missing`.
+   The fake GitHub records no push and no pull-request request. Render with
+   no pattern file also refuses.
 7. A fixture repository without the opt-in file prepares and merges as on
    `main`. No entry row is written.
 
