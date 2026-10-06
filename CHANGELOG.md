@@ -463,6 +463,13 @@
 
 ### Fixed
 
+- **`sd-ship` names the main commits behind a base refusal (sd:2339).**
+  `prepare` on a branch behind the default branch already refused before any review.
+  Its refusal now names the missing commits: the count and the first three short SHAs.
+  `merge` on a head that differs from the reviewed head only by a clean merge of
+  `origin/<base>` says so, names that merge's main commits, and points to `sd-ship prepare`.
+  `WORKFLOW.md` now says to run `prepare` and `merge` back to back for one item.
+
 - **`sd-status` no longer reports `branch-unresolvable` on a done item (sd:2729).**
   A merge deletes the squashed branch, so a done item's `branch` is history, not a fault to repair.
 

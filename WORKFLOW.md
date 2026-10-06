@@ -425,7 +425,10 @@ which the installer places in `~/.claude/agents`.
   because two branches cut in parallel would claim the same slot. An item id
   is not that kind of metadata: `sd work register` allocates it at plan time,
   before review and before any branch exists, and `sd runner prepare` and
-  `sd run` both require it to already exist.
+  `sd run` both require it to already exist. Run `sd-ship prepare` and
+  `merge` back to back for one item; do not hold a prepared item while
+  another merges ahead of it, or its merge needs a catch-up and a new review
+  (sd:2339).
 - **No worker fails silently.** Every worker gets a budget, in wall clock or
   tokens. It runs in the background and reports when it finishes. No report
   by the deadline is a failure. Do not poll, and do not assume success.

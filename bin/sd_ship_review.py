@@ -114,6 +114,26 @@ def clean_merges(root: pathlib.Path, reviewed: str, head: str, base_ref: str) ->
     return merges
 
 
+def named_commits(root: pathlib.Path, have: str, lack: str, *, skip: tuple[str, ...] = (), shown: int = 3) -> str:
+    """`N commits (a, b, c, +M more)`: what `have` holds and `lack` does not, oldest first, less `skip` (sd:2339)."""
+    listed = [commit for commit in (sd_lib.git_output(["rev-list", "--reverse", have, f"^{lack}"], root) or "").split()
+              if commit not in skip]
+    more = f", +{len(listed) - shown} more" if len(listed) > shown else ""
+    return f"{len(listed)} commit{'' if len(listed) == 1 else 's'} ({', '.join(c[:12] for c in listed[:shown])}{more})"
+
+
+def base_merge_note(root: pathlib.Path, reviewed: str | None, head: str, base: str | None) -> str:
+    """Why `head` misses the receipt for `reviewed`, when it adds only clean merges of `origin/<base>` (sd:2339)."""
+    if not reviewed or not base or reviewed == head or not is_ancestor(root, reviewed, head):
+        return ""
+    merges = clean_merges(root, reviewed, head, f"refs/remotes/origin/{base}")
+    if merges is None:
+        return ""
+    return (f"; {head[:12]} adds only a merge of origin/{base}, "
+            f"{named_commits(root, head, reviewed, skip=tuple(merges))}, to the reviewed {reviewed[:12]}: "
+            "run sd-ship prepare, which carries the review forward or reviews only the branch's own diff")
+
+
 def paths_between(root: pathlib.Path, old: str, new: str) -> set[str] | None:
     """Every path `old..new` changes, both sides of a rename, or None when git cannot answer."""
     listed = sd_lib.git_output(["diff", "--name-only", "-z", "--no-renames", old, new], root)
@@ -280,7 +300,12 @@ class SharedReview:
         if not self.binding_holds():
             raise self.binding_refusal()
         subject = self.carried_from(head, passes[-1])
-        report = complete_report(passes[-1], subject, subject if subject != head else self.state.get("reviewed_head"))
+        try:
+            report = complete_report(passes[-1], subject, subject if subject != head else self.state.get("reviewed_head"))
+        except Refusal as refusal:
+            note = base_merge_note(self.root, passes[-1].get("head"), head, self.state.get("base"))
+            refusal.args = (f"{refusal.args[0]}{note}",)
+            raise
         validate_provider_selection(report, passes[-1].get("requested_provider"), completed=True)
         self.history.validate_coverage(self.state, report)
         validate_findings(report)
