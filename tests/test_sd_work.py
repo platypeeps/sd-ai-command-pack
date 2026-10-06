@@ -388,6 +388,22 @@ class TaskCLI(unittest.TestCase):
         self.assertEqual(unscoped, sorted([unregistered["item"]["id"],
                                            opted_out["item"]["id"], outside["item"]["id"]]))
 
+    def test_edit_clears_a_stale_branch(self):
+        """sd:2729. `--clear-branch` is the one way a stale branch name leaves a row."""
+        state = json.loads(self.call("task", "add", "Worked on a branch", "--json").stdout)
+        item = state["item"]["id"]
+        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+            sd_db.writes.set_item_fields(connection, item, branch="feat/gone")
+        before = json.loads(self.call("store", "item", item, "--json").stdout)
+        refused = self.call("task", "edit", item, "--clear-branch",
+                            "--if-revision", state["revision"], code=1)
+        self.assertIn("changed", refused.stderr)
+        cleared = json.loads(self.call(
+            "task", "edit", item, "--clear-branch",
+            "--if-revision", before["revision"], "--json").stdout)
+        self.assertIsNone(cleared["item"]["branch"])
+        self.assertEqual(cleared["notes"][-1]["body"], f"Updated branch by {getpass.getuser()}")
+
     def test_edit_moves_a_followup_and_changes_its_details(self):
         """sd:809. `edit_item` edits a followup's title, body, priority, due
         date and repository, as it does a task's. Before sd:809 it refused

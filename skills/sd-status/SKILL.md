@@ -86,7 +86,7 @@ this table before running the command.
 |---|---|---|---|---|---|
 | 10 | `branch-already-merged` | `w` | yes | `work item + git` | a non-done item whose branch already landed in the default branch |
 | 10 | `in-progress-without-branch` | `w` | yes | `work item` | status: in_progress with no branch: field to work on |
-| 10 | `branch-unresolvable` | `w` | yes | `work item + git` | a branch: field naming a ref no local or remote head carries |
+| 10 | `branch-unresolvable` | `w` | yes | `work item + git` | a non-done item's branch: field naming a ref no local or remote head carries |
 | 10 | `status-unreadable` | `w` | yes | `work item` | an item whose prd.md will not yield a status |
 | 20 | `unresolved-concern` | `c` | yes | `## Review ledger` | a review concern left open by its own ledger row |
 | 20 | `unreadable-concern-row` | `c` | yes | `ledger row nothing can classify` | a C- row whose disposition this reader does not recognise |

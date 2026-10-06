@@ -2542,6 +2542,11 @@ class WorkItemInventoryTests(InventoryFixture):
         self.assertEqual([row["title"] for row in found], ["alpha"])
         self.assertEqual(found[0]["key"], "2026-08-01-alpha")
 
+    def test_a_done_items_deleted_branch_is_no_finding(self) -> None:
+        """A merge deletes the squashed branch, so a done item's branch is history (sd:2729)."""
+        self.item("2026-08-01-alpha", status="done", extra="branch: gone/away\n")
+        self.assertEqual([], self.by_check(self.rows(), "branch-unresolvable"))
+
     def ancient(self, name: str = "2026-01-01-ancient") -> pathlib.Path:
         """A planning item whose own date is 249 days before `TODAY`.
 
@@ -2697,11 +2702,11 @@ class WorkItemInventoryTests(InventoryFixture):
         **The frontmatter's `in_progress` is not what the reader sees.**
         `sd_lib.py:701` returns `done` for any archived item without opening
         `prd.md`, so archiving decides the status and the declared one is never
-        read. That is why every item here carries a `branch:` naming no ref:
-        `branch-unresolvable` is the one check that fires regardless of status,
-        so it is the only thing that can prove the archive guard is doing work.
-        A fixture without it passes with that guard deleted, which is how this
-        test was wrong on its first writing.
+        read. Since sd:2729 no check fires on a done item, so in a `file`
+        checkout `done` suppresses these too, and no file fixture can prove the
+        archive guard. A `row` checkout reads an archived item's status from
+        its row, which may be open; the direct `_work_rows` call at the end
+        is that case, and it fails with the guard deleted.
 
         The two live items are the contrast that makes the rest able to fail.
         One of them carries the cut `parked:` line and must fire exactly like
@@ -2727,10 +2732,16 @@ class WorkItemInventoryTests(InventoryFixture):
         self.assertEqual(
             ["2026-08-01-live", "2026-08-02-parked"],
             sorted({row["key"] for row in rows if "2026-08-0" in row["key"]}),
-            "the archive path is the only suppressor; both live items fire, "
-            "including the one whose `parked:` line nothing reads any more, "
-            "and all four carry `branch:` to make the guard observable",
+            "both live items fire, including the one whose `parked:` line "
+            "nothing reads any more",
         )
+        work = {"status_source": status.sd_lib.FROM_ROW, "items": [
+            {"path": "docs/work/archive/2026-09/2026-08-03-filed", "slug": "filed",
+             "status": "in_progress", "branch": "feat/nope", "archived": True}]}
+        with mock.patch.object(status.sd_lib, "upstream", return_value=(None, "main")):
+            archived = status._work_rows(
+                self.repo, work, self.TODAY, "main", status.Merged(None, ""), {})
+        self.assertEqual([], archived, "an archived row is suppressed whatever its status")
         self.assertEqual(
             len(rows), len({(row["check"], row["key"]) for row in rows}),
             "no object may produce the same check twice",

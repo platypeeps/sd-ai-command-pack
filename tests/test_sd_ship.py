@@ -3111,7 +3111,9 @@ roles:
         from sd_db.workflow import change_status
         self.task_item("task")
         self.unanswered("--deliver").prepare()
-        change_status(self.connection, self.item, "done", who="operator")
+        # sd_db refuses a reasonless close of a row on its own branch (sd:2570);
+        # a reason that names no commit is still no delivery evidence.
+        change_status(self.connection, self.item, "done", who="operator", reason="closed by hand")
         with patch.object(ship.time, "sleep"):
             result = self.merge()
         self.assertTrue(result["delivery_pending"])

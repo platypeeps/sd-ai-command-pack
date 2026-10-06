@@ -4,6 +4,11 @@
 
 ### Added
 
+- **`sd task edit --clear-branch` clears a stale branch name (sd:2729).**
+  It writes the cleared branch through `sd_db`'s `edit_item` (sd:2818), with the usual note and `--if-revision` check.
+  It sets no branch; `sd runner prepare --branch` still does that.
+  `.sd-system-rev` moves to system `bf526153`, the merge that added it, which carries `sd_db` schema 20.
+
 - **Review acknowledgements live in the hub's workflow database (sd:2750).**
   `sd-review-ack --ack` and `sd-ship`'s automatic `fixed` records write one
   `review-ack:v1:<slug>:<finding id>` row through `sd_db.ship`'s
@@ -458,6 +463,9 @@
 
 ### Fixed
 
+- **`sd-status` no longer reports `branch-unresolvable` on a done item (sd:2729).**
+  A merge deletes the squashed branch, so a done item's `branch` is history, not a fault to repair.
+
 - **A hub never reuses a gate receipt another machine wrote (sd:2796).**
   A satellite's own receipts land in the hub's database, and with the same
   login and checkout path their key is the hub's. The binding now names the
@@ -517,6 +525,7 @@
   as `satellite_unidentified`. Intake refuses a request that is not an
   `sd-lane-request` row, names no tailnet identity, or names a base other
   than its `ship:` row's, as `invalid_request`.
+
 - **A fixture gate in `test_sd_local_gate` no longer joins the machine's gate queue (sd:2735).**
   `Repository.setUp` sets `SD_GATE_SLOTS_DIR` and `XDG_STATE_HOME` to the
   test's own folder. Run directly, outside `sd gate check`, the suite took
