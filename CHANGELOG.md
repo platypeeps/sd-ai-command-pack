@@ -4,6 +4,41 @@
 
 ### Added
 
+- **The lane merges a satellite entry without a prepare or a gate (sd:2704).**
+  For a `gate: satellite` entry `lane run` fetches the branch and the base
+  into its main checkout, hands the entry back with `head_moved` when
+  `origin/<branch>` is not the requested head and with `base_moved` when the
+  head lacks `origin/<base>`, and only then runs
+  `sd-ship merge --item N --branch B --expected-head H --manual --satellite-gate`.
+  A merge refusal coded `head_moved`, `base_moved` or `satellite_*` also hands
+  back; the entry, the request row and an item note carry the reason and the
+  trust rule's next action for its code (`sd_local_gate.SATELLITE_REFUSALS`). The lane starts no speculative gate for a satellite
+  follower, and predicts past a satellite entry ahead from its branch on
+  origin. After the merge it deletes `origin/<branch>` with a lease on the
+  merged head and writes `merged` to the request row; a row write that
+  failed is retried at the next intake. It claims a satellite entry only
+  while the request's newest revision is the `queued` write naming it, so a
+  failed write, a newer request or an unreadable row never runs it on a
+  superseded authority.
+- **A satellite asks the hub's lane to merge: `sd-ship lane request` (sd:2704).**
+  On a satellite, `lane request --item N [--manual]` writes the row
+  `lane-request:v1:<slug>:<item>` over the wire. It refuses on the hub
+  (`hub_request`, naming `lane enqueue`) and when the item's `ship:` row is
+  not `ready_to_send` at the branch's pushed head. Before each claim
+  `lane run` takes in this repository's requests, oldest first: it refuses a
+  repository without `repo.ci = local` and `repo.satellite_gate = accept`
+  (`satellite_gate_off`), a malformed branch, base, head or item
+  (`invalid_request`), and a request whose `ship:` row is not ready at its
+  head (`satellite_not_prepared`), each with the reason on the row and no
+  queue entry. It supersedes the item's pending entry, leaves a request whose
+  item is running for the next intake, and queues a `gate: satellite` entry
+  before it writes `queued`, so a crash between the two takes the request in
+  once. `lane run --satellite-only` claims satellite entries only, starts no
+  speculative gate and exits when none is pending; hub entries keep their
+  place. Either mode refuses on a satellite (`hub_only`) before it reads a
+  request or writes a row. Each run publishes the hub's pack digest to `sd-lane-pack:v1:<slug>`
+  at its start and after a fast-forward of the pack checkout; a pack that
+  gates itself publishes `tree`, as its receipts bind (sd:2613).
 - **A satellite's gate writes an offload receipt for the hub (sd:2704 step 3).**
   On an sd satellite, in a repository with `repo.satellite_gate = accept`, a
   recorded pass of `check_in_worktree` (`sd gate check`, `sd-review

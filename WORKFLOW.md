@@ -554,8 +554,31 @@ which the installer places in `~/.claude/agents`.
   checkout when it is on the default branch. When that checkout holds the
   running `sd-ship`, it first tries every other lane's runner lock once and
   skips if one is held; the next landing retries.
+- **A satellite gates; the hub's lane merges (sd:2704).** In a repository
+  with `repo.ci = local` and `repo.satellite_gate = accept`, a satellite runs
+  the gate and the prepare, and asks the hub's lane to merge with `sd-ship
+  lane request`. The hub runs no gate for that item: its merge compares the
+  satellite's offload receipt under the trust rule and refuses with a
+  `satellite_*` or `base_moved` code. A refusal, or a branch or base that
+  moved, hands the item back to the satellite with the next action on the
+  request row and the item. The table below is who does what.
 - **Test one version per language, the latest stable (Python 3.14, Node
   26), in CI and locally; no version matrices.**
+
+| Step | Machine | Command | What it does |
+|---|---|---|---|
+| 1 | satellite | `git merge origin/main` on the branch, or `sd-ship prepare --catch-up` | The head contains the current base before any gate |
+| 2 | satellite | `sd gate check --base main` | Runs `sd-check`; writes the satellite's receipt and the offload receipt to the hub |
+| 3 | satellite | `sd-ship prepare --item N --title T --body-file F` | Reviews (its gate reuses step 2), pushes, binds the pull request, posts `sd/local-gate` from the offload receipt |
+| 4 | satellite | `sd-ship lane request --item N --manual` | Writes `lane-request:v1:<slug>:<item>` to the hub |
+| 5 | hub | `sd-ship -C <checkout> lane run --satellite-only`, from a scheduled job | Takes requests in and runs satellite entries only; exits when none is pending or another runner holds the lane |
+| 6 | hub | intake, before each claim | Refuses a request the repository did not opt into, a malformed one, or one not prepared at its head; else queues a `gate: satellite` entry and writes `queued` |
+| 7 | hub | the entry | Fetches the branch and the base; hands back on `head_moved` or `base_moved`; no prepare, no catch-up, no speculative gate; then `sd-ship merge --satellite-gate` |
+| 8 | hub | `sd-ship merge --satellite-gate` | Accepts the offload receipt under the trust rule, posts no status, merges |
+| 9 | hub | landing | Deletes `origin/<branch>` with a lease on the merged head; writes the outcome to the request row; notes the item |
+
+Without `--manual` in step 4, step 7 stops before the merge as `prepared`,
+as a hub entry queued without it does.
 
 The pack has two write lanes, and each holds one writer. A session writes on
 its own branch in its own worktree: `sd runner prepare <item> --branch <name>`

@@ -337,9 +337,14 @@ written through `sd_db.ship.save`. No schema change is needed.
 | `authority` | satellite | `manual` or none, as `lane enqueue --manual` |
 | `satellite` | satellite | the same identity as the offload receipt |
 | `requested_at` | satellite | satellite clock, for display |
-| `status` | both | `requested` by the satellite; then `queued`, `refused`, `handed_back`, `merged` or `failed` by the hub |
+| `status` | both | `requested` by the satellite; then `queued`, `refused`, `handed_back`, `prepared`, `merged` or `failed` by the hub |
 | `reason`, `next_action`, `code` | hub | why the status, and who acts next |
 | `entry` | hub | the queue's `enqueued_at` and the request revision it took in |
+
+`prepared` ends a request without `manual` authority, as a hub entry queued
+without `--manual` ends: the lane's checks passed, and the merge waits for a
+person. Its `next_action` names the hub's
+`sd-ship merge --item N --branch B --expected-head H --manual --satellite-gate`.
 
 `sd-ship lane request` refuses on the hub, naming `lane enqueue`: a request
 means "the satellite gated this", which a hub item is not. It also refuses
@@ -355,7 +360,8 @@ intake.
 
 `run_lane` calls `intake` before each `claim_next`, under the runner lock.
 It reads every `lane-request:v1:<own slug>:*` row whose newest status is
-`requested`, oldest first. The slug is the lane's own, from its main
+`requested`, oldest first. A row that is `queued` while its entry has finished
+gets that entry's outcome, so an outcome write that failed is retried. The slug is the lane's own, from its main
 checkout's origin, so each repository's lane reads only its own requests. For
 each request, in order:
 
@@ -369,7 +375,9 @@ each request, in order:
    `ready_to_send` at `head`. Otherwise `refused`, `satellite_not_prepared`.
 4. **Taken in already.** A queue entry that names this request's revision
    means a crash came between the queue write and the row write. Write
-   `queued` and go on; add nothing.
+   `queued` and go on; add nothing. Intake checks this before step 1: the
+   entry may have run since, and its merge moves the `ship:` row past step 3.
+   A finished entry writes its outcome instead of `queued`.
 5. **Pending entry for the item.** Cancel it, marked `superseded` by this
    revision. The row needs no extra write: its older revision stays in its
    history. A `running` entry for the item leaves the request `requested`
@@ -380,7 +388,14 @@ each request, in order:
    Then write `queued`.
 
 Queue first, row second, so a crash leaves a queue entry that step 4
-recognises, never a `queued` row with no entry.
+recognises, never a `queued` row with no entry. The entry is not yet
+claimable: `claim_next` takes a satellite entry only while the request's
+newest revision is the `queued` write naming it (`claimable`). A failed
+`queued` write, a newer request from the satellite, or a row that cannot be
+read keeps the entry pending and unclaimed, so it never runs on a superseded
+authority. The next intake settles it: step 4 writes `queued` for the same
+revision, or step 5 cancels it for a newer one (review round 5, prepare
+review at 63bc828e).
 
 ### Scheduling
 

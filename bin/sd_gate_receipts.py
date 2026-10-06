@@ -47,6 +47,19 @@ with these inputs minutes ago; it does not prove the check is deterministic.
 A repository that needs more uses the explicit dependency contract,
 `sd-check --record-receipt` with a declared inventory (sd:1912).
 
+A satellite widens that boundary to a second machine (sd:2704). In a
+repository with `repo.satellite_gate = accept`, a satellite's recorded pass
+also writes an offload receipt, `sd-gate-offload:v1:<key>`, to the hub's
+database, and `sd-ship merge --satellite-gate` on the hub merges on it without
+a run. The hub compares what it can recompute: the tree part of the binding,
+the offload view (`offload_view`: `PATH` order, the bytes of named tools and
+of the interpreter, named files under `HOME`, and a digest of each other
+variable) and the pack digest. It never compares the machine part or
+`environment_sha256`, which hold the satellite's login. What the satellite's
+machine holds beyond the view, and the satellite's honesty, are trusted as
+the operator's own node: the trust rule in `sd_local_gate` guards against a
+stale head, another pack and a moved base, not against a hostile satellite.
+
 A repository whose check reads no commit history may key its receipts by tree
 instead of head, in its reviewed tree:
 

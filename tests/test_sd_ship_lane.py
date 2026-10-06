@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import shlex
 import subprocess
 import sys
 import unittest
@@ -21,10 +22,13 @@ from sd_db import create_item
 from sd_db import ship as receipts
 from sd_db.testing.remote import _git
 
+from tests import test_sd_lane_requests as requests_suite
 from tests import test_sd_ship as fixture
 
 ship = fixture.ship
 ROOT = fixture.ROOT
+sd_lane = requests_suite.sd_lane
+lane_git = requests_suite.git
 
 
 class LaneCase(unittest.TestCase):
@@ -273,6 +277,232 @@ class MergeFromTheLane(LaneCase):
                                     "--expected-head", self.head(), cwd=self.directory)
         self.assertEqual(code, 0, merged)
         self.assertEqual(merged["phase"], "merged")
+
+
+class SatelliteEntry(requests_suite.Requests):
+    """sd:2704 step 7. A satellite entry runs no prepare and no catch-up: fetch, head and base checks,
+    then one `merge --satellite-gate`; `sd-ship` is the lane suite's recorder."""
+
+    def setUp(self):
+        super().setUp()
+        self.prepared()
+        self.ask()
+        requests_suite.sd_lane.intake(self.hub, self.path)
+
+    def run_lane(self, ship=None, **options):
+        return sd_lane.run_lane(self.repo, self.environ, ship or self.ship, self.gate, **{"hub": self.hub, **options})
+
+    def advance(self, branch: str) -> str:
+        """Another machine pushes to `branch` on origin."""
+        other = self.tmp / f"other-{branch}"
+        if not other.exists():
+            subprocess.run(["git", "clone", "-q", str(self.origin), str(other)], check=True)
+        lane_git(other, "fetch", "-q", "origin")
+        lane_git(other, "checkout", "-q", "-B", branch, f"origin/{branch}")
+        lane_git(other, "-c", "user.email=t@example.test", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x")
+        lane_git(other, "push", "-q", "origin", branch)
+        return lane_git(other, "rev-parse", "HEAD")
+
+    def remote_branches(self):
+        return lane_git(self.origin, "for-each-ref", "--format=%(refname:short)", "refs/heads").split()
+
+    def test_a_satellite_entry_merges_with_its_receipt_and_no_prepare_or_catch_up(self):
+        self.run_lane()
+        [merge] = self.calls
+        self.assertEqual(merge, sd_lane.satellite_merge_argv(self.entries()[0]))
+        self.assertNotIn("prepare", merge)
+        self.assertNotIn("--catch-up", merge)
+        for flag, value in (("--branch", "topic"), ("--expected-head", self.head), ("-C", str(self.repo))):
+            self.assertEqual(merge[merge.index(flag) + 1], value)
+        self.assertIn("--satellite-gate", merge)
+        entry, row = self.entries()[0], self.row()
+        self.assertEqual((entry["status"], entry["request_row"]), ("merged", "written"))
+        self.assertEqual((row["status"], row["merge_commit"]), ("merged", "merged-7"))
+
+    def test_a_moved_base_hands_back_with_no_merge_call(self):
+        from sd_local_gate import HAND_BACK  # noqa: PLC0415
+
+        self.advance("main")
+        self.run_lane()
+        self.assertEqual(self.calls, [])
+        entry, row = self.entries()[0], self.row()
+        self.assertEqual((entry["status"], entry["code"]), ("handed_back", "base_moved"))
+        self.assertEqual((row["status"], row["code"], row["next_action"]),
+                         ("handed_back", "base_moved", HAND_BACK.format(base="main")))
+        [(item, body, _)] = self.notes
+        self.assertEqual(item, 7)
+        self.assertIn("handed_back (base_moved)", body)
+        self.assertIn("sd-ship lane request again", body)
+
+    def test_a_moved_branch_hands_back_with_no_merge_call(self):
+        self.advance("topic")
+        self.run_lane()
+        self.assertEqual(self.calls, [])
+        self.assertEqual((self.entries()[0]["code"], self.row()["status"]), ("head_moved", "handed_back"))
+
+    def test_a_satellite_refusal_from_merge_hands_back_and_another_fails(self):
+        for code, status in (("satellite_pack_mismatch", "handed_back"), ("base_moved", "handed_back"),
+                             ("checks_failed", "failed")):
+            with self.subTest(code=code):
+                self.answers[(7, "merge")] = {"ok": False, "error": f"refused: {code}", "workflow": {
+                    "blocker": {"code": code}, "next_action": "the merge's own next step"}}
+                if self.entries()[-1]["status"] != "pending":
+                    self.ask()
+                    requests_suite.sd_lane.intake(self.hub, self.path)
+                self.run_lane()
+                entry, row = self.entries()[-1], self.row()
+                self.assertEqual((entry["status"], entry["code"], row["status"]), (status, code, status))
+                self.assertIn(f"Lane: {status} ({code})", self.notes[-1][1])
+                if code == "satellite_pack_mismatch":  # the trust rule's own next action, not the generic hand-back
+                    self.assertTrue(row["next_action"].startswith("Bring the satellite's pack checkout"), row["next_action"])
+
+    def test_no_speculative_gate_starts_for_a_satellite_follower(self):
+        hub_tree = self.worktree("hubitem")
+        sd_lane.enqueue_entry(hub_tree, 3, "hub item", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.move(self.repo, 3, "top", self.environ)
+        self.run_lane()
+        self.assertEqual(self.gates, [])
+        satellite = next(entry for entry in self.entries() if entry["item"] == 7)
+        self.assertEqual(satellite["status"], "merged")
+        self.assertNotIn("speculation", satellite)
+
+    def test_the_remote_branch_is_deleted_at_the_merged_head_only(self):
+        self.run_lane()
+        self.assertEqual(self.remote_branches(), ["main"])
+        self.assertIn("removed origin/topic", self.entries()[0]["cleanup"])
+        self.assertIsNone(self.entries()[0]["remove"])
+
+    def test_a_remote_branch_pushed_past_the_merged_head_is_kept(self):
+        ship = self.ship
+
+        def push_during_merge(argv, log):
+            self.advance("topic")
+            return ship(argv, log)
+        self.run_lane(push_during_merge)
+        self.assertEqual(self.remote_branches(), ["main", "topic"])
+        self.assertIn("origin/topic kept: it is at", self.entries()[0]["cleanup"])
+
+    def test_a_request_without_manual_stops_before_the_merge(self):
+        self.ask(authority=None)
+        requests_suite.sd_lane.intake(self.hub, self.path)
+        self.run_lane()
+        self.assertEqual(self.calls, [])
+        entry = self.entries()[-1]
+        self.assertEqual((entry["status"], self.row()["status"]), ("prepared", "prepared"))
+        self.assertIn("--satellite-gate", entry["next_action"])
+
+    def test_the_hand_merge_command_is_quoted_for_a_shell(self):
+        """Prepare review at 9cbbbec5: a path with a space or a branch with `;` broke the copied command."""
+        entry = {"worktree": "/hub/my pack", "item": 7, "branch": "topic;echo", "expected_head": self.head}
+        command = sd_lane.hand_merge(entry).removeprefix("On the hub: ")
+        self.assertEqual(shlex.split(command), ["sd-ship", "-C", "/hub/my pack", "merge", "--item", "7", "--branch",
+                                                "topic;echo", "--expected-head", self.head, "--manual",
+                                                "--satellite-gate"])
+
+    def test_a_request_replaced_while_intake_decides_does_not_run_on_the_old_authority(self):
+        """Review round 5: the satellite asked again without --manual; the queued entry kept `manual` and merged."""
+        self.ask()
+        raced: list[int] = []
+
+        def satellite_asks_again(connection, key, previous, value):
+            if value.get("status") == "queued" and not raced:
+                raced.append(self.ask(authority=None))
+            return receipts.save(connection, key, previous, value)
+        store = requests_suite.types.SimpleNamespace(read=receipts.read, receipt_key=receipts.receipt_key,
+                                                     save=satellite_asks_again)
+        self.run_lane(hub=sd_lane.Hub(self.connection, store, requests_suite.SLUG, self.repo))
+        self.assertEqual((self.calls, self.entries()[-1]["status"], self.row()["status"]), ([], "pending", "requested"))
+        self.run_lane()  # the newer request decides: no --manual, so no merge
+        self.assertEqual(self.entries()[-2]["superseded_by"]["revision"], raced[0])
+        self.assertEqual((self.calls, self.entries()[-1]["status"]), ([], "prepared"))
+
+    def test_a_replaced_request_whose_row_cannot_be_read_again_is_not_claimed(self):
+        """Prepare review at 63bc828e: the conflict's recovery read failed, so the manual entry stayed claimable."""
+        self.ask()
+        raced: list[int] = []
+
+        def satellite_asks_again(connection, key, previous, value):
+            if value.get("status") == "queued" and not raced:
+                raced.append(self.ask(authority=None))
+            return receipts.save(connection, key, previous, value)
+
+        def stopped_after_the_race(connection, key):
+            if raced:
+                raise RuntimeError("the database stopped here")
+            return receipts.read(connection, key)
+        store = requests_suite.types.SimpleNamespace(read=stopped_after_the_race, receipt_key=receipts.receipt_key,
+                                                     save=satellite_asks_again)
+        self.run_lane(hub=sd_lane.Hub(self.connection, store, requests_suite.SLUG, self.repo))
+        self.assertEqual((self.calls, self.entries()[-1]["authority"], self.entries()[-1]["status"]),
+                         ([], "manual", "pending"))
+        self.run_lane()
+        self.assertEqual((self.calls, self.entries()[-1]["status"]), ([], "prepared"))
+
+    def test_no_entry_is_claimed_unless_its_request_row_names_it(self):
+        """Prepare review at 63bc828e: every failure point in intake leaves the replaced manual entry unclaimed."""
+        update = sd_lane.update
+
+        def queue_write_fails(path, change):
+            if change.__name__ == "queue_request":
+                raise OSError("the queue file stopped here")
+            return update(path, change)
+
+        def read_fails(connection, key):
+            raise RuntimeError("the database stopped here")
+        unread = requests_suite.types.SimpleNamespace(read=read_fails, receipt_key=receipts.receipt_key,
+                                                      save=receipts.save)
+        faults = {"queue write": (self.hub, patch.object(sd_lane, "update", queue_write_fails)),
+                  "queued write": (self.failing_hub("queued"), contextlib.nullcontext()),
+                  "row read": (sd_lane.Hub(self.connection, unread, requests_suite.SLUG, self.repo),
+                               contextlib.nullcontext())}
+        for fault, (hub, broken) in faults.items():
+            with self.subTest(fault):
+                self.ask()
+                requests_suite.sd_lane.intake(self.hub, self.path)  # a manual entry the row names
+                self.ask(authority=None)
+                with broken:
+                    self.run_lane(hub=hub)
+                self.assertEqual(self.calls, [])
+                self.assertFalse([entry for entry in self.entries() if entry["status"] in ("running", "merged")])
+                self.run_lane()
+                self.assertEqual((self.calls, self.entries()[-1]["authority"], self.entries()[-1]["status"]),
+                                 ([], None, "prepared"))
+
+    def failing_hub(self, *statuses):
+        """The hub's rows, but a row write with one of `statuses` fails as a stopped database would."""
+        def save(connection, key, previous, value):
+            if value.get("status") in statuses:
+                raise RuntimeError("the database stopped here")
+            return receipts.save(connection, key, previous, value)
+        store = requests_suite.types.SimpleNamespace(read=receipts.read, receipt_key=receipts.receipt_key, save=save)
+        return sd_lane.Hub(self.connection, store, requests_suite.SLUG, self.repo)
+
+    def test_an_entry_whose_queued_write_failed_runs_after_the_next_intake_writes_it(self):
+        """Review round 1: the row stayed `requested` while its entry merged; now the entry waits for the row."""
+        self.ask()
+        self.run_lane(hub=self.failing_hub("queued"))
+        self.assertEqual((self.calls, self.entries()[-1]["status"], self.row()["status"]), ([], "pending", "requested"))
+        self.run_lane()
+        self.assertEqual((self.entries()[-1]["status"], self.entries()[-1]["request_row"]), ("merged", "written"))
+        self.assertEqual((self.row()["status"], self.row()["merge_commit"]), ("merged", "merged-7"))
+
+    def test_a_failed_outcome_write_is_written_at_the_next_intake(self):
+        """Review round 2: the row was `queued` and its outcome write failed, so it read `queued` for good."""
+        queued = sd_lane.request_key(requests_suite.SLUG, 7)
+        before = receipts.read(self.connection, queued)[0]
+        self.assertEqual(requests_suite.sd_lane.intake(self.hub, self.path), [])  # a pending entry: nothing to write
+        self.run_lane(hub=self.failing_hub("merged"))
+        self.assertEqual((receipts.read(self.connection, queued)[0], self.row()["status"]), (before, "queued"))
+        [answer] = requests_suite.sd_lane.intake(self.hub, self.path)
+        self.assertEqual((answer["status"], answer["request_row"]), ("merged", "written"))
+        self.assertEqual((self.row()["status"], self.row()["merge_commit"]), ("merged", "merged-7"))
+
+    def test_a_finished_entry_writes_its_outcome_though_its_ship_row_moved_on(self):
+        """Review round 1: with the outcome write failed, the next intake must not refuse a merged item as unprepared."""
+        self.run_lane(hub=self.failing_hub("merged"))
+        self.prepared(phase="merged")
+        requests_suite.sd_lane.intake(self.hub, self.path)
+        self.assertEqual((self.row()["status"], self.row()["merge_commit"]), ("merged", "merged-7"))
 
 
 if __name__ == "__main__":
