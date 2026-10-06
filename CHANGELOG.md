@@ -445,7 +445,9 @@
   variables `offload_variable` names: `SD_`, `NEXTEST_`, `CARGO_`, `RUST`,
   `PYTHON`, `LC_`, `UV_`, `PIP_`, `NPM_CONFIG_`, `NODE_` and `GIT_CONFIG`
   prefixes, and `CI`, `GITHUB_ACTIONS`, `LANG`, `MAKEFLAGS`, `MAKEFILES`,
-  `MFLAGS` and the `XDG_` config, cache and state folders. A credential-named
+  `MFLAGS`, the C compiler, flag and SDK variables (`CC`, `CFLAGS`,
+  `LDFLAGS`, `SDKROOT` and their kin) and the `XDG_` config, cache and state
+  folders. A credential-named
   variable stays out even under a prefix. Per-login and per-session values
   such as `__CF_USER_TEXT_ENCODING`, `SSH_AUTH_SOCK` and `TMPDIR` no longer
   hand a satellite's receipt back with `satellite_binding`, and no value or

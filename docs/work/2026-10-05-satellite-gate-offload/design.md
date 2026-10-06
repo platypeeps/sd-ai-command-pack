@@ -188,6 +188,8 @@ digest of a short password can be guessed offline.
 | `CI`, `GITHUB_ACTIONS` | `sd_gate_slots.configured` takes no slot under either |
 | `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME` | where `machine_settings`, `sd_gate_cache.cache_root` and `sd_gate_slots.directory` look |
 | `MAKEFLAGS`, `MAKEFILES`, `MFLAGS` | what `make` runs |
+| `CC`, `CXX`, `CPP`, `AR`, `CFLAGS`, `CXXFLAGS`, `CPPFLAGS`, `LDFLAGS`, `LDLIBS`, `PKG_CONFIG_PATH` | the compiler and flags `make`'s implicit rules and a build script use: `CFLAGS=-DNDEBUG` runs other tests |
+| `MACOSX_DEPLOYMENT_TARGET`, `SDKROOT`, `DEVELOPER_DIR` | the SDK and toolchain `xcrun` and `cc` choose |
 | `NEXTEST_`, `CARGO_`, `RUST` | a Rust check: `RUSTFLAGS`, `RUSTUP_TOOLCHAIN`, `RUST_TEST_THREADS`, `CARGO_HOME` |
 | `PYTHON` | the interpreter: `PYTHONHASHSEED`, `PYTHONWARNINGS`, `PYTHONUTF8` |
 | `LANG`, `LC_` | the locale |

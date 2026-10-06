@@ -135,6 +135,13 @@ class OffloadView(unittest.TestCase):
         self.assertEqual(sd_gate_receipts.offload_miss(self.view("sat"), self.view("hub", RUSTFLAGS="-Dwarnings")),
                          {"part": "variables", "name": "RUSTFLAGS"})
 
+    def test_a_compiler_or_its_flags_miss(self) -> None:
+        """Review round 1: `make`'s implicit rules read these, so `CFLAGS=-DNDEBUG` runs other tests."""
+        for name, value in (("CC", "gcc-15"), ("CFLAGS", "-DNDEBUG"), ("LDFLAGS", "-L/opt/lib"), ("SDKROOT", "/sdk")):
+            with self.subTest(name=name):
+                self.assertEqual(sd_gate_receipts.offload_miss(self.view("sat"), self.view("hub", **{name: value})),
+                                 {"part": "variables", "name": name})
+
     def test_a_credential_is_neither_compared_nor_stored(self) -> None:
         """sd:2782 L6: no digest of a credential reaches the view, even under an allowlisted prefix."""
         theirs = self.view("sat", GITHUB_TOKEN="x", CARGO_REGISTRY_TOKEN="y")

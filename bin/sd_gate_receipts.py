@@ -131,10 +131,13 @@ OFFLOAD_TOOLS = ("sh", "bash", "make", "python3", "git", "cc", "c++", "clang", "
 OFFLOAD_HOME_FILES = (".gitconfig", ".config/git/config", ".cargo/config.toml", ".npmrc", ".config/pip/pip.conf",
                       ".config/uv/uv.toml")
 #: Variables an offload view compares, by name (sd:2782): `CI` and `GITHUB_ACTIONS` choose the slot count
-#: (`sd_gate_slots.configured`); `LANG` the locale; `MAKEFLAGS`, `MAKEFILES` and `MFLAGS` what `make` runs; the
-#: `XDG_` folders where the machine config, slot locks and cargo cache live (`machine_settings`, `directory`, `cache_root`).
-OFFLOAD_VARIABLES = ("CI", "GITHUB_ACTIONS", "LANG", "MAKEFLAGS", "MAKEFILES", "MFLAGS", "XDG_CONFIG_HOME",
-                     "XDG_CACHE_HOME", "XDG_STATE_HOME")
+#: (`sd_gate_slots.configured`); `LANG` the locale; `MAKEFLAGS`, `MAKEFILES` and `MFLAGS` what `make` runs; `CC` to
+#: `DEVELOPER_DIR` the compiler, flags and SDK that `make`'s implicit rules and `xcrun` choose; the `XDG_` folders
+#: where the machine config, slot locks and cargo cache live (`machine_settings`, `directory`, `cache_root`).
+OFFLOAD_VARIABLES = ("CI", "GITHUB_ACTIONS", "LANG", "MAKEFLAGS", "MAKEFILES", "MFLAGS",
+                     "CC", "CXX", "CPP", "AR", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "LDLIBS", "PKG_CONFIG_PATH",
+                     "MACOSX_DEPLOYMENT_TARGET", "SDKROOT", "DEVELOPER_DIR",
+                     "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME")
 #: ... and by prefix: `SD_` the pack's own settings; `NEXTEST_`, `CARGO_` and `RUST` (`RUSTFLAGS`, `RUSTUP_TOOLCHAIN`,
 #: `RUST_TEST_THREADS`) a Rust check; `PYTHON` the interpreter; `LC_` the locale; `UV_`, `PIP_`, `NPM_CONFIG_`, `NODE_`
 #: and `GIT_CONFIG` the bound tools, as their `OFFLOAD_HOME_FILES` do. Any other variable, such as a per-login
