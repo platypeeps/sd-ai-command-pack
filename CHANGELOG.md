@@ -475,6 +475,10 @@
 - **The publish-signal harness test waits on the run, not on a 60 s bound (sd:2826).**
   It waited 60 s for the fixture run to start a child, and failed under gate load.
   The run now writes a sentinel inside the publish window and holds it until the test releases it.
+- **A satellite reruns a read-only `sd` verb itself after its `sd_db` self-install (sd:2845, pack part).**
+  `sd today`, `sd store items`, `sd store item` and `sd task show` call `sd_db.self_install.declare_replayable()`.
+  `REPLAYABLE` in `bin/sd` lists them: each reads the hub and does no local work with effects before its first session.
+  Every other verb keeps the manual rerun. An `sd_db` without the call runs the verb as before.
 
 - **`sd-status` no longer reports `branch-unresolvable` on a done item (sd:2729).**
   A merge deletes the squashed branch, so a done item's `branch` is history, not a fault to repair.
