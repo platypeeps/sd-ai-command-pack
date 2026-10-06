@@ -1934,7 +1934,7 @@ def review(
         if (not isinstance(previous, dict) or previous.get("scope") != "branch"
                 or not isinstance(previous.get("subject"), dict)
                 or (verify and previous["subject"].get("head") != args.base)
-                or (verify and previous.get("status") not in ("clean", "advisory", "blocking"))
+                or (verify and previous.get("status") not in ("clean", "advisory", "blocking", "gate_failed"))  # sd:2721
                 or not isinstance(previous.get("findings"), list)
                 or any(not isinstance(row, dict) or not isinstance(row.get("path"), str) for row in previous["findings"])
                 or not isinstance(previous.get("authored_with"), list)
@@ -2177,7 +2177,7 @@ def after_gate(result: dict[str, Any], root: pathlib.Path, args: argparse.Namesp
                chosen: Sequence[sd_registry.Provider]) -> dict[str, Any]:
     """The gate's verdict over a review that cleared: a failure, inputs it changed, or the review as it stands."""
     if result["check"]["status"] == "fail":
-        result["status"] = "gate_failed"
+        result["status"], result["cleared_status"] = "gate_failed", result["status"]  # sd:2721: sd-ship restores it
         return result
     changed = changed_review_input(root, args, previous, env, before, overheads)
     if changed is not None:
