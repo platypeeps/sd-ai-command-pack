@@ -1403,7 +1403,7 @@ CLASSES = (
     Class("in-progress-without-branch", "w", True, 10, "work item",
           "status: in_progress with no branch: field to work on"),
     Class("branch-unresolvable", "w", True, 10, "work item + git",
-          "a branch: field naming a ref no local or remote head carries"),
+          "a non-done item's branch: field naming a ref no local or remote head carries"),
     Class("status-unreadable", "w", True, 10, "work item",
           "an item whose authoritative source will not yield a status"),
     Class("unresolved-concern", "c", True, 20, "## Review ledger",
@@ -2044,7 +2044,9 @@ def _work_rows(
                 f"{where} is in_progress with no branch: field",
                 f"set branch: in {where}/prd.md to the branch carrying this work",
             ))
-        if branch and heads is not None and branch not in heads:
+        # Not on a done item: its merge deleted the squashed branch, so the
+        # field is history, and neither repair below applies (sd:2729).
+        if branch and status != "done" and heads is not None and branch not in heads:
             rows.append(_row(
                 "branch-unresolvable", item, slug,
                 f"{where} names branch {branch}, which no local or remote head has",

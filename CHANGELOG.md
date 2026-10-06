@@ -458,6 +458,9 @@
 
 ### Fixed
 
+- **`sd-status` no longer reports `branch-unresolvable` on a done item (sd:2729).**
+  A merge deletes the squashed branch, so a done item's `branch` is history, not a fault to repair.
+
 - **A fixture gate in `test_sd_local_gate` no longer joins the machine's gate queue (sd:2735).**
   `Repository.setUp` sets `SD_GATE_SLOTS_DIR` and `XDG_STATE_HOME` to the
   test's own folder. Run directly, outside `sd gate check`, the suite took
