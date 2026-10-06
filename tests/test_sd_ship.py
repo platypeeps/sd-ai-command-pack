@@ -3636,7 +3636,7 @@ roles:
         head = _git(self.root, "rev-parse", "HEAD")
         operation.check_review(head)
         local.symlink_to(self.root / "missing-config")
-        with self.assertRaises(OSError):
+        with self.assertRaisesRegex(ship.sd_lib.ConfigError, "dangling local configuration link"):
             operation.check_review(head)
         self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
 
@@ -3650,10 +3650,14 @@ roles:
         self.assertNotEqual(ship.binding(linked), before)
 
     def test_new_review_configuration_invalidates_the_saved_receipt(self):
+        """A key in the block binds; a note outside it does not (sd:2854)."""
         self.prepare()
-        with (self.root / "CLAUDE.local.md").open("a") as stream:
-            stream.write("\nconfiguration changed\n")
-        with self.assertRaisesRegex(ship.Refusal, "policy changed"):
+        local = self.root / "CLAUDE.local.md"
+        with local.open("a") as stream:
+            stream.write("\nconfiguration noted outside the block\n")
+        self.operation().check_review(_git(self.root, "rev-parse", "HEAD"))
+        local.write_text(local.read_text().replace("mode: full", "mode: full\nguest_allow: docs/decisions"))
+        with self.assertRaisesRegex(ship.Refusal, "policy changed after review: CLAUDE.local.md \\(policy\\)$"):
             self.merge()
 
     def set_written_mode(self, word):

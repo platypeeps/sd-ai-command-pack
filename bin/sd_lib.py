@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import datetime
+import hashlib
 import json
 import os
 import pathlib
@@ -515,7 +516,23 @@ def parse_local_block(text: str, label: str = LOCAL_FILE_NAME) -> dict[str, str]
 
 def local_block(root: pathlib.Path) -> dict[str, str]:
     """The repo's local configuration block; missing file or block is `{}`."""
-    path = local_block_path(root)
+    return read_local_block(local_block_path(root))
+
+
+def local_policy_digest(path: pathlib.Path | None) -> str:
+    """sha256 of the parsed block at `path`, keys sorted; None, no file, no block and an empty block are `{}` alike.
+
+    What the review binding and the gate's `inputs` bind of `CLAUDE.local.md`
+    (sd:2854). The file is untracked and per machine, so its comments, layout
+    and lines outside the markers differ between a hub and a satellite with no
+    effect on either; the raw bytes refused every satellite merge.
+    """
+    block = {} if path is None else read_local_block(path)
+    return hashlib.sha256(json.dumps(block, sort_keys=True).encode()).hexdigest()
+
+
+def read_local_block(path: pathlib.Path) -> dict[str, str]:
+    """The local configuration block in the file at `path`; missing file or block is `{}`."""
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:

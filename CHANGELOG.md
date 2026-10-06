@@ -463,12 +463,15 @@
 
 ### Fixed
 
-- **`sd-ship merge --satellite-gate` binds the satellite's `CLAUDE.local.md`, not the hub's (sd:2854).**
-  The file is untracked and per machine, so the hub's copy moved every satellite review's binding.
-  Under the flag the hub carries the receipt's `CLAUDE.local.md` entry; the satellite's prepare bound it.
-  Review tool files, `.github/sd-review.json` and the external-review setting still bind on the hub.
-  A hub-reviewed merge still binds its own copy byte-exact. No stored binding moves.
-  The gate's `inputs` still hash the file's bytes, so copies that differ still refuse at clause 5 or 8.
+- **The review binding and the gate's `inputs` read the parsed `CLAUDE.local.md` block, not its bytes (sd:2854).**
+  The file is untracked and per machine. A hub's copy that differed from a satellite's in comments,
+  layout or lines outside the markers refused every `sd-ship merge --satellite-gate`, first as
+  `review_binding_moved` and then at trust-rule clause 5 or 8. Both now hash `sd_lib.local_policy_digest`:
+  the parsed block, keys sorted. No file, no block and an empty block read alike. A key that differs,
+  such as `mode:` or a declared check command, still refuses on both. `.github/sd-review.json` still binds byte-exact.
+  **Migration:** every stored binding moves once, named as `normalizer changed ... local-block-1`;
+  a review whose replayed request is unchanged is kept, as for any normalizer change.
+  Every stored gate receipt and offload row misses once on `inputs`, and the check runs again.
 
 - **`sd-status` no longer reports `branch-unresolvable` on a done item (sd:2729).**
   A merge deletes the squashed branch, so a done item's `branch` is history, not a fault to repair.

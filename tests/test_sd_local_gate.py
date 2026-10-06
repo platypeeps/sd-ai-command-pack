@@ -32,6 +32,8 @@ import sd_lib  # noqa: E402
 import sd_local_gate  # noqa: E402
 from sd_ship_remote import Refusal  # noqa: E402
 
+BLOCK_START, BLOCK_END = sd_lib.LOCAL_BLOCK_START, sd_lib.LOCAL_BLOCK_END
+
 
 def git(root: pathlib.Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True, text=True).stdout.strip()
@@ -350,9 +352,13 @@ class Gate(Repository):
         self.assertEqual(checked.call_args.kwargs["slot_timeout"], sd_lib.GATE_SLOT_SECONDS)
 
     def test_the_digest_follows_the_local_block(self) -> None:
+        """The parsed block, not the file's bytes: notes outside it and comments in it move nothing (sd:2854)."""
         head = self.commit("check:\n\t@echo ok\n")
         before = sd_local_gate.gate_inputs(self.root, head)
-        (self.root / "CLAUDE.local.md").write_text("check: make other\n", encoding="utf-8")
+        local = self.root / "CLAUDE.local.md"
+        local.write_text(f"an operator note\n{BLOCK_START}\n# a comment\n\n{BLOCK_END}\n", encoding="utf-8")
+        self.assertEqual(sd_local_gate.gate_inputs(self.root, head), before)
+        local.write_text(f"{BLOCK_START}\ncheck: make other\n{BLOCK_END}\n", encoding="utf-8")
         self.assertNotEqual(sd_local_gate.gate_inputs(self.root, head), before)
 
 
@@ -430,7 +436,7 @@ class Receipts(ReceiptFixture):
         """A pack upgrade or a new `CLAUDE.local.md` changes `gate_inputs`, so the receipt no longer binds."""
         head = self.counted()
         self.gate(head)
-        (self.root / "CLAUDE.local.md").write_text("an operator note\n", encoding="utf-8")
+        (self.root / "CLAUDE.local.md").write_text(f"{BLOCK_START}\nnote: an operator note\n{BLOCK_END}\n", encoding="utf-8")
         self.assertNotIn("reused", self.gate(head))
         with mock.patch.object(sd_gate_run, "gate_inputs", return_value="0" * 12):
             self.assertNotIn("reused", self.gate(head))
@@ -630,7 +636,7 @@ class MergeReuse(ReceiptFixture):
         """The untracked `CLAUDE.local.md` may respell `check`; the tree is equal and the command is not."""
         head = self.declare()
         self.prepare(head)
-        (self.root / "CLAUDE.local.md").write_text("## sd-check\n\ncheck: make check MODE=other\n", encoding="utf-8")
+        (self.root / "CLAUDE.local.md").write_text(f"{BLOCK_START}\ncheck: make check MODE=other\n{BLOCK_END}\n", encoding="utf-8")
         merged = self.merge(head)
         self.assertEqual(("reused" in merged, self.runs()), (False, 2))
         self.assertEqual(merged["reuse_miss"]["reason"], "binding")

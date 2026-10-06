@@ -106,8 +106,8 @@ def gate_inputs(root: pathlib.Path, head: str, tree: str | None = None, own: boo
     """A 12-hex digest of what a gate run depends on beyond the commit's own tree; `tree` replaces `head` under a tree key.
     `own`, the pack gating itself, leaves out the checkout's `bin/` (sd:2613); else every pack `bin/` file, or `pack_scope`'s closure (sd:2722)."""
     digest = hashlib.sha256((f"head {head}" if tree is None else f"tree {tree}").encode() + b"\n")
-    local = untracked_local_block(root)
-    digest.update(b"local " + (local.read_bytes() if local else b"absent") + b"\n" + b"pack tree\n" * own)
+    # The parsed block, not its bytes: a hub and a satellite each keep their own copy (sd:2854).
+    digest.update(b"local " + sd_lib.local_policy_digest(untracked_local_block(root)).encode() + b"\n" + b"pack tree\n" * own)
     for path in [] if own else sd_gate_receipts.pack_files(BIN, sd_gate_receipts.pack_scope(root, head)):
         digest.update(f"pack {path.name}\n".encode() + path.read_bytes())
     return digest.hexdigest()[:12]

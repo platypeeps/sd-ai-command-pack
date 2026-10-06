@@ -110,7 +110,7 @@ request-id protocol of sd:1335 step 5 apply as for every `ship:` row.
 | `offload_view` | the portable view of the run's environment (step 2a; "The offload view" below), taken before the run; the satellite's own receipt keeps it, a reuse writes the kept one, and a view that moves during the run writes no row |
 | `pack_bin` | sha256 of the pack `bin/` files that `gate_inputs` hashes, or `"tree"` when the run gated its own tree (`gates_itself`) |
 | `pack_rev` | `git rev-parse HEAD` of the pack checkout, for the refusal text only |
-| `local_block` | sha256 of the copied `CLAUDE.local.md`, or `"absent"` |
+| `local_block` | `sd_lib.local_policy_digest` of the copied `CLAUDE.local.md`: sha256 of its parsed block, keys sorted; no file reads as an empty block (sd:2854) |
 | `reading` | the passing reading, as `record_pass` stores it |
 | `head` | the commit that passed |
 | `recorded_at` | the run's time on the satellite's clock; a reuse keeps the original run's time |
@@ -130,7 +130,7 @@ once step 2a lands.
 | Binding field | Hub compares | Why |
 |---|---|---|
 | `schema`, `reuse`, `head`, `tree`, `fork` | yes | The commit, or the tree and the merge base's tree, that passed |
-| `inputs` | yes | Hashes the head or tree, `CLAUDE.local.md` and the pack `bin/`. Equal inputs mean the same pack and the same local block. `pack_bin` and `local_block` name which part differs |
+| `inputs` | yes | Hashes the head or tree, the parsed block of `CLAUDE.local.md` and the pack `bin/`. Equal inputs mean the same pack and the same local block. `pack_bin` and `local_block` name which part differs |
 | `scope`, `detection` | yes | Pack code over the tree, the local block and the base. A difference means another command ran |
 | `tools` | through `offload_view`, after step 2a | Paths may differ between logins; bytes must not. A tool the hub cannot resolve is recorded, not compared, and named in the merge's provenance |
 | `python` | through `offload_view`'s `python` part: the bytes and version of `sys.executable`, which runs `sd-check`; `python3` on `PATH` stays in `OFFLOAD_TOOLS` | sd:2724 measured equal digests on both machines. On 2026-10-05 all 155 gate receipts in the hub's database since id 29000, the satellite's revision 29982 among them, named one `sys.executable`: Homebrew `python@3.14` 3.14.8, one sha256 |
@@ -139,8 +139,10 @@ once step 2a lands.
 
 The first brief asked for the pack `bin/` digest as the one compared field.
 Comparing `inputs` covers it and adds the `CLAUDE.local.md` digest. That file
-can spell the repository's check, so a different copy means a different
-command. Under the pack's own tree key with `"tool": "tree"`, `inputs` leaves
+can spell the repository's check, so a different block means a different
+command. The digest reads the parsed block, not the file's bytes (sd:2854):
+each machine keeps its own untracked copy, and comments, layout and lines
+outside the markers differ with no effect on the check. Under the pack's own tree key with `"tool": "tree"`, `inputs` leaves
 out `bin/` (sd:2613). There the running pack does not decide what ran, and
 `pack_bin` reads `"tree"` on both sides.
 
