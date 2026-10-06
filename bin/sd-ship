@@ -45,6 +45,7 @@ from sd_ship_review import (
     SharedReview,
     carry_forward,
     is_ancestor,
+    named_commits,
     restart_reason,
 )
 from sd_ship_workflow import blocked, failure
@@ -1457,7 +1458,9 @@ class Ship(SharedReview):
             git(self.root, "merge-base", "--is-ancestor", f"refs/remotes/origin/{base}", head)
         except Refusal:
             notes = "".join(f"; {note}" for note in self.squash_notes(base, head))
-            raise Refusal(f"the branch is behind the current default branch origin/{base}; nothing was reviewed{notes}",
+            missing = named_commits(self.root, f"refs/remotes/origin/{base}", head)
+            raise Refusal(f"the branch is behind the current default branch origin/{base} by {missing}; "
+                          f"nothing was reviewed{notes}",
                           code="base_moved", boundary="ci", state="retryable_failure",
                           next_action=f"Run sd-ship prepare --catch-up, or git merge origin/{base} on the branch "
                                       "and then prepare again.") from None

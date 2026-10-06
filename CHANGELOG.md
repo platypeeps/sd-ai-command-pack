@@ -463,6 +463,13 @@
 
 ### Fixed
 
+- **`sd-ship` names the main commits behind a base refusal (sd:2339).**
+  `prepare` on a branch behind the default branch already refused before any review.
+  Its refusal now names the missing commits: the count and the first three short SHAs.
+  `merge` on a head that differs from the reviewed head only by a clean merge of
+  `origin/<base>` says so, names that merge's main commits, and points to `sd-ship prepare`.
+  `WORKFLOW.md` now says to run `prepare` and `merge` back to back for one item.
+
 - **A gate run from a linked worktree reads the main checkout's `CLAUDE.local.md` (sd:2859).**
   The review reads the main checkout's copy; the gate read the linked worktree's own path, found none,
   and reused its receipt across an edit to the block. The hub then refused the satellite's receipt on `inputs`.
