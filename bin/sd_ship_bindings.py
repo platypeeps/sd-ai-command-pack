@@ -141,6 +141,21 @@ def policy_files(root: pathlib.Path) -> dict:
     return files
 
 
+def carry_local_policy(current: dict, stored: object) -> dict:
+    """`current` with the stored receipt's `CLAUDE.local.md` entry: the hub's `--satellite-gate` merge (sd:2854).
+
+    The file is untracked and per machine. The satellite reviewed under its own
+    copy, and its own prepare refused a copy changed after that review; the
+    hub's copy says nothing about it. Every other entry still binds. A receipt
+    with no such entry carries nothing, so the hub's copy decides and refuses.
+    """
+    policy = stored.get("policy") if isinstance(stored, dict) else None
+    entry = policy.get(sd_lib.LOCAL_FILE_NAME) if isinstance(policy, dict) else None
+    if not isinstance(entry, str):
+        return current
+    return {**current, "policy": {**current["policy"], sd_lib.LOCAL_FILE_NAME: entry}}
+
+
 def binding_manifest(root: pathlib.Path) -> dict:
     """What a receipt stores beside its digest, so a moved binding can name what moved."""
     return {"schema": 2, "normalizer": NORMALIZER, **tool_manifest(), "policy": policy_files(root)}

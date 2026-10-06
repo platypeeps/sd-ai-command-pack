@@ -203,6 +203,18 @@ class PolicyReferenceBinding(unittest.TestCase):
             old["policy"]["external_review_policy"] = bindings.digest({"path": str(scratch / "hub"), "value": "configured"})
             self.assertEqual(bindings.binding_change(old, hub), [("external_review_policy", "policy")])
 
+    def test_a_satellite_merge_carries_only_the_local_file_entry(self):
+        """sd:2854. The satellite's `CLAUDE.local.md` entry replaces the hub's; every other entry still binds,
+        and a receipt with no entry carries nothing, so the hub's copy decides."""
+        current = {"schema": 2, "policy": {"CLAUDE.local.md": "hub", ".github/sd-review.json": "x", "external_review_policy": "v"}}
+        stored = {"schema": 2, "policy": {"CLAUDE.local.md": "satellite", ".github/sd-review.json": "y"}}
+        self.assertEqual(bindings.carry_local_policy(current, stored)["policy"],
+                         {"CLAUDE.local.md": "satellite", ".github/sd-review.json": "x", "external_review_policy": "v"})
+        self.assertEqual(current["policy"]["CLAUDE.local.md"], "hub")
+        for stored in (None, "a schema-1 digest", {}, {"policy": {}}, {"policy": {"CLAUDE.local.md": None}}):
+            with self.subTest(stored=stored):
+                self.assertIs(bindings.carry_local_policy(current, stored), current)
+
     def test_the_protection_reader_is_in_the_review_manifest(self):
         """`sd_protection.py` is what the merge gate reads a ruleset through.
         A change to its bypass or pagination handling must invalidate a

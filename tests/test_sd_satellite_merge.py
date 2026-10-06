@@ -315,6 +315,42 @@ class SatelliteMerge(unittest.TestCase):
         miss = self.merged_gate()["reuse_miss"]
         self.assertEqual(miss["offload"]["code"], "satellite_pack_mismatch")
 
+    # -- sd:2854: the review binding under `--satellite-gate` --
+
+    def hub_copy(self) -> None:
+        """The hub's own untracked `CLAUDE.local.md`, unlike the copy the review ran under.
+
+        The gate's inputs bind the same file's bytes (clauses 5 and 8); this
+        leaves them out on both sides, so the review binding is all that differs.
+        """
+        patcher = patch.object(sd_gate_run, "untracked_local_block", lambda root: None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.inputs = sd_gate_run.gate_inputs(self.root, self.head())
+        self.satellite_pass()
+        self.satellite_status()
+        local = self.root / "CLAUDE.local.md"
+        local.write_text(local.read_text().replace("mode: full", "# the hub's copy\nmode: full")
+                         + "reviewers: a line outside the block\n")
+
+    def test_the_satellite_gate_carries_the_satellites_local_policy_entry(self) -> None:
+        self.hub_copy()
+        self.merge("--satellite-gate")
+        self.assertEqual((self.puts(), self.runs), (1, 0))
+
+    def test_without_the_satellite_gate_the_hubs_local_policy_still_binds(self) -> None:
+        self.hub_copy()
+        refusal = self.refuse("review_binding_moved")
+        self.assertIn("CLAUDE.local.md (policy)", str(refusal))
+
+    def test_the_satellite_gate_still_binds_the_tracked_review_policy(self) -> None:
+        self.hub_copy()
+        with (self.root / ".git/info/exclude").open("a") as stream:  # a clean checkout, so the binding decides
+            stream.write("\n.github/sd-review.json\n")
+        (self.root / ".github" / "sd-review.json").write_text("{}")
+        refusal = self.refuse("review_binding_moved", "--satellite-gate")
+        self.assertTrue(str(refusal).endswith(": .github/sd-review.json (policy)"), str(refusal))
+
     def test_a_repository_not_opted_in_merges_as_before(self) -> None:
         self.satellite_pass()
         self.satellite_status()

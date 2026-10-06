@@ -439,10 +439,25 @@ class SharedReview:
         Called only once the digests differ: the digest decides, and this
         names. Gate and check entries ride along, marked, never decisive.
         """
+        current = self.current_manifest()
+        if current is None:
+            return []
+        return sd_ship_bindings.binding_change(self.state.get("binding_manifest"), current)
+
+    def current_manifest(self) -> dict | None:
+        """This checkout's manifest; under `--satellite-gate`, with the satellite's `CLAUDE.local.md` entry (sd:2854)."""
         manifest = getattr(self.runtime, "manifest", None)
         if manifest is None:
-            return []
-        return sd_ship_bindings.binding_change(self.state.get("binding_manifest"), manifest(self.root))
+            return None
+        current = manifest(self.root)
+        if getattr(self.args, "satellite_gate", False):
+            current = sd_ship_bindings.carry_local_policy(current, self.state.get("binding_manifest"))
+        return current
+
+    def current_binding(self) -> str:
+        """The digest `binding` is compared with; `current_manifest`'s under `--satellite-gate`."""
+        current = self.current_manifest() if getattr(self.args, "satellite_gate", False) else None
+        return self.runtime.binding(self.root) if current is None else sd_ship_bindings.manifest_digest(current)
 
     def binding_refusal(self) -> Refusal:
         detail = sd_ship_bindings.describe_change(self.binding_changes())
@@ -473,7 +488,7 @@ class SharedReview:
         return self._binding_moved
 
     def binding_holds(self) -> bool:
-        return self.state.get("binding") == self.runtime.binding(self.root) or self.request_unchanged()
+        return self.state.get("binding") == self.current_binding() or self.request_unchanged()
 
     def request_unchanged(self) -> bool:
         """sd:1397, option E: only review code moved, and the reviewers would be asked the same.
@@ -487,15 +502,15 @@ class SharedReview:
         """
         passes = self.history.native(self.state)
         request = (passes[-1].get("review_request") if passes else None) or {}
-        changed, manifest = self.binding_changes(), getattr(self.runtime, "manifest", None)
-        if (manifest is None or not request.get("sha256") or not changed
+        changed, current = self.binding_changes(), self.current_manifest()
+        if (current is None or not request.get("sha256") or not changed
                 or any(kind not in ("verdict", "gate", "check") or name in sd_ship_bindings.FINDING_FILES
                        for name, kind in changed)
                 or self.replayed_request(passes, request) != request["sha256"]):
             return False
         kept = {"head": passes[-1].get("head"), "recorded_at": self.runtime.clock(), "superseded_binding": self.state.get("binding"),
                 "changed": [list(row) for row in changed], "request_sha256": request["sha256"]}
-        self.save(binding=self.runtime.binding(self.root), binding_manifest=manifest(self.root),
+        self.save(binding=self.current_binding(), binding_manifest=current,
                   review_binding_kept=[*(self.state.get("review_binding_kept") or []), kept])
         return True
 
