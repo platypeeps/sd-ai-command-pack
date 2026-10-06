@@ -1162,12 +1162,17 @@
 
 ### Changed
 
-- **A gate receipt binds only the pack files `sd-check` imports (sd:2722).**
-  `gate_inputs`, and the offload receipt's `pack_bin` with it, hashed every
-  pack `bin/` file, so a pack landing voided another repository's receipt
-  still in flight. They now hash `sd-check` and its import closure, nested
-  imports and `sd_lib.sibling` loads included. A closure that cannot be read
-  hashes every file, as before. The pack gating itself still binds its tree.
+- **A repository may bind only the pack files `sd-check` imports (sd:2722).**
+  `gate_inputs`, and the offload receipt's `pack_bin` with it, hash every
+  pack `bin/` file, so a pack landing voids another repository's receipt
+  still in flight. A tree whose `.github/sd-gate-reuse.json` adds
+  `"pack": "sd-check"` declares that its check runs no other pack command;
+  its receipts then hash `sd-check` and its import closure, nested imports
+  and `sd_lib.sibling` loads included. Without the field every file binds,
+  because a check may run `sd-docs-lint` or another pack command from
+  `PATH` and the binding names only the command it starts. A closure that
+  cannot be read hashes every file. The pack gating itself still binds its
+  tree.
 
 - **`sd-docs-lint`'s claim-support reading is on by default, through the local
   Kev only (sd:2762).** A repository without `.github/sd-docs-lint.json`, or

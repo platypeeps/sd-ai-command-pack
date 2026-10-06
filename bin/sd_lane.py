@@ -574,8 +574,9 @@ def publish_pack(hub: Hub) -> str:
 
     key = sd_gate_receipts.PACK_PREFIX + hub.slug
     try:
-        # A pack gating itself binds its tree, not this bin/, so it publishes what its receipts hold (sd:2613).
-        digest = sd_gate_receipts.pack_bin(sd_gate_receipts.gates_itself(hub.main, hub.main, BIN))
+        # A pack gating itself binds its tree, not this bin/, so it publishes what its receipts hold (sd:2613, sd:2722).
+        digest = sd_gate_receipts.pack_bin(sd_gate_receipts.gates_itself(hub.main, hub.main, BIN),
+                                           sd_gate_receipts.pack_scope(hub.main, "HEAD"))
         revision, _ = hub.store.read(hub.connection, key)
         hub.store.save(hub.connection, key, revision, {"writer": "sd-lane", "pack_bin": digest, "published_at": stamp_now(),
                                                        "pack_rev": lane_git(BIN.parent, "rev-parse", "HEAD")})

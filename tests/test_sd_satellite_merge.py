@@ -256,7 +256,7 @@ class SatelliteMerge(unittest.TestCase):
         with patch.object(sd_gate_receipts, "gates_itself", lambda *_: True):
             self.satellite_pass()
             posted = self.satellite_prepare()["offload_status"]["description"]
-            with patch.object(sd_gate_receipts, "pack_files", lambda folder: []):  # the hub's installed pack differs
+            with patch.object(sd_gate_receipts, "pack_files", lambda folder, closure=False: []):  # the hub's installed pack differs
                 self.merge("--satellite-gate")
         self.assertTrue(posted.startswith(f"{self.head()[:12]} inputs {sd_gate_run.gate_inputs(self.root, self.head(), own=True)}:"))
         self.assertEqual((self.puts(), self.runs), (1, 0))

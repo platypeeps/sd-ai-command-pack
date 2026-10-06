@@ -104,11 +104,12 @@ def untracked_local_block(root: pathlib.Path) -> pathlib.Path | None:
 
 def gate_inputs(root: pathlib.Path, head: str, tree: str | None = None, own: bool = False) -> str:
     """A 12-hex digest of what a gate run depends on beyond the commit's own tree; `tree` replaces `head` under a tree key.
-    `own`, the pack gating itself, leaves out the checkout's `bin/`: the run executes the tree's own (sd:2613)."""
+    `own`, the pack gating itself, leaves out the checkout's `bin/`: the run executes the tree's own (sd:2613).
+    Otherwise it hashes every pack `bin/` file, or `sd-check`'s import closure where `head` declares it (`pack_scope`, sd:2722)."""
     digest = hashlib.sha256((f"head {head}" if tree is None else f"tree {tree}").encode() + b"\n")
     local = untracked_local_block(root)
     digest.update(b"local " + (local.read_bytes() if local else b"absent") + b"\n" + b"pack tree\n" * own)
-    for path in [] if own else sd_gate_receipts.pack_files(BIN):
+    for path in [] if own else sd_gate_receipts.pack_files(BIN, sd_gate_receipts.pack_scope(root, head)):
         digest.update(f"pack {path.name}\n".encode() + path.read_bytes())
     return digest.hexdigest()[:12]
 
@@ -185,7 +186,7 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
             answer, miss = sd_gate_receipts.from_receipts(database, gated, identity, reuse=reuse, record=record, offload=offload)
             if answer is not None:
                 return {"head": gate_git(tree, "rev-parse", "HEAD"), **answer}
-            warning = sd_gate_receipts.pack_warning(database, root, own) if record and database else None
+            warning = sd_gate_receipts.pack_warning(database, root, head, own) if record and database else None
             argv = [sys.executable, str((tree / "bin" if own else BIN) / "sd-check"), "--json", "--timeout", str(timeout),
                     *(["--base", base] if base else []), *(["--slot-timeout", str(slot_timeout)] * (slot_timeout > 0))]
             with sd_gate_cache.cargo_environment(root, tree, env) as child:

@@ -269,7 +269,7 @@ class PackDigest(Requests):
         return receipts.read(self.connection, sd_lane_receipts().PACK_PREFIX + SLUG)[1]
 
     def test_a_run_publishes_the_hubs_pack_digest_at_its_start(self) -> None:
-        with mock.patch.object(sd_lane_receipts(), "pack_bin", lambda own=False: "tree" if own else "f" * 64):
+        with mock.patch.object(sd_lane_receipts(), "pack_bin", lambda own=False, closure=False: "tree" if own else "f" * 64):
             answer = sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate, hub=self.hub)
         self.assertEqual(answer["pack"], "published")
         row = self.pack_row()
