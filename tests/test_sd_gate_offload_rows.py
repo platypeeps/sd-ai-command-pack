@@ -439,7 +439,8 @@ class BindingSplit(SatelliteFixture):
         part = sd_gate_receipts.tree_binding(tree, self.head, "i" * 12, None)
         assert whole is not None and part is not None
         self.assertEqual(set(part), set(sd_gate_receipts.TREE_FIELDS))
-        self.assertEqual(set(whole) - set(part), {"tools", "python", "environment_sha256", "threads", "environment_mode"})
+        self.assertEqual(set(whole) - set(part), {"tools", "python", "environment_sha256", "threads", "machine",
+                                                  "environment_mode"})
         self.assertEqual({name: whole[name] for name in part}, part)
 
     def test_the_tree_part_needs_no_tool_on_path(self) -> None:

@@ -458,6 +458,19 @@
 
 ### Fixed
 
+- **A hub never reuses a gate receipt another machine wrote (sd:2796).**
+  A satellite's own receipts land in the hub's database, and with the same
+  login and checkout path their key is the hub's. The binding now names the
+  machine (`machine`, the host name), so such a receipt misses with
+  `reuse_miss` field `machine` and the check runs. Receipts written before
+  this change miss once on the new field.
+- **A satellite refuses `sd-ship merge` and the lane's queue verbs before it reads a row (sd:2795).**
+  `sd-ship merge` on a satellite read the `ship:` row and the hold, then
+  refused at the ship lock. Every writing verb but `prepare` now refuses
+  first, with `hub_only`. `lane enqueue`, `list`, `cancel`, `move`, `hold`
+  and `release` filled a satellite queue that no `lane run` drains; they now
+  refuse with `hub_only` and name `sd-ship lane request`.
+
 - **A gate's `PATH` drops entries that name no folder, so `sd-review` reuses
   the pass of `sd gate check` at the same head (sd:2772).** fnm's `cd` hook
   prepends a per-shell link to `PATH`; on a machine with no default Node it
@@ -1163,6 +1176,18 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **A repository may bind only the pack files `sd-check` imports (sd:2722).**
+  `gate_inputs`, and the offload receipt's `pack_bin` with it, hash every
+  pack `bin/` file, so a pack landing voids another repository's receipt
+  still in flight. A tree whose `.github/sd-gate-reuse.json` adds
+  `"pack": "sd-check"` declares that its check runs no other pack command;
+  its receipts then hash the import closure of `sd-check` and of the gate's
+  own `sd_gate_run`, nested imports and `sd_lib.sibling` loads included. Without the field every file binds,
+  because a check may run `sd-docs-lint` or another pack command from
+  `PATH` and the binding names only the command it starts. A closure that
+  cannot be read hashes every file. The pack gating itself still binds its
+  tree.
 
 - **A gate that fails after a cleared review keeps the review pass (sd:2721).**
   This reverses sd:2605's release for that case. `sd-review` records the

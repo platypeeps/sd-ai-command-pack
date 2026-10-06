@@ -18,7 +18,9 @@ The binding is what this module can name about a run, and nothing weaker:
   fork         under a tree key, the tree of the merge base with the base branch;
   inputs       `sd_gate_run.gate_inputs`: the head (or tree), the copied untracked
                `CLAUDE.local.md` (or its absence) and every pack `bin/` file,
-               so a pack upgrade reruns the check;
+               or only those `sd-check` imports where the tree declares it
+               (`pack_files`, `pack_scope`, sd:2722), so a pack upgrade reruns
+               the check;
   scope        the `sd_check_scope` decision, with its merge base (its tree under a tree key);
   commands     the detected entrypoints and the detection source;
   tools        path and bytes of each command's executable on the gate's PATH;
@@ -30,6 +32,7 @@ The binding is what this module can name about a run, and nothing weaker:
                machine's slot count (`sd_gate_slots.thread_caps`, sd:2726).
                The precheck runs on the environment as given, so both bind:
                a new slot count that changes the caps runs the check once more.
+  machine      the host name of the machine that ran it (sd:2796).
 
 The environment is bound whole because the gate forwards it whole: any
 variable may choose what a check runs, and a hand-kept list of the ones that
@@ -95,6 +98,7 @@ cannot be read never grants a pass.
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 import hashlib
 import itertools
@@ -129,6 +133,9 @@ REUSE_DECLARATION = ".github/sd-gate-reuse.json"
 REUSE_FIELDS = {"schema_version", "key", "reason"}
 #: Optional in the declaration: `"tool": "tree"` says the gate runs this tree's own `bin/sd-check` (sd:2613).
 TOOL_FIELD = "tool"
+#: Optional too: `"pack": "sd-check"` says the check runs no pack command but `sd-check`, so the gate binds
+#: `sd-check`'s import closure, not every pack `bin/` file (`pack_scope`, sd:2722).
+PACK_FIELD = "pack"
 #: Names whose bytes an offload view binds (sd:2704): what a check reaches through `make` or a script.
 OFFLOAD_TOOLS = ("sh", "bash", "make", "python3", "git", "cc", "c++", "clang", "cargo", "rustc", "node", "npm", "uv")
 #: Tool configuration under `HOME` that an offload view binds, by path relative to `HOME`.
@@ -179,7 +186,7 @@ def keyed_by_tree(tree: pathlib.Path) -> bool:
         value = json.loads((tree / REUSE_DECLARATION).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
-    return (isinstance(value, dict) and set(value) - {TOOL_FIELD} == REUSE_FIELDS and value["schema_version"] == 1
+    return (isinstance(value, dict) and set(value) - {TOOL_FIELD, PACK_FIELD} == REUSE_FIELDS and value["schema_version"] == 1
             and value["key"] == "tree" and isinstance(value["reason"], str) and bool(value["reason"].strip()))
 
 
@@ -202,6 +209,20 @@ def gates_itself(root: pathlib.Path, tree: pathlib.Path, pack: pathlib.Path) -> 
     if not mine or not theirs:
         return False
     return pathlib.Path(mine).resolve() == pathlib.Path(theirs).resolve()
+
+
+def pack_scope(root: pathlib.Path, head: str) -> bool:
+    """True when `head`'s `REUSE_DECLARATION` names `"pack": "sd-check"`: its check runs no other pack command (sd:2722).
+
+    A check may run any pack command, such as `sd-docs-lint` from `PATH`, and the binding names only the
+    command it starts. So the gate binds every pack `bin/` file unless the reviewed tree says otherwise;
+    anything short of exactly that field, under schema 1, keeps every file.
+    """
+    try:
+        value = json.loads(sd_lib.git_output(["show", f"{head}:{REUSE_DECLARATION}"], root) or "")
+    except ValueError:
+        return False
+    return isinstance(value, dict) and value.get("schema_version") == 1 and value.get(PACK_FIELD) == "sd-check"
 
 
 def tree_key(tree: pathlib.Path, base: str | None) -> tuple[str, str] | tuple[None, None]:
@@ -279,7 +300,11 @@ def binding_commands(part: Mapping[str, Any]) -> list[list[str]]:
 
 
 def machine_binding(tree: pathlib.Path, commands: list[list[str]], env: Mapping[str, str]) -> dict[str, Any]:
-    """`tools`, `python`, `environment_sha256` and `threads`: this machine's half of `gate_binding`; raises when a tool does not resolve."""
+    """`tools`, `python`, `environment_sha256`, `threads` and `machine`: this machine's half of `gate_binding`; raises when a tool does not resolve.
+
+    `machine` is the host name, as `satellite_identity` writes it: a satellite's own receipts land in the hub's
+    database, under the hub's key when the login and checkout path match, and the hub never reuses one (sd:2796).
+    """
     tools = [sd_check_receipts.tool_identity(argv[0], env, tree) for argv in commands]
     for tool in tools:  # the worktree is temporary; name a tool inside it by its place in the tree
         path = pathlib.Path(tool["path"])
@@ -288,7 +313,8 @@ def machine_binding(tree: pathlib.Path, commands: list[list[str]], env: Mapping[
     python = pathlib.Path(sys.executable).resolve()
     return {"tools": tools, "python": {"path": str(python), "version": sys.version,
                                        "sha256": sd_check_receipts.file_digest(python)},
-            "environment_sha256": _digest(dict(env)), "threads": sd_gate_slots.thread_caps(env)}
+            "environment_sha256": _digest(dict(env)), "threads": sd_gate_slots.thread_caps(env),
+            "machine": socket.gethostname()}
 
 
 def offload_view(environment: Mapping[str, str], names: Iterable[str] = ()) -> dict[str, Any] | None:
@@ -462,21 +488,61 @@ def offload_key(slug: str, head: str, tree: str | None = None) -> str:
     return OFFLOAD_PREFIX + _digest([slug, head] if tree is None else [slug, "tree", tree])
 
 
-def pack_bin(own: bool = False) -> str:
-    """sha256 of the pack `bin/` files `gate_inputs` hashes, or "tree" when the run gates its own tree (sd:2613)."""
+def pack_bin(own: bool = False, closure: bool = False) -> str:
+    """sha256 of the pack `bin/` files `gate_inputs` hashes, or "tree" when the run gates its own tree (sd:2613).
+
+    `closure` is `pack_scope`'s answer for the gated head.
+    """
     import sd_gate_run  # noqa: PLC0415 -- it imports this module
 
     if own:
         return "tree"
     digest = hashlib.sha256()
-    for path in pack_files(sd_gate_run.BIN):
+    for path in pack_files(sd_gate_run.BIN, closure):
         digest.update(f"pack {path.name}\n".encode() + path.read_bytes())
     return digest.hexdigest()
 
 
-def pack_files(folder: pathlib.Path) -> list[pathlib.Path]:
-    """The pack `bin/` files in `folder` a run depends on; `gate_inputs` and `pack_bin` hash these."""
-    return [path for path in sorted(folder.iterdir()) if path.is_file() and (path.suffix == ".py" or path.name.startswith("sd-"))]
+#: Where `pack_files`' closure starts: `sd-check`, which runs the check, and `sd_gate_run`, the gate that sets up
+#: its worktree and environment (`cargo_environment`) through `sd_gate_receipts` and `sd_gate_cache` (sd:2722).
+CLOSURE_ROOTS = ("sd-check", "sd_gate_run.py")
+
+
+def pack_files(folder: pathlib.Path, closure: bool = False) -> list[pathlib.Path]:
+    """The pack `bin/` files in `folder` a run depends on; `gate_inputs` and `pack_bin` hash these.
+
+    Every one, or with `closure` (`pack_scope`) only what each of `CLOSURE_ROOTS` imports, at any depth, or loads
+    with `sd_lib.sibling` (sd:2722): the run then executes nothing else from the pack, so a landing elsewhere in
+    `bin/` voids no receipt. A closure that cannot be read, such as a file that does not parse, is every pack file.
+    """
+    every = [path for path in sorted(folder.iterdir()) if path.is_file() and (path.suffix == ".py" or path.name.startswith("sd-"))]
+    if not closure:
+        return every
+    found: set[pathlib.Path] = set()
+    todo = [folder / name for name in CLOSURE_ROOTS]
+    try:
+        while todo:
+            path = todo.pop()
+            if path not in found:
+                found.add(path)
+                todo += [folder / name for name in loaded_names(path) if (folder / name).is_file()]
+    except (OSError, SyntaxError, ValueError):
+        return every
+    return [path for path in every if path in found]
+
+
+def loaded_names(path: pathlib.Path) -> list[str]:
+    """The `bin/` file names the Python file at `path` imports or loads with `sd_lib.sibling`; raises when it does not parse."""
+    names = []
+    for node in ast.walk(ast.parse(path.read_bytes(), str(path))):
+        if isinstance(node, ast.Import):
+            names += [f"{alias.name.partition('.')[0]}.py" for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+            names.append(f"{node.module.partition('.')[0]}.py")
+        elif (isinstance(node, ast.Call) and getattr(node.func, "attr", getattr(node.func, "id", None)) == "sibling"
+              and len(node.args) == 2 and isinstance(node.args[1], ast.Constant)):
+            names.append(str(node.args[1].value))
+    return names
 
 
 def pack_rev() -> str | None:
@@ -515,7 +581,7 @@ def read_offload(database: pathlib.Path | None, key: str) -> tuple[int, dict[str
     return revision, row if isinstance(row, dict) else {}
 
 
-def pack_warning(database: pathlib.Path | None, root: pathlib.Path, own: bool) -> str | None:
+def pack_warning(database: pathlib.Path | None, root: pathlib.Path, head: str, own: bool) -> str | None:
     """On an opted-in satellite, warn on stderr why the hub's merge would refuse this run's receipt as another pack.
 
     It compares with the digest the hub's lane last published. A warning only: the hub's pack can still
@@ -532,7 +598,7 @@ def pack_warning(database: pathlib.Path | None, root: pathlib.Path, own: bool) -
     except Exception:
         return None
     published = published if isinstance(published, dict) else {}
-    theirs, ours = published.get("pack_bin"), pack_bin(own)
+    theirs, ours = published.get("pack_bin"), pack_bin(own, pack_scope(root, head))
     if not theirs or theirs == ours:
         return None
     warning = (f"this pack's bin/ digest {ours[:12]} (rev {str(pack_rev())[:12]}) is not the hub's {str(theirs)[:12]} "
@@ -568,7 +634,7 @@ def record_offload(database: pathlib.Path | None, run: Worktree, identity: Mappi
             from sd_db import ship  # noqa: PLC0415
             revision, existing = ship.read(connection, key)
             row = {"writer": OFFLOAD_WRITER, "satellite": satellite_identity(), "hub": hub, "binding": dict(identity),
-                   "offload_view": view, "pack_bin": pack_bin(run.own), "pack_rev": pack_rev(),
+                   "offload_view": view, "pack_bin": pack_bin(run.own, pack_scope(run.root, run.head)), "pack_rev": pack_rev(),
                    "local_block": _content_digest(local) if local else "absent", "reading": dict(reading),
                    "head": run.head, "recorded_at": time.time() if recorded_at is None else recorded_at}
             # Only the same row stands; any other is one the hub may refuse. The store adds `protocol`.
@@ -597,7 +663,7 @@ def examine_offload(database: pathlib.Path | None, run: Worktree,
     part = tree_binding(run.tree, run.head, run.inputs, run.base, run.fork)
     view = run.view(part) if part else None
     hub_now = time.time() if now is None else now
-    refused = (invalid_offload(row, revision) or pack_mismatch(row, run.own) or binding_mismatch(row, part, view, run.mode)
+    refused = (invalid_offload(row, revision) or pack_mismatch(row, run.own, pack_scope(run.root, run.head)) or binding_mismatch(row, part, view, run.mode)
                or expired_offload(row, hub_now))
     if refused:
         return None, refused
@@ -631,7 +697,7 @@ def standing_offload(database: pathlib.Path | None, root: pathlib.Path, head: st
         binding = binding if isinstance(binding, dict) else {}
         inputs = sd_gate_run.gate_inputs(root, head, content, own)
         refused = (({"reason": f"no row at {key}"} if not row else None) or invalid_offload(row, revision)
-                   or pack_mismatch(row, own) or expired_offload(row, time.time() if now is None else now)
+                   or pack_mismatch(row, own, pack_scope(root, head)) or expired_offload(row, time.time() if now is None else now)
                    or (None if binding.get("inputs") == inputs else
                        {"reason": f"the row binds inputs {binding.get('inputs')}, not this checkout's {inputs}"}))
         if refused is None:
@@ -659,9 +725,9 @@ def invalid_offload(row: Mapping[str, Any], revision: int) -> dict[str, str] | N
             f"host with a tailnet login and address{f': {error}' if error else ''}"[:300]}
 
 
-def pack_mismatch(row: Mapping[str, Any], own: bool) -> dict[str, str] | None:
+def pack_mismatch(row: Mapping[str, Any], own: bool, closure: bool = False) -> dict[str, str] | None:
     """Clause 6, the named case of clause 5: the satellite's pack `bin/` digest is the hub's."""
-    ours, theirs = pack_bin(own), row.get("pack_bin")
+    ours, theirs = pack_bin(own, closure), row.get("pack_bin")
     if theirs == ours:
         return None
     return {"code": "satellite_pack_mismatch", "reason": f"the satellite's pack bin/ digest {theirs} "

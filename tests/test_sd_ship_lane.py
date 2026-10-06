@@ -205,11 +205,15 @@ class SatellitePrepare(LaneCase):
         self.assertEqual((row["phase"], row["pull_request"]["number"]), ("ready_to_send", number))
         self.assertEqual((row["invoker"]["lock_holder"], row["invoker"]["served_by"]), (None, self.HUB))
 
-    def test_merge_still_refuses_at_the_lock(self):
+    def test_merge_refuses_before_it_reads_a_row(self):
+        """sd:2795 (sd:2782 L3): merge used to read the ship: and hold rows, then meet HubOnly at the lock."""
         self.assertEqual(self.dispatch("prepare")["phase"], "ready_to_send")
-        with self.assertRaisesRegex(ship.Refusal, "runs on the sd hub only"):
+        with patch.object(ship, "Ship", side_effect=AssertionError("read the ship: row")), \
+                patch.object(ship.sd_ship_hold, "refuse_other", side_effect=AssertionError("read the hold")), \
+                self.assertRaisesRegex(ship.Refusal, f"sd-ship merge runs on the sd hub only; .* {self.HUB}") as refused:
             self.dispatch("merge", "--manual", "--expected-head", self.head())
-        self.assertEqual(self.entered, ["fixture/repo"])
+        self.assertEqual(refused.exception.workflow["blocker"]["code"], "hub_only")
+        self.assertEqual(self.entered, [])
         self.assertEqual(self.puts(), [])
 
     def test_a_merged_records_prepare_reconciles_on_the_hub_only(self):
