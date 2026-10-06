@@ -31,6 +31,24 @@ import sd_lib  # noqa: E402
 
 HUB = "hub.example.test:8769"
 SLUG = "fixture/repo"
+SATELLITE = {"hostname": "satellite.example.test", "login": "fixture@example.test", "address": "192.0.2.10"}
+
+
+def no_real_tailscale(case: unittest.TestCase, scratch: pathlib.Path) -> None:
+    """Name the satellite with fixture values, and fail `case` if anything still runs `tailscale` (sd:2775).
+
+    The real `satellite_identity` asks `tailscale status --json`, and so wrote this machine's names into a row.
+    A stand-in `tailscale` first on PATH leaves a mark; the check at cleanup fails on it.
+    """
+    programs, mark = scratch / "no-tailscale", scratch / "tailscale-ran"
+    programs.mkdir()
+    (programs / "tailscale").write_text(f'#!/bin/sh\necho "$*" >> "{mark}"\nexit 1\n', encoding="utf-8")
+    (programs / "tailscale").chmod(0o755)
+    case.addCleanup(lambda: case.assertFalse(mark.exists(), mark.exists() and f"the real tailscale ran: {mark.read_text()}"))
+    for patcher in (mock.patch.object(sd_gate_receipts, "satellite_identity", lambda: dict(SATELLITE)),
+                    mock.patch.dict(os.environ, {"PATH": f"{programs}{os.pathsep}{os.environ.get('PATH', '')}"})):
+        patcher.start()
+        case.addCleanup(patcher.stop)
 
 
 def git(root: pathlib.Path, *args: str) -> str:
@@ -57,6 +75,7 @@ class SatelliteFixture(unittest.TestCase):
 
         self.database = self.root.parent / "sd.db"
         initialise(self.database)
+        no_real_tailscale(self, self.root.parent)
         self.runs = 0
         self.hub: str | None = HUB
         self.opted = "accept"
@@ -94,7 +113,7 @@ class OffloadRows(SatelliteFixture):
         row, own = self.offload_row(), self.own_row()
         self.assertEqual(row["writer"], "sd-satellite-gate")
         self.assertEqual((row["hub"], row["head"], row["reading"]["status"]), (HUB, self.head, "success"))
-        self.assertTrue(row["satellite"]["hostname"])
+        self.assertEqual(row["satellite"], SATELLITE)
         self.assertEqual(row["binding"], own["binding"])
         self.assertEqual(row["pack_bin"], sd_gate_receipts.pack_bin())
         self.assertEqual(row["local_block"], "absent")
@@ -211,6 +230,16 @@ class OffloadRows(SatelliteFixture):
         self.assertEqual((result["status"], self.runs), ("success", 1))
         self.assertIn("HubUnreachable", result["offload_error"])
         self.assertIn("receipt_error", result)
+
+    def test_a_malformed_hub_configuration_still_passes_and_reports_offload_error(self) -> None:
+        """sd:2776: a fault in `served_by` reaches neither the run nor the receipt; the result names it."""
+        fault = ValueError("malformed hub configuration")
+        with mock.patch("sd_db.database.served_by", side_effect=fault, create=True):
+            result = self.gate()
+        self.assertEqual((result["status"], self.runs), ("success", 1))
+        self.assertEqual(result["offload_error"], "ValueError: malformed hub configuration")
+        self.assertIn("receipt_revision", result)
+        self.assertEqual(self.offload_row(), {})
 
     def test_a_differing_published_pack_digest_warns_before_the_run(self) -> None:
         from contextlib import closing
