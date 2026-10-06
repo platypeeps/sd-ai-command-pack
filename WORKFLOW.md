@@ -475,7 +475,7 @@ which the installer places in `~/.claude/agents`.
   `$XDG_STATE_HOME/sd/gate-slots`, so a dead holder's slot is free at once.
 - **Each gate gets its share of the cores (sd:2726).** The slot count bounds
   how many gates run, not the CPU each uses. Under a cap, a holder sets
-  `CARGO_BUILD_JOBS` and `RUST_TEST_THREADS` in its checks to the cores over
+  `CARGO_BUILD_JOBS`, `RUST_TEST_THREADS` and `NEXTEST_TEST_THREADS` (sd:2872) in its checks to the cores over
   `sd.gate_slots`, at least 1: 8 for 2 slots on 16 cores. A positive value the
   caller set wins when it is lower; a higher one is lowered. The
   `sd gate check` receipt binds these values, because a suite can pass on

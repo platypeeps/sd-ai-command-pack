@@ -117,6 +117,10 @@ R12. Local reuse keeps today's binding, the whole environment included, in
      tools by sha256, named `HOME` configuration files by sha256, and every
      other kept variable by the sha256 of its value. `HOME`, `USER` and the home prefix are
      normalized. A mismatch misses, and `reuse_miss` names the part (C-17).
+     Since sd:2862 only the parts that decide the result miss: the
+     interpreter, the toolchain and the check's own tools, and the steering
+     variables. `PATH` order, other tools, `HOME` files, thread caps and `SD_`
+     settings are named in the merge's `local_gate`, not refused.
 
 R13. A plain `sd-ship merge` in an opted-in repository reuses an offload
      receipt first, and runs the gate only on a miss (sd:2724).

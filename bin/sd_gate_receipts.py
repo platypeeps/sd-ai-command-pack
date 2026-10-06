@@ -55,9 +55,11 @@ repository with `repo.satellite_gate = accept`, a satellite's recorded pass
 also writes an offload receipt, `sd-gate-offload:v1:<key>`, to the hub's
 database, and `sd-ship merge --satellite-gate` on the hub merges on it without
 a run. The hub compares what it can recompute: the tree part of the binding,
-the offload view (`offload_view`: `PATH` order, the bytes of named tools and
-of the interpreter, named files under `HOME`, the thread caps, and a digest of
-each variable on its allowlist, `offload_variable`) and the pack digest. It
+the offload view (`offload_view`) and the pack digest. The view refuses only on
+what decides the result (`offload_differences`, sd:2862): the interpreter, the
+toolchain's bytes and the allowlisted variables but `SD_` and the thread caps.
+`PATH` order, other tools, `HOME` files and the caps it names in the merge's
+`view_differences`, since two real machines always differ in them. It
 never compares the machine part or `environment_sha256`, which hold the
 satellite's login. In an opted-in repository every gate, the hub's and the
 satellite's, runs its check under `offload_environment`, only the variables
@@ -138,6 +140,9 @@ TOOL_FIELD = "tool"
 PACK_FIELD = "pack"
 #: Names whose bytes an offload view binds (sd:2704): what a check reaches through `make` or a script.
 OFFLOAD_TOOLS = ("sh", "bash", "make", "python3", "git", "cc", "c++", "clang", "cargo", "rustc", "node", "npm", "uv")
+#: Of those, the toolchain whose bytes decide a check's result, so a hub refuses on them, as on the check's own names
+#: (sd:2862). Another tool, `PATH`, `HOME` files and thread caps differ between any two machines: recorded, not refused.
+OFFLOAD_DECIDING_TOOLS = ("sh", "bash", "make", "python3", "cc", "c++", "clang", "cargo", "rustc")
 #: Tool configuration under `HOME` that an offload view binds, by path relative to `HOME`.
 OFFLOAD_HOME_FILES = (".gitconfig", ".config/git/config", ".cargo/config.toml", ".npmrc", ".config/pip/pip.conf",
                       ".config/uv/uv.toml")
@@ -299,6 +304,11 @@ def binding_commands(part: Mapping[str, Any]) -> list[list[str]]:
     return [list(argv) for argv in part["detection"]["commands"].values()]
 
 
+def check_names(part: Mapping[str, Any]) -> list[str]:
+    """The executable each of `part`'s commands names: what an offload view binds beside `OFFLOAD_TOOLS`."""
+    return [argv[0] for argv in binding_commands(part)]
+
+
 def machine_binding(tree: pathlib.Path, commands: list[list[str]], env: Mapping[str, str]) -> dict[str, Any]:
     """`tools`, `python`, `environment_sha256`, `threads` and `machine`: this machine's half of `gate_binding`; raises when a tool does not resolve.
 
@@ -411,34 +421,48 @@ def start_view(gated: Worktree, identity: dict[str, Any] | None) -> dict[str, An
     return gated.view(identity) if gated.mode == "offload" and identity else None
 
 
-def offload_miss(theirs: Any, ours: Any) -> dict[str, Any] | None:
-    """None when a satellite's offload view (`theirs`) stands for the hub's (`ours`), else the first difference.
+def offload_differences(theirs: Any, ours: Any, names: Iterable[str] = ()) -> list[dict[str, Any]]:
+    """Every difference between a satellite's offload view (`theirs`) and the hub's (`ours`), as `{"part", "name", "refuses"}`.
 
-    The difference is `{"part", "name"}`: parts compare in the order `path`, `tools`, `python`, `home_files`, `threads`,
-    `variables`,
-    and `name` is the first differing `PATH` entry (the satellite's, or the hub's past the satellite's end), tool, `python` field,
-    file, thread variable or variable. A tool the hub cannot resolve is recorded, not compared; one only the hub resolves
-    misses. A view that is not one, or a part of the wrong shape or missing, misses with no name: a row written
-    before `threads` was bound misses on `threads`.
+    Parts compare in the order `path`, `tools`, `python`, `home_files`, `threads`, `variables`. A difference refuses
+    only where it decides what the check ran (sd:2862): `python`, a tool in `OFFLOAD_DECIDING_TOOLS` or `names` (the
+    check's own executables), and a variable other than the pack's own `SD_` settings and the thread caps a gate
+    holder sets (`sd_gate_slots.CPU_VARIABLES`). `name` is the first differing `PATH` entry (the satellite's, or the
+    hub's past the satellite's end), tool, `python` field, file, thread variable or variable. A tool the hub cannot
+    resolve is not compared. A view that is not one, or a part of the wrong shape or missing, differs with no name.
     """
     if not (isinstance(theirs, dict) and isinstance(ours, dict)):
-        return {"part": "view", "name": None}
+        return [{"part": "view", "name": None, "refuses": True}]
+    deciding = {*OFFLOAD_DECIDING_TOOLS, *names}
+
+    def refuses(part: str, name: str | None) -> bool:
+        if part == "tools":
+            return name is None or name in deciding
+        if part == "variables":
+            return name is None or not (name.startswith("SD_") or name in sd_gate_slots.CPU_VARIABLES)
+        return part == "python"
+
+    found = []
     for part in ("path", "tools", "python", "home_files", "threads", "variables"):
         other: Any = theirs.get(part)
         mine: Any = ours.get(part)
         if not isinstance(other, (list, dict)) or not isinstance(other, type(mine)):
-            return {"part": part, "name": None}
-        if isinstance(other, list):
+            found.append({"part": part, "name": None, "refuses": refuses(part, None)})
+        elif isinstance(other, list):
             if other != mine:
-                return {"part": part, "name": next(entry if entry is not None else own for entry, own
-                                                   in itertools.zip_longest(other, mine) if entry != own)}
-            continue
-        for name in sorted(set(other) | set(mine)):
-            if part == "tools" and mine.get(name) is None:
-                continue
-            if other.get(name) != mine.get(name):
-                return {"part": part, "name": name}
-    return None
+                found.append({"part": part, "name": next(entry if entry is not None else own for entry, own
+                                                         in itertools.zip_longest(other, mine) if entry != own),
+                              "refuses": False})
+        else:
+            found += [{"part": part, "name": name, "refuses": refuses(part, name)} for name in sorted(set(other) | set(mine))
+                      if not (part == "tools" and mine.get(name) is None) and other.get(name) != mine.get(name)]
+    return found
+
+
+def offload_miss(theirs: Any, ours: Any, names: Iterable[str] = ()) -> dict[str, Any] | None:
+    """None when a satellite's offload view (`theirs`) stands for the hub's (`ours`), else its first refusing difference."""
+    return next(({"part": miss["part"], "name": miss["name"]} for miss in offload_differences(theirs, ours, names)
+                 if miss["refuses"]), None)
 
 
 # The offload receipt (sd:2704): a satellite's pass, keyed so the hub computes the same key.
@@ -474,7 +498,7 @@ class Worktree:
 
     def view(self, part: Mapping[str, Any]) -> dict[str, Any] | None:
         """This environment's offload view, binding the executables of `part`'s commands too."""
-        return offload_view(self.environment, [argv[0] for argv in binding_commands(part)])
+        return offload_view(self.environment, check_names(part))
 
 
 def repository_slug(root: pathlib.Path) -> str | None:
@@ -669,9 +693,11 @@ def examine_offload(database: pathlib.Path | None, run: Worktree,
         return None, refused
     unresolved = sorted(name for name, digest in (view or {})["tools"].items()
                         if digest is None and row["offload_view"]["tools"].get(name) is not None)
+    recorded = [{"part": miss["part"], "name": miss["name"]} for miss in offload_differences(row["offload_view"], view)]
     return {"reading": row["reading"], "revision": revision, "satellite": row["satellite"], "hub": row.get("hub"),
             "recorded_at": row["recorded_at"], "age_seconds": round(hub_now - float(row["recorded_at"])),
-            "head": row.get("head"), "unresolved_tools": unresolved, "pack_bin": row["pack_bin"]}, None
+            "head": row.get("head"), "unresolved_tools": unresolved, "view_differences": recorded,
+            "pack_bin": row["pack_bin"]}, None
 
 
 def standing_offload(database: pathlib.Path | None, root: pathlib.Path, head: str,
@@ -751,7 +777,7 @@ def binding_mismatch(row: Mapping[str, Any], part: Mapping[str, Any] | None,
         return {"code": "satellite_binding",
                 "reason": f"the satellite's receipt binds environment_mode {stored.get('environment_mode')}, not offload"}
     fields = list(TREE_FIELDS) if part is None else [name for name in TREE_FIELDS if stored.get(name) != part.get(name)]
-    miss = offload_miss(row.get("offload_view"), view)
+    miss = offload_miss(row.get("offload_view"), view, check_names(part) if part else ())
     if fields:
         named = f"binding fields {', '.join(fields)}"
     elif miss is not None:
@@ -812,7 +838,8 @@ def record_gate_pass(database: pathlib.Path, gated: Worktree, identity: dict[str
     after = gate_binding(gated.tree, gated.head, sd_gate_run.gate_inputs(gated.root, gated.head, gated.content, gated.own),
                                           gated.base, gated.environment, gated.fork, gated.mode)
     key = receipt_key(gated.root, gated.head, gated.content)
-    moved = offload_miss(before, gated.view(identity)) if before is not None else None
+    # Any part, refusing or not: the row keeps the view the run started from, and records it whole (sd:2862).
+    moved = next(iter(offload_differences(before, gated.view(identity))), None) if before is not None else None
     record_unless_moved(database, key, identity, after, reading, gated.head, None if moved else before)  # no reuse exports it
     if "receipt_skipped" in reading:
         return
@@ -833,7 +860,8 @@ def satellite_reading(accepted: dict[str, Any]) -> dict[str, Any]:
         "revision": accepted["revision"], "login": satellite.get("login"), "address": satellite.get("address"),
         "hostname": satellite.get("hostname"), "hub": accepted["hub"], "head": accepted["head"],
         "recorded_at": accepted["recorded_at"], "age_seconds": accepted["age_seconds"],
-        "unresolved_tools": accepted["unresolved_tools"], "pack_bin": accepted["pack_bin"]})
+        "unresolved_tools": accepted["unresolved_tools"], "view_differences": accepted["view_differences"],
+        "pack_bin": accepted["pack_bin"]})
 
 
 def record_unless_moved(database: pathlib.Path, key: str, identity: Mapping[str, Any], after: Mapping[str, Any] | None,

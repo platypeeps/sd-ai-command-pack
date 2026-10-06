@@ -394,6 +394,9 @@ class SlotCount(unittest.TestCase):
         self.assertEqual((held["CARGO_BUILD_JOBS"], held["RUST_TEST_THREADS"]), ("1", str(share)))
         unset = sd_gate_slots.holder_environment({}, 2)
         self.assertEqual((unset["CARGO_BUILD_JOBS"], unset["RUST_TEST_THREADS"]), (str(share), str(share)))
+        # sd:2872: cargo-nextest reads its own variable, not `RUST_TEST_THREADS`, so it ran on every core.
+        self.assertEqual(sd_gate_slots.holder_environment({"NEXTEST_TEST_THREADS": "1"}, 2)["NEXTEST_TEST_THREADS"], "1")
+        self.assertEqual(unset["NEXTEST_TEST_THREADS"], str(share))
         for value in ("0", "-1", "", "two", "٣", str(share)):
             with self.subTest(value=value):
                 self.assertEqual(sd_gate_slots.thread_cap(value, share), value if value == str(share) else str(share))

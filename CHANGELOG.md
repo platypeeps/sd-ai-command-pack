@@ -463,6 +463,18 @@
 
 ### Fixed
 
+- **A hub accepts a satellite's pass across two real machines (sd:2862).**
+  The offload view refused on any difference, and two machines always differ: the hub's launchd job and the
+  satellite's shell order `PATH` apart, `git` and `uv` differ by build, `HOME` files by login, thread caps by core
+  count. It now refuses only on what decides the result: the interpreter, the toolchain's bytes (`sh`, `bash`,
+  `make`, `python3`, `cc`, `c++`, `clang`, `cargo`, `rustc`) and the check's own tools, and the allowlisted
+  variables but the pack's `SD_` settings and the thread caps. The merge's `local_gate` names every other
+  difference in `satellite.view_differences`. Rows written before keep the same view and need no move.
+
+- **A capped gate holder caps cargo-nextest too (sd:2872).**
+  It sets `NEXTEST_TEST_THREADS` to its share beside `RUST_TEST_THREADS`, which nextest ignores, so a nextest
+  suite no longer ran on every core. The receipt binds it, so a Rust repository's next gate runs once more.
+
 - **A gate run from a linked worktree reads the main checkout's `CLAUDE.local.md` (sd:2859).**
   The review reads the main checkout's copy; the gate read the linked worktree's own path, found none,
   and reused its receipt across an edit to the block. The hub then refused the satellite's receipt on `inputs`.
