@@ -442,6 +442,19 @@ class Receipts(ReceiptFixture):
             self.assertNotIn("reused", self.gate(head))
         self.assertEqual(self.runs(), 3)
 
+    def test_a_gate_in_a_linked_worktree_reads_the_main_checkouts_local_block(self) -> None:
+        """sd:2859. The review reads the main checkout's `CLAUDE.local.md`; the gate read the linked worktree's
+        own path, found none, and reused its receipt across an edit to the main checkout's block."""
+        head = self.counted()
+        linked = self.root.parent / "linked"
+        git(self.root, "worktree", "add", "-q", "--detach", str(linked), head)
+        gate = lambda: sd_gate_run.check_in_worktree(linked, head, database=self.database)  # noqa: E731
+        self.assertEqual(gate()["status"], "success")
+        (self.root / "CLAUDE.local.md").write_text(f"{BLOCK_START}\nnote: an edit at the same head\n{BLOCK_END}\n", encoding="utf-8")
+        again = gate()
+        self.assertNotIn("reused", again)
+        self.assertEqual((again["status"], self.runs()), ("success", 2))
+
     def test_another_repository_records_nothing_when_the_pack_moves_mid_run(self) -> None:
         """The child may open the moved pack, so a landing mid-run drops the pass (sd:2612 review), and says so."""
         head = self.counted()

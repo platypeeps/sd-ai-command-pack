@@ -463,6 +463,10 @@
 
 ### Fixed
 
+- **A gate run from a linked worktree reads the main checkout's `CLAUDE.local.md` (sd:2859).**
+  The review reads the main checkout's copy; the gate read the linked worktree's own path, found none,
+  and reused its receipt across an edit to the block. The hub then refused the satellite's receipt on `inputs`.
+
 - **The review binding and the gate's `inputs` read the parsed `CLAUDE.local.md` block, not its bytes (sd:2854).**
   The file is untracked and per machine. A hub's copy that differed from a satellite's in comments,
   layout or lines outside the markers refused every `sd-ship merge --satellite-gate`, first as

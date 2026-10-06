@@ -16,8 +16,8 @@ The binding is what this module can name about a run, and nothing weaker:
   reuse        "head", or "tree" for a declared tree key (below);
   head, tree   the exact commit the worktree held; head is None under a tree key;
   fork         under a tree key, the tree of the merge base with the base branch;
-  inputs       `sd_gate_run.gate_inputs`: the head (or tree), the parsed block of the
-               copied untracked `CLAUDE.local.md` (sd:2854) and every pack `bin/` file,
+  inputs       `sd_gate_run.gate_inputs`: the head (or tree), the parsed block of the main
+               checkout's untracked `CLAUDE.local.md` (sd:2854, sd:2859) and every pack `bin/` file,
                or only those `sd-check` imports where the tree declares it
                (`pack_files`, `pack_scope`, sd:2722), so a pack upgrade reruns
                the check;

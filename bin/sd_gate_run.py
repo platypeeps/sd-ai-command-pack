@@ -95,8 +95,13 @@ def gate_git(root: pathlib.Path, *args: str) -> str:
 
 
 def untracked_local_block(root: pathlib.Path) -> pathlib.Path | None:
-    """The checkout's untracked `CLAUDE.local.md`, the one file the worktree gets copied in."""
-    local = root / LOCAL_BLOCK
+    """The checkout's untracked `CLAUDE.local.md`, the one file the worktree gets copied in.
+
+    The main checkout's, as the review binding and `sd-review` read it: a gate
+    run from a linked worktree read the worktree's own path, found nothing,
+    and reused a receipt across an edit the hub's `inputs` then saw (sd:2859).
+    """
+    local = sd_lib.local_block_path(root)
     if local.is_file() and sd_lib.git_output(["ls-files", "--error-unmatch", LOCAL_BLOCK], root) is None:
         return local
     return None

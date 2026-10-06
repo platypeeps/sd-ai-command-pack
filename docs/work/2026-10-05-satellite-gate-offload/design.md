@@ -142,7 +142,9 @@ Comparing `inputs` covers it and adds the `CLAUDE.local.md` digest. That file
 can spell the repository's check, so a different block means a different
 command. The digest reads the parsed block, not the file's bytes (sd:2854):
 each machine keeps its own untracked copy, and comments, layout and lines
-outside the markers differ with no effect on the check. Under the pack's own tree key with `"tool": "tree"`, `inputs` leaves
+outside the markers differ with no effect on the check.
+The gate reads the main checkout's copy, as the review does, so a gate run
+from a linked worktree binds the same block (sd:2859). Under the pack's own tree key with `"tool": "tree"`, `inputs` leaves
 out `bin/` (sd:2613). There the running pack does not decide what ran, and
 `pack_bin` reads `"tree"` on both sides.
 
