@@ -68,6 +68,8 @@ SATELLITE_REFUSALS = {
     "base_moved": HAND_BACK,
     "satellite_receipt_missing": HAND_BACK,
     "satellite_receipt_invalid": HAND_BACK,
+    "satellite_unidentified": "On the satellite: bring Tailscale up so it names this node and its owner's login. "
+                              + HAND_BACK,
     "satellite_binding": HAND_BACK,
     "satellite_pack_mismatch": "Bring the satellite's pack checkout to the hub's revision. " + HAND_BACK,
     "satellite_receipt_expired": HAND_BACK,

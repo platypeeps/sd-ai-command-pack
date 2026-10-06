@@ -53,11 +53,12 @@ also writes an offload receipt, `sd-gate-offload:v1:<key>`, to the hub's
 database, and `sd-ship merge --satellite-gate` on the hub merges on it without
 a run. The hub compares what it can recompute: the tree part of the binding,
 the offload view (`offload_view`: `PATH` order, the bytes of named tools and
-of the interpreter, named files under `HOME`, and a digest of each other
-variable) and the pack digest. It never compares the machine part or
-`environment_sha256`, which hold the satellite's login. What the satellite's
-machine holds beyond the view, and the satellite's honesty, are trusted as
-the operator's own node: the trust rule in `sd_local_gate` guards against a
+of the interpreter, named files under `HOME`, the thread caps, and a digest of
+each variable on its allowlist, `offload_variable`) and the pack digest. It
+never compares the machine part or `environment_sha256`, which hold the
+satellite's login. What the satellite's machine holds beyond the view -- a
+variable off the allowlist among it -- and the satellite's honesty, are
+trusted as the operator's own node: the trust rule in `sd_local_gate` guards against a
 stale head, another pack and a moved base, not against a hostile satellite.
 
 A repository whose check reads no commit history may key its receipts by tree
@@ -129,9 +130,17 @@ OFFLOAD_TOOLS = ("sh", "bash", "make", "python3", "git", "cc", "c++", "clang", "
 #: Tool configuration under `HOME` that an offload view binds, by path relative to `HOME`.
 OFFLOAD_HOME_FILES = (".gitconfig", ".config/git/config", ".cargo/config.toml", ".npmrc", ".config/pip/pip.conf",
                       ".config/uv/uv.toml")
-#: Variables an offload view leaves out: `PATH` is its own part; `HOME`, `USER` and `LOGNAME` name the login;
-#: `TMPDIR` is a per-login scratch folder, which says where temporary files go, not what the check does (sd:2704).
-OFFLOAD_LEFT_OUT = ("PATH", "HOME", "USER", "LOGNAME", "TMPDIR")
+#: Variables an offload view compares, by name (sd:2782): `CI` and `GITHUB_ACTIONS` choose the slot count
+#: (`sd_gate_slots.configured`); `LANG` the locale; `MAKEFLAGS`, `MAKEFILES` and `MFLAGS` what `make` runs; the
+#: `XDG_` folders where the machine config, slot locks and cargo cache live (`machine_settings`, `directory`, `cache_root`).
+OFFLOAD_VARIABLES = ("CI", "GITHUB_ACTIONS", "LANG", "MAKEFLAGS", "MAKEFILES", "MFLAGS", "XDG_CONFIG_HOME",
+                     "XDG_CACHE_HOME", "XDG_STATE_HOME")
+#: ... and by prefix: `SD_` the pack's own settings; `NEXTEST_`, `CARGO_` and `RUST` (`RUSTFLAGS`, `RUSTUP_TOOLCHAIN`,
+#: `RUST_TEST_THREADS`) a Rust check; `PYTHON` the interpreter; `LC_` the locale; `UV_`, `PIP_`, `NPM_CONFIG_`, `NODE_`
+#: and `GIT_CONFIG` the bound tools, as their `OFFLOAD_HOME_FILES` do. Any other variable, such as a per-login
+#: `__CF_USER_TEXT_ENCODING`, `SSH_AUTH_SOCK` or `TMPDIR`, or a cron job's, is neither compared nor stored.
+OFFLOAD_VARIABLE_PREFIXES = ("SD_", "NEXTEST_", "CARGO_", "RUST", "PYTHON", "LC_", "UV_", "PIP_", "NPM_CONFIG_", "NODE_",
+                             "GIT_CONFIG")
 
 
 def _digest(value: Any) -> str:
@@ -268,13 +277,14 @@ def machine_binding(tree: pathlib.Path, commands: list[list[str]], env: Mapping[
 def offload_view(environment: Mapping[str, str], names: Iterable[str] = ()) -> dict[str, Any] | None:
     """The portable view of a gate's `environment` that a hub compares with a satellite's (sd:2704), or None.
 
-    Local reuse never reads it: `gate_binding` binds the whole environment (C-17). The view leaves out
-    `OFFLOAD_LEFT_OUT` and writes each `$HOME` prefix as `~`, so two logins can compare equal, and binds what they
-    select instead: `path`, the `PATH` entries in order; `tools`, the bytes of each name in `OFFLOAD_TOOLS`
+    Local reuse never reads it: `gate_binding` binds the whole environment (C-17). The view writes each `$HOME`
+    prefix as `~`, so two logins can compare equal, and binds what `HOME` and `PATH` select: `path`, the `PATH`
+    entries in order; `tools`, the bytes of each name in `OFFLOAD_TOOLS`
     and `names` resolved on that `PATH`, or None for one that does not resolve; `python`, the bytes and version of
     `sys.executable`, the interpreter that runs `sd-check` whatever `PATH` says; `home_files`, the bytes of
-    each `OFFLOAD_HOME_FILES` entry under `HOME`, or "absent"; `variables`, the sha256 of every other variable's
-    value, so a row on the hub holds no credential the gate environment keeps.
+    each `OFFLOAD_HOME_FILES` entry under `HOME`, or "absent"; `threads`, `sd_gate_slots.thread_caps`, which
+    `machine_binding` binds too; `variables`, the sha256 of each `offload_variable`'s value. A variable outside
+    that list is not compared, and neither its value nor its digest reaches the hub (sd:2782).
     `names` are the check's own executables; one with a relative folder lives in the tree, which `inputs` binds.
     """
     try:
@@ -297,23 +307,33 @@ def offload_view(environment: Mapping[str, str], names: Iterable[str] = ()) -> d
                 "python": {"sha256": _content_digest(pathlib.Path(sys.executable).resolve()), "version": sys.version},
                 "home_files": {name: _content_digest(pathlib.Path(home, name)) if home and pathlib.Path(home, name).is_file()
                                else "absent" for name in OFFLOAD_HOME_FILES},
+                "threads": sd_gate_slots.thread_caps(environment),
                 "variables": {key: hashlib.sha256(portable(value).encode()).hexdigest() for key, value in environment.items()
-                              if key not in OFFLOAD_LEFT_OUT}}
+                              if offload_variable(key)}}
     except Exception:  # a view that cannot be named matches nothing; the hub runs the check
         return None
+
+
+def offload_variable(name: str) -> bool:
+    """`name` is one an offload view compares: in `OFFLOAD_VARIABLES` or under a prefix, and named like no credential."""
+    upper = name.upper()
+    return ((upper in OFFLOAD_VARIABLES or upper.startswith(OFFLOAD_VARIABLE_PREFIXES))
+            and not sd_check_receipts.SECRET.search(name))
 
 
 def offload_miss(theirs: Any, ours: Any) -> dict[str, Any] | None:
     """None when a satellite's offload view (`theirs`) stands for the hub's (`ours`), else the first difference.
 
-    The difference is `{"part", "name"}`: parts compare in the order `path`, `tools`, `python`, `home_files`, `variables`,
+    The difference is `{"part", "name"}`: parts compare in the order `path`, `tools`, `python`, `home_files`, `threads`,
+    `variables`,
     and `name` is the first differing `PATH` entry (the satellite's, or the hub's past the satellite's end), tool, `python` field,
-    file or variable. A tool the hub cannot resolve is recorded, not compared; one only the hub resolves
-    misses. A view that is not one, or a part of the wrong shape, misses with no name.
+    file, thread variable or variable. A tool the hub cannot resolve is recorded, not compared; one only the hub resolves
+    misses. A view that is not one, or a part of the wrong shape or missing, misses with no name: a row written
+    before `threads` was bound misses on `threads`.
     """
     if not (isinstance(theirs, dict) and isinstance(ours, dict)):
         return {"part": "view", "name": None}
-    for part in ("path", "tools", "python", "home_files", "variables"):
+    for part in ("path", "tools", "python", "home_files", "threads", "variables"):
         other: Any = theirs.get(part)
         mine: Any = ours.get(part)
         if not isinstance(other, (list, dict)) or not isinstance(other, type(mine)):
@@ -555,14 +575,23 @@ def standing_offload(database: pathlib.Path | None, root: pathlib.Path, head: st
     raise LookupError("; ".join(reasons))
 
 
+def names_node(satellite: Any) -> bool:
+    """`satellite`, as `satellite_identity` writes it, names a host and its tailnet login and address (sd:2782)."""
+    return isinstance(satellite, dict) and all(isinstance(satellite.get(name), str) and satellite[name]
+                                               for name in ("hostname", "login", "address"))
+
+
 def invalid_offload(row: Mapping[str, Any], revision: int) -> dict[str, str] | None:
-    """Clause 4: the row is a `sd-satellite-gate` success that names its satellite."""
+    """Clause 4: the row is a `sd-satellite-gate` success that names its satellite's host and tailnet identity."""
     reading, satellite = row.get("reading"), row.get("satellite")
-    if (row.get("writer") == OFFLOAD_WRITER and isinstance(reading, dict) and reading.get("status") == "success"
-            and isinstance(satellite, dict) and satellite.get("hostname")):
+    if not (row.get("writer") == OFFLOAD_WRITER and isinstance(reading, dict) and reading.get("status") == "success"):
+        return {"code": "satellite_receipt_invalid",
+                "reason": f"the offload receipt at revision {revision} is not a {OFFLOAD_WRITER} success"}
+    if names_node(satellite):
         return None
-    return {"code": "satellite_receipt_invalid",
-            "reason": f"the offload receipt at revision {revision} is not a {OFFLOAD_WRITER} success that names its satellite"}
+    error = satellite.get("error") if isinstance(satellite, dict) else None
+    return {"code": "satellite_unidentified", "reason": f"the offload receipt at revision {revision} names no satellite "
+            f"host with a tailnet login and address{f': {error}' if error else ''}"[:300]}
 
 
 def pack_mismatch(row: Mapping[str, Any], own: bool) -> dict[str, str] | None:

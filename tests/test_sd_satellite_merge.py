@@ -74,6 +74,20 @@ class GateCompare(rows.SatelliteFixture):
         rewrite(self.database, self.key, writer=sd_gate_receipts.OFFLOAD_WRITER, reading={"status": "failure"})
         self.refused("satellite_receipt_invalid")
 
+    def test_clause_4_a_satellite_with_no_tailnet_identity_refuses_as_unidentified(self) -> None:
+        """sd:2782 L4: `satellite_identity` keeps `hostname` when the tailnet lookup fails; that row names no node."""
+        rewrite(self.database, self.key, satellite={"hostname": rows.SATELLITE["hostname"],
+                                                    "error": "TailnetError: Tailscale is not running"})
+        self.assertIn("Tailscale is not running", self.refused("satellite_unidentified")["offload_refused"]["reason"])
+
+    def test_clause_5_other_thread_caps_refuse_as_binding(self) -> None:
+        """sd:2782 M1: the view binds the caps `machine_binding` binds; a row from before that misses on them by name."""
+        view = self.row(self.key)["offload_view"]
+        rewrite(self.database, self.key, offload_view={**view, "threads": {"RUST_TEST_THREADS": "1"}})
+        self.assertIn("part threads", self.refused("satellite_binding")["offload_refused"]["reason"])
+        rewrite(self.database, self.key, offload_view={name: part for name, part in view.items() if name != "threads"})
+        self.assertIn("part threads at None", self.refused("satellite_binding")["offload_refused"]["reason"])
+
     def test_clause_5_a_tree_field_or_the_offload_view_refuses_as_binding(self) -> None:
         row = self.row(self.key)
         rewrite(self.database, self.key, binding={**row["binding"], "inputs": "0" * 64})

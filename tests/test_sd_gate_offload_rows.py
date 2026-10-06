@@ -11,6 +11,7 @@ its own tests below. No test starts `sd-check`: a stand-in run counts calls.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -122,13 +123,14 @@ class OffloadRows(SatelliteFixture):
             "sha256": sd_gate_receipts._content_digest(pathlib.Path(sys.executable).resolve()), "version": sys.version})
         self.assertNotIn("receipt_revision", row["reading"])
 
-    def test_the_offload_row_holds_no_variable_value(self) -> None:
-        """A credential the gate environment keeps reaches the hub's database as a digest only."""
-        with mock.patch.dict(os.environ, {"GH_TOKEN": "synthetic-secret-0001"}):
+    def test_the_offload_row_holds_no_variable_off_the_allowlist(self) -> None:
+        """sd:2782 L6: a credential the gate environment keeps reaches the hub's database neither as a value nor as a digest."""
+        with mock.patch.dict(os.environ, {"GITHUB_TOKEN": "synthetic-secret-0001", "LANG": "C"}):
             self.gate()
-        row = self.offload_row()
-        self.assertIn("GH_TOKEN", row["offload_view"]["variables"])
-        self.assertNotIn("synthetic-secret-0001", json.dumps(row))
+        stored = json.dumps(self.offload_row())
+        self.assertIn('"LANG"', stored)
+        for text in ("GITHUB_TOKEN", "synthetic-secret-0001", hashlib.sha256(b"synthetic-secret-0001").hexdigest()):
+            self.assertNotIn(text, stored)
 
     def test_a_hub_run_writes_no_offload_row(self) -> None:
         self.hub = None
@@ -311,7 +313,7 @@ class PackDigest(unittest.TestCase):
 
 
 class LoginVariables(unittest.TestCase):
-    """Decision 2026-10-05 10:02 MDT: `LOGNAME` and `TMPDIR` name the login, so a view leaves them out."""
+    """Decision 2026-10-05 10:02 MDT: `LOGNAME` and `TMPDIR` name the login; off the allowlist (sd:2782), a view leaves them out."""
 
     def view(self, **extra: str) -> dict:
         environment = {"HOME": "/Users/sat", "USER": "sat", "LOGNAME": "sat", "TMPDIR": "/var/folders/aa/T/",

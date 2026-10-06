@@ -440,6 +440,22 @@
 
 ### Fixed
 
+- **The offload view compares an allowlist of variables and the thread caps (sd:2782).**
+  The `variables` part of a satellite's offload view now holds only the
+  variables `offload_variable` names: `SD_`, `NEXTEST_`, `CARGO_`, `RUST`,
+  `PYTHON`, `LC_`, `UV_`, `PIP_`, `NPM_CONFIG_`, `NODE_` and `GIT_CONFIG`
+  prefixes, and `CI`, `GITHUB_ACTIONS`, `LANG`, `MAKEFLAGS`, `MAKEFILES`,
+  `MFLAGS` and the `XDG_` config, cache and state folders. A credential-named
+  variable stays out even under a prefix. Per-login and per-session values
+  such as `__CF_USER_TEXT_ENCODING`, `SSH_AUTH_SOCK` and `TMPDIR` no longer
+  hand a satellite's receipt back with `satellite_binding`, and no value or
+  digest of a variable off the list reaches the hub's row. A new `threads`
+  part binds `sd_gate_slots.thread_caps`, as `machine_binding` does, so other
+  caps miss on `threads`; a row written before it misses there by name.
+  Clause 4 refuses a row whose satellite names no tailnet login and address
+  as `satellite_unidentified`. Intake refuses a request that is not an
+  `sd-lane-request` row, names no tailnet identity, or names a base other
+  than its `ship:` row's, as `invalid_request`.
 - **An acknowledgement no longer accepts an unknown `enforce_admins` (sd:2755).**
   `sd_protection.observed_state` read unknown (a withheld `bypass_actors`
   list, an unresolved `RepositoryRole`) as `false`, so an `accepted_gaps`

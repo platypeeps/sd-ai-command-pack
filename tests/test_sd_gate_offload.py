@@ -14,6 +14,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "bin") not in sys.path:
@@ -21,6 +22,7 @@ if str(REPO_ROOT / "bin") not in sys.path:
 
 import sd_gate_receipts  # noqa: E402
 import sd_gate_run  # noqa: E402
+import sd_gate_slots  # noqa: E402
 
 
 class OffloadView(unittest.TestCase):
@@ -120,6 +122,40 @@ class OffloadView(unittest.TestCase):
     def test_a_variable_on_one_side_only_misses(self) -> None:
         self.assertEqual(sd_gate_receipts.offload_miss(self.view("sat"), self.view("hub", MAKEFLAGS="-j8")),
                          {"part": "variables", "name": "MAKEFLAGS"})
+
+    def test_per_login_and_per_session_variables_compare_equal(self) -> None:
+        """sd:2782 M2: a builder shell and a cron job differ in these, and none chooses what a check runs."""
+        theirs = self.view("sat", __CF_USER_TEXT_ENCODING="0x1F5:0:0", SSH_AUTH_SOCK="/private/tmp/a/Listeners",
+                           TMPDIR="/var/folders/aa/T/", LOGNAME="sat", TERM_PROGRAM_VERSION="3.5", XPC_SERVICE_NAME="0")
+        ours = self.view("hub", __CF_USER_TEXT_ENCODING="0x1F6:0:0", LOGNAME="hub", MAILTO="")
+        self.assertIsNone(sd_gate_receipts.offload_miss(theirs, ours))
+        self.assertNotIn("__CF_USER_TEXT_ENCODING", theirs["variables"])
+
+    def test_an_allowlisted_variable_by_prefix_still_misses(self) -> None:
+        self.assertEqual(sd_gate_receipts.offload_miss(self.view("sat"), self.view("hub", RUSTFLAGS="-Dwarnings")),
+                         {"part": "variables", "name": "RUSTFLAGS"})
+
+    def test_a_credential_is_neither_compared_nor_stored(self) -> None:
+        """sd:2782 L6: no digest of a credential reaches the view, even under an allowlisted prefix."""
+        theirs = self.view("sat", GITHUB_TOKEN="x", CARGO_REGISTRY_TOKEN="y")
+        self.assertIsNone(sd_gate_receipts.offload_miss(theirs, self.view("hub")))
+        self.assertFalse({"GITHUB_TOKEN", "CARGO_REGISTRY_TOKEN"} & set(theirs["variables"]))
+
+    def test_other_thread_caps_miss_on_threads(self) -> None:
+        """sd:2782 M1: `machine_binding` binds the caps, since a suite can pass on one thread and fail on eight."""
+        for login, slots in (("sat", 16), ("hub", 2)):
+            config = self.home(login) / ".config" / "sd-ai-command-pack" / "config.json"
+            config.parent.mkdir(parents=True)
+            config.write_text(f'{{"config": {{"sd": {{"gate_slots": {slots}}}}}}}', encoding="utf-8")
+        with mock.patch.object(sd_gate_slots.os, "cpu_count", return_value=16):
+            theirs, ours = self.view("sat"), self.view("hub")
+        self.assertEqual((theirs["threads"]["RUST_TEST_THREADS"], ours["threads"]["RUST_TEST_THREADS"]), ("1", "8"))
+        self.assertEqual(sd_gate_receipts.offload_miss(theirs, ours), {"part": "threads", "name": "CARGO_BUILD_JOBS"})
+
+    def test_a_view_written_before_threads_were_bound_misses_on_threads(self) -> None:
+        ours = self.view("hub")
+        old = {name: part for name, part in ours.items() if name != "threads"}
+        self.assertEqual(sd_gate_receipts.offload_miss(old, ours), {"part": "threads", "name": None})
 
     def test_a_view_that_is_not_one_misses(self) -> None:
         ours = self.view("hub")
