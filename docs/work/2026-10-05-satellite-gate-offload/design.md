@@ -205,6 +205,21 @@ Names compare without case. A name that matches the credential pattern of
 under a listed prefix. A variable off the list is neither compared nor
 written: no value and no digest of it reaches the hub's row.
 
+A satellite run that will write an offload row runs its check under exactly
+that environment (`offload_environment`, sd:2782): the allowlisted names plus
+`HOME`, `USER` and `PATH`, which the view binds through `path`, `tools` and
+`home_files`. Every other variable is dropped from the child. The ship review
+of the allowlist showed why: a Makefile that skips its tests under
+`SKIP_TESTS=1`, or a `GOFLAGS` that selects tests, left the view equal to the
+hub's, and the hub would merge a pass that never ran those tests. What ran is
+now what the hub compares. The cost: a check that needs a dropped variable, a
+credential among them, fails on the satellite, and the hub gates that item
+itself, as before this item. The run is offloaded when `served_by` names a hub
+and the repository has `repo.satellite_gate = accept` (`offloads`). The hub's
+own gate, a satellite in a repository that did not opt in, and local receipt
+reuse keep the whole `gate_environment`. A local pass is not exported: its
+binding names the whole environment, so the offloaded run runs again.
+
 Residual risk on the offload path:
 
 - an executable reached by a name outside `OFFLOAD_TOOLS`, whose bytes
@@ -212,9 +227,9 @@ Residual risk on the offload path:
 - tool configuration under `HOME` outside `OFFLOAD_HOME_FILES`, and outside
   `HOME`, such as `/etc` or the package manager's prefix;
 - shared libraries that the compared tools load.
-- a variable off the allowlist that steers the check, such as a
-  repository's own `MYAPP_MODE`, or a credential that selects what a test
-  reaches;
+- a check that skips work, rather than failing, when a variable the offloaded
+  run drops is absent, such as a test marked to skip without a token: the
+  satellite then passes with less run than the hub's own gate would run;
 - the packages installed for the interpreter: a virtualenv's `python` resolves to
   its base interpreter, so the `python` part binds that binary, not the
   virtualenv's `site-packages`.
@@ -275,7 +290,6 @@ guarantees that the check passes on the hub's own image:
 - system libraries, and tools reached by a name outside `OFFLOAD_TOOLS`;
 - a tool the hub cannot resolve, which is recorded but not compared;
 - tool configuration outside `OFFLOAD_HOME_FILES`;
-- a variable off the allowlist of the `variables` part;
 - before step 2a, the whole environment;
 - inputs outside the repository on the satellite: an external makefile, a
   tool's own files, machine state, a network answer.

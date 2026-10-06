@@ -175,13 +175,15 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
             if local := untracked_local_block(root):
                 shutil.copyfile(local, tree / LOCAL_BLOCK)
             env = gate_environment(root, None if environ is None else dict(environ))
+            # sd:2782: a pass that writes an offload row runs under exactly what the hub compares.
+            env, offloaded = sd_gate_receipts.offload_run(database, root, env, record=record, offload=offload)
             content, fork = sd_gate_receipts.tree_key(tree, base)
             own = sd_gate_receipts.gates_itself(root, tree, BIN)
             gated = sd_gate_receipts.Worktree(root, tree, head, base, env, content, fork, own,
                                               gate_inputs(root, head, content, own))
             identity = (sd_gate_receipts.gate_binding(tree, head, gated.inputs, base, env, fork)
                         if database is not None and offload != "require" else None)
-            before = sd_gate_receipts.start_view(database, gated, identity) if record else None  # sd:2704
+            before = sd_gate_receipts.start_view(gated, identity, offloaded)  # sd:2704
             answer, miss = sd_gate_receipts.from_receipts(database, gated, identity, reuse=reuse, record=record, offload=offload)
             if answer is not None:
                 return {"head": gate_git(tree, "rev-parse", "HEAD"), **answer}

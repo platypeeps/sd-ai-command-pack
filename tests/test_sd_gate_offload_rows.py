@@ -145,10 +145,13 @@ class OffloadRows(SatelliteFixture):
         self.assertEqual(result["offload_skipped"], "repo.satellite_gate is not accept for this repository")
         self.assertEqual(self.offload_row(), {})
 
+    def unwritten(self) -> dict:
+        """A pass whose offload row never reached the hub (sd:2782: an opted-out pass runs otherwise, so is not reused)."""
+        with mock.patch.object(sd_gate_receipts, "record_offload", lambda *args, **kwargs: {}):
+            return self.gate()
+
     def test_a_reuse_writes_the_missing_row_with_the_original_time(self) -> None:
-        self.opted = "off"
-        self.gate()
-        self.opted = "accept"
+        self.unwritten()
         reused = self.gate()
         self.assertEqual(self.runs, 1)
         self.assertIn("reused", reused)
@@ -192,22 +195,19 @@ class OffloadRows(SatelliteFixture):
     def test_a_reuse_writes_the_view_its_pass_kept_not_one_taken_now(self) -> None:
         """A home file that changed after the pass does not bind the old pass on the hub."""
         home = self.home()
-        self.opted = "off"
-        self.gate()
+        self.unwritten()
         (home / ".npmrc").write_text("registry=https://registry.example.test/\n", encoding="utf-8")
-        self.opted = "accept"
         reused = self.gate()
         self.assertEqual((self.runs, reused["offload"]["written"]), (1, True))
         self.assertEqual(self.offload_row()["offload_view"]["home_files"][".npmrc"], "absent")
 
-    def test_a_reuse_of_a_pass_that_kept_no_view_writes_no_row(self) -> None:
+    def test_a_local_pass_is_not_exported_the_offloaded_run_runs_again(self) -> None:
+        """sd:2782: a pass under the whole environment kept no view; the offloaded run's environment binds otherwise."""
         self.hub = None
         self.gate()
         self.hub = HUB
-        reused = self.gate()
-        self.assertEqual(self.runs, 1)
-        self.assertIn("kept no offload view", reused["offload_error"])
-        self.assertEqual(self.offload_row(), {})
+        result = self.gate()
+        self.assertEqual((self.runs, result["offload"]["written"]), (2, True))
 
     def test_a_view_that_moves_during_the_run_writes_no_row(self) -> None:
         home = self.home()
@@ -281,6 +281,47 @@ class OffloadRows(SatelliteFixture):
             result = self.gate()
         self.assertEqual((result["status"], self.runs), ("success", 1))
         self.assertNotIn("pack_warning", result)
+
+
+class OffloadedEnvironment(SatelliteFixture):
+    """sd:2782: a satellite run that writes an offload row runs its check under only what the hub compares.
+
+    The fixture's `make check` records its environment, so each test reads what the check saw.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.record = self.root.parent / "check-env.txt"
+        (self.root / "Makefile").write_text(f"check:\n\t@env > {self.record}\n", encoding="utf-8")
+        git(self.root, "commit", "-q", "-am", "record the environment")
+        self.head = git(self.root, "rev-parse", "HEAD")
+        self.extra = {"SKIP_TESTS": "1", "GOFLAGS": "-run=Smoke", "GITHUB_TOKEN": "synthetic-secret-0003",
+                      "CARGO_REGISTRY_TOKEN": "synthetic-secret-0004", "RUSTFLAGS": "-Dwarnings"}
+
+    def seen(self) -> dict[str, str]:
+        with mock.patch.dict(os.environ, self.extra):
+            result = sd_gate_run.check_in_worktree(self.root, self.head, database=self.database, reuse=False)
+        self.assertEqual(result["status"], "success", result)
+        return dict(line.split("=", 1) for line in self.record.read_text(encoding="utf-8").splitlines() if "=" in line)
+
+    def test_an_offloaded_check_sees_no_variable_off_the_allowlist(self) -> None:
+        seen = self.seen()
+        self.assertFalse({"SKIP_TESTS", "GOFLAGS"} & set(seen))
+        self.assertEqual((seen["RUSTFLAGS"], seen["SD_LOCAL_GATE"]), ("-Dwarnings", "1"))
+        self.assertTrue({"HOME", "PATH"} <= set(seen))
+        self.assertEqual(self.offload_row()["writer"], "sd-satellite-gate")
+
+    def test_an_offloaded_check_sees_no_credential(self) -> None:
+        seen = self.seen()
+        self.assertFalse({"GITHUB_TOKEN", "CARGO_REGISTRY_TOKEN"} & set(seen))
+        self.assertNotIn("synthetic-secret", self.record.read_text(encoding="utf-8"))
+
+    def test_a_local_gate_passes_the_whole_environment(self) -> None:
+        for hub, opted in ((None, "accept"), (HUB, "off")):
+            with self.subTest(hub=hub, opted=opted):
+                self.hub, self.opted = hub, opted
+                seen = self.seen()
+                self.assertEqual({name: seen.get(name) for name in self.extra}, self.extra)
 
 
 class PackDigest(unittest.TestCase):

@@ -455,6 +455,12 @@
   digest of a variable off the list reaches the hub's row. A new `threads`
   part binds `sd_gate_slots.thread_caps`, as `machine_binding` does, so other
   caps miss on `threads`; a row written before it misses there by name.
+  A satellite run that writes an offload row now runs its check under only
+  those variables plus `HOME`, `USER` and `PATH` (`offload_environment`), so
+  a `SKIP_TESTS=1` or a `GOFLAGS` off the list cannot choose what ran; a check
+  that needs a dropped variable fails there, and the hub gates the item
+  itself. The hub's own gate and a repository that did not opt in keep the
+  whole environment.
   Clause 4 refuses a row whose satellite names no tailnet login and address
   as `satellite_unidentified`. Intake refuses a request that is not an
   `sd-lane-request` row, names no tailnet identity, or names a base other

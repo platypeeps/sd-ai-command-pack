@@ -56,10 +56,14 @@ the offload view (`offload_view`: `PATH` order, the bytes of named tools and
 of the interpreter, named files under `HOME`, the thread caps, and a digest of
 each variable on its allowlist, `offload_variable`) and the pack digest. It
 never compares the machine part or `environment_sha256`, which hold the
-satellite's login. What the satellite's machine holds beyond the view -- a
-variable off the allowlist among it -- and the satellite's honesty, are
-trusted as the operator's own node: the trust rule in `sd_local_gate` guards against a
-stale head, another pack and a moved base, not against a hostile satellite.
+satellite's login. A satellite run that will write the row runs its check
+under `offload_environment`, only the variables the view compares, so a
+variable off the allowlist cannot choose what ran (sd:2782); a check that
+needs one fails there, and the hub gates the item itself. What the
+satellite's machine holds beyond the view, and the satellite's honesty, are
+trusted as the operator's own node: the trust rule in `sd_local_gate` guards
+against a stale head, another pack and a moved base, not against a hostile
+satellite.
 
 A repository whose check reads no commit history may key its receipts by tree
 instead of head, in its reviewed tree:
@@ -135,8 +139,8 @@ OFFLOAD_HOME_FILES = (".gitconfig", ".config/git/config", ".cargo/config.toml", 
 #: `DEVELOPER_DIR` the compiler, flags and SDK that `make`'s implicit rules and `xcrun` choose; `TZ` the clock a test
 #: reads; `BASH_ENV` and `ENV` what a non-interactive shell sources; the `GIT_` names which repository `git` acts on;
 #: the `XDG_` folders where the machine config, slot locks and cargo cache live (`machine_settings`, `directory`,
-#: `cache_root`).
-OFFLOAD_VARIABLES = ("CI", "GITHUB_ACTIONS", "LANG", "MAKEFLAGS", "MAKEFILES", "MFLAGS",
+#: `cache_root`); `NO_COLOR`, which the gate sets itself (`sd_gate_run.NO_COLOUR_ENVIRONMENT`).
+OFFLOAD_VARIABLES = ("CI", "GITHUB_ACTIONS", "LANG", "NO_COLOR", "MAKEFLAGS", "MAKEFILES", "MFLAGS",
                      "CC", "CXX", "CPP", "AR", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "LDLIBS", "PKG_CONFIG_PATH",
                      "MACOSX_DEPLOYMENT_TARGET", "SDKROOT", "DEVELOPER_DIR", "TZ", "BASH_ENV", "ENV",
                      "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
@@ -147,9 +151,12 @@ OFFLOAD_VARIABLES = ("CI", "GITHUB_ACTIONS", "LANG", "MAKEFLAGS", "MAKEFILES", "
 #: tests); `TASK_` a Taskfile's; `DYLD_` and `LD_` the libraries every tool loads; `LC_` the locale; `UV_`, `PIP_`,
 #: `NPM_CONFIG_`, `NODE_` and `GIT_CONFIG` the bound tools, as their `OFFLOAD_HOME_FILES` do. Any other variable,
 #: such as a per-login `__CF_USER_TEXT_ENCODING`, `SSH_AUTH_SOCK` or `TMPDIR`, or a cron job's, is neither compared
-#: nor stored.
+#: nor stored, and an offloaded run's check never sees it (`offload_environment`).
 OFFLOAD_VARIABLE_PREFIXES = ("SD_", "NEXTEST_", "CARGO_", "RUST", "PYTHON", "PYTEST_", "COVERAGE_", "TASK_", "DYLD_",
                              "LD_", "LC_", "UV_", "PIP_", "NPM_CONFIG_", "NODE_", "GIT_CONFIG")
+#: What an offloaded run's check keeps beside those: the view binds what `HOME` and `PATH` select, and `USER` names
+#: the login, as `HOME` does.
+OFFLOAD_KEPT = ("HOME", "USER", "PATH")
 
 
 def _digest(value: Any) -> str:
@@ -328,6 +335,45 @@ def offload_variable(name: str) -> bool:
     upper = name.upper()
     return ((upper in OFFLOAD_VARIABLES or upper.startswith(OFFLOAD_VARIABLE_PREFIXES))
             and not sd_check_receipts.SECRET.search(name))
+
+
+def offload_environment(environment: Mapping[str, str]) -> dict[str, str]:
+    """`environment` cut to what an offload view compares: the one an offloaded run's check gets (sd:2782).
+
+    The view compares an allowlist, so a variable off it -- a Makefile's `SKIP_TESTS`, a `GOFLAGS` -- could
+    choose what a satellite's check ran and still stand for the hub's run. Dropped from the run, it cannot:
+    what ran is what the hub compares. A check that needs a dropped variable, a credential among them, fails
+    on the satellite, and the hub gates the item itself as before. One that skips work without it instead
+    passes with less run: the residual design.md names.
+    """
+    return {key: value for key, value in environment.items() if key in OFFLOAD_KEPT or offload_variable(key)}
+
+
+def offloads(database: pathlib.Path | None, root: pathlib.Path) -> bool:
+    """This machine is a satellite and `root`'s repository has `repo.satellite_gate = accept`; any fault is False.
+
+    A recorded pass then writes an offload row (`record_offload`), so `check_in_worktree` runs the check under
+    `offload_environment` and keeps its offload view. Otherwise the run is a local gate, with the whole environment.
+    """
+    try:
+        if served_hub(database) is None:
+            return False
+        with closing(_connect(database, write=False)) as connection:
+            return sd_lib.repo_satellite_gate(connection, root) == "accept"
+    except Exception:  # the run is a local gate; a pass that keeps no view writes no offload row
+        return False
+
+
+def offload_run(database: pathlib.Path | None, root: pathlib.Path, environment: Mapping[str, str], *, record: bool,
+                offload: str | None) -> tuple[dict[str, str], bool]:
+    """`(environment, offloaded)` for a gate run: a recording run that `offloads` gets `offload_environment`."""
+    offloaded = record and offload != "require" and offloads(database, root)
+    return (offload_environment(environment) if offloaded else dict(environment)), offloaded
+
+
+def start_view(gated: Worktree, identity: dict[str, Any] | None, offloaded: bool) -> dict[str, Any] | None:
+    """The offload view an offloaded run starts from, which its receipts keep; None for a local gate."""
+    return gated.view(identity) if offloaded and identity else None
 
 
 def offload_miss(theirs: Any, ours: Any) -> dict[str, Any] | None:
@@ -669,15 +715,6 @@ def from_receipts(database: pathlib.Path | None, gated: Worktree, identity: dict
     if offload == "require":
         return {"status": "refused", "offload_refused": refused}, None
     return None, {**(miss or {}), "offload": refused}
-
-
-def start_view(database: pathlib.Path | None, gated: Worktree, identity: dict[str, Any] | None) -> dict[str, Any] | None:
-    """On a satellite, the offload view a run starts from, which its receipts keep; None on a hub."""
-    try:
-        hub = served_hub(database) if identity else None
-    except Exception:  # the run goes on; `record_offload` meets the fault again and reports it as `offload_error`
-        return None
-    return gated.view(identity) if identity and hub is not None else None
 
 
 def record_gate_pass(database: pathlib.Path, gated: Worktree, identity: dict[str, Any],
