@@ -4,6 +4,11 @@
 
 ### Added
 
+- **`sd task edit --clear-branch` clears a stale branch name (sd:2729).**
+  It writes the cleared branch through `sd_db`'s `edit_item` (sd:2818), with the usual note and `--if-revision` check.
+  It sets no branch; `sd runner prepare --branch` still does that.
+  `.sd-system-rev` moves to system `bf526153`, the merge that added it, which carries `sd_db` schema 20.
+
 - **Review acknowledgements live in the hub's workflow database (sd:2750).**
   `sd-review-ack --ack` and `sd-ship`'s automatic `fixed` records write one
   `review-ack:v1:<slug>:<finding id>` row through `sd_db.ship`'s
