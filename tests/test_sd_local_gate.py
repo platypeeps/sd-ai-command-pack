@@ -471,6 +471,16 @@ class Receipts(ReceiptFixture):
         self.assertEqual(seen, [f"{BLOCK_START}\nmode: 'full'\nnote: \"it's \\\"quoted\\\"\"\n{BLOCK_END}\n"])
         self.assertEqual(sd_lib.parse_local_block(seen[0]), {"mode": "full", "note": 'it\'s "quoted"'})
 
+    def test_a_tracked_dangling_link_is_left_alone_not_written_through(self) -> None:
+        """sd:2854 review round 3: `exists()` follows a link, so a tracked dangling `CLAUDE.local.md` sent the write outside the tree."""
+        outside = self.root.parent / "outside.md"
+        (self.root / "CLAUDE.local.md").symlink_to(outside)
+        git(self.root, "add", "-f", "CLAUDE.local.md")  # a global ignore may name the file
+        head = self.counted()
+        self.assertTrue(git(self.root, "ls-files", "CLAUDE.local.md"))
+        self.assertEqual(self.gate(head, run=self.passing(), reuse=False, record=False)["status"], "success")
+        self.assertFalse(outside.exists())
+
     def test_another_repository_records_nothing_when_the_pack_moves_mid_run(self) -> None:
         """The child may open the moved pack, so a landing mid-run drops the pass (sd:2612 review), and says so."""
         head = self.counted()

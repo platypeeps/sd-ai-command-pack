@@ -171,7 +171,7 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
         tree = pathlib.Path(parent) / "tree"
         gate_git(root, "worktree", "add", "--detach", str(tree), head)
         try:
-            if not (tree / LOCAL_BLOCK).exists():  # the digested block only, an empty one for no file; a tracked copy is the tree's
+            if not os.path.lexists(tree / LOCAL_BLOCK):  # the digested block only, an empty one for no file; a tracked copy, even a link, is the tree's
                 (tree / LOCAL_BLOCK).write_text(sd_lib.local_policy_text(sd_lib.read_local_block(local) if (local := untracked_local_block(root)) else {}), encoding="utf-8")
             env, mode = sd_gate_receipts.offload_run(database, root, gate_environment(root, None if environ is None else dict(environ)), record=record, offload=offload)  # sd:2782
             content, fork = sd_gate_receipts.tree_key(tree, base)
