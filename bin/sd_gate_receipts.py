@@ -333,8 +333,9 @@ def offload_view(environment: Mapping[str, str], names: Iterable[str] = ()) -> d
 def offload_variable(name: str) -> bool:
     """`name` is one an offload view compares: in `OFFLOAD_VARIABLES` or under a prefix, and named like no credential."""
     upper = name.upper()
+    # `GIT_CONFIG_KEY_<n>` names a config key, not a credential, and `GIT_CONFIG_COUNT` fails git without it.
     return ((upper in OFFLOAD_VARIABLES or upper.startswith(OFFLOAD_VARIABLE_PREFIXES))
-            and not sd_check_receipts.SECRET.search(name))
+            and not sd_check_receipts.SECRET.search(upper.removeprefix("GIT_CONFIG_KEY_")))
 
 
 def offload_environment(environment: Mapping[str, str]) -> dict[str, str]:

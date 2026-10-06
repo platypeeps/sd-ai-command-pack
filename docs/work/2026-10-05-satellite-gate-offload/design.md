@@ -202,7 +202,8 @@ digest of a short password can be guessed offline.
 
 Names compare without case. A name that matches the credential pattern of
 `sd_check_receipts.SECRET`, such as `CARGO_REGISTRY_TOKEN`, is left out even
-under a listed prefix. A variable off the list is neither compared nor
+under a listed prefix. `GIT_CONFIG_KEY_<n>` is kept: it names a config key,
+and `GIT_CONFIG_COUNT` fails every `git` call without it. A variable off the list is neither compared nor
 written: no value and no digest of it reaches the hub's row.
 
 A satellite run that will write an offload row runs its check under exactly

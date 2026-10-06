@@ -174,9 +174,7 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
         try:
             if local := untracked_local_block(root):
                 shutil.copyfile(local, tree / LOCAL_BLOCK)
-            env = gate_environment(root, None if environ is None else dict(environ))
-            # sd:2782: a pass that writes an offload row runs under exactly what the hub compares.
-            env, offloaded = sd_gate_receipts.offload_run(database, root, env, record=record, offload=offload)
+            env, offloaded = sd_gate_receipts.offload_run(database, root, gate_environment(root, None if environ is None else dict(environ)), record=record, offload=offload)  # sd:2782
             content, fork = sd_gate_receipts.tree_key(tree, base)
             own = sd_gate_receipts.gates_itself(root, tree, BIN)
             gated = sd_gate_receipts.Worktree(root, tree, head, base, env, content, fork, own,

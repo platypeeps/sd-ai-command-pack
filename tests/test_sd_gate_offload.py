@@ -151,6 +151,13 @@ class OffloadView(unittest.TestCase):
         self.assertIsNone(sd_gate_receipts.offload_miss(theirs, self.view("hub")))
         self.assertFalse({"GITHUB_TOKEN", "CARGO_REGISTRY_TOKEN"} & set(theirs["variables"]))
 
+    def test_an_offloaded_run_keeps_git_command_scope_config(self) -> None:
+        """`GIT_CONFIG_COUNT` without its `GIT_CONFIG_KEY_<n>` fails every git call; `KEY` there names no credential."""
+        git_config = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "gc.auto", "GIT_CONFIG_VALUE_0": "0"}
+        kept = sd_gate_receipts.offload_environment({**self.environ("sat"), **git_config, "API_KEY": "x"})
+        self.assertEqual({name: kept.get(name) for name in git_config}, git_config)
+        self.assertNotIn("API_KEY", kept)
+
     def test_other_thread_caps_miss_on_threads(self) -> None:
         """sd:2782 M1: `machine_binding` binds the caps, since a suite can pass on one thread and fail on eight."""
         for login, slots in (("sat", 16), ("hub", 2)):
