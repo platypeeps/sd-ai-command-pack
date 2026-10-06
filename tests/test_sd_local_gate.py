@@ -958,7 +958,7 @@ class StaleGateWorktrees(Repository):
         gone.wait()
         tree = self.left(f"{gone.pid}-", head)
         self.assertEqual(sd_gate_run.check_in_worktree(self.root, head)["status"], "success")
-        self.assertEqual((self.worktrees(), tree.parent.exists()), (1, False))
+        self.assertEqual((self.worktrees(), tree.exists()), (1, False))
 
     def test_a_live_gates_worktree_and_one_that_names_no_pid_stay(self) -> None:
         head = self.commit("check:\n\t@echo ok\n")

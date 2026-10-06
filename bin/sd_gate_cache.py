@@ -80,8 +80,7 @@ def worktree_prefix(root: pathlib.Path) -> str:
         owner = tree.parent.name.removeprefix(GATE_PREFIX).partition("-")[0]
         if line.startswith("worktree ") and tree.parent.name.startswith(GATE_PREFIX) and owner.isdigit() \
                 and not running(int(owner)):
-            sd_lib.git_output(["worktree", "remove", "--force", str(tree)], root)
-            shutil.rmtree(tree.parent, ignore_errors=True)
+            sd_lib.git_output(["worktree", "remove", "--force", str(tree)], root)  # its empty parent stays in the temp dir
     return f"{GATE_PREFIX}{os.getpid()}-"
 
 
