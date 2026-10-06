@@ -458,6 +458,21 @@
 
 ### Fixed
 
+- **A gate's `PATH` drops entries that name no folder, so `sd-review` reuses
+  the pass of `sd gate check` at the same head (sd:2772).** fnm's `cd` hook
+  prepends a per-shell link to `PATH`; on a machine with no default Node it
+  resolves to no folder. `cd <checkout> && sd gate check` then bound another
+  environment digest than `sd-review -C <checkout> --gate-check main`, and the
+  review ran the whole check again (seen on sd:2704 at 8793d5b1). A folder
+  that does not exist selects no tool, so the gate environment leaves it out.
+  `sd-review --json` now carries the gate's `reuse_miss` in its `check`, so a
+  later miss names the binding fields that differed.
+
+- **`sd-ship review` on a no-item record names each blocking finding (sd:1986).**
+  sd:2102 fixed the refusal; a test now pins it on the `--no-item` path: the
+  error names `path:line` and the summary, and `next_action` names
+  `sd-ship adjudicate --no-item --review-id <id>`.
+
 - **The offload view compares an allowlist of variables and the thread caps (sd:2782).**
   The `variables` part of a satellite's offload view now holds only the
   variables `offload_variable` names: `SD_`, `NEXTEST_`, `CARGO_`, `RUST`,
@@ -1148,6 +1163,16 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **A gate that fails after a cleared review keeps the review pass (sd:2721).**
+  This reverses sd:2605's release for that case. `sd-review` records the
+  status the review cleared with as `cleared_status` beside `gate_failed`,
+  and `sd-ship prepare` keeps that pass with no reviewed head. The next
+  prepare at the same head runs only the gate; a pass restores the cleared
+  status and keeps the failed check as `failed_check`. A fix at a new head is
+  reviewed as a fix verification of the kept pass, so `sd-review
+  --verify-report` accepts a `gate_failed` report. A kept pass counts against
+  the five automatic passes, as any completed review does.
 
 - **`sd-docs-lint`'s claim-support reading is on by default, through the local
   Kev only (sd:2762).** A repository without `.github/sd-docs-lint.json`, or
