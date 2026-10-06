@@ -503,18 +503,23 @@ def pack_bin(own: bool = False, closure: bool = False) -> str:
     return digest.hexdigest()
 
 
+#: Where `pack_files`' closure starts: `sd-check`, which runs the check, and `sd_gate_run`, the gate that sets up
+#: its worktree and environment (`cargo_environment`) through `sd_gate_receipts` and `sd_gate_cache` (sd:2722).
+CLOSURE_ROOTS = ("sd-check", "sd_gate_run.py")
+
+
 def pack_files(folder: pathlib.Path, closure: bool = False) -> list[pathlib.Path]:
     """The pack `bin/` files in `folder` a run depends on; `gate_inputs` and `pack_bin` hash these.
 
-    Every one, or with `closure` (`pack_scope`) only `sd-check` and what it imports, at any depth, or loads with
-    `sd_lib.sibling` (sd:2722): the check then runs nothing else from the pack, so a landing elsewhere in `bin/`
-    voids no receipt. A closure that cannot be read, such as a file that does not parse, is every pack file.
+    Every one, or with `closure` (`pack_scope`) only what each of `CLOSURE_ROOTS` imports, at any depth, or loads
+    with `sd_lib.sibling` (sd:2722): the run then executes nothing else from the pack, so a landing elsewhere in
+    `bin/` voids no receipt. A closure that cannot be read, such as a file that does not parse, is every pack file.
     """
     every = [path for path in sorted(folder.iterdir()) if path.is_file() and (path.suffix == ".py" or path.name.startswith("sd-"))]
     if not closure:
         return every
     found: set[pathlib.Path] = set()
-    todo = [folder / "sd-check"]
+    todo = [folder / name for name in CLOSURE_ROOTS]
     try:
         while todo:
             path = todo.pop()

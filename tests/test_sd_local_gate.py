@@ -889,8 +889,9 @@ class PackImportClosure(ReceiptFixture):
 
     FILES = {"sd-check": "import sd_a\n",
              "sd_a.py": "def later():\n    import sd_b\n    return sd_lib.sibling('sd_c', 'sd-c')\n",
-             "sd_b.py": "", "sd-c": "", "sd_lane.py": "", "sd-ship": ""}
-    EVERY = ["sd-c", "sd-check", "sd-ship", "sd_a.py", "sd_b.py", "sd_lane.py"]
+             "sd_b.py": "", "sd-c": "", "sd_lane.py": "", "sd-ship": "",
+             "sd_gate_run.py": "import sd_gate_cache\n", "sd_gate_cache.py": ""}
+    EVERY = ["sd-c", "sd-check", "sd-ship", "sd_a.py", "sd_b.py", "sd_gate_cache.py", "sd_gate_run.py", "sd_lane.py"]
 
     def setUp(self) -> None:
         super().setUp()
@@ -920,7 +921,17 @@ class PackImportClosure(ReceiptFixture):
 
     def test_the_closure_follows_nested_imports_and_siblings(self) -> None:
         self.assertEqual([path.name for path in sd_gate_receipts.pack_files(self.pack, closure=True)],
-                         ["sd-c", "sd-check", "sd_a.py", "sd_b.py"])
+                         ["sd-c", "sd-check", "sd_a.py", "sd_b.py", "sd_gate_cache.py", "sd_gate_run.py"])
+
+    def test_a_change_to_the_gates_own_modules_runs_again(self) -> None:
+        """Prepare review at 00716c92: the gate's own code sets up what the check runs under, such as
+        `cargo_environment`, so `sd_gate_run` and what it imports bind beside `sd-check`'s closure."""
+        with mock.patch.object(sd_gate_run, "BIN", self.pack):
+            self.gate(self.head, run=self.passing())
+            with (self.pack / "sd_gate_cache.py").open("a", encoding="utf-8") as stream:
+                stream.write("WARM_ENVIRONMENT = {}\n")
+            again = self.gate(self.head, run=self.passing())
+        self.assertEqual(("reused" in again, again["reuse_miss"]), (False, {"reason": "binding", "fields": ["inputs"]}))
 
     def test_a_pack_landing_outside_the_closure_leaves_the_receipt_standing(self) -> None:
         self.assertIn("reused", self.landed_outside(self.head))
@@ -950,11 +961,11 @@ class PackImportClosure(ReceiptFixture):
         (self.pack / "sd_a.py").write_text("def (:\n", encoding="utf-8")
         self.assertEqual([path.name for path in sd_gate_receipts.pack_files(self.pack, closure=True)], self.EVERY)
 
-    def test_the_real_closure_holds_sd_checks_modules_and_not_the_lane(self) -> None:
+    def test_the_real_closure_holds_sd_check_and_the_gate_and_not_the_lane(self) -> None:
         names = {path.name for path in sd_gate_receipts.pack_files(sd_gate_run.BIN, closure=True)}
-        self.assertLessEqual({"sd-check", "sd_lib.py", "sd_check_receipts.py", "sd_check_scope.py", "sd_gate_slots.py"},
-                             names)
-        self.assertEqual(names & {"sd-ship", "sd_lane.py", "sd_gate_receipts.py", "sd_gate_run.py"}, set())
+        self.assertLessEqual({"sd-check", "sd_lib.py", "sd_check_receipts.py", "sd_check_scope.py", "sd_gate_slots.py",
+                              "sd_gate_run.py", "sd_gate_receipts.py", "sd_gate_cache.py"}, names)
+        self.assertEqual(names & {"sd-ship", "sd_lane.py"}, set())
 
 
 class PackDeclaresTreeReuse(unittest.TestCase):

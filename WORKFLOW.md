@@ -172,7 +172,7 @@ After the switch:
   It refuses to post for any commit other than the one the worktree held.
 - The description carries `inputs <digest>` as provenance: the head, the copied `CLAUDE.local.md` and the pack's `bin/` files.
   A tree whose `.github/sd-gate-reuse.json` adds `"pack": "sd-check"` declares that its check runs no other pack command.
-  Its inputs then hash only `sd-check` and what it imports, so a pack landing elsewhere voids no receipt (sd:2722).
+  Its inputs then hash only what `sd-check` and the gate's `sd_gate_run` import, so a pack landing elsewhere voids no receipt (sd:2722).
 - Every merge attempt posts a fresh status. `sd-ship prepare` runs this same gate, through `sd-review --gate-check`.
   Prepare's pass leaves a receipt; the merge gate at the same head and binding, within 30 minutes, reads it instead of running `sd-check` again.
   The status then says `(reused)`. The merge gate never writes a receipt.

@@ -1182,8 +1182,8 @@
   pack `bin/` file, so a pack landing voids another repository's receipt
   still in flight. A tree whose `.github/sd-gate-reuse.json` adds
   `"pack": "sd-check"` declares that its check runs no other pack command;
-  its receipts then hash `sd-check` and its import closure, nested imports
-  and `sd_lib.sibling` loads included. Without the field every file binds,
+  its receipts then hash the import closure of `sd-check` and of the gate's
+  own `sd_gate_run`, nested imports and `sd_lib.sibling` loads included. Without the field every file binds,
   because a check may run `sd-docs-lint` or another pack command from
   `PATH` and the binding names only the command it starts. A closure that
   cannot be read hashes every file. The pack gating itself still binds its
