@@ -654,6 +654,15 @@ class MergeReuse(ReceiptFixture):
         self.assertEqual((merged["reuse_miss"], self.runs()),
                          ({"reason": "binding", "fields": ["environment_sha256"]}, 2))
 
+    def test_a_receipt_another_machine_wrote_is_not_reused(self) -> None:
+        """sd:2796 (sd:2782 L7): a satellite's own receipts land in the hub's database under the same key when
+        the login and checkout path match; the binding names the machine, so the hub never reuses one."""
+        head = self.declare()
+        with mock.patch.object(sd_gate_receipts.socket, "gethostname", return_value="satellite.example.test"):
+            self.prepare(head)
+        merged = self.merge(head)
+        self.assertEqual((merged["reuse_miss"], self.runs()), ({"reason": "binding", "fields": ["machine"]}, 2))
+
 
 class FnmShells(ReceiptFixture):
     """fnm gives every shell its own folder (operator ruling, 2026-10-04, sd:2602).
@@ -854,9 +863,57 @@ class PackGatesItself(ReceiptFixture):
         argvs: list = []
         with mock.patch.object(sd_gate_run, "BIN", foreign):
             self.gate(self.head, run=self.passing(argvs=argvs))
-            (foreign / "sd-x").write_text("landed\n", encoding="utf-8")
+            (foreign / "sd-check").write_text("#!/bin/sh\n# landed\n", encoding="utf-8")
             self.assertNotIn("reused", self.gate(self.head, run=self.passing(argvs=argvs)))
         self.assertEqual(argvs[0][1], str(foreign / "sd-check"))
+
+
+class PackImportClosure(ReceiptFixture):
+    """sd:2722: another repository's receipt binds the pack files `sd-check` imports, not every `bin/` file,
+    so a pack landing that leaves them alone does not void a receipt still in flight."""
+
+    FILES = {"sd-check": "import sd_a\n",
+             "sd_a.py": "def later():\n    import sd_b\n    return sd_lib.sibling('sd_c', 'sd-c')\n",
+             "sd_b.py": "", "sd-c": "", "sd_lane.py": "", "sd-ship": ""}
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.pack = self.root.parent / "pack"
+        self.pack.mkdir()
+        for name, text in self.FILES.items():
+            (self.pack / name).write_text(text, encoding="utf-8")
+        self.head = self.counted()
+
+    def test_the_closure_follows_nested_imports_and_siblings(self) -> None:
+        self.assertEqual([path.name for path in sd_gate_receipts.pack_files(self.pack)],
+                         ["sd-c", "sd-check", "sd_a.py", "sd_b.py"])
+
+    def test_a_pack_landing_outside_the_closure_leaves_the_receipt_standing(self) -> None:
+        with mock.patch.object(sd_gate_run, "BIN", self.pack):
+            self.gate(self.head, run=self.passing())
+            for name in ("sd_lane.py", "sd-ship"):
+                (self.pack / name).write_text("landed\n", encoding="utf-8")
+            self.assertIn("reused", self.gate(self.head, run=self.passing()))
+
+    def test_a_change_inside_the_closure_runs_again(self) -> None:
+        with mock.patch.object(sd_gate_run, "BIN", self.pack):
+            self.gate(self.head, run=self.passing())
+            for name in ("sd-check", "sd_a.py", "sd_b.py", "sd-c"):
+                with self.subTest(name=name):
+                    with (self.pack / name).open("a", encoding="utf-8") as stream:
+                        stream.write("# landed\n")
+                    self.assertNotIn("reused", self.gate(self.head, run=self.passing()))
+
+    def test_a_closure_that_cannot_be_read_binds_every_pack_file(self) -> None:
+        (self.pack / "sd_a.py").write_text("def (:\n", encoding="utf-8")
+        self.assertEqual([path.name for path in sd_gate_receipts.pack_files(self.pack)],
+                         ["sd-c", "sd-check", "sd-ship", "sd_a.py", "sd_b.py", "sd_lane.py"])
+
+    def test_the_real_closure_holds_sd_checks_modules_and_not_the_lane(self) -> None:
+        names = {path.name for path in sd_gate_receipts.pack_files(sd_gate_run.BIN)}
+        self.assertLessEqual({"sd-check", "sd_lib.py", "sd_check_receipts.py", "sd_check_scope.py", "sd_gate_slots.py"},
+                             names)
+        self.assertEqual(names & {"sd-ship", "sd_lane.py", "sd_gate_receipts.py", "sd_gate_run.py"}, set())
 
 
 class PackDeclaresTreeReuse(unittest.TestCase):

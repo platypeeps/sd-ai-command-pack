@@ -170,7 +170,7 @@ After the switch:
   The repository's own `check` entrypoint owns a hermetic environment if it needs one.
 - It posts the result to that exact commit as the `sd/local-gate` status, `success` or `failure`.
   It refuses to post for any commit other than the one the worktree held.
-- The description carries `inputs <digest>` as provenance: the head, the copied `CLAUDE.local.md` and the pack's `bin/` files.
+- The description carries `inputs <digest>` as provenance: the head, the copied `CLAUDE.local.md` and the pack's `bin/` files that `sd-check` imports (sd:2722).
 - Every merge attempt posts a fresh status. `sd-ship prepare` runs this same gate, through `sd-review --gate-check`.
   Prepare's pass leaves a receipt; the merge gate at the same head and binding, within 30 minutes, reads it instead of running `sd-check` again.
   The status then says `(reused)`. The merge gate never writes a receipt.
@@ -565,7 +565,9 @@ which the installer places in `~/.claude/agents`.
   in the repository, on the hub too, to the variables the hub compares plus
   `HOME`, `USER` and `PATH` (sd:2782): a check that needs a credential or
   another variable off that list fails, so leave such a repository off. The
-  table below is who does what.
+  table below is who does what. On a satellite, `sd-ship merge` and the queue
+  verbs (`lane enqueue`, `list`, `cancel`, `move`, `hold`, `release`) refuse
+  with `hub_only` before they read a row (sd:2795).
 - **Test one version per language, the latest stable (Python 3.14, Node
   26), in CI and locally; no version matrices.**
 

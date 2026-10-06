@@ -458,6 +458,19 @@
 
 ### Fixed
 
+- **A hub never reuses a gate receipt another machine wrote (sd:2796).**
+  A satellite's own receipts land in the hub's database, and with the same
+  login and checkout path their key is the hub's. The binding now names the
+  machine (`machine`, the host name), so such a receipt misses with
+  `reuse_miss` field `machine` and the check runs. Receipts written before
+  this change miss once on the new field.
+- **A satellite refuses `sd-ship merge` and the lane's queue verbs before it reads a row (sd:2795).**
+  `sd-ship merge` on a satellite read the `ship:` row and the hold, then
+  refused at the ship lock. Every writing verb but `prepare` now refuses
+  first, with `hub_only`. `lane enqueue`, `list`, `cancel`, `move`, `hold`
+  and `release` filled a satellite queue that no `lane run` drains; they now
+  refuse with `hub_only` and name `sd-ship lane request`.
+
 - **The offload view compares an allowlist of variables and the thread caps (sd:2782).**
   The `variables` part of a satellite's offload view now holds only the
   variables `offload_variable` names: `SD_`, `NEXTEST_`, `CARGO_`, `RUST`,
@@ -1148,6 +1161,13 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **A gate receipt binds only the pack files `sd-check` imports (sd:2722).**
+  `gate_inputs`, and the offload receipt's `pack_bin` with it, hashed every
+  pack `bin/` file, so a pack landing voided another repository's receipt
+  still in flight. They now hash `sd-check` and its import closure, nested
+  imports and `sd_lib.sibling` loads included. A closure that cannot be read
+  hashes every file, as before. The pack gating itself still binds its tree.
 
 - **`sd-docs-lint`'s claim-support reading is on by default, through the local
   Kev only (sd:2762).** A repository without `.github/sd-docs-lint.json`, or

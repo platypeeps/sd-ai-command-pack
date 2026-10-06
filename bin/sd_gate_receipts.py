@@ -17,8 +17,9 @@ The binding is what this module can name about a run, and nothing weaker:
   head, tree   the exact commit the worktree held; head is None under a tree key;
   fork         under a tree key, the tree of the merge base with the base branch;
   inputs       `sd_gate_run.gate_inputs`: the head (or tree), the copied untracked
-               `CLAUDE.local.md` (or its absence) and every pack `bin/` file,
-               so a pack upgrade reruns the check;
+               `CLAUDE.local.md` (or its absence) and the pack `bin/` files
+               `sd-check` imports (`pack_files`, sd:2722), so a pack upgrade
+               that changes them reruns the check;
   scope        the `sd_check_scope` decision, with its merge base (its tree under a tree key);
   commands     the detected entrypoints and the detection source;
   tools        path and bytes of each command's executable on the gate's PATH;
@@ -30,6 +31,7 @@ The binding is what this module can name about a run, and nothing weaker:
                machine's slot count (`sd_gate_slots.thread_caps`, sd:2726).
                The precheck runs on the environment as given, so both bind:
                a new slot count that changes the caps runs the check once more.
+  machine      the host name of the machine that ran it (sd:2796).
 
 The environment is bound whole because the gate forwards it whole: any
 variable may choose what a check runs, and a hand-kept list of the ones that
@@ -95,6 +97,7 @@ cannot be read never grants a pass.
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 import hashlib
 import itertools
@@ -279,7 +282,11 @@ def binding_commands(part: Mapping[str, Any]) -> list[list[str]]:
 
 
 def machine_binding(tree: pathlib.Path, commands: list[list[str]], env: Mapping[str, str]) -> dict[str, Any]:
-    """`tools`, `python`, `environment_sha256` and `threads`: this machine's half of `gate_binding`; raises when a tool does not resolve."""
+    """`tools`, `python`, `environment_sha256`, `threads` and `machine`: this machine's half of `gate_binding`; raises when a tool does not resolve.
+
+    `machine` is the host name, as `satellite_identity` writes it: a satellite's own receipts land in the hub's
+    database, under the hub's key when the login and checkout path match, and the hub never reuses one (sd:2796).
+    """
     tools = [sd_check_receipts.tool_identity(argv[0], env, tree) for argv in commands]
     for tool in tools:  # the worktree is temporary; name a tool inside it by its place in the tree
         path = pathlib.Path(tool["path"])
@@ -288,7 +295,8 @@ def machine_binding(tree: pathlib.Path, commands: list[list[str]], env: Mapping[
     python = pathlib.Path(sys.executable).resolve()
     return {"tools": tools, "python": {"path": str(python), "version": sys.version,
                                        "sha256": sd_check_receipts.file_digest(python)},
-            "environment_sha256": _digest(dict(env)), "threads": sd_gate_slots.thread_caps(env)}
+            "environment_sha256": _digest(dict(env)), "threads": sd_gate_slots.thread_caps(env),
+            "machine": socket.gethostname()}
 
 
 def offload_view(environment: Mapping[str, str], names: Iterable[str] = ()) -> dict[str, Any] | None:
@@ -475,8 +483,38 @@ def pack_bin(own: bool = False) -> str:
 
 
 def pack_files(folder: pathlib.Path) -> list[pathlib.Path]:
-    """The pack `bin/` files in `folder` a run depends on; `gate_inputs` and `pack_bin` hash these."""
-    return [path for path in sorted(folder.iterdir()) if path.is_file() and (path.suffix == ".py" or path.name.startswith("sd-"))]
+    """The pack `bin/` files in `folder` a run depends on; `gate_inputs` and `pack_bin` hash these.
+
+    Only `sd-check` and what it imports, at any depth, or loads with `sd_lib.sibling` (sd:2722): the gate runs
+    nothing else from the pack, so a landing elsewhere in `bin/` voids no receipt. A closure that cannot be read,
+    such as a file that does not parse, is every pack file, as before.
+    """
+    every = [path for path in sorted(folder.iterdir()) if path.is_file() and (path.suffix == ".py" or path.name.startswith("sd-"))]
+    found: set[pathlib.Path] = set()
+    todo = [folder / "sd-check"]
+    try:
+        while todo:
+            path = todo.pop()
+            if path not in found:
+                found.add(path)
+                todo += [folder / name for name in loaded_names(path) if (folder / name).is_file()]
+    except (OSError, SyntaxError, ValueError):
+        return every
+    return [path for path in every if path in found]
+
+
+def loaded_names(path: pathlib.Path) -> list[str]:
+    """The `bin/` file names the Python file at `path` imports or loads with `sd_lib.sibling`; raises when it does not parse."""
+    names = []
+    for node in ast.walk(ast.parse(path.read_bytes(), str(path))):
+        if isinstance(node, ast.Import):
+            names += [f"{alias.name.partition('.')[0]}.py" for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+            names.append(f"{node.module.partition('.')[0]}.py")
+        elif (isinstance(node, ast.Call) and getattr(node.func, "attr", getattr(node.func, "id", None)) == "sibling"
+              and len(node.args) == 2 and isinstance(node.args[1], ast.Constant)):
+            names.append(str(node.args[1].value))
+    return names
 
 
 def pack_rev() -> str | None:
