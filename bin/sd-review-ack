@@ -744,12 +744,16 @@ def read_store(root: pathlib.Path) -> tuple[dict[str, dict], str]:
     """
     rows, broken = _read_file(root)
     place, detail = store_place(root)
+    if place == "hub":
+        try:
+            held, unreadable = _hub_rows(detail)
+        except _Unknown as error:  # it answered `_registered` and failed since
+            place, detail = "unreachable", str(error)
+        else:
+            rows.update(held)
+            broken = "; ".join(part for part in (broken, unreadable) if part)
     if place == "unreachable":
         return {}, f"acknowledgements {detail}; every finding reads as unread"
-    if place == "hub":
-        held, unreadable = _hub_rows(detail)
-        rows.update(held)
-        broken = "; ".join(part for part in (broken, unreadable) if part)
     return rows, broken
 
 
@@ -868,8 +872,16 @@ def store_unreachable(root: pathlib.Path) -> str:
     return detail if place == "unreachable" else ""
 
 
+class _Unknown(Exception):
+    """The record's database stopped answering; the message is `store_unreachable`'s sentence."""
+
+
 def _hub_rows(own: str) -> tuple[dict[str, dict], str]:
-    """The newest row per finding under `own`, and a sentence naming any row that is not one."""
+    """The newest row per finding under `own`, and a sentence naming any row that is not one.
+
+    Raises `_Unknown` when the read fails, and leaves the record unknown for
+    the rest of this process, so `store_unreachable` says so too.
+    """
     sd_lib.import_sd_db()
     from sd_db.database import connect, default_path  # noqa: PLC0415
 
@@ -881,7 +893,9 @@ def _hub_rows(own: str) -> tuple[dict[str, dict], str]:
                 "WHERE kind = 'checkpoint' AND substr(key, 1, ?) = ? GROUP BY key)",
                 (len(prefix), prefix)).fetchall()
     except Exception as error:
-        return {}, f"the workflow database's acknowledgements cannot be read ({error}); every finding reads as unread"
+        place = "hub unreachable" if _satellite() else "workflow database unreadable"
+        _HUB[str(default_path())] = f"unknown ({place}: {type(error).__name__}: {error})"
+        raise _Unknown(_HUB[str(default_path())]) from None
     rows, bad = {}, []
     for key, body in found:
         try:
@@ -903,11 +917,19 @@ def _hub_save(own: str, rows: dict[str, dict], *, replace: bool) -> list[str]:
     records first: the import and `record_answers`, which never move a
     record. `replace=True` is `--ack`, which does, and refuses when another
     writer moved the row since it was read rather than drop that write.
+    Every other failure -- the hub gone mid-write, an unknown outcome --
+    refuses too: only a row that is seen to have moved is somebody else's
+    write, and anything else skipped would be a record lost in silence.
     """
     sd_lib.import_sd_db()
     from sd_db import ship as store  # noqa: PLC0415
     from sd_db.database import connect, default_path  # noqa: PLC0415
-    from sd_db.errors import SdDbError  # noqa: PLC0415
+
+    def _moved(key: str, revision: int | None) -> bool:
+        try:
+            return revision is not None and store.read(connection, key)[0] != revision
+        except Exception:  # a hub that cannot say the row moved has not shown it did
+            return False
 
     written: list[str] = []
     try:
@@ -917,15 +939,17 @@ def _hub_save(own: str, rows: dict[str, dict], *, replace: bool) -> list[str]:
     try:
         for found_id, row in rows.items():
             key = f"{ROW_PREFIX}{own}:{found_id}"
+            revision = None
             try:
                 revision, _ = store.read(connection, key)
                 if revision and not replace:
                     continue
                 store.save(connection, key, revision, {"writer": ROW_WRITER, "repository": own,
                                                        "finding": found_id, "row": row})
-            except SdDbError as error:
-                if replace:
-                    raise UsageError(f"not recorded: {error}; rerun sd-review-ack --ack") from None
+            except Exception as error:
+                if replace or not _moved(key, revision):
+                    raise UsageError(f"not recorded: {type(error).__name__}: {error}; "
+                                     "rerun once the workflow database answers") from None
                 continue
             written.append(found_id)
     finally:
@@ -1569,7 +1593,8 @@ def verdict(root: pathlib.Path, found: dict, rows: dict[str, dict], ref: str,
 
 def unacknowledged(root: pathlib.Path, ids: Iterable[str], ref: str | None = None,
                    stated: dict[str, list[str]] | None = None,
-                   merge: dict[str, str] | None = None) -> list[str]:
+                   merge: dict[str, str] | None = None,
+                   rows: dict[str, dict] | None = None) -> list[str]:
     """Which of these finding ids nobody has answered. The whole public gate.
 
     One call, so a reader that only wants the number -- `sd-status`'s row --
@@ -1578,9 +1603,11 @@ def unacknowledged(root: pathlib.Path, ids: Iterable[str], ref: str | None = Non
     carries them; without it a restated finding cannot be told from an
     answered one, so a caller that has the map passes it. `merge` is
     `landing_evidence`'s shape, for a merged pull request: without it a fix
-    that landed through a squash reads `fix-not-landed`.
+    that landed through a squash reads `fix-not-landed`. `rows` is a
+    `read_store` the caller already holds, so a report over many pull requests
+    reads the record once and judges them all against one snapshot.
     """
-    rows, _ = read_store(root)
+    rows = read_store(root)[0] if rows is None else rows
     landing = ref or landing_ref(root)
     read = stated or {}
     return [found for found in ids

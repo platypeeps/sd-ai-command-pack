@@ -22,6 +22,7 @@ import sys
 import tempfile
 import time
 import unittest
+from typing import Any
 from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -150,6 +151,72 @@ class SatelliteWritesTheHubReads(HubCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self.hub_rows(), {})
         self.assertTrue(ack.store_path(self.hub_clone).exists())
+
+
+class AFailureIsNeverSilent(HubCase):
+    """Review round 1 (sd:2750): a failed write or read reads as a failure, never as a skip or a zero."""
+
+    def in_home(self, home: pathlib.Path) -> Any:
+        patcher = mock.patch.dict(os.environ, {"HOME": str(home)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        module = sd_lib.sibling("sd_review_ack", "sd-review-ack")
+        module._forget_hub()
+        self.addCleanup(module._forget_hub)
+        return module
+
+    def test_a_hub_failure_mid_write_refuses_rather_than_skips(self) -> None:
+        from sd_db import remote, ship
+
+        self.in_home(self.hub_home)
+        with mock.patch.object(ship, "save", side_effect=remote.HubUnreachable("127.0.0.1", 1, "reset")):
+            with self.assertRaisesRegex(ack.UsageError, "not recorded: HubUnreachable"):
+                ack._hub_save(SLUG, {"aa11": {"pr": PULL}}, replace=False)
+        self.assertEqual(self.hub_rows(), {})
+
+    def test_a_row_another_writer_recorded_first_is_skipped(self) -> None:
+        from sd_db import ship
+
+        self.in_home(self.hub_home)
+        real = ship.save
+
+        def racing(connection: Any, key: str, previous: int, value: dict) -> int:
+            real(connection, key, previous, {**value, "row": {"pr": PULL, "by": "the other writer"}})
+            return real(connection, key, previous, value)
+        with mock.patch.object(ship, "save", side_effect=racing):
+            self.assertEqual(ack._hub_save(SLUG, {"aa11": {"pr": PULL}}, replace=False), [])
+        self.assertEqual(self.hub_rows(), {"aa11": 1})
+
+    def test_a_record_that_fails_after_answering_registration_reads_unknown_not_late(self) -> None:
+        """The `repo` read answers and the `state` read does not, inside one report."""
+        from sd_db import database
+
+        self.in_home(self.hub_home)
+        real = database.connect
+
+        class Failing:
+            def __init__(self, inner: Any) -> None:
+                self.inner = inner
+
+            def execute(self, sql: str, *args: Any) -> Any:
+                if "FROM state" in sql:
+                    raise sqlite3.OperationalError("disk I/O error")
+                return self.inner.execute(sql, *args)
+
+            def close(self) -> None:
+                self.inner.close()
+
+        merged = {"repo": SLUG, "pull_requests": [{
+            "number": PULL, "title": "t", "merged_at": "2026-10-04T12:00:00Z",
+            "review_findings": {"ids": ids()}, "head_oid": "", "merge_oid": ""}]}
+        unchecked: dict[str, str] = {}
+        with mock.patch.object(database, "connect", lambda *args, **kwargs: Failing(real(*args, **kwargs))):
+            late = status.late_reviews(self.hub_clone, merged, status.datetime.date(2026, 10, 5))
+            rows = status._merged_review_rows(self.hub_clone, merged, status.datetime.date(2026, 10, 5), unchecked)
+        self.assertIsNone(late["findings"])
+        self.assertIn("unknown (workflow database unreadable: OperationalError", late["unchecked"])
+        self.assertEqual(rows, [])
+        self.assertIn("unknown (workflow database unreadable", unchecked["merged-pr-review-unacknowledged"])
 
 
 class TheHubDoesNotAnswer(HubCase):

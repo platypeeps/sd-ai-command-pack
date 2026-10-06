@@ -2943,21 +2943,23 @@ def _unanswered_rows(
     No rows when the record's hub does not answer: every finding would read
     unread there, and a row would call an answered finding unanswered (sd:2750).
     """
-    unknown = sd_lib.sibling("sd_review_ack", "sd-review-ack").store_unreachable(root)
+    ack = sd_lib.sibling("sd_review_ack", "sd-review-ack")
+    held = ack.read_store(root)
+    unknown = ack.store_unreachable(root)
     if unknown:
         unchecked.setdefault(check, "; ".join([f"review acknowledgements {unknown}", *(reasons or [])]))
         return []
-    return _read_unanswered_rows(check, root, slug, listed, unchecked, reasons)
+    return _read_unanswered_rows(ack, check, root, slug, listed, unchecked, reasons, held)
 
 
 def _read_unanswered_rows(
-    check: str, root: pathlib.Path, slug: str | None,
+    ack: Any, check: str, root: pathlib.Path, slug: str | None,
     listed: Sequence[tuple[dict[str, Any], dict[str, str] | None, str]],
     unchecked: dict[str, str], reasons: list[str] | None,
+    held: tuple[dict[str, dict], str],
 ) -> list[dict[str, Any]]:
-    """`_unanswered_rows` with the record reachable."""
-    ack = sd_lib.sibling("sd_review_ack", "sd-review-ack")
-    _, broken = ack.read_store(root)
+    """`_unanswered_rows` with the record reachable, read once as `held`."""
+    record, broken = held
     reasons, blind = ([broken] if broken else []) + (reasons or []), []
     ref = ack.landing_ref(root)
     rows: list[dict[str, Any]] = []
@@ -2967,7 +2969,7 @@ def _read_unanswered_rows(
             blind.append((int(pull["number"]), stated["unreadable"]))
             continue
         found = list(stated.get("ids") or [])
-        standing = ack.unacknowledged(root, found, ref, stated.get("stated") or {}, merge)
+        standing = ack.unacknowledged(root, found, ref, stated.get("stated") or {}, merge, record)
         if not standing:
             continue
         # A reviewer that writes `(3 votes each)` has stated more than one
@@ -3104,11 +3106,11 @@ def _unread_between(root: pathlib.Path, merged: dict[str, Any], day: datetime.da
     if merged.get("truncated"):
         reasons.append(f"the merged list stopped at its limit of {merged.get('limit')}")
     ack = sd_lib.sibling("sd_review_ack", "sd-review-ack")
+    record, broken = ack.read_store(root)
     unknown = ack.store_unreachable(root)
     if unknown:  # a count, not a zero: `findings` is None (sd:2750)
         return {"days": [first, last], "findings": None, "pull_requests": [],
                 "unchecked": f"review acknowledgements {unknown}"}
-    _, broken = ack.read_store(root)
     if broken:
         reasons.append(broken)
     ref = ack.landing_ref(root)
@@ -3122,7 +3124,7 @@ def _unread_between(root: pathlib.Path, merged: dict[str, Any], day: datetime.da
             continue
         merge = {"head": str(pull.get("head_oid") or ""), "merge": str(pull.get("merge_oid") or "")}
         standing = ack.unacknowledged(root, list(stated.get("ids") or []), ref,
-                                      stated.get("stated") or {}, merge)
+                                      stated.get("stated") or {}, merge, record)
         if standing:
             findings += len(standing)
             numbers.append(pull.get("number"))
