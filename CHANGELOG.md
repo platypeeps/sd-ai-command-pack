@@ -1092,6 +1092,9 @@
   `rule 6 claim support: no answer (<reason>)` on stderr and passes.
   `JEV_SD_DOCS_LINT=0` switches the reading off, local and hosted; a missing
   `jev` stays silent, and a malformed file still takes no reading.
+  `sd-ship prepare` lints with `JEV_SD_DOCS_LINT=0`: the reading is advisory,
+  a local reading of 77 citations took 82 s, and prepare lints the branch and
+  then the base, each under a 300 s timeout. An author's own run keeps it.
 
 - **`sd-status` asks each `git` question once per run (sd:2677).** One run on
   a working checkout started 2,079 subprocesses, and 1,750 of them repeated a
