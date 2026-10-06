@@ -56,10 +56,10 @@ the offload view (`offload_view`: `PATH` order, the bytes of named tools and
 of the interpreter, named files under `HOME`, the thread caps, and a digest of
 each variable on its allowlist, `offload_variable`) and the pack digest. It
 never compares the machine part or `environment_sha256`, which hold the
-satellite's login. A satellite run that will write the row runs its check
-under `offload_environment`, only the variables the view compares, so a
-variable off the allowlist cannot choose what ran (sd:2782); a check that
-needs one fails there, and the hub gates the item itself. What the
+satellite's login. In an opted-in repository every gate, the hub's and the
+satellite's, runs its check under `offload_environment`, only the variables
+the view compares, so a variable off the allowlist cannot choose what ran on
+either machine (sd:2782); a check that needs one fails on both. What the
 satellite's machine holds beyond the view, and the satellite's honesty, are
 trusted as the operator's own node: the trust rule in `sd_local_gate` guards
 against a stale head, another pack and a moved base, not against a hostile
@@ -151,10 +151,10 @@ OFFLOAD_VARIABLES = ("CI", "GITHUB_ACTIONS", "LANG", "NO_COLOR", "MAKEFLAGS", "M
 #: tests); `TASK_` a Taskfile's; `DYLD_` and `LD_` the libraries every tool loads; `LC_` the locale; `UV_`, `PIP_`,
 #: `NPM_CONFIG_`, `NODE_` and `GIT_CONFIG` the bound tools, as their `OFFLOAD_HOME_FILES` do. Any other variable,
 #: such as a per-login `__CF_USER_TEXT_ENCODING`, `SSH_AUTH_SOCK` or `TMPDIR`, or a cron job's, is neither compared
-#: nor stored, and an offloaded run's check never sees it (`offload_environment`).
+#: nor stored, and no check in an opted-in repository sees it (`offload_environment`).
 OFFLOAD_VARIABLE_PREFIXES = ("SD_", "NEXTEST_", "CARGO_", "RUST", "PYTHON", "PYTEST_", "COVERAGE_", "TASK_", "DYLD_",
                              "LD_", "LC_", "UV_", "PIP_", "NPM_CONFIG_", "NODE_", "GIT_CONFIG")
-#: What an offloaded run's check keeps beside those: the view binds what `HOME` and `PATH` select, and `USER` names
+#: What an opted-in repository's check keeps beside those: the view binds what `HOME` and `PATH` select, and `USER` names
 #: the login, as `HOME` does.
 OFFLOAD_KEPT = ("HOME", "USER", "PATH")
 
@@ -234,18 +234,19 @@ def receipt_key(root: pathlib.Path, head: str, tree: str | None = None) -> str:
 
 
 def gate_binding(tree: pathlib.Path, head: str, inputs: str, base: str | None, env: Mapping[str, str],
-                 fork: str | None = None) -> dict[str, Any] | None:
+                 fork: str | None = None, mode: str = "whole") -> dict[str, Any] | None:
     """What a run in `tree` would be bound to, or None when something in it cannot be named.
 
     `fork` is the merge base's tree under a tree key (`tree_key`); the binding then names it in place of
     `head`, and names the scope's merge base by its tree too. It is the union of `tree_binding`, which a
-    hub compares with a satellite's (sd:2704), and `machine_binding`, which it does not.
+    hub compares with a satellite's (sd:2704), and `machine_binding`, which it does not, plus
+    `environment_mode`, `offload_run`'s `mode`: a pass under one mode never stands for a run under another (sd:2782).
     """
     part = tree_binding(tree, head, inputs, base, fork)
     if part is None:
         return None
     try:
-        return {**part, **machine_binding(tree, binding_commands(part), env)}
+        return {**part, **machine_binding(tree, binding_commands(part), env), "environment_mode": mode}
     except Exception:  # an input that cannot be named binds nothing; the check runs
         return None
 
@@ -339,42 +340,49 @@ def offload_variable(name: str) -> bool:
 
 
 def offload_environment(environment: Mapping[str, str]) -> dict[str, str]:
-    """`environment` cut to what an offload view compares: the one an offloaded run's check gets (sd:2782).
+    """`environment` cut to what an offload view compares, plus `OFFLOAD_KEPT` (sd:2782).
 
-    The view compares an allowlist, so a variable off it -- a Makefile's `SKIP_TESTS`, a `GOFLAGS` -- could
-    choose what a satellite's check ran and still stand for the hub's run. Dropped from the run, it cannot:
-    what ran is what the hub compares. A check that needs a dropped variable, a credential among them, fails
-    on the satellite, and the hub gates the item itself as before. One that skips work without it instead
-    passes with less run: the residual design.md names.
+    It is the environment of every gate in an opted-in repository (`offload_run`). The view compares an
+    allowlist, so a variable off it could choose what a satellite's check ran and still stand for the hub's:
+    `SKIP_TESTS=1` skips tests, `RUN_INTEGRATION=1` adds them. Dropped on both machines, it chooses nothing.
+    A check that needs a dropped variable, a credential among them, fails on every machine; such a
+    repository does not opt in until the variable is allowlisted.
     """
     return {key: value for key, value in environment.items() if key in OFFLOAD_KEPT or offload_variable(key)}
 
 
-def offloads(database: pathlib.Path | None, root: pathlib.Path) -> bool:
-    """This machine is a satellite and `root`'s repository has `repo.satellite_gate = accept`; any fault is False.
-
-    A recorded pass then writes an offload row (`record_offload`), so `check_in_worktree` runs the check under
-    `offload_environment` and keeps its offload view. Otherwise the run is a local gate, with the whole environment.
-    """
+def opted_in(database: pathlib.Path | None, root: pathlib.Path) -> bool:
+    """`root`'s repository has `repo.satellite_gate = accept` in `database`; no database or any fault is False."""
+    if database is None:
+        return False
     try:
-        if served_hub(database) is None:
-            return False
         with closing(_connect(database, write=False)) as connection:
             return sd_lib.repo_satellite_gate(connection, root) == "accept"
-    except Exception:  # the run is a local gate; a pass that keeps no view writes no offload row
+    except Exception:  # the gate runs as before opt-in; `environment_mode` keeps its pass from an opted-in gate
         return False
 
 
 def offload_run(database: pathlib.Path | None, root: pathlib.Path, environment: Mapping[str, str], *, record: bool,
-                offload: str | None) -> tuple[dict[str, str], bool]:
-    """`(environment, offloaded)` for a gate run: a recording run that `offloads` gets `offload_environment`."""
-    offloaded = record and offload != "require" and offloads(database, root)
-    return (offload_environment(environment) if offloaded else dict(environment)), offloaded
+                offload: str | None) -> tuple[dict[str, str], str]:
+    """`(environment, mode)` for a gate run in `root`; the binding names `mode` (sd:2782).
+
+    In an opted-in repository (`opted_in`) every gate runs under `offload_environment`: the hub's own, the
+    merge gate, local reuse and a satellite's. Both machines then run the same check by construction.
+    `mode` is `offload` for a recording satellite run, whose pass keeps its view and writes an offload row,
+    `allowlist` for any other gate there, and `whole` elsewhere, with the whole environment as before.
+    """
+    if not opted_in(database, root):
+        return dict(environment), "whole"
+    try:
+        satellite = served_hub(database) is not None
+    except Exception:  # `record_offload` reports the fault; this run keeps no view
+        satellite = False
+    return offload_environment(environment), "offload" if record and offload != "require" and satellite else "allowlist"
 
 
-def start_view(gated: Worktree, identity: dict[str, Any] | None, offloaded: bool) -> dict[str, Any] | None:
-    """The offload view an offloaded run starts from, which its receipts keep; None for a local gate."""
-    return gated.view(identity) if offloaded and identity else None
+def start_view(gated: Worktree, identity: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The offload view an `offload` run starts from, which its receipts keep; None for any other mode."""
+    return gated.view(identity) if gated.mode == "offload" and identity else None
 
 
 def offload_miss(theirs: Any, ours: Any) -> dict[str, Any] | None:
@@ -424,7 +432,7 @@ class Worktree:
     """A gate's worktree `tree` of `head` in `root`, and what keys and binds its receipts.
 
     `content` and `fork` are `tree_key`'s answer, `own` is `gates_itself`'s, `inputs` is `gate_inputs`'s,
-    and `environment` is the gate's own (`sd_gate_run.gate_environment`).
+    `environment` is the gate's own (`sd_gate_run.gate_environment`), and `mode` is `offload_run`'s.
     """
 
     root: pathlib.Path
@@ -436,6 +444,7 @@ class Worktree:
     fork: str | None
     own: bool
     inputs: str
+    mode: str = "whole"
 
     def view(self, part: Mapping[str, Any]) -> dict[str, Any] | None:
         """This environment's offload view, binding the executables of `part`'s commands too."""
@@ -724,7 +733,7 @@ def record_gate_pass(database: pathlib.Path, gated: Worktree, identity: dict[str
     import sd_gate_run  # noqa: PLC0415 -- it imports this module
 
     after = gate_binding(gated.tree, gated.head, sd_gate_run.gate_inputs(gated.root, gated.head, gated.content, gated.own),
-                                          gated.base, gated.environment, gated.fork)
+                                          gated.base, gated.environment, gated.fork, gated.mode)
     key = receipt_key(gated.root, gated.head, gated.content)
     moved = offload_miss(before, gated.view(identity)) if before is not None else None
     record_unless_moved(database, key, identity, after, reading, gated.head, None if moved else before)  # no reuse exports it

@@ -146,8 +146,9 @@ out `bin/` (sd:2613). There the running pack does not decide what ran, and
 
 ### The offload view
 
-Local reuse does not change. `gate_binding` keeps `environment_sha256` over
-the whole `gate_environment`, and every local receipt binds it as today.
+Local reuse keeps its binding. `gate_binding` keeps `environment_sha256` over
+the gate's environment, and every local receipt binds it as before. In an
+opted-in repository that environment is the cut one described below.
 The ship review of 884d31a3 showed why (C-17). Equal `make` bytes can run
 another python or compiler through another `PATH` order. `HOME` selects
 tool configuration.
@@ -206,20 +207,33 @@ under a listed prefix. `GIT_CONFIG_KEY_<n>` is kept: it names a config key,
 and `GIT_CONFIG_COUNT` fails every `git` call without it. A variable off the list is neither compared nor
 written: no value and no digest of it reaches the hub's row.
 
-A satellite run that will write an offload row runs its check under exactly
-that environment (`offload_environment`, sd:2782): the allowlisted names plus
-`HOME`, `USER` and `PATH`, which the view binds through `path`, `tools` and
-`home_files`. Every other variable is dropped from the child. The ship review
-of the allowlist showed why: a Makefile that skips its tests under
-`SKIP_TESTS=1`, or a `GOFLAGS` that selects tests, left the view equal to the
-hub's, and the hub would merge a pass that never ran those tests. What ran is
-now what the hub compares. The cost: a check that needs a dropped variable, a
-credential among them, fails on the satellite, and the hub gates that item
-itself, as before this item. The run is offloaded when `served_by` names a hub
-and the repository has `repo.satellite_gate = accept` (`offloads`). The hub's
-own gate, a satellite in a repository that did not opt in, and local receipt
-reuse keep the whole `gate_environment`. A local pass is not exported: its
-binding names the whole environment, so the offloaded run runs again.
+In a repository with `repo.satellite_gate = accept`, every gate runs its
+check under exactly that environment (`offload_environment`, sd:2782): the
+allowlisted names plus `HOME`, `USER` and `PATH`, which the view binds through
+`path`, `tools` and `home_files`. That covers the hub's own gate, the merge
+gate, local receipt reuse and a satellite's gate. Every other variable is
+dropped from the child on both machines, so both run the same check by
+construction. Two ship reviews showed why:
+
+- dropped on the satellite only, a variable that skips work (`SKIP_TESTS=1`,
+  a `GOFLAGS` that selects tests) left the view equal to the hub's;
+- kept on the hub only, a variable that adds work (`RUN_INTEGRATION=1`) ran an
+  integration test there that the satellite's accepted pass never ran.
+
+Opting in therefore means: on every machine, checks see only the allowlist
+plus `HOME`, `USER` and `PATH`. A check that needs a credential or another
+variable off the list fails on every machine. Such a repository does not opt
+in until the variable is allowlisted. A repository that did not opt in keeps
+the whole `gate_environment`, as before this item.
+
+The binding names the mode in `environment_mode` (`offload_run`): `offload`
+for a recording satellite run, which keeps its view and writes the offload
+row; `allowlist` for any other gate in an opted-in repository; `whole`
+elsewhere. A pass under one mode never stands for a run under another, so
+flipping `repo.satellite_gate` reruns the check. An `allowlist` pass is not
+exported as an offload row: it kept no view, so the satellite's run runs again.
+An opt-in read fault on either machine answers `whole`, so that run's pass
+cannot stand for an opted-in gate.
 
 Residual risk on the offload path:
 
@@ -228,9 +242,9 @@ Residual risk on the offload path:
 - tool configuration under `HOME` outside `OFFLOAD_HOME_FILES`, and outside
   `HOME`, such as `/etc` or the package manager's prefix;
 - shared libraries that the compared tools load.
-- a check that skips work, rather than failing, when a variable the offloaded
-  run drops is absent, such as a test marked to skip without a token: the
-  satellite then passes with less run than the hub's own gate would run;
+- a check that skips work, rather than failing, when a dropped variable is
+  absent, such as a test marked to skip without a token: in an opted-in
+  repository it skips that work on every machine, the hub's included;
 - the packages installed for the interpreter: a virtualenv's `python` resolves to
   its base interpreter, so the `python` part binds that binary, not the
   virtualenv's `site-packages`.
