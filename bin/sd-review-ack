@@ -778,18 +778,15 @@ def _read_file(root: pathlib.Path) -> tuple[dict[str, dict], str]:
     return {k: v for k, v in rows.items() if isinstance(v, dict)}, ""
 
 
-#: This process's database reader, keyed by the database path, so a test that
-#: moves `HOME` gets its own: `(connection, registered slugs)` or the reason
-#: there is none. One connection answers every pull request a report reads.
-_HUB: dict[str, Any] = {}
+#: This process's answer to `_registered`, keyed by the database path, so a
+#: test that moves `HOME` gets its own. An unreachable hub is asked once, not
+#: once per pull request. No connection is kept: each read opens and closes
+#: its own, so none is left for the collector to close.
+_HUB: dict[str, frozenset[str] | str] = {}
 
 
 def _forget_hub() -> None:
-    """Close the cached reader; the counterpart of `_forget_carried_rows`."""
-    for reader in _HUB.values():
-        if isinstance(reader, tuple):
-            with contextlib.suppress(Exception):
-                reader[0].close()
+    """Drop the cached answer; the counterpart of `_forget_carried_rows`."""
     _HUB.clear()
 
 
@@ -803,31 +800,31 @@ def _origin_slug(root: pathlib.Path) -> str:
         return ""
 
 
-def _hub_reader() -> tuple[Any, frozenset[str]] | str:
-    """A read connection on the workflow database and the slugs its `repo` rows name, or why not."""
+def _registered() -> frozenset[str] | str:
+    """The slugs the workflow database's `repo` rows name, or why it did not answer."""
+    sd_lib.import_sd_db()
     from sd_db import database  # noqa: PLC0415
     from sd_ship_remote import Refusal, slug  # noqa: PLC0415
 
-    path = database.default_path()
-    if str(path) in _HUB:
-        return _HUB[str(path)]
-    reader: tuple[Any, frozenset[str]] | str
-    try:
-        connection = database.connect(path, write=False)
-        slugs: set[str] = set()
-        for (remote,) in connection.execute("SELECT remote FROM repo WHERE remote IS NOT NULL").fetchall():
-            with contextlib.suppress(Refusal):
-                slugs.add(slug(str(remote)))
-        reader = (connection, frozenset(slugs))
-    except Exception as error:  # every way a hub or a file refuses: the record is unknown, not empty
-        place = "hub unreachable" if _satellite() else "workflow database unreadable"
-        reader = f"unknown ({place}: {type(error).__name__}: {error})"
-    _HUB[str(path)] = reader
-    return reader
+    path = str(database.default_path())
+    if path not in _HUB:
+        try:
+            with contextlib.closing(database.connect(database.default_path(), write=False)) as connection:
+                remotes = connection.execute("SELECT remote FROM repo WHERE remote IS NOT NULL").fetchall()
+            slugs: set[str] = set()
+            for (remote,) in remotes:
+                with contextlib.suppress(Refusal):
+                    slugs.add(slug(str(remote)))
+            _HUB[path] = frozenset(slugs)
+        except Exception as error:  # every way a hub or a file refuses: the record is unknown, not empty
+            place = "hub unreachable" if _satellite() else "workflow database unreadable"
+            _HUB[path] = f"unknown ({place}: {type(error).__name__}: {error})"
+    return _HUB[path]
 
 
 def _satellite() -> bool:
     """Whether this home names a hub, by the library's own rule; False with an older `sd_db`."""
+    sd_lib.import_sd_db()
     try:
         from sd_db import hub  # noqa: PLC0415
     except ImportError:
@@ -855,10 +852,10 @@ def store_place(root: pathlib.Path) -> tuple[str, str]:
     local = getattr(database, "local_path", database.default_path)()
     if not _satellite() and not local.exists():
         return "file", ""
-    reader = _hub_reader()
-    if isinstance(reader, str):
-        return "unreachable", reader
-    return ("hub", own) if own in reader[1] else ("file", "")
+    registered = _registered()
+    if isinstance(registered, str):
+        return "unreachable", registered
+    return ("hub", own) if own in registered else ("file", "")
 
 
 def store_unreachable(root: pathlib.Path) -> str:
@@ -873,15 +870,16 @@ def store_unreachable(root: pathlib.Path) -> str:
 
 def _hub_rows(own: str) -> tuple[dict[str, dict], str]:
     """The newest row per finding under `own`, and a sentence naming any row that is not one."""
-    reader = _hub_reader()
-    if isinstance(reader, str):
-        return {}, reader
+    sd_lib.import_sd_db()
+    from sd_db.database import connect, default_path  # noqa: PLC0415
+
     prefix = f"{ROW_PREFIX}{own}:"
     try:
-        found = reader[0].execute(
-            "SELECT key, body FROM state WHERE id IN (SELECT MAX(id) FROM state "
-            "WHERE kind = 'checkpoint' AND substr(key, 1, ?) = ? GROUP BY key)",
-            (len(prefix), prefix)).fetchall()
+        with contextlib.closing(connect(default_path(), write=False)) as connection:
+            found = connection.execute(
+                "SELECT key, body FROM state WHERE id IN (SELECT MAX(id) FROM state "
+                "WHERE kind = 'checkpoint' AND substr(key, 1, ?) = ? GROUP BY key)",
+                (len(prefix), prefix)).fetchall()
     except Exception as error:
         return {}, f"the workflow database's acknowledgements cannot be read ({error}); every finding reads as unread"
     rows, bad = {}, []
@@ -906,6 +904,7 @@ def _hub_save(own: str, rows: dict[str, dict], *, replace: bool) -> list[str]:
     record. `replace=True` is `--ack`, which does, and refuses when another
     writer moved the row since it was read rather than drop that write.
     """
+    sd_lib.import_sd_db()
     from sd_db import ship as store  # noqa: PLC0415
     from sd_db.database import connect, default_path  # noqa: PLC0415
     from sd_db.errors import SdDbError  # noqa: PLC0415
