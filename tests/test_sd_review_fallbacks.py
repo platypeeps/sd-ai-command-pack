@@ -7,9 +7,11 @@ import json
 import os
 import pathlib
 import pwd
+import socket
 import subprocess
 import sys
 from typing import Any
+from unittest import mock
 
 from sd_db import connect, initialise, read_registry, seed
 
@@ -341,7 +343,9 @@ class DatabaseProviderStateTests(ReviewRunFixture):
         home = self.tmp / "satellite"
         (home / ".config/sd").mkdir(parents=True)
         (home / ".config/sd/hub.json").write_text(json.dumps({"hub": "127.0.0.1", "port": 9}))
-        registry, reason = sd_review.sd_registry.read_or_report(home=home, with_database=True)
+        # The transport refuses, whatever listens on this machine; the rest of the path is the real one.
+        with mock.patch.object(socket, "create_connection", side_effect=ConnectionRefusedError(61, "refused")):
+            registry, reason = sd_review.sd_registry.read_or_report(home=home, with_database=True)
         self.assertEqual(registry.providers, {})
         self.assertIn("the sd hub at 127.0.0.1:9 is unreachable", reason)
 
