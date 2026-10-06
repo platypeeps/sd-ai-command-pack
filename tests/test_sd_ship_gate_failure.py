@@ -201,6 +201,72 @@ class GateFailureSpendsNoPass(unittest.TestCase):
         self.assertEqual(len(review.state["passes"]), 1)
 
 
+#: What sd-review reports when the review cleared and the gate then failed (sd:2721).
+CLEARED = {**GATE_FAILED, "cleared_status": "clean", "outcomes": [{"backend": "automatic", "status": "clean"}],
+           "reviewed_by": ["automatic"], "completed_reviews": 1}
+
+
+class AClearedReviewOutlivesItsGate(unittest.TestCase):
+    """sd:2721. A gate that fails after a cleared review keeps the review: sd:2671 ran three full reviews for load flakes."""
+
+    context = provider_tests.ProviderSelection.context
+
+    def kept(self) -> dict:
+        review, _process = self.context(report_changes=CLEARED)
+        with self.assertRaisesRegex(ship.Refusal, "after the review cleared; the review pass is kept") as caught:
+            review.review(HEAD)
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "gate_failed")
+        self.assertIn("timed out after 900s", str(caught.exception))
+        return review.state
+
+    def gate(self, status: str):
+        check = {"status": status, "exit_code": 0 if status == "pass" else 1, "detail": "gate-again", "checks": None,
+                 "summary": f"sd-check {status}"}
+        return unittest.mock.patch.object(sd_ship_review, "adjudicated_check", return_value=check)
+
+    def test_the_failure_keeps_the_pass_and_names_no_reviewed_head(self):
+        state = self.kept()
+        self.assertEqual([entry["report"]["status"] for entry in state["passes"]], ["gate_failed"])
+        self.assertIsNone(state.get("reviewed_head"))
+        self.assertEqual(state["review_preflight_error"]["kind"], "gate_failed")
+
+    def test_a_review_short_of_its_depth_is_released_as_before(self):
+        review, _process = self.context(report_changes={**CLEARED, "completed_reviews": 0})
+        with self.assertRaisesRegex(ship.Refusal, "the review pass was released"):
+            review.review(HEAD)
+        self.assertEqual(review.state["passes"], [])
+
+    def test_the_next_prepare_at_that_head_runs_only_the_gate(self):
+        review, process = self.context(state=self.kept())
+        with self.gate("pass") as gate:
+            review.review(HEAD)
+        self.assertEqual((process.call_count, gate.call_args.args[1]), (0, HEAD))
+        [entry] = review.state["passes"]
+        self.assertEqual((entry["report"]["status"], entry["report"]["check"]["status"]), ("clean", "pass"))
+        self.assertEqual(entry["report"]["failed_check"], GATE_FAILED["check"])
+        self.assertEqual(review.state["reviewed_head"], HEAD)
+        self.assertIsNone(review.state["review_preflight_error"])
+
+    def test_a_gate_that_fails_again_keeps_the_pass_and_refuses(self):
+        review, process = self.context(state=self.kept())
+        with self.gate("fail"), self.assertRaisesRegex(ship.Refusal, "failed again at .*; its review pass stays kept"):
+            review.review(HEAD)
+        self.assertEqual(process.call_count, 0)
+        self.assertEqual([entry["report"]["status"] for entry in review.state["passes"]], ["gate_failed"])
+        self.assertIsNone(review.state.get("reviewed_head"))
+
+    def test_a_fix_after_it_is_verified_as_a_delta(self):
+        fixed = "c" * 40
+        review, process = self.context(state=self.kept(), head=fixed)
+        with unittest.mock.patch("sd_ship_review.is_ancestor", return_value=True):
+            review.review(fixed)
+        argv = process.call_args_list[-1].args[1]
+        self.assertEqual(argv[argv.index("--base") + 1], HEAD)
+        self.assertIn("--verify-report", argv)
+        self.assertEqual(len(review.state["passes"]), 2)
+        self.assertEqual(review.state["reviewed_head"], fixed)
+
+
 NOT_RUN = {"status": "not_run", "exit_code": None, "reason": "the review is blocking; the gate runs on a head it does not block"}
 FINDING = {"path": "a.py", "line": 1, "severity": "high", "summary": "wrong", "family": "correctness",
            "disposition": "blocking", "backend": "automatic"}

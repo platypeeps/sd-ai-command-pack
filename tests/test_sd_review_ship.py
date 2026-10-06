@@ -77,6 +77,20 @@ class FixReviewTests(ReviewFixture):
                                  self.environment(), self.chatgpt_home())
             self.assertEqual(runner.calls, [])
 
+    def test_a_review_that_cleared_before_its_gate_failed_can_be_verified(self):
+        """sd:2721. sd-ship keeps that pass, so the fix after it verifies a `gate_failed` report."""
+        root, first = self.branch()
+        prior = sd_review.review(root, namespace(scope="branch"), FakeRunner({"sd-check": sd_review.Completed(1, "{}", "")}),
+                                 self.environment(), self.chatgpt_home())
+        self.assertEqual(prior["status"], "gate_failed")
+        report = self.tmp / "prior.json"
+        report.write_text(json.dumps(prior))
+        self.commit(root, "fix.py", "fix = True\n")
+        result = sd_review.review(root, namespace(scope="branch", base=first, verify_report=str(report)), FakeRunner(),
+                                  self.environment(), self.chatgpt_home())
+        self.assertEqual((result["status"], result["subject"]["paths"]), ("clean", ["fix.py"]))
+        self.assertTrue(result["verification_report_digest"])
+
     def test_resume_reviews_full_branch_and_repeats_prior_blockers(self):
         root, first = self.branch()
         blocking = json.dumps({"findings": [{"path": "src.py", "line": 1, "summary": "original unresolved defect",

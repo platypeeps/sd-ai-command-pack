@@ -171,6 +171,19 @@ class RunCheck(Repository):
         env = sd_gate_run.gate_environment(self.root, {"PATH": os.pathsep.join([str(venv / "bin"), str(plain)])})
         self.assertEqual(env["PATH"], str(plain.resolve()))  # each kept entry resolved (sd:2602)
 
+    def test_a_path_entry_that_names_no_folder_is_dropped(self) -> None:
+        """sd:2772. fnm's `cd` hook prepends a per-shell link, here to no installation, so
+        `cd <checkout> && sd gate check` bound another environment than `sd-review -C <checkout>`
+        and the review ran the whole check again. A folder that does not exist selects no tool."""
+        outside = tempfile.TemporaryDirectory()
+        self.addCleanup(outside.cleanup)
+        shell = pathlib.Path(outside.name) / "fnm_multishells" / "3315_1791163917161"
+        shell.parent.mkdir()
+        shell.symlink_to(pathlib.Path(outside.name) / "no-installation")
+        plain = {"PATH": "/usr/bin", "HOME": "/h"}
+        after_cd = {**plain, "PATH": os.pathsep.join([str(shell / "bin"), "/usr/bin"])}
+        self.assertEqual(sd_gate_run.gate_environment(self.root, after_cd), sd_gate_run.gate_environment(self.root, plain))
+
     def test_the_gates_bound_is_the_per_check_timeout_sd_check_reports(self) -> None:
         """`sd-check`'s own 900 s default must not cut a gate run short; the gate's bound reaches it."""
         head = self.commit("check:\n\t@sleep 5\n")

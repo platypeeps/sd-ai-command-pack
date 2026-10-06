@@ -817,6 +817,7 @@ class PipelineTests(ReviewFixture):
         runner = FakeRunner({"sd-check": sd_review.Completed(1, "{}", "lint failed")})
         result = self.run_review(root, runner)
         self.assertEqual(result["status"], "gate_failed")
+        self.assertEqual(result["cleared_status"], "clean")  # sd:2721: what sd-ship restores once a gate passes
         self.assertEqual(self.programs(runner)[-1], "sd-check")
         self.assertIn("codex", self.programs(runner)[:-1])
 
