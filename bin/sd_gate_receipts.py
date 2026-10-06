@@ -400,7 +400,10 @@ def pack_rev() -> str | None:
 
 
 def served_hub(database: pathlib.Path | None) -> str | None:
-    """The hub serving `database` to this satellite as `host:port`, or None on the hub or with an older `sd_db`."""
+    """The hub serving `database` to this satellite as `host:port`, or None on the hub or with an older `sd_db`.
+
+    Raises what `served_by` raises, such as on a malformed hub configuration; each caller keeps its pass (sd:2776).
+    """
     served_by = getattr(getattr(sd_lib.import_sd_db().module, "database", None), "served_by", None)
     return served_by(database) if served_by is not None and database is not None else None
 
@@ -433,9 +436,9 @@ def pack_warning(database: pathlib.Path | None, root: pathlib.Path, own: bool) -
     It compares with the digest the hub's lane last published. A warning only: the hub's pack can still
     move after the run, and its merge compares again (clause 6). Any fault warns of nothing.
     """
-    if served_hub(database) is None or (slug := repository_slug(root)) is None:
-        return None
     try:
+        if served_hub(database) is None or (slug := repository_slug(root)) is None:
+            return None
         with closing(_connect(database, write=False)) as connection:
             if sd_lib.repo_satellite_gate(connection, root) != "accept":
                 return None
@@ -463,12 +466,11 @@ def record_offload(database: pathlib.Path | None, run: Worktree, identity: Mappi
     `view` is the offload view the pass started from (`start_view`), never one taken now: a reuse writes the
     one its receipt kept. `recorded_at` is a reused pass's own time; a reuse leaves alone only the same row.
     """
-    hub = served_hub(database)
-    if hub is None:
-        return {}
     import sd_gate_run  # noqa: PLC0415 -- it imports this module
 
     try:
+        if (hub := served_hub(database)) is None:
+            return {}
         slug = repository_slug(run.root)
         if slug is None:
             raise LookupError("origin names no github.com repository, so no hub can compute the key")
@@ -633,7 +635,11 @@ def from_receipts(database: pathlib.Path | None, gated: Worktree, identity: dict
 
 def start_view(database: pathlib.Path | None, gated: Worktree, identity: dict[str, Any] | None) -> dict[str, Any] | None:
     """On a satellite, the offload view a run starts from, which its receipts keep; None on a hub."""
-    return gated.view(identity) if identity and served_hub(database) is not None else None
+    try:
+        hub = served_hub(database) if identity else None
+    except Exception:  # the run goes on; `record_offload` meets the fault again and reports it as `offload_error`
+        return None
+    return gated.view(identity) if identity and hub is not None else None
 
 
 def record_gate_pass(database: pathlib.Path, gated: Worktree, identity: dict[str, Any],
