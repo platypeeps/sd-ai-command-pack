@@ -484,6 +484,29 @@
   Its request row stays `queued`, `lock_retries` counts the runs, and the same run does not claim it again.
   After `LOCK_RETRIES` (12) runs it fails, and the reason says how long the lock was held.
 
+- **`sd-ship` names the main commits behind a base refusal (sd:2339).**
+  `prepare` on a branch behind the default branch already refused before any review.
+  Its refusal now names the missing commits: the count and the first three short SHAs.
+  `merge` on a head that differs from the reviewed head only by a clean merge of
+  `origin/<base>` says so, names that merge's main commits, and points to `sd-ship prepare`.
+  `WORKFLOW.md` now says to run `prepare` and `merge` back to back for one item.
+
+- **A gate run from a linked worktree reads the main checkout's `CLAUDE.local.md` (sd:2859).**
+  The review reads the main checkout's copy; the gate read the linked worktree's own path, found none,
+  and reused its receipt across an edit to the block. The hub then refused the satellite's receipt on `inputs`.
+
+- **The review binding and the gate's `inputs` read the parsed `CLAUDE.local.md` block, not its bytes (sd:2854).**
+  The file is untracked and per machine. A hub's copy that differed from a satellite's in comments,
+  layout or lines outside the markers refused every `sd-ship merge --satellite-gate`, first as
+  `review_binding_moved` and then at trust-rule clause 5 or 8. Both now hash `sd_lib.local_policy_digest`:
+  the parsed block, keys sorted. No file, no block and an empty block read alike. A key that differs,
+  such as `mode:` or a declared check command, still refuses on both. `.github/sd-review.json` still binds byte-exact.
+  The gate's check tree gets the parsed block rewritten, quoted and sorted (`sd_lib.local_policy_text`), not the file, so a check reads only what the digest covers.
+  With no file it gets an empty block, since no file and an empty block share one digest.
+  **Migration:** every stored binding moves once, named as `normalizer changed ... local-block-1`;
+  a review whose replayed request is unchanged is kept, as for any normalizer change.
+  Every stored gate receipt and offload row misses once on `inputs`, and the check runs again.
+
 - **`sd-status` no longer reports `branch-unresolvable` on a done item (sd:2729).**
   A merge deletes the squashed branch, so a done item's `branch` is history, not a fault to repair.
 

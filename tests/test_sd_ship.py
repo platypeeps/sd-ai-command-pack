@@ -703,11 +703,14 @@ roles:
         # sd:1346, sd:1367: merge refuses a branch behind the default branch,
         # so prepare refused nothing, spent the review and answered
         # ready_to_send. It now refuses first and spends nothing.
-        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        first = self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"other.txt": "main\n"})
+        second = self.remote.commit_on("main", "more main work\n\nAuthored-with: human", files={"other.txt": "more\n"})
         with patch.object(ship.Ship, "review") as review:
             with self.assertRaisesRegex(ship.Refusal, "behind the current default branch") as caught:
                 self.prepare()
         review.assert_not_called()
+        # sd:2339: the refusal names what the branch lacks, oldest first.
+        self.assertIn(f"origin/main by 2 commits ({first[:12]}, {second[:12]})", str(caught.exception))
         self.assertEqual(caught.exception.workflow["blocker"]["code"], "base_moved")
         self.assertIn("git merge origin/main", caught.exception.workflow["next_action"])
         self.assertIn("--catch-up", caught.exception.workflow["next_action"])
@@ -790,6 +793,29 @@ roles:
         state = self.operation().state
         self.assertEqual(len(state["passes"]), 1)
         self.assertEqual(state["review_carry_forward"]["from"], before)
+
+    def test_merge_after_a_hand_merge_of_the_base_names_it(self):
+        # sd:2339: a merge after a hand merge of main refused with "does not
+        # name this exact head" alone, and an extra review round followed.
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        reviewed = _git(self.root, "rev-parse", "HEAD")
+        landed = self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"lib/other.txt": "main\n"})
+        _git(self.root, "fetch", "-q", "origin", "main:refs/remotes/origin/main")
+        _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge origin/main into topic\n\nAuthored-with: human", "origin/main")
+        with self.assertRaisesRegex(ship.Refusal, "does not name this exact head") as caught:
+            self.merge()
+        self.assertIn(f"adds only a merge of origin/main, 1 commit ({landed[:12]}), to the reviewed {reviewed[:12]}",
+                      str(caught.exception))
+        self.assertIn("sd-ship prepare", str(caught.exception))
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        self.assertEqual(self.operation().state["review_carry_forward"]["from"], reviewed)
+
+    def test_merge_after_an_ordinary_commit_names_no_base_merge(self):
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        _git(self.root, "commit", "--allow-empty", "-qm", "later\n\nAuthored-with: human")
+        with self.assertRaisesRegex(ship.Refusal, "does not name this exact head") as caught:
+            self.merge()
+        self.assertNotIn("origin/main", str(caught.exception))
 
     def test_a_hand_merge_of_the_base_is_scoped_like_a_catch_up(self):
         before = self.shared_context()
@@ -3636,7 +3662,7 @@ roles:
         head = _git(self.root, "rev-parse", "HEAD")
         operation.check_review(head)
         local.symlink_to(self.root / "missing-config")
-        with self.assertRaises(OSError):
+        with self.assertRaisesRegex(ship.sd_lib.ConfigError, "dangling local configuration link"):
             operation.check_review(head)
         self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
 
@@ -3650,10 +3676,14 @@ roles:
         self.assertNotEqual(ship.binding(linked), before)
 
     def test_new_review_configuration_invalidates_the_saved_receipt(self):
+        """A key in the block binds; a note outside it does not (sd:2854)."""
         self.prepare()
-        with (self.root / "CLAUDE.local.md").open("a") as stream:
-            stream.write("\nconfiguration changed\n")
-        with self.assertRaisesRegex(ship.Refusal, "policy changed"):
+        local = self.root / "CLAUDE.local.md"
+        with local.open("a") as stream:
+            stream.write("\nconfiguration noted outside the block\n")
+        self.operation().check_review(_git(self.root, "rev-parse", "HEAD"))
+        local.write_text(local.read_text().replace("mode: full", "mode: full\nguest_allow: docs/decisions"))
+        with self.assertRaisesRegex(ship.Refusal, "policy changed after review: CLAUDE.local.md \\(policy\\)$"):
             self.merge()
 
     def set_written_mode(self, word):

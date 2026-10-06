@@ -68,8 +68,9 @@ ADJUDICATOR_POLICY_FILES = (
 )
 #: Names the normalizer. The interpreter is in it because `ast.dump` is only
 #: stable within one minor version: a new one moves every binding once, and
-#: says so, rather than naming every file.
-NORMALIZER = f"ast-docstring-1/py{sys.version_info.major}.{sys.version_info.minor}"
+#: says so, rather than naming every file. `local-block-1` is the parsed
+#: `CLAUDE.local.md` entry (sd:2854), which moved every binding once the same way.
+NORMALIZER = f"ast-docstring-1+local-block-1/py{sys.version_info.major}.{sys.version_info.minor}"
 LEGACY_ENTRY = "receipt predates the per-file manifest"
 
 
@@ -132,7 +133,10 @@ def tool_files() -> dict:
 def policy_files(root: pathlib.Path) -> dict:
     files = {}
     for name in POLICY_FILES:
-        path = sd_lib.local_block_path(root) if name == sd_lib.LOCAL_FILE_NAME else root / name
+        if name == sd_lib.LOCAL_FILE_NAME:  # the parsed block, as the gate's `inputs` read it (sd:2854)
+            files[name] = sd_lib.local_policy_digest(sd_lib.local_block_path(root))
+            continue
+        path = root / name
         # Preserve item-backed repository-policy I/O errors for existing callers.
         files[name] = hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() or path.is_symlink() else "absent"
     # The setting's value, never the config file's path: that follows HOME, and a

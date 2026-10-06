@@ -117,7 +117,7 @@ class OffloadRows(SatelliteFixture):
         self.assertEqual(row["satellite"], SATELLITE)
         self.assertEqual(row["binding"], own["binding"])
         self.assertEqual(row["pack_bin"], sd_gate_receipts.pack_bin())
-        self.assertEqual(row["local_block"], "absent")
+        self.assertEqual(row["local_block"], sd_gate_receipts.sd_lib.local_policy_digest(None))
         self.assertIn("make", row["offload_view"]["tools"])
         self.assertEqual(row["offload_view"]["python"], {
             "sha256": sd_gate_receipts._content_digest(pathlib.Path(sys.executable).resolve()), "version": sys.version})
