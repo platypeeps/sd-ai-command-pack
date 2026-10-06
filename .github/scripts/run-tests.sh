@@ -127,6 +127,9 @@ export PYTHONPATH="$REPO_ROOT/tests/coverage_sitecustomize${PYTHONPATH:+:$PYTHON
 # makes a real `jev` answer "cannot answer here" (exit 3) and send nothing. The
 # Jev tests put their own stub first on a fixture PATH and never read it.
 export JEV_ENABLED=0
+# `sd-docs-lint` probes `jev` in every repository since sd:2762, and a probe
+# records its decline in the judgment ledger; its stage off skips the probe.
+export JEV_SD_DOCS_LINT=0
 
 # Git 2.54 can detach automatic maintenance after commits and pushes. The test
 # suite creates and removes many short-lived repositories, so a detached repack

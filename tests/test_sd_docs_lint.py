@@ -85,6 +85,12 @@ class LintFixture(unittest.TestCase):
         self.git("init", "-q")
         self.work = self.repo / "docs" / "work"
         self.spec = self.repo / "docs" / "spec"
+        # The claim-support reading off: since sd:2762 it runs in every
+        # repository, and a fixture must not reach the developer's `jev`.
+        # `Rule6ClaimSupportTests.jev` switches it back on, against a stub.
+        stage_off = mock.patch.dict(os.environ, {lint.JEV_STAGE: "0"})
+        stage_off.start()
+        self.addCleanup(stage_off.stop)
         self.write_item("2026-08-29-a-workable-item", GOOD_PRD)
         self.write_spec("backend", ["quality.md"])
 
@@ -2397,7 +2403,18 @@ class Rule6ClaimSupportTests(LintFixture):
         gitless.mkdir()
         (gitless / "git").symlink_to(shutil.which("git"))
         with mock.patch.dict(os.environ, {"PATH": str(gitless)}):
+            os.environ.pop(lint.JEV_STAGE, None)
             self.assertNotIn("claim support", self.notes())
+
+    def test_the_shared_fixture_never_reaches_a_jev_on_path(self) -> None:
+        """A rule test with a `jev` on PATH and the switch as the fixture left
+        it: no probe and no request, because the default reads everywhere."""
+
+        self.recorded_item()
+        with mock.patch.dict(os.environ, {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
+                                          "JEV_STUB_PROBED": str(self.probed)}):
+            self.notes()
+        self.assertFalse(self.probed.exists(), "a fixture run probed jev")
 
     def test_a_jev_that_cannot_answer_is_silent_too(self) -> None:
         """The third silent reason, and the one review caught.
