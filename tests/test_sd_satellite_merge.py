@@ -138,6 +138,15 @@ class GateCompare(rows.SatelliteFixture):
         rewrite(self.database, self.key, offload_view={name: part for name, part in view.items() if name != "python"})
         self.assertIn("part python", self.refused("satellite_binding")["offload_refused"]["reason"])
 
+    def test_clause_5_reads_the_parsed_local_block_not_its_bytes(self) -> None:
+        """sd:2854. The pass ran with no `CLAUDE.local.md`; notes and comments match it, a key does not."""
+        local = self.root / "CLAUDE.local.md"
+        start, end = sd_lib.LOCAL_BLOCK_START, sd_lib.LOCAL_BLOCK_END
+        local.write_text(f"a note outside the block\n{start}\n# a comment\n{end}\n")
+        self.assertEqual(self.compare()["status"], "success")
+        local.write_text(f"{start}\nmode: minimal\n{end}\n")
+        self.assertIn("binding fields inputs", self.refused("satellite_binding")["offload_refused"]["reason"])
+
     def test_clause_6_another_pack_refuses_as_pack_mismatch(self) -> None:
         rewrite(self.database, self.key, pack_bin="0" * 64)
         self.refused("satellite_pack_mismatch")
@@ -314,6 +323,38 @@ class SatelliteMerge(unittest.TestCase):
         self.assertEqual(post.body["state"], "success")
         miss = self.merged_gate()["reuse_miss"]
         self.assertEqual(miss["offload"]["code"], "satellite_pack_mismatch")
+
+    # -- sd:2854: both bindings read the parsed `CLAUDE.local.md` block, not its bytes --
+
+    def hub_copy(self, old: str, new: str) -> None:
+        """The satellite's pass and status, then the hub's own copy of the untracked file, `old` replaced by `new`."""
+        self.satellite_pass()
+        self.satellite_status()
+        local = self.root / "CLAUDE.local.md"
+        local.write_text(local.read_text().replace(old, new))
+
+    def test_a_hub_copy_that_differs_outside_the_block_merges_on_the_satellite_gate(self) -> None:
+        """Clause 5 compares `inputs`, clause 8 the status's, and the review its binding: none moves."""
+        self.hub_copy("mode: full\n", "# the hub's copy\n\nmode: full  # a comment\n")
+        with (self.root / "CLAUDE.local.md").open("a") as stream:
+            stream.write("reviewers: a line outside the block\n")
+        self.merge("--satellite-gate")
+        self.assertEqual((self.puts(), self.runs), (1, 0))
+
+    def test_a_key_that_differs_in_the_block_refuses_with_or_without_the_satellite_gate(self) -> None:
+        self.hub_copy("mode: full", "mode: minimal")
+        for extra in (("--satellite-gate",), ()):
+            with self.subTest(extra=extra):
+                refusal = self.refuse("review_binding_moved", *extra)
+                self.assertTrue(str(refusal).endswith(": CLAUDE.local.md (policy)"), str(refusal))
+
+    def test_the_satellite_gate_still_binds_the_tracked_review_policy(self) -> None:
+        self.hub_copy("mode: full", "mode: full")
+        with (self.root / ".git/info/exclude").open("a") as stream:  # a clean checkout, so the binding decides
+            stream.write("\n.github/sd-review.json\n")
+        (self.root / ".github" / "sd-review.json").write_text("{}")
+        refusal = self.refuse("review_binding_moved", "--satellite-gate")
+        self.assertTrue(str(refusal).endswith(": .github/sd-review.json (policy)"), str(refusal))
 
     def test_a_repository_not_opted_in_merges_as_before(self) -> None:
         self.satellite_pass()

@@ -32,6 +32,8 @@ import sd_lib  # noqa: E402
 import sd_local_gate  # noqa: E402
 from sd_ship_remote import Refusal  # noqa: E402
 
+BLOCK_START, BLOCK_END = sd_lib.LOCAL_BLOCK_START, sd_lib.LOCAL_BLOCK_END
+
 
 def git(root: pathlib.Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True, text=True).stdout.strip()
@@ -350,9 +352,13 @@ class Gate(Repository):
         self.assertEqual(checked.call_args.kwargs["slot_timeout"], sd_lib.GATE_SLOT_SECONDS)
 
     def test_the_digest_follows_the_local_block(self) -> None:
+        """The parsed block, not the file's bytes: notes outside it and comments in it move nothing (sd:2854)."""
         head = self.commit("check:\n\t@echo ok\n")
         before = sd_local_gate.gate_inputs(self.root, head)
-        (self.root / "CLAUDE.local.md").write_text("check: make other\n", encoding="utf-8")
+        local = self.root / "CLAUDE.local.md"
+        local.write_text(f"an operator note\n{BLOCK_START}\n# a comment\n\n{BLOCK_END}\n", encoding="utf-8")
+        self.assertEqual(sd_local_gate.gate_inputs(self.root, head), before)
+        local.write_text(f"{BLOCK_START}\ncheck: make other\n{BLOCK_END}\n", encoding="utf-8")
         self.assertNotEqual(sd_local_gate.gate_inputs(self.root, head), before)
 
 
@@ -430,11 +436,50 @@ class Receipts(ReceiptFixture):
         """A pack upgrade or a new `CLAUDE.local.md` changes `gate_inputs`, so the receipt no longer binds."""
         head = self.counted()
         self.gate(head)
-        (self.root / "CLAUDE.local.md").write_text("an operator note\n", encoding="utf-8")
+        (self.root / "CLAUDE.local.md").write_text(f"{BLOCK_START}\nnote: an operator note\n{BLOCK_END}\n", encoding="utf-8")
         self.assertNotIn("reused", self.gate(head))
         with mock.patch.object(sd_gate_run, "gate_inputs", return_value="0" * 12):
             self.assertNotIn("reused", self.gate(head))
         self.assertEqual(self.runs(), 3)
+
+    def test_a_gate_in_a_linked_worktree_reads_the_main_checkouts_local_block(self) -> None:
+        """sd:2859. The review reads the main checkout's `CLAUDE.local.md`; the gate read the linked worktree's
+        own path, found none, and reused its receipt across an edit to the main checkout's block."""
+        head = self.counted()
+        linked = self.root.parent / "linked"
+        git(self.root, "worktree", "add", "-q", "--detach", str(linked), head)
+        gate = lambda: sd_gate_run.check_in_worktree(linked, head, database=self.database)  # noqa: E731
+        self.assertEqual(gate()["status"], "success")
+        (self.root / "CLAUDE.local.md").write_text(f"{BLOCK_START}\nnote: an edit at the same head\n{BLOCK_END}\n", encoding="utf-8")
+        again = gate()
+        self.assertNotIn("reused", again)
+        self.assertEqual((again["status"], self.runs()), ("success", 2))
+
+    def test_the_check_tree_gets_only_the_digested_block(self) -> None:
+        """sd:2854 review: the digest covers the parsed block, so the check reads nothing beyond it.
+        No file reads as an empty block, so the tree gets an empty block, not no file (review round 2)."""
+        head = self.counted()
+        seen: list[str] = []
+        def run(argv, env, tree, timeout):  # type: ignore[no-untyped-def]
+            seen.append((pathlib.Path(tree) / "CLAUDE.local.md").read_text(encoding="utf-8"))
+            return 0, json.dumps({"status": "pass", "scope": {"mode": "full"}, "checks": []}), ""
+        self.gate(head, run=run, reuse=False, record=False)
+        self.assertEqual(seen.pop(), f"{BLOCK_START}\n{BLOCK_END}\n")
+        (self.root / "CLAUDE.local.md").write_text(
+            f"an operator note\n{BLOCK_START}\n# a comment\nmode: full  # inline\nnote: it's \"quoted\"\n{BLOCK_END}\ntail\n", encoding="utf-8")
+        self.gate(head, run=run, reuse=False, record=False)
+        self.assertEqual(seen, [f"{BLOCK_START}\nmode: 'full'\nnote: \"it's \\\"quoted\\\"\"\n{BLOCK_END}\n"])
+        self.assertEqual(sd_lib.parse_local_block(seen[0]), {"mode": "full", "note": 'it\'s "quoted"'})
+
+    def test_a_tracked_dangling_link_is_left_alone_not_written_through(self) -> None:
+        """sd:2854 review round 3: `exists()` follows a link, so a tracked dangling `CLAUDE.local.md` sent the write outside the tree."""
+        outside = self.root.parent / "outside.md"
+        (self.root / "CLAUDE.local.md").symlink_to(outside)
+        git(self.root, "add", "-f", "CLAUDE.local.md")  # a global ignore may name the file
+        head = self.counted()
+        git(self.root, "ls-files", "--error-unmatch", "CLAUDE.local.md")  # tracked, or the git helper raises
+        self.assertEqual(self.gate(head, run=self.passing(), reuse=False, record=False)["status"], "success")
+        self.assertFalse(outside.exists())
 
     def test_another_repository_records_nothing_when_the_pack_moves_mid_run(self) -> None:
         """The child may open the moved pack, so a landing mid-run drops the pass (sd:2612 review), and says so."""
@@ -630,7 +675,7 @@ class MergeReuse(ReceiptFixture):
         """The untracked `CLAUDE.local.md` may respell `check`; the tree is equal and the command is not."""
         head = self.declare()
         self.prepare(head)
-        (self.root / "CLAUDE.local.md").write_text("## sd-check\n\ncheck: make check MODE=other\n", encoding="utf-8")
+        (self.root / "CLAUDE.local.md").write_text(f"{BLOCK_START}\ncheck: make check MODE=other\n{BLOCK_END}\n", encoding="utf-8")
         merged = self.merge(head)
         self.assertEqual(("reused" in merged, self.runs()), (False, 2))
         self.assertEqual(merged["reuse_miss"]["reason"], "binding")

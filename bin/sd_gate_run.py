@@ -41,7 +41,6 @@ import hashlib
 import json
 import os
 import pathlib
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -95,8 +94,8 @@ def gate_git(root: pathlib.Path, *args: str) -> str:
 
 
 def untracked_local_block(root: pathlib.Path) -> pathlib.Path | None:
-    """The checkout's untracked `CLAUDE.local.md`, the one file the worktree gets copied in."""
-    local = root / LOCAL_BLOCK
+    """The main checkout's untracked `CLAUDE.local.md`, as the review reads it (sd:2859); the one file the worktree gets copied in."""
+    local = sd_lib.local_block_path(root)
     if local.is_file() and sd_lib.git_output(["ls-files", "--error-unmatch", LOCAL_BLOCK], root) is None:
         return local
     return None
@@ -106,8 +105,8 @@ def gate_inputs(root: pathlib.Path, head: str, tree: str | None = None, own: boo
     """A 12-hex digest of what a gate run depends on beyond the commit's own tree; `tree` replaces `head` under a tree key.
     `own`, the pack gating itself, leaves out the checkout's `bin/` (sd:2613); else every pack `bin/` file, or `pack_scope`'s closure (sd:2722)."""
     digest = hashlib.sha256((f"head {head}" if tree is None else f"tree {tree}").encode() + b"\n")
-    local = untracked_local_block(root)
-    digest.update(b"local " + (local.read_bytes() if local else b"absent") + b"\n" + b"pack tree\n" * own)
+    # The parsed block, not its bytes: a hub and a satellite each keep their own copy (sd:2854).
+    digest.update(b"local " + sd_lib.local_policy_digest(untracked_local_block(root)).encode() + b"\n" + b"pack tree\n" * own)
     for path in [] if own else sd_gate_receipts.pack_files(BIN, sd_gate_receipts.pack_scope(root, head)):
         digest.update(f"pack {path.name}\n".encode() + path.read_bytes())
     return digest.hexdigest()[:12]
@@ -172,8 +171,8 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
         tree = pathlib.Path(parent) / "tree"
         gate_git(root, "worktree", "add", "--detach", str(tree), head)
         try:
-            if local := untracked_local_block(root):
-                shutil.copyfile(local, tree / LOCAL_BLOCK)
+            if not os.path.lexists(tree / LOCAL_BLOCK):  # the digested block only, an empty one for no file; a tracked copy, even a link, is the tree's
+                (tree / LOCAL_BLOCK).write_text(sd_lib.local_policy_text(sd_lib.read_local_block(local) if (local := untracked_local_block(root)) else {}), encoding="utf-8")
             env, mode = sd_gate_receipts.offload_run(database, root, gate_environment(root, None if environ is None else dict(environ)), record=record, offload=offload)  # sd:2782
             content, fork = sd_gate_receipts.tree_key(tree, base)
             own = sd_gate_receipts.gates_itself(root, tree, BIN)
