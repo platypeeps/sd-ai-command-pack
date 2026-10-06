@@ -153,13 +153,16 @@ python3 tests/test_doc_citations.py --repoint --apply
 The repair tool matches anchored text. It refuses ambiguous or missing matches.
 Do not replace line numbers without checking their targets.
 
-#### The optional claim-support reading
+#### The claim-support reading
 
 Rule 6 compares recorded text against the cited line.
 It cannot tell whether that passage still supports the sentence citing it.
 
-A second reading asks a model that question. It is off unless the repository
-opts in (sd:1304). Opt in with a tracked `.github/sd-docs-lint.json`:
+A second reading asks a model that question. By default the model is the
+local Kev, reached through `jev --local-only`: `jev` sends the request to a
+loopback address and nowhere else, so the prose stays on this machine
+(sd:2762). Hosted Jev reads only where the repository opts in (sd:1304).
+Opt in to hosted Jev with a tracked `.github/sd-docs-lint.json`:
 
 ```json
 {
@@ -168,9 +171,9 @@ opts in (sd:1304). Opt in with a tracked `.github/sd-docs-lint.json`:
 }
 ```
 
-Only a JSON `true` opts in. No file, or `false`, takes no reading and prints
-nothing. A file that exists and cannot be read as that shape takes no reading
-and prints a note naming the fault; it never fails the run.
+Only a JSON `true` opts in. No file, or `false`, keeps the local Kev reading.
+A file that exists and cannot be read as that shape takes no reading, not
+even a local one, and prints a note naming the fault; it never fails the run.
 `.github/sd-docs-lint.schema.json` in this repository describes the file.
 This repository opts itself in: its `docs/work` is public already.
 
@@ -182,15 +185,20 @@ once, which is the failure this replaced.
 The reading also needs `jev` on `PATH`. `jev` ships in a private companion
 repository, so most checkouts do not have it, and a run without it is a run
 without this pass — silently, because announcing a missing optional companion
-would put a line in every pull request here forever. The pass prints notes
-only. It never fails a run and never changes an exit code.
+would put a line in every pull request here forever. A `jev` older than
+`--local-only` refuses the flag, and the run notes `jev enabled exited 2`.
+When `jev` is there but the local Kev is down, the run prints
+`rule 6 claim support: no answer (<reason>)` on stderr and still passes.
+The pass prints notes only. It never fails a run and never changes an exit
+code.
 
 ```bash
 make docs-lint
 ```
 
-Taking the reading sends the citing sentence and the cited passage to a
-third-party model. Both are capped, and neither carries a path, an item name,
+Taking the hosted reading sends the citing sentence and the cited passage to
+a third-party model. The local reading sends the same payload to the local
+Kev. Both are capped, and neither carries a path, an item name,
 or the citation marker.
 The citing sentence is the whole sentence that ends at the marker, joined
 across the wrapped lines of its paragraph or list item; it is capped at 400
@@ -210,9 +218,10 @@ JEV_SD_DOCS_LINT=0 make check    # or export it once, for every invocation
 ```
 
 `0`, `off`, `false`, `no` and `disabled` all switch it off, in any case, and
-the switch wins over the opt-in. The switch only ever subtracts. No value of
-it, `1` included, takes a reading in a repository that has not opted in, and
-it cannot make a reading happen that `jev` itself declines. Before sd:1304
+the switch wins over the opt-in and over the local default. The switch only
+ever subtracts. No value of it, `1` included, sends a repository that has not
+opted in to hosted Jev, and it cannot make a reading happen that `jev` itself
+declines. Before sd:1304
 unset meant on everywhere, so a checkout whose `docs/work` must not leave the
 machine had to export `0` itself. That export still works; it is no longer
 the only protection.
@@ -223,8 +232,8 @@ the only protection.
 undocumented here until review said so. `sd_route.route` decides the tier and
 keeps the decision; the reading is a second opinion over a diff shape the
 policy's globs cannot see, and it is taken wherever `jev` says it can answer.
-Unlike the claim-support reading it needs no per-repository opt-in, because
-it sends no prose; the kill switch and the silent cases are the same.
+Unlike the hosted claim-support reading it needs no per-repository opt-in,
+because it sends no prose; the kill switch and the silent cases are the same.
 
 What leaves the machine: the tier names, the repository-relative paths the
 change touches (capped, then a count), the number of lines it moves, and the

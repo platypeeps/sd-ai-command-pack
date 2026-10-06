@@ -12,6 +12,7 @@ import io
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -64,6 +65,11 @@ class Repository(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.root = pathlib.Path(tmp.name).resolve() / "repo"
         self.root.mkdir()
+        # sd:2735: a fixture gate run outside `sd gate check` must not join the machine's real gate queue.
+        state = {"SD_GATE_SLOTS_DIR": str(self.root.parent / "slots"), "XDG_STATE_HOME": str(self.root.parent / "state")}
+        patch = mock.patch.dict(os.environ, state)
+        patch.start()
+        self.addCleanup(patch.stop)
         git(self.root, "init", "-q", "-b", "main")
         git(self.root, "config", "user.email", "t@example.com")
         git(self.root, "config", "user.name", "t")
@@ -79,6 +85,15 @@ class Repository(unittest.TestCase):
 
 
 class RunCheck(Repository):
+    def test_a_fixture_gate_queues_in_its_own_folder_not_the_machines(self) -> None:
+        """sd:2735: run directly, this suite's gates took and waited on the real slots under `~/.local/state`."""
+        head = self.commit("check:\n\t@echo ok\n")
+        with mock.patch.dict(os.environ, {"SD_GATE_LOAD_MAX": "0", "SD_GATE_SETTLE_SECONDS": "0"}):
+            for name in ("SD_GATE_SLOTS", "CI", "GITHUB_ACTIONS"):  # each of these takes no slot at all
+                os.environ.pop(name, None)
+            self.assertEqual(sd_gate_run.check_in_worktree(self.root, head)["status"], "success")
+        self.assertTrue((self.root.parent / "slots").is_dir())
+
     def test_a_passing_check_is_a_success_at_the_head_it_ran_on(self) -> None:
         head = self.commit("check:\n\t@echo ok\n")
         result = sd_gate_run.check_in_worktree(self.root, head)
@@ -927,6 +942,46 @@ class CacheBound(Repository):
             self.assertIsNotNone(target)
         self.assertFalse(old.exists())
         self.assertIn(f"sd gate: pruned {old}", errors.getvalue())
+
+
+class StaleGateWorktrees(Repository):
+    """sd:2739: a killed gate skips its `finally`; the next gate start removes its worktree, never a live one's."""
+
+    def left(self, owner: str, head: str, folder: pathlib.Path | None = None) -> pathlib.Path:
+        """A worktree registered as `<folder>/tree`; by default a gate's folder in the temp dir, as a killed gate leaves it."""
+        if folder is None:
+            folder = pathlib.Path(tempfile.mkdtemp(prefix=f"{sd_gate_cache.GATE_PREFIX}{owner}-"))
+            self.addCleanup(shutil.rmtree, folder, True)
+        git(self.root, "worktree", "add", "-q", "--detach", str(folder / "tree"), head)
+        return folder / "tree"
+
+    def dead(self) -> str:
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        return str(gone.pid)
+
+    def test_a_dead_gates_worktree_is_removed_at_the_next_gate_start(self) -> None:
+        head = self.commit("check:\n\t@echo ok\n")
+        tree = self.left(self.dead(), head)
+        self.assertEqual(sd_gate_run.check_in_worktree(self.root, head)["status"], "success")
+        self.assertEqual((self.worktrees(), tree.exists()), (1, False))
+
+    def test_a_live_gates_worktree_and_one_that_names_no_pid_stay(self) -> None:
+        head = self.commit("check:\n\t@echo ok\n")
+        live = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        self.addCleanup(live.wait)
+        self.addCleanup(live.kill)
+        trees = [self.left(str(live.pid), head), self.left("abc", head)]
+        self.assertEqual(sd_gate_run.check_in_worktree(self.root, head)["status"], "success")
+        self.assertEqual((self.worktrees(), [tree.exists() for tree in trees]), (3, [True, True]))
+
+    def test_a_like_named_checkout_outside_the_temp_dir_or_past_the_pid_range_stays(self) -> None:
+        """Review round 2: the name alone selected a user's checkout, and a 24-digit pid raised `OverflowError`."""
+        head = self.commit("check:\n\t@echo ok\n")
+        trees = [self.left("", head, self.root.parent / f"{sd_gate_cache.GATE_PREFIX}{self.dead()}-x"),
+                 self.left("9" * 24, head)]
+        self.assertEqual(sd_gate_run.check_in_worktree(self.root, head)["status"], "success")
+        self.assertEqual((self.worktrees(), [tree.exists() for tree in trees]), (3, [True, True]))
 
 
 class DocsScopeGate(Repository):
