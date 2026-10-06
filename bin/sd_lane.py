@@ -19,7 +19,10 @@ runs it under one lock per repository:
            While one entry ships, the next one's gate runs on its predicted
            landing (sd:2586, below). After a merge it deletes the remote
            branch, notes the item with the worktree's removal command and
-           fast-forwards the main checkout (sd:2568, below);
+           fast-forwards the main checkout (sd:2568, below). Under the
+           runner lock it first marks failed a running entry whose runner
+           pid is gone, with `reclaimed_by`, and lists it as `reclaimed`
+           (sd:2821);
   watch    print each gate end a lane or builder log records, once;
   request  on a satellite: ask the hub's lane to merge an item the satellite
            gated and prepared, through a row in the workflow database (sd:2704).
@@ -575,10 +578,14 @@ def publish_pack(hub: Hub) -> str:
     key = sd_gate_receipts.PACK_PREFIX + hub.slug
     try:
         # A pack gating itself binds its tree, not this bin/, so it publishes what its receipts hold (sd:2613, sd:2722).
-        digest = sd_gate_receipts.pack_bin(sd_gate_receipts.gates_itself(hub.main, hub.main, BIN),
-                                           sd_gate_receipts.pack_scope(hub.main, "HEAD"))
+        own = sd_gate_receipts.gates_itself(hub.main, hub.main, BIN)
+        # One digest per scope: the merge compares under the PR head's scope, which main's need not share (sd:2823).
+        # `pack_bin` stays for a satellite whose pack reads only that field.
+        digests = {scope: sd_gate_receipts.pack_bin(own, closure) for scope, closure in sd_gate_receipts.PACK_SCOPES.items()}
+        digest = digests["closure" if sd_gate_receipts.pack_scope(hub.main, "HEAD") else "every"]
         revision, _ = hub.store.read(hub.connection, key)
-        hub.store.save(hub.connection, key, revision, {"writer": "sd-lane", "pack_bin": digest, "published_at": stamp_now(),
+        hub.store.save(hub.connection, key, revision, {"writer": "sd-lane", "pack_bin": digest, "pack_bins": digests,
+                                                       "published_at": stamp_now(),
                                                        "pack_rev": lane_git(BIN.parent, "rev-parse", "HEAD")})
     except Exception as error:  # a satellite only loses its early warning; the merge still compares
         return f"failed: {type(error).__name__}: {error}"[:300]
@@ -974,6 +981,37 @@ def refuse_on_satellite(verb: str, remedy: str = "Run it on the hub") -> None:
                         + remedy, code="hub_only")
 
 
+def runner_alive(pid: Any) -> bool:
+    """Whether `pid` may still run; True unless the kernel says no such process, so a doubt keeps the entry."""
+    if type(pid) is not int or pid <= 0:
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:  # EPERM: a process holds the pid
+        return True
+    return True
+
+
+def reclaim_dead(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Mark failed each `running` entry whose runner died (sd:2821); called with the runner lock held.
+
+    Every runner holds that lock while an entry runs, so holding it proves no
+    runner is live; the entry's pid must also be gone, which a reused pid only
+    makes wait. A pid that cannot be read keeps the entry `running`.
+    """
+    reclaimed = []
+    for row in entries:
+        pid = row.get("runner_pid")
+        if row.get("status") == "running" and not runner_alive(pid):
+            row.update(status="failed", step="runner", finished_at=stamp_now(), reclaimed_by=os.getpid(),
+                       reason=f"runner pid {pid} died with the entry running; a merge may have landed, so read "
+                              "its logs and pull request before enqueueing it again")
+            reclaimed.append({"item": row.get("item"), "runner_pid": pid})
+    return reclaimed
+
+
 def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_ship,
              gate: Gate = default_gate, note: Note | None = None, *, satellite_only: bool = False,
              hub: Hub | None = None) -> dict[str, Any]:
@@ -998,9 +1036,10 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return {"ran": [], "busy": f"another runner holds {own_lock}"}
+        reclaimed = update(path, reclaim_dead)
         with contextlib.nullcontext(hub) if hub is not None else default_hub(root) as hub:
             ran: list[dict[str, Any]] = []
-            answer: dict[str, Any] = {"ran": ran}
+            answer: dict[str, Any] = {"ran": ran, **({"reclaimed": reclaimed} if reclaimed else {})}
             if hub is not None:
                 answer.update(pack=publish_pack(hub), intake=[])
             ahead: threading.Thread | None = None
