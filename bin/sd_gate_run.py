@@ -168,7 +168,7 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
     `reuse=False` never reads one and `record=False` never writes one (the merge gate).
     `offload` and a satellite's offload receipt (sd:2704): `sd_gate_receipts.from_receipts`.
     """
-    with tempfile.TemporaryDirectory(prefix="sd-local-gate-") as parent:
+    with tempfile.TemporaryDirectory(prefix=sd_gate_cache.worktree_prefix(root)) as parent:  # sd:2739
         tree = pathlib.Path(parent) / "tree"
         gate_git(root, "worktree", "add", "--detach", str(tree), head)
         try:

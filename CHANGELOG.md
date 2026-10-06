@@ -4,6 +4,24 @@
 
 ### Added
 
+- **Review acknowledgements live in the hub's workflow database (sd:2750).**
+  `sd-review-ack --ack` and `sd-ship`'s automatic `fixed` records write one
+  `review-ack:v1:<slug>:<finding id>` row through `sd_db.ship`'s
+  revision-checked store, and every reader reads those rows, on the hub
+  locally and on a satellite over the tailnet. A satellite reported
+  acknowledged findings as late because it read only its own
+  `sd-review-ack.json`. The database holds a checkout's record when its
+  `origin` names a GitHub repository the `repo` table registers; any other
+  checkout, and a machine without `sd_db` or a database, keeps the file.
+  **Migration:** each write first imports the file's rows the database
+  lacks, so the move runs once and repeats harmlessly. The file in the git
+  common dir is still read beside the rows, the rows winning, for this
+  release only; the next release stops reading it. A satellite whose hub
+  does not answer refuses every write, and `sd-status` reports `review
+  acknowledgements unknown (hub unreachable: ...)` with no review rows and a
+  `null` `late:` and `expired:` count rather than count an answered finding
+  as late.
+
 - **The lane merges a satellite entry without a prepare or a gate (sd:2704).**
   For a `gate: satellite` entry `lane run` fetches the branch and the base
   into its main checkout, hands the entry back with `head_moved` when
@@ -468,7 +486,23 @@
   as `satellite_unidentified`. Intake refuses a request that is not an
   `sd-lane-request` row, names no tailnet identity, or names a base other
   than its `ship:` row's, as `invalid_request`.
-
+- **A fixture gate in `test_sd_local_gate` no longer joins the machine's gate queue (sd:2735).**
+  `Repository.setUp` sets `SD_GATE_SLOTS_DIR` and `XDG_STATE_HOME` to the
+  test's own folder. Run directly, outside `sd gate check`, the suite took
+  and waited on the real slots under `~/.local/state/sd/gate-slots`.
+- **A killed gate's worktree is removed at the next gate start (sd:2739).**
+  `check_in_worktree` removed its `sd-local-gate-*` worktree in a `finally`,
+  which a killed gate never runs, so the entry stayed registered. The folder
+  name now carries the gate's pid. Each gate start removes the repository's
+  gate worktrees whose named process is gone. Only a worktree `tree` in a
+  folder `sd-local-gate-<pid>-<suffix>` directly in the temp dir counts; a
+  like-named checkout elsewhere stays. A live gate's worktree stays, and so
+  does a folder from before this change, which names no pid.
+- **`sd-review --explain` reports an unreachable hub instead of a traceback (sd:2728).**
+  On a satellite, `sd_registry.read_runtime` asked the hub whether the
+  database exists outside its `try`, so `HubUnreachable` escaped. It is now a
+  `RegistryError` naming the hub, which `read_or_report` hands every caller
+  (`sd`, `sd-review`, `sd-ship`, `sd-status`) as the refusal reason.
 - **The review binding no longer follows HOME (sd:2793).**
   The `external_review_policy` entry digested the machine config file's path
   beside the `external_reviews` value. The path follows `HOME` and
@@ -1111,6 +1145,19 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **`sd-docs-lint`'s claim-support reading is on by default, through the local
+  Kev only (sd:2762).** A repository without `.github/sd-docs-lint.json`, or
+  with `"jev_claim_support": false`, now takes the reading: both `jev` calls
+  carry `--local-only`, so `jev` sends the prose to a loopback Kev and never to
+  hosted Jev. `"jev_claim_support": true` still opts a repository in to hosted
+  Jev. When the local Kev gives no answer, the run prints
+  `rule 6 claim support: no answer (<reason>)` on stderr and passes.
+  `JEV_SD_DOCS_LINT=0` switches the reading off, local and hosted; a missing
+  `jev` stays silent, and a malformed file still takes no reading.
+  `sd-ship prepare` lints with `JEV_SD_DOCS_LINT=0`: the reading is advisory,
+  a local reading of 77 citations took 82 s, and prepare lints the branch and
+  then the base, each under a 300 s timeout. An author's own run keeps it.
 
 - **`sd-status` asks each `git` question once per run (sd:2677).** One run on
   a working checkout started 2,079 subprocesses, and 1,750 of them repeated a
