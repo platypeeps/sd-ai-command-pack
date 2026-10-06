@@ -11,6 +11,7 @@ its own tests below. No test starts `sd-check`: a stand-in run counts calls.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -122,13 +123,14 @@ class OffloadRows(SatelliteFixture):
             "sha256": sd_gate_receipts._content_digest(pathlib.Path(sys.executable).resolve()), "version": sys.version})
         self.assertNotIn("receipt_revision", row["reading"])
 
-    def test_the_offload_row_holds_no_variable_value(self) -> None:
-        """A credential the gate environment keeps reaches the hub's database as a digest only."""
-        with mock.patch.dict(os.environ, {"GH_TOKEN": "synthetic-secret-0001"}):
+    def test_the_offload_row_holds_no_variable_off_the_allowlist(self) -> None:
+        """sd:2782 L6: a credential the gate environment keeps reaches the hub's database neither as a value nor as a digest."""
+        with mock.patch.dict(os.environ, {"GITHUB_TOKEN": "synthetic-secret-0001", "LANG": "C"}):
             self.gate()
-        row = self.offload_row()
-        self.assertIn("GH_TOKEN", row["offload_view"]["variables"])
-        self.assertNotIn("synthetic-secret-0001", json.dumps(row))
+        stored = json.dumps(self.offload_row())
+        self.assertIn('"LANG"', stored)
+        for text in ("GITHUB_TOKEN", "synthetic-secret-0001", hashlib.sha256(b"synthetic-secret-0001").hexdigest()):
+            self.assertNotIn(text, stored)
 
     def test_a_hub_run_writes_no_offload_row(self) -> None:
         self.hub = None
@@ -143,10 +145,13 @@ class OffloadRows(SatelliteFixture):
         self.assertEqual(result["offload_skipped"], "repo.satellite_gate is not accept for this repository")
         self.assertEqual(self.offload_row(), {})
 
+    def unwritten(self) -> dict:
+        """A pass whose offload row never reached the hub (sd:2782: an opted-out pass runs otherwise, so is not reused)."""
+        with mock.patch.object(sd_gate_receipts, "record_offload", lambda *args, **kwargs: {}):
+            return self.gate()
+
     def test_a_reuse_writes_the_missing_row_with_the_original_time(self) -> None:
-        self.opted = "off"
-        self.gate()
-        self.opted = "accept"
+        self.unwritten()
         reused = self.gate()
         self.assertEqual(self.runs, 1)
         self.assertIn("reused", reused)
@@ -190,22 +195,19 @@ class OffloadRows(SatelliteFixture):
     def test_a_reuse_writes_the_view_its_pass_kept_not_one_taken_now(self) -> None:
         """A home file that changed after the pass does not bind the old pass on the hub."""
         home = self.home()
-        self.opted = "off"
-        self.gate()
+        self.unwritten()
         (home / ".npmrc").write_text("registry=https://registry.example.test/\n", encoding="utf-8")
-        self.opted = "accept"
         reused = self.gate()
         self.assertEqual((self.runs, reused["offload"]["written"]), (1, True))
         self.assertEqual(self.offload_row()["offload_view"]["home_files"][".npmrc"], "absent")
 
-    def test_a_reuse_of_a_pass_that_kept_no_view_writes_no_row(self) -> None:
+    def test_a_local_pass_is_not_exported_the_offloaded_run_runs_again(self) -> None:
+        """sd:2782: a pass under the whole environment kept no view; the offloaded run's environment binds otherwise."""
         self.hub = None
         self.gate()
         self.hub = HUB
-        reused = self.gate()
-        self.assertEqual(self.runs, 1)
-        self.assertIn("kept no offload view", reused["offload_error"])
-        self.assertEqual(self.offload_row(), {})
+        result = self.gate()
+        self.assertEqual((self.runs, result["offload"]["written"]), (2, True))
 
     def test_a_view_that_moves_during_the_run_writes_no_row(self) -> None:
         home = self.home()
@@ -281,6 +283,102 @@ class OffloadRows(SatelliteFixture):
         self.assertNotIn("pack_warning", result)
 
 
+class OffloadedEnvironment(SatelliteFixture):
+    """sd:2782: in an opted-in repository every gate runs its check under only what the hub compares.
+
+    The fixture's `make check` records its environment, and fails as an integration test would when
+    `RUN_INTEGRATION` is set. Each run has a scratch `HOME` and no gate slot, so it touches no real config.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.record = self.root.parent / "check-env.txt"
+        (self.root / "Makefile").write_text(
+            f"check:\n\t@env > {self.record}\n\t@if [ -n \"$$RUN_INTEGRATION\" ]; then echo integration-ran; exit 1; fi\n",
+            encoding="utf-8")
+        git(self.root, "commit", "-q", "-am", "record the environment")
+        self.head = git(self.root, "rev-parse", "HEAD")
+        home = self.root.parent / "home"
+        home.mkdir()
+        self.extra = {"SKIP_TESTS": "1", "GOFLAGS": "-run=Smoke", "RUN_INTEGRATION": "1", "RUSTFLAGS": "-Dwarnings",
+                      "GITHUB_TOKEN": "synthetic-secret-0003", "CARGO_REGISTRY_TOKEN": "synthetic-secret-0004"}
+        self.scratch = {"HOME": str(home), "SD_GATE_SLOTS": "0", "XDG_CONFIG_HOME": str(home / ".config"),
+                        "XDG_CACHE_HOME": str(home / ".cache"), "XDG_STATE_HOME": str(home / ".state")}
+
+    def seen(self) -> tuple[str, dict[str, str]]:
+        """The gate's status, and the environment its check saw."""
+        with mock.patch.dict(os.environ, {**self.extra, **self.scratch}):
+            result = sd_gate_run.check_in_worktree(self.root, self.head, database=self.database, reuse=False)
+        return result["status"], dict(line.split("=", 1) for line in self.record.read_text(encoding="utf-8").splitlines()
+                                      if "=" in line)
+
+    def test_an_opted_in_check_sees_no_variable_off_the_allowlist(self) -> None:
+        status, seen = self.seen()
+        self.assertEqual(status, "success")
+        self.assertFalse({"SKIP_TESTS", "GOFLAGS", "RUN_INTEGRATION"} & set(seen))
+        self.assertEqual((seen["RUSTFLAGS"], seen["SD_LOCAL_GATE"], seen["HOME"]), ("-Dwarnings", "1", self.scratch["HOME"]))
+        self.assertTrue({"HOME", "PATH"} <= set(seen))
+        self.assertEqual(self.offload_row()["writer"], "sd-satellite-gate")
+
+    def test_an_opted_in_check_sees_no_credential(self) -> None:
+        status, seen = self.seen()
+        self.assertFalse({"GITHUB_TOKEN", "CARGO_REGISTRY_TOKEN"} & set(seen))
+        self.assertNotIn("synthetic-secret", self.record.read_text(encoding="utf-8"))
+
+    def test_the_hub_and_the_satellite_run_the_same_check(self) -> None:
+        """The ship review's repro: `RUN_INTEGRATION=1` ran the integration test on the hub only."""
+        runs = {}
+        for hub in (None, HUB):
+            self.hub = hub
+            status, seen = self.seen()
+            runs[hub] = (status, "RUN_INTEGRATION" in seen)
+        self.assertEqual(runs, {None: ("success", False), HUB: ("success", False)})
+
+    def test_a_repository_that_did_not_opt_in_passes_the_whole_environment(self) -> None:
+        self.opted = "off"
+        for hub in (None, HUB):
+            with self.subTest(hub=hub):
+                self.hub = hub
+                status, seen = self.seen()
+                self.assertEqual({name: seen.get(name) for name in self.extra}, self.extra)
+                self.assertEqual(status, "failure")
+
+
+class EnvironmentMode(SatelliteFixture):
+    """sd:2782: a pass under the whole environment never stands for an opted-in gate, nor the reverse.
+
+    The environment holds only allowlisted names, so the two modes give one `environment_sha256`:
+    only `environment_mode` tells the passes apart.
+    """
+
+    def gate(self, reuse: bool = True) -> dict:
+        allowlisted = {name: os.environ[name] for name in ("HOME", "USER", "PATH") if name in os.environ}
+        return sd_gate_run.check_in_worktree(self.root, self.head, database=self.database, run=self.passing,
+                                             environ=allowlisted, reuse=reuse)
+
+    def test_a_pass_under_one_mode_is_not_reused_under_the_other(self) -> None:
+        self.hub = None
+        for first, second in (("off", "accept"), ("accept", "off")):
+            with self.subTest(first=first, second=second):
+                self.runs = 0
+                self.opted = first
+                self.gate(reuse=False)
+                self.opted = second
+                result = self.gate()
+                self.assertEqual(self.runs, 2)
+                self.assertEqual(result["reuse_miss"], {"reason": "binding", "fields": ["environment_mode"]})
+
+    def test_a_pass_under_one_mode_is_reused_under_the_same(self) -> None:
+        self.hub = None
+        for opted in ("off", "accept"):
+            with self.subTest(opted=opted):
+                self.runs = 0
+                self.opted = opted
+                self.gate()
+                self.assertIn("reused", self.gate())
+                self.assertEqual(self.runs, 1)
+
+
 class PackDigest(unittest.TestCase):
     def test_pack_bin_hashes_the_files_gate_inputs_hashes(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
@@ -311,7 +409,7 @@ class PackDigest(unittest.TestCase):
 
 
 class LoginVariables(unittest.TestCase):
-    """Decision 2026-10-05 10:02 MDT: `LOGNAME` and `TMPDIR` name the login, so a view leaves them out."""
+    """Decision 2026-10-05 10:02 MDT: `LOGNAME` and `TMPDIR` name the login; off the allowlist (sd:2782), a view leaves them out."""
 
     def view(self, **extra: str) -> dict:
         environment = {"HOME": "/Users/sat", "USER": "sat", "LOGNAME": "sat", "TMPDIR": "/var/folders/aa/T/",
@@ -341,7 +439,7 @@ class BindingSplit(SatelliteFixture):
         part = sd_gate_receipts.tree_binding(tree, self.head, "i" * 12, None)
         assert whole is not None and part is not None
         self.assertEqual(set(part), set(sd_gate_receipts.TREE_FIELDS))
-        self.assertEqual(set(whole) - set(part), {"tools", "python", "environment_sha256", "threads"})
+        self.assertEqual(set(whole) - set(part), {"tools", "python", "environment_sha256", "threads", "environment_mode"})
         self.assertEqual({name: whole[name] for name in part}, part)
 
     def test_the_tree_part_needs_no_tool_on_path(self) -> None:

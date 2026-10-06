@@ -1062,7 +1062,8 @@ def repo_ci(connection: Any, root: pathlib.Path | str) -> str:
 
 
 #: The values `repo.satellite_gate` takes (sd:2704), default first: `accept`
-#: lets the hub merge on a satellite's offload receipt.
+#: lets the hub merge on a satellite's offload receipt, and runs every gate in
+#: the repository under `sd_gate_receipts.offload_environment` (sd:2782).
 SATELLITE_GATE_MODES = ("off", "accept")
 
 

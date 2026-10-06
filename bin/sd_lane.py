@@ -427,7 +427,11 @@ def git_name(main: pathlib.Path, name: Any) -> bool:
 
 def malformed(hub: Hub, key: str, row: dict[str, Any]) -> str | None:
     """Why a request cannot be taken in as written, or None. Its branch and base reach `git` argv on the hub."""
+    import sd_gate_receipts  # noqa: PLC0415
+
     item, head = row.get("item"), row.get("head")
+    if row.get("writer") != REQUEST_WRITER or not sd_gate_receipts.names_node(row.get("satellite")):
+        return f"the request is not a {REQUEST_WRITER} row from a satellite named by host, tailnet login and address"
     if type(item) is not int or key != request_key(hub.slug, item) or row.get("repository") != hub.slug:
         return "the request's item or repository does not match its key"
     if not git_name(hub.main, row.get("branch")) or not git_name(hub.main, row.get("base")):
@@ -466,6 +470,8 @@ def take_in(hub: Hub, path: pathlib.Path, key: str, revision: int, row: dict[str
     if shipped.get("phase") != "ready_to_send" or shipped.get("head") != head:
         return refuse("satellite_not_prepared", f"the ship: row for {branch} is {shipped.get('phase') or 'absent'} "
                                                 f"at {str(shipped.get('head'))[:12]}, not ready_to_send at {head[:12]}")
+    if shipped.get("base") != row["base"]:  # the merge would check the ship: row's base, not the one intake pre-checked
+        return refuse("invalid_request", f"the request's base {row['base']} is not the ship: row's {shipped.get('base')}")
 
     def queue_request(entries: list[dict[str, Any]]) -> dict[str, Any] | None:
         if any(entry.get("item") == item and entry.get("status") == "running" for entry in entries):

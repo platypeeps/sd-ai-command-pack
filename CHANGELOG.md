@@ -461,6 +461,38 @@
 - **`sd-status` no longer reports `branch-unresolvable` on a done item (sd:2729).**
   A merge deletes the squashed branch, so a done item's `branch` is history, not a fault to repair.
 
+- **The offload view compares an allowlist of variables and the thread caps (sd:2782).**
+  The `variables` part of a satellite's offload view now holds only the
+  variables `offload_variable` names: `SD_`, `NEXTEST_`, `CARGO_`, `RUST`,
+  `PYTHON`, `PYTEST_`, `COVERAGE_`, `TASK_`, `DYLD_`, `LD_`, `LC_`, `UV_`,
+  `PIP_`, `NPM_CONFIG_`, `NODE_` and `GIT_CONFIG` prefixes, and `CI`,
+  `GITHUB_ACTIONS`, `LANG`, `TZ`, `BASH_ENV`, `ENV`, `MAKEFLAGS`,
+  `MAKEFILES`, `MFLAGS`, the C compiler, flag and SDK variables (`CC`,
+  `CFLAGS`, `LDFLAGS`, `SDKROOT` and their kin), the `GIT_` variables that
+  choose a repository, and the `XDG_` config, cache and state folders. A credential-named
+  variable stays out even under a prefix. Per-login and per-session values
+  such as `__CF_USER_TEXT_ENCODING`, `SSH_AUTH_SOCK` and `TMPDIR` no longer
+  hand a satellite's receipt back with `satellite_binding`, and no value or
+  digest of a variable off the list reaches the hub's row. A new `threads`
+  part binds `sd_gate_slots.thread_caps`, as `machine_binding` does, so other
+  caps miss on `threads`; a row written before it misses there by name.
+  In a repository with `repo.satellite_gate = accept`, every gate, the hub's
+  and the satellite's, now runs its check under only those variables plus
+  `HOME`, `USER` and `PATH` (`offload_environment`). A `SKIP_TESTS=1` or a
+  `RUN_INTEGRATION=1` off the list cannot make the two machines run different
+  checks. A check that needs a dropped variable, such as a credential, fails on
+  every machine, so such a repository stays off until the variable is
+  allowlisted. A repository that did not opt in keeps the whole environment.
+  The binding names the mode (`environment_mode`), so a pass under one mode
+  never stands for a gate under another. The hub accepts a satellite's
+  receipt only when its own gate ran under the offload environment and the
+  receipt binds `offload`. A fault on the hub's opt-in read refuses the
+  receipt as `satellite_binding`.
+  Clause 4 refuses a row whose satellite names no tailnet login and address
+  as `satellite_unidentified`. Intake refuses a request that is not an
+  `sd-lane-request` row, names no tailnet identity, or names a base other
+  than its `ship:` row's, as `invalid_request`.
+
 - **A fixture gate in `test_sd_local_gate` no longer joins the machine's gate queue (sd:2735).**
   `Repository.setUp` sets `SD_GATE_SLOTS_DIR` and `XDG_STATE_HOME` to the
   test's own folder. Run directly, outside `sd gate check`, the suite took

@@ -561,7 +561,11 @@ which the installer places in `~/.claude/agents`.
   satellite's offload receipt under the trust rule and refuses with a
   `satellite_*` or `base_moved` code. A refusal, or a branch or base that
   moved, hands the item back to the satellite with the next action on the
-  request row and the item. The table below is who does what.
+  request row and the item. Opting in also cuts the environment of every gate
+  in the repository, on the hub too, to the variables the hub compares plus
+  `HOME`, `USER` and `PATH` (sd:2782): a check that needs a credential or
+  another variable off that list fails, so leave such a repository off. The
+  table below is who does what.
 - **Test one version per language, the latest stable (Python 3.14, Node
   26), in CI and locally; no version matrices.**
 
