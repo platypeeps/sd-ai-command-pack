@@ -2138,6 +2138,13 @@ capture = os.environ.get("JEV_STUB_CAPTURE")
 if capture:
     shutil.copyfile(state, capture)
 questions = json.loads(sys.stdin.read())
+if os.environ.get("JEV_STUB_DOWN") == "1":
+    # What `jev ask --fallback` does when the endpoint refuses: the fallback
+    # on stdout, exit 0, and the reason on stderr.
+    sys.stderr.write("jev: http://127.0.0.1:8009/v1/systemone: [Errno 61] "
+                     "Connection refused; using the fallback\\n")
+    sys.stdout.write(sys.argv[sys.argv.index("--fallback") + 1] + "\\n")
+    raise SystemExit(0)
 if os.environ.get("JEV_STUB_FAIL") == "1":
     sys.stdout.write("not json at all\\n")
     raise SystemExit(1)
@@ -2211,6 +2218,18 @@ class Rule6ClaimSupportTests(LintFixture):
         lint.write_citation_manifest(item, self.work)
         return item
 
+    def calls(self, argv_log: pathlib.Path) -> list[list[str]]:
+        """Every argv the stub was handed, in order; none when it was never run."""
+        if not argv_log.exists():
+            return []
+        return [json.loads(line) for line in argv_log.read_text().splitlines()]
+
+    def assert_local_only(self, calls: list[list[str]]) -> None:
+        """Both calls were made, and each one named `--local-only` (sd:2762)."""
+        self.assertEqual([call[0] for call in calls], ["enabled", "ask"])
+        for call in calls:
+            self.assertIn("--local-only", call, f"{call[0]} could reach hosted Jev")
+
     def test_both_calls_name_themselves_for_the_judgment_ledger(self) -> None:
         """sd:2136. A bare `jev enabled` and an unnamed `ask` land in the ledger
         as caller "unknown", so this gate's calls could not be counted."""
@@ -2219,10 +2238,12 @@ class Rule6ClaimSupportTests(LintFixture):
         self.recorded_item()
         with self.jev(JEV_STUB_ARGV=str(argv_log)):
             self.notes()
-        calls = [json.loads(line) for line in argv_log.read_text().splitlines()]
+        calls = self.calls(argv_log)
         self.assertEqual(calls[0], ["enabled", lint.JEV_STAGE, "--record", "--caller", lint.JEV_CALLER])
         ask = calls[1]
         self.assertEqual(ask[0], "ask")
+        # Opted in, so hosted Jev: the local-only flag is the default's alone.
+        self.assertNotIn("--local-only", ask)
         self.assertEqual(ask[ask.index("--caller") + 1], lint.JEV_CALLER)
         self.assertEqual(ask[ask.index("--stage") + 1], lint.JEV_STAGE)
 
@@ -2234,38 +2255,69 @@ class Rule6ClaimSupportTests(LintFixture):
             self.assertIn("claim support", self.notes())
         self.assertTrue(self.capture.exists(), "an opted-in repository took no reading")
 
-    def test_a_repository_that_has_not_opted_in_sends_nothing(self) -> None:
-        """The default (sd:1304). No file, the switch unset, `jev` on PATH and
-        keyed: no request, no note, and `jev` is not even asked whether it can
-        answer. Before sd:1304 this run took the reading, and every checkout
-        whose `docs/work` must not leave the machine had to export `0`."""
+    def test_a_repository_that_has_not_opted_in_reads_through_local_kev_only(self) -> None:
+        """The default (sd:2762). No file, the switch unset: the reading is
+        taken, and both calls name `--local-only`, so `jev` sends it to the
+        local Kev and nowhere else. Before sd:2762 this run took no reading
+        (sd:1304), because the only reader was hosted."""
 
+        argv_log = self.repo / "argv.jsonl"
         self.opt_out()
         self.recorded_item()
-        with self.jev():
-            self.assertNotIn("claim support", self.notes())
-        self.assertFalse(self.capture.exists(), "a repository that never opted in sent a request")
-        self.assertFalse(self.probed.exists(), "a repository that never opted in probed jev")
+        with self.jev(JEV_STUB_ARGV=str(argv_log)):
+            self.assertIn("1 of 1 recorded citation(s) answered", self.notes())
+        self.assert_local_only(self.calls(argv_log))
 
-    def test_no_environment_variable_can_opt_a_repository_in(self) -> None:
+    def test_no_environment_variable_can_send_a_repository_to_hosted_jev(self) -> None:
         """The variable only ever subtracts. The operator's shell exports
-        `JEV_SD_DOCS_LINT=1` for other reasons; that must not turn the
-        reading on in a repository that did not ask for it."""
+        `JEV_SD_DOCS_LINT=1` for other reasons; that must not take a
+        repository that did not opt in off the local-only path."""
 
+        argv_log = self.repo / "argv.jsonl"
         self.opt_out()
         self.recorded_item()
         for value in ("1", "on", "true", "True", "TRUE", "yes", "enabled", ""):
-            with self.subTest(value=value), self.jev(JEV_SD_DOCS_LINT=value):
-                self.assertNotIn("claim support", self.notes())
-            self.assertFalse(self.capture.exists(), f"{value!r} opted a repository in")
-            self.assertFalse(self.probed.exists(), f"{value!r} made a repository probe jev")
+            with self.subTest(value=value), self.jev(JEV_SD_DOCS_LINT=value, JEV_STUB_ARGV=str(argv_log)):
+                self.notes()
+            self.assert_local_only(self.calls(argv_log))
+            argv_log.unlink()
 
     def test_a_file_that_says_false_is_the_default(self) -> None:
+        argv_log = self.repo / "argv.jsonl"
         self.opt_in(False)
         self.recorded_item()
-        with self.jev():
+        with self.jev(JEV_STUB_ARGV=str(argv_log)):
+            self.notes()
+        self.assert_local_only(self.calls(argv_log))
+
+    def test_the_switch_off_wins_over_the_local_default(self) -> None:
+        """The explicit opt-out: `0` takes no reading, not even a local one,
+        and does not probe `jev` either."""
+
+        self.opt_out()
+        self.recorded_item()
+        with self.jev(JEV_SD_DOCS_LINT="0"):
             self.assertNotIn("claim support", self.notes())
-        self.assertFalse(self.capture.exists(), "an opt-in of false sent a request")
+        self.assertFalse(self.probed.exists(), "a switched-off run probed jev")
+        self.assertFalse(self.capture.exists(), "a switched-off run sent a request")
+
+    def test_kev_down_is_a_stderr_note_and_never_a_failure(self) -> None:
+        """Local Kev down: `jev` answers the fallback and says why on stderr.
+        The run passes, and says on its own stderr that nothing answered and
+        why, so a dead reader cannot pass for a clean reading."""
+
+        self.opt_out()
+        self.recorded_item()
+        self.git("add", "-A")
+        out, err = io.StringIO(), io.StringIO()
+        with self.jev(JEV_STUB_DOWN="1"), in_directory(self.repo), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = lint.main(["--no-history"])
+        self.assertEqual(code, 0, err.getvalue())
+        self.assertIn("rule 6 claim support: no answer (jev: http://127.0.0.1:8009/v1/systemone: "
+                      "[Errno 61] Connection refused; using the fallback)", err.getvalue())
+        self.assertNotIn("Connection refused", out.getvalue())
+        self.assertIn("0 of 1 recorded citation(s) answered", out.getvalue())
 
     def test_the_switch_off_wins_over_the_opt_in(self) -> None:
         """Silence, not a note: the operator asked for silence, and the

@@ -28,8 +28,9 @@ path, no repository or branch name, no author, no commit message, no file
 contents and no diff text.
 
 **No per-repository opt-in, unlike `bin/sd-docs-lint`.** That gate's reading
-sends a repository's own prose, so since sd:1304 it runs only where the
-repository's `.github/sd-docs-lint.json` asks for it. This one sends the
+sends a repository's own prose, so it asks the local Kev only
+(`jev --local-only`, sd:2762) unless the repository's
+`.github/sd-docs-lint.json` opts in to hosted Jev (sd:1304). This one sends the
 metadata above and no prose, so it keeps its default. What the two gates share
 is unchanged and must stay so: `sd_lib.jev_stage_off` is the one kill switch,
 which only ever subtracts, and an absent `jev` or `jev enabled` exiting 3 is

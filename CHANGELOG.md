@@ -1083,6 +1083,16 @@
 
 ### Changed
 
+- **`sd-docs-lint`'s claim-support reading is on by default, through the local
+  Kev only (sd:2762).** A repository without `.github/sd-docs-lint.json`, or
+  with `"jev_claim_support": false`, now takes the reading: both `jev` calls
+  carry `--local-only`, so `jev` sends the prose to a loopback Kev and never to
+  hosted Jev. `"jev_claim_support": true` still opts a repository in to hosted
+  Jev. When the local Kev gives no answer, the run prints
+  `rule 6 claim support: no answer (<reason>)` on stderr and passes.
+  `JEV_SD_DOCS_LINT=0` switches the reading off, local and hosted; a missing
+  `jev` stays silent, and a malformed file still takes no reading.
+
 - **`sd-status` asks each `git` question once per run (sd:2677).** One run on
   a working checkout started 2,079 subprocesses, and 1,750 of them repeated a
   question already answered. `sd_lib.git_read_memo()` remembers read-only
