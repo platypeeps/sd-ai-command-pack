@@ -311,7 +311,22 @@ class BuilderReceipt(BuilderFixture):
         self.assertEqual(done.returncode, 0, done.stderr)
         gate = self.gate(root, database)
         self.assertEqual(gate["source"], "gate")
+        self.assertEqual(gate["reuse_miss"], {"reason": "binding", "fields": ["environment_sha256"]})  # sd:2772
         self.assertEqual(self.runs(), 2)
+
+    def test_a_builder_whose_cd_added_a_path_entry_to_no_folder_is_reused(self) -> None:
+        """sd:2772. fnm's `cd` hook prepends a per-shell link, here to no installation, so
+        `cd <checkout> && sd gate check` bound another environment than `sd-review -C <checkout>`."""
+        root, database = self.repo()
+        shell = self.tmp / "fnm_multishells" / "3315_1791163917161"
+        shell.parent.mkdir()
+        shell.symlink_to(self.tmp / "no-installation")
+        path = str(shell / "bin") + ":" + self.environment()["PATH"]
+        done = self.builder(root, database, PATH=path)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        gate = self.gate(root, database)
+        self.assertEqual(gate["source"], "gate-receipt", json.dumps(gate)[:2000])
+        self.assertEqual(self.runs(), 1)
 
 
 class TreeReceipt(BuilderFixture):

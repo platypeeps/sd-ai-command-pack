@@ -1642,8 +1642,7 @@ def run_gate_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], t
         "head": gate["head"],
         "summary": gate.get("summary"),
     }
-    if gate.get("reused"):
-        report["reused"] = gate["reused"]
+    report.update({key: gate[key] for key in ("reused", "reuse_miss") if gate.get(key)})  # sd:2772: a miss names its fields
     if report["status"] == "fail":
         report.update(gate_failure(checks, report["detail"]))
     return report
