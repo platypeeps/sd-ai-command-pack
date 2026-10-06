@@ -64,6 +64,11 @@ class Repository(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.root = pathlib.Path(tmp.name).resolve() / "repo"
         self.root.mkdir()
+        # sd:2735: a fixture gate run outside `sd gate check` must not join the machine's real gate queue.
+        state = {"SD_GATE_SLOTS_DIR": str(self.root.parent / "slots"), "XDG_STATE_HOME": str(self.root.parent / "state")}
+        patch = mock.patch.dict(os.environ, state)
+        patch.start()
+        self.addCleanup(patch.stop)
         git(self.root, "init", "-q", "-b", "main")
         git(self.root, "config", "user.email", "t@example.com")
         git(self.root, "config", "user.name", "t")
@@ -79,6 +84,15 @@ class Repository(unittest.TestCase):
 
 
 class RunCheck(Repository):
+    def test_a_fixture_gate_queues_in_its_own_folder_not_the_machines(self) -> None:
+        """sd:2735: run directly, this suite's gates took and waited on the real slots under `~/.local/state`."""
+        head = self.commit("check:\n\t@echo ok\n")
+        with mock.patch.dict(os.environ, {"SD_GATE_LOAD_MAX": "0", "SD_GATE_SETTLE_SECONDS": "0"}):
+            for name in ("SD_GATE_SLOTS", "CI", "GITHUB_ACTIONS"):  # each of these takes no slot at all
+                os.environ.pop(name, None)
+            self.assertEqual(sd_gate_run.check_in_worktree(self.root, head)["status"], "success")
+        self.assertTrue((self.root.parent / "slots").is_dir())
+
     def test_a_passing_check_is_a_success_at_the_head_it_ran_on(self) -> None:
         head = self.commit("check:\n\t@echo ok\n")
         result = sd_gate_run.check_in_worktree(self.root, head)
@@ -927,6 +941,33 @@ class CacheBound(Repository):
             self.assertIsNotNone(target)
         self.assertFalse(old.exists())
         self.assertIn(f"sd gate: pruned {old}", errors.getvalue())
+
+
+class StaleGateWorktrees(Repository):
+    """sd:2739: a killed gate skips its `finally`; the next gate start removes its worktree, never a live one's."""
+
+    def left(self, owner: str, head: str) -> pathlib.Path:
+        """A gate worktree registered under `sd-local-gate-<owner>x`, as a gate that never cleaned up leaves it."""
+        tree = self.root.parent / f"{sd_gate_cache.GATE_PREFIX}{owner}x" / "tree"
+        git(self.root, "worktree", "add", "-q", "--detach", str(tree), head)
+        return tree
+
+    def test_a_dead_gates_worktree_is_removed_at_the_next_gate_start(self) -> None:
+        head = self.commit("check:\n\t@echo ok\n")
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        tree = self.left(f"{gone.pid}-", head)
+        self.assertEqual(sd_gate_run.check_in_worktree(self.root, head)["status"], "success")
+        self.assertEqual((self.worktrees(), tree.parent.exists()), (1, False))
+
+    def test_a_live_gates_worktree_and_one_that_names_no_pid_stay(self) -> None:
+        head = self.commit("check:\n\t@echo ok\n")
+        live = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        self.addCleanup(live.wait)
+        self.addCleanup(live.kill)
+        trees = [self.left(f"{live.pid}-", head), self.left("abc", head)]
+        self.assertEqual(sd_gate_run.check_in_worktree(self.root, head)["status"], "success")
+        self.assertEqual((self.worktrees(), [tree.exists() for tree in trees]), (3, [True, True]))
 
 
 class DocsScopeGate(Repository):

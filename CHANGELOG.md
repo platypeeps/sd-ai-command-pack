@@ -440,6 +440,21 @@
 
 ### Fixed
 
+- **A fixture gate in `test_sd_local_gate` no longer joins the machine's gate queue (sd:2735).**
+  `Repository.setUp` sets `SD_GATE_SLOTS_DIR` and `XDG_STATE_HOME` to the
+  test's own folder. Run directly, outside `sd gate check`, the suite took
+  and waited on the real slots under `~/.local/state/sd/gate-slots`.
+- **A killed gate's worktree is removed at the next gate start (sd:2739).**
+  `check_in_worktree` removed its `sd-local-gate-*` worktree in a `finally`,
+  which a killed gate never runs, so the entry stayed registered. The folder
+  name now carries the gate's pid. Each gate start removes the repository's
+  gate worktrees whose named process is gone. A live gate's worktree stays,
+  and so does a folder from before this change, which names no pid.
+- **`sd-review --explain` reports an unreachable hub instead of a traceback (sd:2728).**
+  On a satellite, `sd_registry.read_runtime` asked the hub whether the
+  database exists outside its `try`, so `HubUnreachable` escaped. It is now a
+  `RegistryError` naming the hub, which `read_or_report` hands every caller
+  (`sd`, `sd-review`, `sd-ship`, `sd-status`) as the refusal reason.
 - **The review binding no longer follows HOME (sd:2793).**
   The `external_review_policy` entry digested the machine config file's path
   beside the `external_reviews` value. The path follows `HOME` and

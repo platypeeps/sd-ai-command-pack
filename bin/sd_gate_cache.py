@@ -22,6 +22,12 @@ repository's, until the cache fits `sd.gate_cache_gb`. A folder another gate
 holds is skipped, since removing it needs its lock; the gate's own folder
 goes last, before its run starts. A pruned folder costs its next gate one
 cold build, and the gate names each one on stderr.
+
+The gate's worktree is housekeeping of the same kind (sd:2739). A killed gate
+never runs the `finally` that removes it, so its entry stays registered.
+`worktree_prefix` names each gate's temporary folder after its pid, and first
+removes every gate worktree whose named process is gone. A live gate's
+worktree stays; so does a folder from before this rule, which names no pid.
 """
 
 from __future__ import annotations
@@ -51,6 +57,32 @@ CACHE_GB_VARIABLE = "SD_GATE_CACHE_GB"
 #: Two folders of the one Rust repository gated here measured 9 GB cold and about 18 GB after five builds.
 DEFAULT_CACHE_GB = 40
 GIB = 1024 ** 3
+#: A gate's temporary folder: this prefix, then the pid of the gate that owns it, then `-` (sd:2739).
+GATE_PREFIX = "sd-local-gate-"
+
+
+def running(pid: int) -> bool:
+    """Whether a process `pid` exists; one owned by another user does."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass
+    return True
+
+
+def worktree_prefix(root: pathlib.Path) -> str:
+    """This gate's temporary folder prefix, after removing `root`'s gate worktrees whose gate process is gone."""
+    listing = sd_lib.git_output(["worktree", "list", "--porcelain"], root) or ""
+    for line in listing.splitlines():
+        tree = pathlib.Path(line.removeprefix("worktree "))
+        owner = tree.parent.name.removeprefix(GATE_PREFIX).partition("-")[0]
+        if line.startswith("worktree ") and tree.parent.name.startswith(GATE_PREFIX) and owner.isdigit() \
+                and not running(int(owner)):
+            sd_lib.git_output(["worktree", "remove", "--force", str(tree)], root)
+            shutil.rmtree(tree.parent, ignore_errors=True)
+    return f"{GATE_PREFIX}{os.getpid()}-"
 
 
 def cache_root(environ: Mapping[str, str]) -> pathlib.Path:
