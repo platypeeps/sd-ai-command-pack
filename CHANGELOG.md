@@ -440,6 +440,15 @@
 
 ### Fixed
 
+- **The review binding no longer follows HOME (sd:2793).**
+  The `external_review_policy` entry digested the machine config file's path
+  beside the `external_reviews` value. The path follows `HOME` and
+  `XDG_CONFIG_HOME`, so a satellite under another login computed another
+  binding, and the hub's `sd-ship merge --satellite-gate` refused every
+  offload merge with `review_binding_moved`. The entry now binds the value
+  alone; a changed value still moves the binding. A receipt written before
+  this change reads as moved once, naming `external_review_policy (policy)`,
+  and its item re-reviews at the next prepare.
 - **An acknowledgement no longer accepts an unknown `enforce_admins` (sd:2755).**
   `sd_protection.observed_state` read unknown (a withheld `bypass_actors`
   list, an unresolved `RepositoryRole`) as `false`, so an `accepted_gaps`

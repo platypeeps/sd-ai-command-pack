@@ -135,7 +135,9 @@ def policy_files(root: pathlib.Path) -> dict:
         path = sd_lib.local_block_path(root) if name == sd_lib.LOCAL_FILE_NAME else root / name
         # Preserve item-backed repository-policy I/O errors for existing callers.
         files[name] = hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() or path.is_symlink() else "absent"
-    files["external_review_policy"] = digest({"path": str(sd_lib.machine_config_path()), "value": sd_lib.core_setting("external_reviews")})
+    # The setting's value, never the config file's path: that follows HOME, and a
+    # satellite under another login then moved the binding the hub checks (sd:2793).
+    files["external_review_policy"] = digest({"value": sd_lib.core_setting("external_reviews")})
     return files
 
 
