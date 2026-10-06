@@ -455,6 +455,19 @@ class Receipts(ReceiptFixture):
         self.assertNotIn("reused", again)
         self.assertEqual((again["status"], self.runs()), ("success", 2))
 
+    def test_the_check_tree_gets_only_the_digested_block(self) -> None:
+        """sd:2854 review: the digest covers the parsed block, so the check reads nothing beyond it."""
+        head = self.counted()
+        (self.root / "CLAUDE.local.md").write_text(
+            f"an operator note\n{BLOCK_START}\n# a comment\nmode: full  # inline\nnote: it's \"quoted\"\n{BLOCK_END}\ntail\n", encoding="utf-8")
+        seen: list[str] = []
+        def run(argv, env, tree, timeout):  # type: ignore[no-untyped-def]
+            seen.append((pathlib.Path(tree) / "CLAUDE.local.md").read_text(encoding="utf-8"))
+            return 0, json.dumps({"status": "pass", "scope": {"mode": "full"}, "checks": []}), ""
+        self.gate(head, run=run, reuse=False, record=False)
+        self.assertEqual(seen, [f"{BLOCK_START}\nmode: 'full'\nnote: \"it's \\\"quoted\\\"\"\n{BLOCK_END}\n"])
+        self.assertEqual(sd_lib.parse_local_block(seen[0]), {"mode": "full", "note": 'it\'s "quoted"'})
+
     def test_another_repository_records_nothing_when_the_pack_moves_mid_run(self) -> None:
         """The child may open the moved pack, so a landing mid-run drops the pass (sd:2612 review), and says so."""
         head = self.counted()

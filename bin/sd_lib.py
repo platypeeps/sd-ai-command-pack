@@ -531,6 +531,20 @@ def local_policy_digest(path: pathlib.Path | None) -> str:
     return hashlib.sha256(json.dumps(block, sort_keys=True).encode()).hexdigest()
 
 
+def local_policy_text(block: dict[str, str]) -> str:
+    """`block` as a marked block of quoted scalars, keys sorted: all of `CLAUDE.local.md` a gate's check tree gets.
+
+    The digest covers the parsed block only, so the check reads nothing more
+    (sd:2854 review). Refused when it would not parse back to `block`.
+    """
+    def quoted(value: str) -> str:
+        return f"'{value}'" if "'" not in value else '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    text = "\n".join([LOCAL_BLOCK_START, *(f"{key}: {quoted(value)}" for key, value in sorted(block.items())), LOCAL_BLOCK_END, ""])
+    if parse_local_block(text) != block:
+        raise ConfigError(f"{LOCAL_FILE_NAME}: the block does not survive a rewrite for the gate's check tree")
+    return text
+
+
 def read_local_block(path: pathlib.Path) -> dict[str, str]:
     """The local configuration block in the file at `path`; missing file or block is `{}`."""
     try:

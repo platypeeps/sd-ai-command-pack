@@ -473,6 +473,7 @@
   `review_binding_moved` and then at trust-rule clause 5 or 8. Both now hash `sd_lib.local_policy_digest`:
   the parsed block, keys sorted. No file, no block and an empty block read alike. A key that differs,
   such as `mode:` or a declared check command, still refuses on both. `.github/sd-review.json` still binds byte-exact.
+  The gate's check tree gets the parsed block rewritten, quoted and sorted (`sd_lib.local_policy_text`), not the file, so a check reads only what the digest covers.
   **Migration:** every stored binding moves once, named as `normalizer changed ... local-block-1`;
   a review whose replayed request is unchanged is kept, as for any normalizer change.
   Every stored gate receipt and offload row misses once on `inputs`, and the check runs again.
