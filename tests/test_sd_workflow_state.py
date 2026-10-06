@@ -179,6 +179,30 @@ class PolicyReferenceBinding(unittest.TestCase):
                         path.write_text("fixture policy")
                         self.assertEqual(bindings.adjudicator_binding(str(library)), before)
 
+    def test_the_review_binding_binds_the_external_reviews_value_not_the_home_path(self):
+        """A satellite under another login has another HOME, so another config
+        path; the hub then refused every offload merge as `review_binding_moved`
+        (sd:2793). The binding holds across HOMEs and moves with the value; a
+        receipt that bound the path reads as moved, naming the entry."""
+        with tempfile.TemporaryDirectory() as directory:
+            scratch = pathlib.Path(directory)
+            root = scratch / "repo"
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+
+            def manifest(home: str, value: str) -> dict:
+                config = scratch / home / ".config" / bindings.sd_lib.CONFIG_RELATIVE_PATH
+                config.parent.mkdir(parents=True, exist_ok=True)
+                config.write_text(json.dumps({"config": {"sd": {"external_reviews": value}}}))
+                with patch.dict("os.environ", {"HOME": str(scratch / home), "XDG_CONFIG_HOME": ""}):
+                    return bindings.binding_manifest(root)
+
+            hub = manifest("hub", "configured")
+            self.assertEqual(bindings.manifest_digest(manifest("satellite", "configured")), bindings.manifest_digest(hub))
+            self.assertNotEqual(bindings.manifest_digest(manifest("satellite", "deny")), bindings.manifest_digest(hub))
+            old = json.loads(json.dumps(hub))
+            old["policy"]["external_review_policy"] = bindings.digest({"path": str(scratch / "hub"), "value": "configured"})
+            self.assertEqual(bindings.binding_change(old, hub), [("external_review_policy", "policy")])
+
     def test_the_protection_reader_is_in_the_review_manifest(self):
         """`sd_protection.py` is what the merge gate reads a ruleset through.
         A change to its bypass or pagination handling must invalidate a
