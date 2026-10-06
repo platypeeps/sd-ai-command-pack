@@ -388,10 +388,14 @@ each request, in order:
    Then write `queued`.
 
 Queue first, row second, so a crash leaves a queue entry that step 4
-recognises, never a `queued` row with no entry. When the `queued` write fails because the
-satellite asked again in between, intake cancels the entry it just added,
-superseded by the newer revision, so the runner never claims it on the older
-request's authority; the next intake takes the newer request in.
+recognises, never a `queued` row with no entry. The entry is not yet
+claimable: `claim_next` takes a satellite entry only while the request's
+newest revision is the `queued` write naming it (`claimable`). A failed
+`queued` write, a newer request from the satellite, or a row that cannot be
+read keeps the entry pending and unclaimed, so it never runs on a superseded
+authority. The next intake settles it: step 4 writes `queued` for the same
+revision, or step 5 cancels it for a newer one (review round 5, prepare
+review at 63bc828e).
 
 ### Scheduling
 

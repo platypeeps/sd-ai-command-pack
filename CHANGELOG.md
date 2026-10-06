@@ -16,7 +16,10 @@
   follower, and predicts past a satellite entry ahead from its branch on
   origin. After the merge it deletes `origin/<branch>` with a lease on the
   merged head and writes `merged` to the request row; a row write that
-  failed is retried at the next intake.
+  failed is retried at the next intake. It claims a satellite entry only
+  while the request's newest revision is the `queued` write naming it, so a
+  failed write, a newer request or an unreadable row never runs it on a
+  superseded authority.
 - **A satellite asks the hub's lane to merge: `sd-ship lane request` (sd:2704).**
   On a satellite, `lane request --item N [--manual]` writes the row
   `lane-request:v1:<slug>:<item>` over the wire. It refuses on the hub

@@ -411,12 +411,62 @@ class SatelliteEntry(requests_suite.Requests):
         store = requests_suite.types.SimpleNamespace(read=receipts.read, receipt_key=receipts.receipt_key,
                                                      save=satellite_asks_again)
         self.run_lane(hub=sd_lane.Hub(self.connection, store, requests_suite.SLUG, self.repo))
-        self.assertEqual(self.calls, [])
-        self.assertEqual({entry["status"] for entry in self.entries()}, {"cancelled"})
-        self.assertEqual(self.entries()[-1]["superseded_by"]["revision"], raced[0])
-        self.assertEqual(self.row()["status"], "requested")
+        self.assertEqual((self.calls, self.entries()[-1]["status"], self.row()["status"]), ([], "pending", "requested"))
         self.run_lane()  # the newer request decides: no --manual, so no merge
+        self.assertEqual(self.entries()[-2]["superseded_by"]["revision"], raced[0])
         self.assertEqual((self.calls, self.entries()[-1]["status"]), ([], "prepared"))
+
+    def test_a_replaced_request_whose_row_cannot_be_read_again_is_not_claimed(self):
+        """Prepare review at 63bc828e: the conflict's recovery read failed, so the manual entry stayed claimable."""
+        self.ask()
+        raced: list[int] = []
+
+        def satellite_asks_again(connection, key, previous, value):
+            if value.get("status") == "queued" and not raced:
+                raced.append(self.ask(authority=None))
+            return receipts.save(connection, key, previous, value)
+
+        def stopped_after_the_race(connection, key):
+            if raced:
+                raise RuntimeError("the database stopped here")
+            return receipts.read(connection, key)
+        store = requests_suite.types.SimpleNamespace(read=stopped_after_the_race, receipt_key=receipts.receipt_key,
+                                                     save=satellite_asks_again)
+        self.run_lane(hub=sd_lane.Hub(self.connection, store, requests_suite.SLUG, self.repo))
+        self.assertEqual((self.calls, self.entries()[-1]["authority"], self.entries()[-1]["status"]),
+                         ([], "manual", "pending"))
+        self.run_lane()
+        self.assertEqual((self.calls, self.entries()[-1]["status"]), ([], "prepared"))
+
+    def test_no_entry_is_claimed_unless_its_request_row_names_it(self):
+        """Prepare review at 63bc828e: every failure point in intake leaves the replaced manual entry unclaimed."""
+        update = sd_lane.update
+
+        def queue_write_fails(path, change):
+            if change.__name__ == "queue_request":
+                raise OSError("the queue file stopped here")
+            return update(path, change)
+
+        def read_fails(connection, key):
+            raise RuntimeError("the database stopped here")
+        unread = requests_suite.types.SimpleNamespace(read=read_fails, receipt_key=receipts.receipt_key,
+                                                      save=receipts.save)
+        faults = {"queue write": (self.hub, patch.object(sd_lane, "update", queue_write_fails)),
+                  "queued write": (self.failing_hub("queued"), contextlib.nullcontext()),
+                  "row read": (sd_lane.Hub(self.connection, unread, requests_suite.SLUG, self.repo),
+                               contextlib.nullcontext())}
+        for fault, (hub, broken) in faults.items():
+            with self.subTest(fault):
+                self.ask()
+                requests_suite.sd_lane.intake(self.hub, self.path)  # a manual entry the row names
+                self.ask(authority=None)
+                with broken:
+                    self.run_lane(hub=hub)
+                self.assertEqual(self.calls, [])
+                self.assertFalse([entry for entry in self.entries() if entry["status"] in ("running", "merged")])
+                self.run_lane()
+                self.assertEqual((self.calls, self.entries()[-1]["authority"], self.entries()[-1]["status"]),
+                                 ([], None, "prepared"))
 
     def failing_hub(self, *statuses):
         """The hub's rows, but a row write with one of `statuses` fails as a stopped database would."""
@@ -427,10 +477,12 @@ class SatelliteEntry(requests_suite.Requests):
         store = requests_suite.types.SimpleNamespace(read=receipts.read, receipt_key=receipts.receipt_key, save=save)
         return sd_lane.Hub(self.connection, store, requests_suite.SLUG, self.repo)
 
-    def test_an_entry_whose_queued_write_failed_still_writes_its_outcome(self):
-        """Review round 1: the row stayed `requested` while its entry merged, and later read `queued` for good."""
+    def test_an_entry_whose_queued_write_failed_runs_after_the_next_intake_writes_it(self):
+        """Review round 1: the row stayed `requested` while its entry merged; now the entry waits for the row."""
         self.ask()
         self.run_lane(hub=self.failing_hub("queued"))
+        self.assertEqual((self.calls, self.entries()[-1]["status"], self.row()["status"]), ([], "pending", "requested"))
+        self.run_lane()
         self.assertEqual((self.entries()[-1]["status"], self.entries()[-1]["request_row"]), ("merged", "written"))
         self.assertEqual((self.row()["status"], self.row()["merge_commit"]), ("merged", "merged-7"))
 
@@ -446,9 +498,8 @@ class SatelliteEntry(requests_suite.Requests):
         self.assertEqual((self.row()["status"], self.row()["merge_commit"]), ("merged", "merged-7"))
 
     def test_a_finished_entry_writes_its_outcome_though_its_ship_row_moved_on(self):
-        """Review round 1: with both row writes failed, the next intake must not refuse a merged item as unprepared."""
-        self.ask()
-        self.run_lane(hub=self.failing_hub("queued", "merged"))
+        """Review round 1: with the outcome write failed, the next intake must not refuse a merged item as unprepared."""
+        self.run_lane(hub=self.failing_hub("merged"))
         self.prepared(phase="merged")
         requests_suite.sd_lane.intake(self.hub, self.path)
         self.assertEqual((self.row()["status"], self.row()["merge_commit"]), ("merged", "merged-7"))

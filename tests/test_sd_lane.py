@@ -513,8 +513,9 @@ class Speculation(Lane):
             "expected_head": git(satellite, "rev-parse", "HEAD"), "authority": "manual", "status": "pending",
             "enqueued_at": sd_lane.stamp_now()}))
         sd_lane.enqueue_entry(self.second, 2, "two", self.body, self.environ, manual=True, claim="deliver")
-        sd_lane.run_lane(self.repo, self.environ, super().ship, lambda root, head, base: self.gates.append(
-            (root, head, base)) or {"status": "success"})
+        with mock.patch.object(sd_lane, "claimable", lambda hub, entry: True):  # no request row here: see SatelliteEntry
+            sd_lane.run_lane(self.repo, self.environ, super().ship, lambda root, head, base: self.gates.append(
+                (root, head, base)) or {"status": "success"})
         [(root, _, _)] = self.gates
         self.assertEqual((root, self.entries()[1]["speculation"]["status"]), (self.second, "success"))
 

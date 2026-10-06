@@ -79,6 +79,8 @@ A satellite gates on its own machine and asks the hub to merge (sd:2704).
 each claim the runner takes in this repository's requests (`intake`). It
 first looks for an entry that names the request's revision: one is there when
 the row's `queued` write failed, and a finished one gives the row its outcome.
+The runner claims a satellite entry only while the request's newest revision
+is the `queued` write naming it, so a failed write or a newer request keeps it.
 It then refuses a request the repository did not opt into, one whose branch
 or head is malformed, and one whose `ship:` row is not `ready_to_send` at its
 head; it supersedes the item's pending entry, leaves a request whose item is
@@ -480,20 +482,9 @@ def take_in(hub: Hub, path: pathlib.Path, key: str, revision: int, row: dict[str
     if entry is None:
         return {"request": key, "revision": revision, "status": "requested",
                 "reason": f"sd:{item} is running; the next intake takes the request in"}
-    try:
-        return answer("queued", entry={"enqueued_at": entry["enqueued_at"], "revision": revision})
-    except Exception:
-        # The satellite asked again while intake decided: the newer request decides, never this entry's
-        # authority, so it must not be claimed (review round 5). Any other failed write keeps the entry.
-        newest, _ = hub.store.read(hub.connection, key)
-        if newest != revision:
-            def supersede(entries: list[dict[str, Any]]) -> None:
-                for queued in entries:
-                    if queued.get("request") == taken and queued.get("status") == "pending":
-                        queued.update(status="cancelled", finished_at=stamp_now(),
-                                      superseded_by={"key": key, "revision": newest})
-            update(path, supersede)
-        raise
+    # A failed write leaves the entry unclaimable (`claimable`): the next intake writes `queued` (step 4),
+    # or a newer request supersedes it (step 5).
+    return answer("queued", entry={"enqueued_at": entry["enqueued_at"], "revision": revision})
 
 
 def intake(hub: Hub, path: pathlib.Path) -> list[dict[str, Any]]:
@@ -528,13 +519,31 @@ def outcome_fields(outcome: dict[str, Any]) -> dict[str, Any]:
     return {name: outcome.get(name) for name in ("code", "reason", "next_action", "merge_commit")}
 
 
+def acknowledges(row: dict[str, Any], taken: dict[str, Any]) -> bool:
+    """The request row says `queued` for the entry that took in revision `taken`."""
+    return row.get("status") == "queued" and (row.get("entry") or {}).get("revision") == taken.get("revision")
+
+
+def claimable(hub: Hub | None, entry: dict[str, Any]) -> bool:
+    """Whether the runner may claim `entry`. A satellite entry needs its request's newest revision to be the
+    `queued` write naming it: a failed write, a newer request or a row that cannot be read keeps it pending
+    until an intake settles it, so it never runs on a superseded authority (review rounds 5 and 6)."""
+    if entry.get("gate") != SATELLITE:
+        return True
+    taken = entry.get("request") or {}
+    try:
+        _, row = hub.store.read(hub.connection, taken["key"]) if hub is not None else (None, {})
+    except Exception:  # an unread row authorises nothing
+        return False
+    return acknowledges(row, taken)
+
+
 def write_outcome(hub: Hub, entry: dict[str, Any], outcome: dict[str, Any]) -> str:
     """Write a satellite entry's outcome to its request row, unless a newer request replaced the one it took in."""
     taken = entry.get("request") or {}
     try:
         revision, row = hub.store.read(hub.connection, taken.get("key"))
-        acknowledged = row.get("status") == "queued" and (row.get("entry") or {}).get("revision") == taken.get("revision")
-        if not (acknowledged or revision == taken.get("revision")):  # the second: its `queued` write failed
+        if not acknowledges(row, taken):
             return "skipped: the request row moved on from this entry"
         hub.store.save(hub.connection, taken["key"], revision, {
             **row, "status": outcome.get("status"), **outcome_fields(outcome), "decided_at": stamp_now()})
@@ -959,7 +968,8 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
     call, so a suite can replace it; `hub` defaults to `default_hub`'s, the
     same way. Before each claim the runner takes in satellite requests
     (`intake`). `satellite_only` claims only satellite entries and starts no
-    speculative gate (ruling Q4). On a satellite it refuses before any of
+    speculative gate (ruling Q4). A satellite entry is claimed only while
+    its request row acknowledges it (`claimable`). On a satellite it refuses before any of
     that: the requests and the pack row are the hub's (prepare review).
     """
     refuse_on_satellite("lane run")
@@ -984,7 +994,7 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
                 def claim_next(entries: list[dict[str, Any]]) -> dict[str, Any] | None:
                     for row in entries:
                         if (row.get("status") == "pending" and not row.get("held")
-                                and (not satellite_only or row.get("gate") == SATELLITE)):
+                                and (not satellite_only or row.get("gate") == SATELLITE) and claimable(hub, row)):
                             row.update(status="running", started_at=stamp_now(), runner_pid=os.getpid())
                             return dict(row)
                     return None
