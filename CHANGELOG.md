@@ -449,6 +449,13 @@
   alone; a changed value still moves the binding. A receipt written before
   this change reads as moved once, naming `external_review_policy (policy)`,
   and its item re-reviews at the next prepare.
+
+- **A request row whose `entry` is not an object no longer stops the lane (sd:2792).**
+  `lane run` read a `queued` request row's `entry` as an object, so a list,
+  a string or a number there raised `AttributeError` in `claimable` and
+  stopped every run until the row changed. One reader (`entry_revision`)
+  now answers no revision for such an entry: the runner leaves its queue
+  entry pending and claims the next one, and intake reports no error.
 - **An acknowledgement no longer accepts an unknown `enforce_admins` (sd:2755).**
   `sd_protection.observed_state` read unknown (a withheld `bypass_actors`
   list, an unresolved `RepositoryRole`) as `false`, so an `accepted_gaps`
