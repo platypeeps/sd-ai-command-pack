@@ -168,6 +168,13 @@ request with one keeps its row. Those rows say to repair or move the store
 first, because `sd-review-ack --ack` stops with an error on a store it could
 not read rather than replace the acknowledgements still in it.
 
+The acknowledgements live in the workflow database, so a satellite reads the
+hub's (sd:2750). A satellite whose hub does not answer is the one exception to
+"hides no row": every finding would read unanswered there, so both review
+classes get no row and are `unchecked` with `review acknowledgements unknown
+(hub unreachable: ...)`, and the `late:` and `expired:` lines print that in
+place of a count.
+
 The count is sometimes a floor. A reviewer that writes `Moderate findings
 (3 votes each)` has stated more than one finding under one marker and has not
 said where they split; `sd-review-ack` keeps the whole text, marks the row
@@ -383,7 +390,7 @@ so capping it would make the cap the interface.
 The `--json` schema is version **3**. Beyond the section keys it carries
 `merged_pull_requests` (the pull requests merged inside the review window, with
 the findings each carries), `expired_reviews` (the `expired:` count, its
-days, its pull requests and why it is short, if it is), `late_reviews` (the `late:` count, in the same shape), `inventory` (`rows` plus the `unchecked` map),
+days, its pull requests and why it is short, if it is), `late_reviews` (the `late:` count, in the same shape; both `findings` are `null` when the hub is unreachable), `inventory` (`rows` plus the `unchecked` map),
 `abnormalities`, `actions` — the uncapped inventory, of which `pending` is the
 first ten after each class's `pending_cap` (`pending_rows`) — and `next`. It
 has no top-level `pending` key, and the two nested ones are something else

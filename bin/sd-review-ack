@@ -14,9 +14,24 @@ thread at all: an automated reviewer states them under `Suppressed comments
 (N)` and `Outstanding review findings:` in the review **body**, where there is
 nothing to resolve and nothing to reply to. A reader counting inline comments
 sees zero on such a pull request and reports it clean. So the record has to
-live somewhere the operator controls, and it lives in `.git/`, outside the
-tree, because an acknowledgement committed to the branch would change the very
-head whose findings it acknowledges.
+live somewhere the operator controls, and outside the tree, because an
+acknowledgement committed to the branch would change the very head whose
+findings it acknowledges.
+
+WHERE THE RECORD LIVES (sd:2750). In the workflow database, one
+`review-ack:v1:<slug>:<finding id>` row per acknowledgement, written through
+`sd_db.ship`'s revision-checked store. On a satellite that database is the
+hub's, read over the tailnet, so the hub and every satellite read one record.
+The file `sd-review-ack.json` in the git common dir held it before, and a
+satellite never saw the hub's file: it reported acknowledged findings as late.
+The database holds a checkout's record when its `origin` names a GitHub
+repository the `repo` table registers; any other checkout, and a machine
+with no `sd_db` or no database, keeps the file as before. Moving over, the
+file is still read beside the rows, the rows winning, and every write first
+imports the file's rows the database lacks, so the import runs once and
+again changes nothing. A satellite whose hub does not answer refuses every
+write and reads `unknown (hub unreachable)`; `sd-status` then counts nothing
+rather than count an acknowledged finding as unread.
 
 WHAT A DISPOSITION MAY BE. Three:
 
@@ -115,7 +130,7 @@ tests replay it: the gate refuses that round and names all of its findings,
 including the ones on #859 and #861, which carry no inline comment at all.
 
 Reads GitHub live through `gh` when given nothing, or replays a captured round
-with `--from`. Writes exactly one file, and only when asked to acknowledge.
+with `--from`. Writes the record, and only when asked to acknowledge.
 """
 
 from __future__ import annotations
@@ -159,6 +174,10 @@ STORE_NAME = "sd-review-ack.json"
 #: the store it guards -- outside the tree, so it is never staged, never
 #: committed, and never changes the head under review.
 LOCK_NAME = STORE_NAME + ".lock"
+
+#: One acknowledgement's row in the workflow database; `<slug>:<finding id>` follows (sd:2750).
+ROW_PREFIX = "review-ack:v1:"
+ROW_WRITER = "sd-review-ack"
 
 DEFAULT_LIMIT = 30
 
@@ -717,6 +736,26 @@ def store_path(root: pathlib.Path) -> pathlib.Path:
 def read_store(root: pathlib.Path) -> tuple[dict[str, dict], str]:
     """Acknowledgements on record, and the sentence saying the record is broken.
 
+    The database's rows over the file's when the database holds this
+    checkout's record (`store_place`), the file's alone otherwise. A database
+    that cannot be reached reads as empty, as a broken file does, with the
+    sentence `store_unreachable` returns: `--check` refuses and `--ack`
+    writes nothing.
+    """
+    rows, broken = _read_file(root)
+    place, detail = store_place(root)
+    if place == "unreachable":
+        return {}, f"acknowledgements {detail}; every finding reads as unread"
+    if place == "hub":
+        held, unreadable = _hub_rows(detail)
+        rows.update(held)
+        broken = "; ".join(part for part in (broken, unreadable) if part)
+    return rows, broken
+
+
+def _read_file(root: pathlib.Path) -> tuple[dict[str, dict], str]:
+    """The file's acknowledgements, and the sentence saying the file is broken.
+
     A store that cannot be parsed reads as empty, and empty means every finding
     is unread, which is the safe direction: a corrupt record makes the gate
     refuse rather than pass. Safe is not the same as silent, though, and
@@ -737,6 +776,171 @@ def read_store(root: pathlib.Path) -> tuple[dict[str, dict], str]:
     if not isinstance(rows, dict):
         return {}, f"{path} has no acknowledgements object; every finding reads as unread"
     return {k: v for k, v in rows.items() if isinstance(v, dict)}, ""
+
+
+#: This process's database reader, keyed by the database path, so a test that
+#: moves `HOME` gets its own: `(connection, registered slugs)` or the reason
+#: there is none. One connection answers every pull request a report reads.
+_HUB: dict[str, Any] = {}
+
+
+def _forget_hub() -> None:
+    """Close the cached reader; the counterpart of `_forget_carried_rows`."""
+    for reader in _HUB.values():
+        if isinstance(reader, tuple):
+            with contextlib.suppress(Exception):
+                reader[0].close()
+    _HUB.clear()
+
+
+def _origin_slug(root: pathlib.Path) -> str:
+    """`owner/name` of this checkout's GitHub origin, or ``""``: the record's key across machines."""
+    from sd_ship_remote import Refusal, slug  # noqa: PLC0415
+
+    try:
+        return slug(sd_lib.git_output(["config", "--get", "remote.origin.url"], root) or "")
+    except Refusal:
+        return ""
+
+
+def _hub_reader() -> tuple[Any, frozenset[str]] | str:
+    """A read connection on the workflow database and the slugs its `repo` rows name, or why not."""
+    from sd_db import database  # noqa: PLC0415
+    from sd_ship_remote import Refusal, slug  # noqa: PLC0415
+
+    path = database.default_path()
+    if str(path) in _HUB:
+        return _HUB[str(path)]
+    reader: tuple[Any, frozenset[str]] | str
+    try:
+        connection = database.connect(path, write=False)
+        slugs: set[str] = set()
+        for (remote,) in connection.execute("SELECT remote FROM repo WHERE remote IS NOT NULL").fetchall():
+            with contextlib.suppress(Refusal):
+                slugs.add(slug(str(remote)))
+        reader = (connection, frozenset(slugs))
+    except Exception as error:  # every way a hub or a file refuses: the record is unknown, not empty
+        place = "hub unreachable" if _satellite() else "workflow database unreadable"
+        reader = f"unknown ({place}: {type(error).__name__}: {error})"
+    _HUB[str(path)] = reader
+    return reader
+
+
+def _satellite() -> bool:
+    """Whether this home names a hub, by the library's own rule; False with an older `sd_db`."""
+    try:
+        from sd_db import hub  # noqa: PLC0415
+    except ImportError:
+        return False
+    return bool(hub.configured())
+
+
+def store_place(root: pathlib.Path) -> tuple[str, str]:
+    """Where this checkout's acknowledgements live (sd:2750).
+
+    `("hub", slug)`: the workflow database, local on the hub and served on a
+    satellite, holds them, because `origin` names a GitHub repository its
+    `repo` table registers. `("file", "")`: `store_path` holds them, as it
+    did before; that is a checkout with no GitHub origin, an unregistered
+    repository, and a machine with no `sd_db` or no database. Registration
+    is the guard that keeps a scratch checkout, a test's included, off the
+    operator's record. `("unreachable", why)`: the database holds them and
+    did not answer, so nothing here may say whether a finding is answered.
+    """
+    own = _origin_slug(root)
+    if not own or sd_lib.import_sd_db().module is None:
+        return "file", ""
+    from sd_db import database  # noqa: PLC0415
+
+    local = getattr(database, "local_path", database.default_path)()
+    if not _satellite() and not local.exists():
+        return "file", ""
+    reader = _hub_reader()
+    if isinstance(reader, str):
+        return "unreachable", reader
+    return ("hub", own) if own in reader[1] else ("file", "")
+
+
+def store_unreachable(root: pathlib.Path) -> str:
+    """`unknown (hub unreachable: ...)` when the record's database did not answer, else ``""``.
+
+    For a reader that must not count: `sd-status` reports this in place of a
+    number, because every finding reading unread here says nothing about it.
+    """
+    place, detail = store_place(root)
+    return detail if place == "unreachable" else ""
+
+
+def _hub_rows(own: str) -> tuple[dict[str, dict], str]:
+    """The newest row per finding under `own`, and a sentence naming any row that is not one."""
+    reader = _hub_reader()
+    if isinstance(reader, str):
+        return {}, reader
+    prefix = f"{ROW_PREFIX}{own}:"
+    try:
+        found = reader[0].execute(
+            "SELECT key, body FROM state WHERE id IN (SELECT MAX(id) FROM state "
+            "WHERE kind = 'checkpoint' AND substr(key, 1, ?) = ? GROUP BY key)",
+            (len(prefix), prefix)).fetchall()
+    except Exception as error:
+        return {}, f"the workflow database's acknowledgements cannot be read ({error}); every finding reads as unread"
+    rows, bad = {}, []
+    for key, body in found:
+        try:
+            row = json.loads(body).get("row")
+        except (TypeError, ValueError, AttributeError):
+            row = None
+        if isinstance(row, dict):
+            rows[str(key)[len(prefix):]] = row
+        else:
+            bad.append(str(key))
+    unreadable = f"{len(bad)} acknowledgement row(s) unreadable, first {bad[0]}; those findings read as unread" if bad else ""
+    return rows, unreadable
+
+
+def _hub_save(own: str, rows: dict[str, dict], *, replace: bool) -> list[str]:
+    """Write each row under `own`; the finding ids written.
+
+    `replace=False` skips a finding already on record and one another writer
+    records first: the import and `record_answers`, which never move a
+    record. `replace=True` is `--ack`, which does, and refuses when another
+    writer moved the row since it was read rather than drop that write.
+    """
+    from sd_db import ship as store  # noqa: PLC0415
+    from sd_db.database import connect, default_path  # noqa: PLC0415
+    from sd_db.errors import SdDbError  # noqa: PLC0415
+
+    written: list[str] = []
+    try:
+        connection = connect(default_path())
+    except Exception as error:
+        raise UsageError(f"not recorded: the workflow database did not answer ({error}); rerun once it does") from None
+    try:
+        for found_id, row in rows.items():
+            key = f"{ROW_PREFIX}{own}:{found_id}"
+            try:
+                revision, _ = store.read(connection, key)
+                if revision and not replace:
+                    continue
+                store.save(connection, key, revision, {"writer": ROW_WRITER, "repository": own,
+                                                       "finding": found_id, "row": row})
+            except SdDbError as error:
+                if replace:
+                    raise UsageError(f"not recorded: {error}; rerun sd-review-ack --ack") from None
+                continue
+            written.append(found_id)
+    finally:
+        connection.close()
+    return written
+
+
+def _hub_import(root: pathlib.Path, own: str) -> None:
+    """Copy the file's rows the database lacks into it: the one-time move, safe to repeat."""
+    rows, broken = _read_file(root)
+    if broken:  # importing would lose what could not be read, as writing would
+        raise UsageError(f"not recorded: {broken}; repair or move it first")
+    if rows:
+        _hub_save(own, rows, replace=False)
 
 
 def write_store(root: pathlib.Path, rows: dict[str, dict]) -> pathlib.Path:
@@ -901,6 +1105,13 @@ def acknowledge(root: pathlib.Path, found: dict, disposition: str, detail: str) 
             )
         commit = resolved
     row = _row(found, disposition, detail.strip(), commit)
+    place, own = store_place(root)
+    if place == "unreachable":
+        raise UsageError(f"not recorded: acknowledgements {own}; rerun once the hub answers")
+    if place == "hub":
+        _hub_import(root, own)
+        _hub_save(own, {found["id"]: row}, replace=True)
+        return row
     with locked(root):
         rows, broken = read_store(root)
         if broken:  # writing would replace what could not be read, as record_answers says
@@ -970,6 +1181,12 @@ def record_answers(root: pathlib.Path, rows: Iterable[dict], head: str) -> tuple
     re-recording a fix would move the commit under a verdict somebody has
     already read.
     """
+    place, own = store_place(root)
+    if place == "hub":
+        try:
+            _hub_import(root, own)
+        except UsageError as error:
+            return [], str(error)
     store, broken = read_store(root)
     if broken:
         # The store cannot be read, so which findings are already answered is
@@ -990,6 +1207,15 @@ def record_answers(root: pathlib.Path, rows: Iterable[dict], head: str) -> tuple
     if not answers:
         return [], ""
     written: list[dict] = []
+    if place == "hub":
+        # No lock: `_hub_save` skips a finding another writer recorded first,
+        # by the row's revision, on whichever machine that writer ran.
+        made = {found["id"]: _row(found, "fixed", commit, commit) for found, commit in answers}
+        try:
+            saved = _hub_save(own, made, replace=False)
+        except UsageError as error:
+            return [], str(error)
+        return [dict(made[found_id], id=found_id) for found_id in saved], ""
     with locked(root):
         # Read again, under the lock, and this read is the one that decides.
         # Between the pre-read and here another lane may have recorded some of
