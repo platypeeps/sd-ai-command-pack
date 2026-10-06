@@ -477,7 +477,7 @@ class Receipts(ReceiptFixture):
         (self.root / "CLAUDE.local.md").symlink_to(outside)
         git(self.root, "add", "-f", "CLAUDE.local.md")  # a global ignore may name the file
         head = self.counted()
-        self.assertTrue(git(self.root, "ls-files", "CLAUDE.local.md"))
+        git(self.root, "ls-files", "--error-unmatch", "CLAUDE.local.md")  # tracked, or the git helper raises
         self.assertEqual(self.gate(head, run=self.passing(), reuse=False, record=False)["status"], "success")
         self.assertFalse(outside.exists())
 
