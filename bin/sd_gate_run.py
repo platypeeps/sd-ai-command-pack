@@ -115,7 +115,7 @@ def gate_inputs(root: pathlib.Path, head: str, tree: str | None = None, own: boo
 
 def gate_environment(root: pathlib.Path, environ: dict[str, str] | None = None) -> dict[str, str]:
     """The caller's environment without package selectors, forced colour, the operator's `CARGO_TARGET_DIR`,
-    session variables, `PATH` entries in `root`, or venv `bin`s; each `PATH` entry resolved.
+    session variables, `PATH` entries in `root`, no folder (fnm's per-shell link, sd:2772) or venv `bin`s; each resolved.
 
     Plus `SD_LOCAL_GATE=1`, `NO_COLOR=1` and `PYTHON_COLORS=0`, whatever the caller had them set to.
     """
@@ -123,9 +123,9 @@ def gate_environment(root: pathlib.Path, environ: dict[str, str] | None = None) 
     env = {key: value for key, value in source.items()
            if key not in DROPPED_ENVIRONMENT + SESSION_ENVIRONMENT and not key.startswith(SESSION_PREFIXES)}
     top = root.resolve()
-    kept = [str(pathlib.Path(entry).resolve()) for entry in env.get("PATH", "").split(os.pathsep)
-            if entry and os.path.isabs(entry) and not pathlib.Path(entry).resolve().is_relative_to(top)
-            and not (pathlib.Path(entry).resolve().parent / "pyvenv.cfg").is_file()]
+    resolved = [pathlib.Path(entry).resolve() for entry in env.get("PATH", "").split(os.pathsep) if entry and os.path.isabs(entry)]
+    kept = [str(path) for path in resolved if path.is_dir() and not path.is_relative_to(top)
+            and not (path.parent / "pyvenv.cfg").is_file()]
     env["PATH"] = os.pathsep.join(kept)
     env.update({GATE_VARIABLE: "1", **NO_COLOUR_ENVIRONMENT})
     return env
