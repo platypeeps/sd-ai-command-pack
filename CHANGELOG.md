@@ -4,6 +4,24 @@
 
 ### Added
 
+- **Review acknowledgements live in the hub's workflow database (sd:2750).**
+  `sd-review-ack --ack` and `sd-ship`'s automatic `fixed` records write one
+  `review-ack:v1:<slug>:<finding id>` row through `sd_db.ship`'s
+  revision-checked store, and every reader reads those rows, on the hub
+  locally and on a satellite over the tailnet. A satellite reported
+  acknowledged findings as late because it read only its own
+  `sd-review-ack.json`. The database holds a checkout's record when its
+  `origin` names a GitHub repository the `repo` table registers; any other
+  checkout, and a machine without `sd_db` or a database, keeps the file.
+  **Migration:** each write first imports the file's rows the database
+  lacks, so the move runs once and repeats harmlessly. The file in the git
+  common dir is still read beside the rows, the rows winning, for this
+  release only; the next release stops reading it. A satellite whose hub
+  does not answer refuses every write, and `sd-status` reports `review
+  acknowledgements unknown (hub unreachable: ...)` with no review rows and a
+  `null` `late:` and `expired:` count rather than count an answered finding
+  as late.
+
 - **The lane merges a satellite entry without a prepare or a gate (sd:2704).**
   For a `gate: satellite` entry `lane run` fetches the branch and the base
   into its main checkout, hands the entry back with `head_moved` when
