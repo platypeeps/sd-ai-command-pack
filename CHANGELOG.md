@@ -481,7 +481,10 @@
   every machine, so such a repository stays off until the variable is
   allowlisted. A repository that did not opt in keeps the whole environment.
   The binding names the mode (`environment_mode`), so a pass under one mode
-  never stands for a gate under another.
+  never stands for a gate under another. The hub accepts a satellite's
+  receipt only when its own gate ran under the offload environment and the
+  receipt binds `offload`. A fault on the hub's opt-in read refuses the
+  receipt as `satellite_binding`.
   Clause 4 refuses a row whose satellite names no tailnet login and address
   as `satellite_unidentified`. Intake refuses a request that is not an
   `sd-lane-request` row, names no tailnet identity, or names a base other

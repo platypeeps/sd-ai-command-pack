@@ -88,6 +88,39 @@ class GateCompare(rows.SatelliteFixture):
         rewrite(self.database, self.key, offload_view={name: part for name, part in view.items() if name != "threads"})
         self.assertIn("part threads at None", self.refused("satellite_binding")["offload_refused"]["reason"])
 
+    def test_clause_5_an_opt_in_read_fault_then_a_good_receipt_read_does_not_accept(self) -> None:
+        """sd:2782: the fault ran the hub's gate under the whole environment; that gate never stands on a satellite's pass."""
+        connect = sd_gate_receipts._connect
+        for offload in ("require", "fallback"):
+            with self.subTest(offload=offload):
+                self.runs = 1
+                calls = []
+
+                def first_faults(database, *, write, calls=calls):  # type: ignore[no-untyped-def]
+                    calls.append(write)
+                    if len(calls) == 1:
+                        raise OSError("hub database unreachable")
+                    return connect(database, write=write)
+
+                with patch.object(sd_gate_receipts, "_connect", first_faults):
+                    result = self.compare(offload)
+                self.assertNotIn("satellite", result)
+                if offload == "require":
+                    self.assertEqual((result["status"], result["offload_refused"]["code"]), ("refused", "satellite_binding"))
+                    self.assertIn("whole environment", result["offload_refused"]["reason"])
+                    self.assertEqual(self.runs, 1, "the hub ran the check")
+                else:
+                    self.assertIn("whole environment", result["reuse_miss"]["offload"]["reason"])
+                    self.assertEqual((result["status"], self.runs), ("success", 2))
+
+    def test_clause_5_a_receipt_that_binds_no_offload_mode_refuses_as_binding(self) -> None:
+        row = self.row(self.key)
+        self.assertEqual(row["binding"]["environment_mode"], "offload")
+        for mode in ("allowlist", "whole", None):
+            with self.subTest(mode=mode):
+                rewrite(self.database, self.key, binding={**row["binding"], "environment_mode": mode})
+                self.assertIn(f"environment_mode {mode}, not offload", self.refused("satellite_binding")["offload_refused"]["reason"])
+
     def test_clause_5_a_tree_field_or_the_offload_view_refuses_as_binding(self) -> None:
         row = self.row(self.key)
         rewrite(self.database, self.key, binding={**row["binding"], "inputs": "0" * 64})

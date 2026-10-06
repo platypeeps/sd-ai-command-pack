@@ -597,7 +597,7 @@ def examine_offload(database: pathlib.Path | None, run: Worktree,
     part = tree_binding(run.tree, run.head, run.inputs, run.base, run.fork)
     view = run.view(part) if part else None
     hub_now = time.time() if now is None else now
-    refused = (invalid_offload(row, revision) or pack_mismatch(row, run.own) or binding_mismatch(row, part, view)
+    refused = (invalid_offload(row, revision) or pack_mismatch(row, run.own) or binding_mismatch(row, part, view, run.mode)
                or expired_offload(row, hub_now))
     if refused:
         return None, refused
@@ -669,10 +669,21 @@ def pack_mismatch(row: Mapping[str, Any], own: bool) -> dict[str, str] | None:
 
 
 def binding_mismatch(row: Mapping[str, Any], part: Mapping[str, Any] | None,
-                     view: Mapping[str, Any] | None) -> dict[str, str] | None:
-    """Clause 5: each of `TREE_FIELDS` equals the hub's `part`, and the offload views compare equal."""
+                     view: Mapping[str, Any] | None, mode: str) -> dict[str, str] | None:
+    """Clause 5: both runs had the offload environment, each of `TREE_FIELDS` equals the hub's `part`, and the views match.
+
+    `mode` is the hub run's `environment_mode`. `whole` refuses: the hub's check would see variables the
+    satellite's never did, and an opt-in read fault answers `whole` too (sd:2782). The row's binding must
+    name `offload`, the mode of the run that wrote it.
+    """
     stored = row.get("binding")
     stored = stored if isinstance(stored, dict) else {}
+    if mode == "whole":
+        return {"code": "satellite_binding", "reason": "the hub's gate ran under the whole environment, not the offload "
+                "environment: on the hub, repo.satellite_gate read as off or could not be read"}
+    if stored.get("environment_mode") != "offload":
+        return {"code": "satellite_binding",
+                "reason": f"the satellite's receipt binds environment_mode {stored.get('environment_mode')}, not offload"}
     fields = list(TREE_FIELDS) if part is None else [name for name in TREE_FIELDS if stored.get(name) != part.get(name)]
     miss = offload_miss(row.get("offload_view"), view)
     if fields:

@@ -233,7 +233,11 @@ elsewhere. A pass under one mode never stands for a run under another, so
 flipping `repo.satellite_gate` reruns the check. An `allowlist` pass is not
 exported as an offload row: it kept no view, so the satellite's run runs again.
 An opt-in read fault on either machine answers `whole`, so that run's pass
-cannot stand for an opted-in gate.
+cannot stand for an opted-in gate. The hub accepts a satellite's receipt only
+when its own run's mode is not `whole` and the row's binding names `offload`
+(clause 5, `binding_mismatch`, which the `require` and `fallback` paths both
+reach through `examine_offload`). A fault on the hub's opt-in read therefore
+refuses the receipt as `satellite_binding` and does not accept it.
 
 Residual risk on the offload path:
 
@@ -264,7 +268,7 @@ the first that fails refuses with its code. No clause failure starts a run.
 | 2 | The pull request is not BEHIND its base (`refuse_behind`, unchanged) | `base_moved` |
 | 3 | An offload row exists at the key for this slug and the exact `--expected-head` (or its tree) | `satellite_receipt_missing` |
 | 4 | `writer` is `sd-satellite-gate` and `reading.status` is `success`; then `satellite` names `hostname`, `login` and `address` | `satellite_receipt_invalid`; `satellite_unidentified` for a row whose tailnet lookup failed |
-| 5 | The compared binding fields equal the hub's (table above); the refusal names each differing field | `satellite_binding` |
+| 5 | The hub's run is not in `environment_mode` `whole`, the row's binding names `offload`, and the compared binding fields equal the hub's (table above); the refusal names each differing field | `satellite_binding` |
 | 6 | Within that, `pack_bin` equals the hub's; the refusal names both digests and both `pack_rev` values | `satellite_pack_mismatch` |
 | 7 | Age on the hub's clock is at most `OFFLOAD_WINDOW_SECONDS`, and `recorded_at` is at most 300 s in the hub's future | `satellite_receipt_expired` |
 | 8 | The newest `sd/local-gate` status at the head is `success`, posted by `viewer_login()`, and its description starts with `head[:12] inputs <digest>`, where the digest is the hub's own `gate_inputs(root, head)` | `satellite_status_missing` or `local_gate_foreign` |
