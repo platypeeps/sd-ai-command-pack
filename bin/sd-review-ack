@@ -902,9 +902,10 @@ def _hub_rows(own: str) -> tuple[dict[str, dict], str]:
             row = json.loads(body).get("row")
         except (TypeError, ValueError, AttributeError):
             row = None
-        if isinstance(row, dict):
-            rows[str(key)[len(prefix):]] = row
-        else:
+        # An unreadable row is an empty record, not an absent one: it then
+        # overrides the file's older entry, and the finding reads unread.
+        rows[str(key)[len(prefix):]] = row if isinstance(row, dict) else {}
+        if not isinstance(row, dict):
             bad.append(str(key))
     unreadable = f"{len(bad)} acknowledgement row(s) unreadable, first {bad[0]}; those findings read as unread" if bad else ""
     return rows, unreadable

@@ -43,7 +43,10 @@ PULL = 857
 ORIGIN = "https://github.com/example/acks.git"
 SLUG = "example/acks"
 GIT = ("git", "-c", "user.email=hub@example.invalid", "-c", "user.name=Hub Fixture",
-       "-c", "commit.gpgsign=false")
+       "-c", "commit.gpgsign=false", "-c", f"core.hooksPath={os.devnull}")
+#: No operator configuration, hook or repository override reaches a child.
+CLEAN = {name: value for name, value in os.environ.items() if not name.startswith("GIT_")}
+CLEAN.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
 
 
 def ids() -> list[str]:
@@ -64,6 +67,7 @@ class HubCase(unittest.TestCase):
             sd_db.upsert_repo(connection, str(self.base / "hub-clone"), remote=ORIGIN)
         self.satellite_home = self.base / "satellite"
         (self.satellite_home / ".config" / "sd").mkdir(parents=True)
+        self.git_env = {**CLEAN, "HOME": str(self.base / "git-home")}
         self.hub_clone = self.clone("hub-clone")
         self.satellite_clone = self.clone("satellite-clone")
         self.addCleanup(ack._forget_hub)
@@ -73,8 +77,11 @@ class HubCase(unittest.TestCase):
         root.mkdir()
         for args in (("init", "-q", "--initial-branch=main"), ("remote", "add", "origin", ORIGIN),
                      ("commit", "-q", "--allow-empty", "-m", "landed")):
-            subprocess.run([*GIT, *args], cwd=root, check=True, capture_output=True)
+            self.git(root, *args)
         return root
+
+    def git(self, root: pathlib.Path, *args: str) -> None:
+        subprocess.run([*GIT, *args], cwd=root, check=True, capture_output=True, env=self.git_env)
 
     def serve(self) -> None:
         log = self.base / "serve.log"
@@ -82,7 +89,7 @@ class HubCase(unittest.TestCase):
         process = subprocess.Popen(
             [sys.executable, "-m", "sd_db.serve", "--loopback", "--port", "0", "--database", str(self.database)],
             stdout=subprocess.DEVNULL, stderr=stream, cwd=self.base,
-            env={**os.environ, "HOME": str(self.hub_home)})
+            env={**CLEAN, "HOME": str(self.hub_home)})
 
         def stop() -> None:
             process.terminate()
@@ -105,7 +112,7 @@ class HubCase(unittest.TestCase):
         return subprocess.run(
             [sys.executable, str(BIN / "sd-review-ack"), "-C", str(root), "--from", str(FIXTURE),
              "--pr", str(PULL), "--landed-in", "main", *args],
-            capture_output=True, text=True, timeout=120, env={**os.environ, "HOME": str(home)})
+            capture_output=True, text=True, timeout=120, env={**CLEAN, "HOME": str(home)})
 
     def hub_rows(self) -> dict[str, int]:
         """Finding id -> how many revisions the hub's file holds for it."""
@@ -144,9 +151,17 @@ class SatelliteWritesTheHubReads(HubCase):
         self.assertEqual(self.hub_rows(), {legacy: 1, written: 2})
         self.assertNotIn(legacy, self.unread(self.hub_home, self.hub_clone))
 
+    def test_an_unreadable_hub_row_overrides_the_file_and_reads_unread(self) -> None:
+        self.serve()
+        legacy = ids()[0]
+        ack.write_store(self.satellite_clone, {legacy: {"pr": PULL, "disposition": "dismissed", "reason": "old"}})
+        with contextlib.closing(sqlite3.connect(self.database)) as connection, connection:
+            connection.execute("INSERT INTO state(kind, key, timestamp, body) VALUES ('checkpoint', ?, ?, ?)",
+                               (f"{ack.ROW_PREFIX}{SLUG}:{legacy}", "2026-10-05T00:00:00Z", "[]"))
+        self.assertIn(legacy, self.unread(self.satellite_home, self.satellite_clone))
+
     def test_an_unregistered_repository_keeps_the_file(self) -> None:
-        subprocess.run([*GIT, "remote", "set-url", "origin", "https://github.com/example/other.git"],
-                       cwd=self.hub_clone, check=True)
+        self.git(self.hub_clone, "remote", "set-url", "origin", "https://github.com/example/other.git")
         done = self.run_ack(self.hub_home, self.hub_clone, "--ack", ids()[0], "--dismiss", "why")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self.hub_rows(), {})
