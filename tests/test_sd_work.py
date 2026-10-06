@@ -1163,11 +1163,6 @@ class WorkRegister(unittest.TestCase):
         self.assertNotIn("Traceback", result.stderr)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
-
 def load_cli():
     """`bin/sd` as a module, so `main` runs in-process."""
     loader = importlib.machinery.SourceFileLoader("sd_cli_for_replay", str(ROOT / "bin" / "sd"))
@@ -1202,3 +1197,7 @@ class Replayable(unittest.TestCase):
                 unittest.mock.patch.object(sd_work, "run", unittest.mock.Mock(return_value=0)) as run:
             self.assertEqual(load_cli().main(["task", "show", "5"]), 0)
         run.assert_called_once()
+
+
+if __name__ == "__main__":
+    unittest.main()

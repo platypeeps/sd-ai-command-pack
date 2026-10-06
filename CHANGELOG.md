@@ -479,6 +479,10 @@
   `sd today`, `sd store items`, `sd store item` and `sd task show` call `sd_db.self_install.declare_replayable()`.
   `REPLAYABLE` in `bin/sd` lists them: each reads the hub and does no local work with effects before its first session.
   Every other verb keeps the manual rerun. An `sd_db` without the call runs the verb as before.
+- **A satellite entry whose merge meets another ship operation's lock waits for the next run (sd:2861).**
+  It failed as `prerequisite_failed`, and the satellite had to request again. The lane now puts it back as `pending`.
+  Its request row stays `queued`, `lock_retries` counts the runs, and the same run does not claim it again.
+  After `LOCK_RETRIES` (12) runs it fails, and the reason says how long the lock was held.
 
 - **`sd-status` no longer reports `branch-unresolvable` on a done item (sd:2729).**
   A merge deletes the squashed branch, so a done item's `branch` is history, not a fault to repair.

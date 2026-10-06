@@ -158,6 +158,10 @@ REFUSAL_ACTIONS = {
     "satellite_not_prepared": "On the satellite: sd-ship prepare at the pushed head, then sd-ship lane request again.",
 }
 COMMIT_ID = re.compile(r"[0-9a-f]{40}")
+#: `sd_db.ship.HELD`: the merge met another live ship operation's repository lock, which passes (sd:2861).
+LOCK_HELD = "another ship operation owns this repository"
+#: How many runs a satellite entry waits out a held lock before it fails; the scheduled run comes every 5 minutes.
+LOCK_RETRIES = 12
 
 
 @dataclasses.dataclass(frozen=True)
@@ -685,6 +689,11 @@ def process_satellite(entry: dict[str, Any], logs: pathlib.Path, ship: Ship) -> 
     reason = str(merged.get("error") or code or "merge did not confirm")
     if code in ("head_moved", "base_moved") or code.startswith("satellite_"):
         return {**fields, **handed_back(entry, code, reason)}
+    if LOCK_HELD in reason:  # the next run retries; the request row stays `queued`
+        retries = int(entry.get("lock_retries") or 0)
+        if retries < LOCK_RETRIES:
+            return {**fields, "status": "pending", "lock_retries": retries + 1, "reason": reason[:600]}
+        reason = f"{reason}; still held after {retries} runs"
     return {**fields, "status": "failed", "step": "merge", "phase": merged.get("phase"), "code": code or None,
             "reason": reason[:600], "next_action": workflow.get("next_action")}
 
@@ -953,6 +962,8 @@ def settle(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, st
            own_lock: pathlib.Path, hub: Hub | None) -> dict[str, Any]:
     """What follows an entry's outcome: the landing of a merge, and a satellite entry's row and note."""
     fields: dict[str, Any] = {}
+    if outcome.get("status") == "pending":  # put back (sd:2861): nothing to settle, and the row still acknowledges it
+        return fields
     if outcome.get("status") == "merged":
         try:
             fields.update(land(entry, outcome, environ, note, own_lock))
@@ -1043,6 +1054,7 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
             if hub is not None:
                 answer.update(pack=publish_pack(hub), intake=[])
             ahead: threading.Thread | None = None
+            deferred: set[tuple[Any, Any]] = set()  # entries put back this run; the next run retries them
             while True:
                 if hub is not None:
                     answer["intake"] += intake(hub, path)
@@ -1050,6 +1062,7 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
                 def claim_next(entries: list[dict[str, Any]]) -> dict[str, Any] | None:
                     for row in entries:
                         if (row.get("status") == "pending" and not row.get("held")
+                                and (row.get("item"), row.get("enqueued_at")) not in deferred
                                 and (not satellite_only or row.get("gate") == SATELLITE) and claimable(hub, row)):
                             row.update(status="running", started_at=stamp_now(), runner_pid=os.getpid())
                             return dict(row)
@@ -1078,6 +1091,8 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
                             row.update(outcome, finished_at=stamp_now())
                 update(path, finish)
                 ran.append({"item": entry["item"], **outcome})
+                if outcome.get("status") == "pending":
+                    deferred.add((entry["item"], entry.get("enqueued_at")))
                 if ahead is not None and outcome.get("status") == "merged":
                     ahead.join(PREPARE_SECONDS)  # the next prepare reads its receipt
 

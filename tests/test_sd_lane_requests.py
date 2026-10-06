@@ -264,6 +264,42 @@ class SatelliteOnly(Requests):
         self.assertTrue(args.satellite_only)
 
 
+class HeldLock(Requests):
+    """sd:2861: another ship operation's repository lock passes, so the merge waits for the next run."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.prepared()
+        self.ask()
+        self.answers[(7, "merge")] = {
+            "ok": False, "error": f"{receipts.HELD} (pid 25080, sd-ship prepare --item 2816, held 110s); "
+                                  "retry after it finishes", "workflow": {"blocker": {"code": "prerequisite_failed"}}}
+
+    def run_once(self) -> dict:
+        return sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate, satellite_only=True, hub=self.hub)
+
+    def test_a_held_lock_leaves_the_request_queued_for_the_next_run(self) -> None:
+        self.run_once()
+        [entry] = self.entries()
+        self.assertEqual((entry["status"], entry["lock_retries"], self.row()["status"]), ("pending", 1, "queued"))
+        self.assertIn(receipts.HELD, entry["reason"])
+        self.assertEqual([call[2] for call in self.calls], ["merge"])  # once a run, not a spin
+        del self.answers[(7, "merge")]
+        self.run_once()
+        self.assertEqual((self.entries()[0]["status"], self.row()["status"]), ("merged", "merged"))
+
+    def test_a_lock_held_past_the_cap_fails_with_the_reason(self) -> None:
+        sd_lane.intake(self.hub, self.path)
+
+        def waited(entries: list[dict]) -> None:
+            entries[0]["lock_retries"] = sd_lane.LOCK_RETRIES
+        sd_lane.update(self.path, waited)
+        self.run_once()
+        [entry], row = self.entries(), self.row()
+        self.assertEqual((entry["status"], row["status"], row["code"]), ("failed", "failed", "prerequisite_failed"))
+        self.assertIn(f"still held after {sd_lane.LOCK_RETRIES} runs", row["reason"])
+
+
 class PackDigest(Requests):
     def pack_row(self) -> dict:
         return receipts.read(self.connection, sd_lane_receipts().PACK_PREFIX + SLUG)[1]
