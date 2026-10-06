@@ -135,9 +135,12 @@ class OffloadView(unittest.TestCase):
         self.assertEqual(sd_gate_receipts.offload_miss(self.view("sat"), self.view("hub", RUSTFLAGS="-Dwarnings")),
                          {"part": "variables", "name": "RUSTFLAGS"})
 
-    def test_a_compiler_or_its_flags_miss(self) -> None:
-        """Review round 1: `make`'s implicit rules read these, so `CFLAGS=-DNDEBUG` runs other tests."""
-        for name, value in (("CC", "gcc-15"), ("CFLAGS", "-DNDEBUG"), ("LDFLAGS", "-L/opt/lib"), ("SDKROOT", "/sdk")):
+    def test_a_build_or_test_control_misses(self) -> None:
+        """Review rounds 1 and 2: `CFLAGS=-DNDEBUG` or `PYTEST_ADDOPTS='-k smoke'` runs other tests."""
+        for name, value in (("CC", "gcc-15"), ("CFLAGS", "-DNDEBUG"), ("LDFLAGS", "-L/opt/lib"), ("SDKROOT", "/sdk"),
+                            ("PYTEST_ADDOPTS", "-k smoke"), ("COVERAGE_RCFILE", "/c"), ("TASK_TEMP_DIR", "/t"),
+                            ("TZ", "UTC"), ("BASH_ENV", "/b"), ("LD_PRELOAD", "/l.so"), ("DYLD_INSERT_LIBRARIES", "/d"),
+                            ("GIT_DIR", "/g")):
             with self.subTest(name=name):
                 self.assertEqual(sd_gate_receipts.offload_miss(self.view("sat"), self.view("hub", **{name: value})),
                                  {"part": "variables", "name": name})

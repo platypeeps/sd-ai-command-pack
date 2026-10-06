@@ -191,7 +191,12 @@ digest of a short password can be guessed offline.
 | `CC`, `CXX`, `CPP`, `AR`, `CFLAGS`, `CXXFLAGS`, `CPPFLAGS`, `LDFLAGS`, `LDLIBS`, `PKG_CONFIG_PATH` | the compiler and flags `make`'s implicit rules and a build script use: `CFLAGS=-DNDEBUG` runs other tests |
 | `MACOSX_DEPLOYMENT_TARGET`, `SDKROOT`, `DEVELOPER_DIR` | the SDK and toolchain `xcrun` and `cc` choose |
 | `NEXTEST_`, `CARGO_`, `RUST` | a Rust check: `RUSTFLAGS`, `RUSTUP_TOOLCHAIN`, `RUST_TEST_THREADS`, `CARGO_HOME` |
-| `PYTHON` | the interpreter: `PYTHONHASHSEED`, `PYTHONWARNINGS`, `PYTHONUTF8` |
+| `PYTHON`, `PYTEST_`, `COVERAGE_` | a Python check: `PYTHONHASHSEED`, `PYTHONWARNINGS`; `PYTEST_ADDOPTS='-k smoke'` runs a part of the suite |
+| `TASK_` | a Taskfile check |
+| `TZ` | the clock a test reads |
+| `BASH_ENV`, `ENV` | what a non-interactive shell sources before each script |
+| `DYLD_`, `LD_` | the libraries every tool loads |
+| `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_NAMESPACE`, `GIT_EXEC_PATH`, `GIT_CEILING_DIRECTORIES` | which repository and which `git` programs a check's `git` uses |
 | `LANG`, `LC_` | the locale |
 | `UV_`, `PIP_`, `NPM_CONFIG_`, `NODE_`, `GIT_CONFIG` | the bound tools, beside their `OFFLOAD_HOME_FILES` |
 

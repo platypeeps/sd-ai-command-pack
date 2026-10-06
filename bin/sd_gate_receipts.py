@@ -132,18 +132,24 @@ OFFLOAD_HOME_FILES = (".gitconfig", ".config/git/config", ".cargo/config.toml", 
                       ".config/uv/uv.toml")
 #: Variables an offload view compares, by name (sd:2782): `CI` and `GITHUB_ACTIONS` choose the slot count
 #: (`sd_gate_slots.configured`); `LANG` the locale; `MAKEFLAGS`, `MAKEFILES` and `MFLAGS` what `make` runs; `CC` to
-#: `DEVELOPER_DIR` the compiler, flags and SDK that `make`'s implicit rules and `xcrun` choose; the `XDG_` folders
-#: where the machine config, slot locks and cargo cache live (`machine_settings`, `directory`, `cache_root`).
+#: `DEVELOPER_DIR` the compiler, flags and SDK that `make`'s implicit rules and `xcrun` choose; `TZ` the clock a test
+#: reads; `BASH_ENV` and `ENV` what a non-interactive shell sources; the `GIT_` names which repository `git` acts on;
+#: the `XDG_` folders where the machine config, slot locks and cargo cache live (`machine_settings`, `directory`,
+#: `cache_root`).
 OFFLOAD_VARIABLES = ("CI", "GITHUB_ACTIONS", "LANG", "MAKEFLAGS", "MAKEFILES", "MFLAGS",
                      "CC", "CXX", "CPP", "AR", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "LDLIBS", "PKG_CONFIG_PATH",
-                     "MACOSX_DEPLOYMENT_TARGET", "SDKROOT", "DEVELOPER_DIR",
+                     "MACOSX_DEPLOYMENT_TARGET", "SDKROOT", "DEVELOPER_DIR", "TZ", "BASH_ENV", "ENV",
+                     "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                     "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_EXEC_PATH", "GIT_CEILING_DIRECTORIES",
                      "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME")
 #: ... and by prefix: `SD_` the pack's own settings; `NEXTEST_`, `CARGO_` and `RUST` (`RUSTFLAGS`, `RUSTUP_TOOLCHAIN`,
-#: `RUST_TEST_THREADS`) a Rust check; `PYTHON` the interpreter; `LC_` the locale; `UV_`, `PIP_`, `NPM_CONFIG_`, `NODE_`
-#: and `GIT_CONFIG` the bound tools, as their `OFFLOAD_HOME_FILES` do. Any other variable, such as a per-login
-#: `__CF_USER_TEXT_ENCODING`, `SSH_AUTH_SOCK` or `TMPDIR`, or a cron job's, is neither compared nor stored.
-OFFLOAD_VARIABLE_PREFIXES = ("SD_", "NEXTEST_", "CARGO_", "RUST", "PYTHON", "LC_", "UV_", "PIP_", "NPM_CONFIG_", "NODE_",
-                             "GIT_CONFIG")
+#: `RUST_TEST_THREADS`) a Rust check; `PYTHON`, `PYTEST_` and `COVERAGE_` a Python one (`PYTEST_ADDOPTS` selects
+#: tests); `TASK_` a Taskfile's; `DYLD_` and `LD_` the libraries every tool loads; `LC_` the locale; `UV_`, `PIP_`,
+#: `NPM_CONFIG_`, `NODE_` and `GIT_CONFIG` the bound tools, as their `OFFLOAD_HOME_FILES` do. Any other variable,
+#: such as a per-login `__CF_USER_TEXT_ENCODING`, `SSH_AUTH_SOCK` or `TMPDIR`, or a cron job's, is neither compared
+#: nor stored.
+OFFLOAD_VARIABLE_PREFIXES = ("SD_", "NEXTEST_", "CARGO_", "RUST", "PYTHON", "PYTEST_", "COVERAGE_", "TASK_", "DYLD_",
+                             "LD_", "LC_", "UV_", "PIP_", "NPM_CONFIG_", "NODE_", "GIT_CONFIG")
 
 
 def _digest(value: Any) -> str:
