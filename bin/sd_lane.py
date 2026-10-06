@@ -508,7 +508,7 @@ def intake(hub: Hub, path: pathlib.Path) -> list[dict[str, Any]]:
             if row["status"] == "requested":
                 done.append(take_in(hub, path, key, revision, row))
                 continue
-            taken = {"key": key, "revision": (row.get("entry") or {}).get("revision")}
+            taken = {"key": key, "revision": entry_revision(row)}
             finished = next((entry for entry in entries if entry.get("request") == taken
                              and entry.get("status") not in ("pending", "running")), None)
             if finished is not None:
@@ -525,9 +525,17 @@ def outcome_fields(outcome: dict[str, Any]) -> dict[str, Any]:
     return {name: outcome.get(name) for name in ("code", "reason", "next_action", "merge_commit")}
 
 
+def entry_revision(row: dict[str, Any]) -> Any:
+    """The request revision a row's `entry` names; None when the entry is not an object, so a bad write
+    from a satellite acknowledges nothing and stops no runner (sd:2792)."""
+    entry = row.get("entry")
+    return entry.get("revision") if isinstance(entry, dict) else None
+
+
 def acknowledges(row: dict[str, Any], taken: dict[str, Any]) -> bool:
     """The request row says `queued` for the entry that took in revision `taken`."""
-    return row.get("status") == "queued" and (row.get("entry") or {}).get("revision") == taken.get("revision")
+    revision = entry_revision(row)
+    return row.get("status") == "queued" and revision is not None and revision == taken.get("revision")
 
 
 def claimable(hub: Hub | None, entry: dict[str, Any]) -> bool:
