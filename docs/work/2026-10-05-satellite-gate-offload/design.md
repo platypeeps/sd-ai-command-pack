@@ -104,7 +104,7 @@ request-id protocol of sd:1335 step 5 apply as for every `ship:` row.
 | Field | Value |
 |---|---|
 | `writer` | `sd-satellite-gate` |
-| `satellite` | `{"login", "address", "hostname"}`: `sd_db.tailnet.this_node()` gives the owner login and the Tailscale IPv4 address; `socket.gethostname()` is for display only |
+| `satellite` | `{"login", "address", "hostname"}`: `sd_db.tailnet.this_node()` gives the owner login and the Tailscale IPv4 address; `socket.gethostname()` is for display only. When the lookup fails, the row keeps `hostname` and an `error`, and clause 4 refuses it |
 | `hub` | `served_by(database)`, the `host:port` the row went to |
 | `binding` | the satellite's whole `gate_binding` output, unchanged |
 | `offload_view` | the portable view of the run's environment (step 2a; "The offload view" below), taken before the run; the satellite's own receipt keeps it, a reuse writes the kept one, and a view that moves during the run writes no row |
@@ -146,15 +146,16 @@ out `bin/` (sd:2613). There the running pack does not decide what ran, and
 
 ### The offload view
 
-Local reuse does not change. `gate_binding` keeps `environment_sha256` over
-the whole `gate_environment`, and every local receipt binds it as today.
+Local reuse keeps its binding. `gate_binding` keeps `environment_sha256` over
+the gate's environment, and every local receipt binds it as before. In an
+opted-in repository that environment is the cut one described below.
 The ship review of 884d31a3 showed why (C-17). Equal `make` bytes can run
 another python or compiler through another `PATH` order. `HOME` selects
 tool configuration.
 
 The satellite writes `offload_view` from the run's own environment. Only the
 hub reads it, only on the offload path, and only when `repo.satellite_gate`
-is `accept`. It has five parts:
+is `accept`. It has six parts:
 
 | Part | Content | What it covers |
 |---|---|---|
@@ -162,7 +163,8 @@ is `accept`. It has five parts:
 | `tools` | sha256 of each name in `OFFLOAD_TOOLS`, resolved on that `PATH`, and of each tool `gate_binding` resolves | A name the check reaches through `make` or a script has equal bytes |
 | `python` | sha256 of the bytes of `sys.executable`, resolved, and `sys.version` | The interpreter that runs `sd-check` is equal, even when the gate was started through a virtualenv or an explicit path that `PATH`'s `python3` does not name |
 | `home_files` | sha256 of each file in `OFFLOAD_HOME_FILES` under `HOME`, or `"absent"` | Named tool configuration under `HOME` is equal |
-| `variables` | sha256 of the value of every other variable `gate_environment` keeps, with the `$HOME` prefix written as `~` first, so a row holds no credential | A variable that steers the check is equal. A variable present on one side only misses |
+| `threads` | `sd_gate_slots.thread_caps`: the `CARGO_BUILD_JOBS` and `RUST_TEST_THREADS` a check gets under the machine's slot count and cores, as `machine_binding` binds them (sd:2782) | A suite that passes on one test thread and fails on eight misses. Two machines with other core counts or `sd.gate_slots` miss |
+| `variables` | sha256 of the value of each allowlisted variable `gate_environment` keeps, with the `$HOME` prefix written as `~` first | An allowlisted variable that steers the check is equal. One present on one side only misses |
 
 `OFFLOAD_TOOLS` is one pack constant: `sh`, `bash`, `make`, `python3`,
 `git`, `cc`, `c++`, `clang`, `cargo`, `rustc`, `node`, `npm`, `uv`.
@@ -172,9 +174,70 @@ A name the hub cannot resolve is recorded, not compared, and named in the
 merge's provenance. A name the hub resolves and the satellite does not
 misses with `satellite_binding`.
 
-The variables part compares by exclusion, not by an allow-list. An unknown
-variable that differs misses, which costs one hub run. An allow-list would
-let it pass unseen.
+The variables part compares an allowlist (`offload_variable`, sd:2782). It
+first compared by exclusion. The review of sd:2782 showed the cost: a builder
+shell and the hub's cron job differ in per-login and per-session values,
+such as `__CF_USER_TEXT_ENCODING` (the UID), `SSH_AUTH_SOCK`, `TMPDIR` and
+`XPC_SERVICE_NAME`. Each miss hands back, and the satellite's re-gate runs in
+the same shell, so the lane would never accept. The exclusion also wrote a
+digest of every credential in the builder's shell to the hub. An unsalted
+digest of a short password can be guessed offline.
+
+| Name or prefix | Why the check reads it |
+|---|---|
+| `SD_` | the pack's settings: `SD_LOCAL_GATE`, `SD_GATE_SLOTS`, `SD_GATE_CACHE_DIR` and the rest that `sd-check`, `sd_gate_slots` and `sd_gate_cache` read |
+| `CI`, `GITHUB_ACTIONS` | `sd_gate_slots.configured` takes no slot under either |
+| `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME` | where `machine_settings`, `sd_gate_cache.cache_root` and `sd_gate_slots.directory` look |
+| `MAKEFLAGS`, `MAKEFILES`, `MFLAGS` | what `make` runs |
+| `CC`, `CXX`, `CPP`, `AR`, `CFLAGS`, `CXXFLAGS`, `CPPFLAGS`, `LDFLAGS`, `LDLIBS`, `PKG_CONFIG_PATH` | the compiler and flags `make`'s implicit rules and a build script use: `CFLAGS=-DNDEBUG` runs other tests |
+| `MACOSX_DEPLOYMENT_TARGET`, `SDKROOT`, `DEVELOPER_DIR` | the SDK and toolchain `xcrun` and `cc` choose |
+| `NEXTEST_`, `CARGO_`, `RUST` | a Rust check: `RUSTFLAGS`, `RUSTUP_TOOLCHAIN`, `RUST_TEST_THREADS`, `CARGO_HOME` |
+| `PYTHON`, `PYTEST_`, `COVERAGE_` | a Python check: `PYTHONHASHSEED`, `PYTHONWARNINGS`; `PYTEST_ADDOPTS='-k smoke'` runs a part of the suite |
+| `TASK_` | a Taskfile check |
+| `TZ` | the clock a test reads |
+| `BASH_ENV`, `ENV` | what a non-interactive shell sources before each script |
+| `DYLD_`, `LD_` | the libraries every tool loads |
+| `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_NAMESPACE`, `GIT_EXEC_PATH`, `GIT_CEILING_DIRECTORIES` | which repository and which `git` programs a check's `git` uses |
+| `LANG`, `LC_` | the locale |
+| `UV_`, `PIP_`, `NPM_CONFIG_`, `NODE_`, `GIT_CONFIG` | the bound tools, beside their `OFFLOAD_HOME_FILES` |
+
+Names compare without case. A name that matches the credential pattern of
+`sd_check_receipts.SECRET`, such as `CARGO_REGISTRY_TOKEN`, is left out even
+under a listed prefix. `GIT_CONFIG_KEY_<n>` is kept: it names a config key,
+and `GIT_CONFIG_COUNT` fails every `git` call without it. A variable off the list is neither compared nor
+written: no value and no digest of it reaches the hub's row.
+
+In a repository with `repo.satellite_gate = accept`, every gate runs its
+check under exactly that environment (`offload_environment`, sd:2782): the
+allowlisted names plus `HOME`, `USER` and `PATH`, which the view binds through
+`path`, `tools` and `home_files`. That covers the hub's own gate, the merge
+gate, local receipt reuse and a satellite's gate. Every other variable is
+dropped from the child on both machines, so both run the same check by
+construction. Two ship reviews showed why:
+
+- dropped on the satellite only, a variable that skips work (`SKIP_TESTS=1`,
+  a `GOFLAGS` that selects tests) left the view equal to the hub's;
+- kept on the hub only, a variable that adds work (`RUN_INTEGRATION=1`) ran an
+  integration test there that the satellite's accepted pass never ran.
+
+Opting in therefore means: on every machine, checks see only the allowlist
+plus `HOME`, `USER` and `PATH`. A check that needs a credential or another
+variable off the list fails on every machine. Such a repository does not opt
+in until the variable is allowlisted. A repository that did not opt in keeps
+the whole `gate_environment`, as before this item.
+
+The binding names the mode in `environment_mode` (`offload_run`): `offload`
+for a recording satellite run, which keeps its view and writes the offload
+row; `allowlist` for any other gate in an opted-in repository; `whole`
+elsewhere. A pass under one mode never stands for a run under another, so
+flipping `repo.satellite_gate` reruns the check. An `allowlist` pass is not
+exported as an offload row: it kept no view, so the satellite's run runs again.
+An opt-in read fault on either machine answers `whole`, so that run's pass
+cannot stand for an opted-in gate. The hub accepts a satellite's receipt only
+when its own run's mode is not `whole` and the row's binding names `offload`
+(clause 5, `binding_mismatch`, which the `require` and `fallback` paths both
+reach through `examine_offload`). A fault on the hub's opt-in read therefore
+refuses the receipt as `satellite_binding` and does not accept it.
 
 Residual risk on the offload path:
 
@@ -183,6 +246,9 @@ Residual risk on the offload path:
 - tool configuration under `HOME` outside `OFFLOAD_HOME_FILES`, and outside
   `HOME`, such as `/etc` or the package manager's prefix;
 - shared libraries that the compared tools load.
+- a check that skips work, rather than failing, when a dropped variable is
+  absent, such as a test marked to skip without a token: in an opted-in
+  repository it skips that work on every machine, the hub's included;
 - the packages installed for the interpreter: a virtualenv's `python` resolves to
   its base interpreter, so the `python` part binds that binary, not the
   virtualenv's `site-packages`.
@@ -201,8 +267,8 @@ the first that fails refuses with its code. No clause failure starts a run.
 | 1 | `repo.ci` is `local` and `repo.satellite_gate` is `accept` for this repository | `satellite_gate_off` |
 | 2 | The pull request is not BEHIND its base (`refuse_behind`, unchanged) | `base_moved` |
 | 3 | An offload row exists at the key for this slug and the exact `--expected-head` (or its tree) | `satellite_receipt_missing` |
-| 4 | `writer` is `sd-satellite-gate`, `reading.status` is `success`, and `satellite` is present | `satellite_receipt_invalid` |
-| 5 | The compared binding fields equal the hub's (table above); the refusal names each differing field | `satellite_binding` |
+| 4 | `writer` is `sd-satellite-gate` and `reading.status` is `success`; then `satellite` names `hostname`, `login` and `address` | `satellite_receipt_invalid`; `satellite_unidentified` for a row whose tailnet lookup failed |
+| 5 | The hub's run is not in `environment_mode` `whole`, the row's binding names `offload`, and the compared binding fields equal the hub's (table above); the refusal names each differing field | `satellite_binding` |
 | 6 | Within that, `pack_bin` equals the hub's; the refusal names both digests and both `pack_rev` values | `satellite_pack_mismatch` |
 | 7 | Age on the hub's clock is at most `OFFLOAD_WINDOW_SECONDS`, and `recorded_at` is at most 300 s in the hub's future | `satellite_receipt_expired` |
 | 8 | The newest `sd/local-gate` status at the head is `success`, posted by `viewer_login()`, and its description starts with `head[:12] inputs <digest>`, where the digest is the hub's own `gate_inputs(root, head)` | `satellite_status_missing` or `local_gate_foreign` |
@@ -368,11 +434,14 @@ each request, in order:
 1. **Opt-in.** `repo.ci = local` and `repo.satellite_gate = accept`.
    Otherwise `refused`, `satellite_gate_off`.
 2. **Shape.** `branch` passes `git check-ref-format --branch` and does not
-   start with `-`; `head` is 40 hex digits; `item` is an integer. Otherwise
-   `refused`, `invalid_request`. The branch reaches `git fetch` and
+   start with `-`; `head` is 40 hex digits; `item` is an integer; `writer` is
+   `sd-lane-request`; `satellite` names `hostname`, `login` and `address`.
+   Otherwise `refused`, `invalid_request`. The branch reaches `git fetch` and
    `git push` argv, so this is input validation at a trust boundary.
 3. **Prepared.** The `ship:` row for the slug, branch and item is
    `ready_to_send` at `head`. Otherwise `refused`, `satellite_not_prepared`.
+   Its `base` is the request's; otherwise `refused`, `invalid_request`: the
+   merge checks the `ship:` row's base, so intake pre-checks that one.
 4. **Taken in already.** A queue entry that names this request's revision
    means a crash came between the queue write and the row write. Write
    `queued` and go on; add nothing. Intake checks this before step 1: the
@@ -466,8 +535,10 @@ Two consequences, accepted:
   pack checkout. It is a warning: the hub's pack can still move after the
   gate, and clause 6 is the check.
 - `sd-ship prepare` on a satellite, opted in, at `ready_to_send`: post
-  `sd/local-gate` from the offload row through `post_gate_status`. That
-  function refuses a head the run did not check. The description is
+  `sd/local-gate` from the offload row through `post_gate_status`. The row
+  must stand at that head (`standing_offload`): its key names the head, and
+  its `inputs` are this checkout's at the head. `post_gate_status`'s own head
+  guard cannot fire here, since the caller passes it the same head. The description is
   `head[:12] inputs <gate_inputs(root, head)>: sat <hostname>: <summary>`,
   cut to 140 characters. No row, no post; prepare reports `offload_error`.
 - `sd-ship lane request`: the new verb above.

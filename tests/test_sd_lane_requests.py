@@ -24,6 +24,7 @@ git = lane_suite.git
 SLUG = "fixture/repo"
 URL = f"https://github.com/{SLUG}.git"
 HUB = "hub.example.test:8769"
+SATELLITE = {"hostname": "satellite.example.test", "login": "fixture@example.test", "address": "192.0.2.10"}
 
 
 class Requests(lane_suite.Lane):
@@ -72,7 +73,7 @@ class Requests(lane_suite.Lane):
         revision, _ = receipts.read(self.connection, key)
         return receipts.save(self.connection, key, revision, {
             "writer": sd_lane.REQUEST_WRITER, "repository": SLUG, "item": item, "branch": "topic", "head": self.head,
-            "base": "main", "authority": "manual", "satellite": {"hostname": "satellite.example.test"},
+            "base": "main", "authority": "manual", "satellite": SATELLITE,
             "requested_at": sd_lane.stamp_now(), "status": "requested", **fields})
 
     def row(self, item: int = 7) -> dict:
@@ -122,12 +123,22 @@ class Intake(Requests):
 
     def test_a_malformed_request_is_refused_before_any_git_call_on_its_names(self) -> None:
         for fields in ({"branch": "--upload-pack=touch /tmp/x"}, {"branch": "a..b"}, {"base": "-main"},
-                       {"head": self.head[:12]}, {"item": "7"}, {"authority": "everyone"}):
+                       {"head": self.head[:12]}, {"item": "7"}, {"authority": "everyone"}, {"writer": "sd-check"},
+                       {"satellite": {"hostname": "satellite.example.test", "error": "TailnetError: not running"}},
+                       {"satellite": None}):
             with self.subTest(fields=fields):
                 self.prepared()
                 self.ask(**fields)
                 self.intake()
                 self.assert_refused("invalid_request")
+
+    def test_a_request_whose_base_is_not_the_ship_rows_is_refused(self) -> None:
+        """sd:2782 L2: the merge checks the ship: row's base, so intake must not pre-check another one."""
+        self.prepared()
+        self.ask(base="release")
+        self.intake()
+        self.assert_refused("invalid_request")
+        self.assertIn("release", self.row()["reason"])
 
     def test_a_request_whose_ship_row_is_not_ready_at_its_head_is_refused(self) -> None:
         for prepare in (lambda: None, lambda: self.prepared(phase="push_dispatch"),
@@ -301,7 +312,7 @@ class RequestVerb(Requests):
 
     def request(self, served_by: str | None = HUB) -> dict:
         with mock.patch("sd_db.database.served_by", lambda target, home=None: served_by, create=True), \
-                mock.patch.object(sd_lane_receipts(), "satellite_identity", lambda: {"hostname": "satellite.example.test"}):
+                mock.patch.object(sd_lane_receipts(), "satellite_identity", lambda: SATELLITE):
             return sd_lane.request(self.topic, 7, manual=True, database=self.database)
 
     def test_a_prepared_item_writes_its_request_row(self) -> None:
@@ -313,7 +324,7 @@ class RequestVerb(Requests):
                                                     "authority", "status", "satellite")},
                          {"writer": "sd-lane-request", "repository": SLUG, "item": 7, "branch": "topic",
                           "head": self.head, "base": "main", "authority": "manual", "status": "requested",
-                          "satellite": {"hostname": "satellite.example.test"}})
+                          "satellite": SATELLITE})
         [taken] = self.intake()
         self.assertEqual(taken["status"], "queued")
 
