@@ -12,6 +12,7 @@ import io
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -946,17 +947,22 @@ class CacheBound(Repository):
 class StaleGateWorktrees(Repository):
     """sd:2739: a killed gate skips its `finally`; the next gate start removes its worktree, never a live one's."""
 
-    def left(self, owner: str, head: str) -> pathlib.Path:
-        """A gate worktree registered under `sd-local-gate-<owner>x`, as a gate that never cleaned up leaves it."""
-        tree = self.root.parent / f"{sd_gate_cache.GATE_PREFIX}{owner}x" / "tree"
-        git(self.root, "worktree", "add", "-q", "--detach", str(tree), head)
-        return tree
+    def left(self, owner: str, head: str, folder: pathlib.Path | None = None) -> pathlib.Path:
+        """A worktree registered as `<folder>/tree`; by default a gate's folder in the temp dir, as a killed gate leaves it."""
+        if folder is None:
+            folder = pathlib.Path(tempfile.mkdtemp(prefix=f"{sd_gate_cache.GATE_PREFIX}{owner}-"))
+            self.addCleanup(shutil.rmtree, folder, True)
+        git(self.root, "worktree", "add", "-q", "--detach", str(folder / "tree"), head)
+        return folder / "tree"
+
+    def dead(self) -> str:
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        return str(gone.pid)
 
     def test_a_dead_gates_worktree_is_removed_at_the_next_gate_start(self) -> None:
         head = self.commit("check:\n\t@echo ok\n")
-        gone = subprocess.Popen([sys.executable, "-c", "pass"])
-        gone.wait()
-        tree = self.left(f"{gone.pid}-", head)
+        tree = self.left(self.dead(), head)
         self.assertEqual(sd_gate_run.check_in_worktree(self.root, head)["status"], "success")
         self.assertEqual((self.worktrees(), tree.exists()), (1, False))
 
@@ -965,7 +971,15 @@ class StaleGateWorktrees(Repository):
         live = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
         self.addCleanup(live.wait)
         self.addCleanup(live.kill)
-        trees = [self.left(f"{live.pid}-", head), self.left("abc", head)]
+        trees = [self.left(str(live.pid), head), self.left("abc", head)]
+        self.assertEqual(sd_gate_run.check_in_worktree(self.root, head)["status"], "success")
+        self.assertEqual((self.worktrees(), [tree.exists() for tree in trees]), (3, [True, True]))
+
+    def test_a_like_named_checkout_outside_the_temp_dir_or_past_the_pid_range_stays(self) -> None:
+        """Review round 2: the name alone selected a user's checkout, and a 24-digit pid raised `OverflowError`."""
+        head = self.commit("check:\n\t@echo ok\n")
+        trees = [self.left("", head, self.root.parent / f"{sd_gate_cache.GATE_PREFIX}{self.dead()}-x"),
+                 self.left("9" * 24, head)]
         self.assertEqual(sd_gate_run.check_in_worktree(self.root, head)["status"], "success")
         self.assertEqual((self.worktrees(), [tree.exists() for tree in trees]), (3, [True, True]))
 

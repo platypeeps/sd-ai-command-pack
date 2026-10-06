@@ -448,8 +448,10 @@
   `check_in_worktree` removed its `sd-local-gate-*` worktree in a `finally`,
   which a killed gate never runs, so the entry stayed registered. The folder
   name now carries the gate's pid. Each gate start removes the repository's
-  gate worktrees whose named process is gone. A live gate's worktree stays,
-  and so does a folder from before this change, which names no pid.
+  gate worktrees whose named process is gone. Only a worktree `tree` in a
+  folder `sd-local-gate-<pid>-<suffix>` directly in the temp dir counts; a
+  like-named checkout elsewhere stays. A live gate's worktree stays, and so
+  does a folder from before this change, which names no pid.
 - **`sd-review --explain` reports an unreachable hub instead of a traceback (sd:2728).**
   On a satellite, `sd_registry.read_runtime` asked the hub whether the
   database exists outside its `try`, so `HubUnreachable` escaped. It is now a
