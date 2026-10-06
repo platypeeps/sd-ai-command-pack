@@ -164,7 +164,7 @@ is `accept`. It has six parts:
 | Part | Content | Refuses on a difference |
 |---|---|---|
 | `path` | the gate's `PATH` entries in order, each `$HOME` prefix written as `~` | No: recorded. The tools it selects are compared by bytes |
-| `tools` | sha256 of each name in `OFFLOAD_TOOLS`, resolved on that `PATH`, and of each tool `gate_binding` resolves | For `OFFLOAD_DECIDING_TOOLS` and the check's own names; another tool (`git`, `uv`, `node`, `npm`) is recorded |
+| `tools` | sha256 of each name in `OFFLOAD_TOOLS`, resolved on that `PATH`, and of each tool `gate_binding` resolves | For `OFFLOAD_DECIDING_TOOLS` and the check's own names; another tool (`git`, `uv`, `npm` when the check does not name it) is recorded |
 | `python` | sha256 of the bytes of `sys.executable`, resolved, and `sys.version` | Yes: the interpreter that runs `sd-check`, even when the gate was started through a virtualenv or an explicit path that `PATH`'s `python3` does not name |
 | `home_files` | sha256 of each file in `OFFLOAD_HOME_FILES` under `HOME`, or `"absent"` | No: recorded |
 | `threads` | `sd_gate_slots.thread_caps`: the `CARGO_BUILD_JOBS`, `RUST_TEST_THREADS` and `NEXTEST_TEST_THREADS` a check gets under the machine's slot count and cores, as `machine_binding` binds them (sd:2782, sd:2872) | No: recorded. They follow the core count |
@@ -177,7 +177,7 @@ differ by build, and `.gitconfig` and `.npmrc` differ by login. The thread
 caps differ by core count. A satellite gate run inside an `sd gate check`
 holder carries caps a merge does not. So the view now refuses only on what
 decides the check's result: `OFFLOAD_DECIDING_TOOLS` (`sh`, `bash`, `make`,
-`python3`, `cc`, `c++`, `clang`, `cargo`, `rustc`), the check's own names, the
+`python3`, `cc`, `c++`, `clang`, `cargo`, `rustc`, `node`), the check's own names, the
 interpreter, and the steering variables (`offload_differences`). Every other
 difference is recorded by part and name in the merge's `local_gate`, as
 `satellite.view_differences`.

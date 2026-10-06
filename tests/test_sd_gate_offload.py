@@ -104,6 +104,14 @@ class OffloadView(unittest.TestCase):
         self.assertEqual(sd_gate_receipts.offload_miss(theirs, ours, ("npm",)), {"part": "tools", "name": "npm"})
         self.assertEqual(self.recorded(theirs, ours), [("tools", "npm")])
 
+    def test_the_runtime_behind_a_launcher_refuses(self) -> None:
+        """sd:2862 review: `npm run check` names only `npm`, and equal `npm` bytes can run another `node`."""
+        for login, version in (("sat", "22"), ("hub", "24")):
+            self.tool(self.home(login) / "bin" / "npm", "npm 10")
+            self.tool(self.home(login) / "bin" / "node", f"node {version}")
+        theirs, ours = self.view("sat", ("npm",)), self.view("hub", ("npm",))
+        self.assertEqual(sd_gate_receipts.offload_miss(theirs, ours, ("npm",)), {"part": "tools", "name": "node"})
+
     def test_a_home_prefix_needs_a_folder_boundary(self) -> None:
         """`/Users/hubber` is not under `/Users/hub`."""
         self.tool(self.tmp / "Users" / "hubber" / "bin" / "make", "make 4.4")

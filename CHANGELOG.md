@@ -467,7 +467,7 @@
   The offload view refused on any difference, and two machines always differ: the hub's launchd job and the
   satellite's shell order `PATH` apart, `git` and `uv` differ by build, `HOME` files by login, thread caps by core
   count. It now refuses only on what decides the result: the interpreter, the toolchain's bytes (`sh`, `bash`,
-  `make`, `python3`, `cc`, `c++`, `clang`, `cargo`, `rustc`) and the check's own tools, and the allowlisted
+  `make`, `python3`, `cc`, `c++`, `clang`, `cargo`, `rustc`, `node`) and the check's own tools, and the allowlisted
   variables but the pack's `SD_` settings and the thread caps. The merge's `local_gate` names every other
   difference in `satellite.view_differences`. Rows written before keep the same view and need no move.
 
