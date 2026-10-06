@@ -202,6 +202,49 @@ class Runner(Lane):
         self.assertIn("another runner holds", answer["busy"])
         self.assertEqual((self.calls, self.entries()[0]["status"]), ([], "pending"))
 
+    def left_running(self, pid: int | None) -> None:
+        """Item 1 claimed by the runner `pid` and never finished, as a killed runner leaves it (sd:2821)."""
+        sd_lane.enqueue_entry(self.repo, 1, "one", self.body, self.environ, claim="deliver")
+
+        def claimed(entries: list[dict]) -> None:
+            entries[0].update(status="running", runner_pid=pid)
+        sd_lane.update(sd_lane.queue_path(self.repo, self.environ), claimed)
+
+    def dead_pid(self) -> int:
+        runner = subprocess.Popen([sys.executable, "-c", ""])
+        runner.wait()
+        return runner.pid
+
+    def test_a_running_entry_whose_runner_died_is_failed_and_the_queue_goes_on(self) -> None:
+        pid = self.dead_pid()
+        self.left_running(pid)
+        sd_lane.enqueue_entry(self.worktree("second"), 2, "two", self.body, self.environ, claim="deliver")
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(answer["reclaimed"], [{"item": 1, "runner_pid": pid}])
+        first, second = self.entries()
+        self.assertEqual((first["status"], first["step"], first["reclaimed_by"]), ("failed", "runner", os.getpid()))
+        self.assertIn(f"runner pid {pid} died", first["reason"])
+        self.assertEqual(([call[4] for call in self.calls], second["status"]), (["2"], "prepared"))
+        sd_lane.enqueue_entry(self.repo, 1, "one", self.body, self.environ, claim="deliver")  # no longer refused
+
+    def test_a_running_entry_whose_runner_may_live_is_kept(self) -> None:
+        for pid in (os.getpid(), None, 1):  # alive, unreadable, and a pid this user may not signal
+            with self.subTest(pid=pid):
+                sd_lane.update(sd_lane.queue_path(self.repo, self.environ), list.clear)
+                self.left_running(pid)
+                answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+                self.assertNotIn("reclaimed", answer)
+                self.assertEqual((self.calls, self.entries()[0]["status"]), ([], "running"))
+
+    def test_a_running_entry_is_kept_while_another_runner_holds_the_lock(self) -> None:
+        self.left_running(self.dead_pid())
+        lock = sd_lane.queue_path(self.repo, self.environ).parent / "runner.lock"
+        with open(lock, "a", encoding="utf-8") as held:
+            fcntl.flock(held, fcntl.LOCK_EX)
+            answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertIn("another runner holds", answer["busy"])
+        self.assertEqual(self.entries()[0]["status"], "running")
+
     def test_an_entry_queued_while_the_runner_works_is_run_too(self) -> None:
         sd_lane.enqueue_entry(self.repo, 1, "one", self.body, self.environ, claim="deliver")
         second = self.worktree("second")

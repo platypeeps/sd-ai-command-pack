@@ -463,6 +463,27 @@
 
 ### Fixed
 
+- **`sd-ship lane run` reclaims an entry its dead runner left `running` (sd:2821).**
+  No verb could clear one: `cancel` refused it, `enqueue` refused the item, and `run` claimed only pending entries.
+  With the runner lock held, `run` first marks failed each `running` entry whose `runner_pid` no process holds.
+  The entry carries `step: runner`, `reclaimed_by` and a reason; the run's answer lists it under `reclaimed`.
+  A live pid, a pid the runner may not signal, or no pid keeps the entry `running`.
+- **A satellite's pack warning compares the hub's digest under its own head's scope (sd:2823).**
+  The lane published one digest, under the scope of the hub's `main`. A head that adds or drops
+  `"pack": "sd-check"` drew a false `satellite_pack_mismatch` warning. The lane now also publishes
+  `pack_bins`, one digest per scope, and `pack_warning` reads the one for its head. The merge was never affected.
+- **The publish-signal harness test waits on the run, not on a 60 s bound (sd:2826).**
+  It waited 60 s for the fixture run to start a child, and failed under gate load.
+  The run now writes a sentinel inside the publish window and holds it until the test releases it.
+- **A satellite reruns a read-only `sd` verb itself after its `sd_db` self-install (sd:2845, pack part).**
+  `sd today`, `sd store items`, `sd store item` and `sd task show` call `sd_db.self_install.declare_replayable()`.
+  `REPLAYABLE` in `bin/sd` lists them: each reads the hub and does no local work with effects before its first session.
+  Every other verb keeps the manual rerun. An `sd_db` without the call runs the verb as before.
+- **A satellite entry whose merge meets another ship operation's lock waits for the next run (sd:2861).**
+  It failed as `prerequisite_failed`, and the satellite had to request again. The lane now puts it back as `pending`.
+  Its request row stays `queued`, `lock_retries` counts the runs, and the same run does not claim it again.
+  After `LOCK_RETRIES` (12) runs it fails, and the reason says how long the lock was held.
+
 - **`sd-ship` names the main commits behind a base refusal (sd:2339).**
   `prepare` on a branch behind the default branch already refused before any review.
   Its refusal now names the missing commits: the count and the first three short SHAs.

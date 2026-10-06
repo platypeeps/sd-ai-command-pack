@@ -90,17 +90,28 @@ branch = True
 
 
 PUBLISH_RM_PREFIX = 'rm -f "$REPO_ROOT/.coverage"'
+PUBLISH_SENTINEL = ".harness-publishing"
+PUBLISH_RELEASE = ".harness-publish-release"
 
 
 def _widen_publish_window(harness):
-    """Hold the publish open for two seconds, in this copy of the script only.
+    """Hold the publish open, in this copy of the script only, and say so with a sentinel.
 
     The window between the destructive `rm` and the `mv` that refills the root
     is a few milliseconds, which is too short for a test to aim a signal at: a
     first version of the signal test below polled for that window, never landed
-    a signal in it, and reported a pass having tested nothing. Inserting a sleep
+    a signal in it, and reported a pass having tested nothing. Inserting a hold
     changes the width of the window and nothing else -- the same statements run
     in the same order with the same traps installed.
+
+    The hold lasts until the test creates the release file, under a cap of
+    `HARNESS_PUBLISH_TENTHS` tenths (default 3000); `0` holds not at all, for a
+    run that is not the one under test. It was a fixed two seconds, and the
+    test waited 60 s for the run's process tree: under gate load the wait ran
+    out before the run reached it (sd:2826). The test now waits on the sentinel,
+    which the run writes inside the window, and the hold outlasts any delay
+    in the test's own signals. It is counted in tenths because bash runs a trap
+    only after its foreground command returns.
 
     A missing anchor raises rather than no-oping, so a future edit that moves
     the publish block fails this test loudly instead of making it vacuous again.
@@ -112,7 +123,11 @@ def _widen_publish_window(harness):
             f"expected exactly one publish `rm` line to widen, found {len(anchors)}: "
             "the publish block moved, and this test would otherwise assert nothing"
         )
-    lines.insert(anchors[0] + 1, "sleep 2\n")
+    hold = (
+        f'held=0; while [ ! -e "$REPO_ROOT/{PUBLISH_RELEASE}" ] && '
+        '[ "$held" -lt "${HARNESS_PUBLISH_TENTHS:-3000}" ]; do sleep 0.1; held=$((held + 1)); done\n'
+    )
+    lines.insert(anchors[0] + 1, f': > "$REPO_ROOT/{PUBLISH_SENTINEL}"\n{hold}')
     harness.write_text("".join(lines))
 
 
@@ -593,14 +608,19 @@ class PublishSignalTests(unittest.TestCase):
             script = _build_fixture(root, widen_publish=True)
             env = _fixture_env(HARNESS_FIXTURE_SLEEP="1")
 
+            # Only the second run is the one under test; the first need not hold.
             first = subprocess.run(
                 ["bash", str(script)],
                 capture_output=True,
                 text=True,
-                env=env,
+                env={**env, "HARNESS_PUBLISH_TENTHS": "0"},
                 check=False,
             )
             self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+            # The first run left one behind; waiting on a stale sentinel would
+            # signal the second run before it had started anything.
+            sentinel = root / PUBLISH_SENTINEL
+            sentinel.unlink()
 
             log = root / "second.log"
             with open(log, "w", encoding="utf-8") as handle:
@@ -611,22 +631,23 @@ class PublishSignalTests(unittest.TestCase):
                     env=env,
                 )
                 try:
-                    self.assertTrue(
-                        _wait_for(lambda: bool(_descendants(second.pid)), timeout=60),
-                        "the shard phase never started",
-                    )
-                    # The window is read off the filesystem rather than off the
-                    # process tree: the first run left two shards at the root, so
-                    # a live run with none there is one that has run the
-                    # destructive `rm` and not yet the `mv`. Counting processes
-                    # instead does not work -- the widening sleep is a child of
-                    # the script, so the tree never empties.
+                    # The run says when it is inside the window: its sentinel
+                    # follows the destructive `rm`, and the hold keeps the `mv`
+                    # back until the release below. The bound is generous on
+                    # purpose; a run that ends early stops the wait at once.
+                    # It used to wait 60 s for any child process, and lost that
+                    # race under gate load (sd:2826).
                     _wait_for(
-                        lambda: second.poll() is not None or not _shards(root),
-                        timeout=120,
+                        lambda: sentinel.exists() or second.poll() is not None,
+                        timeout=900,
                     )
+                    self.assertTrue(
+                        sentinel.exists(),
+                        f"the run never reached the publish: {log.read_text()}",
+                    )
+                    self.assertEqual(_shards(root), [], "the sentinel came before the `rm`")
                     delivered = 0
-                    while second.poll() is None:
+                    while second.poll() is None and delivered < 20:
                         try:
                             os.kill(second.pid, signal.SIGTERM)
                         except OSError:
@@ -638,6 +659,8 @@ class PublishSignalTests(unittest.TestCase):
                         0,
                         "no signal reached the run; this assertion tested nothing",
                     )
+                    (root / PUBLISH_RELEASE).touch()
+                    second.wait(timeout=900)
                 finally:
                     if second.poll() is None:
                         second.kill()
