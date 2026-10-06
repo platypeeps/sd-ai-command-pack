@@ -1117,7 +1117,7 @@ roles:
 
         with patch.object(ship, "run", recording):
             self.assertEqual(self.prepare()["phase"], "ready_to_send")
-        lint = [argv for argv in calls if str(argv[1]).endswith("sd-docs-lint")]
+        lint = [argv for argv in calls if any(str(word).endswith("sd-docs-lint") for word in argv)]
         self.assertEqual(len(lint), 1, calls)
         body = pathlib.Path(lint[0][lint[0].index("--pr-body") + 1])
         self.assertFalse(body.exists(), "the body file is temporary")

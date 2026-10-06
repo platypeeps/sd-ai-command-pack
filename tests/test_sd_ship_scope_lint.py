@@ -46,7 +46,7 @@ class ScopeLintCase(unittest.TestCase):
 
         with patch.object(ship, "run", recording):
             self.assertEqual(self.prepare(*extra)["phase"], "ready_to_send")
-        return [argv for argv in calls if argv[1].endswith("sd-docs-lint")]
+        return [argv for argv in calls if any(word.endswith("sd-docs-lint") for word in argv)]
 
     def commit_a_ci_change(self) -> None:
         # The policy file is on the branch, because the linter reads it from
@@ -72,6 +72,13 @@ class ScopeLintCase(unittest.TestCase):
         lint = self.lint_calls()
         self.assertEqual(len(lint), 1, lint)
         self.assertNotIn("--body-only", lint[0])
+
+    def test_the_lint_takes_no_claim_support_reading(self) -> None:
+        """sd:2762. The reading is advisory and takes minutes through the
+        local Kev; inside prepare it buys nothing, so the call switches it off."""
+        (self.root / "docs/work").mkdir(parents=True)
+        lint = self.lint_calls()
+        self.assertEqual(lint[0][:2], ["env", "JEV_SD_DOCS_LINT=0"], lint)
 
     def test_red_a_ci_diff_with_no_scope_line_and_no_work_root_is_refused_before_push(self) -> None:
         # The fail-first case. Before #972's second push the linter was not

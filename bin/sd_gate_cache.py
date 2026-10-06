@@ -22,6 +22,14 @@ repository's, until the cache fits `sd.gate_cache_gb`. A folder another gate
 holds is skipped, since removing it needs its lock; the gate's own folder
 goes last, before its run starts. A pruned folder costs its next gate one
 cold build, and the gate names each one on stderr.
+
+The gate's worktree is housekeeping of the same kind (sd:2739). A killed gate
+never runs the `finally` that removes it, so its entry stays registered.
+`worktree_prefix` names each gate's temporary folder after its pid, and first
+removes every gate worktree whose named process is gone. Only a worktree
+named `tree` in a folder `sd-local-gate-<pid>-<suffix>` directly in the temp
+dir counts as a gate's: a checkout elsewhere with a like name is never touched.
+A live gate's worktree stays; so does a folder from before this rule.
 """
 
 from __future__ import annotations
@@ -31,8 +39,10 @@ import fcntl
 import hashlib
 import os
 import pathlib
+import re
 import shutil
 import sys
+import tempfile
 from typing import Iterator, Mapping, TextIO
 
 import sd_lib
@@ -51,6 +61,34 @@ CACHE_GB_VARIABLE = "SD_GATE_CACHE_GB"
 #: Two folders of the one Rust repository gated here measured 9 GB cold and about 18 GB after five builds.
 DEFAULT_CACHE_GB = 40
 GIB = 1024 ** 3
+#: A gate's temporary folder: this prefix, then the pid of the gate that owns it, then `-` (sd:2739).
+GATE_PREFIX = "sd-local-gate-"
+#: The whole folder name `tempfile` makes from that prefix; nine digits keep a pid within `os.kill`'s range.
+GATE_FOLDER = re.compile(r"sd-local-gate-([0-9]{1,9})-[a-z0-9_]+")
+
+
+def running(pid: int) -> bool:
+    """Whether a process `pid` exists; one owned by another user does."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass
+    return True
+
+
+def worktree_prefix(root: pathlib.Path) -> str:
+    """This gate's temporary folder prefix, after removing `root`'s gate worktrees whose gate process is gone."""
+    temporary = pathlib.Path(tempfile.gettempdir()).resolve()
+    listing = sd_lib.git_output(["worktree", "list", "--porcelain"], root) or ""
+    for line in listing.splitlines():
+        tree = pathlib.Path(line.removeprefix("worktree "))
+        named = GATE_FOLDER.fullmatch(tree.parent.name)
+        if line.startswith("worktree ") and named and tree.name == "tree" \
+                and tree.parent.parent.resolve() == temporary and not running(int(named[1])):
+            sd_lib.git_output(["worktree", "remove", "--force", str(tree)], root)  # its empty parent stays in the temp dir
+    return f"{GATE_PREFIX}{os.getpid()}-"
 
 
 def cache_root(environ: Mapping[str, str]) -> pathlib.Path:
