@@ -468,6 +468,23 @@ class SatelliteEntry(requests_suite.Requests):
                 self.assertEqual((self.calls, self.entries()[-1]["authority"], self.entries()[-1]["status"]),
                                  ([], None, "prepared"))
 
+    def test_a_queued_row_whose_entry_is_not_an_object_is_skipped_and_the_next_entry_runs(self):
+        """sd:2792: a non-object `entry` raised AttributeError in `claimable`, so every lane run stopped."""
+        self.prepared(item=8)
+        self.ask(item=8)
+        sd_lane.intake(self.hub, self.path)  # sd:8 queued behind sd:7
+        key = sd_lane.request_key(requests_suite.SLUG, 7)
+        for entry in ([1], "1", 1):
+            with self.subTest(entry=entry):
+                revision, row = receipts.read(self.connection, key)
+                receipts.save(self.connection, key, revision, {**row, "status": "queued", "entry": entry})
+                self.assertEqual(sd_lane.intake(self.hub, self.path), [])  # no error from the queued row
+                self.assertFalse(sd_lane.claimable(self.hub, self.entries()[0]))
+        self.run_lane()
+        [merge] = self.calls
+        self.assertEqual(merge[merge.index("--item") + 1], "8")
+        self.assertEqual([entry["status"] for entry in self.entries()], ["pending", "merged"])
+
     def failing_hub(self, *statuses):
         """The hub's rows, but a row write with one of `statuses` fails as a stopped database would."""
         def save(connection, key, previous, value):
