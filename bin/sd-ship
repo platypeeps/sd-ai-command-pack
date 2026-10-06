@@ -1294,8 +1294,10 @@ class Ship(SharedReview):
         # withheld there, scope rule included, and a diff touching
         # `.github/**` shipped without its scope line. `--body-only` runs the
         # two body rules and nothing else; no planning directory is created
-        # to satisfy the rest.
-        lint = [sys.executable, str(BIN / "sd-docs-lint")]
+        # to satisfy the rest. The claim-support reading is off: it is advisory,
+        # takes minutes through the local Kev, and this call reruns on the base
+        # (sd:2762). An author's own run keeps it.
+        lint = ["env", "JEV_SD_DOCS_LINT=0", sys.executable, str(BIN / "sd-docs-lint")]
         if not (self.root / "docs/work").is_dir():
             lint.append("--body-only")
         lint_warnings: list[str] = []
