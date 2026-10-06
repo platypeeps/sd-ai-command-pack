@@ -9,6 +9,8 @@ the lane suite's recorder, so nothing reaches GitHub.
 
 from __future__ import annotations
 
+import io
+import json
 import pathlib
 import subprocess
 import types
@@ -267,7 +269,7 @@ class PackDigest(Requests):
         return receipts.read(self.connection, sd_lane_receipts().PACK_PREFIX + SLUG)[1]
 
     def test_a_run_publishes_the_hubs_pack_digest_at_its_start(self) -> None:
-        with mock.patch.object(sd_lane_receipts(), "pack_bin", lambda own=False: "tree" if own else "f" * 64):
+        with mock.patch.object(sd_lane_receipts(), "pack_bin", lambda own=False, closure=False: "tree" if own else "f" * 64):
             answer = sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate, hub=self.hub)
         self.assertEqual(answer["pack"], "published")
         row = self.pack_row()
@@ -305,6 +307,22 @@ class SatelliteRun(Requests):
         self.assertEqual((receipts.read(self.connection, key)[0], self.row()["status"]), (revision, "requested"))
         self.assertEqual(receipts.read(self.connection, sd_lane_receipts().PACK_PREFIX + SLUG), pack)
         self.assertEqual((self.entries(), self.calls), ([], []))
+
+    def test_the_queue_verbs_refuse_on_a_satellite_and_name_lane_request(self) -> None:
+        """sd:2795 (sd:2782 L3): no `lane run` drains a satellite's queue, so its verbs refuse rather than fill it."""
+        for argv in (["enqueue", "--item", "7", "--title", "t", "--body-file", str(self.body)], ["list"], ["cancel", "7"],
+                     ["move", "7", "top"], ["hold", "7"], ["release", "7"]):
+            with self.subTest(verb=argv[0]), \
+                    mock.patch("sd_db.database.served_by", lambda target, home=None: HUB, create=True), \
+                    mock.patch.dict(sd_lane.os.environ, self.environ), \
+                    mock.patch.object(sd_lane.sd_lib, "repo_root", lambda start: self.topic), \
+                    mock.patch("sys.stdout", new_callable=io.StringIO) as printed:
+                code = sd_lane.lane_main(sd_lane_parser().parse_args(["lane", *argv]))
+                answer = json.loads(printed.getvalue())
+                self.assertEqual((code, answer["ok"], answer.get("code")), (3, False, "hub_only"))
+                self.assertIn(f"lane {argv[0]} runs on the sd hub only", answer["error"])
+                self.assertIn("sd-ship lane request", answer["error"])
+        self.assertFalse(self.path.exists())
 
 
 class RequestVerb(Requests):

@@ -2644,12 +2644,19 @@ def dispatch(root, connection, database, args, store, readonly):
     if args.no_item and args.command in ("review", "verify-review", "adjudicate"):
         import sd_ship_no_item
         return sd_ship_no_item.run_no_item(root, connection, database, args, store, review_runtime())
+    # Every other writing verb but prepare takes the ship lock, a file on the hub, so on a
+    # satellite it refuses here, before `Ship` or the hold reads a shared row (sd:2795).
+    if not readonly and args.command != "prepare" and (hub := hub_serving(database)):
+        raise Refusal(f"sd-ship {args.command} runs on the sd hub only; this machine reaches the database on {hub}. "
+                      "Run it on the hub; from this machine, ask the hub's lane to merge with `sd-ship lane request`",
+                      code="hub_only", boundary="runtime", state="operator_decision",
+                      next_action="Run it on the hub, or ask the hub's lane with sd-ship lane request.")
     delivery = Ship(root, connection, database, args)
     if readonly:
         return getattr(delivery, args.command)()
     # sd:2679. The ship lock is a file on the hub, so a satellite prepares
-    # without it: each save is checked against the row's revision. Merge, and
-    # a merged record's prepare, which reconciles, still meet HubOnly at the lock.
+    # without it: each save is checked against the row's revision. A merged
+    # record's prepare, which reconciles, still meets HubOnly at the lock.
     if args.command == "prepare" and delivery.state.get("phase") not in ("merged", "merge_dispatch"):
         delivery.served_by = hub_serving(database)
         if delivery.served_by:

@@ -684,6 +684,17 @@ class NoItemContracts(unittest.TestCase):
         self.assertEqual(reopened["passes"], interrupted["passes"])
         self.refused("review", "--review-id", review_id, pattern="incomplete|retry|request")
 
+    def test_a_blocking_review_names_each_finding_and_the_command_for_this_record(self):
+        """sd:1986. `sd-ship review` said only `see item ship receipt`, and a no-item record has none."""
+        review_id = self.create()
+        reviewer, _calls = self.native_reviewer(review_id, blocking=True)
+        code, value, diagnostic = self.cli("review", "--review-id", review_id, reviewer=reviewer)
+        self.assertEqual(code, 3, diagnostic)
+        self.assertIn("src.py:1 fixture dispute", value["error"])
+        self.assertNotIn("item ship receipt", value["error"])
+        self.assertIn(f"sd-ship adjudicate --no-item --review-id {review_id} --expected-head {self.head}",
+                      value["workflow"]["next_action"])
+
     def test_acceptance_requires_exact_digest_and_never_dispatches_a_provider(self):
         review_id, _proposal, proposal_path, _evidence = self.blocking_proposal()
         self.refused(

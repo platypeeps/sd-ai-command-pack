@@ -134,6 +134,8 @@ WATCH_MINUTES = 3
 CLAIMS = ("deliver", "associate-only")
 #: The relative places `move` takes besides a 1-based position among pending entries.
 PLACES = ("up", "down", "top")
+#: The verbs on this machine's queue file, which only the hub's `lane run` drains; a satellite refuses them (sd:2795).
+QUEUE_VERBS = ("enqueue", "list", "cancel", "move", "hold", "release")
 #: `(argv, log) -> sd-ship's JSON answer`; the log receives the step's whole output.
 Ship = Callable[[list[str], pathlib.Path], dict[str, Any]]
 #: `(root, head, base) -> the gate's result`: the next entry's gate on a predicted landing (sd:2586).
@@ -572,8 +574,9 @@ def publish_pack(hub: Hub) -> str:
 
     key = sd_gate_receipts.PACK_PREFIX + hub.slug
     try:
-        # A pack gating itself binds its tree, not this bin/, so it publishes what its receipts hold (sd:2613).
-        digest = sd_gate_receipts.pack_bin(sd_gate_receipts.gates_itself(hub.main, hub.main, BIN))
+        # A pack gating itself binds its tree, not this bin/, so it publishes what its receipts hold (sd:2613, sd:2722).
+        digest = sd_gate_receipts.pack_bin(sd_gate_receipts.gates_itself(hub.main, hub.main, BIN),
+                                           sd_gate_receipts.pack_scope(hub.main, "HEAD"))
         revision, _ = hub.store.read(hub.connection, key)
         hub.store.save(hub.connection, key, revision, {"writer": "sd-lane", "pack_bin": digest, "published_at": stamp_now(),
                                                        "pack_rev": lane_git(BIN.parent, "rev-parse", "HEAD")})
@@ -958,7 +961,7 @@ def settle(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, st
     return fields
 
 
-def refuse_on_satellite(verb: str) -> None:
+def refuse_on_satellite(verb: str, remedy: str = "Run it on the hub") -> None:
     """Refuse a hub-only verb on a satellite, as `sd_db`'s `HubOnly` does, before it reads or writes a row."""
     if sd_lib.import_sd_db().module is None:
         return  # no database: no request or pack row to reach
@@ -968,7 +971,7 @@ def refuse_on_satellite(verb: str) -> None:
     served = sd_gate_receipts.served_hub(default_path())
     if served:
         raise LaneError(f"{verb} runs on the sd hub only; this machine reaches the database on {served}. "
-                        "Run it on the hub", code="hub_only")
+                        + remedy, code="hub_only")
 
 
 def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_ship,
@@ -1115,6 +1118,9 @@ def lane_main(args: Any) -> int:
             return watch(lane_root(environ), once=args.once)
         if root is None:
             raise LaneError("cwd is not inside a Git repository")
+        if args.lane_command in QUEUE_VERBS:  # no `lane run` drains a satellite's queue (sd:2795)
+            refuse_on_satellite(f"lane {args.lane_command}", "Run it on the hub; from this machine, ask the hub's lane "
+                                "to merge with `sd-ship lane request`")
         if args.lane_command == "enqueue":
             result: Any = enqueue_entry(root, args.item, args.title, args.body_file, environ,
                                         expected_head=args.expected_head, manual=args.manual, claim=args.claim,
