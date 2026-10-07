@@ -73,6 +73,18 @@ class ParseSection(unittest.TestCase):
     def test_a_section_inside_a_code_fence_is_an_example(self):
         self.assertEqual(self.refusal("## Summary\n\n```markdown\n## Changelog\n\nnone\n```\n"), "changelog_missing")
 
+    def test_a_fence_closes_only_on_its_own_character_and_length(self):
+        for body in ("````markdown\n```\n## Changelog\n\nnone\n````\n",
+                     "~~~markdown\n```\n## Changelog\n\nnone\n~~~\n",
+                     "```markdown\n``` not a close\n## Changelog\n\nnone\n```\n"):
+            with self.subTest(body=body):
+                self.assertEqual(self.refusal(body), "changelog_missing")
+
+    def test_a_heading_inside_an_html_comment_neither_ends_nor_opens_a_section(self):
+        body = "## Changelog\n\n### Fixed\n\n- Real fix.\n<!--\n## Notes\nhidden guidance\n-->\n- Second fix.\n"
+        self.assertEqual([entry["text"] for entry in sd_changelog.parse_section(body)], ["Real fix.", "Second fix."])
+        self.assertEqual(sd_changelog.parse_section("<!--\n## Changelog\n-->\n## Changelog\n\nnone\n"), [])
+
     def test_each_invalid_shape_is_changelog_invalid(self):
         for body in (
             "## Changelog\n",

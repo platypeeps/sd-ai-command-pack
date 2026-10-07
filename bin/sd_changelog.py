@@ -29,7 +29,7 @@ NONE = "none"
 TOP = "\U0010ffff"
 TIMEOUT_SECONDS = 60
 
-_FENCE = re.compile(r"^ {0,3}(```|~~~)")
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 _HEADING = re.compile(r"^ {0,3}(#{1,2})(?!#)(?:[ \t]+(.*?))?[ \t#]*$")
 _COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 _BULLET = re.compile(r"^[-*+][ \t]+(\S.*)$")
@@ -52,15 +52,20 @@ def _heading(line: str) -> str | None:
 def _section(body: str) -> list[str]:
     """The lines of the one `## Changelog` section, outside code fences.
 
-    A heading inside a fence is an example, not the section. The section runs
-    to the next level-1 or level-2 heading.
+    A heading inside a fence or an HTML comment is an example, not the
+    section. Only a run of the opening fence's character, at least as long
+    and with no info string, closes a fence. The section runs to the next
+    level-1 or level-2 heading.
     """
     sections: list[list[str]] = []
-    fenced = inside = False
-    for line in body.splitlines():
-        if _FENCE.match(line):
-            fenced = not fenced
-        heading = None if fenced else _heading(line)
+    fence, inside = "", False
+    for line in _COMMENT.sub("", body).splitlines():
+        match = _FENCE.match(line)
+        if match and not fence:
+            fence = match.group(1)
+        elif match and match.group(1)[0] == fence[0] and len(match.group(1)) >= len(fence) and not match.group(2).strip():
+            fence = ""
+        heading = None if fence or match else _heading(line)
         if heading is not None:
             inside = heading.strip().lower() == "changelog"
             if inside:
@@ -118,7 +123,7 @@ def parse_section(body: str) -> list[dict[str, Any]]:
     when it holds anything but `none` or `### <subsection>` bullets. HTML
     comments are dropped first, so the template's guidance never parses.
     """
-    text = _COMMENT.sub("", "\n".join(_section(body)))
+    text = "\n".join(_section(body))
     return [] if text.strip() == NONE else _entries(text.split("\n"))
 
 
