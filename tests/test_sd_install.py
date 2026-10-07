@@ -117,9 +117,9 @@ class InstallerHarness(unittest.TestCase):
             )
         return checkout
 
-    def checkout_with_commands(self, *names: str) -> Path:
+    def checkout_with_commands(self, *names: str, name: str = "serving") -> Path:
         """`committed_checkout()` given executables in `bin/`, the way the pack has them."""
-        checkout = self.committed_checkout()
+        checkout = self.committed_checkout(name)
         (checkout / "bin").mkdir()
         for name in names:
             target = checkout / "bin" / name
@@ -2458,6 +2458,51 @@ class ServingTreeTests(InstallerHarness):
         self.assertEqual(sd_install.read_receipt(self.context(self.serving).receipt), {
             "schema": sd_install.RECEIPT_SCHEMA, "commit": self.first}, "the receipt kept the failed render's write")
 
+    def test_an_unreadable_head_moves_nothing(self):
+        merged = self.commit(self.origin, "two\n")
+        real = sd_install._git
+
+        def no_head(ctx, args, timeout=sd_install.GIT_TIMEOUT):
+            return (128, "", "fatal: bad HEAD") if args[:2] == ["rev-parse", "--verify"] and args[2] == "HEAD^{commit}" else real(ctx, args, timeout)
+
+        out = io.StringIO()
+        with self.recording(), unittest.mock.patch.object(sd_install, "_git", side_effect=no_head):
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
+        self.assertIn("cannot read the serving tree's HEAD:\nfatal: bad HEAD", out.getvalue())
+        self.assertEqual((self.head(), self.rendered), (self.first, []))
+        self.assertNotEqual(self.head(), merged)
+
+    def test_a_failed_first_render_leaves_no_receipt(self):
+        """With no receipt before the run, putting it back means removing what the failed render wrote."""
+        merged = self.commit(self.origin, "two\n")
+
+        def failed(ctx, out):
+            self.write_receipt(commit=merged)
+            return 1
+
+        out = io.StringIO()
+        with unittest.mock.patch.object(sd_install, "cmd_user", side_effect=failed):
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
+        self.assertFalse(self.context(self.serving).receipt.exists())
+        self.assertEqual(self.head(), self.first)
+
+    def test_a_put_back_git_refuses_names_the_split_and_the_command(self):
+        merged = self.commit(self.origin, "two\n")
+        real = sd_install._git
+
+        def stuck(ctx, args, timeout=sd_install.GIT_TIMEOUT):
+            if args[:3] == ["checkout", "--quiet", "--detach"] and args[3] == self.first:
+                return (1, "", "locked")
+            return real(ctx, args, timeout)
+
+        out = io.StringIO()
+        with unittest.mock.patch.object(sd_install, "cmd_user", return_value=1), \
+                unittest.mock.patch.object(sd_install, "_git", side_effect=stuck):
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
+        self.assertIn(f"git could not return the serving tree to {self.first}:\nlocked", out.getvalue())
+        self.assertIn(f"checkout --detach {self.first}`", out.getvalue())
+        self.assertEqual(self.head(), merged)
+
     def test_a_target_whose_installer_predates_the_contract_is_refused(self):
         """Review round 1: after such a target no second rollback could come back, so neither verb moves to it."""
 
@@ -2486,6 +2531,148 @@ class ServingTreeTests(InstallerHarness):
                 self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
         receipt = sd_install.read_receipt(ctx.receipt)
         self.assertEqual((receipt["commit"], receipt["previousCommit"]), ("b", "a"))
+
+
+class ServeTests(InstallerHarness):
+    """`make setup` serves the machine from a dedicated clone of origin/main (sd:1118).
+
+    `--serve` makes the clone the first time, links its `.venv` to the main
+    checkout's, and hands the activation to the clone's own installer as
+    `--pull`. That installer is a recorder here; `ServingTreeTests` covers
+    what the real `--pull` does in the clone.
+    """
+
+    RECORDER = (
+        "import json, os, sys\n"
+        "with open(os.environ['SERVE_RECORD'], 'w') as handle:\n"
+        "    json.dump({'argv': sys.argv[1:], 'file': __file__}, handle)\n"
+        "sys.exit(int(os.environ.get('SERVE_EXIT', '0')))\n"
+    )
+
+    def git(self, repo: Path, *args: str) -> str:
+        return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout.strip()
+
+    def setUp(self):
+        super().setUp()
+        self.origin = self.home / "origin"
+        (self.origin / "bin").mkdir(parents=True)
+        (self.origin / "bin" / "sd_install.py").write_text(self.RECORDER, encoding="utf-8")
+        self.git(self.origin, "init", "-q", "-b", "main")
+        self.git(self.origin, "add", "-A")
+        self.git(self.origin, "-c", "user.email=t@example.test", "-c", "user.name=t", "commit", "-qm", "one")
+        self.merged = self.git(self.origin, "rev-parse", "HEAD")
+        self.work = self.home / "work"
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(self.work)], check=True, capture_output=True)
+        (self.work / ".venv" / "bin").mkdir(parents=True)
+        self.record = self.home / "record.json"
+        self.tree = self.home / ".local" / "share" / "sd-ai-command-pack" / "serving"
+
+    def context(self, checkout: Path | None = None, **extra) -> "sd_install.Context":
+        environ = {"PATH": os.environ.get("PATH", ""), "SERVE_RECORD": str(self.record), **extra}
+        return sd_install.Context(checkout=checkout or self.work, home=self.home, environ=environ)
+
+    def serve(self, ctx=None) -> tuple[int, str]:
+        out = io.StringIO()
+        return sd_install.cmd_serve(ctx or self.context(), out), out.getvalue()
+
+    def test_serve_clones_origin_detached_at_main_and_hands_over_to_the_clone(self):
+        rc, output = self.serve()
+        self.assertEqual(rc, 0, output)
+        self.assertEqual(self.git(self.tree, "rev-parse", "HEAD"), self.merged)
+        self.assertEqual(self.git(self.tree, "rev-parse", "--abbrev-ref", "HEAD"), "HEAD", "the clone is detached")
+        self.assertEqual(self.git(self.tree, "remote", "get-url", "origin"), str(self.origin))
+        self.assertEqual((self.tree / ".venv").readlink(), self.work / ".venv")
+        self.assertEqual(self.git(self.tree, "status", "--porcelain"), "", "the venv link dirties the clone")
+        record = json.loads(self.record.read_text(encoding="utf-8"))
+        self.assertEqual(record["argv"], ["--pull", "--home", str(self.home)])
+        self.assertEqual(Path(record["file"]).resolve(), (self.tree / "bin" / "sd_install.py").resolve())
+        self.assertIn(f"cloned {self.origin} into {self.tree}", output)
+
+    def test_a_second_serve_reuses_the_clone_and_passes_the_link_directory(self):
+        self.assertEqual(self.serve()[0], 0)
+        marker = self.tree / ".git" / "kept"
+        marker.write_text("x", encoding="utf-8")
+        links = self.home / "links"
+        ctx = self.context()
+        ctx.bin_dir = links
+        rc, output = self.serve(ctx)
+        self.assertEqual(rc, 0, output)
+        self.assertTrue(marker.exists(), "the clone was made again")
+        self.assertNotIn("cloned", output)
+        argv = json.loads(self.record.read_text(encoding="utf-8"))["argv"]
+        self.assertEqual(argv, ["--pull", "--home", str(self.home), "--bin-dir", str(links)])
+
+    def test_a_dry_run_serve_of_an_existing_clone_runs_nothing(self):
+        self.assertEqual(self.serve()[0], 0)
+        self.record.unlink()
+        ctx = self.context()
+        ctx.dry_run = True
+        rc, output = self.serve(ctx)
+        self.assertEqual(rc, 0)
+        self.assertIn(f"would detach {self.tree} at origin/main and render", output)
+        self.assertFalse(self.record.exists())
+
+    def test_outside_a_sandbox_the_clone_installer_gets_no_home(self):
+        with unittest.mock.patch.object(sd_install.Context, "sandboxed", new_callable=unittest.mock.PropertyMock,
+                                        return_value=False):
+            self.assertEqual(self.serve()[0], 0)
+        self.assertEqual(json.loads(self.record.read_text(encoding="utf-8"))["argv"], ["--pull"])
+
+    def test_serve_reads_the_data_home_and_reports_the_clone_installer_exit(self):
+        data = self.home / "data"
+        rc, output = self.serve(self.context(XDG_DATA_HOME=str(data), SERVE_EXIT="3"))
+        self.assertEqual(rc, 3, output)
+        self.assertTrue((data / "sd-ai-command-pack" / "serving" / ".git").is_dir())
+
+    def test_serve_leaves_a_venv_it_did_not_make(self):
+        self.assertEqual(self.serve()[0], 0)
+        (self.tree / ".venv").unlink()
+        (self.tree / ".venv").mkdir()
+        self.assertEqual(self.serve()[0], 0)
+        self.assertFalse((self.tree / ".venv").is_symlink())
+
+    def test_serve_refuses_to_run_from_the_serving_clone_or_without_origin(self):
+        self.assertEqual(self.serve()[0], 0)
+        rc, output = self.serve(self.context(self.tree))
+        self.assertEqual(rc, 1)
+        self.assertIn("is the serving checkout", output)
+        self.git(self.work, "remote", "remove", "origin")
+        self.tree.rename(self.home / "old-tree")
+        rc, output = self.serve()
+        self.assertEqual(rc, 1)
+        self.assertIn("has no origin remote", output)
+        self.assertFalse(self.tree.exists())
+
+    def test_serve_refuses_a_path_that_is_not_a_clone(self):
+        self.tree.mkdir(parents=True)
+        (self.tree / "notes.md").write_text("mine\n", encoding="utf-8")
+        rc, output = self.serve()
+        self.assertEqual(rc, 1)
+        self.assertIn("is not a git checkout", output)
+        self.assertEqual(sorted(path.name for path in self.tree.iterdir()), ["notes.md"])
+
+    def test_a_clone_that_fails_is_reported_and_nothing_runs(self):
+        self.git(self.work, "remote", "set-url", "origin", str(self.home / "gone"))
+        rc, output = self.serve()
+        self.assertEqual(rc, 1)
+        self.assertIn("git clone", output)
+        self.assertFalse(self.record.exists())
+
+    def test_a_dry_run_serve_clones_and_runs_nothing(self):
+        ctx = self.context()
+        ctx.dry_run = True
+        rc, output = self.serve(ctx)
+        self.assertEqual(rc, 0)
+        self.assertIn(f"would clone {self.origin} into {self.tree}", output)
+        self.assertFalse(self.tree.exists())
+        self.assertFalse(self.record.exists())
+
+    def test_serve_is_reachable_from_the_command_line(self):
+        out = io.StringIO()
+        with unittest.mock.patch.object(sd_install, "cmd_serve", return_value=0) as serve:
+            self.assertEqual(sd_install.main(["--serve", "--home", str(self.home)], out=out), 0)
+        serve.assert_called_once()
+        self.assertIn("--serve", sd_install.USAGE)
 
 
 class RepoCommandTests(InstallerHarness):
@@ -3659,6 +3846,57 @@ class LinkEdgeCaseTests(InstallerHarness):
         self.assertIn("removed 5 file(s)", out.getvalue())
         self.assertTrue((checkout / "bin" / "sd").is_file())
         self.assertFalse((self.home / ".local" / "bin" / "sd").is_symlink())
+
+    def test_a_link_the_receipt_owns_moves_to_the_next_checkout(self):
+        """sd:1118: the switch to a serving checkout retargets the links the last install made."""
+        work = self.checkout_with_commands("sd", "sd-review", name="work")
+        serving = self.checkout_with_commands("sd", "sd-review")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(self.context_for(serving), out), 0, out.getvalue())
+        bin_dir = self.home / ".local" / "bin"
+        for name in ("sd", "sd-review"):
+            self.assertEqual((bin_dir / name).resolve(), (serving / "bin" / name).resolve())
+        self.assertEqual(self.receipt["checkout"], str(serving))
+        self.assertEqual(
+            [row["target"] for row in self.receipt["owned"] if row.get("kind") == "link"],
+            [str(serving / "bin" / name) for name in ("sd", "sd-review")],
+        )
+
+    def test_a_link_moved_since_the_receipt_is_still_foreign(self):
+        """Only a link still at the target the receipt records is the installer's to move."""
+        work = self.checkout_with_commands("sd", "sd-review", name="work")
+        serving = self.checkout_with_commands("sd", "sd-review")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        moved = self.home / ".local" / "bin" / "sd-review"
+        moved.unlink()
+        moved.symlink_to(self.home / "elsewhere")
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(self.context_for(serving), out), 1)
+        self.assertIn(f"error: {moved} exists and is not a link to", out.getvalue())
+        self.assertEqual((self.home / ".local" / "bin" / "sd").resolve(), (work / "bin" / "sd").resolve())
+
+    def test_a_failed_retarget_puts_the_moved_links_back(self):
+        work = self.checkout_with_commands("sd", "sd-review", name="work")
+        serving = self.checkout_with_commands("sd", "sd-review")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        real = os.symlink
+        calls = []
+
+        def second_fails(target, path, *args, **kwargs):
+            calls.append(path)
+            if len(calls) == 2:
+                raise OSError(28, "No space left on device")
+            return real(target, path, *args, **kwargs)
+
+        out = io.StringIO()
+        with unittest.mock.patch("os.symlink", side_effect=second_fails):
+            self.assertEqual(sd_install.cmd_user(self.context_for(serving), out), 1)
+        self.assertIn("No space left on device", out.getvalue())
+        bin_dir = self.home / ".local" / "bin"
+        for name in ("sd", "sd-review"):
+            self.assertEqual((bin_dir / name).resolve(), (work / "bin" / name).resolve(), name)
+        self.assertEqual(self.receipt["checkout"], str(work))
 
     def test_a_symlink_loop_at_a_target_is_foreign_and_a_recorded_one_is_left(self):
         """Review finding 3, measured rather than guarded: on the interpreter

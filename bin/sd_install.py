@@ -186,6 +186,15 @@ def config_home(home: Path, environ: dict[str, str]) -> Path:
     return xdg_root("XDG_CONFIG_HOME", home, environ, ".config")
 
 
+def serving_tree(home: Path, environ: dict[str, str]) -> Path:
+    """The dedicated clone `make setup` serves the machine from (sd:1118).
+
+    Under the data home, so it sits outside `~/repos`, where repo-sync would
+    read it as a checkout, and outside the worktree folder the lane cleans.
+    """
+    return xdg_root("XDG_DATA_HOME", home, environ, ".local", "share") / STATE_DIR / "serving"
+
+
 def receipt_path(home: Path, environ: dict[str, str]) -> Path:
     return state_home(home, environ) / STATE_DIR / RECEIPT_NAME
 
@@ -1147,23 +1156,28 @@ class Link:
     name: str
     path: Path
     target: Path
-    state: str  # "absent", "ours" or "foreign"
+    state: str  # "absent", "ours", "recorded" or "foreign"
 
 
 class LinkFailed(Exception):
     """A link could not be made; whatever this run linked has been unlinked."""
 
 
-def link_plan(checkout: Path, bin_dir: Path) -> list[Link]:
+def link_plan(checkout: Path, bin_dir: Path, recorded: dict[str, str] | None = None) -> list[Link]:
     """Classify `bin_dir/<name>` for every command, before anything is written.
 
     "Ours" is a symlink, absolute or relative, that resolves to this checkout's
-    copy; it is kept as it is, inode and all. Anything else at the path -- a
-    regular file, a dangling link, a link into another checkout -- is foreign,
-    and one foreign entry refuses the whole run. The plan runs first thing in
-    `cmd_user`, before the library is opened, because `expire_trials` writes
-    to the shared database and a refusal must leave nothing changed.
+    copy; it is kept as it is, inode and all. "Recorded" is a symlink still at
+    the target the receipt's link row for that path names: the last install
+    made it, `prune_links` could remove it, so this run may retarget it. That
+    is how the links follow an install to a serving checkout (sd:1118).
+    Anything else at the path -- a regular file, a dangling link, a link into
+    another checkout no receipt names -- is foreign, and one foreign entry
+    refuses the whole run. The plan runs first thing in `cmd_user`, before the
+    library is opened, because `expire_trials` writes to the shared database
+    and a refusal must leave nothing changed.
     """
+    recorded = recorded or {}
     plans: list[Link] = []
     for name in bin_commands(checkout):
         path = bin_dir / name
@@ -1172,6 +1186,8 @@ def link_plan(checkout: Path, bin_dir: Path) -> list[Link]:
             state = "absent"
         elif path.is_symlink() and _resolves_to(path, target):
             state = "ours"
+        elif path.is_symlink() and str(path) in recorded and _resolves_to(path, Path(recorded[str(path)])):
+            state = "recorded"
         else:
             state = "foreign"
         plans.append(Link(name, path, target, state))
@@ -1185,8 +1201,10 @@ def link_commands(plans: list[Link], bin_dir: Path, *, dry_run: bool = False) ->
     no bytes of its own, and a digest read through it would be the script's.
     An `OSError` on any link unlinks every link this call made and raises
     `LinkFailed`, so no link exists that no receipt names; the renders made
-    before this stand, and the next `--user` converges them. A checkout with
-    no commands links nothing and makes no directory.
+    before this stand, and the next `--user` converges them. A recorded link
+    is replaced by a rename over it, and a failure points every link this
+    call replaced back at its old target, so the old receipt still holds. A
+    checkout with no commands links nothing and makes no directory.
     """
     rows = [
         {"path": str(plan.path), "kind": "link", "target": str(plan.target)}
@@ -1195,6 +1213,7 @@ def link_commands(plans: list[Link], bin_dir: Path, *, dry_run: bool = False) ->
     if dry_run or not plans:
         return rows
     made: list[Path] = []
+    moved: list[tuple[Path, str]] = []
     for plan in plans:
         if plan.state == "ours":
             continue
@@ -1203,15 +1222,33 @@ def link_commands(plans: list[Link], bin_dir: Path, *, dry_run: bool = False) ->
         # line and rc 1, not a traceback (C-31).
         try:
             bin_dir.mkdir(parents=True, exist_ok=True)
-            os.symlink(plan.target, plan.path)
+            if plan.state == "recorded":
+                old = os.readlink(plan.path)
+                _replace_link(plan.path, plan.target)
+                moved.append((plan.path, old))
+            else:
+                os.symlink(plan.target, plan.path)
+                made.append(plan.path)
         except OSError as exc:
             for path in made:
                 path.unlink()
+            for path, old in moved:
+                _replace_link(path, Path(old))
             raise LinkFailed(
                 f"could not link {plan.path} ({exc.strerror or exc})"
             ) from exc
-        made.append(plan.path)
     return rows
+
+
+def _replace_link(path: Path, target: Path) -> None:
+    """Point the link at `path` to `target` in one rename, so no moment finds it missing."""
+    spare = path.with_name(f".{path.name}.sd-install")
+    spare.unlink(missing_ok=True)
+    try:
+        os.symlink(target, spare)
+        os.replace(spare, path)
+    finally:
+        spare.unlink(missing_ok=True)
 
 
 def prune_links(
@@ -2129,7 +2166,10 @@ def cmd_user(ctx: Context, out) -> int:
     # Before the library: `expire_trials` writes, and a refusal writes nothing.
     recorded = read_receipt(ctx.receipt)
     bin_dir = link_directory(ctx, recorded)
-    plans = link_plan(ctx.checkout, bin_dir)
+    plans = link_plan(ctx.checkout, bin_dir, {
+        row["path"]: row["target"] for row in owned_entries(recorded)
+        if row.get("kind") == "link" and isinstance(row.get("target"), str)
+    })
     for plan in plans:
         if plan.state == "foreign":
             print(
@@ -2679,9 +2719,14 @@ def cmd_status(ctx: Context, out) -> int:
 
 def _git(ctx: Context, args: list[str], timeout: float = GIT_TIMEOUT) -> tuple[int, str, str]:
     """`git -C <checkout> <args>`: exit, stdout, stderr; a git that cannot run or finish is exit 1 with the reason."""
+    return _git_in(ctx.checkout, args, timeout)
+
+
+def _git_in(directory: Path, args: list[str], timeout: float = GIT_TIMEOUT) -> tuple[int, str, str]:
+    """`_git` for a directory other than the checkout."""
     try:
         done = subprocess.run(  # nosec B603 - fixed argv, no shell
-            ["git", "-C", str(ctx.checkout), *args],
+            ["git", "-C", str(directory), *args],
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -2849,6 +2894,80 @@ def cmd_rollback(ctx: Context, out) -> int:
     return _activate(ctx, target, out)
 
 
+def _clone_serving_tree(ctx: Context, tree: Path, out) -> bool:
+    """Clone this checkout's origin into `tree`, detached at `origin/main`; False with the reason on `out`.
+
+    Built beside `tree` and renamed into place, so a clone cut short leaves
+    no half-made serving tree for the next run to mistake for one.
+    """
+    code, url, err = _git(ctx, ["remote", "get-url", "origin"])
+    if code or not url:
+        print(f"error: {ctx.checkout} has no origin remote to clone the serving checkout from{': ' + err if err else ''}",
+              file=out)
+        return False
+    if ctx.dry_run:
+        print(f"would clone {url} into {tree}, detach it at origin/main and render", file=out)
+        return True
+    spare = tree.with_name(f".{tree.name}.new")
+    shutil.rmtree(spare, ignore_errors=True)
+    spare.parent.mkdir(parents=True, exist_ok=True)
+    for where, args in ((spare.parent, ["clone", "--quiet", "--no-checkout", url, str(spare)]),
+                        (spare, ["checkout", "--quiet", "--detach", "refs/remotes/origin/main"])):
+        code, _, err = _git_in(where, args, timeout=PULL_TIMEOUT)
+        if code:
+            shutil.rmtree(spare, ignore_errors=True)
+            print(f"error: git {' '.join(args[:2])} failed for the serving checkout:\n{err}", file=out)
+            return False
+    # The `.venv` link below is the machine's, not the tree's: excluded here,
+    # so `--verify` and `--pull` never read it as somebody's work.
+    with open(spare / ".git" / "info" / "exclude", "a", encoding="utf-8") as exclude:
+        exclude.write("/.venv\n")
+    spare.rename(tree)
+    print(f"cloned {url} into {tree}", file=out)
+    return True
+
+
+def cmd_serve(ctx: Context, out) -> int:
+    """Serve this machine from a dedicated clone of `origin/main`; `make setup` runs it (sd:1118).
+
+    The operator ruled on 2026-09-30 that the commands are served from a
+    clean checkout nobody works in, which only `make setup` updates. The
+    first run clones it; every run then hands it to the clone's own
+    installer as `--pull`, which detaches it at the exact commit `origin/main`
+    names and renders from it. The clone's `.venv` is a link to the main
+    checkout's, where `make setup` provisions `sd_db`, so the served commands
+    find the library the same way a worktree does.
+    """
+    tree = serving_tree(ctx.home, ctx.environ)
+    if tree.resolve() == ctx.checkout.resolve():
+        print(f"error: {tree} is the serving checkout, and nobody works in it; "
+              "run `make setup` in your working checkout", file=out)
+        return 1
+    if tree.exists() and not (tree / ".git").is_dir():
+        print(f"error: {tree} is not a git checkout; move it aside and run `make setup` again", file=out)
+        return 1
+    if not tree.exists():
+        if not _clone_serving_tree(ctx, tree, out):
+            return 1
+        if ctx.dry_run:
+            return 0
+    elif ctx.dry_run:
+        print(f"would detach {tree} at origin/main and render", file=out)
+        return 0
+    code, common, _ = _git(ctx, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+    venv = tree / ".venv"
+    if not code and common and not venv.is_symlink() and not venv.exists():
+        venv.symlink_to(Path(common).parent / ".venv")
+    argv = [sys.executable, str(tree / "bin" / "sd_install.py"), "--pull"]
+    if ctx.sandboxed:
+        argv += ["--home", str(ctx.home)]
+    if ctx.bin_dir is not None:
+        argv += ["--bin-dir", str(ctx.bin_dir)]
+    done = subprocess.run(argv, env=ctx.environ, capture_output=True, text=True, check=False)  # nosec B603 - fixed argv
+    print(done.stdout + done.stderr, file=out, end="")
+    return done.returncode
+
+
 def cmd_uninstall(ctx: Context, out) -> int:
     """Remove exactly what the receipt says we wrote, and nothing else.
 
@@ -2959,8 +3078,9 @@ def cmd_repo(ctx: Context, repo: Path, out, reviewers: str | None = None) -> int
 # ------------------------------------------------------------------------ CLI
 
 USAGE = """\
-usage: python3 bin/sd_install.py (--user | --status | --verify | --pull | --rollback | --uninstall
-                   | --adopt-legacy | --repo [PATH]) [--dry-run] [--home DIR] [--bin-dir DIR]
+usage: python3 bin/sd_install.py (--user | --status | --verify | --pull | --rollback | --serve
+                   | --uninstall | --adopt-legacy | --repo [PATH]) [--dry-run] [--home DIR]
+                   [--bin-dir DIR]
 
   --user           render every sd-* surface into this machine's platform homes
                    and link the bin/ commands into the link directory
@@ -2971,6 +3091,8 @@ usage: python3 bin/sd_install.py (--user | --status | --verify | --pull | --roll
                    a detached serving tree moves to the exact origin/main commit
   --rollback       return a detached serving tree to the receipt's previousCommit
                    and re-render
+  --serve          clone the serving checkout if it is missing, then --pull in it;
+                   `make setup` runs this last
   --uninstall      remove exactly what the receipt records having written
   --adopt-legacy   delete the old fleet installer's successor-less renders (M1)
   --repo [PATH]    write the marked block into PATH/CLAUDE.local.md (default: .)
@@ -2983,12 +3105,12 @@ usage: python3 bin/sd_install.py (--user | --status | --verify | --pull | --roll
 
   --dry-run        print what would happen; write nothing
   --home DIR       treat DIR as the home directory (tests and scratch installs)
-  --bin-dir DIR    with --user, --pull or --rollback, link the bin/ commands into DIR
+  --bin-dir DIR    with --user, --pull, --rollback or --serve, link the bin/ commands into DIR
                    (default: the directory the last run linked into, else
                    ~/.local/bin); the installer never edits PATH
 """
 
-MODES = ("user", "status", "verify", "pull", "rollback", "uninstall", "adopt-legacy", "repo",
+MODES = ("user", "status", "verify", "pull", "rollback", "serve", "uninstall", "adopt-legacy", "repo",
          "provision-library")
 
 
@@ -3085,7 +3207,7 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
     # (C-30): a receipt is a file anyone can edit, and a stale or tampered
     # `binDir` would otherwise be written to unchecked. Refused by name, and
     # `--bin-dir` is the way past it (review 1, finding 2).
-    if bin_dir is None and mode in ("user", "pull", "rollback") and ctx.sandboxed:
+    if bin_dir is None and mode in ("user", "pull", "rollback", "serve") and ctx.sandboxed:
         recorded_dir = link_directory(ctx, read_receipt(ctx.receipt))
         if not _is_within(recorded_dir.resolve(), home.resolve()):
             print(
@@ -3113,6 +3235,8 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
         return cmd_pull(ctx, out)
     if mode == "rollback":
         return cmd_rollback(ctx, out)
+    if mode == "serve":
+        return cmd_serve(ctx, out)
     if mode == "uninstall":
         return cmd_uninstall(ctx, out)
     if mode == "adopt-legacy":

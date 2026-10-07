@@ -177,6 +177,13 @@ SETUP_PYTHON = $(SETUP_VENV)/bin/python
 # `venv` accepts a directory that already exists and leaves files it did not
 # write alone -- measured, not assumed -- which is why the marker survives
 # the step that rebuilds the interpreter around it.
+#
+# The last step serves the machine (sd:1118). The operator ruled on 2026-09-30
+# that the commands run from a clean clone of origin/main that nobody works
+# in and that only `make setup` updates: `--serve` clones it on the first run
+# and moves it to the exact commit origin/main names on every run, after the
+# environment its `.venv` links to is complete. `SERVE=no` skips it, for a
+# rollback that should stay put. README "A dedicated serving tree" has the rest.
 setup:
 	@venv="$(SETUP_VENV)"; \
 	  [ -n "$$venv" ] || { printf '%s\n' "error: VENV is empty; there is no path to provision" >&2; exit 1; }; \
@@ -196,6 +203,9 @@ setup:
 	cp requirements-dev.txt requirements-security.txt "$(SETUP_VENV)/.sd-requirements.new/"
 	@mv "$(SETUP_VENV)/.sd-requirements.new" "$(SETUP_VENV)/sd-requirements"
 	@rm -f "$(SETUP_VENV)/sd-provisioning"
+ifneq ($(SERVE),no)
+	"$(SETUP_PYTHON)" bin/sd_install.py --serve
+endif
 
 # The pre-commit tier of sd:431. `hooks/pre-commit` runs Ruff over the staged
 # Python and the two whole-tree test passes that walk the tree, with a

@@ -1,7 +1,7 @@
 ---
 title: Serve the pack from a clean tree that moves by commit
 created: 2026-10-03
-branch: installer-serving-tree
+branch: feat/serving-checkout-1118
 item: sd:1118
 ---
 # PRD — serving tree
@@ -36,10 +36,13 @@ checkout of `origin/main` that only setup updates, and that nobody works in.
 4. Refresh and rollback are documented and tested. The receipt records
    `previousCommit`, and `--rollback` returns to it.
 5. Default paths do not change. A checkout on `main` keeps today's `--pull`.
+6. `make setup` creates and refreshes the serving tree (`--serve`), so no
+   other step moves it. The receipt's command links follow the install there.
 
 ## Out of scope
 
-- Creating the serving clone, running an install and changing launchd: these
-  are operator steps, listed in the pull request.
+- Running `make setup` on the operator's machine, and pointing
+  `~/bin/common` at the serving tree: operator steps, listed in the pull
+  request.
 - The merge lane's fast-forward of the working checkout, and the system
   repository's `bin-links.sh` default (`SD_PACK_ROOT`).

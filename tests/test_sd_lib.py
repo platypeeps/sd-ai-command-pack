@@ -1022,6 +1022,13 @@ class SetupStaysLocalTests(unittest.TestCase):
         recipe = self.make("setup", f"VENV={self.tmp}/chosen")
         self.assertIn(f'-m venv "{self.tmp}/chosen"', recipe)
 
+    def test_setup_ends_by_serving_from_the_dedicated_checkout(self) -> None:
+        """sd:1118: `make setup` is what refreshes the serving checkout; `SERVE=no` skips it."""
+
+        recipe = self.make("setup")
+        self.assertTrue(recipe.rstrip().endswith('".venv/bin/python" bin/sd_install.py --serve'), recipe)
+        self.assertNotIn("--serve", self.make("setup", "SERVE=no"))
+
 
 class BorrowedEnvironmentTests(unittest.TestCase):
     """A worktree borrows the main checkout's virtualenv only when it fits.

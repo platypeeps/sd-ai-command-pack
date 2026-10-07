@@ -4,8 +4,8 @@ The requirements are in [prd.md](prd.md).
 
 ## Shape
 
-A serving tree is a clean clone on a detached `HEAD`, for example
-`~/.local/share/sd-ai-command-pack/serving`. It sits outside `~/repos`, so
+A serving tree is a clean clone on a detached `HEAD`, at
+`${XDG_DATA_HOME:-~/.local/share}/sd-ai-command-pack/serving`. It sits outside `~/repos`, so
 repo-sync never reads it as a checkout. It is a separate clone, not a
 worktree: nothing lists it as active work, and worktree cleanup cannot reach
 it. It is detached because activation names a commit, not a branch.
@@ -48,6 +48,26 @@ copy halfway through.
   commit it started from, and the receipt to its bytes before the run. The
   commands served and the receipt never disagree, so `--rollback` after a
   failed update still starts from the commit the receipt names.
+
+## `make setup` serves (sd:1118, second pass)
+
+The ruling makes `make setup` the only step that moves the serving tree.
+Its last line runs `bin/sd_install.py --serve` from the working checkout:
+
+- **Clone.** A missing tree is cloned from the working checkout's `origin`
+  into a spare directory beside it, detached at `origin/main`, then renamed
+  into place. A clone cut short leaves no half-made tree.
+- **Library.** The tree's `.venv` is a link to the main checkout's `.venv`,
+  where `make setup` provisions `sd_db`. The clone's `info/exclude` names
+  it, so `--verify` stays clean. A `.venv` already there is left alone.
+- **Hand-over.** `--serve` runs the tree's own installer as `--pull`, so the
+  activation is the tree's code, as in the first pass.
+- **Links.** `link_plan` gains a fourth state, `recorded`: a link the
+  receipt names, still at its recorded target. The install moves it to the
+  new checkout with one rename, and puts it back on a failure. Any other
+  link stays foreign and refuses the run.
+- **Opt-out.** `make setup SERVE=no` provisions without moving the tree,
+  for a rollback that should stay put.
 
 ## Verification
 
