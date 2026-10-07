@@ -164,7 +164,7 @@ is `accept`. It has six parts:
 | Part | Content | Refuses on a difference |
 |---|---|---|
 | `path` | the gate's `PATH` entries in order, each `$HOME` prefix written as `~` | No: recorded. The tools it selects are compared by bytes |
-| `tools` | sha256 of each name in `OFFLOAD_TOOLS`, resolved on that `PATH`, and of each tool `gate_binding` resolves; a rustup proxy binds the toolchain binary it runs beside its own bytes (`resolution`, sd:2881) | For `OFFLOAD_DECIDING_TOOLS` and the check's own names, or a docs-only scope's declared `docs_tools` alone; another tool (`git`, `uv`, `npm` when the check does not name it) is recorded |
+| `tools` | sha256 of each name in `OFFLOAD_TOOLS`, resolved on that `PATH`, and of each tool `gate_binding` resolves; `cargo` and `rustc` bind their `-vV` build lines beside their bytes (`resolution`, sd:2881) | For `OFFLOAD_DECIDING_TOOLS` and the check's own names, or a docs-only scope's declared `docs_tools` alone; another tool (`git`, `uv`, `npm` when the check does not name it) is recorded |
 | `python` | sha256 of the bytes of `sys.executable`, resolved, and `sys.version` | Yes: the interpreter that runs `sd-check`, even when the gate was started through a virtualenv or an explicit path that `PATH`'s `python3` does not name |
 | `home_files` | sha256 of each file in `OFFLOAD_HOME_FILES` under `HOME`, or `"absent"` | No: recorded |
 | `threads` | `sd_gate_slots.thread_caps`: the `CARGO_BUILD_JOBS`, `RUST_TEST_THREADS` and `NEXTEST_TEST_THREADS` a check gets under the machine's slot count and cores, as `machine_binding` binds them (sd:2782, sd:2872) | No: recorded. They follow the core count |
@@ -183,17 +183,19 @@ difference is recorded by part and name in the merge's `local_gate`, as
 `satellite.view_differences`.
 
 A rustup proxy's bytes name no toolchain: `rust-toolchain.toml` in the tree
-picks it (sd:2881). For a name in `RUSTUP_TOOLS`, the view binds the binary
-that `rustup which` names in the check's worktree beside the `PATH` tool's own
-bytes, when that tool proves it dispatches through rustup: under a
-`RUSTUP_TOOLCHAIN` that names a probe toolchain, it runs the probe's binary.
-The wrapper's bytes stay bound, since they decide what it adds to a check's
-own arguments. A `PATH` tool that is no proxy, such as Homebrew's `cargo`,
-ignores the pin and binds its own bytes only, even when it prints the pinned
-version. `resolution` names the way each side took, `rustup` or `path`, and a
-refusal on that tool names both. A hub whose `PATH` finds Homebrew's `cargo`
-before the rustup wrapper refuses a satellite that ran the wrapper: the hub's
-own check would run another compiler.
+picks it (sd:2881). For `cargo` and `rustc` (`VERSIONED_TOOLS`), the view binds
+the build lines of `<tool> -vV` beside the `PATH` tool's own bytes. It runs
+that tool as the gate runs it: in the check's worktree, under the gate's
+environment, through any wrapper. The bound lines are the first one, `release`,
+`commit-hash`, `commit-date`, `host` and `LLVM version`; `os:` and the library
+lines follow the machine. `resolution` names each tool's release line, or
+`path` when `-vV` failed, and a refusal on that tool names both sides. A hub
+whose `PATH` finds Homebrew's `cargo` 1.99.0 before the rustup wrapper refuses
+a satellite that ran the pinned 1.98.1: release and commit-hash differ.
+
+The threat model is one operator's two machines. The binding catches
+accidental toolchain drift; it does not defend against a wrapper built to lie.
+One commit-hash is one compiler source.
 
 A docs-only scope's docs command can reach a compiler through `make`, as
 `cargo doc` or a doctest does, so it compares `OFFLOAD_DECIDING_TOOLS` too.

@@ -59,8 +59,8 @@ the offload view (`offload_view`) and the pack digest. The view refuses only on
 what decides the result (`offload_differences`, sd:2862): the interpreter, the
 toolchain's bytes and the allowlisted variables but `SD_` and the thread caps.
 A docs-only scope that declares `docs_tools` refuses on those alone. A rustup
-proxy's bytes name no toolchain: the view binds the binary that `rustup which`
-picks in the check's tree, which `rust-toolchain.toml` pins, beside them (sd:2881).
+proxy's bytes name no toolchain: the view binds `cargo -vV` and `rustc -vV`,
+run in the check's tree, beside them (`tool_version`, sd:2881).
 `PATH` order, other tools, `HOME` files and the caps it names in the merge's
 `view_differences`, since two real machines always differ in them. It
 never compares the machine part or `environment_sha256`, which hold the
@@ -110,12 +110,10 @@ import itertools
 import json
 import os
 import pathlib
-import secrets
 import shutil
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 from contextlib import closing
 from typing import Any, Iterable, Mapping
@@ -149,9 +147,11 @@ OFFLOAD_TOOLS = ("sh", "bash", "make", "python3", "git", "cc", "c++", "clang", "
 #: Of those, the toolchain whose bytes decide a check's result, so a hub refuses on them, as on the check's own names
 #: (sd:2862). Another tool, `PATH`, `HOME` files and thread caps differ between any two machines: recorded, not refused.
 OFFLOAD_DECIDING_TOOLS = ("sh", "bash", "make", "python3", "cc", "c++", "clang", "cargo", "rustc", "node")
-#: Names a rustup proxy dispatches by the tree's `rust-toolchain.toml`: a view binds the toolchain binary that
-#: `rustup which` picks in the tree beside the proxy, whose bytes name no toolchain (sd:2881).
-RUSTUP_TOOLS = ("cargo", "rustc", "rustdoc", "rustfmt", "cargo-clippy", "clippy-driver")
+#: Names whose `-vV` build lines a view binds beside their bytes (sd:2881): a rustup proxy's bytes name no toolchain.
+#: Only these two: `cargo-clippy -vV` runs clippy, and `rustdoc` and `clippy-driver` answer as `rustc` does.
+VERSIONED_TOOLS = ("cargo", "rustc")
+#: The `-vV` lines that name a compiler build; `os:` and the library lines follow the machine, not the compiler.
+VERSION_KEYS = ("release", "commit-hash", "commit-date", "host", "LLVM version")
 #: Tool configuration under `HOME` that an offload view binds, by path relative to `HOME`.
 OFFLOAD_HOME_FILES = (".gitconfig", ".config/git/config", ".cargo/config.toml", ".npmrc", ".config/pip/pip.conf",
                       ".config/uv/uv.toml")
@@ -351,8 +351,8 @@ def offload_view(environment: Mapping[str, str], names: Iterable[str] = (),
     `machine_binding` binds too; `variables`, the sha256 of each `offload_variable`'s value. A variable outside
     that list is not compared, and neither its value nor its digest reaches the hub (sd:2782).
     `names` are the check's own executables; one with a relative folder lives in the tree, which `inputs` binds.
-    A `RUSTUP_TOOLS` name that `rustup_resolved` finds dispatching in `tree`, the check's worktree, binds the
-    toolchain binary it runs beside its own bytes, and `resolution` names `rustup` or `path` per name (sd:2881).
+    A `VERSIONED_TOOLS` name binds `tool_version` in `tree`, the check's worktree, beside its own bytes, and
+    `resolution` names its release line, or `path` where `-vV` answered nothing (sd:2881).
     """
     try:
         home = os.path.normpath(environment["HOME"]) if environment.get("HOME") else None
@@ -385,50 +385,37 @@ def offload_view(environment: Mapping[str, str], names: Iterable[str] = (),
 
 def view_tool(name: str, search: str, environment: Mapping[str, str],
               tree: pathlib.Path | None) -> tuple[str | None, str | None]:
-    """`(digest, resolution)` of `name` on `search`: None for one that does not resolve, and `resolution` None outside `RUSTUP_TOOLS`."""
+    """`(digest, resolution)` of `name` on `search`: None for one that does not resolve, and `resolution` None outside `VERSIONED_TOOLS`."""
     found = shutil.which(name, path=search)
     if not found:
         return None, None
-    if name not in RUSTUP_TOOLS:
-        return _content_digest(found), None
-    binary = rustup_resolved(name, found, environment, tree) if tree else None
-    # A proxy's own bytes decide how it dispatches; the toolchain binary, what it runs (sd:2881).
-    return (f"{_content_digest(found)} {_content_digest(binary)}", "rustup") if binary else (_content_digest(found), "path")
+    digest = _content_digest(found)
+    if name not in VERSIONED_TOOLS:
+        return digest, None
+    version = tool_version(found, environment, tree) if tree else None
+    if version is None:
+        return digest, "path"
+    return f"{digest} {hashlib.sha256(version.encode()).hexdigest()}", version.splitlines()[0]
 
 
-def rustup_resolved(name: str, found: str, environment: Mapping[str, str], tree: pathlib.Path) -> str | None:
-    """The binary `rustup which <name>` names in `tree`, when `found`, `name` on `PATH`, runs it; else None (sd:2881).
+def tool_version(found: str, environment: Mapping[str, str], tree: pathlib.Path) -> str | None:
+    """The first line and `VERSION_KEYS` lines of `found -vV`, run as the gate runs it; None when it fails (sd:2881).
 
-    A rustup proxy, or a wrapper that execs one, has the same bytes whatever toolchain it runs, and a
-    `rust-toolchain.toml` in `tree` picks that toolchain. A `PATH` tool that is no proxy, such as Homebrew's
-    `cargo`, ignores the pin and keeps its own bytes: `found` counts as a proxy only when it runs a probe
-    toolchain's `name` that `RUSTUP_TOOLCHAIN` names. Runs under `environment` with `RUSTUP_AUTO_INSTALL=0`.
+    It runs the `PATH` tool in `tree` under the gate's `environment`, so a wrapper's settings and the tree's
+    `rust-toolchain.toml` choose the toolchain as they do for the check; `RUSTUP_AUTO_INSTALL=0` installs nothing.
+    Threat model: the hub and the satellite are one operator's machines. This catches accidental toolchain drift,
+    such as a Homebrew `cargo` ahead of the rustup proxy on `PATH`; it does not defend against a wrapper built to
+    lie. One commit-hash is one compiler source.
     """
-    rustup = shutil.which("rustup", path=environment.get("PATH", ""))
-    if rustup is None:
+    try:
+        result = subprocess.run([found, "-vV"], cwd=tree, env={**environment, "RUSTUP_AUTO_INSTALL": "0"}, text=True,
+                                capture_output=True, timeout=60, check=False)
+    except (OSError, subprocess.SubprocessError):
         return None
-    env = {**environment, "RUSTUP_AUTO_INSTALL": "0"}
-
-    def output(argv: list[str], **extra: str) -> str | None:
-        try:
-            result = subprocess.run(argv, cwd=tree, env={**env, **extra}, text=True, capture_output=True, timeout=60,
-                                    check=False)
-        except (OSError, subprocess.SubprocessError):
-            return None
-        return result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
-
-    # Proof that `found` dispatches through rustup with its arguments unchanged: under a `RUSTUP_TOOLCHAIN` that
-    # names a probe toolchain, it runs the probe's `name`. Another build that prints the same version does not.
-    with tempfile.TemporaryDirectory() as probe:
-        nonce = secrets.token_hex(8)
-        stub = pathlib.Path(probe, "bin", name)
-        stub.parent.mkdir()
-        stub.write_text(f'#!/bin/sh\necho "{nonce} $*"\n', encoding="utf-8")
-        stub.chmod(0o755)
-        if output([found, "--version"], RUSTUP_TOOLCHAIN=probe) != f"{nonce} --version":
-            return None
-    binary = output([rustup, "which", name])
-    return binary if binary is not None and os.path.isabs(binary) else None
+    lines = result.stdout.splitlines()
+    if result.returncode != 0 or not lines:
+        return None
+    return "\n".join([lines[0], *(line for line in lines[1:] if line.split(":", 1)[0] in VERSION_KEYS)])
 
 
 def offload_variable(name: str) -> bool:
