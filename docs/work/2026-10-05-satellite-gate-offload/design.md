@@ -168,7 +168,7 @@ is `accept`. It has six parts:
 | `python` | sha256 of the bytes of `sys.executable`, resolved, and `sys.version` | Yes: the interpreter that runs `sd-check`, even when the gate was started through a virtualenv or an explicit path that `PATH`'s `python3` does not name |
 | `home_files` | sha256 of each file in `OFFLOAD_HOME_FILES` under `HOME`, or `"absent"` | No: recorded |
 | `threads` | `sd_gate_slots.thread_caps`: the `CARGO_BUILD_JOBS`, `RUST_TEST_THREADS` and `NEXTEST_TEST_THREADS` a check gets under the machine's slot count and cores, as `machine_binding` binds them (sd:2782, sd:2872) | No: recorded. They follow the core count |
-| `variables` | sha256 of the value of each allowlisted variable `gate_environment` keeps, with the `$HOME` prefix written as `~` first | Yes, but for the pack's own `SD_` settings and the thread caps a gate holder sets (`CPU_VARIABLES`), which are recorded |
+| `variables` | sha256 of the value of each allowlisted variable `gate_environment` keeps, with the `$HOME` prefix written as `~` first | Yes, but for the slot holder's `SD_GATE_` settings and the thread caps it sets (`CPU_VARIABLES`), which are recorded |
 
 The view first refused on any difference. The first satellite merge
 (sd:2844, sd:2862) showed that two real machines never match. The hub's
@@ -201,7 +201,7 @@ digest of a short password can be guessed offline.
 
 | Name or prefix | Why the check reads it |
 |---|---|
-| `SD_` | the pack's settings: `SD_LOCAL_GATE`, `SD_GATE_SLOTS`, `SD_GATE_CACHE_DIR` and the rest that `sd-check`, `sd_gate_slots` and `sd_gate_cache` read |
+| `SD_LOCAL_GATE`, `SD_GATE_` | the gate's own settings: `SD_LOCAL_GATE`, which the gate sets, and `SD_GATE_SLOTS`, `SD_GATE_CACHE_DIR` and the rest that `sd_gate_slots` and `sd_gate_cache` read. No other `SD_` name reaches the check, so a check cannot read an `SD_SKIP_TESTS` on one machine only (sd:2862) |
 | `CI`, `GITHUB_ACTIONS` | `sd_gate_slots.configured` takes no slot under either |
 | `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME` | where `machine_settings`, `sd_gate_cache.cache_root` and `sd_gate_slots.directory` look |
 | `MAKEFLAGS`, `MAKEFILES`, `MFLAGS` | what `make` runs |
@@ -327,7 +327,23 @@ guarantees that the check passes on the hub's own image:
   and the check's own names;
 - a tool the hub cannot resolve, which is recorded but not compared;
 - tool configuration under `HOME`, the `PATH` order, the thread caps and the
-  pack's `SD_` settings, which are recorded but not compared (sd:2862);
+  slot holder's `SD_GATE_` settings, which are recorded but not compared
+  (sd:2862). Three named vectors remain, each a file or tool that can change
+  what passes while every compared byte is equal:
+  - `~/.cargo/config.toml`: a `runner` or `rustflags` key can run the tests
+    under another program, or build them otherwise;
+  - `npm` and `uv` when a Makefile or script calls them: resolution and
+    lock handling can install other dependencies under equal `node` or
+    `python3` bytes;
+  - git configuration (`~/.gitconfig`, `~/.config/git/config`): hooks, filters
+    and attributes can change what a test reads.
+
+  Binding them was tried first, and the first satellite merge (sd:2844) showed
+  that two machines always differ in them. So each difference is named in the
+  merge's `local_gate` as `satellite.view_differences`, by part and file or
+  tool name, and the operator sees on every satellite merge what was not bound.
+  The trust rule trusts the operator's own node for these, as it does for its
+  honesty (below);
 - before step 2a, the whole environment;
 - inputs outside the repository on the satellite: an external makefile, a
   tool's own files, machine state, a network answer.

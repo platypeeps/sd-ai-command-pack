@@ -90,11 +90,17 @@ class OffloadView(unittest.TestCase):
         (self.home("sat") / ".cargo").mkdir()
         (self.home("sat") / ".cargo" / "config.toml").write_text("[build]\n", encoding="utf-8")
         theirs = self.view("sat", CARGO_BUILD_JOBS="4", NEXTEST_TEST_THREADS="4", SD_GATE_POOL_SIZE="2")
-        ours = self.view("hub", SD_NOTION_PRIVATE_FOLDER="/n")
+        ours = self.view("hub", SD_NOTION_PRIVATE_FOLDER="/n")  # scrubbed: no check sees it, so it is not compared
         self.assertEqual(self.recorded(theirs, ours), [
             ("tools", "git"), ("tools", "uv"), ("home_files", ".cargo/config.toml"), ("home_files", ".gitconfig"),
-            ("variables", "CARGO_BUILD_JOBS"), ("variables", "NEXTEST_TEST_THREADS"), ("variables", "SD_GATE_POOL_SIZE"),
-            ("variables", "SD_NOTION_PRIVATE_FOLDER")])
+            ("variables", "CARGO_BUILD_JOBS"), ("variables", "NEXTEST_TEST_THREADS"), ("variables", "SD_GATE_POOL_SIZE")])
+
+    def test_an_sd_variable_the_gate_does_not_set_never_reaches_the_check(self) -> None:
+        """sd:2862 review: a check that reads `SD_SKIP_TESTS` could skip its tests on one machine only; it sees nothing."""
+        kept = sd_gate_receipts.offload_environment(
+            sd_gate_run.gate_environment(self.tmp / "repo", self.environ("sat", SD_SKIP_TESTS="1", SD_GATE_SLOTS="2")))
+        self.assertNotIn("SD_SKIP_TESTS", kept)
+        self.assertEqual((kept["SD_LOCAL_GATE"], kept["SD_GATE_SLOTS"]), ("1", "2"))
 
     def test_a_check_named_tool_outside_the_toolchain_refuses(self) -> None:
         """`npm test` decides its own result, so `npm` refuses when the check names it, and is recorded when not."""

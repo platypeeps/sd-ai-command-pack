@@ -468,8 +468,9 @@
   satellite's shell order `PATH` apart, `git` and `uv` differ by build, `HOME` files by login, thread caps by core
   count. It now refuses only on what decides the result: the interpreter, the toolchain's bytes (`sh`, `bash`,
   `make`, `python3`, `cc`, `c++`, `clang`, `cargo`, `rustc`, `node`) and the check's own tools, and the allowlisted
-  variables but the pack's `SD_` settings and the thread caps. The merge's `local_gate` names every other
-  difference in `satellite.view_differences`. Rows written before keep the same view and need no move.
+  variables but the slot holder's `SD_GATE_` settings and the thread caps. The merge's `local_gate` names every
+  other difference in `satellite.view_differences`. Rows written before keep the same view and need no move.
+  An opted-in repository's check no longer sees any `SD_` variable but `SD_LOCAL_GATE` and `SD_GATE_*`.
 
 - **A capped gate holder caps cargo-nextest too (sd:2872).**
   It sets `NEXTEST_TEST_THREADS` to its share beside `RUST_TEST_THREADS`, which nextest ignores, so a nextest

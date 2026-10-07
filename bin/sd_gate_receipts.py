@@ -151,20 +151,21 @@ OFFLOAD_HOME_FILES = (".gitconfig", ".config/git/config", ".cargo/config.toml", 
 #: `DEVELOPER_DIR` the compiler, flags and SDK that `make`'s implicit rules and `xcrun` choose; `TZ` the clock a test
 #: reads; `BASH_ENV` and `ENV` what a non-interactive shell sources; the `GIT_` names which repository `git` acts on;
 #: the `XDG_` folders where the machine config, slot locks and cargo cache live (`machine_settings`, `directory`,
-#: `cache_root`); `NO_COLOR`, which the gate sets itself (`sd_gate_run.NO_COLOUR_ENVIRONMENT`).
-OFFLOAD_VARIABLES = ("CI", "GITHUB_ACTIONS", "LANG", "NO_COLOR", "MAKEFLAGS", "MAKEFILES", "MFLAGS",
+#: `cache_root`); `NO_COLOR` and `SD_LOCAL_GATE`, which the gate sets itself (`sd_gate_run.NO_COLOUR_ENVIRONMENT`).
+OFFLOAD_VARIABLES = ("CI", "GITHUB_ACTIONS", "LANG", "NO_COLOR", "SD_LOCAL_GATE", "MAKEFLAGS", "MAKEFILES", "MFLAGS",
                      "CC", "CXX", "CPP", "AR", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "LDLIBS", "PKG_CONFIG_PATH",
                      "MACOSX_DEPLOYMENT_TARGET", "SDKROOT", "DEVELOPER_DIR", "TZ", "BASH_ENV", "ENV",
                      "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
                      "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_EXEC_PATH", "GIT_CEILING_DIRECTORIES",
                      "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME")
-#: ... and by prefix: `SD_` the pack's own settings; `NEXTEST_`, `CARGO_` and `RUST` (`RUSTFLAGS`, `RUSTUP_TOOLCHAIN`,
+#: ... and by prefix: `SD_GATE_` the slot holder's and gate cache's own settings, and no other `SD_` name, so a
+#: check cannot read an `SD_SKIP_TESTS` on one machine only (sd:2862); `NEXTEST_`, `CARGO_` and `RUST` (`RUSTFLAGS`, `RUSTUP_TOOLCHAIN`,
 #: `RUST_TEST_THREADS`) a Rust check; `PYTHON`, `PYTEST_` and `COVERAGE_` a Python one (`PYTEST_ADDOPTS` selects
 #: tests); `TASK_` a Taskfile's; `DYLD_` and `LD_` the libraries every tool loads; `LC_` the locale; `UV_`, `PIP_`,
 #: `NPM_CONFIG_`, `NODE_` and `GIT_CONFIG` the bound tools, as their `OFFLOAD_HOME_FILES` do. Any other variable,
 #: such as a per-login `__CF_USER_TEXT_ENCODING`, `SSH_AUTH_SOCK` or `TMPDIR`, or a cron job's, is neither compared
 #: nor stored, and no check in an opted-in repository sees it (`offload_environment`).
-OFFLOAD_VARIABLE_PREFIXES = ("SD_", "NEXTEST_", "CARGO_", "RUST", "PYTHON", "PYTEST_", "COVERAGE_", "TASK_", "DYLD_",
+OFFLOAD_VARIABLE_PREFIXES = ("SD_GATE_", "NEXTEST_", "CARGO_", "RUST", "PYTHON", "PYTEST_", "COVERAGE_", "TASK_", "DYLD_",
                              "LD_", "LC_", "UV_", "PIP_", "NPM_CONFIG_", "NODE_", "GIT_CONFIG")
 #: What an opted-in repository's check keeps beside those: the view binds what `HOME` and `PATH` select, and `USER` names
 #: the login, as `HOME` does.
@@ -426,8 +427,8 @@ def offload_differences(theirs: Any, ours: Any, names: Iterable[str] = ()) -> li
 
     Parts compare in the order `path`, `tools`, `python`, `home_files`, `threads`, `variables`. A difference refuses
     only where it decides what the check ran (sd:2862): `python`, a tool in `OFFLOAD_DECIDING_TOOLS` or `names` (the
-    check's own executables), and a variable other than the pack's own `SD_` settings and the thread caps a gate
-    holder sets (`sd_gate_slots.CPU_VARIABLES`). `name` is the first differing `PATH` entry (the satellite's, or the
+    check's own executables), and a variable other than the slot holder's `SD_GATE_` settings and the thread caps it
+    sets (`sd_gate_slots.CPU_VARIABLES`). `name` is the first differing `PATH` entry (the satellite's, or the
     hub's past the satellite's end), tool, `python` field, file, thread variable or variable. A tool the hub cannot
     resolve is not compared. A view that is not one, or a part of the wrong shape or missing, differs with no name.
     """
@@ -439,7 +440,7 @@ def offload_differences(theirs: Any, ours: Any, names: Iterable[str] = ()) -> li
         if part == "tools":
             return name is None or name in deciding
         if part == "variables":
-            return name is None or not (name.startswith("SD_") or name in sd_gate_slots.CPU_VARIABLES)
+            return name is None or not (name.startswith("SD_GATE_") or name in sd_gate_slots.CPU_VARIABLES)
         return part == "python"
 
     found = []

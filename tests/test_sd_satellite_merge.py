@@ -87,12 +87,12 @@ class GateCompare(rows.SatelliteFixture):
         rewrite(self.database, self.key, offload_view={
             **view, "threads": {"RUST_TEST_THREADS": "1"}, "path": ["/elsewhere", *view["path"]],
             "home_files": {**view["home_files"], ".npmrc": "0" * 64}, "tools": {**view["tools"], "git": "0" * 64},
-            "variables": {**view["variables"], "SD_NOTION_PRIVATE_FOLDER": "0" * 64}})
+            "variables": {**view["variables"], "SD_GATE_POOL_SIZE": "0" * 64}})
         result = self.compare()
         self.assertEqual((result["status"], self.runs), ("success", 1))
         found = [(miss["part"], miss["name"]) for miss in result["satellite"]["view_differences"]]
         self.assertEqual([miss for miss in found if miss[0] != "threads"], [
-            ("path", "/elsewhere"), ("tools", "git"), ("home_files", ".npmrc"), ("variables", "SD_NOTION_PRIVATE_FOLDER")])
+            ("path", "/elsewhere"), ("tools", "git"), ("home_files", ".npmrc"), ("variables", "SD_GATE_POOL_SIZE")])
         self.assertIn(("threads", "RUST_TEST_THREADS"), found)
         rewrite(self.database, self.key, offload_view={name: part for name, part in view.items() if name != "threads"})
         self.assertIn({"part": "threads", "name": None}, self.compare()["satellite"]["view_differences"])
