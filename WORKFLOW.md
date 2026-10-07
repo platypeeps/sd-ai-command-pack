@@ -573,6 +573,13 @@ which the installer places in `~/.claude/agents`.
   table below is who does what. On a satellite, `sd-ship merge` and the queue
   verbs (`lane enqueue`, `list`, `cancel`, `move`, `hold`, `release`) refuse
   with `hub_only` before they read a row (sd:2795).
+- **Large uncommitted data goes under the bulk root (sd:1792).** When
+  `sd.bulk_storage_root` names a folder, put run outputs, logs, captures,
+  agent scratch evidence and large downloaded fixtures under
+  `<root>/<repository>/`, not in the checkout. Keep build output, such as
+  Cargo's `target/` or `node_modules/`, and data whose mode or owner matters
+  on the system disk: a bulk volume may be ejected mid-build, and a volume
+  mounted `noowners` reports every file as yours. Unset, nothing moves.
 - **Test one version per language, the latest stable (Python 3.14, Node
   26), in CI and locally; no version matrices.**
 
@@ -905,6 +912,8 @@ The reserved `sd` namespace declares four settings:
   Absence reads 40. `SD_GATE_CACHE_GB` overrides it for one run. It grants nothing.
 - `sd.lane_root`: the folder that holds each repository's `sd-ship lane` queue, as `<root>/<repository>/lane/queue/`.
   Absence reads `$XDG_STATE_HOME/sd/lanes`. `SD_LANE_ROOT` overrides it. It grants nothing.
+- `sd.bulk_storage_root`: the folder for large uncommitted data, as `<root>/<repository>/`; see
+  [Parallel work](#parallel-work). Absence is no bulk root. It grants nothing.
 
 Installation supplies neither grant. A new operator must state their own policy; never copy another user's personal permission.
 These settings start no background work, enable no runner policy, and bypass no ownership, review, CI, or protection gate.

@@ -13,7 +13,11 @@ things the repository itself carries (sd:1326, decision D5 on sd:1334):
     "no protection by decision" form, only where GitHub positively reports
     the default branch unprotected (see `branch_protection`);
   * the `CLAUDE.local.md` block, rendered by `bin/sd_install.py`, and
-    `docs/dashboard/` ignored and present for generated HTML.
+    `docs/dashboard/` ignored and present for generated HTML;
+  * the Claude Code settings baseline, `SECRET_READ_DENY` (sd:1661), per
+    repository class: an owned or co-owned repository carries it in a
+    tracked `.claude/settings.json`, and a guest one, which takes no tracked
+    file of ours, in the untracked `.claude/settings.local.json`.
 
 The verb is idempotent: it renders what each file should hold and diffs that
 against what the file holds, so a second run over a stamped repository finds
@@ -99,9 +103,39 @@ GITIGNORE_PATH = ".gitignore"
 LOCAL_BLOCK_PATH = "CLAUDE.local.md"
 DASHBOARD_DIR = "docs/dashboard"
 FLEET_PATH = ".github/sd-fleet.json"
+SETTINGS_PATH = ".claude/settings.json"
+LOCAL_SETTINGS_PATH = ".claude/settings.local.json"
 #: Every path the stamp writes, so every path `.github/sd-fleet.json` may exempt.
-EXEMPTABLE = (ROUTE_PATH, DEPENDABOT_PATH, CHECK_PATH, STATUS_PATH, GITIGNORE_PATH, LOCAL_BLOCK_PATH,
-              DASHBOARD_DIR)
+EXEMPTABLE = (ROUTE_PATH, DEPENDABOT_PATH, CHECK_PATH, STATUS_PATH, GITIGNORE_PATH, SETTINGS_PATH,
+              LOCAL_SETTINGS_PATH, LOCAL_BLOCK_PATH, DASHBOARD_DIR)
+
+#: The Claude Code settings baseline (sd:1661, ruling #6991): reads an agent
+#: must not make, in every repository class. Deny rules only, so the file
+#: grants nothing a collaborator's session did not already have. Named files
+#: rather than `.env.*`, because a committed `.env.example` is documentation an
+#: agent has to read. The rules bind Claude Code's file tools; a shell command
+#: can still read the file, which the operator's sandbox settles.
+SECRET_READ_DENY = (
+    "Read(**/.env)",
+    "Read(**/.env.local)",
+    "Read(**/.env.*.local)",
+    "Read(**/.env.development)",
+    "Read(**/.env.staging)",
+    "Read(**/.env.production)",
+    "Read(**/secrets/**)",
+    "Read(**/*.key)",
+    "Read(**/*-key.pem)",
+    "Read(**/*.p12)",
+    "Read(**/*.pfx)",
+    "Read(**/id_rsa)",
+    "Read(**/id_ecdsa)",
+    "Read(**/id_ed25519)",
+    "Read(**/.netrc)",
+    "Read(**/.pypirc)",
+    "Read(~/.ssh/**)",
+    "Read(~/.aws/credentials)",
+    "Read(~/.config/gh/hosts.yml)",
+)
 DASHBOARD_IGNORES = frozenset({
     "docs/dashboard", "docs/dashboard/", "/docs/dashboard", "/docs/dashboard/",
     "docs/dashboard/*", "/docs/dashboard/*",
@@ -167,7 +201,7 @@ jobs:
           ref: refs/pull/${{{{ github.event.pull_request.number }}}}/head
           fetch-depth: 0
           persist-credentials: false
-      - name: The diff has no whitespace errors or conflict markers
+{sd_setup_github.HEAD_CHECK_STEP}      - name: The diff has no whitespace errors or conflict markers
         env:
           BASE_REF: ${{{{ github.base_ref }}}}
         run: git diff --check "origin/${{BASE_REF}}...HEAD"
@@ -436,6 +470,36 @@ def status_text(current: str | None) -> str:
     return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
+def settings_text(current: str | None) -> str:
+    """Claude Code settings with every `SECRET_READ_DENY` rule in `permissions.deny`.
+
+    Additive only: every other key and rule stays, and a file that already
+    carries every rule comes back byte for byte. Raises ValueError on a file
+    that is not a settings object.
+    """
+    data = {} if current is None else json.loads(current)
+    if not isinstance(data, dict):
+        raise ValueError("not a JSON object")
+    permissions = data.setdefault("permissions", {})
+    if not isinstance(permissions, dict) or not isinstance(permissions.setdefault("deny", []), list):
+        raise ValueError("permissions.deny is not a list")
+    missing = [rule for rule in SECRET_READ_DENY if rule not in permissions["deny"]]
+    if current is not None and not missing:
+        return current
+    permissions["deny"].extend(missing)
+    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+
+
+def settings_change(plan: Plan, path: str, current: str | None, propose: Callable[[str], None]) -> None:
+    """Propose the settings baseline at `path`, or refuse a file that does not read."""
+    try:
+        after = settings_text(current)
+    except ValueError as error:
+        plan.refused.append(f"{path}: unreadable ({error}); fix it by hand, then re-run")
+    else:
+        propose(after)
+
+
 #: How a repository says it runs no CI. The declaration is structured and
 #: sd-ship reads it, so it is the signal; CLAUDE.md's rule line is the
 #: second, for a repository that says so there and nowhere else.
@@ -543,6 +607,7 @@ def tracked_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None],
             propose(STATUS_PATH, after)
 
     propose(GITIGNORE_PATH, gitignore_text(tree.text_at(GITIGNORE_PATH)))
+    settings_change(plan, SETTINGS_PATH, tree.text_at(SETTINGS_PATH), lambda after: propose(SETTINGS_PATH, after))
 
 
 def is_route_template(text: str, *, self_install: bool) -> bool:
@@ -550,7 +615,7 @@ def is_route_template(text: str, *, self_install: bool) -> bool:
     pin = None if self_install else sd_setup_guard.read_pin(text)
     if pin is None and not self_install:
         return False
-    return text == sd_setup_github.workflow_text(sd_setup_github.action_reference(pin))
+    return text in sd_setup_github.known_texts(sd_setup_github.workflow_text(sd_setup_github.action_reference(pin)))
 
 
 def workflow_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None], *, pin: str,
@@ -580,11 +645,15 @@ def workflow_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None]
 
     # Check workflow, only where nothing else validates a pull request, and
     # create-only: a file already at the path is the repository's, whatever
-    # it holds, so an operator's own jobs there are never replaced.
+    # it holds, so an operator's own jobs there are never replaced. The one
+    # exception is the text the stamp laid before the head check (sd:1818):
+    # byte for byte the pack's, so moving it forward replaces nobody's job.
     others = pull_request_workflows(tree, besides=(ROUTE_PATH, CHECK_PATH))
-    if tree.text_at(CHECK_PATH) is not None:
-        if tree.text_at(CHECK_PATH) != check_workflow_text():
-            plan.adapted.append(f"{CHECK_PATH}: kept as written; the stamp only creates it")
+    current = tree.text_at(CHECK_PATH)
+    if current is not None and current in sd_setup_github.known_texts(check_workflow_text()):
+        propose(CHECK_PATH, check_workflow_text())
+    elif current is not None:
+        plan.adapted.append(f"{CHECK_PATH}: kept as written; the stamp only creates it")
     elif others:
         plan.adapted.append(f"{CHECK_PATH}: not laid; {', '.join(others)} already run on pull_request")
     else:
@@ -619,10 +688,15 @@ def plan_repo(root: pathlib.Path, remote: str | None, *, pin: str, tree: Tree,
     # the one no a row can override is sd-ship's: co-ownership (sd:1347).
     # Only a remote that answers `full` -- nobody else may push -- gets the
     # `unprotected` declaration.
+    # The settings baseline follows the class: an owned or co-owned
+    # repository carries it tracked, from `tracked_changes`; a guest one takes
+    # no tracked file, so it gets the untracked local settings instead.
+    guest = True
     try:
         mode = sd_lib.written_mode(root)
     except sd_lib.ConfigError as error:
         plan.refused.append(f"tracked files: {LOCAL_BLOCK_PATH} is unreadable ({error})")
+        guest = False
     else:
         if mode in sd_lib.SETTLED_MODES:
             plan.refused.append(f"tracked files: the local block says mode {mode}; a {mode} repository "
@@ -630,6 +704,7 @@ def plan_repo(root: pathlib.Path, remote: str | None, *, pin: str, tree: Tree,
         else:
             answer = sd_lib.remote_permits_full(root, ask=ask)
             if answer.full or sd_lib.coownership_only(answer):
+                guest = False
                 protection = branch_protection(root, ask=ask) if owned and answer.full else None
                 plan.protection = protection.state if protection else ""
                 tracked_changes(plan, tree, propose, pin=pin, owned=owned and answer.full,
@@ -637,6 +712,8 @@ def plan_repo(root: pathlib.Path, remote: str | None, *, pin: str, tree: Tree,
             else:
                 plan.refused.append(f"tracked files: {answer.reason}; the stamp writes only where the "
                                     "remote permits full mode, or where co-ownership alone says no")
+    if guest:
+        guest_settings(plan, root, tracked, propose)
 
     # The checkout's own, untracked files.
     if tracked(root, LOCAL_BLOCK_PATH):
@@ -656,6 +733,19 @@ def plan_repo(root: pathlib.Path, remote: str | None, *, pin: str, tree: Tree,
         plan.changes.append(Change(DASHBOARD_DIR, "local", None, "", directory=True))
     apply_exemptions(plan, tree)
     return plan
+
+
+def guest_settings(plan: Plan, root: pathlib.Path, tracked: Callable[[pathlib.Path, str], bool],
+                   propose: Callable[..., None]) -> None:
+    """The settings baseline in a guest checkout's untracked `.claude/settings.local.json`."""
+    if tracked(root, LOCAL_SETTINGS_PATH):
+        plan.refused.append(f"{LOCAL_SETTINGS_PATH}: tracked in this repository; the guest baseline goes "
+                            "only into an untracked file")
+        return
+    target = root / LOCAL_SETTINGS_PATH
+    before = target.read_text(encoding="utf-8") if target.is_file() else None
+    settings_change(plan, LOCAL_SETTINGS_PATH, before,
+                    lambda after: propose(LOCAL_SETTINGS_PATH, after, where="local", before=before))
 
 
 def apply_exemptions(plan: Plan, tree: Tree) -> None:
@@ -852,7 +942,8 @@ def register_fleet(groups: Any) -> None:
     verbs = fleet.add_subparsers(dest="verb", required=True)
     stamper = verbs.add_parser(
         "stamp",
-        help="route and check workflows, the sd-status declaration and the CLAUDE.local.md block, per auto repo")
+        help="route and check workflows, the sd-status declaration, the Claude Code settings baseline and the "
+             "CLAUDE.local.md block, per auto repo")
     stamper.add_argument("--dry-run", action="store_true",
                          help="print each repository's diff against its origin/HEAD; write nothing")
     stamper.add_argument("--only", action="append", default=[], metavar="OWNER/NAME",

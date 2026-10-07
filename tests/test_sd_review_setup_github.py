@@ -21,6 +21,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from typing import Any
 from unittest import mock
@@ -265,8 +266,10 @@ class WorkflowContentTests(SetupFixture):
         # one -- so a SHA resolves for a same-repo pull request and fails for a
         # fork, whose head is on no branch here. Asserted because every pull
         # request in these repositories is same-repo today, which means CI
-        # cannot show the difference.
-        self.assertNotIn("head.sha", text)
+        # cannot show the difference. The head-check step below names
+        # `head.sha` as a value to compare with, never as the ref.
+        refs = [line.strip() for line in text.splitlines() if line.strip().startswith("ref:")]
+        self.assertEqual(refs, ["ref: refs/pull/${{ github.event.pull_request.number }}/head"])
         # And `origin` stays this repository, or `origin/<base>` would name the
         # fork's base branch and `route()` would measure the wrong diff.
         # Matched as a YAML key on its own line: the comment above it in the
@@ -308,6 +311,53 @@ class WorkflowContentTests(SetupFixture):
         action = (REPO_ROOT / setup.ACTION_SUBPATH / "action.yml").read_text(encoding="utf-8")
         self.assertIn('git remote set-head origin "${GITHUB_BASE_REF}"', action)
         self.assertIn("fetch-depth: 0", setup.workflow_text("./x"))
+
+
+def head_check_script() -> str:
+    """The shell the head-check step runs, as GitHub hands it to `bash -e`."""
+    lines = setup.HEAD_CHECK_STEP.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip() == "run: |") + 1
+    return textwrap.dedent("\n".join(lines[start:])) + "\n"
+
+
+class HeadCheckTests(SetupFixture):
+    """sd:1818. The checkout reads `refs/pull/N/head`, so a re-run of an
+    older run checks out the newer head while it reports on the SHA its
+    event named. The step after checkout fails that run instead."""
+
+    def test_the_lane_compares_the_checkout_with_the_event_head_after_checkout(self) -> None:
+        text = setup.workflow_text("./x")
+        self.assertIn("HEAD_SHA: ${{ github.event.pull_request.head.sha }}", setup.HEAD_CHECK_STEP)
+        checkout = text.index("- name: Check out the pull request")
+        check = text.index(setup.HEAD_CHECK_STEP)
+        self.assertLess(checkout, check)
+        self.assertLess(check, text.index("- name: Report the routing plan"))
+
+    def test_the_script_takes_the_sha_from_the_environment_not_an_expression(self) -> None:
+        # An expression inside `run:` is spliced into the script before the
+        # shell reads it; `env:` hands it over as data.
+        self.assertNotIn("${{", head_check_script())
+
+    def test_the_script_passes_on_the_head_and_fails_on_any_other_commit(self) -> None:
+        root = self.make_repo()
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(root), check=True,
+                              capture_output=True, text=True).stdout.strip()
+        for sha, code in ((head, 0), ("f" * 40, 1)):
+            with self.subTest(sha=sha):
+                done = subprocess.run(["bash", "-e", "-c", head_check_script()], cwd=str(root),
+                                      env={"PATH": "/usr/bin:/bin", "HEAD_SHA": sha},
+                                      capture_output=True, text=True)
+                self.assertEqual(done.returncode, code, done.stdout + done.stderr)
+        self.assertIn(f"but this run reports on {'f' * 40}", done.stdout)
+
+    def test_remove_takes_a_lane_written_before_the_head_check_without_force(self) -> None:
+        root = self.make_repo()
+        install(root)
+        current = self.workflow(root).read_text(encoding="utf-8")
+        self.workflow(root).write_text(current.replace(setup.HEAD_CHECK_STEP, ""), encoding="utf-8")
+        code = setup.remove(root, setup_args(remove=True), io.StringIO())
+        self.assertEqual(code, 0)
+        self.assertFalse(self.workflow(root).exists())
 
 
 class ReplacementTests(SetupFixture):

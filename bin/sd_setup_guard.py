@@ -439,12 +439,12 @@ def unguarded(text: str, action: str = DEFAULT_ACTION) -> str | None:
     return "\n".join(lines) + "\n"
 
 
-def removal(root: pathlib.Path, workflow: pathlib.Path, template: Any, *, self_install: bool,
+def removal(root: pathlib.Path, workflow: pathlib.Path, templates: Any, *, self_install: bool,
             force: bool) -> list[tuple[pathlib.Path, str | None, str]]:
     """What `setup-github --remove` changes: (path, new text or None to delete, report line).
 
-    Text in, a plan out; the installer does the writing. `template(pin)` is
-    the workflow the installer writes at `pin`, so a workflow the repository
+    Text in, a plan out; the installer does the writing. `templates(pin)` is
+    every text the installer has written at `pin`, so a workflow the repository
     edited beyond its pin needs `force`, as replacing one does.
     The guard stays while another workflow still names review-route, because
     Dependabot would bump that pin the day the guard went. Any mention counts,
@@ -454,7 +454,7 @@ def removal(root: pathlib.Path, workflow: pathlib.Path, template: Any, *, self_i
     target = root / workflow
     current = target.read_text(encoding="utf-8") if target.is_file() else None
     pin = None if self_install or current is None else read_pin(current)
-    if current is not None and current != template(pin) and not force:
+    if current is not None and current not in templates(pin) and not force:
         raise GuardError(f"{workflow} differs from the template beyond its pin; rerun with --force to remove it")
     verdict = "remove" if current is not None else "absent"
     plan: list[tuple[pathlib.Path, str | None, str]] = [(target, None, f"{verdict} {workflow}")]

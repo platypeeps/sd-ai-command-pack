@@ -230,6 +230,19 @@ class SliceBuilderTools(unittest.TestCase):
         self.assertEqual(sorted({"Skill", "Monitor"} - set(tools)), [])
 
 
+class SliceBuilderDiskRules(unittest.TestCase):
+    """sd:1792. Three builders failed `make check` with `No space left on
+    device` after eleven worktrees' `target/` filled the system disk. The
+    brief carries the build-size defaults, the free-space stop and the bulk
+    root, because a builder reads its brief and not WORKFLOW.md."""
+
+    def test_the_slice_builder_keeps_builds_small_and_stops_on_a_full_disk(self) -> None:
+        _, body = (AGENTS / "sd-slice-builder.md").read_text(encoding="utf-8").split("\n---\n", 1)
+        for needle in ("CARGO_INCREMENTAL=0", "cargo test -p", "df -h", "20 GiB", "sd.bulk_storage_root"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, body)
+
+
 class RenderTests(unittest.TestCase):
     def setUp(self) -> None:
         scratch = tempfile.TemporaryDirectory()

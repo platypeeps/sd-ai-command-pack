@@ -120,7 +120,7 @@ class DryRun(Fleet):
         paths = [change["path"] for change in plan["changes"]]
         self.assertEqual(paths, [".github/workflows/sd-review-route.yml", ".github/dependabot.yml",
                                  ".github/workflows/sd-check.yml", ".github/sd-status.json", ".gitignore",
-                                 "CLAUDE.local.md", "docs/dashboard"])
+                                 ".claude/settings.json", "CLAUDE.local.md", "docs/dashboard"])
         self.assertIn(f"review-route@{PIN}", plan["changes"][0]["diff"])
         self.assertEqual(plan["refused"], [])
 
@@ -130,7 +130,8 @@ class DryRun(Fleet):
         root, remote = self.repo("local-ci")
         [plan] = self.plan([(root, remote)], ci="local")
         paths = [change["path"] for change in plan["changes"]]
-        self.assertEqual(paths, [".github/sd-status.json", ".gitignore", "CLAUDE.local.md", "docs/dashboard"])
+        self.assertEqual(paths, [".github/sd-status.json", ".gitignore", ".claude/settings.json", "CLAUDE.local.md",
+                                 "docs/dashboard"])
         [line] = [line for line in plan["adapted"] if line.startswith("workflows: none laid")]
         self.assertIn("repo.ci is local", line)
         self.assertIn("sd/local-gate", line)
@@ -187,6 +188,28 @@ class DryRun(Fleet):
         [route] = [change for change in plan["changes"] if change["path"] == sd_fleet.ROUTE_PATH]
         self.assertIn(f"review-route@{PIN}", route["diff"])
         self.assertFalse(any(line.startswith(sd_fleet.ROUTE_PATH) for line in plan["refused"]))
+
+    def test_the_check_workflow_fails_a_run_whose_checkout_is_not_its_head(self) -> None:
+        """sd:1818: the check workflow carries the route workflow's head check, after its checkout."""
+        text = sd_fleet.check_workflow_text()
+        check = text.index(sd_setup_github.HEAD_CHECK_STEP)
+        self.assertLess(text.index("- name: Check out the pull request"), check)
+        self.assertLess(check, text.index("- name: The diff has no whitespace errors"))
+
+    def test_workflows_laid_before_the_head_check_move_forward(self) -> None:
+        """sd:1818: a stamped file as the stamp wrote it before the head check
+        is the pack's own text, so the stamp replaces it; neither is refused
+        nor kept as the repository's."""
+        old_route = sd_setup_github.workflow_text(sd_setup_github.action_reference("a" * 40))
+        root, remote = self.repo("pre-1818", {
+            sd_fleet.ROUTE_PATH: old_route.replace(sd_setup_github.HEAD_CHECK_STEP, ""),
+            sd_fleet.CHECK_PATH: sd_fleet.check_workflow_text().replace(sd_setup_github.HEAD_CHECK_STEP, "")})
+        [plan] = self.plan([(root, remote)])
+        changed = {change["path"]: change["diff"] for change in plan["changes"]}
+        for path in (sd_fleet.ROUTE_PATH, sd_fleet.CHECK_PATH):
+            with self.subTest(path=path):
+                self.assertIn("+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}", changed[path])
+                self.assertFalse(any(line.startswith(path) for line in plan["refused"] + plan["adapted"]))
 
     def test_a_customised_route_workflow_is_refused_not_replaced(self) -> None:
         # #1169 review: a job the repository added to the route workflow was
@@ -323,6 +346,93 @@ class DryRun(Fleet):
         self.assertIn("docs/dashboard/", sd_install.DEFAULT_BLOCK_BODY)
 
 
+class SettingsBaseline(Fleet):
+    """sd:1661, ruling #6991: one `.claude/settings.json` baseline per repository class.
+
+    Owned and co-owned repositories carry it tracked; a guest repository
+    carries none of the framework's files, so it goes into the untracked
+    `.claude/settings.local.json` there. The rules are the same everywhere.
+    """
+
+    def changes(self, plan: dict) -> dict[str, dict]:
+        return {change["path"]: change for change in plan["changes"]}
+
+    def test_owned_and_co_owned_repositories_get_the_tracked_file(self) -> None:
+        for name, ask in (("owned", remote()), ("co-owned", remote(others=("colleague",)))):
+            with self.subTest(name):
+                root, remote_url = self.repo(name)
+                [plan] = self.plan([(root, remote_url)], ask=ask)
+                changes = self.changes(plan)
+                self.assertEqual(changes[sd_fleet.SETTINGS_PATH]["where"], "tracked")
+                self.assertEqual(changes[sd_fleet.SETTINGS_PATH]["action"], "create")
+                self.assertNotIn(sd_fleet.LOCAL_SETTINGS_PATH, changes)
+
+    def test_a_guest_repository_gets_the_untracked_file_only(self) -> None:
+        local = f"{sd_install.BLOCK_BEGIN}\n    mode: guest\n{sd_install.BLOCK_END}\n"
+        shapes = (("guest", remote(), local), ("fork", remote(fork=True), None),
+                  ("visitor", remote(admin=False), None))
+        for name, ask, block in shapes:
+            with self.subTest(name):
+                root, remote_url = self.repo(name, local=block)
+                [plan] = self.plan([(root, remote_url)], ask=ask)
+                changes = self.changes(plan)
+                self.assertEqual(changes[sd_fleet.LOCAL_SETTINGS_PATH]["where"], "local")
+                self.assertNotIn(sd_fleet.SETTINGS_PATH, changes)
+
+    def test_the_baseline_denies_reading_secrets_and_grants_nothing(self) -> None:
+        written = json.loads(sd_fleet.settings_text(None))
+        self.assertEqual(written, {"permissions": {"deny": list(sd_fleet.SECRET_READ_DENY)}})
+        for rule in ("Read(**/.env)", "Read(**/.env.*.local)", "Read(**/secrets/**)", "Read(~/.ssh/**)"):
+            self.assertIn(rule, sd_fleet.SECRET_READ_DENY)
+        self.assertTrue(all(rule.startswith("Read(") for rule in sd_fleet.SECRET_READ_DENY))
+        # A committed example file is documentation an agent has to read.
+        self.assertNotIn("Read(**/.env.*)", sd_fleet.SECRET_READ_DENY)
+
+    def test_an_existing_file_keeps_its_rules_and_gains_the_missing_ones(self) -> None:
+        current = json.dumps({"env": {"A": "1"}, "permissions": {
+            "allow": ["Bash(make check)"], "deny": ["Bash(gh issue create:*)", "Read(**/.env)"]}}, indent=4) + "\n"
+        after = json.loads(sd_fleet.settings_text(current))
+        self.assertEqual(after["env"], {"A": "1"})
+        self.assertEqual(after["permissions"]["allow"], ["Bash(make check)"])
+        deny = after["permissions"]["deny"]
+        self.assertEqual(deny[:2], ["Bash(gh issue create:*)", "Read(**/.env)"])
+        self.assertEqual(sorted(deny[2:] + ["Read(**/.env)"]), sorted(sd_fleet.SECRET_READ_DENY))
+
+    def test_a_file_that_already_carries_the_rules_is_left_byte_for_byte(self) -> None:
+        current = json.dumps({"permissions": {"deny": list(reversed(sd_fleet.SECRET_READ_DENY))}}, indent=8) + "\n"
+        self.assertEqual(sd_fleet.settings_text(current), current)
+        root, remote_url = self.repo("settled", {sd_fleet.SETTINGS_PATH: current})
+        [plan] = self.plan([(root, remote_url)])
+        self.assertNotIn(sd_fleet.SETTINGS_PATH, self.changes(plan))
+
+    def test_an_unreadable_file_is_refused_not_rewritten(self) -> None:
+        for name, text in (("not-json", "{nope"), ("a-list", "[]\n"), ("deny-not-list", '{"permissions": {"deny": "x"}}')):
+            with self.subTest(name):
+                root, remote_url = self.repo(name, {sd_fleet.SETTINGS_PATH: text})
+                [plan] = self.plan([(root, remote_url)])
+                self.assertNotIn(sd_fleet.SETTINGS_PATH, self.changes(plan))
+                self.assertTrue(any(line.startswith(f"{sd_fleet.SETTINGS_PATH}: unreadable") for line in plan["refused"]),
+                                plan["refused"])
+
+    def test_a_tracked_local_settings_file_in_a_guest_repository_is_refused(self) -> None:
+        local = f"{sd_install.BLOCK_BEGIN}\n    mode: guest\n{sd_install.BLOCK_END}\n"
+        root, remote_url = self.repo("tracked-local", local=local)
+        (root / sd_fleet.LOCAL_SETTINGS_PATH).parent.mkdir()
+        (root / sd_fleet.LOCAL_SETTINGS_PATH).write_text("{}\n", encoding="utf-8")
+        git(root, "add", "--force", sd_fleet.LOCAL_SETTINGS_PATH)  # a global excludes file may ignore it
+        git(root, "commit", "-q", "-m", "track it")
+        [plan] = self.plan([(root, remote_url)])
+        self.assertNotIn(sd_fleet.LOCAL_SETTINGS_PATH, self.changes(plan))
+        self.assertTrue(any(line.startswith(f"{sd_fleet.LOCAL_SETTINGS_PATH}: tracked") for line in plan["refused"]))
+
+    def test_a_repository_may_exempt_the_file(self) -> None:
+        exempt = json.dumps({"exempt": [sd_fleet.SETTINGS_PATH]}) + "\n"
+        root, remote_url = self.repo("declines", {sd_fleet.FLEET_PATH: exempt})
+        [plan] = self.plan([(root, remote_url)])
+        self.assertNotIn(sd_fleet.SETTINGS_PATH, self.changes(plan))
+        self.assertIn(f"{sd_fleet.SETTINGS_PATH}: exempt by {sd_fleet.FLEET_PATH}; not proposed", plan["adapted"])
+
+
 class Write(Fleet):
     def worktree(self, root: pathlib.Path, branch: str) -> pathlib.Path:
         into = self.tmp / f"{root.name}-wt"
@@ -335,6 +445,8 @@ class Write(Fleet):
         code, _ = self.run_stamp([(root, remote)], cwd=into, dry_run=False)
         self.assertEqual(code, sd_fleet.EXIT_OK)
         self.assertTrue((into / sd_fleet.CHECK_PATH).is_file())
+        self.assertEqual(json.loads((into / sd_fleet.SETTINGS_PATH).read_text(encoding="utf-8")),
+                         {"permissions": {"deny": list(sd_fleet.SECRET_READ_DENY)}})
         self.assertTrue((into / "docs" / "dashboard").is_dir())
         self.assertIn(sd_install.BLOCK_BEGIN, (into / "CLAUDE.local.md").read_text(encoding="utf-8"))
         self.assertFalse((root / sd_fleet.CHECK_PATH).exists())  # only the checkout the caller stands in
