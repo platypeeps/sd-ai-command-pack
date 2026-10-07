@@ -6,6 +6,16 @@
 
 - **A serving tree moves by commit, and rolls back (sd:1118).** `bin/sd_install.py --pull` in a clean checkout on a detached `HEAD` fetches `origin`, detaches at the exact commit `origin/main` names, and re-renders. A checkout on `main` fast-forwards as before; any other branch is still refused. Every render that activates a new commit records the one it replaced as `previousCommit` in the receipt, and a re-render at the same commit keeps it. The new `--rollback` detaches a clean serving tree at that commit and re-renders, so a second `--rollback` undoes the first. Both refuse a target whose installer declares no `ACTIVATION_CONTRACT`, since from there no second rollback could come back, The target commit's own installer renders it, under the supervision of the installer that started the move. A render that fails puts the tree back at its commit, restores the receipt, and renders that commit again when the receipt names the tree, so a failed first `--serve` leaves the working checkout's install as it was; a failed install now restores every render it wrote, not only the Codex policies, and writes each render through a scratch file, so a write cut short leaves the previous file whole. `--verify` is unchanged: an untracked file or a `HEAD` moved without a render still fails the source check. `make setup` now ends with `bin/sd_install.py --serve`: it clones `origin` into `${XDG_DATA_HOME:-~/.local/share}/sd-ai-command-pack/serving` on the first run, builds each target commit's environment with that commit's `make setup SERVE=no` in a scratch checkout, in one of two slots `.venv` links to, while the tree serves its commit, refusing an `sd_db` older than that slot or the live one holds (`--live-venv`), then moves the code and `.venv` together and renders, and runs `--pull` there, so only `make setup` moves what the machine serves; a second `make setup` waits on `serving.lock` beside the tree until the first move ends, and after 600 seconds refuses with nothing moved. `make setup SERVE=no` skips it. A command link the receipt records at its recorded target now moves to the installing checkout instead of refusing the run; any other link at the path still refuses. The hook commands the receipt recorded for the last checkout move with the links, so each hook runs once; another installer's hook stays. Pointing `~/bin/common` at the serving tree is an operator step.
 
+- **An opted-in gate runs pinned copies of `cargo-nextest`, `node`, `npm` and `uv` (sd:2936).**
+  Two builds of one release differ, and Homebrew upgrades each machine on its own day, so a satellite's pass refused on tool bytes.
+  `PINS` in `bin/sd_gate_tools.py` names each tool's official release archive by URL and sha256.
+  `sd gate tools install` checks the digest, unpacks each into `<gate cache>/pinned-tools/<tool>-<version>-<sha256[:12]>/` and never changes an installed copy; `sd gate tools status` lists them.
+  In a repository with `repo.satellite_gate = accept` those copies come first on every check's `PATH`, and a missing one refuses the gate before reuse or a run, naming the install command.
+  A tool in macOS's own folders binds the Command Line Tools or Xcode version beside its bytes, since a `/usr/bin/cc` shim is the same bytes under every version; the macOS version is named, not bound.
+  `git` and `make` run the Command Line Tools copies through the gate's own links in `<gate cache>/clt-links/`, whatever the caller's `PATH` puts first.
+  A refusal on a tool names how each machine found it: its resolved file, and for a system tool those versions.
+  `bash` and `python3` stay unpinned; the design names why.
+
 - **Jev shadow readings: review-finding triage and a duplicate hint on `sd task add` (sd:2092, sd:2093).**
   `sd-review` asks Jev to class each of its first ten findings as correctness, robustness, style or likely wrong (`JEV_SD_REVIEW_TRIAGE`).
   `sd task add` asks which open item of the same repository already tracks the new one, if any (`JEV_SD_TASK_DEDUPE`).
@@ -535,6 +545,19 @@
   registry that sets it.
 
 ### Fixed
+
+- **An opted-in gate finds the bound cargo subcommands again (sd:2921).**
+  `offload_pins` set `CARGO_HOME` to the gate's cache folder, and cargo looks for subcommands in `$CARGO_HOME/bin`.
+  So `cargo nextest` failed with "no such command" unless `~/.cargo/bin` was on `PATH`.
+  `OFFLOAD_TOOLS` adds `cargo-nextest`. Each opted-in gate copies every `cargo-` name in it from the caller's `CARGO_HOME/bin`, `~/.cargo/bin` by default, into a folder of its own beside its worktree.
+  That folder comes first on the check's `PATH`, and the offload view and the local binding resolve every bound name on that `PATH`.
+  The caller's folder passes the gate's `PATH` rule (`gate_path`) first, so a relative folder or one inside the checkout gives nothing.
+  Nothing in the pinned `CARGO_HOME` is written or removed: while its `bin` holds a bound name, the gate refuses before it runs and names the path.
+  A subcommand the view does not bind, such as `cargo-llvm-cov`, stays unavailable.
+  The local gate binding adds `offload_tools`: each `OFFLOAD_TOOLS` executable by name and bytes, found as the check finds it.
+  So a changed tool behind `make`, or a changed copy, misses local reuse; each existing receipt misses once after the upgrade.
+  The offload design lists each way the run and the view could part, with its guard and its test.
+  The registry cache stays in the pinned folder, so each machine downloads crates once.
 
 - **`sd shadow sync` reports the library's two refusals in one line, not a traceback (sd:2898).**
   Since system #199, `sd_db` raises `SyncBusy` while another sync holds the lock and `HubOnly` on a satellite.

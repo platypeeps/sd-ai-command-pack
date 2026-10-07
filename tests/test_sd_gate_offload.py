@@ -26,6 +26,7 @@ if str(REPO_ROOT / "bin") not in sys.path:
 import sd_gate_receipts  # noqa: E402
 import sd_gate_run  # noqa: E402
 import sd_gate_slots  # noqa: E402
+import sd_gate_tools  # noqa: E402
 
 
 class ViewFixture(unittest.TestCase):
@@ -35,6 +36,9 @@ class ViewFixture(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.tmp = pathlib.Path(tmp.name)  # unresolved, as a real HOME may be; the gate resolves PATH entries
+        patcher = mock.patch.object(sd_gate_tools, "PINS", ())  # no pinned copy (sd:2936); `PinnedTools` sets its own
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.shared = self.tmp / "usr" / "bin"
         self.shared.mkdir(parents=True)
         self.tool(self.shared / "sh", "shared sh")
@@ -77,7 +81,7 @@ class OffloadView(ViewFixture):
     def test_two_logins_that_differ_only_in_home_user_and_the_path_prefix_compare_equal(self) -> None:
         theirs, ours = self.view("sat"), self.view("hub")
         self.assertIsNone(sd_gate_receipts.offload_miss(theirs, ours))
-        self.assertEqual(theirs["path"][0], "~/bin")
+        self.assertEqual(theirs["path"][:2], ["~/.cache/sd/gate/clt-links", "~/bin"])  # the gate's links first (sd:2936)
         self.assertEqual(theirs["variables"]["CARGO_HOME"], ours["variables"]["CARGO_HOME"])
         self.assertNotIn("HOME", theirs["variables"])
         self.assertNotIn("USER", theirs["variables"])
@@ -117,8 +121,11 @@ class OffloadView(ViewFixture):
         self.assertEqual(sd_gate_receipts.offload_miss(theirs, ours, ("npm",)), {"part": "tools", "name": "npm"})
 
     def test_a_tool_the_check_reaches_through_make_refuses(self) -> None:
-        """sd:2879 finding 3: `make check` may run `npm ci`, `uv sync` or `git`, and `check_names` sees only `make`."""
-        for name in ("git", "npm", "uv"):
+        """sd:2879 finding 3: `make check` may run `npm ci`, `uv sync` or `bash`, and `check_names` sees only `make`.
+
+        `git` is the Command Line Tools copy through the gate's links (sd:2936), so a login's own `git` decides nothing.
+        """
+        for name in ("bash", "npm", "uv"):
             with self.subTest(name=name):
                 self.tool(self.home("sat") / "bin" / name, f"{name} 1")
                 self.tool(self.home("hub") / "bin" / name, f"{name} 2")
@@ -139,12 +146,12 @@ class OffloadView(ViewFixture):
         self.tool(self.tmp / "Users" / "hubber" / "bin" / "make", "make 4.4")
         other = self.tmp / "Users" / "hubber" / "bin"
         view = self.view("hub", PATH=os.pathsep.join([str(other), str(self.shared)]))
-        self.assertEqual(view["path"][0], str(other.resolve()))
+        self.assertEqual(view["path"][1], str(other.resolve()))  # after the gate's links (sd:2936)
 
     def test_a_named_tool_with_other_bytes_misses_on_tools(self) -> None:
-        self.tool(self.home("hub") / "bin" / "make", "make 3.81")
+        self.tool(self.home("hub") / "bin" / "bash", "bash 3.2")
         self.assertEqual(sd_gate_receipts.offload_miss(self.view("sat"), self.view("hub")),
-                         {"part": "tools", "name": "make"})
+                         {"part": "tools", "name": "bash"})
 
     def test_a_tool_the_hub_cannot_resolve_is_recorded_not_compared(self) -> None:
         self.tool(self.home("sat") / "bin" / "cargo", "cargo 1.90")
@@ -182,6 +189,63 @@ class OffloadView(ViewFixture):
         read = [subprocess.run([git, "config", "--get", "user.name"], env=env, cwd=self.tmp, text=True,
                                capture_output=True, check=False).stdout for env in (self.environ("sat"), kept)]
         self.assertEqual(read, ["t\n", ""])  # the fixture's `~/.gitconfig` names `t`
+
+    def test_a_bound_cargo_subcommand_is_copied_for_the_gate_and_refuses(self) -> None:
+        """sd:2921: cargo finds `cargo-nextest` in `$CARGO_HOME/bin`, and the pinned one holds none. The gate copies the
+        caller's, `~/.cargo/bin` by default, into its own folder, and the view binds the copy's bytes."""
+        views = {}
+        for login, version in (("sat", "0.9.100"), ("hub", "0.9.101")):
+            self.tool(self.home(login) / ".cargo" / "bin" / "cargo-nextest", f"cargo-nextest {version}")
+            for caller in ("CARGO_HOME", "HOME"):
+                with self.subTest(login=login, caller=caller):
+                    tree = self.tmp / f"gate-{login}-{caller}" / "tree"
+                    tree.mkdir(parents=True)
+                    environ = {key: value for key, value in self.environ(login).items()
+                               if not (caller == "HOME" and key == "CARGO_HOME")}
+                    environment = sd_gate_receipts.offload_environment(environ)
+                    sd_gate_receipts.cargo_subcommands(environ, tree, self.tmp / "repo", "offload")
+                    copy = tree.parent / sd_gate_receipts.CARGO_SUBCOMMANDS / "cargo-nextest"
+                    self.assertEqual(copy.read_bytes(), (self.home(login) / ".cargo" / "bin" / "cargo-nextest").read_bytes())
+                    views[login] = sd_gate_receipts.offload_view(environment, (), tree)
+                    self.assertEqual(views[login]["tools"]["cargo-nextest"], sd_gate_receipts._content_digest(copy))
+        self.assertEqual(sd_gate_receipts.offload_miss(views["sat"], views["hub"]), {"part": "tools", "name": "cargo-nextest"})
+
+    def test_a_check_that_runs_the_subcommand_itself_binds_the_gates_copy(self) -> None:
+        """sd:2921 r4 review: `machine_binding` resolves the check's own names on the check's `PATH`, and names the
+        copy by its place in the gate's folder, not by the temporary folder's random name."""
+        self.tool(self.home("sat") / ".cargo" / "bin" / "cargo-nextest", "cargo-nextest 0.9.100")
+        tree = self.tmp / "gate" / "tree"
+        tree.mkdir(parents=True)
+        environ = self.environ("sat")
+        environment = sd_gate_receipts.offload_environment(environ)
+        sd_gate_receipts.cargo_subcommands(environ, tree, self.tmp / "repo", "offload")
+        bound = sd_gate_receipts.machine_binding(tree, [["cargo-nextest", "run"]], environment)["tools"]
+        copy = tree.parent / sd_gate_receipts.CARGO_SUBCOMMANDS / "cargo-nextest"
+        self.assertEqual(bound, [{"invocation": "cargo-nextest", "path": "subcommands:cargo-nextest",
+                                  "sha256": sd_gate_receipts.sd_check_receipts.file_digest(copy)}])
+
+    def test_a_check_that_runs_cargo_nextest_binds_the_gates_copy(self) -> None:
+        """sd:2921 r6 review: `cargo nextest` runs the copy too, as the pinned `CARGO_HOME/bin` holds none; the view
+        resolves the name on the check's `PATH`, which starts with the copy, not on the gate's `PATH`."""
+        self.tool(self.home("sat") / ".cargo" / "bin" / "cargo-nextest", "cargo-nextest 0.9.100")
+        self.tool(self.tmp / "decoy" / "cargo-nextest", "cargo-nextest decoy")
+        tree = self.tmp / "gate" / "tree"
+        tree.mkdir(parents=True)
+        environ = self.environ("sat")
+        environment = sd_gate_receipts.offload_environment(environ)
+        environment["PATH"] = os.pathsep.join([str(self.tmp / "decoy"), environment["PATH"]])
+        sd_gate_receipts.cargo_subcommands(environ, tree, self.tmp / "repo", "offload")
+        copy = tree.parent / sd_gate_receipts.CARGO_SUBCOMMANDS / "cargo-nextest"
+        self.assertIsNone(sd_gate_receipts.pinned_subcommands(environment, "offload"))
+        self.assertEqual(sd_gate_receipts.view_tools(environment, (), tree)[0]["cargo-nextest"],
+                         sd_gate_receipts._content_digest(copy))
+        self.assertEqual(sd_gate_receipts.machine_binding(tree, [["cargo-nextest", "run"]], environment)["tools"][0]["path"],
+                         "subcommands:cargo-nextest")
+
+    def test_the_pins_hold_on_an_environment_they_already_pinned(self) -> None:
+        """A pass under `offload_environment` reuses only when a second pinning changes nothing (sd:2921)."""
+        once = sd_gate_receipts.offload_environment(self.environ("sat"))
+        self.assertEqual(sd_gate_receipts.offload_environment(once), once)
 
     def test_an_isolated_home_file_is_not_bound(self) -> None:
         """No check reads `.gitconfig`, `.npmrc`, pip's or cargo's file, so two machines may differ in them (sd:2879)."""
@@ -369,21 +433,22 @@ class ToolVersion(ViewFixture):
         """Another macOS release changes `cargo -vV`'s `os:` line, which names the machine, not the compiler."""
         self.toolchain("hub", "cargo", build("cargo", os_line="Mac OS 26.4.0"))
         theirs, ours = self.view("sat", tree=self.tree), self.view("hub", tree=self.tree)
-        self.assertEqual(theirs["resolution"], {"cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
-                                                "rustc": "rustc 1.98.1 (797e8a9bc 2026-08-05)"})
+        self.assertEqual({name: theirs["resolution"][name] for name in sd_gate_receipts.VERSIONED_TOOLS},
+                         {"cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05) at ~/bin/cargo",
+                          "rustc": "rustc 1.98.1 (797e8a9bc 2026-08-05) at ~/bin/rustc"})
         self.assertIsNone(self.mismatch(theirs, ours))
 
     def test_another_commit_hash_behind_the_same_wrapper_refuses(self) -> None:
         self.toolchain("hub", "cargo", build("cargo", commit="48a229ceaefd4985"))
         theirs, ours = self.view("sat", tree=self.tree), self.view("hub", tree=self.tree)
-        self.assertIn("tools at cargo (satellite via cargo 1.98.1 (797e8a9bc 2026-08-05), "
-                      "hub via cargo 1.98.1 (48a229cea 2026-08-05))", self.mismatch(theirs, ours)["reason"])
+        self.assertIn("tools at cargo (satellite via cargo 1.98.1 (797e8a9bc 2026-08-05) at ~/bin/cargo, "
+                      "hub via cargo 1.98.1 (48a229cea 2026-08-05) at ~/bin/cargo)", self.mismatch(theirs, ours)["reason"])
 
     def test_a_homebrew_cargo_ahead_of_the_proxy_refuses(self) -> None:
         """The hub's cron `PATH` found Homebrew's `cargo` 1.99.0, which ignores the pin: the hub would run another compiler."""
         self.script(self.home("hub") / "bin" / "cargo", build("cargo", "5f94df4789f005f9", suffix=" (Homebrew)"))
         theirs, ours = self.view("sat", tree=self.tree), self.view("hub", tree=self.tree)
-        self.assertEqual(ours["resolution"]["cargo"], "cargo 1.98.1 (5f94df478 2026-08-05) (Homebrew)")
+        self.assertEqual(ours["resolution"]["cargo"], "cargo 1.98.1 (5f94df478 2026-08-05) (Homebrew) at ~/bin/cargo")
         self.assertIn("tools at cargo", self.mismatch(theirs, ours)["reason"])
 
     def test_another_wrapper_refuses_though_it_runs_the_same_toolchain(self) -> None:
@@ -396,14 +461,15 @@ class ToolVersion(ViewFixture):
         for login in ("sat", "hub"):
             (self.home(login) / "bin" / "rustup").unlink()
         theirs = self.view("sat", tree=self.tree)
-        self.assertEqual(theirs["resolution"], {"cargo": "path", "rustc": "path"})
+        self.assertEqual({name: theirs["resolution"][name] for name in sd_gate_receipts.VERSIONED_TOOLS},
+                         {"cargo": "path at ~/bin/cargo", "rustc": "path at ~/bin/rustc"})
         self.assertIsNone(self.mismatch(theirs, self.view("hub", tree=self.tree)))
 
     def test_a_gates_worktree_runs_it_in_its_own_tree(self) -> None:
         """Both sides take the view through `Worktree.view`: the satellite when it writes the row, the hub when it compares."""
         environment = sd_gate_run.gate_environment(self.tmp / "repo", self.environ("sat"))
         gated = sd_gate_receipts.Worktree(self.tmp / "repo", self.tree, "a" * 40, None, environment, None, None, False, "i" * 12)
-        self.assertEqual(gated.view(part())["resolution"]["cargo"], "cargo 1.98.1 (797e8a9bc 2026-08-05)")
+        self.assertEqual(gated.view(part())["resolution"]["cargo"], "cargo 1.98.1 (797e8a9bc 2026-08-05) at ~/bin/cargo")
 
     def test_a_row_from_before_the_resolution_refuses_and_says_it_recorded_none(self) -> None:
         """A 7801d8b8 view hashed the wrapper alone and has no `resolution`: it refuses on `tools.cargo` (its pack digest first)."""
@@ -420,8 +486,9 @@ class ToolVersion(ViewFixture):
         self.assertIsNone(self.mismatch(theirs, ours, "docs-only", ["sh", "python3"]))
         self.tool(self.shared / "sh", "another sh")
         self.assertIn("tools at sh", self.mismatch(theirs, self.view("hub", tree=self.tree), "docs-only", ["sh"])["reason"])
-        self.tool(self.home("hub") / "bin" / "make", "make 3.81")
-        self.assertIn("tools at make", self.mismatch(theirs, self.view("hub", tree=self.tree), "docs-only", [])["reason"])
+        with mock.patch.object(sd_gate_receipts, "developer_tools", return_value="CLT 0"):  # `make` is the CLT's (sd:2936)
+            other = self.view("hub", tree=self.tree)
+        self.assertIn("tools at make", self.mismatch(theirs, other, "docs-only", [])["reason"])
 
     def test_a_declared_docs_tool_outside_the_toolchain_is_bound(self) -> None:
         """`check_names` carries `docs_tools`, so the view hashes one that `OFFLOAD_TOOLS` does not name."""
