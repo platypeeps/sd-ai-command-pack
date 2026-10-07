@@ -194,7 +194,7 @@ class OffloadView(ViewFixture):
                 drop = {"CARGO_HOME"} if caller == "HOME" else set()
                 environment = sd_gate_receipts.offload_environment(
                     {key: value for key, value in self.environ("sat").items() if key not in drop})
-                self.assertEqual(shutil.which("cargo-nextest", path=environment["PATH"]), str(nextest))
+                self.assertEqual(shutil.which("cargo-nextest", path=environment["PATH"]), str(nextest.resolve()))
         theirs, ours = self.view("sat"), self.view("hub")
         self.assertEqual(theirs["tools"]["cargo-nextest"], sd_gate_receipts._content_digest(nextest))
         self.assertEqual(sd_gate_receipts.offload_miss(theirs, ours), {"part": "tools", "name": "cargo-nextest"})

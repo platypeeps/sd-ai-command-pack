@@ -448,8 +448,19 @@ def offload_variable(name: str) -> bool:
             and not sd_check_receipts.SECRET.search(upper.removeprefix("GIT_CONFIG_KEY_")))
 
 
-def offload_environment(environment: Mapping[str, str]) -> dict[str, str]:
-    """`environment` cut to what an offload view compares, plus `OFFLOAD_KEPT` (sd:2782), then `offload_pins`.
+def gate_path(search: str, root: pathlib.Path | None) -> list[str]:
+    """`search`'s absolute entries, each resolved, that name a folder outside `root` and no venv `bin`.
+
+    `sd_gate_run.gate_environment` cuts every gate's `PATH` to these, and `offload_pins` its one added folder.
+    """
+    top = root.resolve() if root is not None else None
+    resolved = [pathlib.Path(entry).resolve() for entry in search.split(os.pathsep) if entry and os.path.isabs(entry)]
+    return [str(path) for path in resolved if path.is_dir() and not (top and path.is_relative_to(top))
+            and not (path.parent / "pyvenv.cfg").is_file()]
+
+
+def offload_environment(environment: Mapping[str, str], root: pathlib.Path | None = None) -> dict[str, str]:
+    """`environment` cut to what an offload view compares, plus `OFFLOAD_KEPT` (sd:2782), then `offload_pins` for `root`.
 
     It is the environment of every gate in an opted-in repository (`offload_run`). The view compares an
     allowlist, so a variable off it could choose what a satellite's check ran and still stand for the hub's:
@@ -458,10 +469,10 @@ def offload_environment(environment: Mapping[str, str]) -> dict[str, str]:
     repository does not opt in until the variable is allowlisted.
     """
     kept = {key: value for key, value in environment.items() if key in OFFLOAD_KEPT or offload_variable(key)}
-    return {**kept, **offload_pins(kept)}
+    return {**kept, **offload_pins(kept, root)}
 
 
-def offload_pins(environment: Mapping[str, str]) -> dict[str, str]:
+def offload_pins(environment: Mapping[str, str], root: pathlib.Path | None = None) -> dict[str, str]:
     """What every opted-in check runs under whatever the caller set: one tool configuration and one thread cap (sd:2879).
 
     Two machines differ in `~/.gitconfig`, `~/.npmrc` and `~/.cargo/config.toml`, and in their core counts, so a
@@ -473,13 +484,15 @@ def offload_pins(environment: Mapping[str, str]) -> dict[str, str]:
     only on a machine whose share of the cores is smaller.
     cargo finds a subcommand such as `cargo-nextest` in `$CARGO_HOME/bin` before `PATH`, so the caller's own
     `CARGO_HOME/bin`, `~/.cargo/bin` by default, joins the end of `PATH`, where the view binds its tools (sd:2921).
+    It passes `gate_path` first, as every other entry did: one that is relative or inside `root`, the checkout, is not added.
     """
     folder = sd_gate_cache.cache_root(environment) / "tool-config"
     cargo = str(folder / "cargo")
     own = environment.get("CARGO_HOME") or (os.path.join(environment["HOME"], ".cargo") if environment.get("HOME") else None)
     search = [entry for entry in environment.get("PATH", "").split(os.pathsep) if entry]
-    extra = os.path.join(own, "bin") if own and own != cargo else None  # already pinned: cargo searches its own bin
-    path = {"PATH": os.pathsep.join([*search, extra])} if extra and extra not in search else {}
+    # Already pinned: cargo searches its own bin.
+    extra = gate_path(os.path.join(own, "bin"), root) if own and own != cargo else []
+    path = {"PATH": os.pathsep.join([*search, *extra])} if extra and extra[0] not in search else {}
     return {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1", "NPM_CONFIG_USERCONFIG": os.devnull,
             "NPM_CONFIG_GLOBALCONFIG": str(folder / "npmrc"), "PIP_CONFIG_FILE": os.devnull,
             "CARGO_HOME": cargo, **path, **dict.fromkeys(sd_gate_slots.CPU_VARIABLES, OFFLOAD_THREADS)}
@@ -511,7 +524,7 @@ def offload_run(database: pathlib.Path | None, root: pathlib.Path, environment: 
         satellite = served_hub(database) is not None
     except Exception:  # `record_offload` reports the fault; this run keeps no view
         satellite = False
-    return offload_environment(environment), "offload" if record and offload != "require" and satellite else "allowlist"
+    return offload_environment(environment, root), "offload" if record and offload != "require" and satellite else "allowlist"
 
 
 def start_view(gated: Worktree, identity: dict[str, Any] | None) -> dict[str, Any] | None:

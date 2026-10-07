@@ -538,6 +538,7 @@
   `offload_pins` set `CARGO_HOME` to the gate's cache folder, and cargo looks for subcommands in `$CARGO_HOME/bin`.
   So `cargo nextest` failed with "no such command" unless `~/.cargo/bin` was on `PATH`.
   The pins now append the caller's `CARGO_HOME/bin`, `~/.cargo/bin` by default, to the end of `PATH`.
+  That folder passes the gate's `PATH` rule first (`gate_path`): a relative one or one inside the checkout is not added.
   `OFFLOAD_TOOLS` adds `cargo-nextest`, so the offload view binds its bytes and refuses when they differ.
   The registry cache stays in the pinned folder, so each machine downloads crates once.
 

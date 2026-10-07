@@ -121,11 +121,7 @@ def gate_environment(root: pathlib.Path, environ: dict[str, str] | None = None) 
     source = os.environ if environ is None else environ
     env = {key: value for key, value in source.items()
            if key not in DROPPED_ENVIRONMENT + SESSION_ENVIRONMENT and not key.startswith(SESSION_PREFIXES)}
-    top = root.resolve()
-    resolved = [pathlib.Path(entry).resolve() for entry in env.get("PATH", "").split(os.pathsep) if entry and os.path.isabs(entry)]
-    kept = [str(path) for path in resolved if path.is_dir() and not path.is_relative_to(top)
-            and not (path.parent / "pyvenv.cfg").is_file()]
-    env["PATH"] = os.pathsep.join(kept)
+    env["PATH"] = os.pathsep.join(sd_gate_receipts.gate_path(env.get("PATH", ""), root))
     env.update({GATE_VARIABLE: "1", **NO_COLOUR_ENVIRONMENT})
     return env
 
