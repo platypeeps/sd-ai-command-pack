@@ -2716,6 +2716,33 @@ class ServingTreeTests(InstallerHarness):
         self.assertEqual((self.head(), self.rendered, ctx.receipt.read_bytes()), (self.first, [], receipt))
         self.assertFalse((self.serving / ".venv").is_symlink())
 
+    def test_an_absolute_link_to_a_slot_rebuilds_the_other_one(self):
+        """Review round 16: the live slot is where `.venv` resolves, whatever the link text says."""
+        ctx = self.real_provision()
+        live = self.serving / sd_install.ENV_SLOTS[0]
+        live.mkdir()
+        (live / "provisioned").write_text("served\n", encoding="utf-8")
+        (self.serving / ".venv").symlink_to(live.resolve())
+        merged = self.commit(self.origin, "two\n")
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+        self.assertEqual((live / "provisioned").read_text(encoding="utf-8"), "served\n", "the live slot was rebuilt")
+        self.assertEqual((os.readlink(self.serving / ".venv"), self.built_for()), (sd_install.ENV_SLOTS[1], merged))
+
+    def test_a_link_outside_both_slots_is_refused_and_nothing_moves(self):
+        ctx = self.real_provision()
+        elsewhere = self.home / "elsewhere"
+        elsewhere.mkdir()
+        (self.serving / ".venv").symlink_to(elsewhere)
+        self.commit(self.origin, "two\n")
+        out = io.StringIO()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, out), 1)
+        self.assertIn("is not a link to .venv-a or .venv-b; move it aside", out.getvalue())
+        self.assertEqual((self.head(), self.rendered), (self.first, []))
+        self.assertEqual(os.readlink(self.serving / ".venv"), str(elsewhere))
+        self.assertFalse(any((self.serving / name).exists() for name in sd_install.ENV_SLOTS), "a slot was built")
+
     def test_a_put_back_git_refuses_after_a_failed_provision_names_the_command(self):
         merged = self.commit(self.origin, "two\n")
         real = sd_install._git

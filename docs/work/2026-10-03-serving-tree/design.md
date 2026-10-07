@@ -82,7 +82,8 @@ Its last line runs `bin/sd_install.py --serve` from the working checkout:
   environment, then render. The build is the target's own
   `make setup SERVE=no VENV=<slot>`, with the caller's `MAKEFLAGS` and
   `VENV` removed, into `.venv-a` or `.venv-b`, whichever `.venv` does not
-  link to. `.venv` moves to the slot only after the build succeeds, and
+  resolve to; a `.venv` that resolves to neither is refused before any build
+  (review round 16). `.venv` moves to the slot only after the build succeeds, and
   back if the render fails. A failed build checks out the previous commit
   and publishes nothing, so the previous environment and install serve on.
   Two slots, not a temporary directory renamed into place: a virtualenv's

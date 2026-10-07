@@ -2883,11 +2883,20 @@ def _provision(ctx: Context, commit: str, out) -> Path | None:
     the checkout that ran `make setup` takes nothing a served command needs.
     """
     venv = ctx.checkout / ".venv"
-    if venv.exists() and not venv.is_symlink():
+    slots = [ctx.checkout / name for name in ENV_SLOTS]
+    # By where the link resolves, not its text: `.venv -> /abs/.venv-a` is
+    # live on `.venv-a`, and rebuilding that would damage what is served
+    # (review round 16).
+    live = os.path.realpath(venv) if venv.is_symlink() else None
+    targets = [os.path.realpath(path) for path in slots]
+    if live is None and not venv.exists():
+        slot = slots[0]
+    elif live in targets:
+        slot = slots[1 - targets.index(live)]
+    else:
         print(f"error: {venv} is not a link to {' or '.join(ENV_SLOTS)}; move it aside and run `make setup` again",
               file=out)
         return None
-    slot = ctx.checkout / (ENV_SLOTS[1] if venv.is_symlink() and os.readlink(venv) == ENV_SLOTS[0] else ENV_SLOTS[0])
     environ = {key: value for key, value in ctx.environ.items() if key not in MAKE_VARIABLES}
     try:
         done = subprocess.run(["make", "-C", str(ctx.checkout), "setup", "SERVE=no", f"VENV={slot}"],  # nosec B603 B607 - fixed argv

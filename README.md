@@ -337,7 +337,7 @@ clean clone on a detached `HEAD` that nobody works in, at
   with tracked or untracked changes.
   Each `--pull` builds that commit's environment before it renders: the
   commit's own `make setup SERVE=no` builds `.venv-a` or `.venv-b`, whichever
-  `.venv` does not link to, and `.venv` moves to it only when the build
+  `.venv` does not resolve to, and `.venv` moves to it only when the build
   succeeds. A failed build puts the tree back at its commit, with the
   environment and install it had. The environment is the tree's own, so
   removing the checkout that ran `make setup` leaves it working. The
