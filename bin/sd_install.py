@@ -43,6 +43,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Iterable
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
@@ -2928,24 +2929,42 @@ def _put_back(ctx: Context, original: str, receipt: bytes | None, commit: str, o
           "and rendered from it again.", file=out)
 
 
+#: Seconds a move of the serving tree waits for another to end before it refuses.
+SERVE_LOCK_WAIT = 600
+
+
 @contextmanager
-def serving_lock(tree: Path, dry_run: bool = False):
-    """Hold `<tree>.lock`, beside the serving tree, for one whole move of it; a dry run takes none.
+def serving_lock(tree: Path, out, dry_run: bool = False):
+    """Hold `<tree>.lock`, beside the serving tree, for one whole move of it; yields False if never held.
 
     Two `make setup` runs at once each read the slot `.venv` did not link
     to, built it together and published it while the other still wrote it
     (review round 15). The hold spans the fetch, the checkout, the build,
     the render and any put-back, so the second run waits, then starts from
-    what the first left. It is beside the tree, so `--verify` never sees it,
-    and the kernel drops it with the process, so nothing cleans it up.
+    what the first left. It waits `SERVE_LOCK_WAIT` seconds, then refuses
+    with nothing moved, so a stuck run cannot hang every later one. The lock
+    is beside the tree, so `--verify` never sees it, and the kernel drops it
+    with the process, so nothing cleans it up. A dry run takes none.
     """
     if dry_run:
-        yield
+        yield True
         return
     tree.parent.mkdir(parents=True, exist_ok=True)
-    with open(tree.with_name(f"{tree.name}.lock"), "a", encoding="utf-8") as handle:
-        fcntl.flock(handle, fcntl.LOCK_EX)
-        yield
+    path = tree.with_name(f"{tree.name}.lock")
+    with open(path, "a", encoding="utf-8") as handle:
+        deadline = time.monotonic() + SERVE_LOCK_WAIT
+        while True:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    print(f"error: another `make setup` has held {path} for {SERVE_LOCK_WAIT} seconds; "
+                          "nothing moved. Run `make setup` again once it ends.", file=out)
+                    yield False
+                    return
+                time.sleep(1)
+        yield True
 
 
 def cmd_pull_serving(ctx: Context, out) -> int:
@@ -2956,7 +2975,9 @@ def cmd_pull_serving(ctx: Context, out) -> int:
     commit and `--verify` keeps comparing against it. `cmd_user` records the
     commit it replaced as `previousCommit`, which `--rollback` returns to.
     """
-    with serving_lock(ctx.checkout, ctx.dry_run):
+    with serving_lock(ctx.checkout, out, ctx.dry_run) as held:
+        if not held:
+            return 1
         code, _, err = _git(ctx, ["fetch", "--quiet", "origin"], timeout=PULL_TIMEOUT)
         if code:
             print(f"error: git fetch origin failed:\n{err}", file=out)
@@ -3022,7 +3043,9 @@ def cmd_rollback(ctx: Context, out) -> int:
     activation like any other, so the commit it leaves becomes the new
     `previousCommit`, and a second `--rollback` undoes the first.
     """
-    with serving_lock(ctx.checkout, ctx.dry_run):
+    with serving_lock(ctx.checkout, out, ctx.dry_run) as held:
+        if not held:
+            return 1
         live = git_context(ctx.checkout)
         if live["branch"] != "HEAD":
             print(
@@ -3101,8 +3124,8 @@ def cmd_serve(ctx: Context, out) -> int:
     if not tree.exists():
         # A second first run waits here, then finds the tree; the lock is
         # released before the hand-over, whose `--pull` takes it again.
-        with serving_lock(tree, ctx.dry_run):
-            cloned = tree.exists() or _clone_serving_tree(ctx, tree, out)
+        with serving_lock(tree, out, ctx.dry_run) as held:
+            cloned = held and (tree.exists() or _clone_serving_tree(ctx, tree, out))
         if not cloned:
             return 1
         if ctx.dry_run:

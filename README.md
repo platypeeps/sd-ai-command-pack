@@ -345,7 +345,8 @@ clean clone on a detached `HEAD` that nobody works in, at
   a link the receipt does not name is still refused.
   Two `make setup` runs at once take turns: each move holds `serving.lock`,
   beside the tree, from the fetch to the end of any put-back, and the second
-  run waits for it, then moves from where the first left the tree.
+  run waits for it, then moves from where the first left the tree. After 600
+  seconds it refuses with nothing moved; run `make setup` again.
 - **Roll back:** `python3 bin/sd_install.py --rollback`, run in the serving
   tree. Each render that activates a new commit records the replaced one as
   `previousCommit` in the receipt. `--rollback` detaches at that commit and

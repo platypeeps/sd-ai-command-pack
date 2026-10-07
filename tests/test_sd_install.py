@@ -16,6 +16,7 @@ actual global excludes, and the test that noticed that is the reason the
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import importlib.util
 import io
 import json
@@ -2699,6 +2700,22 @@ class ServingTreeTests(InstallerHarness):
         self.assertEqual(slots, [sd_install.ENV_SLOTS[1], sd_install.ENV_SLOTS[0]], "both runs built one slot")
         self.assertEqual((self.head(), self.built_for()), (merged, merged))
 
+    def test_a_move_that_waits_too_long_for_the_lock_refuses_and_moves_nothing(self):
+        """Round 16: a stuck run holds the lock; pull and rollback give up after `SERVE_LOCK_WAIT`."""
+        self.write_receipt(checkout=str(self.serving), commit=self.first, previousCommit=self.first)
+        self.commit(self.origin, "two\n")
+        ctx = self.context(self.serving)
+        receipt = ctx.receipt.read_bytes()
+        with open(self.home / "serving.lock", "a", encoding="utf-8") as held, \
+                unittest.mock.patch.object(sd_install, "SERVE_LOCK_WAIT", 1.5), self.recording():
+            fcntl.flock(held, fcntl.LOCK_EX)
+            for move in (sd_install.cmd_pull, sd_install.cmd_rollback):
+                out = io.StringIO()
+                self.assertEqual(move(ctx, out), 1)
+                self.assertIn("another `make setup` has held", out.getvalue())
+        self.assertEqual((self.head(), self.rendered, ctx.receipt.read_bytes()), (self.first, [], receipt))
+        self.assertFalse((self.serving / ".venv").is_symlink())
+
     def test_a_put_back_git_refuses_after_a_failed_provision_names_the_command(self):
         merged = self.commit(self.origin, "two\n")
         real = sd_install._git
@@ -2906,16 +2923,26 @@ class ServeTests(InstallerHarness):
         real = sd_install.serving_lock
 
         @contextlib.contextmanager
-        def other_run_cloned_first(tree, dry_run=False):
-            with real(tree, dry_run):
+        def other_run_cloned_first(tree, out, dry_run=False):
+            with real(tree, out, dry_run) as held:
                 subprocess.run(["git", "clone", "-q", str(self.origin), str(tree)], check=True, capture_output=True)
-                yield
+                yield held
 
         with unittest.mock.patch.object(sd_install, "serving_lock", side_effect=other_run_cloned_first):
             rc, output = self.serve()
         self.assertEqual(rc, 0, output)
         self.assertNotIn("cloned", output)
         self.assertTrue(self.tree.with_name("serving.lock").exists())
+
+    def test_a_first_run_that_waits_too_long_clones_nothing(self):
+        self.tree.parent.mkdir(parents=True)
+        with open(self.tree.with_name("serving.lock"), "a", encoding="utf-8") as held, \
+                unittest.mock.patch.object(sd_install, "SERVE_LOCK_WAIT", 0):
+            fcntl.flock(held, fcntl.LOCK_EX)
+            rc, output = self.serve()
+        self.assertEqual(rc, 1)
+        self.assertIn("another `make setup` has held", output)
+        self.assertFalse(self.tree.exists() or self.record.exists())
 
     def test_a_dry_run_serve_of_an_existing_clone_runs_nothing(self):
         self.assertEqual(self.serve()[0], 0)

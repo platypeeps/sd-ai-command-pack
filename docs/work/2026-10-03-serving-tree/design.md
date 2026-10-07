@@ -97,9 +97,9 @@ Its last line runs `bin/sd_install.py --serve` from the working checkout:
 - **One move at a time.** `--pull` and `--rollback` hold `fcntl.flock` on
   `<tree>.lock` from the fetch or receipt read through the render and any
   put-back; `--serve` holds it around the clone, and a run that waited finds
-  the tree and clones nothing. A second run waits rather than refusing, as
-  the `sd_db` provisioning lock does, so concurrent lane `make setup` runs
-  all succeed. Without it, two runs built the same slot and one published it
+  the tree and clones nothing. A second run waits up to `SERVE_LOCK_WAIT`
+  (600 s), so concurrent lane `make setup` runs succeed, then refuses with
+  nothing moved, so a stuck run cannot hang every later one. Without it, two runs built the same slot and one published it
   half-built (review round 15). The kernel drops the lock with its process.
 - **Links.** `link_plan` gains a fourth state, `recorded`: a link the
   receipt names, still at its recorded target. The install moves it to the
