@@ -17,22 +17,27 @@ fail on `main` before the step's code lands.
       - `plan_steps(text)` returns `(id, title, ticked)` per step, from the
         first `## Steps`, `## Step checklist` or `## Order` section (design
         point 2). Fenced code is skipped.
-      - `step_line(id, status, evidence=None)` writes the first line;
-        `read_step_line(body)` reads it, or returns None.
-      - `step_status(steps, notes)` applies design point 3: newest note,
-        then `[x]`, then `open`. Notes for ids the plan lacks come back
-        marked `not in plan`.
+      - `step_line(id, status, title, evidence=None)` writes the first line
+        and the `title:` line; `read_step_line(body)` reads both, or returns
+        None.
+      - `step_status(steps, notes)` applies design point 3: a note counts
+        only when id and title match; newest counted note, then `[x]`, then
+        `open`. A note whose title differs marks the row `changed`. Notes
+        for ids the plan lacks come back marked `not in plan`; a note with
+        no `title:` line comes back `unbound`.
       - Check: `tests/test_sd_steps.py` covers each section heading, `2a`
         ids, a fenced example that is skipped, a `[x]` box with no note, a
-        note that overrides `[x]`, and two notes for one id. Swapping
-        "newest" for "first" fails the two-note case.
+        note that overrides `[x]`, two notes for one id, an unbound note, and a
+        plan rewritten after a `done` note so id 2 names other work (PRD
+        criterion 8). Swapping "newest" for "first" fails the two-note case.
+        Dropping the title comparison fails criterion 8.
 - [ ] 2. `sd task note --step` and `sd task steps`. Size M, 3 h. PR A.
       - In `bin/sd_work.py`, beside the existing `note` parser:
         `--step <id>:<status>` and `--evidence`; `--kind` absent or
         `comment`.
       - Find the plan through the item's work directory (design point 3).
         Refuse an id the plan lacks and list the plan's ids (R2). No plan:
-        write and warn.
+        refuse and name the path read.
       - `sd task steps <item> [--json]` prints the rows of design point 3.
       - Check: PRD acceptance criteria 1, 2 and 3 pass against a fixture
         database and checkout. Criterion 2 also asserts that the note count
@@ -44,8 +49,8 @@ fail on `main` before the step's code lands.
       - Add the second remedy to the action text. Update the `EXCLUDED`
         checkbox line, and the `open-step` row in
         `skills/sd-status/SKILL.md`, which mirrors the class table.
-      - Check: PRD criteria 4 and 6 pass. Removing the join fails
-        criterion 4.
+      - Check: PRD criteria 4, 6 and the `sd-status` half of 8 pass.
+        Removing the join fails criterion 4.
 - [ ] 4. `sd-docs-lint` rule 1 refuses a repeated step id. Size S, 1 h. PR B.
       - Reuse `plan_steps`. The failure names the item, the file and the id.
       - Check: PRD criterion 5 passes, and `make docs-lint` passes on this

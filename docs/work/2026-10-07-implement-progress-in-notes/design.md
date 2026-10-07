@@ -24,7 +24,11 @@ database schema do not change.
 ## Status
 
 Proposed, 2026-10-07. The operator has not ruled Q1 to Q11. Each question
-below carries a recommendation. Implementation has not started.
+below carries a recommendation.
+
+Planning review round 1 (codex) found that a renumbered plan moves a `done`
+note onto other work. Points 1, 3, 4 and 7 now bind each note to its step's
+title and keep step ids stable.
 
 ## Decisions
 
@@ -91,6 +95,7 @@ system, once its doc-reading tests have a target of their own.
 
 ```text
 step 3: done · #1377 · 5dff9e55
+title: Pack: the offload view.
 Steps 3-5 merged in one squash; review codex, round 6 advisory.
 ```
 
@@ -99,7 +104,9 @@ Steps 3-5 merged in one squash; review codex, round 6 advisory.
 - The first line may end with ` · <evidence>`: free text such as
   `#1377 · 5dff9e55` or `system #172`. `dropped` should carry a reason on
   the next line.
-- Lines after the first are free text: the log, timings, a path under
+- The second line is `title: <title>`: the step's title in the plan when
+  the note was written. The writer copies it; point 3 uses it.
+- Lines after the second are free text: the log, timings, a path under
   `/Volumes/local/repo-storage/<repo>/`.
 - One note per step. The lane's "Steps 3-5 merged" becomes three notes.
 
@@ -117,8 +124,9 @@ Reasons:
   `sd task show` and Details. The step status would then live in one store
   and the log in another.
 
-The risk is a hand-written comment that starts `step 3: done`. The reader
-counts it. That is what its author said, so the reading is correct.
+A hand-written comment that starts `step 3: done` but has no `title:` line
+is unbound. `sd task steps` lists it, marked `unbound`, and it sets no
+status. Only a note bound to a title closes a step.
 
 **Q2.** Store step status as a `comment` note with a fixed first line? The
 alternatives are a new note kind (schema bump) or a `state` row (invisible in
@@ -145,15 +153,16 @@ each marked `not in plan`.
 ### 3. Writer and reader
 
 **Writer:** `sd task note <item> --step <id>:<status> [--evidence TEXT]
-[--body TEXT]`. It composes the first line, appends `--body`, and writes a
-`comment` note through the existing note path. With `--step`, `--kind` must
-be absent or `comment`.
+[--body TEXT]`. It composes the first line and the `title:` line from the
+plan, appends `--body`, and writes a `comment` note through the existing
+note path. With `--step`, `--kind` must be absent or `comment`.
 
 It finds the plan through the item's work directory: the `prd.md` whose
 frontmatter says `item: sd:<n>`, or the item's `path`, under the checkout
 `item.repo` names. It reads that checkout's working tree. A plan that lists
-no such id refuses, and names the ids it lists (R2). No plan found writes
-the note and warns on stderr: a satellite may lack the checkout.
+no such id refuses, and names the ids it lists (R2). No plan found refuses
+too, and names the path it read: without the plan, the writer has no title
+to bind. A machine that lacks the checkout writes a plain comment instead.
 
 **Reader:** `sd task steps <item> [--json]`. One row per plan step, then one
 row per note id the plan lacks. The example is sd:2704 after the backfill;
@@ -169,10 +178,23 @@ id  status   evidence          date        title
 
 `step_status(steps, notes)` decides each row (R4):
 
-1. The newest step note for the id wins, by timestamp, then note id.
-2. With no note, a ticked `[x]` box reads `done`. This keeps existing
-   plans correct with no backfill commit.
-3. Otherwise the step is `open`.
+1. A note counts for a step only when its id matches and its `title:` line
+   equals the plan's title for that id, whitespace collapsed.
+2. The newest counted note wins, by timestamp, then note id.
+3. With no counted note, a ticked `[x]` box reads `done`. This keeps
+   existing plans correct with no backfill commit.
+4. Otherwise the step is `open`.
+
+A note whose id matches but whose title does not is stale. The plan moved
+under it: a step was renumbered, reworded, split or merged. The row reads
+by rules 3 and 4, and is marked `changed` with the note's title. Nothing is
+closed by a note written for other work. To reconcile, the lane writes a new
+note for the id, which binds the current title. Its answer is the
+operator's or the lane's, never the reader's.
+
+The title binding is the backstop for point 7, which keeps ids stable. A
+renumbered plan breaks that rule, and the lint cannot see it: the lint
+reads one version of the file and no history.
 
 **Q4.** Should `sd-ship merge` write `step <id>: done` notes from a
 `Steps:` line in the pull-request body? Recommended: not now. The lane
@@ -183,8 +205,9 @@ Revisit after the measurement in implement.md step 7.
 
 **`sd-status`:** `_step_rows` in `bin/sd-status` produces `open-step` rows.
 Today it lists every `- [ ]` in every `.md` of an item that is not done. One
-change, for `implement.md` in a `row` repository: a `- [ ] <id>.` box whose
-newest step note says `done` or `dropped` is not listed. Every other box is
+change, for `implement.md` in a `row` repository: a `- [ ] <id>.` box that
+`step_status` reads `done` or `dropped` is not listed. A stale note counts
+for nothing, so a box whose title changed is listed again. Every other box is
 listed as today, with today's key.
 
 So a step note only removes rows. A plan written as plain `<id>.` lines
@@ -254,6 +277,13 @@ a cited line moved it.
 - a step's scope, size, check, or pull-request split;
 - a ruling that changes any of the above.
 
+A step id is an identity, not a position. Reordering keeps each step's
+id. A new step takes an id the plan has never used, such as `2a` or the next
+number. A removed, split or merged step's id is retired, not reused. A step
+that is split keeps neither half on the old id. Point 3 catches a plan that
+breaks this rule: the old note no longer matches the title, so it closes
+nothing.
+
 These go to notes and are never a reason for a commit: a step's status,
 "what landed", merge shas, timings, measurements, review rounds and their
 dispositions, hand-offs. A measurement that a later decision rests on is
@@ -304,7 +334,9 @@ correct. Revisit if a criterion with a merged check stays listed.
 | Fault | Effect | Who sees it |
 | --- | --- | --- |
 | Step id not in the plan | the writer refuses and lists the plan's ids | the writer |
-| No plan found for the item | the note is written; stderr warns | the writer |
+| No plan found for the item | the writer refuses and names the path it read | the writer |
+| Plan renumbered or step reworded after a note | the note is stale; the step reads by its box and is marked `changed` | the reader, in `sd task steps` |
+| A hand-written `step <id>:` comment with no `title:` line | listed as `unbound`; it sets no status | the reader |
 | Plan in an unparsed shape | `sd task steps` says "no step list"; notes render as `not in plan` | the reader |
 | Plan repeats a step id | `sd-docs-lint` rule 1 fails, names the id | the author, at the gate |
 | A wrong `done` note | the step reads `done`; a newer note corrects it | whoever reads the note |

@@ -75,19 +75,23 @@ agreements need review.
 ## Requirements
 
 R1. A note records one step's status in a fixed first line,
-    `step <id>: <status>`. The status is `started`, `done` or `dropped`.
-    `sd task note --step <id>:<status>` writes it.
+    `step <id>: <status>`, and the step's plan title in a second line,
+    `title: <title>`. The status is `started`, `done` or `dropped`.
+    `sd task note --step <id>:<status>` writes both lines.
 
-R2. The writer refuses a step id that the item's plan does not list, when
-    it finds the plan. It names the ids the plan lists.
+R2. The writer refuses a step id that the item's plan does not list, and
+    names the ids the plan lists. It refuses when it finds no plan.
 
 R3. `sd task steps <item>` prints one row per plan step: id, status, the
     note's evidence, its date and the step's title. `--json` prints the same
     rows. A note whose id the plan lacks prints as a row marked
     `not in plan`.
 
-R4. The newest step note for an id decides its status. With no note, a
-    ticked `[x]` box reads `done`. With neither, the step is `open`.
+R4. A note counts for a step only when its id and its title both match
+    the plan. The newest counted note decides the status. With no counted
+    note, a ticked `[x]` box reads `done`. With neither, the step is `open`.
+    A note whose title no longer matches is shown as `changed` and closes
+    nothing.
 
 R5. `sd-status` does not list an `implement.md` `- [ ] <id>.` box as
     `open-step` when R4 reads the step `done` or `dropped`. Every other box
@@ -122,6 +126,10 @@ R9. The plan template keeps `- [ ] <id>.` as the step marker. It and
 7. After the backfill (implement.md, step 6), `sd task steps 2704` reports
    eight `done` steps, and the pack's `sd-status` lists at most one
    `open-step` row for sd:2704.
+8. A test records `step 2: done`, then rewrites the plan so that id 2
+   names a different, unticked step. `sd task steps` reports step 2 `open`
+   and marked `changed`. `sd-status` lists its `open-step` row again.
+   Dropping the title comparison reads step 2 `done` and fails the test.
 
 ## Out of scope
 
