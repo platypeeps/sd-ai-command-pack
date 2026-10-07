@@ -38,12 +38,15 @@ fail on `main` before the step's code lands.
       - In `bin/sd_work.py`, beside the existing `note` parser:
         `--step <id>:<status>` and `--evidence`; `--kind` absent or
         `comment`.
-      - Find the plan through the item's work directory (design point 3).
-        Refuse an id the plan lacks and list the plan's ids (R2). No plan:
-        refuse and name the path read.
+      - Find the plan through the item's work directory, in the checkout
+        design point 3 picks: `--checkout`, else the current checkout of
+        the item's repository, else `item.repo`. Refuse an id the plan
+        lacks and list the plan's ids (R2). No plan: refuse and name the
+        path read.
       - `sd task steps <item> [--json]` prints the rows of design point 3.
-      - Check: PRD acceptance criteria 1, 2 and 3 pass against a fixture
-        database and checkout. Criterion 2 also asserts that the note count
+      - Check: PRD acceptance criteria 1, 2, 3 and 11 pass against a
+        fixture database and checkout, criterion 11 with a fixture
+        worktree. Criterion 2 also asserts that the note count
         is unchanged. Removing the id check fails criterion 2.
 - [ ] 3. `sd-status` subtracts recorded steps. Size S, 2 h. PR B.
       - `_step_rows` in `bin/sd-status`: for `implement.md` in a `row`
@@ -56,8 +59,10 @@ fail on `main` before the step's code lands.
         Removing the join fails criterion 4.
 - [ ] 4. `sd-docs-lint` rule 1 refuses a repeated step id. Size S, 1 h. PR B.
       - Reuse `plan_steps`. The failure names the item, the file and the id.
-      - Check: PRD criterion 5 passes, and `make docs-lint` passes on this
-        repository. Before the system pin moves past PR B, a system pull
+        The rule runs only where `.status-source` is `row`.
+      - Check: PRD criterion 5 passes, both halves. Running the rule in a
+        `file` repository fails its second half. `make docs-lint` passes on
+        this repository. Before the system pin moves past PR B, a system pull
         request renumbers the second list in sd:2107's plan. System's
         `sd-docs-lint` then passes with the new pack.
 - [ ] 5. Template and documentation. Size S, 2 h. PR C.

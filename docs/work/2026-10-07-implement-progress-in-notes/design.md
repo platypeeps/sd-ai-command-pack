@@ -26,6 +26,12 @@ database schema do not change.
 Accepted. Operator ruling 2026-10-07: accept all Q1-Q11. Each question
 below keeps its recommendation, which is now the ruling.
 
+Planning review round 4 (codex) found that the writer read `item.repo`'s
+checkout, not the worktree the step was built in; point 3 now picks the
+current checkout, with `--checkout` as an override. It also found the
+repeated-id lint unconditional; point 5 now limits it to `row`
+repositories.
+
 Planning review round 1 (codex) found that a renumbered plan moves a `done`
 note onto other work. Round 2 found that a title match misses a scope change
 under an unchanged title. Both are one class: a note survives a plan change
@@ -170,11 +176,28 @@ plan, appends `--body`, and writes a `comment` note through the existing
 note path. With `--step`, `--kind` must be absent or `comment`.
 
 It finds the plan through the item's work directory: the `prd.md` whose
-frontmatter says `item: sd:<n>`, or the item's `path`, under the checkout
-`item.repo` names. It reads that checkout's working tree. A plan that lists
-no such id refuses, and names the ids it lists (R2). No plan found refuses
-too, and names the path it read: without the plan, the writer has no block
-to bind. A machine that lacks the checkout writes a plain comment instead.
+frontmatter says `item: sd:<n>`, or the item's `path`. It reads it from one
+checkout's working tree, chosen in this order:
+
+1. `--checkout DIR`, when given. It must belong to the item's repository.
+2. The current checkout, when it belongs to the item's repository. This is
+   the worktree the step was built in, whose plan may differ from `main`.
+3. The checkout `item.repo` names.
+
+A checkout belongs to the item's repository when its git common directory
+is the one `item.repo`'s checkout uses, or when both name the same
+`origin` URL. Any other `--checkout` refuses and names both.
+
+The note binds to the plan where the work was done. A worktree that adds
+step 4 accepts `--step 4:done`, and the digest is that worktree's block.
+Run from `main` before the plan merges, `sd task steps` shows the note as
+`not in plan` or `changed`; once the plan merges, the digest matches and the
+step reads `done`. `sd task steps` and `sd-status` read their own current
+checkout, by the same order; `sd-status` reads the checkout it is given.
+
+A plan that lists no such id refuses, and names the ids it lists (R2). No
+plan found refuses too, and names the path it read: without the plan, the
+writer has no block to bind. A machine that lacks the checkout writes a plain comment instead.
 
 **Reader:** `sd task steps <item> [--json]`. One row per plan step, then one
 row per note id the plan lacks. The example is sd:2704 after the backfill;
@@ -293,9 +316,13 @@ dashboard.
 `implement.md` stays an item document. Rules 1, 2, 6 and 7 apply as today.
 The lint reads no database, so it never reads a step's status.
 
-One addition, in rule 1: an `implement.md` whose step list repeats an id
-fails, and names the id. A note keys on the id, so a repeated id makes a
-note ambiguous.
+One addition, in rule 1, for a `row` repository only: an `implement.md`
+whose step list repeats an id fails, and names the id. A note keys on the
+id, so a repeated id makes a note ambiguous. A `file` repository joins no
+notes, so a repeated id there is harmless and keeps today's lint result
+(R7). The lint reads `.status-source` already, for rule 2.
+
+Both the pack and system are `row` repositories on 2026-10-07.
 
 On 2026-10-07 one plan outside an archive repeats ids: system's sd:2107
 plan (`2026-09-29-jev-judgment-correctness`). Ids 1 and 2 appear twice under
@@ -399,6 +426,8 @@ correct. Revisit if a criterion with a merged check stays listed.
 | --- | --- | --- |
 | Step id not in the plan | the writer refuses and lists the plan's ids | the writer |
 | No plan found for the item | the writer refuses and names the path it read | the writer |
+| Worktree plan differs from `main` | the note binds the worktree's block; `main` reads it `changed` or `not in plan` until the plan merges | the reader on `main` |
+| `--checkout` names another repository | the writer refuses and names both | the writer |
 | Plan changed in a step's block after a note | the note is stale; the step reads by its box and is marked `changed` | the reader, in `sd task steps` and `sd-status` |
 | A hand-written `step <id>:` comment with no `plan:` line | listed as `unbound`; it sets no status | the reader |
 | Plan in an unparsed shape | `sd task steps` says "no step list"; notes render as `not in plan` | the reader |

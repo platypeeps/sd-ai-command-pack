@@ -97,8 +97,9 @@ R5. `sd-status` does not list an `implement.md` `- [ ] <id>.` box as
     `open-step` when R4 reads the step `done` or `dropped`. Every other box
     keeps today's reading, including every box in `prd.md`.
 
-R6. `sd-docs-lint` fails an `implement.md` whose step list repeats a step
-    id. It reads no database.
+R6. In a `row` repository, `sd-docs-lint` fails an `implement.md` whose
+    step list repeats a step id. It reads no database. A `file` repository
+    keeps today's lint result.
 
 R7. A repository whose `docs/work/.status-source` is not `row` behaves
     exactly as today.
@@ -121,7 +122,9 @@ R9. The plan template keeps `- [ ] <id>.` as the step marker. In a `row`
 4. An `sd-status` fixture with the same item lists `open-step` rows for
    steps 1 and 3 only. Removing the note join lists all three.
 5. `sd-docs-lint` fails a fixture `implement.md` that lists step 2 twice,
-   and names the id. It passes every active item in this repository.
+   and names the id, in a `row` repository. The same fixture in a `file`
+   repository keeps the result it has on `main`. The lint passes every
+   active item in this repository.
 6. A fixture repository with `.status-source` set to `file` lists the same
    `open-step` rows as on `main`.
 7. After the backfill (implement.md, step 6), `sd task steps 2704` reports
@@ -142,6 +145,13 @@ R9. The plan template keeps `- [ ] <id>.` as the step marker. In a `row`
 10. A test records `step 2: done`, then moves step 2 above step 1, ticks its
    box and re-wraps its text. Step 2 still reads `done`. Hashing the box
    mark or the raw whitespace fails the test.
+11. A fixture main checkout lists steps 1 to 3, and a worktree of it adds
+   step 4. Run from the worktree, `step 4: done` is written with the
+   worktree's block digest. Run from the main checkout, it refuses and names
+   1, 2 and 3. With `--checkout <worktree>` from elsewhere, it is written.
+   After the worktree's plan is copied to main, step 4 reads `done` there.
+   A `--checkout` of another repository refuses. Reading only `item.repo`
+   fails the first case.
 
 ## Out of scope
 
