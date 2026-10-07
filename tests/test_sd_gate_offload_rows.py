@@ -31,6 +31,7 @@ if str(REPO_ROOT / "bin") not in sys.path:
 import sd_gate_cache  # noqa: E402
 import sd_gate_receipts  # noqa: E402
 import sd_gate_run  # noqa: E402
+import sd_gate_tools  # noqa: E402
 import sd_lib  # noqa: E402
 
 HUB = "hub.example.test:8769"
@@ -62,6 +63,7 @@ def no_real_gate_cache(case: unittest.TestCase, scratch: pathlib.Path) -> None:
 
     `mock.patch.dict` keeps an inherited `SD_GATE_CACHE_DIR`, which outranks a scratch `XDG_CACHE_HOME`, so a gate
     would remove and write cargo subcommands in the real cache. Every pinning passes through `offload_pins`.
+    The real `sd_gate_tools.PINS` name copies in that cache too, so this pins no tool (sd:2936).
     """
     pins, outside = sd_gate_receipts.offload_pins, []
 
@@ -72,7 +74,7 @@ def no_real_gate_cache(case: unittest.TestCase, scratch: pathlib.Path) -> None:
         return pinned
 
     case.addCleanup(lambda: case.assertEqual(outside, [], "a test pinned the real gate cache"))
-    for patcher in (mock.patch.object(sd_gate_receipts, "offload_pins", isolated),
+    for patcher in (mock.patch.object(sd_gate_receipts, "offload_pins", isolated), mock.patch.object(sd_gate_tools, "PINS", ()),
                     mock.patch.dict(os.environ, {sd_gate_cache.CACHE_VARIABLE: str(scratch / "gate-cache")})):
         patcher.start()
         case.addCleanup(patcher.stop)
@@ -378,6 +380,7 @@ class OffloadedEnvironment(SatelliteFixture):
         status, seen = self.seen()
         self.assertEqual(status, "success")
         pins = sd_gate_receipts.offload_pins({**os.environ, **self.scratch})
+        del pins["PATH"]  # `gate_environment` cuts the caller's PATH first; `PinnedTools` checks the pinned entries
         self.assertEqual({name: seen.get(name) for name in pins}, pins)
         self.assertEqual((seen["GIT_CONFIG_GLOBAL"], seen["RUST_TEST_THREADS"]), (os.devnull, sd_gate_receipts.OFFLOAD_THREADS))
         self.assertTrue(pathlib.Path(seen["CARGO_HOME"]).is_relative_to(self.scratch["XDG_CACHE_HOME"]), seen["CARGO_HOME"])
