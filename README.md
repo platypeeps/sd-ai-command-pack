@@ -336,10 +336,11 @@ clean clone on a detached `HEAD` that nobody works in, at
   names and runs that commit's own installer as `--user`. It refuses a tree
   with tracked or untracked changes.
   Each `--pull` builds that commit's environment before it renders: the
-  commit's own `make setup SERVE=no` builds `.venv-a` or `.venv-b`, whichever
-  `.venv` does not resolve to, and `.venv` moves to it only when the build
-  succeeds. A failed build puts the tree back at its commit, with the
-  environment and install it had. The environment is the tree's own, so
+  commit's own `make setup SERVE=no`, run in a scratch checkout beside the
+  tree, builds `.venv-a` or `.venv-b`, whichever `.venv` does not resolve
+  to. The tree serves its commit for the whole build; then the code and
+  `.venv` move together. A failed build moves nothing, so the tree keeps
+  its commit, environment and install. The environment is the tree's own, so
   removing the checkout that ran `make setup` leaves it working. The
   receipt's command links move to the serving tree;
   a link the receipt does not name is still refused.

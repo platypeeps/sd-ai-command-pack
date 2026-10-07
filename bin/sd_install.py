@@ -2825,44 +2825,32 @@ def _activate(ctx: Context, commit: str, out) -> int:
         print(f"error: cannot read the serving tree's HEAD:\n{err}", file=out)
         return 1
     receipt = ctx.receipt.read_bytes() if ctx.receipt.exists() else None
-    code, _, err = _git(ctx, ["checkout", "--quiet", "--detach", commit])
-    if code:
-        print(f"error: git checkout --detach {commit} failed:\n{err}", file=out)
-        return 1
-    # Armed as soon as HEAD moves: the served commands run the tree's code,
-    # so every failure from here on, raised or returned, puts the tree, the
-    # `.venv` link and the install back (review round 14).
+    # One order (review rounds 14 and 17): build the target's environment
+    # from a scratch checkout while the tree serves on untouched, then move
+    # the code and `.venv` back to back, then render. Recovery covers every
+    # step after the first change, raised or returned.
     venv = ctx.checkout / ".venv"
-    previous = os.readlink(venv) if venv.is_symlink() else None
-    rendering = False
+    moved = rendering = False
     rendered = 1
     try:
+        previous = os.readlink(venv) if venv.is_symlink() else None
         slot = _provision(ctx, commit, out)
         if slot is None:
+            print(f"error: the serving tree stays at {original}, with its environment and install as they were.",
+                  file=out)
+            return 1
+        moved = True
+        code, _, err = _git(ctx, ["checkout", "--quiet", "--detach", commit])
+        if code:
+            print(f"error: git checkout --detach {commit} failed:\n{err}", file=out)
             return 1
         _replace_link(venv, Path(slot.name))
         print(f"serving {commit}", file=out)
         rendering = True
         rendered = _render_checked_out(ctx, out)
     finally:
-        if rendered:
-            if previous is None:
-                if venv.is_symlink():
-                    venv.unlink()
-            else:
-                _replace_link(venv, Path(previous))
-            if rendering:
-                _put_back(ctx, original, receipt, commit, out)
-            else:
-                # Nothing was published: the links, renders, hooks and
-                # receipt still serve `original` once its code is back.
-                code, _, err = _git(ctx, ["checkout", "--quiet", "--detach", original])
-                if code:
-                    print(f"error: git could not return the serving tree to {original}:\n{err}\nrun "
-                          f"`git -C {ctx.checkout} checkout --detach {original}`.", file=out)
-                else:
-                    print(f"error: the serving tree is back at {original}, with its environment and install as "
-                          "they were.", file=out)
+        if rendered and moved:
+            _put_back(ctx, original, previous, receipt if rendering else None, commit, out, rendered=rendering)
     return rendered
 
 
@@ -2898,12 +2886,28 @@ def _provision(ctx: Context, commit: str, out) -> Path | None:
               file=out)
         return None
     environ = {key: value for key, value in ctx.environ.items() if key not in MAKE_VARIABLES}
+    # Built from a scratch checkout of `commit` beside the tree, so the tree
+    # keeps serving its own code on its own environment for the whole build
+    # (review round 17). The environment holds copies, never a path into the
+    # code. The scratch `.venv` names the live one, which the `sd_db`
+    # downgrade guard compares with, as it did when the build ran in place.
     try:
-        done = subprocess.run(["make", "-C", str(ctx.checkout), "setup", "SERVE=no", f"VENV={slot}"],  # nosec B603 B607 - fixed argv
-                              env=environ, capture_output=True, text=True, check=False)
+        with tempfile.TemporaryDirectory(prefix=f".{ctx.checkout.name}-build-", dir=ctx.checkout.parent,
+                                         ignore_cleanup_errors=True) as scratch:
+            build = Path(scratch) / "tree"
+            code, _, err = _git(ctx, ["worktree", "add", "--quiet", "--detach", str(build), commit])
+            if code:
+                print(f"error: git could not check out {commit} to build {slot}:\n{err}", file=out)
+                return None
+            if live is not None:
+                (build / ".venv").symlink_to(live)
+            done = subprocess.run(["make", "-C", str(build), "setup", "SERVE=no", f"VENV={slot}"],  # nosec B603 B607 - fixed argv
+                                  env=environ, capture_output=True, text=True, check=False)
     except OSError as problem:
         print(f"error: provisioning {slot} for {commit} could not start make: {problem}", file=out)
         return None
+    finally:
+        _git(ctx, ["worktree", "prune"])
     print(done.stdout + done.stderr, file=out, end="")
     if done.returncode:
         print(f"error: provisioning {slot} for {commit} failed", file=out)
@@ -2911,17 +2915,42 @@ def _provision(ctx: Context, commit: str, out) -> Path | None:
     return slot
 
 
-def _put_back(ctx: Context, original: str, receipt: bytes | None, commit: str, out) -> None:
-    """Return the serving tree to `original`, the receipt to `receipt`, and render `original` again."""
-    code, _, err = _git(ctx, ["checkout", "--quiet", "--detach", original])
-    if receipt is None:
-        ctx.receipt.unlink(missing_ok=True)
-    else:
-        ctx.receipt.write_bytes(receipt)
+def _put_back(ctx: Context, original: str, previous: str | None, receipt: bytes | None, commit: str, out, *,
+              rendered: bool) -> None:
+    """Return the tree to `original`, then `.venv` to `previous`; after a render, the receipt and install too.
+
+    The code goes back first: if git cannot move it, `.venv` stays with the
+    code it was built for, and the error names the command. Each later step
+    is attempted even when an earlier one fails (review round 17).
+    """
+    code, _, err = _git(ctx, ["checkout", "--quiet", "--force", "--detach", original])
     if code:
-        print(f"error: the render at {commit} failed, and git could not return the serving tree to "
-              f"{original}:\n{err}\nIt serves {commit} while the receipt names {original}; run "
-              f"`git -C {ctx.checkout} checkout --detach {original}`, then `--user`.", file=out)
+        print(f"error: activating {commit} failed, and git could not return the serving tree to {original}:\n"
+              f"{err}\nIt holds {commit}'s code; run "
+              f"`git -C {ctx.checkout} checkout --detach {original}`, then `make setup`.", file=out)
+        return
+    venv = ctx.checkout / ".venv"
+    try:
+        if previous is None:
+            if venv.is_symlink():
+                venv.unlink()
+        else:
+            _replace_link(venv, Path(previous))
+    except OSError as problem:
+        print(f"error: the serving tree is back at {original}, but {venv} could not be put back to "
+              f"{previous or 'nothing'}: {problem}; run `make setup` again.", file=out)
+    if not rendered:
+        print(f"error: the serving tree is back at {original}, with its environment and install as they were.",
+              file=out)
+        return
+    try:
+        if receipt is None:
+            ctx.receipt.unlink(missing_ok=True)
+        else:
+            atomic_policy_write(ctx.receipt, receipt)
+    except OSError as problem:
+        print(f"error: the render at {commit} failed; the serving tree is back at {original}, but its receipt "
+              f"could not be put back: {problem}; run `make setup` again.", file=out)
         return
     # Render the tree again only if it was what the machine served. On a first
     # `--serve` the restored receipt names the working checkout, or nothing,
