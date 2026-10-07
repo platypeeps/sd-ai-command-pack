@@ -17,6 +17,8 @@ import sqlite3
 import subprocess
 from typing import Any
 
+import sd_lib
+
 #: The `state` key prefix; the key is `<PREFIX><owner/name>:<pull request>`.
 PREFIX = "sd-changelog:v1:"
 #: The six Keep a Changelog subsections, in the order render writes them.
@@ -143,6 +145,16 @@ def private(text: str, patterns: list[str]) -> list[int]:
     return [int(line.split(b":", 1)[0]) for line in done.stdout.splitlines()]
 
 
+def _store() -> Any:
+    """`sd_db.ship`, reached through `sd_lib.import_sd_db` as every `bin/` module reaches `sd_db`."""
+    imported = sd_lib.import_sd_db()
+    if imported.module is None:
+        raise RuntimeError(str(imported.problem))
+    from sd_db import ship  # noqa: PLC0415
+
+    return ship
+
+
 def row_key(slug: str, pull_request: int) -> str:
     """`sd-changelog:v1:<owner/name>:<number>`, the slug in lower case."""
     if type(pull_request) is not int or pull_request <= 0:
@@ -157,8 +169,7 @@ def write(connection: sqlite3.Connection, row: dict[str, Any]) -> int:
     `body_digest` is left alone, so a rerun of the merge adds nothing. A
     changed digest is a correction and appends a revision.
     """
-    from sd_db import ship  # noqa: PLC0415
-
+    ship = _store()
     for field in ("merge_commit", "body_digest"):
         if not isinstance(row.get(field), str) or not row[field]:
             raise ValueError(f"a changelog row needs its {field}")
@@ -176,8 +187,7 @@ def rows(connection: sqlite3.Connection, slug: str) -> list[dict[str, Any]]:
     A range scan on the key, not `LIKE`: an `_` in a slug would match any
     character, and `owner/a_b` would read the rows of `owner/axb`.
     """
-    from sd_db import ship  # noqa: PLC0415
-
+    ship = _store()
     prefix = f"{PREFIX}{slug.lower()}:"
     keys = connection.execute("SELECT DISTINCT key FROM state WHERE kind = 'checkpoint' AND key >= ? AND key < ?",
                               (prefix, prefix + TOP)).fetchall()
