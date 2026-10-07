@@ -863,8 +863,10 @@ def _baseline_for(root: pathlib.Path, slug: str, section: dict[str, Any]) -> lis
     `detail` already carries what `_baseline_flags` reads: the layered
     `source` (absent for classic alone), the required contexts, and
     `classic_visibility`, `present` where a classic object stood beside rulesets.
+    A classic read that failed (`unread`) gets none: the system files it as
+    unknown, so the dashboard shows no baseline flag either.
     """
-    if section["protected"] is None:
+    if section["protected"] is None or section["detail"].get("classic_visibility") == "unread":
         return []
     owners, problem = _baseline_owners()
     detail = section["detail"]

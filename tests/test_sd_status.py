@@ -6478,7 +6478,7 @@ class BaselineFlagCase(unittest.TestCase):
                  "parameters": {"strict_required_status_checks_policy": True,
                                 "required_status_checks": [{"context": context}]}}]
 
-    def flags(self, classic: dict[str, Any] | None, rules: list[dict[str, Any]], *, ci: str = "github",
+    def flags(self, classic: dict[str, Any] | str | None, rules: list[dict[str, Any]], *, ci: str = "github",
               owners: tuple[str, ...] = ("platypeeps",), admin: bool = True) -> dict[str, dict[str, Any]]:
         repo = dict(self.REPO, permissions={"admin": admin})
 
@@ -6487,6 +6487,8 @@ class BaselineFlagCase(unittest.TestCase):
             if path == f"repos/{self.SLUG}":
                 return dict(repo), ""
             if path.endswith("/branches/main/protection"):
+                if isinstance(classic, str):
+                    return None, classic
                 return (classic, "") if classic is not None else (None, "gh: Branch not protected (HTTP 404)")
             if path.endswith("/rules/branches/main"):
                 return rules, ""
@@ -6535,6 +6537,12 @@ class BaselineFlagCase(unittest.TestCase):
     def test_unknown_protection_carries_neither(self) -> None:
         """A classic 404 to a token without admin is unknown: no verdict on the baseline either."""
         self.assertEqual(sorted(self.flags(None, [], admin=False)), ["rebase_merge", "squash_message"])
+
+    def test_a_failed_classic_read_beside_a_ruleset_carries_neither(self) -> None:
+        """The system files a classic read that failed as unknown, so the dashboard
+        shows no baseline flag; `ruleset` here would claim rulesets alone on no evidence."""
+        flags = self.flags("gh: Server Error (HTTP 502)", self.rules("ci"))
+        self.assertEqual(sorted(flags), ["rebase_merge", "squash_message"])
 
     def test_neither_flag_is_acknowledgeable(self) -> None:
         self.assertEqual(sorted(set(status.BASELINE_FLAG_IDS) & set(status.ACKNOWLEDGEABLE_GAPS)), [])

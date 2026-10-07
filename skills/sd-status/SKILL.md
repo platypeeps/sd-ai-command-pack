@@ -356,6 +356,7 @@ missing leg prints as a named gap:
   `sd.fleet_owners`, else `platypeeps` as on the dashboard (sd:1807): `protection_source`, raised unless rulesets alone
   protect the branch, and `required_check`, raised unless `ci` is required
   (`sd/local-gate` under `repo.ci = local`). The dashboard shows the same ids.
+  A classic read that failed carries neither, as the system files it unknown.
 
 **A finding is a report, not a failure.** The command exits 0 whether or not it
 found gaps or abnormalities. Exit 2 is reserved for an invocation or

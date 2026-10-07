@@ -4,7 +4,7 @@
 
 ### Added
 
-- **`sd-status` reports the fleet baseline's two flags (sd:1807).** The dashboard showed `protection_source` (rulesets alone, no classic object) and `required_check` (`ci`, or `sd/local-gate` for a `repo.ci = local` repository) for each owned repository; `sd-status` printed neither. It now reports both in `protection.merge_settings`, with the ids, values and sentences `sd_db.protection.baseline_flags` writes, and prints them as `FLAG` or `ok` lines beside the merge flags. A repository whose owner is not in `sd.fleet_owners` carries neither; with no `sd.fleet_owners` the owners are `platypeeps`, the system collector's default. No acknowledgement reaches them. `GapVocabularyTests` compares them with the system library at `.sd-system-rev`.
+- **`sd-status` reports the fleet baseline's two flags (sd:1807).** The dashboard showed `protection_source` (rulesets alone, no classic object) and `required_check` (`ci`, or `sd/local-gate` for a `repo.ci = local` repository) for each owned repository; `sd-status` printed neither. It now reports both in `protection.merge_settings`, with the ids, values and sentences `sd_db.protection.baseline_flags` writes, and prints them as `FLAG` or `ok` lines beside the merge flags. A repository whose owner is not in `sd.fleet_owners` carries neither; with no `sd.fleet_owners` the owners are `platypeeps`, the system collector's default. A classic read that failed carries neither, as the system files it unknown. No acknowledgement reaches them. `GapVocabularyTests` compares them with the system library at `.sd-system-rev`.
 
 - **`sd task edit --clear-branch` clears a stale branch name (sd:2729).**
   It writes the cleared branch through `sd_db`'s `edit_item` (sd:2818), with the usual note and `--if-revision` check.
