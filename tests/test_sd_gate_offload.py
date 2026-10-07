@@ -228,18 +228,21 @@ class OffloadView(ViewFixture):
         self.assertEqual(sd_gate_receipts.offload_miss({**ours, "tools": []}, ours), {"part": "tools", "name": None})
 
 
-#: A fake `rustup`: `which <tool>` names the toolchain that the cwd's `rust-toolchain.toml` pins, under `HOME`.
-FAKE_RUSTUP = """[ "$1" = which ] && [ -f rust-toolchain.toml ] || exit 1
+#: A fake `rustup`: `which <tool>` names the toolchain a path in `RUSTUP_TOOLCHAIN` or the cwd's `rust-toolchain.toml` pins.
+FAKE_RUSTUP = """[ "$1" = which ] || exit 1
+[ -n "$RUSTUP_TOOLCHAIN" ] && echo "$RUSTUP_TOOLCHAIN/bin/$2" && exit
+[ -f rust-toolchain.toml ] || exit 1
 while read -r key _ value; do [ "$key" = channel ] && channel=${value#\\"} && channel=${channel%\\"}; done < rust-toolchain.toml
 [ -n "$channel" ] || exit 1
 echo "$HOME/.rustup/toolchains/$channel/bin/$2"
 """
 
 
-def part(mode: str = "full") -> dict:
-    """A tree part as `tree_binding` writes it, for a `make check` repository in `mode`'s scope."""
+def part(mode: str = "full", tools: list[str] | None = None) -> dict:
+    """A tree part as `tree_binding` writes it, for a `make check` repository in `mode`'s scope, declaring `tools`."""
     return {"schema": 2, "reuse": "head", "head": "a" * 40, "fork": None, "tree": "t" * 40, "inputs": "i" * 12,
-            "scope": {"mode": mode, "fork": None, "command": ["make", "docs-gate"] if mode == "docs-only" else []},
+            "scope": {"mode": mode, "fork": None, "command": ["make", "docs-gate"] if mode == "docs-only" else [],
+                      **({"tools": tools} if tools is not None else {})},
             "detection": {"source": "Makefile", "commands": {"check": ["make", "check"]}}}
 
 
@@ -273,9 +276,9 @@ class RustupResolution(ViewFixture):
         for name in ("cargo", "rustc"):
             self.script(self.home(login) / "bin" / name, f'{prefix}exec "$(rustup which {name})" "$@"\n')
 
-    def mismatch(self, theirs: dict, ours: dict, mode: str = "full") -> dict | None:
-        row = {"binding": {**part(mode), "environment_mode": "offload"}, "offload_view": theirs}
-        return sd_gate_receipts.binding_mismatch(row, part(mode), ours, "offload")
+    def mismatch(self, theirs: dict, ours: dict, mode: str = "full", tools: list[str] | None = None) -> dict | None:
+        row = {"binding": {**part(mode, tools), "environment_mode": "offload"}, "offload_view": theirs}
+        return sd_gate_receipts.binding_mismatch(row, part(mode, tools), ours, "offload")
 
     def test_two_proxies_hash_the_toolchain_the_tree_pins(self) -> None:
         theirs, ours = self.view("sat", tree=self.tree), self.view("hub", tree=self.tree)
@@ -302,22 +305,40 @@ class RustupResolution(ViewFixture):
         self.assertEqual(ours["resolution"], {"cargo": "path", "rustc": "rustup"})
         self.assertIn("tools at cargo (satellite via rustup, hub via path)", self.mismatch(theirs, ours)["reason"])
 
+    def test_a_cargo_that_prints_the_pinned_version_but_is_no_proxy_keeps_its_own_bytes(self) -> None:
+        """Review round 1: equal `--version` output proves no dispatch; neither does a wrapper that adds arguments."""
+        for body in ('# another build\necho "cargo 1.98.1 (797e8a9bc 2026-08-05)"\n', 'exec "$(rustup which cargo)" --locked "$@"\n'):
+            with self.subTest(body=body):
+                self.script(self.home("hub") / "bin" / "cargo", body)
+                theirs, ours = self.view("sat", tree=self.tree), self.view("hub", tree=self.tree)
+                self.assertEqual(ours["resolution"]["cargo"], "path")
+                self.assertIn("tools at cargo (satellite via rustup, hub via path)", self.mismatch(theirs, ours)["reason"])
+
     def test_a_tree_that_pins_nothing_or_no_rustup_hashes_the_path_tool(self) -> None:
         for login in ("sat", "hub"):
             (self.home(login) / "bin" / "rustup").unlink()
         self.assertEqual(self.view("sat", tree=self.tree)["resolution"], {"cargo": "path", "rustc": "path"})
         self.assertEqual(self.view("sat", tree=self.tmp)["resolution"], {"cargo": "path", "rustc": "path"})
 
-    def test_a_docs_only_scope_does_not_refuse_on_a_compiler(self) -> None:
-        """`make docs-gate` builds no code: `cargo` and `cc` are recorded there, and still refuse in a full scope."""
+    def test_a_docs_only_scope_refuses_on_its_declared_tools_only(self) -> None:
+        """`make docs-gate` may run `cargo doc`, so a compiler still refuses, unless `docs_tools` names what it reaches."""
         self.script(self.home("hub") / "bin" / "cargo", 'echo "cargo 1.99.0 (Homebrew)"\n')
         self.tool(self.home("hub") / "bin" / "cc", "clang 21")
         theirs, ours = self.view("sat", tree=self.tree), self.view("hub", tree=self.tree)
-        self.assertIsNone(self.mismatch(theirs, ours, "docs-only"))
-        self.assertIn("tools at cargo", self.mismatch(theirs, ours)["reason"])
+        self.assertIn("tools at cargo", self.mismatch(theirs, ours, "docs-only")["reason"])
+        self.assertIsNone(self.mismatch(theirs, ours, "docs-only", ["sh", "python3"]))
+        self.tool(self.shared / "sh", "another sh")
+        self.assertIn("tools at sh", self.mismatch(theirs, self.view("hub", tree=self.tree), "docs-only", ["sh"])["reason"])
         self.tool(self.home("hub") / "bin" / "make", "make 3.81")
-        self.assertIn("tools at make", self.mismatch(theirs, self.view("hub", tree=self.tree), "docs-only")["reason"])
+        self.assertIn("tools at make", self.mismatch(theirs, self.view("hub", tree=self.tree), "docs-only", [])["reason"])
 
+    def test_a_declared_docs_tool_outside_the_toolchain_is_bound(self) -> None:
+        """`check_names` carries `docs_tools`, so the view hashes one that `OFFLOAD_TOOLS` does not name."""
+        self.tool(self.home("sat") / "bin" / "markdownlint", "markdownlint 1")
+        self.tool(self.home("hub") / "bin" / "markdownlint", "markdownlint 2")
+        names = tuple(sd_gate_receipts.check_names(part("docs-only", ["markdownlint"])))
+        theirs, ours = self.view("sat", names, tree=self.tree), self.view("hub", names, tree=self.tree)
+        self.assertIn("tools at markdownlint", self.mismatch(theirs, ours, "docs-only", ["markdownlint"])["reason"])
 
 if __name__ == "__main__":
     unittest.main()

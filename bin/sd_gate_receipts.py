@@ -58,7 +58,7 @@ a run. The hub compares what it can recompute: the tree part of the binding,
 the offload view (`offload_view`) and the pack digest. The view refuses only on
 what decides the result (`offload_differences`, sd:2862): the interpreter, the
 toolchain's bytes and the allowlisted variables but `SD_` and the thread caps.
-A docs-only scope builds no code, so no compiler's bytes refuse there. A rustup
+A docs-only scope that declares `docs_tools` refuses on those alone. A rustup
 proxy's bytes name no toolchain: the view hashes the binary that `rustup which`
 picks in the check's tree, which `rust-toolchain.toml` pins (sd:2881).
 `PATH` order, other tools, `HOME` files and the caps it names in the merge's
@@ -110,10 +110,12 @@ import itertools
 import json
 import os
 import pathlib
+import secrets
 import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import closing
 from typing import Any, Iterable, Mapping
@@ -147,9 +149,6 @@ OFFLOAD_TOOLS = ("sh", "bash", "make", "python3", "git", "cc", "c++", "clang", "
 #: Of those, the toolchain whose bytes decide a check's result, so a hub refuses on them, as on the check's own names
 #: (sd:2862). Another tool, `PATH`, `HOME` files and thread caps differ between any two machines: recorded, not refused.
 OFFLOAD_DECIDING_TOOLS = ("sh", "bash", "make", "python3", "cc", "c++", "clang", "cargo", "rustc", "node")
-#: The fixed set a docs-only scope refuses on (sd:2881): its docs command reads docs paths and builds no code, so a
-#: compiler cannot decide its result. A docs command that names a compiler binds it through the check's own names.
-OFFLOAD_DOCS_DECIDING_TOOLS = ("sh", "bash", "make", "python3", "node")
 #: Names a rustup proxy dispatches by the tree's `rust-toolchain.toml`: a view hashes the toolchain binary that
 #: `rustup which` picks in the tree, not the proxy, whose bytes name no toolchain (sd:2881).
 RUSTUP_TOOLS = ("cargo", "rustc", "rustdoc", "rustfmt", "cargo-clippy", "clippy-driver")
@@ -301,7 +300,8 @@ def tree_binding(tree: pathlib.Path, head: str, inputs: str, base: str | None,
         part = {"schema": 2, "reuse": "tree" if fork else "head", "head": None if fork else head, "fork": fork,
                 "tree": sd_lib.git_output(["rev-parse", "HEAD^{tree}"], tree),
                 "inputs": inputs, "scope": {"mode": scope.mode, "fork": fork_tree(tree, scope.fork) if fork else scope.fork,
-                                             "command": list(scope.command)},
+                                             "command": list(scope.command),
+                                             **({"tools": list(scope.tools)} if scope.tools is not None else {})},
                 "detection": {"source": detection.source, "commands": detection.commands}}
     except Exception:  # an input that cannot be named binds nothing; the check runs
         return None
@@ -316,8 +316,8 @@ def binding_commands(part: Mapping[str, Any]) -> list[list[str]]:
 
 
 def check_names(part: Mapping[str, Any]) -> list[str]:
-    """The executable each of `part`'s commands names: what an offload view binds beside `OFFLOAD_TOOLS`."""
-    return [argv[0] for argv in binding_commands(part)]
+    """The executable each of `part`'s commands names, and a docs-only scope's `docs_tools`: what an offload view binds beside `OFFLOAD_TOOLS`."""
+    return [argv[0] for argv in binding_commands(part)] + list(part["scope"].get("tools") or [])
 
 
 def machine_binding(tree: pathlib.Path, commands: list[list[str]], env: Mapping[str, str]) -> dict[str, Any]:
@@ -390,26 +390,34 @@ def rustup_resolved(name: str, found: str, environment: Mapping[str, str], tree:
 
     A rustup proxy, or a wrapper that execs one, has the same bytes whatever toolchain it runs, and a
     `rust-toolchain.toml` in `tree` picks that toolchain. A `PATH` tool that is no proxy, such as Homebrew's
-    `cargo`, ignores the pin and keeps its own bytes: `found` runs the binary only when both print the same
-    `--version` in `tree`. Runs under `environment` with `RUSTUP_AUTO_INSTALL=0`, so it installs nothing.
+    `cargo`, ignores the pin and keeps its own bytes: `found` counts as a proxy only when it runs a probe
+    toolchain's `name` that `RUSTUP_TOOLCHAIN` names. Runs under `environment` with `RUSTUP_AUTO_INSTALL=0`.
     """
     rustup = shutil.which("rustup", path=environment.get("PATH", ""))
     if rustup is None:
         return None
     env = {**environment, "RUSTUP_AUTO_INSTALL": "0"}
 
-    def output(argv: list[str]) -> str | None:
+    def output(argv: list[str], **extra: str) -> str | None:
         try:
-            result = subprocess.run(argv, cwd=tree, env=env, text=True, capture_output=True, timeout=60, check=False)
+            result = subprocess.run(argv, cwd=tree, env={**env, **extra}, text=True, capture_output=True, timeout=60,
+                                    check=False)
         except (OSError, subprocess.SubprocessError):
             return None
         return result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
 
+    # Proof that `found` dispatches through rustup with its arguments unchanged: under a `RUSTUP_TOOLCHAIN` that
+    # names a probe toolchain, it runs the probe's `name`. Another build that prints the same version does not.
+    with tempfile.TemporaryDirectory() as probe:
+        nonce = secrets.token_hex(8)
+        stub = pathlib.Path(probe, "bin", name)
+        stub.parent.mkdir()
+        stub.write_text(f'#!/bin/sh\necho "{nonce} $*"\n', encoding="utf-8")
+        stub.chmod(0o755)
+        if output([found, "--version"], RUSTUP_TOOLCHAIN=probe) != f"{nonce} --version":
+            return None
     binary = output([rustup, "which", name])
-    if binary is None or not os.path.isabs(binary):
-        return None
-    version = output([binary, "--version"])
-    return binary if version is not None and output([found, "--version"]) == version else None
+    return binary if binary is not None and os.path.isabs(binary) else None
 
 
 def offload_variable(name: str) -> bool:
@@ -467,9 +475,12 @@ def start_view(gated: Worktree, identity: dict[str, Any] | None) -> dict[str, An
 
 
 def deciding_tools(part: Mapping[str, Any] | None) -> tuple[str, ...]:
-    """The fixed tools a hub refuses on for a run of `part`: `OFFLOAD_DOCS_DECIDING_TOOLS` in a docs-only scope (sd:2881)."""
-    docs = part is not None and part["scope"]["mode"] == sd_check_scope.DOCS_ONLY
-    return OFFLOAD_DOCS_DECIDING_TOOLS if docs else OFFLOAD_DECIDING_TOOLS
+    """The fixed tools a hub refuses on beside `check_names`: none where a docs-only scope declares `docs_tools` (sd:2881).
+
+    Those name every tool its docs command reaches, and `check_names` carries them. A docs scope that declares
+    none may reach a compiler through `make`, as `cargo doc` does, so it keeps `OFFLOAD_DECIDING_TOOLS`.
+    """
+    return () if part is not None and part["scope"].get("tools") is not None else OFFLOAD_DECIDING_TOOLS
 
 
 def offload_differences(theirs: Any, ours: Any, names: Iterable[str] = (),

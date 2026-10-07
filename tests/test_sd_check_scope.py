@@ -10,8 +10,13 @@ from __future__ import annotations
 import json
 import pathlib
 import subprocess
+import sys
 
 from tests.test_sd_check import PY, CheckFixture
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "bin"))
+import sd_check_scope  # noqa: E402
+import sd_lib  # noqa: E402
 
 FAILING = f"{PY} -c 'raise SystemExit(3)'"
 PASSING_DOCS = ["python3", "-c", "print('docs ok')"]
@@ -23,7 +28,7 @@ def git(root: pathlib.Path, *args: str) -> str:
 
 class DocsScope(CheckFixture):
     def repo(self, docs_command: list[str] | None = None, docs_paths: list[str] | None = None,
-             declare: bool = True, name: str = "repo") -> pathlib.Path:
+             declare: bool = True, name: str = "repo", docs_tools: list[str] | None = None) -> pathlib.Path:
         root = self.make_repo(name)
         self.declare(root, check=FAILING)
         (root / "src").mkdir()
@@ -34,7 +39,8 @@ class DocsScope(CheckFixture):
             (root / ".github").mkdir()
             (root / ".github" / "sd-check-scope.json").write_text(json.dumps({
                 "schema_version": 1, "docs_paths": docs_paths or ["docs/**", "*.md"],
-                "docs_command": docs_command or PASSING_DOCS}), encoding="utf-8")
+                "docs_command": docs_command or PASSING_DOCS,
+                **({"docs_tools": docs_tools} if docs_tools is not None else {})}), encoding="utf-8")
         git(root, "add", "src", "docs", *([".github"] if declare else []))
         git(root, "commit", "-q", "-m", "base")
         git(root, "checkout", "-q", "-b", "topic")
@@ -126,6 +132,21 @@ class DocsScope(CheckFixture):
         completed = self.run_check(root, "--base", "main")
         self.assertEqual(completed.returncode, 2)
         self.assertIn("sd-check-scope.json needs exactly", completed.stderr)
+
+    def test_declared_docs_tools_reach_a_docs_only_scope(self) -> None:
+        """sd:2881: `docs_tools` names every tool the docs command reaches; a hub compares those in a docs-only scope."""
+        root = self.repo(docs_tools=["sh", "python3"])
+        self.change(root, "docs/guide.md")
+        self.assertEqual(sd_check_scope.decide(root, "main", sd_lib.detect_entrypoints(root)).tools, ("sh", "python3"))
+        self.change(root, "src/app.py")
+        self.assertIsNone(sd_check_scope.decide(root, "main", sd_lib.detect_entrypoints(root)).tools)
+        for bad in ("sh", [""], [1]):
+            with self.subTest(bad=bad):
+                path = root / ".github" / "sd-check-scope.json"
+                path.write_text(json.dumps({**json.loads(path.read_text(encoding="utf-8")), "docs_tools": bad}),
+                                encoding="utf-8")
+                with self.assertRaisesRegex(sd_check_scope.DeclarationError, "docs_tools must be a list"):
+                    sd_check_scope.declaration(root)
 
     def test_base_does_not_combine_with_only_or_a_receipt(self) -> None:
         root = self.repo()
