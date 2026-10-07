@@ -939,7 +939,9 @@ def remove_hook(settings: Path, commands, *, dry_run: bool = False) -> bool:
             continue
         surviving = []
         for group in groups:
-            if not isinstance(group, dict) or (event, group.get("matcher")) not in ours:
+            # Another installer's entry may hold any JSON; only strings can be ours.
+            matcher = group.get("matcher") if isinstance(group, dict) else None
+            if not isinstance(matcher, str) or (event, matcher) not in ours:
                 surviving.append(group)
                 continue
             entries = group.get("hooks")
@@ -949,7 +951,8 @@ def remove_hook(settings: Path, commands, *, dry_run: bool = False) -> bool:
             kept = [
                 entry
                 for entry in entries
-                if not (isinstance(entry, dict) and entry.get("command") in wanted)
+                if not (isinstance(entry, dict) and isinstance(entry.get("command"), str)
+                        and entry["command"] in wanted)
             ]
             if len(kept) != len(entries):
                 changed = True
@@ -2315,10 +2318,12 @@ def cmd_user(ctx: Context, out) -> int:
         stale -= {command for command, _, _ in specs}
         if not ctx.dry_run:
             settings_before = ctx.settings.read_bytes() if ctx.settings.exists() else None
-        hook_changed = install_hook(ctx.settings, specs, dry_run=ctx.dry_run)
-        hook_changed = remove_hook(ctx.settings, stale, dry_run=ctx.dry_run) or hook_changed
-        if not ctx.dry_run and hook_changed:
-            backups.append((ctx.settings, ctx.settings.read_bytes(), settings_before))
+        try:
+            hook_changed = install_hook(ctx.settings, specs, dry_run=ctx.dry_run)
+            hook_changed = remove_hook(ctx.settings, stale, dry_run=ctx.dry_run) or hook_changed
+        finally:
+            if not ctx.dry_run and ctx.settings.exists():
+                backups.append((ctx.settings, ctx.settings.read_bytes(), settings_before))
 
         excludes = excludes_file(ctx.home, ctx.environ, sandboxed=ctx.sandboxed)
         excludes_changed = ensure_excludes_line(excludes, dry_run=ctx.dry_run)

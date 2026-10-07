@@ -4024,6 +4024,34 @@ class LinkEdgeCaseTests(InstallerHarness):
         startup = next(g for g in self.settings["hooks"]["SessionStart"] if g["matcher"] == "startup")
         self.assertEqual(startup["hooks"], [*foreign, {"type": "command", "command": str(serving / "bin" / "sd-handoff-restore")}])
 
+    def test_a_move_keeps_hooks_whose_command_or_matcher_is_not_a_string(self):
+        """Review round 7: the hook move reads other installers' entries of any shape."""
+        work = self.checkout_with_commands("sd", name="work")
+        serving = self.checkout_with_commands("sd")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        settings = self.settings
+        odd_entry = {"type": "command", "command": ["not", "a", "string"]}
+        odd_group = {"matcher": ["startup"], "hooks": [{"type": "command", "command": "elsewhere"}]}
+        next(g for g in settings["hooks"]["SessionStart"] if g["matcher"] == "startup")["hooks"].append(odd_entry)
+        settings["hooks"]["SessionStart"].append(odd_group)
+        (self.home / ".claude" / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(self.context_for(serving), out), 0, out.getvalue())
+        groups = self.settings["hooks"]["SessionStart"]
+        self.assertIn(odd_entry, next(g for g in groups if g["matcher"] == "startup")["hooks"])
+        self.assertIn(odd_group, groups)
+
+    def test_a_failed_hook_removal_puts_the_added_hooks_back(self):
+        work = self.checkout_with_commands("sd", name="work")
+        serving = self.checkout_with_commands("sd")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        settings = self.home / ".claude" / "settings.json"
+        before = settings.read_bytes()
+        with unittest.mock.patch.object(sd_install, "remove_hook", side_effect=OSError(13, "Permission denied")):
+            with self.assertRaises(OSError):
+                sd_install.cmd_user(self.context_for(serving), io.StringIO())
+        self.assertEqual(settings.read_bytes(), before, "the added hooks stayed")
+
     def test_a_failure_after_the_hook_move_puts_the_hooks_back(self):
         work = self.checkout_with_commands("sd", name="work")
         serving = self.checkout_with_commands("sd")
