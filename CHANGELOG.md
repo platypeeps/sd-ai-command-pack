@@ -1395,6 +1395,11 @@
 
 ### Changed
 
+- **`.sd-system-rev` advances to system `b3b067d7`, schema 21 (sd:2975).**
+  The range adds migration `021_judgment_call_context.sql` (sd:2950): five nullable columns on `judgment`, written through `sd_db.judgment.record`, which no pack code calls.
+  The other two commits change only `local-scan-for-secrets`.
+  With the old pin, a checkout whose library came from system main failed `tests.test_system_pin`: `AssertionError: 20 != 21`.
+
 - **`.sd-system-rev` advances to system `8797a036`, which estimates a prompt at three bytes a token (sd:2963, for sd:2935).**
   A `url` reviewer's reserved bound now errs high on the input side; settlement still bills the vendor's own count.
   `TheShippedBounds` in `tests/test_sd_review_ledger.py` derives its token count from the library's `BYTES_PER_TOKEN`, so the test follows the pin.
