@@ -4064,6 +4064,28 @@ class LinkEdgeCaseTests(InstallerHarness):
         self.assertIn(odd_entry, next(g for g in groups if g["matcher"] == "startup")["hooks"])
         self.assertIn(odd_group, groups)
 
+    def test_a_failure_before_the_receipt_prunes_nothing_of_the_last_install(self):
+        """Review round 11: renders and links the next checkout drops go only once its receipt is written."""
+        work = self.checkout_with_commands("sd", "sd-old", name="work")
+        folder = work / "skills" / "sd-old-skill"
+        folder.mkdir()
+        (folder / sd_install.SKILL_FILE).write_text("---\nname: sd-old-skill\n---\n\nold\n", encoding="utf-8")
+        self.write_paths(work, "sd-probe", "sd-old-skill")
+        serving = self.checkout_with_commands("sd")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        rendered = sd_install.platform_homes(self.home, dict(os.environ))[0].target_for("sd-old-skill")
+        self.assertTrue(rendered.is_file())
+        with unittest.mock.patch.object(sd_install, "write_receipt", side_effect=OSError(28, "No space left on device")):
+            with self.assertRaises(OSError):
+                sd_install.cmd_user(self.context_for(serving), io.StringIO())
+        self.assertTrue(rendered.is_file(), "the last install's render was pruned")
+        old = self.home / ".local" / "bin" / "sd-old"
+        self.assertEqual(old.resolve(), (work / "bin" / "sd-old").resolve(), "the last install's link was pruned")
+        self.assertEqual(self.receipt["checkout"], str(work))
+        self.assertEqual(sd_install.cmd_user(self.context_for(serving), io.StringIO()), 0)
+        self.assertFalse(rendered.exists(), "the next install did not prune")
+        self.assertFalse(old.is_symlink(), "the next install did not prune the link")
+
     def test_a_failed_hook_removal_puts_the_added_hooks_back(self):
         work = self.checkout_with_commands("sd", name="work")
         serving = self.checkout_with_commands("sd")

@@ -2302,13 +2302,6 @@ def cmd_user(ctx: Context, out) -> int:
             return 1
 
         previous = owned_entries(recorded)
-        skipped = prune_stale(previous, current, dry_run=ctx.dry_run)
-        skipped += prune_links(previous, {row["path"] for row in links}, dry_run=ctx.dry_run)
-        # After the renders, so a predecessor goes only once its successor is
-        # on disk; no receipt names it, so `prune_stale` above never sees it.
-        retired, left = retire_predecessors(agents, ctx.agents, dry_run=ctx.dry_run)
-        skipped += left
-
         # A move to another checkout drops the hooks the receipt recorded for
         # the last one, after adding the new ones so each group keeps its place;
         # the settings bytes recover with the renders (sd:1118).
@@ -2368,6 +2361,15 @@ def cmd_user(ctx: Context, out) -> int:
         if not ctx.dry_run:
             write_receipt(ctx.receipt, payload)
         recovery.pop_all()
+
+        # After the receipt, so a failed install prunes nothing of the last
+        # one, which keeps its receipt and stays whole (sd:1118).
+        skipped = prune_stale(previous, current, dry_run=ctx.dry_run)
+        skipped += prune_links(previous, {row["path"] for row in links}, dry_run=ctx.dry_run)
+        # After the renders, so a predecessor goes only once its successor is
+        # on disk; no receipt names it, so `prune_stale` above never sees it.
+        retired, left = retire_predecessors(agents, ctx.agents, dry_run=ctx.dry_run)
+        skipped += left
 
     prefix = "would render" if ctx.dry_run else "rendered"
     print(

@@ -57,6 +57,9 @@ Review round 2 replaced that: see the next section.
   again with the loaded installer, which is that commit's. It renders only
   when the restored receipt names the tree: on a failed first `--serve` the
   receipt names the working checkout, which stays installed (review round 10).
+- **Prune last.** Renders and links the new checkout drops are pruned only
+  after its receipt is written, so a failed install deletes nothing of the
+  last one (review round 11).
 - **Renders recover.** A failed `cmd_user` restores every render it wrote,
   not only the Codex policies, so a failed target leaves none of its files.
 
