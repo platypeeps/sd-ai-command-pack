@@ -97,9 +97,9 @@ Its last line runs `bin/sd_install.py --serve` from the working checkout:
   slots behind one stable link. (a) holds, so it is taken: the environment
   holds copies, never a path into the code. `make setup` writes only under
   `$(VENV)`, pip installs the requirements and `sd_db` as copies, and the
-  scripts and `pyvenv.cfg` name the slot. One thing reads the checkout: the
-  `sd_db` downgrade guard compares with `<checkout>/.venv`, so the scratch
-  checkout's `.venv` links to the live environment. What remains is the
+  scripts and `pyvenv.cfg` name the slot. The `sd_db` guards read no
+  checkout either: they read the environments named to them (the G rows
+  below), so the scratch checkout has no `.venv`. What remains is the
   seconds git takes to check out, on each move and each put-back; (b)
   would close that too, at the cost of a second tree and a link every
   receipt, link and hook would name.
@@ -172,6 +172,28 @@ environment that live links and hooks run while the step is in progress.
 | U4 | add the excludes line and git config | global excludes | left in place | additive and idempotent; not undone | as U2 | `test_a_failure_after_the_hook_move_puts_the_hooks_back` |
 | U5 | write the receipt | receipt | the old receipt stays whole | renders, links and settings restored | as U2 | `test_a_failure_before_the_receipt_prunes_nothing_of_the_last_install` |
 | U6 | prune what the new receipt drops | renders, links | stale files stay, and no receipt names them | Follow-up sd:2927 (P4) | the new install | none |
+
+### Guards: which environment each one reads (review round 18)
+
+Every place an environment path is chosen, and every guard that reads one.
+`guarded_environments` is the one list the `sd_db` guards read: the
+destination (`--venv`, else the checkout's `.venv`) and, on a serving build,
+the live environment it replaces (`--live-venv`, from `LIVE_VENV`). A
+guard refuses when the candidate is older than any of them.
+
+| # | Where | Environment it reads or chooses | Why that one | Test |
+| --- | --- | --- | --- | --- |
+| G1 | `_provision`: pick the slot | the slot `.venv` does not resolve to; the live one is `.venv`'s realpath | the live slot is never rebuilt | `test_each_activation_builds_the_slot_not_in_use`, `test_an_absolute_link_to_a_slot_rebuilds_the_other_one` |
+| G2 | `_provision`: the build's `make` line | `VENV=<inactive slot>`, `LIVE_VENV=<live slot>`; the caller's `VENV`, `LIVE_VENV` and `MAKEFLAGS` removed | the build writes the slot and protects what it replaces | `test_the_build_names_the_environment_it_replaces`, `test_the_callers_make_overrides_do_not_reach_the_trees_setup` |
+| G3 | `Makefile` `setup` | `SETUP_VENV` (`VENV` from the command line, else `.venv`), passed as `--venv`; `LIVE_VENV` as `--live-venv` | the recipe installs `sd_db` where it built | `test_provision_library_installs_into_the_environment_venv_names`, `test_a_live_venv_reaches_the_library_guards` |
+| G4 | `provision_library`: pip's interpreter | the destination, `guarded_environments(ctx)[0]` | pip installs where the guards looked | `test_provision_library_installs_into_the_environment_venv_names` |
+| G5 | `downgrade_refusal` (schema), from `provision_library` | every `guarded_environments` entry | a custom `VENV` or a live slot with a newer schema is protected | `test_a_custom_venv_with_a_newer_schema_is_preserved`, `test_a_live_environment_with_a_newer_schema_is_preserved` |
+| G6 | `ancestry_refusal`, from `provision_guarded` | every `guarded_environments` entry | an empty or older inactive slot cannot let older library code replace the live one | `test_a_live_environment_newer_than_the_inactive_slot_is_preserved`, `test_a_missing_destination_still_checks_the_live_environment` |
+| G7 | `provision_guarded`: a reconcile of the commit already installed | the destination | a reconcile installs into the pack's own `.venv` | `test_the_commit_already_installed_is_not_installed_again` |
+| G8 | served commands: `sd_lib` finds `sd_db` | `<checkout>/.venv`, skipped while it carries the mid-provision marker | in the tree, `.venv` links to the live slot | `test_the_serving_environment_is_the_trees_own`, `test_a_mid_provision_environment_is_refused_through_the_link` |
+| G9 | `_activate` and the put-back: the `.venv` link | read before anything moves; set to the new slot after the checkout; restored after the code | the code and the environment move together | `test_an_unreadable_venv_link_moves_nothing`, `test_a_failed_link_switch_keeps_serving_the_previous_commit`, `test_a_link_that_cannot_go_back_still_puts_the_tree_back` |
+| G10 | `--serve` hand-over and the target render | the caller's interpreter (`sys.executable`) runs the installer | the installer is standard library only; served commands use G8 | `test_serve_clones_origin_detached_at_main_and_hands_over_to_the_clone` |
+| G11 | `--serve` clone: `info/exclude` | `.venv`, `.venv-a` and `.venv-b` excluded in the new clone | `--pull` and `--verify` never read the built environments as somebody's work | `test_serve_clones_origin_detached_at_main_and_hands_over_to_the_clone` (its `status --porcelain` assertion) |
 
 ## Verification
 

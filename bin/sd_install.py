@@ -1914,10 +1914,10 @@ def provision_library(ctx: Context, out, ref: str | None = None) -> tuple[bool, 
         ref, why = library_pin(checkout)
         if not ref:
             return False, f"sd_db not installed, trials unavailable: {why}"
-    refusal = sibling("sd_library_guard").downgrade_refusal(
-        ctx.checkout, checkout, ref, sibling("sd_lib").git_output)
-    if refusal:
-        return False, refusal
+    for venv in guarded_environments(ctx):
+        refusal = sibling("sd_library_guard").downgrade_refusal(venv, checkout, ref, sibling("sd_lib").git_output)
+        if refusal:
+            return False, refusal
     target = f"git+file://{checkout}@{ref}#subdirectory={LIBRARY_RELATIVE}"
     git = sibling("sd_lib").git_output
     # The note is about the checkout's HEAD: a `ref` that is not it installs
@@ -1967,13 +1967,24 @@ def provisioning_lock(ctx: Context):
         yield
 
 
-def installed_library_commit(pack: Path, venv: Path | None = None) -> str | None:
-    """The commit pip installed `sd_db` from into `pack`'s virtualenv, or `venv`, or None.
+def guarded_environments(ctx: Context) -> tuple[Path, ...]:
+    """Every environment a provisioning run must not put older `sd_db` into (review round 18).
+
+    The destination it writes, `--venv` or the checkout's `.venv`; and, for a
+    serving build, the live environment the built one replaces, `--live-venv`.
+    The guards read exactly these, so neither a custom `VENV` nor an empty
+    inactive slot hides a newer install.
+    """
+    return (ctx.venv or ctx.checkout / ".venv", *((ctx.live_venv,) if ctx.live_venv else ()))
+
+
+def installed_library_commit(venv: Path) -> str | None:
+    """The commit pip installed `sd_db` from into the environment `venv`, or None.
 
     A VCS install records `vcs_info.commit_id` in `direct_url.json`; a path
     install records none, and neither does a virtualenv without `sd_db`.
     """
-    for record in sorted(((venv or pack / ".venv") / "lib").glob("python*/site-packages/sd_db-*.dist-info/direct_url.json")):
+    for record in sorted((venv / "lib").glob("python*/site-packages/sd_db-*.dist-info/direct_url.json")):
         try:
             vcs = json.loads(record.read_text(encoding="utf-8")).get("vcs_info")
         except (OSError, ValueError, AttributeError):
@@ -1984,8 +1995,8 @@ def installed_library_commit(pack: Path, venv: Path | None = None) -> str | None
     return None
 
 
-def ancestry_refusal(pack: Path, system: Path, ref: str, *, merged: bool, venv: Path | None = None) -> str:
-    """Why installing `ref` over `pack`'s installed `sd_db` would go backwards, or "".
+def ancestry_refusal(venvs: tuple[Path, ...], system: Path, ref: str, *, merged: bool) -> str:
+    """Why installing `ref` would put older `sd_db` than one of `venvs` holds, or "".
 
     The schema guard compares schema numbers, so two library commits under
     one schema pass it in either order. A `ref` that is an ancestor of the
@@ -1997,18 +2008,19 @@ def ancestry_refusal(pack: Path, system: Path, ref: str, *, merged: bool, venv: 
     nothing here; the install reports the latter.
     """
     git = sibling("sd_lib").git_output
-    present = installed_library_commit(pack, venv)
     commit = git(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], system)
-    if not present or not commit or present == commit:
-        return ""
-    if merged:
-        if git(["merge-base", "--is-ancestor", present, commit], system) is None:
-            return (f"kept installed sd_db {present}: installed sd_db {present} is not an ancestor of "
-                    f"{commit}, so installing would replace newer or unrelated library code")
-        return ""
-    if git(["merge-base", "--is-ancestor", commit, present], system) is not None:
-        return (f"preserving installed sd_db {present}: {ref} ({commit}) is an ancestor of it, so "
-                f"installing would replace newer library code; update {system} before provisioning")
+    for venv in venvs:
+        present = installed_library_commit(venv)
+        if not present or not commit or present == commit:
+            continue
+        if merged:
+            if git(["merge-base", "--is-ancestor", present, commit], system) is None:
+                return (f"kept installed sd_db {present}: installed sd_db {present} is not an ancestor of "
+                        f"{commit}, so installing would replace newer or unrelated library code")
+            continue
+        if git(["merge-base", "--is-ancestor", commit, present], system) is not None:
+            return (f"preserving installed sd_db {present}: {ref} ({commit}) is an ancestor of it, so "
+                    f"installing would replace newer library code; update {system} before provisioning")
     return ""
 
 
@@ -2026,9 +2038,9 @@ def provision_guarded(ctx: Context, out, ref: str | None = None, *, merged: bool
         if candidate is None:
             candidate, _ = library_pin(system)
         if candidate:
-            if merged and installed_library_commit(ctx.checkout, ctx.venv) == candidate:
+            if merged and installed_library_commit(guarded_environments(ctx)[0]) == candidate:
                 return False, f"sd_db {candidate} is already installed"
-            refusal = ancestry_refusal(ctx.checkout, system, candidate, merged=merged, venv=ctx.venv)
+            refusal = ancestry_refusal(guarded_environments(ctx), system, candidate, merged=merged)
             if refusal:
                 return False, refusal
             return provision_library(ctx, out, ref=candidate)
@@ -2128,6 +2140,9 @@ class Context:
     bin_dir: Path | None = None
     # `--venv`, when given: the environment `--provision-library` installs into.
     venv: Path | None = None
+    # `--live-venv`, when given: the environment a serving build replaces,
+    # which the library guards protect as well as the destination.
+    live_venv: Path | None = None
 
     @property
     def sandboxed(self) -> bool:
@@ -2860,7 +2875,7 @@ ENV_SLOTS = (".venv-a", ".venv-b")
 
 #: What a calling `make` hands its children. `make setup VENV=...` puts the
 #: override in `MAKEFLAGS`, and a sub-make would provision that path.
-MAKE_VARIABLES = frozenset({"MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES", "VENV"})
+MAKE_VARIABLES = frozenset({"MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES", "VENV", "LIVE_VENV"})
 
 
 def _provision(ctx: Context, commit: str, out) -> Path | None:
@@ -2889,8 +2904,8 @@ def _provision(ctx: Context, commit: str, out) -> Path | None:
     # Built from a scratch checkout of `commit` beside the tree, so the tree
     # keeps serving its own code on its own environment for the whole build
     # (review round 17). The environment holds copies, never a path into the
-    # code. The scratch `.venv` names the live one, which the `sd_db`
-    # downgrade guard compares with, as it did when the build ran in place.
+    # code. `LIVE_VENV` names the environment the build will replace, which
+    # the `sd_db` guards protect as well as the slot (review round 18).
     try:
         with tempfile.TemporaryDirectory(prefix=f".{ctx.checkout.name}-build-", dir=ctx.checkout.parent,
                                          ignore_cleanup_errors=True) as scratch:
@@ -2899,9 +2914,8 @@ def _provision(ctx: Context, commit: str, out) -> Path | None:
             if code:
                 print(f"error: git could not check out {commit} to build {slot}:\n{err}", file=out)
                 return None
-            if live is not None:
-                (build / ".venv").symlink_to(live)
-            done = subprocess.run(["make", "-C", str(build), "setup", "SERVE=no", f"VENV={slot}"],  # nosec B603 B607 - fixed argv
+            argv = ["make", "-C", str(build), "setup", "SERVE=no", f"VENV={slot}"]
+            done = subprocess.run(argv + ([f"LIVE_VENV={live}"] if live else []),  # nosec B603 B607 - fixed argv
                                   env=environ, capture_output=True, text=True, check=False)
     except OSError as problem:
         print(f"error: provisioning {slot} for {commit} could not start make: {problem}", file=out)
@@ -3309,6 +3323,8 @@ usage: python3 bin/sd_install.py (--user | --status | --verify | --pull | --roll
                    install sd_db into this pack's virtualenv and stop
   --venv DIR       with --provision-library, install into DIR instead; `make setup` passes
                    the environment it builds
+  --live-venv DIR  with --provision-library, refuse older sd_db than DIR holds too; a
+                   serving build passes the environment it will replace
 
   --reviewers NAMES
                    with --repo, the registry entries this repo consents to
@@ -3337,6 +3353,7 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
     home_arg = None
     bin_dir_arg = None
     venv_arg = None
+    live_venv_arg = None
     index = 0
     while index < len(argv):
         token = argv[index]
@@ -3371,6 +3388,12 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
                 print("error: --venv needs a directory", file=out)
                 return 2
             venv_arg = argv[index]
+        elif token == "--live-venv":
+            index += 1
+            if index >= len(argv):
+                print("error: --live-venv needs a directory", file=out)
+                return 2
+            live_venv_arg = argv[index]
         elif token == "--reviewers":
             # Taken positionally: an empty string is a real answer, nobody.
             index += 1
@@ -3392,9 +3415,10 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
     if as_json and mode != "verify":
         print("error: --json requires --verify", file=out)
         return 2
-    if venv_arg is not None and mode != "provision-library":
-        print("error: --venv requires --provision-library", file=out)
-        return 2
+    for flag, value in (("--venv", venv_arg), ("--live-venv", live_venv_arg)):
+        if value is not None and mode != "provision-library":
+            print(f"error: {flag} requires --provision-library", file=out)
+            return 2
 
     home = Path(home_arg).expanduser().resolve() if home_arg else Path(
         os.path.expanduser("~")
@@ -3414,6 +3438,7 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
     ctx = Context(
         checkout=checkout, home=home, environ=environ, dry_run=dry_run, bin_dir=bin_dir,
         venv=Path(venv_arg).expanduser().absolute() if venv_arg else None,
+        live_venv=Path(live_venv_arg).expanduser().absolute() if live_venv_arg else None,
     )
     # Checked here, before any mode runs: `--pull` fast-forwards the serving
     # checkout before it calls `cmd_user`, so a check inside the link step

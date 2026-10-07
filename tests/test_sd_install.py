@@ -2246,7 +2246,7 @@ class ServingTreeTests(InstallerHarness):
         "\t@mkdir -p \"$(VENV)\"\n"
         "\t@git rev-parse HEAD > \"$(VENV)/provisioned\"\n"
         "\t@echo 'LIBRARY = 1' > \"$(VENV)/sd_db.py\"\n"
-        "\t@echo 'VENV=$(VENV) SERVE=$(SERVE)' > \"$(VENV)/variables\"\n"
+        "\t@echo 'VENV=$(VENV) SERVE=$(SERVE) LIVE_VENV=$(LIVE_VENV)' > \"$(VENV)/variables\"\n"
         "\t@exit $${SERVE_MAKE_EXIT:-0}\n"
     )
 
@@ -2893,6 +2893,27 @@ class ServingTreeTests(InstallerHarness):
         self.assertIn(f"the serving tree is back at {self.first}, with its environment and install as they were",
                       out.getvalue())
 
+    def test_the_build_names_the_environment_it_replaces(self):
+        """Review round 18: the build's `sd_db` guards protect the live slot, not only the one being built."""
+        ctx = self.real_provision()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+            self.commit(self.origin, "two\n")
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+        first, second = ((self.serving / name / "variables").read_text(encoding="utf-8") for name in sd_install.ENV_SLOTS)
+        self.assertIn("LIVE_VENV=\n", first)
+        self.assertIn(f"LIVE_VENV={os.path.realpath(self.serving / sd_install.ENV_SLOTS[0])}\n", second)
+
+    def test_a_first_checkout_that_stops_part_way_leaves_no_venv_link(self):
+        """The put-back with no `.venv` before and none published: nothing to put back but the code."""
+        merged = self.commit(self.origin, "two\n")
+        out = io.StringIO()
+        with self.recording(), self.stops_part_way(merged):
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
+        self.assertEqual(self.head(), self.first)
+        self.assertFalse((self.serving / ".venv").is_symlink())
+        self.assertNotIn("could not be put back", out.getvalue())
+
     def test_a_put_back_git_refuses_after_a_failed_checkout_names_the_command(self):
         merged = self.commit(self.origin, "two\n")
         out = io.StringIO()
@@ -2906,11 +2927,13 @@ class ServingTreeTests(InstallerHarness):
         """`make setup VENV=x` passes VENV in MAKEFLAGS; the tree builds its own slot regardless."""
         ctx = self.real_provision()
         elsewhere = self.home / "elsewhere"
-        ctx.environ.update(MAKEFLAGS=f"VENV={elsewhere}", VENV=str(elsewhere), MAKELEVEL="1")
+        ctx.environ.update(MAKEFLAGS=f"VENV={elsewhere}", VENV=str(elsewhere), MAKELEVEL="1",
+                           LIVE_VENV=str(elsewhere))
         with self.recording():
             self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
         slot = self.serving / sd_install.ENV_SLOTS[0]
-        self.assertEqual((slot / "variables").read_text(encoding="utf-8").split(), [f"VENV={slot}", "SERVE=no"])
+        self.assertEqual((slot / "variables").read_text(encoding="utf-8").split(),
+                         [f"VENV={slot}", "SERVE=no", "LIVE_VENV="])
         self.assertFalse(elsewhere.exists())
 
     def test_the_target_commit_renders_with_its_own_installer(self):
@@ -3189,6 +3212,13 @@ class ServeTests(InstallerHarness):
         self.assertIn("error: --venv requires --provision-library", out.getvalue())
         self.assertEqual(sd_install.main(["--provision-library", "--venv"], out=out), 2)
         self.assertIn("error: --venv needs a directory", out.getvalue())
+        with unittest.mock.patch.object(sd_install, "provision_guarded", return_value=(True, "ok")) as provision:
+            self.assertEqual(sd_install.main(["--provision-library", "--live-venv", str(self.home / "live")], out=out), 0)
+        self.assertEqual(provision.call_args.args[0].live_venv, self.home / "live")
+        self.assertEqual(sd_install.main(["--user", "--live-venv", "x", "--home", str(self.home)], out=out), 2)
+        self.assertIn("error: --live-venv requires --provision-library", out.getvalue())
+        self.assertEqual(sd_install.main(["--provision-library", "--live-venv"], out=out), 2)
+        self.assertIn("error: --live-venv needs a directory", out.getvalue())
 
     def test_serve_is_reachable_from_the_command_line(self):
         out = io.StringIO()
