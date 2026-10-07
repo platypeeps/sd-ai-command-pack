@@ -2845,6 +2845,13 @@ def _put_back(ctx: Context, original: str, receipt: bytes | None, commit: str, o
               f"{original}:\n{err}\nIt serves {commit} while the receipt names {original}; run "
               f"`git -C {ctx.checkout} checkout --detach {original}`, then `--user`.", file=out)
         return
+    # Render the tree again only if it was what the machine served. On a first
+    # `--serve` the restored receipt names the working checkout, or nothing,
+    # and rendering here would activate the clone the failed run left (sd:1118).
+    if read_receipt(ctx.receipt).get("checkout") != str(ctx.checkout):
+        print(f"error: the render at {commit} failed; the serving tree is back at {original}; it was not "
+              "serving, so nothing was rendered from it and the install it found is left as it was.", file=out)
+        return
     if cmd_user(ctx, out):
         print(f"error: the render at {commit} failed, the serving tree is back at {original}, and "
               f"rendering {original} again failed too; run `--user` in {ctx.checkout}.", file=out)

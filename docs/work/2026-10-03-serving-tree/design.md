@@ -54,7 +54,9 @@ Review round 2 replaced that: see the next section.
   the update that brings it. The loaded installer only supervises.
 - **Put back.** A target render that fails returns the tree to the original
   commit and the receipt to its bytes, then renders the original commit
-  again with the loaded installer, which is that commit's.
+  again with the loaded installer, which is that commit's. It renders only
+  when the restored receipt names the tree: on a failed first `--serve` the
+  receipt names the working checkout, which stays installed (review round 10).
 - **Renders recover.** A failed `cmd_user` restores every render it wrote,
   not only the Codex policies, so a failed target leaves none of its files.
 

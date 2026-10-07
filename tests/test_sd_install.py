@@ -2432,7 +2432,7 @@ class ServingTreeTests(InstallerHarness):
         self.commit(self.origin, "c\n", installer="ACTIVATION_CONTRACT = 1\nprint('refused: sd-collides')\nraise SystemExit(1)\n")
         self.git(self.serving, "fetch", "-q", "origin")
         self.git(self.serving, "checkout", "-q", "--detach", current)
-        self.write_receipt(commit=current, previousCommit=before)
+        self.write_receipt(checkout=str(self.serving), commit=current, previousCommit=before)
         again = []
 
         def render(ctx, out):
@@ -2451,11 +2451,34 @@ class ServingTreeTests(InstallerHarness):
 
     def test_a_put_back_whose_re_render_fails_says_so(self):
         self.commit(self.origin, "two\n")
+        self.write_receipt(checkout=str(self.serving), commit=self.first)
         out = io.StringIO()
         with self.recording(), unittest.mock.patch.object(sd_install, "_render_checked_out", return_value=1), \
                 unittest.mock.patch.object(sd_install, "cmd_user", return_value=1):
             self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
         self.assertIn(f"rendering {self.first} again failed too", out.getvalue())
+
+    def test_a_failed_first_serve_leaves_the_install_of_another_checkout(self):
+        """Review round 10: the put-back renders the tree again only when the restored receipt names it."""
+        self.commit(self.origin, "two\n", installer="ACTIVATION_CONTRACT = 1\nraise SystemExit(1)\n")
+        work = self.home / "work"
+        for receipt in ({"checkout": str(work), "commit": "a" * 40}, None):
+            with self.subTest(receipt=receipt):
+                self.git(self.serving, "checkout", "-q", "--detach", self.first)
+                ctx = self.context(self.serving)
+                if receipt is None:
+                    ctx.receipt.unlink(missing_ok=True)
+                else:
+                    self.write_receipt(**receipt)
+                before = ctx.receipt.read_bytes() if receipt else None
+                out = io.StringIO()
+                with unittest.mock.patch.object(sd_install, "cmd_user") as again:
+                    self.assertEqual(sd_install.cmd_pull(ctx, out), 1)
+                again.assert_not_called()
+                self.assertEqual(ctx.receipt.read_bytes() if receipt else ctx.receipt.exists(), before or False)
+                self.assertEqual(self.head(), self.first)
+                self.assertIn(f"the serving tree is back at {self.first}; it was not serving, so nothing was rendered "
+                              "from it and the install it found is left as it was", out.getvalue())
 
     def test_the_target_commit_renders_with_its_own_installer(self):
         """Review round 2: an update to rendering applies in the update that brings it."""

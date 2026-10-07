@@ -349,8 +349,9 @@ clean clone on a detached `HEAD` that nobody works in, at
 - **Both** refuse a target commit whose installer declares no
   `ACTIVATION_CONTRACT`: it predates the serving tree, so no second
   `--rollback` could come back from it. A render that refuses or fails puts
-  the tree back at the commit it started from, restores the receipt, and
-  renders that commit again.
+  the tree back at the commit it started from and restores the receipt. It
+  renders that commit again only if the receipt names the serving tree, so a
+  failed first `make setup` leaves the working checkout's install as it was.
 - **Verify:** `--verify --json` is as strict as in any checkout. Planning
   drafts or a `HEAD` moved without a render fail the source check, which is why
   nobody works in the serving tree.
