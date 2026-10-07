@@ -3,7 +3,8 @@
 Two logins on two machines differ in `HOME`, `USER` and the home prefix of
 every `PATH` entry, so the local `environment_sha256` never matches across
 them. `offload_view` leaves those out and binds what they select instead;
-`offload_miss` names the first part that differs. Every `HOME`, tool and
+`offload_miss` names the first difference that decides a check's result, and
+`offload_differences` every difference (sd:2862). Every `HOME`, tool and
 `PATH` entry here is a temporary folder, so nothing reads the real home.
 """
 
@@ -68,10 +69,54 @@ class OffloadView(unittest.TestCase):
         self.assertNotIn("USER", theirs["variables"])
         self.assertIsNotNone(theirs["tools"]["make"])
 
-    def test_another_path_order_misses_on_path(self) -> None:
+    def recorded(self, theirs: dict, ours: dict, names: tuple[str, ...] = ()) -> list:
+        """Every difference, each recorded and none refusing: `offload_miss` answers None (sd:2862)."""
+        self.assertIsNone(sd_gate_receipts.offload_miss(theirs, ours, names))
+        found = sd_gate_receipts.offload_differences(theirs, ours, names)
+        self.assertFalse([miss for miss in found if miss["refuses"]])
+        return [(miss["part"], miss["name"]) for miss in found]
+
+    def test_another_path_order_is_recorded_not_refused(self) -> None:
+        """sd:2862: the hub's launchd job and the satellite's shell order `PATH` differently; the tools it picks compare by bytes."""
         reordered = os.pathsep.join([str(self.shared), str(self.home("hub") / "bin")])
-        miss = sd_gate_receipts.offload_miss(self.view("sat"), self.view("hub", PATH=reordered))
-        self.assertEqual(miss, {"part": "path", "name": "~/bin"})
+        self.assertEqual(self.recorded(self.view("sat"), self.view("hub", PATH=reordered)), [("path", "~/bin")])
+
+    def test_the_machines_of_sd_2844_differ_and_the_satellites_pass_stands(self) -> None:
+        """sd:2862: the first satellite merge differed in all of these; each is recorded, none refuses."""
+        for login, version in (("sat", "2.50"), ("hub", "2.51")):
+            self.tool(self.home(login) / "bin" / "git", f"git {version}")
+            self.tool(self.home(login) / "bin" / "uv", f"uv {version}")
+        (self.home("hub") / ".gitconfig").write_text("[user]\n\tname = hub\n", encoding="utf-8")
+        (self.home("sat") / ".cargo").mkdir()
+        (self.home("sat") / ".cargo" / "config.toml").write_text("[build]\n", encoding="utf-8")
+        theirs = self.view("sat", CARGO_BUILD_JOBS="4", NEXTEST_TEST_THREADS="4", SD_GATE_POOL_SIZE="2")
+        ours = self.view("hub", SD_NOTION_PRIVATE_FOLDER="/n")  # scrubbed: no check sees it, so it is not compared
+        self.assertEqual(self.recorded(theirs, ours), [
+            ("tools", "git"), ("tools", "uv"), ("home_files", ".cargo/config.toml"), ("home_files", ".gitconfig"),
+            ("variables", "CARGO_BUILD_JOBS"), ("variables", "NEXTEST_TEST_THREADS"), ("variables", "SD_GATE_POOL_SIZE")])
+
+    def test_an_sd_variable_the_gate_does_not_set_never_reaches_the_check(self) -> None:
+        """sd:2862 review: a check that reads `SD_SKIP_TESTS` could skip its tests on one machine only; it sees nothing."""
+        kept = sd_gate_receipts.offload_environment(
+            sd_gate_run.gate_environment(self.tmp / "repo", self.environ("sat", SD_SKIP_TESTS="1", SD_GATE_SLOTS="2")))
+        self.assertNotIn("SD_SKIP_TESTS", kept)
+        self.assertEqual((kept["SD_LOCAL_GATE"], kept["SD_GATE_SLOTS"]), ("1", "2"))
+
+    def test_a_check_named_tool_outside_the_toolchain_refuses(self) -> None:
+        """`npm test` decides its own result, so `npm` refuses when the check names it, and is recorded when not."""
+        self.tool(self.home("sat") / "bin" / "npm", "npm 10")
+        self.tool(self.home("hub") / "bin" / "npm", "npm 11")
+        theirs, ours = self.view("sat", ("npm",)), self.view("hub", ("npm",))
+        self.assertEqual(sd_gate_receipts.offload_miss(theirs, ours, ("npm",)), {"part": "tools", "name": "npm"})
+        self.assertEqual(self.recorded(theirs, ours), [("tools", "npm")])
+
+    def test_the_runtime_behind_a_launcher_refuses(self) -> None:
+        """sd:2862 review: `npm run check` names only `npm`, and equal `npm` bytes can run another `node`."""
+        for login, version in (("sat", "22"), ("hub", "24")):
+            self.tool(self.home(login) / "bin" / "npm", "npm 10")
+            self.tool(self.home(login) / "bin" / "node", f"node {version}")
+        theirs, ours = self.view("sat", ("npm",)), self.view("hub", ("npm",))
+        self.assertEqual(sd_gate_receipts.offload_miss(theirs, ours, ("npm",)), {"part": "tools", "name": "node"})
 
     def test_a_home_prefix_needs_a_folder_boundary(self) -> None:
         """`/Users/hubber` is not under `/Users/hub`."""
@@ -102,18 +147,17 @@ class OffloadView(unittest.TestCase):
         names = ("just", "scripts/check")
         theirs, ours = self.view("sat", names), self.view("hub", names)
         self.assertNotIn("scripts/check", theirs["tools"])
-        self.assertEqual(sd_gate_receipts.offload_miss(theirs, ours), {"part": "tools", "name": "just"})
+        self.assertEqual(sd_gate_receipts.offload_miss(theirs, ours, names), {"part": "tools", "name": "just"})
 
-    def test_a_named_home_file_with_other_bytes_misses_on_home_files(self) -> None:
+    def test_a_named_home_file_with_other_bytes_is_recorded(self) -> None:
         (self.home("hub") / ".gitconfig").write_text("[core]\n\thooksPath = /dev/null\n", encoding="utf-8")
-        self.assertEqual(sd_gate_receipts.offload_miss(self.view("sat"), self.view("hub")),
-                         {"part": "home_files", "name": ".gitconfig"})
+        self.assertEqual(self.recorded(self.view("sat"), self.view("hub")), [("home_files", ".gitconfig")])
 
-    def test_a_named_home_file_on_one_side_only_misses(self) -> None:
+    def test_a_named_home_file_on_one_side_only_is_recorded(self) -> None:
         (self.home("sat") / ".npmrc").write_text("registry=https://registry.example.test/\n", encoding="utf-8")
         theirs, ours = self.view("sat"), self.view("hub")
         self.assertEqual(ours["home_files"][".npmrc"], "absent")
-        self.assertEqual(sd_gate_receipts.offload_miss(theirs, ours), {"part": "home_files", "name": ".npmrc"})
+        self.assertEqual(self.recorded(theirs, ours), [("home_files", ".npmrc")])
 
     def test_another_variable_value_misses_on_variables(self) -> None:
         self.assertEqual(sd_gate_receipts.offload_miss(self.view("sat"), self.view("hub", LANG="en_US.UTF-8")),
@@ -158,8 +202,8 @@ class OffloadView(unittest.TestCase):
         self.assertEqual({name: kept.get(name) for name in git_config}, git_config)
         self.assertNotIn("API_KEY", kept)
 
-    def test_other_thread_caps_miss_on_threads(self) -> None:
-        """sd:2782 M1: `machine_binding` binds the caps, since a suite can pass on one thread and fail on eight."""
+    def test_other_thread_caps_are_recorded(self) -> None:
+        """sd:2782 M1: `machine_binding` binds the caps locally; across machines they follow the core count (sd:2862)."""
         for login, slots in (("sat", 16), ("hub", 2)):
             config = self.home(login) / ".config" / "sd-ai-command-pack" / "config.json"
             config.parent.mkdir(parents=True)
@@ -167,12 +211,12 @@ class OffloadView(unittest.TestCase):
         with mock.patch.object(sd_gate_slots.os, "cpu_count", return_value=16):
             theirs, ours = self.view("sat"), self.view("hub")
         self.assertEqual((theirs["threads"]["RUST_TEST_THREADS"], ours["threads"]["RUST_TEST_THREADS"]), ("1", "8"))
-        self.assertEqual(sd_gate_receipts.offload_miss(theirs, ours), {"part": "threads", "name": "CARGO_BUILD_JOBS"})
+        self.assertEqual(self.recorded(theirs, ours), [("threads", name) for name in sorted(sd_gate_slots.CPU_VARIABLES)])
 
-    def test_a_view_written_before_threads_were_bound_misses_on_threads(self) -> None:
+    def test_a_view_written_before_threads_were_bound_is_recorded(self) -> None:
         ours = self.view("hub")
         old = {name: part for name, part in ours.items() if name != "threads"}
-        self.assertEqual(sd_gate_receipts.offload_miss(old, ours), {"part": "threads", "name": None})
+        self.assertEqual(self.recorded(old, ours), [("threads", None)])
 
     def test_a_view_that_is_not_one_misses(self) -> None:
         ours = self.view("hub")

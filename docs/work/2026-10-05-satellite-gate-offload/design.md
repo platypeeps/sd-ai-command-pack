@@ -161,14 +161,26 @@ The satellite writes `offload_view` from the run's own environment. Only the
 hub reads it, only on the offload path, and only when `repo.satellite_gate`
 is `accept`. It has six parts:
 
-| Part | Content | What it covers |
+| Part | Content | Refuses on a difference |
 |---|---|---|
-| `path` | the gate's `PATH` entries in order, each `$HOME` prefix written as `~` | Equal order: a name resolves through the same directory on both sides |
-| `tools` | sha256 of each name in `OFFLOAD_TOOLS`, resolved on that `PATH`, and of each tool `gate_binding` resolves | A name the check reaches through `make` or a script has equal bytes |
-| `python` | sha256 of the bytes of `sys.executable`, resolved, and `sys.version` | The interpreter that runs `sd-check` is equal, even when the gate was started through a virtualenv or an explicit path that `PATH`'s `python3` does not name |
-| `home_files` | sha256 of each file in `OFFLOAD_HOME_FILES` under `HOME`, or `"absent"` | Named tool configuration under `HOME` is equal |
-| `threads` | `sd_gate_slots.thread_caps`: the `CARGO_BUILD_JOBS` and `RUST_TEST_THREADS` a check gets under the machine's slot count and cores, as `machine_binding` binds them (sd:2782) | A suite that passes on one test thread and fails on eight misses. Two machines with other core counts or `sd.gate_slots` miss |
-| `variables` | sha256 of the value of each allowlisted variable `gate_environment` keeps, with the `$HOME` prefix written as `~` first | An allowlisted variable that steers the check is equal. One present on one side only misses |
+| `path` | the gate's `PATH` entries in order, each `$HOME` prefix written as `~` | No: recorded. The tools it selects are compared by bytes |
+| `tools` | sha256 of each name in `OFFLOAD_TOOLS`, resolved on that `PATH`, and of each tool `gate_binding` resolves | For `OFFLOAD_DECIDING_TOOLS` and the check's own names; another tool (`git`, `uv`, `npm` when the check does not name it) is recorded |
+| `python` | sha256 of the bytes of `sys.executable`, resolved, and `sys.version` | Yes: the interpreter that runs `sd-check`, even when the gate was started through a virtualenv or an explicit path that `PATH`'s `python3` does not name |
+| `home_files` | sha256 of each file in `OFFLOAD_HOME_FILES` under `HOME`, or `"absent"` | No: recorded |
+| `threads` | `sd_gate_slots.thread_caps`: the `CARGO_BUILD_JOBS`, `RUST_TEST_THREADS` and `NEXTEST_TEST_THREADS` a check gets under the machine's slot count and cores, as `machine_binding` binds them (sd:2782, sd:2872) | No: recorded. They follow the core count |
+| `variables` | sha256 of the value of each allowlisted variable `gate_environment` keeps, with the `$HOME` prefix written as `~` first | Yes, but for the slot holder's `SD_GATE_` settings and the thread caps it sets (`CPU_VARIABLES`), which are recorded |
+
+The view first refused on any difference. The first satellite merge
+(sd:2844, sd:2862) showed that two real machines never match. The hub's
+launchd job and the satellite's shell differ in `PATH` order. `git` and `uv`
+differ by build, and `.gitconfig` and `.npmrc` differ by login. The thread
+caps differ by core count. A satellite gate run inside an `sd gate check`
+holder carries caps a merge does not. So the view now refuses only on what
+decides the check's result: `OFFLOAD_DECIDING_TOOLS` (`sh`, `bash`, `make`,
+`python3`, `cc`, `c++`, `clang`, `cargo`, `rustc`, `node`), the check's own names, the
+interpreter, and the steering variables (`offload_differences`). Every other
+difference is recorded by part and name in the merge's `local_gate`, as
+`satellite.view_differences`.
 
 `OFFLOAD_TOOLS` is one pack constant: `sh`, `bash`, `make`, `python3`,
 `git`, `cc`, `c++`, `clang`, `cargo`, `rustc`, `node`, `npm`, `uv`.
@@ -189,7 +201,7 @@ digest of a short password can be guessed offline.
 
 | Name or prefix | Why the check reads it |
 |---|---|
-| `SD_` | the pack's settings: `SD_LOCAL_GATE`, `SD_GATE_SLOTS`, `SD_GATE_CACHE_DIR` and the rest that `sd-check`, `sd_gate_slots` and `sd_gate_cache` read |
+| `SD_LOCAL_GATE`, `SD_GATE_` | the gate's own settings: `SD_LOCAL_GATE`, which the gate sets, and `SD_GATE_SLOTS`, `SD_GATE_CACHE_DIR` and the rest that `sd_gate_slots` and `sd_gate_cache` read. No other `SD_` name reaches the check, so a check cannot read an `SD_SKIP_TESTS` on one machine only (sd:2862) |
 | `CI`, `GITHUB_ACTIONS` | `sd_gate_slots.configured` takes no slot under either |
 | `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME` | where `machine_settings`, `sd_gate_cache.cache_root` and `sd_gate_slots.directory` look |
 | `MAKEFLAGS`, `MAKEFILES`, `MFLAGS` | what `make` runs |
@@ -272,7 +284,7 @@ the first that fails refuses with its code. No clause failure starts a run.
 | 2 | The pull request is not BEHIND its base (`refuse_behind`, unchanged) | `base_moved` |
 | 3 | An offload row exists at the key for this slug and the exact `--expected-head` (or its tree) | `satellite_receipt_missing` |
 | 4 | `writer` is `sd-satellite-gate` and `reading.status` is `success`; then `satellite` names `hostname`, `login` and `address` | `satellite_receipt_invalid`; `satellite_unidentified` for a row whose tailnet lookup failed |
-| 5 | The hub's run is not in `environment_mode` `whole`, the row's binding names `offload`, and the compared binding fields equal the hub's (table above); the refusal names each differing field | `satellite_binding` |
+| 5 | The hub's run is not in `environment_mode` `whole`, the row's binding names `offload`, the compared binding fields equal the hub's (table above), and so do the view's refusing parts ("The offload view"); the refusal names each differing field | `satellite_binding` |
 | 6 | Within that, `pack_bin` equals the hub's; the refusal names both digests and both `pack_rev` values | `satellite_pack_mismatch` |
 | 7 | Age on the hub's clock is at most `OFFLOAD_WINDOW_SECONDS`, and `recorded_at` is at most 300 s in the hub's future | `satellite_receipt_expired` |
 | 8 | The newest `sd/local-gate` status at the head is `success`, posted by `viewer_login()`, and its description starts with `head[:12] inputs <digest>`, where the digest is the hub's own `gate_inputs(root, head)` | `satellite_status_missing` or `local_gate_foreign` |
@@ -283,7 +295,8 @@ The digest is the one `local_gate` would post on the hub for this head, so a
 status from a run with another pack or local block does not count.
 
 On a pass the merge saves `local_gate` with `satellite` provenance: the
-row's revision, the satellite's login, address and hostname, and the age. It
+row's revision, the satellite's login, address and hostname, the age, and
+the view's recorded differences (`view_differences`, sd:2862). It
 posts no status, because the satellite's status already stands at the head.
 Then `settled_ready` runs as today. `ready` still calls `local_gate_passed`,
 and still refuses a head behind the base.
@@ -310,9 +323,27 @@ operator's goal is that the hub runs no check for a satellite item.
 Under an accepted offload receipt the hub does not run the check. It no longer
 guarantees that the check passes on the hub's own image:
 
-- system libraries, and tools reached by a name outside `OFFLOAD_TOOLS`;
+- system libraries, and tools reached by a name outside `OFFLOAD_DECIDING_TOOLS`
+  and the check's own names;
 - a tool the hub cannot resolve, which is recorded but not compared;
-- tool configuration outside `OFFLOAD_HOME_FILES`;
+- tool configuration under `HOME`, the `PATH` order, the thread caps and the
+  slot holder's `SD_GATE_` settings, which are recorded but not compared
+  (sd:2862). Three named vectors remain, each a file or tool that can change
+  what passes while every compared byte is equal:
+  - `~/.cargo/config.toml`: a `runner` or `rustflags` key can run the tests
+    under another program, or build them otherwise;
+  - `npm` and `uv` when a Makefile or script calls them: resolution and
+    lock handling can install other dependencies under equal `node` or
+    `python3` bytes;
+  - git configuration (`~/.gitconfig`, `~/.config/git/config`): hooks, filters
+    and attributes can change what a test reads.
+
+  Binding them was tried first, and the first satellite merge (sd:2844) showed
+  that two machines always differ in them. So each difference is named in the
+  merge's `local_gate` as `satellite.view_differences`, by part and file or
+  tool name, and the operator sees on every satellite merge what was not bound.
+  The trust rule trusts the operator's own node for these, as it does for its
+  honesty (below);
 - before step 2a, the whole environment;
 - inputs outside the repository on the satellite: an external makefile, a
   tool's own files, machine state, a network answer.
@@ -628,7 +659,7 @@ record.
 | C-14 | blocking | The environment digest keeps `HOME`, `USER` and `PATH`, so neither a satellite receipt nor many hub receipts ever match (sd:2724's evidence) | `gate_environment`; sd:2724: revision 29982, 8 hub digests in a day | addressed: step 2a, narrowed by C-17. The hub compares `offload_view` on the offload path only. Same-machine reuse stays with sd:2724 |
 | C-15 | major | The satellite runs as another local login, and clause 8 needs its `gh` to be the hub's GitHub account | sd:2724 names two logins | parked: implement step 1 reads both; two accounts block step 5. Owner: the operator |
 | C-16 | minor | sd:2722 changes what `gate_inputs` hashes | sd:2722's title | rebutted: clause 6 compares whatever `gate_inputs` hashes; the items are independent |
-| C-17 | blocking | Step 2a dropped `HOME`, `USER` and `PATH` from every local binding, also where offload is off. Equal `make` bytes can run another python or compiler through another `PATH` order; `HOME` selects tool configuration | ship review of 884d31a3, HIGH, on implement step 2a | addressed: local reuse keeps the whole environment; `offload_view` compares `PATH` order, named tools, named `HOME` files and other variables, on the offload path only; residual risk under "The offload view" |
+| C-17 | blocking | Step 2a dropped `HOME`, `USER` and `PATH` from every local binding, also where offload is off. Equal `make` bytes can run another python or compiler through another `PATH` order; `HOME` selects tool configuration | ship review of 884d31a3, HIGH, on implement step 2a | addressed: local reuse keeps the whole environment; `offload_view` compares `PATH` order, named tools, named `HOME` files and other variables, on the offload path only; residual risk under "The offload view". sd:2862 narrowed it: `PATH` order and `HOME` files are recorded, and the python and compiler a `PATH` selects are compared by bytes |
 
 Round 2 swept the three artifacts for each value they share: the window,
 the skew bound, step numbers, refusal codes, the request key and the

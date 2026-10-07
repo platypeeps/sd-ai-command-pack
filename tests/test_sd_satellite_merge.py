@@ -80,13 +80,30 @@ class GateCompare(rows.SatelliteFixture):
                                                     "error": "TailnetError: Tailscale is not running"})
         self.assertIn("Tailscale is not running", self.refused("satellite_unidentified")["offload_refused"]["reason"])
 
-    def test_clause_5_other_thread_caps_refuse_as_binding(self) -> None:
-        """sd:2782 M1: the view binds the caps `machine_binding` binds; a row from before that misses on them by name."""
+    def test_clause_5_records_what_two_machines_differ_in_and_accepts(self) -> None:
+        """sd:2862: thread caps, `PATH` order, `HOME` files, `git` and the pack's own settings differ on every pair of
+        machines; the hub accepts and names each. A row from before the caps were bound names the part."""
         view = self.row(self.key)["offload_view"]
-        rewrite(self.database, self.key, offload_view={**view, "threads": {"RUST_TEST_THREADS": "1"}})
-        self.assertIn("part threads", self.refused("satellite_binding")["offload_refused"]["reason"])
+        rewrite(self.database, self.key, offload_view={
+            **view, "threads": {"RUST_TEST_THREADS": "1"}, "path": ["/elsewhere", *view["path"]],
+            "home_files": {**view["home_files"], ".npmrc": "0" * 64}, "tools": {**view["tools"], "git": "0" * 64},
+            "variables": {**view["variables"], "SD_GATE_POOL_SIZE": "0" * 64}})
+        result = self.compare()
+        self.assertEqual((result["status"], self.runs), ("success", 1))
+        found = [(miss["part"], miss["name"]) for miss in result["satellite"]["view_differences"]]
+        self.assertEqual([miss for miss in found if miss[0] != "threads"], [
+            ("path", "/elsewhere"), ("tools", "git"), ("home_files", ".npmrc"), ("variables", "SD_GATE_POOL_SIZE")])
+        self.assertIn(("threads", "RUST_TEST_THREADS"), found)
         rewrite(self.database, self.key, offload_view={name: part for name, part in view.items() if name != "threads"})
-        self.assertIn("part threads at None", self.refused("satellite_binding")["offload_refused"]["reason"])
+        self.assertIn({"part": "threads", "name": None}, self.compare()["satellite"]["view_differences"])
+
+    def test_clause_5_a_toolchain_tool_or_the_checks_own_tool_refuses_as_binding(self) -> None:
+        """sd:2862: what decides the result still refuses: `sh` from the toolchain, and `make`, the check's own."""
+        view = self.row(self.key)["offload_view"]
+        for name in ("sh", "make"):
+            with self.subTest(name=name):
+                rewrite(self.database, self.key, offload_view={**view, "tools": {**view["tools"], name: "0" * 64}})
+                self.assertIn(f"part tools at {name}", self.refused("satellite_binding")["offload_refused"]["reason"])
 
     def test_clause_5_an_opt_in_read_fault_then_a_good_receipt_read_does_not_accept(self) -> None:
         """sd:2782: the fault ran the hub's gate under the whole environment; that gate never stands on a satellite's pass."""
@@ -259,6 +276,7 @@ class SatelliteMerge(unittest.TestCase):
         gate = self.merged_gate()
         self.assertEqual(gate["satellite"]["hub"], self.HUB)
         self.assertIn("(satellite ", gate["summary"])
+        self.assertEqual(gate["satellite"]["view_differences"], [])  # sd:2862: what the machines differ in, by name
 
     def test_a_self_gating_pack_merges_from_a_satellite_with_another_installed_pack(self) -> None:
         """Clause 8 under sd:2613: the row binds the tree, so the status inputs leave the installed `bin/` out."""

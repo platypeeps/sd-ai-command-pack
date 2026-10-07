@@ -524,7 +524,7 @@ class Receipts(ReceiptFixture):
     def test_the_cpu_cap_reaches_the_check_and_the_receipt_binds_it(self) -> None:
         """sd:2726: a suite can pass on one test thread and fail on eight, so another cap runs the check again."""
         seen = self.root.parent / "seen"
-        head = self.counted(f'echo "$$CARGO_BUILD_JOBS $$RUST_TEST_THREADS" >> {seen}')
+        head = self.counted(f'echo "$$CARGO_BUILD_JOBS $$RUST_TEST_THREADS $$NEXTEST_TEST_THREADS" >> {seen}')
         config = self.root.parent / "config" / "sd-ai-command-pack" / "config.json"
         config.parent.mkdir(parents=True)
         machine = {"SD_GATE_SLOTS_DIR": str(self.root.parent / "slots"), "SD_GATE_SLOT_POLL": "0.1",
@@ -540,7 +540,7 @@ class Receipts(ReceiptFixture):
         self.assertEqual([first["status"], second["status"], "reused" in second, "reused" in third, self.runs()],
                          ["success", "success", False, True, 2])
         whole, half = (str(sd_gate_slots.cpu_share(slots)) for slots in (1, 2))  # they differ on two or more cores
-        self.assertEqual(seen.read_text().splitlines(), [f"{whole} {whole}", f"{half} {half}"])
+        self.assertEqual(seen.read_text().splitlines(), [f"{whole} {whole} {whole}", f"{half} {half} {half}"])  # sd:2872
         with mock.patch.dict(os.environ, machine):
             for name in ("SD_GATE_SLOTS", "CI", "GITHUB_ACTIONS", *sd_gate_slots.CPU_VARIABLES):
                 os.environ.pop(name, None)
@@ -555,7 +555,7 @@ class Receipts(ReceiptFixture):
             one, two = (sd_gate_receipts.gate_binding(self.root, head, "0" * 12, None, {
                 "SD_GATE_SLOTS": "2", "CARGO_BUILD_JOBS": jobs, "RUST_TEST_THREADS": jobs}) for jobs in ("16", "32"))
         assert one is not None and two is not None
-        self.assertEqual((one["threads"], two["threads"]), ({"CARGO_BUILD_JOBS": "8", "RUST_TEST_THREADS": "8"},) * 2)
+        self.assertEqual((one["threads"], two["threads"]), (dict.fromkeys(sd_gate_slots.CPU_VARIABLES, "8"),) * 2)
         self.assertNotEqual(one["environment_sha256"], two["environment_sha256"])
 
     def test_a_receipt_older_than_the_window_is_not_reused(self) -> None:
