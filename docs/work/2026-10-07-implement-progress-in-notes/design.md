@@ -23,8 +23,8 @@ database schema do not change.
 
 ## Status
 
-Proposed, 2026-10-07. The operator has not ruled Q1 to Q11. Each question
-below carries a recommendation.
+Accepted. Operator ruling 2026-10-07: accept all Q1-Q11. Each question
+below keeps its recommendation, which is now the ruling.
 
 Planning review round 1 (codex) found that a renumbered plan moves a `done`
 note onto other work. Round 2 found that a title match misses a scope change

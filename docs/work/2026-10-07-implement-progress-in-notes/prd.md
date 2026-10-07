@@ -7,8 +7,8 @@ item: sd:2784
 
 ## Status
 
-Proposed. The design is in [design.md](design.md). The operator has not ruled
-Q1 to Q11 yet. Implementation has not started.
+Accepted. The design is in [design.md](design.md). Operator ruling
+2026-10-07: accept all Q1-Q11.
 
 ## Problem
 
