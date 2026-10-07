@@ -1199,7 +1199,7 @@ def link_plan(checkout: Path, bin_dir: Path, recorded: dict[str, str] | None = N
     return plans
 
 
-def link_commands(plans: list[Link], bin_dir: Path, *, dry_run: bool = False) -> list[dict]:
+def link_commands(plans: list[Link], bin_dir: Path, recovery: ExitStack, *, dry_run: bool = False) -> list[dict]:
     """Make the absent links and return one receipt row per command.
 
     A row carries the link's `path` and its `target` and no digest: a link has
@@ -1208,7 +1208,9 @@ def link_commands(plans: list[Link], bin_dir: Path, *, dry_run: bool = False) ->
     `LinkFailed`, so no link exists that no receipt names; `cmd_user` then
     puts the renders made before this back. A recorded link
     is replaced by a rename over it, and a failure points every link this
-    call replaced back at its old target, so the old receipt still holds. A
+    call replaced back at its old target, so the old receipt still holds.
+    `recovery` keeps that undo armed after this returns, for a failure later
+    in the install; the caller disarms it once the receipt is written. A
     checkout with no commands links nothing and makes no directory.
     """
     rows = [
@@ -1219,6 +1221,7 @@ def link_commands(plans: list[Link], bin_dir: Path, *, dry_run: bool = False) ->
         return rows
     made: list[Path] = []
     moved: list[tuple[Path, str]] = []
+    recovery.callback(_undo_links, made, moved)
     for plan in plans:
         if plan.state == "ours":
             continue
@@ -1235,14 +1238,21 @@ def link_commands(plans: list[Link], bin_dir: Path, *, dry_run: bool = False) ->
                 os.symlink(plan.target, plan.path)
                 made.append(plan.path)
         except OSError as exc:
-            for path in made:
-                path.unlink()
-            for path, old in moved:
-                _replace_link(path, Path(old))
+            _undo_links(made, moved)
             raise LinkFailed(
                 f"could not link {plan.path} ({exc.strerror or exc})"
             ) from exc
     return rows
+
+
+def _undo_links(made: list[Path], moved: list[tuple[Path, str]]) -> None:
+    """Remove the links one `link_commands` call made and point the ones it moved back; once."""
+    for path in made:
+        path.unlink(missing_ok=True)
+    for path, old in moved:
+        _replace_link(path, Path(old))
+    made.clear()
+    moved.clear()
 
 
 def _replace_link(path: Path, target: Path) -> None:
@@ -2279,10 +2289,11 @@ def cmd_user(ctx: Context, out) -> int:
         written = write_render_plan(render_files, ctx.dry_run)
         current = {str(item.path) for item in written}
 
-        # Every render recovers until the receipt records ownership, including
-        # failures after linking, so a failed install leaves no half (sd:1118).
+        # Every render and every link recovers until the receipt records
+        # ownership, including failures after linking, so a failed install
+        # leaves no half (sd:1118).
         try:
-            links = link_commands(plans, bin_dir, dry_run=ctx.dry_run)
+            links = link_commands(plans, bin_dir, recovery, dry_run=ctx.dry_run)
         except LinkFailed as problem:
             print(f"error: {problem}", file=out)
             return 1

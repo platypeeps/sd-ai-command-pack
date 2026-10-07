@@ -3913,6 +3913,20 @@ class LinkEdgeCaseTests(InstallerHarness):
         out = io.StringIO()
         self.assertEqual(sd_install.cmd_user(ctx, out), 0, out.getvalue())
 
+    def test_a_failure_after_linking_puts_the_links_back(self):
+        """Review round 3: until the receipt is written, a later failure undoes the moved and the new links."""
+        work = self.checkout_with_commands("sd", name="work")
+        serving = self.checkout_with_commands("sd", "sd-new")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        with unittest.mock.patch.object(sd_install, "install_hook", side_effect=OSError(13, "Permission denied")):
+            with self.assertRaises(OSError):
+                sd_install.cmd_user(self.context_for(serving), io.StringIO())
+        bin_dir = self.home / ".local" / "bin"
+        self.assertEqual((bin_dir / "sd").resolve(), (work / "bin" / "sd").resolve(), "the moved link stayed moved")
+        self.assertFalse((bin_dir / "sd-new").is_symlink(), "the new link stayed")
+        self.assertEqual(self.receipt["checkout"], str(work))
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+
     def test_a_retarget_leaves_every_other_file_beside_the_link(self):
         """Review round 3: the spare link's name is new to the call, so a file at any sibling name stays."""
         work = self.checkout_with_commands("sd", name="work")
