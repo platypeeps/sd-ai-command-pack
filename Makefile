@@ -181,8 +181,10 @@ SETUP_PYTHON = $(SETUP_VENV)/bin/python
 # The last step serves the machine (sd:1118). The operator ruled on 2026-09-30
 # that the commands run from a clean clone of origin/main that nobody works
 # in and that only `make setup` updates: `--serve` clones it on the first run
-# and moves it to the exact commit origin/main names on every run. The clone
-# builds its own `.venv` with this recipe and `SERVE=no`. `SERVE=no` skips it, for a
+# and moves it to the exact commit origin/main names on every run. Each move
+# builds that commit's environment with this recipe and `SERVE=no` before it
+# renders. `--venv` takes sd_db into the environment this recipe builds, which
+# `VENV=...` may put outside `.venv`. `SERVE=no` skips the serving step, for a
 # rollback that should stay put. README "A dedicated serving tree" has the rest.
 setup:
 	@venv="$(SETUP_VENV)"; \
@@ -198,7 +200,7 @@ setup:
 	  rm -rf "$$venv/sd-requirements" "$$venv/.sd-requirements.new"
 	"$(PYTHON)" -m venv "$(SETUP_VENV)"
 	"$(SETUP_PYTHON)" -m pip install --require-hashes -r requirements-dev.txt -r requirements-security.txt
-	"$(SETUP_PYTHON)" bin/sd_install.py --provision-library
+	"$(SETUP_PYTHON)" bin/sd_install.py --provision-library --venv "$(SETUP_VENV)"
 	@mkdir -p "$(SETUP_VENV)/.sd-requirements.new"
 	cp requirements-dev.txt requirements-security.txt "$(SETUP_VENV)/.sd-requirements.new/"
 	@mv "$(SETUP_VENV)/.sd-requirements.new" "$(SETUP_VENV)/sd-requirements"

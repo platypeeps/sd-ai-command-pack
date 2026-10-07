@@ -335,10 +335,12 @@ clean clone on a detached `HEAD` that nobody works in, at
   `--pull`: that fetches `origin`, detaches at the exact commit `origin/main`
   names and runs that commit's own installer as `--user`. It refuses a tree
   with tracked or untracked changes.
-  The tree has its own `.venv`, built by its own `make setup SERVE=no`:
-  before the first `--pull`, so nothing is served without `sd_db`, and
-  after each later one, so the environment matches the commit served.
-  Removing the checkout that ran `make setup` leaves it working. The
+  Each `--pull` builds that commit's environment before it renders: the
+  commit's own `make setup SERVE=no` builds `.venv-a` or `.venv-b`, whichever
+  `.venv` does not link to, and `.venv` moves to it only when the build
+  succeeds. A failed build puts the tree back at its commit, with the
+  environment and install it had. The environment is the tree's own, so
+  removing the checkout that ran `make setup` leaves it working. The
   receipt's command links move to the serving tree;
   a link the receipt does not name is still refused.
 - **Roll back:** `python3 bin/sd_install.py --rollback`, run in the serving

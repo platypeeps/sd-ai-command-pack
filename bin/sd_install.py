@@ -1900,7 +1900,7 @@ def provision_library(ctx: Context, out, ref: str | None = None) -> tuple[bool, 
     machine the exit code exists for, the one with no library, exited zero.
     """
     del out
-    python = ctx.checkout / VENV_RELATIVE
+    python = ctx.venv / "bin" / "python" if ctx.venv else ctx.checkout / VENV_RELATIVE
     source = library_source(ctx.environ)
     if not python.is_file():
         return False, f"no virtualenv at {python}; run `make setup` for sd_db"
@@ -1965,13 +1965,13 @@ def provisioning_lock(ctx: Context):
         yield
 
 
-def installed_library_commit(pack: Path) -> str | None:
-    """The commit pip installed `sd_db` from into `pack`'s virtualenv, or None.
+def installed_library_commit(pack: Path, venv: Path | None = None) -> str | None:
+    """The commit pip installed `sd_db` from into `pack`'s virtualenv, or `venv`, or None.
 
     A VCS install records `vcs_info.commit_id` in `direct_url.json`; a path
     install records none, and neither does a virtualenv without `sd_db`.
     """
-    for record in sorted((pack / ".venv/lib").glob("python*/site-packages/sd_db-*.dist-info/direct_url.json")):
+    for record in sorted(((venv or pack / ".venv") / "lib").glob("python*/site-packages/sd_db-*.dist-info/direct_url.json")):
         try:
             vcs = json.loads(record.read_text(encoding="utf-8")).get("vcs_info")
         except (OSError, ValueError, AttributeError):
@@ -1982,7 +1982,7 @@ def installed_library_commit(pack: Path) -> str | None:
     return None
 
 
-def ancestry_refusal(pack: Path, system: Path, ref: str, *, merged: bool) -> str:
+def ancestry_refusal(pack: Path, system: Path, ref: str, *, merged: bool, venv: Path | None = None) -> str:
     """Why installing `ref` over `pack`'s installed `sd_db` would go backwards, or "".
 
     The schema guard compares schema numbers, so two library commits under
@@ -1995,7 +1995,7 @@ def ancestry_refusal(pack: Path, system: Path, ref: str, *, merged: bool) -> str
     nothing here; the install reports the latter.
     """
     git = sibling("sd_lib").git_output
-    present = installed_library_commit(pack)
+    present = installed_library_commit(pack, venv)
     commit = git(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], system)
     if not present or not commit or present == commit:
         return ""
@@ -2024,9 +2024,9 @@ def provision_guarded(ctx: Context, out, ref: str | None = None, *, merged: bool
         if candidate is None:
             candidate, _ = library_pin(system)
         if candidate:
-            if merged and installed_library_commit(ctx.checkout) == candidate:
+            if merged and installed_library_commit(ctx.checkout, ctx.venv) == candidate:
                 return False, f"sd_db {candidate} is already installed"
-            refusal = ancestry_refusal(ctx.checkout, system, candidate, merged=merged)
+            refusal = ancestry_refusal(ctx.checkout, system, candidate, merged=merged, venv=ctx.venv)
             if refusal:
                 return False, refusal
             return provision_library(ctx, out, ref=candidate)
@@ -2124,6 +2124,8 @@ class Context:
     dry_run: bool = False
     # `--bin-dir`, when given. `link_directory` is what the link step reads.
     bin_dir: Path | None = None
+    # `--venv`, when given: the environment `--provision-library` installs into.
+    venv: Path | None = None
 
     @property
     def sandboxed(self) -> bool:
@@ -2825,14 +2827,65 @@ def _activate(ctx: Context, commit: str, out) -> int:
     if code:
         print(f"error: git checkout --detach {commit} failed:\n{err}", file=out)
         return 1
+    slot = _provision(ctx, commit, out)
+    if slot is None:
+        # Nothing was published: the links, renders, hooks, receipt and the
+        # `.venv` link still serve `original` once its code is back.
+        code, _, err = _git(ctx, ["checkout", "--quiet", "--detach", original])
+        if code:
+            print(f"error: git could not return the serving tree to {original}:\n{err}\nrun "
+                  f"`git -C {ctx.checkout} checkout --detach {original}`.", file=out)
+        else:
+            print(f"error: the serving tree is back at {original}, with its environment and install as they were.",
+                  file=out)
+        return 1
+    venv = ctx.checkout / ".venv"
+    previous = os.readlink(venv) if venv.is_symlink() else None
+    _replace_link(venv, Path(slot.name))
     print(f"serving {commit}", file=out)
     rendered = 1
     try:
         rendered = _render_checked_out(ctx, out)
     finally:
         if rendered:
+            if previous is None:
+                venv.unlink()
+            else:
+                _replace_link(venv, Path(previous))
             _put_back(ctx, original, receipt, commit, out)
     return rendered
+
+
+#: The two environments a serving tree alternates between; `.venv` links to
+#: the one in use, so building the next never touches it.
+ENV_SLOTS = (".venv-a", ".venv-b")
+
+#: What a calling `make` hands its children. `make setup VENV=...` puts the
+#: override in `MAKEFLAGS`, and a sub-make would provision that path.
+MAKE_VARIABLES = frozenset({"MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES", "VENV"})
+
+
+def _provision(ctx: Context, commit: str, out) -> Path | None:
+    """Build the slot `.venv` does not name, for the checked-out `commit`; None after reporting (sd:1118).
+
+    The checked-out commit's own `make setup SERVE=no` builds it, so the
+    requirements match the code. The environment is the tree's own: removing
+    the checkout that ran `make setup` takes nothing a served command needs.
+    """
+    venv = ctx.checkout / ".venv"
+    if venv.exists() and not venv.is_symlink():
+        print(f"error: {venv} is not a link to {' or '.join(ENV_SLOTS)}; move it aside and run `make setup` again",
+              file=out)
+        return None
+    slot = ctx.checkout / (ENV_SLOTS[1] if venv.is_symlink() and os.readlink(venv) == ENV_SLOTS[0] else ENV_SLOTS[0])
+    environ = {key: value for key, value in ctx.environ.items() if key not in MAKE_VARIABLES}
+    done = subprocess.run(["make", "-C", str(ctx.checkout), "setup", "SERVE=no", f"VENV={slot}"],  # nosec B603 B607 - fixed argv
+                          env=environ, capture_output=True, text=True, check=False)
+    print(done.stdout + done.stderr, file=out, end="")
+    if done.returncode:
+        print(f"error: provisioning {slot} for {commit} failed", file=out)
+        return None
+    return slot
 
 
 def _put_back(ctx: Context, original: str, receipt: bytes | None, commit: str, out) -> None:
@@ -2984,35 +3037,13 @@ def _clone_serving_tree(ctx: Context, tree: Path, out) -> bool:
             print(f"error: git {' '.join(args[:2])} failed for the serving checkout:\n{err}\n"
                   f"{spare} holds what it left; remove it once read.", file=out)
             return False
-    # The tree's own `.venv` is provisioned, not committed: excluded here, so
-    # `--verify` and `--pull` never read it as somebody's work.
+    # The tree's environments are built, not committed: excluded here, so
+    # `--verify` and `--pull` never read them as somebody's work.
     with open(spare / ".git" / "info" / "exclude", "a", encoding="utf-8") as exclude:
-        exclude.write("/.venv\n")
+        exclude.write("".join(f"/{name}\n" for name in (".venv", *ENV_SLOTS)))
     spare.rename(tree)
     print(f"cloned {url} into {tree}", file=out)
     return True
-
-
-#: What a calling `make` hands its children. `make setup VENV=...` puts the
-#: override in `MAKEFLAGS`, and a sub-make would provision that path, not the
-#: tree's own `.venv`.
-MAKE_VARIABLES = frozenset({"MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES", "VENV"})
-
-
-def _provision_serving_tree(ctx: Context, tree: Path, out) -> int:
-    """Build the tree's own `.venv` with its own `make setup SERVE=no` (sd:1118 lane review).
-
-    The tree's environment is its own, so removing the checkout that ran
-    `make setup` takes nothing the served commands need. Its recipe is the
-    tree's, at the commit it serves, so the requirements match the code.
-    """
-    environ = {key: value for key, value in ctx.environ.items() if key not in MAKE_VARIABLES}
-    done = subprocess.run(["make", "-C", str(tree), "setup", "SERVE=no"],  # nosec B603 B607 - fixed argv
-                          env=environ, capture_output=True, text=True, check=False)
-    print(done.stdout + done.stderr, file=out, end="")
-    if done.returncode:
-        print(f"error: provisioning {tree / '.venv'} failed; run `make setup` again", file=out)
-    return done.returncode
 
 
 def cmd_serve(ctx: Context, out) -> int:
@@ -3022,9 +3053,7 @@ def cmd_serve(ctx: Context, out) -> int:
     clean checkout nobody works in, which only `make setup` updates. The
     first run clones it; every run then hands it to the clone's own
     installer as `--pull`, which detaches it at the exact commit `origin/main`
-    names and renders from it. The clone provisions its own `.venv`: before
-    the first `--pull`, so no command is served without its library, and
-    after each later one, so the environment matches the commit served.
+    names, builds that commit's environment and only then renders from it.
     """
     tree = serving_tree(ctx.home, ctx.environ)
     if tree.resolve() == ctx.checkout.resolve():
@@ -3042,19 +3071,10 @@ def cmd_serve(ctx: Context, out) -> int:
     elif ctx.dry_run:
         print(f"would detach {tree} at origin/main and render", file=out)
         return 0
-    venv = tree / ".venv"
-    # A link is another checkout's environment, which the tree must not borrow.
-    fresh = venv.is_symlink() or not venv.is_dir()
-    if fresh:
-        code = _provision_serving_tree(ctx, tree, out)
-        if code:
-            return code
     argv = [sys.executable, str(tree / "bin" / "sd_install.py"), "--pull", *_forwarded(ctx)]
     done = subprocess.run(argv, env=ctx.environ, capture_output=True, text=True, check=False)  # nosec B603 - fixed argv
     print(done.stdout + done.stderr, file=out, end="")
-    if done.returncode or fresh:
-        return done.returncode
-    return _provision_serving_tree(ctx, tree, out)
+    return done.returncode
 
 
 def cmd_uninstall(ctx: Context, out) -> int:
@@ -3187,6 +3207,8 @@ usage: python3 bin/sd_install.py (--user | --status | --verify | --pull | --roll
   --repo [PATH]    write the marked block into PATH/CLAUDE.local.md (default: .)
   --provision-library
                    install sd_db into this pack's virtualenv and stop
+  --venv DIR       with --provision-library, install into DIR instead; `make setup` passes
+                   the environment it builds
 
   --reviewers NAMES
                    with --repo, the registry entries this repo consents to
@@ -3214,6 +3236,7 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
     as_json = False
     home_arg = None
     bin_dir_arg = None
+    venv_arg = None
     index = 0
     while index < len(argv):
         token = argv[index]
@@ -3242,6 +3265,12 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
                 print("error: --bin-dir needs a directory", file=out)
                 return 2
             bin_dir_arg = argv[index]
+        elif token == "--venv":
+            index += 1
+            if index >= len(argv):
+                print("error: --venv needs a directory", file=out)
+                return 2
+            venv_arg = argv[index]
         elif token == "--reviewers":
             # Taken positionally: an empty string is a real answer, nobody.
             index += 1
@@ -3263,6 +3292,9 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
     if as_json and mode != "verify":
         print("error: --json requires --verify", file=out)
         return 2
+    if venv_arg is not None and mode != "provision-library":
+        print("error: --venv requires --provision-library", file=out)
+        return 2
 
     home = Path(home_arg).expanduser().resolve() if home_arg else Path(
         os.path.expanduser("~")
@@ -3280,7 +3312,8 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
     checkout = Path(__file__).resolve().parent.parent
     bin_dir = Path(bin_dir_arg).expanduser().resolve() if bin_dir_arg else None
     ctx = Context(
-        checkout=checkout, home=home, environ=environ, dry_run=dry_run, bin_dir=bin_dir
+        checkout=checkout, home=home, environ=environ, dry_run=dry_run, bin_dir=bin_dir,
+        venv=Path(venv_arg).expanduser().absolute() if venv_arg else None,
     )
     # Checked here, before any mode runs: `--pull` fast-forwards the serving
     # checkout before it calls `cmd_user`, so a check inside the link step

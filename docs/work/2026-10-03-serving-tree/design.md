@@ -71,13 +71,20 @@ Its last line runs `bin/sd_install.py --serve` from the working checkout:
 - **Clone.** A missing tree is cloned from the working checkout's `origin`
   into a spare directory beside it, detached at `origin/main`, then renamed
   into place. A clone cut short leaves no half-made tree.
-- **Library.** The tree builds its own `.venv` with its own
-  `make setup SERVE=no`, with the caller's `MAKEFLAGS` and `VENV` removed.
-  A link to the caller's environment broke when a lane worktree that ran
-  `make setup` was removed (lane review). A missing or linked `.venv` is
-  built before the first `--pull`; an existing one is refreshed after each
-  `--pull` that succeeds. A failed build before the pull runs no pull. The
-  clone's `info/exclude` names `.venv`, so `--verify` stays clean.
+- **Library.** One order, in `_activate`: check out the target, build its
+  environment, then render. The build is the target's own
+  `make setup SERVE=no VENV=<slot>`, with the caller's `MAKEFLAGS` and
+  `VENV` removed, into `.venv-a` or `.venv-b`, whichever `.venv` does not
+  link to. `.venv` moves to the slot only after the build succeeds, and
+  back if the render fails. A failed build checks out the previous commit
+  and publishes nothing, so the previous environment and install serve on.
+  Two slots, not a temporary directory renamed into place: a virtualenv's
+  scripts name its path, and replacing one would delete the other, which
+  the deletion guard forbids. `--provision-library --venv <slot>` installs
+  `sd_db` into the slot, not into `.venv`. A link to the caller's
+  environment broke when a lane worktree that ran `make setup` was removed
+  (lane review, rounds 13 and 14). The clone's `info/exclude` names `.venv`
+  and both slots, so `--verify` stays clean.
 - **Hand-over.** `--serve` runs the tree's own installer as `--pull`, so the
   activation is the tree's code, as in the first pass.
 - **Links.** `link_plan` gains a fourth state, `recorded`: a link the
