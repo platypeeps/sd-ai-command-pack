@@ -198,7 +198,8 @@ own check would run another compiler.
 A docs-only scope's docs command can reach a compiler through `make`, as
 `cargo doc` or a doctest does, so it compares `OFFLOAD_DECIDING_TOOLS` too.
 A repository whose docs command reaches no compiler declares `docs_tools` in
-`.github/sd-check-scope.json`, every executable that command reaches. A
+`.github/sd-check-scope.json`, every executable that command reaches, each
+by bare name on `PATH`, since a path names a file no binding hashes. A
 docs-only scope then refuses on those tools and the command's own name only.
 
 `OFFLOAD_TOOLS` is one pack constant: `sh`, `bash`, `make`, `python3`,

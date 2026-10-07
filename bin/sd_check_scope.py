@@ -17,7 +17,7 @@ that does not parse all run the full check: the scope only ever narrows what
 runs when every condition for narrowing holds.
 
 An optional `docs_tools` lists every executable the docs command reaches, the
-shell included, such as `["sh", "python3"]` (sd:2881). A hub that accepts a
+shell included, by bare name on `PATH`, such as `["sh", "python3"]` (sd:2881). A hub that accepts a
 satellite's docs-only pass then compares those tools and the command's own,
 not the compilers a full check may run. Without it the hub compares them all:
 `make docs-gate` can reach `cargo` through `cargo doc` or a doctest.
@@ -84,8 +84,10 @@ def declaration(root: pathlib.Path) -> tuple[list[str], list[str], list[str] | N
         if not isinstance(entries, list) or not entries or any(not isinstance(v, str) or not v for v in entries):
             raise DeclarationError(f"{DECLARATION}: {name} must be a non-empty list of non-empty strings")
     tools = value.get("docs_tools")
-    if tools is not None and (not isinstance(tools, list) or any(not isinstance(v, str) or not v for v in tools)):
-        raise DeclarationError(f"{DECLARATION}: docs_tools must be a list of non-empty strings")
+    # A bare name resolves on `PATH`, where an offload view hashes it; a path names a file no binding covers (sd:2881).
+    if tools is not None and (not isinstance(tools, list)
+                              or any(not isinstance(v, str) or not v or "/" in v or v in (".", "..") for v in tools)):
+        raise DeclarationError(f"{DECLARATION}: docs_tools must be a list of bare command names, resolved on PATH")
     return list(value["docs_paths"]), list(value["docs_command"]), None if tools is None else list(tools)
 
 

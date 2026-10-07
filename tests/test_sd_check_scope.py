@@ -140,12 +140,12 @@ class DocsScope(CheckFixture):
         self.assertEqual(sd_check_scope.decide(root, "main", sd_lib.detect_entrypoints(root)).tools, ("sh", "python3"))
         self.change(root, "src/app.py")
         self.assertIsNone(sd_check_scope.decide(root, "main", sd_lib.detect_entrypoints(root)).tools)
-        for bad in ("sh", [""], [1]):
+        for bad in ("sh", [""], [1], ["../tools/validator"], ["tools/validator"], ["/usr/bin/vale"], ["."], [".."]):
             with self.subTest(bad=bad):
                 path = root / ".github" / "sd-check-scope.json"
                 path.write_text(json.dumps({**json.loads(path.read_text(encoding="utf-8")), "docs_tools": bad}),
                                 encoding="utf-8")
-                with self.assertRaisesRegex(sd_check_scope.DeclarationError, "docs_tools must be a list"):
+                with self.assertRaisesRegex(sd_check_scope.DeclarationError, "docs_tools must be a list of bare command names"):
                     sd_check_scope.declaration(root)
 
     def test_base_does_not_combine_with_only_or_a_receipt(self) -> None:
