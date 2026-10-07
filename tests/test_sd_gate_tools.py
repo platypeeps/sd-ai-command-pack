@@ -265,6 +265,18 @@ class SystemTools(unittest.TestCase):
                 version = sd_gate_receipts.system_version({"DEVELOPER_DIR": str(contents / "Developer")})
         self.assertEqual(version, "macOS x (x); Xcode 27.1 (27B5)")
 
+    def test_a_developer_dir_naming_the_app_reads_the_apps_version(self) -> None:
+        """`DEVELOPER_DIR=/Applications/Xcode.app` is the app, not its `Contents/Developer`: two Xcodes there differ."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = pathlib.Path(tmp, "Xcode.app")
+            (app / "Contents").mkdir(parents=True)
+            (app / "Contents" / "version.plist").write_bytes(plistlib.dumps({"CFBundleShortVersionString": "27.2",
+                                                                             "ProductBuildVersion": "27C1"}))
+            with mock.patch.object(sd_gate_receipts, "system_answer", lambda argv: "x"), \
+                    mock.patch.object(sys, "platform", "darwin"):
+                version = sd_gate_receipts.system_version({"DEVELOPER_DIR": f"{app}/"})
+        self.assertEqual(version, "macOS x (x); Xcode 27.2 (27C1)")
+
     def test_another_platform_names_itself(self) -> None:
         with mock.patch.object(sys, "platform", "linux"):
             self.assertEqual(sd_gate_receipts.system_version({}), sd_gate_receipts.platform.platform())

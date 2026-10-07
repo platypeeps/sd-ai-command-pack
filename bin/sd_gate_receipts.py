@@ -476,9 +476,12 @@ def developer_version(developer: str) -> str:
     if sys.platform != "darwin":
         return platform.platform()
     macos = f"macOS {system_answer(['/usr/bin/sw_vers', '-productVersion'])} ({system_answer(['/usr/bin/sw_vers', '-buildVersion'])})"
-    developer = developer or system_answer(["/usr/bin/xcode-select", "-p"])
-    try:  # an Xcode developer folder is `Xcode.app/Contents/Developer`, beside the app's `version.plist`
-        with open(pathlib.Path(developer).parent / "version.plist", "rb") as stream:
+    developer = os.path.normpath(developer or system_answer(["/usr/bin/xcode-select", "-p"]))
+    # An Xcode developer folder is `Xcode.app/Contents/Developer`, beside the app's `version.plist`;
+    # `DEVELOPER_DIR` may also name the app itself, as `xcode-select -s` takes it.
+    plist = (pathlib.Path(developer, "Contents") if developer.endswith(".app") else pathlib.Path(developer).parent)
+    try:
+        with open(plist / "version.plist", "rb") as stream:
             plist = plistlib.load(stream)
         tools = f"Xcode {plist.get('CFBundleShortVersionString')} ({plist.get('ProductBuildVersion')})"
     except (OSError, ValueError):

@@ -88,7 +88,7 @@ the Cellar version; the remedy is `brew upgrade <tool>` on the older one.
 `xcrun` runs: `CLT <version>` from `pkgutil` when the developer folder is the
 CLT, else `Xcode <version> (<build>)` from the app's `version.plist`.
 `DEVELOPER_DIR` in the gate's environment chooses the folder before
-`xcode-select -p`. A system tool's digest binds that line beside its bytes,
+`xcode-select -p`; it may name `Xcode.app` itself, as `xcode-select -s` takes it. A system tool's digest binds that line beside its bytes,
 as a `VERSIONED_TOOLS` name binds `-vV`. One process asks once per
 developer folder. It runs `sw_vers`, `xcode-select` and `pkgutil` by absolute path,
 so a gate's short `PATH` cannot turn one part into `unknown`.
