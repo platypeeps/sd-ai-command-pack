@@ -912,11 +912,19 @@ class LineBudgetTests(unittest.TestCase):
         # `try`/`finally` (+3) on every exit, before the gate. The
         # slot logic is `bin/sd_review_slots.py`, outside the lane: `sd-review`
         # does not import it.
+        #
+        # 4723 -> 4820 is sd:2092, under the operator's 4900 ceiling (ruling of
+        # 2026-10-04), raised in its own commit before the one that spends it:
+        # `bin/sd-review` +3 asks the shadow triage after the reviewers, and
+        # `bin/sd_jev.py` +94 holds it with the shadow helpers `sd task add`
+        # shares (sd:2093): the public-repository gate, one shadow `choice`,
+        # the loud stop, and the section saying what is sent. The duplicate
+        # hint itself is in `bin/sd_work.py`, outside the lane.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4723,
+            4820,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
