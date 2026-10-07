@@ -912,11 +912,25 @@ class LineBudgetTests(unittest.TestCase):
         # `try`/`finally` (+3) on every exit, before the gate. The
         # slot logic is `bin/sd_review_slots.py`, outside the lane: `sd-review`
         # does not import it.
+        #
+        # 4723 -> 4820 is sd:2092, under the operator's 4900 ceiling (ruling of
+        # 2026-10-04), raised in its own commit before the one that spends it:
+        # `bin/sd-review` +3 asks the shadow triage after the reviewers, and
+        # `bin/sd_jev.py` +94 holds it with the shadow helpers `sd task add`
+        # shares (sd:2093): the public-repository gate, one shadow `choice`,
+        # the loud stop, and the section saying what is sent. The duplicate
+        # hint itself is in `bin/sd_work.py`, outside the lane. Review rounds
+        # then spent 4820 -> 4841: `--hostname github.com` on the visibility
+        # question (+3), `errors="replace"` in `_jev_run` (+1), and
+        # `shadow_safely`, which turns any exception in a shadow stage into a
+        # note and checks the switch before any probe (+17). The lane review of
+        # b527597e9 spent 4841 -> 4849: the local Kev by default and hosted Jev
+        # only on the machine's `SD_JEV_SHADOW_HOSTED=1`, as `sd-docs-lint` does.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4723,
+            4849,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
