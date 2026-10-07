@@ -4,6 +4,11 @@
 
 ### Added
 
+- **`sd-review` asks a hint-blind twin of the tier question, in shadow (sd:2969).**
+  `JEV_SD_REVIEW_BLIND` sends the tier reading's state without `deterministic_routing_said`, the rule's reason, with the same criteria and subject.
+  `--shadow` prints the routed tier and nothing reads Jev's answer, so no tier, output or exit code changes; the ledger pairs it with the routed tier.
+  It runs only after the reading's gate passes, and `JEV_SD_REVIEW_BLIND=0` stops it alone. A failing twin is one note on stderr.
+
 - **`sd changelog render|show|import` renders `CHANGELOG.md` from the database's entry rows (sd:2783, step 2).**
   `render` writes the region between `<!-- sd-changelog:begin -->` and `<!-- sd-changelog:end -->` from the rows merged on the base's first-parent history since the newest `v*` tag; text outside the region stays byte for byte.
   Entries go by subsection, then newest merge first by first-parent position; neither write order nor a clock decides the order.

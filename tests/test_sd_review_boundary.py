@@ -926,11 +926,21 @@ class LineBudgetTests(unittest.TestCase):
         # note and checks the switch before any probe (+17). The lane review of
         # b527597e9 spent 4841 -> 4849: the local Kev by default and hosted Jev
         # only on the machine's `SD_JEV_SHADOW_HOSTED=1`, as `sd-docs-lint` does.
+        #
+        # 4849 -> 4873 is sd:2969, under the operator's 4900 ceiling (ruling of
+        # 2026-10-04): `bin/sd_jev.py` +24 asks the hint-blind twin,
+        # `JEV_SD_REVIEW_BLIND`, the tier question without the rule's reason, in
+        # shadow: `_jev_blind` (+15 with its docstring and blank lines), its call
+        # (+1), its stage constant (+2), the module paragraph saying what it
+        # sends (+5) and a docstring line on the reasonless state (+1). The
+        # operator approved the stage for the Jev experiment (sd:2968). Main sat
+        # at 4848 when this was set; the 4849 left room for sd:2954's `JEV_RUN`
+        # line, which may land before or after this.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4849,
+            4873,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
