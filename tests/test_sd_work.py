@@ -2,6 +2,8 @@
 
 import getpass
 import importlib
+import importlib.machinery
+import importlib.util
 import json
 import os
 import subprocess
@@ -1159,6 +1161,42 @@ class WorkRegister(unittest.TestCase):
         self.assertIn("register_work_item", result.stderr)
         self.assertIn("sd-install", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
+
+
+def load_cli():
+    """`bin/sd` as a module, so `main` runs in-process."""
+    loader = importlib.machinery.SourceFileLoader("sd_cli_for_replay", str(ROOT / "bin" / "sd"))
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(module)
+    return module
+
+
+class Replayable(unittest.TestCase):
+    """sd:2845: a read-only verb lets a satellite's `sd_db` self-install run it again; a write verb does not."""
+
+    def declared(self, *argv):
+        fake = unittest.mock.Mock(spec=["declare_replayable"])
+        with unittest.mock.patch.dict(sys.modules, {"sd_db.self_install": fake}), \
+                unittest.mock.patch.object(sd_work, "run", unittest.mock.Mock(return_value=0)) as run:
+            self.assertEqual(load_cli().main(list(argv)), 0)
+        run.assert_called_once()
+        return fake.declare_replayable
+
+    def test_a_read_only_verb_declares_itself_replayable(self):
+        for argv in (("task", "show", "5"), ("store", "item", "5"), ("store", "items"), ("today",)):
+            with self.subTest(argv=argv):
+                self.declared(*argv).assert_called_once_with()
+
+    def test_a_write_verb_keeps_the_manual_rerun(self):
+        for argv in (("task", "note", "5", "--body", "x"), ("task", "status", "5", "done"), ("task", "add", "t")):
+            with self.subTest(argv=argv):
+                self.declared(*argv).assert_not_called()
+
+    def test_an_sd_db_without_the_call_still_runs_the_verb(self):
+        with unittest.mock.patch.dict(sys.modules, {"sd_db.self_install": object()}), \
+                unittest.mock.patch.object(sd_work, "run", unittest.mock.Mock(return_value=0)) as run:
+            self.assertEqual(load_cli().main(["task", "show", "5"]), 0)
+        run.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -475,6 +475,8 @@ OFFLOAD_WINDOW_SECONDS = TREE_REUSE_WINDOW_SECONDS
 OFFLOAD_SKEW_SECONDS = 300
 #: The pack digest the hub's lane publishes, which a satellite compares before its run; `<slug>` follows.
 PACK_PREFIX = "sd-lane-pack:v1:"
+#: The published row's `pack_bins` keys, each `pack_bin`'s `closure` argument (`pack_scope`'s answer) (sd:2823).
+PACK_SCOPES = {"every": False, "closure": True}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -622,7 +624,11 @@ def pack_warning(database: pathlib.Path | None, root: pathlib.Path, head: str, o
     except Exception:
         return None
     published = published if isinstance(published, dict) else {}
-    theirs, ours = published.get("pack_bin"), pack_bin(own, pack_scope(root, head))
+    closure = pack_scope(root, head)
+    # The hub's digest under this head's scope, as its merge compares (sd:2823); an older hub publishes one, under its own.
+    bins = published.get("pack_bins")
+    theirs = bins.get("closure" if closure else "every") if isinstance(bins, dict) else published.get("pack_bin")
+    ours = pack_bin(own, closure)
     if not theirs or theirs == ours:
         return None
     warning = (f"this pack's bin/ digest {ours[:12]} (rev {str(pack_rev())[:12]}) is not the hub's {str(theirs)[:12]} "

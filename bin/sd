@@ -62,6 +62,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
 import json
 import math
 import os
@@ -3325,6 +3326,26 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+#: `(group, verb)` pairs that read the hub and do no local work with effects before its first session,
+#: so a satellite's `sd_db` self-install may run them again (sd:2845). Every other verb keeps the manual rerun.
+REPLAYABLE = {("today", None), ("store", "items"), ("store", "item"), ("task", "show")}
+
+
+def declare_replayable(args: argparse.Namespace) -> None:
+    """Tell `sd_db` that `args` may rerun after a self-install; an `sd_db` older than sd:2802 has no such call."""
+    if (getattr(args, "group", None), getattr(args, "verb", None)) not in REPLAYABLE:
+        return
+    if sd_lib.import_sd_db().module is None:
+        return
+    try:
+        self_install = importlib.import_module("sd_db.self_install")
+    except ImportError:
+        return
+    declare = getattr(self_install, "declare_replayable", None)
+    if callable(declare):
+        declare()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     if argv is None:
@@ -3338,6 +3359,7 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exit_code:
         return 2 if exit_code.code else 0
     try:
+        declare_replayable(args)
         return int(args.handler(args))
     except Refusal as refusal:
         print(f"sd: {refusal}", file=sys.stderr)
