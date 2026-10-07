@@ -183,6 +183,63 @@ class OffloadView(ViewFixture):
                                capture_output=True, check=False).stdout for env in (self.environ("sat"), kept)]
         self.assertEqual(read, ["t\n", ""])  # the fixture's `~/.gitconfig` names `t`
 
+    def test_a_bound_cargo_subcommand_is_copied_for_the_gate_and_refuses(self) -> None:
+        """sd:2921: cargo finds `cargo-nextest` in `$CARGO_HOME/bin`, and the pinned one holds none. The gate copies the
+        caller's, `~/.cargo/bin` by default, into its own folder, and the view binds the copy's bytes."""
+        views = {}
+        for login, version in (("sat", "0.9.100"), ("hub", "0.9.101")):
+            self.tool(self.home(login) / ".cargo" / "bin" / "cargo-nextest", f"cargo-nextest {version}")
+            for caller in ("CARGO_HOME", "HOME"):
+                with self.subTest(login=login, caller=caller):
+                    tree = self.tmp / f"gate-{login}-{caller}" / "tree"
+                    tree.mkdir(parents=True)
+                    environ = {key: value for key, value in self.environ(login).items()
+                               if not (caller == "HOME" and key == "CARGO_HOME")}
+                    environment = sd_gate_receipts.offload_environment(environ)
+                    sd_gate_receipts.cargo_subcommands(environ, tree, self.tmp / "repo", "offload")
+                    copy = tree.parent / sd_gate_receipts.CARGO_SUBCOMMANDS / "cargo-nextest"
+                    self.assertEqual(copy.read_bytes(), (self.home(login) / ".cargo" / "bin" / "cargo-nextest").read_bytes())
+                    views[login] = sd_gate_receipts.offload_view(environment, (), tree)
+                    self.assertEqual(views[login]["tools"]["cargo-nextest"], sd_gate_receipts._content_digest(copy))
+        self.assertEqual(sd_gate_receipts.offload_miss(views["sat"], views["hub"]), {"part": "tools", "name": "cargo-nextest"})
+
+    def test_a_check_that_runs_the_subcommand_itself_binds_the_gates_copy(self) -> None:
+        """sd:2921 r4 review: `machine_binding` resolves the check's own names on the check's `PATH`, and names the
+        copy by its place in the gate's folder, not by the temporary folder's random name."""
+        self.tool(self.home("sat") / ".cargo" / "bin" / "cargo-nextest", "cargo-nextest 0.9.100")
+        tree = self.tmp / "gate" / "tree"
+        tree.mkdir(parents=True)
+        environ = self.environ("sat")
+        environment = sd_gate_receipts.offload_environment(environ)
+        sd_gate_receipts.cargo_subcommands(environ, tree, self.tmp / "repo", "offload")
+        bound = sd_gate_receipts.machine_binding(tree, [["cargo-nextest", "run"]], environment)["tools"]
+        copy = tree.parent / sd_gate_receipts.CARGO_SUBCOMMANDS / "cargo-nextest"
+        self.assertEqual(bound, [{"invocation": "cargo-nextest", "path": "subcommands:cargo-nextest",
+                                  "sha256": sd_gate_receipts.sd_check_receipts.file_digest(copy)}])
+
+    def test_a_check_that_runs_cargo_nextest_binds_the_gates_copy(self) -> None:
+        """sd:2921 r6 review: `cargo nextest` runs the copy too, as the pinned `CARGO_HOME/bin` holds none; the view
+        resolves the name on the check's `PATH`, which starts with the copy, not on the gate's `PATH`."""
+        self.tool(self.home("sat") / ".cargo" / "bin" / "cargo-nextest", "cargo-nextest 0.9.100")
+        self.tool(self.tmp / "decoy" / "cargo-nextest", "cargo-nextest decoy")
+        tree = self.tmp / "gate" / "tree"
+        tree.mkdir(parents=True)
+        environ = self.environ("sat")
+        environment = sd_gate_receipts.offload_environment(environ)
+        environment["PATH"] = os.pathsep.join([str(self.tmp / "decoy"), environment["PATH"]])
+        sd_gate_receipts.cargo_subcommands(environ, tree, self.tmp / "repo", "offload")
+        copy = tree.parent / sd_gate_receipts.CARGO_SUBCOMMANDS / "cargo-nextest"
+        self.assertIsNone(sd_gate_receipts.pinned_subcommands(environment, "offload"))
+        self.assertEqual(sd_gate_receipts.view_tools(environment, (), tree)[0]["cargo-nextest"],
+                         sd_gate_receipts._content_digest(copy))
+        self.assertEqual(sd_gate_receipts.machine_binding(tree, [["cargo-nextest", "run"]], environment)["tools"][0]["path"],
+                         "subcommands:cargo-nextest")
+
+    def test_the_pins_hold_on_an_environment_they_already_pinned(self) -> None:
+        """A pass under `offload_environment` reuses only when a second pinning changes nothing (sd:2921)."""
+        once = sd_gate_receipts.offload_environment(self.environ("sat"))
+        self.assertEqual(sd_gate_receipts.offload_environment(once), once)
+
     def test_an_isolated_home_file_is_not_bound(self) -> None:
         """No check reads `.gitconfig`, `.npmrc`, pip's or cargo's file, so two machines may differ in them (sd:2879)."""
         (self.home("hub") / ".gitconfig").write_text("[core]\n\thooksPath = /dev/null\n", encoding="utf-8")
