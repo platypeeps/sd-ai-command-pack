@@ -126,6 +126,10 @@ class Install(unittest.TestCase):
         with mock.patch.object(pathlib.Path, "rename", side_effect=OSError("disk full")):
             self.assertIn("disk full", sd_gate_tools.install(self.environment)[0]["error"])
 
+    def test_a_url_that_is_neither_https_nor_a_file_installs_nothing(self) -> None:
+        self.pins(pin("http://example.test/uv.tar.gz", self.sha256))
+        self.assertIn("is not an https or file URL", sd_gate_tools.install(self.environment)[0]["error"])
+
     def test_another_platforms_pin_is_ignored(self) -> None:
         self.pins(pin(self.url, self.sha256, platform="plan9-mips"))
         self.assertEqual((sd_gate_tools.install(self.environment), sd_gate_tools.missing(self.environment)), ([], None))

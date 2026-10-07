@@ -28,7 +28,8 @@ folder name holds the archive digest, so a new pin is a new folder, and an
 installed folder never changes. The gate cache's pruning removes only
 `*/cargo-target.*` folders, so it never reaches these.
 
-`install` downloads to a temporary file in `pinned-tools/`, checks the
+`install` reads an `https` URL, or a `file` URL in tests, and refuses any other scheme.
+It downloads to a temporary file in `pinned-tools/`, checks the
 sha256, unpacks into a temporary folder with the `data` filter, checks that
 each `provides` name is an executable file under `bin`, and renames the
 folder into place. A rename onto a folder another install finished first

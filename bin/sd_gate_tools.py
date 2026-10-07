@@ -27,6 +27,7 @@ import platform
 import sys
 import tarfile
 import tempfile
+import urllib.parse
 import urllib.request
 from typing import Any, Mapping
 
@@ -51,6 +52,8 @@ PINS: tuple[dict[str, Any], ...] = (
 FOLDER = "pinned-tools"
 INSTALL = "sd gate tools install"
 DOWNLOAD_SECONDS = 300
+#: The URL schemes `install` reads: a release over TLS, and a local archive, which tests use.
+SCHEMES = ("https", "file")
 
 
 def this_platform() -> str:
@@ -122,7 +125,9 @@ def unpack(pin: Mapping[str, Any], environment: Mapping[str, str]) -> None:
     with tempfile.TemporaryDirectory(prefix=f".{final.name}.", dir=final.parent) as scratch:
         archive, staging = pathlib.Path(scratch, "archive"), pathlib.Path(scratch, "folder")
         digest = hashlib.sha256()
-        with urllib.request.urlopen(pin["url"], timeout=DOWNLOAD_SECONDS) as source, open(archive, "wb") as target:
+        if urllib.parse.urlsplit(pin["url"]).scheme not in SCHEMES:
+            raise ValueError(f"{pin['url']} is not an {' or '.join(SCHEMES)} URL")
+        with urllib.request.urlopen(pin["url"], timeout=DOWNLOAD_SECONDS) as source, open(archive, "wb") as target:  # nosec B310 - scheme checked above
             while chunk := source.read(1 << 20):
                 digest.update(chunk)
                 target.write(chunk)
