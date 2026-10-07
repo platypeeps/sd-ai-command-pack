@@ -583,7 +583,10 @@ def _apply_acknowledgements(
     accepted: list[dict[str, Any]] = []
     for gap in gaps:
         candidates = [entry for entry in acknowledgements if entry["id"] == gap["id"]]
-        matched = next(
+        # A gap whose own fact is unknown is accepted by no entry, whatever
+        # it pins: what nobody could see is not what the entry decided (sd:2755).
+        unknown = gap["id"] in observed and observed[gap["id"]] is None
+        matched = None if unknown else next(
             (
                 entry
                 for entry in candidates
@@ -601,7 +604,7 @@ def _apply_acknowledgements(
                 for entry in candidates
                 for fact, value in sorted(entry["state"].items())
                 if observed.get(fact) != value
-            ]
+            ] + ([f"{gap['id']} is unknown, which no acknowledgement accepts"] if unknown else [])
             row["acknowledgement_stale"] = (
                 f"an acknowledgement recorded {candidates[0]['since']} no longer matches "
                 f"the live protection state: {'; '.join(drift)}"
@@ -702,9 +705,8 @@ def _admin_gaps(protection: dict[str, Any], default_branch: str) -> tuple[list[d
     detail carries: the one decision of `_protection_gaps` with more than
     two answers, kept out of it so that function stays under the ceiling."""
     gaps: list[dict[str, str]] = []
-    admins = protection.get("enforce_admins") or {}
-    enabled = admins.get("enabled") if isinstance(admins, dict) else admins
-    if enabled is None and isinstance(admins, dict):
+    enabled = sd_protection.admins_enforced(protection)
+    if enabled is None:
         # Unknown, reported as not enforced and never as enforced, for one
         # of two reasons, each named: a ruleset whose `bypass_actors` GitHub
         # withheld (it shows that list only to a caller who can edit the
@@ -791,14 +793,14 @@ def _merge_settings(repo: dict[str, Any]) -> list[dict[str, Any]]:
 #: (sd:1807). Like the merge flags they ride in `merge_settings`, so no
 #: acknowledgement reaches them; `GapVocabularyTests` binds them to the system's.
 BASELINE_FLAG_IDS = ("protection_source", "required_check")
-#: The owners the baseline covers when `fleet.owners` names none: the system
+#: The owners the baseline covers when `sd.fleet_owners` names none: the system
 #: collector's default, `sd_db.protection.BASELINE_OWNERS`, so sd-status raises
-#: a flag where the dashboard does. List more owners in `fleet.owners`.
+#: a flag where the dashboard does. List more owners in `sd.fleet_owners`.
 BASELINE_OWNERS = ("platypeeps",)
 
 
 def _baseline_owners() -> tuple[tuple[str, ...], str]:
-    """The owners whose repositories carry the baseline, `fleet.owners` else `BASELINE_OWNERS`, and why not."""
+    """The owners whose repositories carry the baseline, `sd.fleet_owners` else `BASELINE_OWNERS`, and why not."""
     import sd_fleet  # noqa: PLC0415 - only the baseline flags read the fleet config
 
     try:
@@ -1451,6 +1453,11 @@ class Class(NamedTuple):
 #: grow into a list of every finding this repository never answered.
 MERGED_REVIEW_DAYS = 14
 
+#: How many days past that window `expired_reviews` still counts a finding
+#: nobody answered, so expiry is not read as resolution (sd:998, decision of
+#: 2026-09-26). A count, not rows: the window's rows stay the action list.
+MERGED_AGED_DAYS = 14
+
 #: The most merged-pull-request rows `pending` shows. Lanes that push without
 #: `bin/sd-ship` leave hundreds of merges a fortnight with nothing recorded,
 #: and uncapped those rows would fill all ten slots (review-925 N-4).
@@ -1470,7 +1477,7 @@ CLASSES = (
     Class("in-progress-without-branch", "w", True, 10, "work item",
           "status: in_progress with no branch: field to work on"),
     Class("branch-unresolvable", "w", True, 10, "work item + git",
-          "a branch: field naming a ref no local or remote head carries"),
+          "a non-done item's branch: field naming a ref no local or remote head carries"),
     Class("status-unreadable", "w", True, 10, "work item",
           "an item whose authoritative source will not yield a status"),
     Class("unresolved-concern", "c", True, 20, "## Review ledger",
@@ -1550,7 +1557,8 @@ EXCLUDED = (
     "markers outside bin/, dashboard/, tests/ and .github/scripts/ -- in "
     "skills/ and docs/ the word documents the convention instead of instancing it",
     f"review findings on pull requests merged more than {MERGED_REVIEW_DAYS} days ago "
-    "-- past that window a finding nobody answered stops being a row (sd:631)",
+    "-- past that window a finding nobody answered stops being a row (sd:631); those "
+    f"up to {MERGED_REVIEW_DAYS + MERGED_AGED_DAYS} days are counted as expired, not as answered (sd:998)",
 )
 
 
@@ -2110,7 +2118,9 @@ def _work_rows(
                 f"{where} is in_progress with no branch: field",
                 f"set branch: in {where}/prd.md to the branch carrying this work",
             ))
-        if branch and heads is not None and branch not in heads:
+        # Not on a done item: its merge deleted the squashed branch, so the
+        # field is history, and neither repair below applies (sd:2729).
+        if branch and status != "done" and heads is not None and branch not in heads:
             rows.append(_row(
                 "branch-unresolvable", item, slug,
                 f"{where} names branch {branch}, which no local or remote head has",
@@ -3005,9 +3015,27 @@ def _unanswered_rows(
     One body for both review classes, so the open class and the merged class
     cannot come to disagree about what unreadable, broken or answered means.
     `reasons` are the caller's own sentences, kept after the store's.
+
+    No rows when the record's hub does not answer: every finding would read
+    unread there, and a row would call an answered finding unanswered (sd:2750).
     """
     ack = sd_lib.sibling("sd_review_ack", "sd-review-ack")
-    _, broken = ack.read_store(root)
+    held = ack.read_store(root)
+    unknown = ack.store_unreachable(root)
+    if unknown:
+        unchecked.setdefault(check, "; ".join([f"review acknowledgements {unknown}", *(reasons or [])]))
+        return []
+    return _read_unanswered_rows(ack, check, root, slug, listed, unchecked, reasons, held)
+
+
+def _read_unanswered_rows(
+    ack: Any, check: str, root: pathlib.Path, slug: str | None,
+    listed: Sequence[tuple[dict[str, Any], dict[str, str] | None, str]],
+    unchecked: dict[str, str], reasons: list[str] | None,
+    held: tuple[dict[str, dict], str],
+) -> list[dict[str, Any]]:
+    """`_unanswered_rows` with the record reachable, read once as `held`."""
+    record, broken = held
     reasons, blind = ([broken] if broken else []) + (reasons or []), []
     ref = ack.landing_ref(root)
     rows: list[dict[str, Any]] = []
@@ -3017,7 +3045,7 @@ def _unanswered_rows(
             blind.append((int(pull["number"]), stated["unreadable"]))
             continue
         found = list(stated.get("ids") or [])
-        standing = ack.unacknowledged(root, found, ref, stated.get("stated") or {}, merge)
+        standing = ack.unacknowledged(root, found, ref, stated.get("stated") or {}, merge, record)
         if not standing:
             continue
         # A reviewer that writes `(3 votes each)` has stated more than one
@@ -3113,6 +3141,72 @@ def _merged_review_rows(
         reasons.append(f"GitHub gave no merge date for {', '.join(undated)}")
     return _unanswered_rows("merged-pr-review-unacknowledged", root, merged.get("repo"),
                             listed, unchecked, reasons)
+
+
+def expired_reviews(root: pathlib.Path, merged: dict[str, Any], day: datetime.date) -> dict[str, Any]:
+    """The findings nobody answered on pull requests that left the window, counted.
+
+    `merged-pr-review-unacknowledged` drops a pull request on day fifteen,
+    answered or not, so its findings stopped reading as anything: expiry looked
+    like resolution (sd:998). This counts each unanswered finding on a pull
+    request merged `MERGED_REVIEW_DAYS + 1` to `MERGED_REVIEW_DAYS +
+    MERGED_AGED_DAYS` days before `day`.
+    """
+    return _unread_between(root, merged, day, MERGED_REVIEW_DAYS + 1, MERGED_REVIEW_DAYS + MERGED_AGED_DAYS)
+
+
+def late_reviews(root: pathlib.Path, merged: dict[str, Any], day: datetime.date) -> dict[str, Any]:
+    """The unread findings on pull requests merged inside the window, counted (sd:1178).
+
+    A review posted after the merge reaches no merge gate, and the window's
+    rows are capped in `pending`, so nothing totalled them. Stateless by the
+    operator's ruling (2026-10-03, go D): `sd-review-ack` clears a finding
+    here as it clears its row.
+    """
+    return _unread_between(root, merged, day, 0, MERGED_REVIEW_DAYS)
+
+
+def _unread_between(root: pathlib.Path, merged: dict[str, Any], day: datetime.date,
+                    first: int, last: int) -> dict[str, Any]:
+    """Unanswered findings on pull requests merged `first` to `last` days before `day`.
+
+    The verdict is the window rows'. A read that failed or stopped at its
+    limit is named in `unchecked`, so a short count is never read as a
+    complete one. Unreadable pull requests are counted with the first reason,
+    not listed: under a `gh` timeout every one of them fails the same way.
+    """
+    findings, numbers, reasons, unreadable = 0, [], [], []
+    if not merged.get("available", True):
+        reasons.append(str(merged.get("reason") or "the merged pull requests could not be read"))
+        return {"days": [first, last], "findings": 0, "pull_requests": [], "unchecked": reasons[0]}
+    if merged.get("truncated"):
+        reasons.append(f"the merged list stopped at its limit of {merged.get('limit')}")
+    ack = sd_lib.sibling("sd_review_ack", "sd-review-ack")
+    record, broken = ack.read_store(root)
+    unknown = ack.store_unreachable(root)
+    if unknown:  # a count, not a zero: `findings` is None (sd:2750)
+        return {"days": [first, last], "findings": None, "pull_requests": [],
+                "unchecked": f"review acknowledgements {unknown}"}
+    if broken:
+        reasons.append(broken)
+    ref = ack.landing_ref(root)
+    for pull in merged.get("pull_requests") or []:
+        when = _merged_on(pull)
+        if when is None or not first <= (day - when).days <= last:
+            continue
+        stated = pull.get("review_findings") or {}
+        if stated.get("unreadable"):
+            unreadable.append(f"#{pull.get('number')}: {stated['unreadable']}")
+            continue
+        merge = {"head": str(pull.get("head_oid") or ""), "merge": str(pull.get("merge_oid") or "")}
+        standing = ack.unacknowledged(root, list(stated.get("ids") or []), ref,
+                                      stated.get("stated") or {}, merge, record)
+        if standing:
+            findings += len(standing)
+            numbers.append(pull.get("number"))
+    if unreadable:
+        reasons.append(f"{len(unreadable)} pull request(s) unreadable, first {unreadable[0]}")
+    return {"days": [first, last], "findings": findings, "pull_requests": numbers, "unchecked": "; ".join(reasons)}
 
 
 def _protection_rows(protection: dict[str, Any]) -> list[dict[str, Any]]:
@@ -3558,6 +3652,13 @@ def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str
         # `today` is local, so the producer cuts the exact edge, not the query.
         "merged_pull_requests": pr_state.collect_merged(root, gh, (
             datetime.date.today() - datetime.timedelta(days=MERGED_REVIEW_DAYS + 1)).isoformat()),
+        # Its own read, so a busy fortnight past the window cannot truncate the
+        # window's list; a day wider at each end for the same UTC reason.
+        "expired_reviews": expired_reviews(root, pr_state.collect_merged(
+            root, gh,
+            (datetime.date.today() - datetime.timedelta(days=MERGED_REVIEW_DAYS + MERGED_AGED_DAYS + 1)).isoformat(),
+            until=(datetime.date.today() - datetime.timedelta(days=MERGED_REVIEW_DAYS)).isoformat(),
+        ), datetime.date.today()),
         "setup": setup_section(root),
         "protection": protection_section(root, gh),
         "handoff": handoff_section(root, environ),
@@ -3567,6 +3668,7 @@ def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str
         "jira": jira_section(),
         "contributions": contributions_section(root),
     }
+    result["late_reviews"] = late_reviews(root, result["merged_pull_requests"], datetime.date.today())
     inventory = actionable_inventory(root, result, environ=environ)
     result["inventory"] = {"rows": inventory.rows, "unchecked": inventory.unchecked}
     result["abnormalities"] = banner(inventory)
@@ -3837,7 +3939,8 @@ def _render_next(rows: list[dict[str, Any]], write: Any) -> None:
     write(f"  {top['id']}  {top['suggest']}\n")
 
 
-def _render_threads(rows: list[dict[str, Any]], write: Any) -> None:
+def _render_threads(rows: list[dict[str, Any]], write: Any,
+                    expired: dict[str, Any] | None = None, late: dict[str, Any] | None = None) -> None:
     """Per-source counts over the same list, and what was not swept.
 
     The counts give `pending`'s cap a denominator per source. The exclusions
@@ -3856,6 +3959,25 @@ def _render_threads(rows: list[dict[str, Any]], write: Any) -> None:
     write("  not swept, and named so the counts above are not read as total:\n")
     for reason in EXCLUDED:
         write(f"    - {reason}\n")
+    if late:
+        _render_unread("late", late, f"merged in the last {late['days'][1]} days are unread", write)
+    if expired:
+        first, last = expired["days"]
+        _render_unread("expired", expired, f"merged {first}-{last} days ago expired unanswered", write)
+
+
+def _render_unread(label: str, counted: dict[str, Any], said: str, write: Any) -> None:
+    """One `late:` or `expired:` line: the count, the first pull requests, the hedge."""
+    if counted["findings"] is None:
+        write(f"  {label}: {counted['unchecked']}\n")
+        return
+    pulls = counted["pull_requests"]
+    line = f"{counted['findings']} review finding(s) on {len(pulls)} pull request(s) {said}"
+    if pulls:
+        line += f": {', '.join(f'#{n}' for n in pulls[:5])}" + (f" and {len(pulls) - 5} more" if len(pulls) > 5 else "")
+    if counted.get("unchecked"):
+        line += f" (at least; {counted['unchecked']})"
+    write(f"  {label}: {line}\n")
 
 
 def render(result: dict[str, Any], stream: TextIO) -> None:
@@ -3865,7 +3987,7 @@ def render(result: dict[str, Any], stream: TextIO) -> None:
     _render_banner(result["abnormalities"], write)
     _render_pending(rows, write)
     _render_next(rows, write)
-    _render_threads(rows, write)
+    _render_threads(rows, write, result.get("expired_reviews"), result.get("late_reviews"))
     _render_work(result["work"], write)
     _render_contributions(result.get("contributions"), write)
 
@@ -4030,7 +4152,8 @@ def main(argv: list[str] | None = None) -> int:
         if root is None:
             raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")
         sd_lib.refuse_unmanaged(root, UsageError)
-        result = collect(root, dict(os.environ), args.limit)
+        with sd_lib.git_read_memo():
+            result = collect(root, dict(os.environ), args.limit)
     except sd_lib.ConfigError as error:
         print(f"sd-status: error: {error}", file=sys.stderr)
         return 2

@@ -66,7 +66,7 @@ def _skill_prose() -> str:
 
 
 def _skill_says(*sentences: str) -> str:
-    """The page's prose, once each of `sentences` is in it verbatim and once.
+    """The page's prose, once each of `sentences` is in it verbatim, once, at a sentence start.
 
     A rule stated in prose has no slot to extract. "every row of the class,
     not just the rows past the cap" and "only the rows past the cap, never
@@ -79,11 +79,49 @@ def _skill_says(*sentences: str) -> str:
     after re-reading the assertions under it; a change that does not keeps
     failing, which is the point.
     """
-    prose = _skill_prose()
+    prose, starts = _skill_prose(), _skill_starts()
     for sentence in sentences:
-        count = prose.count(" ".join(sentence.split()))
-        assert count == 1, f"{SKILL_MD.name} says this {count} times, not once: {sentence!r}"
+        pinned = " ".join(sentence.split())
+        found = [match.start() for match in re.finditer(re.escape(pinned), prose)]
+        assert len(found) == 1, \
+            f"{SKILL_MD.name} says this {len(found)} times, not once: {sentence!r}"
+        # Bound at a sentence or list-item start, so a "never" put in front of
+        # a pinned rule does not count as the rule (sd:1002, 11b348a64abb).
+        assert found[0] in starts, \
+            f"{SKILL_MD.name} says this, but not at a sentence start: {sentence!r}"
     return prose
+
+
+#: A list item's marker: "- ", "* " or "1. " at the start of a line.
+_ITEM = re.compile(r"(?:[-*]|\d+\.)$")
+#: What may close a sentence after its stop: emphasis, code, quotes, brackets.
+_SENTENCE_END = re.compile(r"[.!?][*_`\"')\]]*$")
+
+
+def _skill_starts() -> set[int]:
+    """Where in `_skill_prose()` a sentence or a list item begins.
+
+    Read from the page's lines, since the one-line prose has none: the first
+    word of a paragraph, a heading, a table row or a list item (its marker and
+    the word after it), and every word after a sentence's stop.
+    """
+    starts, offset, previous, block = set(), 0, None, True
+    for line in SKILL_MD.read_text(encoding="utf-8").splitlines():
+        words = line.split()
+        if not words:
+            block = True
+            continue
+        if words[0].startswith(("#", "|")) or _ITEM.match(words[0]):
+            block = True
+        for index, word in enumerate(words):
+            item_text = index == 1 and _ITEM.match(words[0])
+            after_stop = previous is not None and _SENTENCE_END.search(previous)
+            if (index == 0 and block) or item_text or after_stop:
+                starts.add(offset)
+            offset += len(word) + 1
+            previous = word
+        block = words[0].startswith("#")
+    return starts
 
 
 def _number(word: str) -> int | None:
@@ -158,6 +196,37 @@ created: 2026-08-01
 
 # {title}
 """
+
+
+class SkillSaysTests(unittest.TestCase):
+    """sd:1002, 11b348a64abb: a pin counts only where a sentence or list item starts."""
+
+    def says(self, page: str, sentence: str) -> str:
+        with tempfile.TemporaryDirectory() as root:
+            path = pathlib.Path(root) / "SKILL.md"
+            path.write_text(page, encoding="utf-8")
+            with mock.patch.object(sys.modules[__name__], "SKILL_MD", path):
+                return _skill_says(sentence)
+
+    def test_a_negation_in_front_of_a_pinned_rule_fails_the_pin(self) -> None:
+        rule = "It is capped at ten and says so."
+        for page in ("# Rules\n\nNobody believes that\nIt is capped at ten and says so.\n",
+                     "- **Never read it whole.** Never say It is capped at ten and says so.\n"):
+            with self.subTest(page=page), \
+                    self.assertRaisesRegex(AssertionError, "not at a sentence start"):
+                self.says(page, rule)
+
+    def test_a_rule_at_a_sentence_or_item_start_passes(self) -> None:
+        rule = "It is capped at ten and says so."
+        for page in ("# Rules\n\nIt is capped at ten and says so.\n",
+                     "# Rules\nIt is capped at ten\nand says so.\n",
+                     "- **Never read it whole.** It is capped at ten and says so.\n",
+                     "Read the list. It is capped at ten and says so.\n",
+                     "- It is capped at ten and says so.\n"):
+            with self.subTest(page=page):
+                self.assertIn(rule, self.says(page, rule))
+        self.assertIn("- **Rank 3**, below the rest.",
+                      self.says("- **Rank 3**, below the rest.\n", "- **Rank 3**, below the rest."))
 
 
 class WorkflowCheckNameTests(unittest.TestCase):
@@ -551,7 +620,7 @@ class GapVocabularyTests(unittest.TestCase):
         )
 
     def test_the_default_baseline_owners_are_the_systems(self) -> None:
-        """sd:1807. With no `fleet.owners`, sd-status flags the repositories the dashboard flags."""
+        """sd:1807. With no `sd.fleet_owners`, sd-status flags the repositories the dashboard flags."""
         import sd_db.protection as system  # noqa: PLC0415 - provisioned by `make setup`
 
         with mock.patch.dict(os.environ):
@@ -624,6 +693,35 @@ class AcknowledgementTests(unittest.TestCase):
             (root / ".github" / "sd-status.json").write_text(body, encoding="utf-8")
             return status.load_acknowledgements(root)
 
+    def test_an_enforce_admins_off_acknowledgement_still_accepts_a_known_off(self) -> None:
+        """sd:2755's other half: keeping unknown apart from `False` must not
+        stop an entry for `enforce_admins` off accepting the known state."""
+        entry = {"id": "enforce_admins", "state": {"enforce_admins": False},
+                 "because": "admins ship the release bump", "since": "2026-10-05", "until": "never"}
+        still_open, accepted = self.split(self.enforcing(enforce_admins={"enabled": False}), [entry])
+        self.assertEqual([gap["id"] for gap in accepted], ["enforce_admins"])
+        self.assertEqual([gap["id"] for gap in still_open], ["reviews"])
+
+    def test_an_object_without_enforce_admins_keeps_its_unknown_gap(self) -> None:
+        """`_admin_gaps` reports an object without `enforce_admins` as
+        unknown, so `observed_state` reads it unknown too, and an entry for
+        off does not accept it (sd:2755)."""
+        entry = {"id": "enforce_admins", "state": {"enforce_admins": False},
+                 "because": "admins ship the release bump", "since": "2026-10-05", "until": "never"}
+        protection = self.enforcing()
+        del protection["enforce_admins"]
+        still_open, accepted = self.split(protection, [entry])
+        self.assertEqual(accepted, [])
+        self.assertEqual([gap["id"] for gap in still_open], ["enforce_admins", "reviews"])
+
+    def test_a_pinned_fact_cannot_be_null(self) -> None:
+        """`enforce_admins` observes `None` when it is unknown; a `null` pin
+        would accept exactly that, on any gap's entry (sd:2755)."""
+        entry = dict(self.ZERO_APPROVALS, state={"required_pull_request_reviews": True, "enforce_admins": None})
+        entries, problems = self.written(json.dumps({"accepted_gaps": [entry]}))
+        self.assertEqual(entries, [])
+        self.assertIn("accepted_gaps[0].state.enforce_admins is null", problems[0])
+
     def test_the_schema_and_the_readers_vocabulary_name_the_same_facts(self) -> None:
         """Two recitations of one list, so this enumerates both rather than a third.
 
@@ -665,10 +763,13 @@ class AcknowledgementTests(unittest.TestCase):
         absent = status._observed_state(None)
         empty = status._observed_state({})
         self.assertNotEqual(absent, empty)
-        # ... and they differ in exactly that one fact, which is the point:
-        # the other four genuinely are constants on both.
+        # ... and in `enforce_admins`: no object is off, while an object
+        # without the answer is unknown, the gap `_admin_gaps` reports for it
+        # (sd:2755). The other facts genuinely are constants on both.
         differing = [key for key in absent if absent[key] != empty[key]]
-        self.assertEqual(differing, ["branch_protection"])
+        self.assertEqual(differing, ["branch_protection", "enforce_admins"])
+        self.assertIs(absent["enforce_admins"], False)
+        self.assertIsNone(empty["enforce_admins"])
 
     def test_a_matching_acknowledgement_moves_the_finding_out_of_the_gaps(self) -> None:
         still_open, accepted = self.split(self.enforcing(), [self.ZERO_APPROVALS])
@@ -2467,6 +2568,11 @@ class WorkItemInventoryTests(InventoryFixture):
         self.assertEqual([row["title"] for row in found], ["alpha"])
         self.assertEqual(found[0]["key"], "2026-08-01-alpha")
 
+    def test_a_done_items_deleted_branch_is_no_finding(self) -> None:
+        """A merge deletes the squashed branch, so a done item's branch is history (sd:2729)."""
+        self.item("2026-08-01-alpha", status="done", extra="branch: gone/away\n")
+        self.assertEqual([], self.by_check(self.rows(), "branch-unresolvable"))
+
     def ancient(self, name: str = "2026-01-01-ancient") -> pathlib.Path:
         """A planning item whose own date is 249 days before `TODAY`.
 
@@ -2622,11 +2728,11 @@ class WorkItemInventoryTests(InventoryFixture):
         **The frontmatter's `in_progress` is not what the reader sees.**
         `sd_lib.py:701` returns `done` for any archived item without opening
         `prd.md`, so archiving decides the status and the declared one is never
-        read. That is why every item here carries a `branch:` naming no ref:
-        `branch-unresolvable` is the one check that fires regardless of status,
-        so it is the only thing that can prove the archive guard is doing work.
-        A fixture without it passes with that guard deleted, which is how this
-        test was wrong on its first writing.
+        read. Since sd:2729 no check fires on a done item, so in a `file`
+        checkout `done` suppresses these too, and no file fixture can prove the
+        archive guard. A `row` checkout reads an archived item's status from
+        its row, which may be open; the direct `_work_rows` call at the end
+        is that case, and it fails with the guard deleted.
 
         The two live items are the contrast that makes the rest able to fail.
         One of them carries the cut `parked:` line and must fire exactly like
@@ -2652,10 +2758,16 @@ class WorkItemInventoryTests(InventoryFixture):
         self.assertEqual(
             ["2026-08-01-live", "2026-08-02-parked"],
             sorted({row["key"] for row in rows if "2026-08-0" in row["key"]}),
-            "the archive path is the only suppressor; both live items fire, "
-            "including the one whose `parked:` line nothing reads any more, "
-            "and all four carry `branch:` to make the guard observable",
+            "both live items fire, including the one whose `parked:` line "
+            "nothing reads any more",
         )
+        work = {"status_source": status.sd_lib.FROM_ROW, "items": [
+            {"path": "docs/work/archive/2026-09/2026-08-03-filed", "slug": "filed",
+             "status": "in_progress", "branch": "feat/nope", "archived": True}]}
+        with mock.patch.object(status.sd_lib, "upstream", return_value=(None, "main")):
+            archived = status._work_rows(
+                self.repo, work, self.TODAY, "main", status.Merged(None, ""), {})
+        self.assertEqual([], archived, "an archived row is suppressed whatever its status")
         self.assertEqual(
             len(rows), len({(row["check"], row["key"]) for row in rows}),
             "no object may produce the same check twice",
@@ -3760,6 +3872,25 @@ class ConcernLedgerTests(InventoryFixture):
             ["docs/work/2026-08-01-mixed/prd.md#C-2"], found.get("unresolved-concern")
         )
         self.assertNotIn("C-3", str(found))
+
+    def test_a_row_that_declares_addressed_is_read_by_its_declaration(self) -> None:
+        """sd:1000 (note #2752): C-6 and C-33 in the system ledgers said
+        `Addressed:` and then named the defect's own words, `open means
+        unresolved` and `an unresolved merge`, so they read as unresolved.
+        `_declared_verdict` reads the declaration; a lower-case mention is
+        not one, so the control row stays open.
+        """
+        self.ledger("2026-09-05-declared/prd.md", (
+            "# declared\n\n"
+            "- C-6, requirement 7: notes had no resolution state. Addressed: notes carry "
+            "`resolved_at`, and open means unresolved.\n"
+            "- C-33: Addressed: the fixture restores an unresolved merge before the run.\n"
+            "- C-34: the reader still treats an unresolved merge as clean; addressed: later.\n"
+        ))
+        found = self.checks(self.scan())
+        self.assertEqual(
+            {"unresolved-concern": ["docs/work/2026-09-05-declared/prd.md#C-34"]}, found
+        )
 
     def test_a_table_row_outranks_a_prose_mention_of_the_same_concern(self) -> None:
         """Shape precedence, and what it stops.
@@ -4929,6 +5060,46 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
         return status.actionable_inventory(
             self.repo, self.sections(merged_pull_requests=merged), self.TODAY)
 
+    def test_a_finding_that_left_the_window_unanswered_counts_as_expired(self) -> None:
+        """sd:998: past day fourteen a finding lost its row and read as nothing,
+        so expiry looked like resolution. Days fifteen to twenty-eight are
+        counted; the window's own days and day twenty-nine are not."""
+        merged = {"pull_requests": [self.merged(14, 14, ["d14"]), self.merged(15, 15, ["a15", "b15"]),
+                                    self.merged(28, 28, ["c28"]), self.merged(29, 29, ["e29"])]}
+        expired = status.expired_reviews(self.repo, merged, self.TODAY)
+        self.assertEqual({"days": [15, 28], "findings": 3, "pull_requests": [15, 28], "unchecked": ""}, expired)
+        stopped = status.expired_reviews(self.repo, dict(merged, truncated=True, limit=500), self.TODAY)
+        self.assertIn("stopped at its limit of 500", stopped["unchecked"])
+        out = io.StringIO()
+        status._render_threads([], out.write, expired)
+        self.assertIn("  expired: 3 review finding(s) on 2 pull request(s) merged 15-28 days ago "
+                      "expired unanswered: #15, #28\n", out.getvalue())
+
+    def test_unread_findings_on_pull_requests_merged_in_the_window_count_as_late(self) -> None:
+        """sd:1178, operator ruling 2026-10-03 (go D). A review posted after the
+        merge reaches no merge gate, so the report totals the unread findings on
+        pull requests merged in the last fourteen days. Day fifteen is
+        `expired:`'s, and a finding `sd-review-ack` dismissed counts nowhere."""
+        ack = status.sd_lib.sibling("sd_review_ack_late", "sd-review-ack")
+        rows = ack.findings(2, [{"author": "bot", "commit_id": "", "body":
+                                 "| File | Summary |\n|---|---|\n"
+                                 "| `bin/a.py` | Moderate finding (1 vote): wrong. |\n"
+                                 "| `bin/b.py` | Moderate finding (1 vote): also wrong. |\n"}], [])
+        ack.acknowledge(self.repo, rows[1], "dismissed", "the reviewer misread the diff")
+        merged = {"pull_requests": [self.merged(0, 0, ["z0"]), self.merged(2, 2, [row["id"] for row in rows]),
+                                    self.merged(14, 14, ["d14", "e14"]), self.merged(15, 15, ["a15"])]}
+        late = status.late_reviews(self.repo, merged, self.TODAY)
+        self.assertEqual({"days": [0, 14], "findings": 4, "pull_requests": [0, 2, 14], "unchecked": ""}, late)
+        unread = status.late_reviews(self.repo, {"available": False, "reason": "gh is not signed in"}, self.TODAY)
+        self.assertEqual("gh is not signed in", unread["unchecked"])
+        timed_out = {"pull_requests": [self.merged(n, 1, [], unreadable="gh timed out after 60s") for n in (5, 6, 7)]}
+        self.assertEqual("3 pull request(s) unreadable, first #5: gh timed out after 60s",
+                         status.late_reviews(self.repo, timed_out, self.TODAY)["unchecked"])
+        out = io.StringIO()
+        status._render_threads([], out.write, late=late)
+        self.assertIn("  late: 4 review finding(s) on 3 pull request(s) merged in the last 14 days "
+                      "are unread: #0, #2, #14\n", out.getvalue())
+
     def test_the_window_holds_day_thirteen_and_fourteen_and_drops_day_fifteen(self) -> None:
         inventory = self.found(self.merged(13, 13, ["a13"]), self.merged(14, 14, ["a14"]),
                                self.merged(15, 15, ["a15"]))
@@ -5174,9 +5345,16 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
 
         # The `--json` paragraph names the function that applies that rule,
         # and #946's review renamed it to `rollup_buckets` unnoticed (E-W2).
-        _skill_says(f"`actions` — the uncapped inventory, of which `pending` is the first "
-                    f"{_word(limit)} after each class's `pending_cap` (`pending_rows`) "
-                    "— and `next`.")
+        # Pinned from its sentence's start, which the bound requires (sd:1002).
+        _skill_says("Beyond the section keys it carries `merged_pull_requests` (the pull "
+                    "requests merged inside the review window, with the findings each "
+                    "carries), `expired_reviews` (the `expired:` count, its days, its pull "
+                    "requests and why it is short, if it is), `late_reviews` (the `late:` "
+                    "count, in the same shape), `inventory` (`rows` plus the `unchecked` map), "
+                    "`abnormalities`, "
+                    "`actions` — the uncapped inventory, of which `pending` is the first "
+                    f"{_word(limit)} after each class's `pending_cap` (`pending_rows`) — and "
+                    "`next`.")
         self.assertEqual(limit, len(status.pending_rows([{"check": below}] * (limit + 3))[0]))
 
         # "`--actions` and `--json` still carry every row": the text list
@@ -5278,10 +5456,14 @@ class MergedQueryWindowTests(StatusFixture):
         after = datetime.date.today()
         asked = [line for line in log.read_text(encoding="utf-8").splitlines()
                  if "--state merged" in line]
-        self.assertEqual(1, len(asked), asked)
+        self.assertEqual(2, len(asked), asked)
         allowed = {f"merged:>={(day - datetime.timedelta(days=15)).isoformat()}"
                    for day in (before, after)}
         self.assertTrue(any(token in asked[0] for token in allowed), (asked, allowed))
+        # The expired count's own read, a day wider at each end (sd:998).
+        allowed = {f"merged:{(day - datetime.timedelta(days=29)).isoformat()}.."
+                   f"{(day - datetime.timedelta(days=14)).isoformat()}" for day in (before, after)}
+        self.assertTrue(any(token in asked[1] for token in allowed), (asked, allowed))
 
 
 class CollectMergedTests(unittest.TestCase):
@@ -6110,6 +6292,26 @@ class RulesetProtectionCase(unittest.TestCase):
         shown = self.section(self.gating_rules())
         self.assertNotIn("enforce_admins", [gap["id"] for gap in shown["gaps"]])
         self.assertTrue(shown["detail"]["enforce_admins"])
+
+    def test_no_acknowledgement_accepts_an_unknown_enforce_admins(self) -> None:
+        """sd:2755: `observed_state` read unknown as `False`, so an entry
+        written for `enforce_admins` off also silenced the unknown gap. No
+        entry for the gap applies while its fact is unknown, by any pin: off,
+        the admin exemptions alone, or a fact unrelated to admins."""
+        withheld = {"id": 42, "name": "main", "enforcement": "active"}
+        role = dict(self.RULESET, bypass_actors=[
+            {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}])
+        pins = {"off": {"enforce_admins": False, "admin_bypass": []},
+                "exemptions only": {"admin_bypass": []}, "unrelated": {"strict": True}}
+        for unknown, ruleset in (("withheld", withheld), ("role", role)):
+            for pinned, state in pins.items():
+                with self.subTest(unknown=unknown, pinned=pinned):
+                    entry = {"id": "enforce_admins", "state": state, "because": "admins ship the release bump",
+                             "since": "2026-10-05", "until": "the bypass is gone"}
+                    result = self.section(self.gating_rules(), ruleset, accepted=(entry,))
+                    self.assertEqual(result["accepted"], [])
+                    stale = [gap for gap in result["gaps"] if gap["id"] == "enforce_admins"][0]
+                    self.assertIn("unknown", stale["acknowledgement_stale"])
 
     def test_a_ruleset_that_gates_no_merge_keeps_the_unprotected_finding(self) -> None:
         rules = [{"type": "deletion", "ruleset_id": 42}, {"type": "non_fast_forward", "ruleset_id": 42}]

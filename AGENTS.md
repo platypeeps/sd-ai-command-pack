@@ -39,7 +39,9 @@ External review uses the operator's standing machine policy, with local restrict
 Read `sd config get sd.external_reviews` and `sd config get sd.assistant_merge`; these settings are never granted by installation.
 `sd.gate_slots` grants nothing: it caps how many repository gates run at once on the machine.
 `sd.gate_load_max` and `sd.gate_settle_seconds` grant nothing: they set the gate queue's load rule.
+`sd.review_slots` grants nothing: it caps how many reviews run their reviewers at once on the machine.
 `sd.gate_cache_gb` grants nothing: it bounds the gate's warm Rust build folders.
+`sd.fleet_owners` grants nothing: it names the owners whose repositories `sd fleet stamp` treats as the operator's own.
 `sd.lane_root` grants nothing: it names where `sd-ship lane` keeps each repository's queue.
 `sd.copilot_review` is the one core setting with a default: unset reads `deep`, one Copilot review on deep-tier changes and none otherwise; a repository's `.github/sd-review.json` overrides `deep` and `always`, and `never` wins over the file.
 `sd.assistant_merge` is read by the assistant, not by `sd-ship`; the tool merges whatever the gates let through, and the setting decides whether to ask it to.

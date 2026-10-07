@@ -49,9 +49,15 @@ _FORGE_CLAIMS = (
 
 #: What turns a mention of that vocabulary into a denial. "no branch" and
 #: "open nothing themselves" are true statements the comment exists to make,
-#: so the check reads clause by clause and skips any clause that denies.
-#: A contraction ("doesn't", "won't") denies as "not" does.
-_NEGATORS = r"\b(?:no|not|never|nothing|none|neither|nor|without)\b|n['\u2019]t\b"
+#: so the check reads clause by clause. The two kinds of negator reach
+#: differently (sd:1002, operator ruling 2026-10-03). An object negator
+#: denies what its clause offers wherever it stands: "open nothing". A verb
+#: negator denies only what follows it, so "open a pull request without a
+#: branch" still promises the pull request. A contraction ("doesn't",
+#: "won't") denies as "not" does.
+_OBJECT_NEGATORS = r"\b(?:nothing|none|no\s+one)\b"
+_VERB_NEGATORS = r"\b(?:no|not|never|neither|nor|without)\b|n['\u2019]t\b"
+_NEGATORS = f"{_OBJECT_NEGATORS}|{_VERB_NEGATORS}"
 
 #: Clause boundaries. `and` and `but` split as well as punctuation, so a
 #: promise cannot shelter under a denial standing next to it.
@@ -80,14 +86,16 @@ def _normalised(text: str) -> str:
 
 
 def _promised(text: str) -> list[str]:
-    """Forge vocabulary used as a promise, ignoring clauses that deny it."""
+    """Forge vocabulary used as a promise, ignoring what a negator denies."""
 
     promises: list[str] = []
     for clause in re.split(_CLAUSES, _normalised(text)):
-        if re.search(_NEGATORS, clause):
+        if re.search(_OBJECT_NEGATORS, clause):
             continue
+        negator = re.search(_VERB_NEGATORS, clause)
+        offered = clause[:negator.start()] if negator else clause
         promises.extend(
-            pattern for pattern in _FORGE_CLAIMS if re.search(pattern, clause))
+            pattern for pattern in _FORGE_CLAIMS if re.search(pattern, offered))
     return promises
 
 
@@ -416,6 +424,16 @@ class PromiseReaderTests(unittest.TestCase):
     def test_a_promise_to_publish_is_a_forge_claim(self) -> None:
         self.assertNotEqual([], _promised(
             "queue one code review task to move a contrib/ skill onto a path and publish the result"))
+
+    def test_a_trailing_negation_takes_back_only_what_follows_it(self) -> None:
+        # Findings 1ba1f7eaabc9 and 7279b654d6bc: "without" after the promise
+        # hid the pull request in front of it.
+        self.assertEqual([r"pull\s*requests?", r"\bopen(?:s|ed|ing)?\b"],
+                         _promised("queue one task to open a pull request without a branch"))
+        for text in ("open nothing themselves", "no one opens a pull request",
+                     "never pushes a branch", "queue one task with no branch"):
+            with self.subTest(text=text):
+                self.assertEqual([], _promised(text))
 
     def test_a_contracted_denial_is_a_denial(self) -> None:
         for text in ("doesn't open a pull request", "it won't push a branch", "can’t merge anything"):

@@ -86,7 +86,7 @@ this table before running the command.
 |---|---|---|---|---|---|
 | 10 | `branch-already-merged` | `w` | yes | `work item + git` | a non-done item whose branch already landed in the default branch |
 | 10 | `in-progress-without-branch` | `w` | yes | `work item` | status: in_progress with no branch: field to work on |
-| 10 | `branch-unresolvable` | `w` | yes | `work item + git` | a branch: field naming a ref no local or remote head carries |
+| 10 | `branch-unresolvable` | `w` | yes | `work item + git` | a non-done item's branch: field naming a ref no local or remote head carries |
 | 10 | `status-unreadable` | `w` | yes | `work item` | an item whose prd.md will not yield a status |
 | 20 | `unresolved-concern` | `c` | yes | `## Review ledger` | a review concern left open by its own ledger row |
 | 20 | `unreadable-concern-row` | `c` | yes | `ledger row nothing can classify` | a C- row whose disposition this reader does not recognise |
@@ -168,6 +168,13 @@ request with one keeps its row. Those rows say to repair or move the store
 first, because `sd-review-ack --ack` stops with an error on a store it could
 not read rather than replace the acknowledgements still in it.
 
+The acknowledgements live in the workflow database, so a satellite reads the
+hub's (sd:2750). A satellite whose hub does not answer is the one exception to
+"hides no row": every finding would read unanswered there, so both review
+classes get no row and are `unchecked` with `review acknowledgements unknown
+(hub unreachable: ...)`, and the `late:` and `expired:` lines print that in
+place of a count; `--json` carries their `findings` as `null`.
+
 The count is sometimes a floor. A reviewer that writes `Moderate findings
 (3 votes each)` has stated more than one finding under one marker and has not
 said where they split; `sd-review-ack` keeps the whole text, marks the row
@@ -184,6 +191,18 @@ PR #896 merged with seven of seven findings unread, its fixes pushed without
 request on the report for 14 days after the merge: merged fourteen days ago is
 in, fifteen is out. Past that it is no longer a row, and `open threads` names
 the exclusion.
+
+Expiry is not an answer (sd:998). `open threads` ends with an `expired:` line
+that counts the findings nobody answered on pull requests merged 15 to 28 days
+ago (`MERGED_AGED_DAYS`), names those pull requests, and says "at least" with
+the reason when its read failed or stopped at its limit. It is a count, not
+rows: it never reaches `pending` or the banner. `--json` carries it as
+`expired_reviews`.
+
+A review posted after the merge reaches no merge gate (sd:1178).
+Above `expired:`, a `late:` line counts the unread findings on pull requests merged in the last 14 days.
+It reads the window's own list, so it costs no extra `gh` call, and `sd-review-ack` clears a finding there as it clears the row.
+It warns only; `--json` carries it as `late_reviews`.
 
 The days are counted from the UTC calendar day GitHub records the merge on to
 the local date `sd-status` runs on. So the edge can move by the local offset
@@ -232,7 +251,8 @@ stopped at its limit.
 
 The read runs two `gh` commands, however many pull requests merged: `gh pr list
 --state merged` for the window, and one `gh api --paginate` over the
-repository's review comments. That call's `since` is the oldest merged pull
+repository's review comments. The `expired:` count runs the same two over its
+own days, so a busy fortnight past the window cannot truncate the window's list. That call's `since` is the oldest merged pull
 request's creation time, since no review comment predates its pull request. It
 is still as many HTTP pages as there are comments since then, and one
 long-lived pull request that merges widens it. If it runs past `sd-pr-state`'s
@@ -323,7 +343,7 @@ missing leg prints as a named gap:
 - the two r7 merge-settings flags: squash title/message source (a `wip:`
   subject reaching main) and whether rebase-merge is allowed
 - the two fleet-baseline flags, for a repository whose owner is in
-  `fleet.owners`, else `platypeeps` as on the dashboard (sd:1807): `protection_source`, raised unless rulesets alone
+  `sd.fleet_owners`, else `platypeeps` as on the dashboard (sd:1807): `protection_source`, raised unless rulesets alone
   protect the branch, and `required_check`, raised unless `ci` is required
   (`sd/local-gate` under `repo.ci = local`). The dashboard shows the same ids.
 
@@ -373,7 +393,8 @@ so capping it would make the cap the interface.
 
 The `--json` schema is version **3**. Beyond the section keys it carries
 `merged_pull_requests` (the pull requests merged inside the review window, with
-the findings each carries), `inventory` (`rows` plus the `unchecked` map),
+the findings each carries), `expired_reviews` (the `expired:` count, its
+days, its pull requests and why it is short, if it is), `late_reviews` (the `late:` count, in the same shape), `inventory` (`rows` plus the `unchecked` map),
 `abnormalities`, `actions` — the uncapped inventory, of which `pending` is the
 first ten after each class's `pending_cap` (`pending_rows`) — and `next`. It
 has no top-level `pending` key, and the two nested ones are something else

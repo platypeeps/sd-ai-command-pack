@@ -489,6 +489,22 @@ class TheCommandTests(CommandFixture):
         self.assertIn("nosuch", err)
         self.assertEqual(self.git("rev-parse", "HEAD"), before)
 
+    def test_the_trailer_value_names_its_entry(self) -> None:
+        """`claude/anthropic` is what every commit carries; refusing it pushed agents to `human` (sd:2689)."""
+        silent = self.commit("feat: something")
+        code, out, err = self.run_sd("attribute", silent, "claude/anthropic")
+        self.assertEqual(code, 0, err)
+        self.assertIn("claude/anthropic", out)
+        self.assertEqual(self.said()[silent], "claude/anthropic")
+
+    def test_a_vendor_the_registry_does_not_give_refuses_naming_both_forms(self) -> None:
+        silent = self.commit("feat: something")
+        before = self.git("rev-parse", "HEAD")
+        code, _, err = self.run_sd("attribute", silent, "claude/openai")
+        self.assertEqual(code, 1)
+        self.assertIn("'claude' or 'claude/anthropic'", err)
+        self.assertEqual(self.git("rev-parse", "HEAD"), before)
+
     def test_the_range_form_reaches_the_library(self) -> None:
         first = self.commit("feat: one")
         second = self.commit("feat: two")
@@ -507,11 +523,14 @@ class TheWriterTests(CommandFixture):
     unset, the repair says `human`, as before.
     """
 
-    def run_as(self, author: str | None, *argv: str) -> tuple[int, str, str]:
+    def run_as(self, author: str | None, *argv: str, marker: str | None = None) -> tuple[int, str, str]:
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("SD_AUTHOR", None)
+            os.environ.pop("CLAUDECODE", None)  # the suite itself may run in a Claude Code shell
             if author is not None:
                 os.environ["SD_AUTHOR"] = author
+            if marker is not None:
+                os.environ["CLAUDECODE"] = marker
             return self.run_sd(*argv)
 
     def own(self) -> str:
@@ -527,6 +546,39 @@ class TheWriterTests(CommandFixture):
         silent = self.commit("feat: something")
         code, _, err = self.run_as(None, "attribute", silent, "codex")
         self.assertEqual((code, self.own()), (0, "human"), err)
+
+    def test_a_claude_code_shell_without_sd_author_says_claude(self) -> None:
+        """Claude Code sets `CLAUDECODE=1` and not `SD_AUTHOR`; its repair was `human` (sd:2689)."""
+        silent = self.commit("feat: something")
+        code, _, err = self.run_as(None, "attribute", silent, "codex", marker="1")
+        self.assertEqual((code, self.own()), (0, "claude/anthropic"), err)
+
+    def test_a_marker_the_registry_cannot_resolve_refuses(self) -> None:
+        """A `claude` of another vendor is not Claude Code's, and `human` would let anthropic review the repair."""
+        seeded = self.home / sd_registry.REGISTRY_RELATIVE
+        seeded.write_text(seeded.read_text(encoding="utf-8").replace(
+            "vendor: anthropic", "vendor: openai"), encoding="utf-8")
+        silent = self.commit("feat: something")
+        before = self.git("rev-parse", "HEAD")
+        code, _, err = self.run_as(None, "attribute", silent, "codex", marker="1")
+        self.assertEqual(code, 1)
+        self.assertIn("SD_AUTHOR=human", err)
+        self.assertEqual(self.git("rev-parse", "HEAD"), before)
+
+    def test_an_explicit_sd_author_outranks_the_marker(self) -> None:
+        silent = self.commit("feat: something")
+        code, _, err = self.run_as("codex", "attribute", silent, "claude", marker="1")
+        self.assertEqual((code, self.own()), (0, "codex/openai"), err)
+
+    def test_a_marker_with_another_value_is_no_marker(self) -> None:
+        silent = self.commit("feat: something")
+        code, _, err = self.run_as(None, "attribute", silent, "codex", marker="0")
+        self.assertEqual((code, self.own()), (0, "human"), err)
+
+    def test_sd_author_may_name_the_value_itself(self) -> None:
+        silent = self.commit("feat: something")
+        code, _, err = self.run_as("claude/anthropic", "attribute", silent, "codex")
+        self.assertEqual((code, self.own()), (0, "claude/anthropic"), err)
 
     def test_an_sd_author_nothing_resolves_writes_nothing(self) -> None:
         silent = self.commit("feat: something")

@@ -258,8 +258,15 @@ def read_runtime(target: Path, *, home: Path | str | None = None, database_path:
             raise RegistryError("provider state exists but sd_db is unavailable; provision the library") from None
         return read_file(target)
     explicit = database_path is not None
-    database_path = Path(database_path) if database_path is not None else database.default_path(home)
-    if not database_path.exists():
+    default = database.default_path(home)
+    # On a satellite the default is a `HubPath`, whose `exists()` asks the hub;
+    # `sd-ship` hands it down as a string, which a plain `Path` would test here (sd:2679).
+    database_path = default if database_path is None or Path(database_path) == default else Path(database_path)
+    try:
+        present = database_path.exists()
+    except SdDbError as error:  # `HubUnreachable` names the hub; every caller reports a `RegistryError` (sd:2728)
+        raise RegistryError(f"cannot read provider state at {database_path}: {error}") from None
+    if not present:
         if explicit:
             raise RegistryError(f"configured provider database is missing: {database_path}")
         return read(target)

@@ -87,6 +87,8 @@ A conflict aborts the merge and leaves the branch unchanged; resolve it by hand,
 One conflict is resolved for you: two additions to `CHANGELOG.md` at the root, and no other conflicted path.
 Both entries are kept, the branch's first, and the receipt warnings name the resolution.
 Merge again with the new `--expected-head`; the local gate runs at that head.
+A merge after a hand merge of the base, with no prepare between, refuses as a receipt that does not name the head.
+When that merge is the only change, the refusal says so and names its main commits; run `sd-ship prepare`, which carries or re-reviews as above (sd:2339).
 
 ## A branch built on a squashed branch
 
@@ -157,9 +159,12 @@ It supplies prior evidence through `--resume-report` and verifies every previous
 Failed attempts, findings, and the initial receipt remain unchanged.
 Repeated incomplete runs exhaust the automatic allowance and grant no publication clearance.
 
-A repository gate that fails before any reviewer is asked spends no pass.
+The repository gate runs after a review that does not block.
+A blocking review runs no gate; its refusal says so, and its `check.status` is `not_run`.
+After its dispositions are accepted, the next prepare runs the gate before clearance (`adjudication.md`, step 5).
+A repository gate that fails spends no pass, even after a review that cleared.
 `sd-ship` removes that reservation and keeps the gate output under `review_preflight_error`.
-The next prepare reviews normally, without `--retry-review`.
+The next prepare reviews the branch again, without `--retry-review`.
 A slow gate under load can take a longer limit: `sd-ship prepare --review-timeout SECONDS`.
 It reaches `sd-review --timeout`, which bounds the gate and each reviewer.
 

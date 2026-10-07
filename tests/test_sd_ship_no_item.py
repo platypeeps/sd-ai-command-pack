@@ -442,6 +442,20 @@ class NoItemContracts(unittest.TestCase):
         self.assertNotEqual(first, second)
         self.assertEqual(len(self.keys()), 2)
 
+    def test_an_empty_commit_on_merged_work_allocates_its_own_record(self):
+        """sd:2009. An `sd attribute` repair is an empty commit: its tree is the
+        base's, which a merged record already claimed, so allocation refused
+        with "already owns this tree". The base tree is no claim; the commit is."""
+        merged = self.create()
+        _git(self.remote.path, "update-ref", "refs/heads/main", self.head)
+        _git(self.root, "fetch", "-q", str(self.remote.path), "+main:refs/remotes/origin/main")
+        _git(self.root, "checkout", "-q", "-b", "attribution-repair", "origin/main")
+        _git(self.root, "commit", "-q", "--allow-empty", "-m", "Attributes: repair\n\nAuthored-with: human")
+        repair = self.create()
+        self.assertNotEqual(merged, repair)
+        _git(self.root, "checkout", "-q", "-b", "repair-copy")
+        self.refused("review", "--create-record", "--assert-new-work", pattern=f"{repair} already owns this head")
+
     def test_import_preserves_three_spent_passes_and_exact_original_bytes(self):
         review_id, manifest = self.import_history(3, missing=True)
         _key, (_revision, record) = self.record(review_id)
@@ -669,6 +683,17 @@ class NoItemContracts(unittest.TestCase):
         _key, (_revision, reopened) = self.record(review_id)
         self.assertEqual(reopened["passes"], interrupted["passes"])
         self.refused("review", "--review-id", review_id, pattern="incomplete|retry|request")
+
+    def test_a_blocking_review_names_each_finding_and_the_command_for_this_record(self):
+        """sd:1986. `sd-ship review` said only `see item ship receipt`, and a no-item record has none."""
+        review_id = self.create()
+        reviewer, _calls = self.native_reviewer(review_id, blocking=True)
+        code, value, diagnostic = self.cli("review", "--review-id", review_id, reviewer=reviewer)
+        self.assertEqual(code, 3, diagnostic)
+        self.assertIn("src.py:1 fixture dispute", value["error"])
+        self.assertNotIn("item ship receipt", value["error"])
+        self.assertIn(f"sd-ship adjudicate --no-item --review-id {review_id} --expected-head {self.head}",
+                      value["workflow"]["next_action"])
 
     def test_acceptance_requires_exact_digest_and_never_dispatches_a_provider(self):
         review_id, _proposal, proposal_path, _evidence = self.blocking_proposal()

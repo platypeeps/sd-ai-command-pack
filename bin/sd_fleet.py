@@ -82,10 +82,10 @@ EXIT_OK = 0
 EXIT_USAGE = 2
 EXIT_REFUSED = 3
 
-#: The owners whose repositories the operator owns outright, when the machine
-#: config's `fleet.owners` names none. Any other owner is an employer's, and
-#: its protection stands (sd:1334, D2 kept those). Read through
-#: `configured_owners`, so another operator lists their own logins (sd:2324).
+#: The owners whose repositories the operator owns outright, when
+#: `sd.fleet_owners` names none. Any other owner is an employer's, and its
+#: protection stands (sd:1334, D2 kept those). Read through
+#: `configured_owners`, so another operator lists their own logins (sd:2502).
 DEFAULT_OWNERS = ("platypeeps", "sdelmas")
 #: A GitHub login: letters, digits and single inner hyphens.
 LOGIN = re.compile(r"[A-Za-z0-9](?:-?[A-Za-z0-9])*")
@@ -339,24 +339,31 @@ def _git_show(root: pathlib.Path, spec: str) -> str | None:
 
 
 def configured_owners(default: tuple[str, ...] = DEFAULT_OWNERS) -> tuple[str, ...]:
-    """The owner logins in the machine config's `fleet.owners`, lower-cased.
+    """The owner logins in `sd.fleet_owners`, lower-cased (sd:2502).
 
-    Absent, the key reads `default`: `DEFAULT_OWNERS` for the stamp, the
-    system collector's baseline owners for `sd-status` (sd:1807). A value that is not a non-empty
-    list of logins refuses: ownership decides the `unprotected` declaration,
-    so a guess in either direction is the wrong answer.
+    Unset, the machine config's `fleet.owners` list is read with a
+    deprecation warning, so a machine set up under sd:2324 keeps its owners;
+    absent too, `default`: `DEFAULT_OWNERS` for the stamp, the system
+    collector's baseline owners for `sd-status` (sd:1807). A value that does
+    not read refuses: ownership decides the `unprotected` declaration, so a
+    guess in either direction is the wrong answer.
     """
-    path = sd_lib.machine_config_path()
     try:
-        fleet = sd_lib.machine_config(path).get("fleet")
+        setting = sd_lib.core_setting("fleet_owners")
     except sd_lib.ConfigError as error:
-        raise FleetRefusal(f"cannot read fleet.owners: {error}") from None
+        raise FleetRefusal(f"cannot read sd.fleet_owners: {error}") from None
+    if setting is not None:
+        return tuple(login.lower() for login in setting.split(","))
+    path = sd_lib.machine_config_path()
+    fleet = sd_lib.machine_config(path).get("fleet")
     if fleet is None or (isinstance(fleet, dict) and "owners" not in fleet):
         return default
     owners = fleet.get("owners") if isinstance(fleet, dict) else None
     if (not isinstance(owners, list) or not owners
             or not all(isinstance(login, str) and LOGIN.fullmatch(login) for login in owners)):
         raise FleetRefusal(f"fleet.owners in {path} must be a non-empty list of GitHub logins")
+    print(f"sd fleet: fleet.owners in {path} is deprecated; run `sd config set sd.fleet_owners "
+          f"{','.join(owners)}` and remove it", file=sys.stderr)
     return tuple(login.lower() for login in owners)
 
 

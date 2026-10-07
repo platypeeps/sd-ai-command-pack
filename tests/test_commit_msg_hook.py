@@ -32,6 +32,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "bin"))
 
 import sd_lib  # noqa: E402
+import sd_registry  # noqa: E402
 
 HOOK = REPO_ROOT / "hooks" / "commit-msg"
 
@@ -165,6 +166,16 @@ class CommitAuthor(unittest.TestCase):
     def test_an_unreadable_registry_refuses_naming_the_variable(self):
         with self.assertRaisesRegex(sd_lib.TrailerError, "SD_AUTHOR='claude'.*no such file"):
             sd_lib.commit_author("claude", lambda: (None, "no such file"))
+
+    def test_the_value_itself_names_its_entry_and_a_slash_hides_no_dependabot(self):
+        registry = sd_registry.Registry(pathlib.Path("/fixture/providers.yaml"), {}, {
+            "claude": sd_registry.Provider(name="claude", vendor="anthropic", bill="b", start="x")})
+        self.assertEqual(sd_lib.commit_author("claude/anthropic", lambda: (registry, "")), "claude/anthropic")
+        for name in ("claude/openai", "human/anthropic"):
+            with self.subTest(name), self.assertRaises(sd_lib.TrailerError):
+                sd_lib.commit_author(name, lambda: (registry, ""))
+        with self.assertRaisesRegex(sd_lib.TrailerError, "never Dependabot"):
+            sd_lib.commit_author("dependabot/github", self.unread)
 
     def test_only_an_unindented_line_states_the_author(self):
         self.assertTrue(sd_lib.states_author("x\n\nAuthored-with: human\n"))
@@ -316,6 +327,61 @@ class TheHookWritesTheAuthor(HookFixture):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual("", git("log", "-1", "--format=%(trailers:key=Authored-with,valueonly)",
                                  cwd=self.root).strip())
+
+
+class TheHookInAnotherRepository(unittest.TestCase):
+    """sd:2546: `sd commit-hook` arms a repository that holds no pack files.
+
+    The hook used to import `sd_lib` from the repository it ran in, so it
+    could only run in a clone of the pack. It now reads `sd_lib` beside its
+    own real path, and `sd commit-hook` links the clone's hook to this one.
+    """
+
+    def setUp(self):
+        self.root = scratch_repository("sd-2546-other-")
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.home = pathlib.Path(tempfile.mkdtemp(prefix="sd-2546-home-"))
+        self.addCleanup(shutil.rmtree, self.home, ignore_errors=True)
+        self.link = self.root / ".git" / "hooks" / "commit-msg"
+
+    def install(self) -> subprocess.CompletedProcess[str]:
+        return subprocess.run([sys.executable, str(REPO_ROOT / "bin" / "sd"), "commit-hook"],
+                              cwd=self.root, env=clean_env(HOME=str(self.home)),
+                              capture_output=True, text=True, check=False)
+
+    def test_it_links_the_pack_hook_and_the_hook_writes_the_author(self):
+        made = self.install()
+        self.assertEqual(made.returncode, 0, made.stderr)
+        self.assertEqual(self.link.resolve(), HOOK.resolve())
+        result = subprocess.run(
+            ["git", "commit", "-q", "--allow-empty", "-F", "-"], cwd=self.root, input=PLAIN,
+            env=clean_env(SD_AUTHOR="script", HOME=str(self.home)),
+            capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual("script", git(
+            "log", "-1", "--format=%(trailers:key=Authored-with,valueonly)", cwd=self.root).strip())
+
+    def test_a_second_install_changes_nothing(self):
+        self.assertEqual(self.install().returncode, 0)
+        again = self.install()
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertIn("already", again.stdout)
+
+    def test_a_hook_already_there_is_refused_and_kept(self):
+        self.link.parent.mkdir(parents=True, exist_ok=True)
+        self.link.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        made = self.install()
+        self.assertEqual(made.returncode, 1)
+        self.assertIn("move it aside", made.stderr)
+        self.assertEqual(self.link.read_text(encoding="utf-8"), "#!/bin/sh\nexit 0\n")
+
+    def test_core_hooks_path_is_refused(self):
+        git("config", "core.hooksPath", ".husky", cwd=self.root)
+        made = self.install()
+        self.assertEqual(made.returncode, 1)
+        self.assertIn("core.hooksPath", made.stderr)
+        self.assertFalse(self.link.exists() or self.link.is_symlink())
+
 
 if __name__ == "__main__":
     unittest.main()

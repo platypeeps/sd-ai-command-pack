@@ -19,6 +19,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -86,6 +87,35 @@ def wait_until(predicate, seconds: float = 60.0) -> bool:
             return True
         time.sleep(0.05)
     return predicate()
+
+
+class Watched:
+    """A process's output read as it arrives, and an event for its first waiting line (sd:2630).
+
+    A test that releases the holder must wait for this event, not for the
+    ticket: the ticket exists before the waiter reads who holds the slot, so
+    a holder released on the ticket was gone by the time the line named it.
+    """
+
+    def __init__(self, process: subprocess.Popen[str]) -> None:
+        self.process, self.out, self.err = process, [], []
+        self.waiting = threading.Event()
+        self.readers = [threading.Thread(target=self.read, args=(stream, lines), daemon=True)
+                        for stream, lines in ((process.stdout, self.out), (process.stderr, self.err))]
+        for reader in self.readers:
+            reader.start()
+
+    def read(self, stream, lines: list[str]) -> None:
+        for line in stream:
+            lines.append(line)
+            if lines is self.err and line.startswith("waiting for a gate slot"):
+                self.waiting.set()
+
+    def finish(self, timeout: float = 300) -> tuple[int, str, str]:
+        code = self.process.wait(timeout=timeout)
+        for reader in self.readers:
+            reader.join(timeout)
+        return code, "".join(self.out), "".join(self.err)
 
 
 def slot_free(lock: pathlib.Path) -> bool:
@@ -287,9 +317,6 @@ class OnePool(GateSlotFixture):
         self.processes.append(process)
         return process
 
-    def queued(self) -> bool:
-        return any((self.slots / "queue").glob("*.ticket"))
-
     def test_a_gate_in_one_repository_waits_for_a_plain_run_in_another_and_names_it(self):
         first = self.repo("first", f"{PY} -c pass")
         ran = self.tmp / "second-ran"
@@ -298,10 +325,12 @@ class OnePool(GateSlotFixture):
         self.assertTrue(wait_until(self.started.exists), holder.stderr)
         gate = self.start(second, self.env())
         self.processes.append(gate)
-        self.assertTrue(wait_until(self.queued), "the second repository's gate never queued")
+        watched = Watched(gate)
+        self.assertTrue(watched.waiting.wait(60), "the second repository's gate never said it waits")
         self.assertFalse(ran.exists(), "the second gate ran while the first repository held the one slot")
         self.release.touch()
-        code, report, err = self.finish(gate)
+        code, out, err = watched.finish()
+        report = json.loads(out) if out.strip() else {}
         self.assertEqual(code, 0, f"{err}\n{report}")
         self.assertEqual(report["gate_slot"]["slots"], 1)
         waiting = next(line for line in err.splitlines() if line.startswith("waiting for a gate slot"))
@@ -318,11 +347,12 @@ class OnePool(GateSlotFixture):
         self.processes.append(gate)
         self.assertTrue(wait_until(self.started.exists), "the first repository's gate never started its check")
         plain = self.plain_run(second, sys.executable, "-c", f"open({str(ran)!r}, 'w').close()")
-        self.assertTrue(wait_until(self.queued), "the plain run never queued: it did not read sd.gate_slots")
+        watched = Watched(plain)
+        self.assertTrue(watched.waiting.wait(60), "the plain run never queued: it did not read sd.gate_slots")
         self.assertFalse(ran.exists())
         self.release.touch()
-        _, err = plain.communicate(timeout=120)
-        self.assertEqual(plain.returncode, 0, err)
+        code, _, err = watched.finish(120)
+        self.assertEqual(code, 0, err)
         self.assertTrue(ran.exists())
         self.assertIn("held by sd-check first", err)
         code, report, err = self.finish(gate)
@@ -355,6 +385,21 @@ class SlotCount(unittest.TestCase):
         for bad in ("", "-1", "two", "٣"):
             with self.subTest(value=bad), self.assertRaises(ValueError):
                 configured({"SD_GATE_SLOTS": bad}, None)
+
+    def test_a_holder_caps_each_gate_at_its_share_of_the_cores(self):
+        """sd:2726: 2 slots on 16 cores let one Rust gate drive the load to 185; the slot count bounds no gate's CPU."""
+        self.assertEqual([sd_gate_slots.cpu_share(slots, 16) for slots in (1, 2, 3, 16, 32)], [16, 8, 5, 1, 1])
+        share = sd_gate_slots.cpu_share(2)
+        held = sd_gate_slots.holder_environment({"CARGO_BUILD_JOBS": "1", "RUST_TEST_THREADS": str(share + 1)}, 2)
+        self.assertEqual((held["CARGO_BUILD_JOBS"], held["RUST_TEST_THREADS"]), ("1", str(share)))
+        unset = sd_gate_slots.holder_environment({}, 2)
+        self.assertEqual((unset["CARGO_BUILD_JOBS"], unset["RUST_TEST_THREADS"]), (str(share), str(share)))
+        # sd:2872: cargo-nextest reads its own variable, not `RUST_TEST_THREADS`, so it ran on every core.
+        self.assertEqual(sd_gate_slots.holder_environment({"NEXTEST_TEST_THREADS": "1"}, 2)["NEXTEST_TEST_THREADS"], "1")
+        self.assertEqual(unset["NEXTEST_TEST_THREADS"], str(share))
+        for value in ("0", "-1", "", "two", "٣", str(share)):
+            with self.subTest(value=value):
+                self.assertEqual(sd_gate_slots.thread_cap(value, share), value if value == str(share) else str(share))
 
     def test_the_machine_setting_is_a_declared_core_setting(self):
         with tempfile.TemporaryDirectory() as tmp:

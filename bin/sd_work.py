@@ -218,6 +218,10 @@ def _edit_changes(args: argparse.Namespace) -> dict[str, Any]:
         changes["priority"] = None
     if args.clear_due:
         changes["due"] = None
+    # Clear only: `sd runner prepare --branch` sets a branch, checked against
+    # git, and `edit_item` refuses any other value (sd:2729).
+    if args.clear_branch:
+        changes["branch"] = None
     # The field `add` sets and nothing could change afterwards. It is not in
     # the loop above because the flag carries a path and the row carries a
     # checkout; `_belongs_to` is the one step between them, and `edit_item` --
@@ -1208,8 +1212,9 @@ def register(groups: Any, store: Any) -> None:
     add.add_argument("--due", help="YYYY-MM-DD")
     kind = add.add_argument(
         "--kind", default="task",
-        help="what the item is (default: task); a followup takes a checkout as a task "
-             "does, and personal, work-idea and personal-idea carry no repository")
+        help="what the item is (default: task), from the kinds the installed sd_db offers; a "
+             "followup takes a checkout as a task does (an sd_db older than sd:809 files it "
+             "with none), and personal, work-idea and personal-idea carry no repository")
     kind.choices = LibraryKinds()  # after add_argument: see `LibraryKinds`
     _recurrence_flags(add)
     where = add.add_mutually_exclusive_group()
@@ -1230,6 +1235,8 @@ def register(groups: Any, store: Any) -> None:
     due = edit.add_mutually_exclusive_group()
     due.add_argument("--due", help="YYYY-MM-DD")
     due.add_argument("--clear-due", action="store_true")
+    edit.add_argument("--clear-branch", action="store_true",
+                      help="clear a stale branch name; `sd runner prepare --branch` sets one")
     # `--belongs-to` and not `--repo`: see `_belongs_to`. `--no-repo` is the
     # word `add` already uses for the same idea, so the pair reads the same on
     # both verbs.

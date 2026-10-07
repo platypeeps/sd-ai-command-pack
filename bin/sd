@@ -62,6 +62,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
 import json
 import math
 import os
@@ -97,6 +98,8 @@ import sd_writing  # noqa: E402
 
 MANIFEST_NAME = "sd-plugin.json"
 LOCK_NAME = "sd-plugin.lock"
+#: What `sd commit-hook` links a clone's commit-msg hook to: this checkout's, by real path.
+PACK_COMMIT_HOOK = pathlib.Path(__file__).resolve().parents[1] / "hooks" / "commit-msg"
 
 # The closed vocabulary a plugin may use to describe one kind (R11-D14). Eight
 # keys, and a ninth is a decision record rather than a commit. The invariant
@@ -976,9 +979,43 @@ def describe(root: str) -> dict[str, object]:
     return entry
 
 
+def described(roots: list[str]) -> list[dict[str, object]]:
+    """`describe` for every root, each in its own daemon thread, as `scan` reads (sd:2555).
+
+    A root still silent after ROOT_READ_SECONDS is listed unreadable, with a
+    warning, instead of holding the whole list behind one stalled open().
+    """
+
+    answers: queue.Queue[tuple[int, dict[str, object] | BaseException]] = queue.Queue()
+
+    def describe_root(index: int, root: str) -> None:
+        try:
+            answers.put((index, describe(root)))
+        except BaseException as error:  # noqa: BLE001 - raised again on the caller's thread
+            answers.put((index, error))
+
+    for index, root in enumerate(roots):
+        threading.Thread(target=describe_root, args=(index, root), daemon=True, name=f"sd plugin root {root}").start()
+    entries: dict[int, dict[str, object]] = {}
+    deadline = time.monotonic() + ROOT_READ_SECONDS
+    while len(entries) < len(roots):
+        try:
+            index, entry = answers.get(timeout=max(0.0, deadline - time.monotonic()))
+        except queue.Empty:
+            break
+        if isinstance(entry, BaseException):
+            raise entry
+        entries[index] = entry
+    silent = f"its {MANIFEST_NAME} did not answer within {ROOT_READ_SECONDS:g}s"
+    for index, root in enumerate(roots):
+        if index not in entries:
+            print(f"warning: skipped plugin root {root}: {silent}", file=sys.stderr)
+            entries[index] = {"root": root, "readable": False, "why": silent}
+    return [entries[index] for index in range(len(roots))]
+
+
 def plugin_list(args: argparse.Namespace) -> int:
-    roots = registry(sd_lib.machine_config())
-    entries = [describe(root) for root in roots]
+    entries = described(registry(sd_lib.machine_config()))
     if args.json:
         json.dump(entries, sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
@@ -1546,7 +1583,9 @@ def note_paths(base: pathlib.Path) -> list[pathlib.Path]:
         return sorted(
             path for path in base.iterdir() if path.suffix == ".md" and path.is_file())
     except FileNotFoundError:
-        raise Refusal(f"{base} does not exist; the vault does not hold this kind") from None
+        # A declared kind whose folder nobody has made yet holds no notes;
+        # `store_root` has already refused a vault that is not there (sd:2688).
+        return []
     except OSError as error:
         raise Refusal(f"cannot list {base}: {error}") from None
 
@@ -1936,14 +1975,6 @@ def refuse_duplicate_unique(
     assert isinstance(unique, list)
     wanted = {field: values[field] for field in unique if values.get(field)}
     if not wanted:
-        return
-    # A kind directory that does not exist yet holds no notes, so nothing can
-    # collide. `note_paths` refuses a missing base, which is right for the read
-    # verbs -- asking to list a kind the vault does not have is a mistake worth
-    # reporting -- and wrong here, where `store_add` creates the directory a few
-    # lines later. Before this, the first `add` into a new kind failed, and the
-    # failure came out of a uniqueness check and named the vault.
-    if not base.is_dir():
         return
     for path in note_paths(base):
         if skip is not None and path == skip:
@@ -2889,13 +2920,43 @@ def cmd_attribute(args: argparse.Namespace) -> int:
     registry, reason = sd_registry.read_or_report()
     if reason and args.entry.strip() not in sd_lib.RESERVED_AUTHORS:
         raise Refusal(f"{reason}; an attribution names an entry the registry has")
-    # The repair commit says who made it: `SD_AUTHOR`'s entry, else `human` (sd:2009).
-    invoker = os.environ.get(sd_lib.AUTHOR_VARIABLE, "").strip()
+    # The repair commit says who made it: `SD_AUTHOR`, else a harness marker, else `human` (sd:2009, sd:2689).
+    invoker = sd_lib.invoking_author(os.environ, registry)
     writer = sd_lib.commit_author(invoker, lambda: (registry, reason)) if invoker else sd_lib.HUMAN_AUTHOR
     sha, value, covered = sd_lib.attribute(root, args.commits, args.entry, registry, writer)
     print(f"{sha[:12]} attributes {len(covered)} commit(s) to {value}")
     for target in covered:
         print(f"  {target[:12]}")
+    return 0
+
+
+def cmd_commit_hook(args: argparse.Namespace) -> int:
+    """`sd commit-hook` -- arm a clone outside the pack with the pack's commit-msg hook (sd:2546).
+
+    One absolute link in the clone's common `.git/hooks`, shared by its
+    worktrees, to the `hooks/commit-msg` of the checkout this `sd` runs from.
+    `make hooks` stays the pack's own path. A set `core.hooksPath` and any
+    other file at the link's path are refused, not replaced.
+    """
+    root = sd_lib.repo_root()
+    if root is None:
+        raise Refusal("not inside a git repository")
+    hooks_path = sd_lib.git_output(["config", "--get", "core.hooksPath"], root)
+    if hooks_path:
+        raise Refusal(f"core.hooksPath is set to {hooks_path}, so git would not run a hook in .git/hooks; "
+                      f"unset it, or call {PACK_COMMIT_HOOK} from the hook in {hooks_path}")
+    common = sd_lib.git_output(["rev-parse", "--path-format=absolute", "--git-common-dir"], root)
+    if not common:
+        raise Refusal("git could not name this clone's common git directory")
+    link = pathlib.Path(common) / "hooks" / "commit-msg"
+    if link.is_symlink() and link.resolve() == PACK_COMMIT_HOOK.resolve():
+        print(f"git hooks: {link} already links to {PACK_COMMIT_HOOK}")
+        return 0
+    if link.exists() or link.is_symlink():
+        raise Refusal(f"{link} exists and is not a link to {PACK_COMMIT_HOOK}; move it aside first")
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(PACK_COMMIT_HOOK)
+    print(f"git hooks: {link} -> {PACK_COMMIT_HOOK}")
     return 0
 
 
@@ -3229,9 +3290,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="record who wrote commits that did not say, as one empty commit")
     attributer.add_argument("commits", help="a commit, or a `<from>..<to>` range, on this branch")
     attributer.add_argument(
-        "entry", help=f"a registry entry, `{sd_lib.HUMAN_AUTHOR}` for the operator, `{sd_lib.SCRIPT_AUTHOR}` "
+        "entry", help=f"a registry entry or its `<entry>/<vendor>` value, `{sd_lib.HUMAN_AUTHOR}` for the operator, `{sd_lib.SCRIPT_AUTHOR}` "
                       f"for an unattended job, or `{sd_lib.DEPENDABOT_ENTRY}` for a bump rewritten after GitHub made it")
     attributer.set_defaults(handler=cmd_attribute)
+
+    hooker = groups.add_parser(
+        "commit-hook",
+        help="link this clone's commit-msg hook to the pack's, which writes `Authored-with:` from SD_AUTHOR")
+    hooker.set_defaults(handler=cmd_commit_hook)
 
     gate = groups.add_parser("gate", help="the machine-wide gate queue: run a command in it, or show it; "
                                  "post the local gate at a commit")
@@ -3260,6 +3326,26 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+#: `(group, verb)` pairs that read the hub and do no local work with effects before its first session,
+#: so a satellite's `sd_db` self-install may run them again (sd:2845). Every other verb keeps the manual rerun.
+REPLAYABLE = {("today", None), ("store", "items"), ("store", "item"), ("task", "show")}
+
+
+def declare_replayable(args: argparse.Namespace) -> None:
+    """Tell `sd_db` that `args` may rerun after a self-install; an `sd_db` older than sd:2802 has no such call."""
+    if (getattr(args, "group", None), getattr(args, "verb", None)) not in REPLAYABLE:
+        return
+    if sd_lib.import_sd_db().module is None:
+        return
+    try:
+        self_install = importlib.import_module("sd_db.self_install")
+    except ImportError:
+        return
+    declare = getattr(self_install, "declare_replayable", None)
+    if callable(declare):
+        declare()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     if argv is None:
@@ -3273,6 +3359,7 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exit_code:
         return 2 if exit_code.code else 0
     try:
+        declare_replayable(args)
         return int(args.handler(args))
     except Refusal as refusal:
         print(f"sd: {refusal}", file=sys.stderr)

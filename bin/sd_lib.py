@@ -10,7 +10,9 @@ Stdlib only, Python 3.10+, no network. A caller that cannot proceed gets a
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
+import hashlib
 import json
 import os
 import pathlib
@@ -18,9 +20,13 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Iterable, NamedTuple
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping, NamedTuple
+
+if TYPE_CHECKING:  # `sd_review_slots` imports this module; see `review_slot`.
+    import sd_review_slots
 
 LOCAL_FILE_NAME = "CLAUDE.local.md"
 LOCAL_BLOCK_START = "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->"
@@ -82,6 +88,9 @@ CORE_CONFIG = {
     "gate_load_max": {"pattern": r"[0-9]+(\.[0-9]+)?",
                       "description": "The gate queue starts a gate only while load1 is below this; 0 is no load "
                                      "condition. Unset is none; SD_GATE_LOAD_MAX overrides it for one run."},
+    "review_slots": {"pattern": "[0-9]+",
+                     "description": "How many reviews may run their reviewers at once on this machine; 0 is no cap. "
+                                    "Unset reads 2; SD_REVIEW_SLOTS overrides it for one run."},
     "lane_root": {"pattern": r"[~/][^\x00]*",
                   "description": "The folder holding each repository's `sd-ship lane` queue, as "
                                  "<root>/<repository>/lane/queue/. Unset reads $XDG_STATE_HOME/sd/lanes; "
@@ -93,6 +102,10 @@ CORE_CONFIG = {
     "gate_settle_seconds": {"pattern": "[0-9]+",
                             "description": "Seconds between two gate starts, and of low load1 while load5 is high; "
                                            "0 is none. Unset reads 45; SD_GATE_SETTLE_SECONDS overrides it for one run."},
+    "fleet_owners": {"pattern": r"[A-Za-z0-9](-?[A-Za-z0-9])*(,[A-Za-z0-9](-?[A-Za-z0-9])*)*",
+                     "description": "Comma-separated GitHub logins whose repositories `sd fleet stamp` treats as the "
+                                    "operator's own; any other owner's protection stands. Unset reads the deprecated "
+                                    "fleet.owners list, then the pack's default pair. It grants nothing."},
 }
 
 #: `{current name: the name it was stored under before 1.1.0}`. A rename must
@@ -244,8 +257,56 @@ def parse_frontmatter(text: str) -> dict[str, str] | None:
 # --------------------------------------------------------------------------
 
 
+#: Answers to read-only `git` calls, by cwd and argv, while `git_read_memo()`
+#: is open, and the tip each `_fetched` ref came back at; None otherwise.
+_GIT_READS: dict[tuple[str, ...], str | None] | None = None
+_FETCHED: dict[tuple[str, ...], str] | None = None
+
+#: The verbs that cannot change what a read answers. `config`, `remote` and
+#: `symbolic-ref` count only in the reading forms `_reads_only` names.
+_READ_VERBS = frozenset({"rev-parse", "merge-base", "rev-list", "log", "cat-file", "for-each-ref",
+                         "status", "grep"})
+
+
+def _reads_only(args: list[str]) -> bool:
+    while args[:1] in (["--no-optional-locks"], ["-C"]):
+        args = args[2:] if args[0] == "-C" else args[1:]
+    head = args[:2]
+    return (bool(args) and args[0] in _READ_VERBS) or args == ["remote"] or head in (
+        ["config", "--get"], ["config", "--get-regexp"], ["remote", "-v"], ["remote", "get-url"],
+    ) or (head == ["symbolic-ref", "--short"] and len(args) == 3)
+
+
+@contextlib.contextmanager
+def git_read_memo() -> Iterator[None]:
+    """Answer a repeated read-only `git` call from memory until the block ends.
+
+    `sd-status` opens one per run: a report asked the same 400 questions
+    2,162 times (sd:2677). Any other call through `_git` empties the memo
+    first, so no answer outlives a change the run itself made.
+    """
+    global _GIT_READS, _FETCHED
+    saved = _GIT_READS, _FETCHED
+    _GIT_READS, _FETCHED = {}, {}
+    try:
+        yield
+    finally:
+        _GIT_READS, _FETCHED = saved
+
+
+def git_reads_memoized() -> bool:
+    """Whether a `git_read_memo()` block is open."""
+    return _GIT_READS is not None
+
+
 def _git(args: list[str], cwd: pathlib.Path) -> str | None:
     """Run one `git` command; None when git cannot answer."""
+    key = (str(cwd), *args)
+    memo = _GIT_READS if _GIT_READS is not None and _reads_only(args) else None
+    if memo is not None and key in memo:
+        return memo[key]
+    if memo is None and _GIT_READS is not None:
+        _GIT_READS.clear()
     try:
         completed = subprocess.run(  # fixed argv, no shell
             ["git", *args],
@@ -257,9 +318,10 @@ def _git(args: list[str], cwd: pathlib.Path) -> str | None:
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    if completed.returncode != 0:
-        return None
-    return completed.stdout.strip()
+    answer = completed.stdout.strip() if completed.returncode == 0 else None
+    if memo is not None:
+        memo[key] = answer
+    return answer
 
 
 def sibling(module_name: str, filename: str):
@@ -454,7 +516,37 @@ def parse_local_block(text: str, label: str = LOCAL_FILE_NAME) -> dict[str, str]
 
 def local_block(root: pathlib.Path) -> dict[str, str]:
     """The repo's local configuration block; missing file or block is `{}`."""
-    path = local_block_path(root)
+    return read_local_block(local_block_path(root))
+
+
+def local_policy_digest(path: pathlib.Path | None) -> str:
+    """sha256 of the parsed block at `path`, keys sorted; None, no file, no block and an empty block are `{}` alike.
+
+    What the review binding and the gate's `inputs` bind of `CLAUDE.local.md`
+    (sd:2854). The file is untracked and per machine, so its comments, layout
+    and lines outside the markers differ between a hub and a satellite with no
+    effect on either; the raw bytes refused every satellite merge.
+    """
+    block = {} if path is None else read_local_block(path)
+    return hashlib.sha256(json.dumps(block, sort_keys=True).encode()).hexdigest()
+
+
+def local_policy_text(block: dict[str, str]) -> str:
+    """`block` as a marked block of quoted scalars, keys sorted: all of `CLAUDE.local.md` a gate's check tree gets.
+
+    The digest covers the parsed block only, so the check reads nothing more
+    (sd:2854 review). Refused when it would not parse back to `block`.
+    """
+    def quoted(value: str) -> str:
+        return f"'{value}'" if "'" not in value else '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    text = "\n".join([LOCAL_BLOCK_START, *(f"{key}: {quoted(value)}" for key, value in sorted(block.items())), LOCAL_BLOCK_END, ""])
+    if parse_local_block(text) != block:
+        raise ConfigError(f"{LOCAL_FILE_NAME}: the block does not survive a rewrite for the gate's check tree")
+    return text
+
+
+def read_local_block(path: pathlib.Path) -> dict[str, str]:
+    """The local configuration block in the file at `path`; missing file or block is `{}`."""
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -471,6 +563,25 @@ def machine_config_path(environ: dict[str, str] | None = None) -> pathlib.Path:
     env = os.environ if environ is None else environ
     home = pathlib.Path(env.get("XDG_CONFIG_HOME") or pathlib.Path(env.get("HOME") or pathlib.Path.home()) / ".config")
     return home / CONFIG_RELATIVE_PATH
+
+
+#: When this process imported sd_lib: `sd-review` imports it first, so its
+#: review slot wait counts its check bound from here (sd:2523).
+STARTED = time.monotonic()
+
+
+def review_slot(result: dict[str, Any], environ: Mapping[str, str], root: pathlib.Path,
+                bound_seconds: float) -> sd_review_slots.Slot | None:
+    """Hold a machine-wide review slot for `sd-review`, or refuse the review in `result`.
+
+    A thin door: the slot logic is `sd_review_slots.hold_review_slot`, which
+    `sd-review` does not import, so it stays outside the review lane's line
+    budget the way `sd_gate_receipts` does. Imported here on first use,
+    because `sd_review_slots` imports this module.
+    """
+    import sd_review_slots
+
+    return sd_review_slots.hold_review_slot(result, environ, root, bound_seconds)
 
 
 def core_setting(key: str, environ: dict[str, str] | None = None) -> str | None:
@@ -720,7 +831,7 @@ def mode(root: pathlib.Path, *, ask: Asker = gh_api) -> str:
 DEMOTION_NOTE_KIND = "comment"
 
 
-def demotion_note(repository: str, answer: RemoteAnswer) -> tuple[str, str]:
+def demotion_note(repository: str, answer: RemoteAnswer, *, at_push: bool = True) -> tuple[str, str]:
     """The note `sd-ship` writes on an item when `repository` lowered its mode.
 
     Returns `(marker, body)`. The marker is the body's first line, and
@@ -733,6 +844,10 @@ def demotion_note(repository: str, answer: RemoteAnswer) -> tuple[str, str]:
     as `RemoteAnswer` keeps it, and what the operator is left holding: the
     written line stays, and the mode is `full` again the day the remote says
     yes, with no edit to the line.
+
+    `at_push=False` is the merge-time ownership check: the branch was pushed
+    before that answer, so the body must not claim artifacts were held back
+    (sd:1000, 3057e71978d9).
     """
     marker = f"Mode demoted to guest on {repository}"
     said = ("the remote answered: " if answer.answered else "the remote could not be asked: ") + (
@@ -740,9 +855,11 @@ def demotion_note(repository: str, answer: RemoteAnswer) -> tuple[str, str]:
     )
     body = (
         f"{marker}\n{said}. The written mode stays as it is: detection is a ceiling, and the next run "
-        "is full again once the remote says yes to all three questions. Planning artifacts this branch "
-        "carries under docs/work/, docs/spec/ or docs/decisions/ were not pushed to that remote; what is "
-        "already in its shared tree from before the answer changed is yours to move."
+        "is full again once the remote says yes to all three questions. "
+        + ("Planning artifacts this branch carries under docs/work/, docs/spec/ or docs/decisions/ were "
+           "not pushed to that remote; what is " if at_push else
+           "The answer came at merge time, after the branch was pushed, so it held nothing back; what is ")
+        + "already in its shared tree from before the answer changed is yours to move."
     )
     return marker, body
 
@@ -762,7 +879,6 @@ def demotion_note_key(marker: str) -> str:
     a newline, so one key matches one marker and no other.
     """
     return marker + "\n"
-
 
 
 # --------------------------------------------------------------------------
@@ -976,6 +1092,37 @@ def repo_ci(connection: Any, root: pathlib.Path | str) -> str:
     return value if value in CI_MODES else "github"
 
 
+#: The values `repo.satellite_gate` takes (sd:2704), default first: `accept`
+#: lets the hub merge on a satellite's offload receipt, and runs every gate in
+#: the repository under `sd_gate_receipts.offload_environment` (sd:2782).
+SATELLITE_GATE_MODES = ("off", "accept")
+
+
+def repo_satellite_gate(connection: Any, root: pathlib.Path | str) -> str:
+    """`repo.satellite_gate` for the repository `root` is a checkout of, else `off`.
+
+    Resolved as `repo_ci` resolves, and fail-closed the same way: an older
+    library or schema without the column, no row, or a read fault answers
+    `off`, and `off` grants nothing, so the hub runs its own gate.
+    """
+    if import_sd_db().module is None:
+        return "off"
+    try:
+        from sd_db import repos  # noqa: PLC0415
+
+        origin = git_output(["config", "--get", "remote.origin.url"], pathlib.Path(root))
+        path = repos.registered_for(connection, str(pathlib.Path(root).resolve()), origin)
+        reader = getattr(repos, "repo_satellite_gate", None)
+        if reader is not None:
+            value = reader(connection, path)
+        else:
+            row = repo_row(connection, path)
+            value = row["satellite_gate"] if row is not None and "satellite_gate" in row.keys() else "off"
+    except Exception:  # every fault is "not said"; see the docstring
+        return "off"
+    return value if value in SATELLITE_GATE_MODES else "off"
+
+
 def ci_mode(root: pathlib.Path | str) -> str:
     """`repo_ci` over a read-only connection this call opens and closes.
 
@@ -995,8 +1142,6 @@ def ci_mode(root: pathlib.Path | str) -> str:
         return repo_ci(connection, root)
     finally:
         connection.close()
-
-
 
 
 def is_managed(row: Any) -> bool:
@@ -2512,8 +2657,20 @@ def attribution_value(name: str, registry: Any) -> str:
     `attribution` drops an `Attributes:` line that does not split into two
     fields, a commit with no claim keeps its vendor out of the author set, and
     the author's own vendor stays on the reviewer chain, open and in silence.
+
+    `<entry>/<vendor>`, the value itself, names `<entry>` when the registry
+    gives it that vendor (sd:2689); another vendor refuses, naming both forms.
     """
-    entry = name.strip()
+    entry, slash, vendor = name.strip().partition("/")
+    if slash:
+        value = attribution_value(entry, registry)
+        if value != f"{entry.strip()}/{vendor.strip().lower()}":
+            raise TrailerError(
+                f"{name.strip()!r} names vendor {vendor.strip()!r}, and {registry.path} "
+                f"resolves {entry.strip()!r} to {value!r}. Name {entry.strip()!r} or "
+                f"{value!r}: a claimed vendor the registry does not give is not a claim.")
+        return value
+    entry = entry.strip()
     provider = registry.providers.get(entry)
     if entry in RESERVED_AUTHORS:
         if provider is not None:
@@ -2544,10 +2701,41 @@ def attribution_value(name: str, registry: Any) -> str:
 
 
 #: Names who is committing, for `hooks/commit-msg` to write as `Authored-with:`
-#: on a message that states none (sd:1295): a registry entry, `human` or
-#: `script`. A harness sets it for its session and a job for its run, so the
-#: trailer lands at commit time and no `sd attribute` commit follows.
+#: on a message that states none (sd:1295): a registry entry, its
+#: `<entry>/<vendor>` value, `human` or `script`. A harness sets it for its
+#: session and a job for its run, so the trailer lands at commit time and no
+#: `sd attribute` commit follows.
 AUTHOR_VARIABLE = "SD_AUTHOR"
+
+#: The variable Claude Code sets to `1` in every tool shell, and the entry and
+#: vendor it stands for when `SD_AUTHOR` is unset (sd:2689). An entry name is
+#: the operator's choice, so the marker resolves only while the registry gives
+#: that entry that vendor. Only a marker a harness is seen to set belongs
+#: here; Codex documents none, so it has no line.
+HARNESS_MARKERS = (("CLAUDECODE", "1", "claude", "anthropic"),)
+
+
+def invoking_author(environ: Mapping[str, str], registry: Any) -> str:
+    """Who runs this: `SD_AUTHOR`, else a harness marker's entry, else "".
+
+    A marker the registry cannot resolve refuses rather than reading as
+    `human`: `human` would let the harness's own vendor review its repair.
+    """
+    named = environ.get(AUTHOR_VARIABLE, "").strip()
+    if named:
+        return named
+    providers = getattr(registry, "providers", {})
+    for variable, mark, entry, vendor in HARNESS_MARKERS:
+        if environ.get(variable) != mark:
+            continue
+        if entry in providers and providers[entry].vendor.strip().lower() == vendor:
+            return entry
+        raise TrailerError(
+            f"{variable}={mark} stands for entry {entry!r} of vendor {vendor!r}, and the "
+            f"registry has no such entry, so this repair cannot name who made it. "
+            f"Set {AUTHOR_VARIABLE}=<the registry entry of vendor {vendor}> or "
+            f"{AUTHOR_VARIABLE}={HUMAN_AUTHOR}.")
+    return ""
 
 
 def states_author(message: str) -> bool:
@@ -2564,7 +2752,7 @@ def commit_author(name: str, read_registry: Callable[[], tuple[Any, str]]) -> st
     local commit does not carry it.
     """
     entry = name.strip()
-    if entry == DEPENDABOT_ENTRY:
+    if entry.partition("/")[0].strip() == DEPENDABOT_ENTRY:
         raise TrailerError(f"{AUTHOR_VARIABLE}={entry!r}: a local commit is never "
                            f"Dependabot's; GitHub's identity on its own commits says that")
     if entry in VENDORLESS_AUTHORS:
@@ -2744,8 +2932,9 @@ ITEM_TRAILER = "Item:"
 WORK_TRAILER = "Work:"
 #: The trailer lines `sd-ship` owns in a pull-request body (sd:1870). It
 #: writes `Work:` into the body it publishes and `Item:`, `Delivers:` and the
-#: authorship lines into the squash message; `Closes:` rides a later merge or
-#: an empty commit, never a body `sd-ship` publishes. `sd_ship_body` reads a
+#: authorship lines into the squash message. `Closes:` rides a later merge or
+#: an empty commit, and in a body names the items a pull request co-delivers,
+#: which the merge closes with a `Delivers:` each (sd:1481). `sd_ship_body` reads a
 #: supplied body against this tuple, and the template test holds the
 #: template's closing block to it.
 OWNED_TRAILERS = (ITEM_TRAILER, WORK_TRAILER, DELIVERS_TRAILER, CLOSES_TRAILER,
@@ -2851,6 +3040,26 @@ def upstream(root: pathlib.Path) -> tuple[str, str]:
     return remote, "main"
 
 
+def _fetched(root: pathlib.Path, remote: str, ref: str) -> str | None:
+    """`git fetch <remote> <ref>`, then what to read the fetched tip as; None when it fails.
+
+    `FETCH_HEAD`, unless a `git_read_memo()` block is open: then the tip's sha,
+    kept for the block, so the next item asks no second fetch (sd:2677). A
+    later write does not drop it, since a sha names the same commit after one.
+    """
+    key = (str(root), remote, ref)
+    if _FETCHED is not None and key in _FETCHED:
+        return _FETCHED[key]
+    if git_output(["fetch", remote, ref], root) is None:
+        return None
+    if _FETCHED is None:
+        return "FETCH_HEAD"
+    tip = git_output(["rev-parse", "--verify", "--quiet", "FETCH_HEAD^{commit}"], root)
+    if tip:
+        _FETCHED[key] = tip
+    return tip or "FETCH_HEAD"
+
+
 def delivered(root: pathlib.Path, item: "str | tuple[str, ...]") -> Answer:
     """`yes`, `no` or `unknown`: is `item` delivered, asked of git and nothing else.
 
@@ -2878,19 +3087,21 @@ def delivered(root: pathlib.Path, item: "str | tuple[str, ...]") -> Answer:
     remote, default = upstream(root)
     if not remote:
         return Answer(YES if any(_closed_by(root, r, item) for r in ("HEAD", default)) else NO)
-    if git_output(["fetch", remote, default], root) is None:
+    fetched = _fetched(root, remote, default)
+    if fetched is None:
         return Answer(UNKNOWN, f"git fetch {remote} {default}")
-    if _closed_by(root, "FETCH_HEAD", item):
+    if _closed_by(root, fetched, item):
         return Answer(YES)
     branch = git_output(["rev-parse", "--abbrev-ref", "HEAD"], root) or ""
     if branch not in ("", "HEAD", default):
-        if git_output(["fetch", remote, branch], root) is None:
+        fetched = _fetched(root, remote, branch)
+        if fetched is None:
             # The remote answered a moment ago, so a refusal here is about the
             # ref -- unless it is still published, and then the tip is missing.
             listed = git_output(["ls-remote", "--heads", remote, branch], root)
             if listed is None or listed:
                 return Answer(UNKNOWN, f"git fetch {remote} {branch}")
-        elif _closed_by(root, "FETCH_HEAD", item):
+        elif _closed_by(root, fetched, item):
             return Answer(YES)
     return Answer(YES if _closed_by(root, "HEAD", item) else NO)
 
@@ -2971,8 +3182,8 @@ def guest_artifact_refusal(root: pathlib.Path, paths: Any, *, ask: Asker = gh_ap
     return (
         f"this repository is in guest mode, so {shown} cannot be written into the "
         "upstream tree; planning artifacts live on the fork's integration branch "
-        "(WORKFLOW.md, `mode: guest`). Detection is a ceiling: a `mode: full` line "
-        "the remote lowers, and a remote that cannot be asked, both resolve guest here."
+        "(WORKFLOW.md, `mode: guest`), and detection is a ceiling, so a `mode: full` line "
+        "the remote lowers, or a remote that cannot be asked, resolves guest here too."
     )
 
 
@@ -3527,6 +3738,12 @@ def acknowledgement_problems(label: str, entry: Any) -> list[str]:
             f"{label}.state.{fact} is not an observable protection fact; "
             f"known facts are {', '.join(ACKNOWLEDGED_FACTS)}"
             for fact in sorted(set(state) - set(ACKNOWLEDGED_FACTS))
+        )
+        # `null` is what an unknown fact observes, so a pin of it would
+        # accept exactly the state nobody could see (sd:2755).
+        problems.extend(
+            f"{label}.state.{fact} is null; a pin names an observed value, and unknown is not one"
+            for fact in sorted(state) if state[fact] is None
         )
     return problems
 

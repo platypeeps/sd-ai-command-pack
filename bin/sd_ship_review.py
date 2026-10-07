@@ -114,6 +114,26 @@ def clean_merges(root: pathlib.Path, reviewed: str, head: str, base_ref: str) ->
     return merges
 
 
+def named_commits(root: pathlib.Path, have: str, lack: str, *, skip: tuple[str, ...] = (), shown: int = 3) -> str:
+    """`N commits (a, b, c, +M more)`: what `have` holds and `lack` does not, oldest first, less `skip` (sd:2339)."""
+    listed = [commit for commit in (sd_lib.git_output(["rev-list", "--reverse", have, f"^{lack}"], root) or "").split()
+              if commit not in skip]
+    more = f", +{len(listed) - shown} more" if len(listed) > shown else ""
+    return f"{len(listed)} commit{'' if len(listed) == 1 else 's'} ({', '.join(c[:12] for c in listed[:shown])}{more})"
+
+
+def base_merge_note(root: pathlib.Path, reviewed: str | None, head: str, base: str | None) -> str:
+    """Why `head` misses the receipt for `reviewed`, when it adds only clean merges of `origin/<base>` (sd:2339)."""
+    if not reviewed or not base or reviewed == head or not is_ancestor(root, reviewed, head):
+        return ""
+    merges = clean_merges(root, reviewed, head, f"refs/remotes/origin/{base}")
+    if merges is None:
+        return ""
+    return (f"; {head[:12]} adds only a merge of origin/{base}, "
+            f"{named_commits(root, head, reviewed, skip=tuple(merges))}, to the reviewed {reviewed[:12]}: "
+            "run sd-ship prepare, which carries the review forward or reviews only the branch's own diff")
+
+
 def paths_between(root: pathlib.Path, old: str, new: str) -> set[str] | None:
     """Every path `old..new` changes, both sides of a rename, or None when git cannot answer."""
     listed = sd_lib.git_output(["diff", "--name-only", "-z", "--no-renames", old, new], root)
@@ -178,13 +198,35 @@ class ReviewRuntime:
     manifest: Callable[[pathlib.Path], dict] | None = None
 
 
+GATE_NOT_RUN = sd_ship_dispositions.GATE_NOT_RUN
+
+
+#: The report fields `timing_plan` judges, kept whole in a refused plan's diagnostic (sd:2646): the stdout tail cut them off.
+PLAN_FIELDS = ("timing", "requested_reviews", "authorship_refusal", "selection_refusal")
+
+
+def plan_fields(output: str) -> dict | None:
+    """`PLAN_FIELDS` from a review run's output; None when the output is not a JSON object."""
+    try:
+        report = json.loads(output)
+    except (ValueError, RecursionError):
+        return None
+    return {key: report.get(key) for key in PLAN_FIELDS} if isinstance(report, dict) else None
+
+
 def complete_report(last: dict, head: str, reviewed_head: str | None) -> dict:
+    """The stored report for `head`, refused unless it is whole.
+
+    A blocking report may carry a gate that never ran: sd-review runs the gate
+    only after a review that does not block (sd:2605). Any other report needs
+    the gate's pass.
+    """
     report = last.get("report") or {}
     blocked = report.get("status") == "blocking"
     if (last.get("head") != head or report.get("subject", {}).get("head") != head
             or (reviewed_head != head and not blocked)
             or report.get("status") not in ("clean", "advisory", "blocking")
-            or (report.get("check") or {}).get("status") != "pass"
+            or (report.get("check") or {}).get("status") not in (("pass", GATE_NOT_RUN) if blocked else ("pass",))
             or not completed_depth(report)):
         raise Refusal("local review receipt is incomplete or does not name this exact head")
     if blocked and (last.get("exit_code") != 1 or last.get("execution_error")
@@ -258,7 +300,12 @@ class SharedReview:
         if not self.binding_holds():
             raise self.binding_refusal()
         subject = self.carried_from(head, passes[-1])
-        report = complete_report(passes[-1], subject, subject if subject != head else self.state.get("reviewed_head"))
+        try:
+            report = complete_report(passes[-1], subject, subject if subject != head else self.state.get("reviewed_head"))
+        except Refusal as refusal:
+            note = base_merge_note(self.root, passes[-1].get("head"), head, self.state.get("base"))
+            refusal.args = (f"{refusal.args[0]}{note}",)
+            raise
         validate_provider_selection(report, passes[-1].get("requested_provider"), completed=True)
         self.history.validate_coverage(self.state, report)
         validate_findings(report)
@@ -300,13 +347,73 @@ class SharedReview:
               file=sys.stderr)
         return True
 
-    def check_review(self, head: str, *, refresh_adjudication: bool = False) -> dict | None:
-        if self.review_inputs(head)["status"] == "blocking":
+    def check_review(self, head: str, *, refresh_adjudication: bool = False, run_gate: bool = False) -> dict | None:
+        report = self.review_inputs(head)
+        if report["status"] == "blocking":
             clearance = sd_ship_dispositions.accepted(self, head)
+            if (report.get("check") or {}).get("status") == GATE_NOT_RUN:
+                self.adjudicated_gate(head, run=run_gate)
             if not refresh_adjudication and self.state.get("review_clearance") != clearance:
                 raise Refusal("accepted dispositions changed; prepare again before publishing or merging")
             return clearance
         return None
+
+    def adjudicated_gate(self, head: str, *, run: bool) -> None:
+        """sd:2605. The gate a blocking review never ran, run once its dispositions are accepted.
+
+        Adjudication accepts a blocking report whose `check` is `not_run`, so
+        the head has passed no test when its findings clear. The prepare that
+        reuses that report runs the gate here, before clearance, and records it
+        as `adjudicated_gate`; publication, merge and `verify-review` read the
+        record and never run one. A failure keeps the pass: its review found
+        blocking findings, which is a spent pass as it always was.
+        """
+        gate = self.state.get("adjudicated_gate") or {}
+        if gate.get("head") == head and gate.get("status") == "pass":
+            return
+        if not run:
+            raise Refusal(f"the review of {head[:12]} blocked before the gate ran, and no gate has passed there "
+                          "since its dispositions were accepted",
+                          code="gate_not_run", boundary="review", state="retryable_failure",
+                          next_action="Run the review or prepare again with the same identity; it reuses the "
+                                      "adjudicated review and runs the gate at this head before clearance.")
+        base = self.gate_check_base()
+        check = adjudicated_check(self.root, head, base, self.database if base else None,
+                                  getattr(self.args, "review_timeout", None) or sd_lib.GATE_CHECK_SECONDS)
+        self.save(adjudicated_gate={**check, "head": head, "recorded_at": self.runtime.clock()})
+        if check["status"] != "pass":
+            said = "\n".join(failing_check_tails(check.get("checks"))) or check.get("detail") or "no check output"
+            raise Refusal(f"the repository gate failed at {head[:12]} after its blocking findings were adjudicated; "
+                          f"the review pass stays spent: {said}",
+                          code="gate_failed", boundary="runtime", state="retryable_failure",
+                          next_action="Fix the gate and prepare again; the fix is reviewed as a fix verification.")
+
+    def rerun_gate(self, head: str) -> None:
+        """sd:2721. The gate alone, at the head whose review cleared before its gate failed.
+
+        `release_gate_failure` kept that pass, so a gate that fails under load
+        costs a gate run rather than a review. A pass puts back the status the
+        review cleared with and this gate's check, keeping the failed one as
+        `failed_check`; the report then reads as any cleared review does. A
+        failure keeps the pass as it was.
+        """
+        base = self.gate_check_base()
+        check = adjudicated_check(self.root, head, base, self.database if base else None,
+                                  getattr(self.args, "review_timeout", None) or sd_lib.GATE_CHECK_SECONDS)
+        passes = self.history.native(self.state)
+        if check["status"] != "pass":
+            self.save(review_preflight_error={"kind": "gate_failed", "stage": "check", "head": head,
+                                              "exit_code": check.get("exit_code"),
+                                              "checks": gate_diagnostics(check, self.runtime.diagnostic_bytes)})
+            said = "\n".join(failing_check_tails(check.get("checks"))) or check.get("detail") or "no check output"
+            raise Refusal(f"the repository gate failed again at {head[:12]}; its review pass stays kept: {said}",
+                          code="gate_failed", boundary="runtime", state="retryable_failure",
+                          next_action="Fix the gate and prepare again; the fix is reviewed as a fix verification.")
+        report = passes[-1]["report"]
+        passes[-1].update(exit_code=0, report={**report, "status": report["cleared_status"], "check": check,
+                                               "failed_check": report["check"]})
+        self.save(passes=passes, reviewed_head=head, review_preflight_error=None)
+        self.check_review(head)
 
     def adjudicate(self) -> dict:
         return sd_ship_dispositions.adjudicate(self)
@@ -464,8 +571,13 @@ class SharedReview:
         if not retry and prior.get("status") == "blocking" and prior.get("subject", {}).get("head") == head:
             if self.binding_moved():
                 return False
-            clearance = self.check_review(head, refresh_adjudication=True)
+            clearance = self.check_review(head, refresh_adjudication=True, run_gate=True)
             self.save(reviewed_head=head, review_clearance=clearance)
+            return True
+        if not retry and kept_gate_failure(prior) and prior.get("subject", {}).get("head") == head:
+            if self.binding_moved():
+                return False
+            self.rerun_gate(head)
             return True
         if self.state.get("reviewed_head") == head and (not retry or completed_depth(prior)):
             if self.binding_moved():
@@ -671,7 +783,9 @@ class SharedReview:
 
     def preflight_diagnostic(self, planned: subprocess.CompletedProcess,
                              kind: str = "invalid_timing_plan", stage: str = "planning") -> dict:
-        diagnostic: dict = {"kind": kind, "stage": stage, "exit_code": planned.returncode}
+        argv = planned.args if isinstance(planned.args, list) else [planned.args]
+        diagnostic: dict = {"kind": kind, "stage": stage, "exit_code": planned.returncode,
+                            "argv": [str(part) for part in argv], "plan": plan_fields(planned.stdout)}
         limit = self.runtime.diagnostic_bytes
         for name in ("stdout", "stderr"):
             data = getattr(planned, name).encode("utf-8", "replace")
@@ -714,8 +828,15 @@ class SharedReview:
                           + ("no provider pass reserved; " if stage == "planning" else f"reserved pass retained{consumed(passes)}; ")
                           + "bounded diagnostics remain in the item ship receipt") from None
 
-    def release_gate_failure(self, report: dict, head: str, passes: list[dict]) -> None:
+    def release_gate_failure(self, report: dict, head: str, passes: list[dict], exit_code: int) -> None:
         """Drop the pass a gate failure reserved, and refuse with the gate's words.
+
+        sd:2721 reverses sd:2605 for a review that cleared before its gate
+        failed (`kept_gate_failure`): that pass reviewed the branch, so it is
+        kept with its report and no reviewed head. The next prepare at the
+        head runs the gate alone (`rerun_gate`), and a fix is verified as the
+        delta from it. The operator ruled so on 2026-10-05: sd:2671 spent three
+        full reviews on load-flaky gates.
 
         The reservation is removed rather than kept as an incomplete pass: it
         reviewed nothing, so it has no findings to carry forward, and keeping
@@ -734,17 +855,37 @@ class SharedReview:
         check = report.get("check") or {}
         detail = str(check.get("detail") or "")[-self.runtime.diagnostic_bytes:]
         checks = gate_diagnostics(check, self.runtime.diagnostic_bytes)
-        self.release_pass(passes, {"kind": "gate_failed", "stage": "check", "head": head,
-                                   "exit_code": check.get("exit_code"), "detail": detail, "checks": checks})
+        diagnostic = {"kind": "gate_failed", "stage": "check", "head": head,
+                      "exit_code": check.get("exit_code"), "detail": detail, "checks": checks}
+        kept = kept_gate_failure(report)
+        if kept:
+            passes[-1].update(report=report, exit_code=exit_code)
+            self.save(passes=passes, reviewed_head=None, phase="reviewed", review_preflight_error=diagnostic)
+        else:
+            self.release_pass(passes, diagnostic)
         # Each failing check by name with its own tail; the last 500 characters
         # of one stream dropped the failing test's assertion (sd:2021).
+        # The gate's summary and the failing checks lead; the gate's own
+        # stderr, such as its slot wait, follows as context: a reader that
+        # cuts the refusal's head read the wait line as the failure (sd:2687).
         said = detail.strip()[-FAILING_TAIL_CHARS:]
-        evidence = "\n".join([said] * bool(said) + failing_check_tails(checks))
-        raise Refusal(f"the repository gate failed before any reviewer was asked; no review pass was spent: "
+        summary = str(check.get("summary") or "").strip()
+        failed = [summary] * bool(summary) + failing_check_tails(checks)
+        evidence = "\n".join(failed + [f"gate output: {said}" if failed else said] * bool(said))
+        # sd:2605. A pass that asked reviewers but kept no cleared status is
+        # released too, and the next prepare reviews the fixed branch again.
+        when = ("after the review cleared; the review pass is kept, so the next prepare at this head runs only "
+                "the gate" if kept else
+                "after the review cleared; the review pass was released, so the next prepare reviews again"
+                if report.get("outcomes") else "before any reviewer was asked; no review pass was spent")
+        raise Refusal(f"the repository gate failed {when}: "
                       f"{evidence or 'no check output; sd-ship observe prints the ship receipt'}",
                       code="gate_failed", boundary="runtime", state="retryable_failure",
-                      next_action="Fix the gate, or rerun prepare when the machine is less loaded "
-                                  "(--review-timeout raises the limit); the next prepare reviews normally.")
+                      next_action=("Rerun prepare when the machine is less loaded: it runs only the gate at this head "
+                                   "(--review-timeout raises the limit). Or fix the gate and prepare again: the fix "
+                                   "is reviewed as a fix verification." if kept else
+                                   "Fix the gate, or rerun prepare when the machine is less loaded "
+                                   "(--review-timeout raises the limit); the next prepare reviews normally."))
 
     def release_pass(self, passes: list[dict], diagnostic: dict) -> None:
         """Drop the pass just reserved and put back every field its dispatch overwrote."""
@@ -796,8 +937,8 @@ class SharedReview:
                           f"its reserved pass remains recorded{consumed(passes)}; "
                           "bounded diagnostics remain in the item ship receipt")
         stash_raw_responses(report, head)
-        if unreviewed_gate_failure(report, result.returncode):
-            self.release_gate_failure(report, head, passes)
+        if released_gate_failure(report, result.returncode):
+            self.release_gate_failure(report, head, passes, result.returncode)
         request = passes[-1].get("additional_review_request")
         if request and unreviewed(report, result.returncode):
             self.release_unreviewed_request(report, head, passes, result.returncode)
@@ -810,8 +951,12 @@ class SharedReview:
             self.save(reviewed_head=None)
             raise
         if result.returncode:
+            # sd:2605. A review that refuses the head stops before the gate; say so,
+            # so nobody reads a refusal with no gate failure in it as tests that passed.
+            unrun = (report.get("check") or {}).get("status") == GATE_NOT_RUN
             message = (f"local review {report.get('status')}: {report.get('completed_reviews', 0)}/{report.get('requested_reviews', 0)} completed"
-                       f"{failed_outcomes(report)}{REQUEST_CONSUMED if request else ''}")
+                       f"{failed_outcomes(report)}{REQUEST_CONSUMED if request else ''}"
+                       f"{'; the gate did not run, so no test has passed at this head' if unrun else ''}")
             if report.get("status") == "blocking":
                 raise sd_ship_dispositions.blocking_refusal(self, head, report, message)
             raise Refusal(f"{message}; see item ship receipt")
@@ -884,7 +1029,10 @@ def gate_diagnostics(check: dict, limit: int) -> list[dict]:
              "stdout": str(record.get("stdout") or "")[-limit:], "stderr": str(record.get("stderr") or "")[-limit:],
              # Where sd-check kept the whole output, and the failed shards it read there (sd:2558).
              "output_path": str(record["output_path"])[:limit] if record.get("output_path") else None,
-             "failed_shards": [str(line)[:limit] for line in shard_lines(record.get("failed_shards"))][:FAILED_SHARDS_NAMED]}
+             "failed_shards": [str(line)[:limit] for line in shard_lines(record.get("failed_shards"))][:FAILED_SHARDS_NAMED],
+             # Every step that failed, shard or not, and the failing part of the output (sd:2608).
+             "failed_steps": [str(line)[:limit] for line in shard_lines(record.get("failed_steps"))][:FAILED_SHARDS_NAMED],
+             "failure": str(record.get("failure") or "")[-limit:]}
             for record in [*records[:len(sd_lib.CHECK_NAMES)], *docs] if isinstance(record, dict)]
 
 
@@ -909,7 +1057,9 @@ def failing_check_tails(rows: Any, limit: int = FAILING_TAIL_CHARS) -> list[str]
 
     The failed shards and the file holding the whole output come first: a
     shard that failed early in a long run is in neither tail, and the tails
-    are what a lane log cuts again (sd:2558).
+    are what a lane log cuts again (sd:2558). Each other failed step, such as
+    a make target, follows the tails, and then the failing lines the tails
+    do not already hold (sd:2608).
     """
     named = []
     for row in rows if isinstance(rows, list) else []:
@@ -920,8 +1070,14 @@ def failing_check_tails(rows: Any, limit: int = FAILING_TAIL_CHARS) -> list[str]
         streams = [(stream, str(row.get(stream) or "").strip()) for stream in ("stderr", "stdout")]
         said = [f"{stream}: {'...' if len(text) > limit else ''}{text[-limit:]}" for stream, text in streams if text]
         reason = str(row.get("reason") or "").strip()
+        shards = set(shard_lines(row.get("failed_shards")))
+        steps = [f"failed step: {step}" for step in shard_lines(row.get("failed_steps"))[:FAILED_SHARDS_NAMED]
+                 if step not in shards]
+        failure = str(row.get("failure") or "").strip()
+        adds = any(line.strip() and line not in "\n".join(said) for line in failure.splitlines())
+        steps += [f"failure: {'...' if len(failure) > limit else ''}{failure[-limit:]}"] * adds
         named.append(f"{row.get('name')} (exit {row.get('exit_code')}): "
-                     + "\n".join(found + (said if said else [reason or "no output"])))
+                     + "\n".join(found + (said if said else [reason or "no output"]) + steps))
     return named
 
 
@@ -942,18 +1098,51 @@ def failed_outcomes(report: dict, limit: int = 600) -> str:
     return f" ({text[:limit]}{'...' if len(text) > limit else ''})" if text else ""
 
 
-def unreviewed_gate_failure(report: dict, exit_code: int) -> bool:
-    """sd:1475. The repository gate failed and no reviewer was asked.
+def adjudicated_check(root: pathlib.Path, head: str, base: str | None, database: pathlib.Path | None,
+                      timeout: int) -> dict:
+    """`sd-check` at `head` in a clean worktree, as sd-review's gate step runs it (sd:2605).
 
-    sd-review stops at the gate and returns before any provider dispatch, so
-    such a run verified nothing and cost nothing. Every clause has to hold: a
-    report that names an outcome, a reviewer or a completed review asked
-    someone, and that run keeps its pass as it always has.
+    With a `base` it runs as the local gate does and reads or leaves a receipt
+    the merge gate reuses; without one exit 0 passes and no receipt is kept.
+    """
+    import sd_gate_run  # noqa: PLC0415 -- only a prepare that clears adjudicated findings runs a gate here
+
+    try:
+        gate = sd_gate_run.check_in_worktree(root, head, timeout=timeout, base=sd_gate_run.base_ref(base),
+                                             database=database, slot_timeout=sd_lib.GATE_SLOT_SECONDS)
+    except sd_gate_run.GateError as error:
+        gate = {"status": "failure", "exit_code": None, "stderr": str(error), "head": head}
+    passed = gate["status"] == "success" if base else gate["exit_code"] == 0
+    check = {"status": "pass" if passed and gate.get("head") == head else "fail", "exit_code": gate["exit_code"],
+             "detail": str(gate.get("stderr") or "").strip()[-2000:], "checks": (gate.get("report") or {}).get("checks"),
+             "summary": gate.get("summary")}
+    return {**check, "reused": gate["reused"]} if gate.get("reused") else check
+
+
+#: The statuses a review clears a head with; `cleared_status` is one of them when the gate failed after it.
+CLEARED_STATUSES = ("clean", "advisory")
+
+
+def kept_gate_failure(report: dict) -> bool:
+    """sd:2721. A `gate_failed` report whose review completed and cleared, so its pass is kept."""
+    return (report.get("status") == "gate_failed" and report.get("cleared_status") in CLEARED_STATUSES
+            and completed_depth(report))
+
+
+def released_gate_failure(report: dict, exit_code: int) -> bool:
+    """sd:1475, sd:2605. The repository gate failed, so the pass is released.
+
+    sd-review runs the gate only after a review that does not block, so a
+    `gate_failed` report either asked nobody (an old binding) or holds a
+    review that cleared. The first is released: the head cannot ship, and the
+    next prepare reviews the fixed branch again. The second keeps its pass
+    (`kept_gate_failure`, sd:2721). A report holding a blocking finding is
+    not a gate failure and keeps its pass as it always has.
     """
     return (exit_code != 0 and report.get("status") == "gate_failed"
             and (report.get("check") or {}).get("status") == "fail"
-            and not report.get("outcomes") and not report.get("reviewed_by")
-            and not report.get("completed_reviews") and not report.get("findings"))
+            and not any(isinstance(row, dict) and row.get("disposition") == "blocking"
+                        for row in report.get("findings") or []))
 
 
 #: Opt-in debugging (system #590): the directory that receives raw reviewer

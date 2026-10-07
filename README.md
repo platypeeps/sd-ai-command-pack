@@ -93,9 +93,9 @@ else is. Its executables write these paths, and no others:
   It also adds the template's new lines to that checkout's `CLAUDE.local.md`
   block, removing none, and creates its untracked `docs/dashboard/`. `--dry-run` prints every auto repository's diff against
   its `origin/HEAD` and writes nothing. A repository is the operator's own
-  when its owner is in `fleet.owners` of the machine config, a JSON list of
-  GitHub logins (unset: `DEFAULT_OWNERS` in `bin/sd_fleet.py`); any other
-  owner's protection stands.
+  when its owner is in `sd.fleet_owners`, comma-separated GitHub logins
+  (unset: the deprecated `fleet.owners` list in the machine config, then
+  `DEFAULT_OWNERS` in `bin/sd_fleet.py`); any other owner's protection stands.
 - `docs/work/<item>/.citations.tsv` — the citation baseline, one per active work
   item, from `sd-docs-lint --update-citations`. **Tracked.**
 - `build/` — HTML from `sd-research-kit render`, into the research repository you
@@ -168,11 +168,13 @@ These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOM
 `sd config get`, `list`, and `unset` inspect or remove settings. No personal grant ships in this repository.
 `sd.gate_slots` is load control, not a grant: how many gates may run at once on the machine, across every repository (unset: a quarter of the cores).
 `sd.gate_load_max` and `sd.gate_settle_seconds` are load control too: the gate queue starts its head 45 s after the last start by default, and only below a load1 limit where one is set (unset: none, since macOS counts disk waits in the load average).
+`sd.fleet_owners` names the GitHub logins whose repositories `sd fleet stamp` treats as the operator's own, comma-separated; it grants nothing.
 `sd.gate_cache_gb` bounds the local gate's warm Rust build folders (unset: 40 GB); past it the gate removes the least recently used free folder.
-`sd-ship lane enqueue|list|cancel|run|watch` keeps a serial prepare-and-merge queue per repository in a file under `sd.lane_root` (unset: `$XDG_STATE_HOME/sd/lanes`), so a queued chain outlives the session that filled it.
+`sd-ship lane enqueue|list|cancel|move|hold|release|run|watch` keeps a serial prepare-and-merge queue per repository in a file under `sd.lane_root` (unset: `$XDG_STATE_HOME/sd/lanes`), so a queued chain outlives the session that filled it. After a merge the runner deletes the remote branch, notes the item with the command that removes the worktree, and fast-forwards the main checkout; it never removes a worktree, since removal can race a live builder.
 `sd gate run -- make check` queues any command the same way; `sd gate status` shows the queue.
 Wrap a plain `make check` in any repository that way, and drop a per-repository `lockf` from lane scripts: the pool orders gates across every repository.
 A waiting gate names who holds each slot and since when.
+`sd.review_slots` is load control too: how many reviews may run their reviewers at once on the machine (unset: 2).
 `sd gate post --head SHA` runs the merge gate at SHA and posts `sd/local-gate`, for a merge path that is not `sd-ship merge`.
 `sd gate check` runs the same check at `HEAD` and records a pass that `sd-ship prepare` and the merge gate reuse at that head; it posts nothing.
 
@@ -354,7 +356,7 @@ and prints its own wall time against the budget its header states.
 `Authored-with:`, `Needed-by:` or other checked trailer sits outside the final
 paragraph, where git does not read it; it names the line, and
 `SD_SKIP_HOOKS` does not skip it. With `SD_AUTHOR=<entry>` set (`claude`,
-`codex`, `human`, `script`), it first writes `Authored-with:` into a message
+`codex`, `human`, `script`, or a value such as `claude/anthropic`), it first writes `Authored-with:` into a message
 that has none, so no `sd attribute` commit follows. The hook is one per
 clone: the link sits in the clone's common `.git/hooks`, its target is the
 relative `../../hooks/pre-commit`, so it reads the main checkout's tracked
@@ -367,6 +369,12 @@ stack's residue. This is
 a setting of the clone, not a render, so `--user` does not make it and
 `--uninstall` does not remove it; `bin/sd_install.py` is unchanged, and folding
 the hook into `--user` is the owner's call.
+
+Another repository gets the commit-msg hook alone from `sd commit-hook`, run
+inside it. It links that clone's common `.git/hooks/commit-msg` to this
+checkout's `hooks/commit-msg` by absolute path, and the hook reads `sd_lib`
+from the `bin/` beside its own real path. It refuses while `core.hooksPath` is
+set, and it refuses any other file already at the link's path.
 
 ### What it owns, and what it will not touch
 

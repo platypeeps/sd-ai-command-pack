@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import copy
 import importlib
 import json
@@ -21,6 +22,24 @@ ship = fixture.ship
 sd_ship_review = importlib.import_module("sd_ship_review")
 CAP = fixture.CAP
 HEAD, BASE = "a" * 40, "b" * 40
+
+
+class WholeOptionNames(unittest.TestCase):
+    """sd:2646: `prepare --pr 207` parsed as `--provider 207`, and every review asked for a provider named 207."""
+
+    def test_a_prefix_of_an_option_is_refused(self):
+        with patch("sys.stderr"), self.assertRaises(SystemExit) as refused:
+            ship.parser().parse_args(["prepare", "--pr", "207", "--item", "2645", "--associate-only"])
+        self.assertEqual(refused.exception.code, 2)
+
+    def test_no_subcommand_matches_a_prefix(self):
+        def walk(parser, name):
+            yield name, parser.allow_abbrev
+            for action in parser._actions:
+                if isinstance(action, argparse._SubParsersAction):
+                    for child_name, child in action.choices.items():
+                        yield from walk(child, f"{name} {child_name}")
+        self.assertEqual([name for name, abbreviates in walk(ship.parser(), "sd-ship") if abbreviates], [])
 
 
 class ProviderSelection(unittest.TestCase):
