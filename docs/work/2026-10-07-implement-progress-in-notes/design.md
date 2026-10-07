@@ -244,7 +244,9 @@ block. Point 7 therefore requires a change that alters a step to be written
 in that step's block.
 
 **Decision: the block digest, with point 7's stable ids kept as a rule.** It
-is the one binding that covers every edit row.
+is the one binding that covers every edit row. Block digest chosen by the
+hub lead: forced new id cannot be checked by the lint. The operator may
+overrule when ruling on Q1-Q11.
 
 The digest binding is also the backstop for point 7's stable ids. A
 renumbered plan breaks that rule, and the lint cannot see it: the lint
