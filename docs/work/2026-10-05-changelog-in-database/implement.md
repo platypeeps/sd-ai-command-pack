@@ -9,14 +9,20 @@ fail on `main` before the step's code lands.
 
 ## Step checklist
 
-- [ ] 1. `bin/sd_changelog.py`: parser, row key, writer, reader. Size M, 4 h.
+- [x] 1. `bin/sd_changelog.py`: parser, row key, writer, reader. Size M, 4 h.
       Own PR.
-      - `parse(body)` returns the entries of the `## Changelog` section, an
-        empty list for `none` (Q1), or a refusal code: `changelog_missing`,
-        `changelog_invalid`.
-      - `private(text, patterns)` returns the matching line numbers.
-      - `key(slug, pr)`, `write(connection, row)` through `sd_db.ship.save`,
-        idempotent on `merge_commit` and `body_digest`.
+      - `parse_section(body)` returns the entries of the `## Changelog`
+        section, an empty list for `none` (Q1), or raises `ChangelogError`
+        with a refusal code: `changelog_missing`, `changelog_invalid`.
+      - `private(text, patterns)` returns the matching line numbers. It
+        matches with `grep -E`, as `local-leak-guard` does. No usable pattern
+        raises `changelog_patterns_missing`; a pattern `grep` refuses raises
+        `changelog_patterns_invalid`.
+      - `row_key(slug, pr)`, `write(connection, row)` through
+        `sd_db.ship.save`, idempotent on `merge_commit` and `body_digest`.
+      - The names `parse` and `key` were planned. Other `bin/` functions
+        carry both names, and `tests/test_code_health.py` holds the count of
+        shared public names to its ceiling.
       - `rows(connection, slug)` by range scan on `state`, newest revision
         per key.
       - Nothing calls them yet.
