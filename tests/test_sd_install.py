@@ -2589,10 +2589,10 @@ class ServingTreeTests(InstallerHarness):
 class ServeTests(InstallerHarness):
     """`make setup` serves the machine from a dedicated clone of origin/main (sd:1118).
 
-    `--serve` makes the clone the first time, links its `.venv` to the main
-    checkout's, and hands the activation to the clone's own installer as
-    `--pull`. That installer is a recorder here; `ServingTreeTests` covers
-    what the real `--pull` does in the clone.
+    `--serve` makes the clone the first time, has it provision its own
+    `.venv` with its own `make setup SERVE=no`, and hands the activation to
+    the clone's own installer as `--pull`. The installer and the Makefile are
+    recorders here; `ServingTreeTests` covers what the real `--pull` does.
     """
 
     RECORDER = (
@@ -2600,6 +2600,15 @@ class ServeTests(InstallerHarness):
         "with open(os.environ['SERVE_RECORD'], 'w') as handle:\n"
         "    json.dump({'argv': sys.argv[1:], 'file': __file__}, handle)\n"
         "sys.exit(int(os.environ.get('SERVE_EXIT', '0')))\n"
+    )
+    # Says whether it ran before or after the `--pull` recorder, and what VENV it saw.
+    MAKEFILE = (
+        "setup:\n"
+        "\t@if [ -L .venv ]; then rm .venv; fi; mkdir -p .venv\n"
+        "\t@if [ -e \"$$SERVE_RECORD\" ]; then echo after; else echo before; fi >> .venv/provisioned\n"
+        "\t@echo 'LIBRARY = 1' > .venv/sd_db.py\n"
+        "\t@echo 'VENV=$(VENV) SERVE=$(SERVE)' > .venv/variables\n"
+        "\t@exit $${SERVE_MAKE_EXIT:-0}\n"
     )
 
     def git(self, repo: Path, *args: str) -> str:
@@ -2610,6 +2619,7 @@ class ServeTests(InstallerHarness):
         self.origin = self.home / "origin"
         (self.origin / "bin").mkdir(parents=True)
         (self.origin / "bin" / "sd_install.py").write_text(self.RECORDER, encoding="utf-8")
+        (self.origin / "Makefile").write_text(self.MAKEFILE, encoding="utf-8")
         self.git(self.origin, "init", "-q", "-b", "main")
         self.git(self.origin, "add", "-A")
         self.git(self.origin, "-c", "user.email=t@example.test", "-c", "user.name=t", "commit", "-qm", "one")
@@ -2619,10 +2629,6 @@ class ServeTests(InstallerHarness):
         (self.work / ".venv" / "bin").mkdir(parents=True)
         self.record = self.home / "record.json"
         self.tree = self.home / ".local" / "share" / "sd-ai-command-pack" / "serving"
-        # The suite runs inside a virtualenv; most tests here stand for a `--serve` outside one.
-        patcher = unittest.mock.patch.object(sd_install.sys, "prefix", sys.base_prefix)
-        patcher.start()
-        self.addCleanup(patcher.stop)
 
     def context(self, checkout: Path | None = None, **extra) -> "sd_install.Context":
         environ = {"PATH": os.environ.get("PATH", ""), "SERVE_RECORD": str(self.record), **extra}
@@ -2632,14 +2638,18 @@ class ServeTests(InstallerHarness):
         out = io.StringIO()
         return sd_install.cmd_serve(ctx or self.context(), out), out.getvalue()
 
+    def provisioned(self) -> list[str]:
+        return (self.tree / ".venv" / "provisioned").read_text(encoding="utf-8").split()
+
     def test_serve_clones_origin_detached_at_main_and_hands_over_to_the_clone(self):
         rc, output = self.serve()
         self.assertEqual(rc, 0, output)
         self.assertEqual(self.git(self.tree, "rev-parse", "HEAD"), self.merged)
         self.assertEqual(self.git(self.tree, "rev-parse", "--abbrev-ref", "HEAD"), "HEAD", "the clone is detached")
         self.assertEqual(self.git(self.tree, "remote", "get-url", "origin"), str(self.origin))
-        self.assertEqual((self.tree / ".venv").readlink(), self.work / ".venv")
-        self.assertEqual(self.git(self.tree, "status", "--porcelain"), "", "the venv link dirties the clone")
+        self.assertFalse((self.tree / ".venv").is_symlink())
+        self.assertEqual(self.provisioned(), ["before"], "the first pull ran before the clone had its library")
+        self.assertEqual(self.git(self.tree, "status", "--porcelain"), "", "the venv dirties the clone")
         record = json.loads(self.record.read_text(encoding="utf-8"))
         self.assertEqual(record["argv"], ["--pull", "--home", str(self.home)])
         self.assertEqual(Path(record["file"]).resolve(), (self.tree / "bin" / "sd_install.py").resolve())
@@ -2681,45 +2691,56 @@ class ServeTests(InstallerHarness):
         self.assertEqual(rc, 3, output)
         self.assertTrue((data / "sd-ai-command-pack" / "serving" / ".git").is_dir())
 
-    def test_serve_leaves_a_venv_it_did_not_make(self):
-        self.assertEqual(self.serve()[0], 0)
-        (self.tree / ".venv").unlink()
-        (self.tree / ".venv").mkdir()
-        self.assertEqual(self.serve()[0], 0)
-        self.assertFalse((self.tree / ".venv").is_symlink())
-
-    def test_the_venv_link_follows_the_environment_make_setup_provisioned(self):
-        """Review round 3: `make setup VENV=...` runs `--serve` from that environment, so the clone links it."""
-        self.assertEqual(self.serve()[0], 0)
-        chosen = self.home / "chosen-env"
-        with unittest.mock.patch.object(sd_install.sys, "prefix", str(chosen)):
+    def test_the_serving_environment_outlives_the_checkout_that_ran_setup(self):
+        """sd:1118 lane review: the tree's `.venv` is its own, not a link to the caller's environment."""
+        with unittest.mock.patch.object(sd_install.sys, "prefix", str(self.work / ".venv")):
             self.assertEqual(self.serve()[0], 0)
-        self.assertEqual((self.tree / ".venv").readlink(), chosen)
+        (self.work / ".venv").rename(self.home / "removed-venv")
+        venv = self.tree / ".venv"
+        self.assertFalse(venv.is_symlink())
+        found = subprocess.run([sys.executable, "-c", "import sd_db; print(sd_db.LIBRARY)"],
+                               cwd=venv, capture_output=True, text=True, check=False)
+        self.assertEqual(found.stdout.strip(), "1", found.stderr)
 
-    def test_a_refused_pull_leaves_the_venv_link_as_it_was(self):
-        """Review round 4: a dirty serving tree refuses `--pull`, and the tree keeps the environment it had."""
+    def test_a_later_serve_provisions_after_the_pull(self):
         self.assertEqual(self.serve()[0], 0)
-        (self.tree / "draft.md").write_text("planning\n", encoding="utf-8")
-        chosen = self.home / "chosen-env"
-        with unittest.mock.patch.object(sd_install.sys, "prefix", str(chosen)):
-            rc, _ = self.serve(self.context(SERVE_EXIT="1"))
-        self.assertEqual(rc, 1)
-        self.assertEqual((self.tree / ".venv").readlink(), self.work / ".venv")
-
-    def test_a_child_run_that_raises_leaves_the_venv_link_as_it_was(self):
-        """Review round 5: the restore runs when the child run raises, not only when it returns non-zero."""
+        self.record.unlink()
         self.assertEqual(self.serve()[0], 0)
-        chosen = self.home / "chosen-env"
-        with unittest.mock.patch.object(sd_install.sys, "prefix", str(chosen)), \
-                unittest.mock.patch.object(sd_install.subprocess, "run", side_effect=OSError(8, "Exec format error")):
-            with self.assertRaises(OSError):
-                self.serve()
-        self.assertEqual((self.tree / ".venv").readlink(), self.work / ".venv")
+        self.assertEqual(self.provisioned(), ["before", "after"])
 
-    def test_a_failed_first_pull_leaves_no_venv_link(self):
-        rc, _ = self.serve(self.context(SERVE_EXIT="1"))
-        self.assertEqual(rc, 1)
+    def test_a_borrowed_venv_link_is_replaced_before_the_pull(self):
+        self.assertEqual(self.serve()[0], 0)
+        (self.tree / ".venv").rename(self.home / "first-venv")
+        (self.tree / ".venv").symlink_to(self.work / ".venv")
+        self.record.unlink()
+        self.assertEqual(self.serve()[0], 0)
         self.assertFalse((self.tree / ".venv").is_symlink())
+        self.assertEqual(self.provisioned(), ["before"])
+        self.assertEqual(list((self.work / ".venv").iterdir()), [self.work / ".venv" / "bin"])
+
+    def test_a_failed_first_provision_runs_no_pull(self):
+        rc, output = self.serve(self.context(SERVE_MAKE_EXIT="2"))
+        self.assertEqual(rc, 2)
+        self.assertIn(f"error: provisioning {self.tree / '.venv'} failed; run `make setup` again", output)
+        self.assertFalse(self.record.exists(), "the pull ran without the clone's library")
+
+    def test_a_failed_pull_provisions_nothing_after_it(self):
+        self.assertEqual(self.serve()[0], 0)
+        self.record.unlink()
+        self.assertEqual(self.serve(self.context(SERVE_EXIT="1"))[0], 1)
+        self.assertEqual(self.provisioned(), ["before"])
+
+    def test_a_failed_provision_after_the_pull_is_reported(self):
+        self.assertEqual(self.serve()[0], 0)
+        rc, output = self.serve(self.context(SERVE_MAKE_EXIT="2"))
+        self.assertEqual(rc, 2)
+        self.assertIn("failed; run `make setup` again", output)
+
+    def test_the_callers_make_overrides_do_not_reach_the_trees_setup(self):
+        """`make setup VENV=x` passes VENV in MAKEFLAGS; the tree provisions its own `.venv` regardless."""
+        elsewhere = str(self.home / "elsewhere")
+        self.assertEqual(self.serve(self.context(MAKEFLAGS=f"VENV={elsewhere}", VENV=elsewhere, MAKELEVEL="1"))[0], 0)
+        self.assertEqual((self.tree / ".venv" / "variables").read_text(encoding="utf-8").split(), ["VENV=", "SERVE=no"])
 
     def test_serve_refuses_to_run_from_the_serving_clone_or_without_origin(self):
         self.assertEqual(self.serve()[0], 0)

@@ -2984,8 +2984,8 @@ def _clone_serving_tree(ctx: Context, tree: Path, out) -> bool:
             print(f"error: git {' '.join(args[:2])} failed for the serving checkout:\n{err}\n"
                   f"{spare} holds what it left; remove it once read.", file=out)
             return False
-    # The `.venv` link below is the machine's, not the tree's: excluded here,
-    # so `--verify` and `--pull` never read it as somebody's work.
+    # The tree's own `.venv` is provisioned, not committed: excluded here, so
+    # `--verify` and `--pull` never read it as somebody's work.
     with open(spare / ".git" / "info" / "exclude", "a", encoding="utf-8") as exclude:
         exclude.write("/.venv\n")
     spare.rename(tree)
@@ -2993,12 +2993,26 @@ def _clone_serving_tree(ctx: Context, tree: Path, out) -> bool:
     return True
 
 
-def _provisioned_environment(ctx: Context) -> Path | None:
-    """The environment `make setup` just provisioned: the one running `--serve`, else the main checkout's `.venv`."""
-    if sys.prefix != sys.base_prefix:
-        return Path(sys.prefix)
-    code, common, _ = _git(ctx, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
-    return None if code or not common else Path(common).parent / ".venv"
+#: What a calling `make` hands its children. `make setup VENV=...` puts the
+#: override in `MAKEFLAGS`, and a sub-make would provision that path, not the
+#: tree's own `.venv`.
+MAKE_VARIABLES = frozenset({"MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES", "VENV"})
+
+
+def _provision_serving_tree(ctx: Context, tree: Path, out) -> int:
+    """Build the tree's own `.venv` with its own `make setup SERVE=no` (sd:1118 lane review).
+
+    The tree's environment is its own, so removing the checkout that ran
+    `make setup` takes nothing the served commands need. Its recipe is the
+    tree's, at the commit it serves, so the requirements match the code.
+    """
+    environ = {key: value for key, value in ctx.environ.items() if key not in MAKE_VARIABLES}
+    done = subprocess.run(["make", "-C", str(tree), "setup", "SERVE=no"],  # nosec B603 B607 - fixed argv
+                          env=environ, capture_output=True, text=True, check=False)
+    print(done.stdout + done.stderr, file=out, end="")
+    if done.returncode:
+        print(f"error: provisioning {tree / '.venv'} failed; run `make setup` again", file=out)
+    return done.returncode
 
 
 def cmd_serve(ctx: Context, out) -> int:
@@ -3008,10 +3022,9 @@ def cmd_serve(ctx: Context, out) -> int:
     clean checkout nobody works in, which only `make setup` updates. The
     first run clones it; every run then hands it to the clone's own
     installer as `--pull`, which detaches it at the exact commit `origin/main`
-    names and renders from it. The clone's `.venv` is a link to the
-    environment `make setup` provisioned `sd_db` into, so the served commands
-    find the library the same way a worktree does. A real `.venv` directory
-    there is left alone.
+    names and renders from it. The clone provisions its own `.venv`: before
+    the first `--pull`, so no command is served without its library, and
+    after each later one, so the environment matches the commit served.
     """
     tree = serving_tree(ctx.home, ctx.environ)
     if tree.resolve() == ctx.checkout.resolve():
@@ -3029,27 +3042,19 @@ def cmd_serve(ctx: Context, out) -> int:
     elif ctx.dry_run:
         print(f"would detach {tree} at origin/main and render", file=out)
         return 0
-    environment = _provisioned_environment(ctx)
     venv = tree / ".venv"
-    swapped = environment is not None and (venv.is_symlink() or not venv.exists())
-    previous = os.readlink(venv) if venv.is_symlink() else None
-    if environment is not None and swapped:
-        _replace_link(venv, environment)
+    # A link is another checkout's environment, which the tree must not borrow.
+    fresh = venv.is_symlink() or not venv.is_dir()
+    if fresh:
+        code = _provision_serving_tree(ctx, tree, out)
+        if code:
+            return code
     argv = [sys.executable, str(tree / "bin" / "sd_install.py"), "--pull", *_forwarded(ctx)]
-    returncode = 1
-    try:
-        done = subprocess.run(argv, env=ctx.environ, capture_output=True, text=True, check=False)  # nosec B603 - fixed argv
-        print(done.stdout + done.stderr, file=out, end="")
-        returncode = done.returncode
-    finally:
-        # A `--pull` that refuses, fails or never runs leaves the tree at its
-        # old commit, so it keeps the environment it had (review rounds 4, 5).
-        if returncode and swapped:
-            if previous is None:
-                venv.unlink()
-            else:
-                _replace_link(venv, Path(previous))
-    return returncode
+    done = subprocess.run(argv, env=ctx.environ, capture_output=True, text=True, check=False)  # nosec B603 - fixed argv
+    print(done.stdout + done.stderr, file=out, end="")
+    if done.returncode or fresh:
+        return done.returncode
+    return _provision_serving_tree(ctx, tree, out)
 
 
 def cmd_uninstall(ctx: Context, out) -> int:
