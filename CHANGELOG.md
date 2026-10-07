@@ -4,6 +4,13 @@
 
 ### Added
 
+- **`sd-research-kit review` checks each map for stable row IDs and a gaps section (sd:1835, sd:1836).**
+  Each `20-map/*.md` needs one table whose first column is all stable IDs (`C01`, `C02`, ...) and a heading with the word `Gaps`.
+  A miss prints `WARN` and leaves the exit at 0: the rulings make both required without saying they fail, and every research repo predates them.
+  The research hook now runs `sd-research-kit checklinks` after each render and reports broken links; it still never fails the git command (sd:1840).
+  `init-hook` upgrades an installed hook in place.
+  `references/conventions.md` adds a number-grade table for the main document (sd:1837) and a `Status` column for `10-sources/registry.md` (sd:1838); both are guidance only.
+
 - **`sd task edit --clear-branch` clears a stale branch name (sd:2729).**
   It writes the cleared branch through `sd_db`'s `edit_item` (sd:2818), with the usual note and `--if-revision` check.
   It sets no branch; `sd runner prepare --branch` still does that.

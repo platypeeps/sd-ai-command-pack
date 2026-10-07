@@ -1490,6 +1490,18 @@ def main(argv):
     except (OSError, subprocess.SubprocessError):
         print("%s: render failed; docs/dashboard/ is now stale" % trigger,
               file=sys.stderr)
+    # A renamed document leaves every link to it pointing nowhere, and the
+    # render does not notice (sd:1840). Reported, never fatal, like the render.
+    try:
+        checked = subprocess.run([kit, "checklinks"], cwd=root, timeout=600,
+                                 env=env).returncode
+    except (OSError, subprocess.SubprocessError):
+        checked = None
+    if checked:
+        print("%s: checklinks found broken links; fix them before publishing"
+              % trigger, file=sys.stderr)
+    elif checked is None:
+        print("%s: checklinks could not run" % trigger, file=sys.stderr)
     return 0
 
 
@@ -2767,6 +2779,230 @@ def main(argv):
     try:
         subprocess.run([kit, "render"], cwd=root, timeout=600, check=True,
                        env=dict(os.environ, **{TRIGGER_ENV: trigger}))
+    except (OSError, subprocess.SubprocessError):
+        print("%s: render failed; docs/dashboard/ is now stale" % trigger,
+              file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
+''',
+    # `8b2b4f07`, sd:1991's body, replaced by sd:1840's: it rendered and
+    # checked no links.
+    '''#!/usr/bin/env python3
+# Re-render this research repo when git changes a document.
+#
+# Installed by `sd-research-kit init-hook` under three names at once:
+# post-commit, post-merge and post-checkout. A pull, a branch switch and a
+# checkout of one path change the documents as surely as a commit does, and
+# a `docs/dashboard/` left from the old tree is the stale render this exists
+# to prevent. Post-commit and not pre-commit: `docs/dashboard/` is generated
+# and not committed, so there is nothing to stage, and the commit is the
+# revision a queued mirror should name.
+#
+# One source, three names, and the trigger is read from `argv[0]`, because each
+# one has to ask git a different question. `diff-tree ... HEAD` is
+# commit-shaped: it prints nothing at all for a merge commit, and a checkout's
+# HEAD says nothing about what the checkout moved. So a copy of the
+# post-commit body under the other two names would never render.
+#
+# Rendered output goes stale the moment its source changes, and a stale page is
+# worse than a missing one because it looks current. This is what keeps the
+# dashboard's Documents tab a statement about the render rather than about who
+# remembered to run it.
+#
+# Never fails the git command. The commit, the merge or the checkout is already
+# made when this runs, so exiting non-zero would report a failure for work that
+# succeeded. A render that cannot run says so and leaves git alone.
+#
+# `SD_SKIP_RENDER=1` skips it, for all three.
+#
+# A render executes research.conf.py, and after a pull or a checkout it can
+# be one nobody here has read. A commit does not vouch for it either: after a
+# declined pull, a commit of doc.md alone leaves the incoming config in the
+# tree. So all three render only a config a render by hand has executed here,
+# and otherwise say how to render once it is read. The render they run is told
+# it is automatic, checks the bytes it executes again, and records nothing
+# (sd:1376). Whether a repository may instruct this tool at all is sd:1375.
+#
+# A branch checkout that lands behind its upstream renders and queues no
+# mirror (sd:1991). Checking out a stale `main` and pulling it is the usual
+# way to update, and the checkout's render queued the stale text for the
+# shared mirror a moment before the pull's render replaced it: a drain in
+# between published it. The render is told why in `SD_SKIP_MIRROR`. Only
+# the local tracking ref is read, so nothing here fetches, and a branch with
+# no upstream renders and queues as before.
+
+import hashlib
+import os
+import shutil
+import subprocess
+import sys
+
+# What `diff_argv` answers for a trigger that renders without asking git
+# anything. Not an empty list: "git named nothing" is a statement about the
+# tree, and this is the refusal to make one.
+ALWAYS = "always"
+
+
+def diff_argv(trigger, argv):
+    # The git command that names what this trigger moved; ALWAYS to render
+    # without asking; None for an invocation that renders nothing. Three
+    # answers and not two, because "ask git nothing" and "git answered
+    # nothing" are different, and only the second is a statement about the
+    # tree.
+    if trigger == "post-commit":
+        # Only when the commit carried a document. A commit touching nothing
+        # but the config or a script still renders: both change the output.
+        return ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]
+    if trigger == "post-merge":
+        # HEAD is the merge commit and `diff-tree` prints nothing for one, so
+        # the post-commit question is unusable here. ORIG_HEAD is where this
+        # branch stood before the merge, which is what the pull changed from.
+        return ["diff", "--name-only", "ORIG_HEAD", "HEAD"]
+    if trigger == "post-checkout":
+        # git passes the previous HEAD, the new HEAD, and 1 for a branch
+        # checkout or 0 for a file checkout.
+        #
+        # All zeros for the previous HEAD is a fresh clone or a
+        # `git worktree add`: nothing is rendered there yet and nothing
+        # has been committed to it, so a render would publish a checkout
+        # nobody has worked in. Said here rather than left to the `git
+        # diff 0000000 <new>` below failing into the caller's error arm:
+        # that arm returns 0 for any failure of that command, so the day
+        # something else throws in it a fresh clone stops rendering and
+        # the test that pins this goes on passing.
+        if len(argv) >= 2 and argv[1] and set(argv[1]) <= {"0"}:
+            return None
+        # A branch checkout has a range, and the range is the only thing
+        # that names what it moved.
+        if len(argv) >= 4 and argv[3] == "1" and argv[1] != argv[2]:
+            return ["diff", "--name-only", argv[1], argv[2]]
+        # Everything else this trigger fires for moved no branch, so its two
+        # revisions are equal and there is no range -- and it renders anyway,
+        # without a question, because there is no question worth asking here.
+        #
+        # Do not reintroduce `diff --name-only HEAD` as an optimisation. It
+        # looks like the right guard and it is the wrong one: it asks whether
+        # the tree differs from HEAD, and what a mirror needs to know is
+        # whether the tree differs from what was published. Those agree only
+        # while the published copy tracks HEAD, and a file checkout is exactly
+        # what breaks that. `git checkout <rev> -- doc.md` publishes the older
+        # text; `git checkout HEAD -- doc.md` then restores a clean tree, the
+        # guard sees no diff, and the published copy keeps the reverted text
+        # for good. Comparing against what was published instead would be a
+        # second record of the same fact, which is the failure this contract
+        # exists to close.
+        #
+        # So it renders on an unchanged tree too. That is the price, and it is
+        # small: a render that finds nothing changed is cheap, and a mirror
+        # holding text nobody can see is not.
+        return ALWAYS
+    # An unrecognised name is not this hook's trigger. Guessing would run a
+    # render on a git event nobody installed it for.
+    return None
+
+
+# Where `sd-research-kit render`, run by hand, records the sha256 of the
+# research.conf.py it executed: under the git directory, per checkout, never
+# in the tree.
+TRUSTED = "sd-research-conf.sha256"
+
+# What this sets, to the trigger's name, for the render it runs. The render
+# then executes only a recorded config and records nothing itself.
+TRIGGER_ENV = "SD_RESEARCH_TRIGGER"
+
+# What this sets, to a reason, for a render that must queue no mirror.
+SKIP_MIRROR = "SD_SKIP_MIRROR"
+
+
+def behind_upstream(root):
+    # How many commits this branch's upstream has that HEAD lacks, read off
+    # the local tracking ref; 0 when there is no upstream to be behind. No
+    # fetch: a hook that reached the network would make every checkout wait
+    # on it, and the ref a pull is about to fast-forward to is already local
+    # whenever the pull is `--ff-only` after a fetch.
+    counted = subprocess.run(
+        ["git", "rev-list", "--count", "HEAD..@{u}"],
+        cwd=root, capture_output=True, text=True, timeout=30,
+    )
+    if counted.returncode != 0:
+        return 0
+    try:
+        return int(counted.stdout.strip() or 0)
+    except ValueError:
+        return 0
+
+
+def conf_trusted(root):
+    # Whether the tree's research.conf.py is one a render by hand executed
+    # here, after the operator read it. Asking git whether this operation
+    # changed the config is not enough, and neither is a commit: a declined
+    # pull leaves the incoming config in the tree, and the next file checkout
+    # or commit of doc.md alone would execute it. No record means no render
+    # has vouched for it, which declines too.
+    path = subprocess.run(
+        ["git", "rev-parse", "--git-path", TRUSTED],
+        cwd=root, capture_output=True, text=True, timeout=30, check=True,
+    ).stdout.strip()
+    try:
+        with open(os.path.join(root, path), encoding="utf-8") as handle:
+            recorded = handle.read().strip()
+        with open(os.path.join(root, "research.conf.py"), "rb") as handle:
+            current = hashlib.sha256(handle.read()).hexdigest()
+    except OSError:
+        return False
+    return recorded == current
+
+
+def main(argv):
+    if os.environ.get("SD_SKIP_RENDER"):
+        return 0
+    trigger = os.path.basename(argv[0]) if argv else ""
+    query = diff_argv(trigger, argv)
+    if query is None:
+        return 0
+    try:
+        root = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=30, check=True,
+        ).stdout.strip()
+        if not os.path.isfile(os.path.join(root, "research.conf.py")):
+            return 0
+        if query != ALWAYS:
+            changed = subprocess.run(
+                ["git"] + query,
+                cwd=root, capture_output=True, text=True, timeout=30, check=True,
+            ).stdout.split()
+            if not any(name.endswith((".md", ".py")) for name in changed):
+                return 0
+        env = dict(os.environ, **{TRIGGER_ENV: trigger})
+        # A branch checkout is the only trigger with a range and no pull of
+        # its own; post-merge is the pull, and renders the tree it brought.
+        behind = behind_upstream(root) if (
+            trigger == "post-checkout" and query != ALWAYS) else 0
+        if behind:
+            env[SKIP_MIRROR] = ("%s: HEAD is %d commit%s behind its upstream; "
+                                "pull, and that render queues the mirrors"
+                                % (trigger, behind, "" if behind == 1 else "s"))
+        if not conf_trusted(root):
+            print("%s: no render by hand has executed this research.conf.py, and "
+                  "a render executes it; read it, then run `sd-research-kit "
+                  "render`. docs/dashboard/ is stale until then" % trigger,
+                  file=sys.stderr)
+            return 0
+    except (OSError, subprocess.SubprocessError):
+        return 0
+
+    kit = shutil.which("sd-research-kit")
+    if kit is None:
+        print("%s: sd-research-kit not on PATH; docs/dashboard/ is now stale"
+              % trigger, file=sys.stderr)
+        return 0
+    try:
+        subprocess.run([kit, "render"], cwd=root, timeout=600, check=True,
+                       env=env)
     except (OSError, subprocess.SubprocessError):
         print("%s: render failed; docs/dashboard/ is now stale" % trigger,
               file=sys.stderr)
