@@ -1352,6 +1352,15 @@
 
 ### Changed
 
+- **`sd-author` and `sd-topic-radar` carry the writing pack's drafting, research and ideation rules (sd:1659).**
+  The operator ruled on 2026-09-30 that the pack owns all writing skills; this ports what `sdw-draft`, `sdw-research` and `sdw-ideate` had and the pack did not.
+  `sd-author` marks how and when each claim was established, carries that certainty into prose, and sources the remedy as well as the problem.
+  Without remedy evidence, the prescription becomes a stated practice or a proposal, not a finding.
+  Its review adds a fact-check that counts only with a ledger, an optional cross-model hostile review, and stale-review reconciliation.
+  `sd-topic-radar` reads the user's own ratings to steer generation but not scoring, never proposes a declined idea again, and treats a newsletter item as a prompt.
+  A fatal component keeps a candidate out of the top group, and an optional cross-model challenge may only lower a score.
+  Paths, stores and the vault filing step stay in `sd-writing-pack`; retiring its copies is a separate change there.
+
 - **The default review severity floor is `high` (sd:1657).**
   A repository whose `.github/sd-review.json` names no `severity_floor` blocks on `high` findings only, not `medium`.
   The operator ruled the fleet default on 2026-09-30; a repository that wants `medium` names it in its policy file.
