@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import os
 import pathlib
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -43,6 +45,13 @@ class ViewFixture(unittest.TestCase):
     def home(self, login: str) -> pathlib.Path:
         return self.tmp / "Users" / login
 
+    def gate_slots(self, **slots: int) -> None:
+        """Each login's machine-wide `sd.gate_slots`."""
+        for login, count in slots.items():
+            config = self.home(login) / ".config" / "sd-ai-command-pack" / "config.json"
+            config.parent.mkdir(parents=True, exist_ok=True)
+            config.write_text(f'{{"config": {{"sd": {{"gate_slots": {count}}}}}}}', encoding="utf-8")
+
     @staticmethod
     def tool(path: pathlib.Path, text: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -55,7 +64,8 @@ class ViewFixture(unittest.TestCase):
                 "PATH": os.pathsep.join([str(home / "bin"), str(self.shared)]), **extra}
 
     def view(self, login: str, names: tuple[str, ...] = (), tree: pathlib.Path | None = None, **extra: str) -> dict:
-        environment = sd_gate_run.gate_environment(self.tmp / "repo", self.environ(login, **extra))
+        environment = sd_gate_receipts.offload_environment(sd_gate_run.gate_environment(self.tmp / "repo",
+                                                                                          self.environ(login, **extra)))
         view = sd_gate_receipts.offload_view(environment, names, tree)
         self.assertIsNotNone(view)
         return view
@@ -85,19 +95,12 @@ class OffloadView(ViewFixture):
         reordered = os.pathsep.join([str(self.shared), str(self.home("hub") / "bin")])
         self.assertEqual(self.recorded(self.view("sat"), self.view("hub", PATH=reordered)), [("path", "~/bin")])
 
-    def test_the_machines_of_sd_2844_differ_and_the_satellites_pass_stands(self) -> None:
-        """sd:2862: the first satellite merge differed in all of these; each is recorded, none refuses."""
-        for login, version in (("sat", "2.50"), ("hub", "2.51")):
-            self.tool(self.home(login) / "bin" / "git", f"git {version}")
-            self.tool(self.home(login) / "bin" / "uv", f"uv {version}")
-        (self.home("hub") / ".gitconfig").write_text("[user]\n\tname = hub\n", encoding="utf-8")
-        (self.home("sat") / ".cargo").mkdir()
-        (self.home("sat") / ".cargo" / "config.toml").write_text("[build]\n", encoding="utf-8")
-        theirs = self.view("sat", CARGO_BUILD_JOBS="4", NEXTEST_TEST_THREADS="4", SD_GATE_POOL_SIZE="2")
-        ours = self.view("hub", SD_NOTION_PRIVATE_FOLDER="/n")  # scrubbed: no check sees it, so it is not compared
-        self.assertEqual(self.recorded(theirs, ours), [
-            ("tools", "git"), ("tools", "uv"), ("home_files", ".cargo/config.toml"), ("home_files", ".gitconfig"),
-            ("variables", "CARGO_BUILD_JOBS"), ("variables", "NEXTEST_TEST_THREADS"), ("variables", "SD_GATE_POOL_SIZE")])
+    def test_only_path_order_and_the_slot_holders_settings_are_recorded(self) -> None:
+        """sd:2879: of what the machines of sd:2844 differed in, these two decide nothing the check runs."""
+        reordered = os.pathsep.join([str(self.shared), str(self.home("hub") / "bin")])
+        theirs = self.view("sat", SD_GATE_POOL_SIZE="2")
+        ours = self.view("hub", PATH=reordered, SD_NOTION_PRIVATE_FOLDER="/n")  # scrubbed: no check sees it
+        self.assertEqual(self.recorded(theirs, ours), [("path", "~/bin"), ("variables", "SD_GATE_POOL_SIZE")])
 
     def test_an_sd_variable_the_gate_does_not_set_never_reaches_the_check(self) -> None:
         """sd:2862 review: a check that reads `SD_SKIP_TESTS` could skip its tests on one machine only; it sees nothing."""
@@ -112,7 +115,16 @@ class OffloadView(ViewFixture):
         self.tool(self.home("hub") / "bin" / "npm", "npm 11")
         theirs, ours = self.view("sat", ("npm",)), self.view("hub", ("npm",))
         self.assertEqual(sd_gate_receipts.offload_miss(theirs, ours, ("npm",)), {"part": "tools", "name": "npm"})
-        self.assertEqual(self.recorded(theirs, ours), [("tools", "npm")])
+
+    def test_a_tool_the_check_reaches_through_make_refuses(self) -> None:
+        """sd:2879 finding 3: `make check` may run `npm ci`, `uv sync` or `git`, and `check_names` sees only `make`."""
+        for name in ("git", "npm", "uv"):
+            with self.subTest(name=name):
+                self.tool(self.home("sat") / "bin" / name, f"{name} 1")
+                self.tool(self.home("hub") / "bin" / name, f"{name} 2")
+                self.assertEqual(sd_gate_receipts.offload_miss(self.view("sat"), self.view("hub"), ("make",)),
+                                 {"part": "tools", "name": name})
+                self.tool(self.home("hub") / "bin" / name, f"{name} 1")
 
     def test_the_runtime_behind_a_launcher_refuses(self) -> None:
         """sd:2862 review: `npm run check` names only `npm`, and equal `npm` bytes can run another `node`."""
@@ -153,15 +165,40 @@ class OffloadView(ViewFixture):
         self.assertNotIn("scripts/check", theirs["tools"])
         self.assertEqual(sd_gate_receipts.offload_miss(theirs, ours, names), {"part": "tools", "name": "just"})
 
-    def test_a_named_home_file_with_other_bytes_is_recorded(self) -> None:
-        (self.home("hub") / ".gitconfig").write_text("[core]\n\thooksPath = /dev/null\n", encoding="utf-8")
-        self.assertEqual(self.recorded(self.view("sat"), self.view("hub")), [("home_files", ".gitconfig")])
+    def test_an_opted_in_check_reads_no_home_tool_configuration(self) -> None:
+        """sd:2879 finding 1: git, npm, pip and cargo read no file under `HOME` or the system's, whatever the caller set."""
+        caller = self.environ("sat", CARGO_HOME="/elsewhere/.cargo", GIT_CONFIG_GLOBAL="/elsewhere/gitconfig",
+                              PIP_CONFIG_FILE="/elsewhere/pip.conf", NPM_CONFIG_USERCONFIG="/elsewhere/npmrc")
+        kept = sd_gate_receipts.offload_environment(sd_gate_run.gate_environment(self.tmp / "repo", caller))
+        self.assertEqual({name: kept.get(name) for name in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "NPM_CONFIG_USERCONFIG",
+                                                            "PIP_CONFIG_FILE")},
+                         {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1", "NPM_CONFIG_USERCONFIG": os.devnull,
+                          "PIP_CONFIG_FILE": os.devnull})
+        gate_cache = self.home("sat") / ".cache" / "sd" / "gate"
+        for name in ("CARGO_HOME", "NPM_CONFIG_GLOBALCONFIG"):  # the gate's own folder, which holds no configuration
+            self.assertTrue(pathlib.Path(kept[name]).is_relative_to(gate_cache), kept[name])
+        git = shutil.which("git")
+        assert git is not None
+        read = [subprocess.run([git, "config", "--get", "user.name"], env=env, cwd=self.tmp, text=True,
+                               capture_output=True, check=False).stdout for env in (self.environ("sat"), kept)]
+        self.assertEqual(read, ["t\n", ""])  # the fixture's `~/.gitconfig` names `t`
 
-    def test_a_named_home_file_on_one_side_only_is_recorded(self) -> None:
+    def test_an_isolated_home_file_is_not_bound(self) -> None:
+        """No check reads `.gitconfig`, `.npmrc`, pip's or cargo's file, so two machines may differ in them (sd:2879)."""
+        (self.home("hub") / ".gitconfig").write_text("[core]\n\thooksPath = /dev/null\n", encoding="utf-8")
         (self.home("sat") / ".npmrc").write_text("registry=https://registry.example.test/\n", encoding="utf-8")
+        (self.home("sat") / ".cargo").mkdir()
+        (self.home("sat") / ".cargo" / "config.toml").write_text("[build]\n", encoding="utf-8")
+        self.assertEqual(sd_gate_receipts.offload_differences(self.view("sat"), self.view("hub")), [])
+
+    def test_a_home_file_the_check_still_reads_refuses(self) -> None:
+        """sd:2879 finding 1: `UV_NO_CONFIG` would skip the tree's own `uv.toml` too, so uv's user file is compared."""
+        uv = self.home("hub") / ".config" / "uv" / "uv.toml"
+        uv.parent.mkdir(parents=True)
+        uv.write_text('index-url = "https://pypi.example.test/simple"\n', encoding="utf-8")
         theirs, ours = self.view("sat"), self.view("hub")
-        self.assertEqual(ours["home_files"][".npmrc"], "absent")
-        self.assertEqual(self.recorded(theirs, ours), [("home_files", ".npmrc")])
+        self.assertEqual(theirs["home_files"][".config/uv/uv.toml"], "absent")
+        self.assertEqual(sd_gate_receipts.offload_miss(theirs, ours), {"part": "home_files", "name": ".config/uv/uv.toml"})
 
     def test_another_variable_value_misses_on_variables(self) -> None:
         self.assertEqual(sd_gate_receipts.offload_miss(self.view("sat"), self.view("hub", LANG="en_US.UTF-8")),
@@ -206,21 +243,37 @@ class OffloadView(ViewFixture):
         self.assertEqual({name: kept.get(name) for name in git_config}, git_config)
         self.assertNotIn("API_KEY", kept)
 
-    def test_other_thread_caps_are_recorded(self) -> None:
-        """sd:2782 M1: `machine_binding` binds the caps locally; across machines they follow the core count (sd:2862)."""
-        for login, slots in (("sat", 16), ("hub", 2)):
-            config = self.home(login) / ".config" / "sd-ai-command-pack" / "config.json"
-            config.parent.mkdir(parents=True)
-            config.write_text(f'{{"config": {{"sd": {{"gate_slots": {slots}}}}}}}', encoding="utf-8")
+    def test_an_opted_in_check_runs_under_one_thread_cap_on_every_machine(self) -> None:
+        """sd:2879 finding 2: 2 slots and 4 on 16 cores, and a caller's own lower caps, all run at `OFFLOAD_THREADS`."""
+        self.gate_slots(sat=4, hub=2)
+        with mock.patch.object(sd_gate_slots.os, "cpu_count", return_value=16):
+            theirs = self.view("sat", RUST_TEST_THREADS="1", CARGO_BUILD_JOBS="2")
+            ours = self.view("hub")
+            child = sd_gate_slots.holder_environment(sd_gate_receipts.offload_environment(self.environ("hub")), 2)
+        common = dict.fromkeys(sd_gate_slots.CPU_VARIABLES, sd_gate_receipts.OFFLOAD_THREADS)
+        self.assertEqual((theirs["threads"], ours["threads"]), (common, common))
+        self.assertEqual({name: child[name] for name in sd_gate_slots.CPU_VARIABLES}, common)  # what `sd-check` hands make
+        self.assertEqual(sd_gate_receipts.offload_differences(theirs, ours), [])
+
+    def test_a_machine_whose_share_is_below_the_common_cap_refuses(self) -> None:
+        """sd:2879 finding 2: 16 slots on 16 cores run each check on one thread; a suite can pass there and fail on four."""
+        self.gate_slots(sat=16, hub=2)
         with mock.patch.object(sd_gate_slots.os, "cpu_count", return_value=16):
             theirs, ours = self.view("sat"), self.view("hub")
-        self.assertEqual((theirs["threads"]["RUST_TEST_THREADS"], ours["threads"]["RUST_TEST_THREADS"]), ("1", "8"))
-        self.assertEqual(self.recorded(theirs, ours), [("threads", name) for name in sorted(sd_gate_slots.CPU_VARIABLES)])
+        self.assertEqual((theirs["threads"]["RUST_TEST_THREADS"], ours["threads"]["RUST_TEST_THREADS"]),
+                         ("1", sd_gate_receipts.OFFLOAD_THREADS))
+        self.assertEqual(sd_gate_receipts.offload_miss(theirs, ours), {"part": "threads", "name": "CARGO_BUILD_JOBS"})
 
-    def test_a_view_written_before_threads_were_bound_is_recorded(self) -> None:
+    def test_another_thread_variable_refuses(self) -> None:
+        """A row whose check saw another `RUST_TEST_THREADS` ran at other concurrency (sd:2879)."""
+        ours = self.view("hub")
+        theirs = {**ours, "variables": {**ours["variables"], "RUST_TEST_THREADS": "0" * 64}}
+        self.assertEqual(sd_gate_receipts.offload_miss(theirs, ours), {"part": "variables", "name": "RUST_TEST_THREADS"})
+
+    def test_a_view_written_before_threads_were_bound_refuses(self) -> None:
         ours = self.view("hub")
         old = {name: part for name, part in ours.items() if name != "threads"}
-        self.assertEqual(self.recorded(old, ours), [("threads", None)])
+        self.assertEqual(sd_gate_receipts.offload_miss(old, ours), {"part": "threads", "name": None})
 
     def test_a_view_that_is_not_one_misses(self) -> None:
         ours = self.view("hub")

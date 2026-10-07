@@ -33,6 +33,8 @@ import sd_lib  # noqa: E402
 HUB = "hub.example.test:8769"
 SLUG = "fixture/repo"
 SATELLITE = {"hostname": "satellite.example.test", "login": "fixture@example.test", "address": "192.0.2.10"}
+#: The one tool configuration under `HOME` an opted-in check still reads (sd:2879).
+UV_CONFIG = sd_gate_receipts.OFFLOAD_HOME_FILES[0]
 
 
 def no_real_tailscale(case: unittest.TestCase, scratch: pathlib.Path) -> None:
@@ -196,10 +198,11 @@ class OffloadRows(SatelliteFixture):
         """A home file that changed after the pass does not bind the old pass on the hub."""
         home = self.home()
         self.unwritten()
-        (home / ".npmrc").write_text("registry=https://registry.example.test/\n", encoding="utf-8")
+        (home / UV_CONFIG).parent.mkdir(parents=True)
+        (home / UV_CONFIG).write_text('index-url = "https://pypi.example.test/simple"\n', encoding="utf-8")
         reused = self.gate()
         self.assertEqual((self.runs, reused["offload"]["written"]), (1, True))
-        self.assertEqual(self.offload_row()["offload_view"]["home_files"][".npmrc"], "absent")
+        self.assertEqual(self.offload_row()["offload_view"]["home_files"][UV_CONFIG], "absent")
 
     def test_a_local_pass_is_not_exported_the_offloaded_run_runs_again(self) -> None:
         """sd:2782: a pass under the whole environment kept no view; the offloaded run's environment binds otherwise."""
@@ -213,11 +216,12 @@ class OffloadRows(SatelliteFixture):
         home = self.home()
 
         def moving(argv, env, tree, timeout):  # type: ignore[no-untyped-def]
-            (home / ".npmrc").write_text("registry=https://registry.example.test/\n", encoding="utf-8")
+            (home / UV_CONFIG).parent.mkdir(parents=True)
+            (home / UV_CONFIG).write_text('index-url = "https://pypi.example.test/simple"\n', encoding="utf-8")
             return self.passing(argv, env, tree, timeout)
 
         result = sd_gate_run.check_in_worktree(self.root, self.head, database=self.database, run=moving)
-        self.assertEqual(result["offload_error"], "the offload view moved during the run: home_files .npmrc")
+        self.assertEqual(result["offload_error"], f"the offload view moved during the run: home_files {UV_CONFIG}")
         self.assertIn("receipt_revision", result)
         self.assertEqual(self.offload_row(), {})
         # The receipt keeps no view it did not hold through the run, so a reuse cannot export it.
@@ -342,6 +346,16 @@ class OffloadedEnvironment(SatelliteFixture):
         self.assertTrue({"HOME", "PATH"} <= set(seen))
         self.assertEqual(self.offload_row()["writer"], "sd-satellite-gate")
 
+    def test_an_opted_in_check_sees_one_tool_configuration_and_thread_cap(self) -> None:
+        """sd:2879: the caller's own git and cargo configuration and thread counts never reach the check."""
+        self.extra.update(GIT_CONFIG_GLOBAL="/elsewhere/gitconfig", CARGO_HOME="/elsewhere/cargo", RUST_TEST_THREADS="1")
+        status, seen = self.seen()
+        self.assertEqual(status, "success")
+        pins = sd_gate_receipts.offload_pins({**os.environ, **self.scratch})
+        self.assertEqual({name: seen.get(name) for name in pins}, pins)
+        self.assertEqual((seen["GIT_CONFIG_GLOBAL"], seen["RUST_TEST_THREADS"]), (os.devnull, sd_gate_receipts.OFFLOAD_THREADS))
+        self.assertTrue(pathlib.Path(seen["CARGO_HOME"]).is_relative_to(self.scratch["XDG_CACHE_HOME"]), seen["CARGO_HOME"])
+
     def test_an_opted_in_check_sees_no_credential(self) -> None:
         status, seen = self.seen()
         self.assertFalse({"GITHUB_TOKEN", "CARGO_REGISTRY_TOKEN"} & set(seen))
@@ -369,12 +383,13 @@ class OffloadedEnvironment(SatelliteFixture):
 class EnvironmentMode(SatelliteFixture):
     """sd:2782: a pass under the whole environment never stands for an opted-in gate, nor the reverse.
 
-    The environment holds only allowlisted names, so the two modes give one `environment_sha256`:
-    only `environment_mode` tells the passes apart.
+    The environment holds only allowlisted names and the pins (sd:2879), so the two modes give one
+    `environment_sha256`: only `environment_mode` tells the passes apart.
     """
 
     def gate(self, reuse: bool = True) -> dict:
         allowlisted = {name: os.environ[name] for name in ("HOME", "USER", "PATH") if name in os.environ}
+        allowlisted.update(sd_gate_receipts.offload_pins(allowlisted))
         return sd_gate_run.check_in_worktree(self.root, self.head, database=self.database, run=self.passing,
                                              environ=allowlisted, reuse=reuse)
 

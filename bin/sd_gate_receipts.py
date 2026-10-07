@@ -55,19 +55,23 @@ repository with `repo.satellite_gate = accept`, a satellite's recorded pass
 also writes an offload receipt, `sd-gate-offload:v1:<key>`, to the hub's
 database, and `sd-ship merge --satellite-gate` on the hub merges on it without
 a run. The hub compares what it can recompute: the tree part of the binding,
-the offload view (`offload_view`) and the pack digest. The view refuses only on
-what decides the result (`offload_differences`, sd:2862): the interpreter, the
-toolchain's bytes and the allowlisted variables but `SD_` and the thread caps.
-A docs-only scope that declares `docs_tools` refuses on those alone. A rustup
+the offload view (`offload_view`) and the pack digest. The view refuses on
+every difference that can decide the result (`offload_differences`, sd:2879):
+the interpreter, every bound tool's bytes, uv's user file, the thread caps and
+the allowlisted variables but the slot holder's `SD_GATE_` settings.
+A docs-only scope that declares `docs_tools` refuses on those tools alone. A rustup
 proxy's bytes name no toolchain: the view binds `cargo -vV` and `rustc -vV`,
 run in the check's tree, beside them (`tool_version`, sd:2881).
-`PATH` order, other tools, `HOME` files and the caps it names in the merge's
-`view_differences`, since two real machines always differ in them. It
+It names `PATH` order and those settings in the merge's `view_differences`. It
 never compares the machine part or `environment_sha256`, which hold the
 satellite's login. In an opted-in repository every gate, the hub's and the
 satellite's, runs its check under `offload_environment`, only the variables
 the view compares, so a variable off the allowlist cannot choose what ran on
-either machine (sd:2782); a check that needs one fails on both. What the
+either machine (sd:2782); a check that needs one fails on both. That
+environment also pins one tool configuration and one thread cap
+(`offload_pins`), so `~/.gitconfig`, `~/.npmrc`, `~/.cargo/config.toml` and
+the core count, which two machines always differ in (sd:2862), reach neither
+check. What the
 satellite's machine holds beyond the view, and the satellite's honesty, are
 trusted as the operator's own node: the trust rule in `sd_local_gate` guards
 against a stale head, another pack and a moved base, not against a hostile
@@ -120,6 +124,7 @@ from typing import Any, Iterable, Mapping
 
 import sd_check_receipts
 import sd_check_scope
+import sd_gate_cache
 import sd_gate_slots
 import sd_lib
 
@@ -142,19 +147,21 @@ TOOL_FIELD = "tool"
 #: Optional too: `"pack": "sd-check"` says the check runs no pack command but `sd-check`, so the gate binds
 #: `sd-check`'s import closure, not every pack `bin/` file (`pack_scope`, sd:2722).
 PACK_FIELD = "pack"
-#: Names whose bytes an offload view binds (sd:2704): what a check reaches through `make` or a script.
+#: Names whose bytes an offload view binds (sd:2704): what a check reaches through `make` or a script. Each refuses on a
+#: difference, as the check's own names do: `check_names` sees only `make`, not the `npm ci` or `uv sync` it runs (sd:2879).
 OFFLOAD_TOOLS = ("sh", "bash", "make", "python3", "git", "cc", "c++", "clang", "cargo", "rustc", "node", "npm", "uv")
-#: Of those, the toolchain whose bytes decide a check's result, so a hub refuses on them, as on the check's own names
-#: (sd:2862). Another tool, `PATH`, `HOME` files and thread caps differ between any two machines: recorded, not refused.
-OFFLOAD_DECIDING_TOOLS = ("sh", "bash", "make", "python3", "cc", "c++", "clang", "cargo", "rustc", "node")
 #: Names whose `-vV` build lines a view binds beside their bytes (sd:2881): a rustup proxy's bytes name no toolchain.
 #: Only these two: `cargo-clippy -vV` runs clippy, and `rustdoc` and `clippy-driver` answer as `rustc` does.
 VERSIONED_TOOLS = ("cargo", "rustc")
 #: The `-vV` lines that name a compiler build; `os:` and the library lines follow the machine, not the compiler.
 VERSION_KEYS = ("release", "commit-hash", "commit-date", "host", "LLVM version")
-#: Tool configuration under `HOME` that an offload view binds, by path relative to `HOME`.
-OFFLOAD_HOME_FILES = (".gitconfig", ".config/git/config", ".cargo/config.toml", ".npmrc", ".config/pip/pip.conf",
-                      ".config/uv/uv.toml")
+#: Tool configuration under `HOME` that an opted-in check still reads, by path relative to `HOME`: a view binds it and
+#: refuses on it. uv has no switch that skips the user's file alone; `UV_NO_CONFIG` skips the tree's own too. git, npm,
+#: pip and cargo read none (`offload_pins`, sd:2879).
+OFFLOAD_HOME_FILES = (".config/uv/uv.toml",)
+#: The thread cap every opted-in check runs under, on every machine (sd:2879): one gate's share of the cores under the
+#: default slot count, so a machine on its default keeps it, and one whose share is lower refuses on `threads`.
+OFFLOAD_THREADS = str(sd_gate_slots.CORES_PER_SLOT)
 #: Variables an offload view compares, by name (sd:2782): `CI` and `GITHUB_ACTIONS` choose the slot count
 #: (`sd_gate_slots.configured`); `LANG` the locale; `MAKEFLAGS`, `MAKEFILES` and `MFLAGS` what `make` runs; `CC` to
 #: `DEVELOPER_DIR` the compiler, flags and SDK that `make`'s implicit rules and `xcrun` choose; `TZ` the clock a test
@@ -171,7 +178,7 @@ OFFLOAD_VARIABLES = ("CI", "GITHUB_ACTIONS", "LANG", "NO_COLOR", "SD_LOCAL_GATE"
 #: check cannot read an `SD_SKIP_TESTS` on one machine only (sd:2862); `NEXTEST_`, `CARGO_` and `RUST` (`RUSTFLAGS`, `RUSTUP_TOOLCHAIN`,
 #: `RUST_TEST_THREADS`) a Rust check; `PYTHON`, `PYTEST_` and `COVERAGE_` a Python one (`PYTEST_ADDOPTS` selects
 #: tests); `TASK_` a Taskfile's; `DYLD_` and `LD_` the libraries every tool loads; `LC_` the locale; `UV_`, `PIP_`,
-#: `NPM_CONFIG_`, `NODE_` and `GIT_CONFIG` the bound tools, as their `OFFLOAD_HOME_FILES` do. Any other variable,
+#: `NPM_CONFIG_`, `NODE_` and `GIT_CONFIG` the bound tools, whose configuration `offload_pins` sets. Any other variable,
 #: such as a per-login `__CF_USER_TEXT_ENCODING`, `SSH_AUTH_SOCK` or `TMPDIR`, or a cron job's, is neither compared
 #: nor stored, and no check in an opted-in repository sees it (`offload_environment`).
 OFFLOAD_VARIABLE_PREFIXES = ("SD_GATE_", "NEXTEST_", "CARGO_", "RUST", "PYTHON", "PYTEST_", "COVERAGE_", "TASK_", "DYLD_",
@@ -427,7 +434,7 @@ def offload_variable(name: str) -> bool:
 
 
 def offload_environment(environment: Mapping[str, str]) -> dict[str, str]:
-    """`environment` cut to what an offload view compares, plus `OFFLOAD_KEPT` (sd:2782).
+    """`environment` cut to what an offload view compares, plus `OFFLOAD_KEPT` (sd:2782), then `offload_pins`.
 
     It is the environment of every gate in an opted-in repository (`offload_run`). The view compares an
     allowlist, so a variable off it could choose what a satellite's check ran and still stand for the hub's:
@@ -435,7 +442,24 @@ def offload_environment(environment: Mapping[str, str]) -> dict[str, str]:
     A check that needs a dropped variable, a credential among them, fails on every machine; such a
     repository does not opt in until the variable is allowlisted.
     """
-    return {key: value for key, value in environment.items() if key in OFFLOAD_KEPT or offload_variable(key)}
+    kept = {key: value for key, value in environment.items() if key in OFFLOAD_KEPT or offload_variable(key)}
+    return {**kept, **offload_pins(kept)}
+
+
+def offload_pins(environment: Mapping[str, str]) -> dict[str, str]:
+    """What every opted-in check runs under whatever the caller set: one tool configuration and one thread cap (sd:2879).
+
+    Two machines differ in `~/.gitconfig`, `~/.npmrc` and `~/.cargo/config.toml`, and in their core counts, so a
+    view that bound those never matched (sd:2862). git, npm and pip then read no user or system file, and cargo
+    reads its configuration from a `CARGO_HOME` in the gate's cache folder, which holds none: a check that needs
+    a git identity sets its own. npm refuses one file as both its user and its global configuration, so the global
+    one is a path in that folder too. `sd_gate_slots.CPU_VARIABLES` read `OFFLOAD_THREADS`, which a holder lowers
+    only on a machine whose share of the cores is smaller.
+    """
+    folder = sd_gate_cache.cache_root(environment) / "tool-config"
+    return {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1", "NPM_CONFIG_USERCONFIG": os.devnull,
+            "NPM_CONFIG_GLOBALCONFIG": str(folder / "npmrc"), "PIP_CONFIG_FILE": os.devnull,
+            "CARGO_HOME": str(folder / "cargo"), **dict.fromkeys(sd_gate_slots.CPU_VARIABLES, OFFLOAD_THREADS)}
 
 
 def opted_in(database: pathlib.Path | None, root: pathlib.Path) -> bool:
@@ -476,19 +500,19 @@ def deciding_tools(part: Mapping[str, Any] | None) -> tuple[str, ...]:
     """The fixed tools a hub refuses on beside `check_names`: none where a docs-only scope declares `docs_tools` (sd:2881).
 
     Those name every tool its docs command reaches, and `check_names` carries them. A docs scope that declares
-    none may reach a compiler through `make`, as `cargo doc` does, so it keeps `OFFLOAD_DECIDING_TOOLS`.
+    none may reach a compiler through `make`, as `cargo doc` does, so it keeps `OFFLOAD_TOOLS`.
     """
-    return () if part is not None and part["scope"].get("tools") is not None else OFFLOAD_DECIDING_TOOLS
+    return () if part is not None and part["scope"].get("tools") is not None else OFFLOAD_TOOLS
 
 
 def offload_differences(theirs: Any, ours: Any, names: Iterable[str] = (),
-                        tools: Iterable[str] = OFFLOAD_DECIDING_TOOLS) -> list[dict[str, Any]]:
+                        tools: Iterable[str] = OFFLOAD_TOOLS) -> list[dict[str, Any]]:
     """Every difference between a satellite's offload view (`theirs`) and the hub's (`ours`), as `{"part", "name", "refuses"}`.
 
-    Parts compare in the order `path`, `tools`, `python`, `home_files`, `threads`, `variables`. A difference refuses
-    only where it decides what the check ran (sd:2862): `python`, a tool in `tools` (`deciding_tools`) or `names`
-    (the check's own executables), and a variable other than the slot holder's `SD_GATE_` settings and the thread caps it
-    sets (`sd_gate_slots.CPU_VARIABLES`). `name` is the first differing `PATH` entry (the satellite's, or the
+    Parts compare in the order `path`, `tools`, `python`, `home_files`, `threads`, `variables`. Every difference
+    refuses (sd:2879) but two that choose nothing the check runs: the `PATH` order, whose tools compare by bytes, and
+    the slot holder's `SD_GATE_` settings; and a tool outside `tools` (`deciding_tools`) and `names` (the check's own
+    executables). `name` is the first differing `PATH` entry (the satellite's, or the
     hub's past the satellite's end), tool, `python` field, file, thread variable or variable. A tool the hub cannot
     resolve is not compared. A view that is not one, or a part of the wrong shape or missing, differs with no name.
     """
@@ -500,8 +524,8 @@ def offload_differences(theirs: Any, ours: Any, names: Iterable[str] = (),
         if part == "tools":
             return name is None or name in deciding
         if part == "variables":
-            return name is None or not (name.startswith("SD_GATE_") or name in sd_gate_slots.CPU_VARIABLES)
-        return part == "python"
+            return name is None or not name.startswith("SD_GATE_")
+        return part != "path"
 
     found = []
     for part in ("path", "tools", "python", "home_files", "threads", "variables"):
@@ -521,7 +545,7 @@ def offload_differences(theirs: Any, ours: Any, names: Iterable[str] = (),
 
 
 def offload_miss(theirs: Any, ours: Any, names: Iterable[str] = (),
-                 tools: Iterable[str] = OFFLOAD_DECIDING_TOOLS) -> dict[str, Any] | None:
+                 tools: Iterable[str] = OFFLOAD_TOOLS) -> dict[str, Any] | None:
     """None when a satellite's offload view (`theirs`) stands for the hub's (`ours`), else its first refusing difference."""
     return next(({"part": miss["part"], "name": miss["name"]} for miss in offload_differences(theirs, ours, names, tools)
                  if miss["refuses"]), None)

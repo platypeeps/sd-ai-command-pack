@@ -470,6 +470,19 @@
 
 ### Fixed
 
+- **An opted-in check runs under one tool configuration and one thread cap, and the hub refuses again on what differs (sd:2879).**
+  sd:2862 accepted a satellite's pass across differing `HOME` tool configuration, thread caps and indirect tools,
+  each of which can change what passes. Every check in a repository with `repo.satellite_gate = accept`, the hub's
+  and the satellite's, now runs with `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, no npm or pip user
+  file, a `CARGO_HOME` in the gate's cache folder (`tool-config/cargo`), and `CARGO_BUILD_JOBS`,
+  `RUST_TEST_THREADS` and `NEXTEST_TEST_THREADS` at 4, whatever the caller set. The view no longer binds the
+  isolated `HOME` files. It refuses on uv's `~/.config/uv/uv.toml`, which no switch isolates alone, on `threads`,
+  on the thread variables and on every bound tool, `git`, `npm` and `uv` included. Only the `PATH` order and the
+  slot holder's `SD_GATE_` settings are recorded. **Migration:** a row written before this release refuses on the
+  pack `bin/` digest. The first opted-in Rust gate on each machine downloads its crates into the new `CARGO_HOME`
+  and rebuilds its dependencies once. A machine whose `git`, `npm` or `uv` build differs from the hub's hands back
+  until both run one build. A check that commits needs its own git identity.
+
 - **The offload view binds the compiler build `cargo` and `rustc` run, beside their bytes (sd:2881).**
   A rustup proxy's bytes name no toolchain. The view now also binds the build lines of `cargo -vV` and `rustc -vV`
   (release, commit-hash, commit-date, host, LLVM version), run in the check's worktree under the gate's environment.
