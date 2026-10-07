@@ -16,10 +16,12 @@ import io
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from typing import Any
 from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -356,23 +358,6 @@ class OffloadedEnvironment(SatelliteFixture):
         self.assertEqual((seen["GIT_CONFIG_GLOBAL"], seen["RUST_TEST_THREADS"]), (os.devnull, sd_gate_receipts.OFFLOAD_THREADS))
         self.assertTrue(pathlib.Path(seen["CARGO_HOME"]).is_relative_to(self.scratch["XDG_CACHE_HOME"]), seen["CARGO_HOME"])
 
-    def test_a_cargo_bin_the_gate_path_drops_links_nothing(self) -> None:
-        """sd:2921 review: a relative `CARGO_HOME`, or one in the checkout, names a folder `gate_environment` drops
-        from `PATH`, since the check runs in another worktree; the caller's cargo `bin` passes the same rule."""
-        inside = self.root / "tools" / "cargo"
-        (inside / "bin").mkdir(parents=True)
-        (inside / "bin" / "cargo-nextest").write_text("#!/bin/sh\n", encoding="utf-8")
-        (inside / "bin" / "cargo-nextest").chmod(0o755)
-        pinned = pathlib.Path(sd_gate_receipts.offload_pins(self.scratch)["CARGO_HOME"], "bin")
-        for cargo_home in ("tools/cargo", str(inside)):
-            with self.subTest(cargo_home=cargo_home):
-                self.extra["CARGO_HOME"] = cargo_home
-                with contextlib.chdir(self.root):  # where the relative one names the checkout's folder
-                    status, seen = self.seen()
-                self.assertEqual(status, "success")
-                self.assertFalse(os.path.lexists(pinned / "cargo-nextest"))
-                self.assertNotIn(os.path.join("tools", "cargo", "bin"), seen["PATH"])
-
     def test_an_opted_in_check_sees_no_credential(self) -> None:
         status, seen = self.seen()
         self.assertFalse({"GITHUB_TOKEN", "CARGO_REGISTRY_TOKEN"} & set(seen))
@@ -395,6 +380,128 @@ class OffloadedEnvironment(SatelliteFixture):
                 status, seen = self.seen()
                 self.assertEqual({name: seen.get(name) for name in self.extra}, self.extra)
                 self.assertEqual(status, "failure")
+
+
+class CargoSubcommands(SatelliteFixture):
+    """sd:2921: what cargo runs for `cargo nextest` in an opted-in check is the caller's, and the offload row binds it.
+
+    The stand-in run finds `cargo-nextest` as cargo does: `$CARGO_HOME/bin`, then the check's `PATH`. Each
+    test names one way the run and the view could part, as the table in the offload design lists them.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        home = self.root.parent / "home"
+        home.mkdir()
+        self.scratch = {"HOME": str(home), "SD_GATE_SLOTS": "0", "XDG_CONFIG_HOME": str(home / ".config"),
+                        "XDG_CACHE_HOME": str(home / ".cache"), "XDG_STATE_HOME": str(home / ".state")}
+        self.cargo = self.root.parent / "cargo-a"
+        self.tool(self.cargo / "bin" / "cargo-nextest", "cargo-nextest a")
+        self.tool(self.cargo / "bin" / "cargo-llvm-cov", "cargo-llvm-cov")
+        self.during: Any = None
+        self.seen: dict[str, Any] = {}
+
+    @staticmethod
+    def tool(path: pathlib.Path, text: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"#!/bin/sh\n# {text}\n", encoding="utf-8")
+        path.chmod(0o755)
+
+    @staticmethod
+    def found(env: dict[str, str], name: str) -> str | None:
+        return shutil.which(name, path=os.pathsep.join([os.path.join(env["CARGO_HOME"], "bin"), env["PATH"]]))
+
+    def stand_in(self, argv, env, tree, timeout):  # type: ignore[no-untyped-def]
+        if self.during is not None:
+            during, self.during = self.during, None
+            during()
+        folder = pathlib.Path(tree).parent / sd_gate_receipts.CARGO_SUBCOMMANDS
+        nextest = self.found(env, "cargo-nextest")
+        self.seen = {"nextest": nextest and sd_gate_receipts._content_digest(nextest),
+                     "llvm-cov": self.found(env, "cargo-llvm-cov"), "folder": folder,
+                     "listing": sorted(path.name for path in folder.iterdir()) if folder.is_dir() else []}
+        return self.passing(argv, env, tree, timeout)
+
+    def gate(self, cargo_home: str | None = None) -> dict:  # type: ignore[override]
+        with mock.patch.dict(os.environ, {**self.scratch, "CARGO_HOME": cargo_home or str(self.cargo)}):
+            return sd_gate_run.check_in_worktree(self.root, self.head, database=self.database, run=self.stand_in, reuse=False)
+
+    def caller(self, cargo: pathlib.Path | None = None) -> str:
+        return sd_gate_receipts._content_digest((cargo or self.cargo) / "bin" / "cargo-nextest")
+
+    def bound(self) -> str | None:
+        return self.offload_row()["offload_view"]["tools"]["cargo-nextest"]
+
+    def test_the_check_runs_the_callers_subcommand_and_the_row_binds_it(self) -> None:
+        result = self.gate()
+        self.assertEqual(result["status"], "success")
+        self.assertNotIn("offload_error", result)
+        self.assertEqual((self.seen["nextest"], self.bound()), (self.caller(), self.caller()))
+
+    def test_a_gate_that_did_not_opt_in_copies_and_removes_nothing(self) -> None:
+        """Its `CARGO_HOME` is the caller's own, whose `bin` the pinned-folder cleanup must never touch."""
+        self.opted = "off"
+        self.assertEqual(self.gate()["status"], "success")
+        self.assertTrue((self.cargo / "bin" / "cargo-nextest").is_file())
+        self.assertEqual(self.seen["listing"], [])
+
+    def test_a_concurrent_gate_of_another_caller_changes_nothing_this_one_runs(self) -> None:
+        other = self.root.parent / "cargo-b"
+        self.tool(other / "bin" / "cargo-nextest", "cargo-nextest b")
+        self.during = lambda: self.gate(str(other))
+        self.gate()
+        self.assertEqual((self.seen["nextest"], self.bound()), (self.caller(), self.caller()))
+
+    def test_a_subcommand_left_in_the_pinned_cargo_home_is_removed(self) -> None:
+        """An earlier version linked `cargo-nextest` into the shared pinned `CARGO_HOME/bin`, where cargo looks first."""
+        pinned = pathlib.Path(sd_gate_receipts.offload_pins(self.scratch)["CARGO_HOME"], "bin")
+        self.tool(self.root.parent / "elsewhere" / "cargo-nextest", "cargo-nextest left")
+        pinned.mkdir(parents=True)
+        (pinned / "cargo-nextest").symlink_to(self.root.parent / "elsewhere" / "cargo-nextest")
+        self.gate()
+        self.assertFalse(os.path.lexists(pinned / "cargo-nextest"))
+        self.assertEqual((self.seen["nextest"], self.bound()), (self.caller(), self.caller()))
+
+    def test_a_subcommand_written_to_the_pinned_cargo_home_during_the_run_keeps_no_offload_row(self) -> None:
+        """A check's `cargo install` writes the shared pinned `CARGO_HOME/bin`, which cargo reads first; the after view sees it."""
+        pinned = pathlib.Path(sd_gate_receipts.offload_pins(self.scratch)["CARGO_HOME"], "bin")
+        self.during = lambda: self.tool(pinned / "cargo-nextest", "cargo-nextest installed")
+        result = self.gate()
+        self.assertEqual(result["offload_error"], "the offload view moved during the run: tools cargo-nextest")
+
+    def test_a_caller_binary_changed_during_the_run_changes_nothing_it_runs(self) -> None:
+        before = self.caller()
+        self.during = lambda: self.tool(self.cargo / "bin" / "cargo-nextest", "cargo-nextest changed")
+        result = self.gate()
+        self.assertNotIn("offload_error", result)
+        self.assertEqual((self.seen["nextest"], self.bound()), (before, before))
+
+    def test_a_caller_without_the_subcommand_does_not_run_another_callers(self) -> None:
+        self.gate()
+        other = self.root.parent / "cargo-b"
+        (other / "bin").mkdir(parents=True)
+        self.gate(str(other))
+        self.assertNotIn("cargo-nextest", self.seen["listing"])
+        self.assertNotEqual(self.seen["nextest"], self.caller())
+        self.assertEqual(self.seen["nextest"], self.bound())
+
+    def test_a_cargo_bin_the_gate_path_drops_gives_nothing(self) -> None:
+        """A relative `CARGO_HOME`, or one in the checkout, names a folder `gate_environment` drops from `PATH`."""
+        inside = self.root / "tools" / "cargo"
+        self.tool(inside / "bin" / "cargo-nextest", "cargo-nextest in the checkout")
+        for cargo_home in ("tools/cargo", str(inside)):
+            with self.subTest(cargo_home=cargo_home), contextlib.chdir(self.root):
+                self.assertEqual(self.gate(cargo_home)["status"], "success")
+                self.assertEqual(self.seen["listing"], [])
+                self.assertEqual(self.seen["nextest"], self.bound())
+
+    def test_an_unbound_subcommand_stays_unavailable_and_the_folder_goes_with_the_run(self) -> None:
+        """sd:2921 lane review: `cargo llvm-cov` would run bytes no view binds."""
+        self.gate()
+        llvm = self.seen["llvm-cov"]
+        self.assertFalse(llvm and pathlib.Path(llvm).resolve().is_relative_to(self.cargo.resolve()), llvm)
+        self.assertEqual(self.seen["listing"], ["cargo-nextest"])
+        self.assertFalse(self.seen["folder"].exists())
 
 
 class EnvironmentMode(SatelliteFixture):

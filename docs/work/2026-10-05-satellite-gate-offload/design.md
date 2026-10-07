@@ -190,7 +190,7 @@ cap (`offload_pins`, sd:2879), and the view refuses again on what is left:
 | `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM` | `/dev/null`, `1` | `~/.gitconfig`, `~/.config/git/config` and the system file |
 | `NPM_CONFIG_USERCONFIG`, `NPM_CONFIG_GLOBALCONFIG` | `/dev/null`; a path in the gate's cache folder, since npm refuses one file as both | `~/.npmrc` and the prefix's `npmrc` |
 | `PIP_CONFIG_FILE` | `/dev/null` | every pip file |
-| `CARGO_HOME` | `tool-config/cargo` in the gate's cache folder (`sd_gate_cache.cache_root`) | `~/.cargo/config.toml`; the registry cache moves with it, so each machine downloads it once. Each `cargo-` name in `OFFLOAD_TOOLS` is linked into its `bin` from the caller's `CARGO_HOME/bin`, `~/.cargo/bin` by default, if that folder passes `gate_path`; no other subcommand is reachable there (sd:2921) |
+| `CARGO_HOME` | `tool-config/cargo` in the gate's cache folder (`sd_gate_cache.cache_root`) | `~/.cargo/config.toml`; the registry cache moves with it, so each machine downloads it once. Its `bin` holds no subcommand; each gate copies the `cargo-` names in `OFFLOAD_TOOLS` into a folder of its own (sd:2921, "Cargo subcommands") |
 | `CPU_VARIABLES` | `OFFLOAD_THREADS`, 4, one gate's share under the default slot count | the core count; a holder lowers it only where the share is smaller, and the view then refuses on `threads` |
 
 uv has no switch that skips the user's file alone: `UV_NO_CONFIG` skips the
@@ -236,7 +236,6 @@ docs-only scope then refuses on those tools and the command's own name only.
 `OFFLOAD_TOOLS` is one pack constant: `sh`, `bash`, `make`, `python3`,
 `git`, `cc`, `c++`, `clang`, `cargo`, `cargo-nextest`, `rustc`, `node`, `npm`, `uv`.
 `cargo-nextest` is what `cargo nextest` runs, which the check names as `cargo` (sd:2921).
-The view looks for a `cargo-` name in `$CARGO_HOME/bin` before `PATH`, as cargo does.
 `OFFLOAD_HOME_FILES` is another: `.config/uv/uv.toml` (sd:2879).
 A name the hub cannot resolve is recorded, not compared, and named in the
 merge's provenance. A name the hub resolves and the satellite does not
@@ -316,6 +315,8 @@ Residual risk on the offload path:
 - the slot holder's `SD_GATE_POOL_SIZE`, which a test runner may size its
   workers by, as the pack's own `run-tests.sh` does;
 - shared libraries that the compared tools load.
+- a cargo subcommand that a check writes into the pinned `CARGO_HOME/bin` and
+  removes within the run ("Cargo subcommands");
 - a check that skips work, rather than failing, when a dropped variable is
   absent, such as a test marked to skip without a token: in an opted-in
   repository it skips that work on every machine, the hub's included;
@@ -325,6 +326,37 @@ Residual risk on the offload path:
 
 A repository whose check depends on one of these leaves `repo.satellite_gate`
 off.
+
+### Cargo subcommands
+
+cargo looks for a subcommand such as `cargo-nextest` in `$CARGO_HOME/bin`,
+then on `PATH`. The pinned `CARGO_HOME` holds none, so `cargo nextest`
+failed in an opted-in check unless `~/.cargo/bin` was on `PATH` (sd:2921).
+Each opted-in gate copies every `cargo-` name in `OFFLOAD_TOOLS` from the
+caller's `CARGO_HOME/bin`, `~/.cargo/bin` by default, into
+`CARGO_SUBCOMMANDS` beside its worktree (`cargo_subcommands`).
+`subcommand_path` puts that folder first on the check's `PATH`, and the
+view looks for a `cargo-` name where cargo does: `$CARGO_HOME/bin`, that
+folder, then `PATH`. Three rounds of review found the run and the view
+parting in one way each, so this table lists every way the code knows of.
+
+| How the tool the check runs can differ from the one the view binds | Guard | Test (`CargoSubcommands` unless named) |
+|---|---|---|
+| Two gates run at once for callers whose `CARGO_HOME`s differ | Each gate copies into its own folder; no gate writes a shared one | `test_a_concurrent_gate_of_another_caller_changes_nothing_this_one_runs` |
+| An earlier version left a link in the pinned `CARGO_HOME/bin`, which cargo reads first | `cargo_subcommands` removes each bound name there before the run | `test_a_subcommand_left_in_the_pinned_cargo_home_is_removed` |
+| A check writes a bound name into the pinned `CARGO_HOME/bin` during the run | The view looks there first, so the after view differs from the before view and no offload row is kept (`record_gate_pass`) | `test_a_subcommand_written_to_the_pinned_cargo_home_during_the_run_keeps_no_offload_row` |
+| The caller's binary changes during the run | A copy, not a link: the check runs the copy and both views bind it | `test_a_caller_binary_changed_during_the_run_changes_nothing_it_runs` |
+| The caller has no binary, after another caller's gate had one | Nothing is copied, and no other gate's copy is reachable | `test_a_caller_without_the_subcommand_does_not_run_another_callers` |
+| The caller's cargo `bin` is relative or inside the checkout | `gate_path`, the rule `gate_environment` applies to every `PATH` entry | `test_a_cargo_bin_the_gate_path_drops_gives_nothing` |
+| A subcommand the view does not bind, such as `cargo-llvm-cov` | Only bound names are copied; no caller folder joins `PATH` | `test_an_unbound_subcommand_stays_unavailable_and_the_folder_goes_with_the_run` |
+| The view looks where cargo does not | `offload_view` and `subcommand_path` use one order: `$CARGO_HOME/bin`, `CARGO_SUBCOMMANDS`, `PATH` | `test_the_check_runs_the_callers_subcommand_and_the_row_binds_it` |
+| The hub's and the satellite's copies differ | `cargo-nextest` is in `OFFLOAD_TOOLS`, so it refuses | `OffloadView.test_a_bound_cargo_subcommand_is_copied_for_the_gate_and_refuses` |
+| A gate in a repository that did not opt in, whose `CARGO_HOME` is the caller's own | `cargo_subcommands` does nothing in `whole` mode, so the cleanup never removes the caller's binary | `test_a_gate_that_did_not_opt_in_copies_and_removes_nothing` |
+| The folder outlives the run | It lies in the gate's temporary folder, which `check_in_worktree` removes | `test_an_unbound_subcommand_stays_unavailable_and_the_folder_goes_with_the_run`; the temporary folder is the guard, so no change to the code makes this test fail alone |
+
+Not guarded: a check that writes a bound name into the pinned
+`CARGO_HOME/bin` and removes it again before the run ends. Both views then
+agree, and the check ran the written binary.
 
 ## The trust rule
 
