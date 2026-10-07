@@ -3164,7 +3164,8 @@ def merged_review_change(root: pathlib.Path, merged: dict[str, Any], day: dateti
     shifts the window back a day and leaves out acknowledgements recorded in
     the 24 hours before `now`. A review posted within the day still counts a
     day earlier, so the change can understate an increase. An unchecked
-    class gets no change: its count is a floor.
+    class gets no change, its count being a floor; nor does an earlier
+    window that could not be read whole.
     """
     count = sum(1 for row in inventory.rows if row["check"] == MERGED_CHECK)
     if MERGED_CHECK in inventory.unchecked:
@@ -3177,8 +3178,12 @@ def merged_review_change(root: pathlib.Path, merged: dict[str, Any], day: dateti
     before = day - datetime.timedelta(days=1)
     pulls = [pull for pull in merged.get("pull_requests") or [] if (_merged_on(pull) or day) <= before]
     listed, _ = _merged_window({"pull_requests": pulls}, before)
-    then = len(_read_unanswered_rows(ack, MERGED_CHECK, root, merged.get("repo"), listed, {}, None,
+    missed: dict[str, str] = {}
+    then = len(_read_unanswered_rows(ack, MERGED_CHECK, root, merged.get("repo"), listed, missed, None,
                                      (earlier, broken)))
+    if missed:  # a pull request only the earlier window holds could not be read
+        return {"count": count, "day_before": None, "change": None,
+                "unchecked": f"a day earlier, {missed[MERGED_CHECK]}"}
     return {"count": count, "day_before": then, "change": count - then, "unchecked": ""}
 
 

@@ -5129,6 +5129,12 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
                                             self.found(*pulls, truncated=True, limit=500))
         self.assertEqual((2, None, None), (short["count"], short["day_before"], short["change"]))
         self.assertIn("stopped at its limit of 500", short["unchecked"])
+        # Only the earlier window holds #17, so today's class reads complete and the change does not.
+        blind = pulls + [self.merged(17, 15, [], unreadable="gh timed out after 60s")]
+        hidden = status.merged_review_change(self.repo, dict(merged, pull_requests=blind), self.TODAY,
+                                             now, self.found(*blind))
+        self.assertEqual((2, None, None), (hidden["count"], hidden["day_before"], hidden["change"]))
+        self.assertIn("a day earlier, the inline comments on #17 could not be read", hidden["unchecked"])
         out = io.StringIO()
         for counted in (change, dict(change, day_before=2, change=0), dict(change, count=5, change=1), short):
             status._render_threads([], out.write, change=counted)

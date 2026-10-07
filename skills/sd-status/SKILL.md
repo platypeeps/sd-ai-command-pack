@@ -211,6 +211,7 @@ It warns only, by the operator's ruling of 2026-09-30: no ceiling, and nothing b
 It is stateless like `late:`. The earlier count shifts the window back a day and leaves out acknowledgements recorded in the last 24 hours.
 A review posted within the day counts a day earlier too, so the change can understate a rise.
 When the class is `unchecked`, the count is a floor and the line says the change is unknown.
+The change is unknown too when a pull request only the earlier window holds could not be read.
 `--json` carries it as `merged_review_count`.
 
 The days are counted from the UTC calendar day GitHub records the merge on to
