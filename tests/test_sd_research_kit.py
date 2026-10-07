@@ -121,6 +121,7 @@ class ReviewDocstringTests(unittest.TestCase):
         "main_document": "`START HERE — ` title",
         "template_drift": "`CLAUDE.md` has not drifted",
         "work_items": "work items under `docs/work/`",
+        "map_ledgers": "stable row IDs and a gaps section",
     }
 
     def test_the_docstring_names_every_check_review_runs(self) -> None:
@@ -1018,6 +1019,64 @@ class BuildFreshness(unittest.TestCase):
         self.assertEqual(review.DASHBOARD_DIR, publish.DASHBOARD_DIR)
 
 
+class MapLedgerTests(unittest.TestCase):
+    """sd:1835 and sd:1836: a map keys its ledger by stable row IDs and names its gaps.
+
+    Rulings #6985 and #6986 make both required and checked by `review`. Neither
+    says the check fails, and the research repos predate it, so a map that
+    lacks either warns and the exit stays 0.
+    """
+
+    LEDGER = (
+        "| # | Capability | Verdict |\n"
+        "|---|---|---|\n"
+        "| C01 | Tools | shipped |\n"
+        "| **C02** | Resources | open |\n"
+    )
+    GAPS = "## 3. Gaps\n\nC02 has no owner.\n"
+
+    def review(self, map_text: str | None) -> subprocess.CompletedProcess:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = Path(raw)
+            (repo / "research.conf.py").write_text('PROJECT = "probe"\nDOCS = []\n')
+            (repo / "CLAUDE.md").write_text(TEMPLATE.read_text(encoding="utf-8"))
+            if map_text is not None:
+                (repo / "20-map").mkdir()
+                (repo / "20-map" / "MAP-probe.md").write_text(map_text)
+            return run("review", cwd=repo)
+
+    def test_a_map_with_a_ledger_and_gaps_passes(self) -> None:
+        result = self.review("# Map\n\n" + self.LEDGER + "\n" + self.GAPS)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("ok   20-map/: 1 map(s)", result.stdout)
+        self.assertNotIn("WARN 20-map/", result.stdout)
+
+    def test_a_ledger_without_row_ids_warns_and_does_not_fail(self) -> None:
+        unkeyed = self.LEDGER.replace("C01", "Tools row").replace("**C02**", "Resources row")
+        result = self.review("# Map\n\n" + unkeyed + "\n" + self.GAPS)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("WARN 20-map/MAP-probe.md: no table keyed by stable row IDs",
+                      result.stdout)
+
+    def test_a_map_without_a_gaps_section_warns_and_does_not_fail(self) -> None:
+        result = self.review("# Map\n\n" + self.LEDGER)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("WARN 20-map/MAP-probe.md: no gaps section", result.stdout)
+
+    def test_a_fenced_example_is_not_the_map(self) -> None:
+        """A map that shows the shape in a code fence has not adopted it."""
+
+        fenced = "# Map\n\n```markdown\n" + self.LEDGER + "\n" + self.GAPS + "```\n"
+        result = self.review(fenced)
+        self.assertIn("no table keyed by stable row IDs", result.stdout)
+        self.assertIn("no gaps section", result.stdout)
+
+    def test_a_repo_with_no_maps_says_nothing_about_them(self) -> None:
+        result = self.review(None)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("20-map/", result.stdout)
+
+
 class InitHookInstallTests(unittest.TestCase):
     """`init-hook` installs one source under every trigger, or none at all.
 
@@ -1220,6 +1279,9 @@ class InitHookInstallTests(unittest.TestCase):
             # `e81f7fc0`, sd:1376's third body, which rendered a branch
             # checkout behind its upstream and queued the stale tree (sd:1991).
             "64d1cce850343632604289dcd70ba9cd7df4e94c7fcea688992b94fb1527cebb",
+            # `8b2b4f07`, sd:1991's body, which rendered and checked no links
+            # (sd:1840).
+            "aaaa4cdc91ce1da64ae73f7138cb538010e9fc5e2f5ca0b6dcbd3ebe8b62d808",
         }
         digests = {hashlib.sha256(body.encode("utf-8")).hexdigest()
                    for body in module.SUPERSEDED_HOOKS}
@@ -1268,6 +1330,8 @@ class HookTriggerTests(unittest.TestCase):
             "import os, pathlib, sys\n"
             "with pathlib.Path(%r).open('a') as handle:\n"
             "    handle.write(' '.join(sys.argv[1:]) + chr(10))\n"
+            "if sys.argv[1:] == ['checklinks']:\n"
+            "    sys.exit(1 if os.environ.get('PROBE_BROKEN_LINKS') else 0)\n"
             "with pathlib.Path(%r).open('a') as handle:\n"
             "    handle.write(os.environ.get('SD_RESEARCH_TRIGGER', '-') + chr(10))\n"
             "with pathlib.Path(%r).open('a') as handle:\n"
@@ -1310,10 +1374,14 @@ class HookTriggerTests(unittest.TestCase):
                               cwd=self.repo, env=env,
                               capture_output=True, text=True)
 
-    def renders(self) -> list[str]:
+    def calls(self) -> list[str]:
+        """Every kit verb the hook ran, in order."""
         if not self.marker.exists():
             return []
         return self.marker.read_text(encoding="utf-8").split()
+
+    def renders(self) -> list[str]:
+        return [verb for verb in self.calls() if verb == "render"]
 
     def triggers(self) -> list[str]:
         path = self.root / "triggers"
@@ -1332,6 +1400,30 @@ class HookTriggerTests(unittest.TestCase):
         result = self.fire("post-commit")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.renders(), ["render"])
+
+    def test_the_render_is_followed_by_checklinks(self) -> None:
+        """sd:1840: a link check that runs only by hand stops running.
+
+        A renamed document leaves every link to it pointing nowhere, and the
+        render does not notice. The hook runs the check after each render.
+        """
+
+        self.a_second_commit()
+        result = self.fire("post-commit")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.calls(), ["render", "checklinks"])
+
+    def test_broken_links_are_reported_and_git_is_left_alone(self) -> None:
+        self.a_second_commit()
+        with unittest.mock.patch.dict(os.environ, PROBE_BROKEN_LINKS="1"):
+            result = self.fire("post-commit")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("post-commit: checklinks found broken links", result.stderr)
+
+    def test_a_declined_render_checks_no_links(self) -> None:
+        self.a_config_change()
+        self.assert_declined(self.fire("post-commit"))
+        self.assertEqual(self.calls(), [])
 
     def test_post_merge_reads_orig_head_and_not_the_merge_commit(self) -> None:
         """The defect a copied post-commit body would have.

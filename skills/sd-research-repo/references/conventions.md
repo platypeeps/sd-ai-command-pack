@@ -115,6 +115,33 @@ Type prefixes carry meaning:
 - `REVIEW-` assesses something someone else produced; `BRIEF-` argues a position
   of our own.
 
+### Maps: stable row IDs and a gaps section
+
+Every ledger numbers its rows with stable IDs: `C01`, `C02`, and so on. Later
+cards, decisions and gaps cite those IDs, in prose, in a ticket or in a meeting.
+Never renumber a row; retire its ID and say so.
+
+Every map closes its ledger with a gaps section, under a heading that carries
+the word `Gaps`. Bucket every ID, then name the leftovers: rows with no owner,
+no card or no decision. A map that names no gaps claims a completeness it has
+not checked.
+
+`sd-research-kit review` checks each `20-map/*.md`: at least one table whose
+first column is all stable IDs, and a gaps heading. Which table is the ledger
+is not mechanical, so one ID-keyed table satisfies it. A miss **warns and does
+not fail**. The rulings of 2026-09-30 (sd:1835, sd:1836) make both required but
+do not say they fail the review, and every research repo predates them.
+
+### The source registry carries a status
+
+`10-sources/registry.md` gives every source a `Status` column: `approved`,
+`draft`, `restricted` or `superseded`, or the repo's own documented set. A
+source someone else owns starts as `draft` until its owner approves it. Re-read
+the handling notes of every cited source before publishing. A document that
+cites a source not `approved` does not publish until the status changes or the
+citation goes. This is guidance; no check reads the column (ruling of
+2026-09-30, sd:1838).
+
 ## Main document — START HERE
 
 Every research project has exactly one main document for readers entering the document set.
@@ -173,6 +200,22 @@ The renderer strips everything above `---` and builds the masthead from
   the commit; from a tracker, cite the ticket.
 - Supersession is stated in the document, not encoded in its filename.
 
+### Grade every number
+
+End the main document with one number-grade table. List every number the
+document states, with its grade and what would settle it:
+
+| Number | Grade | Source | What would settle it |
+|---|---|---|---|
+| 42% of traces carry a status | measured | the map's row C07 | — |
+| $0.12 per GB stored | published | vendor price page, 2026-09-01 | an invoice |
+| 3× ingest growth | modelled | the spike plan | a 30-day data pull |
+
+Use four grades: `measured` (we verified it), `published` (a source states it),
+`modelled` (we derived it) and `assumed`. The table tells a reader which claims
+can carry a decision, and which data pulls would settle the most. This is
+guidance; no check reads the table (ruling of 2026-09-30, sd:1837).
+
 ## Rendering
 
 ```bash
@@ -211,7 +254,8 @@ sd-research-kit checklinks
 It resolves markdown links relative to the containing file, and backticked paths
 carrying a `NN-dir/` segment against the repo root. A backticked bare filename is
 prose, not a link — docs legitimately name files that live in another repo or do
-not exist yet.
+not exist yet. The hook `sd-research-kit init-hook` installs runs it after every
+render and reports broken links (sd:1840).
 
 Check what the documents pin:
 
@@ -235,8 +279,9 @@ sd-research-kit review
 
 It checks what a script can decide — every document has a provenance block,
 closes with a Status section that separates verified from not verified, and is
-not newer than its build — and then prints the checklist for the half no script
-can do. Exit 1 means fix it first.
+not newer than its build; each map has stable row IDs and a gaps section, which
+only warns — and then prints the checklist for the half no script can do. Exit 1
+means fix it first.
 
 **The information.** Take the review adversarially: the job is to refute the
 document, not to confirm it.
