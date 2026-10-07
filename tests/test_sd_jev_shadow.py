@@ -218,7 +218,8 @@ class TriageTests(ReviewFixture):
         with unittest.mock.patch.object(sd_jev.sd_lib, "github_head", side_effect=RuntimeError("boom")), \
                 contextlib.redirect_stderr(noise):
             sd_jev.jev_triage([FINDING], self.environment(), root, said)
-            sd_work._dedupe((2, "new", [(1, "old")], root), self.environment())
+            sd_work._dedupe((None, None, {"item": {"id": 2, "title": "new", "repo": str(root)}}),
+                            self.environment())
         self.assertIn("sd-review: the Jev shadow reading stopped: RuntimeError: boom", said.getvalue())
         self.assertIn("sd-task-add: the Jev shadow reading stopped: RuntimeError: boom", noise.getvalue())
 
@@ -285,8 +286,22 @@ class DedupeTests(ReviewFixture):
         self.add("Fix the lane too", JEV_SD_TASK_DEDUPE="off")
         self.assertEqual((stubs.jev(), stubs.gh()), ([], []))
 
-    def test_the_first_item_of_a_repository_asks_nobody(self):
+    def test_the_first_item_of_a_repository_asks_no_question(self):
         stubs = Stubs(self.tool_bin)
         self.add("Fix the lane")
-        self.assertEqual((stubs.jev(), stubs.gh()), ([], []))
+        self.assertEqual(stubs.choices(), [])
+
+    def test_a_failing_candidate_read_cannot_fail_the_add(self):
+        """Review of c57c43bd2: the candidate read ran outside the guarded stage,
+        so with the stage off a read failure after filing hid the new item's id."""
+        shim = self.tmp / "shim"
+        shim.mkdir()
+        (shim / "sitecustomize.py").write_text(
+            "import sd_db.reads\n"
+            "def broken(*args, **kwargs):\n"
+            "    raise RuntimeError('backlog unreadable')\n"
+            "sd_db.reads.backlog_items = broken\n")
+        added = self.add("Fix the lane", JEV_SD_TASK_DEDUPE="0",
+                         PYTHONPATH=f"{shim}{os.pathsep}{os.environ.get('PYTHONPATH', '')}")
+        self.assertEqual(json.loads(added.stdout)["item"]["title"], "Fix the lane")
 

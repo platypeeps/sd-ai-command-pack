@@ -1066,27 +1066,17 @@ def run(args: argparse.Namespace) -> int:
         connection.close()
 
 
-#: `sd_jev.jev_dedupe`'s inputs before the environment: item, title, open items, checkout.
-DedupeInputs = tuple[int, str, list[tuple[int, str]], pathlib.Path]
-
-
 def _add(sd_db: Any, workflow: Any, args: argparse.Namespace, connection: Any,
-         who: str) -> tuple[dict, DedupeInputs | None]:
-    """The filed row, and `jev_dedupe`'s inputs when it is a new item in a checkout.
+         who: str) -> tuple[dict, tuple[Any, Any, dict]]:
+    """The filed row, and what the shadow duplicate hint (sd:2093) reads it from.
 
-    The duplicate hint is shadow only (sd:2093): `run` asks it after the row is
-    filed and printed, and Jev's pick goes to its ledger and is never read back.
-    A `--ref` update made no new item, and an item with no checkout has no
-    repository whose visibility could make its titles sendable.
+    `run` asks the hint after the row is filed and printed; Jev's pick goes to
+    its ledger and is never read back. Nothing here reads for the hint: every
+    read is `_dedupe_ask`'s, inside `shadow_safely` and after the switch.
     """
     _kinds(workflow)
     state = _capture(sd_db, workflow, args, connection, who)
-    item = state["item"]
-    if state.get("created") is False or not item.get("repo"):
-        return state, None
-    rows = sd_db.reads.backlog_items(connection, repo=item["repo"])
-    candidates = [(row["id"], row["title"]) for row in rows if row["status"] != "done"]
-    return state, (item["id"], item["title"], candidates, pathlib.Path(item["repo"]).expanduser())
+    return state, (sd_db, connection, state)
 
 
 #: The duplicate hint's stage, its name in the judgment ledger, and its shadow
@@ -1098,29 +1088,38 @@ NO_DUPLICATE = "none"
 MAX_CANDIDATES = 40
 
 
-def _dedupe(inputs: DedupeInputs | None, env: Any = os.environ) -> None:
+def _dedupe(inputs: tuple[Any, Any, dict] | None, env: Any = os.environ) -> None:
     """Record which open item Jev reads as a duplicate of the one `_add` filed (sd:2093).
 
     Shadow only, and only for a public repository: `sd_jev.shadow_ready` says
     when. Sent: the new title, and the ids and titles of up to
-    `MAX_CANDIDATES` open items of the same repository.
+    `MAX_CANDIDATES` open items of the same repository. Any failure is a note.
     """
     if inputs is not None:
         sd_jev.shadow_safely(DEDUPE_CALLER, DEDUPE_STAGE, sys.stderr, _dedupe_ask, *inputs, env)
 
 
-def _dedupe_ask(item: int, title: str, candidates: list[tuple[int, str]], root: pathlib.Path,
-                env: Any) -> None:
-    shown = [(number, _bare(text)) for number, text in candidates if number != item][:MAX_CANDIDATES]
-    ready = sd_jev.shadow_ready(DEDUPE_STAGE, DEDUPE_CALLER, root, env, sys.stderr) if shown else None
+def _dedupe_ask(sd_db: Any, connection: Any, state: dict, env: Any) -> None:
+    """The hint itself. A `--ref` update made no new item, and an item with no
+    checkout has no repository whose visibility could make its titles sendable."""
+    item = state["item"]
+    if state.get("created") is False or not item.get("repo"):
+        return
+    root = pathlib.Path(item["repo"]).expanduser()
+    ready = sd_jev.shadow_ready(DEDUPE_STAGE, DEDUPE_CALLER, root, env, sys.stderr)
     if ready is None:
+        return
+    rows = sd_db.reads.backlog_items(connection, repo=item["repo"])
+    shown = [(row["id"], _bare(row["title"])) for row in rows
+             if row["status"] != "done" and row["id"] != item["id"]][:MAX_CANDIDATES]
+    if not shown:
         return
     criteria = ",".join([f"{NO_DUPLICATE}=no listed item tracks the same work"]
                         + [f"sd-{number}={text}" for number, text in shown])
     sd_jev.shadow_ask(ready[0], "Which open item already tracks the same work as the new item?",
-                      criteria, json.dumps({"new_item_title": _bare(title)}), env, sys.stderr,
+                      criteria, json.dumps({"new_item_title": _bare(item["title"])}), env, sys.stderr,
                       caller=DEDUPE_CALLER, stage=DEDUPE_STAGE, answer=NO_DUPLICATE, scope=ready[2],
-                      subject=f"sd-task-dedupe:sd-{item}")
+                      subject=f"sd-task-dedupe:sd-{item['id']}")
 
 
 def _bare(text: object) -> str:
