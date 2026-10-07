@@ -309,7 +309,6 @@ def _jev_run(argv: Sequence[str], env: Mapping[str, str],
         return subprocess.CompletedProcess(list(argv), 1, "", str(error))
 
 
-
 # --------------------------------------------------------------------------
 # Shadow stages: review triage here (sd:2092), and the `sd task add` duplicate
 # hint in `bin/sd_work.py` (sd:2093), which shares these helpers.
