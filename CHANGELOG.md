@@ -481,6 +481,12 @@
 
 ### Fixed
 
+- **A failed review's refusal names every failed reviewer (sd:1819).**
+  `sd-ship` gave its 600-character detail to the failed reviewers in order, so a long first detail hid the rest.
+  Each failed reviewer now gets an equal share, under its own name.
+  A `length` stop from a `url` entry with no `max_tokens` read `below max_tokens (None)` and said to raise it.
+  It now reads `stopped on length with no max_tokens set` and names setting one.
+
 - **A missing `--base` ref no longer runs the full check silently (sd:2863).**
   `sd gate check --base X` compares at `refs/remotes/origin/X`; unfetched, it found no merge base and ran everything.
   In a repository that declares `.github/sd-check-scope.json`, `sd-check --base REF` now exits 2 naming a `REF` that
@@ -1280,6 +1286,10 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **The default review severity floor is `high` (sd:1657).**
+  A repository whose `.github/sd-review.json` names no `severity_floor` blocks on `high` findings only, not `medium`.
+  The operator ruled the fleet default on 2026-09-30; a repository that wants `medium` names it in its policy file.
 
 - **A repository may bind only the pack files `sd-check` imports (sd:2722).**
   `gate_inputs`, and the offload receipt's `pack_bin` with it, hash every
