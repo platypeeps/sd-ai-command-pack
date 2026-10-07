@@ -196,7 +196,7 @@ class OffloadView(ViewFixture):
                     environ = {key: value for key, value in self.environ(login).items()
                                if not (caller == "HOME" and key == "CARGO_HOME")}
                     environment = sd_gate_receipts.offload_environment(environ)
-                    sd_gate_receipts.cargo_subcommands(environ, environment, tree, self.tmp / "repo", "offload")
+                    sd_gate_receipts.cargo_subcommands(environ, tree, self.tmp / "repo", "offload")
                     copy = tree.parent / sd_gate_receipts.CARGO_SUBCOMMANDS / "cargo-nextest"
                     self.assertEqual(copy.read_bytes(), (self.home(login) / ".cargo" / "bin" / "cargo-nextest").read_bytes())
                     views[login] = sd_gate_receipts.offload_view(environment, (), tree)
@@ -211,11 +211,29 @@ class OffloadView(ViewFixture):
         tree.mkdir(parents=True)
         environ = self.environ("sat")
         environment = sd_gate_receipts.offload_environment(environ)
-        sd_gate_receipts.cargo_subcommands(environ, environment, tree, self.tmp / "repo", "offload")
+        sd_gate_receipts.cargo_subcommands(environ, tree, self.tmp / "repo", "offload")
         bound = sd_gate_receipts.machine_binding(tree, [["cargo-nextest", "run"]], environment)["tools"]
         copy = tree.parent / sd_gate_receipts.CARGO_SUBCOMMANDS / "cargo-nextest"
         self.assertEqual(bound, [{"invocation": "cargo-nextest", "path": "subcommands:cargo-nextest",
                                   "sha256": sd_gate_receipts.sd_check_receipts.file_digest(copy)}])
+
+    def test_a_check_that_runs_cargo_nextest_binds_the_gates_copy(self) -> None:
+        """sd:2921 r6 review: `cargo nextest` runs the copy too, as the pinned `CARGO_HOME/bin` holds none; the view
+        resolves the name on the check's `PATH`, which starts with the copy, not on the gate's `PATH`."""
+        self.tool(self.home("sat") / ".cargo" / "bin" / "cargo-nextest", "cargo-nextest 0.9.100")
+        self.tool(self.tmp / "decoy" / "cargo-nextest", "cargo-nextest decoy")
+        tree = self.tmp / "gate" / "tree"
+        tree.mkdir(parents=True)
+        environ = self.environ("sat")
+        environment = sd_gate_receipts.offload_environment(environ)
+        environment["PATH"] = os.pathsep.join([str(self.tmp / "decoy"), environment["PATH"]])
+        sd_gate_receipts.cargo_subcommands(environ, tree, self.tmp / "repo", "offload")
+        copy = tree.parent / sd_gate_receipts.CARGO_SUBCOMMANDS / "cargo-nextest"
+        self.assertIsNone(sd_gate_receipts.pinned_subcommands(environment, "offload"))
+        self.assertEqual(sd_gate_receipts.view_tools(environment, (), tree)[0]["cargo-nextest"],
+                         sd_gate_receipts._content_digest(copy))
+        self.assertEqual(sd_gate_receipts.machine_binding(tree, [["cargo-nextest", "run"]], environment)["tools"][0]["path"],
+                         "subcommands:cargo-nextest")
 
     def test_the_pins_hold_on_an_environment_they_already_pinned(self) -> None:
         """A pass under `offload_environment` reuses only when a second pinning changes nothing (sd:2921)."""

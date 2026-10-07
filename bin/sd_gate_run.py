@@ -171,7 +171,7 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
                 (tree / LOCAL_BLOCK).write_text(sd_lib.local_policy_text(sd_lib.read_local_block(local) if (local := untracked_local_block(root)) else {}), encoding="utf-8")
             caller = gate_environment(root, None if environ is None else dict(environ))
             env, mode = sd_gate_receipts.offload_run(database, root, caller, record=record, offload=offload)  # sd:2782
-            sd_gate_receipts.cargo_subcommands(caller, env, tree, root, mode)  # sd:2921
+            sd_gate_receipts.cargo_subcommands(caller, tree, root, mode)  # sd:2921
             content, fork = sd_gate_receipts.tree_key(tree, base)
             own = sd_gate_receipts.gates_itself(root, tree, BIN)
             gated = sd_gate_receipts.Worktree(root, tree, head, base, env, content, fork, own,

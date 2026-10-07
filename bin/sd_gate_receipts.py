@@ -368,7 +368,7 @@ def offload_view(environment: Mapping[str, str], names: Iterable[str] = (),
     Local reuse reads only its `tools` (`view_tools`, sd:2921): `gate_binding` binds the whole environment (C-17). The view writes each `$HOME`
     prefix as `~`, so two logins can compare equal, and binds what `HOME` and `PATH` select: `path`, the `PATH`
     entries in order; `tools`, the bytes of each name in `OFFLOAD_TOOLS`
-    and `names` resolved on that `PATH`, a `cargo-` name in `$CARGO_HOME/bin` and `CARGO_SUBCOMMANDS` first, as cargo does, or None for one that does not resolve; `python`, the bytes and version of
+    and `names` resolved on the check's own `PATH` (`subcommand_path`), or None for one that does not resolve; `python`, the bytes and version of
     `sys.executable`, the interpreter that runs `sd-check` whatever `PATH` says; `home_files`, the bytes of
     each `OFFLOAD_HOME_FILES` entry under `HOME` and of each `OFFLOAD_VARIABLE_FILES` entry, or "absent"; `threads`, `sd_gate_slots.thread_caps`, which
     `machine_binding` binds too; `variables`, the sha256 of each `offload_variable`'s value. A variable outside
@@ -407,19 +407,17 @@ def view_tools(environment: Mapping[str, str], names: Iterable[str] = (),
                tree: pathlib.Path | None = None) -> tuple[dict[str, str | None], dict[str, str]]:
     """`offload_view`'s `tools` and `resolution`: each name in `OFFLOAD_TOOLS` and `names`, by name and bytes; raises as `view_tool`.
 
-    A `cargo-` name resolves as cargo finds a subcommand: `$CARGO_HOME/bin`, then the check's `PATH`, which starts
-    with the gate's own `CARGO_SUBCOMMANDS` beside `tree` (`subcommand_path`, sd:2921). No folder name is bound, so
+    Each name resolves on the check's own `PATH`, which starts with the gate's `CARGO_SUBCOMMANDS` beside `tree`
+    (`subcommand_path`, sd:2921). cargo looks in `$CARGO_HOME/bin` first, which `pinned_subcommands` keeps free of
+    every bound name, so `cargo nextest` and `cargo-nextest` run the file bound here. No folder name is bound, so
     the temporary folder's random name never reaches a binding.
     """
-    search = environment.get("PATH", "")
-    cargo = [os.path.join(environment["CARGO_HOME"], "bin")] if environment.get("CARGO_HOME") else []
-    cargo += [str(tree.parent / CARGO_SUBCOMMANDS)] if tree is not None else []
+    search = (subcommand_path(dict(environment), tree) if tree is not None else environment).get("PATH", "")
     tools: dict[str, str | None] = {}
     resolution: dict[str, str] = {}
     for name in (*OFFLOAD_TOOLS, *names):
         if os.path.isabs(name) or not os.path.dirname(name):
-            found = os.pathsep.join([*cargo, search]) if name.startswith("cargo-") else search
-            tools[name], way = view_tool(name, found, environment, tree)
+            tools[name], way = view_tool(name, search, environment, tree)
             if way:
                 resolution[name] = way
     return tools, resolution
@@ -498,42 +496,42 @@ def offload_environment(environment: Mapping[str, str]) -> dict[str, str]:
     return {**kept, **offload_pins(kept)}
 
 
-def cargo_subcommands(caller: Mapping[str, str], environment: Mapping[str, str], tree: pathlib.Path,
-                      root: pathlib.Path, mode: str) -> None:
+def cargo_subcommands(caller: Mapping[str, str], tree: pathlib.Path, root: pathlib.Path, mode: str) -> None:
     """Copy each `cargo-` name in `OFFLOAD_TOOLS` from the caller's `CARGO_HOME/bin`, `~/.cargo/bin` by default, into
     `CARGO_SUBCOMMANDS` beside `tree`: this gate's own folder, which goes with its temporary folder (sd:2921).
 
-    cargo looks for a subcommand in `$CARGO_HOME/bin`, then `PATH`, and the pinned `CARGO_HOME` (`environment`'s)
-    holds none, so the check's `PATH` starts with this folder (`subcommand_path`) and the view looks
-    there too (`offload_view`). A copy, not a link: no other gate writes it, and a caller's binary that changes
-    during the run changes neither what the check runs nor what the view binds. Only bound names: an unbound
-    subcommand such as `cargo-llvm-cov` stays unavailable. The caller's folder passes `gate_path`, so a relative
-    one or one inside `root` gives nothing. A link an earlier version left in the pinned `CARGO_HOME/bin` is
-    removed, since cargo would find it first: a symlink under a bound name whose target has that name. A regular
-    file or any other link there stays, and a caller whose `CARGO_HOME` is the pinned one changes nothing in it.
-    `caller` is the environment before the pins; a `whole` gate (`offload_run`'s `mode`) keeps the caller's
-    `CARGO_HOME` and gets nothing.
+    cargo looks for a subcommand in `$CARGO_HOME/bin`, then `PATH`, and the pinned `CARGO_HOME` holds none
+    (`pinned_subcommands`), so the check's `PATH` starts with this folder (`subcommand_path`) and the view resolves
+    on that `PATH` too (`view_tools`). A copy, not a link: no other gate writes it, and a caller's binary that
+    changes during the run changes neither what the check runs nor what the view binds. Only bound names: an
+    unbound subcommand such as `cargo-llvm-cov` stays unavailable. The caller's folder passes `gate_path`, so a
+    relative one or one inside `root` gives nothing. Nothing here writes or removes anything in the pinned
+    `CARGO_HOME`. `caller` is the environment before the pins; a `whole` gate (`offload_run`'s `mode`) keeps the
+    caller's `CARGO_HOME` and gets nothing.
     """
-    if mode == "whole":
-        return
-    names = [name for name in OFFLOAD_TOOLS if name.startswith("cargo-")]
-    pinned = pathlib.Path(environment["CARGO_HOME"], "bin")
     own = caller.get("CARGO_HOME") or (os.path.join(caller["HOME"], ".cargo") if caller.get("HOME") else None)
-    if own and pathlib.Path(own, "bin").resolve() == pinned.resolve():  # the caller's own install: touch nothing
-        return
-    for name in names:
-        with suppress(OSError):  # only an earlier version's link (sd:2921 round 3), never a file someone installed
-            if os.path.islink(pinned / name) and pathlib.Path(os.readlink(pinned / name)).name == name:
-                (pinned / name).unlink()
-    folders = gate_path(os.path.join(own, "bin"), root) if own else []
+    folders = gate_path(os.path.join(own, "bin"), root) if own and mode != "whole" else []
     if not folders:
         return
-    for name in names:
+    for name in OFFLOAD_TOOLS:
         source = pathlib.Path(folders[0], name)
         with suppress(OSError):  # no copy: the check finds no such subcommand, and the view binds what it finds
-            if source.is_file():
+            if name.startswith("cargo-") and source.is_file():
                 (tree.parent / CARGO_SUBCOMMANDS).mkdir(exist_ok=True)
                 shutil.copy2(source, tree.parent / CARGO_SUBCOMMANDS / name)
+
+
+def pinned_subcommands(environment: Mapping[str, str], mode: str) -> str | None:
+    """Why an opted-in gate refuses to run: a name in `OFFLOAD_TOOLS` in the pinned `CARGO_HOME/bin` (sd:2921), else None.
+
+    cargo would run such a `cargo-` file before the gate's copy, while the view binds the copy. No gate writes
+    there, so refusing costs less than binding two ways to resolve one name. A `whole` gate keeps the caller's
+    own `CARGO_HOME` and never refuses.
+    """
+    pinned = pathlib.Path(environment["CARGO_HOME"], "bin") if mode != "whole" else None
+    found = [str(pinned / name) for name in OFFLOAD_TOOLS if pinned is not None and os.path.lexists(pinned / name)]
+    return (f"the gate's pinned CARGO_HOME holds {', '.join(found)}, which cargo runs before the bound copy: remove it, "
+            "or stop setting CARGO_HOME to the gate's pinned folder") if found else None
 
 
 def subcommand_path(child: dict[str, str], tree: pathlib.Path) -> dict[str, str]:
@@ -1000,10 +998,13 @@ def from_receipts(database: pathlib.Path | None, gated: Worktree, identity: dict
     This machine's own receipt first; a reuse on a satellite writes the offload row it lacks (sd:2704).
     Then `offload`, the hub's: `require` answers from a satellite's offload receipt or with
     `offload_refused`, and never runs; `fallback` tries one after its own receipt and names its miss.
+    A bound name in the pinned `CARGO_HOME/bin` answers first, with a failure that names it (`pinned_subcommands`).
     An accepted one carries `satellite`. A recorded pass writes the offload row too (`record_gate_pass`).
     """
     import sd_gate_run  # noqa: PLC0415 -- it imports this module
 
+    if (pinned := pinned_subcommands(gated.environment, gated.mode)) is not None:  # whole in `stderr` (sd:2921)
+        return sd_gate_run.check_reading(None, pinned, pinned), None
     key = receipt_key(gated.root, gated.head, gated.content)
     found, miss = examine(database, key, identity) if reuse and database and offload != "require" else (None, None)
     if found is not None:
@@ -1033,6 +1034,9 @@ def record_gate_pass(database: pathlib.Path, gated: Worktree, identity: dict[str
     key = receipt_key(gated.root, gated.head, gated.content)
     # Any part, refusing or not: the row keeps the view the run started from, and records it whole (sd:2862).
     moved = next(iter(offload_differences(before, gated.view(identity))), None) if before is not None else None
+    if (written := pinned_subcommands(gated.environment, gated.mode)) is not None:  # cargo may have run it (sd:2921)
+        reading["receipt_skipped"] = f"moved during the run: {written}"
+        return
     record_unless_moved(database, key, identity, after, reading, gated.head, None if moved else before)  # no reuse exports it
     if "receipt_skipped" in reading:
         return

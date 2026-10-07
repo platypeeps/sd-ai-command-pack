@@ -463,8 +463,8 @@ class CargoSubcommands(SatelliteFixture):
         self.assertNotIn("offload_error", result)
         self.assertEqual((self.seen["nextest"], self.bound()), (self.caller(), self.caller()))
 
-    def test_a_gate_that_did_not_opt_in_copies_and_removes_nothing(self) -> None:
-        """Its `CARGO_HOME` is the caller's own, whose `bin` the pinned-folder cleanup must never touch."""
+    def test_a_gate_that_did_not_opt_in_copies_and_refuses_nothing(self) -> None:
+        """Its `CARGO_HOME` is the caller's own, whose `bin` holds `cargo-nextest`: no copy, and no refusal."""
         self.opted = "off"
         self.assertEqual(self.gate()["status"], "success")
         self.assertTrue((self.cargo / "bin" / "cargo-nextest").is_file())
@@ -490,48 +490,40 @@ class CargoSubcommands(SatelliteFixture):
         self.gate()
         self.assertEqual((self.seen["nextest"], self.bound()), (self.caller(), self.caller()))
 
-    def test_a_subcommand_left_in_the_pinned_cargo_home_is_removed(self) -> None:
-        """An earlier version linked `cargo-nextest` into the shared pinned `CARGO_HOME/bin`, where cargo looks first."""
+    def refused(self, pinned: pathlib.Path, cargo_home: str | None = None) -> None:
+        """The gate refuses before it runs, names the file, and leaves it as it was."""
+        before = os.readlink(pinned / "cargo-nextest") if os.path.islink(pinned / "cargo-nextest") else (pinned / "cargo-nextest").read_bytes()
+        result = self.gate(cargo_home)
+        self.assertEqual((result["status"], self.runs, self.own_row(), self.offload_row()), ("failure", 0, {}, {}))
+        self.assertIn(f"pinned CARGO_HOME holds {pinned / 'cargo-nextest'}", result["stderr"])
+        self.assertEqual(os.readlink(pinned / "cargo-nextest") if os.path.islink(pinned / "cargo-nextest")
+                         else (pinned / "cargo-nextest").read_bytes(), before)
+
+    def test_a_file_in_the_pinned_cargo_home_refuses_the_gate(self) -> None:
+        """sd:2921 r6 review: cargo runs it before the copy, so no gate runs or binds; a caller whose `CARGO_HOME`
+        is the pinned one keeps its install."""
         pinned = pathlib.Path(sd_gate_receipts.offload_pins(self.scratch)["CARGO_HOME"], "bin")
-        self.tool(self.root.parent / "elsewhere" / "cargo-nextest", "cargo-nextest left")
+        self.tool(pinned / "cargo-nextest", "cargo-nextest installed")
+        for cargo_home in (None, str(pinned.parent)):
+            with self.subTest(cargo_home=cargo_home):
+                self.refused(pinned, cargo_home)
+
+    def test_a_link_in_the_pinned_cargo_home_refuses_the_gate(self) -> None:
+        """A link to another install, such as one an unmerged round of sd:2921 left, refuses and stays."""
+        pinned = pathlib.Path(sd_gate_receipts.offload_pins(self.scratch)["CARGO_HOME"], "bin")
+        self.tool(self.root.parent / "elsewhere" / "cargo-nextest", "cargo-nextest elsewhere")
         pinned.mkdir(parents=True)
         (pinned / "cargo-nextest").symlink_to(self.root.parent / "elsewhere" / "cargo-nextest")
-        self.gate()
-        self.assertFalse(os.path.lexists(pinned / "cargo-nextest"))
-        self.assertEqual((self.seen["nextest"], self.bound()), (self.caller(), self.caller()))
-
-    def test_a_caller_whose_cargo_home_is_the_pinned_one_keeps_its_install(self) -> None:
-        """sd:2921 r5 review: such a caller's `cargo-nextest` is its real install, not a leftover to remove."""
-        pinned = pathlib.Path(sd_gate_receipts.offload_pins(self.scratch)["CARGO_HOME"], "bin")
-        self.tool(pinned / "cargo-nextest", "cargo-nextest installed")
-        self.assertEqual(self.gate(cargo_home=str(pinned.parent))["status"], "success")
-        self.assertEqual((pinned / "cargo-nextest").read_text(encoding="utf-8"), "#!/bin/sh\n# cargo-nextest installed\n")
-        self.assertEqual((self.seen["listing"], self.seen["nextest"]), ([], self.caller(pinned.parent)))
-        self.tool(self.root.parent / "elsewhere" / "cargo-nextest", "cargo-nextest linked")  # a link install stays too
-        (pinned / "cargo-nextest").unlink()
-        (pinned / "cargo-nextest").symlink_to(self.root.parent / "elsewhere" / "cargo-nextest")
-        self.gate(cargo_home=str(pinned.parent))
-        self.assertTrue(os.path.islink(pinned / "cargo-nextest"))
-
-    def test_the_cleanup_removes_no_file_and_no_other_link(self) -> None:
-        """Only a link an earlier version left goes: its target has the bound name. A regular file there stays."""
-        pinned = pathlib.Path(sd_gate_receipts.offload_pins(self.scratch)["CARGO_HOME"], "bin")
-        self.tool(pinned / "cargo-nextest", "cargo-nextest installed")
-        self.tool(self.root.parent / "elsewhere" / "nextest-wrapper", "nextest wrapper")
-        self.gate()
-        self.assertEqual((pinned / "cargo-nextest").read_text(encoding="utf-8"), "#!/bin/sh\n# cargo-nextest installed\n")
-        (pinned / "cargo-nextest").unlink()
-        (pinned / "cargo-nextest").symlink_to(self.root.parent / "elsewhere" / "nextest-wrapper")
-        self.gate()
-        self.assertTrue(os.path.islink(pinned / "cargo-nextest"))
+        self.refused(pinned)
 
     def test_a_subcommand_written_to_the_pinned_cargo_home_during_the_run_keeps_no_receipt(self) -> None:
-        """A check's `cargo install` writes the shared pinned `CARGO_HOME/bin`, which cargo reads first; the after
-        binding and view see it, so neither a local receipt nor an offload row is kept."""
+        """A check's `cargo install` writes the shared pinned `CARGO_HOME/bin`, which cargo reads first; the gate
+        looks there again after the run, so neither a local receipt nor an offload row is kept."""
         pinned = pathlib.Path(sd_gate_receipts.offload_pins(self.scratch)["CARGO_HOME"], "bin")
         self.during = lambda: self.tool(pinned / "cargo-nextest", "cargo-nextest installed")
         result = self.gate()
-        self.assertEqual(result["receipt_skipped"], "moved during the run: offload_tools")
+        self.assertIn(f"moved during the run: the gate's pinned CARGO_HOME holds {pinned / 'cargo-nextest'}",
+                      result["receipt_skipped"])
         self.assertEqual((self.own_row(), self.offload_row()), ({}, {}))
 
     def test_a_caller_binary_changed_during_the_run_changes_nothing_it_runs(self) -> None:

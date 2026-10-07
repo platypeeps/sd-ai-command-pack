@@ -190,7 +190,7 @@ cap (`offload_pins`, sd:2879), and the view refuses again on what is left:
 | `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM` | `/dev/null`, `1` | `~/.gitconfig`, `~/.config/git/config` and the system file |
 | `NPM_CONFIG_USERCONFIG`, `NPM_CONFIG_GLOBALCONFIG` | `/dev/null`; a path in the gate's cache folder, since npm refuses one file as both | `~/.npmrc` and the prefix's `npmrc` |
 | `PIP_CONFIG_FILE` | `/dev/null` | every pip file |
-| `CARGO_HOME` | `tool-config/cargo` in the gate's cache folder (`sd_gate_cache.cache_root`) | `~/.cargo/config.toml`; the registry cache moves with it, so each machine downloads it once. Its `bin` holds no subcommand; each gate copies the `cargo-` names in `OFFLOAD_TOOLS` into a folder of its own (sd:2921, "Cargo subcommands") |
+| `CARGO_HOME` | `tool-config/cargo` in the gate's cache folder (`sd_gate_cache.cache_root`) | `~/.cargo/config.toml`; the registry cache moves with it, so each machine downloads it once. Its `bin` holds no bound name, or the gate refuses; each gate copies the `cargo-` names in `OFFLOAD_TOOLS` into a folder of its own (sd:2921, "Cargo subcommands") |
 | `CPU_VARIABLES` | `OFFLOAD_THREADS`, 4, one gate's share under the default slot count | the core count; a holder lowers it only where the share is smaller, and the view then refuses on `threads` |
 
 uv has no switch that skips the user's file alone: `UV_NO_CONFIG` skips the
@@ -336,24 +336,34 @@ Each opted-in gate copies every `cargo-` name in `OFFLOAD_TOOLS` from the
 caller's `CARGO_HOME/bin`, `~/.cargo/bin` by default, into
 `CARGO_SUBCOMMANDS` beside its worktree (`cargo_subcommands`).
 `subcommand_path` puts that folder first on the check's `PATH`, and the
-view looks for a `cargo-` name where cargo does: `$CARGO_HOME/bin`, that
-folder, then `PATH`. Three rounds of review found the run and the view
-parting in one way each, so this table lists every way the code knows of.
+view resolves every bound name on that same `PATH`. Nothing writes or
+removes a file in the pinned `CARGO_HOME`. Instead an opted-in gate
+refuses, before it runs or reuses, while the pinned `CARGO_HOME/bin` holds
+any name in `OFFLOAD_TOOLS` (`pinned_subcommands`). cargo then finds
+nothing there, so `cargo nextest` and `cargo-nextest` run the one file
+the view binds. The refusal names the path, and says to remove it or stop
+setting `CARGO_HOME` to the gate's pinned folder.
+
+No migration: an unmerged round of this change linked `cargo-` names into
+the pinned `CARGO_HOME/bin`, but it never reached main, and the hub's gate
+cache held no `cargo-` name when checked on 2026-10-07. A machine that
+ran that round's branch gets the refusal, which names the link to remove.
+
+Review rounds found the run and the view parting in one way each, so
+this table lists every way the code knows of.
 
 | How the tool the check runs can differ from the one the view binds | Guard | Test (`CargoSubcommands` unless named) |
 |---|---|---|
 | Two gates run at once for callers whose `CARGO_HOME`s differ | Each gate copies into its own folder; no gate writes a shared one | `test_a_concurrent_gate_of_another_caller_changes_nothing_this_one_runs` |
-| An earlier version left a link in the pinned `CARGO_HOME/bin`, which cargo reads first | `cargo_subcommands` removes, before the run, a symlink there under a bound name whose target has that name | `test_a_subcommand_left_in_the_pinned_cargo_home_is_removed` |
-| The caller's `CARGO_HOME` resolves to the pinned one | `cargo_subcommands` compares the two before any cleanup and then changes nothing: the files there are the caller's install, which the check runs and the view binds | `test_a_caller_whose_cargo_home_is_the_pinned_one_keeps_its_install` |
-| The cleanup removes a user's file | Only a symlink whose target has the bound name goes; a regular file or another link stays, and since cargo and `view_tools` both read that folder first, the view binds what runs | `test_the_cleanup_removes_no_file_and_no_other_link` |
-| A check writes a bound name into the pinned `CARGO_HOME/bin` during the run | `view_tools` looks there first, so the after binding's `offload_tools` differs and neither a local receipt nor an offload row is kept (`record_gate_pass`) | `test_a_subcommand_written_to_the_pinned_cargo_home_during_the_run_keeps_no_receipt` |
+| The pinned `CARGO_HOME/bin` holds a bound name, as a file or a link: an earlier round's link, a user's install, or a caller whose `CARGO_HOME` is the pinned one | Refuse: `from_receipts` answers with a failure that names the path, before reuse or a run, and nothing there is changed | `test_a_file_in_the_pinned_cargo_home_refuses_the_gate`, `test_a_link_in_the_pinned_cargo_home_refuses_the_gate` |
+| A check writes a bound name into the pinned `CARGO_HOME/bin` during the run | `record_gate_pass` asks `pinned_subcommands` again after the run, so neither a local receipt nor an offload row is kept | `test_a_subcommand_written_to_the_pinned_cargo_home_during_the_run_keeps_no_receipt` |
 | The caller's binary changes during the run | A copy, not a link: the check runs the copy and both views bind it | `test_a_caller_binary_changed_during_the_run_changes_nothing_it_runs` |
 | The caller has no binary, after another caller's gate had one | Nothing is copied, and no other gate's copy is reachable | `test_a_caller_without_the_subcommand_does_not_run_another_callers` |
 | The caller's cargo `bin` is relative or inside the checkout | `gate_path`, the rule `gate_environment` applies to every `PATH` entry | `test_a_cargo_bin_the_gate_path_drops_gives_nothing` |
 | A subcommand the view does not bind, such as `cargo-llvm-cov` | Only bound names are copied; no caller folder joins `PATH` | `test_an_unbound_subcommand_stays_unavailable_and_the_folder_goes_with_the_run` |
-| The view looks where cargo does not | `offload_view` and `subcommand_path` use one order: `$CARGO_HOME/bin`, `CARGO_SUBCOMMANDS`, `PATH` | `test_the_check_runs_the_callers_subcommand_and_the_row_binds_it` |
+| `cargo nextest` and `cargo-nextest` resolve to different files | `view_tools` and `machine_binding` resolve on the check's own `PATH` (`subcommand_path`), and the pinned `CARGO_HOME/bin`, where cargo looks first, holds no bound name | `test_the_check_runs_the_callers_subcommand_and_the_row_binds_it`, `OffloadView.test_a_check_that_runs_cargo_nextest_binds_the_gates_copy`, `OffloadView.test_a_check_that_runs_the_subcommand_itself_binds_the_gates_copy` |
 | The hub's and the satellite's copies differ | `cargo-nextest` is in `OFFLOAD_TOOLS`, so it refuses | `OffloadView.test_a_bound_cargo_subcommand_is_copied_for_the_gate_and_refuses` |
-| A gate in a repository that did not opt in, whose `CARGO_HOME` is the caller's own | `cargo_subcommands` does nothing in `whole` mode, so the cleanup never removes the caller's binary | `test_a_gate_that_did_not_opt_in_copies_and_removes_nothing` |
+| A gate in a repository that did not opt in, whose `CARGO_HOME` is the caller's own | In `whole` mode `cargo_subcommands` copies nothing and `pinned_subcommands` never refuses | `test_a_gate_that_did_not_opt_in_copies_and_refuses_nothing` |
 | Local receipt reuse: identity bound vs executable run. Local reuse never reads the view | `gate_binding` adds `offload_tools`, each `OFFLOAD_TOOLS` executable by name and bytes as `view_tools` finds it; `machine_binding` resolves the check's own names on the check's `PATH` (`subcommand_path`) and names a copy `subcommands:<name>`, never the random folder | `test_a_changed_subcommand_moves_the_local_binding`, `OffloadView.test_a_check_that_runs_the_subcommand_itself_binds_the_gates_copy`, `test_an_unchanged_subcommand_reuses_the_pass` |
 | Tests touch the real cache: `mock.patch.dict` keeps an inherited `SD_GATE_CACHE_DIR`, which outranks a scratch `XDG_CACHE_HOME` | `no_real_gate_cache` in `SatelliteFixture` points the variable into the test's folder, and fails a test whose pinning lands outside it | every `SatelliteFixture` test; fails first with the variable exported and the isolation removed |
 | The folder outlives the run | It lies in the gate's temporary folder, which `check_in_worktree` removes | `test_an_unbound_subcommand_stays_unavailable_and_the_folder_goes_with_the_run`; the temporary folder is the guard, so no change to the code makes this test fail alone |
