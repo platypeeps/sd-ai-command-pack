@@ -56,7 +56,8 @@ USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pi
                 default branch, no mirror under the same switch
   publish       the registration and queueing half on its own, without
                 re-rendering
-  init-hook     install the hook that re-renders this repo, under all three
+  init-hook     install the hook that re-renders this repo and then runs
+                checklinks, reporting broken links, under all three
                 triggers at once -- post-commit, post-merge and post-checkout,
                 so a pull and a branch switch render too; upgrades an earlier
                 install of its own. The hook renders only a research.conf.py
@@ -71,9 +72,11 @@ USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pi
   review        the mechanical half of the pre-publication adversarial review:
                 provenance block, Status section separating verified from not,
                 build freshness, the one `START HERE -- ` main document across
-                the configured H1s and rendered titles, and this repo's
-                CLAUDE.md against the pack's template. Then prints the checklist
-                for the half no script can do. Exit 1 if a check fails, 2 outside a research repo
+                the configured H1s and rendered titles, this repo's
+                CLAUDE.md against the pack's template, and stable row IDs and
+                a gaps section in each 20-map/ map (warnings only). Then prints
+                the checklist for the half no script can do. Exit 1 if a check
+                fails, 2 outside a research repo
   pins          for every `source` @ `sha` the markdown asserts, say whether
                 upstream has moved past it. The list is read out of the
                 documents each run, never maintained
