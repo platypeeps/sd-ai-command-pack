@@ -3027,8 +3027,8 @@ def gate_check(args: argparse.Namespace) -> int:
     except sd_gate_run.GateError as error:
         raise Refusal(str(error)) from None
     print(json.dumps(result, indent=2, sort_keys=True))
-    scope = (result.get("report") or {}).get("scope") or {}
-    if scope.get("mode") == "full":  # why no narrower scope applied, where a reader sees it (sd:2863)
+    scope = (result.get("report") or {}).get("scope")
+    if isinstance(scope, dict) and scope.get("mode") == "full":  # why no narrower scope applied, where a reader sees it (sd:2863)
         print(f"sd gate check: full check: {scope.get('reason')}", file=sys.stderr)
     return 0 if result.get("status") == "success" else 1
 
