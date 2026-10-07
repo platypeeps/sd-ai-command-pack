@@ -4,6 +4,12 @@
 
 ### Added
 
+- **Every `jev` call names its subject and its run (sd:2954).**
+  `sd-docs-lint` passes `--subject sd-docs-lint:<16 hex>`, a hash of the batch's sorted origins, never their text.
+  `sd-review`, `sd task add` and `sd-docs-lint` export one `JEV_RUN=<caller>-<UTC>-<4 hex>` per process and keep an inherited one.
+  The `sd-fact-check`, `sd-publish` and prose-score pages show a hashed `--subject` and one run id per run.
+  CONTRIBUTING.md names each key and how an outcome recomputes it.
+
 - **`sd changelog render|show|import` renders `CHANGELOG.md` from the database's entry rows (sd:2783, step 2).**
   `render` writes the region between `<!-- sd-changelog:begin -->` and `<!-- sd-changelog:end -->` from the rows merged on the base's first-parent history since the newest `v*` tag; text outside the region stays byte for byte.
   Entries go by subsection, then newest merge first by first-parent position; neither write order nor a clock decides the order.

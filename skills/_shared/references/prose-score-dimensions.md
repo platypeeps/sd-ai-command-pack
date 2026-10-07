@@ -97,8 +97,14 @@ Write the draft to a file, write the block below to a file, then run:
 
 ```sh
 jev ask --questions questions.json --state draft.txt \
-    --caller <skill> --stage JEV_SD_PROSE_SCORE
+    --caller <skill> --stage JEV_SD_PROSE_SCORE \
+    --subject "<skill>:$(shasum -a 256 draft.txt | cut -c1-16)"
 ```
+
+`--subject` names the draft by the first 16 hex of its SHA-256, never by its
+text, so a later outcome can join the scores by hashing the same draft. Export
+one `JEV_RUN=<skill>-<UTC yyyymmddThhmmss>-<4 hex>` before the first call of a
+run and keep it for every call in it.
 
 Both `--questions` and `--state` read stdin when given `-`, so at most one of
 them can be `-` in a single call. Keep the draft in a file and pipe the

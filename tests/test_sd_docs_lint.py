@@ -2134,6 +2134,10 @@ argv_log = os.environ.get("JEV_STUB_ARGV")
 if argv_log:
     with open(argv_log, "a") as log:
         log.write(json.dumps(sys.argv[1:]) + "\\n")
+run_log = os.environ.get("JEV_STUB_RUN")
+if run_log:
+    with open(run_log, "a") as log:
+        log.write(os.environ.get("JEV_RUN", "") + "\\n")
 if verb == "enabled":
     probed = os.environ.get("JEV_STUB_PROBED")
     if probed:
@@ -2255,6 +2259,22 @@ class Rule6ClaimSupportTests(LintFixture):
         self.assertNotIn("--local-only", ask)
         self.assertEqual(ask[ask.index("--caller") + 1], lint.JEV_CALLER)
         self.assertEqual(ask[ask.index("--stage") + 1], lint.JEV_STAGE)
+
+    def test_the_ask_names_its_batch_by_hash_and_the_run_is_one_id(self) -> None:
+        """sd:2954. `--subject` hashes the batch's origins, never a path or a
+        citation, and the probe and the ask share one `JEV_RUN`."""
+
+        argv_log, run_log = self.repo / "argv.jsonl", self.repo / "runs"
+        self.recorded_item()
+        with self.jev(JEV_STUB_ARGV=str(argv_log), JEV_STUB_RUN=str(run_log)):
+            os.environ.pop("JEV_RUN", None)
+            self.notes()
+        ask = self.calls(argv_log)[1]
+        self.assertRegex(ask[ask.index("--subject") + 1], r"^sd-docs-lint:[0-9a-f]{16}$")
+        runs = run_log.read_text().split()
+        self.assertEqual(len(runs), 2, runs)
+        self.assertEqual(len(set(runs)), 1, runs)
+        self.assertRegex(runs[0], r"^sd-docs-lint-\d{8}T\d{6}-[0-9a-f]{4}$")
 
     def test_an_opted_in_repository_with_the_switch_unset_takes_the_reading(self) -> None:
         """The opt-in on, the switch unset: the one way a reading is taken."""

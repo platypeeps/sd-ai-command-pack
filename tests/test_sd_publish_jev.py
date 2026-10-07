@@ -232,6 +232,13 @@ class TheCallIsWrittenAsItRuns(unittest.TestCase):
                 self.assertNotIn(refused, body,
                                  f"`ask` does not take {refused}")
 
+    def test_the_state_is_named_by_hash_and_the_run_is_one_id(self):
+        """The ledger joins a later outcome by subject and groups a run (sd:2954)."""
+        body = judgment_steps()
+        self.assertIn('--subject "sd-publish:$(shasum -a 256 s.json | cut -c1-16)"',
+                      body)
+        self.assertIn("JEV_RUN=sd-publish-", body)
+
     def test_one_state_is_shared_and_referenced_by_path(self):
         body = judgment_steps()
         self.assertRegex(body, r"share one state",
