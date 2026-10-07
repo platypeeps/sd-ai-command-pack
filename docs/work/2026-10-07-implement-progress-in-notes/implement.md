@@ -26,6 +26,11 @@ fail on `main` before the step's code lands.
         `open`. A note whose digest differs marks the row `changed`. Notes
         for ids the plan lacks come back marked `not in plan`; a note with
         no `plan:` line comes back `unbound`.
+      - `plan_checkout(item, given=None)` returns the checkout design
+        point 3 orders: `given`, else the current checkout of the item's
+        repository, else `item.repo`. A `given` checkout of another
+        repository raises, naming both. Every caller in steps 2 and 3 uses
+        it; none resolves a checkout on its own.
       - Check: `tests/test_sd_steps.py` covers each section heading, `2a`
         ids, a fenced example that is skipped, a `[x]` box with no note, a
         note that overrides `[x]`, two notes for one id, an unbound note, and a
@@ -39,10 +44,11 @@ fail on `main` before the step's code lands.
         `--step <id>:<status>` and `--evidence`; `--kind` absent or
         `comment`.
       - Find the plan through the item's work directory, in the checkout
-        design point 3 picks: `--checkout`, else the current checkout of
-        the item's repository, else `item.repo`. Refuse an id the plan
-        lacks and list the plan's ids (R2). No plan: refuse and name the
-        path read.
+        `plan_checkout` picks (design point 3): `--checkout`, else the
+        current checkout of the item's repository, else `item.repo`.
+        `plan_checkout` lives in `bin/sd_steps.py`, step 1. Refuse an id
+        the plan lacks and list the plan's ids (R2). No plan: refuse and
+        name the path read.
       - `sd task steps <item> [--json]` prints the rows of design point 3.
       - Check: PRD acceptance criteria 1, 2, 3 and 11 pass against a
         fixture database and checkout, criterion 11 with a fixture
@@ -51,7 +57,8 @@ fail on `main` before the step's code lands.
 - [ ] 3. `sd-status` subtracts recorded steps. Size S, 2 h. PR B.
       - `_step_rows` in `bin/sd-status`: for `implement.md` in a `row`
         repository, skip a `- [ ] <id>.` box whose step reads `done` or
-        `dropped`. Keys and every other box stay as today.
+        `dropped`, with the plan from `plan_checkout(item, <its checkout>)`.
+        The second remedy in the action text is `row` only too. Keys and every other box stay as today.
       - Add the second remedy to the action text. Update the `EXCLUDED`
         checkbox line, and the `open-step` row in
         `skills/sd-status/SKILL.md`, which mirrors the class table.
@@ -85,7 +92,7 @@ fail on `main` before the step's code lands.
         comment.
 - [ ] 6. Backfill merged steps. Size S, 0.5 h. No pull request.
       - The lane writes eight `step <id>: done` notes on sd:2704 from the
-        item's notes and merge shas (design point 8). It runs
+        item's notes and merge shas (design point 9). It runs
         `sd-status --actions` in system and backfills any merged step listed.
       - Check: PRD criterion 7. `sd task steps 2704` reports eight `done`,
         and the pack's `sd-status --actions` lists at most one `open-step`

@@ -27,10 +27,12 @@ Accepted. Operator ruling 2026-10-07: accept all Q1-Q11. Each question
 below keeps its recommendation, which is now the ruling.
 
 Planning review round 4 (codex) found that the writer read `item.repo`'s
-checkout, not the worktree the step was built in; point 3 now picks the
-current checkout, with `--checkout` as an override. It also found the
-repeated-id lint unconditional; point 5 now limits it to `row`
-repositories.
+checkout, not the worktree the step was built in. Point 3 now has one
+function, `plan_checkout`, and a table of every command that reads or writes
+a step digest. Round 4 also found the repeated-id lint unconditional, the
+second rule after round 2's to reach `file` repositories. Point 8 now
+tables every new rule with where it applies and the test that fails if it
+leaks.
 
 Planning review round 1 (codex) found that a renumbered plan moves a `done`
 note onto other work. Round 2 found that a title match misses a scope change
@@ -192,8 +194,25 @@ The note binds to the plan where the work was done. A worktree that adds
 step 4 accepts `--step 4:done`, and the digest is that worktree's block.
 Run from `main` before the plan merges, `sd task steps` shows the note as
 `not in plan` or `changed`; once the plan merges, the digest matches and the
-step reads `done`. `sd task steps` and `sd-status` read their own current
-checkout, by the same order; `sd-status` reads the checkout it is given.
+step reads `done`.
+
+**One rule, one function.** `plan_checkout(item, given=None)` in
+`bin/sd_steps.py` applies the order above. Every command that reads or
+writes a step digest calls it; none resolves a checkout on its own. A
+command that names a checkout passes it as `given`, so the same refusal
+applies. The class: writer and reader disagree on which plan they read.
+
+| Command | Reads or writes | Checkout it resolves | When it differs from the writer's | Test |
+| --- | --- | --- | --- | --- |
+| `sd task note --step` | writes a digest | `plan_checkout(item, --checkout)` | it is the writer | criterion 11 |
+| `sd task steps` | reads digests | `plan_checkout(item, --checkout)` | run elsewhere: `changed` or `not in plan` until the plan merges | criterion 11 |
+| `sd-status` `_step_rows` | reads digests | `plan_checkout(item, <its checkout>)`; a foreign checkout skips the join, and the box lists as today | run on `main` before the merge: the note does not close the box | criterion 11 |
+| `sd-docs-lint` rule 1 | reads ids only, no digest, no database | the checkout it runs in | never: it binds nothing | criterion 5 |
+| `sd-ship merge` | none (Q4: not now) | none | none | none |
+| A squash that rewrites the plan's step block | changes the digest on `main` | none | the note reads `changed`; the lane writes a new note | criterion 9 |
+| Backfill, implement.md step 6 | writes digests | the lane runs the writer in the item repository's checkout of `main`, where the plans have merged | none: the plans are merged | criterion 7 |
+| Dashboard | none (Q9) | none | none | none |
+| A satellite without the checkout | none | none: the writer refuses with no plan | none | criterion 2 |
 
 A plan that lists no such id refuses, and names the ids it lists (R2). No
 plan found refuses too, and names the path it read: without the plan, the
@@ -294,10 +313,12 @@ produces no `open-step` rows, as today; `sd task steps` reads it. That is why
 the template keeps the `- [ ]` box as the step marker (design point 7): the
 box says "this is a step", and a note, never a tick, closes it.
 
-The action text gains the second remedy: "do it, or record it with
-`sd task note <n> --step <id>:done`". `prd.md` boxes and a `file` repository
-keep today's reading (R5, R7). The section's `EXCLUDED` line about
-checkboxes gains a clause naming the join.
+In a `row` repository only, the action text gains the second remedy: "do
+it, or record it with `sd task note <n> --step <id>:done`". A `file`
+repository keeps today's action text, since its reader joins no notes.
+`prd.md` boxes and a `file` repository keep today's reading (R5, R7). The
+section's `EXCLUDED` line about checkboxes gains a clause naming the join
+and saying it is for `row` repositories.
 
 `sd-status` reads the database already for item status. The join adds one
 note query per active item with a plan.
@@ -400,7 +421,29 @@ advance. Only the place the observation is recorded changes.
 **Q8.** Drop progress lines from `## Status` sections, keeping rulings?
 Recommended: yes.
 
-### 8. Existing plans and the backfill
+### 8. What reaches a `file` repository
+
+R7 promises that a `file` repository behaves as today. Review rounds 2 and
+4 each found a new rule that reached one. The class: a new rule reaches
+`file` repositories. Every rule this item adds, and where it applies:
+
+| New rule | Applies in | `file` repository keeps | Test that fails if it leaks |
+| --- | --- | --- | --- |
+| `sd-status` subtracts boxes a note closes (point 4) | `row` only | every `open-step` row | criterion 6 |
+| `sd-status` action text names `--step` (point 4) | `row` only | today's action text | criterion 6 |
+| `sd-status` `EXCLUDED` line clause (point 4) | both; the clause names `row` | the line, plus a clause that excludes it | none; static text |
+| `sd-docs-lint` rule 1: repeated step id fails (point 5) | `row` only | today's lint result | criterion 5, second half |
+| `implement.md` template: "notes, never tick" (point 7) | `row` clause only | "tick the box" | implement.md step 5 grep |
+| `prd.md` template: `## Log` dropped (Q7) | `row` only | the `## Log` section | implement.md step 5 grep |
+| `WORKFLOW.md`: plan-change paragraph, sd:1933 note (point 7, Q7) | `row`, said in the text | today's paragraphs | none; prose |
+| `sd task note --step` and `sd task steps` (point 3) | both | every existing output; these are new verbs | criterion 6: a `done` note on a `file` fixture changes no `open-step` row |
+| `[x]` reads `done` with no note (point 3) | both, in `sd task steps` only | today's tick reading in `sd-status` | criterion 6 |
+
+The two "both" verbs change no output a `file` repository has today. A
+step note there is recorded and listed by `sd task steps`, and `sd-status`
+ignores it.
+
+### 9. Existing plans and the backfill
 
 No existing `implement.md` changes. A ticked box reads `done` until a note
 says otherwise (point 3). In the pack on 2026-10-07, one active plan has

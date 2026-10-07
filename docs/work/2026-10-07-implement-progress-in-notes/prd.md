@@ -116,7 +116,8 @@ R9. The plan template keeps `- [ ] <id>.` as the step marker. In a `row`
 1. A test writes `step 2: done` for a fixture item whose plan lists steps
    1, 2 and 3 as `- [ ]` boxes. `sd task steps` reports 1 `open`, 2 `done` and 3 `open`.
 2. A test writes `step 9: done` for the same item. The writer refuses and
-   names 1, 2 and 3. No note is written.
+   names 1, 2 and 3. No note is written. With the plan moved away, the
+   writer refuses and names the path it read; no note is written.
 3. A test writes `step 2: done`, then `step 2: dropped`. The step reads
    `dropped`. A ticked `[x]` box with no note reads `done`.
 4. An `sd-status` fixture with the same item lists `open-step` rows for
@@ -125,8 +126,10 @@ R9. The plan template keeps `- [ ] <id>.` as the step marker. In a `row`
    and names the id, in a `row` repository. The same fixture in a `file`
    repository keeps the result it has on `main`. The lint passes every
    active item in this repository.
-6. A fixture repository with `.status-source` set to `file` lists the same
-   `open-step` rows as on `main`.
+6. A fixture repository with `.status-source` set to `file`, and a `done`
+   note for step 2, lists the same `open-step` rows and the same action
+   text as on `main`. Applying the join or the new action text there fails
+   the test.
 7. After the backfill (implement.md, step 6), `sd task steps 2704` reports
    eight `done` steps, and the pack's `sd-status` lists at most one
    `open-step` row for sd:2704.
@@ -150,8 +153,9 @@ R9. The plan template keeps `- [ ] <id>.` as the step marker. In a `row`
    worktree's block digest. Run from the main checkout, it refuses and names
    1, 2 and 3. With `--checkout <worktree>` from elsewhere, it is written.
    After the worktree's plan is copied to main, step 4 reads `done` there.
-   A `--checkout` of another repository refuses. Reading only `item.repo`
-   fails the first case.
+   A `--checkout` of another repository refuses. Before the copy,
+   `sd task steps` on the main checkout lists the note as `not in plan`. Reading only
+   `item.repo` fails the first case.
 
 ## Out of scope
 
