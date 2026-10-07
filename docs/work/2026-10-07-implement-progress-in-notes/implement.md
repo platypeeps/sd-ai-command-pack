@@ -5,73 +5,79 @@ in [design.md](design.md). The steps assume the recommended answers to Q1 to
 Q11; a different ruling changes the step it names.
 
 Progress on these steps goes to `sd task` notes on sd:2784, as the design
-proposes. This file changes only when the plan changes.
+proposes. Nobody ticks a box below; this file changes only when the plan
+changes.
 
 Each step names its check and the result that means failure. Each check must
 fail on `main` before the step's code lands.
 
-## Steps
+## Step checklist
 
-1. `bin/sd_steps.py`: plan parser, note line, join. Size S, 2 h. PR A.
-   - `plan_steps(text)` returns `(id, title, ticked)` per step, from the
-     first `## Steps`, `## Step checklist` or `## Order` section (design
-     point 2). Fenced code is skipped.
-   - `step_line(id, status, pr=None, commit=None)` writes the first line;
-     `read_step_line(body)` reads it, or returns None.
-   - `step_status(steps, notes)` applies design point 3: newest note, then
-     `[x]`, then `open`. Notes for ids the plan lacks come back marked
-     `not in plan`.
-   - Check: `tests/test_sd_steps.py` covers each section heading, `2a` ids,
-     a fenced example that is skipped, a `[x]` box with no note, a note that
-     overrides `[x]`, and two notes for one id. Swapping "newest" for
-     "first" fails the two-note case.
-2. `sd task note --step` and `sd task steps`. Size M, 3 h. PR A.
-   - In `bin/sd_work.py`, beside the existing `note` parser. `--step
-     <id>:<status>`, `--pr`, `--commit`; `--kind` absent or `comment`.
-   - Find the plan through the item's work directory (design point 3).
-     Refuse an id the plan lacks and list the plan's ids (R2). No plan:
-     write and warn.
-   - `sd task steps <item> [--json]` prints the rows of design point 3.
-   - Check: PRD acceptance criteria 1, 2 and 3 pass against a fixture
-     database and checkout. Criterion 2 also asserts that the note count is
-     unchanged. Removing the id check fails criterion 2.
-3. `sd-status` reads step notes. Size S, 2 h. PR B.
-   - `_step_rows` in `bin/sd-status`: for `implement.md` in a `row`
-     repository, list the steps `step_status` reads `open` or `started`.
-     Key `<item>/implement.md#step <id>`. Other files keep today's reading.
-   - Update the `EXCLUDED` checkbox line and `skills/sd-status/SKILL.md`
-     where it describes `open-step`.
-   - Check: PRD criteria 4 and 6 pass. Removing the join fails criterion 4.
-4. `sd-docs-lint` rule 1 refuses a repeated step id. Size S, 1 h. PR B.
-   - Reuse `plan_steps`. The failure names the item, the file and the id.
-   - Check: PRD criterion 5 passes, and `make docs-lint` passes on this
-     repository. Before the system pin moves past PR B, a system pull
-     request renumbers the second list in sd:2107's plan, and system's
-     `sd-docs-lint` passes with the new pack.
-5. Template and documentation. Size S, 2 h. PR C.
-   - `skills/sd-plan/templates/implement.md`: `## Steps` with numbered
-     steps, no boxes, and one line: progress goes to
-     `sd task note <item> --step <id>:<status>`.
-   - `skills/sd-plan/templates/prd.md`: the `## Log` section only where
-     `.status-source` is not `row` (Q7), as its status instruction does.
-   - `WORKFLOW.md`: the sd:1933 paragraph records an observed criterion as
-     a note in a `row` repository (Q7). One paragraph says what a plan
-     change is (design point 7).
-   - `skills/sd-plan/SKILL.md` and `docs/work/README.md`: one line each.
-   - Check: `make check` passes. `grep -rn "## Log" skills/sd-plan`
-     shows the section only inside the `file` branch of the template.
-6. Backfill sd:2704. Size S, 0.5 h. No pull request.
-   - The lane writes eight `step <id>: done` notes from the item's existing
-     notes and merge shas (design point 8).
-   - Check: PRD criterion 7. `sd task steps 2704` reports eight `done`, and
-     `sd-status --actions` in the pack lists at most one `open-step` row for
-     sd:2704. Nine rows means the join is not reached.
-7. Measure, two weeks after PR C. Size S, 0.5 h.
-   - Re-run the prd.md measurement over those two weeks.
-   - Expect no squash whose only reason is progress. Count the
-     `open-step` rows that name a merged step.
-   - Answer Q4 from the result: if the lane missed step notes, add the
-     `sd-ship merge` writer then.
+- [ ] 1. `bin/sd_steps.py`: plan parser, note line, join. Size S, 2 h. PR A.
+      - `plan_steps(text)` returns `(id, title, ticked)` per step, from the
+        first `## Steps`, `## Step checklist` or `## Order` section (design
+        point 2). Fenced code is skipped.
+      - `step_line(id, status, evidence=None)` writes the first line;
+        `read_step_line(body)` reads it, or returns None.
+      - `step_status(steps, notes)` applies design point 3: newest note,
+        then `[x]`, then `open`. Notes for ids the plan lacks come back
+        marked `not in plan`.
+      - Check: `tests/test_sd_steps.py` covers each section heading, `2a`
+        ids, a fenced example that is skipped, a `[x]` box with no note, a
+        note that overrides `[x]`, and two notes for one id. Swapping
+        "newest" for "first" fails the two-note case.
+- [ ] 2. `sd task note --step` and `sd task steps`. Size M, 3 h. PR A.
+      - In `bin/sd_work.py`, beside the existing `note` parser:
+        `--step <id>:<status>` and `--evidence`; `--kind` absent or
+        `comment`.
+      - Find the plan through the item's work directory (design point 3).
+        Refuse an id the plan lacks and list the plan's ids (R2). No plan:
+        write and warn.
+      - `sd task steps <item> [--json]` prints the rows of design point 3.
+      - Check: PRD acceptance criteria 1, 2 and 3 pass against a fixture
+        database and checkout. Criterion 2 also asserts that the note count
+        is unchanged. Removing the id check fails criterion 2.
+- [ ] 3. `sd-status` subtracts recorded steps. Size S, 2 h. PR B.
+      - `_step_rows` in `bin/sd-status`: for `implement.md` in a `row`
+        repository, skip a `- [ ] <id>.` box whose step reads `done` or
+        `dropped`. Keys and every other box stay as today.
+      - Add the second remedy to the action text. Update the `EXCLUDED`
+        checkbox line, and the `open-step` row in
+        `skills/sd-status/SKILL.md`, which mirrors the class table.
+      - Check: PRD criteria 4 and 6 pass. Removing the join fails
+        criterion 4.
+- [ ] 4. `sd-docs-lint` rule 1 refuses a repeated step id. Size S, 1 h. PR B.
+      - Reuse `plan_steps`. The failure names the item, the file and the id.
+      - Check: PRD criterion 5 passes, and `make docs-lint` passes on this
+        repository. Before the system pin moves past PR B, a system pull
+        request renumbers the second list in sd:2107's plan. System's
+        `sd-docs-lint` then passes with the new pack.
+- [ ] 5. Template and documentation. Size S, 2 h. PR C.
+      - `skills/sd-plan/templates/implement.md`: keep `- [ ] <id>.` steps;
+        add one line: record progress with
+        `sd task note <item> --step <id>:<status>`, never by a tick.
+      - `skills/sd-plan/templates/prd.md`: the `## Log` section only where
+        `.status-source` is not `row` (Q7), as its status instruction does.
+      - `WORKFLOW.md`: the sd:1933 paragraph records an observed criterion
+        as a note in a `row` repository (Q7). One paragraph says what a plan
+        change is (design point 7).
+      - `skills/sd-plan/SKILL.md` and `docs/work/README.md`: one line each.
+      - Check: `make check` passes. `grep -n "## Log"
+        skills/sd-plan/templates/prd.md` shows the section only inside the
+        `file` branch of the template.
+- [ ] 6. Backfill merged steps. Size S, 0.5 h. No pull request.
+      - The lane writes eight `step <id>: done` notes on sd:2704 from the
+        item's notes and merge shas (design point 8). It runs
+        `sd-status --actions` in system and backfills any merged step listed.
+      - Check: PRD criterion 7. `sd task steps 2704` reports eight `done`,
+        and the pack's `sd-status --actions` lists at most one `open-step`
+        row for sd:2704. Nine rows means the join is not reached.
+- [ ] 7. Measure, two weeks after PR C. Size S, 0.5 h.
+      - Re-run the prd.md measurement over those two weeks.
+      - Expect no squash whose only reason is progress. Count the
+        `open-step` rows that name a merged step.
+      - Answer Q4 from the result: if the lane missed step notes, add the
+        `sd-ship merge` writer then.
 
 ## Estimate
 

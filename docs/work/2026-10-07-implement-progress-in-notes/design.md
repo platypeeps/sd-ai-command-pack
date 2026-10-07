@@ -11,7 +11,7 @@ implement.md (committed, reviewed)       note table (sd database)
   1. ...  2. ...  3. ...                   step 1: started
         |                                         |
         +---------- bin/sd_steps.py --------------+
-                      plan_steps + step_notes -> one status per step
+                      plan_steps + step_status -> one status per step
                                   |
              sd task steps <item>   sd-status open-step   (dashboard: Q9)
 ```
@@ -60,8 +60,8 @@ of gate time in 16 days. Catch-up merges add more gates, so this is a floor.
 **Why the tier does not answer this item.**
 
 - It makes a progress commit cheaper. It does not make one happen. sd:2704's
-  boxes stayed unticked though its five code pull requests could tick them at
-  no extra cost. Progress lands where the lane already writes it: notes.
+  boxes stayed unticked, though its three pack code pull requests could
+  tick them at no extra cost. Progress lands where the lane already writes it: notes.
 - A progress-only commit is rare. Neither repository has an
   `implement.md`-only squash in the window (prd.md). Most `implement.md`
   edits ride with code, and the tier does nothing for those.
@@ -96,18 +96,19 @@ Steps 3-5 merged in one squash; review codex, round 6 advisory.
 
 - The status is one of `started`, `done` or `dropped`. A step with no note
   is `open`.
-- `done` may carry ` · #<pr>` and ` · <short sha>`. `dropped` should carry a
-  reason on the next line.
+- The first line may end with ` · <evidence>`: free text such as
+  `#1377 · 5dff9e55` or `system #172`. `dropped` should carry a reason on
+  the next line.
 - Lines after the first are free text: the log, timings, a path under
   `/Volumes/local/repo-storage/<repo>/`.
 - One note per step. The lane's "Steps 3-5 merged" becomes three notes.
 
 Reasons:
 
-- The lane writes progress as notes today: sd:2704 holds 48 notes that are
-  not status changes, on 2026-10-07.
-  `sd task show` and the dashboard's Details pane list notes already. A step
-  note appears in both with no renderer change.
+- The lane writes progress as notes today: on 2026-10-07, sd:2704 holds 48
+  notes that are not status changes. `sd task show` and the dashboard's
+  Details pane list notes already. A step note appears in both with no
+  renderer change.
 - `kind` is a `CHECK` list in the `note` table. A new kind needs a
   `SCHEMA_VERSION` bump in system and a live migrate on the hub. sd:2704 note
   #10084 records what that costs: every `sd` write refused until the migrate
@@ -137,14 +138,13 @@ In it, a step is a line that starts at column 0 with `<id>. `,
 `- [ ] <id>. ` or `- [x] <id>. `. Fenced code is skipped.
 
 Measured on 2026-10-07, this reads 17 of 22 active plans in the pack and
-system. One plan repeats ids, which design
-point 5 handles. Plans in other shapes, such as system sd:234's
+system. One plan repeats ids, which design point 5 handles. Plans in other shapes, such as system sd:234's
 "Slice 1, PR 1" headings, read as "no step list". Their notes still render,
 each marked `not in plan`.
 
 ### 3. Writer and reader
 
-**Writer:** `sd task note <item> --step <id>:<status> [--pr N] [--commit SHA]
+**Writer:** `sd task note <item> --step <id>:<status> [--evidence TEXT]
 [--body TEXT]`. It composes the first line, appends `--body`, and writes a
 `comment` note through the existing note path. With `--step`, `--kind` must
 be absent or `comment`.
@@ -156,13 +156,14 @@ no such id refuses, and names the ids it lists (R2). No plan found writes
 the note and warns on stderr: a satellite may lack the checkout.
 
 **Reader:** `sd task steps <item> [--json]`. One row per plan step, then one
-row per note id the plan lacks:
+row per note id the plan lacks. The example is sd:2704 after the backfill;
+its last row is invented, to show a note whose id the plan lacks:
 
 ```text
 id  status   evidence          date        title
 1   open                                   Measure, no code.
 2   done     system #172       2026-10-05  System repository: the opt-in (Q1).
-2a  done     #1374 458f7de0    2026-10-05  Pack: the offload view.
+2a  done     #1374 · 458f7de0  2026-10-05  Pack: the offload view.
 9   done     #1390             2026-10-06  (not in plan)
 ```
 
@@ -181,16 +182,20 @@ Revisit after the measurement in implement.md step 7.
 ### 4. How `sd-status` and the dashboard render progress
 
 **`sd-status`:** `_step_rows` in `bin/sd-status` produces `open-step` rows.
-Today it lists every `- [ ]` in every `.md` of an item that is not done. The
-change applies to `implement.md` in a `row` repository only:
+Today it lists every `- [ ]` in every `.md` of an item that is not done. One
+change, for `implement.md` in a `row` repository: a `- [ ] <id>.` box whose
+newest step note says `done` or `dropped` is not listed. Every other box is
+listed as today, with today's key.
 
-- It lists the steps `step_status` reads `open` or `started`.
-- The row key becomes `<item>/implement.md#step <id>`. The heading, text and
-  ordinal key stays for every other file.
-- The action reads "do it, or record it: `sd task note <n> --step <id>:done`".
+So a step note only removes rows. A plan written as plain `<id>.` lines
+produces no `open-step` rows, as today; `sd task steps` reads it. That is why
+the template keeps the `- [ ]` box as the step marker (design point 7): the
+box says "this is a step", and a note, never a tick, closes it.
 
-`prd.md` boxes and a `file` repository keep today's reading (R5, R7). The
-section's `EXCLUDED` line about checkboxes gains a clause naming the join.
+The action text gains the second remedy: "do it, or record it with
+`sd task note <n> --step <id>:done`". `prd.md` boxes and a `file` repository
+keep today's reading (R5, R7). The section's `EXCLUDED` line about
+checkboxes gains a clause naming the join.
 
 `sd-status` reads the database already for item status. The join adds one
 note query per active item with a plan.
@@ -254,6 +259,10 @@ These go to notes and are never a reason for a commit: a step's status,
 dispositions, hand-offs. A measurement that a later decision rests on is
 quoted into `design.md` with that decision, which is then a plan change.
 
+The plan template keeps `- [ ] <id>.` as the step marker and adds one line:
+record progress with `sd task note <item> --step <id>:<status>`, never by a
+tick. A plan that ticks a box still reads correctly (point 3).
+
 The same split applies to the `## Status` section of `prd.md` and
 `design.md`. A ruling stays in it. "Implementation has not started" and
 "steps 3-5 merged" do not; `sd task steps` answers that.
@@ -273,14 +282,17 @@ Recommended: yes.
 ### 8. Existing plans and the backfill
 
 No existing `implement.md` changes. A ticked box reads `done` until a note
-says otherwise (point 3). Two active pack plans have merged steps without a
-ticked box: sd:2704 (eight steps) and sd:2783 (none past step 1, which is
-ticked). After the writer lands, the lane writes eight `step <id>: done`
-notes on sd:2704 from its existing notes. That is a database write, not a
-commit.
+says otherwise (point 3). In the pack on 2026-10-07, one active plan has
+merged steps behind unticked boxes: sd:2704, eight steps. sd:2783's one
+merged step is ticked. System's `open-step` rows were not measured here.
 
-**Q5.** Read a ticked box as `done` when no note exists, and backfill only
-sd:2704 by notes? Recommended: yes. No plan file is rewritten.
+After the writer lands, the lane writes eight `step <id>: done` notes on
+sd:2704 from its existing notes. It does the same for any merged step that
+`sd-status --actions` lists in system. These are database writes, not
+commits.
+
+**Q5.** Read a ticked box as `done` when no note exists, and backfill
+merged steps by notes only? Recommended: yes. No plan file is rewritten.
 
 **Q11.** Include `prd.md` acceptance-criteria boxes? Recommended: no, not
 in this item. 28 of the pack's 43 `open-step` rows on 2026-10-07 come from
@@ -328,7 +340,7 @@ The questions above, in one list. Each carries its recommendation.
 | Q2 | Store: `comment` note, new note kind, or `state` row? | `comment` note with a fixed first line. |
 | Q3 | Statuses `started`, `done`, `dropped`? | Yes. |
 | Q4 | `sd-ship merge` writes step notes from a `Steps:` line? | Not now; revisit after step 7. |
-| Q5 | Ticked box reads `done` with no note; backfill sd:2704 by notes only? | Yes. |
+| Q5 | Ticked box reads `done` with no note; backfill merged steps by notes only? | Yes. |
 | Q6 | Keep `.citations.tsv` committed? | Yes. |
 | Q7 | `## Log` and the sd:1933 record move to notes in `row` repositories? | Yes. |
 | Q8 | Progress lines leave `## Status`; rulings stay? | Yes. |

@@ -49,8 +49,8 @@ The larger cost is staleness. sd:2704's
 steps and nine unticked boxes on 2026-10-07. Eight steps merged in five pull
 requests: pack #1374, #1377 and #1380, system #172 and #177. Step 1 is a
 measurement, recorded in note #9971. The item's notes hold that progress, in
-free text. The boxes did not move, though a code pull request could tick them
-at no extra cost.
+free text. The boxes did not move, though the three pack pull requests
+could tick them at no extra cost.
 
 The stale boxes are noise in `sd-status`. Its `open-step` class reads every
 `- [ ]` on an item that is not done. On 2026-10-07 the pack's
@@ -89,8 +89,9 @@ R3. `sd task steps <item>` prints one row per plan step: id, status, the
 R4. The newest step note for an id decides its status. With no note, a
     ticked `[x]` box reads `done`. With neither, the step is `open`.
 
-R5. `sd-status` lists an `implement.md` step as `open-step` only when R4
-    reads it `open` or `started`. Boxes in `prd.md` keep today's reading.
+R5. `sd-status` does not list an `implement.md` `- [ ] <id>.` box as
+    `open-step` when R4 reads the step `done` or `dropped`. Every other box
+    keeps today's reading, including every box in `prd.md`.
 
 R6. `sd-docs-lint` fails an `implement.md` whose step list repeats a step
     id. It reads no database.
@@ -100,13 +101,14 @@ R7. A repository whose `docs/work/.status-source` is not `row` behaves
 
 R8. `.citations.tsv` stays committed, and rule 6 reads it as today.
 
-R9. The plan template and `WORKFLOW.md` say that progress goes to notes,
-    and that `implement.md` changes only when the plan changes.
+R9. The plan template keeps `- [ ] <id>.` as the step marker. It and
+    `WORKFLOW.md` say that progress goes to notes, never to a tick, and
+    that `implement.md` changes only when the plan changes.
 
 ## Acceptance criteria
 
 1. A test writes `step 2: done` for a fixture item whose plan lists steps
-   1, 2 and 3. `sd task steps` reports 1 `open`, 2 `done` and 3 `open`.
+   1, 2 and 3 as `- [ ]` boxes. `sd task steps` reports 1 `open`, 2 `done` and 3 `open`.
 2. A test writes `step 9: done` for the same item. The writer refuses and
    names 1, 2 and 3. No note is written.
 3. A test writes `step 2: done`, then `step 2: dropped`. The step reads
