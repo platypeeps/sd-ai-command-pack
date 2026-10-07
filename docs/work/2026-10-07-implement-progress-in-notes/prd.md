@@ -8,7 +8,7 @@ item: sd:2784
 ## Status
 
 Proposed. The design is in [design.md](design.md). The operator has not ruled
-Q1 to Q12 yet. Implementation has not started.
+Q1 to Q11 yet. Implementation has not started.
 
 ## Problem
 

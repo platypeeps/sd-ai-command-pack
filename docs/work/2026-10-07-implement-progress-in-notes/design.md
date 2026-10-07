@@ -23,7 +23,7 @@ database schema do not change.
 
 ## Status
 
-Proposed, 2026-10-07. The operator has not ruled Q1 to Q12. Each question
+Proposed, 2026-10-07. The operator has not ruled Q1 to Q11. Each question
 below carries a recommendation.
 
 Planning review round 1 (codex) found that a renumbered plan moves a `done`
@@ -31,7 +31,7 @@ note onto other work. Round 2 found that a title match misses a scope change
 under an unchanged title. Both are one class: a note survives a plan change
 that should reopen its step. Points 1, 3, 4 and 7 now bind each note to a
 digest of the whole step, and the table in point 3 covers every plan change
-point 7 names. Q12 asks the operator to confirm the binding. Round 2 also
+point 7 names. Round 2 also
 found the template's "never tick" line wrong for `file` repositories; point
 7 now limits it to `row` repositories.
 
@@ -215,7 +215,7 @@ enumerates every plan edit point 7 names, plus the two readers. Each cell
 says whether a `done` note written before the edit still closes the step.
 "Wrong" means it closes work that the edit added or moved.
 
-| Plan edit after a `done` note on step 2 | Id only | Title | Block digest (chosen) | New id on scope change (Q12) | Recovery | Test |
+| Plan edit after a `done` note on step 2 | Id only | Title | Block digest (chosen) | New id on scope change | Recovery | Test |
 | --- | --- | --- | --- | --- | --- | --- |
 | Reordered, block unchanged | `done`, right | `done`, right | `done`, right | `done`, right | none | criterion 10 |
 | Box ticked, text re-wrapped | `done`, right | `done`, right | `done`, right | `done`, right | none | criterion 10 |
@@ -243,9 +243,8 @@ the steps, such as "every step also updates the changelog", changes no
 block. Point 7 therefore requires a change that alters a step to be written
 in that step's block.
 
-**Q12.** Bind a note to a digest of its step's block, or require a new step
-id on every scope change? Recommended: the digest, with point 7's stable
-ids kept as a rule. The two differ on the rows that trust the author.
+**Decision: the block digest, with point 7's stable ids kept as a rule.** It
+is the one binding that covers every edit row.
 
 The digest binding is also the backstop for point 7's stable ids. A
 renumbered plan breaks that rule, and the lint cannot see it: the lint
@@ -442,4 +441,3 @@ The questions above, in one list. Each carries its recommendation.
 | Q9 | Dashboard step table deferred to a system item? | Yes. |
 | Q10 | Lint fails a tick-only diff? | No. |
 | Q11 | `prd.md` acceptance-criteria boxes in scope? | No. |
-| Q12 | Bind a step note to a digest of its block, or force a new id on scope change? | The digest; stable ids stay a rule (point 7). |
