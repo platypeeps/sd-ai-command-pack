@@ -500,6 +500,31 @@ class CargoSubcommands(SatelliteFixture):
         self.assertFalse(os.path.lexists(pinned / "cargo-nextest"))
         self.assertEqual((self.seen["nextest"], self.bound()), (self.caller(), self.caller()))
 
+    def test_a_caller_whose_cargo_home_is_the_pinned_one_keeps_its_install(self) -> None:
+        """sd:2921 r5 review: such a caller's `cargo-nextest` is its real install, not a leftover to remove."""
+        pinned = pathlib.Path(sd_gate_receipts.offload_pins(self.scratch)["CARGO_HOME"], "bin")
+        self.tool(pinned / "cargo-nextest", "cargo-nextest installed")
+        self.assertEqual(self.gate(cargo_home=str(pinned.parent))["status"], "success")
+        self.assertEqual((pinned / "cargo-nextest").read_text(encoding="utf-8"), "#!/bin/sh\n# cargo-nextest installed\n")
+        self.assertEqual((self.seen["listing"], self.seen["nextest"]), ([], self.caller(pinned.parent)))
+        self.tool(self.root.parent / "elsewhere" / "cargo-nextest", "cargo-nextest linked")  # a link install stays too
+        (pinned / "cargo-nextest").unlink()
+        (pinned / "cargo-nextest").symlink_to(self.root.parent / "elsewhere" / "cargo-nextest")
+        self.gate(cargo_home=str(pinned.parent))
+        self.assertTrue(os.path.islink(pinned / "cargo-nextest"))
+
+    def test_the_cleanup_removes_no_file_and_no_other_link(self) -> None:
+        """Only a link an earlier version left goes: its target has the bound name. A regular file there stays."""
+        pinned = pathlib.Path(sd_gate_receipts.offload_pins(self.scratch)["CARGO_HOME"], "bin")
+        self.tool(pinned / "cargo-nextest", "cargo-nextest installed")
+        self.tool(self.root.parent / "elsewhere" / "nextest-wrapper", "nextest wrapper")
+        self.gate()
+        self.assertEqual((pinned / "cargo-nextest").read_text(encoding="utf-8"), "#!/bin/sh\n# cargo-nextest installed\n")
+        (pinned / "cargo-nextest").unlink()
+        (pinned / "cargo-nextest").symlink_to(self.root.parent / "elsewhere" / "nextest-wrapper")
+        self.gate()
+        self.assertTrue(os.path.islink(pinned / "cargo-nextest"))
+
     def test_a_subcommand_written_to_the_pinned_cargo_home_during_the_run_keeps_no_receipt(self) -> None:
         """A check's `cargo install` writes the shared pinned `CARGO_HOME/bin`, which cargo reads first; the after
         binding and view see it, so neither a local receipt nor an offload row is kept."""

@@ -508,21 +508,25 @@ def cargo_subcommands(caller: Mapping[str, str], environment: Mapping[str, str],
     there too (`offload_view`). A copy, not a link: no other gate writes it, and a caller's binary that changes
     during the run changes neither what the check runs nor what the view binds. Only bound names: an unbound
     subcommand such as `cargo-llvm-cov` stays unavailable. The caller's folder passes `gate_path`, so a relative
-    one or one inside `root` gives nothing. A bound name left in the pinned `CARGO_HOME/bin`, such as an earlier
-    version's link, is removed, since cargo would find it first. `caller` is the environment before the pins;
-    a `whole` gate (`offload_run`'s `mode`) keeps the caller's `CARGO_HOME` and gets nothing.
+    one or one inside `root` gives nothing. A link an earlier version left in the pinned `CARGO_HOME/bin` is
+    removed, since cargo would find it first: a symlink under a bound name whose target has that name. A regular
+    file or any other link there stays, and a caller whose `CARGO_HOME` is the pinned one changes nothing in it.
+    `caller` is the environment before the pins; a `whole` gate (`offload_run`'s `mode`) keeps the caller's
+    `CARGO_HOME` and gets nothing.
     """
     if mode == "whole":
         return
     names = [name for name in OFFLOAD_TOOLS if name.startswith("cargo-")]
     pinned = pathlib.Path(environment["CARGO_HOME"], "bin")
-    for name in names:
-        with suppress(OSError):
-            if os.path.lexists(pinned / name):
-                (pinned / name).unlink()
     own = caller.get("CARGO_HOME") or (os.path.join(caller["HOME"], ".cargo") if caller.get("HOME") else None)
+    if own and pathlib.Path(own, "bin").resolve() == pinned.resolve():  # the caller's own install: touch nothing
+        return
+    for name in names:
+        with suppress(OSError):  # only an earlier version's link (sd:2921 round 3), never a file someone installed
+            if os.path.islink(pinned / name) and pathlib.Path(os.readlink(pinned / name)).name == name:
+                (pinned / name).unlink()
     folders = gate_path(os.path.join(own, "bin"), root) if own else []
-    if not folders or pathlib.Path(folders[0]) == pinned.resolve():  # already pinned: nothing of the caller's to copy
+    if not folders:
         return
     for name in names:
         source = pathlib.Path(folders[0], name)

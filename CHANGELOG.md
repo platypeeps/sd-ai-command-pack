@@ -540,7 +540,7 @@
   `OFFLOAD_TOOLS` adds `cargo-nextest`. Each opted-in gate copies every `cargo-` name in it from the caller's `CARGO_HOME/bin`, `~/.cargo/bin` by default, into a folder of its own beside its worktree.
   That folder comes first on the check's `PATH`, and the offload view looks for a `cargo-` name in `$CARGO_HOME/bin`, then that folder, then `PATH`, as cargo does.
   The caller's folder passes the gate's `PATH` rule (`gate_path`) first, so a relative folder or one inside the checkout gives nothing.
-  A bound name in the pinned `CARGO_HOME/bin` is removed before the run, and a subcommand the view does not bind, such as `cargo-llvm-cov`, stays unavailable.
+  A link an earlier build of this fix left in the pinned `CARGO_HOME/bin` is removed before the run; a regular file there, or a caller whose `CARGO_HOME` is the pinned one, is never touched, and a subcommand the view does not bind, such as `cargo-llvm-cov`, stays unavailable.
   The local gate binding adds `offload_tools`: each `OFFLOAD_TOOLS` executable by name and bytes, found as the check finds it.
   So a changed tool behind `make`, or a changed copy, misses local reuse; each existing receipt misses once after the upgrade.
   The offload design lists each way the run and the view could part, with its guard and its test.
