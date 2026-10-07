@@ -13,6 +13,17 @@
   Reviews run outside `sd-ship` leave no receipt and are not counted.
   The reviewer order does not read precision yet (sd:1788 ask 3).
 
+- **`sd task add --ref <source>:<id>` files one row per occurrence (sd:1902).**
+  A second add with the same reference updates that row and keeps its status, so a retried delivery never reopens done work.
+  A new reference, such as the next run's `job:repo-sync:43`, files a new row.
+  `sd task show` prints the reference as `ref:`; `sd today --json` and the other `--json` rows carry it as `ref`.
+  The row stores it as `source = 'task-ref'` and `external_id = <reference>`, so no schema change is needed.
+  Only a task or a followup takes `--ref`, and not with `--recur`.
+
+- **`sd runner get --json` carries each attempt's `started_at` and `finished_at` (sd:1995).**
+  The new `runs` list holds one entry per attempt, oldest first, with `run`, `started_at`, `finished_at` and `outcome`.
+  `started_at` is the claim time and `finished_at` the release time; it is null while the attempt runs.
+
 - **`sd fleet stamp` lays a Claude Code settings baseline per repository class (sd:1661).**
   The baseline is `permissions.deny` rules that stop Claude Code's file tools reading secret files: `.env` variants, `secrets/`, private keys, `.netrc`, `.pypirc`, `~/.ssh`, AWS credentials and the `gh` token file.
   An owned or co-owned repository carries it in a tracked `.claude/settings.json`; a guest one gets the untracked `.claude/settings.local.json` in its plan.
@@ -513,6 +524,27 @@
   registry that sets it.
 
 ### Fixed
+
+- **`sd shadow sync` reports the library's two refusals in one line, not a traceback (sd:2898).**
+  Since system #199, `sd_db` raises `SyncBusy` while another sync holds the lock and `HubOnly` on a satellite.
+  The verb now prints the library's message as one `sd:` line on stderr.
+  It exits 3 on a satellite, the pack's refused code, and 4 while the lock is held, the pack's retry-later code.
+  `sd shadow sync --help` names both codes. A library without `SyncBusy` still runs the verb.
+  `.sd-system-rev` advances to system `776e017f`, which raises both; the schema stays 20.
+
+- **An opted-in check runs under one tool configuration and one thread cap, and the hub refuses again on what differs (sd:2879).**
+  sd:2862 accepted a satellite's pass across differing `HOME` tool configuration, thread caps and indirect tools,
+  each of which can change what passes. Every check in a repository with `repo.satellite_gate = accept`, the hub's
+  and the satellite's, now runs with `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, no npm or pip user
+  file, a `CARGO_HOME` in the gate's cache folder (`tool-config/cargo`), and `CARGO_BUILD_JOBS`,
+  `RUST_TEST_THREADS` and `NEXTEST_TEST_THREADS` at 4, whatever the caller set. The view no longer binds the
+  isolated `HOME` files. It refuses on uv's `~/.config/uv/uv.toml`, which no switch isolates alone, on any
+  configuration file left in the pinned `CARGO_HOME` or npm global file, on `threads`,
+  on the thread variables and on every bound tool, `git`, `npm` and `uv` included. Only the `PATH` order and the
+  slot holder's `SD_GATE_` settings are recorded. **Migration:** a row written before this release refuses on the
+  pack `bin/` digest. The first opted-in Rust gate on each machine downloads its crates into the new `CARGO_HOME`
+  and rebuilds its dependencies once. A machine whose `git`, `npm` or `uv` build differs from the hub's hands back
+  until both run one build. A check that commits needs its own git identity.
 
 - **A failed review's refusal names every failed reviewer (sd:1819).**
   `sd-ship` gave its 600-character detail to the failed reviewers in order, so a long first detail hid the rest.

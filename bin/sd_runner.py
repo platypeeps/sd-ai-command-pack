@@ -71,6 +71,20 @@ def ship_lock_status() -> dict:
     return {"ship_locks": held, "ship_lock_files": counts}
 
 
+def attempts(connection, assignment: int) -> list[dict]:
+    """Each attempt's start and finish, oldest first (sd:1995).
+
+    `queue_state` carries only the latest attempt, and the assignment's own
+    `started` and `ended` are reset by a requeue, so neither splits queue time
+    from run time. A `runner_run` row is created when the runner claims the
+    assignment and gets `released_at` when it ends, so `finished_at` is None
+    while the attempt runs.
+    """
+    return [dict(row) for row in connection.execute(
+        "SELECT run, created_at AS started_at, released_at AS finished_at, outcome "
+        "FROM runner_run WHERE assignment = ? ORDER BY run", (assignment,))]
+
+
 def run(args: argparse.Namespace) -> int:
     sd_db = sd_handoff_rows.library()
     try:
@@ -91,6 +105,7 @@ def run(args: argparse.Namespace) -> int:
             result = {"queued": runner.queued(connection), "active": runner.active_runs(connection)}
         elif action == "get":
             result = runner.queue_state(connection, args.assignment)
+            result["runs"] = attempts(connection, args.assignment)
         elif action == "prepare":
             from sd_db.runner_controls import configure_item
             from sd_db.workflow import item_state

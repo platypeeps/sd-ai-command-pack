@@ -740,6 +740,64 @@ class TaskCLI(unittest.TestCase):
         self.call("task", "add", "Task", "--due", "tomorrow", code=1)
 
 
+class TaskRef(unittest.TestCase):
+    """sd:1902. `sd task add --ref` files one row per occurrence and prints it back."""
+
+    # Borrowed, not inherited: a subclass would run every `TaskCLI` test twice.
+    setUp = TaskCLI.setUp
+    call = TaskCLI.call
+
+    def add(self, *arguments):
+        return json.loads(self.call("task", "add", *arguments, "--json").stdout)
+
+    def rows(self):
+        return json.loads(self.call("store", "items", "--json").stdout)
+
+    def test_help_lists_ref(self):
+        self.assertIn("--ref", self.call("task", "add", "--help").stdout)
+
+    def test_a_second_add_with_the_same_ref_updates_the_one_row(self):
+        first = self.add("repo-sync failed", "--kind", "followup", "--ref", "job:repo-sync:42",
+                         "--body", "log at line 9")
+        second = self.add("repo-sync failed: core", "--kind", "followup", "--ref", "job:repo-sync:42")
+        self.assertEqual(len(self.rows()), 1)
+        self.assertEqual(second["item"]["id"], first["item"]["id"])
+        self.assertIs(second["created"], False)
+        self.assertEqual(second["item"]["title"], "repo-sync failed: core")
+        self.assertEqual(second["item"]["body"], first["item"]["body"])
+        self.assertEqual(second["item"]["ref"], "job:repo-sync:42")
+        shown = self.call("task", "show", first["item"]["id"]).stdout
+        self.assertIn("  ref: job:repo-sync:42", shown)
+
+    def test_a_done_row_stays_done_and_the_next_run_files_a_new_row(self):
+        first = self.add("repo-sync failed", "--kind", "followup", "--ref", "job:repo-sync:42")
+        self.call("task", "status", first["item"]["id"], "done")
+        again = self.add("repo-sync failed", "--kind", "followup", "--ref", "job:repo-sync:42")
+        self.assertEqual((again["item"]["id"], again["item"]["status"]), (first["item"]["id"], "done"))
+        self.assertEqual(len(self.rows()), 1)
+        later = self.add("repo-sync failed", "--kind", "followup", "--ref", "job:repo-sync:43")
+        self.assertNotEqual(later["item"]["id"], first["item"]["id"])
+        self.assertEqual(len(self.rows()), 2)
+
+    def test_today_carries_the_ref(self):
+        state = self.add("HOA alarm follow-up", "--ref", "hoa:a2-vsd")
+        self.call("task", "status", state["item"]["id"], "in_progress")
+        (row,) = json.loads(self.call("today", "--json").stdout)
+        self.assertEqual((row["id"], row["ref"]), (state["item"]["id"], "hoa:a2-vsd"))
+
+    def test_a_ref_the_upsert_cannot_keep_is_refused(self):
+        for arguments, reason in (
+            (("--ref", "job"), "<source>:<id>"),
+            (("--ref", ":42"), "<source>:<id>"),
+            (("--ref", "job:x", "--kind", "personal"), "task or a followup"),
+            (("--ref", "job:x", "--due", "2026-01-01", "--recur", "FREQ=WEEKLY"), "--recur"),
+        ):
+            with self.subTest(arguments=arguments):
+                refused = self.call("task", "add", "x", *arguments, code=1)
+                self.assertIn(reason, refused.stderr)
+        self.assertEqual(self.rows(), [])
+
+
 class Recurrence(unittest.TestCase):
     """sd:1428. `--recur` and `--recur-anchor` reach the rule sd:1099 stores.
 
