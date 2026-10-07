@@ -42,11 +42,14 @@ print(argv[argv.index("--shadow") + 1])
 """
 
 #: Answers `gh api repos/<owner>/<repo> --jq .private` with the case's word.
+#: Asked of the host `GH_HOST` names, unless `--hostname` pins one, it says
+#: `false`: an Enterprise twin of a private github.com repository is public.
 GH_STUB = """#!/usr/bin/env python3
-import json, sys
+import json, os, sys
 with open({log!r}, "a") as log:
     log.write(json.dumps(sys.argv[1:]) + "\\n")
-print({private!r})
+pinned = "--hostname" in sys.argv
+print("false" if os.environ.get("GH_HOST") and not pinned else {private!r})
 """
 
 FINDING = {"path": "src.py", "line": 1, "severity": "high", "summary": "bad, really", "family": "correctness"}
@@ -116,7 +119,7 @@ class TriageTests(ReviewFixture):
         self.assertEqual(json.loads(call["state"]), {
             "severity": "high", "disposition": "blocking", "family": "correctness",
             "path": "src.py", "summary": "bad, really"})
-        self.assertEqual(stubs.gh(), [["api", "repos/example/demo", "--jq", ".private"]])
+        self.assertEqual(stubs.gh(), [["api", "--hostname", "github.com", "repos/example/demo", "--jq", ".private"]])
 
     def test_a_clean_review_asks_nothing(self):
         stubs = Stubs(self.tool_bin)
@@ -128,6 +131,13 @@ class TriageTests(ReviewFixture):
         self.assertEqual(self.triage([FINDING]), "")
         self.assertEqual(stubs.choices(), [])
         self.assertEqual(len(stubs.gh()), 1)
+
+    def test_gh_host_cannot_point_the_visibility_question_elsewhere(self):
+        """Review of 9b7c4daad: `GH_HOST` sends `gh api` to another host, where a
+        public repository of the same name would vouch for a private one."""
+        stubs = Stubs(self.tool_bin, private="true")
+        self.assertEqual(self.triage([FINDING], GH_HOST="ghe.example.test"), "")
+        self.assertEqual(stubs.choices(), [])
 
     def test_a_failing_visibility_answer_reads_as_private(self):
         stubs = Stubs(self.tool_bin, private="")

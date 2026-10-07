@@ -351,7 +351,9 @@ def shadow_ready(stage: str, caller: str, root: str | pathlib.Path, env: Mapping
     gh = shutil.which("gh", path=env.get("PATH"))
     if gate.returncode != 0 or gh is None:
         return None
-    visible = _jev_run([gh, "api", f"repos/{head[0]}/{head[1]}", "--jq", ".private"], env)
+    # Pinned: `GH_HOST` would ask another host, whose public namesake vouches for nothing.
+    visible = _jev_run([gh, "api", "--hostname", "github.com", f"repos/{head[0]}/{head[1]}",
+                        "--jq", ".private"], env)
     return (binary, head) if visible.returncode == 0 and visible.stdout.strip() == "false" else None
 
 
