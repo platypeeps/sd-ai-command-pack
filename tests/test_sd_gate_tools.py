@@ -246,8 +246,10 @@ class SystemTools(unittest.TestCase):
             self.assertEqual(sd_gate_receipts.view_tool("uv", str(home / "bin"), {"HOME": str(home)}, None)[1], "~/real")
 
     def test_the_command_line_tools_version_comes_from_pkgutil(self) -> None:
-        said = {"sw_vers -productVersion": "27.0.1", "sw_vers -buildVersion": "26A434", "xcode-select -p": "/nonexistent/CLT",
-                "pkgutil --pkg-info=com.apple.pkg.CLTools_Executables": "package-id: x\nversion: 27.0.0.1\nvolume: /"}
+        """Each question names its absolute path, so a gate's short `PATH` cannot turn `/usr/sbin/pkgutil` into `unknown`."""
+        said = {"/usr/bin/sw_vers -productVersion": "27.0.1", "/usr/bin/sw_vers -buildVersion": "26A434",
+                "/usr/bin/xcode-select -p": "/nonexistent/CLT",
+                "/usr/sbin/pkgutil --pkg-info=com.apple.pkg.CLTools_Executables": "package-id: x\nversion: 27.0.0.1\nvolume: /"}
         with mock.patch.object(sd_gate_receipts, "system_answer", lambda argv: said[" ".join(argv)]), \
                 mock.patch.object(sys, "platform", "darwin"):
             self.assertEqual(sd_gate_receipts.system_version({}), "macOS 27.0.1 (26A434); CLT 27.0.0.1")

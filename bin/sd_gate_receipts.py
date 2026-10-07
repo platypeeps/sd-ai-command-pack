@@ -468,17 +468,21 @@ def system_version(environment: Mapping[str, str]) -> str:
 
 @functools.cache
 def developer_version(developer: str) -> str:
-    """`system_version` for one developer folder, asked once per process; a part that does not answer reads `unknown`."""
+    """`system_version` for one developer folder, asked once per process; a part that does not answer reads `unknown`.
+
+    Each command is named by its absolute path: a gate's `PATH` (a fixture's `/bin:/usr/bin`, a launchd lane's) must
+    not decide whether `pkgutil` in `/usr/sbin` answers, or two gates on one machine bind two versions.
+    """
     if sys.platform != "darwin":
         return platform.platform()
-    macos = f"macOS {system_answer(['sw_vers', '-productVersion'])} ({system_answer(['sw_vers', '-buildVersion'])})"
-    developer = developer or system_answer(["xcode-select", "-p"])
+    macos = f"macOS {system_answer(['/usr/bin/sw_vers', '-productVersion'])} ({system_answer(['/usr/bin/sw_vers', '-buildVersion'])})"
+    developer = developer or system_answer(["/usr/bin/xcode-select", "-p"])
     try:  # an Xcode developer folder is `Xcode.app/Contents/Developer`, beside the app's `version.plist`
         with open(pathlib.Path(developer).parent / "version.plist", "rb") as stream:
             plist = plistlib.load(stream)
         tools = f"Xcode {plist.get('CFBundleShortVersionString')} ({plist.get('ProductBuildVersion')})"
     except (OSError, ValueError):
-        clt = system_answer(["pkgutil", "--pkg-info=com.apple.pkg.CLTools_Executables"])
+        clt = system_answer(["/usr/sbin/pkgutil", "--pkg-info=com.apple.pkg.CLTools_Executables"])
         tools = "CLT " + next((line.split(":", 1)[1].strip() for line in clt.splitlines() if line.startswith("version:")),
                               "unknown")
     return f"{macos}; {tools}"
