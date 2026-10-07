@@ -217,6 +217,7 @@ class SatelliteMerge(unittest.TestCase):
     def setUp(self) -> None:
         fixture.DeclaredGapCase.setUp(self)
         rows.no_real_tailscale(self, self.directory)
+        rows.no_real_gate_cache(self, self.directory)
         self.runs = 0
         self.opted = "accept"
         self.served: str | None = None

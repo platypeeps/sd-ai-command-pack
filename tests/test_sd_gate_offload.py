@@ -26,6 +26,7 @@ if str(REPO_ROOT / "bin") not in sys.path:
 import sd_gate_receipts  # noqa: E402
 import sd_gate_run  # noqa: E402
 import sd_gate_slots  # noqa: E402
+import sd_gate_tools  # noqa: E402
 
 
 class ViewFixture(unittest.TestCase):
@@ -35,6 +36,9 @@ class ViewFixture(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.tmp = pathlib.Path(tmp.name)  # unresolved, as a real HOME may be; the gate resolves PATH entries
+        patcher = mock.patch.object(sd_gate_tools, "PINS", ())  # no pinned copy (sd:2936); `PinnedTools` sets its own
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.shared = self.tmp / "usr" / "bin"
         self.shared.mkdir(parents=True)
         self.tool(self.shared / "sh", "shared sh")
@@ -426,8 +430,8 @@ class ToolVersion(ViewFixture):
         """Another macOS release changes `cargo -vV`'s `os:` line, which names the machine, not the compiler."""
         self.toolchain("hub", "cargo", build("cargo", os_line="Mac OS 26.4.0"))
         theirs, ours = self.view("sat", tree=self.tree), self.view("hub", tree=self.tree)
-        self.assertEqual(theirs["resolution"], {"cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
-                                                "rustc": "rustc 1.98.1 (797e8a9bc 2026-08-05)"})
+        self.assertEqual({name: theirs["resolution"][name] for name in sd_gate_receipts.VERSIONED_TOOLS},
+                         {"cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)", "rustc": "rustc 1.98.1 (797e8a9bc 2026-08-05)"})
         self.assertIsNone(self.mismatch(theirs, ours))
 
     def test_another_commit_hash_behind_the_same_wrapper_refuses(self) -> None:
@@ -453,7 +457,8 @@ class ToolVersion(ViewFixture):
         for login in ("sat", "hub"):
             (self.home(login) / "bin" / "rustup").unlink()
         theirs = self.view("sat", tree=self.tree)
-        self.assertEqual(theirs["resolution"], {"cargo": "path", "rustc": "path"})
+        self.assertEqual({name: theirs["resolution"][name] for name in sd_gate_receipts.VERSIONED_TOOLS},
+                         {"cargo": "path", "rustc": "path"})
         self.assertIsNone(self.mismatch(theirs, self.view("hub", tree=self.tree)))
 
     def test_a_gates_worktree_runs_it_in_its_own_tree(self) -> None:
