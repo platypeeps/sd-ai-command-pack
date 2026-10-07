@@ -505,6 +505,20 @@
 
 ### Fixed
 
+- **An opted-in check runs under one tool configuration and one thread cap, and the hub refuses again on what differs (sd:2879).**
+  sd:2862 accepted a satellite's pass across differing `HOME` tool configuration, thread caps and indirect tools,
+  each of which can change what passes. Every check in a repository with `repo.satellite_gate = accept`, the hub's
+  and the satellite's, now runs with `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, no npm or pip user
+  file, a `CARGO_HOME` in the gate's cache folder (`tool-config/cargo`), and `CARGO_BUILD_JOBS`,
+  `RUST_TEST_THREADS` and `NEXTEST_TEST_THREADS` at 4, whatever the caller set. The view no longer binds the
+  isolated `HOME` files. It refuses on uv's `~/.config/uv/uv.toml`, which no switch isolates alone, on any
+  configuration file left in the pinned `CARGO_HOME` or npm global file, on `threads`,
+  on the thread variables and on every bound tool, `git`, `npm` and `uv` included. Only the `PATH` order and the
+  slot holder's `SD_GATE_` settings are recorded. **Migration:** a row written before this release refuses on the
+  pack `bin/` digest. The first opted-in Rust gate on each machine downloads its crates into the new `CARGO_HOME`
+  and rebuilds its dependencies once. A machine whose `git`, `npm` or `uv` build differs from the hub's hands back
+  until both run one build. A check that commits needs its own git identity.
+
 - **A failed review's refusal names every failed reviewer (sd:1819).**
   `sd-ship` gave its 600-character detail to the failed reviewers in order, so a long first detail hid the rest.
   Each failed reviewer now gets an equal share, under its own name.

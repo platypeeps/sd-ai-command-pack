@@ -80,30 +80,33 @@ class GateCompare(rows.SatelliteFixture):
                                                     "error": "TailnetError: Tailscale is not running"})
         self.assertIn("Tailscale is not running", self.refused("satellite_unidentified")["offload_refused"]["reason"])
 
-    def test_clause_5_records_what_two_machines_differ_in_and_accepts(self) -> None:
-        """sd:2862: thread caps, `PATH` order, `HOME` files, `git` and the pack's own settings differ on every pair of
-        machines; the hub accepts and names each. A row from before the caps were bound names the part."""
+    def test_clause_5_records_what_decides_nothing_and_accepts(self) -> None:
+        """sd:2879: `PATH` order and the slot holder's own settings differ on every pair of machines and choose
+        nothing the check runs; the hub accepts and names each."""
         view = self.row(self.key)["offload_view"]
         rewrite(self.database, self.key, offload_view={
-            **view, "threads": {"RUST_TEST_THREADS": "1"}, "path": ["/elsewhere", *view["path"]],
-            "home_files": {**view["home_files"], ".npmrc": "0" * 64}, "tools": {**view["tools"], "git": "0" * 64},
-            "variables": {**view["variables"], "SD_GATE_POOL_SIZE": "0" * 64}})
+            **view, "path": ["/elsewhere", *view["path"]], "variables": {**view["variables"], "SD_GATE_POOL_SIZE": "0" * 64}})
         result = self.compare()
         self.assertEqual((result["status"], self.runs), ("success", 1))
-        found = [(miss["part"], miss["name"]) for miss in result["satellite"]["view_differences"]]
-        self.assertEqual([miss for miss in found if miss[0] != "threads"], [
-            ("path", "/elsewhere"), ("tools", "git"), ("home_files", ".npmrc"), ("variables", "SD_GATE_POOL_SIZE")])
-        self.assertIn(("threads", "RUST_TEST_THREADS"), found)
-        rewrite(self.database, self.key, offload_view={name: part for name, part in view.items() if name != "threads"})
-        self.assertIn({"part": "threads", "name": None}, self.compare()["satellite"]["view_differences"])
+        self.assertEqual([(miss["part"], miss["name"]) for miss in result["satellite"]["view_differences"]],
+                         [("path", "/elsewhere"), ("variables", "SD_GATE_POOL_SIZE")])
 
-    def test_clause_5_a_toolchain_tool_or_the_checks_own_tool_refuses_as_binding(self) -> None:
-        """sd:2862: what decides the result still refuses: `sh` from the toolchain, and `make`, the check's own."""
+    def test_clause_5_a_bound_tool_home_file_or_thread_cap_refuses_as_binding(self) -> None:
+        """sd:2862 recorded these; sd:2879 runs every opted-in check under one tool configuration and thread cap,
+        so what still differs decides the result: `sh` from the toolchain, `make`, the check's own, `git` behind it,
+        uv's user file, a thread cap, and a row from before the caps were bound."""
         view = self.row(self.key)["offload_view"]
-        for name in ("sh", "make"):
-            with self.subTest(name=name):
-                rewrite(self.database, self.key, offload_view={**view, "tools": {**view["tools"], name: "0" * 64}})
-                self.assertIn(f"part tools at {name}", self.refused("satellite_binding")["offload_refused"]["reason"])
+        cases = {"tools at sh": {"tools": {**view["tools"], "sh": "0" * 64}},
+                 "tools at make": {"tools": {**view["tools"], "make": "0" * 64}},
+                 "tools at git": {"tools": {**view["tools"], "git": "0" * 64}},
+                 "home_files at .config/uv/uv.toml": {"home_files": {**view["home_files"], ".config/uv/uv.toml": "0" * 64}},
+                 "threads at RUST_TEST_THREADS": {"threads": {**view["threads"], "RUST_TEST_THREADS": "1"}},
+                 "variables at CARGO_BUILD_JOBS": {"variables": {**view["variables"], "CARGO_BUILD_JOBS": "0" * 64}},
+                 "threads at None": {"threads": None}}
+        for named, changed in cases.items():
+            with self.subTest(named=named):
+                rewrite(self.database, self.key, offload_view={**view, **changed})
+                self.assertIn(f"part {named}", self.refused("satellite_binding")["offload_refused"]["reason"])
 
     def test_clause_5_an_opt_in_read_fault_then_a_good_receipt_read_does_not_accept(self) -> None:
         """sd:2782: the fault ran the hub's gate under the whole environment; that gate never stands on a satellite's pass."""
