@@ -71,11 +71,13 @@ stop and identify them before reading sources or workspace artifacts.
      confidentiality;
    - `interview.md`: dated questions and user answers, separate from assistant
      hypotheses and prose suggestions;
-   - `evidence.md`: claim/evidence ledger with source, strength, citation,
-     contrary evidence, state, and unresolved gaps;
+   - `evidence.md`: claim/evidence ledger with source, strength, how and when
+     each claim was established, citation, contrary evidence, state, and
+     unresolved gaps;
    - `outline.md`: approved sections with claim, evidence, example, and reader purpose;
    - `draft.md`: current prose and declared draft pass; and
-   - `review.md`: findings, decisions, approved edits, and unresolved issues.
+   - `review.md`: findings, decisions, approved edits, unresolved issues, and
+     the draft revision each review answered.
 3. When no `theme=` is supplied, use `sd-topic-radar` when available to produce
    ten ranked opportunities. Otherwise derive ten explicitly provisional ideas
    only from authorized current context, disclose source coverage, and do not
@@ -102,6 +104,23 @@ stop and identify them before reading sources or workspace artifacts.
    source-faithful compression, and `sd-fact-check` for claim auditing when
    available. Research supports the approved thesis; a material thesis change
    returns to brief revision and approval.
+   - Mark each non-obvious claim as read in the primary source, taken from a
+     search summary, or inferred, with the date. An unmarked claim counts as
+     the weaker reading.
+   - Never infer what an identifier, flag, config key, endpoint, or column
+     does from its name. Read the code or specification that implements it,
+     and cite that location.
+   - Source the remedy, not only the problem. When the article recommends an
+     action, find evidence for that remedy: who ran it and with what result,
+     its cost, its baseline, and how it fails. Record missing remedy evidence
+     as an open gap.
+   - Internal notes, topic primers, and entity profiles orient research; they
+     are never citations. Re-verify their claims against a public primary
+     source before prose uses them.
+   - Read known primary feeds, such as a vendor blog or changelog, directly.
+     A search-only pass misses announcements published only there.
+   - If `sd-research` cannot run, report the fallback search as a
+     degradation and mark its claims search-summary only.
 8. Offer two or three outline structures only when they are materially
    different, recommend one with reasons, and obtain approval for a skeleton in
    which each section has a reader purpose, claim, evidence need, and example.
@@ -109,10 +128,33 @@ stop and identify them before reading sources or workspace artifacts.
    `reader comprehension`, then `integrity`. Label the active pass. Do not call
    skeleton or early prose final, and do not let voice polish conceal an
    unsupported claim, confidentiality risk, or missing original contribution.
+   - Carry each claim into prose at the certainty `evidence.md` gives it. A
+     hedge such as "vendor-reported" stays in the sentence. To make a sentence
+     firmer, verify the claim and upgrade its ledger entry first.
+   - Name the article's prescription before the conclusion and check its
+     remedy evidence. Without that evidence, change the register: state the
+     prescription as what the author does and why, or as a proposal with its
+     untested parts named, never as a finding.
+   - After each full pass or substantial revision, run `sd-humanizer` when
+     available, calibrated against the approved tone. The author's own
+     distinctive lines stay even when a scrubber flags them.
 10. Review technical correctness, citations, novelty, strongest objections,
     structure, confidentiality, title/opening, and voice as separate passes.
     Report findings before changing load-bearing claims or the approved thesis.
     Route specialist editing to `sd-technical-editor` when available.
+    - Before packaging, run `sd-fact-check` on the draft against
+      `evidence.md`, in a subagent when the host has one. A fact-check counts
+      only with its claim ledger; carry unresolved findings in `review.md`.
+    - When a reviewer from a different model family is available, run it as
+      a hostile domain expert on the argument and citations, never the voice.
+      Treat each finding as a hypothesis: verify its "what would have to be
+      true" condition against the primary source before changing a word.
+      Discard style findings. Record rebuttals; a rebutted finding is a good
+      outcome. A fact added to answer a finding enters `evidence.md` first.
+    - After each revision, a review or ledger that answered an older draft
+      revision is stale. Re-run that review, or reconcile each finding as
+      confirmed, conceded, or rebutted with its source, and source each new
+      claim. A review that names no revision cannot be reconciled; re-run it.
 11. Package the approved article, title and deck options, short summary,
     evidence state and unresolved gaps, visual/adaptation suggestions, and
     follow-up topics. Handoff to `sd-publish` only through a separate explicit
@@ -151,9 +193,11 @@ stop and identify them before reading sources or workspace artifacts.
 - **Interview record** — settled user-provided insights and the single next
   highest-value question, without blending assistant hypotheses;
 - **Evidence state** — claim coverage, citations, contrary evidence, source
-  strength, unresolved gaps, and any thesis-change decision;
+  strength, unresolved gaps, any thesis-change decision, and the prescription
+  with what sources its remedy;
 - **Outline and draft state** — approved structure, active draft pass, material
-  edits, and remaining reviews;
+  edits, remaining reviews, fact-check and cross-model findings marked
+  verified or rebutted, and any review stale against the current draft;
 - **Article package** — approved article, title/deck options, summary,
   visual/adaptation suggestions, and follow-up topics when package-ready;
 - **Integrity and confidentiality** — unsupported claims, originality limits,
