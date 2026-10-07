@@ -293,12 +293,15 @@ def gate_binding(tree: pathlib.Path, head: str, inputs: str, base: str | None, e
     `head`, and names the scope's merge base by its tree too. It is the union of `tree_binding`, which a
     hub compares with a satellite's (sd:2704), and `machine_binding`, which it does not, plus
     `environment_mode`, `offload_run`'s `mode`: a pass under one mode never stands for a run under another (sd:2782).
+    `offload_tools` binds the bytes of each `OFFLOAD_TOOLS` executable the check would run, as `view_tools` finds it:
+    a tool behind `make`, or the gate's copy of a cargo subcommand, moves the binding when it changes (sd:2921).
     """
     part = tree_binding(tree, head, inputs, base, fork)
     if part is None:
         return None
     try:
-        return {**part, **machine_binding(tree, binding_commands(part), env), "environment_mode": mode}
+        return {**part, **machine_binding(tree, binding_commands(part), env), "offload_tools": view_tools(env, (), tree)[0],
+                "environment_mode": mode}
     except Exception:  # an input that cannot be named binds nothing; the check runs
         return None
 
@@ -342,11 +345,15 @@ def machine_binding(tree: pathlib.Path, commands: list[list[str]], env: Mapping[
     `machine` is the host name, as `satellite_identity` writes it: a satellite's own receipts land in the hub's
     database, under the hub's key when the login and checkout path match, and the hub never reuses one (sd:2796).
     """
-    tools = [sd_check_receipts.tool_identity(argv[0], env, tree) for argv in commands]
-    for tool in tools:  # the worktree is temporary; name a tool inside it by its place in the tree
+    # Resolved on the check's own `PATH`, which starts with the gate's `CARGO_SUBCOMMANDS` (sd:2921).
+    tools = [sd_check_receipts.tool_identity(argv[0], subcommand_path(dict(env), tree), tree) for argv in commands]
+    subcommands = (tree.parent / CARGO_SUBCOMMANDS).resolve()
+    for tool in tools:  # the worktree and its folder are temporary; name a tool inside them by its place there
         path = pathlib.Path(tool["path"])
         if path.is_relative_to(tree.resolve()):
             tool["path"] = "tree:" + str(path.relative_to(tree.resolve()))
+        elif path.is_relative_to(subcommands):
+            tool["path"] = "subcommands:" + str(path.relative_to(subcommands))
     python = pathlib.Path(sys.executable).resolve()
     return {"tools": tools, "python": {"path": str(python), "version": sys.version,
                                        "sha256": sd_check_receipts.file_digest(python)},
@@ -358,7 +365,7 @@ def offload_view(environment: Mapping[str, str], names: Iterable[str] = (),
                  tree: pathlib.Path | None = None) -> dict[str, Any] | None:
     """The portable view of a gate's `environment` that a hub compares with a satellite's (sd:2704), or None.
 
-    Local reuse never reads it: `gate_binding` binds the whole environment (C-17). The view writes each `$HOME`
+    Local reuse reads only its `tools` (`view_tools`, sd:2921): `gate_binding` binds the whole environment (C-17). The view writes each `$HOME`
     prefix as `~`, so two logins can compare equal, and binds what `HOME` and `PATH` select: `path`, the `PATH`
     entries in order; `tools`, the bytes of each name in `OFFLOAD_TOOLS`
     and `names` resolved on that `PATH`, a `cargo-` name in `$CARGO_HOME/bin` and `CARGO_SUBCOMMANDS` first, as cargo does, or None for one that does not resolve; `python`, the bytes and version of
@@ -381,17 +388,7 @@ def offload_view(environment: Mapping[str, str], names: Iterable[str] = (),
             return value
 
         search = environment.get("PATH", "")
-        # cargo looks for a subcommand in `$CARGO_HOME/bin`, then the check's `PATH`, which starts with the gate's
-        # own `CARGO_SUBCOMMANDS` (sd:2921).
-        cargo = [os.path.join(environment["CARGO_HOME"], "bin")] if environment.get("CARGO_HOME") else []
-        cargo += [str(tree.parent / CARGO_SUBCOMMANDS)] if tree is not None else []
-        tools, resolution = {}, {}
-        for name in (*OFFLOAD_TOOLS, *names):
-            if os.path.isabs(name) or not os.path.dirname(name):
-                found = os.pathsep.join([*cargo, search]) if name.startswith("cargo-") else search
-                tools[name], way = view_tool(name, found, environment, tree)
-                if way:
-                    resolution[name] = way
+        tools, resolution = view_tools(environment, names, tree)
         return {"path": [portable(entry) for entry in search.split(os.pathsep) if entry], "tools": tools,
                 "resolution": resolution,
                 "python": {"sha256": _content_digest(pathlib.Path(sys.executable).resolve()), "version": sys.version},
@@ -404,6 +401,28 @@ def offload_view(environment: Mapping[str, str], names: Iterable[str] = (),
                               if offload_variable(key)}}
     except Exception:  # a view that cannot be named matches nothing; the hub runs the check
         return None
+
+
+def view_tools(environment: Mapping[str, str], names: Iterable[str] = (),
+               tree: pathlib.Path | None = None) -> tuple[dict[str, str | None], dict[str, str]]:
+    """`offload_view`'s `tools` and `resolution`: each name in `OFFLOAD_TOOLS` and `names`, by name and bytes; raises as `view_tool`.
+
+    A `cargo-` name resolves as cargo finds a subcommand: `$CARGO_HOME/bin`, then the check's `PATH`, which starts
+    with the gate's own `CARGO_SUBCOMMANDS` beside `tree` (`subcommand_path`, sd:2921). No folder name is bound, so
+    the temporary folder's random name never reaches a binding.
+    """
+    search = environment.get("PATH", "")
+    cargo = [os.path.join(environment["CARGO_HOME"], "bin")] if environment.get("CARGO_HOME") else []
+    cargo += [str(tree.parent / CARGO_SUBCOMMANDS)] if tree is not None else []
+    tools: dict[str, str | None] = {}
+    resolution: dict[str, str] = {}
+    for name in (*OFFLOAD_TOOLS, *names):
+        if os.path.isabs(name) or not os.path.dirname(name):
+            found = os.pathsep.join([*cargo, search]) if name.startswith("cargo-") else search
+            tools[name], way = view_tool(name, found, environment, tree)
+            if way:
+                resolution[name] = way
+    return tools, resolution
 
 
 def file_state(folder: str | None, name: str) -> str:

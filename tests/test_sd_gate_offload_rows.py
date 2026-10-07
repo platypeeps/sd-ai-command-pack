@@ -28,6 +28,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "bin") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "bin"))
 
+import sd_gate_cache  # noqa: E402
 import sd_gate_receipts  # noqa: E402
 import sd_gate_run  # noqa: E402
 import sd_lib  # noqa: E402
@@ -52,6 +53,27 @@ def no_real_tailscale(case: unittest.TestCase, scratch: pathlib.Path) -> None:
     case.addCleanup(lambda: case.assertFalse(mark.exists(), mark.exists() and f"the real tailscale ran: {mark.read_text()}"))
     for patcher in (mock.patch.object(sd_gate_receipts, "satellite_identity", lambda: dict(SATELLITE)),
                     mock.patch.dict(os.environ, {"PATH": f"{programs}{os.pathsep}{os.environ.get('PATH', '')}"})):
+        patcher.start()
+        case.addCleanup(patcher.stop)
+
+
+def no_real_gate_cache(case: unittest.TestCase, scratch: pathlib.Path) -> None:
+    """Point `SD_GATE_CACHE_DIR` into `scratch`, and fail `case` if a pinned tool folder lands outside it (sd:2921).
+
+    `mock.patch.dict` keeps an inherited `SD_GATE_CACHE_DIR`, which outranks a scratch `XDG_CACHE_HOME`, so a gate
+    would remove and write cargo subcommands in the real cache. Every pinning passes through `offload_pins`.
+    """
+    pins, outside = sd_gate_receipts.offload_pins, []
+
+    def isolated(environment):  # type: ignore[no-untyped-def]
+        pinned = pins(environment)
+        if not pathlib.Path(pinned["CARGO_HOME"]).resolve().is_relative_to(scratch.resolve()):
+            outside.append(pinned["CARGO_HOME"])
+        return pinned
+
+    case.addCleanup(lambda: case.assertEqual(outside, [], "a test pinned the real gate cache"))
+    for patcher in (mock.patch.object(sd_gate_receipts, "offload_pins", isolated),
+                    mock.patch.dict(os.environ, {sd_gate_cache.CACHE_VARIABLE: str(scratch / "gate-cache")})):
         patcher.start()
         case.addCleanup(patcher.stop)
 
@@ -81,6 +103,7 @@ class SatelliteFixture(unittest.TestCase):
         self.database = self.root.parent / "sd.db"
         initialise(self.database)
         no_real_tailscale(self, self.root.parent)
+        no_real_gate_cache(self, self.root.parent)
         self.runs = 0
         self.hub: str | None = HUB
         self.opted = "accept"
@@ -331,7 +354,8 @@ class OffloadedEnvironment(SatelliteFixture):
         self.extra = {"SKIP_TESTS": "1", "GOFLAGS": "-run=Smoke", "RUN_INTEGRATION": "1", "RUSTFLAGS": "-Dwarnings",
                       "GITHUB_TOKEN": "synthetic-secret-0003", "CARGO_REGISTRY_TOKEN": "synthetic-secret-0004"}
         self.scratch = {"HOME": str(home), "SD_GATE_SLOTS": "0", "XDG_CONFIG_HOME": str(home / ".config"),
-                        "XDG_CACHE_HOME": str(home / ".cache"), "XDG_STATE_HOME": str(home / ".state")}
+                        "XDG_CACHE_HOME": str(home / ".cache"), "XDG_STATE_HOME": str(home / ".state"),
+                        "SD_GATE_CACHE_DIR": str(home / ".cache" / "sd" / "gate")}
 
     def seen(self) -> tuple[str, dict[str, str]]:
         """The gate's status, and the environment its check saw."""
@@ -394,7 +418,8 @@ class CargoSubcommands(SatelliteFixture):
         home = self.root.parent / "home"
         home.mkdir()
         self.scratch = {"HOME": str(home), "SD_GATE_SLOTS": "0", "XDG_CONFIG_HOME": str(home / ".config"),
-                        "XDG_CACHE_HOME": str(home / ".cache"), "XDG_STATE_HOME": str(home / ".state")}
+                        "XDG_CACHE_HOME": str(home / ".cache"), "XDG_STATE_HOME": str(home / ".state"),
+                        "SD_GATE_CACHE_DIR": str(home / ".cache" / "sd" / "gate")}
         self.cargo = self.root.parent / "cargo-a"
         self.tool(self.cargo / "bin" / "cargo-nextest", "cargo-nextest a")
         self.tool(self.cargo / "bin" / "cargo-llvm-cov", "cargo-llvm-cov")
@@ -422,9 +447,9 @@ class CargoSubcommands(SatelliteFixture):
                      "listing": sorted(path.name for path in folder.iterdir()) if folder.is_dir() else []}
         return self.passing(argv, env, tree, timeout)
 
-    def gate(self, cargo_home: str | None = None) -> dict:  # type: ignore[override]
+    def gate(self, cargo_home: str | None = None, reuse: bool = False) -> dict:  # type: ignore[override]
         with mock.patch.dict(os.environ, {**self.scratch, "CARGO_HOME": cargo_home or str(self.cargo)}):
-            return sd_gate_run.check_in_worktree(self.root, self.head, database=self.database, run=self.stand_in, reuse=False)
+            return sd_gate_run.check_in_worktree(self.root, self.head, database=self.database, run=self.stand_in, reuse=reuse)
 
     def caller(self, cargo: pathlib.Path | None = None) -> str:
         return sd_gate_receipts._content_digest((cargo or self.cargo) / "bin" / "cargo-nextest")
@@ -445,6 +470,19 @@ class CargoSubcommands(SatelliteFixture):
         self.assertTrue((self.cargo / "bin" / "cargo-nextest").is_file())
         self.assertEqual(self.seen["listing"], [])
 
+    def test_a_changed_subcommand_moves_the_local_binding(self) -> None:
+        """sd:2921 r4 review: local reuse never reads the view, so the binding itself must hold the copy's bytes."""
+        self.gate(reuse=True)
+        self.tool(self.cargo / "bin" / "cargo-nextest", "cargo-nextest changed")
+        result = self.gate(reuse=True)
+        self.assertEqual((self.runs, result["reuse_miss"]), (2, {"reason": "binding", "fields": ["offload_tools"]}))
+
+    def test_an_unchanged_subcommand_reuses_the_pass(self) -> None:
+        """The binding names no temporary folder, so a second gate of the same tools reuses the first one's pass."""
+        self.gate(reuse=True)
+        self.assertIn("reused", self.gate(reuse=True))
+        self.assertEqual(self.runs, 1)
+
     def test_a_concurrent_gate_of_another_caller_changes_nothing_this_one_runs(self) -> None:
         other = self.root.parent / "cargo-b"
         self.tool(other / "bin" / "cargo-nextest", "cargo-nextest b")
@@ -462,12 +500,14 @@ class CargoSubcommands(SatelliteFixture):
         self.assertFalse(os.path.lexists(pinned / "cargo-nextest"))
         self.assertEqual((self.seen["nextest"], self.bound()), (self.caller(), self.caller()))
 
-    def test_a_subcommand_written_to_the_pinned_cargo_home_during_the_run_keeps_no_offload_row(self) -> None:
-        """A check's `cargo install` writes the shared pinned `CARGO_HOME/bin`, which cargo reads first; the after view sees it."""
+    def test_a_subcommand_written_to_the_pinned_cargo_home_during_the_run_keeps_no_receipt(self) -> None:
+        """A check's `cargo install` writes the shared pinned `CARGO_HOME/bin`, which cargo reads first; the after
+        binding and view see it, so neither a local receipt nor an offload row is kept."""
         pinned = pathlib.Path(sd_gate_receipts.offload_pins(self.scratch)["CARGO_HOME"], "bin")
         self.during = lambda: self.tool(pinned / "cargo-nextest", "cargo-nextest installed")
         result = self.gate()
-        self.assertEqual(result["offload_error"], "the offload view moved during the run: tools cargo-nextest")
+        self.assertEqual(result["receipt_skipped"], "moved during the run: offload_tools")
+        self.assertEqual((self.own_row(), self.offload_row()), ({}, {}))
 
     def test_a_caller_binary_changed_during_the_run_changes_nothing_it_runs(self) -> None:
         before = self.caller()
@@ -512,7 +552,7 @@ class EnvironmentMode(SatelliteFixture):
     """
 
     def gate(self, reuse: bool = True) -> dict:
-        allowlisted = {name: os.environ[name] for name in ("HOME", "USER", "PATH") if name in os.environ}
+        allowlisted = {name: os.environ[name] for name in ("HOME", "USER", "PATH", "SD_GATE_CACHE_DIR") if name in os.environ}
         allowlisted.update(sd_gate_receipts.offload_pins(allowlisted))
         return sd_gate_run.check_in_worktree(self.root, self.head, database=self.database, run=self.passing,
                                              environ=allowlisted, reuse=reuse)
@@ -601,7 +641,7 @@ class BindingSplit(SatelliteFixture):
         assert whole is not None and part is not None
         self.assertEqual(set(part), set(sd_gate_receipts.TREE_FIELDS))
         self.assertEqual(set(whole) - set(part), {"tools", "python", "environment_sha256", "threads", "machine",
-                                                  "environment_mode"})
+                                                  "offload_tools", "environment_mode"})
         self.assertEqual({name: whole[name] for name in part}, part)
 
     def test_the_tree_part_needs_no_tool_on_path(self) -> None:

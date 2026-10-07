@@ -344,7 +344,7 @@ parting in one way each, so this table lists every way the code knows of.
 |---|---|---|
 | Two gates run at once for callers whose `CARGO_HOME`s differ | Each gate copies into its own folder; no gate writes a shared one | `test_a_concurrent_gate_of_another_caller_changes_nothing_this_one_runs` |
 | An earlier version left a link in the pinned `CARGO_HOME/bin`, which cargo reads first | `cargo_subcommands` removes each bound name there before the run | `test_a_subcommand_left_in_the_pinned_cargo_home_is_removed` |
-| A check writes a bound name into the pinned `CARGO_HOME/bin` during the run | The view looks there first, so the after view differs from the before view and no offload row is kept (`record_gate_pass`) | `test_a_subcommand_written_to_the_pinned_cargo_home_during_the_run_keeps_no_offload_row` |
+| A check writes a bound name into the pinned `CARGO_HOME/bin` during the run | `view_tools` looks there first, so the after binding's `offload_tools` differs and neither a local receipt nor an offload row is kept (`record_gate_pass`) | `test_a_subcommand_written_to_the_pinned_cargo_home_during_the_run_keeps_no_receipt` |
 | The caller's binary changes during the run | A copy, not a link: the check runs the copy and both views bind it | `test_a_caller_binary_changed_during_the_run_changes_nothing_it_runs` |
 | The caller has no binary, after another caller's gate had one | Nothing is copied, and no other gate's copy is reachable | `test_a_caller_without_the_subcommand_does_not_run_another_callers` |
 | The caller's cargo `bin` is relative or inside the checkout | `gate_path`, the rule `gate_environment` applies to every `PATH` entry | `test_a_cargo_bin_the_gate_path_drops_gives_nothing` |
@@ -352,7 +352,20 @@ parting in one way each, so this table lists every way the code knows of.
 | The view looks where cargo does not | `offload_view` and `subcommand_path` use one order: `$CARGO_HOME/bin`, `CARGO_SUBCOMMANDS`, `PATH` | `test_the_check_runs_the_callers_subcommand_and_the_row_binds_it` |
 | The hub's and the satellite's copies differ | `cargo-nextest` is in `OFFLOAD_TOOLS`, so it refuses | `OffloadView.test_a_bound_cargo_subcommand_is_copied_for_the_gate_and_refuses` |
 | A gate in a repository that did not opt in, whose `CARGO_HOME` is the caller's own | `cargo_subcommands` does nothing in `whole` mode, so the cleanup never removes the caller's binary | `test_a_gate_that_did_not_opt_in_copies_and_removes_nothing` |
+| Local receipt reuse: identity bound vs executable run. Local reuse never reads the view | `gate_binding` adds `offload_tools`, each `OFFLOAD_TOOLS` executable by name and bytes as `view_tools` finds it; `machine_binding` resolves the check's own names on the check's `PATH` (`subcommand_path`) and names a copy `subcommands:<name>`, never the random folder | `test_a_changed_subcommand_moves_the_local_binding`, `OffloadView.test_a_check_that_runs_the_subcommand_itself_binds_the_gates_copy`, `test_an_unchanged_subcommand_reuses_the_pass` |
+| Tests touch the real cache: `mock.patch.dict` keeps an inherited `SD_GATE_CACHE_DIR`, which outranks a scratch `XDG_CACHE_HOME` | `no_real_gate_cache` in `SatelliteFixture` points the variable into the test's folder, and fails a test whose pinning lands outside it | every `SatelliteFixture` test; fails first with the variable exported and the isolation removed |
 | The folder outlives the run | It lies in the gate's temporary folder, which `check_in_worktree` removes | `test_an_unbound_subcommand_stays_unavailable_and_the_folder_goes_with_the_run`; the temporary folder is the guard, so no change to the code makes this test fail alone |
+
+Each caller that binds or views a gate's environment, against the environment the check runs under:
+
+| Caller | Environment it reads | Same tools as the check? |
+|---|---|---|
+| `check_in_worktree`: `gate_binding` before the receipt lookup | The gate's `env`; tools through `subcommand_path` and `view_tools` | Yes |
+| `record_gate_pass`: `gate_binding` after the run | The same, while the gate's folder still exists | Yes |
+| `start_view` and `Worktree.view`: `offload_view` before and after the run | `view_tools` | Yes |
+| `record_offload`: the view a satellite's row keeps | `view_tools` | Yes |
+| `sd-check`'s own receipts (`check_binding`), inside the check | The check's own environment | Yes; they bind the gate worktree's random path, so a gate never reuses one |
+| `cargo_environment`: `CARGO_TARGET_DIR` | The check's only | Not a tool: a build cache, left unbound on purpose |
 
 Not guarded: a check that writes a bound name into the pinned
 `CARGO_HOME/bin` and removes it again before the run ends. Both views then
