@@ -62,6 +62,13 @@ Review round 2 replaced that: see the next section.
   last one (review round 11).
 - **Renders recover.** A failed `cmd_user` restores every render it wrote,
   not only the Codex policies, so a failed target leaves none of its files.
+  Every render is written to a scratch file and renamed over the old one, so
+  a write that fails part way, as on a full disk, leaves the previous file
+  whole for the restore (review round 14).
+- **Recovery from the checkout on.** `_activate` arms recovery as soon as
+  `HEAD` moves. A build that cannot start `make`, or a `.venv` link that
+  cannot move, returns the tree to the previous commit, not only a failed
+  build or render (review round 14).
 
 ## `make setup` serves (sd:1118, second pass)
 

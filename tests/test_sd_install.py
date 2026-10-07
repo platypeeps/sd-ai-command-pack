@@ -2620,6 +2620,45 @@ class ServingTreeTests(InstallerHarness):
         self.assertIn("is not a link to .venv-a or .venv-b; move it aside", out.getvalue())
         self.assertEqual((self.head(), self.rendered), (self.first, []))
 
+    def test_make_that_cannot_start_keeps_serving_the_previous_commit(self):
+        """Review round 14 (1): launching make raises, and recovery still covers it."""
+        ctx = self.real_provision()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+        self.commit(self.origin, "two\n")
+        ctx.environ["PATH"] = ""
+        out = io.StringIO()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, out), 1)
+        self.assertEqual((self.head(), self.rendered), (self.first, [self.first]))
+        self.assertEqual(os.readlink(self.serving / ".venv"), sd_install.ENV_SLOTS[0])
+        self.assertIn("could not start make", out.getvalue())
+
+    def test_a_failed_link_switch_keeps_serving_the_previous_commit(self):
+        """Review round 14 (1): publishing the environment link fails after the build."""
+        ctx = self.real_provision()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+        self.write_receipt(checkout=str(self.serving), commit=self.first)
+        receipt = ctx.receipt.read_bytes()
+        self.commit(self.origin, "two\n")
+        real = sd_install._replace_link
+        calls = []
+
+        def fails_once(link, target):
+            calls.append(target)
+            if len(calls) == 1:
+                raise OSError(28, "No space left on device")
+            return real(link, target)
+
+        with self.recording(), unittest.mock.patch.object(sd_install, "_replace_link", side_effect=fails_once):
+            with self.assertRaises(OSError):
+                sd_install.cmd_pull(ctx, io.StringIO())
+        self.assertEqual(self.head(), self.first)
+        self.assertEqual(ctx.receipt.read_bytes(), receipt)
+        self.assertEqual(os.readlink(self.serving / ".venv"), sd_install.ENV_SLOTS[0])
+        self.assertEqual(self.built_for(), self.first)
+
     def test_a_put_back_git_refuses_after_a_failed_provision_names_the_command(self):
         merged = self.commit(self.origin, "two\n")
         real = sd_install._git
@@ -4219,6 +4258,33 @@ class LinkEdgeCaseTests(InstallerHarness):
         self.assertEqual(sd_install.cmd_user(self.context_for(serving), io.StringIO()), 0)
         self.assertFalse(rendered.exists(), "the next install did not prune")
         self.assertFalse(old.is_symlink(), "the next install did not prune the link")
+
+    def test_a_render_that_fails_midway_leaves_the_previous_render_whole(self):
+        """Review round 14 (2): a disk-full write must not truncate a render the restore then keeps."""
+        work = self.checkout_with_commands("sd", name="work")
+        serving = self.checkout_with_commands("sd")
+        for checkout, body in ((work, "old"), (serving, "new")):
+            folder = checkout / "skills" / "sd-kept"
+            folder.mkdir()
+            (folder / sd_install.SKILL_FILE).write_text(f"---\nname: sd-kept\n---\n\n{body}\n", encoding="utf-8")
+            self.write_paths(checkout, "sd-probe", "sd-kept")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        rendered = sd_install.platform_homes(self.home, dict(os.environ))[0].target_for("sd-kept")
+        before = rendered.read_bytes()
+        real = Path.write_bytes
+
+        def disk_full(path, data):
+            if b"\nnew\n" in data:
+                with open(path, "wb") as handle:
+                    handle.write(data[: len(data) // 2])
+                raise OSError(28, "No space left on device")
+            return real(path, data)
+
+        with unittest.mock.patch.object(Path, "write_bytes", disk_full):
+            with self.assertRaises(OSError):
+                sd_install.cmd_user(self.context_for(serving), io.StringIO())
+        self.assertEqual(rendered.read_bytes(), before, "the previous render was truncated")
+        self.assertEqual(self.receipt["checkout"], str(work))
 
     def test_a_failed_hook_removal_puts_the_added_hooks_back(self):
         work = self.checkout_with_commands("sd", name="work")

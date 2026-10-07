@@ -758,9 +758,13 @@ def render_plan(surfaces: list[Surface], homes: list[PlatformHome], kind: str) -
 
 
 def atomic_policy_write(target: Path, body: bytes) -> None:
-    """Never expose a partial policy or truncate the previous owned version."""
+    """Never expose a partial render or truncate the previous owned version.
+
+    Named for the Codex policies it first covered; every render uses it since
+    sd:1118, so a failed install finds each previous file whole to restore.
+    """
     with tempfile.TemporaryDirectory(prefix=".sd-policy-", dir=target.parent) as directory:
-        scratch = Path(directory) / "openai.yaml"
+        scratch = Path(directory) / target.name
         scratch.write_bytes(body)
         if target.exists():
             scratch.chmod(target.stat().st_mode & 0o777)
@@ -773,10 +777,7 @@ def write_render_plan(planned: list, dry_run: bool) -> list[Written]:
         written.append(Written(target, digest(body), kind))
         if not dry_run:
             target.parent.mkdir(parents=True, exist_ok=True)
-            if kind == "invocation-policy:codex":
-                atomic_policy_write(target, body)
-            else:
-                target.write_bytes(body)
+            atomic_policy_write(target, body)
     return written
 
 
@@ -2827,32 +2828,40 @@ def _activate(ctx: Context, commit: str, out) -> int:
     if code:
         print(f"error: git checkout --detach {commit} failed:\n{err}", file=out)
         return 1
-    slot = _provision(ctx, commit, out)
-    if slot is None:
-        # Nothing was published: the links, renders, hooks, receipt and the
-        # `.venv` link still serve `original` once its code is back.
-        code, _, err = _git(ctx, ["checkout", "--quiet", "--detach", original])
-        if code:
-            print(f"error: git could not return the serving tree to {original}:\n{err}\nrun "
-                  f"`git -C {ctx.checkout} checkout --detach {original}`.", file=out)
-        else:
-            print(f"error: the serving tree is back at {original}, with its environment and install as they were.",
-                  file=out)
-        return 1
+    # Armed as soon as HEAD moves: the served commands run the tree's code,
+    # so every failure from here on, raised or returned, puts the tree, the
+    # `.venv` link and the install back (review round 14).
     venv = ctx.checkout / ".venv"
     previous = os.readlink(venv) if venv.is_symlink() else None
-    _replace_link(venv, Path(slot.name))
-    print(f"serving {commit}", file=out)
+    rendering = False
     rendered = 1
     try:
+        slot = _provision(ctx, commit, out)
+        if slot is None:
+            return 1
+        _replace_link(venv, Path(slot.name))
+        print(f"serving {commit}", file=out)
+        rendering = True
         rendered = _render_checked_out(ctx, out)
     finally:
         if rendered:
             if previous is None:
-                venv.unlink()
+                if venv.is_symlink():
+                    venv.unlink()
             else:
                 _replace_link(venv, Path(previous))
-            _put_back(ctx, original, receipt, commit, out)
+            if rendering:
+                _put_back(ctx, original, receipt, commit, out)
+            else:
+                # Nothing was published: the links, renders, hooks and
+                # receipt still serve `original` once its code is back.
+                code, _, err = _git(ctx, ["checkout", "--quiet", "--detach", original])
+                if code:
+                    print(f"error: git could not return the serving tree to {original}:\n{err}\nrun "
+                          f"`git -C {ctx.checkout} checkout --detach {original}`.", file=out)
+                else:
+                    print(f"error: the serving tree is back at {original}, with its environment and install as "
+                          "they were.", file=out)
     return rendered
 
 
@@ -2879,8 +2888,12 @@ def _provision(ctx: Context, commit: str, out) -> Path | None:
         return None
     slot = ctx.checkout / (ENV_SLOTS[1] if venv.is_symlink() and os.readlink(venv) == ENV_SLOTS[0] else ENV_SLOTS[0])
     environ = {key: value for key, value in ctx.environ.items() if key not in MAKE_VARIABLES}
-    done = subprocess.run(["make", "-C", str(ctx.checkout), "setup", "SERVE=no", f"VENV={slot}"],  # nosec B603 B607 - fixed argv
-                          env=environ, capture_output=True, text=True, check=False)
+    try:
+        done = subprocess.run(["make", "-C", str(ctx.checkout), "setup", "SERVE=no", f"VENV={slot}"],  # nosec B603 B607 - fixed argv
+                              env=environ, capture_output=True, text=True, check=False)
+    except OSError as problem:
+        print(f"error: provisioning {slot} for {commit} could not start make: {problem}", file=out)
+        return None
     print(done.stdout + done.stderr, file=out, end="")
     if done.returncode:
         print(f"error: provisioning {slot} for {commit} failed", file=out)
