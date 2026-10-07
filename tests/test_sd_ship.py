@@ -428,7 +428,7 @@ roles:
         # runner has no `jev`, so the fixture now answers the same everywhere
         # (sd:1605).
         self.environment = {**os.environ, "HOME": str(self.home), "XDG_CONFIG_HOME": str(self.home / ".config"),
-                            "JEV_SD_REVIEW": "0", "JEV_SD_DOCS_LINT": "0",
+                            "JEV_SD_REVIEW": "0", "JEV_SD_DOCS_LINT": "0", "JEV_SD_REVIEW_TRIAGE": "0",
                             "SHIP_DOUBLE": self.double.base_url,
                             "PATH": str(self.programs) + os.pathsep + os.environ["PATH"]}
         self.patch = patch.dict(os.environ, self.environment, clear=True)

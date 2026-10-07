@@ -4,6 +4,14 @@
 
 ### Added
 
+- **Jev shadow readings: review-finding triage and a duplicate hint on `sd task add` (sd:2092, sd:2093).**
+  `sd-review` asks Jev to class each of its first ten findings as correctness, robustness, style or likely wrong (`JEV_SD_REVIEW_TRIAGE`).
+  `sd task add` asks which open item of the same repository already tracks the new one, if any (`JEV_SD_TASK_DEDUPE`).
+  Both call `jev` with `--shadow`, so Jev's answer goes to its ledger and is never read; no output, exit code or status changes.
+  Both run for a public github.com repository only, asked of `gh` after `jev enabled` answers; any doubt reads as private.
+  Unset means on wherever `jev` can answer; `0` switches a stage off. CONTRIBUTING.md says what each sends.
+  The test runner switches both stages off and pins `JEV_METER=0`, `JEV_CORPUS=0` and `JEV_TRACES_URL=0`.
+
 - **`sd task add --ref <source>:<id>` files one row per occurrence (sd:1902).**
   A second add with the same reference updates that row and keeps its status, so a retried delivery never reopens done work.
   A new reference, such as the next run's `job:repo-sync:43`, files a new row.

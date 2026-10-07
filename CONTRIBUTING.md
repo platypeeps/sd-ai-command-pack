@@ -262,6 +262,30 @@ clause, and the tier itself may move — that is the point of taking it. The
 note naming this switch appears only when the reading was attempted and
 failed.
 
+#### The shadow readings: finding triage and duplicate hints
+
+Two more stages ask Jev with `--shadow`: `jev` prints the answer handed to it
+and records its own judgment beside it in the ledger. Nothing reads the
+judgment back, so neither changes an output, an exit code or a status.
+
+- `JEV_SD_REVIEW_TRIAGE` (sd:2092): after a review with findings, `sd-review`
+  asks for each of the first ten whether it is correctness, robustness, style
+  or likely wrong. Sent per finding: severity, disposition, family,
+  repository-relative path and summary.
+- `JEV_SD_TASK_DEDUPE` (sd:2093): after `sd task add` files a row in a
+  checkout, it asks which open item of that repository, if any, tracks the
+  same work. Sent: the new title, and the ids and titles of up to forty open
+  items.
+
+**Public repositories only.** Each asks GitHub whether `origin` is a public
+github.com repository, after `jev enabled` says a reading could be taken, and
+sends nothing unless the answer is `private: false`. No `gh`, a failing `gh`
+and a private answer all read as private.
+
+```bash
+JEV_SD_REVIEW_TRIAGE=0 JEV_SD_TASK_DEDUPE=0    # either, for a run or a shell
+```
+
 ### Permissions
 
 Put machine-specific rules in ignored `.claude/settings.local.json`.

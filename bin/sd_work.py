@@ -23,6 +23,7 @@ import sys
 from typing import Any
 
 import sd_handoff_rows
+import sd_jev
 import sd_lib
 
 
@@ -1009,7 +1010,7 @@ def run(args: argparse.Namespace) -> int:
         # thing `_emit` cannot read off the result: a row that already sat in
         # the destination looks the same afterwards as one that just moved.
         # `following` is the row a recurring completion created, if any.
-        moved, following = False, None
+        moved, following, dedupe = False, None, None
         result: Any
         if action == "today":
             result = [dict(row) for row in sd_db.reads.today_items(connection)]
@@ -1022,8 +1023,7 @@ def run(args: argparse.Namespace) -> int:
         elif action == "item":
             result = workflow.item_state(connection, args.item)
         elif action == "add":
-            _kinds(workflow)
-            result = _capture(sd_db, workflow, args, connection, who)
+            result, dedupe = _add(sd_db, workflow, args, connection, who)
         elif action == "edit":
             changes = _edit_changes(args)
             if "kind" in changes:
@@ -1058,11 +1058,71 @@ def run(args: argparse.Namespace) -> int:
         else:
             raise WorkRefusal(f"unknown workflow operation: {action}")
         _emit(result, machine=args.json, moved=moved, following=following)
+        _dedupe(dedupe)
         return 0
     except sd_db.SdDbError as error:
         raise WorkRefusal(str(error)) from error
     finally:
         connection.close()
+
+
+#: `sd_jev.jev_dedupe`'s inputs before the environment: item, title, open items, checkout.
+DedupeInputs = tuple[int, str, list[tuple[int, str]], pathlib.Path]
+
+
+def _add(sd_db: Any, workflow: Any, args: argparse.Namespace, connection: Any,
+         who: str) -> tuple[dict, DedupeInputs | None]:
+    """The filed row, and `jev_dedupe`'s inputs when it is a new item in a checkout.
+
+    The duplicate hint is shadow only (sd:2093): `run` asks it after the row is
+    filed and printed, and Jev's pick goes to its ledger and is never read back.
+    A `--ref` update made no new item, and an item with no checkout has no
+    repository whose visibility could make its titles sendable.
+    """
+    _kinds(workflow)
+    state = _capture(sd_db, workflow, args, connection, who)
+    item = state["item"]
+    if state.get("created") is False or not item.get("repo"):
+        return state, None
+    rows = sd_db.reads.backlog_items(connection, repo=item["repo"])
+    candidates = [(row["id"], row["title"]) for row in rows if row["status"] != "done"]
+    return state, (item["id"], item["title"], candidates, pathlib.Path(item["repo"]).expanduser())
+
+
+#: The duplicate hint's stage, its name in the judgment ledger, and its shadow
+#: answer: `add` looks for no duplicate today, which is `none`.
+DEDUPE_STAGE = "JEV_SD_TASK_DEDUPE"
+DEDUPE_CALLER = "sd-task-add"
+NO_DUPLICATE = "none"
+#: How many open items one add offers as candidates.
+MAX_CANDIDATES = 40
+
+
+def _dedupe(inputs: DedupeInputs | None, env: Any = os.environ) -> None:
+    """Record which open item Jev reads as a duplicate of the one `_add` filed (sd:2093).
+
+    Shadow only, and only for a public repository: `sd_jev.shadow_ready` says
+    when. Sent: the new title, and the ids and titles of up to
+    `MAX_CANDIDATES` open items of the same repository.
+    """
+    if inputs is None:
+        return
+    item, title, candidates, root = inputs
+    shown = [(number, _bare(text)) for number, text in candidates if number != item][:MAX_CANDIDATES]
+    ready = sd_jev.shadow_ready(DEDUPE_STAGE, DEDUPE_CALLER, root, env, sys.stderr) if shown else None
+    if ready is None:
+        return
+    criteria = ",".join([f"{NO_DUPLICATE}=no listed item tracks the same work"]
+                        + [f"sd-{number}={text}" for number, text in shown])
+    sd_jev.shadow_ask(ready[0], "Which open item already tracks the same work as the new item?",
+                      criteria, json.dumps({"new_item_title": _bare(title)}), env, sys.stderr,
+                      caller=DEDUPE_CALLER, stage=DEDUPE_STAGE, answer=NO_DUPLICATE,
+                      subject=f"sd-task-dedupe:sd-{item}")
+
+
+def _bare(text: object) -> str:
+    """One line of `text`, bounded, with no `,` to split a criteria list on."""
+    return " ".join(str(text).replace(",", ";").split())[:sd_jev.MAX_TEXT]
 
 
 def _recurrence_flags(parser: argparse.ArgumentParser, *, clear: bool = False) -> None:

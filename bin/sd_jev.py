@@ -66,11 +66,16 @@ and an answer outside the policy's tiers all land on the same line: keep the
 routed tier, write one note to stderr saying which of those happened, and
 return no record. A run with no record took no reading, and the caller's exit
 code and findings are not this module's to change.
+
+**Shadow stages live at the end of this file**: review-finding triage
+(sd:2092) and the helpers `sd task add` uses for its duplicate hint (sd:2093).
+They record Jev's answer and never read it, for public repositories only.
 """
 
 from __future__ import annotations
 
 import json
+import pathlib
 import shutil
 import subprocess
 import sys
@@ -300,3 +305,92 @@ def _jev_run(argv: Sequence[str], env: Mapping[str, str],
                               text=True, timeout=TIMEOUT_SECONDS, check=False)
     except (OSError, subprocess.SubprocessError) as error:
         return subprocess.CompletedProcess(list(argv), 1, "", str(error))
+
+
+
+# --------------------------------------------------------------------------
+# Shadow stages: review triage here (sd:2092), and the `sd task add` duplicate
+# hint in `bin/sd_work.py` (sd:2093), which shares these helpers.
+#
+# A shadow call passes `--shadow`: `jev` prints the answer handed to it, exits
+# 0, and records its own judgment beside it in the ledger. Nothing reads that
+# judgment back, so no output, exit code or status changes.
+#
+# **Public repositories only**, because each sends text about one. GitHub is
+# asked after `jev enabled` answers, so a machine without Jev asks it nothing.
+# No github.com `origin`, no `gh`, a failing `gh` and `private: true` all read
+# as private, silently. A `jev` that fails is loud and stops the stage.
+# --------------------------------------------------------------------------
+
+TRIAGE_STAGE = "JEV_SD_REVIEW_TRIAGE"
+#: sd-review classifies no finding itself, so its shadow answer is no
+#: criterion: Jev's pick is counted, not compared.
+UNTRIAGED = "untriaged"
+#: Findings triaged per review, one bounded call each; characters per text sent.
+MAX_TRIAGE = 10
+MAX_TEXT = 1000
+TRIAGE_CRITERIA = {
+    "correctness": "the finding names a defect that makes the code give a wrong result",
+    "robustness": "the finding names a failure under unusual input or load or environment",
+    "style": "the finding is about wording or naming or layout and changes no behaviour",
+    "likely-wrong": "the finding misreads the code and its claim does not hold",
+}
+
+
+def shadow_ready(stage: str, caller: str, root: str | pathlib.Path, env: Mapping[str, str],
+                 stream: TextIO) -> tuple[str, tuple[str, str, str]] | None:
+    """`(jev, github head)` when a shadow reading may be taken for public `root`, else None."""
+
+    head = sd_lib.github_head(root)
+    binary = shutil.which(COMMAND, path=env.get("PATH"))
+    if sd_lib.jev_stage_off(env.get(stage)) or binary is None or head is None:
+        return None
+    gate = _jev_run([binary, "enabled", stage, "--record", "--caller", caller], env)
+    if gate.returncode not in (0, 3):
+        shadow_stopped(stream, caller, stage, f"`{COMMAND} enabled` exited {gate.returncode}")
+    gh = shutil.which("gh", path=env.get("PATH"))
+    if gate.returncode != 0 or gh is None:
+        return None
+    visible = _jev_run([gh, "api", f"repos/{head[0]}/{head[1]}", "--jq", ".private"], env)
+    return (binary, head) if visible.returncode == 0 and visible.stdout.strip() == "false" else None
+
+
+def shadow_ask(binary: str, question: str, criteria: str, state: str, env: Mapping[str, str],
+               stream: TextIO, *, caller: str, stage: str, answer: str, subject: str) -> bool:
+    """Ask one shadow `choice`; say so on `stream` and return False when it failed."""
+
+    argv = [binary, "choice", question, "--criteria", criteria, "--state", "-",
+            "--state-format", "json", "--caller", caller, "--id", stage.lower(), "--stage", stage,
+            "--shadow", answer, *(["--subject", subject] if len(subject) <= 96 else [])]
+    code = _jev_run(argv, env, state).returncode
+    if code != 0:
+        shadow_stopped(stream, caller, stage, f"`{COMMAND}` exited {code}")
+    return code == 0
+
+
+def shadow_stopped(stream: TextIO, caller: str, stage: str, why: str) -> None:
+    stream.write(f"{caller}: the Jev shadow reading stopped: {why}; nothing it does "
+                 f"changed (set {stage}=0 to stop asking)\n")
+
+
+def jev_triage(findings: Sequence[Mapping[str, Any]], env: Mapping[str, str],
+               root: str | pathlib.Path, stream: TextIO | None = None) -> None:
+    """Record Jev's kind for each of the first `MAX_TRIAGE` findings; return nothing.
+
+    Sent per finding: its severity, disposition, family, repository-relative
+    path and summary. No diff, no file contents, no author.
+    """
+
+    note = sys.stderr if stream is None else stream
+    ready = shadow_ready(TRIAGE_STAGE, CALLER, root, env, note) if findings else None
+    if ready is None:
+        return
+    binary, head = ready
+    criteria = ",".join(f"{name}={text}" for name, text in TRIAGE_CRITERIA.items())
+    for index, finding in enumerate(findings[:MAX_TRIAGE], 1):
+        state = json.dumps({key: str(finding.get(key, ""))[:MAX_TEXT] for key in
+                            ("severity", "disposition", "family", "path", "summary")}, sort_keys=True)
+        if not shadow_ask(binary, "What kind of code review finding is this?", criteria, state, env, note,
+                          caller=CALLER, stage=TRIAGE_STAGE, answer=UNTRIAGED,
+                          subject=f"sd-review-triage:{head[0]}.{head[1]}:{head[2][:12]}:{index}"):
+            return

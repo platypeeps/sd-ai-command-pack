@@ -130,6 +130,13 @@ export JEV_ENABLED=0
 # `sd-docs-lint` probes `jev` in every repository since sd:2762, and a probe
 # records its decline in the judgment ledger; its stage off skips the probe.
 export JEV_SD_DOCS_LINT=0
+# The shadow stages (sd:2092, sd:2093) record a `jev enabled` decline the same
+# way, so they are off too; a stray real call writes no meter, corpus or trace.
+export JEV_SD_REVIEW_TRIAGE=0
+export JEV_SD_TASK_DEDUPE=0
+export JEV_METER=0
+export JEV_CORPUS=0
+export JEV_TRACES_URL=0
 
 # Git 2.54 can detach automatic maintenance after commits and pushes. The test
 # suite creates and removes many short-lived repositories, so a detached repack
