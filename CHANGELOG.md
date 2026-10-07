@@ -10,6 +10,15 @@
   The `sd-fact-check`, `sd-publish` and prose-score pages show a hashed `--subject` and one run id per run.
   CONTRIBUTING.md names each key and how an outcome recomputes it.
 
+- **`sd changelog render|show|import` renders `CHANGELOG.md` from the database's entry rows (sd:2783, step 2).**
+  `render` writes the region between `<!-- sd-changelog:begin -->` and `<!-- sd-changelog:end -->` from the rows merged on the base's first-parent history since the newest `v*` tag; text outside the region stays byte for byte.
+  Entries go by subsection, then newest merge first by first-parent position; neither write order nor a clock decides the order.
+  `--check` writes nothing and exits 1 when the file differs; `--release VERSION` puts the entries under a heading dated by the base commit.
+  `show` prints the region. `import <pr>` writes a missing row from that pull request's squash message.
+  Render refuses a merged `## Changelog` entry with no row, names each pull request, and refuses any row a privacy pattern matches, by line number only.
+  With no pattern file it refuses; `sd.privacy_patterns` names the file. No repository has opted in yet, so nothing calls it on its own.
+  The section parser keeps a comment inside a code span or fence, keeps a fenced `### Fixed` example inside its entry, and drops the trailer paragraphs that end a squash message.
+
 - **A serving tree moves by commit, and rolls back (sd:1118).** `bin/sd_install.py --pull` in a clean checkout on a detached `HEAD` fetches `origin`, detaches at the exact commit `origin/main` names, and re-renders. A checkout on `main` fast-forwards as before; any other branch is still refused. Every render that activates a new commit records the one it replaced as `previousCommit` in the receipt, and a re-render at the same commit keeps it. The new `--rollback` detaches a clean serving tree at that commit and re-renders, so a second `--rollback` undoes the first. Both refuse a target whose installer declares no `ACTIVATION_CONTRACT`, since from there no second rollback could come back, The target commit's own installer renders it, under the supervision of the installer that started the move. A render that fails puts the tree back at its commit, restores the receipt, and renders that commit again when the receipt names the tree, so a failed first `--serve` leaves the working checkout's install as it was; a failed install now restores every render it wrote, not only the Codex policies, and writes each render through a scratch file, so a write cut short leaves the previous file whole. `--verify` is unchanged: an untracked file or a `HEAD` moved without a render still fails the source check. `make setup` now ends with `bin/sd_install.py --serve`: it clones `origin` into `${XDG_DATA_HOME:-~/.local/share}/sd-ai-command-pack/serving` on the first run, builds each target commit's environment with that commit's `make setup SERVE=no` in a scratch checkout, in one of two slots `.venv` links to, while the tree serves its commit, refusing an `sd_db` older than that slot or the live one holds (`--live-venv`), then moves the code and `.venv` together and renders, and runs `--pull` there, so only `make setup` moves what the machine serves; a second `make setup` waits on `serving.lock` beside the tree until the first move ends, and after 600 seconds refuses with nothing moved. `make setup SERVE=no` skips it. A command link the receipt records at its recorded target now moves to the installing checkout instead of refusing the run; any other link at the path still refuses. The hook commands the receipt recorded for the last checkout move with the links, so each hook runs once; another installer's hook stays. Pointing `~/bin/common` at the serving tree is an operator step.
 
 - **An opted-in gate runs pinned copies of `cargo-nextest`, `node`, `npm` and `uv` (sd:2936).**
@@ -1391,6 +1400,11 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **`.sd-system-rev` advances to system `8797a036`, which estimates a prompt at three bytes a token (sd:2963, for sd:2935).**
+  A `url` reviewer's reserved bound now errs high on the input side; settlement still bills the vendor's own count.
+  `TheShippedBounds` in `tests/test_sd_review_ledger.py` derives its token count from the library's `BYTES_PER_TOKEN`, so the test follows the pin.
+  With the old literals, a checkout whose library came from system main failed two subtests, `1.114638 != 1.08174` (kimi) and `0.31742568 != 0.30295056` (baseten).
 
 - **`sd-author` and `sd-topic-radar` carry the writing pack's drafting, research and ideation rules (sd:1659).**
   The operator ruled on 2026-09-30 that the pack owns all writing skills; this ports what `sdw-draft`, `sdw-research` and `sdw-ideate` had and the pack did not.

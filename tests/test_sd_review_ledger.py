@@ -25,7 +25,7 @@ from typing import Any
 from unittest import mock
 
 from sd_db import connect, initialise, read_registry, record_cost, seed, writes
-from sd_db.calls import bound_for
+from sd_db.calls import BYTES_PER_TOKEN, bound_for
 from sd_db.ledger import exposure
 
 from tests.test_sd_registry import SHIPPED, _Answer
@@ -476,7 +476,8 @@ class TheShippedBounds(unittest.TestCase):
     must move with it, or a cap is held against a bound the call can exceed.
 
     Priced at the prompt that ran out of room on mezmo-world-simulator#215:
-    131600 bytes, 32900 estimated tokens.
+    131600 bytes, estimated at the library's `BYTES_PER_TOKEN` (sd:2935 made
+    it 3, so 43866 tokens; it was 4, 32900 tokens).
     """
 
     PROMPT = "x" * 131600
@@ -485,8 +486,9 @@ class TheShippedBounds(unittest.TestCase):
         registry = read_registry(SHIPPED)
         entries = {name: entry for name, entry in registry.providers.items() if entry.url}
         self.assertEqual(sorted(entries), ["baseten", "kimi", "minimax"])
-        expected = {"kimi": (32900 * 3.00 + 65536 * 15.00) / 1e6, "minimax": 0.0,
-                    "baseten": (32900 * 1.32 + 65536 * 3.96) / 1e6}
+        tokens = len(self.PROMPT) // BYTES_PER_TOKEN
+        expected = {"kimi": (tokens * 3.00 + 65536 * 15.00) / 1e6, "minimax": 0.0,
+                    "baseten": (tokens * 1.32 + 65536 * 3.96) / 1e6}
         for name, entry in entries.items():
             with self.subTest(provider=name):
                 self.assertAlmostEqual(bound_for(entry, self.PROMPT), expected[name], places=9)

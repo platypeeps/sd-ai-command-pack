@@ -922,6 +922,9 @@ The reserved `sd` namespace declares four settings:
   Absence reads `$XDG_STATE_HOME/sd/lanes`. `SD_LANE_ROOT` overrides it. It grants nothing.
 - `sd.bulk_storage_root`: the folder for large uncommitted data, as `<root>/<repository>/`; see
   [Parallel work](#parallel-work). Absence is no bulk root. It grants nothing.
+- `sd.privacy_patterns`: the privacy-pattern file `sd changelog render` checks every entry against, one
+  extended regular expression per line. Absence reads `privacy-patterns` in `$SYSTEM_TOOLS_CONFIG`, else in
+  `${XDG_CONFIG_HOME:-~/.config}/system`. No file refuses the render. It grants nothing.
 
 Installation supplies neither grant. A new operator must state their own policy; never copy another user's personal permission.
 These settings start no background work, enable no runner policy, and bypass no ownership, review, CI, or protection gate.
