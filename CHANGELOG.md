@@ -1395,6 +1395,11 @@
 
 ### Changed
 
+- **`.sd-system-rev` advances to system `8797a036`, which estimates a prompt at three bytes a token (sd:2963, for sd:2935).**
+  A `url` reviewer's reserved bound now errs high on the input side; settlement still bills the vendor's own count.
+  `TheShippedBounds` in `tests/test_sd_review_ledger.py` derives its token count from the library's `BYTES_PER_TOKEN`, so the test follows the pin.
+  With the old literals, a checkout whose library came from system main failed two subtests, `1.114638 != 1.08174` (kimi) and `0.31742568 != 0.30295056` (baseten).
+
 - **`sd-author` and `sd-topic-radar` carry the writing pack's drafting, research and ideation rules (sd:1659).**
   The operator ruled on 2026-09-30 that the pack owns all writing skills; this ports what `sdw-draft`, `sdw-research` and `sdw-ideate` had and the pack did not.
   `sd-author` marks how and when each claim was established, carries that certainty into prose, and sources the remedy as well as the problem.
