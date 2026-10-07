@@ -17,6 +17,7 @@ import json
 import os
 import pathlib
 import re
+import secrets
 import shlex
 import subprocess
 import sys
@@ -3785,6 +3786,22 @@ def jev_stage_off(value: str | None) -> bool:
     """
 
     return value is not None and value.strip().lower() in JEV_FLAG_OFF
+
+
+def jev_env(env: Mapping[str, str], caller: str) -> dict[str, str]:
+    """`env` with this run's `JEV_RUN`, the one id every `jev` call of a run inherits (sd:2954).
+
+    The ledger groups a run's calls by it. The run's own when `env` or this
+    process already has one, so a run started by another run stays one run;
+    else `<caller>-<UTC yyyymmddThhmmss>-<4 hex>`, made once and kept in this
+    process's environment for every later call and child.
+    """
+
+    run = env.get("JEV_RUN") or os.environ.get("JEV_RUN")
+    if not run:
+        run = f"{caller}-{time.strftime('%Y%m%dT%H%M%S', time.gmtime())}-{secrets.token_hex(2)}"
+        os.environ["JEV_RUN"] = run
+    return {**env, "JEV_RUN": run}
 
 
 #: How long `run_group` waits for a killed group's leader to be reaped.

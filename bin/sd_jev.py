@@ -154,6 +154,7 @@ def jev_tier(
     binary = shutil.which(COMMAND, path=env.get("PATH"))
     if binary is None:
         return tier, None
+    env = sd_lib.jev_env(env, CALLER)
     gate = _jev_run([binary, "enabled", STAGE, "--record", "--caller", CALLER], env)
     # 3 is "cannot answer here" and nothing narrower: `jev` collapses switched
     # off, no key, a placeholder key and a malformed timeout into this one code
@@ -357,6 +358,7 @@ def shadow_ready(stage: str, caller: str, root: str | pathlib.Path, env: Mapping
     if head is None:
         return None
     scope = [] if env.get(HOSTED_OPT_IN, "").strip() == "1" else ["--local-only"]
+    env = sd_lib.jev_env(env, caller)
     gate = _jev_run([binary, "enabled", stage, "--record", "--caller", caller, *scope], env)
     if gate.returncode not in (0, 3):
         shadow_stopped(stream, caller, stage, f"`{COMMAND} enabled` exited {gate.returncode}")
@@ -377,7 +379,7 @@ def shadow_ask(binary: str, question: str, criteria: str, state: str, env: Mappi
     argv = [binary, "choice", question, "--criteria", criteria, "--state", "-",
             "--state-format", "json", "--caller", caller, "--id", stage.lower(), "--stage", stage,
             "--shadow", answer, *(["--subject", subject] if len(subject) <= 96 else []), *scope]
-    code = _jev_run(argv, env, state).returncode
+    code = _jev_run(argv, sd_lib.jev_env(env, caller), state).returncode
     if code != 0:
         shadow_stopped(stream, caller, stage, f"`{COMMAND}` exited {code}")
     return code == 0

@@ -292,6 +292,22 @@ could be taken, and sends nothing unless the answer is `private: false`. No
 JEV_SD_REVIEW_TRIAGE=0 JEV_SD_TASK_DEDUPE=0    # either, for a run or a shell
 ```
 
+#### Subject and run in the ledger
+
+Every `jev` call names what it judged with `--subject`, so a later outcome can
+join the judgment, and inherits one `JEV_RUN` per run (sd:2954).
+`sd_lib.jev_env` keeps an inherited `JEV_RUN` or sets
+`<caller>-<UTC yyyymmddThhmmss>-<4 hex>` once per process.
+A subject holds no content: it is an existing id, or the first 16 hex of the
+SHA-256 of a stable identifier.
+
+- `sd-review` tier and triage, and `sd task add`: unchanged subjects.
+- `sd-docs-lint`: `sd-docs-lint:<16 hex>` over the batch's sorted origins
+  (`<item>/<file> `<citation>``), one per line; the weak-reading note names
+  each origin, so an outcome recomputes the key from it.
+- `sd-fact-check`, `sd-publish` and the prose scores: the skill pages show the
+  key and the run id the agent sets.
+
 ### Permissions
 
 Put machine-specific rules in ignored `.claude/settings.local.json`.
