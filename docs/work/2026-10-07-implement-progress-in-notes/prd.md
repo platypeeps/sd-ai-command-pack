@@ -1,0 +1,131 @@
+---
+title: Implement progress lives in sd task notes; implement.md changes only when the plan changes
+created: 2026-10-07
+item: sd:2784
+---
+# PRD — implement progress in notes
+
+## Status
+
+Proposed. The design is in [design.md](design.md). The operator has not ruled
+Q1 to Q11 yet. Implementation has not started.
+
+## Problem
+
+An `implement.md` file holds two kinds of text. The plan is the steps, their
+sizes, their checks and the pull-request split. Progress is a ticked box, a
+"what landed" paragraph, a timing, a log line. The plan needs review. Progress
+does not, and nothing reviews it in practice.
+
+Progress in a committed file costs a commit, and a commit in these
+repositories costs a pull request, a gate and a merge slot. So progress is
+either paid for or left out. Both happen.
+
+The measurement covers 2026-09-21 00:00 MDT to 2026-10-07 on `origin/main`:
+pack at `445c8fd9`, system at `8797a03`. It reads first-parent squash commits
+with `git log --first-parent --name-only`.
+
+| Measure | Pack | System |
+| --- | --- | --- |
+| Squash commits | 267 | 225 |
+| Docs-only (every path `*.md`, under `docs/`, or `.citations.tsv`) | 12 | 23 |
+| Of those, every path under `docs/work/` | 5 | 6 |
+| Touch a `docs/work/**/implement.md` | 7 | 20 |
+| Of those, with a code path as well | 5 | 15 |
+| Change only `implement.md` (and `.citations.tsv`) | 0 | 0 |
+| Touch a `.citations.tsv` | 0 | 1 |
+
+Before 2026-09-21, 207 of 1,255 pack squashes touched an `implement.md`
+(16%). Since then, 7 of 267 did (3%). In the pack, progress already moved to
+notes by habit. The rule, a reader and a renderer did not follow.
+
+The stated cost, a progress-only commit that pays a gate and a review, is
+small. One system squash is that case: `72de9862`, sd:1335 step 10, which
+records LAN timings. `9bdd1767` changes the plan (operator decisions), so it
+is not progress. Most `implement.md` edits ride along with code.
+
+The larger cost is staleness. sd:2704's
+[implement.md](../2026-10-05-satellite-gate-offload/implement.md) has nine
+steps and nine unticked boxes on 2026-10-07. Eight steps merged in five pull
+requests: pack #1374, #1377 and #1380, system #172 and #177. Step 1 is a
+measurement, recorded in note #9971. The item's notes hold that progress, in
+free text. The boxes did not move, though a code pull request could tick them
+at no extra cost.
+
+The stale boxes are noise in `sd-status`. Its `open-step` class reads every
+`- [ ]` on an item that is not done. On 2026-10-07 the pack's
+`sd-status --actions` lists 55 actionable rows. 43 are `open-step`; 15 of
+those come from `implement.md` files, and 8 name sd:2704 steps that merged.
+
+What the measurement cannot show:
+
+- Whether a ride-along `implement.md` edit caused a catch-up conflict. The
+  sd:2783 conflict count did not split the 29 conflicts without
+  `CHANGELOG.md` by path.
+- How much progress was never written down. A missing log line leaves no
+  trace.
+
+## Goal
+
+Step status and progress logs are `sd task` notes. A reader renders each
+step's status from the plan and the notes. A commit changes `implement.md`
+only when the plan changes. `prd.md` and `design.md` stay committed, because
+agreements need review.
+
+## Requirements
+
+R1. A note records one step's status in a fixed first line,
+    `step <id>: <status>`. The status is `started`, `done` or `dropped`.
+    `sd task note --step <id>:<status>` writes it.
+
+R2. The writer refuses a step id that the item's plan does not list, when
+    it finds the plan. It names the ids the plan lists.
+
+R3. `sd task steps <item>` prints one row per plan step: id, status, the
+    note's evidence, its date and the step's title. `--json` prints the same
+    rows. A note whose id the plan lacks prints as a row marked
+    `not in plan`.
+
+R4. The newest step note for an id decides its status. With no note, a
+    ticked `[x]` box reads `done`. With neither, the step is `open`.
+
+R5. `sd-status` lists an `implement.md` step as `open-step` only when R4
+    reads it `open` or `started`. Boxes in `prd.md` keep today's reading.
+
+R6. `sd-docs-lint` fails an `implement.md` whose step list repeats a step
+    id. It reads no database.
+
+R7. A repository whose `docs/work/.status-source` is not `row` behaves
+    exactly as today.
+
+R8. `.citations.tsv` stays committed, and rule 6 reads it as today.
+
+R9. The plan template and `WORKFLOW.md` say that progress goes to notes,
+    and that `implement.md` changes only when the plan changes.
+
+## Acceptance criteria
+
+1. A test writes `step 2: done` for a fixture item whose plan lists steps
+   1, 2 and 3. `sd task steps` reports 1 `open`, 2 `done` and 3 `open`.
+2. A test writes `step 9: done` for the same item. The writer refuses and
+   names 1, 2 and 3. No note is written.
+3. A test writes `step 2: done`, then `step 2: dropped`. The step reads
+   `dropped`. A ticked `[x]` box with no note reads `done`.
+4. An `sd-status` fixture with the same item lists `open-step` rows for
+   steps 1 and 3 only. Removing the note join lists all three.
+5. `sd-docs-lint` fails a fixture `implement.md` that lists step 2 twice,
+   and names the id. It passes every active item in this repository.
+6. A fixture repository with `.status-source` set to `file` lists the same
+   `open-step` rows as on `main`.
+7. After the backfill (implement.md, step 6), `sd task steps 2704` reports
+   eight `done` steps, and the pack's `sd-status` lists at most one
+   `open-step` row for sd:2704.
+
+## Out of scope
+
+- A docs-only gate tier for the pack or system. The tier exists (sd:2072);
+  declaring it is its own item (design point 0, Q1).
+- A step table on the dashboard. The Details pane already lists the notes
+  (Q9).
+- Acceptance-criteria boxes in `prd.md` (Q11).
+- A new note kind or a schema change (Q2).
