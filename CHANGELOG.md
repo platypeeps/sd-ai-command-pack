@@ -4,6 +4,24 @@
 
 ### Added
 
+- **`sd fleet stamp` lays a Claude Code settings baseline per repository class (sd:1661).**
+  The baseline is `permissions.deny` rules that stop Claude Code's file tools reading secret files: `.env` variants, `secrets/`, private keys, `.netrc`, `.pypirc`, `~/.ssh`, AWS credentials and the `gh` token file.
+  An owned or co-owned repository carries it in a tracked `.claude/settings.json`; a guest one gets the untracked `.claude/settings.local.json` in its plan.
+  Each rule is anchored at the project root or at home, so a session started in a subdirectory is covered too.
+  The stamp adds missing rules, removes none, leaves a complete file byte for byte, and refuses a file that does not read or decode.
+  `.github/sd-fleet.json` may exempt either path. Nothing restamps the fleet: run `sd fleet stamp --dry-run`, then the write per repository.
+
+- **Stamped workflows fail a run whose checkout is not the head it reports on (sd:1818).**
+  The route and check workflows check out `refs/pull/N/head`, which a re-run of an older run resolves to the newer head.
+  A step after checkout compares `git rev-parse HEAD` with `github.event.pull_request.head.sha` and fails on a mismatch.
+  The stamp moves a file still at the earlier template forward, and `sd-review setup-github --remove` takes one without `--force`.
+  A repository under `repo.ci = local` carries neither workflow and is unaffected.
+
+- **`sd.bulk_storage_root` names where large uncommitted data goes (sd:1792, parts 1, 2 and 4).**
+  WORKFLOW.md § Parallel work puts run outputs, logs and captures under `<root>/<repository>/`, and keeps build output and permission-dependent data on the system disk.
+  The slice-builder brief builds with `CARGO_INCREMENTAL=0` and only the crates under test, and stops before a gate below 20 GiB free.
+  Unset, nothing moves.
+
 - **The shipped `kimi` entry sends the findings schema strict (sd:1827).**
   `providers.yaml` sets `response_format: json_schema` on `kimi` and on no other entry.
   MiniMax-M3 ignores the field, and Baseten's DeepSeek is untested.

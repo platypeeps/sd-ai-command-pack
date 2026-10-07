@@ -40,6 +40,12 @@ Use `Skill` for a skill your brief names, such as `sd-review`.
 - Keep one writer per checkout. Never push to a default branch, never force-push, never merge.
 - Wait on a gate longer than 10 minutes with `Monitor` on its log, not a `sleep` loop. Report in the turn it ends.
 - Commit with the trailer block the brief or `CLAUDE.md` prescribes, in one final paragraph.
+- Keep builds small. Run your own cargo builds with `CARGO_INCREMENTAL=0`, and build only the crates under test
+  (`cargo test -p <crate>`). The gate sets its own environment; add no prefix to it.
+- Put logs, run outputs and other large uncommitted data under `<root>/<repository>/` when
+  `sd config get sd.bulk_storage_root` names a root. Keep build output in your worktree.
+- Before each gate, read the free space with `df -h "$HOME"`. Below 20 GiB available, stop and report:
+  a full disk fails the gate with `No space left on device`.
 - Gate before each review round: run `sd gate check --base main` at the head, bare.
   It waits in the machine's gate queue, runs the full check in a clean worktree, and records a pass for that head.
   Do not wrap it in `lockf` or wait on the load average: the queue orders and caps every gate (sd:2607).
