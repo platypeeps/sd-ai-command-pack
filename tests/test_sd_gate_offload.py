@@ -238,6 +238,10 @@ echo "$HOME/.rustup/toolchains/$channel/bin/$2"
 """
 
 
+#: What Homebrew's rustup wrapper sets before it execs the proxy.
+HOMEBREW_WRAPPER = "RUSTUP_OVERRIDE_UNIX_FALLBACK_SETTINGS=/opt/homebrew/etc/rustup/settings.toml "
+
+
 def part(mode: str = "full", tools: list[str] | None = None) -> dict:
     """A tree part as `tree_binding` writes it, for a `make check` repository in `mode`'s scope, declaring `tools`."""
     return {"schema": 2, "reuse": "head", "head": "a" * 40, "fork": None, "tree": "t" * 40, "inputs": "i" * 12,
@@ -247,9 +251,9 @@ def part(mode: str = "full", tools: list[str] | None = None) -> dict:
 
 
 class RustupResolution(ViewFixture):
-    """sd:2881: the satellite's `cargo` is a Homebrew rustup wrapper, the hub's another proxy or Homebrew's own `cargo`.
+    """sd:2881: the satellite's `cargo` is a Homebrew rustup wrapper, and the hub's the same or Homebrew's own `cargo`.
 
-    A proxy's bytes name no toolchain; the tree's `rust-toolchain.toml` does, through `rustup which`.
+    A proxy's bytes name no toolchain; the tree's `rust-toolchain.toml` does, through `rustup which`. Both bind.
     """
 
     def setUp(self) -> None:
@@ -262,8 +266,8 @@ class RustupResolution(ViewFixture):
             for name in ("cargo", "rustc"):
                 self.script(self.home(login) / ".rustup" / "toolchains" / "1.98.1" / "bin" / name,
                             f'echo "{name} 1.98.1 (797e8a9bc 2026-08-05)"\n')
-        self.proxy("sat", "RUSTUP_OVERRIDE_UNIX_FALLBACK_SETTINGS=/opt/homebrew/etc/rustup/settings.toml ")
-        self.proxy("hub", "")
+        for login in ("sat", "hub"):
+            self.proxy(login, HOMEBREW_WRAPPER)
 
     @staticmethod
     def script(path: pathlib.Path, body: str) -> None:
@@ -272,7 +276,7 @@ class RustupResolution(ViewFixture):
         path.chmod(0o755)
 
     def proxy(self, login: str, prefix: str) -> None:
-        """`cargo` and `rustc` that run the toolchain `rustup which` names, each login's wrapper with its own bytes."""
+        """`cargo` and `rustc` that run the toolchain `rustup which` names, through a wrapper that sets `prefix`."""
         for name in ("cargo", "rustc"):
             self.script(self.home(login) / "bin" / name, f'{prefix}exec "$(rustup which {name})" "$@"\n')
 
@@ -280,11 +284,20 @@ class RustupResolution(ViewFixture):
         row = {"binding": {**part(mode, tools), "environment_mode": "offload"}, "offload_view": theirs}
         return sd_gate_receipts.binding_mismatch(row, part(mode, tools), ours, "offload")
 
-    def test_two_proxies_hash_the_toolchain_the_tree_pins(self) -> None:
+    def test_one_proxy_on_both_binds_the_toolchain_the_tree_pins(self) -> None:
         theirs, ours = self.view("sat", tree=self.tree), self.view("hub", tree=self.tree)
         self.assertEqual(theirs["resolution"], {"cargo": "rustup", "rustc": "rustup"})
-        self.assertEqual(theirs["tools"]["cargo"], ours["tools"]["cargo"])
         self.assertIsNone(self.mismatch(theirs, ours))
+        self.script(self.home("hub") / ".rustup" / "toolchains" / "1.98.1" / "bin" / "cargo", 'echo "cargo 1.98.1 (local)"\n')
+        self.assertIn("tools at cargo (satellite via rustup, hub via rustup)",
+                      self.mismatch(theirs, self.view("hub", tree=self.tree))["reason"])
+
+    def test_another_wrapper_refuses_though_it_runs_the_same_toolchain(self) -> None:
+        """Review round 2: a wrapper's bytes decide what it adds to a check's own arguments, which no probe sees."""
+        self.proxy("hub", "")
+        theirs, ours = self.view("sat", tree=self.tree), self.view("hub", tree=self.tree)
+        self.assertEqual(ours["resolution"]["cargo"], "rustup")
+        self.assertIn("tools at cargo (satellite via rustup, hub via rustup)", self.mismatch(theirs, ours)["reason"])
 
     def test_a_gates_worktree_resolves_in_its_own_tree(self) -> None:
         """Both sides take the view through `Worktree.view`: the satellite when it writes the row, the hub when it compares."""
