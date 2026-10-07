@@ -2673,6 +2673,21 @@ class ServeTests(InstallerHarness):
             self.assertEqual(self.serve()[0], 0)
         self.assertEqual((self.tree / ".venv").readlink(), chosen)
 
+    def test_a_refused_pull_leaves_the_venv_link_as_it_was(self):
+        """Review round 4: a dirty serving tree refuses `--pull`, and the tree keeps the environment it had."""
+        self.assertEqual(self.serve()[0], 0)
+        (self.tree / "draft.md").write_text("planning\n", encoding="utf-8")
+        chosen = self.home / "chosen-env"
+        with unittest.mock.patch.object(sd_install.sys, "prefix", str(chosen)):
+            rc, _ = self.serve(self.context(SERVE_EXIT="1"))
+        self.assertEqual(rc, 1)
+        self.assertEqual((self.tree / ".venv").readlink(), self.work / ".venv")
+
+    def test_a_failed_first_pull_leaves_no_venv_link(self):
+        rc, _ = self.serve(self.context(SERVE_EXIT="1"))
+        self.assertEqual(rc, 1)
+        self.assertFalse((self.tree / ".venv").is_symlink())
+
     def test_serve_refuses_to_run_from_the_serving_clone_or_without_origin(self):
         self.assertEqual(self.serve()[0], 0)
         rc, output = self.serve(self.context(self.tree))

@@ -70,6 +70,7 @@ Its last line runs `bin/sd_install.py --serve` from the working checkout:
   just provisioned with `sd_db`: the one running `--serve`, else the main
   checkout's `.venv` (review round 3). The clone's `info/exclude` names it,
   so `--verify` stays clean. A real `.venv` directory there is left alone.
+  A `--pull` that refuses or fails puts the old link back (review round 4).
 - **Hand-over.** `--serve` runs the tree's own installer as `--pull`, so the
   activation is the tree's code, as in the first pass.
 - **Links.** `link_plan` gains a fourth state, `recorded`: a link the
