@@ -61,6 +61,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 _BIN = str(pathlib.Path(__file__).resolve().parent)
 if _BIN not in sys.path:
@@ -1060,6 +1061,9 @@ CLAIM_CHARS = 400
 EVIDENCE_CHARS = 700
 EVIDENCE_WINDOW = 3
 CLAIM_BATCH = 12
+# The whole pass's wait, not each batch's: seven batches at 120s each made a
+# run with an unreachable reader look hung (sd:2873).
+CLAIM_BUDGET_SECONDS = 120
 SUPPORT_FLOOR = 0.5
 CLAIM_INSTRUCTIONS = (
     "The passage in `citations.{key}.evidence` is cited as the source for the "
@@ -1342,7 +1346,7 @@ def collect_claims(work_root: pathlib.Path) -> tuple[dict[str, dict[str, str]], 
 
 
 def ask_claims(
-    command: str, cases: dict[str, dict[str, str]], scope: list[str]
+    command: str, cases: dict[str, dict[str, str]], scope: list[str], timeout: float = CLAIM_BUDGET_SECONDS
 ) -> tuple[dict[str, dict], str]:
     """One request for a whole batch, and an empty answer set and why when it failed.
 
@@ -1366,7 +1370,7 @@ def ask_claims(
                 [command, "ask", "--questions", "-", "--state", str(state),
                  "--state-format", "json", "--fallback", "{}",
                  "--caller", JEV_CALLER, "--stage", JEV_STAGE, *scope],
-                input=json.dumps(questions), capture_output=True, text=True, timeout=120,
+                input=json.dumps(questions), capture_output=True, text=True, timeout=timeout,
             )
         except (OSError, subprocess.SubprocessError) as error:
             return {}, f"jev ask did not run: {error}"
@@ -1422,9 +1426,20 @@ def check_claim_support(repo: pathlib.Path, work_root: pathlib.Path, report: Rep
     weak = 0
     answered = 0
     unanswered = ""
-    for start in range(0, len(keys), CLAIM_BATCH):
+    batches = range(0, len(keys), CLAIM_BATCH)
+    # Said as it starts, on stderr: the pass waits on a reader and printed nothing until the end (sd:2873).
+    print(f"sd-docs-lint: rule 6 claim support: asking jev about {len(keys)} citation(s) "
+          f"in {len(batches)} batch(es), at most {CLAIM_BUDGET_SECONDS}s", file=sys.stderr, flush=True)
+    deadline = time.monotonic() + CLAIM_BUDGET_SECONDS
+    for asked, start in enumerate(batches):
+        left = deadline - time.monotonic()
+        if left <= 0:
+            unanswered = unanswered or f"the {CLAIM_BUDGET_SECONDS}s budget ran out"
+            report.note(f"rule 6 claim support: stopped after {asked} of {len(batches)} batch(es); "
+                        f"the {CLAIM_BUDGET_SECONDS}s budget ran out")
+            break
         batch = keys[start:start + CLAIM_BATCH]
-        answers, why = ask_claims(command, {key: cases[key] for key in batch}, scope)
+        answers, why = ask_claims(command, {key: cases[key] for key in batch}, scope, left)
         unanswered = unanswered or why
         for key in batch:
             support = answers.get(key, {}).get("noul")
@@ -1711,7 +1726,8 @@ def run(
         check_pr_scope(repo, pr_body, changed, report)
         return report
 
-    check_work_items(repo, work_dir, report, history)
+    with sd_lib.git_read_memo():  # one fetch per remote and ref, not one per item (sd:2873)
+        check_work_items(repo, work_dir, report, history)
     check_decisions(repo / decisions_dir, report)
     check_spec_index(repo / spec_dir, report)
     check_pr_link(repo, work_root, pr_body, report)

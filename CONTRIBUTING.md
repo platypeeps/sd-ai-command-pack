@@ -189,6 +189,7 @@ would put a line in every pull request here forever. A `jev` older than
 `--local-only` refuses the flag, and the run notes `jev enabled exited 2`.
 When `jev` is there but the local Kev is down, the run prints
 `rule 6 claim support: no answer (<reason>)` on stderr and still passes.
+The pass waits at most 120 seconds in all, and says so on stderr as it starts.
 The pass prints notes only. It never fails a run and never changes an exit
 code.
 

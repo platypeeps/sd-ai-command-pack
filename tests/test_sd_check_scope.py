@@ -82,6 +82,20 @@ class DocsScope(CheckFixture):
         self.assertIn("src/app.py is not a docs path", result["scope"]["reason"])
         self.assertNotIn("docs", {row["name"] for row in result["checks"]})
 
+    def test_the_human_report_says_why_the_check_is_full(self) -> None:
+        """sd:2863: a run that fell back to the full check said nothing of why."""
+        root = self.repo()
+        self.change(root, "src/app.py", "x = 2\n")
+        self.assertIn("scope: full (src/app.py is not a docs path)", self.run_check(root, "--base", "main").stdout)
+
+    def test_a_base_that_names_no_commit_is_refused_naming_it(self) -> None:
+        """sd:2863: `sd gate check` passes `refs/remotes/origin/X`; unfetched, it ran the full check silently."""
+        root = self.repo()
+        self.change(root, "docs/guide.md")
+        completed = self.run_check(root, "--base", "refs/remotes/origin/main")
+        self.assertEqual(completed.returncode, 2, completed.stdout)
+        self.assertIn("--base refs/remotes/origin/main names no commit", completed.stderr)
+
     def test_a_change_to_what_decides_the_check_forces_the_full_check(self) -> None:
         """Even where every changed path matches `docs_paths`, these files decide what the check is."""
         for index, path in enumerate((".github/sd-check-scope.json", "Makefile", "sub/rules.mk", "scripts/docs.sh")):

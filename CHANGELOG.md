@@ -463,6 +463,17 @@
 
 ### Fixed
 
+- **A missing `--base` ref no longer runs the full check silently (sd:2863).**
+  `sd gate check --base X` compares at `refs/remotes/origin/X`; unfetched, it found no merge base and ran everything.
+  In a repository that declares `.github/sd-check-scope.json`, `sd-check --base REF` now exits 2 naming a `REF` that
+  names no commit. `sd gate check` prints the reason on stderr whenever the scope is full, and `sd-check`'s human
+  report names the scope and its reason whenever `--base` was given.
+
+- **`sd-docs-lint` bounds its claim-support pass and says it is waiting (sd:2873).**
+  Rule 6's claim support asked `jev` in batches of 12, each bounded at 120 seconds, and printed nothing until the end.
+  The whole pass now shares one 120-second budget, prints one stderr line as it starts, and notes where it stopped.
+  Rule 2's delivery check fetches each remote ref once per run, not once per item.
+
 - **A hub accepts a satellite's pass across two real machines (sd:2862).**
   The offload view refused on any difference, and two machines always differ: the hub's launchd job and the
   satellite's shell order `PATH` apart, `git` and `uv` differ by build, `HOME` files by login, thread caps by core

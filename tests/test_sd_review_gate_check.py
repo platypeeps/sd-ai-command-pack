@@ -241,6 +241,13 @@ class BuilderReceipt(BuilderFixture):
         self.assertEqual((gate["status"], gate["source"]), ("pass", "gate-receipt"), json.dumps(gate)[:2000])
         self.assertEqual(self.runs(), 1)
 
+    def test_a_builders_full_check_says_why(self) -> None:
+        """sd:2863: a scope that fell back to the full check said nothing of why."""
+        root, database = self.repo()
+        done = self.builder(root, database)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("sd gate check: full check: no .github/sd-check-scope.json", done.stderr)
+
     def test_a_builders_gate_queues_for_a_slot_on_its_own_bound(self) -> None:
         """sd:2607: `sd gate check` waits in the machine pool for hours, and its check still gets the whole bound."""
         root, database = self.repo()

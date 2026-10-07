@@ -15,6 +15,8 @@ detected from, `CLAUDE.local.md`, and any repository file a check command
 names in its argv. No declaration, no `--base`, an empty diff or a declaration
 that does not parse all run the full check: the scope only ever narrows what
 runs when every condition for narrowing holds.
+A declared repository's `--base` that names no commit is a usage error, not a
+full check (sd:2863).
 
 Globs are `glob.translate` globs: `*` stays inside one path segment, `**`
 spans segments, and a leading dot is matched like any other character.
@@ -34,12 +36,17 @@ DECLARATION = ".github/sd-check-scope.json"
 FIELDS = {"schema_version", "docs_paths", "docs_command"}
 FULL = "full"
 DOCS_ONLY = "docs-only"
+NO_BASE = "no --base given"
 #: Build files that decide what a check runs, wherever they sit.
 BUILD_FILES = re.compile(r"(?:^|/)(?:[Mm]akefile|GNUmakefile|[^/]*\.mk)$")
 
 
 class DeclarationError(ValueError):
     """The declaration exists and does not say what it must."""
+
+
+class MissingBase(ValueError):
+    """`--base` names no commit, so no merge base can say what changed (sd:2863)."""
 
 
 @dataclass(frozen=True)
@@ -107,12 +114,15 @@ def forcing(path: str, detection: sd_lib.Detection, root: pathlib.Path, named: s
 
 
 def decide(root: pathlib.Path, base: str | None, detection: sd_lib.Detection) -> Scope:
-    """The scope for HEAD against `base`; raises `DeclarationError` for a declaration that does not parse."""
+    """The scope for HEAD against `base`; raises `DeclarationError` for a declaration that does not parse,
+    `MissingBase` for a declared repository's `base` that names no commit: unfetched, it read as a full check, silently."""
     if base is None:
-        return Scope(FULL, "no --base given")
+        return Scope(FULL, NO_BASE)
     value = declaration(root)
     if value is None:
         return Scope(FULL, f"no {DECLARATION}")
+    if not sd_lib.git_output(["rev-parse", "--verify", "--quiet", f"{base}^{{commit}}"], root):
+        raise MissingBase(f"--base {base} names no commit here; fetch it, or name a base that exists")
     fork = sd_lib.git_output(["merge-base", base, "HEAD"], root)
     if not fork:
         return Scope(FULL, f"no merge base with {base}")
