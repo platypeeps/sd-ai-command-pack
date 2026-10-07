@@ -27,8 +27,12 @@ Proposed, 2026-10-07. The operator has not ruled Q1 to Q11. Each question
 below carries a recommendation.
 
 Planning review round 1 (codex) found that a renumbered plan moves a `done`
-note onto other work. Points 1, 3, 4 and 7 now bind each note to its step's
-title and keep step ids stable.
+note onto other work. Round 2 found that a title match misses a scope change
+under an unchanged title. Both are one class: a note survives a plan change
+that should reopen its step. Points 1, 3, 4 and 7 now bind each note to a
+digest of the whole step, and the table in point 3 covers every plan change
+point 7 names. Round 2 also found the template's "never tick" line wrong for
+`file` repositories; point 7 now limits it to `row` repositories.
 
 ## Decisions
 
@@ -95,7 +99,7 @@ system, once its doc-reading tests have a target of their own.
 
 ```text
 step 3: done · #1377 · 5dff9e55
-title: Pack: the offload view.
+plan: 3f9a1c07d2e4 · Pack: the offload view.
 Steps 3-5 merged in one squash; review codex, round 6 advisory.
 ```
 
@@ -104,8 +108,15 @@ Steps 3-5 merged in one squash; review codex, round 6 advisory.
 - The first line may end with ` · <evidence>`: free text such as
   `#1377 · 5dff9e55` or `system #172`. `dropped` should carry a reason on
   the next line.
-- The second line is `title: <title>`: the step's title in the plan when
-  the note was written. The writer copies it; point 3 uses it.
+- The second line is `plan: <digest> · <title>`. The digest is the first
+  12 hex digits of the SHA-256 of the step's block when the note was
+  written; the title is for a human reader. The writer computes both; point 3
+  uses the digest.
+- A step's block is its step line and every line after it, up to the next
+  step line or the end of the section. Before hashing, the box mark is
+  removed (`- [ ] ` and `- [x] ` read the same), runs of whitespace become
+  one space, and blank lines are dropped. A tick or a re-wrap therefore keeps
+  the digest; a changed word does not.
 - Lines after the second are free text: the log, timings, a path under
   `/Volumes/local/repo-storage/<repo>/`.
 - One note per step. The lane's "Steps 3-5 merged" becomes three notes.
@@ -124,9 +135,9 @@ Reasons:
   `sd task show` and Details. The step status would then live in one store
   and the log in another.
 
-A hand-written comment that starts `step 3: done` but has no `title:` line
+A hand-written comment that starts `step 3: done` but has no `plan:` line
 is unbound. `sd task steps` lists it, marked `unbound`, and it sets no
-status. Only a note bound to a title closes a step.
+status. Only a note bound to the step's current block closes a step.
 
 **Q2.** Store step status as a `comment` note with a fixed first line? The
 alternatives are a new note kind (schema bump) or a `state` row (invisible in
@@ -137,8 +148,8 @@ yes. `blocked` is a `question` or `followup` note, which exist today.
 
 ### 2. What a step is: the plan parser
 
-`plan_steps(text)` in `bin/sd_steps.py` returns `(id, title, ticked)` per
-step. A step id is a number with an optional lower-case letter: `1`, `2a`,
+`plan_steps(text)` in `bin/sd_steps.py` returns `(id, title, ticked,
+digest)` per step, the digest as point 1 defines it. A step id is a number with an optional lower-case letter: `1`, `2a`,
 `12`.
 
 It reads the first `## Steps`, `## Step checklist` or `## Order` section.
@@ -153,7 +164,7 @@ each marked `not in plan`.
 ### 3. Writer and reader
 
 **Writer:** `sd task note <item> --step <id>:<status> [--evidence TEXT]
-[--body TEXT]`. It composes the first line and the `title:` line from the
+[--body TEXT]`. It composes the first line and the `plan:` line from the
 plan, appends `--body`, and writes a `comment` note through the existing
 note path. With `--step`, `--kind` must be absent or `comment`.
 
@@ -161,7 +172,7 @@ It finds the plan through the item's work directory: the `prd.md` whose
 frontmatter says `item: sd:<n>`, or the item's `path`, under the checkout
 `item.repo` names. It reads that checkout's working tree. A plan that lists
 no such id refuses, and names the ids it lists (R2). No plan found refuses
-too, and names the path it read: without the plan, the writer has no title
+too, and names the path it read: without the plan, the writer has no block
 to bind. A machine that lacks the checkout writes a plain comment instead.
 
 **Reader:** `sd task steps <item> [--json]`. One row per plan step, then one
@@ -178,21 +189,46 @@ id  status   evidence          date        title
 
 `step_status(steps, notes)` decides each row (R4):
 
-1. A note counts for a step only when its id matches and its `title:` line
-   equals the plan's title for that id, whitespace collapsed.
+1. A note counts for a step only when its id matches and the digest in its
+   `plan:` line equals the digest of that id's block in the plan now.
 2. The newest counted note wins, by timestamp, then note id.
 3. With no counted note, a ticked `[x]` box reads `done`. This keeps
    existing plans correct with no backfill commit.
 4. Otherwise the step is `open`.
 
-A note whose id matches but whose title does not is stale. The plan moved
-under it: a step was renumbered, reworded, split or merged. The row reads
-by rules 3 and 4, and is marked `changed` with the note's title. Nothing is
-closed by a note written for other work. To reconcile, the lane writes a new
-note for the id, which binds the current title. Its answer is the
-operator's or the lane's, never the reader's.
+A note whose id matches but whose digest does not is stale. The plan moved
+under it. The row reads by rules 3 and 4, and is marked `changed` with the
+note's title. Nothing is closed by a note written for other work or for a
+smaller scope. To reconcile, the lane writes a new note for the id, which
+binds the current block. Whether the old work still covers the new block is
+the operator's or the lane's call, never the reader's.
 
-The title binding is the backstop for point 7, which keeps ids stable. A
+The binding errs toward reopening. A change that does not alter the work,
+such as a corrected size, reopens the step too, and costs one note. A
+missed reopening would hide unfinished work, which is the fault this item
+exists to remove.
+
+Every plan change that point 7 names, and what the reader does with a
+`done` note written before it:
+
+| Plan change after a `done` note | Block digest | Reader | Recovery | Test |
+| --- | --- | --- | --- | --- |
+| Step reordered, block unchanged | same | still `done` | none needed | criterion 10 |
+| Step renumbered: id 2 now names other work | differs at id 2 | id 2 `changed`, open | new note on the new id | criterion 8 |
+| New step added under a fresh id | no note | `open` | none needed | criterion 1 |
+| Step removed | id gone | note row `not in plan` | none needed | criterion 2's fixture |
+| Step split or merged; old id retired | id gone | note row `not in plan`; new ids `open` | new notes | criterion 8's fixture |
+| Scope, check, size or PR split edited; title kept | differs | `changed`, open | new note after review | criterion 9 |
+| Title reworded only | differs | `changed`, open | one new note | criterion 9's fixture |
+| Box ticked or text re-wrapped | same | unchanged | none needed | criterion 10 |
+| Ruling recorded outside the step block | same | unchanged | the ruling's author edits the step block | none: point 7 rule |
+
+The last row is the limit of the binding. A plan-wide sentence above the
+steps, such as "every step also updates the changelog", changes no block.
+Point 7 therefore requires a change that alters a step to be written in
+that step's block.
+
+The digest binding is also the backstop for point 7's stable ids. A
 renumbered plan breaks that rule, and the lint cannot see it: the lint
 reads one version of the file and no history.
 
@@ -207,7 +243,7 @@ Revisit after the measurement in implement.md step 7.
 Today it lists every `- [ ]` in every `.md` of an item that is not done. One
 change, for `implement.md` in a `row` repository: a `- [ ] <id>.` box that
 `step_status` reads `done` or `dropped` is not listed. A stale note counts
-for nothing, so a box whose title changed is listed again. Every other box is
+for nothing, so a box whose block changed is listed again. Every other box is
 listed as today, with today's key.
 
 So a step note only removes rows. A plan written as plain `<id>.` lines
@@ -281,17 +317,25 @@ A step id is an identity, not a position. Reordering keeps each step's
 id. A new step takes an id the plan has never used, such as `2a` or the next
 number. A removed, split or merged step's id is retired, not reused. A step
 that is split keeps neither half on the old id. Point 3 catches a plan that
-breaks this rule: the old note no longer matches the title, so it closes
+breaks this rule: the old note no longer matches the block, so it closes
 nothing.
+
+A change that alters a step goes into that step's block: its scope, its
+check, its size or its pull request. A sentence elsewhere in the file
+changes no digest, so it reopens nothing (point 3, the table's last row).
 
 These go to notes and are never a reason for a commit: a step's status,
 "what landed", merge shas, timings, measurements, review rounds and their
 dispositions, hand-offs. A measurement that a later decision rests on is
 quoted into `design.md` with that decision, which is then a plan change.
 
-The plan template keeps `- [ ] <id>.` as the step marker and adds one line:
-record progress with `sd task note <item> --step <id>:<status>`, never by a
-tick. A plan that ticks a box still reads correctly (point 3).
+The plan template keeps `- [ ] <id>.` as the step marker. It has no
+`.status-source` branch today. It gains a template-instruction comment that
+reads `.status-source`, as the `prd.md` template's status comment does.
+With `row`: record progress with `sd task note <item> --step <id>:<status>`,
+never by a tick. With `file`: tick the box, as today: a `file` repository has
+no note join, so an unticked box there stays an `open-step` row (R7). A plan
+that ticks a box in a `row` repository still reads correctly (point 3).
 
 The same split applies to the `## Status` section of `prd.md` and
 `design.md`. A ruling stays in it. "Implementation has not started" and
@@ -335,8 +379,8 @@ correct. Revisit if a criterion with a merged check stays listed.
 | --- | --- | --- |
 | Step id not in the plan | the writer refuses and lists the plan's ids | the writer |
 | No plan found for the item | the writer refuses and names the path it read | the writer |
-| Plan renumbered or step reworded after a note | the note is stale; the step reads by its box and is marked `changed` | the reader, in `sd task steps` |
-| A hand-written `step <id>:` comment with no `title:` line | listed as `unbound`; it sets no status | the reader |
+| Plan changed in a step's block after a note | the note is stale; the step reads by its box and is marked `changed` | the reader, in `sd task steps` and `sd-status` |
+| A hand-written `step <id>:` comment with no `plan:` line | listed as `unbound`; it sets no status | the reader |
 | Plan in an unparsed shape | `sd task steps` says "no step list"; notes render as `not in plan` | the reader |
 | Plan repeats a step id | `sd-docs-lint` rule 1 fails, names the id | the author, at the gate |
 | A wrong `done` note | the step reads `done`; a newer note corrects it | whoever reads the note |

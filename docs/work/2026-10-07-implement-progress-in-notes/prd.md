@@ -75,8 +75,8 @@ agreements need review.
 ## Requirements
 
 R1. A note records one step's status in a fixed first line,
-    `step <id>: <status>`, and the step's plan title in a second line,
-    `title: <title>`. The status is `started`, `done` or `dropped`.
+    `step <id>: <status>`, and a second line, `plan: <digest> · <title>`.
+    The digest covers the step's whole block in the plan (design point 1). The status is `started`, `done` or `dropped`.
     `sd task note --step <id>:<status>` writes both lines.
 
 R2. The writer refuses a step id that the item's plan does not list, and
@@ -87,11 +87,11 @@ R3. `sd task steps <item>` prints one row per plan step: id, status, the
     rows. A note whose id the plan lacks prints as a row marked
     `not in plan`.
 
-R4. A note counts for a step only when its id and its title both match
-    the plan. The newest counted note decides the status. With no counted
-    note, a ticked `[x]` box reads `done`. With neither, the step is `open`.
-    A note whose title no longer matches is shown as `changed` and closes
-    nothing.
+R4. A note counts for a step only when its id and its block digest both
+    match the plan now. The newest counted note decides the status. With no
+    counted note, a ticked `[x]` box reads `done`. With neither, the step is
+    `open`. A note whose digest no longer matches is shown as `changed` and
+    closes nothing.
 
 R5. `sd-status` does not list an `implement.md` `- [ ] <id>.` box as
     `open-step` when R4 reads the step `done` or `dropped`. Every other box
@@ -105,9 +105,10 @@ R7. A repository whose `docs/work/.status-source` is not `row` behaves
 
 R8. `.citations.tsv` stays committed, and rule 6 reads it as today.
 
-R9. The plan template keeps `- [ ] <id>.` as the step marker. It and
-    `WORKFLOW.md` say that progress goes to notes, never to a tick, and
-    that `implement.md` changes only when the plan changes.
+R9. The plan template keeps `- [ ] <id>.` as the step marker. In a `row`
+    repository, it and `WORKFLOW.md` say that progress goes to notes, never
+    to a tick, and that `implement.md` changes only when the plan changes.
+    In a `file` repository, both keep today's instruction to tick the box.
 
 ## Acceptance criteria
 
@@ -129,7 +130,14 @@ R9. The plan template keeps `- [ ] <id>.` as the step marker. It and
 8. A test records `step 2: done`, then rewrites the plan so that id 2
    names a different, unticked step. `sd task steps` reports step 2 `open`
    and marked `changed`. `sd-status` lists its `open-step` row again.
-   Dropping the title comparison reads step 2 `done` and fails the test.
+   Dropping the digest comparison reads step 2 `done` and fails the test.
+9. A test records `step 2: done`, then adds a nested requirement under step
+   2 and keeps its step line unchanged. Step 2 reads `open`, marked
+   `changed`. Hashing only the step line reads it `done` and fails the
+   test. Rewording only the title also reads `changed`.
+10. A test records `step 2: done`, then moves step 2 above step 1, ticks its
+   box and re-wraps its text. Step 2 still reads `done`. Hashing the box
+   mark or the raw whitespace fails the test.
 
 ## Out of scope
 

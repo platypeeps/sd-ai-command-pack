@@ -14,23 +14,26 @@ fail on `main` before the step's code lands.
 ## Step checklist
 
 - [ ] 1. `bin/sd_steps.py`: plan parser, note line, join. Size S, 2 h. PR A.
-      - `plan_steps(text)` returns `(id, title, ticked)` per step, from the
+      - `plan_steps(text)` returns `(id, title, ticked, digest)` per step, from the
         first `## Steps`, `## Step checklist` or `## Order` section (design
-        point 2). Fenced code is skipped.
-      - `step_line(id, status, title, evidence=None)` writes the first line
-        and the `title:` line; `read_step_line(body)` reads both, or returns
+        point 2). Fenced code is skipped. The digest hashes the step's block
+        as design point 1 defines it.
+      - `step_line(id, status, step, evidence=None)` writes the first line
+        and the `plan:` line; `read_step_line(body)` reads both, or returns
         None.
       - `step_status(steps, notes)` applies design point 3: a note counts
-        only when id and title match; newest counted note, then `[x]`, then
-        `open`. A note whose title differs marks the row `changed`. Notes
+        only when id and digest match; newest counted note, then `[x]`, then
+        `open`. A note whose digest differs marks the row `changed`. Notes
         for ids the plan lacks come back marked `not in plan`; a note with
-        no `title:` line comes back `unbound`.
+        no `plan:` line comes back `unbound`.
       - Check: `tests/test_sd_steps.py` covers each section heading, `2a`
         ids, a fenced example that is skipped, a `[x]` box with no note, a
         note that overrides `[x]`, two notes for one id, an unbound note, and a
-        plan rewritten after a `done` note so id 2 names other work (PRD
-        criterion 8). Swapping "newest" for "first" fails the two-note case.
-        Dropping the title comparison fails criterion 8.
+        plan changed after a `done` note: each row of design point 3's table
+        (PRD criteria 8, 9 and 10). Swapping "newest" for "first" fails the
+        two-note case. Dropping the digest comparison fails criterion 8;
+        hashing only the step line fails criterion 9; hashing the box mark
+        fails criterion 10.
 - [ ] 2. `sd task note --step` and `sd task steps`. Size M, 3 h. PR A.
       - In `bin/sd_work.py`, beside the existing `note` parser:
         `--step <id>:<status>` and `--evidence`; `--kind` absent or
@@ -58,18 +61,23 @@ fail on `main` before the step's code lands.
         request renumbers the second list in sd:2107's plan. System's
         `sd-docs-lint` then passes with the new pack.
 - [ ] 5. Template and documentation. Size S, 2 h. PR C.
-      - `skills/sd-plan/templates/implement.md`: keep `- [ ] <id>.` steps;
-        add one line: record progress with
-        `sd task note <item> --step <id>:<status>`, never by a tick.
+      - `skills/sd-plan/templates/implement.md`: keep `- [ ] <id>.` steps.
+        Add a template-instruction comment that reads `.status-source`, as
+        the `prd.md` template's status comment does. With `row`: record
+        progress with `sd task note <item> --step <id>:<status>`, never by a
+        tick, and write a change to a step inside its block. With `file`:
+        tick the box (R7, R9).
       - `skills/sd-plan/templates/prd.md`: the `## Log` section only where
         `.status-source` is not `row` (Q7), as its status instruction does.
       - `WORKFLOW.md`: the sd:1933 paragraph records an observed criterion
         as a note in a `row` repository (Q7). One paragraph says what a plan
-        change is (design point 7).
+        change is (design point 7), for `row` repositories only.
       - `skills/sd-plan/SKILL.md` and `docs/work/README.md`: one line each.
       - Check: `make check` passes. `grep -n "## Log"
         skills/sd-plan/templates/prd.md` shows the section only inside the
-        `file` branch of the template.
+        `file` branch of the template. `grep -n "never by a tick"` shows the
+        text only inside the `row` clause of the implement template's
+        comment.
 - [ ] 6. Backfill merged steps. Size S, 0.5 h. No pull request.
       - The lane writes eight `step <id>: done` notes on sd:2704 from the
         item's notes and merge shas (design point 8). It runs
