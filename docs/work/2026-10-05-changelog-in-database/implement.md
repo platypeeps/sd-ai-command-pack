@@ -30,7 +30,7 @@ fail on `main` before the step's code lands.
         code, `none`, a slug with `_` that a `LIKE` would over-match, and a
         second `write` that adds no revision. Mutating the range bound to a
         `LIKE` fails the slug test.
-- [ ] 2. `sd changelog render|show|import` in `bin/sd`. Size M, 4 h. Own PR.
+- [x] 2. `sd changelog render|show|import` in `bin/sd`. Size M, 4 h. Own PR.
       - Selection, order, region markers and `--release` as design point 3
         states. `--check` exits 1 on a difference.
       - Cross-check against squash messages since the newest `v*` tag (Q6:

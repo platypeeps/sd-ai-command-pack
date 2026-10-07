@@ -30,7 +30,7 @@ class LibraryDowngradeGuard(unittest.TestCase):
             calls.append((args, cwd))
             return candidate
 
-        refusal = guard.downgrade_refusal(self.root, self.root / "system", "abc123", read_git)
+        refusal = guard.downgrade_refusal(self.root / ".venv", self.root / "system", "abc123", read_git)
         for args, cwd in calls:
             self.assertEqual(args, ["show", "abc123:local-sd-db/sd_db/schema.py"])
             self.assertEqual(cwd, self.root / "system")

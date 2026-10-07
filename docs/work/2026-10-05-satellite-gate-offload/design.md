@@ -236,6 +236,11 @@ docs-only scope then refuses on those tools and the command's own name only.
 `OFFLOAD_TOOLS` is one pack constant: `sh`, `bash`, `make`, `python3`,
 `git`, `cc`, `c++`, `clang`, `cargo`, `cargo-nextest`, `rustc`, `node`, `npm`, `uv`.
 `cargo-nextest` is what `cargo nextest` runs, which the check names as `cargo` (sd:2921).
+Two builds of one release differ, and Homebrew upgrades each machine on its own day, so every opted-in
+check runs the pack's pinned copies of `cargo-nextest`, `node`, `npm` and `uv` first on `PATH`, and refuses
+while one is missing (sd:2936, design in `docs/work/2026-10-07-gate-pinned-tools/`). `git` and `make` run
+the Command Line Tools copies through the gate's own links. A tool in macOS's own folders binds the Command
+Line Tools version beside its bytes, and a refusal on any tool names how each machine found it.
 `OFFLOAD_HOME_FILES` is another: `.config/uv/uv.toml` (sd:2879).
 A name the hub cannot resolve is recorded, not compared, and named in the
 merge's provenance. A name the hub resolves and the satellite does not

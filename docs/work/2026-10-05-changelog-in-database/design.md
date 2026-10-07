@@ -24,7 +24,8 @@ The system repository does not change.
 Design accepted. The operator ruled Q1 to Q7 on 2026-10-05 at about
 17:25 MDT, through the team lead. Each 17:25 ruling took the recommendation.
 The ruling is recorded on sd:2783. At about 17:40 MDT the operator revised
-Q7 after the prepare review at `ffec19a9`. Implementation has not started.
+Q7 after the prepare review at `ffec19a9`. Steps 1 and 2 of
+[implement.md](implement.md) are built; steps 3 to 7 remain.
 
 ## Decision log
 
@@ -152,6 +153,27 @@ render pull request.**
   deterministic.
 
 `sd changelog show` prints the same region to stdout and writes nothing.
+
+As built in step 2:
+
+- `--base` names the base and defaults to `HEAD`. Step 3 passes the base
+  that prepare checks.
+- `--check` and `--release` do not combine. A release render puts text
+  outside the region, so a second release render of the same file differs
+  until the tag exists.
+- `show` makes the same refusals as `render`.
+- The cross-check matches a squash to a row by merge commit, not by pull
+  request number. A row for another commit does not satisfy it.
+- A row merged before the newest tag is released: render skips it and names
+  nothing.
+- The parser drops the trailer paragraphs that end a body: `Work:` and the
+  squash's trailer block. A body and its squash message thus parse to the
+  same entries, and `section_digest` gives the same `body_digest`.
+- An entry keeps a blank line before an indented paragraph, and the lines of
+  a fence verbatim. A comment inside a code span or a fence is text.
+- The pattern file is the `sd.privacy_patterns` core setting. Unset reads
+  `privacy-patterns` in `$SYSTEM_TOOLS_CONFIG`, else in
+  `${XDG_CONFIG_HOME:-~/.config}/system`, the file `local-leak-guard` reads.
 
 Between render pull requests, `main`'s `CHANGELOG.md` lags the merged
 entries. The squash messages and `sd changelog show` hold them.

@@ -15,6 +15,8 @@ actual global excludes, and the test that noticed that is the reason the
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import importlib.util
 import io
 import json
@@ -22,6 +24,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -117,9 +120,9 @@ class InstallerHarness(unittest.TestCase):
             )
         return checkout
 
-    def checkout_with_commands(self, *names: str) -> Path:
+    def checkout_with_commands(self, *names: str, name: str = "serving") -> Path:
         """`committed_checkout()` given executables in `bin/`, the way the pack has them."""
-        checkout = self.committed_checkout()
+        checkout = self.committed_checkout(name)
         (checkout / "bin").mkdir()
         for name in names:
             target = checkout / "bin" / name
@@ -2198,6 +2201,1033 @@ class PullBehaviourTests(InstallerHarness):
         self.assertIn("rendered", out.getvalue())
 
 
+class ServingTreeTests(InstallerHarness):
+    """A detached clone of origin that nobody works in: `--pull` moves it by commit, `--rollback` back (sd:1118).
+
+    The target's own installer, `_render_checked_out`, is replaced by a
+    recorder for the git half; the put-back half runs the real `cmd_user`
+    unless a test replaces it too.
+    """
+
+    def context(self, checkout: Path, **kwargs) -> "sd_install.Context":
+        return sd_install.Context(
+            checkout=checkout,
+            home=self.home,
+            environ={
+                "XDG_STATE_HOME": str(self.home / ".local" / "state"),
+                "XDG_CONFIG_HOME": str(self.home / ".config"),
+            },
+            **kwargs,
+        )
+
+    def git(self, repo: Path, *args: str) -> str:
+        return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout.strip()
+
+    def commit(self, repo: Path, body: str, *, contract: bool = True, command: str | None = None,
+               installer: str | None = None) -> str:
+        """A commit whose installer declares the activation contract, unless `contract` is False.
+
+        `command` adds an executable `bin/<command>`, which `--user` links.
+        """
+        (repo / "file.txt").write_text(body, encoding="utf-8")
+        (repo / "bin").mkdir(exist_ok=True)
+        (repo / "bin" / "sd_install.py").write_text(
+            installer or ("ACTIVATION_CONTRACT = 1\n" if contract else "MODES = ()\n"), encoding="utf-8")
+        if command:
+            (repo / "bin" / command).write_text("#!/bin/sh\n", encoding="utf-8")
+            (repo / "bin" / command).chmod(0o755)
+        self.git(repo, "add", "-A")
+        self.git(repo, "commit", "-qm", body.strip())
+        return self.git(repo, "rev-parse", "HEAD")
+
+    # Records the commit it built for, and what VENV it saw; fails on SERVE_MAKE_EXIT.
+    MAKEFILE = (
+        "setup:\n"
+        "\t@mkdir -p \"$(VENV)\"\n"
+        "\t@git rev-parse HEAD > \"$(VENV)/provisioned\"\n"
+        "\t@echo 'LIBRARY = 1' > \"$(VENV)/sd_db.py\"\n"
+        "\t@echo 'VENV=$(VENV) SERVE=$(SERVE) LIVE_VENV=$(LIVE_VENV)' > \"$(VENV)/variables\"\n"
+        "\t@exit $${SERVE_MAKE_EXIT:-0}\n"
+    )
+
+    def setUp(self):
+        super().setUp()
+        self.origin = self.home / "origin"
+        self.origin.mkdir()
+        self.git(self.origin, "init", "-q", "-b", "main")
+        self.git(self.origin, "config", "user.email", "t@example.test")
+        self.git(self.origin, "config", "user.name", "Test")
+        (self.origin / "Makefile").write_text(self.MAKEFILE, encoding="utf-8")
+        self.first = self.commit(self.origin, "one\n")
+        self.serving = self.home / "serving"
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(self.serving)], check=True, capture_output=True)
+        self.git(self.serving, "checkout", "-q", "--detach", self.first)
+        with open(self.serving / ".git" / "info" / "exclude", "a", encoding="utf-8") as exclude:
+            exclude.write("/.venv\n/.venv-a\n/.venv-b\n")
+        self.rendered = []
+        # Most tests here are about git and the receipt; the environment build is stubbed unless a test
+        # calls `real_provision`.
+        self.provisioning = unittest.mock.patch.object(sd_install, "_provision", side_effect=self.stub_provision)
+        self.provisioning.start()
+        self.addCleanup(self.provisioning.stop)
+
+    def stub_provision(self, ctx, commit, out):
+        slot = ctx.checkout / sd_install.ENV_SLOTS[0]
+        slot.mkdir(exist_ok=True)
+        return slot
+
+    def real_provision(self) -> "sd_install.Context":
+        """Stop the stub; the fixture Makefile builds the environment. Returns a context that finds `make`."""
+        self.provisioning.stop()
+        ctx = self.context(self.serving)
+        ctx.environ["PATH"] = os.environ.get("PATH", "")
+        return ctx
+
+    def built_for(self) -> str:
+        return (self.serving / ".venv" / "provisioned").read_text(encoding="utf-8").strip()
+
+    def head(self) -> str:
+        return self.git(self.serving, "rev-parse", "HEAD")
+
+    def recording(self):
+        def render(ctx, out):
+            self.rendered.append(self.git(ctx.checkout, "rev-parse", "HEAD"))
+            return 0
+        return unittest.mock.patch.object(sd_install, "_render_checked_out", side_effect=render)
+
+    def write_receipt(self, **fields):
+        sd_install.write_receipt(self.context(self.serving).receipt, {"schema": sd_install.RECEIPT_SCHEMA, **fields})
+
+    def test_pull_detaches_the_serving_tree_at_the_exact_origin_main_commit_and_renders_it(self):
+        merged = self.commit(self.origin, "two\n")
+        self.commit(self.origin, "three\n")
+        self.git(self.origin, "checkout", "-q", "-b", "side")
+        self.commit(self.origin, "side work\n")
+        self.git(self.origin, "checkout", "-q", "main")
+        self.git(self.origin, "reset", "-q", "--hard", merged)
+        out = io.StringIO()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 0, out.getvalue())
+        self.assertEqual(self.head(), merged)
+        self.assertEqual(self.git(self.serving, "rev-parse", "--abbrev-ref", "HEAD"), "HEAD", "the tree stays detached")
+        self.assertEqual(self.rendered, [merged])
+        self.assertIn(f"serving {merged}", out.getvalue())
+
+    def test_pull_refuses_a_dirty_serving_tree_and_moves_nothing(self):
+        self.commit(self.origin, "two\n")
+        for dirt in ("tracked", "untracked"):
+            with self.subTest(dirt=dirt):
+                if dirt == "tracked":
+                    (self.serving / "file.txt").write_text("edited\n", encoding="utf-8")
+                else:
+                    self.git(self.serving, "checkout", "-q", "--", "file.txt")
+                    (self.serving / "draft.md").write_text("planning\n", encoding="utf-8")
+                out = io.StringIO()
+                with self.recording():
+                    self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
+                self.assertIn("uncommitted changes", out.getvalue())
+                self.assertEqual((self.head(), self.rendered), (self.first, []))
+
+    def test_pull_still_refuses_a_checkout_on_another_branch(self):
+        self.git(self.serving, "checkout", "-q", "-b", "work")
+        out = io.StringIO()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
+        self.assertIn("not main or a detached serving tree", out.getvalue())
+        self.assertEqual(self.rendered, [])
+
+    def test_a_dry_run_pull_of_a_serving_tree_fetches_nothing(self):
+        merged = self.commit(self.origin, "two\n")
+        out = io.StringIO()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving, dry_run=True), out), 0)
+        self.assertIn("would detach", out.getvalue())
+        self.assertEqual(self.head(), self.first)
+        self.assertNotEqual(self.git(self.serving, "rev-parse", "refs/remotes/origin/main"), merged)
+
+    def test_a_serving_pull_that_cannot_fetch_or_find_origin_main_moves_nothing(self):
+        self.git(self.serving, "remote", "set-url", "origin", str(self.home / "gone"))
+        out = io.StringIO()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
+        self.assertIn("git fetch origin failed", out.getvalue())
+        self.git(self.serving, "remote", "set-url", "origin", str(self.origin))
+        self.git(self.origin, "branch", "-q", "-m", "main", "trunk")
+        self.git(self.serving, "update-ref", "-d", "refs/remotes/origin/main")
+        out = io.StringIO()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
+        self.assertIn("origin/main does not name a commit after the fetch", out.getvalue())
+        self.assertEqual((self.head(), self.rendered), (self.first, []))
+
+    def test_a_fetch_that_will_not_finish_is_reported_and_not_raised(self):
+        real = subprocess.run
+
+        def fake(args, **kwargs):
+            if "fetch" in args:
+                raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+            return real(args, **kwargs)
+
+        out = io.StringIO()
+        with self.recording(), unittest.mock.patch("subprocess.run", side_effect=fake):
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
+        self.assertIn("could not finish", out.getvalue())
+
+    def test_a_checkout_git_refuses_is_reported_and_nothing_renders(self):
+        merged = self.commit(self.origin, "two\n")
+        real = sd_install._git
+
+        def refuse(ctx, args, timeout=sd_install.GIT_TIMEOUT):
+            return (1, "", "boom") if args[0] == "checkout" else real(ctx, args, timeout)
+
+        out = io.StringIO()
+        with self.recording(), unittest.mock.patch.object(sd_install, "_git", side_effect=refuse):
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
+        self.assertIn(f"git checkout --detach {merged} failed:\nboom", out.getvalue())
+        self.assertEqual(self.rendered, [])
+
+    def test_a_dry_run_rollback_moves_nothing(self):
+        merged = self.commit(self.origin, "two\n")
+        self.git(self.serving, "fetch", "-q", "origin")
+        self.write_receipt(commit=self.first, previousCommit=merged)
+        out = io.StringIO()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_rollback(self.context(self.serving, dry_run=True), out), 0)
+        self.assertIn(f"would detach {self.serving} at {merged}", out.getvalue())
+        self.assertEqual((self.head(), self.rendered), (self.first, []))
+
+    def test_rollback_returns_to_the_previous_commit_and_a_second_rollback_undoes_it(self):
+        merged = self.commit(self.origin, "two\n")
+        self.git(self.serving, "fetch", "-q", "origin")
+        self.git(self.serving, "checkout", "-q", "--detach", merged)
+        self.write_receipt(commit=merged, previousCommit=self.first)
+        out = io.StringIO()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_rollback(self.context(self.serving), out), 0, out.getvalue())
+        self.assertEqual((self.head(), self.rendered), (self.first, [self.first]))
+        # The real cmd_user would write this receipt; previous_commit is what it records.
+        self.write_receipt(commit=self.first, previousCommit=sd_install.previous_commit({"commit": merged, "previousCommit": self.first}, self.first))
+        with self.recording():
+            self.assertEqual(sd_install.cmd_rollback(self.context(self.serving), io.StringIO()), 0)
+        self.assertEqual(self.head(), merged)
+
+    def test_rollback_refuses_without_a_previous_commit_off_a_serving_tree_dirty_or_unknown(self):
+        cases = {
+            "no previousCommit": ({"commit": self.first}, None, "records no previousCommit"),
+            "unknown commit": ({"commit": self.first, "previousCommit": "0" * 40}, None, "is not a commit"),
+            "on a branch": ({"commit": self.first, "previousCommit": self.first}, "branch", "not a detached serving tree"),
+            "dirty": ({"commit": self.first, "previousCommit": self.first}, "dirty", "uncommitted changes"),
+        }
+        for name, (receipt, setup, said) in cases.items():
+            with self.subTest(name):
+                self.git(self.serving, "checkout", "-q", "--detach", self.first)
+                self.git(self.serving, "clean", "-qfd")
+                if setup == "branch":
+                    self.git(self.serving, "checkout", "-q", "-B", "work")
+                if setup == "dirty":
+                    (self.serving / "draft.md").write_text("planning\n", encoding="utf-8")
+                self.write_receipt(**receipt)
+                out = io.StringIO()
+                with self.recording():
+                    self.assertEqual(sd_install.cmd_rollback(self.context(self.serving), out), 1)
+                self.assertIn(said, out.getvalue())
+                self.assertEqual(self.rendered, [])
+
+    def test_rollback_is_reachable_from_the_command_line(self):
+        out = io.StringIO()
+        with unittest.mock.patch.object(sd_install, "cmd_rollback", return_value=0) as rollback:
+            self.assertEqual(sd_install.main(["--rollback", "--home", str(self.home)], out=out), 0)
+        rollback.assert_called_once()
+        self.assertIn("--rollback", sd_install.USAGE)
+
+    def test_verify_stays_strict_in_a_serving_tree(self):
+        """Drift: an untracked draft, or a HEAD moved without a render, fails the source check."""
+        self.write_receipt(commit=self.first, dirty=False)
+        ctx = self.context(self.serving)
+        receipt = sd_install.read_receipt(ctx.receipt)
+        self.assertEqual(sd_install.verify_source(ctx, receipt)["code"], "ok")
+        (self.serving / "draft.md").write_text("planning\n", encoding="utf-8")
+        self.assertEqual(sd_install.verify_source(ctx, receipt)["code"], "source_not_clean")
+        (self.serving / "draft.md").unlink()
+        moved = self.commit(self.origin, "two\n")
+        self.git(self.serving, "fetch", "-q", "origin")
+        self.git(self.serving, "checkout", "-q", "--detach", moved)
+        self.assertEqual(sd_install.verify_source(ctx, receipt)["code"], "source_commit_changed")
+
+    def test_previous_commit_records_the_replaced_commit_and_keeps_it_across_a_re_render(self):
+        self.assertEqual(sd_install.previous_commit({}, "b"), "")
+        self.assertEqual(sd_install.previous_commit({"commit": "a"}, "b"), "a")
+        self.assertEqual(sd_install.previous_commit({"commit": "b", "previousCommit": "a"}, "b"), "a")
+        self.assertEqual(sd_install.previous_commit({"commit": "b", "previousCommit": "b"}, "b"), "")
+
+    def test_a_failed_render_puts_the_tree_and_the_receipt_back(self):
+        """Review round 1: a refused update to C leaves the tree serving B and the receipt naming B."""
+
+        before = self.commit(self.origin, "a\n")
+        current = self.commit(self.origin, "b\n")
+        self.commit(self.origin, "c\n", installer="ACTIVATION_CONTRACT = 1\nprint('refused: sd-collides')\nraise SystemExit(1)\n")
+        self.git(self.serving, "fetch", "-q", "origin")
+        self.git(self.serving, "checkout", "-q", "--detach", current)
+        self.write_receipt(checkout=str(self.serving), commit=current, previousCommit=before)
+        again = []
+
+        def render(ctx, out):
+            again.append((self.head(), sd_install.read_receipt(ctx.receipt)["commit"]))
+            return 0
+
+        out = io.StringIO()
+        with unittest.mock.patch.object(sd_install, "cmd_user", side_effect=render):
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1, out.getvalue())
+        self.assertEqual(self.head(), current, "the tree kept serving the commit whose render failed")
+        receipt = sd_install.read_receipt(self.context(self.serving).receipt)
+        self.assertEqual((receipt["commit"], receipt["previousCommit"]), (current, before))
+        self.assertEqual(again, [(current, current)], "the original commit was not rendered again over its receipt")
+        self.assertIn("refused: sd-collides", out.getvalue())
+        self.assertIn(f"the serving tree is back at {current} and rendered from it again", out.getvalue())
+
+    def test_a_put_back_whose_re_render_fails_says_so(self):
+        self.commit(self.origin, "two\n")
+        self.write_receipt(checkout=str(self.serving), commit=self.first)
+        out = io.StringIO()
+        with self.recording(), unittest.mock.patch.object(sd_install, "_render_checked_out", return_value=1), \
+                unittest.mock.patch.object(sd_install, "cmd_user", return_value=1):
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
+        self.assertIn(f"rendering {self.first} again failed too", out.getvalue())
+
+    def test_a_failed_first_serve_leaves_the_install_of_another_checkout(self):
+        """Review round 10: the put-back renders the tree again only when the restored receipt names it."""
+        self.commit(self.origin, "two\n", installer="ACTIVATION_CONTRACT = 1\nraise SystemExit(1)\n")
+        work = self.home / "work"
+        for receipt in ({"checkout": str(work), "commit": "a" * 40}, None):
+            with self.subTest(receipt=receipt):
+                self.git(self.serving, "checkout", "-q", "--detach", self.first)
+                ctx = self.context(self.serving)
+                if receipt is None:
+                    ctx.receipt.unlink(missing_ok=True)
+                else:
+                    self.write_receipt(**receipt)
+                before = ctx.receipt.read_bytes() if receipt else None
+                out = io.StringIO()
+                with unittest.mock.patch.object(sd_install, "cmd_user") as again:
+                    self.assertEqual(sd_install.cmd_pull(ctx, out), 1)
+                again.assert_not_called()
+                self.assertEqual(ctx.receipt.read_bytes() if receipt else ctx.receipt.exists(), before or False)
+                self.assertEqual(self.head(), self.first)
+                self.assertIn(f"the serving tree is back at {self.first}; it was not serving, so nothing was rendered "
+                              "from it and the install it found is left as it was", out.getvalue())
+
+    def test_a_failed_provision_keeps_serving_the_previous_commit(self):
+        """Round 14 (a): the build fails after the fetch, and the previous commit, receipt and environment serve on."""
+        ctx = self.real_provision()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+        self.write_receipt(checkout=str(self.serving), commit=self.first)
+        receipt = ctx.receipt.read_bytes()
+        self.commit(self.origin, "two\n")
+        ctx.environ["SERVE_MAKE_EXIT"] = "1"
+        out = io.StringIO()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, out), 1)
+        self.assertEqual(self.head(), self.first)
+        self.assertEqual(ctx.receipt.read_bytes(), receipt)
+        self.assertEqual(self.rendered, [self.first], "the commit whose environment failed was rendered")
+        self.assertEqual(os.readlink(self.serving / ".venv"), sd_install.ENV_SLOTS[0])
+        self.assertEqual(self.built_for(), self.first, "the environment in use was rebuilt")
+        self.assertIn(f"the serving tree stays at {self.first}, with its environment and install as they were",
+                      out.getvalue())
+
+    def test_a_failed_first_provision_leaves_no_venv_and_the_retry_builds_before_rendering(self):
+        """Round 14 (b)."""
+        ctx = self.real_provision()
+        ctx.environ["SERVE_MAKE_EXIT"] = "1"
+        out = io.StringIO()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, out), 1)
+        venv = self.serving / ".venv"
+        self.assertFalse(venv.exists() or venv.is_symlink(), "a failed build left a .venv")
+        self.assertIn(f"for {self.first} failed", out.getvalue())
+        self.assertEqual(self.rendered, [])
+        del ctx.environ["SERVE_MAKE_EXIT"]
+        seen = []
+
+        def render(ctx, out):
+            seen.append(self.built_for())
+            return 0
+
+        with unittest.mock.patch.object(sd_install, "_render_checked_out", side_effect=render):
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+        self.assertEqual(seen, [self.first], "the render ran before its environment was built")
+
+    def test_the_environment_is_built_for_the_commit_that_is_activated(self):
+        """Round 14 (c): origin moves on after the fetch; the build and the render are of the fetched commit."""
+        ctx = self.real_provision()
+        merged = self.commit(self.origin, "two\n")
+        real = sd_install._provision
+        newer = []
+
+        def origin_moves(ctx, commit, out):
+            newer.append(self.commit(self.origin, "three\n"))
+            return real(ctx, commit, out)
+
+        with self.recording(), unittest.mock.patch.object(sd_install, "_provision", side_effect=origin_moves):
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+        self.assertEqual((self.built_for(), self.rendered), (merged, [merged]))
+        self.assertNotEqual(newer, [merged])
+
+    def test_the_serving_environment_is_the_trees_own(self):
+        """sd:1118 lane review: removing the checkout that ran `make setup` takes nothing the tree serves with."""
+        ctx = self.real_provision()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+        venv = self.serving / ".venv"
+        self.assertEqual(venv.resolve().parent, self.serving.resolve())
+        found = subprocess.run([sys.executable, "-c", "import sd_db; print(sd_db.LIBRARY)"],
+                               cwd=venv, capture_output=True, text=True, check=False)
+        self.assertEqual(found.stdout.strip(), "1", found.stderr)
+
+    def test_each_activation_builds_the_slot_not_in_use(self):
+        ctx = self.real_provision()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+            merged = self.commit(self.origin, "two\n")
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+        self.assertEqual(os.readlink(self.serving / ".venv"), sd_install.ENV_SLOTS[1])
+        self.assertEqual(self.built_for(), merged)
+        self.assertEqual((self.serving / sd_install.ENV_SLOTS[0] / "provisioned").read_text(encoding="utf-8").strip(),
+                         self.first, "the slot in use was rebuilt")
+
+    def test_a_failed_render_puts_the_venv_link_back(self):
+        ctx = self.real_provision()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+        self.commit(self.origin, "two\n")
+        with unittest.mock.patch.object(sd_install, "_render_checked_out", return_value=1), \
+                unittest.mock.patch.object(sd_install, "cmd_user", return_value=0):
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 1)
+        self.assertEqual(os.readlink(self.serving / ".venv"), sd_install.ENV_SLOTS[0])
+        self.assertEqual(self.built_for(), self.first)
+
+    def test_a_failed_first_render_leaves_no_venv_link(self):
+        ctx = self.real_provision()
+        with unittest.mock.patch.object(sd_install, "_render_checked_out", return_value=1):
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 1)
+        self.assertFalse((self.serving / ".venv").is_symlink())
+
+    def test_a_real_venv_directory_is_refused_and_nothing_moves(self):
+        ctx = self.real_provision()
+        (self.serving / ".venv").mkdir()
+        self.commit(self.origin, "two\n")
+        out = io.StringIO()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, out), 1)
+        self.assertIn("is not a link to .venv-a or .venv-b; move it aside", out.getvalue())
+        self.assertEqual((self.head(), self.rendered), (self.first, []))
+
+    def test_make_that_cannot_start_keeps_serving_the_previous_commit(self):
+        """Review round 14 (1): launching make raises, and recovery still covers it."""
+        ctx = self.real_provision()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+        self.commit(self.origin, "two\n")
+        ctx.environ["PATH"] = ""
+        out = io.StringIO()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, out), 1)
+        self.assertEqual((self.head(), self.rendered), (self.first, [self.first]))
+        self.assertEqual(os.readlink(self.serving / ".venv"), sd_install.ENV_SLOTS[0])
+        self.assertIn("could not start make", out.getvalue())
+
+    def test_a_failed_link_switch_keeps_serving_the_previous_commit(self):
+        """Review round 14 (1): publishing the environment link fails after the build."""
+        ctx = self.real_provision()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+        self.write_receipt(checkout=str(self.serving), commit=self.first)
+        receipt = ctx.receipt.read_bytes()
+        self.commit(self.origin, "two\n")
+        real = sd_install._replace_link
+        calls = []
+
+        def fails_once(link, target):
+            calls.append(target)
+            if len(calls) == 1:
+                raise OSError(28, "No space left on device")
+            return real(link, target)
+
+        with self.recording(), unittest.mock.patch.object(sd_install, "_replace_link", side_effect=fails_once):
+            with self.assertRaises(OSError):
+                sd_install.cmd_pull(ctx, io.StringIO())
+        self.assertEqual(self.head(), self.first)
+        self.assertEqual(ctx.receipt.read_bytes(), receipt)
+        self.assertEqual(os.readlink(self.serving / ".venv"), sd_install.ENV_SLOTS[0])
+        self.assertEqual(self.built_for(), self.first)
+
+    def test_overlapping_activations_build_and_publish_one_slot_at_a_time(self):
+        """Review round 15: a second `make setup` waits for the first, so no slot is shared or half-built."""
+        ctx = self.real_provision()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+        merged = self.commit(self.origin, "two\n")
+        real = sd_install._provision
+        second_built = threading.Event()
+        slots, overlapped, results, threads = [], [], [], []
+
+        def second_run():
+            other = self.context(self.serving)
+            other.environ["PATH"] = ctx.environ["PATH"]
+            results.append(sd_install.cmd_pull(other, io.StringIO()))
+
+        def provision(ctx, commit, out):
+            if not slots:
+                slots.append(None)
+                threads.append(threading.Thread(target=second_run))
+                threads[0].start()
+                # Without the lock the second run reaches its build while this one is mid-build.
+                overlapped.append(second_built.wait(3))
+                slot = real(ctx, commit, out)
+                slots[0] = slot.name
+                return slot
+            second_built.set()
+            slot = real(ctx, commit, out)
+            slots.append(slot.name)
+            return slot
+
+        with self.recording(), unittest.mock.patch.object(sd_install, "_provision", side_effect=provision):
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+            threads[0].join(30)
+        self.assertEqual(overlapped, [False], "the second activation built while the first was building")
+        self.assertEqual(results, [0])
+        self.assertEqual(slots, [sd_install.ENV_SLOTS[1], sd_install.ENV_SLOTS[0]], "both runs built one slot")
+        self.assertEqual((self.head(), self.built_for()), (merged, merged))
+
+    def test_a_move_that_waits_too_long_for_the_lock_refuses_and_moves_nothing(self):
+        """Round 16: a stuck run holds the lock; pull and rollback give up after `SERVE_LOCK_WAIT`."""
+        self.write_receipt(checkout=str(self.serving), commit=self.first, previousCommit=self.first)
+        self.commit(self.origin, "two\n")
+        ctx = self.context(self.serving)
+        receipt = ctx.receipt.read_bytes()
+        with open(self.home / "serving.lock", "a", encoding="utf-8") as held, \
+                unittest.mock.patch.object(sd_install, "SERVE_LOCK_WAIT", 1.5), self.recording():
+            fcntl.flock(held, fcntl.LOCK_EX)
+            for move in (sd_install.cmd_pull, sd_install.cmd_rollback):
+                out = io.StringIO()
+                self.assertEqual(move(ctx, out), 1)
+                self.assertIn("another `make setup` has held", out.getvalue())
+        self.assertEqual((self.head(), self.rendered, ctx.receipt.read_bytes()), (self.first, [], receipt))
+        self.assertFalse((self.serving / ".venv").is_symlink())
+
+    def test_an_absolute_link_to_a_slot_rebuilds_the_other_one(self):
+        """Review round 16: the live slot is where `.venv` resolves, whatever the link text says."""
+        ctx = self.real_provision()
+        live = self.serving / sd_install.ENV_SLOTS[0]
+        live.mkdir()
+        (live / "provisioned").write_text("served\n", encoding="utf-8")
+        (self.serving / ".venv").symlink_to(live.resolve())
+        merged = self.commit(self.origin, "two\n")
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+        self.assertEqual((live / "provisioned").read_text(encoding="utf-8"), "served\n", "the live slot was rebuilt")
+        self.assertEqual((os.readlink(self.serving / ".venv"), self.built_for()), (sd_install.ENV_SLOTS[1], merged))
+
+    def test_a_link_outside_both_slots_is_refused_and_nothing_moves(self):
+        ctx = self.real_provision()
+        elsewhere = self.home / "elsewhere"
+        elsewhere.mkdir()
+        (self.serving / ".venv").symlink_to(elsewhere)
+        self.commit(self.origin, "two\n")
+        out = io.StringIO()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, out), 1)
+        self.assertIn("is not a link to .venv-a or .venv-b; move it aside", out.getvalue())
+        self.assertEqual((self.head(), self.rendered), (self.first, []))
+        self.assertEqual(os.readlink(self.serving / ".venv"), str(elsewhere))
+        self.assertFalse(any((self.serving / name).exists() for name in sd_install.ENV_SLOTS), "a slot was built")
+
+    def test_the_tree_serves_its_own_commit_while_the_target_builds(self):
+        """Review round 17 (1): links and hooks run the tree's code, so it must not move before its environment."""
+        ctx = self.real_provision()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+        merged = self.commit(self.origin, "two\n")
+        real = sd_install._provision
+        during = []
+
+        def watched(ctx, commit, out):
+            during.append(self.head())
+            slot = real(ctx, commit, out)
+            during.append(self.head())
+            return slot
+
+        with self.recording(), unittest.mock.patch.object(sd_install, "_provision", side_effect=watched):
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+        self.assertEqual(during, [self.first, self.first], "the tree served the target's code during its build")
+        self.assertEqual((self.head(), self.built_for()), (merged, merged))
+        self.assertEqual(self.git(self.serving, "worktree", "list", "--porcelain").count("worktree "), 1,
+                         "the build checkout was left registered")
+
+    def test_a_build_checkout_git_refuses_moves_nothing(self):
+        ctx = self.real_provision()
+        self.commit(self.origin, "two\n")
+        real = sd_install._git
+
+        def refuse(ctx, args, timeout=sd_install.GIT_TIMEOUT):
+            return (1, "", "locked") if args[:2] == ["worktree", "add"] else real(ctx, args, timeout)
+
+        out = io.StringIO()
+        with self.recording(), unittest.mock.patch.object(sd_install, "_git", side_effect=refuse):
+            self.assertEqual(sd_install.cmd_pull(ctx, out), 1)
+        self.assertIn("to build", out.getvalue())
+        self.assertEqual((self.head(), self.rendered), (self.first, []))
+        self.assertFalse(any((self.serving / name).exists() for name in (".venv", *sd_install.ENV_SLOTS)))
+
+    def test_an_unreadable_venv_link_moves_nothing(self):
+        """Review round 17 (2): the link is read before the tree moves."""
+        merged = self.commit(self.origin, "two\n")
+        (self.serving / ".venv").symlink_to(sd_install.ENV_SLOTS[0])
+        real = os.readlink
+        calls = []
+
+        def unreadable(path, *args, **kwargs):
+            calls.append(path)
+            if len(calls) == 1:
+                raise OSError(5, "Input/output error")
+            return real(path, *args, **kwargs)
+
+        with self.recording(), unittest.mock.patch.object(os, "readlink", side_effect=unreadable):
+            with self.assertRaises(OSError):
+                sd_install.cmd_pull(self.context(self.serving), io.StringIO())
+        self.assertEqual((self.head(), self.rendered), (self.first, []))
+        self.assertNotEqual(self.head(), merged)
+
+    def test_a_link_that_cannot_go_back_still_puts_the_tree_back(self):
+        """Gap F1 and review round 17 (2): the checkout is restored whatever `.venv` does."""
+        ctx = self.real_provision()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+        self.write_receipt(checkout=str(self.serving), commit=self.first)
+        self.commit(self.origin, "two\n")
+        real = sd_install._replace_link
+        calls = []
+
+        def once(link, target):
+            calls.append(target)
+            if len(calls) > 1:
+                raise OSError(28, "No space left on device")
+            return real(link, target)
+
+        out = io.StringIO()
+        with unittest.mock.patch.object(sd_install, "_render_checked_out", return_value=1), \
+                unittest.mock.patch.object(sd_install, "_replace_link", side_effect=once), \
+                unittest.mock.patch.object(sd_install, "cmd_user", return_value=0):
+            self.assertEqual(sd_install.cmd_pull(ctx, out), 1)
+        self.assertEqual(self.head(), self.first)
+        self.assertIn(f"the serving tree is back at {self.first}, but {self.serving / '.venv'} could not be put back",
+                      out.getvalue())
+
+    def test_a_receipt_that_cannot_go_back_is_left_whole_and_reported(self):
+        """Gap F4: the put-back writes the receipt through a scratch file."""
+        self.write_receipt(checkout=str(self.serving), commit=self.first)
+        ctx = self.context(self.serving)
+        before = ctx.receipt.read_bytes()
+        self.commit(self.origin, "two\n")
+        real = Path.write_bytes
+
+        def disk_full(path, data):
+            if data == before:
+                with open(path, "wb") as handle:
+                    handle.write(data[: len(data) // 2])
+                raise OSError(28, "No space left on device")
+            return real(path, data)
+
+        def render_writes_a_receipt(ctx, out):
+            sd_install.write_receipt(ctx.receipt, {"schema": sd_install.RECEIPT_SCHEMA, "checkout": "target"})
+            return 1
+
+        out = io.StringIO()
+        with unittest.mock.patch.object(sd_install, "_render_checked_out", side_effect=render_writes_a_receipt), \
+                unittest.mock.patch.object(Path, "write_bytes", disk_full):
+            self.assertEqual(sd_install.cmd_pull(ctx, out), 1)
+        self.assertEqual(json.loads(ctx.receipt.read_text(encoding="utf-8"))["checkout"], "target")
+        self.assertEqual(self.head(), self.first)
+        self.assertIn("but its receipt could not be put back", out.getvalue())
+
+    def test_the_next_pull_converges_after_a_run_was_killed_part_way(self):
+        """Table row A9: nothing recovers a killed run, so the next `make setup` has to."""
+        self.write_receipt(checkout=str(self.serving), commit=self.first)
+        merged = self.commit(self.origin, "two\n")
+        self.git(self.serving, "fetch", "-q", "origin")
+        self.git(self.serving, "checkout", "-q", "--detach", merged)
+        (self.serving / sd_install.ENV_SLOTS[1]).mkdir()
+        (self.serving / ".venv").symlink_to(sd_install.ENV_SLOTS[1])
+        newer = self.commit(self.origin, "three\n")
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), io.StringIO()), 0)
+        self.assertEqual((self.head(), self.rendered), (newer, [newer]))
+        self.assertEqual(os.readlink(self.serving / ".venv"), sd_install.ENV_SLOTS[0])
+
+    def stops_part_way(self, commit: str, *, put_back: tuple[int, str, str] | None = None):
+        """`_git` whose checkout of `commit` moves the tree, then fails; `put_back` answers the recovery checkout."""
+        real = sd_install._git
+
+        def git(ctx, args, timeout=sd_install.GIT_TIMEOUT):
+            if args[0] == "checkout" and args[-1] == commit:
+                real(ctx, args, timeout)
+                return (1, "", "stopped")
+            if put_back and args[0] == "checkout" and args[-1] == self.first:
+                return put_back
+            return real(ctx, args, timeout)
+
+        return unittest.mock.patch.object(sd_install, "_git", side_effect=git)
+
+    def test_a_checkout_that_stops_part_way_is_put_back(self):
+        """Gap A3 of the failure table: git moves part of the tree, then fails."""
+        ctx = self.real_provision()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+        merged = self.commit(self.origin, "two\n")
+        out = io.StringIO()
+        with self.recording(), self.stops_part_way(merged):
+            self.assertEqual(sd_install.cmd_pull(ctx, out), 1)
+        self.assertEqual((self.head(), self.git(self.serving, "status", "--porcelain")), (self.first, ""))
+        self.assertEqual((os.readlink(self.serving / ".venv"), self.built_for()), (sd_install.ENV_SLOTS[0], self.first))
+        self.assertIn(f"the serving tree is back at {self.first}, with its environment and install as they were",
+                      out.getvalue())
+
+    def test_the_build_names_the_environment_it_replaces(self):
+        """Review round 18: the build's `sd_db` guards protect the live slot, not only the one being built."""
+        ctx = self.real_provision()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+            self.commit(self.origin, "two\n")
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+        first, second = ((self.serving / name / "variables").read_text(encoding="utf-8") for name in sd_install.ENV_SLOTS)
+        self.assertIn("LIVE_VENV=\n", first)
+        self.assertIn(f"LIVE_VENV={os.path.realpath(self.serving / sd_install.ENV_SLOTS[0])}\n", second)
+
+    def test_a_first_checkout_that_stops_part_way_leaves_no_venv_link(self):
+        """The put-back with no `.venv` before and none published: nothing to put back but the code."""
+        merged = self.commit(self.origin, "two\n")
+        out = io.StringIO()
+        with self.recording(), self.stops_part_way(merged):
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
+        self.assertEqual(self.head(), self.first)
+        self.assertFalse((self.serving / ".venv").is_symlink())
+        self.assertNotIn("could not be put back", out.getvalue())
+
+    def test_a_put_back_git_refuses_after_a_failed_checkout_names_the_command(self):
+        merged = self.commit(self.origin, "two\n")
+        out = io.StringIO()
+        with self.stops_part_way(merged, put_back=(1, "", "locked")):
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
+        self.assertIn(f"git could not return the serving tree to {self.first}:\nlocked", out.getvalue())
+        self.assertIn(f"checkout --detach {self.first}`", out.getvalue())
+        self.assertEqual(self.head(), merged)
+
+    def test_the_callers_make_overrides_do_not_reach_the_trees_setup(self):
+        """`make setup VENV=x` passes VENV in MAKEFLAGS; the tree builds its own slot regardless."""
+        ctx = self.real_provision()
+        elsewhere = self.home / "elsewhere"
+        ctx.environ.update(MAKEFLAGS=f"VENV={elsewhere}", VENV=str(elsewhere), MAKELEVEL="1",
+                           LIVE_VENV=str(elsewhere))
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+        slot = self.serving / sd_install.ENV_SLOTS[0]
+        self.assertEqual((slot / "variables").read_text(encoding="utf-8").split(),
+                         [f"VENV={slot}", "SERVE=no", "LIVE_VENV="])
+        self.assertFalse(elsewhere.exists())
+
+    def test_the_target_commit_renders_with_its_own_installer(self):
+        """Review round 2: an update to rendering applies in the update that brings it."""
+        record = self.home / "record.json"
+        merged = self.commit(self.origin, "two\n", installer=(
+            "ACTIVATION_CONTRACT = 1\nimport json, os, sys\n"
+            "json.dump({'argv': sys.argv[1:], 'file': __file__}, open(os.environ['RECORD'], 'w'))\n"))
+        ctx = self.context(self.serving)
+        ctx.environ["RECORD"] = str(record)
+        ctx.bin_dir = self.home / "links"
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_pull(ctx, out), 0, out.getvalue())
+        self.assertEqual(self.head(), merged)
+        seen = json.loads(record.read_text(encoding="utf-8"))
+        self.assertEqual(Path(seen["file"]), self.serving / "bin" / "sd_install.py")
+        self.assertEqual(seen["argv"], ["--user", "--home", str(self.home), "--bin-dir", str(self.home / "links")])
+
+    def test_a_render_that_raises_puts_the_tree_and_the_receipt_back_and_raises(self):
+        merged = self.commit(self.origin, "two\n")
+        self.write_receipt(commit=self.first)
+
+        def half_render(ctx, out):
+            self.write_receipt(commit=merged, previousCommit=self.first)
+            raise OSError("disk full")
+
+        with unittest.mock.patch.object(sd_install, "_render_checked_out", side_effect=half_render):
+            with self.assertRaises(OSError):
+                sd_install.cmd_pull(self.context(self.serving), io.StringIO())
+        self.assertEqual(self.head(), self.first, "the tree kept serving the commit whose render raised")
+        self.assertEqual(sd_install.read_receipt(self.context(self.serving).receipt), {
+            "schema": sd_install.RECEIPT_SCHEMA, "commit": self.first}, "the receipt kept the failed render's write")
+
+    def test_an_unreadable_head_moves_nothing(self):
+        merged = self.commit(self.origin, "two\n")
+        real = sd_install._git
+
+        def no_head(ctx, args, timeout=sd_install.GIT_TIMEOUT):
+            return (128, "", "fatal: bad HEAD") if args[:2] == ["rev-parse", "--verify"] and args[2] == "HEAD^{commit}" else real(ctx, args, timeout)
+
+        out = io.StringIO()
+        with self.recording(), unittest.mock.patch.object(sd_install, "_git", side_effect=no_head):
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
+        self.assertIn("cannot read the serving tree's HEAD:\nfatal: bad HEAD", out.getvalue())
+        self.assertEqual((self.head(), self.rendered), (self.first, []))
+        self.assertNotEqual(self.head(), merged)
+
+    def test_a_failed_first_render_leaves_no_receipt(self):
+        """With no receipt before the run, putting it back means removing what the failed render wrote."""
+        merged = self.commit(self.origin, "two\n")
+
+        def failed(ctx, out):
+            self.write_receipt(commit=merged)
+            return 1
+
+        out = io.StringIO()
+        with unittest.mock.patch.object(sd_install, "_render_checked_out", side_effect=failed):
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
+        self.assertFalse(self.context(self.serving).receipt.exists())
+        self.assertEqual(self.head(), self.first)
+
+    def test_a_put_back_git_refuses_names_the_split_and_the_command(self):
+        merged = self.commit(self.origin, "two\n")
+        real = sd_install._git
+
+        def stuck(ctx, args, timeout=sd_install.GIT_TIMEOUT):
+            if args[0] == "checkout" and args[-1] == self.first:
+                return (1, "", "locked")
+            return real(ctx, args, timeout)
+
+        out = io.StringIO()
+        with unittest.mock.patch.object(sd_install, "_render_checked_out", return_value=1), \
+                unittest.mock.patch.object(sd_install, "_git", side_effect=stuck):
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
+        self.assertIn(f"git could not return the serving tree to {self.first}:\nlocked", out.getvalue())
+        self.assertIn(f"checkout --detach {self.first}`", out.getvalue())
+        self.assertEqual(self.head(), merged)
+
+    def test_a_target_whose_installer_predates_the_contract_is_refused(self):
+        """Review round 1: after such a target no second rollback could come back, so neither verb moves to it."""
+
+        old = self.commit(self.origin, "old\n", contract=False)
+        self.git(self.serving, "fetch", "-q", "origin")
+        self.write_receipt(commit=self.first, previousCommit=old)
+        for verb in (sd_install.cmd_pull, sd_install.cmd_rollback):
+            with self.subTest(verb=verb.__name__):
+                out = io.StringIO()
+                with self.recording():
+                    self.assertEqual(verb(self.context(self.serving), out), 1, out.getvalue())
+                self.assertIn(f"the installer at {old} declares no ACTIVATION_CONTRACT", out.getvalue())
+                self.assertEqual((self.head(), self.rendered), (self.first, []))
+
+    def test_the_installer_declares_the_contract_a_target_needs(self):
+        self.assertGreaterEqual(sd_install.ACTIVATION_CONTRACT, 1)
+        self.assertRegex((REPO_ROOT / "bin" / "sd_install.py").read_text(encoding="utf-8"),
+                         r"(?m)^ACTIVATION_CONTRACT = \d+$")
+
+    def test_the_receipt_a_render_writes_carries_the_previous_commit(self):
+        ctx = self.context(REPO_ROOT)
+        for commit in ("a", "b", "b"):
+            with unittest.mock.patch.object(
+                sd_install, "git_context", return_value={"branch": "HEAD", "commit": commit, "dirty": False}
+            ):
+                self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+        receipt = sd_install.read_receipt(ctx.receipt)
+        self.assertEqual((receipt["commit"], receipt["previousCommit"]), ("b", "a"))
+
+
+class ServeTests(InstallerHarness):
+    """`make setup` serves the machine from a dedicated clone of origin/main (sd:1118).
+
+    `--serve` makes the clone the first time and hands the activation to the
+    clone's own installer as `--pull`. That installer is a recorder here;
+    `ServingTreeTests` covers what the real `--pull` does, its environment
+    included.
+    """
+
+    RECORDER = (
+        "import json, os, sys\n"
+        "with open(os.environ['SERVE_RECORD'], 'w') as handle:\n"
+        "    json.dump({'argv': sys.argv[1:], 'file': __file__}, handle)\n"
+        "sys.exit(int(os.environ.get('SERVE_EXIT', '0')))\n"
+    )
+    def git(self, repo: Path, *args: str) -> str:
+        return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout.strip()
+
+    def setUp(self):
+        super().setUp()
+        self.origin = self.home / "origin"
+        (self.origin / "bin").mkdir(parents=True)
+        (self.origin / "bin" / "sd_install.py").write_text(self.RECORDER, encoding="utf-8")
+        self.git(self.origin, "init", "-q", "-b", "main")
+        self.git(self.origin, "add", "-A")
+        self.git(self.origin, "-c", "user.email=t@example.test", "-c", "user.name=t", "commit", "-qm", "one")
+        self.merged = self.git(self.origin, "rev-parse", "HEAD")
+        self.work = self.home / "work"
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(self.work)], check=True, capture_output=True)
+        (self.work / ".venv" / "bin").mkdir(parents=True)
+        self.record = self.home / "record.json"
+        self.tree = self.home / ".local" / "share" / "sd-ai-command-pack" / "serving"
+
+    def context(self, checkout: Path | None = None, **extra) -> "sd_install.Context":
+        environ = {"PATH": os.environ.get("PATH", ""), "SERVE_RECORD": str(self.record), **extra}
+        return sd_install.Context(checkout=checkout or self.work, home=self.home, environ=environ)
+
+    def serve(self, ctx=None) -> tuple[int, str]:
+        out = io.StringIO()
+        return sd_install.cmd_serve(ctx or self.context(), out), out.getvalue()
+
+    def test_serve_clones_origin_detached_at_main_and_hands_over_to_the_clone(self):
+        rc, output = self.serve()
+        self.assertEqual(rc, 0, output)
+        self.assertEqual(self.git(self.tree, "rev-parse", "HEAD"), self.merged)
+        self.assertEqual(self.git(self.tree, "rev-parse", "--abbrev-ref", "HEAD"), "HEAD", "the clone is detached")
+        self.assertEqual(self.git(self.tree, "remote", "get-url", "origin"), str(self.origin))
+        for name in (".venv", *sd_install.ENV_SLOTS):
+            (self.tree / name).mkdir()
+        self.assertEqual(self.git(self.tree, "status", "--porcelain"), "", "an environment dirties the clone")
+        record = json.loads(self.record.read_text(encoding="utf-8"))
+        self.assertEqual(record["argv"], ["--pull", "--home", str(self.home)])
+        self.assertEqual(Path(record["file"]).resolve(), (self.tree / "bin" / "sd_install.py").resolve())
+        self.assertIn(f"cloned {self.origin} into {self.tree}", output)
+
+    def test_a_second_serve_reuses_the_clone_and_passes_the_link_directory(self):
+        self.assertEqual(self.serve()[0], 0)
+        marker = self.tree / ".git" / "kept"
+        marker.write_text("x", encoding="utf-8")
+        links = self.home / "links"
+        ctx = self.context()
+        ctx.bin_dir = links
+        rc, output = self.serve(ctx)
+        self.assertEqual(rc, 0, output)
+        self.assertTrue(marker.exists(), "the clone was made again")
+        self.assertNotIn("cloned", output)
+        argv = json.loads(self.record.read_text(encoding="utf-8"))["argv"]
+        self.assertEqual(argv, ["--pull", "--home", str(self.home), "--bin-dir", str(links)])
+
+    def test_a_first_run_that_waited_for_another_clone_uses_it(self):
+        """Review round 15: two first runs; the one that waited on the lock finds the tree and clones nothing."""
+        real = sd_install.serving_lock
+
+        @contextlib.contextmanager
+        def other_run_cloned_first(tree, out, dry_run=False):
+            with real(tree, out, dry_run) as held:
+                subprocess.run(["git", "clone", "-q", str(self.origin), str(tree)], check=True, capture_output=True)
+                yield held
+
+        with unittest.mock.patch.object(sd_install, "serving_lock", side_effect=other_run_cloned_first):
+            rc, output = self.serve()
+        self.assertEqual(rc, 0, output)
+        self.assertNotIn("cloned", output)
+        self.assertTrue(self.tree.with_name("serving.lock").exists())
+
+    def test_a_first_run_that_waits_too_long_clones_nothing(self):
+        self.tree.parent.mkdir(parents=True)
+        with open(self.tree.with_name("serving.lock"), "a", encoding="utf-8") as held, \
+                unittest.mock.patch.object(sd_install, "SERVE_LOCK_WAIT", 0):
+            fcntl.flock(held, fcntl.LOCK_EX)
+            rc, output = self.serve()
+        self.assertEqual(rc, 1)
+        self.assertIn("another `make setup` has held", output)
+        self.assertFalse(self.tree.exists() or self.record.exists())
+
+    def test_a_clone_that_cannot_be_renamed_into_place_runs_nothing(self):
+        """Table row S5: the spare stays, nothing is served from it, and the error names it."""
+        with unittest.mock.patch.object(sd_install.Path, "rename", side_effect=OSError(28, "No space left on device")):
+            with self.assertRaises(OSError):
+                self.serve()
+        self.assertFalse(self.tree.exists() or self.record.exists())
+
+    def test_a_dry_run_serve_of_an_existing_clone_runs_nothing(self):
+        self.assertEqual(self.serve()[0], 0)
+        self.record.unlink()
+        ctx = self.context()
+        ctx.dry_run = True
+        rc, output = self.serve(ctx)
+        self.assertEqual(rc, 0)
+        self.assertIn(f"would detach {self.tree} at origin/main and render", output)
+        self.assertFalse(self.record.exists())
+
+    def test_outside_a_sandbox_the_clone_installer_gets_no_home(self):
+        with unittest.mock.patch.object(sd_install.Context, "sandboxed", new_callable=unittest.mock.PropertyMock,
+                                        return_value=False):
+            self.assertEqual(self.serve()[0], 0)
+        self.assertEqual(json.loads(self.record.read_text(encoding="utf-8"))["argv"], ["--pull"])
+
+    def test_serve_reads_the_data_home_and_reports_the_clone_installer_exit(self):
+        data = self.home / "data"
+        rc, output = self.serve(self.context(XDG_DATA_HOME=str(data), SERVE_EXIT="3"))
+        self.assertEqual(rc, 3, output)
+        self.assertTrue((data / "sd-ai-command-pack" / "serving" / ".git").is_dir())
+
+    def test_serve_refuses_to_run_from_the_serving_clone_or_without_origin(self):
+        self.assertEqual(self.serve()[0], 0)
+        rc, output = self.serve(self.context(self.tree))
+        self.assertEqual(rc, 1)
+        self.assertIn("is the serving checkout", output)
+        self.git(self.work, "remote", "remove", "origin")
+        self.tree.rename(self.home / "old-tree")
+        rc, output = self.serve()
+        self.assertEqual(rc, 1)
+        self.assertIn("has no origin remote", output)
+        self.assertFalse(self.tree.exists())
+
+    def test_serve_refuses_a_path_that_is_not_a_clone(self):
+        self.tree.mkdir(parents=True)
+        (self.tree / "notes.md").write_text("mine\n", encoding="utf-8")
+        rc, output = self.serve()
+        self.assertEqual(rc, 1)
+        self.assertIn("is not a git checkout", output)
+        self.assertEqual(sorted(path.name for path in self.tree.iterdir()), ["notes.md"])
+
+    def test_a_clone_that_fails_is_reported_and_nothing_runs(self):
+        self.git(self.work, "remote", "set-url", "origin", str(self.home / "gone"))
+        rc, output = self.serve()
+        self.assertEqual(rc, 1)
+        self.assertIn("git clone", output)
+        self.assertFalse(self.record.exists())
+
+    def test_a_dry_run_serve_clones_and_runs_nothing(self):
+        ctx = self.context()
+        ctx.dry_run = True
+        rc, output = self.serve(ctx)
+        self.assertEqual(rc, 0)
+        self.assertIn(f"would clone {self.origin} into {self.tree}", output)
+        self.assertFalse(self.tree.exists())
+        self.assertFalse(self.record.exists())
+
+    def test_provision_library_installs_into_the_environment_venv_names(self):
+        """`make setup VENV=x` builds x, and `--venv` takes `sd_db` there too, not into `.venv`."""
+        out = io.StringIO()
+        with unittest.mock.patch.object(sd_install, "provision_guarded", return_value=(True, "ok")) as provision:
+            self.assertEqual(sd_install.main(["--provision-library", "--venv", str(self.home / "slot")], out=out), 0)
+        self.assertEqual(provision.call_args.args[0].venv, self.home / "slot")
+        self.assertEqual(sd_install.main(["--user", "--venv", "x", "--home", str(self.home)], out=out), 2)
+        self.assertIn("error: --venv requires --provision-library", out.getvalue())
+        self.assertEqual(sd_install.main(["--provision-library", "--venv"], out=out), 2)
+        self.assertIn("error: --venv needs a directory", out.getvalue())
+        with unittest.mock.patch.object(sd_install, "provision_guarded", return_value=(True, "ok")) as provision:
+            self.assertEqual(sd_install.main(["--provision-library", "--live-venv", str(self.home / "live")], out=out), 0)
+        self.assertEqual(provision.call_args.args[0].live_venv, self.home / "live")
+        self.assertEqual(sd_install.main(["--user", "--live-venv", "x", "--home", str(self.home)], out=out), 2)
+        self.assertIn("error: --live-venv requires --provision-library", out.getvalue())
+        self.assertEqual(sd_install.main(["--provision-library", "--live-venv"], out=out), 2)
+        self.assertIn("error: --live-venv needs a directory", out.getvalue())
+
+    def test_serve_is_reachable_from_the_command_line(self):
+        out = io.StringIO()
+        with unittest.mock.patch.object(sd_install, "cmd_serve", return_value=0) as serve:
+            self.assertEqual(sd_install.main(["--serve", "--home", str(self.home)], out=out), 0)
+        serve.assert_called_once()
+        self.assertIn("--serve", sd_install.USAGE)
+
+
 class RepoCommandTests(InstallerHarness):
     def test_repo_defaults_to_the_working_directory(self):
         repo = self.home / "here"
@@ -3370,6 +4400,240 @@ class LinkEdgeCaseTests(InstallerHarness):
         self.assertTrue((checkout / "bin" / "sd").is_file())
         self.assertFalse((self.home / ".local" / "bin" / "sd").is_symlink())
 
+    def test_a_failed_install_puts_every_render_back(self):
+        """Review round 2: a link failure after the renders leaves no render of the failed run."""
+        checkout = self.checkout_with_commands("sd")
+        ctx = self.context_for(checkout)
+        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+        rendered = sd_install.platform_homes(self.home, dict(os.environ))[0].target_for("sd-probe")
+        before = rendered.read_bytes()
+        (checkout / "skills" / "sd-probe" / sd_install.SKILL_FILE).write_text(
+            "---\nname: sd-probe\n---\n\nchanged\n", encoding="utf-8")
+        (self.home / ".local" / "bin" / "sd").unlink()
+        out = io.StringIO()
+        with unittest.mock.patch("os.symlink", side_effect=OSError(28, "No space left on device")):
+            self.assertEqual(sd_install.cmd_user(ctx, out), 1)
+        self.assertEqual(rendered.read_bytes(), before, "the failed run's render stayed")
+
+    def test_a_link_row_without_a_string_path_does_not_stop_the_install(self):
+        """Review round 2: the retarget map reads only rows whose path is a string."""
+        checkout = self.checkout_with_commands("sd")
+        ctx = self.context_for(checkout)
+        sd_install.write_receipt(ctx.receipt, {"schema": sd_install.RECEIPT_SCHEMA, "owned": [
+            {"kind": "link", "target": "/old/bin/sd"}, {"kind": "link", "path": ["x"], "target": "/old/bin/sd"}]})
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(ctx, out), 0, out.getvalue())
+
+    def test_a_failure_after_linking_puts_the_links_back(self):
+        """Review round 3: until the receipt is written, a later failure undoes the moved and the new links."""
+        work = self.checkout_with_commands("sd", name="work")
+        serving = self.checkout_with_commands("sd", "sd-new")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        with unittest.mock.patch.object(sd_install, "install_hook", side_effect=OSError(13, "Permission denied")):
+            with self.assertRaises(OSError):
+                sd_install.cmd_user(self.context_for(serving), io.StringIO())
+        bin_dir = self.home / ".local" / "bin"
+        self.assertEqual((bin_dir / "sd").resolve(), (work / "bin" / "sd").resolve(), "the moved link stayed moved")
+        self.assertFalse((bin_dir / "sd-new").is_symlink(), "the new link stayed")
+        self.assertEqual(self.receipt["checkout"], str(work))
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+
+    def test_a_retarget_leaves_every_other_file_beside_the_link(self):
+        """Review round 3: the spare link's name is new to the call, so a file at any sibling name stays."""
+        work = self.checkout_with_commands("sd", name="work")
+        serving = self.checkout_with_commands("sd")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        bin_dir = self.home / ".local" / "bin"
+        mine = bin_dir / ".sd.sd-install"
+        mine.write_text("mine\n", encoding="utf-8")
+        taken = bin_dir / ".sd.sd-install-taken"
+        taken.write_text("also mine\n", encoding="utf-8")
+        with unittest.mock.patch.object(sd_install.secrets, "token_hex", side_effect=["taken", "free"]):
+            self.assertEqual(sd_install.cmd_user(self.context_for(serving), io.StringIO()), 0)
+        self.assertEqual((mine.read_text(encoding="utf-8"), taken.read_text(encoding="utf-8")), ("mine\n", "also mine\n"))
+        self.assertEqual((bin_dir / "sd").resolve(), (serving / "bin" / "sd").resolve())
+        self.assertEqual(sorted(path.name for path in bin_dir.iterdir()), [".sd.sd-install", ".sd.sd-install-taken", "sd"])
+
+    def test_a_retarget_whose_rename_fails_removes_only_its_own_spare(self):
+        bin_dir = self.home / "links"
+        bin_dir.mkdir()
+        link = bin_dir / "sd"
+        link.symlink_to("/old/bin/sd")
+        with unittest.mock.patch("os.replace", side_effect=OSError(1, "Operation not permitted")):
+            with self.assertRaises(OSError):
+                sd_install._replace_link(link, Path("/new/bin/sd"))
+        self.assertEqual(os.readlink(link), "/old/bin/sd")
+        self.assertEqual([path.name for path in bin_dir.iterdir()], ["sd"])
+
+    def test_a_link_the_receipt_owns_moves_to_the_next_checkout(self):
+        """sd:1118: the switch to a serving checkout retargets the links the last install made."""
+        work = self.checkout_with_commands("sd", "sd-review", name="work")
+        serving = self.checkout_with_commands("sd", "sd-review")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(self.context_for(serving), out), 0, out.getvalue())
+        bin_dir = self.home / ".local" / "bin"
+        for name in ("sd", "sd-review"):
+            self.assertEqual((bin_dir / name).resolve(), (serving / "bin" / name).resolve())
+        self.assertEqual(self.receipt["checkout"], str(serving))
+        self.assertEqual(
+            [row["target"] for row in self.receipt["owned"] if row.get("kind") == "link"],
+            [str(serving / "bin" / name) for name in ("sd", "sd-review")],
+        )
+
+    def test_a_move_to_the_next_checkout_leaves_one_copy_of_each_hook(self):
+        """Review round 6: the hooks the receipt recorded for the last checkout go when the next one installs."""
+        work = self.checkout_with_commands("sd", name="work")
+        serving = self.checkout_with_commands("sd")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(self.context_for(serving), out), 0, out.getvalue())
+        for command, event, matchers in sd_install.HOOK_SPECS:
+            for matcher in matchers:
+                group = next(g for g in self.settings["hooks"][event] if g["matcher"] == matcher)
+                self.assertEqual([entry["command"] for entry in group["hooks"]], [str(serving / command)], f"{event}/{matcher}")
+        self.assertEqual(
+            sorted(row["command"] for row in self.receipt["owned"] if row["kind"] == "hook"),
+            sorted({str(serving / command) for command, _, _ in sd_install.HOOK_SPECS}),
+        )
+
+    def test_a_move_to_the_next_checkout_keeps_every_hook_the_receipt_does_not_name(self):
+        work = self.checkout_with_commands("sd", name="work")
+        serving = self.checkout_with_commands("sd")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        settings = self.settings
+        foreign = [{"type": "command", "command": "~/.claude/hooks/somebody-else"},
+                   {"type": "command", "command": str(self.home / "other" / "bin" / "sd-handoff-restore")}]
+        next(g for g in settings["hooks"]["SessionStart"] if g["matcher"] == "startup")["hooks"] += foreign
+        (self.home / ".claude" / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
+        self.assertEqual(sd_install.cmd_user(self.context_for(serving), io.StringIO()), 0)
+        startup = next(g for g in self.settings["hooks"]["SessionStart"] if g["matcher"] == "startup")
+        self.assertEqual(startup["hooks"], [*foreign, {"type": "command", "command": str(serving / "bin" / "sd-handoff-restore")}])
+
+    def test_a_move_keeps_hooks_whose_command_or_matcher_is_not_a_string(self):
+        """Review round 7: the hook move reads other installers' entries of any shape."""
+        work = self.checkout_with_commands("sd", name="work")
+        serving = self.checkout_with_commands("sd")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        settings = self.settings
+        odd_entry = {"type": "command", "command": ["not", "a", "string"]}
+        odd_group = {"matcher": ["startup"], "hooks": [{"type": "command", "command": "elsewhere"}]}
+        next(g for g in settings["hooks"]["SessionStart"] if g["matcher"] == "startup")["hooks"].append(odd_entry)
+        settings["hooks"]["SessionStart"].append(odd_group)
+        (self.home / ".claude" / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(self.context_for(serving), out), 0, out.getvalue())
+        groups = self.settings["hooks"]["SessionStart"]
+        self.assertIn(odd_entry, next(g for g in groups if g["matcher"] == "startup")["hooks"])
+        self.assertIn(odd_group, groups)
+
+    def test_a_failure_before_the_receipt_prunes_nothing_of_the_last_install(self):
+        """Review round 11: renders and links the next checkout drops go only once its receipt is written."""
+        work = self.checkout_with_commands("sd", "sd-old", name="work")
+        folder = work / "skills" / "sd-old-skill"
+        folder.mkdir()
+        (folder / sd_install.SKILL_FILE).write_text("---\nname: sd-old-skill\n---\n\nold\n", encoding="utf-8")
+        self.write_paths(work, "sd-probe", "sd-old-skill")
+        serving = self.checkout_with_commands("sd")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        rendered = sd_install.platform_homes(self.home, dict(os.environ))[0].target_for("sd-old-skill")
+        self.assertTrue(rendered.is_file())
+        with unittest.mock.patch.object(sd_install, "write_receipt", side_effect=OSError(28, "No space left on device")):
+            with self.assertRaises(OSError):
+                sd_install.cmd_user(self.context_for(serving), io.StringIO())
+        self.assertTrue(rendered.is_file(), "the last install's render was pruned")
+        old = self.home / ".local" / "bin" / "sd-old"
+        self.assertEqual(old.resolve(), (work / "bin" / "sd-old").resolve(), "the last install's link was pruned")
+        self.assertEqual(self.receipt["checkout"], str(work))
+        self.assertEqual(sd_install.cmd_user(self.context_for(serving), io.StringIO()), 0)
+        self.assertFalse(rendered.exists(), "the next install did not prune")
+        self.assertFalse(old.is_symlink(), "the next install did not prune the link")
+
+    def test_a_render_that_fails_midway_leaves_the_previous_render_whole(self):
+        """Review round 14 (2): a disk-full write must not truncate a render the restore then keeps."""
+        work = self.checkout_with_commands("sd", name="work")
+        serving = self.checkout_with_commands("sd")
+        for checkout, body in ((work, "old"), (serving, "new")):
+            folder = checkout / "skills" / "sd-kept"
+            folder.mkdir()
+            (folder / sd_install.SKILL_FILE).write_text(f"---\nname: sd-kept\n---\n\n{body}\n", encoding="utf-8")
+            self.write_paths(checkout, "sd-probe", "sd-kept")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        rendered = sd_install.platform_homes(self.home, dict(os.environ))[0].target_for("sd-kept")
+        before = rendered.read_bytes()
+        real = Path.write_bytes
+
+        def disk_full(path, data):
+            if b"\nnew\n" in data:
+                with open(path, "wb") as handle:
+                    handle.write(data[: len(data) // 2])
+                raise OSError(28, "No space left on device")
+            return real(path, data)
+
+        with unittest.mock.patch.object(Path, "write_bytes", disk_full):
+            with self.assertRaises(OSError):
+                sd_install.cmd_user(self.context_for(serving), io.StringIO())
+        self.assertEqual(rendered.read_bytes(), before, "the previous render was truncated")
+        self.assertEqual(self.receipt["checkout"], str(work))
+
+    def test_a_failed_hook_removal_puts_the_added_hooks_back(self):
+        work = self.checkout_with_commands("sd", name="work")
+        serving = self.checkout_with_commands("sd")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        settings = self.home / ".claude" / "settings.json"
+        before = settings.read_bytes()
+        with unittest.mock.patch.object(sd_install, "remove_hook", side_effect=OSError(13, "Permission denied")):
+            with self.assertRaises(OSError):
+                sd_install.cmd_user(self.context_for(serving), io.StringIO())
+        self.assertEqual(settings.read_bytes(), before, "the added hooks stayed")
+
+    def test_a_failure_after_the_hook_move_puts_the_hooks_back(self):
+        work = self.checkout_with_commands("sd", name="work")
+        serving = self.checkout_with_commands("sd")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        settings = self.home / ".claude" / "settings.json"
+        before = settings.read_bytes()
+        with unittest.mock.patch.object(sd_install, "ensure_excludes_line", side_effect=OSError(13, "Permission denied")):
+            with self.assertRaises(OSError):
+                sd_install.cmd_user(self.context_for(serving), io.StringIO())
+        self.assertEqual(settings.read_bytes(), before, "the failed run's hooks stayed")
+        self.assertEqual(self.receipt["checkout"], str(work))
+
+    def test_a_link_moved_since_the_receipt_is_still_foreign(self):
+        """Only a link still at the target the receipt records is the installer's to move."""
+        work = self.checkout_with_commands("sd", "sd-review", name="work")
+        serving = self.checkout_with_commands("sd", "sd-review")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        moved = self.home / ".local" / "bin" / "sd-review"
+        moved.unlink()
+        moved.symlink_to(self.home / "elsewhere")
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(self.context_for(serving), out), 1)
+        self.assertIn(f"error: {moved} exists and is not a link to", out.getvalue())
+        self.assertEqual((self.home / ".local" / "bin" / "sd").resolve(), (work / "bin" / "sd").resolve())
+
+    def test_a_failed_retarget_puts_the_moved_links_back(self):
+        work = self.checkout_with_commands("sd", "sd-review", name="work")
+        serving = self.checkout_with_commands("sd", "sd-review")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        real = os.symlink
+        calls = []
+
+        def second_fails(target, path, *args, **kwargs):
+            calls.append(path)
+            if len(calls) == 2:
+                raise OSError(28, "No space left on device")
+            return real(target, path, *args, **kwargs)
+
+        out = io.StringIO()
+        with unittest.mock.patch("os.symlink", side_effect=second_fails):
+            self.assertEqual(sd_install.cmd_user(self.context_for(serving), out), 1)
+        self.assertIn("No space left on device", out.getvalue())
+        bin_dir = self.home / ".local" / "bin"
+        for name in ("sd", "sd-review"):
+            self.assertEqual((bin_dir / name).resolve(), (work / "bin" / name).resolve(), name)
+        self.assertEqual(self.receipt["checkout"], str(work))
+
     def test_a_symlink_loop_at_a_target_is_foreign_and_a_recorded_one_is_left(self):
         """Review finding 3, measured rather than guarded: on the interpreter
         the pack requires (`requires-python = ">=3.13"`), `Path.exists` on
@@ -3673,7 +4937,7 @@ class CodexMetadataTests(InstallerHarness):
         self.assertEqual(out.getvalue().count("left in place"), 2)
         with unittest.mock.patch.object(Path, "unlink", side_effect=OSError("synthetic recovery failure")):
             sd_install.restore_policies([(original, b"expected", None)], out)
-        self.assertIn("policy recovery failed", out.getvalue())
+        self.assertIn("render recovery failed", out.getvalue())
         self.assertEqual(original.read_bytes(), b"expected")
 
     def test_dry_run_reports_expired_trials_without_writing(self):

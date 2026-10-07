@@ -109,11 +109,14 @@ from __future__ import annotations
 
 import ast
 import dataclasses
+import functools
 import hashlib
 import itertools
 import json
 import os
 import pathlib
+import platform
+import plistlib
 import shutil
 import socket
 import subprocess
@@ -126,6 +129,7 @@ import sd_check_receipts
 import sd_check_scope
 import sd_gate_cache
 import sd_gate_slots
+import sd_gate_tools
 import sd_lib
 
 KEY_PREFIX = "sd-gate-receipt:v1:"
@@ -149,7 +153,8 @@ TOOL_FIELD = "tool"
 PACK_FIELD = "pack"
 #: Names whose bytes an offload view binds (sd:2704): what a check reaches through `make` or a script. Each refuses on a
 #: difference, as the check's own names do: `check_names` sees only `make`, not the `npm ci` or `uv sync` it runs (sd:2879).
-#: `cargo-nextest` is what `cargo nextest` runs, which `check_names` sees as `cargo` (sd:2921).
+#: `cargo-nextest` is what `cargo nextest` runs, which `check_names` sees as `cargo` (sd:2921). An opted-in check runs
+#: the pinned copies `sd_gate_tools.PINS` names first on `PATH`, so two machines bind one release's bytes (sd:2936).
 OFFLOAD_TOOLS = ("sh", "bash", "make", "python3", "git", "cc", "c++", "clang", "cargo", "cargo-nextest", "rustc", "node",
                  "npm", "uv")
 #: The folder beside a gate's worktree that holds its own copy of each `cargo-` name in `OFFLOAD_TOOLS` (sd:2921).
@@ -157,6 +162,8 @@ CARGO_SUBCOMMANDS = "cargo-subcommands"
 #: Names whose `-vV` build lines a view binds beside their bytes (sd:2881): a rustup proxy's bytes name no toolchain.
 #: Only these two: `cargo-clippy -vV` runs clippy, and `rustdoc` and `clippy-driver` answer as `rustc` does.
 VERSIONED_TOOLS = ("cargo", "rustc")
+#: macOS's own folders: a tool found here binds `developer_tools` beside its bytes, and a refusal names `system_version` (sd:2936).
+SYSTEM_FOLDERS = ("/bin/", "/sbin/", "/usr/bin/", "/usr/sbin/")
 #: The `-vV` lines that name a compiler build; `os:` and the library lines follow the machine, not the compiler.
 VERSION_KEYS = ("release", "commit-hash", "commit-date", "host", "LLVM version")
 #: Tool configuration under `HOME` that an opted-in check still reads, by path relative to `HOME`: a view binds it and
@@ -375,21 +382,13 @@ def offload_view(environment: Mapping[str, str], names: Iterable[str] = (),
     that list is not compared, and neither its value nor its digest reaches the hub (sd:2782).
     `names` are the check's own executables; one with a relative folder lives in the tree, which `inputs` binds.
     A `VERSIONED_TOOLS` name binds `tool_version` in `tree`, the check's worktree, beside its own bytes, and
-    `resolution` names its release line, or `path` where `-vV` answered nothing (sd:2881).
+    `resolution` names its release line, or `path` where `-vV` answered nothing (sd:2881), and its resolved file.
     """
     try:
         home = os.path.normpath(environment["HOME"]) if environment.get("HOME") else None
-        prefixes = sorted({home, str(pathlib.Path(home).resolve())}, key=len, reverse=True) if home else []
-
-        def portable(value: str) -> str:
-            for prefix in prefixes:
-                if value == prefix or value.startswith(prefix + os.sep):
-                    return "~" + value[len(prefix):]
-            return value
-
         search = environment.get("PATH", "")
         tools, resolution = view_tools(environment, names, tree)
-        return {"path": [portable(entry) for entry in search.split(os.pathsep) if entry], "tools": tools,
+        return {"path": [portable(entry, environment) for entry in search.split(os.pathsep) if entry], "tools": tools,
                 "resolution": resolution,
                 "python": {"sha256": _content_digest(pathlib.Path(sys.executable).resolve()), "version": sys.version},
                 "home_files": {**{name: _content_digest(pathlib.Path(home, name)) if home and pathlib.Path(home, name).is_file()
@@ -397,10 +396,19 @@ def offload_view(environment: Mapping[str, str], names: Iterable[str] = (),
                                **{f"${variable}" + (f"/{name}" if name else ""): file_state(environment.get(variable), name)
                                   for variable, name in OFFLOAD_VARIABLE_FILES}},
                 "threads": sd_gate_slots.thread_caps(environment),
-                "variables": {key: hashlib.sha256(portable(value).encode()).hexdigest() for key, value in environment.items()
+                "variables": {key: hashlib.sha256(portable(value, environment).encode()).hexdigest() for key, value in environment.items()
                               if offload_variable(key)}}
     except Exception:  # a view that cannot be named matches nothing; the hub runs the check
         return None
+
+
+def portable(value: str, environment: Mapping[str, str]) -> str:
+    """`value` with its `$HOME` prefix, as given or resolved, written as `~`, so two logins can compare equal."""
+    home = os.path.normpath(environment["HOME"]) if environment.get("HOME") else None
+    for prefix in sorted({home, str(pathlib.Path(home).resolve())}, key=len, reverse=True) if home else []:
+        if value == prefix or value.startswith(prefix + os.sep):
+            return "~" + value[len(prefix):]
+    return value
 
 
 def view_tools(environment: Mapping[str, str], names: Iterable[str] = (),
@@ -431,17 +439,80 @@ def file_state(folder: str | None, name: str) -> str:
 
 def view_tool(name: str, search: str, environment: Mapping[str, str],
               tree: pathlib.Path | None) -> tuple[str | None, str | None]:
-    """`(digest, resolution)` of `name` on `search`: None for one that does not resolve, and `resolution` None outside `VERSIONED_TOOLS`."""
+    """`(digest, resolution)` of `name` on `search`, or `(None, None)` for one that does not resolve (sd:2936).
+
+    `resolution` names how this machine found it, for a refusal: a `VERSIONED_TOOLS` release line (sd:2881), or
+    `path`, and its resolved file; a file in `SYSTEM_FOLDERS` by its path and `system_version`; any other by its
+    resolved path, `~` for `HOME`. A system file's digest binds `developer_tools` too, since a `/usr/bin/cc` shim is
+    the same bytes under every Command Line Tools version; it does not bind the macOS version, which only the
+    refusal names (decision log in docs/work/2026-10-07-gate-pinned-tools/design.md).
+    """
     found = shutil.which(name, path=search)
     if not found:
         return None, None
     digest = _content_digest(found)
+    real = os.path.realpath(found)
     if name not in VERSIONED_TOOLS:
-        return digest, None
+        if not real.startswith(SYSTEM_FOLDERS):
+            return digest, portable(real, environment)
+        tools = developer_tools(environment)
+        return f"{digest} {hashlib.sha256(tools.encode()).hexdigest()}", f"{real}; {system_version(environment)}"
     version = tool_version(found, environment, tree) if tree else None
+    where = portable(real, environment)  # two rustup installs differ in proxy bytes, not in `-vV` (sd:2936)
     if version is None:
-        return digest, "path"
-    return f"{digest} {hashlib.sha256(version.encode()).hexdigest()}", version.splitlines()[0]
+        return digest, f"path at {where}"
+    return f"{digest} {hashlib.sha256(version.encode()).hexdigest()}", f"{version.splitlines()[0]} at {where}"
+
+
+def system_version(environment: Mapping[str, str]) -> str:
+    """What a refusal names for a system file: the macOS version and build, then `developer_tools` (sd:2936)."""
+    return "; ".join(part for part in (macos_version(), developer_tools(environment)) if part)
+
+
+def developer_tools(environment: Mapping[str, str]) -> str:
+    """The developer tools `xcrun` runs, `DEVELOPER_DIR` first: what a system file binds beside its bytes (sd:2936)."""
+    return developer_version(environment.get("DEVELOPER_DIR") or "")
+
+
+@functools.cache
+def macos_version() -> str:
+    """`macOS <version> (<build>)`, asked once per process, or this platform elsewhere; named, never bound (sd:2936)."""
+    if sys.platform != "darwin":
+        return platform.platform()
+    return f"macOS {system_answer(['/usr/bin/sw_vers', '-productVersion'])} ({system_answer(['/usr/bin/sw_vers', '-buildVersion'])})"
+
+
+@functools.cache
+def developer_version(developer: str) -> str:
+    """`developer_tools` for one developer folder, asked once per process; a part that does not answer reads `unknown`.
+
+    Each command is named by its absolute path: a gate's `PATH` (a fixture's `/bin:/usr/bin`, a launchd lane's) must
+    not decide whether `pkgutil` in `/usr/sbin` answers, or two gates on one machine bind two versions. Off macOS a
+    system compiler is the file itself, not a shim, so its bytes suffice and this is empty.
+    """
+    if sys.platform != "darwin":
+        return ""
+    developer = os.path.normpath(developer or system_answer(["/usr/bin/xcode-select", "-p"]))
+    # An Xcode developer folder is `Xcode.app/Contents/Developer`, beside the app's `version.plist`;
+    # `DEVELOPER_DIR` may also name the app itself, as `xcode-select -s` takes it.
+    plist = (pathlib.Path(developer, "Contents") if developer.endswith(".app") else pathlib.Path(developer).parent)
+    try:
+        with open(plist / "version.plist", "rb") as stream:
+            plist = plistlib.load(stream)
+        return f"Xcode {plist.get('CFBundleShortVersionString')} ({plist.get('ProductBuildVersion')})"
+    except (OSError, ValueError):
+        clt = system_answer(["/usr/sbin/pkgutil", "--pkg-info=com.apple.pkg.CLTools_Executables"])
+        return "CLT " + next((line.split(":", 1)[1].strip() for line in clt.splitlines() if line.startswith("version:")),
+                             "unknown")
+
+
+def system_answer(argv: list[str]) -> str:
+    """`argv`'s stripped output, or `unknown` when it fails."""
+    try:
+        result = subprocess.run(argv, text=True, capture_output=True, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    return result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else "unknown"
 
 
 def tool_version(found: str, environment: Mapping[str, str], tree: pathlib.Path) -> str | None:
@@ -507,16 +578,17 @@ def cargo_subcommands(caller: Mapping[str, str], tree: pathlib.Path, root: pathl
     unbound subcommand such as `cargo-llvm-cov` stays unavailable. The caller's folder passes `gate_path`, so a
     relative one or one inside `root` gives nothing. Nothing here writes or removes anything in the pinned
     `CARGO_HOME`. `caller` is the environment before the pins; a `whole` gate (`offload_run`'s `mode`) keeps the
-    caller's `CARGO_HOME` and gets nothing.
+    caller's `CARGO_HOME` and gets nothing. A name a pin provides is skipped: its copy is on `PATH` (sd:2936).
     """
     own = caller.get("CARGO_HOME") or (os.path.join(caller["HOME"], ".cargo") if caller.get("HOME") else None)
     folders = gate_path(os.path.join(own, "bin"), root) if own and mode != "whole" else []
     if not folders:
         return
+    pinned = sd_gate_tools.provided()  # the pinned copy runs, not the caller's (sd:2936)
     for name in OFFLOAD_TOOLS:
         source = pathlib.Path(folders[0], name)
         with suppress(OSError):  # no copy: the check finds no such subcommand, and the view binds what it finds
-            if name.startswith("cargo-") and source.is_file():
+            if name.startswith("cargo-") and name not in pinned and source.is_file():
                 (tree.parent / CARGO_SUBCOMMANDS).mkdir(exist_ok=True)
                 shutil.copy2(source, tree.parent / CARGO_SUBCOMMANDS / name)
 
@@ -549,12 +621,17 @@ def offload_pins(environment: Mapping[str, str]) -> dict[str, str]:
     (`OFFLOAD_VARIABLE_FILES`), since a check could write one there: a check that needs
     a git identity sets its own. npm refuses one file as both its user and its global configuration, so the global
     one is a path in that folder too. `sd_gate_slots.CPU_VARIABLES` read `OFFLOAD_THREADS`, which a holder lowers
-    only on a machine whose share of the cores is smaller.
+    only on a machine whose share of the cores is smaller. `PATH` starts with the gate's pinned tool copies
+    (`sd_gate_tools.path_entries`), then its links to the Command Line Tools' `git` and `make`
+    (`sd_gate_tools.clt_links`), each dropped from the rest first, so a second pinning changes nothing (sd:2936).
     """
     folder = sd_gate_cache.cache_root(environment) / "tool-config"
+    pinned = [*sd_gate_tools.path_entries(environment), sd_gate_tools.clt_links(environment)]
+    rest = [entry for entry in environment.get("PATH", "").split(os.pathsep) if entry and os.path.normpath(entry) not in pinned]
     return {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1", "NPM_CONFIG_USERCONFIG": os.devnull,
             "NPM_CONFIG_GLOBALCONFIG": str(folder / "npmrc"), "PIP_CONFIG_FILE": os.devnull,
-            "CARGO_HOME": str(folder / "cargo"), **dict.fromkeys(sd_gate_slots.CPU_VARIABLES, OFFLOAD_THREADS)}
+            "CARGO_HOME": str(folder / "cargo"), "PATH": os.pathsep.join([*pinned, *rest]),
+            **dict.fromkeys(sd_gate_slots.CPU_VARIABLES, OFFLOAD_THREADS)}
 
 
 def opted_in(database: pathlib.Path | None, root: pathlib.Path) -> bool:
@@ -998,12 +1075,15 @@ def from_receipts(database: pathlib.Path | None, gated: Worktree, identity: dict
     This machine's own receipt first; a reuse on a satellite writes the offload row it lacks (sd:2704).
     Then `offload`, the hub's: `require` answers from a satellite's offload receipt or with
     `offload_refused`, and never runs; `fallback` tries one after its own receipt and names its miss.
-    A bound name in the pinned `CARGO_HOME/bin` answers first, with a failure that names it (`pinned_subcommands`).
+    A bound name in the pinned `CARGO_HOME/bin`, or a missing pinned tool copy in an opted-in gate (`sd_gate_tools.missing`),
+    answers first, with a failure that names it (`pinned_subcommands`).
     An accepted one carries `satellite`. A recorded pass writes the offload row too (`record_gate_pass`).
     """
     import sd_gate_run  # noqa: PLC0415 -- it imports this module
 
-    if (pinned := pinned_subcommands(gated.environment, gated.mode)) is not None:  # whole in `stderr` (sd:2921)
+    pinned = pinned_subcommands(gated.environment, gated.mode) or (  # whole in `stderr` (sd:2921, sd:2936)
+        sd_gate_tools.missing(gated.environment) if gated.mode != "whole" else None)
+    if pinned is not None:
         return sd_gate_run.check_reading(None, pinned, pinned), None
     key = receipt_key(gated.root, gated.head, gated.content)
     found, miss = examine(database, key, identity) if reuse and database and offload != "require" else (None, None)
