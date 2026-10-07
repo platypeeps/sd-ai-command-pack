@@ -1463,6 +1463,9 @@ MERGED_AGED_DAYS = 14
 #: and uncapped those rows would fill all ten slots (review-925 N-4).
 MERGED_PENDING_CAP = 3
 
+#: The merged class, which `merged_review_change` counts for `open threads`.
+MERGED_CHECK = "merged-pr-review-unacknowledged"
+
 #: The enumeration. This tuple is the *only* answer to "which checks exist":
 #: the renderer iterates it, the ranking reads `rank` off it, the banner reads
 #: `abnormal` off it and `open threads` reads `source` off it. Adding a check
@@ -1503,7 +1506,7 @@ CLASSES = (
           "an indexed issue the index says is waiting on you"),
     Class("pr-needs-action", "p", False, 60, "open pull requests",
           "an open pull request waiting on a review or a merge"),
-    Class("merged-pr-review-unacknowledged", "p", False, 65,
+    Class(MERGED_CHECK, "p", False, 65,
           f"merged PRs ({MERGED_REVIEW_DAYS} days) + local acknowledgements",
           f"a pull request merged in the last {MERGED_REVIEW_DAYS} days with a review "
           "finding nobody answered",
@@ -3126,6 +3129,16 @@ def _merged_review_rows(
     if merged.get("truncated"):
         reasons.append(f"the merged list stopped at its limit of {merged.get('limit')}, "
                        "so some pull requests in the window were not read")
+    listed, undated = _merged_window(merged, day)
+    if undated:
+        reasons.append(f"GitHub gave no merge date for {', '.join(undated)}")
+    return _unanswered_rows(MERGED_CHECK, root, merged.get("repo"), listed, unchecked, reasons)
+
+
+def _merged_window(
+    merged: dict[str, Any], day: datetime.date,
+) -> tuple[list[tuple[dict[str, Any], dict[str, str], str]], list[str]]:
+    """The pull requests merged in the window ending `day`, as `_unanswered_rows` lists them, and the undated."""
     listed, undated = [], []
     for pull in merged.get("pull_requests") or []:
         when = _merged_on(pull)
@@ -3137,10 +3150,44 @@ def _merged_review_rows(
             continue
         merge = {"head": str(pull.get("head_oid") or ""), "merge": str(pull.get("merge_oid") or "")}
         listed.append((dict(pull, age_days=age), merge, f", merged {age} day{_s(age)} ago"))
-    if undated:
-        reasons.append(f"GitHub gave no merge date for {', '.join(undated)}")
-    return _unanswered_rows("merged-pr-review-unacknowledged", root, merged.get("repo"),
-                            listed, unchecked, reasons)
+    return listed, undated
+
+
+def merged_review_change(root: pathlib.Path, merged: dict[str, Any], day: datetime.date,
+                         now: datetime.datetime, inventory: "Inventory") -> dict[str, Any]:
+    """The merged class's row count and its change from a day earlier (sd:1179).
+
+    Unbounded and report-only, the class grew to 219 rows unnoticed; the
+    operator's ruling (2026-09-30) is a count plus a change warning, with no
+    ceiling and nothing that blocks. Stateless, as `late_reviews` is: this
+    tool writes nothing, so the earlier count is derived, not remembered. It
+    shifts the window back a day and leaves out acknowledgements recorded in
+    the 24 hours before `now`. A review posted within the day still counts a
+    day earlier, so the change can understate an increase. An unchecked
+    class gets no change: its count is a floor.
+    """
+    count = sum(1 for row in inventory.rows if row["check"] == MERGED_CHECK)
+    if MERGED_CHECK in inventory.unchecked:
+        return {"count": count, "day_before": None, "change": None,
+                "unchecked": inventory.unchecked[MERGED_CHECK]}
+    ack = sd_lib.sibling("sd_review_ack", "sd-review-ack")
+    record, broken = ack.read_store(root)
+    cutoff = now - datetime.timedelta(days=1)
+    earlier = {key: row for key, row in record.items() if not _recorded_after(row, cutoff)}
+    before = day - datetime.timedelta(days=1)
+    pulls = [pull for pull in merged.get("pull_requests") or [] if (_merged_on(pull) or day) <= before]
+    listed, _ = _merged_window({"pull_requests": pulls}, before)
+    then = len(_read_unanswered_rows(ack, MERGED_CHECK, root, merged.get("repo"), listed, {}, None,
+                                     (earlier, broken)))
+    return {"count": count, "day_before": then, "change": count - then, "unchecked": ""}
+
+
+def _recorded_after(row: dict[str, Any], cutoff: datetime.datetime) -> bool:
+    """Whether an acknowledgement's `at` is later than `cutoff`; one with no readable `at` is older."""
+    try:
+        return datetime.datetime.fromisoformat(str(row.get("at") or "")) > cutoff
+    except (TypeError, ValueError):
+        return False
 
 
 def expired_reviews(root: pathlib.Path, merged: dict[str, Any], day: datetime.date) -> dict[str, Any]:
@@ -3670,6 +3717,9 @@ def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str
     }
     result["late_reviews"] = late_reviews(root, result["merged_pull_requests"], datetime.date.today())
     inventory = actionable_inventory(root, result, environ=environ)
+    result["merged_review_count"] = merged_review_change(
+        root, result["merged_pull_requests"], datetime.date.today(),
+        datetime.datetime.now(datetime.timezone.utc), inventory)
     result["inventory"] = {"rows": inventory.rows, "unchecked": inventory.unchecked}
     result["abnormalities"] = banner(inventory)
     # `actions` is the uncapped list and `pending` is the first ten of it after
@@ -3940,7 +3990,8 @@ def _render_next(rows: list[dict[str, Any]], write: Any) -> None:
 
 
 def _render_threads(rows: list[dict[str, Any]], write: Any,
-                    expired: dict[str, Any] | None = None, late: dict[str, Any] | None = None) -> None:
+                    expired: dict[str, Any] | None = None, late: dict[str, Any] | None = None,
+                    change: dict[str, Any] | None = None) -> None:
     """Per-source counts over the same list, and what was not swept.
 
     The counts give `pending`'s cap a denominator per source. The exclusions
@@ -3959,11 +4010,24 @@ def _render_threads(rows: list[dict[str, Any]], write: Any,
     write("  not swept, and named so the counts above are not read as total:\n")
     for reason in EXCLUDED:
         write(f"    - {reason}\n")
+    if change:
+        _render_change(change, write)
     if late:
         _render_unread("late", late, f"merged in the last {late['days'][1]} days are unread", write)
     if expired:
         first, last = expired["days"]
         _render_unread("expired", expired, f"merged {first}-{last} days ago expired unanswered", write)
+
+
+def _render_change(counted: dict[str, Any], write: Any) -> None:
+    """The merged class's count and its change from a day earlier (sd:1179)."""
+    if counted["change"] is None:
+        write(f"  {MERGED_CHECK}: at least {counted['count']} row(s), change unknown ({counted['unchecked']})\n")
+        return
+    moved = counted["change"]
+    said = ("unchanged from" if not moved
+            else f"{'up' if moved > 0 else 'down'} {abs(moved)} from {counted['day_before']}")
+    write(f"  {MERGED_CHECK}: {counted['count']} row(s), {said} a day earlier\n")
 
 
 def _render_unread(label: str, counted: dict[str, Any], said: str, write: Any) -> None:
@@ -3987,7 +4051,8 @@ def render(result: dict[str, Any], stream: TextIO) -> None:
     _render_banner(result["abnormalities"], write)
     _render_pending(rows, write)
     _render_next(rows, write)
-    _render_threads(rows, write, result.get("expired_reviews"), result.get("late_reviews"))
+    _render_threads(rows, write, result.get("expired_reviews"), result.get("late_reviews"),
+                    result.get("merged_review_count"))
     _render_work(result["work"], write)
     _render_contributions(result.get("contributions"), write)
 

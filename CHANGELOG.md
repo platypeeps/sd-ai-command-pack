@@ -187,6 +187,14 @@
   open pull request. The lines go to stderr and the receipt's `warnings`. It
   refuses nothing, and a read that fails is a warning of its own.
 
+- **`sd-status` counts the merged-review rows and their change (sd:1179).**
+  The report-only class `merged-pr-review-unacknowledged` reached 219 rows
+  with nothing saying it grew. `open threads` now prints its row count and the
+  change from a day earlier, and `--json` carries both as
+  `merged_review_count`. It is stateless: the earlier count shifts the window
+  back a day and leaves out acknowledgements recorded in the last 24 hours.
+  It warns only, with no ceiling (operator ruling 2026-09-30).
+
 - **`sd-status` counts late review findings (sd:1178).** A review posted
   after the merge reaches no merge gate: 19 of 219 merged pull requests got
   their review that way. `open threads` now prints a `late:` line counting

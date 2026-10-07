@@ -204,6 +204,15 @@ Above `expired:`, a `late:` line counts the unread findings on pull requests mer
 It reads the window's own list, so it costs no extra `gh` call, and `sd-review-ack` clears a finding there as it clears the row.
 It warns only; `--json` carries it as `late_reviews`.
 
+An unbounded report-only class is not a signal: this one reached 219 rows unnoticed (sd:1179).
+So `open threads` also prints the class's row count and its change from a day earlier.
+The line reads `merged-pr-review-unacknowledged: 12 row(s), up 3 from 9 a day earlier`.
+It warns only, by the operator's ruling of 2026-09-30: no ceiling, and nothing blocks `sd-ship`.
+It is stateless like `late:`. The earlier count shifts the window back a day and leaves out acknowledgements recorded in the last 24 hours.
+A review posted within the day counts a day earlier too, so the change can understate a rise.
+When the class is `unchecked`, the count is a floor and the line says the change is unknown.
+`--json` carries it as `merged_review_count`.
+
 The days are counted from the UTC calendar day GitHub records the merge on to
 the local date `sd-status` runs on. So the edge can move by the local offset
 from UTC: in California a pull request merged in the evening falls on the next
@@ -394,7 +403,8 @@ so capping it would make the cap the interface.
 The `--json` schema is version **3**. Beyond the section keys it carries
 `merged_pull_requests` (the pull requests merged inside the review window, with
 the findings each carries), `expired_reviews` (the `expired:` count, its
-days, its pull requests and why it is short, if it is), `late_reviews` (the `late:` count, in the same shape), `inventory` (`rows` plus the `unchecked` map),
+days, its pull requests and why it is short, if it is), `late_reviews` (the `late:` count, in the same shape), `merged_review_count`
+(the merged class's row count and its change from a day earlier), `inventory` (`rows` plus the `unchecked` map),
 `abnormalities`, `actions` — the uncapped inventory, of which `pending` is the
 first ten after each class's `pending_cap` (`pending_rows`) — and `next`. It
 has no top-level `pending` key, and the two nested ones are something else

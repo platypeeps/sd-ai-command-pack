@@ -5100,6 +5100,49 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
         self.assertIn("  late: 4 review finding(s) on 3 pull request(s) merged in the last 14 days "
                       "are unread: #0, #2, #14\n", out.getvalue())
 
+    def test_the_count_carries_its_change_from_a_day_earlier(self) -> None:
+        """sd:1179, operator ruling 2026-09-30: count plus change warning, no ceiling.
+
+        Stateless, as sd:1178's go D: the day-earlier count shifts the window
+        back a day and leaves out acknowledgements recorded since. #0 merged
+        today, #15 and #16 aged out, and #4 was answered within the day; #3 stands.
+        """
+        ack = status.sd_lib.sibling("sd_review_ack_change", "sd-review-ack")
+        rows = ack.findings(4, [{"author": "bot", "commit_id": "", "body":
+                                 "| File | Summary |\n|---|---|\n"
+                                 "| `bin/a.py` | Moderate finding (1 vote): wrong. |\n"}], [])
+        ack.acknowledge(self.repo, rows[0], "dismissed", "the reviewer misread the diff")
+        pulls = [self.merged(0, 0, ["n0"]), self.merged(3, 3, ["a3"]),
+                 self.merged(4, 4, [rows[0]["id"]]), self.merged(15, 15, ["a15"]),
+                 self.merged(16, 15, ["a16"])]
+        merged = {"repo": "acme/widget", "pull_requests": pulls}
+        inventory = self.found(*pulls)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        change = status.merged_review_change(self.repo, merged, self.TODAY, now, inventory)
+        self.assertEqual({"count": 2, "day_before": 4, "change": -2, "unchecked": ""}, change)
+        # Recorded more than a day before `now`, the answer stood a day earlier too.
+        later = status.merged_review_change(self.repo, merged, self.TODAY,
+                                            now + datetime.timedelta(days=2), inventory)
+        self.assertEqual({"count": 2, "day_before": 3, "change": -1, "unchecked": ""}, later)
+        stopped = dict(merged, truncated=True, limit=500)
+        short = status.merged_review_change(self.repo, stopped, self.TODAY, now,
+                                            self.found(*pulls, truncated=True, limit=500))
+        self.assertEqual((2, None, None), (short["count"], short["day_before"], short["change"]))
+        self.assertIn("stopped at its limit of 500", short["unchecked"])
+        out = io.StringIO()
+        for counted in (change, dict(change, day_before=2, change=0), dict(change, count=5, change=1), short):
+            status._render_threads([], out.write, change=counted)
+        said = out.getvalue()
+        self.assertIn(f"  {self.CHECK}: 2 row(s), down 2 from 4 a day earlier\n", said)
+        self.assertIn(f"  {self.CHECK}: 2 row(s), unchanged from a day earlier\n", said)
+        self.assertIn(f"  {self.CHECK}: 5 row(s), up 1 from 4 a day earlier\n", said)
+        self.assertIn(f"  {self.CHECK}: at least 2 row(s), change unknown (the merged list stopped", said)
+
+    def test_the_json_report_carries_the_count(self) -> None:
+        """sd:1179: `--json` carries the count and its change as `merged_review_count`."""
+        counted = self.report()["merged_review_count"]
+        self.assertEqual({"count", "day_before", "change", "unchecked"}, set(counted))
+
     def test_the_window_holds_day_thirteen_and_fourteen_and_drops_day_fifteen(self) -> None:
         inventory = self.found(self.merged(13, 13, ["a13"]), self.merged(14, 14, ["a14"]),
                                self.merged(15, 15, ["a15"]))
@@ -5350,7 +5393,8 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
                     "requests merged inside the review window, with the findings each "
                     "carries), `expired_reviews` (the `expired:` count, its days, its pull "
                     "requests and why it is short, if it is), `late_reviews` (the `late:` "
-                    "count, in the same shape), `inventory` (`rows` plus the `unchecked` map), "
+                    "count, in the same shape), `merged_review_count` (the merged class's row "
+                    "count and its change from a day earlier), `inventory` (`rows` plus the `unchecked` map), "
                     "`abnormalities`, "
                     "`actions` — the uncapped inventory, of which `pending` is the first "
                     f"{_word(limit)} after each class's `pending_cap` (`pending_rows`) — and "
