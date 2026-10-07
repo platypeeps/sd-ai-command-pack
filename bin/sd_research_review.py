@@ -4,8 +4,10 @@
 This checks the things a script can decide: that every rendered document carries
 a provenance block, closes with a Status section separating what was verified
 from what was not, and is rendered from a source no newer than its build; that
-exactly one configured document carries the `START HERE — ` title; and that the
-repository's `CLAUDE.md` has not drifted from the pack's template. It cannot
+exactly one configured document carries the `START HERE — ` title; that the
+repository's `CLAUDE.md` has not drifted from the pack's template; and that each
+map under `20-map/` carries stable row IDs and a gaps section, which warns
+rather than fails. It cannot
 judge whether a claim is true — that is the other half, and it is printed as a
 checklist rather than pretending the green ticks cover it.
 
@@ -571,6 +573,80 @@ def main_document(repo, docs):
     return bad
 
 
+#: Where `references/conventions.md` puts maps: the structured ledgers.
+MAP_DIR = "20-map"
+
+#: A stable row ID: a short capital prefix and a number, `C01`, `G-3`, `I1.2`.
+ROW_ID = re.compile(r"[A-Z]{1,4}-?\d+(?:\.\d+)*")
+
+#: A heading that names the map's gaps: `## Gaps`, `## 6. Gaps between ...`.
+GAPS_HEADING = re.compile(r"#{2,6}\s.*\bgaps?\b", re.I)
+
+TABLE_RULE = re.compile(r"\s*\|?\s*:?-{3,}")
+
+
+def unfenced(text):
+    """The lines outside code fences; a fenced line reads as blank."""
+    out, fence = [], False
+    for line in text.split("\n"):
+        if FENCE_LINE.match(line):
+            fence = not fence
+            line = ""
+        out.append("" if fence else line)
+    return out
+
+
+def first_columns(lines):
+    """The first-column cells of each table body, markup stripped."""
+    tables: list[list[str]] = []
+    body: list[str] | None = None
+    for i, line in enumerate(lines):
+        previous = lines[i - 1] if i else ""
+        if body is not None and line.lstrip().startswith("|"):
+            body.append(line.split("|")[1].strip(" *`"))
+            continue
+        body = None
+        if TABLE_RULE.match(line) and previous.lstrip().startswith("|"):
+            body = []
+            tables.append(body)
+    return tables
+
+
+def map_ledgers(repo):
+    """Each map under `20-map/` keys a ledger by stable row IDs and names its gaps.
+
+    sd:1835 and sd:1836, rulings #6985 and #6986. A ledger whose rows have IDs
+    is one later documents can cite row by row; a map that names its gaps has
+    checked its own completeness. Which table is the ledger is not mechanical,
+    so one table keyed by IDs satisfies the first half.
+
+    Warnings, not failures: the rulings make both required without saying they
+    fail the review, and every research repo predates them. So this returns 0.
+    """
+    folder = os.path.join(repo, MAP_DIR)
+    if not os.path.isdir(folder):
+        return 0
+    maps = sorted(name for name in os.listdir(folder) if name.endswith(".md"))
+    clean = True
+    for name in maps:
+        with open(os.path.join(folder, name), encoding="utf-8", errors="replace") as handle:
+            lines = unfenced(handle.read())
+        label = f"{MAP_DIR}/{name}"
+        if not any(cells and all(ROW_ID.fullmatch(c) for c in cells)
+                   for cells in first_columns(lines)):
+            clean = False
+            print(f"  WARN {label}: no table keyed by stable row IDs (C01, C02, ...)"
+                  " -- number the ledger's rows so other documents can cite them")
+        if not any(GAPS_HEADING.match(line) for line in lines):
+            clean = False
+            print(f"  WARN {label}: no gaps section -- name what the map does not"
+                  " cover under a heading with the word `Gaps`")
+    if maps and clean:
+        print(f"  ok   {MAP_DIR}/: {len(maps)} map(s), each with stable row IDs "
+              "and a gaps section")
+    return 0
+
+
 NOT_A_RESEARCH_REPO = 2
 """`main()`'s exit when the cwd has no `research.conf.py` (sd:10 requirement 13).
 
@@ -624,7 +700,8 @@ def check(repo):
 
     if not bad:
         print(f"  ok   {len(docs)} document(s): provenance, Status, build freshness")
-    return bad + main_document(repo, docs) + template_drift(repo) + work_items(repo)
+    return (bad + main_document(repo, docs) + template_drift(repo)
+            + map_ledgers(repo) + work_items(repo))
 
 
 CHECKLIST = """
