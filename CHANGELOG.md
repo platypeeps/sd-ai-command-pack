@@ -12,6 +12,15 @@
   Unset means on wherever `jev` can answer; `0` switches a stage off. CONTRIBUTING.md says what each sends.
   The test runner switches both stages off and pins `JEV_METER=0`, `JEV_CORPUS=0` and `JEV_TRACES_URL=0`.
 
+- **`sd providers precision` reports each reviewer's precision from ship receipts (sd:1832, sd:1788 asks 1 and 2).**
+  It reads every local review finding from the newest ship receipt of each branch and the accepted adjudications beside it, and writes nothing.
+  Each finding gets an outcome: `rebutted` or `parked` from its adjudication; `fixed` when a later head was reviewed; `undecided` when neither; `advisory` when the review did not block.
+  `fixed` is inferred: a commit that answers a different finding reads the same.
+  The table shows outcome counts and precision, (fixed + parked) / (fixed + parked + rebutted), per provider and severity.
+  `--json` adds one row per finding with its receipt, PR, item and rebuttal reason; `--repository` and `--since` narrow the rows.
+  Reviews run outside `sd-ship` leave no receipt and are not counted.
+  The reviewer order does not read precision yet (sd:1788 ask 3).
+
 - **`sd task add --ref <source>:<id>` files one row per occurrence (sd:1902).**
   A second add with the same reference updates that row and keeps its status, so a retried delivery never reopens done work.
   A new reference, such as the next run's `job:repo-sync:43`, files a new row.
@@ -1350,6 +1359,15 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **`sd-author` and `sd-topic-radar` carry the writing pack's drafting, research and ideation rules (sd:1659).**
+  The operator ruled on 2026-09-30 that the pack owns all writing skills; this ports what `sdw-draft`, `sdw-research` and `sdw-ideate` had and the pack did not.
+  `sd-author` marks how and when each claim was established, carries that certainty into prose, and sources the remedy as well as the problem.
+  Without remedy evidence, the prescription becomes a stated practice or a proposal, not a finding.
+  Its review adds a fact-check that counts only with a ledger, an optional cross-model hostile review, and stale-review reconciliation.
+  `sd-topic-radar` reads the user's own ratings to steer generation but not scoring, never proposes a declined idea again, and treats a newsletter item as a prompt.
+  A fatal component keeps a candidate out of the top group, and an optional cross-model challenge may only lower a score.
+  Paths, stores and the vault filing step stay in `sd-writing-pack`; retiring its copies is a separate change there.
 
 - **The default review severity floor is `high` (sd:1657).**
   A repository whose `.github/sd-review.json` names no `severity_floor` blocks on `high` findings only, not `medium`.

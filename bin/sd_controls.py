@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import sd_handoff_rows
+import sd_review_precision
 from sd_work import WorkRefusal
 
 #: What the bulk apply records as the acting program, beside the login name
@@ -186,3 +187,5 @@ def register(groups: Any) -> None:
                     command.add_argument("--" + option, required=True)
                 command.add_argument("--exit-code", type=int, required=True)
                 command.add_argument("--offset", type=int, default=0)
+        if name == "providers":
+            sd_review_precision.register_precision(verbs)
