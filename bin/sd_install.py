@@ -2928,6 +2928,26 @@ def _put_back(ctx: Context, original: str, receipt: bytes | None, commit: str, o
           "and rendered from it again.", file=out)
 
 
+@contextmanager
+def serving_lock(tree: Path, dry_run: bool = False):
+    """Hold `<tree>.lock`, beside the serving tree, for one whole move of it; a dry run takes none.
+
+    Two `make setup` runs at once each read the slot `.venv` did not link
+    to, built it together and published it while the other still wrote it
+    (review round 15). The hold spans the fetch, the checkout, the build,
+    the render and any put-back, so the second run waits, then starts from
+    what the first left. It is beside the tree, so `--verify` never sees it,
+    and the kernel drops it with the process, so nothing cleans it up.
+    """
+    if dry_run:
+        yield
+        return
+    tree.parent.mkdir(parents=True, exist_ok=True)
+    with open(tree.with_name(f"{tree.name}.lock"), "a", encoding="utf-8") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        yield
+
+
 def cmd_pull_serving(ctx: Context, out) -> int:
     """`--pull` in a serving tree: detach at the exact commit `origin/main` names, then re-render (sd:1118).
 
@@ -2936,15 +2956,16 @@ def cmd_pull_serving(ctx: Context, out) -> int:
     commit and `--verify` keeps comparing against it. `cmd_user` records the
     commit it replaced as `previousCommit`, which `--rollback` returns to.
     """
-    code, _, err = _git(ctx, ["fetch", "--quiet", "origin"], timeout=PULL_TIMEOUT)
-    if code:
-        print(f"error: git fetch origin failed:\n{err}", file=out)
-        return 1
-    code, target, err = _git(ctx, ["rev-parse", "--verify", "--quiet", "refs/remotes/origin/main^{commit}"])
-    if code or not target:
-        print(f"error: origin/main does not name a commit after the fetch{': ' + err if err else ''}", file=out)
-        return 1
-    return _activate(ctx, target, out)
+    with serving_lock(ctx.checkout, ctx.dry_run):
+        code, _, err = _git(ctx, ["fetch", "--quiet", "origin"], timeout=PULL_TIMEOUT)
+        if code:
+            print(f"error: git fetch origin failed:\n{err}", file=out)
+            return 1
+        code, target, err = _git(ctx, ["rev-parse", "--verify", "--quiet", "refs/remotes/origin/main^{commit}"])
+        if code or not target:
+            print(f"error: origin/main does not name a commit after the fetch{': ' + err if err else ''}", file=out)
+            return 1
+        return _activate(ctx, target, out)
 
 
 def cmd_pull(ctx: Context, out) -> int:
@@ -3001,29 +3022,30 @@ def cmd_rollback(ctx: Context, out) -> int:
     activation like any other, so the commit it leaves becomes the new
     `previousCommit`, and a second `--rollback` undoes the first.
     """
-    live = git_context(ctx.checkout)
-    if live["branch"] != "HEAD":
-        print(
-            f"error: {ctx.checkout} is on {live['branch'] or '(unknown)'}, not a detached serving "
-            "tree; --rollback refuses to move it.",
-            file=out,
-        )
-        return 1
-    if live["dirty"]:
-        print("error: serving tree has uncommitted changes; --rollback refuses.", file=out)
-        return 1
-    target = read_receipt(ctx.receipt).get("previousCommit")
-    if not isinstance(target, str) or not target:
-        print(f"error: the receipt at {ctx.receipt} records no previousCommit; nothing to roll back to.", file=out)
-        return 1
-    code, _, _ = _git(ctx, ["cat-file", "-e", f"{target}^{{commit}}"])
-    if code:
-        print(f"error: previousCommit {target} is not a commit in {ctx.checkout}; fetch it or pull instead.", file=out)
-        return 1
-    if ctx.dry_run:
-        print(f"would detach {ctx.checkout} at {target} and re-render", file=out)
-        return 0
-    return _activate(ctx, target, out)
+    with serving_lock(ctx.checkout, ctx.dry_run):
+        live = git_context(ctx.checkout)
+        if live["branch"] != "HEAD":
+            print(
+                f"error: {ctx.checkout} is on {live['branch'] or '(unknown)'}, not a detached serving "
+                "tree; --rollback refuses to move it.",
+                file=out,
+            )
+            return 1
+        if live["dirty"]:
+            print("error: serving tree has uncommitted changes; --rollback refuses.", file=out)
+            return 1
+        target = read_receipt(ctx.receipt).get("previousCommit")
+        if not isinstance(target, str) or not target:
+            print(f"error: the receipt at {ctx.receipt} records no previousCommit; nothing to roll back to.", file=out)
+            return 1
+        code, _, _ = _git(ctx, ["cat-file", "-e", f"{target}^{{commit}}"])
+        if code:
+            print(f"error: previousCommit {target} is not a commit in {ctx.checkout}; fetch it or pull instead.", file=out)
+            return 1
+        if ctx.dry_run:
+            print(f"would detach {ctx.checkout} at {target} and re-render", file=out)
+            return 0
+        return _activate(ctx, target, out)
 
 
 def _clone_serving_tree(ctx: Context, tree: Path, out) -> bool:
@@ -3077,7 +3099,11 @@ def cmd_serve(ctx: Context, out) -> int:
         print(f"error: {tree} is not a git checkout; move it aside and run `make setup` again", file=out)
         return 1
     if not tree.exists():
-        if not _clone_serving_tree(ctx, tree, out):
+        # A second first run waits here, then finds the tree; the lock is
+        # released before the hand-over, whose `--pull` takes it again.
+        with serving_lock(tree, ctx.dry_run):
+            cloned = tree.exists() or _clone_serving_tree(ctx, tree, out)
+        if not cloned:
             return 1
         if ctx.dry_run:
             return 0

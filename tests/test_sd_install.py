@@ -15,6 +15,7 @@ actual global excludes, and the test that noticed that is the reason the
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import io
 import json
@@ -22,6 +23,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -2659,6 +2661,44 @@ class ServingTreeTests(InstallerHarness):
         self.assertEqual(os.readlink(self.serving / ".venv"), sd_install.ENV_SLOTS[0])
         self.assertEqual(self.built_for(), self.first)
 
+    def test_overlapping_activations_build_and_publish_one_slot_at_a_time(self):
+        """Review round 15: a second `make setup` waits for the first, so no slot is shared or half-built."""
+        ctx = self.real_provision()
+        with self.recording():
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+        merged = self.commit(self.origin, "two\n")
+        real = sd_install._provision
+        second_built = threading.Event()
+        slots, overlapped, results, threads = [], [], [], []
+
+        def second_run():
+            other = self.context(self.serving)
+            other.environ["PATH"] = ctx.environ["PATH"]
+            results.append(sd_install.cmd_pull(other, io.StringIO()))
+
+        def provision(ctx, commit, out):
+            if not slots:
+                slots.append(None)
+                threads.append(threading.Thread(target=second_run))
+                threads[0].start()
+                # Without the lock the second run reaches its build while this one is mid-build.
+                overlapped.append(second_built.wait(3))
+                slot = real(ctx, commit, out)
+                slots[0] = slot.name
+                return slot
+            second_built.set()
+            slot = real(ctx, commit, out)
+            slots.append(slot.name)
+            return slot
+
+        with self.recording(), unittest.mock.patch.object(sd_install, "_provision", side_effect=provision):
+            self.assertEqual(sd_install.cmd_pull(ctx, io.StringIO()), 0)
+            threads[0].join(30)
+        self.assertEqual(overlapped, [False], "the second activation built while the first was building")
+        self.assertEqual(results, [0])
+        self.assertEqual(slots, [sd_install.ENV_SLOTS[1], sd_install.ENV_SLOTS[0]], "both runs built one slot")
+        self.assertEqual((self.head(), self.built_for()), (merged, merged))
+
     def test_a_put_back_git_refuses_after_a_failed_provision_names_the_command(self):
         merged = self.commit(self.origin, "two\n")
         real = sd_install._git
@@ -2860,6 +2900,22 @@ class ServeTests(InstallerHarness):
         self.assertNotIn("cloned", output)
         argv = json.loads(self.record.read_text(encoding="utf-8"))["argv"]
         self.assertEqual(argv, ["--pull", "--home", str(self.home), "--bin-dir", str(links)])
+
+    def test_a_first_run_that_waited_for_another_clone_uses_it(self):
+        """Review round 15: two first runs; the one that waited on the lock finds the tree and clones nothing."""
+        real = sd_install.serving_lock
+
+        @contextlib.contextmanager
+        def other_run_cloned_first(tree, dry_run=False):
+            with real(tree, dry_run):
+                subprocess.run(["git", "clone", "-q", str(self.origin), str(tree)], check=True, capture_output=True)
+                yield
+
+        with unittest.mock.patch.object(sd_install, "serving_lock", side_effect=other_run_cloned_first):
+            rc, output = self.serve()
+        self.assertEqual(rc, 0, output)
+        self.assertNotIn("cloned", output)
+        self.assertTrue(self.tree.with_name("serving.lock").exists())
 
     def test_a_dry_run_serve_of_an_existing_clone_runs_nothing(self):
         self.assertEqual(self.serve()[0], 0)

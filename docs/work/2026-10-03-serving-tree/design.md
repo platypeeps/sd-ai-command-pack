@@ -94,6 +94,13 @@ Its last line runs `bin/sd_install.py --serve` from the working checkout:
   and both slots, so `--verify` stays clean.
 - **Hand-over.** `--serve` runs the tree's own installer as `--pull`, so the
   activation is the tree's code, as in the first pass.
+- **One move at a time.** `--pull` and `--rollback` hold `fcntl.flock` on
+  `<tree>.lock` from the fetch or receipt read through the render and any
+  put-back; `--serve` holds it around the clone, and a run that waited finds
+  the tree and clones nothing. A second run waits rather than refusing, as
+  the `sd_db` provisioning lock does, so concurrent lane `make setup` runs
+  all succeed. Without it, two runs built the same slot and one published it
+  half-built (review round 15). The kernel drops the lock with its process.
 - **Links.** `link_plan` gains a fourth state, `recorded`: a link the
   receipt names, still at its recorded target. The install moves it to the
   new checkout with one rename, and puts it back on a failure. Any other

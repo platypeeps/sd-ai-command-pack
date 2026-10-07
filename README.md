@@ -343,6 +343,9 @@ clean clone on a detached `HEAD` that nobody works in, at
   removing the checkout that ran `make setup` leaves it working. The
   receipt's command links move to the serving tree;
   a link the receipt does not name is still refused.
+  Two `make setup` runs at once take turns: each move holds `serving.lock`,
+  beside the tree, from the fetch to the end of any put-back, and the second
+  run waits for it, then moves from where the first left the tree.
 - **Roll back:** `python3 bin/sd_install.py --rollback`, run in the serving
   tree. Each render that activates a new commit records the replaced one as
   `previousCommit` in the receipt. `--rollback` detaches at that commit and
