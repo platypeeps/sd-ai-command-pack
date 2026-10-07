@@ -78,6 +78,7 @@ import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+import sd_changelog  # noqa: E402
 import sd_ci  # noqa: E402
 import sd_codex  # noqa: E402
 import sd_controls  # noqa: E402
@@ -3330,6 +3331,7 @@ def build_parser() -> argparse.ArgumentParser:
     sd_runner.register(groups)
     sd_fleet.register_fleet(groups)
     sd_ci.register_ci(groups)
+    sd_changelog.register_changelog(groups)
     sd_notes.register_note_group(groups)
     return parser
 

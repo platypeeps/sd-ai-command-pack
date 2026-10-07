@@ -4,6 +4,15 @@
 
 ### Added
 
+- **`sd changelog render|show|import` renders `CHANGELOG.md` from the database's entry rows (sd:2783, step 2).**
+  `render` writes the region between `<!-- sd-changelog:begin -->` and `<!-- sd-changelog:end -->` from the rows merged on the base's first-parent history since the newest `v*` tag; text outside the region stays byte for byte.
+  Entries go by subsection, then newest merge first by first-parent position; neither write order nor a clock decides the order.
+  `--check` writes nothing and exits 1 when the file differs; `--release VERSION` puts the entries under a heading dated by the base commit.
+  `show` prints the region. `import <pr>` writes a missing row from that pull request's squash message.
+  Render refuses a merged `## Changelog` entry with no row, names each pull request, and refuses any row a privacy pattern matches, by line number only.
+  With no pattern file it refuses; `sd.privacy_patterns` names the file. No repository has opted in yet, so nothing calls it on its own.
+  The section parser keeps a comment inside a code span or fence, keeps a fenced `### Fixed` example inside its entry, and drops the trailer paragraphs that end a squash message.
+
 - **Jev shadow readings: review-finding triage and a duplicate hint on `sd task add` (sd:2092, sd:2093).**
   `sd-review` asks Jev to class each of its first ten findings as correctness, robustness, style or likely wrong (`JEV_SD_REVIEW_TRIAGE`).
   `sd task add` asks which open item of the same repository already tracks the new one, if any (`JEV_SD_TASK_DEDUPE`).
