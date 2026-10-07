@@ -8,7 +8,7 @@ item: sd:2784
 ## Status
 
 Proposed. The design is in [design.md](design.md). The operator has not ruled
-Q1 to Q11 yet. Implementation has not started.
+Q1 to Q12 yet. Implementation has not started.
 
 ## Problem
 
@@ -131,10 +131,14 @@ R9. The plan template keeps `- [ ] <id>.` as the step marker. In a `row`
    names a different, unticked step. `sd task steps` reports step 2 `open`
    and marked `changed`. `sd-status` lists its `open-step` row again.
    Dropping the digest comparison reads step 2 `done` and fails the test.
+   Removing step 2, or splitting it into 2a and 2b, instead prints the
+   note as a `not in plan` row, and 2a and 2b read `open`.
 9. A test records `step 2: done`, then adds a nested requirement under step
    2 and keeps its step line unchanged. Step 2 reads `open`, marked
    `changed`. Hashing only the step line reads it `done` and fails the
-   test. Rewording only the title also reads `changed`.
+   test. Each of these also reads `changed`: rewording only the title,
+   merging step 3's block into step 2, cutting step 2's block to its
+   first half, and changing its size.
 10. A test records `step 2: done`, then moves step 2 above step 1, ticks its
    box and re-wraps its text. Step 2 still reads `done`. Hashing the box
    mark or the raw whitespace fails the test.

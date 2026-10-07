@@ -2,7 +2,7 @@
 
 Pack pull requests A to C, and one small system pull request. The design is
 in [design.md](design.md). The steps assume the recommended answers to Q1 to
-Q11; a different ruling changes the step it names.
+Q12; a different ruling changes the step it names.
 
 Progress on these steps goes to `sd task` notes on sd:2784, as the design
 proposes. Nobody ticks a box below; this file changes only when the plan

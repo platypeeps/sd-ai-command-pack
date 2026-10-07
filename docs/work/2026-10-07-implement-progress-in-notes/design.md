@@ -23,7 +23,7 @@ database schema do not change.
 
 ## Status
 
-Proposed, 2026-10-07. The operator has not ruled Q1 to Q11. Each question
+Proposed, 2026-10-07. The operator has not ruled Q1 to Q12. Each question
 below carries a recommendation.
 
 Planning review round 1 (codex) found that a renumbered plan moves a `done`
@@ -31,8 +31,9 @@ note onto other work. Round 2 found that a title match misses a scope change
 under an unchanged title. Both are one class: a note survives a plan change
 that should reopen its step. Points 1, 3, 4 and 7 now bind each note to a
 digest of the whole step, and the table in point 3 covers every plan change
-point 7 names. Round 2 also found the template's "never tick" line wrong for
-`file` repositories; point 7 now limits it to `row` repositories.
+point 7 names. Q12 asks the operator to confirm the binding. Round 2 also
+found the template's "never tick" line wrong for `file` repositories; point
+7 now limits it to `row` repositories.
 
 ## Decisions
 
@@ -208,25 +209,43 @@ such as a corrected size, reopens the step too, and costs one note. A
 missed reopening would hide unfinished work, which is the fault this item
 exists to remove.
 
-Every plan change that point 7 names, and what the reader does with a
-`done` note written before it:
+The class: a plan edit changes what a step means while its `done` note
+still matches. Review rounds 1 and 2 each found one instance. The table
+enumerates every plan edit point 7 names, plus the two readers. Each cell
+says whether a `done` note written before the edit still closes the step.
+"Wrong" means it closes work that the edit added or moved.
 
-| Plan change after a `done` note | Block digest | Reader | Recovery | Test |
-| --- | --- | --- | --- | --- |
-| Step reordered, block unchanged | same | still `done` | none needed | criterion 10 |
-| Step renumbered: id 2 now names other work | differs at id 2 | id 2 `changed`, open | new note on the new id | criterion 8 |
-| New step added under a fresh id | no note | `open` | none needed | criterion 1 |
-| Step removed | id gone | note row `not in plan` | none needed | criterion 2's fixture |
-| Step split or merged; old id retired | id gone | note row `not in plan`; new ids `open` | new notes | criterion 8's fixture |
-| Scope, check, size or PR split edited; title kept | differs | `changed`, open | new note after review | criterion 9 |
-| Title reworded only | differs | `changed`, open | one new note | criterion 9's fixture |
-| Box ticked or text re-wrapped | same | unchanged | none needed | criterion 10 |
-| Ruling recorded outside the step block | same | unchanged | the ruling's author edits the step block | none: point 7 rule |
+| Plan edit after a `done` note on step 2 | Id only | Title | Block digest (chosen) | New id on scope change (Q12) | Recovery | Test |
+| --- | --- | --- | --- | --- | --- | --- |
+| Reordered, block unchanged | `done`, right | `done`, right | `done`, right | `done`, right | none | criterion 10 |
+| Box ticked, text re-wrapped | `done`, right | `done`, right | `done`, right | `done`, right | none | criterion 10 |
+| Renumbered: id 2 now names other work | wrong | `changed` | `changed` | `changed` if the author obeys | new note on the moved step's new id | criterion 8 |
+| Removed; id 2 retired | `not in plan` | `not in plan` | `not in plan` | `not in plan` | none | criterion 8 |
+| Removed; id 2 reused for new work | wrong | `changed` | `changed` | wrong if the author reuses | new note when the new work lands | criterion 8 |
+| Split into 2a and 2b; id 2 retired | `not in plan` | `not in plan` | `not in plan` | `not in plan` | notes on 2a, 2b | criterion 8 |
+| Split; id 2 kept for the first half | wrong | wrong if the title stays | `changed` | `changed` if the author obeys | new note on 2 | criterion 9 |
+| Merged with 3 into 2 | wrong | `changed` if retitled | `changed` | `changed` if the author obeys | new note on 2 | criterion 9 |
+| Scope or check grown; title kept | wrong | wrong | `changed` | wrong if the author keeps the id | new note after the added work lands | criterion 9 |
+| Size or PR split edited; title kept | `done` | `done` | `changed` | `done` | one new note | criterion 9 |
+| Title reworded only | `done` | `changed` | `changed` | `done` | one new note | criterion 9 |
+| Ruling written outside every step block | wrong | wrong | wrong | wrong | point 7: write it in the step's block | none; a rule |
+| `file` repository reader | no join | no join | no join | no join | none; R7, ticks as today | criterion 6 |
 
-The last row is the limit of the binding. A plan-wide sentence above the
-steps, such as "every step also updates the changelog", changes no block.
-Point 7 therefore requires a change that alters a step to be written in
-that step's block.
+Only the block digest covers every edit row without trusting the author.
+"New id on scope change" covers the same rows only when the author obeys
+it, and nothing checks that: the lint reads one version of the file and no
+history. The digest errs toward reopening: a size or title edit reopens a
+step that is still done, and costs one note. A missed reopening would hide
+unfinished work, the fault this item exists to remove.
+
+The ruling row is the limit of every binding. A plan-wide sentence above
+the steps, such as "every step also updates the changelog", changes no
+block. Point 7 therefore requires a change that alters a step to be written
+in that step's block.
+
+**Q12.** Bind a note to a digest of its step's block, or require a new step
+id on every scope change? Recommended: the digest, with point 7's stable
+ids kept as a rule. The two differ on the rows that trust the author.
 
 The digest binding is also the backstop for point 7's stable ids. A
 renumbered plan breaks that rule, and the lint cannot see it: the lint
@@ -423,3 +442,4 @@ The questions above, in one list. Each carries its recommendation.
 | Q9 | Dashboard step table deferred to a system item? | Yes. |
 | Q10 | Lint fails a tick-only diff? | No. |
 | Q11 | `prd.md` acceptance-criteria boxes in scope? | No. |
+| Q12 | Bind a step note to a digest of its block, or force a new id on scope change? | The digest; stable ids stay a rule (point 7). |
