@@ -534,6 +534,13 @@
 
 ### Fixed
 
+- **An opted-in gate finds the caller's cargo subcommands again (sd:2921).**
+  `offload_pins` set `CARGO_HOME` to the gate's cache folder, and cargo looks for subcommands in `$CARGO_HOME/bin`.
+  So `cargo nextest` failed with "no such command" unless `~/.cargo/bin` was on `PATH`.
+  The pins now append the caller's `CARGO_HOME/bin`, `~/.cargo/bin` by default, to the end of `PATH`.
+  `OFFLOAD_TOOLS` adds `cargo-nextest`, so the offload view binds its bytes and refuses when they differ.
+  The registry cache stays in the pinned folder, so each machine downloads crates once.
+
 - **`sd shadow sync` reports the library's two refusals in one line, not a traceback (sd:2898).**
   Since system #199, `sd_db` raises `SyncBusy` while another sync holds the lock and `HubOnly` on a satellite.
   The verb now prints the library's message as one `sd:` line on stderr.

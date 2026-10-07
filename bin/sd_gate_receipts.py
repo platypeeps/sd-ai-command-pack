@@ -149,7 +149,9 @@ TOOL_FIELD = "tool"
 PACK_FIELD = "pack"
 #: Names whose bytes an offload view binds (sd:2704): what a check reaches through `make` or a script. Each refuses on a
 #: difference, as the check's own names do: `check_names` sees only `make`, not the `npm ci` or `uv sync` it runs (sd:2879).
-OFFLOAD_TOOLS = ("sh", "bash", "make", "python3", "git", "cc", "c++", "clang", "cargo", "rustc", "node", "npm", "uv")
+#: `cargo-nextest` is what `cargo nextest` runs, which `check_names` sees as `cargo` (sd:2921).
+OFFLOAD_TOOLS = ("sh", "bash", "make", "python3", "git", "cc", "c++", "clang", "cargo", "cargo-nextest", "rustc", "node",
+                 "npm", "uv")
 #: Names whose `-vV` build lines a view binds beside their bytes (sd:2881): a rustup proxy's bytes name no toolchain.
 #: Only these two: `cargo-clippy -vV` runs clippy, and `rustdoc` and `clippy-driver` answer as `rustc` does.
 VERSIONED_TOOLS = ("cargo", "rustc")
@@ -469,11 +471,18 @@ def offload_pins(environment: Mapping[str, str]) -> dict[str, str]:
     a git identity sets its own. npm refuses one file as both its user and its global configuration, so the global
     one is a path in that folder too. `sd_gate_slots.CPU_VARIABLES` read `OFFLOAD_THREADS`, which a holder lowers
     only on a machine whose share of the cores is smaller.
+    cargo finds a subcommand such as `cargo-nextest` in `$CARGO_HOME/bin` before `PATH`, so the caller's own
+    `CARGO_HOME/bin`, `~/.cargo/bin` by default, joins the end of `PATH`, where the view binds its tools (sd:2921).
     """
     folder = sd_gate_cache.cache_root(environment) / "tool-config"
+    cargo = str(folder / "cargo")
+    own = environment.get("CARGO_HOME") or (os.path.join(environment["HOME"], ".cargo") if environment.get("HOME") else None)
+    search = [entry for entry in environment.get("PATH", "").split(os.pathsep) if entry]
+    extra = os.path.join(own, "bin") if own and own != cargo else None  # already pinned: cargo searches its own bin
+    path = {"PATH": os.pathsep.join([*search, extra])} if extra and extra not in search else {}
     return {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1", "NPM_CONFIG_USERCONFIG": os.devnull,
             "NPM_CONFIG_GLOBALCONFIG": str(folder / "npmrc"), "PIP_CONFIG_FILE": os.devnull,
-            "CARGO_HOME": str(folder / "cargo"), **dict.fromkeys(sd_gate_slots.CPU_VARIABLES, OFFLOAD_THREADS)}
+            "CARGO_HOME": cargo, **path, **dict.fromkeys(sd_gate_slots.CPU_VARIABLES, OFFLOAD_THREADS)}
 
 
 def opted_in(database: pathlib.Path | None, root: pathlib.Path) -> bool:

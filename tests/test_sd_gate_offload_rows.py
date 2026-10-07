@@ -352,9 +352,11 @@ class OffloadedEnvironment(SatelliteFixture):
         status, seen = self.seen()
         self.assertEqual(status, "success")
         pins = sd_gate_receipts.offload_pins({**os.environ, **self.scratch})
+        pins.pop("PATH", None)  # the caller's cargo subcommands stay reachable (sd:2921)
         self.assertEqual({name: seen.get(name) for name in pins}, pins)
         self.assertEqual((seen["GIT_CONFIG_GLOBAL"], seen["RUST_TEST_THREADS"]), (os.devnull, sd_gate_receipts.OFFLOAD_THREADS))
         self.assertTrue(pathlib.Path(seen["CARGO_HOME"]).is_relative_to(self.scratch["XDG_CACHE_HOME"]), seen["CARGO_HOME"])
+        self.assertEqual(seen["PATH"].split(os.pathsep)[-1], "/elsewhere/cargo/bin")
 
     def test_an_opted_in_check_sees_no_credential(self) -> None:
         status, seen = self.seen()

@@ -183,6 +183,27 @@ class OffloadView(ViewFixture):
                                capture_output=True, check=False).stdout for env in (self.environ("sat"), kept)]
         self.assertEqual(read, ["t\n", ""])  # the fixture's `~/.gitconfig` names `t`
 
+    def test_a_cargo_subcommand_in_the_callers_cargo_home_resolves_and_refuses(self) -> None:
+        """sd:2921: cargo finds `cargo-nextest` in `$CARGO_HOME/bin`, and the pinned one holds none. The caller's
+        folder, `~/.cargo/bin` by default, joins `PATH`, so the check finds it and the view binds its bytes."""
+        for login, version in (("sat", "0.9.100"), ("hub", "0.9.101")):
+            self.tool(self.home(login) / ".cargo" / "bin" / "cargo-nextest", f"cargo-nextest {version}")
+        nextest = self.home("sat") / ".cargo" / "bin" / "cargo-nextest"
+        for caller in ("CARGO_HOME", "HOME"):
+            with self.subTest(caller=caller):
+                drop = {"CARGO_HOME"} if caller == "HOME" else set()
+                environment = sd_gate_receipts.offload_environment(
+                    {key: value for key, value in self.environ("sat").items() if key not in drop})
+                self.assertEqual(shutil.which("cargo-nextest", path=environment["PATH"]), str(nextest))
+        theirs, ours = self.view("sat"), self.view("hub")
+        self.assertEqual(theirs["tools"]["cargo-nextest"], sd_gate_receipts._content_digest(nextest))
+        self.assertEqual(sd_gate_receipts.offload_miss(theirs, ours), {"part": "tools", "name": "cargo-nextest"})
+
+    def test_the_pins_hold_on_an_environment_they_already_pinned(self) -> None:
+        """A pass under `offload_environment` reuses only when a second pinning changes nothing (sd:2921)."""
+        once = sd_gate_receipts.offload_environment(self.environ("sat"))
+        self.assertEqual(sd_gate_receipts.offload_environment(once), once)
+
     def test_an_isolated_home_file_is_not_bound(self) -> None:
         """No check reads `.gitconfig`, `.npmrc`, pip's or cargo's file, so two machines may differ in them (sd:2879)."""
         (self.home("hub") / ".gitconfig").write_text("[core]\n\thooksPath = /dev/null\n", encoding="utf-8")
