@@ -439,12 +439,41 @@ def unguarded(text: str, action: str = DEFAULT_ACTION) -> str | None:
     return "\n".join(lines) + "\n"
 
 
-def removal(root: pathlib.Path, workflow: pathlib.Path, template: Any, *, self_install: bool,
+#: The step after checkout in both workflows the pack lays (sd:1818). The
+#: checkout reads `refs/pull/N/head`, which a re-run of an older run resolves
+#: to the pull request's newest head while the run still reports on the SHA
+#: its event named. The step fails that run rather than let one commit's
+#: result stand for another. The SHA reaches the shell through `env:`, never
+#: spliced into the script.
+HEAD_CHECK_STEP = """\
+      - name: The checkout is the head this run reports on
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          checked_out="$(git rev-parse HEAD)"
+          if [ "$checked_out" != "$HEAD_SHA" ]; then
+            echo "::error::checked out $checked_out, but this run reports on $HEAD_SHA; the pull request moved, so run its newest check instead"
+            exit 1
+          fi
+"""
+
+
+def known_texts(text: str) -> tuple[str, str]:
+    """`text`, a workflow the pack writes now, and the same workflow as it was written before `HEAD_CHECK_STEP`.
+
+    A file holding the older text is the pack's own at that pin, so a stamp
+    may move it forward and `--remove` may delete it without `--force`.
+    """
+
+    return text, text.replace(HEAD_CHECK_STEP, "", 1)
+
+
+def removal(root: pathlib.Path, workflow: pathlib.Path, templates: Any, *, self_install: bool,
             force: bool) -> list[tuple[pathlib.Path, str | None, str]]:
     """What `setup-github --remove` changes: (path, new text or None to delete, report line).
 
-    Text in, a plan out; the installer does the writing. `template(pin)` is
-    the workflow the installer writes at `pin`, so a workflow the repository
+    Text in, a plan out; the installer does the writing. `templates(pin)` is
+    every text the installer has written at `pin`, so a workflow the repository
     edited beyond its pin needs `force`, as replacing one does.
     The guard stays while another workflow still names review-route, because
     Dependabot would bump that pin the day the guard went. Any mention counts,
@@ -454,7 +483,7 @@ def removal(root: pathlib.Path, workflow: pathlib.Path, template: Any, *, self_i
     target = root / workflow
     current = target.read_text(encoding="utf-8") if target.is_file() else None
     pin = None if self_install or current is None else read_pin(current)
-    if current is not None and current != template(pin) and not force:
+    if current is not None and current not in templates(pin) and not force:
         raise GuardError(f"{workflow} differs from the template beyond its pin; rerun with --force to remove it")
     verdict = "remove" if current is not None else "absent"
     plan: list[tuple[pathlib.Path, str | None, str]] = [(target, None, f"{verdict} {workflow}")]

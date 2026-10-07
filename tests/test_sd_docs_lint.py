@@ -2144,6 +2144,9 @@ capture = os.environ.get("JEV_STUB_CAPTURE")
 if capture:
     shutil.copyfile(state, capture)
 questions = json.loads(sys.stdin.read())
+if os.environ.get("JEV_STUB_SLEEP"):
+    import time
+    time.sleep(float(os.environ["JEV_STUB_SLEEP"]))
 if os.environ.get("JEV_STUB_DOWN") == "1":
     # What `jev ask --fallback` does when the endpoint refuses: the fallback
     # on stdout, exit 0, and the reason on stderr.
@@ -2324,6 +2327,24 @@ class Rule6ClaimSupportTests(LintFixture):
                       "[Errno 61] Connection refused; using the fallback)", err.getvalue())
         self.assertNotIn("Connection refused", out.getvalue())
         self.assertIn("0 of 1 recorded citation(s) answered", out.getvalue())
+
+    def test_a_slow_reader_is_bounded_by_one_budget_and_said_as_it_starts(self) -> None:
+        """sd:2873: seven batches at 120s each, and nothing printed until the end, read as a hang."""
+
+        item = self.cited_item()
+        (item / "design.md").write_text("# design\n\nThe ladder is at `prd.md:3`.\n\n"
+                                        "The ladder is still at `prd.md:3`.\n", encoding="utf-8")
+        lint.write_citation_manifest(item, self.work)
+        self.git("add", "-A")
+        out, err = io.StringIO(), io.StringIO()
+        with self.jev(JEV_STUB_SLEEP="3"), mock.patch.object(lint, "CLAIM_BATCH", 1), \
+                mock.patch.object(lint, "CLAIM_BUDGET_SECONDS", 1), in_directory(self.repo), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = lint.main(["--no-history"])
+        self.assertEqual(code, 0, err.getvalue())
+        self.assertIn("rule 6 claim support: asking jev about 2 citation(s) in 2 batch(es), at most 1s", err.getvalue())
+        self.assertIn("rule 6 claim support: stopped after 1 of 2 batch(es); the 1s budget ran out", out.getvalue())
+        self.assertIn("0 of 2 recorded citation(s) answered", out.getvalue())
 
     def test_the_switch_off_wins_over_the_opt_in(self) -> None:
         """Silence, not a note: the operator asked for silence, and the

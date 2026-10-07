@@ -58,8 +58,8 @@
     "severity_floor": {
       "type": "string",
       "enum": ["high", "medium", "low", "unspecified"],
-      "description": "The severity at which a finding is dispositioned `blocking` rather than `advisory`, and therefore the severity at which `sd-review` exits 1. Findings are dispositioned locally and are never posted anywhere; this only decides how the local run reports them. Default `medium`.",
-      "default": "medium"
+      "description": "The severity at which a finding is dispositioned `blocking` rather than `advisory`, and therefore the severity at which `sd-review` exits 1. Findings are dispositioned locally and are never posted anywhere; this only decides how the local run reports them. Default `high`.",
+      "default": "high"
     },
     "copilot_review": {
       "type": "object",

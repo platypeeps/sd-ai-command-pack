@@ -59,11 +59,11 @@ class ResponseRegressions(unittest.TestCase):
 
 
 class URLDiagnostics(ReviewFixture):
-    def run_response(self, payload: object, exit_code: int = 0, stderr: str = ""):
+    def run_response(self, payload: object, exit_code: int = 0, stderr: str = "", max_tokens: int | None = 16384):
         body = payload if isinstance(payload, str) else json.dumps(payload)
         client = FakeClient(default=(exit_code, body, stderr, True))
         provider = sd_review.sd_registry.Provider(name="url", vendor="fixture", bill="free",
-            url="https://fixture.example/v1", env=("OWN_KEY",), max_tokens=16384)
+            url="https://fixture.example/v1", env=("OWN_KEY",), max_tokens=max_tokens)
         return sd_review.run_provider(provider, self.tmp,
             sd_review.Subject("worktree", "HEAD", "worktree", (), 0, ""),
             "private-prompt-marker", FakeRunner(), {"OWN_KEY": "credential-marker"}, 7,
@@ -137,6 +137,18 @@ class URLDiagnostics(ReviewFixture):
             self.assertIn("url stopped on length below max_tokens (16384) and it sent no answer", outcome.detail)
             self.assertIn("shorten the review input", outcome.detail)
             self.assertNotIn("hit max_tokens", outcome.detail)
+
+    def test_length_finish_without_max_tokens_names_no_ceiling(self) -> None:
+        """sd:1819: an uncapped entry may leave max_tokens unset; the detail
+        must not read "below max_tokens (None)" or say to raise it."""
+        body = self.envelope("", "length", reasoning_content="thinking")
+        body["usage"] = {"prompt_tokens": 10, "completion_tokens": 131072, "total_tokens": 131082}
+        outcome = self.run_response(body, max_tokens=None)
+        self.assertIn("url stopped on length with no max_tokens set and it sent no answer: 131072 completion tokens",
+                      outcome.detail)
+        self.assertIn("set max_tokens for url in the provider registry", outcome.detail)
+        self.assertNotIn("None", outcome.detail)
+        self.assertNotIn("raise max_tokens", outcome.detail)
 
     def test_valid_findings_about_rate_limits_complete(self) -> None:
         outcome = self.run_response(self.envelope(json.dumps({"findings": [finding("high", "rate_limit defect")]})))

@@ -573,6 +573,13 @@ which the installer places in `~/.claude/agents`.
   table below is who does what. On a satellite, `sd-ship merge` and the queue
   verbs (`lane enqueue`, `list`, `cancel`, `move`, `hold`, `release`) refuse
   with `hub_only` before they read a row (sd:2795).
+- **Large uncommitted data goes under the bulk root (sd:1792).** When
+  `sd.bulk_storage_root` names a folder, put run outputs, logs, captures,
+  agent scratch evidence and large downloaded fixtures under
+  `<root>/<repository>/`, not in the checkout. Keep build output, such as
+  Cargo's `target/` or `node_modules/`, and data whose mode or owner matters
+  on the system disk: a bulk volume may be ejected mid-build, and a volume
+  mounted `noowners` reports every file as yours. Unset, nothing moves.
 - **Test one version per language, the latest stable (Python 3.14, Node
   26), in CI and locally; no version matrices.**
 
@@ -754,8 +761,11 @@ reasoning on a 35k-token prompt and sent no answer (sd:1805); K3 always
 thinks, and its effort can only drop to `low`. A stop at the ceiling reads
 `<name> hit max_tokens (N) and it sent no answer`, with the completion
 tokens and reasoning bytes, and `sd-ship` repeats that detail in its
-refusal. A `length` stop below the ceiling says the context window may be
-full and names shortening the review input first. The installer never rewrites the registry in your home, so a
+refusal, one equal share of its bound per failed reviewer, each under its
+name. A `length` stop below the ceiling says the context window may be
+full and names shortening the review input first. An entry with no
+`max_tokens` reads `stopped on length with no max_tokens set`, and names
+setting one (sd:1819). The installer never rewrites the registry in your home, so a
 home copy still at 16384 keeps the old ceiling until you edit it.
 URL entries can declare one optional control: `thinking: disabled|adaptive`
 or `reasoning_effort: none|low|high|max`. The client sends `thinking` as
@@ -771,6 +781,8 @@ Moonshot's strict mode takes: every property typed, `line` as `anyOf`
 integer or null, and no `minLength` or `maxItems`. The answer is still parsed
 against the full schema. Only an entry that declares the field sends it; an
 endpoint that accepts it may ignore it, as MiniMax-M3 does (sd:1827).
+The shipped `kimi` entry declares it, and no other entry does. A home copy
+seeded before that keeps its own entry; add the line there by hand.
 Incomplete output still fails the review. A pin is changed by editing the
 registry file, never by a page.
 A `url` answer that fails the findings schema is retried once on the same
@@ -905,6 +917,8 @@ The reserved `sd` namespace declares four settings:
   Absence reads 40. `SD_GATE_CACHE_GB` overrides it for one run. It grants nothing.
 - `sd.lane_root`: the folder that holds each repository's `sd-ship lane` queue, as `<root>/<repository>/lane/queue/`.
   Absence reads `$XDG_STATE_HOME/sd/lanes`. `SD_LANE_ROOT` overrides it. It grants nothing.
+- `sd.bulk_storage_root`: the folder for large uncommitted data, as `<root>/<repository>/`; see
+  [Parallel work](#parallel-work). Absence is no bulk root. It grants nothing.
 
 Installation supplies neither grant. A new operator must state their own policy; never copy another user's personal permission.
 These settings start no background work, enable no runner policy, and bypass no ownership, review, CI, or protection gate.

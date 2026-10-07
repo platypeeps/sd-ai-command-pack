@@ -4,6 +4,32 @@
 
 ### Added
 
+- **`sd fleet stamp` lays a Claude Code settings baseline per repository class (sd:1661).**
+  The baseline is `permissions.deny` rules that stop Claude Code's file tools reading secret files: `.env` variants, `secrets/`, private keys, `.netrc`, `.pypirc`, `~/.ssh`, AWS credentials and the `gh` token file.
+  An owned or co-owned repository carries it in a tracked `.claude/settings.json`; a guest one gets the untracked `.claude/settings.local.json` in its plan.
+  Each rule is anchored at the project root or at home, so a session started in a subdirectory is covered too.
+  The stamp adds missing rules, removes none, leaves a complete file byte for byte, and refuses a file that does not read or decode.
+  `.github/sd-fleet.json` may exempt either path. Nothing restamps the fleet: run `sd fleet stamp --dry-run`, then the write per repository.
+
+- **Stamped workflows fail a run whose checkout is not the head it reports on (sd:1818).**
+  The route and check workflows check out `refs/pull/N/head`, which a re-run of an older run resolves to the newer head.
+  A step after checkout compares `git rev-parse HEAD` with `github.event.pull_request.head.sha` and fails on a mismatch.
+  The stamp moves a file still at the earlier template forward, and `sd-review setup-github --remove` takes one without `--force`.
+  A repository under `repo.ci = local` carries neither workflow and is unaffected.
+
+- **`sd.bulk_storage_root` names where large uncommitted data goes (sd:1792, parts 1, 2 and 4).**
+  WORKFLOW.md § Parallel work puts run outputs, logs and captures under `<root>/<repository>/`, and keeps build output and permission-dependent data on the system disk.
+  The slice-builder brief builds with `CARGO_INCREMENTAL=0` and only the crates under test, and stops before a gate below 20 GiB free.
+  Unset, nothing moves.
+
+- **The shipped `kimi` entry sends the findings schema strict (sd:1827).**
+  `providers.yaml` sets `response_format: json_schema` on `kimi` and on no other entry.
+  MiniMax-M3 ignores the field, and Baseten's DeepSeek is untested.
+  The installer never rewrites a home registry, so a machine seeded earlier needs the line added by hand.
+  Moonshot's acceptance of the strict schema is not yet checked with a live call; that paid call is the operator's.
+
+- **`sd-status` reports the fleet baseline's two flags (sd:1807).** The dashboard showed `protection_source` (rulesets alone, no classic object) and `required_check` (`ci`, or `sd/local-gate` for a `repo.ci = local` repository) for each owned repository; `sd-status` printed neither. It now reports both in `protection.merge_settings`, with the ids, values and sentences `sd_db.protection.baseline_flags` writes, and prints them as `FLAG` or `ok` lines beside the merge flags. A repository whose owner is not in `sd.fleet_owners` carries neither; with no `sd.fleet_owners` the owners are `platypeeps`, the system collector's default. A classic read that failed carries neither, as the system files it unknown. No acknowledgement reaches them. `GapVocabularyTests` compares them with the system library at `.sd-system-rev`.
+
 - **`sd-research-kit review` checks each map for stable row IDs and a gaps section (sd:1835, sd:1836).**
   Each `20-map/*.md` needs one table whose first column is all stable IDs (`C01`, `C02`, ...) and a heading with the word `Gaps`.
   A miss prints `WARN` and leaves the exit at 0: the rulings make both required without saying they fail, and every research repo predates them.
@@ -191,6 +217,15 @@
   the branch changes, and each origin branch that names the item with no
   open pull request. The lines go to stderr and the receipt's `warnings`. It
   refuses nothing, and a read that fails is a warning of its own.
+
+- **`sd-status` counts the merged-review rows and their change (sd:1179).**
+  The report-only class `merged-pr-review-unacknowledged` reached 219 rows
+  with nothing saying it grew. `open threads` now prints its row count and the
+  change since yesterday, and `--json` carries both as
+  `merged_review_count`. It is stateless, so not "since the last run", which
+  needs a stored count: yesterday's count shifts the window
+  back a day and leaves out acknowledgements recorded in the last 24 hours.
+  It warns only, with no ceiling (operator ruling 2026-09-30).
 
 - **`sd-status` counts late review findings (sd:1178).** A review posted
   after the merge reaches no merge gate: 19 of 219 merged pull requests got
@@ -483,6 +518,23 @@
   pack `bin/` digest. The first opted-in Rust gate on each machine downloads its crates into the new `CARGO_HOME`
   and rebuilds its dependencies once. A machine whose `git`, `npm` or `uv` build differs from the hub's hands back
   until both run one build. A check that commits needs its own git identity.
+
+- **A failed review's refusal names every failed reviewer (sd:1819).**
+  `sd-ship` gave its 600-character detail to the failed reviewers in order, so a long first detail hid the rest.
+  Each failed reviewer now gets an equal share, under its own name.
+  A `length` stop from a `url` entry with no `max_tokens` read `below max_tokens (None)` and said to raise it.
+  It now reads `stopped on length with no max_tokens set` and names setting one.
+
+- **A missing `--base` ref no longer runs the full check silently (sd:2863).**
+  `sd gate check --base X` compares at `refs/remotes/origin/X`; unfetched, it found no merge base and ran everything.
+  In a repository that declares `.github/sd-check-scope.json`, `sd-check --base REF` now exits 2 naming a `REF` that
+  names no commit. `sd gate check` prints the reason on stderr whenever the scope is full, and `sd-check`'s human
+  report names the scope and its reason whenever `--base` was given.
+
+- **`sd-docs-lint` bounds its claim-support pass and says it is waiting (sd:2873).**
+  Rule 6's claim support asked `jev` in batches of 12, each bounded at 120 seconds, and printed nothing until the end.
+  The whole pass now shares one 120-second budget, prints one stderr line as it starts, and notes where it stopped.
+  Rule 2's delivery check fetches each remote ref once per run, not once per item.
 
 - **The offload view binds the compiler build `cargo` and `rustc` run, beside their bytes (sd:2881).**
   A rustup proxy's bytes name no toolchain. The view now also binds the build lines of `cargo -vV` and `rustc -vV`
@@ -1272,6 +1324,10 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **The default review severity floor is `high` (sd:1657).**
+  A repository whose `.github/sd-review.json` names no `severity_floor` blocks on `high` findings only, not `medium`.
+  The operator ruled the fleet default on 2026-09-30; a repository that wants `medium` names it in its policy file.
 
 - **A repository may bind only the pack files `sd-check` imports (sd:2722).**
   `gate_inputs`, and the offload receipt's `pack_bin` with it, hash every

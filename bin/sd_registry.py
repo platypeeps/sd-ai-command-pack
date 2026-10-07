@@ -1670,7 +1670,12 @@ def stop_detail(provider: Provider, diagnostic: Mapping[str, Any], detail: str) 
         f", {reasoning} bytes of reasoning (finish_reason length)"
     # `length` also means a full context window; only a count at the ceiling
     # proves the ceiling, so anything else names both remedies.
-    if type(used) is int and provider.max_tokens is not None and used >= provider.max_tokens:
+    if provider.max_tokens is None:
+        # sd:1819: no ceiling of ours to blame or raise; the provider's own default stopped it.
+        return (f"{provider.name} stopped on length with no max_tokens set and {what}: {counts}; "
+                f"the provider's default output ceiling or a full context window stopped it, so set "
+                f"max_tokens for {provider.name} in the provider registry, or shorten the review input")
+    if type(used) is int and used >= provider.max_tokens:
         return (f"{provider.name} hit max_tokens ({provider.max_tokens}) and {what}: {counts}; "
                 f"raise max_tokens for {provider.name} in the provider registry or lower its reasoning")
     return (f"{provider.name} stopped on length below max_tokens ({provider.max_tokens}) and {what}: "

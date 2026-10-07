@@ -106,6 +106,10 @@ CORE_CONFIG = {
                      "description": "Comma-separated GitHub logins whose repositories `sd fleet stamp` treats as the "
                                     "operator's own; any other owner's protection stands. Unset reads the deprecated "
                                     "fleet.owners list, then the pack's default pair. It grants nothing."},
+    "bulk_storage_root": {"pattern": r"[~/][^\x00]*",
+                          "description": "The folder for large uncommitted data -- run outputs, logs, captures, "
+                                         "scratch evidence -- as <root>/<repository>/; never build output or "
+                                         "permission-dependent data. Unset is no bulk root. It grants nothing."},
 }
 
 #: `{current name: the name it was stored under before 1.1.0}`. A rename must
