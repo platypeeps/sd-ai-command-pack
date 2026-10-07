@@ -256,6 +256,15 @@ ended:` with the reason when no next occurrence exists. `sd task edit` takes
 the same two flags, and `--clear-recur` stops the series. `sd_db` owns every
 refusal: the grammar, the anchor, the due date and the kinds that may recur.
 
+A row another source raises carries a reference to the occurrence that raised it:
+`sd task add "repo-sync failed" --kind followup --ref job:repo-sync:42`.
+A second add with the same reference updates that row's title, and any body,
+priority or due date it names, and keeps its status, so a retried delivery
+never reopens work that is done; the next run's failure names a new reference
+and files a new row. `sd task show` prints the reference as `ref:`, and
+`sd today --json` and every `--json` row carry it as `ref`. Only a task or a
+followup takes `--ref`, and not with `--recur`.
+
 `sd store items --open` lists the backlog; `sd store item 42 --json` includes
 history and a revision that edits can require with `--if-revision`.
 `sd task show 42` is an alias that prints the same thing.

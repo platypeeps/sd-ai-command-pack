@@ -4,6 +4,17 @@
 
 ### Added
 
+- **`sd task add --ref <source>:<id>` files one row per occurrence (sd:1902).**
+  A second add with the same reference updates that row and keeps its status, so a retried delivery never reopens done work.
+  A new reference, such as the next run's `job:repo-sync:43`, files a new row.
+  `sd task show` prints the reference as `ref:`; `sd today --json` and the other `--json` rows carry it as `ref`.
+  The row stores it as `source = 'task-ref'` and `external_id = <reference>`, so no schema change is needed.
+  Only a task or a followup takes `--ref`, and not with `--recur`.
+
+- **`sd runner get --json` carries each attempt's `started_at` and `finished_at` (sd:1995).**
+  The new `runs` list holds one entry per attempt, oldest first, with `run`, `started_at`, `finished_at` and `outcome`.
+  `started_at` is the claim time and `finished_at` the release time; it is null while the attempt runs.
+
 - **`sd fleet stamp` lays a Claude Code settings baseline per repository class (sd:1661).**
   The baseline is `permissions.deny` rules that stop Claude Code's file tools reading secret files: `.env` variants, `secrets/`, private keys, `.netrc`, `.pypirc`, `~/.ssh`, AWS credentials and the `gh` token file.
   An owned or co-owned repository carries it in a tracked `.claude/settings.json`; a guest one gets the untracked `.claude/settings.local.json` in its plan.

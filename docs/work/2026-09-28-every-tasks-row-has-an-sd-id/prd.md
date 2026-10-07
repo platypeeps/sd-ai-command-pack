@@ -37,12 +37,12 @@ log, an HOA runbook) that the dashboard pastes in as if it were a task.
 
 ## Acceptance criteria
 
-- [ ] `sd task add --help` lists `--ref`.
-- [ ] `sd task add "x" --kind followup --ref job:repo-sync:42` twice leaves
+- [x] `sd task add --help` lists `--ref`.
+- [x] `sd task add "x" --kind followup --ref job:repo-sync:42` twice leaves
       one task, and `sd task show` on it prints the reference.
-- [ ] After that task is done, the same add leaves it done and creates
+- [x] After that task is done, the same add leaves it done and creates
       nothing; `--ref job:repo-sync:43` creates a second task.
-- [ ] Every row in `sd today --json`'s task list carries an `id`.
+- [x] Every row in `sd today --json`'s task list carries an `id`.
 - [ ] `designs/v2/commands.html` shows no declaration with the reason "this row
       has no sd id".
 
@@ -63,3 +63,5 @@ log, an HOA runbook) that the dashboard pastes in as if it were a task.
   references, deduplicating only among open tasks let a retried delivery of a
   resolved run raise new work. Requirement 3 now deduplicates across every
   status; the criterion shows run 43 as the new task.
+- 2026-10-07 requirements 3 and 4 built in the pack (`--ref`, `ref:` and `ref`);
+  requirements 1, 2 and 5 are ui-design and job-side work and stay open.
