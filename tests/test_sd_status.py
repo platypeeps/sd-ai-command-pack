@@ -5120,7 +5120,7 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
         now = datetime.datetime.now(datetime.timezone.utc)
         change = status.merged_review_change(self.repo, merged, self.TODAY, now, inventory)
         self.assertEqual({"count": 2, "day_before": 4, "change": -2, "unchecked": ""}, change)
-        # Recorded more than a day before `now`, the answer stood a day earlier too.
+        # Recorded more than a day before `now`, the answer stood yesterday too.
         later = status.merged_review_change(self.repo, merged, self.TODAY,
                                             now + datetime.timedelta(days=2), inventory)
         self.assertEqual({"count": 2, "day_before": 3, "change": -1, "unchecked": ""}, later)
@@ -5134,15 +5134,15 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
         hidden = status.merged_review_change(self.repo, dict(merged, pull_requests=blind), self.TODAY,
                                              now, self.found(*blind))
         self.assertEqual((2, None, None), (hidden["count"], hidden["day_before"], hidden["change"]))
-        self.assertIn("a day earlier, the inline comments on #17 could not be read", hidden["unchecked"])
+        self.assertIn("yesterday's window: the inline comments on #17 could not be read", hidden["unchecked"])
         out = io.StringIO()
         for counted in (change, dict(change, day_before=2, change=0), dict(change, count=5, change=1), short):
             status._render_threads([], out.write, change=counted)
         said = out.getvalue()
-        self.assertIn(f"  {self.CHECK}: 2 row(s), down 2 from 4 a day earlier\n", said)
-        self.assertIn(f"  {self.CHECK}: 2 row(s), unchanged from a day earlier\n", said)
-        self.assertIn(f"  {self.CHECK}: 5 row(s), up 1 from 4 a day earlier\n", said)
-        self.assertIn(f"  {self.CHECK}: at least 2 row(s), change unknown (the merged list stopped", said)
+        self.assertIn(f"  {self.CHECK}: 2 row(s), down 2 since yesterday (4 then)\n", said)
+        self.assertIn(f"  {self.CHECK}: 2 row(s), unchanged since yesterday\n", said)
+        self.assertIn(f"  {self.CHECK}: 5 row(s), up 1 since yesterday (4 then)\n", said)
+        self.assertIn(f"  {self.CHECK}: at least 2 row(s), change since yesterday unknown (the merged list stopped", said)
 
     def test_the_json_report_carries_the_count(self) -> None:
         """sd:1179: `--json` carries the count and its change as `merged_review_count`."""
@@ -5400,7 +5400,7 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
                     "carries), `expired_reviews` (the `expired:` count, its days, its pull "
                     "requests and why it is short, if it is), `late_reviews` (the `late:` "
                     "count, in the same shape), `merged_review_count` (the merged class's row "
-                    "count and its change from a day earlier), `inventory` (`rows` plus the `unchecked` map), "
+                    "count and its change since yesterday), `inventory` (`rows` plus the `unchecked` map), "
                     "`abnormalities`, "
                     "`actions` — the uncapped inventory, of which `pending` is the first "
                     f"{_word(limit)} after each class's `pending_cap` (`pending_rows`) — and "

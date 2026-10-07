@@ -3157,12 +3157,13 @@ def _merged_window(
 
 def merged_review_change(root: pathlib.Path, merged: dict[str, Any], day: datetime.date,
                          now: datetime.datetime, inventory: "Inventory") -> dict[str, Any]:
-    """The merged class's row count and its change from a day earlier (sd:1179).
+    """The merged class's row count and its change since yesterday (sd:1179).
 
     Unbounded and report-only, the class grew to 219 rows unnoticed; the
     operator's ruling (2026-09-30) is a count plus a change warning, with no
     ceiling and nothing that blocks. Stateless, as `late_reviews` is: this
-    tool writes nothing, so the earlier count is derived, not remembered. It
+    tool writes nothing, so it cannot say "since the last run", which needs a
+    stored count. Yesterday's count is derived from timestamps instead. It
     shifts the window back a day and leaves out acknowledgements recorded in
     the 24 hours before `now`. A review posted within the day still counts a
     day earlier, so the change can understate an increase. An unchecked
@@ -3185,7 +3186,7 @@ def merged_review_change(root: pathlib.Path, merged: dict[str, Any], day: dateti
                                      (earlier, broken)))
     if missed:  # a pull request only the earlier window holds could not be read
         return {"count": count, "day_before": None, "change": None,
-                "unchecked": f"a day earlier, {missed[MERGED_CHECK]}"}
+                "unchecked": f"yesterday's window: {missed[MERGED_CHECK]}"}
     return {"count": count, "day_before": then, "change": count - then, "unchecked": ""}
 
 
@@ -4027,14 +4028,14 @@ def _render_threads(rows: list[dict[str, Any]], write: Any,
 
 
 def _render_change(counted: dict[str, Any], write: Any) -> None:
-    """The merged class's count and its change from a day earlier (sd:1179)."""
+    """The merged class's count and its change since yesterday (sd:1179)."""
     if counted["change"] is None:
-        write(f"  {MERGED_CHECK}: at least {counted['count']} row(s), change unknown ({counted['unchecked']})\n")
+        write(f"  {MERGED_CHECK}: at least {counted['count']} row(s), change since yesterday unknown ({counted['unchecked']})\n")
         return
     moved = counted["change"]
-    said = ("unchanged from" if not moved
-            else f"{'up' if moved > 0 else 'down'} {abs(moved)} from {counted['day_before']}")
-    write(f"  {MERGED_CHECK}: {counted['count']} row(s), {said} a day earlier\n")
+    said = ("unchanged since yesterday" if not moved
+            else f"{'up' if moved > 0 else 'down'} {abs(moved)} since yesterday ({counted['day_before']} then)")
+    write(f"  {MERGED_CHECK}: {counted['count']} row(s), {said}\n")
 
 
 def _render_unread(label: str, counted: dict[str, Any], said: str, write: Any) -> None:

@@ -205,11 +205,12 @@ It reads the window's own list, so it costs no extra `gh` call, and `sd-review-a
 It warns only; `--json` carries it as `late_reviews`.
 
 An unbounded report-only class is not a signal: this one reached 219 rows unnoticed (sd:1179).
-So `open threads` also prints the class's row count and its change from a day earlier.
-The line reads `merged-pr-review-unacknowledged: 12 row(s), up 3 from 9 a day earlier`.
+So `open threads` also prints the class's row count and its change since yesterday.
+The line reads `merged-pr-review-unacknowledged: 12 row(s), up 3 since yesterday (9 then)`.
 It warns only, by the operator's ruling of 2026-09-30: no ceiling, and nothing blocks `sd-ship`.
-It is stateless like `late:`. The earlier count shifts the window back a day and leaves out acknowledgements recorded in the last 24 hours.
-A review posted within the day counts a day earlier too, so the change can understate a rise.
+It is stateless like `late:`, so it says "since yesterday", not "since the last run": that needs a stored count.
+Yesterday's count shifts the window back a day and leaves out acknowledgements recorded in the last 24 hours.
+A review posted within the day counts yesterday too, so the change can understate a rise.
 When the class is `unchecked`, the count is a floor and the line says the change is unknown.
 The change is unknown too when a pull request only the earlier window holds could not be read.
 `--json` carries it as `merged_review_count`.
@@ -406,7 +407,7 @@ The `--json` schema is version **3**. Beyond the section keys it carries
 `merged_pull_requests` (the pull requests merged inside the review window, with
 the findings each carries), `expired_reviews` (the `expired:` count, its
 days, its pull requests and why it is short, if it is), `late_reviews` (the `late:` count, in the same shape), `merged_review_count`
-(the merged class's row count and its change from a day earlier), `inventory` (`rows` plus the `unchecked` map),
+(the merged class's row count and its change since yesterday), `inventory` (`rows` plus the `unchecked` map),
 `abnormalities`, `actions` — the uncapped inventory, of which `pending` is the
 first ten after each class's `pending_cap` (`pending_rows`) — and `next`. It
 has no top-level `pending` key, and the two nested ones are something else

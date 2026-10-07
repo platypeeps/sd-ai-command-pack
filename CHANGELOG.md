@@ -190,8 +190,9 @@
 - **`sd-status` counts the merged-review rows and their change (sd:1179).**
   The report-only class `merged-pr-review-unacknowledged` reached 219 rows
   with nothing saying it grew. `open threads` now prints its row count and the
-  change from a day earlier, and `--json` carries both as
-  `merged_review_count`. It is stateless: the earlier count shifts the window
+  change since yesterday, and `--json` carries both as
+  `merged_review_count`. It is stateless, so not "since the last run", which
+  needs a stored count: yesterday's count shifts the window
   back a day and leaves out acknowledgements recorded in the last 24 hours.
   It warns only, with no ceiling (operator ruling 2026-09-30).
 
