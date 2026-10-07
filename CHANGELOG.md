@@ -4,6 +4,12 @@
 
 ### Added
 
+- **The shipped `kimi` entry sends the findings schema strict (sd:1827).**
+  `providers.yaml` sets `response_format: json_schema` on `kimi` and on no other entry.
+  MiniMax-M3 ignores the field, and Baseten's DeepSeek is untested.
+  The installer never rewrites a home registry, so a machine seeded earlier needs the line added by hand.
+  Moonshot's acceptance of the strict schema is not yet checked with a live call; that paid call is the operator's.
+
 - **`sd-status` reports the fleet baseline's two flags (sd:1807).** The dashboard showed `protection_source` (rulesets alone, no classic object) and `required_check` (`ci`, or `sd/local-gate` for a `repo.ci = local` repository) for each owned repository; `sd-status` printed neither. It now reports both in `protection.merge_settings`, with the ids, values and sentences `sd_db.protection.baseline_flags` writes, and prints them as `FLAG` or `ok` lines beside the merge flags. A repository whose owner is not in `sd.fleet_owners` carries neither; with no `sd.fleet_owners` the owners are `platypeeps`, the system collector's default. A classic read that failed carries neither, as the system files it unknown. No acknowledgement reaches them. `GapVocabularyTests` compares them with the system library at `.sd-system-rev`.
 
 - **`sd-research-kit review` checks each map for stable row IDs and a gaps section (sd:1835, sd:1836).**

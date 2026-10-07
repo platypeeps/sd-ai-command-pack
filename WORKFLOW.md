@@ -774,6 +774,8 @@ Moonshot's strict mode takes: every property typed, `line` as `anyOf`
 integer or null, and no `minLength` or `maxItems`. The answer is still parsed
 against the full schema. Only an entry that declares the field sends it; an
 endpoint that accepts it may ignore it, as MiniMax-M3 does (sd:1827).
+The shipped `kimi` entry declares it, and no other entry does. A home copy
+seeded before that keeps its own entry; add the line there by hand.
 Incomplete output still fails the review. A pin is changed by editing the
 registry file, never by a page.
 A `url` answer that fails the findings schema is retried once on the same
