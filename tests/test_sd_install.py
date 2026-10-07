@@ -2596,6 +2596,10 @@ class ServeTests(InstallerHarness):
         (self.work / ".venv" / "bin").mkdir(parents=True)
         self.record = self.home / "record.json"
         self.tree = self.home / ".local" / "share" / "sd-ai-command-pack" / "serving"
+        # The suite runs inside a virtualenv; most tests here stand for a `--serve` outside one.
+        patcher = unittest.mock.patch.object(sd_install.sys, "prefix", sys.base_prefix)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def context(self, checkout: Path | None = None, **extra) -> "sd_install.Context":
         environ = {"PATH": os.environ.get("PATH", ""), "SERVE_RECORD": str(self.record), **extra}
@@ -2660,6 +2664,14 @@ class ServeTests(InstallerHarness):
         (self.tree / ".venv").mkdir()
         self.assertEqual(self.serve()[0], 0)
         self.assertFalse((self.tree / ".venv").is_symlink())
+
+    def test_the_venv_link_follows_the_environment_make_setup_provisioned(self):
+        """Review round 3: `make setup VENV=...` runs `--serve` from that environment, so the clone links it."""
+        self.assertEqual(self.serve()[0], 0)
+        chosen = self.home / "chosen-env"
+        with unittest.mock.patch.object(sd_install.sys, "prefix", str(chosen)):
+            self.assertEqual(self.serve()[0], 0)
+        self.assertEqual((self.tree / ".venv").readlink(), chosen)
 
     def test_serve_refuses_to_run_from_the_serving_clone_or_without_origin(self):
         self.assertEqual(self.serve()[0], 0)
@@ -3900,6 +3912,33 @@ class LinkEdgeCaseTests(InstallerHarness):
             {"kind": "link", "target": "/old/bin/sd"}, {"kind": "link", "path": ["x"], "target": "/old/bin/sd"}]})
         out = io.StringIO()
         self.assertEqual(sd_install.cmd_user(ctx, out), 0, out.getvalue())
+
+    def test_a_retarget_leaves_every_other_file_beside_the_link(self):
+        """Review round 3: the spare link's name is new to the call, so a file at any sibling name stays."""
+        work = self.checkout_with_commands("sd", name="work")
+        serving = self.checkout_with_commands("sd")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        bin_dir = self.home / ".local" / "bin"
+        mine = bin_dir / ".sd.sd-install"
+        mine.write_text("mine\n", encoding="utf-8")
+        taken = bin_dir / ".sd.sd-install-taken"
+        taken.write_text("also mine\n", encoding="utf-8")
+        with unittest.mock.patch.object(sd_install.secrets, "token_hex", side_effect=["taken", "free"]):
+            self.assertEqual(sd_install.cmd_user(self.context_for(serving), io.StringIO()), 0)
+        self.assertEqual((mine.read_text(encoding="utf-8"), taken.read_text(encoding="utf-8")), ("mine\n", "also mine\n"))
+        self.assertEqual((bin_dir / "sd").resolve(), (serving / "bin" / "sd").resolve())
+        self.assertEqual(sorted(path.name for path in bin_dir.iterdir()), [".sd.sd-install", ".sd.sd-install-taken", "sd"])
+
+    def test_a_retarget_whose_rename_fails_removes_only_its_own_spare(self):
+        bin_dir = self.home / "links"
+        bin_dir.mkdir()
+        link = bin_dir / "sd"
+        link.symlink_to("/old/bin/sd")
+        with unittest.mock.patch("os.replace", side_effect=OSError(1, "Operation not permitted")):
+            with self.assertRaises(OSError):
+                sd_install._replace_link(link, Path("/new/bin/sd"))
+        self.assertEqual(os.readlink(link), "/old/bin/sd")
+        self.assertEqual([path.name for path in bin_dir.iterdir()], ["sd"])
 
     def test_a_link_the_receipt_owns_moves_to_the_next_checkout(self):
         """sd:1118: the switch to a serving checkout retargets the links the last install made."""

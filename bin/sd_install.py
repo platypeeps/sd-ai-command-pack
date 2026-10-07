@@ -37,6 +37,7 @@ import importlib
 import json
 import os
 import re
+import secrets
 import shlex
 import shutil
 import subprocess
@@ -1245,14 +1246,23 @@ def link_commands(plans: list[Link], bin_dir: Path, *, dry_run: bool = False) ->
 
 
 def _replace_link(path: Path, target: Path) -> None:
-    """Point the link at `path` to `target` in one rename, so no moment finds it missing."""
-    spare = path.with_name(f".{path.name}.sd-install")
-    spare.unlink(missing_ok=True)
+    """Point the link at `path` to `target` in one rename, so no moment finds it missing.
+
+    The spare link takes a name no file holds, because `os.symlink` refuses
+    one that exists; so the only file this removes is the spare it made.
+    """
+    while True:
+        spare = path.with_name(f".{path.name}.sd-install-{secrets.token_hex(8)}")
+        try:
+            os.symlink(target, spare)
+            break
+        except FileExistsError:
+            continue
     try:
-        os.symlink(target, spare)
         os.replace(spare, path)
-    finally:
-        spare.unlink(missing_ok=True)
+    except OSError:
+        spare.unlink()
+        raise
 
 
 def prune_links(
@@ -2947,6 +2957,14 @@ def _clone_serving_tree(ctx: Context, tree: Path, out) -> bool:
     return True
 
 
+def _provisioned_environment(ctx: Context) -> Path | None:
+    """The environment `make setup` just provisioned: the one running `--serve`, else the main checkout's `.venv`."""
+    if sys.prefix != sys.base_prefix:
+        return Path(sys.prefix)
+    code, common, _ = _git(ctx, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+    return None if code or not common else Path(common).parent / ".venv"
+
+
 def cmd_serve(ctx: Context, out) -> int:
     """Serve this machine from a dedicated clone of `origin/main`; `make setup` runs it (sd:1118).
 
@@ -2954,9 +2972,10 @@ def cmd_serve(ctx: Context, out) -> int:
     clean checkout nobody works in, which only `make setup` updates. The
     first run clones it; every run then hands it to the clone's own
     installer as `--pull`, which detaches it at the exact commit `origin/main`
-    names and renders from it. The clone's `.venv` is a link to the main
-    checkout's, where `make setup` provisions `sd_db`, so the served commands
-    find the library the same way a worktree does.
+    names and renders from it. The clone's `.venv` is a link to the
+    environment `make setup` provisioned `sd_db` into, so the served commands
+    find the library the same way a worktree does. A real `.venv` directory
+    there is left alone.
     """
     tree = serving_tree(ctx.home, ctx.environ)
     if tree.resolve() == ctx.checkout.resolve():
@@ -2974,10 +2993,10 @@ def cmd_serve(ctx: Context, out) -> int:
     elif ctx.dry_run:
         print(f"would detach {tree} at origin/main and render", file=out)
         return 0
-    code, common, _ = _git(ctx, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+    environment = _provisioned_environment(ctx)
     venv = tree / ".venv"
-    if not code and common and not venv.is_symlink() and not venv.exists():
-        venv.symlink_to(Path(common).parent / ".venv")
+    if environment is not None and (venv.is_symlink() or not venv.exists()):
+        _replace_link(venv, environment)
     argv = [sys.executable, str(tree / "bin" / "sd_install.py"), "--pull", *_forwarded(ctx)]
     done = subprocess.run(argv, env=ctx.environ, capture_output=True, text=True, check=False)  # nosec B603 - fixed argv
     print(done.stdout + done.stderr, file=out, end="")

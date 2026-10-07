@@ -66,9 +66,10 @@ Its last line runs `bin/sd_install.py --serve` from the working checkout:
 - **Clone.** A missing tree is cloned from the working checkout's `origin`
   into a spare directory beside it, detached at `origin/main`, then renamed
   into place. A clone cut short leaves no half-made tree.
-- **Library.** The tree's `.venv` is a link to the main checkout's `.venv`,
-  where `make setup` provisions `sd_db`. The clone's `info/exclude` names
-  it, so `--verify` stays clean. A `.venv` already there is left alone.
+- **Library.** The tree's `.venv` is a link to the environment `make setup`
+  just provisioned with `sd_db`: the one running `--serve`, else the main
+  checkout's `.venv` (review round 3). The clone's `info/exclude` names it,
+  so `--verify` stays clean. A real `.venv` directory there is left alone.
 - **Hand-over.** `--serve` runs the tree's own installer as `--pull`, so the
   activation is the tree's code, as in the first pass.
 - **Links.** `link_plan` gains a fourth state, `recorded`: a link the
