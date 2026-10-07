@@ -396,6 +396,47 @@ class RunnerCancelOnTheDatabase(unittest.TestCase):
         self.assertEqual((code, self.row()["result"]), (0, "written"))
 
 
+class RunnerGetCarriesEachAttempt(unittest.TestCase):
+    """`sd runner get --json` carries each attempt's start and finish (sd:1995)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name).resolve()
+        self.home = self.root / "home"
+        self.connection, self.assignment = RunnerCancelOnTheDatabase.prepared(self, self.home)
+        self.parser = argparse.ArgumentParser()
+        cli.register(self.parser.add_subparsers(required=True))
+        patcher = patch.dict(os.environ, {"HOME": str(self.home)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def get(self):
+        arguments = self.parser.parse_args(["runner", "get", str(self.assignment), "--json"])
+        with redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(arguments.handler(arguments), 0)
+        return json.loads(output.getvalue())
+
+    def test_a_queued_assignment_has_no_attempts(self):
+        self.assertEqual(self.get()["runs"], [])
+
+    def test_a_running_attempt_has_a_start_and_no_finish(self):
+        claimed = runner.claim(self.connection, self.assignment, owner="fixture",
+                               work_root=self.root / "work", retention_root=self.root / "kept")
+        self.assertEqual(self.get()["runs"], [{"run": 1, "started_at": claimed["run"]["created_at"],
+                                               "finished_at": None, "outcome": None}])
+
+    def test_a_finished_attempt_has_both_stamps(self):
+        runner.claim(self.connection, self.assignment, owner="fixture",
+                     work_root=self.root / "work", retention_root=self.root / "kept")
+        with self.connection:
+            self.connection.execute(
+                "UPDATE runner_run SET created_at = ?, released_at = ?, outcome = 'done' WHERE assignment = ?",
+                ("2026-10-04T00:00:00+00:00", "2026-10-04T00:05:00+00:00", self.assignment))
+        self.assertEqual(self.get()["runs"], [{"run": 1, "started_at": "2026-10-04T00:00:00+00:00",
+                                               "finished_at": "2026-10-04T00:05:00+00:00", "outcome": "done"}])
+
+
 class RunnerPreparation(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
