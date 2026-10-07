@@ -188,6 +188,8 @@ A waiting gate names who holds each slot and since when.
 `sd.review_slots` is load control too: how many reviews may run their reviewers at once on the machine (unset: 2).
 `sd gate post --head SHA` runs the merge gate at SHA and posts `sd/local-gate`, for a merge path that is not `sd-ship merge`.
 `sd gate check` runs the same check at `HEAD` and records a pass that `sd-ship prepare` and the merge gate reuse at that head; it posts nothing.
+`sd gate tools install` installs the gate's pinned tool copies (`bin/sd_gate_tools.py`), and `sd gate tools status` lists them.
+A gate in a repository with `repo.satellite_gate = accept` runs those copies first on `PATH`, and refuses while one is missing.
 
 `configured` allows private code and scoped review context to the operator's eligible configured providers, including future entries.
 A local `reviewers` list restricts recipients; an explicit empty value denies review.

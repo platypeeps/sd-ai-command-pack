@@ -13,6 +13,16 @@
   With no pattern file it refuses; `sd.privacy_patterns` names the file. No repository has opted in yet, so nothing calls it on its own.
   The section parser keeps a comment inside a code span or fence, keeps a fenced `### Fixed` example inside its entry, and drops the trailer paragraphs that end a squash message.
 
+- **An opted-in gate runs pinned copies of `cargo-nextest`, `node`, `npm` and `uv` (sd:2936).**
+  Two builds of one release differ, and Homebrew upgrades each machine on its own day, so a satellite's pass refused on tool bytes.
+  `PINS` in `bin/sd_gate_tools.py` names each tool's official release archive by URL and sha256.
+  `sd gate tools install` checks the digest, unpacks each into `<gate cache>/pinned-tools/<tool>-<version>-<sha256[:12]>/` and never changes an installed copy; `sd gate tools status` lists them.
+  In a repository with `repo.satellite_gate = accept` those copies come first on every check's `PATH`, and a missing one refuses the gate before reuse or a run, naming the install command.
+  A tool in macOS's own folders binds the Command Line Tools or Xcode version beside its bytes, since a `/usr/bin/cc` shim is the same bytes under every version; the macOS version is named, not bound.
+  `git` and `make` run the Command Line Tools copies through the gate's own links in `<gate cache>/clt-links/`, whatever the caller's `PATH` puts first.
+  A refusal on a tool names how each machine found it: its resolved file, and for a system tool those versions.
+  `bash` and `python3` stay unpinned; the design names why.
+
 - **Jev shadow readings: review-finding triage and a duplicate hint on `sd task add` (sd:2092, sd:2093).**
   `sd-review` asks Jev to class each of its first ten findings as correctness, robustness, style or likely wrong (`JEV_SD_REVIEW_TRIAGE`).
   `sd task add` asks which open item of the same repository already tracks the new one, if any (`JEV_SD_TASK_DEDUPE`).
