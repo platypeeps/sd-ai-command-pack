@@ -4,6 +4,15 @@
 
 ### Added
 
+- **`sd providers precision` reports each reviewer's precision from ship receipts (sd:1832, sd:1788 asks 1 and 2).**
+  It reads every local review finding from the newest ship receipt of each branch and the accepted adjudications beside it, and writes nothing.
+  Each finding gets an outcome: `rebutted` or `parked` from its adjudication; `fixed` when a later head was reviewed; `undecided` when neither; `advisory` when the review did not block.
+  `fixed` is inferred: a commit that answers a different finding reads the same.
+  The table shows outcome counts and precision, (fixed + parked) / (fixed + parked + rebutted), per provider and severity.
+  `--json` adds one row per finding with its receipt, PR, item and rebuttal reason; `--repository` and `--since` narrow the rows.
+  Reviews run outside `sd-ship` leave no receipt and are not counted.
+  The reviewer order does not read precision yet (sd:1788 ask 3).
+
 - **`sd fleet stamp` lays a Claude Code settings baseline per repository class (sd:1661).**
   The baseline is `permissions.deny` rules that stop Claude Code's file tools reading secret files: `.env` variants, `secrets/`, private keys, `.netrc`, `.pypirc`, `~/.ssh`, AWS credentials and the `gh` token file.
   An owned or co-owned repository carries it in a tracked `.claude/settings.json`; a guest one gets the untracked `.claude/settings.local.json` in its plan.
