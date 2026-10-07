@@ -1105,9 +1105,12 @@ def _dedupe(inputs: DedupeInputs | None, env: Any = os.environ) -> None:
     when. Sent: the new title, and the ids and titles of up to
     `MAX_CANDIDATES` open items of the same repository.
     """
-    if inputs is None:
-        return
-    item, title, candidates, root = inputs
+    if inputs is not None:
+        sd_jev.shadow_safely(DEDUPE_CALLER, DEDUPE_STAGE, sys.stderr, _dedupe_ask, *inputs, env)
+
+
+def _dedupe_ask(item: int, title: str, candidates: list[tuple[int, str]], root: pathlib.Path,
+                env: Any) -> None:
     shown = [(number, _bare(text)) for number, text in candidates if number != item][:MAX_CANDIDATES]
     ready = sd_jev.shadow_ready(DEDUPE_STAGE, DEDUPE_CALLER, root, env, sys.stderr) if shown else None
     if ready is None:

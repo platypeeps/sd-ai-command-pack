@@ -23,6 +23,9 @@ import sd_db.repos
 from tests.test_sd_review import FakeRunner, ReviewFixture, namespace, sd_review
 
 sd_jev = sd_review.sd_jev
+#: Importable once `tests.test_sd_review` has put `bin/` on `sys.path`.
+import sd_work  # noqa: E402
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 #: Logs each call as one JSON line. `enabled` exits with the case's code;
@@ -180,6 +183,26 @@ class TriageTests(ReviewFixture):
         stubs = Stubs(self.tool_bin, raw=True)
         self.assertEqual(self.triage([FINDING, FINDING]), "")
         self.assertEqual(len(stubs.choices()), 2)
+
+    def test_a_switched_off_stage_probes_nothing_that_could_raise(self):
+        """Review of 857d6d039: `github_head` ran before the switch, so an origin
+        that does not decode failed a review whose stage was off."""
+        stubs = Stubs(self.tool_bin)
+        with unittest.mock.patch.object(sd_jev.sd_lib, "github_head", side_effect=UnicodeDecodeError(
+                "utf-8", b"\xff", 0, 1, "invalid start byte")) as head:
+            self.assertEqual(self.triage([FINDING], JEV_SD_REVIEW_TRIAGE="0"), "")
+        head.assert_not_called()
+        self.assertEqual((stubs.jev(), stubs.gh()), ([], []))
+
+    def test_any_failure_in_a_shadow_stage_is_a_note_not_an_exception(self):
+        Stubs(self.tool_bin)
+        root, said, noise = self.repo(), io.StringIO(), io.StringIO()
+        with unittest.mock.patch.object(sd_jev.sd_lib, "github_head", side_effect=RuntimeError("boom")), \
+                contextlib.redirect_stderr(noise):
+            sd_jev.jev_triage([FINDING], self.environment(), root, said)
+            sd_work._dedupe((2, "new", [(1, "old")], root), self.environment())
+        self.assertIn("sd-review: the Jev shadow reading stopped: RuntimeError: boom", said.getvalue())
+        self.assertIn("sd-task-add: the Jev shadow reading stopped: RuntimeError: boom", noise.getvalue())
 
     def test_one_review_triages_at_most_the_cap(self):
         stubs = Stubs(self.tool_bin)

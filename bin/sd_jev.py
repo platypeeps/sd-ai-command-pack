@@ -340,11 +340,15 @@ TRIAGE_CRITERIA = {
 
 def shadow_ready(stage: str, caller: str, root: str | pathlib.Path, env: Mapping[str, str],
                  stream: TextIO) -> tuple[str, tuple[str, str, str]] | None:
-    """`(jev, github head)` when a shadow reading may be taken for public `root`, else None."""
+    """`(jev, github head)` when a shadow reading may be taken for public `root`, else None.
 
-    head = sd_lib.github_head(root)
+    The switch and `jev` come first, so a stage that is off probes nothing."""
+
     binary = shutil.which(COMMAND, path=env.get("PATH"))
-    if sd_lib.jev_stage_off(env.get(stage)) or binary is None or head is None:
+    if sd_lib.jev_stage_off(env.get(stage)) or binary is None:
+        return None
+    head = sd_lib.github_head(root)
+    if head is None:
         return None
     gate = _jev_run([binary, "enabled", stage, "--record", "--caller", caller], env)
     if gate.returncode not in (0, 3):
@@ -371,6 +375,15 @@ def shadow_ask(binary: str, question: str, criteria: str, state: str, env: Mappi
     return code == 0
 
 
+def shadow_safely(caller: str, stage: str, stream: TextIO, stage_body: Any, *args: Any) -> None:
+    """Run one shadow stage; any exception it raises is a note, never the command's outcome."""
+
+    try:
+        stage_body(*args)
+    except Exception as error:  # noqa: BLE001 -- a shadow stage must not change what the command does
+        shadow_stopped(stream, caller, stage, f"{type(error).__name__}: {error}")
+
+
 def shadow_stopped(stream: TextIO, caller: str, stage: str, why: str) -> None:
     stream.write(f"{caller}: the Jev shadow reading stopped: {why}; nothing it does "
                  f"changed (set {stage}=0 to stop asking)\n")
@@ -385,6 +398,11 @@ def jev_triage(findings: Sequence[Mapping[str, Any]], env: Mapping[str, str],
     """
 
     note = sys.stderr if stream is None else stream
+    shadow_safely(CALLER, TRIAGE_STAGE, note, _triage, findings, env, root, note)
+
+
+def _triage(findings: Sequence[Mapping[str, Any]], env: Mapping[str, str],
+            root: str | pathlib.Path, note: TextIO) -> None:
     ready = shadow_ready(TRIAGE_STAGE, CALLER, root, env, note) if findings else None
     if ready is None:
         return
