@@ -470,6 +470,15 @@
 
 ### Fixed
 
+- **The offload view binds the compiler build `cargo` and `rustc` run, beside their bytes (sd:2881).**
+  A rustup proxy's bytes name no toolchain. The view now also binds the build lines of `cargo -vV` and `rustc -vV`
+  (release, commit-hash, commit-date, host, LLVM version), run in the check's worktree under the gate's environment.
+  The view's new `resolution` part names each release line, or `path` where `-vV` failed, and a refusal names both:
+  a hub whose `PATH` finds Homebrew's `cargo` 1.99.0 first refuses a satellite that ran the pinned 1.98.1.
+  `.github/sd-check-scope.json` takes an optional `docs_tools`, every executable the docs command reaches: a
+  docs-only scope that declares it refuses on those tools and the command's own, not on a compiler it never runs.
+  **Migration:** a row written before this release refuses on the pack `bin/` digest; the satellite gates again.
+
 - **A hub accepts a satellite's pass across two real machines (sd:2862).**
   The offload view refused on any difference, and two machines always differ: the hub's launchd job and the
   satellite's shell order `PATH` apart, `git` and `uv` differ by build, `HOME` files by login, thread caps by core
