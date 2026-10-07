@@ -43,6 +43,8 @@ from sd_ship_dispositions import digest
 #: Receipt key prefix -> the adjudication key prefix beside it; the suffix is shared.
 RECEIPTS = {"ship:": "ship-adjudication:", "ship-review-no-item:": "ship-adjudication-no-item:"}
 OUTCOMES = ("fixed", "parked", "rebutted", "undecided", "advisory")
+#: The outcomes whose finding held up; precision is these over these plus rebutted.
+HELD = ("fixed", "parked")
 DEFINITION = "precision = (fixed + parked) / (fixed + parked + rebutted)"
 
 
@@ -108,7 +110,8 @@ def summary(rows: list[dict]) -> list[dict]:
             counts.setdefault((str(row["provider"]), severity), Counter())[row["outcome"]] += 1
     table = []
     for (provider, severity), count in sorted(counts.items(), key=lambda entry: (entry[0][0], entry[0][1] == "all", entry[0][1])):
-        held, decided = count["fixed"] + count["parked"], count["fixed"] + count["parked"] + count["rebutted"]
+        held = sum(count[outcome] for outcome in HELD)
+        decided = held + count["rebutted"]
         table.append({"provider": provider, "severity": severity, "raised": sum(count.values()),
                       **{outcome: count[outcome] for outcome in OUTCOMES},
                       "precision": round(held / decided, 3) if decided else None})
