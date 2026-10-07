@@ -3206,7 +3206,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="the tracker's open work, mirrored as rows this machine can read")
     shadowing = shadow.add_subparsers(dest="verb", required=True)
     syncer = shadowing.add_parser(
-        "sync", help="collect the tracker's open issues and write shadow rows")
+        "sync", help="collect the tracker's open issues and write shadow rows",
+        description=(
+            "Collect each tracker's open issues and write shadow rows. "
+            "Exit 0 on success, 1 when --strict finds a window not fully covered, "
+            f"{sd_shadow.EXIT_HUB_ONLY} on a satellite (run it on the hub), and "
+            f"{sd_shadow.EXIT_BUSY} while another shadow sync holds the lock (retry when it finishes)."))
     syncer.add_argument(
         "--strict", action="store_true",
         help="exit non-zero when the requested window is not fully covered")

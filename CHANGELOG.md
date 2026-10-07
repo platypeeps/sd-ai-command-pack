@@ -505,6 +505,13 @@
 
 ### Fixed
 
+- **`sd shadow sync` reports the library's two refusals in one line, not a traceback (sd:2898).**
+  Since system #199, `sd_db` raises `SyncBusy` while another sync holds the lock and `HubOnly` on a satellite.
+  The verb now prints the library's message as one `sd:` line on stderr.
+  It exits 3 on a satellite, the pack's refused code, and 4 while the lock is held, the pack's retry-later code.
+  `sd shadow sync --help` names both codes. A library without `SyncBusy` still runs the verb.
+  `.sd-system-rev` advances to system `776e017f`, which raises both; the schema stays 20.
+
 - **An opted-in check runs under one tool configuration and one thread cap, and the hub refuses again on what differs (sd:2879).**
   sd:2862 accepted a satellite's pass across differing `HOME` tool configuration, thread caps and indirect tools,
   each of which can change what passes. Every check in a repository with `repo.satellite_gate = accept`, the hub's
