@@ -3995,6 +3995,47 @@ class LinkEdgeCaseTests(InstallerHarness):
             [str(serving / "bin" / name) for name in ("sd", "sd-review")],
         )
 
+    def test_a_move_to_the_next_checkout_leaves_one_copy_of_each_hook(self):
+        """Review round 6: the hooks the receipt recorded for the last checkout go when the next one installs."""
+        work = self.checkout_with_commands("sd", name="work")
+        serving = self.checkout_with_commands("sd")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(self.context_for(serving), out), 0, out.getvalue())
+        for command, event, matchers in sd_install.HOOK_SPECS:
+            for matcher in matchers:
+                group = next(g for g in self.settings["hooks"][event] if g["matcher"] == matcher)
+                self.assertEqual([entry["command"] for entry in group["hooks"]], [str(serving / command)], f"{event}/{matcher}")
+        self.assertEqual(
+            sorted(row["command"] for row in self.receipt["owned"] if row["kind"] == "hook"),
+            sorted({str(serving / command) for command, _, _ in sd_install.HOOK_SPECS}),
+        )
+
+    def test_a_move_to_the_next_checkout_keeps_every_hook_the_receipt_does_not_name(self):
+        work = self.checkout_with_commands("sd", name="work")
+        serving = self.checkout_with_commands("sd")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        settings = self.settings
+        foreign = [{"type": "command", "command": "~/.claude/hooks/somebody-else"},
+                   {"type": "command", "command": str(self.home / "other" / "bin" / "sd-handoff-restore")}]
+        next(g for g in settings["hooks"]["SessionStart"] if g["matcher"] == "startup")["hooks"] += foreign
+        (self.home / ".claude" / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
+        self.assertEqual(sd_install.cmd_user(self.context_for(serving), io.StringIO()), 0)
+        startup = next(g for g in self.settings["hooks"]["SessionStart"] if g["matcher"] == "startup")
+        self.assertEqual(startup["hooks"], [*foreign, {"type": "command", "command": str(serving / "bin" / "sd-handoff-restore")}])
+
+    def test_a_failure_after_the_hook_move_puts_the_hooks_back(self):
+        work = self.checkout_with_commands("sd", name="work")
+        serving = self.checkout_with_commands("sd")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        settings = self.home / ".claude" / "settings.json"
+        before = settings.read_bytes()
+        with unittest.mock.patch.object(sd_install, "ensure_excludes_line", side_effect=OSError(13, "Permission denied")):
+            with self.assertRaises(OSError):
+                sd_install.cmd_user(self.context_for(serving), io.StringIO())
+        self.assertEqual(settings.read_bytes(), before, "the failed run's hooks stayed")
+        self.assertEqual(self.receipt["checkout"], str(work))
+
     def test_a_link_moved_since_the_receipt_is_still_foreign(self):
         """Only a link still at the target the receipt records is the installer's to move."""
         work = self.checkout_with_commands("sd", "sd-review", name="work")

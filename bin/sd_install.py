@@ -2306,8 +2306,19 @@ def cmd_user(ctx: Context, out) -> int:
         retired, left = retire_predecessors(agents, ctx.agents, dry_run=ctx.dry_run)
         skipped += left
 
+        # A move to another checkout drops the hooks the receipt recorded for
+        # the last one, after adding the new ones so each group keeps its place;
+        # the settings bytes recover with the renders (sd:1118).
         specs = hook_specs(ctx.checkout)
+        stale = {row["command"] for row in previous
+                 if row.get("kind") == "hook" and isinstance(row.get("command"), str)}
+        stale -= {command for command, _, _ in specs}
+        if not ctx.dry_run:
+            settings_before = ctx.settings.read_bytes() if ctx.settings.exists() else None
         hook_changed = install_hook(ctx.settings, specs, dry_run=ctx.dry_run)
+        hook_changed = remove_hook(ctx.settings, stale, dry_run=ctx.dry_run) or hook_changed
+        if not ctx.dry_run and hook_changed:
+            backups.append((ctx.settings, ctx.settings.read_bytes(), settings_before))
 
         excludes = excludes_file(ctx.home, ctx.environ, sandboxed=ctx.sandboxed)
         excludes_changed = ensure_excludes_line(excludes, dry_run=ctx.dry_run)

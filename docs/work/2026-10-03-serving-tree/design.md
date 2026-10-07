@@ -77,6 +77,10 @@ Its last line runs `bin/sd_install.py --serve` from the working checkout:
   receipt names, still at its recorded target. The install moves it to the
   new checkout with one rename, and puts it back on a failure. Any other
   link stays foreign and refuses the run.
+- **Hooks.** The install adds the new checkout's hook commands, then drops
+  the ones the receipt recorded for the last checkout, so each hook runs
+  once. A hook the receipt does not name stays. A later failure puts the
+  settings bytes back, unless another writer changed them (review round 6).
 - **Opt-out.** `make setup SERVE=no` provisions without moving the tree,
   for a rollback that should stay put.
 
