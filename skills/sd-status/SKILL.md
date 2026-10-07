@@ -48,7 +48,7 @@ opens with fifteen top-level lines; the fourteen below are the sections.
 | `detected setup` | mode, lowering reason, shared-tree paths to move, and detected check entrypoints |
 | `issues (this repo, from the index)` | indexed issues for this repository, split into the ones the index says need you and the rest |
 | `jira (shared database, all repositories)` | the operator's Jira involvement from the shared database, across every repository: one line per ticket, key and state, open rows first, then rows closed within seven days. Not scoped to the checkout |
-| `protection` | branch-protection **enforcement**, gap by gap, plus the two merge-settings flags |
+| `protection` | branch-protection **enforcement**, gap by gap, plus the merge-settings and fleet-baseline flags |
 | `resumable handoffs` | the pending local packet for this directory (**read, never consumed**) |
 | `backends` | the review lanes the provider registry declares, plus `copilot`, which no entry names — names and states only, enumerated at runtime |
 | `legacy residue` | legacy leftovers, each with the exact command that removes it |
@@ -204,6 +204,17 @@ Above `expired:`, a `late:` line counts the unread findings on pull requests mer
 It reads the window's own list, so it costs no extra `gh` call, and `sd-review-ack` clears a finding there as it clears the row.
 It warns only; `--json` carries it as `late_reviews`.
 
+An unbounded report-only class is not a signal: this one reached 219 rows unnoticed (sd:1179).
+So `open threads` also prints the class's row count and its change since yesterday.
+The line reads `merged-pr-review-unacknowledged: 12 row(s), up 3 since yesterday (9 then)`.
+It warns only, by the operator's ruling of 2026-09-30: no ceiling, and nothing blocks `sd-ship`.
+It is stateless like `late:`, so it says "since yesterday", not "since the last run": that needs a stored count.
+Yesterday's count shifts the window back a day and leaves out acknowledgements recorded in the last 24 hours.
+A review posted within the day counts yesterday too, so the change can understate a rise.
+When the class is `unchecked`, the count is a floor and the line says the change is unknown.
+The change is unknown too when a pull request only the earlier window holds could not be read.
+`--json` carries it as `merged_review_count`.
+
 The days are counted from the UTC calendar day GitHub records the merge on to
 the local date `sd-status` runs on. So the edge can move by the local offset
 from UTC: in California a pull request merged in the evening falls on the next
@@ -342,6 +353,11 @@ missing leg prints as a named gap:
 - `reviews` — no PR review required, or zero required approvals
 - the two r7 merge-settings flags: squash title/message source (a `wip:`
   subject reaching main) and whether rebase-merge is allowed
+- the two fleet-baseline flags, for a repository whose owner is in
+  `sd.fleet_owners`, else `platypeeps` as on the dashboard (sd:1807): `protection_source`, raised unless rulesets alone
+  protect the branch, and `required_check`, raised unless `ci` is required
+  (`sd/local-gate` under `repo.ci = local`). The dashboard shows the same ids.
+  A classic read that failed carries neither, as the system files it unknown.
 
 **A finding is a report, not a failure.** The command exits 0 whether or not it
 found gaps or abnormalities. Exit 2 is reserved for an invocation or
@@ -390,7 +406,8 @@ so capping it would make the cap the interface.
 The `--json` schema is version **3**. Beyond the section keys it carries
 `merged_pull_requests` (the pull requests merged inside the review window, with
 the findings each carries), `expired_reviews` (the `expired:` count, its
-days, its pull requests and why it is short, if it is), `late_reviews` (the `late:` count, in the same shape), `inventory` (`rows` plus the `unchecked` map),
+days, its pull requests and why it is short, if it is), `late_reviews` (the `late:` count, in the same shape), `merged_review_count`
+(the merged class's row count and its change since yesterday), `inventory` (`rows` plus the `unchecked` map),
 `abnormalities`, `actions` — the uncapped inventory, of which `pending` is the
 first ten after each class's `pending_cap` (`pending_rows`) — and `next`. It
 has no top-level `pending` key, and the two nested ones are something else

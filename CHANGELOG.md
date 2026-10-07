@@ -4,6 +4,8 @@
 
 ### Added
 
+- **`sd-status` reports the fleet baseline's two flags (sd:1807).** The dashboard showed `protection_source` (rulesets alone, no classic object) and `required_check` (`ci`, or `sd/local-gate` for a `repo.ci = local` repository) for each owned repository; `sd-status` printed neither. It now reports both in `protection.merge_settings`, with the ids, values and sentences `sd_db.protection.baseline_flags` writes, and prints them as `FLAG` or `ok` lines beside the merge flags. A repository whose owner is not in `sd.fleet_owners` carries neither; with no `sd.fleet_owners` the owners are `platypeeps`, the system collector's default. A classic read that failed carries neither, as the system files it unknown. No acknowledgement reaches them. `GapVocabularyTests` compares them with the system library at `.sd-system-rev`.
+
 - **`sd-research-kit review` checks each map for stable row IDs and a gaps section (sd:1835, sd:1836).**
   Each `20-map/*.md` needs one table whose first column is all stable IDs (`C01`, `C02`, ...) and a heading with the word `Gaps`.
   A miss prints `WARN` and leaves the exit at 0: the rulings make both required without saying they fail, and every research repo predates them.
@@ -191,6 +193,15 @@
   the branch changes, and each origin branch that names the item with no
   open pull request. The lines go to stderr and the receipt's `warnings`. It
   refuses nothing, and a read that fails is a warning of its own.
+
+- **`sd-status` counts the merged-review rows and their change (sd:1179).**
+  The report-only class `merged-pr-review-unacknowledged` reached 219 rows
+  with nothing saying it grew. `open threads` now prints its row count and the
+  change since yesterday, and `--json` carries both as
+  `merged_review_count`. It is stateless, so not "since the last run", which
+  needs a stored count: yesterday's count shifts the window
+  back a day and leaves out acknowledgements recorded in the last 24 hours.
+  It warns only, with no ceiling (operator ruling 2026-09-30).
 
 - **`sd-status` counts late review findings (sd:1178).** A review posted
   after the merge reaches no merge gate: 19 of 219 merged pull requests got

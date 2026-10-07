@@ -619,6 +619,32 @@ class GapVocabularyTests(unittest.TestCase):
             "(pack only, system only) merge flag ids",
         )
 
+    def test_the_default_baseline_owners_are_the_systems(self) -> None:
+        """sd:1807. With no `sd.fleet_owners`, sd-status flags the repositories the dashboard flags."""
+        import sd_db.protection as system  # noqa: PLC0415 - provisioned by `make setup`
+
+        with mock.patch.dict(os.environ):
+            os.environ.pop("SD_BASELINE_OWNERS", None)
+            default = importlib.reload(system).BASELINE_OWNERS
+        importlib.reload(system)
+        self.assertEqual(frozenset(status.BASELINE_OWNERS), default)
+        with mock.patch.object(status.sd_lib, "machine_config", lambda path: {}):
+            self.assertEqual(status._baseline_owners(), (status.BASELINE_OWNERS, ""))
+
+    def test_the_baseline_flags_are_the_systems_ids_and_sentences(self) -> None:
+        """sd:1807. Same ids, values and sentences as `sd_db.protection.baseline_flags`."""
+        import sd_db.protection as system  # noqa: PLC0415 - provisioned by `make setup`
+
+        self.assertEqual(status.BASELINE_FLAG_IDS, system.BASELINE_FLAG_IDS)
+        ruleset = {"source": "ruleset", "required_status_checks": {"contexts": ["ci", "body-lint"]}}
+        classic = {"required_status_checks": {"contexts": ["CI Result"]}}
+        for protection, classic_present, ci in [(None, False, None), (classic, True, None), (ruleset, False, None),
+                                                (ruleset, True, None), (ruleset, False, "local"),
+                                                ({"source": "combined"}, True, "local")]:
+            with self.subTest(protection=protection, classic_present=classic_present, ci=ci):
+                self.assertEqual(status._baseline_flags(protection, True, classic_present, ci),
+                                 system.baseline_flags(protection, "platypeeps", classic_present, ci))
+
 
 class AcknowledgementTests(unittest.TestCase):
     """`.github/sd-status.json`: what it accepts, and when it stops accepting.
@@ -5074,6 +5100,55 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
         self.assertIn("  late: 4 review finding(s) on 3 pull request(s) merged in the last 14 days "
                       "are unread: #0, #2, #14\n", out.getvalue())
 
+    def test_the_count_carries_its_change_from_a_day_earlier(self) -> None:
+        """sd:1179, operator ruling 2026-09-30: count plus change warning, no ceiling.
+
+        Stateless, as sd:1178's go D: the day-earlier count shifts the window
+        back a day and leaves out acknowledgements recorded since. #0 merged
+        today, #15 and #16 aged out, and #4 was answered within the day; #3 stands.
+        """
+        ack = status.sd_lib.sibling("sd_review_ack_change", "sd-review-ack")
+        rows = ack.findings(4, [{"author": "bot", "commit_id": "", "body":
+                                 "| File | Summary |\n|---|---|\n"
+                                 "| `bin/a.py` | Moderate finding (1 vote): wrong. |\n"}], [])
+        ack.acknowledge(self.repo, rows[0], "dismissed", "the reviewer misread the diff")
+        pulls = [self.merged(0, 0, ["n0"]), self.merged(3, 3, ["a3"]),
+                 self.merged(4, 4, [rows[0]["id"]]), self.merged(15, 15, ["a15"]),
+                 self.merged(16, 15, ["a16"])]
+        merged = {"repo": "acme/widget", "pull_requests": pulls}
+        inventory = self.found(*pulls)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        change = status.merged_review_change(self.repo, merged, self.TODAY, now, inventory)
+        self.assertEqual({"count": 2, "day_before": 4, "change": -2, "unchecked": ""}, change)
+        # Recorded more than a day before `now`, the answer stood yesterday too.
+        later = status.merged_review_change(self.repo, merged, self.TODAY,
+                                            now + datetime.timedelta(days=2), inventory)
+        self.assertEqual({"count": 2, "day_before": 3, "change": -1, "unchecked": ""}, later)
+        stopped = dict(merged, truncated=True, limit=500)
+        short = status.merged_review_change(self.repo, stopped, self.TODAY, now,
+                                            self.found(*pulls, truncated=True, limit=500))
+        self.assertEqual((2, None, None), (short["count"], short["day_before"], short["change"]))
+        self.assertIn("stopped at its limit of 500", short["unchecked"])
+        # Only the earlier window holds #17, so today's class reads complete and the change does not.
+        blind = pulls + [self.merged(17, 15, [], unreadable="gh timed out after 60s")]
+        hidden = status.merged_review_change(self.repo, dict(merged, pull_requests=blind), self.TODAY,
+                                             now, self.found(*blind))
+        self.assertEqual((2, None, None), (hidden["count"], hidden["day_before"], hidden["change"]))
+        self.assertIn("yesterday's window: the inline comments on #17 could not be read", hidden["unchecked"])
+        out = io.StringIO()
+        for counted in (change, dict(change, day_before=2, change=0), dict(change, count=5, change=1), short):
+            status._render_threads([], out.write, change=counted)
+        said = out.getvalue()
+        self.assertIn(f"  {self.CHECK}: 2 row(s), down 2 since yesterday (4 then)\n", said)
+        self.assertIn(f"  {self.CHECK}: 2 row(s), unchanged since yesterday\n", said)
+        self.assertIn(f"  {self.CHECK}: 5 row(s), up 1 since yesterday (4 then)\n", said)
+        self.assertIn(f"  {self.CHECK}: at least 2 row(s), change since yesterday unknown (the merged list stopped", said)
+
+    def test_the_json_report_carries_the_count(self) -> None:
+        """sd:1179: `--json` carries the count and its change as `merged_review_count`."""
+        counted = self.report()["merged_review_count"]
+        self.assertEqual({"count", "day_before", "change", "unchecked"}, set(counted))
+
     def test_the_window_holds_day_thirteen_and_fourteen_and_drops_day_fifteen(self) -> None:
         inventory = self.found(self.merged(13, 13, ["a13"]), self.merged(14, 14, ["a14"]),
                                self.merged(15, 15, ["a15"]))
@@ -5324,7 +5399,8 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
                     "requests merged inside the review window, with the findings each "
                     "carries), `expired_reviews` (the `expired:` count, its days, its pull "
                     "requests and why it is short, if it is), `late_reviews` (the `late:` "
-                    "count, in the same shape), `inventory` (`rows` plus the `unchecked` map), "
+                    "count, in the same shape), `merged_review_count` (the merged class's row "
+                    "count and its change since yesterday), `inventory` (`rows` plus the `unchecked` map), "
                     "`abnormalities`, "
                     "`actions` — the uncapped inventory, of which `pending` is the first "
                     f"{_word(limit)} after each class's `pending_cap` (`pending_rows`) — and "
@@ -6376,6 +6452,100 @@ class RulesetProtectionCase(unittest.TestCase):
         self.assertIn("gh: Not Found (HTTP 404)", result["reason"])
         self.assertEqual(result["detail"]["rules_read_error"], "gh: Not Found (HTTP 404)")
 
+
+
+class BaselineFlagCase(unittest.TestCase):
+    """The fleet baseline's two flags, as `sd_db.protection` writes them (sd:1807).
+
+    The dashboard showed `protection_source` (rulesets alone, no classic
+    object) and `required_check` (`ci`, or `sd/local-gate` under `repo.ci =
+    local`) for every owned repository; `sd-status` printed neither. They ride
+    in `merge_settings` beside the merge flags, so no acknowledgement reaches
+    them, and a repository outside the configured owners carries neither.
+    """
+
+    SLUG = "platypeeps/widget"
+    GH = {"available": True, "slug": SLUG, "reason": ""}
+    REPO = RulesetProtectionCase.REPO
+    CLASSIC = {"enforce_admins": {"enabled": True},
+               "required_status_checks": {"strict": True, "contexts": ["CI Result"]},
+               "required_pull_request_reviews": {"required_approving_review_count": 1}}
+
+    @staticmethod
+    def rules(context: str) -> list[dict[str, Any]]:
+        return [{"type": "pull_request", "ruleset_id": 42, "parameters": {"required_approving_review_count": 1}},
+                {"type": "required_status_checks", "ruleset_id": 42,
+                 "parameters": {"strict_required_status_checks_policy": True,
+                                "required_status_checks": [{"context": context}]}}]
+
+    def flags(self, classic: dict[str, Any] | str | None, rules: list[dict[str, Any]], *, ci: str = "github",
+              owners: tuple[str, ...] = ("platypeeps",), admin: bool = True) -> dict[str, dict[str, Any]]:
+        repo = dict(self.REPO, permissions={"admin": admin})
+
+        def answer(args: list[str], root: pathlib.Path) -> tuple[Any, str]:
+            path = urlsplit(args[1]).path
+            if path == f"repos/{self.SLUG}":
+                return dict(repo), ""
+            if path.endswith("/branches/main/protection"):
+                if isinstance(classic, str):
+                    return None, classic
+                return (classic, "") if classic is not None else (None, "gh: Branch not protected (HTTP 404)")
+            if path.endswith("/rules/branches/main"):
+                return rules, ""
+            if path.endswith("/rulesets/42"):
+                return RulesetProtectionCase.RULESET, ""
+            raise AssertionError(f"unexpected read {path}")
+
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(status.pr_state, "gh_json", answer), \
+                mock.patch.object(status.sd_lib, "ci_mode", lambda root: ci), \
+                mock.patch.object(status, "_baseline_owners", lambda: (owners, "")):
+            section = status.protection_section(pathlib.Path(directory), self.GH)
+        return {flag["id"]: flag for flag in section["merge_settings"]}
+
+    def test_a_ruleset_alone_requiring_ci_raises_neither_flag(self) -> None:
+        flags = self.flags(None, self.rules("ci"))
+        self.assertEqual({key: (flags[key]["value"], flags[key]["flagged"]) for key in status.BASELINE_FLAG_IDS},
+                         {"protection_source": ("ruleset", False), "required_check": ("ci", False)})
+
+    def test_classic_protection_without_ci_raises_both(self) -> None:
+        flags = self.flags(self.CLASSIC, [])
+        self.assertEqual((flags["protection_source"]["value"], flags["protection_source"]["flagged"]), ("classic", True))
+        self.assertEqual((flags["required_check"]["value"], flags["required_check"]["flagged"]), ("CI Result", True))
+        self.assertIn("`ci` is not a required check", flags["required_check"]["gap"])
+
+    def test_a_classic_object_that_gates_nothing_beside_a_ruleset_still_raises_the_source(self) -> None:
+        """The layered result reads `ruleset`, but the classic object still stands."""
+        flag = self.flags({"enforce_admins": {"enabled": True}}, self.rules("ci"))["protection_source"]
+        self.assertEqual((flag["value"], flag["flagged"]), ("ruleset, beside a classic object", True))
+
+    def test_a_local_ci_repository_is_judged_on_the_local_gate(self) -> None:
+        self.assertTrue(self.flags(None, self.rules("ci"), ci="local")["required_check"]["flagged"])
+        flag = self.flags(None, self.rules("sd/local-gate"), ci="local")["required_check"]
+        self.assertFalse(flag["flagged"])
+        self.assertIn("`sd/local-gate`", flag["gap"])
+
+    def test_an_unprotected_branch_raises_both_with_none(self) -> None:
+        flags = self.flags(None, [])
+        self.assertEqual({key: (flags[key]["value"], flags[key]["flagged"]) for key in status.BASELINE_FLAG_IDS},
+                         {"protection_source": ("none", True), "required_check": ("none", True)})
+
+    def test_another_owners_repository_carries_neither(self) -> None:
+        flags = self.flags(self.CLASSIC, [], owners=("example-corp",))
+        self.assertEqual(sorted(flags), ["rebase_merge", "squash_message"])
+
+    def test_unknown_protection_carries_neither(self) -> None:
+        """A classic 404 to a token without admin is unknown: no verdict on the baseline either."""
+        self.assertEqual(sorted(self.flags(None, [], admin=False)), ["rebase_merge", "squash_message"])
+
+    def test_a_failed_classic_read_beside_a_ruleset_carries_neither(self) -> None:
+        """The system files a classic read that failed as unknown, so the dashboard
+        shows no baseline flag; `ruleset` here would claim rulesets alone on no evidence."""
+        flags = self.flags("gh: Server Error (HTTP 502)", self.rules("ci"))
+        self.assertEqual(sorted(flags), ["rebase_merge", "squash_message"])
+
+    def test_neither_flag_is_acknowledgeable(self) -> None:
+        self.assertEqual(sorted(set(status.BASELINE_FLAG_IDS) & set(status.ACKNOWLEDGEABLE_GAPS)), [])
 
 
 class ClassicAndRulesetProtectionCase(unittest.TestCase):
