@@ -349,7 +349,7 @@ def execute(
         "detected": detection.reason,
         "warnings": list(detection.warnings),
         "dry_run": dry_run,
-        "scope": (scope or sd_check_scope.Scope(sd_check_scope.FULL, "no --base given")).as_report(),
+        "scope": (scope or sd_check_scope.Scope(sd_check_scope.FULL, sd_check_scope.NO_BASE)).as_report(),
         "status": SKIPPED if dry_run and detection.commands else overall(statuses),
         "checks": checks,
     }
@@ -366,8 +366,8 @@ def render(result: dict[str, object], stream: TextIO) -> None:
     for warning in warnings:
         write(f"  warning: {warning}\n")
     scope = result.get("scope")
-    if isinstance(scope, dict) and scope.get("mode") == sd_check_scope.DOCS_ONLY:
-        write(f"  scope: docs-only ({scope['reason']})\n")
+    if isinstance(scope, dict) and scope.get("reason") != sd_check_scope.NO_BASE:  # a full one says why (sd:2863)
+        write(f"  scope: {scope.get('mode')} ({scope.get('reason')})\n")
     checks = result["checks"]
     assert isinstance(checks, list)
     precheck = result.get("precheck")
@@ -542,7 +542,7 @@ def run_scope(args: argparse.Namespace, root: pathlib.Path, detection: sd_lib.De
         raise UsageError("--base scopes a whole run; it does not combine with --only")
     try:
         return sd_check_scope.decide(root, args.base, detection)
-    except sd_check_scope.DeclarationError as error:
+    except (sd_check_scope.DeclarationError, sd_check_scope.MissingBase) as error:
         raise UsageError(str(error)) from None
 
 
