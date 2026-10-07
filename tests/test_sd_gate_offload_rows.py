@@ -348,31 +348,30 @@ class OffloadedEnvironment(SatelliteFixture):
 
     def test_an_opted_in_check_sees_one_tool_configuration_and_thread_cap(self) -> None:
         """sd:2879: the caller's own git and cargo configuration and thread counts never reach the check."""
-        own = self.root.parent / "elsewhere" / "cargo"
-        (own / "bin").mkdir(parents=True)
-        self.extra.update(GIT_CONFIG_GLOBAL="/elsewhere/gitconfig", CARGO_HOME=str(own), RUST_TEST_THREADS="1")
+        self.extra.update(GIT_CONFIG_GLOBAL="/elsewhere/gitconfig", CARGO_HOME="/elsewhere/cargo", RUST_TEST_THREADS="1")
         status, seen = self.seen()
         self.assertEqual(status, "success")
         pins = sd_gate_receipts.offload_pins({**os.environ, **self.scratch})
-        pins.pop("PATH", None)  # the caller's cargo subcommands stay reachable (sd:2921)
         self.assertEqual({name: seen.get(name) for name in pins}, pins)
         self.assertEqual((seen["GIT_CONFIG_GLOBAL"], seen["RUST_TEST_THREADS"]), (os.devnull, sd_gate_receipts.OFFLOAD_THREADS))
         self.assertTrue(pathlib.Path(seen["CARGO_HOME"]).is_relative_to(self.scratch["XDG_CACHE_HOME"]), seen["CARGO_HOME"])
-        self.assertEqual(seen["PATH"].split(os.pathsep)[-1], str((own / "bin").resolve()))
 
-    def test_a_cargo_bin_the_gate_path_drops_is_not_added_back(self) -> None:
+    def test_a_cargo_bin_the_gate_path_drops_links_nothing(self) -> None:
         """sd:2921 review: a relative `CARGO_HOME`, or one in the checkout, names a folder `gate_environment` drops
-        from `PATH`, since the check runs in another worktree; the added cargo folder passes the same rule."""
+        from `PATH`, since the check runs in another worktree; the caller's cargo `bin` passes the same rule."""
         inside = self.root / "tools" / "cargo"
         (inside / "bin").mkdir(parents=True)
+        (inside / "bin" / "cargo-nextest").write_text("#!/bin/sh\n", encoding="utf-8")
+        (inside / "bin" / "cargo-nextest").chmod(0o755)
+        pinned = pathlib.Path(sd_gate_receipts.offload_pins(self.scratch)["CARGO_HOME"], "bin")
         for cargo_home in ("tools/cargo", str(inside)):
             with self.subTest(cargo_home=cargo_home):
                 self.extra["CARGO_HOME"] = cargo_home
-                status, seen = self.seen()
+                with contextlib.chdir(self.root):  # where the relative one names the checkout's folder
+                    status, seen = self.seen()
                 self.assertEqual(status, "success")
-                entries = seen["PATH"].split(os.pathsep)
-                self.assertFalse([entry for entry in entries if entry.endswith(os.path.join("tools", "cargo", "bin"))],
-                                 entries)
+                self.assertFalse(os.path.lexists(pinned / "cargo-nextest"))
+                self.assertNotIn(os.path.join("tools", "cargo", "bin"), seen["PATH"])
 
     def test_an_opted_in_check_sees_no_credential(self) -> None:
         status, seen = self.seen()

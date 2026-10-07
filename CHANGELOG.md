@@ -534,12 +534,14 @@
 
 ### Fixed
 
-- **An opted-in gate finds the caller's cargo subcommands again (sd:2921).**
+- **An opted-in gate finds the bound cargo subcommands again (sd:2921).**
   `offload_pins` set `CARGO_HOME` to the gate's cache folder, and cargo looks for subcommands in `$CARGO_HOME/bin`.
   So `cargo nextest` failed with "no such command" unless `~/.cargo/bin` was on `PATH`.
-  The pins now append the caller's `CARGO_HOME/bin`, `~/.cargo/bin` by default, to the end of `PATH`.
-  That folder passes the gate's `PATH` rule first (`gate_path`): a relative one or one inside the checkout is not added.
-  `OFFLOAD_TOOLS` adds `cargo-nextest`, so the offload view binds its bytes and refuses when they differ.
+  `OFFLOAD_TOOLS` adds `cargo-nextest`, and `offload_environment` links each `cargo-` name in it into the pinned `CARGO_HOME/bin`.
+  The link comes from the caller's `CARGO_HOME/bin`, `~/.cargo/bin` by default, after the gate's `PATH` rule (`gate_path`).
+  A relative folder or one inside the checkout links nothing, and a link the caller does not back is removed.
+  The offload view looks for a `cargo-` name in `$CARGO_HOME/bin` first, as cargo does, so it binds the linked bytes.
+  A subcommand the view does not bind, such as `cargo-llvm-cov`, stays unavailable, as before.
   The registry cache stays in the pinned folder, so each machine downloads crates once.
 
 - **`sd shadow sync` reports the library's two refusals in one line, not a traceback (sd:2898).**

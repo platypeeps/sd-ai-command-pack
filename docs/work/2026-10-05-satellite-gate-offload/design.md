@@ -190,7 +190,7 @@ cap (`offload_pins`, sd:2879), and the view refuses again on what is left:
 | `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM` | `/dev/null`, `1` | `~/.gitconfig`, `~/.config/git/config` and the system file |
 | `NPM_CONFIG_USERCONFIG`, `NPM_CONFIG_GLOBALCONFIG` | `/dev/null`; a path in the gate's cache folder, since npm refuses one file as both | `~/.npmrc` and the prefix's `npmrc` |
 | `PIP_CONFIG_FILE` | `/dev/null` | every pip file |
-| `CARGO_HOME` | `tool-config/cargo` in the gate's cache folder (`sd_gate_cache.cache_root`) | `~/.cargo/config.toml`; the registry cache moves with it, so each machine downloads it once. The caller's `CARGO_HOME/bin`, `~/.cargo/bin` by default, joins the end of `PATH`, so cargo still finds subcommands such as `cargo-nextest` (sd:2921) |
+| `CARGO_HOME` | `tool-config/cargo` in the gate's cache folder (`sd_gate_cache.cache_root`) | `~/.cargo/config.toml`; the registry cache moves with it, so each machine downloads it once. Each `cargo-` name in `OFFLOAD_TOOLS` is linked into its `bin` from the caller's `CARGO_HOME/bin`, `~/.cargo/bin` by default, if that folder passes `gate_path`; no other subcommand is reachable there (sd:2921) |
 | `CPU_VARIABLES` | `OFFLOAD_THREADS`, 4, one gate's share under the default slot count | the core count; a holder lowers it only where the share is smaller, and the view then refuses on `threads` |
 
 uv has no switch that skips the user's file alone: `UV_NO_CONFIG` skips the
@@ -236,6 +236,7 @@ docs-only scope then refuses on those tools and the command's own name only.
 `OFFLOAD_TOOLS` is one pack constant: `sh`, `bash`, `make`, `python3`,
 `git`, `cc`, `c++`, `clang`, `cargo`, `cargo-nextest`, `rustc`, `node`, `npm`, `uv`.
 `cargo-nextest` is what `cargo nextest` runs, which the check names as `cargo` (sd:2921).
+The view looks for a `cargo-` name in `$CARGO_HOME/bin` before `PATH`, as cargo does.
 `OFFLOAD_HOME_FILES` is another: `.config/uv/uv.toml` (sd:2879).
 A name the hub cannot resolve is recorded, not compared, and named in the
 merge's provenance. A name the hub resolves and the satellite does not
