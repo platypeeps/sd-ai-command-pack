@@ -1085,14 +1085,19 @@ def failing_check_tails(rows: Any, limit: int = FAILING_TAIL_CHARS) -> list[str]
 ANSWERED = ("clean", "findings")
 
 
+#: How much of a failed reviewer's share its name may take in a refusal (sd:1819).
+NAME_CHARS = 40
+
+
 def failed_outcomes(report: dict, limit: int = 600) -> str:
     """The failed reviewers' own details, so a refusal names why (sd:1805).
 
     "0/1 completed" alone sent the operator to the receipt to learn that kimi
     spent its whole max_tokens reasoning. sd-review writes each detail from
     counts and its own sentences, never model text; bounded all the same.
-    Each failed reviewer gets an equal share of `limit` and its name, so a
+    Each failed reviewer gets an equal share of `limit` under its name, so a
     long first detail cannot push the second out of the refusal (sd:1819).
+    The name is bounded apart from the cause, so a long name cannot erase it.
     """
     rows = [row for row in report.get("outcomes") or []
             if isinstance(row, dict) and row.get("status") not in ANSWERED and row.get("detail")]
@@ -1101,8 +1106,11 @@ def failed_outcomes(report: dict, limit: int = 600) -> str:
     share, details = limit // len(rows), []
     for row in rows:
         backend, text = str(row.get("backend") or ""), str(row["detail"])
-        text = text if text.startswith(backend) else f"{backend}: {text}"
-        details.append(f"{text[:share]}{'...' if len(text) > share else ''}")
+        # sd-review's own sentences start with the name; any other detail gets it as a label.
+        cause = text[len(backend):] if text.startswith(backend) else f": {text}" if backend else text
+        name = backend if len(backend) <= NAME_CHARS else f"{backend[:NAME_CHARS - 3]}..."
+        room = max(share - len(name), 0)
+        details.append(f"{name}{cause[:room]}{'...' if len(cause) > room else ''}")
     return f" ({'; '.join(details)})"
 
 

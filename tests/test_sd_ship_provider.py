@@ -278,6 +278,12 @@ class ProviderSelection(unittest.TestCase):
         self.assertIn("; minimax: review input exceeds 10 bytes)", text)
         self.assertIn("kimi xxx", text)
         self.assertLessEqual(len(text), len(" (") + 600 + len("...; )"))
+        long = "r" * 300
+        report = {"outcomes": [{"backend": f"{long}-one-padding", "status": "unavailable", "detail": "cause one"},
+                               {"backend": f"{long}-two-padding", "status": "unavailable", "detail": "cause two"}]}
+        text = sd_ship_review.failed_outcomes(report)
+        self.assertIn("...: cause one;", text)
+        self.assertIn("...: cause two)", text)
 
     def test_failed_retry_and_additional_request_preserve_selectors_and_budget(self):
         incomplete = {"status": "unavailable", "completed_reviews": 0, "reviewed_by": []}
