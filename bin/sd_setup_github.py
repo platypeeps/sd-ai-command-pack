@@ -68,35 +68,6 @@ LEGACY_ROUTER_PATHS = (
 )
 
 
-#: The step after checkout in both workflows the pack lays (sd:1818). The
-#: checkout reads `refs/pull/N/head`, which a re-run of an older run resolves
-#: to the pull request's newest head while the run still reports on the SHA
-#: its event named. The step fails that run rather than let one commit's
-#: result stand for another. The SHA reaches the shell through `env:`, never
-#: spliced into the script.
-HEAD_CHECK_STEP = """\
-      - name: The checkout is the head this run reports on
-        env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          checked_out="$(git rev-parse HEAD)"
-          if [ "$checked_out" != "$HEAD_SHA" ]; then
-            echo "::error::checked out $checked_out, but this run reports on $HEAD_SHA; the pull request moved, so run its newest check instead"
-            exit 1
-          fi
-"""
-
-
-def known_texts(text: str) -> tuple[str, str]:
-    """`text`, a workflow the pack writes now, and the same workflow as it was written before `HEAD_CHECK_STEP`.
-
-    A file holding the older text is the pack's own at that pin, so a stamp
-    may move it forward and `--remove` may delete it without `--force`.
-    """
-
-    return text, text.replace(HEAD_CHECK_STEP, "", 1)
-
-
 class Refusal(Exception):
     """A precondition said no. Exit 3, and the message names what was wrong."""
 
@@ -220,7 +191,7 @@ jobs:
           # shallow clone does not contain.
           fetch-depth: 0
           persist-credentials: false
-{HEAD_CHECK_STEP}      - name: Report the routing plan
+{sd_setup_guard.HEAD_CHECK_STEP}      - name: Report the routing plan
         uses: {action_ref}
 """
 
@@ -322,7 +293,7 @@ def remove(root: pathlib.Path, args: argparse.Namespace, stream: TextIO) -> int:
     """`--remove`, in any mode (sd:1843). The plan is `sd_setup_guard.removal`'s; `--dry-run` writes nothing."""
 
     plan = sd_setup_guard.removal(root, WORKFLOW_RELATIVE_PATH,
-                                  lambda pin: known_texts(workflow_text(action_reference(pin))),
+                                  lambda pin: sd_setup_guard.known_texts(workflow_text(action_reference(pin))),
                                   self_install=root == pack_root(), force=args.force)
     if not args.dry_run:
         _apply((path, content) for path, content, _line in plan)

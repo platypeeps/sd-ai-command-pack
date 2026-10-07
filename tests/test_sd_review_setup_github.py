@@ -315,7 +315,7 @@ class WorkflowContentTests(SetupFixture):
 
 def head_check_script() -> str:
     """The shell the head-check step runs, as GitHub hands it to `bash -e`."""
-    lines = setup.HEAD_CHECK_STEP.splitlines()
+    lines = guard.HEAD_CHECK_STEP.splitlines()
     start = next(i for i, line in enumerate(lines) if line.strip() == "run: |") + 1
     return textwrap.dedent("\n".join(lines[start:])) + "\n"
 
@@ -327,9 +327,9 @@ class HeadCheckTests(SetupFixture):
 
     def test_the_lane_compares_the_checkout_with_the_event_head_after_checkout(self) -> None:
         text = setup.workflow_text("./x")
-        self.assertIn("HEAD_SHA: ${{ github.event.pull_request.head.sha }}", setup.HEAD_CHECK_STEP)
+        self.assertIn("HEAD_SHA: ${{ github.event.pull_request.head.sha }}", guard.HEAD_CHECK_STEP)
         checkout = text.index("- name: Check out the pull request")
-        check = text.index(setup.HEAD_CHECK_STEP)
+        check = text.index(guard.HEAD_CHECK_STEP)
         self.assertLess(checkout, check)
         self.assertLess(check, text.index("- name: Report the routing plan"))
 
@@ -354,7 +354,7 @@ class HeadCheckTests(SetupFixture):
         root = self.make_repo()
         install(root)
         current = self.workflow(root).read_text(encoding="utf-8")
-        self.workflow(root).write_text(current.replace(setup.HEAD_CHECK_STEP, ""), encoding="utf-8")
+        self.workflow(root).write_text(current.replace(guard.HEAD_CHECK_STEP, ""), encoding="utf-8")
         code = setup.remove(root, setup_args(remove=True), io.StringIO())
         self.assertEqual(code, 0)
         self.assertFalse(self.workflow(root).exists())

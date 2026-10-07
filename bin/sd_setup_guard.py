@@ -439,6 +439,35 @@ def unguarded(text: str, action: str = DEFAULT_ACTION) -> str | None:
     return "\n".join(lines) + "\n"
 
 
+#: The step after checkout in both workflows the pack lays (sd:1818). The
+#: checkout reads `refs/pull/N/head`, which a re-run of an older run resolves
+#: to the pull request's newest head while the run still reports on the SHA
+#: its event named. The step fails that run rather than let one commit's
+#: result stand for another. The SHA reaches the shell through `env:`, never
+#: spliced into the script.
+HEAD_CHECK_STEP = """\
+      - name: The checkout is the head this run reports on
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          checked_out="$(git rev-parse HEAD)"
+          if [ "$checked_out" != "$HEAD_SHA" ]; then
+            echo "::error::checked out $checked_out, but this run reports on $HEAD_SHA; the pull request moved, so run its newest check instead"
+            exit 1
+          fi
+"""
+
+
+def known_texts(text: str) -> tuple[str, str]:
+    """`text`, a workflow the pack writes now, and the same workflow as it was written before `HEAD_CHECK_STEP`.
+
+    A file holding the older text is the pack's own at that pin, so a stamp
+    may move it forward and `--remove` may delete it without `--force`.
+    """
+
+    return text, text.replace(HEAD_CHECK_STEP, "", 1)
+
+
 def removal(root: pathlib.Path, workflow: pathlib.Path, templates: Any, *, self_install: bool,
             force: bool) -> list[tuple[pathlib.Path, str | None, str]]:
     """What `setup-github --remove` changes: (path, new text or None to delete, report line).

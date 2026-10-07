@@ -113,25 +113,28 @@ EXEMPTABLE = (ROUTE_PATH, DEPENDABOT_PATH, CHECK_PATH, STATUS_PATH, GITIGNORE_PA
 #: must not make, in every repository class. Deny rules only, so the file
 #: grants nothing a collaborator's session did not already have. Named files
 #: rather than `.env.*`, because a committed `.env.example` is documentation an
-#: agent has to read. The rules bind Claude Code's file tools; a shell command
-#: can still read the file, which the operator's sandbox settles.
+#: agent has to read. Each rule is anchored: `/` at the project, `~/` at home.
+#: A bare `**/` binds at the session's current directory, so a session started
+#: in a subdirectory could still read the root `.env`. The rules bind Claude
+#: Code's file tools; a shell command can still read the file, which the
+#: operator's sandbox settles.
 SECRET_READ_DENY = (
-    "Read(**/.env)",
-    "Read(**/.env.local)",
-    "Read(**/.env.*.local)",
-    "Read(**/.env.development)",
-    "Read(**/.env.staging)",
-    "Read(**/.env.production)",
-    "Read(**/secrets/**)",
-    "Read(**/*.key)",
-    "Read(**/*-key.pem)",
-    "Read(**/*.p12)",
-    "Read(**/*.pfx)",
-    "Read(**/id_rsa)",
-    "Read(**/id_ecdsa)",
-    "Read(**/id_ed25519)",
-    "Read(**/.netrc)",
-    "Read(**/.pypirc)",
+    "Read(/**/.env)",
+    "Read(/**/.env.local)",
+    "Read(/**/.env.*.local)",
+    "Read(/**/.env.development)",
+    "Read(/**/.env.staging)",
+    "Read(/**/.env.production)",
+    "Read(/**/secrets/**)",
+    "Read(/**/*.key)",
+    "Read(/**/*-key.pem)",
+    "Read(/**/*.p12)",
+    "Read(/**/*.pfx)",
+    "Read(/**/id_rsa)",
+    "Read(/**/id_ecdsa)",
+    "Read(/**/id_ed25519)",
+    "Read(/**/.netrc)",
+    "Read(/**/.pypirc)",
     "Read(~/.ssh/**)",
     "Read(~/.aws/credentials)",
     "Read(~/.config/gh/hosts.yml)",
@@ -201,7 +204,7 @@ jobs:
           ref: refs/pull/${{{{ github.event.pull_request.number }}}}/head
           fetch-depth: 0
           persist-credentials: false
-{sd_setup_github.HEAD_CHECK_STEP}      - name: The diff has no whitespace errors or conflict markers
+{sd_setup_guard.HEAD_CHECK_STEP}      - name: The diff has no whitespace errors or conflict markers
         env:
           BASE_REF: ${{{{ github.base_ref }}}}
         run: git diff --check "origin/${{BASE_REF}}...HEAD"
@@ -490,11 +493,15 @@ def settings_text(current: str | None) -> str:
     return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
-def settings_change(plan: Plan, path: str, current: str | None, propose: Callable[[str], None]) -> None:
-    """Propose the settings baseline at `path`, or refuse a file that does not read."""
+def settings_change(plan: Plan, path: str, read: Callable[[], str | None], propose: Callable[[str], None]) -> None:
+    """Propose the settings baseline at `path`, or refuse a file that does not read.
+
+    The read happens here, inside the refusal: a file that does not decode,
+    or cannot be opened, refuses this repository rather than the whole run.
+    """
     try:
-        after = settings_text(current)
-    except ValueError as error:
+        after = settings_text(read())
+    except (ValueError, OSError) as error:
         plan.refused.append(f"{path}: unreadable ({error}); fix it by hand, then re-run")
     else:
         propose(after)
@@ -607,7 +614,7 @@ def tracked_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None],
             propose(STATUS_PATH, after)
 
     propose(GITIGNORE_PATH, gitignore_text(tree.text_at(GITIGNORE_PATH)))
-    settings_change(plan, SETTINGS_PATH, tree.text_at(SETTINGS_PATH), lambda after: propose(SETTINGS_PATH, after))
+    settings_change(plan, SETTINGS_PATH, lambda: tree.text_at(SETTINGS_PATH), lambda after: propose(SETTINGS_PATH, after))
 
 
 def is_route_template(text: str, *, self_install: bool) -> bool:
@@ -615,7 +622,7 @@ def is_route_template(text: str, *, self_install: bool) -> bool:
     pin = None if self_install else sd_setup_guard.read_pin(text)
     if pin is None and not self_install:
         return False
-    return text in sd_setup_github.known_texts(sd_setup_github.workflow_text(sd_setup_github.action_reference(pin)))
+    return text in sd_setup_guard.known_texts(sd_setup_github.workflow_text(sd_setup_github.action_reference(pin)))
 
 
 def workflow_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None], *, pin: str,
@@ -650,7 +657,7 @@ def workflow_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None]
     # byte for byte the pack's, so moving it forward replaces nobody's job.
     others = pull_request_workflows(tree, besides=(ROUTE_PATH, CHECK_PATH))
     current = tree.text_at(CHECK_PATH)
-    if current is not None and current in sd_setup_github.known_texts(check_workflow_text()):
+    if current is not None and current in sd_setup_guard.known_texts(check_workflow_text()):
         propose(CHECK_PATH, check_workflow_text())
     elif current is not None:
         plan.adapted.append(f"{CHECK_PATH}: kept as written; the stamp only creates it")
@@ -742,10 +749,10 @@ def guest_settings(plan: Plan, root: pathlib.Path, tracked: Callable[[pathlib.Pa
         plan.refused.append(f"{LOCAL_SETTINGS_PATH}: tracked in this repository; the guest baseline goes "
                             "only into an untracked file")
         return
-    target = root / LOCAL_SETTINGS_PATH
-    before = target.read_text(encoding="utf-8") if target.is_file() else None
-    settings_change(plan, LOCAL_SETTINGS_PATH, before,
-                    lambda after: propose(LOCAL_SETTINGS_PATH, after, where="local", before=before))
+    read = Tree(root, None).text_at
+    settings_change(plan, LOCAL_SETTINGS_PATH, lambda: read(LOCAL_SETTINGS_PATH),
+                    lambda after: propose(LOCAL_SETTINGS_PATH, after, where="local",
+                                          before=read(LOCAL_SETTINGS_PATH)))
 
 
 def apply_exemptions(plan: Plan, tree: Tree) -> None:

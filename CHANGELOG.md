@@ -7,7 +7,8 @@
 - **`sd fleet stamp` lays a Claude Code settings baseline per repository class (sd:1661).**
   The baseline is `permissions.deny` rules that stop Claude Code's file tools reading secret files: `.env` variants, `secrets/`, private keys, `.netrc`, `.pypirc`, `~/.ssh`, AWS credentials and the `gh` token file.
   An owned or co-owned repository carries it in a tracked `.claude/settings.json`; a guest one gets the untracked `.claude/settings.local.json` in its plan.
-  The stamp adds missing rules, removes none, leaves a complete file byte for byte, and refuses a file that does not read.
+  Each rule is anchored at the project root or at home, so a session started in a subdirectory is covered too.
+  The stamp adds missing rules, removes none, leaves a complete file byte for byte, and refuses a file that does not read or decode.
   `.github/sd-fleet.json` may exempt either path. Nothing restamps the fleet: run `sd fleet stamp --dry-run`, then the write per repository.
 
 - **Stamped workflows fail a run whose checkout is not the head it reports on (sd:1818).**

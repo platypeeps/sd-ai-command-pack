@@ -28,6 +28,7 @@ import sd_fleet  # noqa: E402
 import sd_install  # noqa: E402
 import sd_lib  # noqa: E402
 import sd_setup_github  # noqa: E402
+import sd_setup_guard  # noqa: E402
 
 PIN = "1" * 40
 CI = "name: ci\non:\n  pull_request:\njobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n"
@@ -192,7 +193,7 @@ class DryRun(Fleet):
     def test_the_check_workflow_fails_a_run_whose_checkout_is_not_its_head(self) -> None:
         """sd:1818: the check workflow carries the route workflow's head check, after its checkout."""
         text = sd_fleet.check_workflow_text()
-        check = text.index(sd_setup_github.HEAD_CHECK_STEP)
+        check = text.index(sd_setup_guard.HEAD_CHECK_STEP)
         self.assertLess(text.index("- name: Check out the pull request"), check)
         self.assertLess(check, text.index("- name: The diff has no whitespace errors"))
 
@@ -202,8 +203,8 @@ class DryRun(Fleet):
         nor kept as the repository's."""
         old_route = sd_setup_github.workflow_text(sd_setup_github.action_reference("a" * 40))
         root, remote = self.repo("pre-1818", {
-            sd_fleet.ROUTE_PATH: old_route.replace(sd_setup_github.HEAD_CHECK_STEP, ""),
-            sd_fleet.CHECK_PATH: sd_fleet.check_workflow_text().replace(sd_setup_github.HEAD_CHECK_STEP, "")})
+            sd_fleet.ROUTE_PATH: old_route.replace(sd_setup_guard.HEAD_CHECK_STEP, ""),
+            sd_fleet.CHECK_PATH: sd_fleet.check_workflow_text().replace(sd_setup_guard.HEAD_CHECK_STEP, "")})
         [plan] = self.plan([(root, remote)])
         changed = {change["path"]: change["diff"] for change in plan["changes"]}
         for path in (sd_fleet.ROUTE_PATH, sd_fleet.CHECK_PATH):
@@ -382,21 +383,49 @@ class SettingsBaseline(Fleet):
     def test_the_baseline_denies_reading_secrets_and_grants_nothing(self) -> None:
         written = json.loads(sd_fleet.settings_text(None))
         self.assertEqual(written, {"permissions": {"deny": list(sd_fleet.SECRET_READ_DENY)}})
-        for rule in ("Read(**/.env)", "Read(**/.env.*.local)", "Read(**/secrets/**)", "Read(~/.ssh/**)"):
+        for rule in ("Read(/**/.env)", "Read(/**/.env.*.local)", "Read(/**/secrets/**)", "Read(~/.ssh/**)"):
             self.assertIn(rule, sd_fleet.SECRET_READ_DENY)
         self.assertTrue(all(rule.startswith("Read(") for rule in sd_fleet.SECRET_READ_DENY))
         # A committed example file is documentation an agent has to read.
-        self.assertNotIn("Read(**/.env.*)", sd_fleet.SECRET_READ_DENY)
+        self.assertNotIn("Read(/**/.env.*)", sd_fleet.SECRET_READ_DENY)
+
+    def test_every_rule_is_anchored_away_from_the_current_directory(self) -> None:
+        """Review round 1: `Read(**/.env)` binds at and under the session's
+        current directory, so a session started in a subdirectory could read
+        the root `.env`. `/` anchors at the project, `~/` at home."""
+        for rule in sd_fleet.SECRET_READ_DENY:
+            with self.subTest(rule=rule):
+                self.assertRegex(rule, r"^Read\((/|~/)")
+
+    def test_a_settings_file_that_does_not_decode_refuses_that_repository_only(self) -> None:
+        """Review round 1: a non-UTF-8 file aborted the whole dry run."""
+        root, remote_url = self.repo("bytes")
+        (root / ".claude").mkdir()
+        (root / sd_fleet.SETTINGS_PATH).write_bytes(b'{"permissions": "\xff"}\n')
+        git(root, "add", "-A")
+        git(root, "commit", "-q", "-m", "bytes")
+        git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        local = f"{sd_install.BLOCK_BEGIN}\n    mode: guest\n{sd_install.BLOCK_END}\n"
+        guest, guest_url = self.repo("guest-bytes", local=local)
+        (guest / ".claude").mkdir()
+        (guest / sd_fleet.LOCAL_SETTINGS_PATH).write_bytes(b"\xff\n")
+        other, other_url = self.repo("fine")
+        plans = self.plan([(root, remote_url), (guest, guest_url), (other, other_url)])
+        for plan, path in zip(plans, (sd_fleet.SETTINGS_PATH, sd_fleet.LOCAL_SETTINGS_PATH, None), strict=True):
+            with self.subTest(repo=plan["repo"]):
+                refused = [line for line in plan["refused"] if path and line.startswith(f"{path}: unreadable")]
+                self.assertEqual(len(refused), 1 if path else 0, plan["refused"])
+                self.assertNotIn(path, self.changes(plan))
 
     def test_an_existing_file_keeps_its_rules_and_gains_the_missing_ones(self) -> None:
         current = json.dumps({"env": {"A": "1"}, "permissions": {
-            "allow": ["Bash(make check)"], "deny": ["Bash(gh issue create:*)", "Read(**/.env)"]}}, indent=4) + "\n"
+            "allow": ["Bash(make check)"], "deny": ["Bash(gh issue create:*)", "Read(/**/.env)"]}}, indent=4) + "\n"
         after = json.loads(sd_fleet.settings_text(current))
         self.assertEqual(after["env"], {"A": "1"})
         self.assertEqual(after["permissions"]["allow"], ["Bash(make check)"])
         deny = after["permissions"]["deny"]
-        self.assertEqual(deny[:2], ["Bash(gh issue create:*)", "Read(**/.env)"])
-        self.assertEqual(sorted(deny[2:] + ["Read(**/.env)"]), sorted(sd_fleet.SECRET_READ_DENY))
+        self.assertEqual(deny[:2], ["Bash(gh issue create:*)", "Read(/**/.env)"])
+        self.assertEqual(sorted(deny[2:] + ["Read(/**/.env)"]), sorted(sd_fleet.SECRET_READ_DENY))
 
     def test_a_file_that_already_carries_the_rules_is_left_byte_for_byte(self) -> None:
         current = json.dumps({"permissions": {"deny": list(reversed(sd_fleet.SECRET_READ_DENY))}}, indent=8) + "\n"
