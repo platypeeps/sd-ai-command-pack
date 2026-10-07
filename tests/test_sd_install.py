@@ -2683,6 +2683,16 @@ class ServeTests(InstallerHarness):
         self.assertEqual(rc, 1)
         self.assertEqual((self.tree / ".venv").readlink(), self.work / ".venv")
 
+    def test_a_child_run_that_raises_leaves_the_venv_link_as_it_was(self):
+        """Review round 5: the restore runs when the child run raises, not only when it returns non-zero."""
+        self.assertEqual(self.serve()[0], 0)
+        chosen = self.home / "chosen-env"
+        with unittest.mock.patch.object(sd_install.sys, "prefix", str(chosen)), \
+                unittest.mock.patch.object(sd_install.subprocess, "run", side_effect=OSError(8, "Exec format error")):
+            with self.assertRaises(OSError):
+                self.serve()
+        self.assertEqual((self.tree / ".venv").readlink(), self.work / ".venv")
+
     def test_a_failed_first_pull_leaves_no_venv_link(self):
         rc, _ = self.serve(self.context(SERVE_EXIT="1"))
         self.assertEqual(rc, 1)

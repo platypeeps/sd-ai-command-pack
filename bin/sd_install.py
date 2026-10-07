@@ -3011,16 +3011,20 @@ def cmd_serve(ctx: Context, out) -> int:
     if environment is not None and swapped:
         _replace_link(venv, environment)
     argv = [sys.executable, str(tree / "bin" / "sd_install.py"), "--pull", *_forwarded(ctx)]
-    done = subprocess.run(argv, env=ctx.environ, capture_output=True, text=True, check=False)  # nosec B603 - fixed argv
-    print(done.stdout + done.stderr, file=out, end="")
-    # A refused or failed `--pull` leaves the tree at its old commit, so it
-    # keeps the environment it had (review round 4).
-    if done.returncode and swapped:
-        if previous is None:
-            venv.unlink()
-        else:
-            _replace_link(venv, Path(previous))
-    return done.returncode
+    returncode = 1
+    try:
+        done = subprocess.run(argv, env=ctx.environ, capture_output=True, text=True, check=False)  # nosec B603 - fixed argv
+        print(done.stdout + done.stderr, file=out, end="")
+        returncode = done.returncode
+    finally:
+        # A `--pull` that refuses, fails or never runs leaves the tree at its
+        # old commit, so it keeps the environment it had (review rounds 4, 5).
+        if returncode and swapped:
+            if previous is None:
+                venv.unlink()
+            else:
+                _replace_link(venv, Path(previous))
+    return returncode
 
 
 def cmd_uninstall(ctx: Context, out) -> int:
