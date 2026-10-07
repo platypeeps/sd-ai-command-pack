@@ -15,6 +15,14 @@ detected from, `CLAUDE.local.md`, and any repository file a check command
 names in its argv. No declaration, no `--base`, an empty diff or a declaration
 that does not parse all run the full check: the scope only ever narrows what
 runs when every condition for narrowing holds.
+A declared repository's `--base` that names no commit is a usage error, not a
+full check (sd:2863).
+
+An optional `docs_tools` lists every executable the docs command reaches, the
+shell included, by bare name on `PATH`, such as `["sh", "python3"]` (sd:2881). A hub that accepts a
+satellite's docs-only pass then compares those tools and the command's own,
+not the compilers a full check may run. Without it the hub compares them all:
+`make docs-gate` can reach `cargo` through `cargo doc` or a doctest.
 
 Globs are `glob.translate` globs: `*` stays inside one path segment, `**`
 spans segments, and a leading dot is matched like any other character.
@@ -32,14 +40,20 @@ import sd_lib
 
 DECLARATION = ".github/sd-check-scope.json"
 FIELDS = {"schema_version", "docs_paths", "docs_command"}
+OPTIONAL_FIELDS = {"docs_tools"}
 FULL = "full"
 DOCS_ONLY = "docs-only"
+NO_BASE = "no --base given"
 #: Build files that decide what a check runs, wherever they sit.
 BUILD_FILES = re.compile(r"(?:^|/)(?:[Mm]akefile|GNUmakefile|[^/]*\.mk)$")
 
 
 class DeclarationError(ValueError):
     """The declaration exists and does not say what it must."""
+
+
+class MissingBase(ValueError):
+    """`--base` names no commit, so no merge base can say what changed (sd:2863)."""
 
 
 @dataclass(frozen=True)
@@ -51,14 +65,16 @@ class Scope:
     fork: str | None = None
     command: tuple[str, ...] = ()
     paths: tuple[str, ...] = field(default_factory=tuple)
+    #: The declaration's `docs_tools` in a docs-only scope; None when it declares none.
+    tools: tuple[str, ...] | None = None
 
     def as_report(self) -> dict[str, object]:
         return {"mode": self.mode, "reason": self.reason, "fork": self.fork,
                 "command": list(self.command) or None, "paths": len(self.paths)}
 
 
-def declaration(root: pathlib.Path) -> tuple[list[str], list[str]] | None:
-    """`(docs_paths, docs_command)`, None when the tree has none; `DeclarationError` when it is malformed."""
+def declaration(root: pathlib.Path) -> tuple[list[str], list[str], list[str] | None] | None:
+    """`(docs_paths, docs_command, docs_tools or None)`, None when the tree has none; `DeclarationError` when it is malformed."""
     path = root / DECLARATION
     if not path.is_file():
         return None
@@ -66,13 +82,20 @@ def declaration(root: pathlib.Path) -> tuple[list[str], list[str]] | None:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
         raise DeclarationError(f"{DECLARATION} does not parse: {error}") from None
-    if not isinstance(value, dict) or set(value) != FIELDS or value.get("schema_version") != 1:
-        raise DeclarationError(f"{DECLARATION} needs exactly {sorted(FIELDS)} with schema_version 1")
+    if (not isinstance(value, dict) or not FIELDS <= set(value) <= FIELDS | OPTIONAL_FIELDS
+            or value.get("schema_version") != 1):
+        raise DeclarationError(f"{DECLARATION} needs exactly {sorted(FIELDS)}, optionally {sorted(OPTIONAL_FIELDS)}, "
+                               "with schema_version 1")
     for name in ("docs_paths", "docs_command"):
         entries = value[name]
         if not isinstance(entries, list) or not entries or any(not isinstance(v, str) or not v for v in entries):
             raise DeclarationError(f"{DECLARATION}: {name} must be a non-empty list of non-empty strings")
-    return list(value["docs_paths"]), list(value["docs_command"])
+    tools = value.get("docs_tools")
+    # A bare name resolves on `PATH`, where an offload view hashes it; a path names a file no binding covers (sd:2881).
+    if tools is not None and (not isinstance(tools, list)
+                              or any(not isinstance(v, str) or not v or "/" in v or v in (".", "..") for v in tools)):
+        raise DeclarationError(f"{DECLARATION}: docs_tools must be a list of bare command names, resolved on PATH")
+    return list(value["docs_paths"]), list(value["docs_command"]), None if tools is None else list(tools)
 
 
 def matcher(patterns: list[str]) -> re.Pattern[str]:
@@ -107,19 +130,22 @@ def forcing(path: str, detection: sd_lib.Detection, root: pathlib.Path, named: s
 
 
 def decide(root: pathlib.Path, base: str | None, detection: sd_lib.Detection) -> Scope:
-    """The scope for HEAD against `base`; raises `DeclarationError` for a declaration that does not parse."""
+    """The scope for HEAD against `base`; raises `DeclarationError` for a declaration that does not parse,
+    `MissingBase` for a declared repository's `base` that names no commit: unfetched, it read as a full check, silently."""
     if base is None:
-        return Scope(FULL, "no --base given")
+        return Scope(FULL, NO_BASE)
     value = declaration(root)
     if value is None:
         return Scope(FULL, f"no {DECLARATION}")
+    if not sd_lib.git_output(["rev-parse", "--verify", "--quiet", f"{base}^{{commit}}"], root):
+        raise MissingBase(f"--base {base} names no commit here; fetch it, or name a base that exists")
     fork = sd_lib.git_output(["merge-base", base, "HEAD"], root)
     if not fork:
         return Scope(FULL, f"no merge base with {base}")
     paths = range_paths(root, fork)
     if not paths:
         return Scope(FULL, "no changed path to scope", fork)
-    patterns, command = value
+    patterns, command, tools = value
     named = named_files([*detection.commands.values(), command])
     docs = matcher(patterns)
     for path in paths:
@@ -127,4 +153,5 @@ def decide(root: pathlib.Path, base: str | None, detection: sd_lib.Detection) ->
             return Scope(FULL, f"{path} decides what the check runs", fork, paths=tuple(paths))
         if not docs.fullmatch(path):
             return Scope(FULL, f"{path} is not a docs path", fork, paths=tuple(paths))
-    return Scope(DOCS_ONLY, f"all {len(paths)} changed paths are docs paths", fork, tuple(command), tuple(paths))
+    return Scope(DOCS_ONLY, f"all {len(paths)} changed paths are docs paths", fork, tuple(command), tuple(paths),
+                 None if tools is None else tuple(tools))

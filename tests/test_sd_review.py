@@ -306,10 +306,10 @@ class PolicyTests(ReviewFixture):
         root = self.make_repo()
         (root / ".github").mkdir()
         (root / ".github" / "sd-review.json").write_text(
-            json.dumps({"severity_floor": "high"}), encoding="utf-8"
+            json.dumps({"severity_floor": "low"}), encoding="utf-8"
         )
         policy, source = sd_review.load_policy(root)
-        self.assertEqual(policy["severity_floor"], "high")
+        self.assertEqual(policy["severity_floor"], "low")
         self.assertEqual(policy["large_change_lines"], 800)
         # Not said by the file, so not decided by the file: the machine answers.
         self.assertEqual(policy["copilot_review"], {"automatic_deep": None})
@@ -323,6 +323,12 @@ class PolicyTests(ReviewFixture):
     def test_shipped_schema_covers_every_policy_key(self) -> None:
         schema = json.loads((REPO_ROOT / ".github" / "sd-review.schema.json").read_text())
         self.assertEqual(set(schema["properties"]), set(sd_review.POLICY_KEYS))
+
+    def test_default_severity_floor_is_the_fleet_default_high(self) -> None:
+        """sd:1657: the operator ruled the fleet floor `high`; the schema states the same default."""
+        self.assertEqual(sd_review.DEFAULT_POLICY["severity_floor"], "high")
+        schema = json.loads((REPO_ROOT / ".github" / "sd-review.schema.json").read_text())
+        self.assertEqual(schema["properties"]["severity_floor"]["default"], "high")
 
     def assert_rejects(self, payload: Any, fragment: str) -> None:
         self._rejections = getattr(self, "_rejections", 0) + 1

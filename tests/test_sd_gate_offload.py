@@ -26,7 +26,7 @@ import sd_gate_run  # noqa: E402
 import sd_gate_slots  # noqa: E402
 
 
-class OffloadView(unittest.TestCase):
+class ViewFixture(unittest.TestCase):
     """A satellite login (`sat`) and a hub login (`hub`), each with `~/bin` ahead of one shared folder."""
 
     def setUp(self) -> None:
@@ -54,11 +54,15 @@ class OffloadView(unittest.TestCase):
         return {"HOME": str(home), "USER": login, "LANG": "C", "CARGO_HOME": str(home / ".cargo"),
                 "PATH": os.pathsep.join([str(home / "bin"), str(self.shared)]), **extra}
 
-    def view(self, login: str, names: tuple[str, ...] = (), **extra: str) -> dict:
+    def view(self, login: str, names: tuple[str, ...] = (), tree: pathlib.Path | None = None, **extra: str) -> dict:
         environment = sd_gate_run.gate_environment(self.tmp / "repo", self.environ(login, **extra))
-        view = sd_gate_receipts.offload_view(environment, names)
+        view = sd_gate_receipts.offload_view(environment, names, tree)
         self.assertIsNotNone(view)
         return view
+
+
+class OffloadView(ViewFixture):
+    """Two logins' views compared: what is recorded and what refuses."""
 
     def test_two_logins_that_differ_only_in_home_user_and_the_path_prefix_compare_equal(self) -> None:
         theirs, ours = self.view("sat"), self.view("hub")
@@ -223,6 +227,132 @@ class OffloadView(unittest.TestCase):
         self.assertEqual(sd_gate_receipts.offload_miss(None, ours), {"part": "view", "name": None})
         self.assertEqual(sd_gate_receipts.offload_miss({**ours, "tools": []}, ours), {"part": "tools", "name": None})
 
+
+#: A fake `rustup`: `which <tool>` names the toolchain that the cwd's `rust-toolchain.toml` pins, under `HOME`.
+FAKE_RUSTUP = """[ "$1" = which ] && [ -f rust-toolchain.toml ] || exit 1
+while read -r key _ value; do [ "$key" = channel ] && channel=${value#\\"} && channel=${channel%\\"}; done < rust-toolchain.toml
+[ -n "$channel" ] || exit 1
+echo "$HOME/.rustup/toolchains/$channel/bin/$2"
+"""
+#: What Homebrew's rustup wrapper sets before it execs the proxy.
+HOMEBREW_WRAPPER = "RUSTUP_OVERRIDE_UNIX_FALLBACK_SETTINGS=/opt/homebrew/etc/rustup/settings.toml "
+
+
+def build(name: str, commit: str = "797e8a9bca276c1c", os_line: str = "Mac OS 27.0.1", suffix: str = "") -> str:
+    """A toolchain binary's body: `-vV` prints its build lines and the machine's `os:` line, as `cargo -vV` does."""
+    return (f'echo "{name} 1.98.1 ({commit[:9]} 2026-08-05){suffix}"\necho "release: 1.98.1"\n'
+            f'echo "commit-hash: {commit}"\necho "host: aarch64-apple-darwin"\necho "os: {os_line}"\n')
+
+
+def part(mode: str = "full", tools: list[str] | None = None) -> dict:
+    """A tree part as `tree_binding` writes it, for a `make check` repository in `mode`'s scope, declaring `tools`."""
+    return {"schema": 2, "reuse": "head", "head": "a" * 40, "fork": None, "tree": "t" * 40, "inputs": "i" * 12,
+            "scope": {"mode": mode, "fork": None, "command": ["make", "docs-gate"] if mode == "docs-only" else [],
+                      **({"tools": tools} if tools is not None else {})},
+            "detection": {"source": "Makefile", "commands": {"check": ["make", "check"]}}}
+
+
+class ToolVersion(ViewFixture):
+    """sd:2881: the satellite's `cargo` is a Homebrew rustup wrapper, and the hub's the same or Homebrew's own `cargo`.
+
+    A proxy's bytes name no toolchain; the tree's `rust-toolchain.toml` does, and `-vV` run as the gate runs it
+    prints that toolchain's release and commit-hash. Both bind.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.tree = self.tmp / "tree"
+        self.tree.mkdir()
+        (self.tree / "rust-toolchain.toml").write_text('[toolchain]\nchannel = "1.98.1"\n', encoding="utf-8")
+        for login in ("sat", "hub"):
+            self.script(self.home(login) / "bin" / "rustup", FAKE_RUSTUP)
+            for name in ("cargo", "rustc"):
+                self.toolchain(login, name, build(name))
+            self.proxy(login, HOMEBREW_WRAPPER)
+
+    @staticmethod
+    def script(path: pathlib.Path, body: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+        path.chmod(0o755)
+
+    def toolchain(self, login: str, name: str, body: str) -> None:
+        self.script(self.home(login) / ".rustup" / "toolchains" / "1.98.1" / "bin" / name, body)
+
+    def proxy(self, login: str, prefix: str) -> None:
+        """`cargo` and `rustc` that run the toolchain `rustup which` names, through a wrapper that sets `prefix`."""
+        for name in ("cargo", "rustc"):
+            self.script(self.home(login) / "bin" / name, f'{prefix}exec "$(rustup which {name})" "$@"\n')
+
+    def mismatch(self, theirs: dict, ours: dict, mode: str = "full", tools: list[str] | None = None) -> dict | None:
+        row = {"binding": {**part(mode, tools), "environment_mode": "offload"}, "offload_view": theirs}
+        return sd_gate_receipts.binding_mismatch(row, part(mode, tools), ours, "offload")
+
+    def test_the_same_commit_hash_and_bytes_pass_on_two_machines(self) -> None:
+        """Another macOS release changes `cargo -vV`'s `os:` line, which names the machine, not the compiler."""
+        self.toolchain("hub", "cargo", build("cargo", os_line="Mac OS 26.4.0"))
+        theirs, ours = self.view("sat", tree=self.tree), self.view("hub", tree=self.tree)
+        self.assertEqual(theirs["resolution"], {"cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+                                                "rustc": "rustc 1.98.1 (797e8a9bc 2026-08-05)"})
+        self.assertIsNone(self.mismatch(theirs, ours))
+
+    def test_another_commit_hash_behind_the_same_wrapper_refuses(self) -> None:
+        self.toolchain("hub", "cargo", build("cargo", commit="48a229ceaefd4985"))
+        theirs, ours = self.view("sat", tree=self.tree), self.view("hub", tree=self.tree)
+        self.assertIn("tools at cargo (satellite via cargo 1.98.1 (797e8a9bc 2026-08-05), "
+                      "hub via cargo 1.98.1 (48a229cea 2026-08-05))", self.mismatch(theirs, ours)["reason"])
+
+    def test_a_homebrew_cargo_ahead_of_the_proxy_refuses(self) -> None:
+        """The hub's cron `PATH` found Homebrew's `cargo` 1.99.0, which ignores the pin: the hub would run another compiler."""
+        self.script(self.home("hub") / "bin" / "cargo", build("cargo", "5f94df4789f005f9", suffix=" (Homebrew)"))
+        theirs, ours = self.view("sat", tree=self.tree), self.view("hub", tree=self.tree)
+        self.assertEqual(ours["resolution"]["cargo"], "cargo 1.98.1 (5f94df478 2026-08-05) (Homebrew)")
+        self.assertIn("tools at cargo", self.mismatch(theirs, ours)["reason"])
+
+    def test_another_wrapper_refuses_though_it_runs_the_same_toolchain(self) -> None:
+        """A wrapper's bytes decide what it adds to a check's own arguments, which `-vV` does not show."""
+        self.proxy("hub", "")
+        self.assertIn("tools at cargo", self.mismatch(self.view("sat", tree=self.tree),
+                                                      self.view("hub", tree=self.tree))["reason"])
+
+    def test_a_tool_that_answers_no_version_binds_its_bytes_as_path(self) -> None:
+        for login in ("sat", "hub"):
+            (self.home(login) / "bin" / "rustup").unlink()
+        theirs = self.view("sat", tree=self.tree)
+        self.assertEqual(theirs["resolution"], {"cargo": "path", "rustc": "path"})
+        self.assertIsNone(self.mismatch(theirs, self.view("hub", tree=self.tree)))
+
+    def test_a_gates_worktree_runs_it_in_its_own_tree(self) -> None:
+        """Both sides take the view through `Worktree.view`: the satellite when it writes the row, the hub when it compares."""
+        environment = sd_gate_run.gate_environment(self.tmp / "repo", self.environ("sat"))
+        gated = sd_gate_receipts.Worktree(self.tmp / "repo", self.tree, "a" * 40, None, environment, None, None, False, "i" * 12)
+        self.assertEqual(gated.view(part())["resolution"]["cargo"], "cargo 1.98.1 (797e8a9bc 2026-08-05)")
+
+    def test_a_row_from_before_the_resolution_refuses_and_says_it_recorded_none(self) -> None:
+        """A 7801d8b8 view hashed the wrapper alone and has no `resolution`: it refuses on `tools.cargo` (its pack digest first)."""
+        ours = self.view("hub", tree=self.tree)
+        old = {name: value for name, value in self.view("sat").items() if name != "resolution"}
+        self.assertIn("tools at cargo (satellite via unrecorded, hub via cargo 1.98.1", self.mismatch(old, ours)["reason"])
+
+    def test_a_docs_only_scope_refuses_on_its_declared_tools_only(self) -> None:
+        """`make docs-gate` may run `cargo doc`, so a compiler still refuses, unless `docs_tools` names what it reaches."""
+        self.script(self.home("hub") / "bin" / "cargo", build("cargo", "5f94df4789f005f9", suffix=" (Homebrew)"))
+        self.tool(self.home("hub") / "bin" / "cc", "clang 21")
+        theirs, ours = self.view("sat", tree=self.tree), self.view("hub", tree=self.tree)
+        self.assertIn("tools at cargo", self.mismatch(theirs, ours, "docs-only")["reason"])
+        self.assertIsNone(self.mismatch(theirs, ours, "docs-only", ["sh", "python3"]))
+        self.tool(self.shared / "sh", "another sh")
+        self.assertIn("tools at sh", self.mismatch(theirs, self.view("hub", tree=self.tree), "docs-only", ["sh"])["reason"])
+        self.tool(self.home("hub") / "bin" / "make", "make 3.81")
+        self.assertIn("tools at make", self.mismatch(theirs, self.view("hub", tree=self.tree), "docs-only", [])["reason"])
+
+    def test_a_declared_docs_tool_outside_the_toolchain_is_bound(self) -> None:
+        """`check_names` carries `docs_tools`, so the view hashes one that `OFFLOAD_TOOLS` does not name."""
+        self.tool(self.home("sat") / "bin" / "markdownlint", "markdownlint 1")
+        self.tool(self.home("hub") / "bin" / "markdownlint", "markdownlint 2")
+        names = tuple(sd_gate_receipts.check_names(part("docs-only", ["markdownlint"])))
+        theirs, ours = self.view("sat", names, tree=self.tree), self.view("hub", names, tree=self.tree)
+        self.assertIn("tools at markdownlint", self.mismatch(theirs, ours, "docs-only", ["markdownlint"])["reason"])
 
 if __name__ == "__main__":
     unittest.main()
