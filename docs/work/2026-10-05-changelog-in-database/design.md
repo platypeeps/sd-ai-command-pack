@@ -24,7 +24,8 @@ The system repository does not change.
 Design accepted. The operator ruled Q1 to Q7 on 2026-10-05 at about
 17:25 MDT, through the team lead. Each 17:25 ruling took the recommendation.
 The ruling is recorded on sd:2783. At about 17:40 MDT the operator revised
-Q7 after the prepare review at `ffec19a9`. Implementation has not started.
+Q7 after the prepare review at `ffec19a9`. Steps 1 and 2 of
+[implement.md](implement.md) are built; steps 3 to 7 remain.
 
 ## Decision log
 
