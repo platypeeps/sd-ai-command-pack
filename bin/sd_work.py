@@ -488,7 +488,19 @@ def _repo_line(row: Any, *, here: str | None, moved: bool) -> str | None:
     return f"  repo: {repo}" if repo and not sd_lib.same_repo(repo, here) else None
 
 
+def _name_refs(value: Any) -> None:
+    """Copy the reference `sd task add --ref` filed onto each row as `ref` (sd:1902).
+
+    Under its own key, so a reader of `sd today --json` need not know
+    `REF_SOURCE`, and only on a row that has one.
+    """
+    for row in value if isinstance(value, list) else [value.get("item") or {}]:
+        if row.get("source") == REF_SOURCE:
+            row["ref"] = row["external_id"]
+
+
 def _emit(value: Any, *, machine: bool, moved: bool = False, following: Any = None) -> None:
+    _name_refs(value)
     if machine:
         print(json.dumps(value, ensure_ascii=False))
         return
@@ -503,6 +515,8 @@ def _emit(value: Any, *, machine: bool, moved: bool = False, following: Any = No
         line = _repo_line(row, here=here, moved=moved)
         if line:
             print(line)
+        if row.get("ref"):
+            print(f"  ref: {row['ref']}")
         if row.get("recurrence"):
             print(f"  recurs {row['recurrence']} ({row.get('recurrence_anchor')})")
     if isinstance(value, dict) and "next_occurrence" in value:
@@ -513,7 +527,8 @@ def _emit(value: Any, *, machine: bool, moved: bool = False, following: Any = No
         # makes the second call safe -- but a caller who cannot tell the two
         # apart will read "here is the row" as "I just made it".
         if value.get("created") is False:
-            print("already registered; nothing changed")
+            print("already filed under this ref; updated, status kept" if value["item"].get("ref")
+                  else "already registered; nothing changed")
         for note in value.get("notes", []):
             resolved = " · resolved" if note.get("resolved_at") else ""
             print(f"  note #{note['id']} · {note['kind']}{resolved}: {note['body']}")
@@ -912,20 +927,74 @@ def _capture(sd_db: Any, workflow: Any, args: argparse.Namespace,
     `edit_item` instead, which checks the rule against the kind the row ends
     up with and refuses by name. The row then carries the note that edit
     writes, which says what happened: captured as a task, then reclassified.
+
+    A `--ref` (sd:1902) is read first, in the same transaction: a row that
+    already carries the reference is updated by `_refile` and no row is made.
     """
+    _ref_checked(args)
     with workflow.transaction(connection):
+        if args.ref is not None:
+            filed = sd_db.writes.item_by_external(connection, REF_SOURCE, args.ref)
+            if filed is not None:
+                return {**_refile(workflow, connection, args, filed["id"], who), "created": False}
         state = workflow.capture_task(
             connection, title=args.title, body=args.body, priority=args.priority,
             due=args.due, repo=_task_repo(args, connection, workflow),
             recurrence=args.recur, recurrence_anchor=args.recur_anchor, who=who,
         )
-        if args.kind == "task":
-            return state
         item = state["item"]["id"]
+        if args.ref is not None:
+            sd_db.writes.set_item_fields(connection, item, source=REF_SOURCE, external_id=args.ref)
+        if args.kind == "task":
+            return state if args.ref is None else workflow.item_state(connection, item)
         if args.recur is not None:
             return workflow.edit_item(connection, item, {"kind": args.kind}, who=who)
         sd_db.writes.set_item_fields(connection, item, kind=args.kind)
         return workflow.item_state(connection, item)
+
+
+#: The `item.source` of a row `sd task add --ref` filed (sd:1902). The whole
+#: reference is the row's `external_id`, so the unique index on `(source,
+#: external_id)` holds one row per reference, and a reference whose own source
+#: part is `docs/work` or `cron-report` can never reach a row those sources own.
+REF_SOURCE = "task-ref"
+
+
+def _ref_checked(args: argparse.Namespace) -> None:
+    """Refuse a `--ref` the upsert cannot keep to one row per reference.
+
+    Only `task` and `followup` rows take the update a second add makes:
+    `edit_item` refuses every other kind's details. A recurring row hands its
+    rule to a new row on completion, and a reference names one occurrence.
+    """
+    if args.ref is None:
+        return
+    source, _, ident = args.ref.partition(":")
+    if not source.strip() or not ident.strip():
+        raise WorkRefusal(f"--ref must be <source>:<id>, such as job:repo-sync:42; got {args.ref!r}")
+    if args.kind not in ("task", "followup"):
+        raise WorkRefusal(f"--ref files a task or a followup, not a {args.kind}")
+    if args.recur is not None:
+        raise WorkRefusal("--ref names one occurrence, so it does not take --recur")
+
+
+def _refile(workflow: Any, connection: Any, args: argparse.Namespace,
+            item: int, who: str) -> dict:
+    """A second add with the same reference: update the row, whatever its status.
+
+    A retried delivery of one occurrence must not reopen work the operator
+    resolved or cancelled, so the status stays. The details the caller gave
+    replace the row's; a detail left out keeps its value. `edit_item` writes
+    no note when nothing changed.
+    """
+    changes: dict[str, Any] = {"title": args.title}
+    if args.body:
+        changes["body"] = args.body
+    if args.priority is not None:
+        changes["priority"] = args.priority
+    if args.due is not None:
+        changes["due"] = args.due
+    return workflow.edit_item(connection, item, changes, who=who)
 
 
 def run(args: argparse.Namespace) -> int:
@@ -1217,6 +1286,9 @@ def register(groups: Any, store: Any) -> None:
              "with none), and personal, work-idea and personal-idea carry no repository")
     kind.choices = LibraryKinds()  # after add_argument: see `LibraryKinds`
     _recurrence_flags(add)
+    add.add_argument("--ref", metavar="SOURCE:ID",
+                     help="the occurrence that raised the item, such as job:repo-sync:42; a second "
+                          "add with the same reference updates that item, whatever its status")
     where = add.add_mutually_exclusive_group()
     where.add_argument("--here", action="store_true",
                        help="refuse unless this is a checkout registered in the sd database "
