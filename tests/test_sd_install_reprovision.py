@@ -158,7 +158,7 @@ class NoAncestryDowngrade(ReprovisionAfterMerge):
             second.start()
             first.join(30)
             second.join(30)
-        self.assertEqual(sd_install.installed_library_commit(pack), newer)
+        self.assertEqual(sd_install.installed_library_commit(pack / ".venv"), newer)
         self.assertEqual(self.calls, [older, newer])
 
 
@@ -204,6 +204,92 @@ class DirectProvisioningAfterANewerReconcile(ReprovisionAfterMerge):
         self.assertEqual((code, self.calls), (0, [topic]))
 
 
+class GuardsReadEveryEnvironmentTheyProtect(ReprovisionAfterMerge):
+    """Review round 18: the ancestry guard reads the destination and the live environment a serving build replaces."""
+
+    def record(self, venv: pathlib.Path, commit: str) -> pathlib.Path:
+        info = venv / "lib/python3.14/site-packages/sd_db-0.1.dist-info"
+        info.mkdir(parents=True, exist_ok=True)
+        (info / "direct_url.json").write_text(json.dumps({"vcs_info": {"vcs": "git", "commit_id": commit}}),
+                                              encoding="utf-8")
+        return venv
+
+    def serving_build(self, destination: pathlib.Path, live: pathlib.Path) -> tuple[int, str]:
+        out = io.StringIO()
+        code = sd_install.main(["--provision-library", "--home", str(self.system.parent / "home"),
+                                "--venv", str(destination), "--live-venv", str(live)],
+                               environ=dict(self.environ), out=out)
+        return code, out.getvalue()
+
+    def commits(self) -> tuple[str, str, str]:
+        older = self.commit("local-sd-db/sd_db/a.py")
+        pinned = self.commit("local-sd-db/sd_db/b.py")
+        newer = self.commit("local-sd-db/sd_db/c.py")
+        git(self.system, "checkout", "-q", pinned)
+        return older, pinned, newer
+
+    def test_a_live_environment_newer_than_the_inactive_slot_is_preserved(self) -> None:
+        older, _, newer = self.commits()
+        inactive = self.record(self.system.parent / "inactive", older)
+        live = self.record(self.system.parent / "live", newer)
+        code, output = self.serving_build(inactive, live)
+        self.assertEqual((code, self.calls), (1, []))
+        self.assertIn(f"preserving installed sd_db {newer}", output)
+
+    def test_a_missing_destination_still_checks_the_live_environment(self) -> None:
+        _, _, newer = self.commits()
+        live = self.record(self.system.parent / "live", newer)
+        code, output = self.serving_build(self.system.parent / "never-built", live)
+        self.assertEqual((code, self.calls), (1, []))
+        self.assertIn(f"preserving installed sd_db {newer}", output)
+
+
+class SchemaGuardReadsTheEnvironmentsItProtects(unittest.TestCase):
+    """Review round 18: `--venv` and `--live-venv` name what the schema guard reads, not the checkout's `.venv`."""
+
+    def setUp(self) -> None:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = pathlib.Path(temp.name).resolve()
+        self.system = self.root / "system"
+        (self.system / "local-sd-db/sd_db").mkdir(parents=True)
+        (self.system / "local-sd-db/pyproject.toml").write_text("", encoding="utf-8")
+        (self.system / "local-sd-db/sd_db/schema.py").write_text("SCHEMA_VERSION = 3\n", encoding="utf-8")
+        git(self.system, "init", "-q", "-b", "main")
+        git(self.system, "add", "-A")
+        git(self.system, "-c", "user.email=t@example.test", "-c", "user.name=t", "commit", "-qm", "schema 3")
+        self.ref = git(self.system, "rev-parse", "HEAD")
+
+    def env(self, name: str, schema: int | None = None) -> pathlib.Path:
+        venv = self.root / name
+        (venv / "bin").mkdir(parents=True)
+        (venv / "bin/python").write_text("", encoding="utf-8")
+        if schema is not None:
+            package = venv / "lib/python3.14/site-packages/sd_db"
+            package.mkdir(parents=True)
+            (package / "schema.py").write_text(f"SCHEMA_VERSION = {schema}\n", encoding="utf-8")
+        return venv
+
+    def provision(self, *args: str) -> tuple[int, str]:
+        out = io.StringIO()
+        environ = {sd_install.SYSTEM_CHECKOUT_ENV: str(self.system), "XDG_STATE_HOME": str(self.root / "state")}
+        with mock.patch.object(sd_install, "library_pin", return_value=(self.ref, "")):
+            code = sd_install.main(["--provision-library", "--home", str(self.root / "home"), *args],
+                                   environ=environ, out=out)
+        return code, out.getvalue()
+
+    def test_a_custom_venv_with_a_newer_schema_is_preserved(self) -> None:
+        code, output = self.provision("--venv", str(self.env("custom", schema=4)))
+        self.assertEqual(code, 1)
+        self.assertIn("preserving installed sd_db schema 4", output)
+
+    def test_a_live_environment_with_a_newer_schema_is_preserved(self) -> None:
+        code, output = self.provision("--venv", str(self.env("inactive")), "--live-venv",
+                                      str(self.env("live", schema=4)))
+        self.assertEqual(code, 1)
+        self.assertIn("preserving installed sd_db schema 4", output)
+
+
 class ProvisioningLock(unittest.TestCase):
     def test_a_dry_run_takes_no_lock_and_writes_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -227,9 +313,9 @@ class InstalledLibraryCommit(unittest.TestCase):
             pack = pathlib.Path(temp)
             self.record(pack, "python3.12", "{not json")
             self.record(pack, "python3.13", json.dumps({"url": "file:///x", "dir_info": {}}))
-            self.assertIsNone(sd_install.installed_library_commit(pack))
+            self.assertIsNone(sd_install.installed_library_commit(pack / ".venv"))
             self.record(pack, "python3.14", json.dumps({"vcs_info": {"commit_id": "abc123"}}))
-            self.assertEqual(sd_install.installed_library_commit(pack), "abc123")
+            self.assertEqual(sd_install.installed_library_commit(pack / ".venv"), "abc123")
 
 
 class ProvisionAtARef(unittest.TestCase):

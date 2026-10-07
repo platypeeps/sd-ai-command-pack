@@ -325,12 +325,58 @@ a copy of what is in it at that moment. Keep it on a clean `main` and update
 with `--pull`, which fast-forwards and re-renders in one step and refuses to run
 off `main` or over uncommitted changes.
 
+### A dedicated serving tree
+
+Work in one checkout and serve from another (sd:1118). The serving tree is a
+clean clone on a detached `HEAD` that nobody works in, at
+`${XDG_DATA_HOME:-~/.local/share}/sd-ai-command-pack/serving`. Only
+`make setup` moves it.
+
+- **Create and refresh:** `make setup` in your working checkout. Its last step,
+  `bin/sd_install.py --serve`, clones `origin` into the serving tree the first
+  time. On every run it hands over to the serving tree's own installer as
+  `--pull`: that fetches `origin`, detaches at the exact commit `origin/main`
+  names and runs that commit's own installer as `--user`. It refuses a tree
+  with tracked or untracked changes.
+  Each `--pull` builds that commit's environment before it renders: the
+  commit's own `make setup SERVE=no`, run in a scratch checkout beside the
+  tree, builds `.venv-a` or `.venv-b`, whichever `.venv` does not resolve
+  to. The build refuses an `sd_db` older than the slot or the live
+  environment holds. The tree serves its commit for the whole build; then
+  the code and `.venv` move together. A failed build moves nothing, so the tree keeps
+  its commit, environment and install. The environment is the tree's own, so
+  removing the checkout that ran `make setup` leaves it working. The
+  receipt's command links move to the serving tree;
+  a link the receipt does not name is still refused.
+  Two `make setup` runs at once take turns: each move holds `serving.lock`,
+  beside the tree, from the fetch to the end of any put-back, and the second
+  run waits for it, then moves from where the first left the tree. After 600
+  seconds it refuses with nothing moved; run `make setup` again.
+- **Roll back:** `python3 bin/sd_install.py --rollback`, run in the serving
+  tree. Each render that activates a new commit records the replaced one as
+  `previousCommit` in the receipt. `--rollback` detaches at that commit and
+  re-renders, so a second `--rollback` undoes the first. It refuses a checkout
+  on a branch, a dirty tree, a receipt with no `previousCommit`, and a commit
+  the tree does not have. The next `make setup` moves forward again; run
+  `make setup SERVE=no` to provision without moving the serving tree.
+- **Both** refuse a target commit whose installer declares no
+  `ACTIVATION_CONTRACT`: it predates the serving tree, so no second
+  `--rollback` could come back from it. A render that refuses or fails puts
+  the tree back at the commit it started from and restores the receipt. It
+  renders that commit again only if the receipt names the serving tree, so a
+  failed first `make setup` leaves the working checkout's install as it was.
+- **Verify:** `--verify --json` is as strict as in any checkout. Planning
+  drafts or a `HEAD` moved without a render fail the source check, which is why
+  nobody works in the serving tree.
+
 | Command | What it does |
 |---|---|
 | `python3 bin/sd_install.py --user` | Render skills and link commands into `~/.local/bin`; use `--bin-dir DIR` for another directory |
 | `python3 bin/sd_install.py --status` | Report installed source, drift, legacy residue, and remaining predecessor agents without failing on drift |
 | `python3 bin/sd_install.py --verify --json` | Read-only: fail on receipt, source, rendered-file, command-resolution, or bounded help-probe errors |
-| `python3 bin/sd_install.py --pull` | Fast-forward the clean serving checkout on `main`, then render |
+| `python3 bin/sd_install.py --pull` | Fast-forward the clean serving checkout on `main`, or detach a clean serving tree at the exact `origin/main` commit, then render |
+| `python3 bin/sd_install.py --rollback` | Detach a clean serving tree at the receipt's `previousCommit`, then render |
+| `python3 bin/sd_install.py --serve` | Clone the serving tree if it is missing, then `--pull` in it; `make setup` runs this |
 | `python3 bin/sd_install.py --uninstall` | Remove receipt-owned renders, hooks, and command links; preserve modified files and retargeted links |
 | `python3 bin/sd_install.py --adopt-legacy` | Delete the pre-3e fleet installer's successor-less renders |
 | `python3 bin/sd_install.py --repo [PATH]` | Write the marked block into `PATH/CLAUDE.local.md` |
@@ -354,7 +400,7 @@ For Codex skills, it translates `disable-model-invocation: true` into `policy.al
 An explicit `false` marker becomes `true`; absent markers add no policy.
 The Markdown body and other source metadata remain unchanged.
 Generated policy files belong to the installation receipt and retain drift protection during removal.
-Failed installations restore unchanged generated policies to their prior state; concurrent changes remain untouched.
+Failed installations restore every unchanged render, generated policies included, to its prior state; concurrent changes remain untouched.
 Conflicting or unsupported invocation metadata refuses installation before rendering.
 The adapter accepts plain block-mapping keys and lowercase booleans; other metadata sections remain opaque.
 Invocation booleans cannot have indented continuation lines.
@@ -364,9 +410,10 @@ Claude agents and OpenCode rendering remain unchanged.
 installs into a scratch directory instead of `$HOME`, which is how the tests
 drive it. `--bin-dir DIR` links the commands somewhere other than
 `~/.local/bin`, and the receipt remembers the directory, so a later `--user`
-or `--pull` without the flag links there again; a link already pointing into
-this checkout is kept as it is, and anything at a link's path that is not such
-a link makes `--user` refuse by name and write nothing.
+or `--pull` or `--rollback` without the flag links there again; a link already pointing into
+this checkout is kept as it is, a link the receipt records at its recorded
+target is moved to this checkout, and anything else at a link's path makes
+`--user` refuse by name and write nothing.
 
 If you commit to this checkout, `make hooks` arms the pre-commit tier: it
 links `.git/hooks/pre-commit` to the tracked `hooks/pre-commit`, which runs
@@ -465,7 +512,7 @@ Each prose skill has a "State of the tooling" section.
 ### Verify
 
 ```bash
-make setup   # once
+make setup   # once; it also refreshes the serving tree
 make check   # test + lint + audit + docs-lint
 make precheck   # lint + the always-run test modules, about a minute
 ```
