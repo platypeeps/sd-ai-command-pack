@@ -830,6 +830,9 @@ Only entries on the reviewer order participate in automatic fallback.
 Enabled reviewer-capable entries outside that order require an explicit `--provider` selection.
 With a database, the order in force is its rows: `sd providers configure` sets it, `sd providers list` shows it, and `sd-review --explain` names it on its `order from` line; the file's `roles:` lists only seed those rows. The shipped seed contains Codex, then Claude, then opencode; other providers remain explicit-only until an order names them.
 Existing provider files and database orders remain unchanged until the operator migrates them.
+`sd providers precision` reads every ship receipt and its adjudications and reports each reviewer's findings by outcome and severity.
+Its outcomes are fixed, parked, rebutted, undecided and advisory; precision is (fixed + parked) / (fixed + parked + rebutted).
+It reads only; the order stays the operator's choice (`source:bin/sd_review_precision.py::finding_outcomes` defines each outcome).
 The chain continues until the required count completes or eligible entries run out. A completed
 review with findings counts; it does not trigger a replacement. Consent, author
 exclusions and spending limits apply to every fallback, and earlier findings remain.

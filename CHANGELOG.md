@@ -4,6 +4,15 @@
 
 ### Added
 
+- **`sd providers precision` reports each reviewer's precision from ship receipts (sd:1832, sd:1788 asks 1 and 2).**
+  It reads every local review finding from the newest ship receipt of each branch and the accepted adjudications beside it, and writes nothing.
+  Each finding gets an outcome: `rebutted` or `parked` from its adjudication; `fixed` when a later head was reviewed; `undecided` when neither; `advisory` when the review did not block.
+  `fixed` is inferred: a commit that answers a different finding reads the same.
+  The table shows outcome counts and precision, (fixed + parked) / (fixed + parked + rebutted), per provider and severity.
+  `--json` adds one row per finding with its receipt, PR, item and rebuttal reason; `--repository` and `--since` narrow the rows.
+  Reviews run outside `sd-ship` leave no receipt and are not counted.
+  The reviewer order does not read precision yet (sd:1788 ask 3).
+
 - **`sd task add --ref <source>:<id>` files one row per occurrence (sd:1902).**
   A second add with the same reference updates that row and keeps its status, so a retried delivery never reopens done work.
   A new reference, such as the next run's `job:repo-sync:43`, files a new row.
