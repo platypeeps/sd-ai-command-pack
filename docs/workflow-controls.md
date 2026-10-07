@@ -236,6 +236,10 @@ refuse before database access. If coverage exceeds these limits, retry a
 smaller interval or increase the limits; strict mode continues to report
 failure until coverage is complete.
 
+Two refusals print one `sd:` line on stderr and collect nothing more.
+Exit 3 means a satellite ran the verb; run it on the hub.
+Exit 4 means another shadow sync holds the lock; retry when it finishes.
+
 The dashboard launcher uses the command pack's installed library in an isolated
 interpreter. Health verifies schema, loaded process identity and hashes of the
 running build; changing installed code requires a restart. Provisioning refuses
