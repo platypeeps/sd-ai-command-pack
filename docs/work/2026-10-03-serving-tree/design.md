@@ -35,10 +35,8 @@ receipt with no `previousCommit` and a commit the tree does not have.
 
 ## Activation (review round 1)
 
-`_activate` runs the whole activation in the installer already loaded:
-checkout, render and receipt. It loads `sd_lib` and `sd_registry` before
-the checkout, so the files changing under it cannot swap in the target's
-copy halfway through.
+`_activate` ran the whole activation in the installer already loaded.
+Review round 2 replaced that: see the next section.
 
 - **Contract.** The next activation runs the target commit's installer. So
   `--pull` and `--rollback` refuse a target whose `bin/sd_install.py`
@@ -48,6 +46,17 @@ copy halfway through.
   commit it started from, and the receipt to its bytes before the run. The
   commands served and the receipt never disagree, so `--rollback` after a
   failed update still starts from the commit the receipt names.
+
+## Activation (sd:1118 review round 2)
+
+- **The target renders itself.** After the checkout, `_activate` runs the
+  target commit's installer as `--user`, so a change to rendering applies in
+  the update that brings it. The loaded installer only supervises.
+- **Put back.** A target render that fails returns the tree to the original
+  commit and the receipt to its bytes, then renders the original commit
+  again with the loaded installer, which is that commit's.
+- **Renders recover.** A failed `cmd_user` restores every render it wrote,
+  not only the Codex policies, so a failed target leaves none of its files.
 
 ## `make setup` serves (sd:1118, second pass)
 

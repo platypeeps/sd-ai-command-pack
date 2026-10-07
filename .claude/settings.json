@@ -19,6 +19,7 @@
       "Bash(python3 bin/sd-status:*)",
       "Bash(python3 bin/sd_install.py --pull)",
       "Bash(python3 bin/sd_install.py --rollback)",
+      "Bash(python3 bin/sd_install.py --serve)",
       "Bash(python3 bin/sd_install.py --status)",
       "Bash(python3 bin/sd_install.py --user)",
       "Bash(python3 bin/sd_install.py --verify --json)"

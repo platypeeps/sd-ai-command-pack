@@ -2201,9 +2201,9 @@ class PullBehaviourTests(InstallerHarness):
 class ServingTreeTests(InstallerHarness):
     """A detached clone of origin that nobody works in: `--pull` moves it by commit, `--rollback` back (sd:1118).
 
-    `cmd_user` is replaced by a recorder for the git half; the receipt half
-    runs the real `cmd_user` against this checkout, as
-    `test_a_successful_pull_re_renders` does.
+    The target's own installer, `_render_checked_out`, is replaced by a
+    recorder for the git half; the put-back half runs the real `cmd_user`
+    unless a test replaces it too.
     """
 
     def context(self, checkout: Path, **kwargs) -> "sd_install.Context":
@@ -2220,15 +2220,16 @@ class ServingTreeTests(InstallerHarness):
     def git(self, repo: Path, *args: str) -> str:
         return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout.strip()
 
-    def commit(self, repo: Path, body: str, *, contract: bool = True, command: str | None = None) -> str:
+    def commit(self, repo: Path, body: str, *, contract: bool = True, command: str | None = None,
+               installer: str | None = None) -> str:
         """A commit whose installer declares the activation contract, unless `contract` is False.
 
         `command` adds an executable `bin/<command>`, which `--user` links.
         """
         (repo / "file.txt").write_text(body, encoding="utf-8")
         (repo / "bin").mkdir(exist_ok=True)
-        (repo / "bin" / "sd_install.py").write_text("ACTIVATION_CONTRACT = 1\n" if contract else "MODES = ()\n",
-                                                    encoding="utf-8")
+        (repo / "bin" / "sd_install.py").write_text(
+            installer or ("ACTIVATION_CONTRACT = 1\n" if contract else "MODES = ()\n"), encoding="utf-8")
         if command:
             (repo / "bin" / command).write_text("#!/bin/sh\n", encoding="utf-8")
             (repo / "bin" / command).chmod(0o755)
@@ -2256,7 +2257,7 @@ class ServingTreeTests(InstallerHarness):
         def render(ctx, out):
             self.rendered.append(self.git(ctx.checkout, "rev-parse", "HEAD"))
             return 0
-        return unittest.mock.patch.object(sd_install, "cmd_user", side_effect=render)
+        return unittest.mock.patch.object(sd_install, "_render_checked_out", side_effect=render)
 
     def write_receipt(self, **fields):
         sd_install.write_receipt(self.context(self.serving).receipt, {"schema": sd_install.RECEIPT_SCHEMA, **fields})
@@ -2428,20 +2429,49 @@ class ServingTreeTests(InstallerHarness):
 
         before = self.commit(self.origin, "a\n")
         current = self.commit(self.origin, "b\n")
-        self.commit(self.origin, "c\n", command="sd-collides")
+        self.commit(self.origin, "c\n", installer="ACTIVATION_CONTRACT = 1\nprint('refused: sd-collides')\nraise SystemExit(1)\n")
         self.git(self.serving, "fetch", "-q", "origin")
         self.git(self.serving, "checkout", "-q", "--detach", current)
-        links = self.home / "links"
-        links.mkdir()
-        (links / "sd-collides").write_text("somebody else's\n", encoding="utf-8")
-        self.write_receipt(commit=current, previousCommit=before, binDir=str(links))
+        self.write_receipt(commit=current, previousCommit=before)
+        again = []
+
+        def render(ctx, out):
+            again.append((self.head(), sd_install.read_receipt(ctx.receipt)["commit"]))
+            return 0
+
         out = io.StringIO()
-        self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1, out.getvalue())
+        with unittest.mock.patch.object(sd_install, "cmd_user", side_effect=render):
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1, out.getvalue())
         self.assertEqual(self.head(), current, "the tree kept serving the commit whose render failed")
         receipt = sd_install.read_receipt(self.context(self.serving).receipt)
         self.assertEqual((receipt["commit"], receipt["previousCommit"]), (current, before))
-        self.assertIn("sd-collides exists and is not a link", out.getvalue())
-        self.assertIn(f"the serving tree is back at {current}", out.getvalue())
+        self.assertEqual(again, [(current, current)], "the original commit was not rendered again over its receipt")
+        self.assertIn("refused: sd-collides", out.getvalue())
+        self.assertIn(f"the serving tree is back at {current} and rendered from it again", out.getvalue())
+
+    def test_a_put_back_whose_re_render_fails_says_so(self):
+        self.commit(self.origin, "two\n")
+        out = io.StringIO()
+        with self.recording(), unittest.mock.patch.object(sd_install, "_render_checked_out", return_value=1), \
+                unittest.mock.patch.object(sd_install, "cmd_user", return_value=1):
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
+        self.assertIn(f"rendering {self.first} again failed too", out.getvalue())
+
+    def test_the_target_commit_renders_with_its_own_installer(self):
+        """Review round 2: an update to rendering applies in the update that brings it."""
+        record = self.home / "record.json"
+        merged = self.commit(self.origin, "two\n", installer=(
+            "ACTIVATION_CONTRACT = 1\nimport json, os, sys\n"
+            "json.dump({'argv': sys.argv[1:], 'file': __file__}, open(os.environ['RECORD'], 'w'))\n"))
+        ctx = self.context(self.serving)
+        ctx.environ["RECORD"] = str(record)
+        ctx.bin_dir = self.home / "links"
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_pull(ctx, out), 0, out.getvalue())
+        self.assertEqual(self.head(), merged)
+        seen = json.loads(record.read_text(encoding="utf-8"))
+        self.assertEqual(Path(seen["file"]), self.serving / "bin" / "sd_install.py")
+        self.assertEqual(seen["argv"], ["--user", "--home", str(self.home), "--bin-dir", str(self.home / "links")])
 
     def test_a_render_that_raises_puts_the_tree_and_the_receipt_back_and_raises(self):
         merged = self.commit(self.origin, "two\n")
@@ -2451,7 +2481,7 @@ class ServingTreeTests(InstallerHarness):
             self.write_receipt(commit=merged, previousCommit=self.first)
             raise OSError("disk full")
 
-        with unittest.mock.patch.object(sd_install, "cmd_user", side_effect=half_render):
+        with unittest.mock.patch.object(sd_install, "_render_checked_out", side_effect=half_render):
             with self.assertRaises(OSError):
                 sd_install.cmd_pull(self.context(self.serving), io.StringIO())
         self.assertEqual(self.head(), self.first, "the tree kept serving the commit whose render raised")
@@ -2481,7 +2511,7 @@ class ServingTreeTests(InstallerHarness):
             return 1
 
         out = io.StringIO()
-        with unittest.mock.patch.object(sd_install, "cmd_user", side_effect=failed):
+        with unittest.mock.patch.object(sd_install, "_render_checked_out", side_effect=failed):
             self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
         self.assertFalse(self.context(self.serving).receipt.exists())
         self.assertEqual(self.head(), self.first)
@@ -2496,7 +2526,7 @@ class ServingTreeTests(InstallerHarness):
             return real(ctx, args, timeout)
 
         out = io.StringIO()
-        with unittest.mock.patch.object(sd_install, "cmd_user", return_value=1), \
+        with unittest.mock.patch.object(sd_install, "_render_checked_out", return_value=1), \
                 unittest.mock.patch.object(sd_install, "_git", side_effect=stuck):
             self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
         self.assertIn(f"git could not return the serving tree to {self.first}:\nlocked", out.getvalue())
@@ -3847,6 +3877,30 @@ class LinkEdgeCaseTests(InstallerHarness):
         self.assertTrue((checkout / "bin" / "sd").is_file())
         self.assertFalse((self.home / ".local" / "bin" / "sd").is_symlink())
 
+    def test_a_failed_install_puts_every_render_back(self):
+        """Review round 2: a link failure after the renders leaves no render of the failed run."""
+        checkout = self.checkout_with_commands("sd")
+        ctx = self.context_for(checkout)
+        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+        rendered = sd_install.platform_homes(self.home, dict(os.environ))[0].target_for("sd-probe")
+        before = rendered.read_bytes()
+        (checkout / "skills" / "sd-probe" / sd_install.SKILL_FILE).write_text(
+            "---\nname: sd-probe\n---\n\nchanged\n", encoding="utf-8")
+        (self.home / ".local" / "bin" / "sd").unlink()
+        out = io.StringIO()
+        with unittest.mock.patch("os.symlink", side_effect=OSError(28, "No space left on device")):
+            self.assertEqual(sd_install.cmd_user(ctx, out), 1)
+        self.assertEqual(rendered.read_bytes(), before, "the failed run's render stayed")
+
+    def test_a_link_row_without_a_string_path_does_not_stop_the_install(self):
+        """Review round 2: the retarget map reads only rows whose path is a string."""
+        checkout = self.checkout_with_commands("sd")
+        ctx = self.context_for(checkout)
+        sd_install.write_receipt(ctx.receipt, {"schema": sd_install.RECEIPT_SCHEMA, "owned": [
+            {"kind": "link", "target": "/old/bin/sd"}, {"kind": "link", "path": ["x"], "target": "/old/bin/sd"}]})
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(ctx, out), 0, out.getvalue())
+
     def test_a_link_the_receipt_owns_moves_to_the_next_checkout(self):
         """sd:1118: the switch to a serving checkout retargets the links the last install made."""
         work = self.checkout_with_commands("sd", "sd-review", name="work")
@@ -4201,7 +4255,7 @@ class CodexMetadataTests(InstallerHarness):
         self.assertEqual(out.getvalue().count("left in place"), 2)
         with unittest.mock.patch.object(Path, "unlink", side_effect=OSError("synthetic recovery failure")):
             sd_install.restore_policies([(original, b"expected", None)], out)
-        self.assertIn("policy recovery failed", out.getvalue())
+        self.assertIn("render recovery failed", out.getvalue())
         self.assertEqual(original.read_bytes(), b"expected")
 
     def test_dry_run_reports_expired_trials_without_writing(self):

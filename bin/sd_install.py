@@ -781,7 +781,7 @@ def write_render_plan(planned: list, dry_run: bool) -> list[Written]:
 
 def policy_collisions(planned: list, previous: list[dict]) -> None:
     """New generated companions cannot overwrite an unowned or modified file."""
-    owned = {row.get("path"): row.get("sha256") for row in previous}
+    owned = {row["path"]: row.get("sha256") for row in previous if isinstance(row.get("path"), str)}
     for target, _, kind in planned:
         if kind != "invocation-policy:codex" or not (target.exists() or target.is_symlink()):
             continue
@@ -790,20 +790,24 @@ def policy_collisions(planned: list, previous: list[dict]) -> None:
 
 
 def restore_policies(backups: list, out) -> None:
-    """Restore failed policy writes only while their new bytes remain unchanged."""
+    """Restore a failed install's renders only while their new bytes remain unchanged.
+
+    Named for the Codex policies it first covered; since sd:1118 it covers
+    every render, so a failed activation leaves no file of the target behind.
+    """
     for target, expected, previous in backups:
         try:
             if not target.exists():
                 continue
             if target.is_symlink() or not target.is_file() or target.read_bytes() != expected:
-                print(f"  left in place (policy changed during failed install): {target}", file=out)
+                print(f"  left in place (render changed during failed install): {target}", file=out)
                 continue
             if previous is None:
                 target.unlink()
             else:
                 atomic_policy_write(target, previous)
         except OSError as error:
-            print(f"  policy recovery failed: {target}: {error}", file=out)
+            print(f"  render recovery failed: {target}: {error}", file=out)
 
 
 def render(
@@ -1200,8 +1204,8 @@ def link_commands(plans: list[Link], bin_dir: Path, *, dry_run: bool = False) ->
     A row carries the link's `path` and its `target` and no digest: a link has
     no bytes of its own, and a digest read through it would be the script's.
     An `OSError` on any link unlinks every link this call made and raises
-    `LinkFailed`, so no link exists that no receipt names; the renders made
-    before this stand, and the next `--user` converges them. A recorded link
+    `LinkFailed`, so no link exists that no receipt names; `cmd_user` then
+    puts the renders made before this back. A recorded link
     is replaced by a rename over it, and a failure points every link this
     call replaced back at its old target, so the old receipt still holds. A
     checkout with no commands links nothing and makes no directory.
@@ -2168,7 +2172,7 @@ def cmd_user(ctx: Context, out) -> int:
     bin_dir = link_directory(ctx, recorded)
     plans = link_plan(ctx.checkout, bin_dir, {
         row["path"]: row["target"] for row in owned_entries(recorded)
-        if row.get("kind") == "link" and isinstance(row.get("target"), str)
+        if row.get("kind") == "link" and isinstance(row.get("path"), str) and isinstance(row.get("target"), str)
     })
     for plan in plans:
         if plan.state == "foreign":
@@ -2260,13 +2264,13 @@ def cmd_user(ctx: Context, out) -> int:
     with ExitStack() as recovery:
         if not ctx.dry_run:
             backups = [(path, data, path.read_bytes() if path.exists() else None)
-                       for path, data, kind in render_files if kind == "invocation-policy:codex"]
+                       for path, data, _ in render_files]
             recovery.callback(restore_policies, backups, out)
         written = write_render_plan(render_files, ctx.dry_run)
         current = {str(item.path) for item in written}
 
-        # Ordinary renders remain retryable. Generated policies recover until
-        # the receipt records ownership, including failures after linking.
+        # Every render recovers until the receipt records ownership, including
+        # failures after linking, so a failed install leaves no half (sd:1118).
         try:
             links = link_commands(plans, bin_dir, dry_run=ctx.dry_run)
         except LinkFailed as problem:
@@ -2744,15 +2748,29 @@ def activation_contract(ctx: Context, commit: str) -> int:
     return int(found.group(1)) if found else 0
 
 
-def _activate(ctx: Context, commit: str, out) -> int:
-    """Detach the serving tree at exactly `commit` and re-render; on any failure, put both back.
+def _forwarded(ctx: Context) -> list[str]:
+    """The flags another installer needs to act on the same home and link directory as this run."""
+    argv = ["--home", str(ctx.home)] if ctx.sandboxed else []
+    return argv + (["--bin-dir", str(ctx.bin_dir)] if ctx.bin_dir is not None else [])
 
-    This installer, already loaded, does the whole activation: checkout,
-    render and receipt (review round 1). The helpers it loads lazily are
-    loaded before the checkout, so the files changing under it cannot swap
-    in the target's copy halfway through. A render that refuses or raises
-    leaves the tree detached at the commit it started from and the receipt
-    as it was, so the commands served and the receipt never disagree.
+
+def _render_checked_out(ctx: Context, out) -> int:
+    """Run the installer the checkout now holds as `--user`, and relay what it says."""
+    argv = [sys.executable, str(ctx.checkout / "bin" / "sd_install.py"), "--user", *_forwarded(ctx)]
+    done = subprocess.run(argv, env=ctx.environ, capture_output=True, text=True, check=False)  # nosec B603 - fixed argv
+    print(done.stdout + done.stderr, file=out, end="")
+    return done.returncode
+
+
+def _activate(ctx: Context, commit: str, out) -> int:
+    """Detach the serving tree at exactly `commit` and render it; on any failure, put the install back.
+
+    The target commit's own installer renders it (review round 2 of sd:1118),
+    so a change to rendering takes effect in the update that brings it. This
+    installer, already loaded, supervises: a target render that fails or
+    cannot run returns the tree to the commit it started from, the receipt to
+    its bytes, and renders that commit again with this code, which is that
+    commit's. The target's `cmd_user` has already put its own renders back.
     """
     if activation_contract(ctx, commit) < 1:
         print(f"error: the installer at {commit} declares no ACTIVATION_CONTRACT: it predates the serving "
@@ -2763,8 +2781,6 @@ def _activate(ctx: Context, commit: str, out) -> int:
     if code or not original:
         print(f"error: cannot read the serving tree's HEAD:\n{err}", file=out)
         return 1
-    for name in ("sd_lib", "sd_registry"):
-        sibling(name)
     receipt = ctx.receipt.read_bytes() if ctx.receipt.exists() else None
     code, _, err = _git(ctx, ["checkout", "--quiet", "--detach", commit])
     if code:
@@ -2773,7 +2789,7 @@ def _activate(ctx: Context, commit: str, out) -> int:
     print(f"serving {commit}", file=out)
     rendered = 1
     try:
-        rendered = cmd_user(ctx, out)
+        rendered = _render_checked_out(ctx, out)
     finally:
         if rendered:
             _put_back(ctx, original, receipt, commit, out)
@@ -2781,7 +2797,7 @@ def _activate(ctx: Context, commit: str, out) -> int:
 
 
 def _put_back(ctx: Context, original: str, receipt: bytes | None, commit: str, out) -> None:
-    """Return the serving tree to `original` and the receipt to `receipt` after a failed render of `commit`."""
+    """Return the serving tree to `original`, the receipt to `receipt`, and render `original` again."""
     code, _, err = _git(ctx, ["checkout", "--quiet", "--detach", original])
     if receipt is None:
         ctx.receipt.unlink(missing_ok=True)
@@ -2790,10 +2806,14 @@ def _put_back(ctx: Context, original: str, receipt: bytes | None, commit: str, o
     if code:
         print(f"error: the render at {commit} failed, and git could not return the serving tree to "
               f"{original}:\n{err}\nIt serves {commit} while the receipt names {original}; run "
-              f"`git -C {ctx.checkout} checkout --detach {original}`.", file=out)
+              f"`git -C {ctx.checkout} checkout --detach {original}`, then `--user`.", file=out)
         return
-    print(f"error: the render at {commit} failed; the serving tree is back at {original}, "
-          "and the receipt is as it was.", file=out)
+    if cmd_user(ctx, out):
+        print(f"error: the render at {commit} failed, the serving tree is back at {original}, and "
+              f"rendering {original} again failed too; run `--user` in {ctx.checkout}.", file=out)
+        return
+    print(f"error: the render at {commit} failed; the serving tree is back at {original} "
+          "and rendered from it again.", file=out)
 
 
 def cmd_pull_serving(ctx: Context, out) -> int:
@@ -2897,8 +2917,9 @@ def cmd_rollback(ctx: Context, out) -> int:
 def _clone_serving_tree(ctx: Context, tree: Path, out) -> bool:
     """Clone this checkout's origin into `tree`, detached at `origin/main`; False with the reason on `out`.
 
-    Built beside `tree` and renamed into place, so a clone cut short leaves
-    no half-made serving tree for the next run to mistake for one.
+    Built in a fresh directory beside `tree` and renamed into place, so a
+    clone cut short leaves no half-made serving tree for the next run to
+    mistake for one; the error names what it left.
     """
     code, url, err = _git(ctx, ["remote", "get-url", "origin"])
     if code or not url:
@@ -2908,15 +2929,14 @@ def _clone_serving_tree(ctx: Context, tree: Path, out) -> bool:
     if ctx.dry_run:
         print(f"would clone {url} into {tree}, detach it at origin/main and render", file=out)
         return True
-    spare = tree.with_name(f".{tree.name}.new")
-    shutil.rmtree(spare, ignore_errors=True)
-    spare.parent.mkdir(parents=True, exist_ok=True)
-    for where, args in ((spare.parent, ["clone", "--quiet", "--no-checkout", url, str(spare)]),
+    tree.parent.mkdir(parents=True, exist_ok=True)
+    spare = Path(tempfile.mkdtemp(prefix=f".{tree.name}-", dir=tree.parent))
+    for where, args in ((tree.parent, ["clone", "--quiet", "--no-checkout", url, str(spare)]),
                         (spare, ["checkout", "--quiet", "--detach", "refs/remotes/origin/main"])):
         code, _, err = _git_in(where, args, timeout=PULL_TIMEOUT)
         if code:
-            shutil.rmtree(spare, ignore_errors=True)
-            print(f"error: git {' '.join(args[:2])} failed for the serving checkout:\n{err}", file=out)
+            print(f"error: git {' '.join(args[:2])} failed for the serving checkout:\n{err}\n"
+                  f"{spare} holds what it left; remove it once read.", file=out)
             return False
     # The `.venv` link below is the machine's, not the tree's: excluded here,
     # so `--verify` and `--pull` never read it as somebody's work.
@@ -2958,11 +2978,7 @@ def cmd_serve(ctx: Context, out) -> int:
     venv = tree / ".venv"
     if not code and common and not venv.is_symlink() and not venv.exists():
         venv.symlink_to(Path(common).parent / ".venv")
-    argv = [sys.executable, str(tree / "bin" / "sd_install.py"), "--pull"]
-    if ctx.sandboxed:
-        argv += ["--home", str(ctx.home)]
-    if ctx.bin_dir is not None:
-        argv += ["--bin-dir", str(ctx.bin_dir)]
+    argv = [sys.executable, str(tree / "bin" / "sd_install.py"), "--pull", *_forwarded(ctx)]
     done = subprocess.run(argv, env=ctx.environ, capture_output=True, text=True, check=False)  # nosec B603 - fixed argv
     print(done.stdout + done.stderr, file=out, end="")
     return done.returncode
