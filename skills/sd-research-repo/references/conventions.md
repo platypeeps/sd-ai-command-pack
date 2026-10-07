@@ -255,7 +255,7 @@ It resolves markdown links relative to the containing file, and backticked paths
 carrying a `NN-dir/` segment against the repo root. A backticked bare filename is
 prose, not a link — docs legitimately name files that live in another repo or do
 not exist yet. The hook `sd-research-kit init-hook` installs runs it after every
-render and reports broken links; it never fails the git command (sd:1840).
+render and reports broken links (sd:1840).
 
 Check what the documents pin:
 
