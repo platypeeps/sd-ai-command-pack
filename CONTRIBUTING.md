@@ -277,10 +277,16 @@ judgment back, so neither changes an output, an exit code or a status.
   same work. Sent: the new title, and the ids and titles of up to forty open
   items.
 
-**Public repositories only.** Each asks GitHub whether `origin` is a public
-github.com repository, after `jev enabled` says a reading could be taken, and
-sends nothing unless the answer is `private: false`. No `gh`, a failing `gh`
-and a private answer all read as private.
+**The local Kev by default.** Both call `jev --local-only`, as the
+claim-support reading does: a public origin does not make a review summary or
+a tracker title public. Hosted Jev needs `SD_JEV_SHADOW_HOSTED=1` in the
+machine's environment, which no commit can set. A failed local call sends
+nothing, and nothing retries it hosted.
+
+**Public repositories only**, on either path. Each asks GitHub whether
+`origin` is a public github.com repository, after `jev enabled` says a reading
+could be taken, and sends nothing unless the answer is `private: false`. No
+`gh`, a failing `gh` and a private answer all read as private.
 
 ```bash
 JEV_SD_REVIEW_TRIAGE=0 JEV_SD_TASK_DEDUPE=0    # either, for a run or a shell

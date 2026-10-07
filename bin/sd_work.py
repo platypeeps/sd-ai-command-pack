@@ -1119,7 +1119,7 @@ def _dedupe_ask(item: int, title: str, candidates: list[tuple[int, str]], root: 
                         + [f"sd-{number}={text}" for number, text in shown])
     sd_jev.shadow_ask(ready[0], "Which open item already tracks the same work as the new item?",
                       criteria, json.dumps({"new_item_title": _bare(title)}), env, sys.stderr,
-                      caller=DEDUPE_CALLER, stage=DEDUPE_STAGE, answer=NO_DUPLICATE,
+                      caller=DEDUPE_CALLER, stage=DEDUPE_STAGE, answer=NO_DUPLICATE, scope=ready[2],
                       subject=f"sd-task-dedupe:sd-{item}")
 
 

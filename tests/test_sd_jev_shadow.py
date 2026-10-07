@@ -128,6 +128,8 @@ class TriageTests(ReviewFixture):
             "severity": "high", "disposition": "blocking", "family": "correctness",
             "path": "src.py", "summary": "bad, really"})
         self.assertEqual(stubs.gh(), [["api", "--hostname", "github.com", "repos/example/demo", "--jq", ".private"]])
+        # No opt-in: the local Kev only, for the probe and the question alike.
+        self.assertTrue(all(call["argv"][-1] == "--local-only" for call in stubs.jev()), stubs.jev())
 
     def test_a_clean_review_asks_nothing(self):
         stubs = Stubs(self.tool_bin)
@@ -146,6 +148,22 @@ class TriageTests(ReviewFixture):
         stubs = Stubs(self.tool_bin, private="true")
         self.assertEqual(self.triage([FINDING], GH_HOST="ghe.example.test"), "")
         self.assertEqual(stubs.choices(), [])
+
+    def test_the_hosted_opt_in_still_needs_a_public_repository(self):
+        """Lane review of b527597e9: hosted Jev needs the machine's opt-in, and the
+        opt-in does not make a private repository's text sendable."""
+        root, env = self.repo(), self.environment(SD_JEV_SHADOW_HOSTED="1")
+        stubs = Stubs(self.tool_bin, private="true")
+        sd_jev.jev_triage([FINDING], env, root, io.StringIO())
+        self.assertEqual(stubs.choices(), [])
+        Stubs(self.tool_bin)
+        sd_jev.jev_triage([FINDING], env, root, io.StringIO())
+        self.assertEqual([call["argv"][-1] == "--local-only" for call in stubs.choices()], [False])
+
+    def test_a_failed_local_call_is_never_retried_hosted(self):
+        stubs = Stubs(self.tool_bin, code=1)
+        self.assertIn("`jev` exited 1", self.triage([FINDING, FINDING]))
+        self.assertEqual([call["argv"][-1] for call in stubs.choices()], ["--local-only"])
 
     def test_a_failing_visibility_answer_reads_as_private(self):
         stubs = Stubs(self.tool_bin, private="")
@@ -234,7 +252,7 @@ class DedupeTests(ReviewFixture):
 
     def add(self, title: str, **env: str) -> subprocess.CompletedProcess[str]:
         environment = {key: value for key, value in os.environ.items()
-                       if not key.startswith("JEV_")}
+                       if not key.startswith(("JEV_", "SD_JEV_"))}
         environment.update(HOME=str(self.home), PATH=str(self.tool_bin) + os.pathsep + os.defpath, **env)
         return subprocess.run([sys.executable, str(ROOT / "bin" / "sd"), "task", "add", title, "--json"],
                               cwd=str(self.root), env=environment, capture_output=True, text=True, check=True)
@@ -253,6 +271,7 @@ class DedupeTests(ReviewFixture):
         self.assertEqual(flag(argv, "--criteria"),
                          f"none=no listed item tracks the same work,sd-{first}=Fix the lane; again")
         self.assertEqual(json.loads(call["state"]), {"new_item_title": "Fix the lane"})
+        self.assertEqual(argv[-1], "--local-only")
 
     def test_a_private_repository_sends_no_title(self):
         self.add("Fix the lane")

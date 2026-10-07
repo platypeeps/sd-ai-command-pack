@@ -923,12 +923,14 @@ class LineBudgetTests(unittest.TestCase):
         # then spent 4820 -> 4841: `--hostname github.com` on the visibility
         # question (+3), `errors="replace"` in `_jev_run` (+1), and
         # `shadow_safely`, which turns any exception in a shadow stage into a
-        # note and checks the switch before any probe (+17).
+        # note and checks the switch before any probe (+17). The lane review of
+        # b527597e9 spent 4841 -> 4849: the local Kev by default and hosted Jev
+        # only on the machine's `SD_JEV_SHADOW_HOSTED=1`, as `sd-docs-lint` does.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4841,
+            4849,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
