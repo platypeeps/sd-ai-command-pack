@@ -38,6 +38,10 @@ if argv[:1] == ["enabled"]:
     raise SystemExit({gate})
 if {code}:
     raise SystemExit({code})
+if {raw}:
+    sys.stdout.buffer.write(b"\\xff\\n")
+    sys.stderr.buffer.write(b"\\xfe\\n")
+    raise SystemExit(0)
 print(argv[argv.index("--shadow") + 1])
 """
 
@@ -58,9 +62,10 @@ FINDING = {"path": "src.py", "line": 1, "severity": "high", "summary": "bad, rea
 class Stubs:
     """The two stubs in `bin_dir`, and what each was asked."""
 
-    def __init__(self, bin_dir: pathlib.Path, *, gate: int = 0, code: int = 0, private: str = "false") -> None:
+    def __init__(self, bin_dir: pathlib.Path, *, gate: int = 0, code: int = 0, private: str = "false",
+                 raw: bool = False) -> None:
         self.jev_log, self.gh_log = bin_dir / "jev.log", bin_dir / "gh.log"
-        for name, text in (("jev", JEV_STUB.format(log=str(self.jev_log), gate=gate, code=code)),
+        for name, text in (("jev", JEV_STUB.format(log=str(self.jev_log), gate=gate, code=code, raw=raw)),
                            ("gh", GH_STUB.format(log=str(self.gh_log), private=private))):
             (bin_dir / name).write_text(text)
             (bin_dir / name).chmod(0o700)
@@ -168,6 +173,13 @@ class TriageTests(ReviewFixture):
         self.assertIn("the Jev shadow reading stopped: `jev` exited 2", said)
         self.assertIn("JEV_SD_REVIEW_TRIAGE=0", said)
         self.assertEqual(len(stubs.choices()), 1)
+
+    def test_undecodable_output_cannot_fail_the_command(self):
+        """Review of 46529bae2: bytes that are not UTF-8 raised UnicodeDecodeError
+        out of the shadow call, aborting the review before its gate."""
+        stubs = Stubs(self.tool_bin, raw=True)
+        self.assertEqual(self.triage([FINDING, FINDING]), "")
+        self.assertEqual(len(stubs.choices()), 2)
 
     def test_one_review_triages_at_most_the_cap(self):
         stubs = Stubs(self.tool_bin)

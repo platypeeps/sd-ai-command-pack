@@ -298,11 +298,12 @@ def _jev_state(paths: Sequence[str], lines: int, reason: str) -> str:
 
 def _jev_run(argv: Sequence[str], env: Mapping[str, str],
              state: str | None = None) -> subprocess.CompletedProcess[str]:
-    """Run one bounded command, turning every way it can fail into an exit code."""
+    """Run one bounded command, turning every way it can fail into an exit code.
+    Bytes that do not decode are replaced, never raised (review of 46529bae2)."""
 
     try:
         return subprocess.run(list(argv), env=dict(env), input=state, capture_output=True,
-                              text=True, timeout=TIMEOUT_SECONDS, check=False)
+                              text=True, errors="replace", timeout=TIMEOUT_SECONDS, check=False)
     except (OSError, subprocess.SubprocessError) as error:
         return subprocess.CompletedProcess(list(argv), 1, "", str(error))
 
