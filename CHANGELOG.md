@@ -463,6 +463,15 @@
 
 ### Fixed
 
+- **The offload view hashes the toolchain a tree pins, not the rustup proxy (sd:2881).**
+  Every satellite request refused on `tools.cargo`: the satellite's `cargo` is a Homebrew rustup wrapper, and its
+  bytes name no toolchain. Where `rustup` is on the view's `PATH`, `cargo`, `rustc` and the other proxied names now
+  hash the binary `rustup which` names in the check's worktree, when the `PATH` tool prints that binary's
+  `--version`. A `PATH` tool that is no proxy, such as Homebrew's `cargo`, keeps its own bytes: the hub would run
+  it. The view's new `resolution` part names `rustup` or `path` per tool, and a refusal on the tool names both.
+  A docs-only scope no longer refuses on a compiler (`cc`, `c++`, `clang`, `cargo`, `rustc`).
+  **Migration:** a row written before this release refuses on the pack `bin/` digest; the satellite gates again.
+
 - **A hub accepts a satellite's pass across two real machines (sd:2862).**
   The offload view refused on any difference, and two machines always differ: the hub's launchd job and the
   satellite's shell order `PATH` apart, `git` and `uv` differ by build, `HOME` files by login, thread caps by core

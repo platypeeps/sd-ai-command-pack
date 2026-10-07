@@ -164,7 +164,7 @@ is `accept`. It has six parts:
 | Part | Content | Refuses on a difference |
 |---|---|---|
 | `path` | the gate's `PATH` entries in order, each `$HOME` prefix written as `~` | No: recorded. The tools it selects are compared by bytes |
-| `tools` | sha256 of each name in `OFFLOAD_TOOLS`, resolved on that `PATH`, and of each tool `gate_binding` resolves | For `OFFLOAD_DECIDING_TOOLS` and the check's own names; another tool (`git`, `uv`, `npm` when the check does not name it) is recorded |
+| `tools` | sha256 of each name in `OFFLOAD_TOOLS`, resolved on that `PATH`, and of each tool `gate_binding` resolves; a rustup proxy hashes as the toolchain binary it runs (`resolution`, sd:2881) | For `OFFLOAD_DECIDING_TOOLS`, or `OFFLOAD_DOCS_DECIDING_TOOLS` in a docs-only scope, and the check's own names; another tool (`git`, `uv`, `npm` when the check does not name it) is recorded |
 | `python` | sha256 of the bytes of `sys.executable`, resolved, and `sys.version` | Yes: the interpreter that runs `sd-check`, even when the gate was started through a virtualenv or an explicit path that `PATH`'s `python3` does not name |
 | `home_files` | sha256 of each file in `OFFLOAD_HOME_FILES` under `HOME`, or `"absent"` | No: recorded |
 | `threads` | `sd_gate_slots.thread_caps`: the `CARGO_BUILD_JOBS`, `RUST_TEST_THREADS` and `NEXTEST_TEST_THREADS` a check gets under the machine's slot count and cores, as `machine_binding` binds them (sd:2782, sd:2872) | No: recorded. They follow the core count |
@@ -181,6 +181,17 @@ decides the check's result: `OFFLOAD_DECIDING_TOOLS` (`sh`, `bash`, `make`,
 interpreter, and the steering variables (`offload_differences`). Every other
 difference is recorded by part and name in the merge's `local_gate`, as
 `satellite.view_differences`.
+
+A rustup proxy's bytes name no toolchain: the satellite's Homebrew wrapper and
+the hub's proxy differ while both run the toolchain `rust-toolchain.toml` pins
+(sd:2881). For a name in `RUSTUP_TOOLS`, the view hashes the binary that
+`rustup which` names in the check's worktree, when the `PATH` tool prints the
+same `--version` as that binary. A `PATH` tool that is no proxy, such as
+Homebrew's `cargo`, ignores the pin and keeps its own bytes. `resolution`
+names the way each side took, `rustup` or `path`, and a refusal on that tool
+names both. A docs-only scope runs its docs command and builds no code, so
+it refuses on `OFFLOAD_DOCS_DECIDING_TOOLS` (`sh`, `bash`, `make`, `python3`,
+`node`) and the check's own names, not on a compiler.
 
 `OFFLOAD_TOOLS` is one pack constant: `sh`, `bash`, `make`, `python3`,
 `git`, `cc`, `c++`, `clang`, `cargo`, `rustc`, `node`, `npm`, `uv`.

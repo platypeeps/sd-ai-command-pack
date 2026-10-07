@@ -26,7 +26,7 @@ import sd_gate_run  # noqa: E402
 import sd_gate_slots  # noqa: E402
 
 
-class OffloadView(unittest.TestCase):
+class ViewFixture(unittest.TestCase):
     """A satellite login (`sat`) and a hub login (`hub`), each with `~/bin` ahead of one shared folder."""
 
     def setUp(self) -> None:
@@ -54,11 +54,15 @@ class OffloadView(unittest.TestCase):
         return {"HOME": str(home), "USER": login, "LANG": "C", "CARGO_HOME": str(home / ".cargo"),
                 "PATH": os.pathsep.join([str(home / "bin"), str(self.shared)]), **extra}
 
-    def view(self, login: str, names: tuple[str, ...] = (), **extra: str) -> dict:
+    def view(self, login: str, names: tuple[str, ...] = (), tree: pathlib.Path | None = None, **extra: str) -> dict:
         environment = sd_gate_run.gate_environment(self.tmp / "repo", self.environ(login, **extra))
-        view = sd_gate_receipts.offload_view(environment, names)
+        view = sd_gate_receipts.offload_view(environment, names, tree)
         self.assertIsNotNone(view)
         return view
+
+
+class OffloadView(ViewFixture):
+    """Two logins' views compared: what is recorded and what refuses."""
 
     def test_two_logins_that_differ_only_in_home_user_and_the_path_prefix_compare_equal(self) -> None:
         theirs, ours = self.view("sat"), self.view("hub")
@@ -222,6 +226,97 @@ class OffloadView(unittest.TestCase):
         ours = self.view("hub")
         self.assertEqual(sd_gate_receipts.offload_miss(None, ours), {"part": "view", "name": None})
         self.assertEqual(sd_gate_receipts.offload_miss({**ours, "tools": []}, ours), {"part": "tools", "name": None})
+
+
+#: A fake `rustup`: `which <tool>` names the toolchain that the cwd's `rust-toolchain.toml` pins, under `HOME`.
+FAKE_RUSTUP = """[ "$1" = which ] && [ -f rust-toolchain.toml ] || exit 1
+while read -r key _ value; do [ "$key" = channel ] && channel=${value#\\"} && channel=${channel%\\"}; done < rust-toolchain.toml
+[ -n "$channel" ] || exit 1
+echo "$HOME/.rustup/toolchains/$channel/bin/$2"
+"""
+
+
+def part(mode: str = "full") -> dict:
+    """A tree part as `tree_binding` writes it, for a `make check` repository in `mode`'s scope."""
+    return {"schema": 2, "reuse": "head", "head": "a" * 40, "fork": None, "tree": "t" * 40, "inputs": "i" * 12,
+            "scope": {"mode": mode, "fork": None, "command": ["make", "docs-gate"] if mode == "docs-only" else []},
+            "detection": {"source": "Makefile", "commands": {"check": ["make", "check"]}}}
+
+
+class RustupResolution(ViewFixture):
+    """sd:2881: the satellite's `cargo` is a Homebrew rustup wrapper, the hub's another proxy or Homebrew's own `cargo`.
+
+    A proxy's bytes name no toolchain; the tree's `rust-toolchain.toml` does, through `rustup which`.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.tree = self.tmp / "tree"
+        self.tree.mkdir()
+        (self.tree / "rust-toolchain.toml").write_text('[toolchain]\nchannel = "1.98.1"\n', encoding="utf-8")
+        for login in ("sat", "hub"):
+            self.script(self.home(login) / "bin" / "rustup", FAKE_RUSTUP)
+            for name in ("cargo", "rustc"):
+                self.script(self.home(login) / ".rustup" / "toolchains" / "1.98.1" / "bin" / name,
+                            f'echo "{name} 1.98.1 (797e8a9bc 2026-08-05)"\n')
+        self.proxy("sat", "RUSTUP_OVERRIDE_UNIX_FALLBACK_SETTINGS=/opt/homebrew/etc/rustup/settings.toml ")
+        self.proxy("hub", "")
+
+    @staticmethod
+    def script(path: pathlib.Path, body: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+        path.chmod(0o755)
+
+    def proxy(self, login: str, prefix: str) -> None:
+        """`cargo` and `rustc` that run the toolchain `rustup which` names, each login's wrapper with its own bytes."""
+        for name in ("cargo", "rustc"):
+            self.script(self.home(login) / "bin" / name, f'{prefix}exec "$(rustup which {name})" "$@"\n')
+
+    def mismatch(self, theirs: dict, ours: dict, mode: str = "full") -> dict | None:
+        row = {"binding": {**part(mode), "environment_mode": "offload"}, "offload_view": theirs}
+        return sd_gate_receipts.binding_mismatch(row, part(mode), ours, "offload")
+
+    def test_two_proxies_hash_the_toolchain_the_tree_pins(self) -> None:
+        theirs, ours = self.view("sat", tree=self.tree), self.view("hub", tree=self.tree)
+        self.assertEqual(theirs["resolution"], {"cargo": "rustup", "rustc": "rustup"})
+        self.assertEqual(theirs["tools"]["cargo"], ours["tools"]["cargo"])
+        self.assertIsNone(self.mismatch(theirs, ours))
+
+    def test_a_gates_worktree_resolves_in_its_own_tree(self) -> None:
+        """Both sides take the view through `Worktree.view`: the satellite when it writes the row, the hub when it compares."""
+        environment = sd_gate_run.gate_environment(self.tmp / "repo", self.environ("sat"))
+        gated = sd_gate_receipts.Worktree(self.tmp / "repo", self.tree, "a" * 40, None, environment, None, None, False, "i" * 12)
+        self.assertEqual(gated.view(part())["resolution"], {"cargo": "rustup", "rustc": "rustup"})
+
+    def test_a_row_from_before_the_resolution_refuses_and_says_it_recorded_none(self) -> None:
+        """A 7801d8b8 view hashed the wrapper and has no `resolution`: it refuses on `tools.cargo` (its pack digest first)."""
+        ours = self.view("hub", tree=self.tree)
+        old = {name: value for name, value in self.view("sat").items() if name != "resolution"}
+        self.assertIn("tools at cargo (satellite via unrecorded, hub via rustup)", self.mismatch(old, ours)["reason"])
+
+    def test_a_cargo_that_is_no_proxy_keeps_its_own_bytes_and_refuses(self) -> None:
+        """The hub's cron `PATH` finds Homebrew's `cargo` 1.99.0, which ignores the pin: the hub would run another compiler."""
+        self.script(self.home("hub") / "bin" / "cargo", 'echo "cargo 1.99.0 (5f94df478 2026-08-27) (Homebrew)"\n')
+        theirs, ours = self.view("sat", tree=self.tree), self.view("hub", tree=self.tree)
+        self.assertEqual(ours["resolution"], {"cargo": "path", "rustc": "rustup"})
+        self.assertIn("tools at cargo (satellite via rustup, hub via path)", self.mismatch(theirs, ours)["reason"])
+
+    def test_a_tree_that_pins_nothing_or_no_rustup_hashes_the_path_tool(self) -> None:
+        for login in ("sat", "hub"):
+            (self.home(login) / "bin" / "rustup").unlink()
+        self.assertEqual(self.view("sat", tree=self.tree)["resolution"], {"cargo": "path", "rustc": "path"})
+        self.assertEqual(self.view("sat", tree=self.tmp)["resolution"], {"cargo": "path", "rustc": "path"})
+
+    def test_a_docs_only_scope_does_not_refuse_on_a_compiler(self) -> None:
+        """`make docs-gate` builds no code: `cargo` and `cc` are recorded there, and still refuse in a full scope."""
+        self.script(self.home("hub") / "bin" / "cargo", 'echo "cargo 1.99.0 (Homebrew)"\n')
+        self.tool(self.home("hub") / "bin" / "cc", "clang 21")
+        theirs, ours = self.view("sat", tree=self.tree), self.view("hub", tree=self.tree)
+        self.assertIsNone(self.mismatch(theirs, ours, "docs-only"))
+        self.assertIn("tools at cargo", self.mismatch(theirs, ours)["reason"])
+        self.tool(self.home("hub") / "bin" / "make", "make 3.81")
+        self.assertIn("tools at make", self.mismatch(theirs, self.view("hub", tree=self.tree), "docs-only")["reason"])
 
 
 if __name__ == "__main__":

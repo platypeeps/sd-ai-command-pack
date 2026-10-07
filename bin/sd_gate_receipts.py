@@ -58,6 +58,9 @@ a run. The hub compares what it can recompute: the tree part of the binding,
 the offload view (`offload_view`) and the pack digest. The view refuses only on
 what decides the result (`offload_differences`, sd:2862): the interpreter, the
 toolchain's bytes and the allowlisted variables but `SD_` and the thread caps.
+A docs-only scope builds no code, so no compiler's bytes refuse there. A rustup
+proxy's bytes name no toolchain: the view hashes the binary that `rustup which`
+picks in the check's tree, which `rust-toolchain.toml` pins (sd:2881).
 `PATH` order, other tools, `HOME` files and the caps it names in the merge's
 `view_differences`, since two real machines always differ in them. It
 never compares the machine part or `environment_sha256`, which hold the
@@ -109,6 +112,7 @@ import os
 import pathlib
 import shutil
 import socket
+import subprocess
 import sys
 import time
 from contextlib import closing
@@ -143,6 +147,12 @@ OFFLOAD_TOOLS = ("sh", "bash", "make", "python3", "git", "cc", "c++", "clang", "
 #: Of those, the toolchain whose bytes decide a check's result, so a hub refuses on them, as on the check's own names
 #: (sd:2862). Another tool, `PATH`, `HOME` files and thread caps differ between any two machines: recorded, not refused.
 OFFLOAD_DECIDING_TOOLS = ("sh", "bash", "make", "python3", "cc", "c++", "clang", "cargo", "rustc", "node")
+#: The fixed set a docs-only scope refuses on (sd:2881): its docs command reads docs paths and builds no code, so a
+#: compiler cannot decide its result. A docs command that names a compiler binds it through the check's own names.
+OFFLOAD_DOCS_DECIDING_TOOLS = ("sh", "bash", "make", "python3", "node")
+#: Names a rustup proxy dispatches by the tree's `rust-toolchain.toml`: a view hashes the toolchain binary that
+#: `rustup which` picks in the tree, not the proxy, whose bytes name no toolchain (sd:2881).
+RUSTUP_TOOLS = ("cargo", "rustc", "rustdoc", "rustfmt", "cargo-clippy", "clippy-driver")
 #: Tool configuration under `HOME` that an offload view binds, by path relative to `HOME`.
 OFFLOAD_HOME_FILES = (".gitconfig", ".config/git/config", ".cargo/config.toml", ".npmrc", ".config/pip/pip.conf",
                       ".config/uv/uv.toml")
@@ -328,7 +338,8 @@ def machine_binding(tree: pathlib.Path, commands: list[list[str]], env: Mapping[
             "machine": socket.gethostname()}
 
 
-def offload_view(environment: Mapping[str, str], names: Iterable[str] = ()) -> dict[str, Any] | None:
+def offload_view(environment: Mapping[str, str], names: Iterable[str] = (),
+                 tree: pathlib.Path | None = None) -> dict[str, Any] | None:
     """The portable view of a gate's `environment` that a hub compares with a satellite's (sd:2704), or None.
 
     Local reuse never reads it: `gate_binding` binds the whole environment (C-17). The view writes each `$HOME`
@@ -340,6 +351,8 @@ def offload_view(environment: Mapping[str, str], names: Iterable[str] = ()) -> d
     `machine_binding` binds too; `variables`, the sha256 of each `offload_variable`'s value. A variable outside
     that list is not compared, and neither its value nor its digest reaches the hub (sd:2782).
     `names` are the check's own executables; one with a relative folder lives in the tree, which `inputs` binds.
+    A `RUSTUP_TOOLS` name hashes the toolchain binary `rustup_resolved` finds in `tree`, the check's worktree, and
+    `resolution` names how each one resolved, `rustup` or `path`, so a refusal can say (sd:2881).
     """
     try:
         home = os.path.normpath(environment["HOME"]) if environment.get("HOME") else None
@@ -352,12 +365,16 @@ def offload_view(environment: Mapping[str, str], names: Iterable[str] = ()) -> d
             return value
 
         search = environment.get("PATH", "")
-        tools = {}
+        tools, resolution = {}, {}
         for name in (*OFFLOAD_TOOLS, *names):
             if os.path.isabs(name) or not os.path.dirname(name):
                 found = shutil.which(name, path=search)
+                if found and name in RUSTUP_TOOLS:
+                    binary = rustup_resolved(name, found, environment, tree) if tree else None
+                    found, resolution[name] = (binary, "rustup") if binary else (found, "path")
                 tools[name] = _content_digest(found) if found else None
         return {"path": [portable(entry) for entry in search.split(os.pathsep) if entry], "tools": tools,
+                "resolution": resolution,
                 "python": {"sha256": _content_digest(pathlib.Path(sys.executable).resolve()), "version": sys.version},
                 "home_files": {name: _content_digest(pathlib.Path(home, name)) if home and pathlib.Path(home, name).is_file()
                                else "absent" for name in OFFLOAD_HOME_FILES},
@@ -366,6 +383,33 @@ def offload_view(environment: Mapping[str, str], names: Iterable[str] = ()) -> d
                               if offload_variable(key)}}
     except Exception:  # a view that cannot be named matches nothing; the hub runs the check
         return None
+
+
+def rustup_resolved(name: str, found: str, environment: Mapping[str, str], tree: pathlib.Path) -> str | None:
+    """The binary `rustup which <name>` names in `tree`, when `found`, `name` on `PATH`, runs it; else None (sd:2881).
+
+    A rustup proxy, or a wrapper that execs one, has the same bytes whatever toolchain it runs, and a
+    `rust-toolchain.toml` in `tree` picks that toolchain. A `PATH` tool that is no proxy, such as Homebrew's
+    `cargo`, ignores the pin and keeps its own bytes: `found` runs the binary only when both print the same
+    `--version` in `tree`. Runs under `environment` with `RUSTUP_AUTO_INSTALL=0`, so it installs nothing.
+    """
+    rustup = shutil.which("rustup", path=environment.get("PATH", ""))
+    if rustup is None:
+        return None
+    env = {**environment, "RUSTUP_AUTO_INSTALL": "0"}
+
+    def output(argv: list[str]) -> str | None:
+        try:
+            result = subprocess.run(argv, cwd=tree, env=env, text=True, capture_output=True, timeout=60, check=False)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
+
+    binary = output([rustup, "which", name])
+    if binary is None or not os.path.isabs(binary):
+        return None
+    version = output([binary, "--version"])
+    return binary if version is not None and output([found, "--version"]) == version else None
 
 
 def offload_variable(name: str) -> bool:
@@ -422,19 +466,26 @@ def start_view(gated: Worktree, identity: dict[str, Any] | None) -> dict[str, An
     return gated.view(identity) if gated.mode == "offload" and identity else None
 
 
-def offload_differences(theirs: Any, ours: Any, names: Iterable[str] = ()) -> list[dict[str, Any]]:
+def deciding_tools(part: Mapping[str, Any] | None) -> tuple[str, ...]:
+    """The fixed tools a hub refuses on for a run of `part`: `OFFLOAD_DOCS_DECIDING_TOOLS` in a docs-only scope (sd:2881)."""
+    docs = part is not None and part["scope"]["mode"] == sd_check_scope.DOCS_ONLY
+    return OFFLOAD_DOCS_DECIDING_TOOLS if docs else OFFLOAD_DECIDING_TOOLS
+
+
+def offload_differences(theirs: Any, ours: Any, names: Iterable[str] = (),
+                        tools: Iterable[str] = OFFLOAD_DECIDING_TOOLS) -> list[dict[str, Any]]:
     """Every difference between a satellite's offload view (`theirs`) and the hub's (`ours`), as `{"part", "name", "refuses"}`.
 
     Parts compare in the order `path`, `tools`, `python`, `home_files`, `threads`, `variables`. A difference refuses
-    only where it decides what the check ran (sd:2862): `python`, a tool in `OFFLOAD_DECIDING_TOOLS` or `names` (the
-    check's own executables), and a variable other than the slot holder's `SD_GATE_` settings and the thread caps it
+    only where it decides what the check ran (sd:2862): `python`, a tool in `tools` (`deciding_tools`) or `names`
+    (the check's own executables), and a variable other than the slot holder's `SD_GATE_` settings and the thread caps it
     sets (`sd_gate_slots.CPU_VARIABLES`). `name` is the first differing `PATH` entry (the satellite's, or the
     hub's past the satellite's end), tool, `python` field, file, thread variable or variable. A tool the hub cannot
     resolve is not compared. A view that is not one, or a part of the wrong shape or missing, differs with no name.
     """
     if not (isinstance(theirs, dict) and isinstance(ours, dict)):
         return [{"part": "view", "name": None, "refuses": True}]
-    deciding = {*OFFLOAD_DECIDING_TOOLS, *names}
+    deciding = {*tools, *names}
 
     def refuses(part: str, name: str | None) -> bool:
         if part == "tools":
@@ -460,9 +511,10 @@ def offload_differences(theirs: Any, ours: Any, names: Iterable[str] = ()) -> li
     return found
 
 
-def offload_miss(theirs: Any, ours: Any, names: Iterable[str] = ()) -> dict[str, Any] | None:
+def offload_miss(theirs: Any, ours: Any, names: Iterable[str] = (),
+                 tools: Iterable[str] = OFFLOAD_DECIDING_TOOLS) -> dict[str, Any] | None:
     """None when a satellite's offload view (`theirs`) stands for the hub's (`ours`), else its first refusing difference."""
-    return next(({"part": miss["part"], "name": miss["name"]} for miss in offload_differences(theirs, ours, names)
+    return next(({"part": miss["part"], "name": miss["name"]} for miss in offload_differences(theirs, ours, names, tools)
                  if miss["refuses"]), None)
 
 
@@ -501,7 +553,7 @@ class Worktree:
 
     def view(self, part: Mapping[str, Any]) -> dict[str, Any] | None:
         """This environment's offload view, binding the executables of `part`'s commands too."""
-        return offload_view(self.environment, check_names(part))
+        return offload_view(self.environment, check_names(part), self.tree)
 
 
 def repository_slug(root: pathlib.Path) -> str | None:
@@ -784,11 +836,15 @@ def binding_mismatch(row: Mapping[str, Any], part: Mapping[str, Any] | None,
         return {"code": "satellite_binding",
                 "reason": f"the satellite's receipt binds environment_mode {stored.get('environment_mode')}, not offload"}
     fields = list(TREE_FIELDS) if part is None else [name for name in TREE_FIELDS if stored.get(name) != part.get(name)]
-    miss = offload_miss(row.get("offload_view"), view, check_names(part) if part else ())
+    miss = offload_miss(row.get("offload_view"), view, check_names(part) if part else (), deciding_tools(part))
     if fields:
         named = f"binding fields {', '.join(fields)}"
     elif miss is not None:
         named = f"offload view part {miss['part']} at {miss['name']}"
+        ways = [side.get("resolution", {}).get(miss["name"]) if isinstance(side, dict) and isinstance(side.get("resolution"), dict)
+                else None for side in (row.get("offload_view"), view)]
+        if miss["part"] == "tools" and ways != [None, None]:  # how each side found it (sd:2881)
+            named += f" (satellite via {ways[0] or 'unrecorded'}, hub via {ways[1] or 'unrecorded'})"
     else:
         return None
     return {"code": "satellite_binding", "reason": f"the satellite's receipt differs from the hub's in {named}"}
