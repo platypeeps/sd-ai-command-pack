@@ -1735,6 +1735,10 @@ class HookTests(unittest.TestCase):
     def calls(self) -> list[str]:
         return self.log.read_text(encoding="utf-8").splitlines() if self.log.is_file() else []
 
+    def rendered_and_checked(self) -> list[str]:
+        """One render, then the link check that follows it (sd:1840)."""
+        return ["%s %s" % (self.repo.resolve(), verb) for verb in ("render", "checklinks")]
+
     def git(self, *args: str, env: dict[str, str] | None = None) -> str:
         merged = dict(self.env)
         merged.update(env or {})
@@ -1803,13 +1807,13 @@ class HookTests(unittest.TestCase):
         self.feature_commit()
         self.assertEqual(self.init_hook().returncode, 0)
         self.git("merge", "-q", "--ff-only", "feature")
-        self.assertEqual(self.calls(), ["%s render" % self.repo.resolve()])
+        self.assertEqual(self.calls(), self.rendered_and_checked())
 
     def test_a_branch_checkout_that_changes_a_document_renders(self) -> None:
         self.feature_commit()
         self.assertEqual(self.init_hook().returncode, 0)
         self.git("checkout", "-q", "feature")
-        self.assertEqual(self.calls(), ["%s render" % self.repo.resolve()])
+        self.assertEqual(self.calls(), self.rendered_and_checked())
 
     def test_a_checkout_that_moved_no_branch_renders(self) -> None:
         """Reversed by the merge with sd:1353, deliberately.
@@ -1828,7 +1832,7 @@ class HookTests(unittest.TestCase):
         """
         self.assertEqual(self.init_hook().returncode, 0)
         self.git("checkout", "-q", "-b", "same-commit")
-        self.assertEqual(self.calls(), ["%s render" % self.repo.resolve()])
+        self.assertEqual(self.calls(), self.rendered_and_checked())
 
     def test_a_commit_renders_and_the_skip_variable_still_skips(self) -> None:
         self.assertEqual(self.init_hook().returncode, 0)
@@ -1837,7 +1841,7 @@ class HookTests(unittest.TestCase):
         self.assertEqual(self.calls(), [])
         (self.repo / "10-x" / "a.md").write_text("edited again\n", encoding="utf-8")
         self.git("commit", "-q", "-am", "edit again")
-        self.assertEqual(self.calls(), ["%s render" % self.repo.resolve()])
+        self.assertEqual(self.calls(), self.rendered_and_checked())
 
     def test_a_worktree_add_does_not_render(self) -> None:
         """`git worktree add` runs post-checkout with no previous HEAD. A
