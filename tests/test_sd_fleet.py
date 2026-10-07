@@ -500,6 +500,7 @@ class Owners(Fleet):
         self.assertEqual(sd_fleet.configured_owners(), sd_fleet.DEFAULT_OWNERS)
         self.config({})
         self.assertEqual(sd_fleet.configured_owners(), sd_fleet.DEFAULT_OWNERS)
+        self.assertEqual(sd_fleet.configured_owners(("example-org",)), ("example-org",))
 
     def test_a_malformed_setting_refuses_rather_than_guessing(self) -> None:
         for bad in ([], "example-org", [""], [1], ["example org"], {"owners": 1}):

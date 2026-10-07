@@ -133,7 +133,8 @@ worse than a missing one because it looks current.
 A repository that publishes re-renders when git changes a document. For a
 research repo, `sd-research-kit init-hook` installs the hook that does it, as
 post-commit, post-merge and post-checkout, so a pull or a branch switch renders
-too; the hook never fails the git command, because the change has already been
+too. After the render it runs `sd-research-kit checklinks` and reports broken
+links. The hook never fails the git command, because the change has already been
 made when it runs.
 A render executes `research.conf.py`, so every trigger of the hook, a commit
 included, renders only a config a render by hand has executed there before.

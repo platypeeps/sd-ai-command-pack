@@ -4,6 +4,15 @@
 
 ### Added
 
+- **`sd-status` reports the fleet baseline's two flags (sd:1807).** The dashboard showed `protection_source` (rulesets alone, no classic object) and `required_check` (`ci`, or `sd/local-gate` for a `repo.ci = local` repository) for each owned repository; `sd-status` printed neither. It now reports both in `protection.merge_settings`, with the ids, values and sentences `sd_db.protection.baseline_flags` writes, and prints them as `FLAG` or `ok` lines beside the merge flags. A repository whose owner is not in `sd.fleet_owners` carries neither; with no `sd.fleet_owners` the owners are `platypeeps`, the system collector's default. A classic read that failed carries neither, as the system files it unknown. No acknowledgement reaches them. `GapVocabularyTests` compares them with the system library at `.sd-system-rev`.
+
+- **`sd-research-kit review` checks each map for stable row IDs and a gaps section (sd:1835, sd:1836).**
+  Each `20-map/*.md` needs one table whose first column is all stable IDs (`C01`, `C02`, ...) and a heading with the word `Gaps`.
+  A miss prints `WARN` and leaves the exit at 0: the rulings make both required without saying they fail, and every research repo predates them.
+  The research hook now runs `sd-research-kit checklinks` after each render and reports broken links; it still never fails the git command (sd:1840).
+  `init-hook` upgrades an installed hook in place.
+  `references/conventions.md` adds a number-grade table for the main document (sd:1837) and a `Status` column for `10-sources/registry.md` (sd:1838); both are guidance only.
+
 - **`sd task edit --clear-branch` clears a stale branch name (sd:2729).**
   It writes the cleared branch through `sd_db`'s `edit_item` (sd:2818), with the usual note and `--if-revision` check.
   It sets no branch; `sd runner prepare --branch` still does that.
@@ -184,6 +193,15 @@
   the branch changes, and each origin branch that names the item with no
   open pull request. The lines go to stderr and the receipt's `warnings`. It
   refuses nothing, and a read that fails is a warning of its own.
+
+- **`sd-status` counts the merged-review rows and their change (sd:1179).**
+  The report-only class `merged-pr-review-unacknowledged` reached 219 rows
+  with nothing saying it grew. `open threads` now prints its row count and the
+  change since yesterday, and `--json` carries both as
+  `merged_review_count`. It is stateless, so not "since the last run", which
+  needs a stored count: yesterday's count shifts the window
+  back a day and leaves out acknowledgements recorded in the last 24 hours.
+  It warns only, with no ceiling (operator ruling 2026-09-30).
 
 - **`sd-status` counts late review findings (sd:1178).** A review posted
   after the merge reaches no merge gate: 19 of 219 merged pull requests got
@@ -468,6 +486,26 @@
   Each failed reviewer now gets an equal share, under its own name.
   A `length` stop from a `url` entry with no `max_tokens` read `below max_tokens (None)` and said to raise it.
   It now reads `stopped on length with no max_tokens set` and names setting one.
+
+- **A missing `--base` ref no longer runs the full check silently (sd:2863).**
+  `sd gate check --base X` compares at `refs/remotes/origin/X`; unfetched, it found no merge base and ran everything.
+  In a repository that declares `.github/sd-check-scope.json`, `sd-check --base REF` now exits 2 naming a `REF` that
+  names no commit. `sd gate check` prints the reason on stderr whenever the scope is full, and `sd-check`'s human
+  report names the scope and its reason whenever `--base` was given.
+
+- **`sd-docs-lint` bounds its claim-support pass and says it is waiting (sd:2873).**
+  Rule 6's claim support asked `jev` in batches of 12, each bounded at 120 seconds, and printed nothing until the end.
+  The whole pass now shares one 120-second budget, prints one stderr line as it starts, and notes where it stopped.
+  Rule 2's delivery check fetches each remote ref once per run, not once per item.
+
+- **The offload view binds the compiler build `cargo` and `rustc` run, beside their bytes (sd:2881).**
+  A rustup proxy's bytes name no toolchain. The view now also binds the build lines of `cargo -vV` and `rustc -vV`
+  (release, commit-hash, commit-date, host, LLVM version), run in the check's worktree under the gate's environment.
+  The view's new `resolution` part names each release line, or `path` where `-vV` failed, and a refusal names both:
+  a hub whose `PATH` finds Homebrew's `cargo` 1.99.0 first refuses a satellite that ran the pinned 1.98.1.
+  `.github/sd-check-scope.json` takes an optional `docs_tools`, every executable the docs command reaches: a
+  docs-only scope that declares it refuses on those tools and the command's own, not on a compiler it never runs.
+  **Migration:** a row written before this release refuses on the pack `bin/` digest; the satellite gates again.
 
 - **A hub accepts a satellite's pass across two real machines (sd:2862).**
   The offload view refused on any difference, and two machines always differ: the hub's launchd job and the

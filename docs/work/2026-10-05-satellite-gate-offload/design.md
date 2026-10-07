@@ -164,7 +164,7 @@ is `accept`. It has six parts:
 | Part | Content | Refuses on a difference |
 |---|---|---|
 | `path` | the gate's `PATH` entries in order, each `$HOME` prefix written as `~` | No: recorded. The tools it selects are compared by bytes |
-| `tools` | sha256 of each name in `OFFLOAD_TOOLS`, resolved on that `PATH`, and of each tool `gate_binding` resolves | For `OFFLOAD_DECIDING_TOOLS` and the check's own names; another tool (`git`, `uv`, `npm` when the check does not name it) is recorded |
+| `tools` | sha256 of each name in `OFFLOAD_TOOLS`, resolved on that `PATH`, and of each tool `gate_binding` resolves; `cargo` and `rustc` bind their `-vV` build lines beside their bytes (`resolution`, sd:2881) | For `OFFLOAD_DECIDING_TOOLS` and the check's own names, or a docs-only scope's declared `docs_tools` alone; another tool (`git`, `uv`, `npm` when the check does not name it) is recorded |
 | `python` | sha256 of the bytes of `sys.executable`, resolved, and `sys.version` | Yes: the interpreter that runs `sd-check`, even when the gate was started through a virtualenv or an explicit path that `PATH`'s `python3` does not name |
 | `home_files` | sha256 of each file in `OFFLOAD_HOME_FILES` under `HOME`, or `"absent"` | No: recorded |
 | `threads` | `sd_gate_slots.thread_caps`: the `CARGO_BUILD_JOBS`, `RUST_TEST_THREADS` and `NEXTEST_TEST_THREADS` a check gets under the machine's slot count and cores, as `machine_binding` binds them (sd:2782, sd:2872) | No: recorded. They follow the core count |
@@ -181,6 +181,28 @@ decides the check's result: `OFFLOAD_DECIDING_TOOLS` (`sh`, `bash`, `make`,
 interpreter, and the steering variables (`offload_differences`). Every other
 difference is recorded by part and name in the merge's `local_gate`, as
 `satellite.view_differences`.
+
+A rustup proxy's bytes name no toolchain: `rust-toolchain.toml` in the tree
+picks it (sd:2881). For `cargo` and `rustc` (`VERSIONED_TOOLS`), the view binds
+the build lines of `<tool> -vV` beside the `PATH` tool's own bytes. It runs
+that tool as the gate runs it: in the check's worktree, under the gate's
+environment, through any wrapper. The bound lines are the first one, `release`,
+`commit-hash`, `commit-date`, `host` and `LLVM version`; `os:` and the library
+lines follow the machine. `resolution` names each tool's release line, or
+`path` when `-vV` failed, and a refusal on that tool names both sides. A hub
+whose `PATH` finds Homebrew's `cargo` 1.99.0 before the rustup wrapper refuses
+a satellite that ran the pinned 1.98.1: release and commit-hash differ.
+
+The threat model is one operator's two machines. The binding catches
+accidental toolchain drift; it does not defend against a wrapper built to lie.
+One commit-hash is one compiler source.
+
+A docs-only scope's docs command can reach a compiler through `make`, as
+`cargo doc` or a doctest does, so it compares `OFFLOAD_DECIDING_TOOLS` too.
+A repository whose docs command reaches no compiler declares `docs_tools` in
+`.github/sd-check-scope.json`, every executable that command reaches, each
+by bare name on `PATH`, since a path names a file no binding hashes. A
+docs-only scope then refuses on those tools and the command's own name only.
 
 `OFFLOAD_TOOLS` is one pack constant: `sh`, `bash`, `make`, `python3`,
 `git`, `cc`, `c++`, `clang`, `cargo`, `rustc`, `node`, `npm`, `uv`.
