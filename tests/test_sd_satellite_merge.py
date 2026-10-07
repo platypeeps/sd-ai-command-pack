@@ -99,7 +99,7 @@ class GateCompare(rows.SatelliteFixture):
         cases = {"tools at sh": {"tools": {**view["tools"], "sh": "0" * 64}},
                  "tools at make": {"tools": {**view["tools"], "make": "0" * 64}},
                  "tools at git": {"tools": {**view["tools"], "git": "0" * 64}},
-                 "home_files at .config/uv/uv.toml": {"home_files": {".config/uv/uv.toml": "0" * 64}},
+                 "home_files at .config/uv/uv.toml": {"home_files": {**view["home_files"], ".config/uv/uv.toml": "0" * 64}},
                  "threads at RUST_TEST_THREADS": {"threads": {**view["threads"], "RUST_TEST_THREADS": "1"}},
                  "variables at CARGO_BUILD_JOBS": {"variables": {**view["variables"], "CARGO_BUILD_JOBS": "0" * 64}},
                  "threads at None": {"threads": None}}

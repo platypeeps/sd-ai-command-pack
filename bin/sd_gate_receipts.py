@@ -159,6 +159,11 @@ VERSION_KEYS = ("release", "commit-hash", "commit-date", "host", "LLVM version")
 #: refuses on it. uv has no switch that skips the user's file alone; `UV_NO_CONFIG` skips the tree's own too. git, npm,
 #: pip and cargo read none (`offload_pins`, sd:2879).
 OFFLOAD_HOME_FILES = (".config/uv/uv.toml",)
+#: The configuration files a check reads under a folder a variable names, by variable and file, which a view binds as
+#: `home_files` `$<variable>/<file>`: the pinned `CARGO_HOME` and npm global file persist in the gate's cache, where an
+#: earlier check could leave a cargo `runner`, and uv reads `$XDG_CONFIG_HOME/uv/uv.toml` in place of `~/.config`'s.
+OFFLOAD_VARIABLE_FILES = (("CARGO_HOME", "config.toml"), ("CARGO_HOME", "config"), ("NPM_CONFIG_GLOBALCONFIG", ""),
+                          ("XDG_CONFIG_HOME", "uv/uv.toml"))
 #: The thread cap every opted-in check runs under, on every machine (sd:2879): one gate's share of the cores under the
 #: default slot count, so a machine on its default keeps it, and one whose share is lower refuses on `threads`.
 OFFLOAD_THREADS = str(sd_gate_slots.CORES_PER_SLOT)
@@ -354,7 +359,7 @@ def offload_view(environment: Mapping[str, str], names: Iterable[str] = (),
     entries in order; `tools`, the bytes of each name in `OFFLOAD_TOOLS`
     and `names` resolved on that `PATH`, or None for one that does not resolve; `python`, the bytes and version of
     `sys.executable`, the interpreter that runs `sd-check` whatever `PATH` says; `home_files`, the bytes of
-    each `OFFLOAD_HOME_FILES` entry under `HOME`, or "absent"; `threads`, `sd_gate_slots.thread_caps`, which
+    each `OFFLOAD_HOME_FILES` entry under `HOME` and of each `OFFLOAD_VARIABLE_FILES` entry, or "absent"; `threads`, `sd_gate_slots.thread_caps`, which
     `machine_binding` binds too; `variables`, the sha256 of each `offload_variable`'s value. A variable outside
     that list is not compared, and neither its value nor its digest reaches the hub (sd:2782).
     `names` are the check's own executables; one with a relative folder lives in the tree, which `inputs` binds.
@@ -381,13 +386,21 @@ def offload_view(environment: Mapping[str, str], names: Iterable[str] = (),
         return {"path": [portable(entry) for entry in search.split(os.pathsep) if entry], "tools": tools,
                 "resolution": resolution,
                 "python": {"sha256": _content_digest(pathlib.Path(sys.executable).resolve()), "version": sys.version},
-                "home_files": {name: _content_digest(pathlib.Path(home, name)) if home and pathlib.Path(home, name).is_file()
-                               else "absent" for name in OFFLOAD_HOME_FILES},
+                "home_files": {**{name: _content_digest(pathlib.Path(home, name)) if home and pathlib.Path(home, name).is_file()
+                                  else "absent" for name in OFFLOAD_HOME_FILES},
+                               **{f"${variable}" + (f"/{name}" if name else ""): file_state(environment.get(variable), name)
+                                  for variable, name in OFFLOAD_VARIABLE_FILES}},
                 "threads": sd_gate_slots.thread_caps(environment),
                 "variables": {key: hashlib.sha256(portable(value).encode()).hexdigest() for key, value in environment.items()
                               if offload_variable(key)}}
     except Exception:  # a view that cannot be named matches nothing; the hub runs the check
         return None
+
+
+def file_state(folder: str | None, name: str) -> str:
+    """sha256 of `name` under `folder`, or `folder` itself for no `name`; "absent" for no file or no `folder`."""
+    path = pathlib.Path(folder, name) if folder else None
+    return _content_digest(path) if path is not None and path.is_file() else "absent"
 
 
 def view_tool(name: str, search: str, environment: Mapping[str, str],
@@ -451,7 +464,8 @@ def offload_pins(environment: Mapping[str, str]) -> dict[str, str]:
 
     Two machines differ in `~/.gitconfig`, `~/.npmrc` and `~/.cargo/config.toml`, and in their core counts, so a
     view that bound those never matched (sd:2862). git, npm and pip then read no user or system file, and cargo
-    reads its configuration from a `CARGO_HOME` in the gate's cache folder, which holds none: a check that needs
+    reads its configuration from a `CARGO_HOME` in the gate's cache folder, whose files the view binds
+    (`OFFLOAD_VARIABLE_FILES`), since a check could write one there: a check that needs
     a git identity sets its own. npm refuses one file as both its user and its global configuration, so the global
     one is a path in that folder too. `sd_gate_slots.CPU_VARIABLES` read `OFFLOAD_THREADS`, which a holder lowers
     only on a machine whose share of the cores is smaller.

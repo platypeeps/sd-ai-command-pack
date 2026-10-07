@@ -476,7 +476,8 @@
   and the satellite's, now runs with `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, no npm or pip user
   file, a `CARGO_HOME` in the gate's cache folder (`tool-config/cargo`), and `CARGO_BUILD_JOBS`,
   `RUST_TEST_THREADS` and `NEXTEST_TEST_THREADS` at 4, whatever the caller set. The view no longer binds the
-  isolated `HOME` files. It refuses on uv's `~/.config/uv/uv.toml`, which no switch isolates alone, on `threads`,
+  isolated `HOME` files. It refuses on uv's `~/.config/uv/uv.toml`, which no switch isolates alone, on any
+  configuration file left in the pinned `CARGO_HOME` or npm global file, on `threads`,
   on the thread variables and on every bound tool, `git`, `npm` and `uv` included. Only the `PATH` order and the
   slot holder's `SD_GATE_` settings are recorded. **Migration:** a row written before this release refuses on the
   pack `bin/` digest. The first opted-in Rust gate on each machine downloads its crates into the new `CARGO_HOME`

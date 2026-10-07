@@ -191,6 +191,30 @@ class OffloadView(ViewFixture):
         (self.home("sat") / ".cargo" / "config.toml").write_text("[build]\n", encoding="utf-8")
         self.assertEqual(sd_gate_receipts.offload_differences(self.view("sat"), self.view("hub")), [])
 
+    def test_configuration_left_in_the_pinned_folders_refuses(self) -> None:
+        """sd:2879 review: the pinned `CARGO_HOME` and npm global file persist, and an earlier check could leave a
+        cargo `runner` there; the view binds their bytes, so one machine's leftover refuses."""
+        environment = sd_gate_receipts.offload_environment(self.environ("hub"))
+        for name, path in (("$CARGO_HOME/config.toml", pathlib.Path(environment["CARGO_HOME"], "config.toml")),
+                           ("$CARGO_HOME/config", pathlib.Path(environment["CARGO_HOME"], "config")),
+                           ("$NPM_CONFIG_GLOBALCONFIG", pathlib.Path(environment["NPM_CONFIG_GLOBALCONFIG"]))):
+            with self.subTest(name=name):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('[target.aarch64-apple-darwin]\nrunner = "true"\n', encoding="utf-8")
+                theirs, ours = self.view("sat"), self.view("hub")
+                self.assertEqual(theirs["home_files"][name], "absent")
+                self.assertEqual(sd_gate_receipts.offload_miss(theirs, ours), {"part": "home_files", "name": name})
+                path.unlink()
+
+    def test_uvs_file_under_xdg_config_home_refuses(self) -> None:
+        """uv reads `$XDG_CONFIG_HOME/uv/uv.toml` when the variable is set, not `~/.config/uv/uv.toml`."""
+        config = self.tmp / "config"
+        (config / "uv").mkdir(parents=True)
+        theirs = self.view("sat", XDG_CONFIG_HOME=str(config))
+        (config / "uv" / "uv.toml").write_text('index-url = "https://pypi.example.test/simple"\n', encoding="utf-8")
+        ours = self.view("hub", XDG_CONFIG_HOME=str(config))
+        self.assertEqual(sd_gate_receipts.offload_miss(theirs, ours), {"part": "home_files", "name": "$XDG_CONFIG_HOME/uv/uv.toml"})
+
     def test_a_home_file_the_check_still_reads_refuses(self) -> None:
         """sd:2879 finding 1: `UV_NO_CONFIG` would skip the tree's own `uv.toml` too, so uv's user file is compared."""
         uv = self.home("hub") / ".config" / "uv" / "uv.toml"

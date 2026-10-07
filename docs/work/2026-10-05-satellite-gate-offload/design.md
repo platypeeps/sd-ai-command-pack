@@ -166,7 +166,7 @@ is `accept`. It has six parts:
 | `path` | the gate's `PATH` entries in order, each `$HOME` prefix written as `~` | No: recorded. The tools it selects are compared by bytes |
 | `tools` | sha256 of each name in `OFFLOAD_TOOLS`, resolved on that `PATH`, and of each tool `gate_binding` resolves; `cargo` and `rustc` bind their `-vV` build lines beside their bytes (`resolution`, sd:2881) | Yes, for each of `OFFLOAD_TOOLS` and the check's own names, or a docs-only scope's declared `docs_tools` alone (sd:2879) |
 | `python` | sha256 of the bytes of `sys.executable`, resolved, and `sys.version` | Yes: the interpreter that runs `sd-check`, even when the gate was started through a virtualenv or an explicit path that `PATH`'s `python3` does not name |
-| `home_files` | sha256 of each file in `OFFLOAD_HOME_FILES` under `HOME`, or `"absent"`: the user configuration a check still reads | Yes (sd:2879) |
+| `home_files` | sha256 of each file in `OFFLOAD_HOME_FILES` under `HOME`, the user configuration a check still reads, and of each `OFFLOAD_VARIABLE_FILES` entry, the configuration files under the folders `offload_pins` names; or `"absent"` | Yes (sd:2879) |
 | `threads` | `sd_gate_slots.thread_caps`: the `CARGO_BUILD_JOBS`, `RUST_TEST_THREADS` and `NEXTEST_TEST_THREADS` a check gets under the machine's slot count and cores, as `machine_binding` binds them (sd:2782, sd:2872) | Yes (sd:2879): every opted-in check starts at `OFFLOAD_THREADS`, so only a machine whose share is lower differs |
 | `variables` | sha256 of the value of each allowlisted variable `gate_environment` keeps, with the `$HOME` prefix written as `~` first | Yes, but for the slot holder's `SD_GATE_` settings, which are recorded |
 
@@ -195,7 +195,13 @@ cap (`offload_pins`, sd:2879), and the view refuses again on what is left:
 
 uv has no switch that skips the user's file alone: `UV_NO_CONFIG` skips the
 tree's `pyproject.toml` settings too. So `~/.config/uv/uv.toml` stays the one
-`OFFLOAD_HOME_FILES` entry, and it refuses. A check that needs a git identity
+`OFFLOAD_HOME_FILES` entry, and it refuses. The pinned `CARGO_HOME` and
+npm global file persist in the gate's cache, where an earlier check could
+leave a cargo `runner`. So the view binds `$CARGO_HOME/config.toml`,
+`$CARGO_HOME/config` and `$NPM_CONFIG_GLOBALCONFIG` by bytes too
+(`OFFLOAD_VARIABLE_FILES`), before the run and after it, and a leftover on one
+machine refuses. The same list binds `$XDG_CONFIG_HOME/uv/uv.toml`, which uv
+reads in place of `~/.config/uv/uv.toml` when that variable is set. A check that needs a git identity
 sets its own, as a test that commits already must on a fresh machine.
 
 The view refuses on every bound tool, the interpreter, `home_files`,
