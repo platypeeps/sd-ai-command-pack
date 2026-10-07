@@ -400,9 +400,33 @@ class Changelog(unittest.TestCase):
                          (self.merges[12], "sd:7", "2026-10-05T12:00:00Z",
                           [{"section": "Fixed", "text": "A fix that\nwraps."}]))
         self.assertEqual(row["body_digest"], sd_changelog.section_digest("## Changelog\n\n" + MERGES[1][2]))
-        self.assertEqual(self.sd("import", "12")[1].split(" is ")[1], out.split(" is ")[1])
+        revision = out.split(" is revision ")[1].split(",")[0]
+        self.assertIn(f"already has revision {revision};", self.sd("import", "12")[1])
         self.assertEqual(self.sd("render")[0], 0)
         self.assertIn("- A fix that (#12)", self.region())
+
+    def test_import_leaves_a_corrected_row_alone(self):
+        self.store()
+        connection = connect(self.database)
+        try:
+            row = [row for row in sd_changelog.rows(connection, "owner/name") if row["pull_request"] == 12][0]
+            sd_changelog.write(connection, {**row, "body_digest": "corrected",
+                                            "entries": [{"section": "Fixed", "text": "The corrected fix."}]})
+        finally:
+            connection.close()
+        self.assertEqual(self.sd("import", "12")[0], 0)
+        self.assertEqual(self.sd("render")[0], 0)
+        self.assertIn("- The corrected fix. (#12)", self.region())
+
+    def test_render_keeps_crlf_line_endings_outside_the_region(self):
+        self.store()
+        self.changelog.write_bytes(CHANGELOG.replace("\n", "\r\n").encode())
+        self.assertEqual(self.sd("render")[0], 0)
+        text = self.changelog.read_bytes().decode()
+        self.assertEqual(text.replace(RENDERED.replace("\n", "\r\n"),
+                                      (sd_changelog.BEGIN + "\n" + sd_changelog.END + "\n").replace("\n", "\r\n")),
+                         CHANGELOG.replace("\n", "\r\n"))
+        self.assertEqual(self.sd("render", "--check")[0], 0)
 
     def test_import_refuses_a_pull_request_with_no_squash_or_no_section(self):
         for number, code in (("99", "changelog_import"), ("15", "changelog_missing")):

@@ -436,13 +436,16 @@ def _place(text: str, lines: list[str], release: tuple[str, str] | None = None) 
     <date>` after the region, and the region stays empty.
     """
     current = text.split("\n")
-    if current.count(BEGIN) != 1 or current.count(END) != 1 or current.index(BEGIN) > current.index(END):
+    bare = [line.removesuffix("\r") for line in current]
+    if bare.count(BEGIN) != 1 or bare.count(END) != 1 or bare.index(BEGIN) > bare.index(END):
         raise ChangelogError("changelog_region", f"{FILE} needs one `{BEGIN}` line, then one `{END}` line")
-    start, stop = current.index(BEGIN), current.index(END)
+    start, stop = bare.index(BEGIN), bare.index(END)
+    eol = current[start][len(bare[start]):]  # a CRLF file gets CRLF lines
     if release is None:
-        return "\n".join(current[:start + 1] + lines + current[stop:])
+        return "\n".join(current[:start + 1] + [line + eol for line in lines] + current[stop:])
     version, date = release
-    return "\n".join(current[:start + 1] + [END, "", f"## {version} - {date}"] + lines[:-1] + current[stop + 1:])
+    added = [END, "", f"## {version} - {date}"] + lines[:-1]
+    return "\n".join(current[:start + 1] + [line + eol for line in added] + current[stop + 1:])
 
 
 def privacy_patterns(environ: Mapping[str, str]) -> list[str]:
@@ -528,7 +531,7 @@ def _render(args: argparse.Namespace, root: pathlib.Path, environ: Mapping[str, 
         return 0
     path = root / FILE
     try:
-        text = path.read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8", newline="")
     except (OSError, UnicodeDecodeError) as error:
         raise ChangelogError("changelog_region", f"{FILE} could not be read: {error}") from None
     rendered = _place(text, lines, (args.release, found.date) if args.release else None)
@@ -539,7 +542,7 @@ def _render(args: argparse.Namespace, root: pathlib.Path, environ: Mapping[str, 
         print(f"sd changelog: {FILE} matches `sd changelog render` at {args.base}")
         return 0
     if rendered != text:
-        path.write_text(rendered, encoding="utf-8")
+        path.write_text(rendered, encoding="utf-8", newline="")
     print(f"sd changelog: {FILE} {'rendered' if rendered != text else 'unchanged'} at {args.base}")
     return 0
 
@@ -559,9 +562,14 @@ def _import_row(args: argparse.Namespace, root: pathlib.Path) -> int:
            "merged_at": datetime.datetime.fromtimestamp(stamp, datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")}
     connection = _connect(args.database, write=True)
     try:
-        revision = write(connection, row)
+        revision, current = _store().read(connection, row_key(row["repository"], args.pull_request))
+        if not current:
+            revision = write(connection, row)
     finally:
         connection.close()
+    if current:  # a stored row may carry a correction the squash message lacks
+        print(f"sd changelog: #{args.pull_request} already has revision {revision}; import writes a missing row only")
+        return 0
     print(f"sd changelog: #{args.pull_request} from {sha[:12]} is revision {revision}, "
           f"{len(row['entries'])} entr{'y' if len(row['entries']) == 1 else 'ies'}")
     return 0
