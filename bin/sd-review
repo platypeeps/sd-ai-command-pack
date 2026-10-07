@@ -2155,6 +2155,9 @@ def review(
         finish_review(result, outcomes, reviewed)
     finally:
         slot.give_back()  # sd:2523: on every exit; the gate below queues in its own pool
+    # Shadow only (sd:2092): Jev's kind for each finding goes to its ledger and
+    # is never read back, for a public repository only. `bin/sd_jev.py` says what is sent.
+    sd_jev.jev_triage(result["findings"], env, root)
     if reused is not None or result["status"] not in GATED_STATUSES:
         result["check"] = reused or {"status": NOT_RUN_CHECK, "exit_code": None,
                                      "reason": f"the review is {result['status']}; the gate runs on a head it does not block"}
