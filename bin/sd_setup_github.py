@@ -191,7 +191,7 @@ jobs:
           # shallow clone does not contain.
           fetch-depth: 0
           persist-credentials: false
-      - name: Report the routing plan
+{sd_setup_guard.HEAD_CHECK_STEP}      - name: Report the routing plan
         uses: {action_ref}
 """
 
@@ -292,7 +292,8 @@ def _apply(changes: Iterable[tuple[pathlib.Path, str | None]]) -> None:
 def remove(root: pathlib.Path, args: argparse.Namespace, stream: TextIO) -> int:
     """`--remove`, in any mode (sd:1843). The plan is `sd_setup_guard.removal`'s; `--dry-run` writes nothing."""
 
-    plan = sd_setup_guard.removal(root, WORKFLOW_RELATIVE_PATH, lambda pin: workflow_text(action_reference(pin)),
+    plan = sd_setup_guard.removal(root, WORKFLOW_RELATIVE_PATH,
+                                  lambda pin: sd_setup_guard.known_texts(workflow_text(action_reference(pin))),
                                   self_install=root == pack_root(), force=args.force)
     if not args.dry_run:
         _apply((path, content) for path, content, _line in plan)

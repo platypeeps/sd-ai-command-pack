@@ -31,9 +31,35 @@ to keep.
 from __future__ import annotations
 
 import argparse
+import importlib
 import math
 import re
+import sys
 from datetime import datetime, timezone
+
+#: The two refusals `sync_shadow` raises before it collects (sd:2898), each one
+#: stderr line and its own code. 3 is the pack's `EXIT_REFUSED`: a satellite
+#: cannot run the verb, so a retry there cannot help. 4 is the pack's
+#: retry-later code, `sd-review`'s `EXIT_RATE_LIMITED`: the lock frees itself.
+EXIT_HUB_ONLY = 3
+EXIT_BUSY = 4
+
+#: `(module, class, code)`; looked up rather than imported, so a library older
+#: than system #199, which has no `SyncBusy`, still runs the verb.
+REFUSALS = (("sd_db.remote", "HubOnly", EXIT_HUB_ONLY), ("sd_db.shadow_sync", "SyncBusy", EXIT_BUSY))
+
+
+def refusals() -> dict[type[BaseException], int]:
+    """Each refusal class the installed library defines, mapped to its exit code."""
+    found: dict[type[BaseException], int] = {}
+    for module, name, code in REFUSALS:
+        try:
+            kind = getattr(importlib.import_module(module), name, None)
+        except ImportError:
+            continue
+        if isinstance(kind, type) and issubclass(kind, BaseException):
+            found[kind] = code
+    return found
 
 
 def timestamp(value: str) -> datetime:
@@ -171,7 +197,8 @@ def shadow_sync(args) -> int:
     """Run one sync per tracker and report what moved. Writes rows; never closes anything.
 
     The exit code is the maximum over trackers, so one held GitHub cursor
-    under `--strict` still fails the night when Jira was fine.
+    under `--strict` still fails the night when Jira was fine. A refusal from
+    the library ends the run with one stderr line and its code from `REFUSALS`.
     """
     rows = _rows()
     since = getattr(args, "since", None)
@@ -199,6 +226,7 @@ def shadow_sync(args) -> int:
     recovery = "since" in options or "now" in options
     strict = bool(getattr(args, "strict", False))
     code = 0
+    refused = refusals()
     connection = rows.connect(sd_db, write=True)
     try:
         for name in names:
@@ -207,6 +235,9 @@ def shadow_sync(args) -> int:
                 continue
             result = sd_db.sync_shadow(connection, tracker=name, **options)
             code = max(code, report_sync(result, name=name, strict=strict))
+    except tuple(refused) as error:
+        print(f"sd: {error}", file=sys.stderr)
+        return next(value for kind, value in refused.items() if isinstance(error, kind))
     finally:
         connection.close()
     return code

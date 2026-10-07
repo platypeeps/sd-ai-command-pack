@@ -90,6 +90,15 @@ else is. Its executables write these paths, and no others:
   `.github/sd-fleet.json` holding `{"exempt": ["<path>", ...]}`; the stamp
   names each exempt path and never proposes it, and a file that does not read
   refuses the repository.
+  It lays the Claude Code settings baseline too (sd:1661): `permissions.deny`
+  rules that stop Claude Code's file tools reading secret files, listed in
+  `SECRET_READ_DENY` in `bin/sd_fleet.py`. An owned or co-owned repository
+  carries them in a tracked `.claude/settings.json`. A guest repository takes
+  no tracked file of ours, so its plan proposes the untracked
+  `.claude/settings.local.json` instead; a guest plan carries a refusal, so a
+  write lays nothing there and the operator copies the file by hand.
+  Missing rules are added and none removed, and a settings file that does not
+  read refuses.
   It also adds the template's new lines to that checkout's `CLAUDE.local.md`
   block, removing none, and creates its untracked `docs/dashboard/`. `--dry-run` prints every auto repository's diff against
   its `origin/HEAD` and writes nothing. A repository is the operator's own
@@ -170,6 +179,7 @@ These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOM
 `sd.gate_load_max` and `sd.gate_settle_seconds` are load control too: the gate queue starts its head 45 s after the last start by default, and only below a load1 limit where one is set (unset: none, since macOS counts disk waits in the load average).
 `sd.fleet_owners` names the GitHub logins whose repositories `sd fleet stamp` treats as the operator's own, comma-separated; it grants nothing.
 `sd.gate_cache_gb` bounds the local gate's warm Rust build folders (unset: 40 GB); past it the gate removes the least recently used free folder.
+`sd.bulk_storage_root` names the folder for large uncommitted data, as `<root>/<repository>/` (unset: none); build output stays on the system disk. It grants nothing.
 `sd-ship lane enqueue|list|cancel|move|hold|release|run|watch` keeps a serial prepare-and-merge queue per repository in a file under `sd.lane_root` (unset: `$XDG_STATE_HOME/sd/lanes`), so a queued chain outlives the session that filled it. After a merge the runner deletes the remote branch, notes the item with the command that removes the worktree, and fast-forwards the main checkout; it never removes a worktree, since removal can race a live builder.
 `sd gate run -- make check` queues any command the same way; `sd gate status` shows the queue.
 Wrap a plain `make check` in any repository that way, and drop a per-repository `lockf` from lane scripts: the pool orders gates across every repository.
@@ -245,6 +255,15 @@ and `sd task status` prints `next occurrence: #N · due D`, or `recurrence
 ended:` with the reason when no next occurrence exists. `sd task edit` takes
 the same two flags, and `--clear-recur` stops the series. `sd_db` owns every
 refusal: the grammar, the anchor, the due date and the kinds that may recur.
+
+A row another source raises carries a reference to the occurrence that raised it:
+`sd task add "repo-sync failed" --kind followup --ref job:repo-sync:42`.
+A second add with the same reference updates that row's title, and any body,
+priority or due date it names, and keeps its status, so a retried delivery
+never reopens work that is done; the next run's failure names a new reference
+and files a new row. `sd task show` prints the reference as `ref:`, and
+`sd today --json` and every `--json` row carry it as `ref`. Only a task or a
+followup takes `--ref`, and not with `--recur`.
 
 `sd store items --open` lists the backlog; `sd store item 42 --json` includes
 history and a revision that edits can require with `--if-revision`.

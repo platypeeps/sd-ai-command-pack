@@ -164,23 +164,52 @@ is `accept`. It has six parts:
 | Part | Content | Refuses on a difference |
 |---|---|---|
 | `path` | the gate's `PATH` entries in order, each `$HOME` prefix written as `~` | No: recorded. The tools it selects are compared by bytes |
-| `tools` | sha256 of each name in `OFFLOAD_TOOLS`, resolved on that `PATH`, and of each tool `gate_binding` resolves; `cargo` and `rustc` bind their `-vV` build lines beside their bytes (`resolution`, sd:2881) | For `OFFLOAD_DECIDING_TOOLS` and the check's own names, or a docs-only scope's declared `docs_tools` alone; another tool (`git`, `uv`, `npm` when the check does not name it) is recorded |
+| `tools` | sha256 of each name in `OFFLOAD_TOOLS`, resolved on that `PATH`, and of each tool `gate_binding` resolves; `cargo` and `rustc` bind their `-vV` build lines beside their bytes (`resolution`, sd:2881) | Yes, for each of `OFFLOAD_TOOLS` and the check's own names, or a docs-only scope's declared `docs_tools` alone (sd:2879) |
 | `python` | sha256 of the bytes of `sys.executable`, resolved, and `sys.version` | Yes: the interpreter that runs `sd-check`, even when the gate was started through a virtualenv or an explicit path that `PATH`'s `python3` does not name |
-| `home_files` | sha256 of each file in `OFFLOAD_HOME_FILES` under `HOME`, or `"absent"` | No: recorded |
-| `threads` | `sd_gate_slots.thread_caps`: the `CARGO_BUILD_JOBS`, `RUST_TEST_THREADS` and `NEXTEST_TEST_THREADS` a check gets under the machine's slot count and cores, as `machine_binding` binds them (sd:2782, sd:2872) | No: recorded. They follow the core count |
-| `variables` | sha256 of the value of each allowlisted variable `gate_environment` keeps, with the `$HOME` prefix written as `~` first | Yes, but for the slot holder's `SD_GATE_` settings and the thread caps it sets (`CPU_VARIABLES`), which are recorded |
+| `home_files` | sha256 of each file in `OFFLOAD_HOME_FILES` under `HOME`, the user configuration a check still reads, and of each `OFFLOAD_VARIABLE_FILES` entry, the configuration files under the folders `offload_pins` names; or `"absent"` | Yes (sd:2879) |
+| `threads` | `sd_gate_slots.thread_caps`: the `CARGO_BUILD_JOBS`, `RUST_TEST_THREADS` and `NEXTEST_TEST_THREADS` a check gets under the machine's slot count and cores, as `machine_binding` binds them (sd:2782, sd:2872) | Yes (sd:2879): every opted-in check starts at `OFFLOAD_THREADS`, so only a machine whose share is lower differs |
+| `variables` | sha256 of the value of each allowlisted variable `gate_environment` keeps, with the `$HOME` prefix written as `~` first | Yes, but for the slot holder's `SD_GATE_` settings, which are recorded |
 
 The view first refused on any difference. The first satellite merge
 (sd:2844, sd:2862) showed that two real machines never match. The hub's
 launchd job and the satellite's shell differ in `PATH` order. `git` and `uv`
 differ by build, and `.gitconfig` and `.npmrc` differ by login. The thread
 caps differ by core count. A satellite gate run inside an `sd gate check`
-holder carries caps a merge does not. So the view now refuses only on what
-decides the check's result: `OFFLOAD_DECIDING_TOOLS` (`sh`, `bash`, `make`,
-`python3`, `cc`, `c++`, `clang`, `cargo`, `rustc`, `node`), the check's own names, the
-interpreter, and the steering variables (`offload_differences`). Every other
-difference is recorded by part and name in the merge's `local_gate`, as
-`satellite.view_differences`.
+holder carries caps a merge does not. sd:2862 then refused only on a
+toolchain subset and recorded the rest. Its review showed what that let
+through: `~/.cargo/config.toml` can name a test runner, `.npmrc` another
+registry, a test can pass on one thread and fail on eight, and `make check`
+can run `npm ci`, `uv sync` or `git` with another build behind equal `make`
+bytes.
+
+So every opted-in check now runs under one tool configuration and one thread
+cap (`offload_pins`, sd:2879), and the view refuses again on what is left:
+
+| Pinned | Value | What it stops reading |
+|---|---|---|
+| `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM` | `/dev/null`, `1` | `~/.gitconfig`, `~/.config/git/config` and the system file |
+| `NPM_CONFIG_USERCONFIG`, `NPM_CONFIG_GLOBALCONFIG` | `/dev/null`; a path in the gate's cache folder, since npm refuses one file as both | `~/.npmrc` and the prefix's `npmrc` |
+| `PIP_CONFIG_FILE` | `/dev/null` | every pip file |
+| `CARGO_HOME` | `tool-config/cargo` in the gate's cache folder (`sd_gate_cache.cache_root`) | `~/.cargo/config.toml`; the registry cache moves with it, so each machine downloads it once |
+| `CPU_VARIABLES` | `OFFLOAD_THREADS`, 4, one gate's share under the default slot count | the core count; a holder lowers it only where the share is smaller, and the view then refuses on `threads` |
+
+uv has no switch that skips the user's file alone: `UV_NO_CONFIG` skips the
+tree's `pyproject.toml` settings too. So `~/.config/uv/uv.toml` stays the one
+`OFFLOAD_HOME_FILES` entry, and it refuses. The pinned `CARGO_HOME` and
+npm global file persist in the gate's cache, where an earlier check could
+leave a cargo `runner`. So the view binds `$CARGO_HOME/config.toml`,
+`$CARGO_HOME/config` and `$NPM_CONFIG_GLOBALCONFIG` by bytes too
+(`OFFLOAD_VARIABLE_FILES`), before the run and after it, and a leftover on one
+machine refuses. The same list binds `$XDG_CONFIG_HOME/uv/uv.toml`, which uv
+reads in place of `~/.config/uv/uv.toml` when that variable is set. A check that needs a git identity
+sets its own, as a test that commits already must on a fresh machine.
+
+The view refuses on every bound tool, the interpreter, `home_files`,
+`threads` and the allowlisted variables (`offload_differences`). It records
+two differences, by part and name, in the merge's `local_gate` as
+`satellite.view_differences`: the `PATH` order, whose tools compare by bytes,
+and the slot holder's `SD_GATE_` settings. A tool difference now hands back
+until the operator brings both machines to one build.
 
 A rustup proxy's bytes name no toolchain: `rust-toolchain.toml` in the tree
 picks it (sd:2881). For `cargo` and `rustc` (`VERSIONED_TOOLS`), the view binds
@@ -198,7 +227,7 @@ accidental toolchain drift; it does not defend against a wrapper built to lie.
 One commit-hash is one compiler source.
 
 A docs-only scope's docs command can reach a compiler through `make`, as
-`cargo doc` or a doctest does, so it compares `OFFLOAD_DECIDING_TOOLS` too.
+`cargo doc` or a doctest does, so it compares `OFFLOAD_TOOLS` too.
 A repository whose docs command reaches no compiler declares `docs_tools` in
 `.github/sd-check-scope.json`, every executable that command reaches, each
 by bare name on `PATH`, since a path names a file no binding hashes. A
@@ -206,8 +235,7 @@ docs-only scope then refuses on those tools and the command's own name only.
 
 `OFFLOAD_TOOLS` is one pack constant: `sh`, `bash`, `make`, `python3`,
 `git`, `cc`, `c++`, `clang`, `cargo`, `rustc`, `node`, `npm`, `uv`.
-`OFFLOAD_HOME_FILES` is another: `.gitconfig`, `.config/git/config`,
-`.cargo/config.toml`, `.npmrc`, `.config/pip/pip.conf`, `.config/uv/uv.toml`.
+`OFFLOAD_HOME_FILES` is another: `.config/uv/uv.toml` (sd:2879).
 A name the hub cannot resolve is recorded, not compared, and named in the
 merge's provenance. A name the hub resolves and the satellite does not
 misses with `satellite_binding`.
@@ -237,7 +265,7 @@ digest of a short password can be guessed offline.
 | `DYLD_`, `LD_` | the libraries every tool loads |
 | `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_NAMESPACE`, `GIT_EXEC_PATH`, `GIT_CEILING_DIRECTORIES` | which repository and which `git` programs a check's `git` uses |
 | `LANG`, `LC_` | the locale |
-| `UV_`, `PIP_`, `NPM_CONFIG_`, `NODE_`, `GIT_CONFIG` | the bound tools, beside their `OFFLOAD_HOME_FILES` |
+| `UV_`, `PIP_`, `NPM_CONFIG_`, `NODE_`, `GIT_CONFIG` | the bound tools' settings, including the configuration `offload_pins` sets |
 
 Names compare without case. A name that matches the credential pattern of
 `sd_check_receipts.SECRET`, such as `CARGO_REGISTRY_TOKEN`, is left out even
@@ -248,7 +276,7 @@ written: no value and no digest of it reaches the hub's row.
 In a repository with `repo.satellite_gate = accept`, every gate runs its
 check under exactly that environment (`offload_environment`, sd:2782): the
 allowlisted names plus `HOME`, `USER` and `PATH`, which the view binds through
-`path`, `tools` and `home_files`. That covers the hub's own gate, the merge
+`path`, `tools` and `home_files`, then the pins above (sd:2879). That covers the hub's own gate, the merge
 gate, local receipt reuse and a satellite's gate. Every other variable is
 dropped from the child on both machines, so both run the same check by
 construction. Two ship reviews showed why:
@@ -281,8 +309,10 @@ Residual risk on the offload path:
 
 - an executable reached by a name outside `OFFLOAD_TOOLS`, whose bytes
   differ between the machines;
-- tool configuration under `HOME` outside `OFFLOAD_HOME_FILES`, and outside
-  `HOME`, such as `/etc` or the package manager's prefix;
+- tool configuration that `offload_pins` does not set and `OFFLOAD_HOME_FILES`
+  does not name, under `HOME` or outside it, such as `/etc/uv/uv.toml`;
+- the slot holder's `SD_GATE_POOL_SIZE`, which a test runner may size its
+  workers by, as the pack's own `run-tests.sh` does;
 - shared libraries that the compared tools load.
 - a check that skips work, rather than failing, when a dropped variable is
   absent, such as a test marked to skip without a token: in an opted-in
@@ -345,27 +375,13 @@ operator's goal is that the hub runs no check for a satellite item.
 Under an accepted offload receipt the hub does not run the check. It no longer
 guarantees that the check passes on the hub's own image:
 
-- system libraries, and tools reached by a name outside `OFFLOAD_DECIDING_TOOLS`
+- system libraries, and tools reached by a name outside `OFFLOAD_TOOLS`
   and the check's own names;
 - a tool the hub cannot resolve, which is recorded but not compared;
-- tool configuration under `HOME`, the `PATH` order, the thread caps and the
-  slot holder's `SD_GATE_` settings, which are recorded but not compared
-  (sd:2862). Three named vectors remain, each a file or tool that can change
-  what passes while every compared byte is equal:
-  - `~/.cargo/config.toml`: a `runner` or `rustflags` key can run the tests
-    under another program, or build them otherwise;
-  - `npm` and `uv` when a Makefile or script calls them: resolution and
-    lock handling can install other dependencies under equal `node` or
-    `python3` bytes;
-  - git configuration (`~/.gitconfig`, `~/.config/git/config`): hooks, filters
-    and attributes can change what a test reads.
-
-  Binding them was tried first, and the first satellite merge (sd:2844) showed
-  that two machines always differ in them. So each difference is named in the
-  merge's `local_gate` as `satellite.view_differences`, by part and file or
-  tool name, and the operator sees on every satellite merge what was not bound.
-  The trust rule trusts the operator's own node for these, as it does for its
-  honesty (below);
+- the `PATH` order and the slot holder's `SD_GATE_` settings, which are
+  recorded but not compared, and the residual risks above. sd:2862 recorded
+  `HOME` tool configuration, the thread caps and the tools behind `make` too;
+  sd:2879 pins the first two on both machines and compares all three again;
 - before step 2a, the whole environment;
 - inputs outside the repository on the satellite: an external makefile, a
   tool's own files, machine state, a network answer.

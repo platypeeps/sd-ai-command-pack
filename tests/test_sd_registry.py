@@ -114,6 +114,15 @@ class TheShippedRegistry(unittest.TestCase):
                 self.assertIn("reviewer", provider.roles)
                 self.assertNotIn("reviewer", provider.ranks)
 
+    def test_only_kimi_opts_in_to_the_strict_response_format(self) -> None:
+        """sd:1827 rulings: kimi-k3 holds its answer to the schema; MiniMax-M3
+        ignores the field and Baseten is untested, so neither sends it."""
+        self.assertEqual(
+            {name: provider.response_format for name, provider in self.registry.providers.items()
+             if provider.response_format is not None},
+            {"kimi": "json_schema"},
+        )
+
     #: Each shipped `url` reviewer's documented output ceiling, read 2026-09-27:
     #: kimi-k3 `max_completion_tokens` "can be set up to 1048576" (Kimi API
     #: platform, K3 quickstart); MiniMax-M3 counts input and output together

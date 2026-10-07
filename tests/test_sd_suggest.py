@@ -691,6 +691,84 @@ class TheShadowRecoveryArguments(unittest.TestCase):
                 self.refuse_before_database(*options)
 
 
+class TheShadowSyncRefusals(unittest.TestCase):
+    """sd:2898: the library's two refusals are one stderr line and an exit code each.
+
+    Since system #199 `sync_shadow` raises `SyncBusy` while another sync holds
+    the lock, and `HubOnly` on a satellite. The real classes are raised here,
+    so the verb is proven against the pinned library's types, not stand-ins.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.command = load("sd_shadow_refusal_command", "sd")
+
+    def refused(self, error):
+        library = MagicMock(TRACKERS=("github", "jira"))
+        library.sync_shadow.side_effect = error
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(sd_handoff_rows, "library", return_value=library), \
+                patch.object(sd_handoff_rows, "connect", return_value=MagicMock()) as connect, \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = self.command.main(["shadow", "sync", "--strict"])
+        connect.return_value.close.assert_called_once()
+        self.assertEqual("", out.getvalue())
+        return code, err.getvalue().splitlines()
+
+    def test_a_held_lock_is_one_line_and_the_busy_code(self):
+        from sd_db.shadow_sync import SyncBusy
+
+        code, lines = self.refused(SyncBusy("another shadow sync is already running"))
+        self.assertEqual(sd_shadow.EXIT_BUSY, code)
+        self.assertEqual(["sd: another shadow sync is already running"], lines)
+
+    def test_a_satellite_is_one_line_and_the_hub_only_code(self):
+        from sd_db.remote import HubOnly
+
+        code, lines = self.refused(HubOnly("shadow sync", "hub.example.test"))
+        self.assertEqual(sd_shadow.EXIT_HUB_ONLY, code)
+        self.assertEqual(1, len(lines), lines)
+        self.assertTrue(lines[0].startswith("sd: shadow sync runs on the sd hub only;"), lines)
+
+    def test_the_two_codes_differ_from_each_other_and_from_strict(self):
+        self.assertEqual(4, len({0, 1, sd_shadow.EXIT_BUSY, sd_shadow.EXIT_HUB_ONLY}))
+
+    def test_a_library_without_sync_busy_still_maps_hub_only(self):
+        """A library older than system #199 has no `SyncBusy`; the verb still runs there."""
+        from sd_db import remote
+
+        older = MagicMock(spec=[])
+        real = importlib.import_module
+        with patch.object(sd_shadow.importlib, "import_module",
+                          side_effect=lambda name: older if name == "sd_db.shadow_sync" else real(name)):
+            self.assertEqual({remote.HubOnly: sd_shadow.EXIT_HUB_ONLY}, sd_shadow.refusals())
+
+    def test_the_help_names_both_codes(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(0, self.command.main(["shadow", "sync", "--help"]))
+        text = " ".join(out.getvalue().split())
+        self.assertIn(f"{sd_shadow.EXIT_HUB_ONLY} on a satellite", text)
+        self.assertIn(f"{sd_shadow.EXIT_BUSY} while another shadow sync holds the lock", text)
+
+
+class TheShadowSyncLock(SuggestCase):
+    """CONTROL for the refusals above, on the real library: a held lock reaches the CLI as exit 4."""
+
+    def test_a_sync_under_a_held_lock_is_refused_in_one_line(self):
+        from sd_db.shadow_sync import sync_lock
+
+        command = load("sd_shadow_lock_command", "sd")
+        out, err = io.StringIO(), io.StringIO()
+        with sync_lock(self.connection), contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(err):
+            code = command.main(["shadow", "sync", "--strict"])
+        self.assertEqual(sd_shadow.EXIT_BUSY, code, err.getvalue())
+        self.assertEqual(1, len(err.getvalue().splitlines()), err.getvalue())
+        self.assertIn("another shadow sync is already running", err.getvalue())
+        self.assertEqual([], self.shadow_rows())
+
+
 class TheShadowRecoveryWindow(SuggestCase):
     """The real collector receives explicit controls and preserves its cursor contract."""
 

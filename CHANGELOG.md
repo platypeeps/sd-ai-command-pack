@@ -6,6 +6,50 @@
 
 - **A serving tree moves by commit, and rolls back (sd:1118).** `bin/sd_install.py --pull` in a clean checkout on a detached `HEAD` fetches `origin`, detaches at the exact commit `origin/main` names, and re-renders. A checkout on `main` fast-forwards as before; any other branch is still refused. Every render that activates a new commit records the one it replaced as `previousCommit` in the receipt, and a re-render at the same commit keeps it. The new `--rollback` detaches a clean serving tree at that commit and re-renders, so a second `--rollback` undoes the first. Both refuse a target whose installer declares no `ACTIVATION_CONTRACT`, since from there no second rollback could come back, The target commit's own installer renders it, under the supervision of the installer that started the move. A render that fails puts the tree back at its commit, restores the receipt, and renders that commit again; a failed install now restores every render it wrote, not only the Codex policies. `--verify` is unchanged: an untracked file or a `HEAD` moved without a render still fails the source check. `make setup` now ends with `bin/sd_install.py --serve`: it clones `origin` into `${XDG_DATA_HOME:-~/.local/share}/sd-ai-command-pack/serving` on the first run, links the clone's `.venv` to the environment `make setup` provisioned, and runs `--pull` there, so only `make setup` moves what the machine serves. `make setup SERVE=no` skips it. A command link the receipt records at its recorded target now moves to the installing checkout instead of refusing the run; any other link at the path still refuses. The hook commands the receipt recorded for the last checkout move with the links, so each hook runs once; another installer's hook stays. Pointing `~/bin/common` at the serving tree is an operator step.
 
+- **`sd providers precision` reports each reviewer's precision from ship receipts (sd:1832, sd:1788 asks 1 and 2).**
+  It reads every local review finding from the newest ship receipt of each branch and the accepted adjudications beside it, and writes nothing.
+  Each finding gets an outcome: `rebutted` or `parked` from its adjudication; `fixed` when a later head was reviewed; `undecided` when neither; `advisory` when the review did not block.
+  `fixed` is inferred: a commit that answers a different finding reads the same.
+  The table shows outcome counts and precision, (fixed + parked) / (fixed + parked + rebutted), per provider and severity.
+  `--json` adds one row per finding with its receipt, PR, item and rebuttal reason; `--repository` and `--since` narrow the rows.
+  Reviews run outside `sd-ship` leave no receipt and are not counted.
+  The reviewer order does not read precision yet (sd:1788 ask 3).
+
+- **`sd task add --ref <source>:<id>` files one row per occurrence (sd:1902).**
+  A second add with the same reference updates that row and keeps its status, so a retried delivery never reopens done work.
+  A new reference, such as the next run's `job:repo-sync:43`, files a new row.
+  `sd task show` prints the reference as `ref:`; `sd today --json` and the other `--json` rows carry it as `ref`.
+  The row stores it as `source = 'task-ref'` and `external_id = <reference>`, so no schema change is needed.
+  Only a task or a followup takes `--ref`, and not with `--recur`.
+
+- **`sd runner get --json` carries each attempt's `started_at` and `finished_at` (sd:1995).**
+  The new `runs` list holds one entry per attempt, oldest first, with `run`, `started_at`, `finished_at` and `outcome`.
+  `started_at` is the claim time and `finished_at` the release time; it is null while the attempt runs.
+
+- **`sd fleet stamp` lays a Claude Code settings baseline per repository class (sd:1661).**
+  The baseline is `permissions.deny` rules that stop Claude Code's file tools reading secret files: `.env` variants, `secrets/`, private keys, `.netrc`, `.pypirc`, `~/.ssh`, AWS credentials and the `gh` token file.
+  An owned or co-owned repository carries it in a tracked `.claude/settings.json`; a guest one gets the untracked `.claude/settings.local.json` in its plan.
+  Each rule is anchored at the project root or at home, so a session started in a subdirectory is covered too.
+  The stamp adds missing rules, removes none, leaves a complete file byte for byte, and refuses a file that does not read or decode.
+  `.github/sd-fleet.json` may exempt either path. Nothing restamps the fleet: run `sd fleet stamp --dry-run`, then the write per repository.
+
+- **Stamped workflows fail a run whose checkout is not the head it reports on (sd:1818).**
+  The route and check workflows check out `refs/pull/N/head`, which a re-run of an older run resolves to the newer head.
+  A step after checkout compares `git rev-parse HEAD` with `github.event.pull_request.head.sha` and fails on a mismatch.
+  The stamp moves a file still at the earlier template forward, and `sd-review setup-github --remove` takes one without `--force`.
+  A repository under `repo.ci = local` carries neither workflow and is unaffected.
+
+- **`sd.bulk_storage_root` names where large uncommitted data goes (sd:1792, parts 1, 2 and 4).**
+  WORKFLOW.md § Parallel work puts run outputs, logs and captures under `<root>/<repository>/`, and keeps build output and permission-dependent data on the system disk.
+  The slice-builder brief builds with `CARGO_INCREMENTAL=0` and only the crates under test, and stops before a gate below 20 GiB free.
+  Unset, nothing moves.
+
+- **The shipped `kimi` entry sends the findings schema strict (sd:1827).**
+  `providers.yaml` sets `response_format: json_schema` on `kimi` and on no other entry.
+  MiniMax-M3 ignores the field, and Baseten's DeepSeek is untested.
+  The installer never rewrites a home registry, so a machine seeded earlier needs the line added by hand.
+  Moonshot's acceptance of the strict schema is not yet checked with a live call; that paid call is the operator's.
+
 - **`sd-status` reports the fleet baseline's two flags (sd:1807).** The dashboard showed `protection_source` (rulesets alone, no classic object) and `required_check` (`ci`, or `sd/local-gate` for a `repo.ci = local` repository) for each owned repository; `sd-status` printed neither. It now reports both in `protection.merge_settings`, with the ids, values and sentences `sd_db.protection.baseline_flags` writes, and prints them as `FLAG` or `ok` lines beside the merge flags. A repository whose owner is not in `sd.fleet_owners` carries neither; with no `sd.fleet_owners` the owners are `platypeeps`, the system collector's default. A classic read that failed carries neither, as the system files it unknown. No acknowledgement reaches them. `GapVocabularyTests` compares them with the system library at `.sd-system-rev`.
 
 - **`sd-research-kit review` checks each map for stable row IDs and a gaps section (sd:1835, sd:1836).**
@@ -482,6 +526,27 @@
   registry that sets it.
 
 ### Fixed
+
+- **`sd shadow sync` reports the library's two refusals in one line, not a traceback (sd:2898).**
+  Since system #199, `sd_db` raises `SyncBusy` while another sync holds the lock and `HubOnly` on a satellite.
+  The verb now prints the library's message as one `sd:` line on stderr.
+  It exits 3 on a satellite, the pack's refused code, and 4 while the lock is held, the pack's retry-later code.
+  `sd shadow sync --help` names both codes. A library without `SyncBusy` still runs the verb.
+  `.sd-system-rev` advances to system `776e017f`, which raises both; the schema stays 20.
+
+- **An opted-in check runs under one tool configuration and one thread cap, and the hub refuses again on what differs (sd:2879).**
+  sd:2862 accepted a satellite's pass across differing `HOME` tool configuration, thread caps and indirect tools,
+  each of which can change what passes. Every check in a repository with `repo.satellite_gate = accept`, the hub's
+  and the satellite's, now runs with `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, no npm or pip user
+  file, a `CARGO_HOME` in the gate's cache folder (`tool-config/cargo`), and `CARGO_BUILD_JOBS`,
+  `RUST_TEST_THREADS` and `NEXTEST_TEST_THREADS` at 4, whatever the caller set. The view no longer binds the
+  isolated `HOME` files. It refuses on uv's `~/.config/uv/uv.toml`, which no switch isolates alone, on any
+  configuration file left in the pinned `CARGO_HOME` or npm global file, on `threads`,
+  on the thread variables and on every bound tool, `git`, `npm` and `uv` included. Only the `PATH` order and the
+  slot holder's `SD_GATE_` settings are recorded. **Migration:** a row written before this release refuses on the
+  pack `bin/` digest. The first opted-in Rust gate on each machine downloads its crates into the new `CARGO_HOME`
+  and rebuilds its dependencies once. A machine whose `git`, `npm` or `uv` build differs from the hub's hands back
+  until both run one build. A check that commits needs its own git identity.
 
 - **A failed review's refusal names every failed reviewer (sd:1819).**
   `sd-ship` gave its 600-character detail to the failed reviewers in order, so a long first detail hid the rest.
@@ -1288,6 +1353,15 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **`sd-author` and `sd-topic-radar` carry the writing pack's drafting, research and ideation rules (sd:1659).**
+  The operator ruled on 2026-09-30 that the pack owns all writing skills; this ports what `sdw-draft`, `sdw-research` and `sdw-ideate` had and the pack did not.
+  `sd-author` marks how and when each claim was established, carries that certainty into prose, and sources the remedy as well as the problem.
+  Without remedy evidence, the prescription becomes a stated practice or a proposal, not a finding.
+  Its review adds a fact-check that counts only with a ledger, an optional cross-model hostile review, and stale-review reconciliation.
+  `sd-topic-radar` reads the user's own ratings to steer generation but not scoring, never proposes a declined idea again, and treats a newsletter item as a prompt.
+  A fatal component keeps a candidate out of the top group, and an optional cross-model challenge may only lower a score.
+  Paths, stores and the vault filing step stay in `sd-writing-pack`; retiring its copies is a separate change there.
 
 - **The default review severity floor is `high` (sd:1657).**
   A repository whose `.github/sd-review.json` names no `severity_floor` blocks on `high` findings only, not `medium`.

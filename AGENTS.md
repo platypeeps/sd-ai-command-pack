@@ -43,6 +43,7 @@ Read `sd config get sd.external_reviews` and `sd config get sd.assistant_merge`;
 `sd.gate_cache_gb` grants nothing: it bounds the gate's warm Rust build folders.
 `sd.fleet_owners` grants nothing: it names the owners whose repositories `sd fleet stamp` treats as the operator's own.
 `sd.lane_root` grants nothing: it names where `sd-ship lane` keeps each repository's queue.
+`sd.bulk_storage_root` grants nothing: it names where large uncommitted data goes, per [WORKFLOW.md § Parallel work](WORKFLOW.md#parallel-work).
 `sd.copilot_review` is the one core setting with a default: unset reads `deep`, one Copilot review on deep-tier changes and none otherwise; a repository's `.github/sd-review.json` overrides `deep` and `always`, and `never` wins over the file.
 `sd.assistant_merge` is read by the assistant, not by `sd-ship`; the tool merges whatever the gates let through, and the setting decides whether to ask it to.
 With `sd.assistant_merge` at `controlled`, merge active in-scope PR work without asking, unless the user explicitly says wait.

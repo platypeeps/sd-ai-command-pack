@@ -597,6 +597,21 @@ class CorePolicyReadTests(Fixture):
                 with self.assertRaises(sd_lib.ConfigError):
                     sd_lib.core_setting("copilot_review", env)
 
+    def test_bulk_storage_root_reads_a_folder_and_is_empty_by_default(self):
+        """sd:1792: the per-machine root for large uncommitted data; unset is no bulk root."""
+        env = {"HOME": str(self.tmp)}
+        path = self.tmp / ".config" / sd_lib.CONFIG_RELATIVE_PATH
+        path.parent.mkdir(parents=True)
+        self.assertIsNone(sd_lib.core_setting("bulk_storage_root", env))
+        for value in ("/Volumes/bulk/repo-storage", "~/bulk"):
+            path.write_text(json.dumps({"config": {"sd": {"bulk_storage_root": value}}}))
+            self.assertEqual(sd_lib.core_setting("bulk_storage_root", env), value)
+        for value in ("relative/dir", "", None):
+            with self.subTest(value=value):
+                path.write_text(json.dumps({"config": {"sd": {"bulk_storage_root": value}}}))
+                with self.assertRaises(sd_lib.ConfigError):
+                    sd_lib.core_setting("bulk_storage_root", env)
+
 
 class CopilotPolicyResolution(unittest.TestCase):
     """The two pure halves both lanes share (sd:1328): who decides, and
