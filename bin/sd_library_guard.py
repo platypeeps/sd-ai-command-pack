@@ -24,9 +24,9 @@ def schema_version(source: str) -> int | None:
     return None
 
 
-def downgrade_refusal(checkout: Path, system: Path, ref: str,
+def downgrade_refusal(venv: Path, system: Path, ref: str,
                       git_output: Callable[[list[str], Path], str | None]) -> str:
-    packages = sorted((checkout / ".venv/lib").glob("python*/site-packages/sd_db"))
+    packages = sorted((venv / "lib").glob("python*/site-packages/sd_db"))
     if not packages:
         return ""
     installed = [package / "schema.py" for package in packages]
