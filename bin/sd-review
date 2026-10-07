@@ -151,6 +151,7 @@ class Refusal(Exception):
 # `copilot_review.automatic_deep` is `None` here on purpose: the repository has
 # not said, so the machine's `sd.copilot_review` answers (`deep` when unset).
 # A file naming the key overrides a machine `deep` or `always`, not `never`.
+# `severity_floor` is `high`, the fleet default (sd:1657, operator ruling 2026-09-30).
 DEFAULT_POLICY: dict[str, Any] = {
     "tier_order": ["skip", "cheap", "standard", "deep"],
     "default_tier": "standard",
@@ -161,7 +162,7 @@ DEFAULT_POLICY: dict[str, Any] = {
     "never_skip": ["docs/spec/**"],
     "sensitive": [".github/workflows/**"],
     "large_change_lines": 800,
-    "severity_floor": "medium", "copilot_review": {"automatic_deep": None},
+    "severity_floor": "high", "copilot_review": {"automatic_deep": None},
 }
 
 POLICY_KEYS = frozenset(DEFAULT_POLICY) | {"$schema"}

@@ -270,6 +270,15 @@ class ProviderSelection(unittest.TestCase):
         self.assertEqual(len(text), len(" (") + 600 + len("...)"))
         self.assertEqual(sd_ship_review.failed_outcomes({"outcomes": []}), "")
 
+    def test_failed_outcome_details_keep_every_failed_reviewer(self):
+        """sd:1819: a long first detail used the whole budget and hid the second reviewer."""
+        report = {"outcomes": [{"backend": "kimi", "status": "unavailable", "detail": "kimi " + "x" * 900},
+                               {"backend": "minimax", "status": "refused", "detail": "review input exceeds 10 bytes"}]}
+        text = sd_ship_review.failed_outcomes(report)
+        self.assertIn("; minimax: review input exceeds 10 bytes)", text)
+        self.assertIn("kimi xxx", text)
+        self.assertLessEqual(len(text), len(" (") + 600 + len("...; )"))
+
     def test_failed_retry_and_additional_request_preserve_selectors_and_budget(self):
         incomplete = {"status": "unavailable", "completed_reviews": 0, "reviewed_by": []}
         first, _process = self.context("minimax", report_changes=incomplete)

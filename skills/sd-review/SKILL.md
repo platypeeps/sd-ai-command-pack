@@ -66,7 +66,7 @@ Do not substitute another diff or copy a cap into this procedure.
    Automatic fallback follows ranked registry order.
    Rate limits, missing executables, authentication failures, failed runs, and timeouts can advance that chain.
    An exhausted chain with insufficient completed coverage fails.
-3. Disposition findings locally against the repository's severity floor.
+3. Disposition findings locally against the repository's severity floor; unset, it is `high`.
    Preserve each provider's findings and attempt outcome.
    A completed adverse review counts; it does not trigger replacement.
    A clean fallback cannot erase earlier findings.
@@ -125,6 +125,10 @@ Never run the plain branch form there: it runs a second full check in the checko
 | 5 | Deterministic gate failure or insufficient completed reviews. |
 
 Report completed versus requested coverage, `reviewed_by`, and every failed attempt.
+One clean standalone pass is weak evidence.
+Reviewers sample a change, so another pass at the same head can find what this one missed.
+In sd:1986, two clean `--scope branch` passes preceded a real medium finding from the `sd-ship` review at that head.
+Report a clean pass as one clean pass, not as proof that the head has no defect.
 Keep `rate_limited` distinct from `unavailable`.
 Malformed or oversized responses do not count as completed reviews.
 Retain usable findings, including unknown locations and blockers beyond output limits.

@@ -754,8 +754,11 @@ reasoning on a 35k-token prompt and sent no answer (sd:1805); K3 always
 thinks, and its effort can only drop to `low`. A stop at the ceiling reads
 `<name> hit max_tokens (N) and it sent no answer`, with the completion
 tokens and reasoning bytes, and `sd-ship` repeats that detail in its
-refusal. A `length` stop below the ceiling says the context window may be
-full and names shortening the review input first. The installer never rewrites the registry in your home, so a
+refusal, one equal share of its bound per failed reviewer, each under its
+name. A `length` stop below the ceiling says the context window may be
+full and names shortening the review input first. An entry with no
+`max_tokens` reads `stopped on length with no max_tokens set`, and names
+setting one (sd:1819). The installer never rewrites the registry in your home, so a
 home copy still at 16384 keeps the old ceiling until you edit it.
 URL entries can declare one optional control: `thinking: disabled|adaptive`
 or `reasoning_effort: none|low|high|max`. The client sends `thinking` as
