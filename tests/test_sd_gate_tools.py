@@ -142,6 +142,13 @@ class Install(unittest.TestCase):
         sd_gate_tools.install(self.environment)
         self.assertIsNone(sd_gate_tools.missing(self.environment))
 
+    def test_an_archive_that_also_holds_another_bound_name_installs_nothing(self) -> None:
+        """A pinned folder leads `PATH`, so a `cargo` beside the pinned `cargo-nextest` would shadow the machine's."""
+        url, sha256 = archive(self.tmp, {"cargo-nextest": "nextest", "cargo": "a rustup proxy"}, name="nextest.tar.gz")
+        self.pins(pin(url, sha256, tool="cargo-nextest", bin_folder=".", provides=("cargo-nextest",)))
+        self.assertIn("also holds cargo in ., which it does not pin", sd_gate_tools.install(self.environment)[0]["error"])
+        self.assertEqual(list((self.tmp / "cache" / "pinned-tools").iterdir()), [])
+
     def test_the_shipped_pins_name_bound_tools_and_full_digests(self) -> None:
         for entry in sd_gate_tools.PINS:
             self.assertEqual(len(entry["sha256"]), 64, entry["tool"])
@@ -203,30 +210,63 @@ class PinnedGate(rows.SatelliteFixture):
 
     def test_pinning_twice_changes_nothing(self) -> None:
         once = sd_gate_receipts.offload_pins({**self.scratch, "PATH": os.pathsep.join(["/usr/bin", str(self.pinned)])})
-        self.assertEqual(once["PATH"].split(os.pathsep), [str(self.pinned), "/usr/bin"])
+        links = sd_gate_tools.clt_links(self.scratch)
+        self.assertEqual(once["PATH"].split(os.pathsep), [str(self.pinned), links, "/usr/bin"])
         self.assertEqual(sd_gate_receipts.offload_pins({**self.scratch, **once})["PATH"], once["PATH"])
+
+    def test_git_and_make_bind_the_clt_copy_whatever_path_comes_first(self) -> None:
+        """#296 refused at git: one machine's `PATH` led with Homebrew's `git`, the other's with `/usr/bin`."""
+        brew = self.root.parent / "brew" / "bin"
+        for name in sd_gate_tools.CLT_TOOLS:
+            self.tool(brew / name, f"homebrew {name}")
+        views = []
+        for side, search in (("sat", [str(brew), "/usr/bin", "/bin"]), ("hub", ["/usr/bin", "/bin"])):
+            environment = sd_gate_receipts.offload_pins({**self.scratch, "SD_GATE_CACHE_DIR": str(self.root.parent / side),
+                                                         "PATH": os.pathsep.join(search)})
+            with mock.patch.object(sd_gate_receipts, "developer_tools", return_value="CLT 1"):
+                views.append({name: sd_gate_receipts.view_tool(name, environment["PATH"], environment, None)
+                              for name in sd_gate_tools.CLT_TOOLS})
+        self.assertEqual(views[0], views[1])
+        self.assertTrue(views[0]["git"][1].startswith("/usr/bin/git; "), views[0]["git"])
+
+    def test_a_link_to_another_file_is_mended(self) -> None:
+        links = pathlib.Path(sd_gate_tools.clt_links(self.scratch))
+        (links / "git").unlink()
+        (links / "git").symlink_to(self.root.parent / "elsewhere")
+        sd_gate_tools.clt_links(self.scratch)
+        self.assertEqual(os.readlink(links / "git"), "/usr/bin/git")
 
 
 class SystemTools(unittest.TestCase):
     """A tool in macOS's own folders binds and names `system_version`; any other names its resolved file."""
 
     def setUp(self) -> None:
-        sd_gate_receipts.developer_version.cache_clear()
-        self.addCleanup(sd_gate_receipts.developer_version.cache_clear)
+        for cached in (sd_gate_receipts.developer_version, sd_gate_receipts.macos_version):
+            cached.cache_clear()
+            self.addCleanup(cached.cache_clear)
 
-    def test_a_system_tool_binds_the_system_version(self) -> None:
-        with mock.patch.object(sd_gate_receipts, "system_version", return_value="macOS 27.0 (A); CLT 1"):
-            one = sd_gate_receipts.view_tool("sh", "/bin", {}, None)
-        with mock.patch.object(sd_gate_receipts, "system_version", return_value="macOS 27.0 (A); CLT 2"):
-            two = sd_gate_receipts.view_tool("sh", "/bin", {}, None)
+    def view(self, macos: str, clt: str, name: str = "sh") -> tuple[str | None, str | None]:
+        with mock.patch.object(sd_gate_receipts, "macos_version", return_value=macos), \
+                mock.patch.object(sd_gate_receipts, "developer_tools", return_value=clt):
+            return sd_gate_receipts.view_tool(name, "/bin", {}, None)
+
+    def test_a_system_tool_binds_the_developer_tools(self) -> None:
+        one, two = self.view("macOS 27.0 (A)", "CLT 1"), self.view("macOS 27.0 (A)", "CLT 2")
         self.assertNotEqual(one[0], two[0])
         self.assertEqual(one[1], "/bin/sh; macOS 27.0 (A); CLT 1")
         self.assertTrue(str(one[0]).startswith(sd_gate_receipts._content_digest("/bin/sh") + " "))
 
+    def test_a_system_tool_names_the_macos_version_but_does_not_bind_it(self) -> None:
+        """The lead's ruling (sd:2936): the hub and a satellite one macOS point release apart still share a gate."""
+        one, two = self.view("macOS 27.0 (A)", "CLT 1"), self.view("macOS 27.0.1 (B)", "CLT 1")
+        self.assertEqual(one[0], two[0])
+        self.assertEqual((one[1], two[1]), ("/bin/sh; macOS 27.0 (A); CLT 1", "/bin/sh; macOS 27.0.1 (B); CLT 1"))
+
     def test_a_refusal_on_a_system_tool_names_both_versions(self) -> None:
         views = []
         for clt in ("1", "2"):
-            with mock.patch.object(sd_gate_receipts, "system_version", return_value=f"macOS 27.0 (A); CLT {clt}"):
+            with mock.patch.object(sd_gate_receipts, "macos_version", return_value="macOS 27.0 (A)"), \
+                    mock.patch.object(sd_gate_receipts, "developer_tools", return_value=f"CLT {clt}"):
                 views.append(sd_gate_receipts.offload_view({"HOME": "/nonexistent", "PATH": "/bin"}))
         part = {"scope": {"mode": "full", "command": []}, "detection": {"source": "make", "commands": {}}}
         part = {**dict.fromkeys(sd_gate_receipts.TREE_FIELDS), **part}
@@ -277,9 +317,10 @@ class SystemTools(unittest.TestCase):
                 version = sd_gate_receipts.system_version({"DEVELOPER_DIR": f"{app}/"})
         self.assertEqual(version, "macOS x (x); Xcode 27.2 (27C1)")
 
-    def test_another_platform_names_itself(self) -> None:
+    def test_another_platform_names_itself_and_binds_no_developer_tools(self) -> None:
         with mock.patch.object(sys, "platform", "linux"):
             self.assertEqual(sd_gate_receipts.system_version({}), sd_gate_receipts.platform.platform())
+            self.assertEqual(sd_gate_receipts.developer_tools({}), "")
 
     def test_a_question_that_fails_reads_unknown(self) -> None:
         self.assertEqual(sd_gate_receipts.system_answer(["/nonexistent/sw_vers"]), "unknown")

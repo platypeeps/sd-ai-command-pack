@@ -19,6 +19,7 @@ the per-tool sources and the contract with machine-setup (sd:2937).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -44,12 +45,16 @@ PINS: tuple[dict[str, Any], ...] = (
      "url": "https://nodejs.org/dist/v26.10.0/node-v26.10.0-darwin-arm64.tar.gz",
      "sha256": "751fdf7439f115d87ee2a8f3f18c065b6151852068e3e666ac60ac2996f75ac9",
      "bin": "node-v26.10.0-darwin-arm64/bin", "provides": ("node", "npm")},
-    {"tool": "uv", "version": "0.12.22", "platform": "darwin-arm64",
-     "url": "https://github.com/astral-sh/uv/releases/download/0.12.22/uv-aarch64-apple-darwin.tar.gz",
-     "sha256": "5d714de09501a59393ceca78f4bc232a50478729640d251907160299b2a93ddd",
+    {"tool": "uv", "version": "0.12.23", "platform": "darwin-arm64",
+     "url": "https://github.com/astral-sh/uv/releases/download/0.12.23/uv-aarch64-apple-darwin.tar.gz",
+     "sha256": "50487ae565ccd96e499056b4674d438f4c53170202617b4c759defe0c6a1b544",
      "bin": "uv-aarch64-apple-darwin", "provides": ("uv",)},
 )
 FOLDER = "pinned-tools"
+#: Names an opted-in check runs from the Command Line Tools, through the gate's own links to `/usr/bin/<name>`:
+#: no release archive is self-contained, and a Homebrew copy first on one machine's `PATH` must not decide.
+CLT_TOOLS = ("git", "make")
+CLT_FOLDER = "clt-links"
 INSTALL = "sd gate tools install"
 DOWNLOAD_SECONDS = 300
 #: The URL schemes `install` reads: a release over TLS, and a local archive, which tests use.
@@ -73,6 +78,27 @@ def folder(pin: Mapping[str, Any], environment: Mapping[str, str]) -> pathlib.Pa
 def path_entries(environment: Mapping[str, str]) -> list[str]:
     """The `PATH` folders an opted-in check starts with, in `PINS` order."""
     return [os.path.normpath(folder(pin, environment) / pin["bin"]) for pin in pins()]
+
+
+def clt_links(environment: Mapping[str, str]) -> str:
+    """The gate's folder of links to `/usr/bin/<name>` for each `CLT_TOOLS` name, made or mended here: its path.
+
+    A link is replaced by a rename, so a gate reading it sees the old link or the new one. A folder that cannot be
+    written leaves the names to `PATH`; the view binds and names what they resolve to, so the hub refuses a difference.
+    """
+    links = sd_gate_cache.cache_root(environment) / CLT_FOLDER
+    with contextlib.suppress(OSError):
+        links.mkdir(parents=True, exist_ok=True)
+        for name in CLT_TOOLS:
+            link, target = links / name, f"/usr/bin/{name}"
+            if os.path.islink(link) and os.readlink(link) == target:
+                continue
+            spare = links / f".{name}.{os.getpid()}"
+            with contextlib.suppress(FileNotFoundError):
+                spare.unlink()
+            spare.symlink_to(target)
+            os.replace(spare, link)
+    return os.path.normpath(links)
 
 
 def provided() -> set[str]:
@@ -120,6 +146,8 @@ def install(environment: Mapping[str, str]) -> list[dict[str, Any]]:
 
 def unpack(pin: Mapping[str, Any], environment: Mapping[str, str]) -> None:
     """Download `pin`, check its sha256, unpack it beside its folder and rename it into place; raises on any fault."""
+    import sd_gate_receipts  # noqa: PLC0415 -- it imports this module
+
     final = folder(pin, environment)
     final.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=f".{final.name}.", dir=final.parent) as scratch:
@@ -138,6 +166,10 @@ def unpack(pin: Mapping[str, Any], environment: Mapping[str, str]) -> None:
         absent = [name for name in pin["provides"] if not os.access(staging / pin["bin"] / name, os.X_OK)]
         if absent:
             raise ValueError(f"{pin['url']} holds no executable {', '.join(absent)} in {pin['bin']}")
+        # The folder leads `PATH`: a bound name it does not provide, such as a `cargo`, would shadow the machine's.
+        bound = [name for name in sd_gate_receipts.OFFLOAD_TOOLS if name not in pin["provides"]]
+        if shadow := [name for name in bound if os.path.lexists(staging / pin["bin"] / name)]:
+            raise ValueError(f"{pin['url']} also holds {', '.join(shadow)} in {pin['bin']}, which it does not pin")
         try:
             staging.rename(final)
         except OSError:

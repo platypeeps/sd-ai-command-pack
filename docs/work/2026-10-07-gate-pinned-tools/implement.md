@@ -19,4 +19,8 @@ sd:2937 follows in the system repository.
       exact `resolution` dicts, which now hold every bound name.
 - [x] 5. Docs: the offload design's tool section names the pins. Check:
       `sd-docs-lint` from the repository root passes.
-- [ ] 6. `sd gate check --base main`, then `sd-review --scope branch --gate-check main`.
+- [x] 6. `sd gate check --base main`, then `sd-review --scope branch --gate-check main` (rounds 1 and 2).
+- [x] 7. Round 3 (lead scope): bind `developer_tools`, name `macos_version`; CLT links for `git` and `make`;
+      `uv` 0.12.23; refuse an archive that shadows a bound name; `cargo` resolution names its file.
+      Check: each new test fails with its guard removed; the decision log in design.md names each choice.
+- [ ] 8. `sd gate check --base main`, then `sd-review --scope branch --gate-check main` (round 3).

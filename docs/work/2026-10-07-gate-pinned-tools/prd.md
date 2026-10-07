@@ -46,14 +46,16 @@ hub and the satellite bind identical bytes.
 5. A tool that cannot be pinned keeps resolving on `PATH`. A refusal on it
    names how each side found it: the resolved file, and for a macOS or CLT
    tool the macOS version and build and the CLT version.
-6. A macOS or CLT tool binds that version beside its bytes, so a CLT
-   difference refuses on `cc`.
-7. The contract with sd:2937 (machine-setup installs nightly and reports
+6. A macOS or CLT tool binds the CLT or Xcode version beside its bytes, so a
+   CLT difference refuses on `cc`. The macOS version is named, not bound.
+7. In an opted-in repository `git` and `make` resolve to the CLT copies,
+   whatever the caller's `PATH` puts first.
+8. The contract with sd:2937 (machine-setup installs nightly and reports
    drift) is written in design.md, "Contract with machine-setup".
 
 ## Non-goals
 
-- Pinning `bash`, `git`, `make` or `python3` (design.md, "Per-tool sources").
+- Pinning `bash` or `python3`, or a release archive of `git` or `make` (design.md, "Per-tool sources").
 - Removing old pinned copies.
 - Installing from the gate itself: the gate never downloads.
 

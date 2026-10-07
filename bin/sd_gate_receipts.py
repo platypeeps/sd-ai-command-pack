@@ -162,7 +162,7 @@ CARGO_SUBCOMMANDS = "cargo-subcommands"
 #: Names whose `-vV` build lines a view binds beside their bytes (sd:2881): a rustup proxy's bytes name no toolchain.
 #: Only these two: `cargo-clippy -vV` runs clippy, and `rustdoc` and `clippy-driver` answer as `rustc` does.
 VERSIONED_TOOLS = ("cargo", "rustc")
-#: macOS's own folders: a tool found here binds `system_version` beside its bytes, and a refusal names it (sd:2936).
+#: macOS's own folders: a tool found here binds `developer_tools` beside its bytes, and a refusal names `system_version` (sd:2936).
 SYSTEM_FOLDERS = ("/bin/", "/sbin/", "/usr/bin/", "/usr/sbin/")
 #: The `-vV` lines that name a compiler build; `os:` and the library lines follow the machine, not the compiler.
 VERSION_KEYS = ("release", "commit-hash", "commit-date", "host", "LLVM version")
@@ -382,7 +382,7 @@ def offload_view(environment: Mapping[str, str], names: Iterable[str] = (),
     that list is not compared, and neither its value nor its digest reaches the hub (sd:2782).
     `names` are the check's own executables; one with a relative folder lives in the tree, which `inputs` binds.
     A `VERSIONED_TOOLS` name binds `tool_version` in `tree`, the check's worktree, beside its own bytes, and
-    `resolution` names its release line, or `path` where `-vV` answered nothing (sd:2881).
+    `resolution` names its release line, or `path` where `-vV` answered nothing (sd:2881), and its resolved file.
     """
     try:
         home = os.path.normpath(environment["HOME"]) if environment.get("HOME") else None
@@ -441,41 +441,57 @@ def view_tool(name: str, search: str, environment: Mapping[str, str],
               tree: pathlib.Path | None) -> tuple[str | None, str | None]:
     """`(digest, resolution)` of `name` on `search`, or `(None, None)` for one that does not resolve (sd:2936).
 
-    `resolution` names how this machine found it, for a refusal: a `VERSIONED_TOOLS` release line (sd:2881); a
-    file in `SYSTEM_FOLDERS` by its path and `system_version`, which its digest binds too, since a `/usr/bin/cc`
-    shim is the same bytes under every Command Line Tools version; any other by its resolved path, `~` for `HOME`.
+    `resolution` names how this machine found it, for a refusal: a `VERSIONED_TOOLS` release line (sd:2881), or
+    `path`, and its resolved file; a file in `SYSTEM_FOLDERS` by its path and `system_version`; any other by its
+    resolved path, `~` for `HOME`. A system file's digest binds `developer_tools` too, since a `/usr/bin/cc` shim is
+    the same bytes under every Command Line Tools version; it does not bind the macOS version, which only the
+    refusal names (decision log in docs/work/2026-10-07-gate-pinned-tools/design.md).
     """
     found = shutil.which(name, path=search)
     if not found:
         return None, None
     digest = _content_digest(found)
+    real = os.path.realpath(found)
     if name not in VERSIONED_TOOLS:
-        real = os.path.realpath(found)
         if not real.startswith(SYSTEM_FOLDERS):
             return digest, portable(real, environment)
-        system = system_version(environment)
-        return f"{digest} {hashlib.sha256(system.encode()).hexdigest()}", f"{real}; {system}"
+        tools = developer_tools(environment)
+        return f"{digest} {hashlib.sha256(tools.encode()).hexdigest()}", f"{real}; {system_version(environment)}"
     version = tool_version(found, environment, tree) if tree else None
+    where = portable(real, environment)  # two rustup installs differ in proxy bytes, not in `-vV` (sd:2936)
     if version is None:
-        return digest, "path"
-    return f"{digest} {hashlib.sha256(version.encode()).hexdigest()}", version.splitlines()[0]
+        return digest, f"path at {where}"
+    return f"{digest} {hashlib.sha256(version.encode()).hexdigest()}", f"{version.splitlines()[0]} at {where}"
 
 
 def system_version(environment: Mapping[str, str]) -> str:
-    """The macOS version and build and the developer tools `xcrun` runs, `DEVELOPER_DIR` first (sd:2936)."""
+    """What a refusal names for a system file: the macOS version and build, then `developer_tools` (sd:2936)."""
+    return "; ".join(part for part in (macos_version(), developer_tools(environment)) if part)
+
+
+def developer_tools(environment: Mapping[str, str]) -> str:
+    """The developer tools `xcrun` runs, `DEVELOPER_DIR` first: what a system file binds beside its bytes (sd:2936)."""
     return developer_version(environment.get("DEVELOPER_DIR") or "")
 
 
 @functools.cache
-def developer_version(developer: str) -> str:
-    """`system_version` for one developer folder, asked once per process; a part that does not answer reads `unknown`.
-
-    Each command is named by its absolute path: a gate's `PATH` (a fixture's `/bin:/usr/bin`, a launchd lane's) must
-    not decide whether `pkgutil` in `/usr/sbin` answers, or two gates on one machine bind two versions.
-    """
+def macos_version() -> str:
+    """`macOS <version> (<build>)`, asked once per process, or this platform elsewhere; named, never bound (sd:2936)."""
     if sys.platform != "darwin":
         return platform.platform()
-    macos = f"macOS {system_answer(['/usr/bin/sw_vers', '-productVersion'])} ({system_answer(['/usr/bin/sw_vers', '-buildVersion'])})"
+    return f"macOS {system_answer(['/usr/bin/sw_vers', '-productVersion'])} ({system_answer(['/usr/bin/sw_vers', '-buildVersion'])})"
+
+
+@functools.cache
+def developer_version(developer: str) -> str:
+    """`developer_tools` for one developer folder, asked once per process; a part that does not answer reads `unknown`.
+
+    Each command is named by its absolute path: a gate's `PATH` (a fixture's `/bin:/usr/bin`, a launchd lane's) must
+    not decide whether `pkgutil` in `/usr/sbin` answers, or two gates on one machine bind two versions. Off macOS a
+    system compiler is the file itself, not a shim, so its bytes suffice and this is empty.
+    """
+    if sys.platform != "darwin":
+        return ""
     developer = os.path.normpath(developer or system_answer(["/usr/bin/xcode-select", "-p"]))
     # An Xcode developer folder is `Xcode.app/Contents/Developer`, beside the app's `version.plist`;
     # `DEVELOPER_DIR` may also name the app itself, as `xcode-select -s` takes it.
@@ -483,12 +499,11 @@ def developer_version(developer: str) -> str:
     try:
         with open(plist / "version.plist", "rb") as stream:
             plist = plistlib.load(stream)
-        tools = f"Xcode {plist.get('CFBundleShortVersionString')} ({plist.get('ProductBuildVersion')})"
+        return f"Xcode {plist.get('CFBundleShortVersionString')} ({plist.get('ProductBuildVersion')})"
     except (OSError, ValueError):
         clt = system_answer(["/usr/sbin/pkgutil", "--pkg-info=com.apple.pkg.CLTools_Executables"])
-        tools = "CLT " + next((line.split(":", 1)[1].strip() for line in clt.splitlines() if line.startswith("version:")),
-                              "unknown")
-    return f"{macos}; {tools}"
+        return "CLT " + next((line.split(":", 1)[1].strip() for line in clt.splitlines() if line.startswith("version:")),
+                             "unknown")
 
 
 def system_answer(argv: list[str]) -> str:
@@ -607,10 +622,11 @@ def offload_pins(environment: Mapping[str, str]) -> dict[str, str]:
     a git identity sets its own. npm refuses one file as both its user and its global configuration, so the global
     one is a path in that folder too. `sd_gate_slots.CPU_VARIABLES` read `OFFLOAD_THREADS`, which a holder lowers
     only on a machine whose share of the cores is smaller. `PATH` starts with the gate's pinned tool copies
-    (`sd_gate_tools.path_entries`, sd:2936), dropped from the rest first, so a second pinning changes nothing.
+    (`sd_gate_tools.path_entries`), then its links to the Command Line Tools' `git` and `make`
+    (`sd_gate_tools.clt_links`), each dropped from the rest first, so a second pinning changes nothing (sd:2936).
     """
     folder = sd_gate_cache.cache_root(environment) / "tool-config"
-    pinned = sd_gate_tools.path_entries(environment)
+    pinned = [*sd_gate_tools.path_entries(environment), sd_gate_tools.clt_links(environment)]
     rest = [entry for entry in environment.get("PATH", "").split(os.pathsep) if entry and os.path.normpath(entry) not in pinned]
     return {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1", "NPM_CONFIG_USERCONFIG": os.devnull,
             "NPM_CONFIG_GLOBALCONFIG": str(folder / "npmrc"), "PIP_CONFIG_FILE": os.devnull,
