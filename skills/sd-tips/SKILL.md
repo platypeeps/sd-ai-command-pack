@@ -64,7 +64,7 @@ sd store add sdw.tip "<short imperative title>" \
   --field dateCreated=YYYY-MM-DD \
   --field description="<one line, shown as a column>" \
   --field topics="observability, otel" \
-  --field tags+=tip --field tags+=ai-generated --field tags+=claude --field tags+=sd-tips \
+  --field tags+=tip --field tags+=ai-generated --field tags+=sd-tips \
   --section-file "Tip=<path to a file holding the 2-4 publishable sentences>" \
   --section Score="Immediacy 9 · Non-obviousness 7 · Durability 8 · Brevity 9. <one sentence on what carries or limits it.>" \
   --section Provenance="<where it came from, with a link to the primary source>"

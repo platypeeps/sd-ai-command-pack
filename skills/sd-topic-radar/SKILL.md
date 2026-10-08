@@ -167,7 +167,7 @@ holds `scripts/pack.py` and `profile/`). Its `sdw` plugin declares the
     --field dateCreated=YYYY-MM-DD \
     --field-file 'description=<file with the one-line thesis>' \
     --field "topics=<comma-separated slugs>" \
-    --field 'tags+=blog-idea' --field 'tags+=ai-generated' --field 'tags+=claude' --field 'tags+=ideate' \
+    --field 'tags+=blog-idea' --field 'tags+=ai-generated' --field 'tags+=ideate' \
     --section-file 'Thesis=<file with the thesis paragraph>' \
     --section "Score=Evidence <n> · Falsifiability <n> · Durability <n> · Audience <n>. <why>" \
     --section 'Argument=*Not drafted yet.*' \
