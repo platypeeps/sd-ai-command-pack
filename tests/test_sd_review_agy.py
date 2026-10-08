@@ -286,7 +286,7 @@ class TheVendorMustMatchTheModel(unittest.TestCase):
         message = str(caught.exception)
         self.assertIn("claude-opus-4-6-thinking", message)
         self.assertIn("anthropic", message)
-        self.assertIn("independent", message)
+        self.assertIn("wrong vendor", message)
 
     def test_a_model_hidden_in_the_start_line_is_refused_too(self) -> None:
         """A start line is argv: `--model` written there selects a model."""
@@ -306,7 +306,7 @@ class TheVendorMustMatchTheModel(unittest.TestCase):
             self.read(registry_text(model=None))
         message = str(caught.exception)
         self.assertIn("pins no model", message)
-        self.assertIn("independent", message)
+        self.assertIn("may not be the one that reviewed", message)
         self.assertIn("cannot read", message)
 
     def test_a_start_line_model_satisfies_the_requirement(self) -> None:

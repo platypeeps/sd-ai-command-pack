@@ -3144,7 +3144,7 @@ roles:
         parsed = subprocess.run(["git", "interpret-trailers", "--parse"], input=message, capture_output=True,
                                 text=True, check=True).stdout
         self.assertIn(f"Closes: sd:{held}\n", parsed)
-        self.assertIn("Authored-with: human", parsed)
+        self.assertNotIn("Authored-with:", parsed)
         self.assertEqual(ship.sd_lib.delivered(self.root, f"sd:{held}"), ship.sd_lib.YES)
         receipt = receipts.read(self.connection, receipts.receipt_key(self.remote.slug, "topic", held))[1]
         self.assertEqual(receipt["closing_paid"], carrier["merge_commit"])
@@ -5157,6 +5157,12 @@ roles:
         self.assertEqual(failed["exit_code"], 124)
         self.assertIsNone(self.operation().state["reviewed_head"])
         self.assertIn("captured timeout blocker", json.dumps(ship.review_history([failed])))
+        # The reviewers the timeout used are rate limited for the retry, so it
+        # falls to the next one, or refuses when there is none.
+        registry = self.database.parent / "providers.yaml"
+        registry.write_text(registry.read_text().replace(
+            "vendor: secondvendor,", "enabled: false, reason: rate-limited, vendor: secondvendor,").replace(
+            "vendor: thirdvendor,", "enabled: false, reason: rate-limited, vendor: thirdvendor,"))
         observed = []
         def resumes(root, argv, **kwargs):
             if "--resume-report" in argv:
@@ -5183,7 +5189,7 @@ roles:
         self.assertEqual(latest["completed_reviews"], 1)
         self.assertEqual(latest["reviewed_by"], ["reviewer3"])
 
-    def test_captured_timeout_blocker_and_authorship_survive_unavailable_retry_planning(self):
+    def test_captured_timeout_blocker_survives_unavailable_retry_planning(self):
         self.captured_timeout_retry()
 
     def test_successful_captured_timeout_retry_reaches_verified_fixture_merge(self):

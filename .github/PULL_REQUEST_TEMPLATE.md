@@ -29,8 +29,8 @@ a trailer too; after anything else it opens a new paragraph, which demotes
 every trailer above it to prose no tool can read (sd:640, sd:5). Keep the
 trailer lines contiguous, with no blank line among them.
 Write no association, delivery or authorship line here. sd-ship appends the
-`Work` line to the body it publishes, and the `Item`, `Delivers` and
-authorship lines to the squash message; `sd-ship body` shows the result
+`Work` line to the body it publishes, and the `Item` and `Delivers`
+lines to the squash message; `sd-ship body` shows the result
 (sd:1870). A merge made without sd-ship writes them by hand, as WORKFLOW.md
 says. -->
 
