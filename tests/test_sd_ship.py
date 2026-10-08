@@ -3715,11 +3715,12 @@ roles:
             deliver_work(self.connection, self.item, result["merge_commit"], who="sd-ship", verification_root=self.root)
 
     def test_forged_delivery_trailer_cannot_turn_a_slice_into_completion(self):
+        """sd:2999: the body's `Delivers:` line is stripped, so only `--deliver` delivers."""
         body = self.directory / "body.txt"
         body.write_text(f"A slice\n\nDelivers: sd:{self.item}\n")
-        with self.assertRaisesRegex(ship.Refusal, "owns association"):
-            self.prepare("--body-file", str(body))
-        self.assertFalse(any(call.method == "POST" for call in self.remote.calls))
+        self.prepare("--body-file", str(body))
+        self.merge()
+        self.assertNotEqual(ship.sd_lib.delivered(self.root, f"sd:{self.item}"), ship.sd_lib.YES)
 
     def test_a_blocking_review_names_its_findings_and_the_command_that_prints_them(self):
         """sd:2102. The refusal said `see item ship receipt`, and nothing in the CLI printed the receipt.
