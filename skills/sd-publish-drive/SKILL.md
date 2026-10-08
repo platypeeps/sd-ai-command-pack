@@ -26,9 +26,9 @@ It has no `bin/` command: the steps below are the procedure, and `scripts/pack.p
    - **Relevance**: the draft, the thesis in `research.md`, and `PROFILE.md`. On thesis, and inside the profile's boundaries.
 6. A real problem stops the run before any external write. Report it and suggest `sd-draft`, or ask whether to publish with the findings accepted.
 7. Check `## Draft` for `TODO` or placeholder text.
-8. **Attach one tip.** `sd store list sdw.tip --status approved`; only `approved` counts. Skip a tip that `writing.metadata.tip` on another pushed piece already holds. Pick the best topic fit, not the top score, and say why. `pack tips attach --piece <year>/<slug> --title "<tip title>"` re-checks the status. Render the preview again. With no approved tip, publish without one and say so; never fall back to `inbox` and never write a tip inline.
+8. **Attach one tip.** `sd store list sdw.tip --status approved`; only `approved` counts. Skip a tip that `writing.metadata.tip` on another pushed piece already holds. Pick the best topic fit, not the top score, and say why. `pack tips attach --piece <year>/<slug> --title "<tip title>"` re-checks the status. Render the preview again. With no approved tip, publish without one and say so; do not fall back to `inbox` or write a tip inline.
 9. **Confirm with the user**: piece, word count, tip, account, publishing folder, and the final preview. Approval for that exact result stands.
-10. Read `sdw.google_account`, `sdw.drive_writing_folder` and `sdw.drive_publishing_folder` with `sd config get`. Claim, import once, verify native content, move the same document ID into the publishing folder, and reconcile, all per `references/publication.md`. A lost response needs readback, never a blind retry.
+10. Read `sdw.google_account`, `sdw.drive_writing_folder` and `sdw.drive_publishing_folder` with `sd config get`. Claim, import once, verify native content, move the same document ID into the publishing folder, and reconcile, all per `references/publication.md`. A lost response needs readback, not a blind retry.
 11. If the piece has `obsidian_source`, add `- Published copy: <Drive URL>` to the idea note's `Drive docs` section with `sd store set sdw.blog-idea "<idea title>" --section-file 'Drive docs=<file>'`, keeping its old lines.
 
 Report: title, word count, date, the gate findings, no open TODOs, the Drive URL, which tip and why, and that the live URL, the idea note and the tip still wait on the live URL.
@@ -39,7 +39,7 @@ The primary blog publishes from the Drive doc on its own schedule. When the user
 
 1. `pack pieces set-published-url --piece <year>/<slug> --target <primary> --url "<live URL>"`.
 2. With a tip: `sd store set sdw.tip "<tip title>" --field status=published --field url="<live URL>" --field used-by=<year>/<slug>`.
-3. With `obsidian_source`: `sd store set sdw.blog-idea "<idea title>" --field status=published --field url="<live URL>"`. The idea must be at `drafting`. The note's `url` is always the live primary URL, never the Drive doc.
+3. With `obsidian_source`: `sd store set sdw.blog-idea "<idea title>" --field status=published --field url="<live URL>"`. The idea must be at `drafting`. Set the note's `url` to the live primary URL, not the Drive doc.
 4. Only now may `sd-publish` write a personal-blog version that links to it.
 
 Never guess or build the live URL from a title or slug. A plausible 404 reads as done; a null reads as not live yet.
