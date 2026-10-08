@@ -398,6 +398,30 @@ class ReconciliationTests(InstallerHarness):
         self.assertTrue(edited.exists(), "an edited file was deleted")
         self.assertIn("modified since it was installed", output)
 
+    def test_a_retired_render_that_could_not_be_removed_is_tried_again(self):
+        """sd:2927: the receipt keeps a row whose removal failed, so the next install retries it."""
+        checkout = self.make_checkout("sd-kept", "sd-retired")
+        self.install(checkout)
+        targets = self.rendered("sd-retired")
+        subprocess.run(["rm", "-rf", str(checkout / "skills" / "sd-retired")], check=True)
+        self.write_paths(checkout, "sd-kept")
+        real = Path.unlink
+
+        def stuck(path, *args, **kwargs):
+            if path in targets:
+                raise OSError(1, "Operation not permitted")
+            return real(path, *args, **kwargs)
+
+        with unittest.mock.patch.object(Path, "unlink", stuck):
+            output = self.install(checkout)
+        self.assertIn("could not remove (Operation not permitted)", output)
+        recorded = {row["path"] for row in self.receipt["owned"]}
+        self.assertLessEqual({str(target) for target in targets}, recorded)
+        self.install(checkout)
+        for target in targets:
+            self.assertFalse(target.exists(), f"{target} was never tried again")
+        self.assertFalse(recorded - {row["path"] for row in self.receipt["owned"]} - {str(t) for t in targets})
+
     def test_a_corrupt_receipt_deletes_nothing(self):
         """The receipt is the delete authority, so an unreadable one grants none."""
         checkout = self.make_checkout("sd-kept", "sd-retired")
@@ -2273,7 +2297,9 @@ class ServingTreeTests(InstallerHarness):
 
     def stub_provision(self, ctx, commit, out):
         slot = ctx.checkout / sd_install.ENV_SLOTS[0]
-        slot.mkdir(exist_ok=True)
+        (slot / "bin").mkdir(parents=True, exist_ok=True)
+        if not (slot / "bin" / "python").is_symlink():
+            (slot / "bin" / "python").symlink_to(sys.executable)
         return slot
 
     def real_provision(self) -> "sd_install.Context":
@@ -2952,6 +2978,44 @@ class ServingTreeTests(InstallerHarness):
         self.assertEqual(Path(seen["file"]), self.serving / "bin" / "sd_install.py")
         self.assertEqual(seen["argv"], ["--user", "--home", str(self.home), "--bin-dir", str(self.home / "links")])
 
+    def test_the_target_renders_under_the_activated_slots_python(self):
+        """sd:2945: the render runs the slot `.venv` now links to, not the supervisor's python."""
+        merged = self.commit(self.origin, "two\n")
+        argvs = []
+        real = subprocess.run
+
+        def recorded(argv, **kwargs):
+            argvs.append(argv)
+            return real(argv, **kwargs)
+
+        out = io.StringIO()
+        with unittest.mock.patch.object(sd_install.subprocess, "run", side_effect=recorded):
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 0, out.getvalue())
+        self.assertEqual(self.head(), merged)
+        renders = [argv for argv in argvs if argv[1:3] == [str(self.serving / "bin" / "sd_install.py"), "--user"]]
+        self.assertEqual(len(renders), 1, argvs)
+        self.assertEqual(Path(renders[0][0]).parent.resolve(),
+                         (self.serving / sd_install.ENV_SLOTS[0] / "bin").resolve())
+
+    def test_a_slot_with_no_python_puts_the_tree_back(self):
+        """A render that cannot start is a failed render: the tree, `.venv` and receipt go back."""
+        self.commit(self.origin, "two\n")
+        self.write_receipt(commit=self.first)
+        before = self.context(self.serving).receipt.read_bytes()
+
+        def bare(ctx, commit, out):
+            slot = ctx.checkout / sd_install.ENV_SLOTS[0]
+            slot.mkdir(exist_ok=True)
+            return slot
+
+        out = io.StringIO()
+        with unittest.mock.patch.object(sd_install, "_provision", side_effect=bare):
+            self.assertEqual(sd_install.cmd_pull(self.context(self.serving), out), 1)
+        self.assertIn(f"error: cannot run {self.serving / '.venv' / 'bin' / 'python'} to render", out.getvalue())
+        self.assertEqual(self.head(), self.first)
+        self.assertFalse((self.serving / ".venv").is_symlink())
+        self.assertEqual(self.context(self.serving).receipt.read_bytes(), before)
+
     def test_a_render_that_raises_puts_the_tree_and_the_receipt_back_and_raises(self):
         merged = self.commit(self.origin, "two\n")
         self.write_receipt(commit=self.first)
@@ -3096,6 +3160,17 @@ class ServeTests(InstallerHarness):
         self.assertEqual(record["argv"], ["--pull", "--home", str(self.home)])
         self.assertEqual(Path(record["file"]).resolve(), (self.tree / "bin" / "sd_install.py").resolve())
         self.assertIn(f"cloned {self.origin} into {self.tree}", output)
+
+    def test_a_relative_local_origin_is_cloned_from_the_checkout(self):
+        """sd:2913: `../origin` names a path from the working checkout, not from the serving tree's parent."""
+        for url, expected in (("../origin", str(self.origin)), (f"file://{self.origin}", f"file://{self.origin}")):
+            with self.subTest(url=url):
+                self.git(self.work, "remote", "set-url", "origin", url)
+                rc, output = self.serve()
+                self.assertEqual(rc, 0, output)
+                self.assertEqual(self.git(self.tree, "remote", "get-url", "origin"), expected)
+                self.assertEqual(self.git(self.tree, "rev-parse", "HEAD"), self.merged)
+                subprocess.run(["rm", "-rf", str(self.tree)], check=True)
 
     def test_a_second_serve_reuses_the_clone_and_passes_the_link_directory(self):
         self.assertEqual(self.serve()[0], 0)
@@ -4253,6 +4328,29 @@ class LinkEdgeCaseTests(InstallerHarness):
         self.assertTrue((bin_dir / "sd-handoff").is_symlink())
         links = [row["path"] for row in self.receipt["owned"] if row.get("kind") == "link"]
         self.assertEqual(links, [str(bin_dir / "sd"), str(bin_dir / "sd-handoff")])
+
+    def test_a_retired_link_that_could_not_be_removed_is_tried_again(self):
+        """sd:2927: the receipt keeps the link row, so the next `--user` retries it."""
+        checkout = self.checkout_with_commands("sd", "sd-review")
+        ctx = self.context_for(checkout)
+        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+        (checkout / "bin" / "sd-review").unlink()
+        link = self.home / ".local" / "bin" / "sd-review"
+        real = Path.unlink
+
+        def stuck(path, *args, **kwargs):
+            if path == link:
+                raise OSError(1, "Operation not permitted")
+            return real(path, *args, **kwargs)
+
+        out = io.StringIO()
+        with unittest.mock.patch.object(Path, "unlink", stuck):
+            self.assertEqual(sd_install.cmd_user(ctx, out), 0)
+        self.assertIn(f"left in place (could not remove (Operation not permitted)): {link}", out.getvalue())
+        self.assertIn(str(link), [row["path"] for row in self.receipt["owned"]])
+        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+        self.assertFalse(link.is_symlink(), "the link was never tried again")
+        self.assertNotIn(str(link), [row["path"] for row in self.receipt["owned"]])
 
     def test_a_recorded_link_already_gone_is_not_an_error(self):
         checkout = self.checkout_with_commands("sd", "sd-handoff", "sd-review")

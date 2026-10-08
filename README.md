@@ -462,6 +462,8 @@ rest safe:
   knows the old path was ours.
 - A rendered file you have since edited by hand is **kept** and reported, never
   silently deleted.
+- A stale path it could not remove stays in the receipt, so the next `--user`
+  tries again.
 - `--uninstall` removes those paths and nothing else. A recorded link that no
   longer points into this checkout is left and reported, a link the receipt
   never named is never touched, and the link directory stays. The global

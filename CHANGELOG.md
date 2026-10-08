@@ -566,6 +566,11 @@
 
 ### Fixed
 
+- **Installer follow-ups to the serving tree (sd:2945, sd:2927, sd:2913).**
+  `--pull` renders the target with the activated slot's `.venv/bin/python`, so a library upgrade renders with the new `sd_db`; a slot with no python is a failed render and puts the tree back.
+  A stale render or link that `--user` could not remove stays in the receipt, so the next install tries it again.
+  `--serve` resolves a relative local origin, such as `../pack.git`, against the working checkout before it clones.
+
 - **`sd task add --ref` clears the body when a second add passes `--body ''` (sd:2899).**
   The update checked the body for truthiness, so an explicit empty body kept the old one.
   Now `--body ''` clears it and an add without `--body` keeps it.
