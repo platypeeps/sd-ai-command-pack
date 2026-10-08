@@ -70,8 +70,9 @@ GATE_PREFIX = "sd-local-gate-"
 GATE_FOLDER = re.compile(r"sd-local-gate-([0-9]{1,9})-[a-z0-9_]+")
 #: The check's own `TMPDIR`, beside the gate's worktree: the gate's cleanup removes what the check's tests leave (sd:3032).
 TEMPORARY = "tmp.noindex"
-#: An sd folder that names its owner's pid: a gate's, or a test run's (`tests/__init__.py`); it goes once the pid is gone.
-OWNED = re.compile(r"(?:sd-local-gate|sd-tests)-([0-9]{1,9})-[a-z0-9_]+")
+#: An sd folder that names its owner's pid: a gate's, a test run's (`tests/__init__.py`), or a review's prior report
+#: (`bin/sd_ship_review.py`, sd:3059); it goes once the pid is gone.
+OWNED = re.compile(r"(?:sd-local-gate|sd-tests|sd-ship-verify)-([0-9]{1,9})-[a-z0-9_]+")
 
 
 def running(pid: int) -> bool:

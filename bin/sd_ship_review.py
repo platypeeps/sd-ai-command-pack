@@ -773,7 +773,8 @@ class SharedReview:
             passes[-1]["review_binding_change"] = {"head": head, "recorded_at": self.runtime.clock(),
                                                    "superseded_binding": self.state.get("binding"),
                                                    "changed": [list(row) for row in self.binding_changes()]}
-        with tempfile.TemporaryDirectory(prefix="sd-ship-verify-") as directory:
+        # The pid lets the next gate start remove the folder a killed run left (sd:3059, `sd_gate_cache.OWNED`).
+        with tempfile.TemporaryDirectory(prefix=f"sd-ship-verify-{os.getpid()}-") as directory:
             if prior:
                 prior_path = pathlib.Path(directory) / "prior-review.json"
                 prior_path.write_text(json.dumps(prior, sort_keys=True), encoding="utf-8")
