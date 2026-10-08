@@ -69,7 +69,8 @@ GATE_PREFIX = "sd-local-gate-"
 #: The whole folder name `tempfile` makes from that prefix; nine digits keep a pid within `os.kill`'s range.
 GATE_FOLDER = re.compile(r"sd-local-gate-([0-9]{1,9})-[a-z0-9_]+")
 #: The check's own `TMPDIR`, beside the gate's worktree: the gate's cleanup removes what the check's tests leave (sd:3032).
-TEMPORARY = "tmp.noindex"
+# ponytail: one letter, so a socket under it fits macOS's 104-byte path cap (sd:3086); move TMPDIR to /tmp if 24 bytes stop sufficing.
+TEMPORARY = "t"
 #: An sd folder that names its owner's pid: a gate's, a test run's (`tests/__init__.py`), or a review's prior report
 #: (`bin/sd_ship_review.py`, sd:3059); it goes once the pid is gone.
 OWNED = re.compile(r"(?:sd-local-gate|sd-tests|sd-ship-verify)-([0-9]{1,9})-[a-z0-9_]+")
