@@ -1243,6 +1243,50 @@ class ASquashIsALanding(unittest.TestCase):
         self.assertIn(["api", "repos/acme/widget/pulls/7"], calls)
 
 
+class ASquashedBranchThisCloneNeverFetched(unittest.TestCase):
+    """A clone made after the squash holds `main` and none of the branch (sd:2942).
+
+    Observed on a satellite clone: 164 findings on 17 squash-merged pull
+    requests read `fix-missing`, every one already `fixed` by a branch commit.
+    The branches were deleted at merge, so the clone never fetched them.
+    `origin` here keeps the head as GitHub does, under `refs/pull/7/head`.
+    """
+
+    def setUp(self) -> None:
+        self.stack = tempfile.TemporaryDirectory()
+        self.addCleanup(self.stack.cleanup)
+        self.origin = Squash(self.stack)
+        self.origin._git("update-ref", "refs/pull/7/head", self.origin.head)
+        self.origin._git("branch", "-q", "-D", "topic", "elsewhere", "stranded")
+        self.clone = pathlib.Path(self.stack.name) / "clone"
+        # `--no-local`: a path clone hardlinks every object, the branch's too.
+        subprocess.run(["git", "clone", "-q", "--no-local", str(self.origin.root), str(self.clone)], check=True)
+        self.addCleanup(ack._FETCHED_HEADS.clear)
+        ack._FETCHED_HEADS.clear()
+
+    def has(self, commit: str) -> bool:
+        return subprocess.run(["git", "cat-file", "-e", commit], cwd=str(self.clone),
+                              capture_output=True, check=False).returncode == 0
+
+    def test_the_merged_head_is_fetched_before_the_verdict(self) -> None:
+        self.assertFalse(self.has(self.origin.answer))
+        merge = {"head": self.origin.head, "merge": self.origin.squash}
+        self.assertEqual(ack.fix_verdict(self.clone, self.origin.answer, "origin/main", merge), "landed")
+
+    def test_without_merge_evidence_nothing_is_fetched(self) -> None:
+        self.assertEqual(ack.fix_verdict(self.clone, self.origin.answer, "origin/main"), "fix-missing")
+        self.assertFalse(self.has(self.origin.answer))
+
+    def test_a_head_the_remote_lacks_still_reads_missing_and_is_asked_once(self) -> None:
+        merge = {"head": "0" * 40, "merge": self.origin.squash}
+        with unittest.mock.patch.object(ack.sd_lib, "git_output", wraps=ack.sd_lib.git_output) as git:
+            for _ in range(2):
+                self.assertEqual(ack.fix_verdict(self.clone, self.origin.answer, "origin/main", merge),
+                                 "fix-missing")
+        fetches = [call for call in git.call_args_list if call.args[0][0] == "fetch"]
+        self.assertEqual(len(fetches), 1)
+
+
 class ARestatedFindingIsNotAnswered(unittest.TestCase):
     """A record the reviewer has read and overruled stops satisfying the gate.
 
