@@ -29,7 +29,7 @@ be wrong.
 
 ## The one rule that keeps it honest
 
-**Enumerate; never recite.** A hardcoded list of the twelve commands is a list
+**Enumerate; never recite.** A hardcoded list of the eleven commands is a list
 that drifts the first time one is added or retired, and it drifts silently
 because nothing reads it. If you are answering "what commands exist", read the
 `skills/` tree or the installed renders — do not answer from this file, from

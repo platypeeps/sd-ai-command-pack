@@ -75,12 +75,13 @@ roles:
 """
 
 
-def written(text: str) -> pathlib.Path:
+def written(case: unittest.TestCase, text: str) -> pathlib.Path:
     handle = tempfile.NamedTemporaryFile(
         "w", suffix=".yaml", delete=False, encoding="utf-8"
     )
     with handle:
         handle.write(text)
+    case.addCleanup(pathlib.Path(handle.name).unlink)  # sd:3032: the file outlived every run
     return pathlib.Path(handle.name)
 
 
@@ -157,7 +158,7 @@ class TheShippedRegistry(unittest.TestCase):
                     self.assertEqual(provider.kind, "url")
 
     def test_a_disabled_entry_carries_its_reason_and_never_resolves(self) -> None:
-        fixture = sd_registry.read_file(written(WITH_DISABLED))
+        fixture = sd_registry.read_file(written(self, WITH_DISABLED))
         self.assertFalse(fixture.providers["three"].enabled, "the fixture lost its disabled entry")
         for registry in (self.registry, fixture):
             self.assert_disabled_entries_never_resolve(registry)
@@ -194,6 +195,7 @@ class AddingAProviderIsAnEntry(unittest.TestCase):
 
     def test_an_unknown_name_with_a_url_resolves(self) -> None:
         path = written(
+            self,
             MINIMAL.replace(
                 "roles:\n  author: [one]\n  reviewer: [two]\n",
                 "roles:\n  author: [one]\n  reviewer: [exo, two]\n",
@@ -1140,7 +1142,7 @@ class ThePick(unittest.TestCase):
         self.assertIn("only list of providers", str(caught.exception))
 
     def test_a_disabled_entry_is_refused_by_its_reason(self) -> None:
-        registry = sd_registry.read_file(written(WITH_DISABLED))
+        registry = sd_registry.read_file(written(self, WITH_DISABLED))
         consent = sd_registry.parse_consent(
             " ".join(str(sd_registry.recipient(p)) for p in registry.providers.values())
         )
@@ -1616,7 +1618,7 @@ class StandingReviewConsentTests(unittest.TestCase):
                 sd_registry.pick(registry, entry.name, consent=consent, readers=("codex-json",))
 
     def test_configured_consent_does_not_authorize_non_reviewers(self):
-        registry = sd_registry.read_file(written(WITH_DISABLED))
+        registry = sd_registry.read_file(written(self, WITH_DISABLED))
         consent, _ = sd_registry.resolve_consent(registry, None, "configured")
         self.assertEqual(set(consent), {"two"})
 

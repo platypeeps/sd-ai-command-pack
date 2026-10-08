@@ -424,11 +424,13 @@ STRANDED_RULE_IDS: frozenset[str] = frozenset()
 #:
 #: Per document rather than as one total, so a new uncited claim in `sd-ship`
 #: fails even in a change that cleaned two out of `sd-plan`. One number for the
-#: whole tree would net them off and say nothing.
+#: whole tree would net them off and say nothing. `sd-tips` arrived with its
+#: floor claim when sd:3001 moved it in; `refuse_below_floor` in `bin/sd`
+#: enforces it, and no rule id covers it yet.
 UNCITED_SKILL_CLAIMS = {
     "skills/sd-plan/SKILL.md": 1,
     "skills/sd-research-repo/templates/CLAUDE.md": 1,
-    "skills/sd-suggest/SKILL.md": 1,
+    "skills/sd-tips/SKILL.md": 1,
 }
 
 

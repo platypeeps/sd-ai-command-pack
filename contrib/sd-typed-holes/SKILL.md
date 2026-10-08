@@ -84,23 +84,7 @@ Unknown argument names are an error — stop and report them before starting.
    type change has found a skeleton defect — stop, amend the skeleton as
    its own reviewed change, then resume filling. Never let a fill mutate
    the surface in passing.
-8. Optionally delegate the passes to the pack's agent trio: the
-   `sd-rust-write` agent lays the skeleton, the `sd-rust-fill` agent
-   fills named holes against a fixed surface, and the `sd-rust-reviewer`
-   agent examines each pass. When the work spans multiple units, split it
-   as one skeleton unit plus one unit per fill batch, and gate each unit
-   with `sd-check`. `sd-rust-write` and `sd-rust-fill` change files, so
-   each runs in its own worktree, and never two in one checkout; a fill
-   batch that returns a diff for the parent to apply is the patch-only
-   shape the pack prefers. `sd-rust-reviewer` is read-only and may run
-   beside either. Give each agent a budget, run it in the background, and
-   treat no report by the deadline as a failure. `sd-rust-reviewer` may be
-   respawned on the deadline alone. A silent `sd-rust-write` or
-   `sd-rust-fill` may not: cancel it and confirm it is gone before starting
-   a replacement, because its worktree is still its own, and escalate when
-   the cancellation cannot be confirmed. The rules are the sd-ai-command-pack checkout's
-   `WORKFLOW.md`, section **Parallel work**.
-9. Close out: remove the remaining dead-code allowance, flip the hole
+8. Close out: remove the remaining dead-code allowance, flip the hole
    lint to deny or show the grep returning nothing, and confirm the
    surface carries no marker whose reason is stale.
 
@@ -131,9 +115,8 @@ Unknown argument names are an error — stop and report them before starting.
 - **Marker status** — expect-markers and dead-code allowances still
   standing and the units that will remove them;
 - **Fill progress** — bodies filled this pass and the per-fill check
-  results;
-- **Handoffs** — units delegated to `sd-rust-write`, `sd-rust-fill`, or
-  `sd-rust-reviewer`, and reviews routed to the `sd-review` lane.
+  results; and
+- **Handoffs** — reviews routed to the `sd-review` lane.
 
 ## Lineage
 

@@ -19,8 +19,8 @@ packet's `files[]` lists", sd-humanizer "rewrite the file in place",
 sd-technical-editor "Edit mode authorizes only the supplied draft". It is
 looser than the audit's reading, on purpose: a predicate tight enough to match
 only the six would be the list again, spelled as a regex. So it also matches
-a skill that declares itself read-only in the negative ("Never write to a
-file") and one that writes another repository's tree, and those are held in
+a skill that declares itself read-only in the negative ("It does not
+create or edit slide files") and one that writes another repository's tree, and those are held in
 `NOT_WRITERS` where a reviewer can read why. A seventh skill that writes a
 file lands in neither set and `test_the_list_is_what_the_predicate_answers`
 names it; a skill that leaves `NOT_WRITERS` for the tree without moving to
@@ -55,6 +55,7 @@ POINTER = "sd-rules --for"
 #: answer reads in one order.
 WRITER_SKILLS = (
     "sd-debug",
+    "sd-draft",
     "sd-handoff",
     "sd-humanizer",
     "sd-plan",
@@ -67,10 +68,11 @@ WRITER_SKILLS = (
 #: here is held to the predicate: the day its page stops matching, the entry
 #: is stale and the derivation test says so.
 NOT_WRITERS = {
-    "sd-capture": "matches the negation `Never write to a file`; the skill "
-                  "declares itself read-only and destination-neutral",
     "sd-presentation": "matches the negation `It does not create or edit "
                        "slide files`; the skill declares itself read-only",
+    "sd-draft-review": "matches `writes the draft and its research to "
+                       "Google Docs`; it writes Google Docs, and its one "
+                       "repository write goes through `scripts/pack.py`",
     "sd-research-repo": "matches `Write or edit through the file tools`; the "
                         "files it writes are another repository's, its own "
                         "`CLAUDE.md` among them, not this tree's",

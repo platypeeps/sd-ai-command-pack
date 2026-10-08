@@ -1471,10 +1471,10 @@ class AddListsAndSectionsTests(StoreFixture):
 
 
 class ValueFromFileTests(StoreFixture):
-    """10b-i: the two flags `sdw-tips` cannot move without.
+    """10b-i: the two flags the tips skill (now `sd-tips`) cannot move without.
 
     Step 9 retargeted all six of the vault's `pack.py` invocations and left one
-    caller standing outside it: `sdw-tips`, in the plugin repository, which
+    caller standing outside it: the tips skill, then in the plugin repository, which
     passes its tip text as `--tip-file` precisely so a backtick in the prose is
     not run by the shell. `sd store add` had no twin for that flag; these two
     flags are it.

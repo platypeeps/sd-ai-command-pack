@@ -32,8 +32,10 @@ stop and identify them before reading a profile or source.
 
 - `mode=create|status|propose-update|apply-approved|correct|forget|review|audience|import|export`
   — infer only when the requested operation is unambiguous.
-- `profile=auto|<locator>` — `auto` resolves only an attached, authorized
-  profile or a private host-configured locator; it never searches all stores.
+- `profile=auto|voice|personality|<locator>` — `auto` resolves only an attached,
+  authorized profile or a private host-configured locator; it never searches
+  all stores. `voice` and `personality` pick a writing content repository's
+  author profiles; see *Writing profiles*.
 - `sources=` — a bounded list of current-chat material, messages, notes, pages,
   documents, or URLs authorized for this invocation.
 - `destination=obsidian|notion|<locator>` — the user-selected first-write or
@@ -129,6 +131,35 @@ ambiguous, ask one focused question and do not mutate anything.
    requested. Never silently fall back from Obsidian to Notion. Never mirror
    both destinations, embed a locator in public configuration, or weaken
    approval/read-back rules because a connector is unavailable.
+
+## Writing profiles
+
+A writing content repository keeps two author profiles that `sd-draft`,
+`sd-research` and `sd-ask-me` read: `profile/brand-voice/` (`VOICE.md`, how
+a piece sounds) and `profile/personality-profile/` (`PROFILE.md`, what it
+argues and refuses). Each folder holds the synthesized file, `evidence/`
+(raw sources with provenance) and `interview-log.md` (verbatim Q&A).
+`profile=voice` or `profile=personality` picks one. Infer ingest or
+interview from the request; ask when it is unclear.
+
+- **Ingest.** Take a local file, a vault path, a URL or pasted text, and read
+  it in full. Save a copy in `evidence/` under a kebab-case name with a
+  header of `source:`, `fetched:` and a one-line `relevance:`. Compare with
+  the profile: note what it reinforces, add what is new to the right section,
+  and flag a contradiction to the user instead of overwriting; ask which is
+  current. Bump `updated` and remove gaps it resolved.
+- **Interview.** Start from `## Gaps / open questions`, and check `evidence/`
+  first so you never re-ask. Ask one question at a time. Push a vague answer
+  for a concrete example or an actual sentence. Append each answer verbatim
+  to `interview-log.md` under a dated heading. Personal territory (family,
+  values) gets a check before you push further. When a gap closes, fold it
+  in, remove it from the gaps, bump `updated`, and move `status: seeded` to
+  `maturing` after the first real session.
+- **New gaps.** A question the profile cannot answer becomes a bullet under
+  `## Gaps / open questions`, never a guess. Name new gaps in the report.
+
+Report what reached `evidence/`, what changed in the profile, and any
+contradiction that needs the user's call.
 
 ## Safety rules
 

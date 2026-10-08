@@ -19,7 +19,7 @@ saved videos, links, messages, pages, or notes from supplied or connected
 sources. The result is a read-only triage artifact, not a source cleanup.
 
 Do not use for deep viewing (`sd-video-notes`), whole-corpus synthesis
-(`sd-digest`), durable capture (`sd-capture` or `sd-knowledge-capture`), or
+(`sd-digest`), durable capture (`sd-capture`), or
 commitment extraction (`sd-action-inbox`). If a named sibling is unavailable,
 say so rather than silently absorbing its workflow.
 
@@ -120,4 +120,4 @@ reading saved items.
 - **Evidence coverage** — counts and material decisions by `full content`,
   `snippet`, `metadata`, `user context`, and `judgment`;
 - **Recommended handoffs** — optional, not-yet-run routes to `sd-video-notes`,
-  `sd-capture`, `sd-knowledge-capture`, or `sd-action-inbox`.
+  `sd-capture`, or `sd-action-inbox`.

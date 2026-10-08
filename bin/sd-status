@@ -3443,7 +3443,7 @@ def _tool_candidates(tool: str) -> tuple[str, ...]:
     of `bin/sd-suggest` could be answered by `bin/sd_suggest.py`. It cannot.
     `bin/sd_suggest.py` is an implementation module `bin/sd` imports; the
     command is `sd suggest`, and nothing named `bin/sd-suggest` exists. The
-    skill disclosing it says so in the very line the regex matches -- *"There
+    skill disclosing it said so in the very line the regex matched -- *"There
     is no `bin/sd-suggest` yet"* -- which is word for word what `skills/sd-help`
     says about `bin/sd-help`. The transform gave those two identical sentences
     opposite verdicts, and silenced the one whose stem a module happened to

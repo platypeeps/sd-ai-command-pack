@@ -259,7 +259,7 @@ In a shared repository:
   see [Standing authorization](#standing-authorization). No permission covers a merge that skips
   the review lane. Ownership and protection gates still decide whether `sd-ship` can execute it;
   a refusal is a stop.
-- No issue filed. `sd-suggest` writes a row everywhere; `sd suggest publish`
+- No issue filed. `sd suggest add` writes a row everywhere; `sd suggest publish`
   files it as an sd item when you run it, in the checkout you name with
   `--belongs-to`. No pack surface files a GitHub issue.
 

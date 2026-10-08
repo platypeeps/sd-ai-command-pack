@@ -130,7 +130,7 @@ def suggest_publish(args) -> int:
             raise rows.RowsRefusal(f"--belongs-to: {key} is not a registered repository")
         repo = str(registered["path"])
 
-        # The dedup read the skill requires at `skills/sd-suggest/SKILL.md` --
+        # The dedup read before filing --
         # an open item in that checkout with the same title is the suggestion
         # already filed, so this files nothing and says which item holds it.
         # `same_repo` rather than an equality probe, so every stored form of the

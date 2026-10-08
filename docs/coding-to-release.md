@@ -12,7 +12,7 @@ An agent runs the commands; the user owns scope, exceptions, and release permiss
 | Isolate and implement | Git branch or worktree; editor; focused tests | Coding agent | Scoped changes and regression tests exist. Concurrent work remains untouched. |
 | Check readiness | `sd-review --scope branch --challenge --explain --json` | Pack inspects; agent handles approval | Local blockers are resolved before checks or dispatch. Runtime approval remains separate. |
 | Check | `sd-check --json`; repository `make check` | Repository checks, invoked by agent | Required checks pass. A partial test run does not replace the full gate. |
-| Review | `sd-review --scope branch --challenge`; `sd-gate-probes` skill | Independent reviewer; agent dispositions findings | Required coverage completes and blocking findings have evidenced dispositions. |
+| Review | `sd-review --scope branch --challenge` | Independent reviewer; agent dispositions findings | Required coverage completes and blocking findings have evidenced dispositions. |
 | Commit, push, open PR | `sd-ship prepare --item ID --deliver\|--associate-only --json` | Pack command, directed by agent | Exact reviewed head is published. Optional commit flags enumerate each path. |
 | Wait for CI | `gh pr checks N --watch --fail-fast` | GitHub runs checks; agent watches once | Checks pass for the intended head. Failures return to implementation. |
 | Merge | `sd-ship merge --item ID --expected-head SHA --manual --watch --json` | User authorizes; pack checks; GitHub merges | Review, ownership, protection, and exact-head checks permit the merge. |
@@ -20,7 +20,7 @@ An agent runs the commands; the user owns scope, exceptions, and release permiss
 | Close out every merge | Ship skill's [post-merge procedure](../skills/sd-ship/references/post-merge-closeout.md); `sd-review-ack --pr N --check --json` | Agent inspects; user approves exact deletions | Findings have evidenced dispositions; retained work and cleanup candidates are inventoried. |
 | Activate and verify | Pack: `python3 bin/sd_install.py --pull`; `python3 bin/sd_install.py --verify --json`; system: component installer and check | Operator or authorized agent | Receipt, source, rendered files, PATH resolution, and bounded help checks pass. |
 
-`sd-plan` and `sd-gate-probes` are agent skills, not shell executables.
+`sd-plan` is an agent skill, not a shell executable.
 In Codex, invoke skills with `$sd-plan`, `$sd-review`, or `$sd-ship`.
 Their absence from the `/` menu does not establish that skills or shell commands are missing.
 The `sd-ship` skill coordinates the sequence; its executable has separate prepare, merge, observe, and reconcile operations.
