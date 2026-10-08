@@ -426,6 +426,7 @@ STRANDED_RULE_IDS: frozenset[str] = frozenset()
 #: fails even in a change that cleaned two out of `sd-plan`. One number for the
 #: whole tree would net them off and say nothing.
 UNCITED_SKILL_CLAIMS = {
+    "skills/sd-plan/SKILL.md": 1,
     "skills/sd-research-repo/templates/CLAUDE.md": 1,
     "skills/sd-suggest/SKILL.md": 1,
 }

@@ -1,7 +1,7 @@
 # Provider registry detail
 
 The detail behind the shipped registry entries in [WORKFLOW.md § Providers](../WORKFLOW.md#providers).
-It records how each pin, meter and limit was chosen.
+It describes the meter, token ceiling and reasoning controls each shipped entry uses.
 
 Pins as of 2026-09-05, each read from the vendor's model list on that day:
 `kimi-k3` is Moonshot's current flagship with a one-million-token window;

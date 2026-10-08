@@ -45,8 +45,34 @@ write a design just to record routine progress or work already merged.
    agreement. The templates are in `skills/sd-plan/templates/` (`design.md`,
    `decision.md`, `work-README.md`). Name the row in its frontmatter as
    `item: sd:<id>`, and add no `status:` field. Create `<work>/README.md` from
-   the template if the directory is new.
-4. **Review the plan.** Run `sd-review --scope planning`, which resolves one
+   the template if the directory is new. The file/row status rules stand
+   until sd:3015; for an item with a `prd.md`, adapt the
+   templates to the selected work root's `.status-source` marker, including
+   when `--work-dir` changes that root. When it says `row`, keep progress in
+   the database and add no `status:` field. With `file` or no marker, add
+   `status: planning` for the legacy reader. Report an
+   unrecognized marker instead of falling back. Do not recreate retired
+   frontmatter from a template.
+4. **Register the row**, when the item is under `docs/work` and that root's
+   `.status-source` says `row`. Run `sd work register docs/work/<item>/prd.md`
+   as soon as the file exists. Under a `--work-dir` root the step does not
+   apply and the command will refuse: a row's identity is
+   `<checkout>::docs/work/<item>/prd.md`, where `<checkout>` is the
+   registered key -- `~/repos/<name>` for a checkout under `$HOME` -- and
+   every reader keys on it, so
+   there is no row shape for an item that lives somewhere else. Say the item
+   is unregistered rather than inventing one. The
+   retirement handed status to the database and took the importer away with
+   it, so a folder written after the cutover has a `prd.md` and no row, which
+   is the state `sd-status` reports as `status-unreadable`. Registering is
+   idempotent: a second call prints `already registered` and changes nothing,
+   so re-running it on an item that already has a row is safe. The row takes
+   its name and its date from the file's `title:` and `created:`, which must
+   both be present. With `file` or no marker, skip this step — the `status:`
+   field is the record there, and a row beside it would be a second answer to
+   one question. `sd work register` refuses such a repository by name, so the
+   step cannot create that state by mistake.
+5. **Review the plan.** Run `sd-review --scope planning`, which resolves one
    active `planning`/`in_progress` item's `design.md` (and an older item's
    `prd.md`/`implement.md`) and routes them to the reviewer the registry gives. Which one: the item
    whose `branch:` is the branch you are on. With several active items and
@@ -59,15 +85,17 @@ write a design just to record routine progress or work already merged.
    That file lives only in the sd-ai-command-pack checkout, and planning runs
    in whatever repository encloses cwd (R10-D6), so read the cap there. Record
    the findings on the item's row.
-5. **Promote.** `planning → ready` only when acceptance criteria are present
+6. **Promote.** `planning → ready` only when acceptance criteria are present
    and **no open `BLOCKING` line remains**. An unresolved blocking concern is a
    stop, not a note. In a checkout using row status, write the transition
    through `sd_db`; a missing item row is reported as missing, never replaced
    by a status field or a GitHub issue.
-6. **Branch.** Create the branch when work starts; the row records it. The branch's checkout holds one writer:
+7. **Branch.** Create the branch when work starts; the row records it. The branch's checkout holds one writer:
    this session in its own worktree (`--worktree`), or the runner in its
    clone. See the sd-ai-command-pack checkout's `WORKFLOW.md`, section
-   **Parallel work**.
+   **Parallel work**. An `in_progress` item still needs a branch
+   (`sd-docs-lint` rule 2); in a checkout using row status, the status itself
+   remains on the row.
 
 There is no automatic archive, parking or sweep step. `sd-status` reports
 idle planning items as `idle-planning` rows and moves nothing. Planning and

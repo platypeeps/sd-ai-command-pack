@@ -12,6 +12,8 @@ Instructions for AI assistants working in this repository.
   unless the user says wait. `manual` or no row: ask the operator first.
   No value permits a merge that skips `sd-ship`, such as `gh pr merge` or a web squash; an `sd-ship` refusal is a stop.
 - Reject a review finding with a reason note a reader can check; a rebuttal needs no operator acceptance.
+- Ask the operator before adding a command, flag, config key, state store, gate, check, file kind or document type; name what it replaces, and prefer deleting or reusing.
+- Record decisions, incidents and findings in sd notes, not in new `docs/` files.
 - Do not create pull requests in the upstream `Trellis` repository without
   explicit approval from the user for that specific upstream PR. If
   `sd-ai-command-pack` work uncovers a `Trellis`-owned change, document the
