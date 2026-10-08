@@ -33,6 +33,10 @@ contract with the repository under test: this run is the gate, so build what
 the check needs here and borrow nothing from the operator. The pack's own
 Makefile reads it to provision a pinned in-tree virtualenv (sd:1918); a
 repository that does not read it runs as it always did.
+
+Every git in the run, the gate's own and the check's, reads `core.fsmonitor=false`
+(`sd_lib.without_fsmonitor`, sd:2993), and `sd-check` leads a process group, so
+stopping the gate stops the check and frees its slot (sd:2978).
 """
 
 from __future__ import annotations
@@ -83,9 +87,10 @@ class GateError(RuntimeError):
 
 
 def gate_git(root: pathlib.Path, *args: str) -> str:
-    """`git <args>` in `root`, stripped; `GateError` on any failure, since a gate must not guess."""
+    """`git <args>` in `root`, stripped; `GateError` on any failure, since a gate must not guess. No fsmonitor (sd:2993)."""
     try:
-        result = subprocess.run(["git", *args], cwd=root, text=True, capture_output=True, timeout=60, check=False)
+        result = subprocess.run(["git", *args], cwd=root, text=True, capture_output=True, timeout=60, check=False,
+                                env=sd_lib.without_fsmonitor(os.environ))
     except (OSError, subprocess.SubprocessError) as error:
         raise GateError(f"git could not finish: {error}") from None
     if result.returncode:
@@ -116,14 +121,15 @@ def gate_environment(root: pathlib.Path, environ: dict[str, str] | None = None) 
     """The caller's environment without package selectors, forced colour, the operator's `CARGO_TARGET_DIR`,
     session variables, `PATH` entries in `root`, no folder (fnm's per-shell link, sd:2772) or venv `bin`s; each resolved.
 
-    Plus `SD_LOCAL_GATE=1`, `NO_COLOR=1` and `PYTHON_COLORS=0`, whatever the caller had them set to.
+    Plus `SD_LOCAL_GATE=1`, `NO_COLOR=1` and `PYTHON_COLORS=0`, whatever the caller had them set to,
+    and `core.fsmonitor=false` for every git the check runs in the fresh worktree (sd:2993).
     """
     source = os.environ if environ is None else environ
     env = {key: value for key, value in source.items()
            if key not in DROPPED_ENVIRONMENT + SESSION_ENVIRONMENT and not key.startswith(SESSION_PREFIXES)}
     env["PATH"] = os.pathsep.join(sd_gate_receipts.gate_path(env.get("PATH", ""), root))
     env.update({GATE_VARIABLE: "1", **NO_COLOUR_ENVIRONMENT})
-    return env
+    return sd_lib.without_fsmonitor(env)
 
 
 #: How a caller runs the `sd-check` child: `(argv, env, cwd, timeout)` to `(exit code or None, stdout, stderr)`.
@@ -131,9 +137,10 @@ Run = Callable[[list[str], dict[str, str], pathlib.Path, int], tuple[int | None,
 
 
 def run_child(argv: list[str], env: dict[str, str], cwd: pathlib.Path, timeout: int) -> tuple[int | None, str, str]:
+    """`sd-check` as a process group's leader, so stopping this process stops it and frees its slot (sd:2978)."""
     try:
-        result = subprocess.run(argv, cwd=cwd, text=True, capture_output=True, timeout=timeout, check=False, env=env)
-    except (OSError, subprocess.SubprocessError) as error:
+        result = sd_lib.run_group(argv, cwd=cwd, env=env, timeout=timeout)
+    except (OSError, subprocess.SubprocessError, sd_lib.GroupTimeout) as error:
         return None, f"sd-check could not finish: {error}", ""
     return result.returncode, result.stdout, result.stderr
 

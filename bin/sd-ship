@@ -2645,7 +2645,7 @@ def body_command(args) -> int:
         output = (linted.stdout + linted.stderr).strip()
         result = {"ok": not sd_ship_body.failures(linted), "body": body, "body_source": source,
                   "normalized": list(stripped), "lint": {"exit": linted.returncode, "output": output}}
-    except (Refusal, OSError, UnicodeDecodeError, subprocess.SubprocessError) as error:
+    except (Refusal, OSError, UnicodeDecodeError, subprocess.SubprocessError, sd_lib.ConfigError) as error:
         result = failure("body", error)
         body, stripped, output = "", (), str(error)
     if args.json:

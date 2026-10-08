@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import importlib.util
+import io
 import json
 import os
 import pathlib
@@ -736,6 +737,19 @@ class ShipProcess(Lane):
             answer = sd_lane.ship_process(["-C", str(self.repo), "lane", "list"], log, 120)
         self.assertEqual((answer["ok"], answer["entries"]), (True, []))
         self.assertTrue(log.read_text(encoding="utf-8").startswith(f"$ sd-ship -C {self.repo} lane list\n{{"))
+
+
+class Resolution(unittest.TestCase):
+    def test_a_git_that_gave_no_answer_is_reported_as_itself(self) -> None:
+        """sd:2986: a satellite lane run under load reported a git timeout as 'cwd is not inside a Git repository'."""
+        import argparse  # noqa: PLC0415
+        out = io.StringIO()
+        stalled = subprocess.TimeoutExpired(["git"], sd_lane.sd_lib.GIT_TIMEOUT_SECONDS)
+        with mock.patch.object(sd_lane.sd_lib.subprocess, "run", side_effect=stalled), contextlib.redirect_stdout(out):
+            code = sd_lane.lane_main(argparse.Namespace(lane_command="list"))
+        error = json.loads(out.getvalue())["error"]
+        self.assertEqual(code, 3)
+        self.assertIn("git rev-parse --show-toplevel did not finish within", error)
 
 
 class Watch(Lane):

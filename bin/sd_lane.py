@@ -1158,10 +1158,10 @@ def add_lane_verbs(commands: Any) -> None:
 def lane_main(args: Any) -> int:
     """The `sd-ship lane` verbs; prints JSON and exits 0, or 3 with the refusal."""
     environ = dict(os.environ)
-    root = sd_lib.repo_root(None)
     try:
         if args.lane_command == "watch":
             return watch(lane_root(environ), once=args.once)
+        root = sd_lib.repo_root(None)  # a git that gave no answer says why, as a ConfigError (sd:2986)
         if root is None:
             raise LaneError("cwd is not inside a Git repository")
         if args.lane_command in QUEUE_VERBS:  # no `lane run` drains a satellite's queue (sd:2795)

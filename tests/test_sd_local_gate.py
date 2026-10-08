@@ -13,9 +13,11 @@ import json
 import os
 import pathlib
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 import unittest
 from unittest import mock
@@ -37,6 +39,26 @@ BLOCK_START, BLOCK_END = sd_lib.LOCAL_BLOCK_START, sd_lib.LOCAL_BLOCK_END
 
 def git(root: pathlib.Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True, text=True).stdout.strip()
+
+
+def running(pid: int) -> bool:
+    """Alive and not a zombie waiting for its parent to reap it."""
+    state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+    return bool(state) and not state.startswith("Z")
+
+
+def started(path: pathlib.Path, count: int) -> list[int]:
+    """The pids a stand-in check wrote, once there are `count` of them; whatever is there for 0."""
+    deadline = time.monotonic() + 30
+    while count and len(path.read_text().split() if path.is_file() else []) < count:
+        assert time.monotonic() < deadline, "the stand-in check never recorded its pids"
+        time.sleep(0.05)
+    return [int(word) for word in path.read_text().split()] if path.is_file() else []
+
+
+def stop(pid: int) -> None:
+    with contextlib.suppress(ProcessLookupError):
+        os.kill(pid, signal.SIGKILL)
 
 
 class Recorder:
@@ -132,7 +154,7 @@ class RunCheck(Repository):
             "PATH": os.pathsep.join([inside, outside, "relative/bin"]), "PYTHONPATH": str(self.root),
             "PYTHONHOME": "/x", "VIRTUAL_ENV": inside, "CONDA_PREFIX": "/c", "__PYVENV_LAUNCHER__": "/l", "HOME": "/h"})
         self.assertEqual(env, {"PATH": outside, "HOME": "/h", "SD_LOCAL_GATE": "1", "NO_COLOR": "1",
-                               "PYTHON_COLORS": "0"})
+                               "PYTHON_COLORS": "0", **sd_lib.without_fsmonitor({})})
 
     def test_the_operators_colour_settings_do_not_reach_the_check(self) -> None:
         """`FORCE_COLOR=3` in a terminal failed a repository's gate on ANSI-coloured output (sd:2076)."""
@@ -216,6 +238,50 @@ class RunCheck(Repository):
         before = self.worktrees()
         sd_gate_run.check_in_worktree(self.root, head)
         self.assertEqual(self.worktrees(), before)
+
+    def test_a_repositorys_fsmonitor_is_never_consulted_in_the_gates_worktree(self) -> None:
+        """sd:2993: `core.fsmonitor=true` started a daemon on the fresh worktree's first index read, past git's 60 s.
+        A hook path stands in for the daemon: git runs it wherever it reads the setting, the check's own git included."""
+        marker, hook = self.root.parent / "fsmonitor-ran", self.root.parent / "fsmonitor.sh"
+        hook.write_text(f'#!/bin/sh\necho "$PWD $*" >> "{marker}"\nexit 1\n', encoding="utf-8")
+        hook.chmod(0o755)
+        head = self.commit("check:\n\t@git status --porcelain && git ls-files > /dev/null\n")
+        git(self.root, "config", "core.fsmonitor", str(hook))
+        self.assertEqual(sd_gate_run.check_in_worktree(self.root, head)["status"], "success")
+        self.assertFalse(marker.exists(), marker.read_text(encoding="utf-8") if marker.exists() else "")
+
+    def test_stopping_the_gate_stops_its_check_and_frees_the_slot(self) -> None:
+        """sd:2978: a stopped `sd gate check` left its `sd-check` running, holding a slot on a superseded head.
+        The stand-in check holds a lock as a slot holder does, and starts a group of its own as `sd-check` runs `make`."""
+        pids, slot = self.root.parent / "pids", self.root.parent / "slot.lock"
+        check = self.root.parent / "check.py"
+        check.write_text(textwrap.dedent(f"""\
+            import fcntl, os, pathlib, sys
+            sys.path.insert(0, {str(REPO_ROOT / "bin")!r})
+            import sd_lib
+            held = os.open({str(slot)!r}, os.O_RDWR | os.O_CREAT)
+            fcntl.flock(held, fcntl.LOCK_EX)
+            pathlib.Path({str(pids)!r}).write_text(f"{{os.getpid()}} ")
+            sd_lib.run_group(["sh", "-c", "echo $$ >> {pids}; exec sleep 60"], cwd=pathlib.Path("."), env={{"PATH": "/usr/bin:/bin"}}, timeout=60)
+            """), encoding="utf-8")
+        gate = textwrap.dedent(f"""\
+            import pathlib, sys
+            sys.path.insert(0, {str(REPO_ROOT / "bin")!r})
+            import sd_gate_run
+            sd_gate_run.run_child([sys.executable, {str(check)!r}], {{"PATH": "/usr/bin:/bin"}}, pathlib.Path("."), 120)
+            """)
+        parent = subprocess.Popen([sys.executable, "-c", gate], cwd=self.root, start_new_session=True,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: [stop(pid) for pid in [parent.pid, *started(pids, 0)]])
+        found = started(pids, 2)
+        os.kill(parent.pid, signal.SIGTERM)
+        parent.wait(timeout=30)
+        deadline = time.monotonic() + 10
+        while (alive := [pid for pid in found if running(pid)]) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        self.assertEqual(alive, [], f"left running after the gate was stopped: {found}")
+        with open(slot, "rb") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)  # BlockingIOError while the stopped check still holds it
 
     def test_a_slot_bound_reaches_sd_check_and_widens_the_childs_limit(self) -> None:
         """sd:2607: the queue for a slot has its own bound, so the child may live for both."""

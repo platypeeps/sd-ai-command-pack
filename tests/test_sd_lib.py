@@ -133,6 +133,27 @@ class RepoRootTests(Fixture):
     def test_a_missing_directory_is_not_a_repository(self) -> None:
         self.assertIsNone(sd_lib.repo_root(self.tmp / "nowhere" / "deeper"))
 
+    def test_a_git_that_gave_no_answer_is_not_called_outside_a_repository(self) -> None:
+        """sd:2986: a lane run under load read a git timeout as 'cwd is not inside a Git repository'."""
+        root = self.make_repo()
+        stalled = subprocess.TimeoutExpired(["git"], sd_lib.GIT_TIMEOUT_SECONDS)
+        with unittest.mock.patch.object(sd_lib.subprocess, "run", side_effect=stalled):
+            with self.assertRaisesRegex(sd_lib.ConfigError, "did not finish within"):
+                sd_lib.repo_root(root)
+
+    def test_every_git_call_overrides_fsmonitor_after_the_callers_own_entries_once(self) -> None:
+        """sd:2993: the override outranks the repository's config file and keeps the caller's `GIT_CONFIG_*` entries."""
+        caller = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.autocrlf", "GIT_CONFIG_VALUE_0": "false"}
+        env = sd_lib.without_fsmonitor(caller)
+        self.assertEqual([env[name] for name in ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_KEY_1", "GIT_CONFIG_VALUE_1")],
+                         ["2", "core.autocrlf", "core.fsmonitor", "false"])
+        self.assertEqual(sd_lib.without_fsmonitor(env), env)
+        root = self.make_repo()
+        self.git(root, "config", "core.fsmonitor", "true")
+        read = subprocess.run(["git", "config", "--bool", "core.fsmonitor"], cwd=root, capture_output=True, text=True,
+                              env=sd_lib.without_fsmonitor(os.environ), check=True)
+        self.assertEqual(read.stdout.strip(), "false")
+
 
 class LocalBlockTests(Fixture):
     def test_missing_file_is_empty(self) -> None:
