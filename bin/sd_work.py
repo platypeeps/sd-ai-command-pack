@@ -23,7 +23,7 @@ import sys
 from typing import Any
 
 import sd_handoff_rows
-import sd_jev
+import sd_jev_shadow
 import sd_lib
 
 
@@ -1091,12 +1091,12 @@ MAX_CANDIDATES = 40
 def _dedupe(inputs: tuple[Any, Any, dict] | None, env: Any = os.environ) -> None:
     """Record which open item Jev reads as a duplicate of the one `_add` filed (sd:2093).
 
-    Shadow only, and only for a public repository: `sd_jev.shadow_ready` says
-    when. Sent: the new title, and the ids and titles of up to
-    `MAX_CANDIDATES` open items of the same repository. Any failure is a note.
+    Shadow only: `sd_jev_shadow.shadow_ready` says when. Sent: the new title,
+    and the ids and titles of up to `MAX_CANDIDATES` open items of the same
+    repository. Any failure is a note.
     """
     if inputs is not None:
-        sd_jev.shadow_safely(DEDUPE_CALLER, DEDUPE_STAGE, sys.stderr, _dedupe_ask, *inputs, env)
+        sd_jev_shadow.shadow_safely(DEDUPE_CALLER, DEDUPE_STAGE, sys.stderr, _dedupe_ask, *inputs, env)
 
 
 def _dedupe_ask(sd_db: Any, connection: Any, state: dict, env: Any) -> None:
@@ -1106,7 +1106,7 @@ def _dedupe_ask(sd_db: Any, connection: Any, state: dict, env: Any) -> None:
     if state.get("created") is False or not item.get("repo"):
         return
     root = pathlib.Path(item["repo"]).expanduser()
-    ready = sd_jev.shadow_ready(DEDUPE_STAGE, DEDUPE_CALLER, root, env, sys.stderr)
+    ready = sd_jev_shadow.shadow_ready(DEDUPE_STAGE, DEDUPE_CALLER, root, env, sys.stderr)
     if ready is None:
         return
     rows = sd_db.reads.backlog_items(connection, repo=item["repo"])
@@ -1116,7 +1116,7 @@ def _dedupe_ask(sd_db: Any, connection: Any, state: dict, env: Any) -> None:
         return
     criteria = ",".join([f"{NO_DUPLICATE}=no listed item tracks the same work"]
                         + [f"sd-{number}={text}" for number, text in shown])
-    sd_jev.shadow_ask(ready[0], "Which open item already tracks the same work as the new item?",
+    sd_jev_shadow.shadow_ask(ready[0], "Which open item already tracks the same work as the new item?",
                       criteria, json.dumps({"new_item_title": _bare(item["title"])}), env, sys.stderr,
                       caller=DEDUPE_CALLER, stage=DEDUPE_STAGE, answer=NO_DUPLICATE, scope=ready[2],
                       subject=f"sd-task-dedupe:sd-{item['id']}")
@@ -1124,7 +1124,7 @@ def _dedupe_ask(sd_db: Any, connection: Any, state: dict, env: Any) -> None:
 
 def _bare(text: object) -> str:
     """One line of `text`, bounded, with no `,` to split a criteria list on."""
-    return " ".join(str(text).replace(",", ";").split())[:sd_jev.MAX_TEXT]
+    return " ".join(str(text).replace(",", ";").split())[:sd_jev_shadow.MAX_TEXT]
 
 
 def _recurrence_flags(parser: argparse.ArgumentParser, *, clear: bool = False) -> None:

@@ -221,13 +221,20 @@ class ContractTests(unittest.TestCase):
 
 
 class SliceBuilderTools(unittest.TestCase):
-    """sd:2526. A builder runs gates that outlast one Bash call and skills its
-    brief names; without `Monitor` it waits on a gate with a `sleep` loop or
-    not at all, and without `Skill` it cannot run `sd-review` as a skill."""
+    """sd:2526, sd:3014. A builder runs gates that outlast one Bash call and
+    skills its brief names; without `Skill` it cannot run `sd-review` as a
+    skill. It waits on a gate in the foreground or with Bash
+    `run_in_background`, which wakes it on exit: `Monitor` stops at 30
+    minutes, and builders sat idle about 3,400 minutes in 7 days."""
 
-    def test_the_slice_builder_holds_skill_and_monitor(self) -> None:
-        _, tools = frontmatter((AGENTS / "sd-slice-builder.md").read_text(encoding="utf-8"))
-        self.assertEqual(sorted({"Skill", "Monitor"} - set(tools)), [])
+    def test_the_slice_builder_holds_skill_and_waits_without_monitor(self) -> None:
+        text = (AGENTS / "sd-slice-builder.md").read_text(encoding="utf-8")
+        _, tools = frontmatter(text)
+        self.assertIn("Skill", tools)
+        self.assertNotIn("Monitor", tools)
+        _, body = text.split("\n---\n", 1)
+        self.assertIn("run_in_background", body)
+        self.assertNotIn("with `Monitor`", body)
 
 
 class SliceBuilderDiskRules(unittest.TestCase):

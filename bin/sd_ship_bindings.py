@@ -39,7 +39,7 @@ GATE_FILES = (
     "sd-ship", "sd-docs-lint", "sd_ship_dispositions.py", "sd_ship_remote.py", "sd_ship_review.py",
     "sd_ship_history.py", "sd_ship_identity.py", "sd_ship_item.py", "sd_ship_no_item.py",
     "sd_ship_evidence.py", "sd_ship_bindings.py", "sd_ship_workflow.py", "sd_ship_squash.py", "sd_ship_body.py",
-    "sd_ship_hold.py", "sd_protection.py", "sd_local_gate.py", "sd_changelog_merge.py", "sd_ship_claims.py",
+    "sd_ship_hold.py", "sd_protection.py", "sd_local_gate.py", "sd_ship_claims.py",
 )
 CHECK_FILES = (
     "sd-check", "sd_check_receipts.py", "sd_gate_slots.py",
@@ -59,6 +59,7 @@ IMPORT_EXEMPT = {
     "sd_setup_guard.py": "reached only through sd_setup_github.py",
     "sd_install.py": "sd-ship imports it only after a verified merge, to re-provision sd_db (sd:2108)",
     "sd_lane.py": "sd-ship's `lane` verbs queue and run prepare and merge; they decide no verdict or gate",
+    "sd_jev_shadow.py": "the Jev shadow stages record an answer and never read it back; they decide no verdict",
 }
 REVIEW_TOOL_FILES = VERDICT_FILES + GATE_FILES + CHECK_FILES
 POLICY_FILES = ("CLAUDE.local.md", ".github/sd-review.json")

@@ -87,10 +87,11 @@ EXIT_USAGE = 2
 EXIT_REFUSED = 3
 
 #: The owners whose repositories the operator owns outright, when
-#: `sd.fleet_owners` names none. Any other owner is an employer's, and its
-#: protection stands (sd:1334, D2 kept those). Read through
-#: `configured_owners`, so another operator lists their own logins (sd:2502).
-DEFAULT_OWNERS = ("platypeeps", "sdelmas")
+#: `sd.fleet_owners` names none: the system collector's default,
+#: `sd_db.protection.BASELINE_OWNERS`, so the stamp and `sd-status` agree with
+#: the dashboard. Any other owner is an employer's, and its protection stands
+#: (sd:1334). Read through `configured_owners` (sd:2502).
+DEFAULT_OWNERS = ("platypeeps",)
 #: A GitHub login: letters, digits and single inner hyphens.
 LOGIN = re.compile(r"[A-Za-z0-9](?:-?[A-Za-z0-9])*")
 PACK_SLUG = sd_setup_github.ACTION_REPOSITORY
@@ -382,15 +383,14 @@ def _git_show(root: pathlib.Path, spec: str) -> str | None:
     return done.stdout if done.returncode == 0 else None
 
 
-def configured_owners(default: tuple[str, ...] = DEFAULT_OWNERS) -> tuple[str, ...]:
+def configured_owners() -> tuple[str, ...]:
     """The owner logins in `sd.fleet_owners`, lower-cased (sd:2502).
 
     Unset, the machine config's `fleet.owners` list is read with a
     deprecation warning, so a machine set up under sd:2324 keeps its owners;
-    absent too, `default`: `DEFAULT_OWNERS` for the stamp, the system
-    collector's baseline owners for `sd-status` (sd:1807). A value that does
-    not read refuses: ownership decides the `unprotected` declaration, so a
-    guess in either direction is the wrong answer.
+    absent too, `DEFAULT_OWNERS`. A value that does not read refuses:
+    ownership decides the `unprotected` declaration, so a guess in either
+    direction is the wrong answer.
     """
     try:
         setting = sd_lib.core_setting("fleet_owners")
@@ -401,7 +401,7 @@ def configured_owners(default: tuple[str, ...] = DEFAULT_OWNERS) -> tuple[str, .
     path = sd_lib.machine_config_path()
     fleet = sd_lib.machine_config(path).get("fleet")
     if fleet is None or (isinstance(fleet, dict) and "owners" not in fleet):
-        return default
+        return DEFAULT_OWNERS
     owners = fleet.get("owners") if isinstance(fleet, dict) else None
     if (not isinstance(owners, list) or not owners
             or not all(isinstance(login, str) and LOGIN.fullmatch(login) for login in owners)):

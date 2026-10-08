@@ -33,6 +33,10 @@ contract with the repository under test: this run is the gate, so build what
 the check needs here and borrow nothing from the operator. The pack's own
 Makefile reads it to provision a pinned in-tree virtualenv (sd:1918); a
 repository that does not read it runs as it always did.
+
+Every git in the run, the gate's own and the check's, reads `core.fsmonitor=false`
+(`sd_lib.without_fsmonitor`, sd:2993), and `sd-check` leads a process group, so
+stopping the gate stops the check and frees its slot (sd:2978).
 """
 
 from __future__ import annotations
@@ -69,8 +73,8 @@ LOCAL_BLOCK = "CLAUDE.local.md"
 #: and the operator's Rust build folder, which `sd_gate_cache.cargo_target` replaces with the gate's own (sd:2493).
 DROPPED_ENVIRONMENT = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX", "__PYVENV_LAUNCHER__",
                        "FORCE_COLOR", "CLICOLOR_FORCE", "PY_COLORS", "CARGO_TARGET_DIR")
-#: Session variables, by name or prefix: dropped so two sessions' passes at one head bind equal (sd:1912, D1; fnm's per-shell folder, sd:2602).
-SESSION_ENVIRONMENT = ("CLAUDECODE", "TERM_SESSION_ID", "PWD", "OLDPWD", "SHLVL", "_", "FNM_MULTISHELL_PATH")
+#: Session variables, by name or prefix: dropped so two sessions' passes at one head bind equal (sd:1912, D1; fnm's per-shell folder, sd:2602; `jev`'s per-run id, sd:3013).
+SESSION_ENVIRONMENT = ("CLAUDECODE", "TERM_SESSION_ID", "PWD", "OLDPWD", "SHLVL", "_", "FNM_MULTISHELL_PATH", "JEV_RUN")
 SESSION_PREFIXES = ("CLAUDE_", "HERDR_", "ITERM_")
 #: Set in the child: the gate captures output, and the caller's terminal colour must not change a result (sd:2076).
 NO_COLOUR_ENVIRONMENT = {"NO_COLOR": "1", "PYTHON_COLORS": "0"}
@@ -83,9 +87,10 @@ class GateError(RuntimeError):
 
 
 def gate_git(root: pathlib.Path, *args: str) -> str:
-    """`git <args>` in `root`, stripped; `GateError` on any failure, since a gate must not guess."""
+    """`git <args>` in `root`, stripped; `GateError` on any failure, since a gate must not guess. No fsmonitor (sd:2993)."""
     try:
-        result = subprocess.run(["git", *args], cwd=root, text=True, capture_output=True, timeout=60, check=False)
+        result = subprocess.run(["git", *args], cwd=root, text=True, capture_output=True, timeout=60, check=False,
+                                env=sd_lib.without_fsmonitor(os.environ))
     except (OSError, subprocess.SubprocessError) as error:
         raise GateError(f"git could not finish: {error}") from None
     if result.returncode:
@@ -103,11 +108,11 @@ def untracked_local_block(root: pathlib.Path) -> pathlib.Path | None:
 
 def gate_inputs(root: pathlib.Path, head: str, tree: str | None = None, own: bool = False) -> str:
     """A 12-hex digest of what a gate run depends on beyond the commit's own tree; `tree` replaces `head` under a tree key.
-    `own`, the pack gating itself, leaves out the checkout's `bin/` (sd:2613); else every pack `bin/` file, or `pack_scope`'s closure (sd:2722)."""
+    `own`, the pack gating itself, leaves out the checkout's `bin/` (sd:2613); else every pack `bin/` file."""
     digest = hashlib.sha256((f"head {head}" if tree is None else f"tree {tree}").encode() + b"\n")
     # The parsed block, not its bytes: a hub and a satellite each keep their own copy (sd:2854).
     digest.update(b"local " + sd_lib.local_policy_digest(untracked_local_block(root)).encode() + b"\n" + b"pack tree\n" * own)
-    for path in [] if own else sd_gate_receipts.pack_files(BIN, sd_gate_receipts.pack_scope(root, head)):
+    for path in [] if own else sd_gate_receipts.pack_files(BIN):
         digest.update(f"pack {path.name}\n".encode() + path.read_bytes())
     return digest.hexdigest()[:12]
 
@@ -116,14 +121,15 @@ def gate_environment(root: pathlib.Path, environ: dict[str, str] | None = None) 
     """The caller's environment without package selectors, forced colour, the operator's `CARGO_TARGET_DIR`,
     session variables, `PATH` entries in `root`, no folder (fnm's per-shell link, sd:2772) or venv `bin`s; each resolved.
 
-    Plus `SD_LOCAL_GATE=1`, `NO_COLOR=1` and `PYTHON_COLORS=0`, whatever the caller had them set to.
+    Plus `SD_LOCAL_GATE=1`, `NO_COLOR=1` and `PYTHON_COLORS=0`, whatever the caller had them set to,
+    and `core.fsmonitor=false` for every git the check runs in the fresh worktree (sd:2993).
     """
     source = os.environ if environ is None else environ
     env = {key: value for key, value in source.items()
            if key not in DROPPED_ENVIRONMENT + SESSION_ENVIRONMENT and not key.startswith(SESSION_PREFIXES)}
     env["PATH"] = os.pathsep.join(sd_gate_receipts.gate_path(env.get("PATH", ""), root))
     env.update({GATE_VARIABLE: "1", **NO_COLOUR_ENVIRONMENT})
-    return env
+    return sd_lib.without_fsmonitor(env)
 
 
 #: How a caller runs the `sd-check` child: `(argv, env, cwd, timeout)` to `(exit code or None, stdout, stderr)`.
@@ -131,9 +137,10 @@ Run = Callable[[list[str], dict[str, str], pathlib.Path, int], tuple[int | None,
 
 
 def run_child(argv: list[str], env: dict[str, str], cwd: pathlib.Path, timeout: int) -> tuple[int | None, str, str]:
+    """`sd-check` as a process group's leader, so stopping this process stops it and frees its slot (sd:2978)."""
     try:
-        result = subprocess.run(argv, cwd=cwd, text=True, capture_output=True, timeout=timeout, check=False, env=env)
-    except (OSError, subprocess.SubprocessError) as error:
+        result = sd_lib.run_group(argv, cwd=cwd, env=env, timeout=timeout)
+    except (OSError, subprocess.SubprocessError, sd_lib.GroupTimeout) as error:
         return None, f"sd-check could not finish: {error}", ""
     return result.returncode, result.stdout, result.stderr
 

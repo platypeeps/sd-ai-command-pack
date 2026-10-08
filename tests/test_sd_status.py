@@ -622,14 +622,15 @@ class GapVocabularyTests(unittest.TestCase):
     def test_the_default_baseline_owners_are_the_systems(self) -> None:
         """sd:1807. With no `sd.fleet_owners`, sd-status flags the repositories the dashboard flags."""
         import sd_db.protection as system  # noqa: PLC0415 - provisioned by `make setup`
+        import sd_fleet  # noqa: PLC0415
 
         with mock.patch.dict(os.environ):
             os.environ.pop("SD_BASELINE_OWNERS", None)
             default = importlib.reload(system).BASELINE_OWNERS
         importlib.reload(system)
-        self.assertEqual(frozenset(status.BASELINE_OWNERS), default)
+        self.assertEqual(frozenset(sd_fleet.DEFAULT_OWNERS), default)
         with mock.patch.object(status.sd_lib, "machine_config", lambda path: {}):
-            self.assertEqual(status._baseline_owners(), (status.BASELINE_OWNERS, ""))
+            self.assertEqual(status._baseline_owners(), (sd_fleet.DEFAULT_OWNERS, ""))
 
     def test_the_baseline_flags_are_the_systems_ids_and_sentences(self) -> None:
         """sd:1807. Same ids, values and sentences as `sd_db.protection.baseline_flags`."""
@@ -2412,7 +2413,7 @@ class ClassTableTests(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
         self.assertEqual(len(names), len(status.BY_CHECK))
 
-    def test_the_table_carries_the_twenty_four_checks_the_design_enumerates(self) -> None:
+    def test_the_table_carries_the_checks_the_design_enumerates(self) -> None:
         # Pinned as a set, not a count: a count passes when a check is renamed
         # into a duplicate of another, which is the drift this table exists to
         # make impossible.
@@ -2423,7 +2424,7 @@ class ClassTableTests(unittest.TestCase):
                 "branch-unresolvable", "status-unreadable", "unresolved-concern",
                 "pr-check-failing", "pr-check-missing", "dirty-tree-with-open-pr",
                 "protection-gap", "accepted-gap-standing", "issue-needs-you",
-                "pr-needs-action", "open-step", "unmerged-branch",
+                "pr-needs-action", "unmerged-branch",
                 "parked-concern", "idle-planning", "undated-planning",
                 "issue-open", "source-marker", "unreadable-concern-row",
                 "undisclosed-tool", "pr-review-unacknowledged",
@@ -2446,7 +2447,7 @@ class ClassTableTests(unittest.TestCase):
         joined = " ".join(status.EXCLUDED)
         # `parked` left this list with the field, cut by 31(a) on 2026-09-19.
         # The archive sentence is what excludes every item that carried one.
-        for skipped in ("archive", "Jira", "CHANGELOG.md"):
+        for skipped in ("archive", "Jira", "review-learnings.md"):
             self.assertIn(skipped, joined)
         self.assertNotIn("parked", joined)
 
@@ -2476,11 +2477,11 @@ class ActionIdTests(unittest.TestCase):
             self.assertEqual(found[0], kind.letter)
 
     def test_the_same_data_gives_the_same_id_every_time(self) -> None:
-        first = status.action_id("open-step", "alpha/prd.md#Steps#do it#0")
-        second = status.action_id("open-step", "alpha/prd.md#Steps#do it#0")
+        first = status.action_id("parked-concern", "alpha/prd.md#Steps#do it#0")
+        second = status.action_id("parked-concern", "alpha/prd.md#Steps#do it#0")
         self.assertEqual(first, second)
         self.assertNotEqual(
-            first, status.action_id("open-step", "alpha/prd.md#Steps#do it#1")
+            first, status.action_id("parked-concern", "alpha/prd.md#Steps#do it#1")
         )
 
     def test_a_check_the_table_does_not_carry_is_an_error_not_an_id(self) -> None:
@@ -2489,8 +2490,8 @@ class ActionIdTests(unittest.TestCase):
 
     def test_colliding_rows_both_widen_to_eight_digits_and_say_so(self) -> None:
         rows = [
-            status._row("open-step", "a", "a", "", ""),
-            status._row("open-step", "b", "b", "", ""),
+            status._row("parked-concern", "a", "a", "", ""),
+            status._row("parked-concern", "b", "b", "", ""),
         ]
         rows[1]["id"] = rows[0]["id"]
         status._widen_collisions(rows)
@@ -2794,38 +2795,6 @@ class ItemDateParityTests(unittest.TestCase):
 
     def test_one_pattern_is_shared(self) -> None:
         self.assertIs(status._ITEM_DATE_RE, status.sd_lib.ITEM_DATE_RE)
-
-
-class OpenStepTests(InventoryFixture):
-    def test_two_identical_boxes_under_one_heading_get_two_ids(self) -> None:
-        """C-13: the ordinal is what stops one id naming two tasks."""
-        directory = self.item("2026-08-01-alpha", status="in_progress")
-        (directory / "implement.md").write_text(
-            "# Steps\n\n- [ ] Run the check\n- [ ] Run the check\n- [x] Done\n",
-            encoding="utf-8",
-        )
-        found = self.by_check(self.rows(), "open-step")
-        self.assertEqual(len(found), 2)
-        self.assertEqual(len({row["id"] for row in found}), 2)
-        self.assertEqual({row["title"] for row in found}, {"Run the check"})
-
-    def test_the_key_is_the_heading_and_not_the_line_number(self) -> None:
-        directory = self.item("2026-08-01-alpha", status="in_progress")
-        page = directory / "implement.md"
-        page.write_text("# Steps\n\n- [ ] Run the check\n", encoding="utf-8")
-        before = self.by_check(self.rows(), "open-step")[0]["id"]
-        page.write_text(
-            "# Steps\n\nA paragraph inserted above.\n\n- [ ] Run the check\n",
-            encoding="utf-8",
-        )
-        self.assertEqual(before, self.by_check(self.rows(), "open-step")[0]["id"])
-
-    def test_boxes_on_a_done_item_are_read_as_history(self) -> None:
-        directory = self.item("2026-08-01-alpha", status="done")
-        (directory / "implement.md").write_text(
-            "# Steps\n\n- [ ] Run the check\n", encoding="utf-8"
-        )
-        self.assertEqual([], self.by_check(self.rows(), "open-step"))
 
 
 class PullRequestInventoryTests(InventoryFixture):
@@ -4738,7 +4707,7 @@ class ActionsFlagTests(InventoryFixture):
         # and not a shortened stand-in: an id carrying seven hex digits passes
         # both assertions below while contradicting the docstring above them,
         # so the fixture has to carry the real width to be pinning anything.
-        rows = [{"id": "sd08e3f70", "check": "open-step", "title": "t",
+        rows = [{"id": "sd08e3f70", "check": "parked-concern", "title": "t",
                  "suggest": "do the thing"}]
         line = self.actions_text(rows).splitlines()[1]
         self.assertTrue(re.match(r"^[a-z][0-9a-f]{4,} ", line))
@@ -4758,9 +4727,9 @@ class ActionsFlagTests(InventoryFixture):
         row would prove nothing: widening only happens to a pair.
         """
         rows = [
-            {"id": "s0000", "check": "open-step", "title": "a",
+            {"id": "s0000", "check": "parked-concern", "title": "a",
              "suggest": "do a", "key": "same", "widened": True},
-            {"id": "s0000", "check": "open-step", "title": "b",
+            {"id": "s0000", "check": "parked-concern", "title": "b",
              "suggest": "do b", "key": "same", "widened": True},
         ]
         for text in (self.actions_text(rows), self.pending_text(rows)):
@@ -4769,7 +4738,7 @@ class ActionsFlagTests(InventoryFixture):
 
     def test_no_note_is_printed_when_nothing_widened(self) -> None:
         """A line that always prints is not a signal."""
-        rows = [{"id": "s0001", "check": "open-step", "title": "a",
+        rows = [{"id": "s0001", "check": "parked-concern", "title": "a",
                  "suggest": "do a", "key": "k", "widened": False}]
         self.assertNotIn("widened", self.actions_text(rows))
 
@@ -5170,7 +5139,7 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
         self.assertNotIn(self.CHECK, [row["check"] for row in result["classes"]])
         self.assertEqual("no findings; all 13 checks clear", result["summary"])
 
-    def test_the_rank_sorts_after_pr_needs_action_and_before_open_step(self) -> None:
+    def test_the_rank_sorts_after_pr_needs_action(self) -> None:
         """Below 35, and below the open pull request waiting on a merge (N-4).
 
         The merged row is the oldest of them, so an order by age alone would
@@ -5182,17 +5151,14 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
             failing=[], review_findings={"reviews": 1, "in_body": 1, "reviewers": ["bot"],
                                          "ids": ["op11"], "inline": 0, "unreadable": "",
                                          "indeterminate": []})]}
-        directory = self.item("2026-08-01-alpha", status="in_progress", extra="branch: main\n")
-        (directory / "implement.md").write_text("# Steps\n\n- [ ] do it\n", encoding="utf-8")
         rows = status.actionable_inventory(self.repo, self.sections(
             work=status.work_section(self.repo), pull_requests=open_pull,
             merged_pull_requests={"repo": "acme/widget",
                                   "pull_requests": [self.merged(5, 9, ["mm11"])]},
         ), self.TODAY).rows
         order = [row["check"] for row in rows if row["check"] in (
-            "pr-review-unacknowledged", "pr-needs-action", self.CHECK, "open-step")]
-        self.assertEqual(
-            ["pr-review-unacknowledged", "pr-needs-action", self.CHECK, "open-step"], order)
+            "pr-review-unacknowledged", "pr-needs-action", self.CHECK)]
+        self.assertEqual(["pr-review-unacknowledged", "pr-needs-action", self.CHECK], order)
 
     def test_merged_rows_cannot_crowd_out_pending_or_take_next(self) -> None:
         """Twelve merged rows and one open pull request waiting on a merge.
@@ -5387,7 +5353,7 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
 
         # "leave their slots to the classes below": a lower-ranked class's row
         # takes the slot a row past the cap gave up.
-        below = "open-step"
+        below = "unmerged-branch"
         self.assertGreater(status.BY_CHECK[below].rank, status.BY_CHECK[self.CHECK].rank)
         shown, _ = status.pending_rows([{"check": self.CHECK}] * (cap + 2) + [{"check": below}])
         self.assertEqual([self.CHECK] * cap + [below], [row["check"] for row in shown])
@@ -5429,10 +5395,10 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
         read from the table and measured against the table.
         """
         row = status.BY_CHECK[self.CHECK]
-        above, under = status.BY_CHECK["pr-needs-action"], status.BY_CHECK["open-step"]
+        above, under = status.BY_CHECK["pr-needs-action"], status.BY_CHECK["mirror-sync-pending"]
         _skill_says(
             f"- **Rank {row.rank}**, below `pr-needs-action` at {above.rank} and above "
-            f"`open-step` at {under.rank}.",
+            f"`mirror-sync-pending` at {under.rank}.",
             "- **Newest merge first** within the class (`newest_first` in `CLASSES`), the "
             "reverse of every other class.",
         )

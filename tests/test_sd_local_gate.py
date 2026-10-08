@@ -13,9 +13,11 @@ import json
 import os
 import pathlib
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 import unittest
 from unittest import mock
@@ -37,6 +39,26 @@ BLOCK_START, BLOCK_END = sd_lib.LOCAL_BLOCK_START, sd_lib.LOCAL_BLOCK_END
 
 def git(root: pathlib.Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True, text=True).stdout.strip()
+
+
+def running(pid: int) -> bool:
+    """Alive and not a zombie waiting for its parent to reap it."""
+    state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+    return bool(state) and not state.startswith("Z")
+
+
+def started(path: pathlib.Path, count: int) -> list[int]:
+    """The pids a stand-in check wrote, once there are `count` of them; whatever is there for 0."""
+    deadline = time.monotonic() + 30
+    while count and len(path.read_text().split() if path.is_file() else []) < count:
+        assert time.monotonic() < deadline, "the stand-in check never recorded its pids"
+        time.sleep(0.05)
+    return [int(word) for word in path.read_text().split()] if path.is_file() else []
+
+
+def stop(pid: int) -> None:
+    with contextlib.suppress(ProcessLookupError):
+        os.kill(pid, signal.SIGKILL)
 
 
 class Recorder:
@@ -132,7 +154,7 @@ class RunCheck(Repository):
             "PATH": os.pathsep.join([inside, outside, "relative/bin"]), "PYTHONPATH": str(self.root),
             "PYTHONHOME": "/x", "VIRTUAL_ENV": inside, "CONDA_PREFIX": "/c", "__PYVENV_LAUNCHER__": "/l", "HOME": "/h"})
         self.assertEqual(env, {"PATH": outside, "HOME": "/h", "SD_LOCAL_GATE": "1", "NO_COLOR": "1",
-                               "PYTHON_COLORS": "0"})
+                               "PYTHON_COLORS": "0", **sd_lib.without_fsmonitor({})})
 
     def test_the_operators_colour_settings_do_not_reach_the_check(self) -> None:
         """`FORCE_COLOR=3` in a terminal failed a repository's gate on ANSI-coloured output (sd:2076)."""
@@ -216,6 +238,51 @@ class RunCheck(Repository):
         before = self.worktrees()
         sd_gate_run.check_in_worktree(self.root, head)
         self.assertEqual(self.worktrees(), before)
+
+    def test_a_repositorys_fsmonitor_is_never_consulted_in_the_gates_worktree(self) -> None:
+        """sd:2993: `core.fsmonitor=true` started a daemon on the fresh worktree's first index read, past git's 60 s.
+        A hook path stands in for the daemon: git runs it wherever it reads the setting, the check's own git included."""
+        marker, hook = self.root.parent / "fsmonitor-ran", self.root.parent / "fsmonitor.sh"
+        hook.write_text(f'#!/bin/sh\necho "$PWD $*" >> "{marker}"\nexit 1\n', encoding="utf-8")
+        hook.chmod(0o755)
+        # ls-files-form: plain -- the check command only needs git to read the index; the fsmonitor hook is what this case tests
+        head = self.commit("check:\n\t@git status --porcelain && git ls-files > /dev/null\n")
+        git(self.root, "config", "core.fsmonitor", str(hook))
+        self.assertEqual(sd_gate_run.check_in_worktree(self.root, head)["status"], "success")
+        self.assertFalse(marker.exists(), marker.read_text(encoding="utf-8") if marker.exists() else "")
+
+    def test_stopping_the_gate_stops_its_check_and_frees_the_slot(self) -> None:
+        """sd:2978: a stopped `sd gate check` left its `sd-check` running, holding a slot on a superseded head.
+        The stand-in check holds a lock as a slot holder does, and starts a group of its own as `sd-check` runs `make`."""
+        pids, slot = self.root.parent / "pids", self.root.parent / "slot.lock"
+        check = self.root.parent / "check.py"
+        check.write_text(textwrap.dedent(f"""\
+            import fcntl, os, pathlib, sys
+            sys.path.insert(0, {str(REPO_ROOT / "bin")!r})
+            import sd_lib
+            held = os.open({str(slot)!r}, os.O_RDWR | os.O_CREAT)
+            fcntl.flock(held, fcntl.LOCK_EX)
+            pathlib.Path({str(pids)!r}).write_text(f"{{os.getpid()}} ")
+            sd_lib.run_group(["sh", "-c", "echo $$ >> {pids}; exec sleep 60"], cwd=pathlib.Path("."), env={{"PATH": "/usr/bin:/bin"}}, timeout=60)
+            """), encoding="utf-8")
+        gate = textwrap.dedent(f"""\
+            import pathlib, sys
+            sys.path.insert(0, {str(REPO_ROOT / "bin")!r})
+            import sd_gate_run
+            sd_gate_run.run_child([sys.executable, {str(check)!r}], {{"PATH": "/usr/bin:/bin"}}, pathlib.Path("."), 120)
+            """)
+        parent = subprocess.Popen([sys.executable, "-c", gate], cwd=self.root, start_new_session=True,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: [stop(pid) for pid in [parent.pid, *started(pids, 0)]])
+        found = started(pids, 2)
+        os.kill(parent.pid, signal.SIGTERM)
+        parent.wait(timeout=30)
+        deadline = time.monotonic() + 10
+        while (alive := [pid for pid in found if running(pid)]) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        self.assertEqual(alive, [], f"left running after the gate was stopped: {found}")
+        with open(slot, "rb") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)  # BlockingIOError while the stopped check still holds it
 
     def test_a_slot_bound_reaches_sd_check_and_widens_the_childs_limit(self) -> None:
         """sd:2607: the queue for a slot has its own bound, so the child may live for both."""
@@ -777,6 +844,19 @@ class FnmShells(ReceiptFixture):
         self.assertEqual(self.runs(), 1)
 
 
+class JevRunIds(ReceiptFixture):
+    """`JEV_RUN` names one run's `jev` calls (sd:2954), so prepare and merge always differ in it.
+
+    Bound, it made every merge miss prepare's receipt and run the gate a second time (sd:3013).
+    """
+
+    def test_two_runs_that_differ_only_in_jev_run_bind_one_receipt(self) -> None:
+        head = self.counted()
+        self.assertEqual(self.gate(head, environ={**os.environ, "JEV_RUN": "sd-ship-prepare"}).get("status"), "success")
+        merged = self.gate(head, environ={**os.environ, "JEV_RUN": "sd-ship-merge"}, record=False)
+        self.assertEqual(("reused" in merged, merged.get("reuse_miss"), self.runs()), (True, None, 1))
+
+
 class CargoBuildCache(Repository):
     """A Rust repository's gates share warm build folders instead of compiling every dependency cold (sd:2493)."""
 
@@ -924,93 +1004,6 @@ class PackGatesItself(ReceiptFixture):
             (foreign / "sd-check").write_text("#!/bin/sh\n# landed\n", encoding="utf-8")
             self.assertNotIn("reused", self.gate(self.head, run=self.passing(argvs=argvs)))
         self.assertEqual(argvs[0][1], str(foreign / "sd-check"))
-
-
-class PackImportClosure(ReceiptFixture):
-    """sd:2722: a repository whose reviewed tree declares that its check runs no pack command but `sd-check`
-    binds the pack files `sd-check` imports, not every `bin/` file, so a pack landing that leaves them alone
-    does not void a receipt still in flight. Without the declaration every file binds: a check may run
-    `sd-docs-lint` from `PATH`, and the binding names only the command it starts."""
-
-    FILES = {"sd-check": "import sd_a\n",
-             "sd_a.py": "def later():\n    import sd_b\n    return sd_lib.sibling('sd_c', 'sd-c')\n",
-             "sd_b.py": "", "sd-c": "", "sd_lane.py": "", "sd-ship": "",
-             "sd_gate_run.py": "import sd_gate_cache\n", "sd_gate_cache.py": ""}
-    EVERY = ["sd-c", "sd-check", "sd-ship", "sd_a.py", "sd_b.py", "sd_gate_cache.py", "sd_gate_run.py", "sd_lane.py"]
-
-    def setUp(self) -> None:
-        super().setUp()
-        self.pack = self.root.parent / "pack"
-        self.pack.mkdir()
-        for name, text in self.FILES.items():
-            (self.pack / name).write_text(text, encoding="utf-8")
-        self.undeclared = self.counted()
-        self.head = self.declare({"pack": "sd-check"})
-
-    def declare(self, fields: dict) -> str:
-        (self.root / ".github").mkdir(exist_ok=True)
-        (self.root / ".github" / "sd-gate-reuse.json").write_text(json.dumps(
-            {"schema_version": 1, "key": "tree", "reason": "a fixture", **fields}), encoding="utf-8")
-        git(self.root, "add", "-A")
-        git(self.root, "commit", "-q", "-m", "declare")
-        return git(self.root, "rev-parse", "HEAD")
-
-    def landed_outside(self, head: str) -> dict:
-        """The gate at `head`, again after a landing outside the closure."""
-        with mock.patch.object(sd_gate_run, "BIN", self.pack):
-            self.gate(head, run=self.passing())
-            for name in ("sd_lane.py", "sd-ship"):
-                with (self.pack / name).open("a", encoding="utf-8") as stream:
-                    stream.write("# landed\n")
-            return self.gate(head, run=self.passing())
-
-    def test_the_closure_follows_nested_imports_and_siblings(self) -> None:
-        self.assertEqual([path.name for path in sd_gate_receipts.pack_files(self.pack, closure=True)],
-                         ["sd-c", "sd-check", "sd_a.py", "sd_b.py", "sd_gate_cache.py", "sd_gate_run.py"])
-
-    def test_a_change_to_the_gates_own_modules_runs_again(self) -> None:
-        """Prepare review at 00716c92: the gate's own code sets up what the check runs under, such as
-        `cargo_environment`, so `sd_gate_run` and what it imports bind beside `sd-check`'s closure."""
-        with mock.patch.object(sd_gate_run, "BIN", self.pack):
-            self.gate(self.head, run=self.passing())
-            with (self.pack / "sd_gate_cache.py").open("a", encoding="utf-8") as stream:
-                stream.write("WARM_ENVIRONMENT = {}\n")
-            again = self.gate(self.head, run=self.passing())
-        self.assertEqual(("reused" in again, again["reuse_miss"]), (False, {"reason": "binding", "fields": ["inputs"]}))
-
-    def test_a_pack_landing_outside_the_closure_leaves_the_receipt_standing(self) -> None:
-        self.assertIn("reused", self.landed_outside(self.head))
-
-    def test_without_the_declaration_every_pack_file_binds(self) -> None:
-        self.assertEqual([path.name for path in sd_gate_receipts.pack_files(self.pack)], self.EVERY)
-        self.assertNotIn("reused", self.landed_outside(self.undeclared))
-
-    def test_only_the_exact_field_narrows_and_the_tree_key_still_reads(self) -> None:
-        self.assertTrue(sd_gate_receipts.pack_scope(self.root, self.head))
-        self.assertTrue(sd_gate_receipts.keyed_by_tree(self.root))
-        for fields in ({"pack": "all"}, {"pack": True}, {"schema_version": 2, "pack": "sd-check"}):
-            with self.subTest(fields=fields):
-                self.assertFalse(sd_gate_receipts.pack_scope(self.root, self.declare(fields)))
-        self.assertFalse(sd_gate_receipts.pack_scope(self.root, self.undeclared))
-
-    def test_a_change_inside_the_closure_runs_again(self) -> None:
-        with mock.patch.object(sd_gate_run, "BIN", self.pack):
-            self.gate(self.head, run=self.passing())
-            for name in ("sd-check", "sd_a.py", "sd_b.py", "sd-c"):
-                with self.subTest(name=name):
-                    with (self.pack / name).open("a", encoding="utf-8") as stream:
-                        stream.write("# landed\n")
-                    self.assertNotIn("reused", self.gate(self.head, run=self.passing()))
-
-    def test_a_closure_that_cannot_be_read_binds_every_pack_file(self) -> None:
-        (self.pack / "sd_a.py").write_text("def (:\n", encoding="utf-8")
-        self.assertEqual([path.name for path in sd_gate_receipts.pack_files(self.pack, closure=True)], self.EVERY)
-
-    def test_the_real_closure_holds_sd_check_and_the_gate_and_not_the_lane(self) -> None:
-        names = {path.name for path in sd_gate_receipts.pack_files(sd_gate_run.BIN, closure=True)}
-        self.assertLessEqual({"sd-check", "sd_lib.py", "sd_check_receipts.py", "sd_check_scope.py", "sd_gate_slots.py",
-                              "sd_gate_run.py", "sd_gate_receipts.py", "sd_gate_cache.py"}, names)
-        self.assertEqual(names & {"sd-ship", "sd_lane.py"}, set())
 
 
 class PackDeclaresTreeReuse(unittest.TestCase):

@@ -74,10 +74,6 @@ def copilot_automatic(policy: str, tier: str, depth: int) -> bool:
 CORE_CONFIG = {
     "external_reviews": {"pattern": "configured|deny",
                          "description": "Standing private-code/context review authorization; unset uses local consent."},
-    "assistant_merge": {"pattern": "controlled|ask",
-                        "description": "controlled: merge active in-scope PR work without asking, only via sd-ship "
-                                       "prepare then merge (never skipping the review lane); ask or unset: ask first; "
-                                       "explicit wait wins."},
     "copilot_review": {"pattern": "|".join(COPILOT_REVIEW_POLICIES),
                        "description": "When sd-ship requests a Copilot review by itself: deep (unset reads deep) on deep-tier "
                                       "changes only, always on every reviewing tier, never on none; a repository's "
@@ -106,43 +102,15 @@ CORE_CONFIG = {
     "fleet_owners": {"pattern": r"[A-Za-z0-9](-?[A-Za-z0-9])*(,[A-Za-z0-9](-?[A-Za-z0-9])*)*",
                      "description": "Comma-separated GitHub logins whose repositories `sd fleet stamp` treats as the "
                                     "operator's own; any other owner's protection stands. Unset reads the deprecated "
-                                    "fleet.owners list, then the pack's default pair. It grants nothing."},
+                                    "fleet.owners list, then platypeeps. It grants nothing."},
     "bulk_storage_root": {"pattern": r"[~/][^\x00]*",
                           "description": "The folder for large uncommitted data -- run outputs, logs, captures, "
                                          "scratch evidence -- as <root>/<repository>/; never build output or "
                                          "permission-dependent data. Unset is no bulk root. It grants nothing."},
     "privacy_patterns": {"pattern": r"[~/][^\x00]*",
-                         "description": "The privacy-pattern file `sd changelog render` checks entry text against, one "
-                                        "extended regular expression per line. Unset reads privacy-patterns in "
-                                        "$SYSTEM_TOOLS_CONFIG, else ${XDG_CONFIG_HOME:-~/.config}/system. A missing "
-                                        "file refuses the render. It grants nothing."},
+                         "description": "The privacy-pattern file a pull request body is checked against, one "
+                                        "extended regular expression per line. It grants nothing."},
 }
-
-#: `{current name: the name it was stored under before 1.1.0}`. A rename must
-#: not orphan a grant a machine already recorded, and this checkout cannot
-#: reach the machines that recorded one, so the old name is *read* rather than
-#: migrated: nothing has to have run, and an operator who rolls back to 1.0.0
-#: finds the file they left. `sd config set` and `unset` clear the old name as
-#: they write, so the two never disagree.
-#:
-#: Deprecated, not permanent. 1.1.0 reads these; 1.2.0 removes this map and
-#: the old names stop resolving. `sd config list sd` already names a stored
-#: key the declarations dropped, which is how a machine still holding one
-#: finds out.
-RENAMED_CORE_KEYS = {"assistant_merge": "merge_authorization"}
-
-
-def stored_name(stored: dict, key: str) -> str | None:
-    """The name `stored` actually holds one declared key under, or `None`.
-
-    The current name wins whenever it is present, so a file carrying both --
-    written by 1.0.0 and then set by 1.1.0 before the clearing landed --
-    reads the one the operator set last.
-    """
-    if key in stored:
-        return key
-    former = RENAMED_CORE_KEYS.get(key)
-    return former if former is not None and former in stored else None
 
 WORK_DIR = "docs/work"
 ARCHIVE_DIR = "archive"
@@ -162,6 +130,9 @@ CONSENT_KEY = "reviewers"
 
 GIT_TIMEOUT_SECONDS = 15
 GH_TIMEOUT_SECONDS = 20
+#: The one `git` setting the pack overrides (sd:2993): a repository's `core.fsmonitor=true` starts a daemon on a
+#: fresh worktree's first index read, which took 24.7 s idle and passed the gate's 60 s bound under load.
+NO_FSMONITOR = ("core.fsmonitor", "false")
 
 #: `WORKFLOW.md`'s three questions as the endpoints that ask them; `gh` fills
 #: `{owner}` and `{repo}` from the checkout's origin, so no URL parser is needed
@@ -185,6 +156,28 @@ _TASKFILE_ENTRY_RE = re.compile(r"^(?P<indent>\s+)(?P<name>[A-Za-z0-9_][A-Za-z0-
 
 class ConfigError(RuntimeError):
     """A configuration or environment fault a caller reports instead of raising."""
+
+
+class GitUnavailable(ConfigError):
+    """`git` gave no answer: it timed out, could not start or was killed (sd:2986). Not "outside a repository"."""
+
+
+def without_fsmonitor(environ: Mapping[str, str]) -> dict[str, str]:
+    """`environ` plus a `GIT_CONFIG_COUNT` entry that sets `NO_FSMONITOR`, which outranks every config file (sd:2993).
+
+    The caller's own entries keep their places; an environment whose last entry is already this one comes back
+    unchanged, so a gate inside a gate adds nothing. A count git cannot read is left for git to refuse.
+    """
+    env = dict(environ)
+    count = env.get("GIT_CONFIG_COUNT") or "0"
+    if not count.isdigit():
+        return env
+    last = int(count) - 1
+    if last >= 0 and (env.get(f"GIT_CONFIG_KEY_{last}"), env.get(f"GIT_CONFIG_VALUE_{last}")) == NO_FSMONITOR:
+        return env
+    key, value = NO_FSMONITOR
+    env.update({f"GIT_CONFIG_KEY_{last + 1}": key, f"GIT_CONFIG_VALUE_{last + 1}": value, "GIT_CONFIG_COUNT": str(last + 2)})
+    return env
 
 
 # --------------------------------------------------------------------------
@@ -325,6 +318,7 @@ def _git(args: list[str], cwd: pathlib.Path) -> str | None:
             text=True,
             timeout=GIT_TIMEOUT_SECONDS,
             check=False,
+            env=without_fsmonitor(os.environ),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -390,12 +384,25 @@ def repo_root(start: pathlib.Path | str | None = None) -> pathlib.Path | None:
     Inside a linked worktree this is that worktree's root, not the main
     checkout's: `--show-toplevel` is per-worktree, which is exactly what a
     command resolving its repo from cwd wants.
+
+    A `git` that gave no answer raises `GitUnavailable` naming why (sd:2986):
+    a lane run under load read its timeout as "not inside a Git repository".
     """
     base = pathlib.Path(start) if start is not None else pathlib.Path.cwd()
     base = base if base.is_dir() else base.parent
     if not base.is_dir():
         return None
-    answer = _git(["rev-parse", "--show-toplevel"], cwd=base)
+    command = "git rev-parse --show-toplevel"
+    try:
+        completed = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=str(base), capture_output=True, text=True,
+                                   timeout=GIT_TIMEOUT_SECONDS, check=False, env=without_fsmonitor(os.environ))
+    except subprocess.TimeoutExpired:
+        raise GitUnavailable(f"{command} did not finish within {GIT_TIMEOUT_SECONDS}s in {base}") from None
+    except OSError as error:
+        raise GitUnavailable(f"{command} could not start in {base}: {error}") from None
+    if completed.returncode < 0:
+        raise GitUnavailable(f"{command} was killed by signal {-completed.returncode} in {base}")
+    answer = completed.stdout.strip() if completed.returncode == 0 else ""
     return pathlib.Path(answer).resolve() if answer else None
 
 
@@ -600,10 +607,9 @@ def core_setting(key: str, environ: dict[str, str] | None = None) -> str | None:
     mine = config.get("sd", {}) if isinstance(config, dict) else None
     if not isinstance(mine, dict):
         raise ConfigError("machine config config.sd must be an object")
-    name = stored_name(mine, key)
-    if name is None:
+    if key not in mine:
         return None
-    value = mine[name]
+    value = mine[key]
     if not isinstance(value, str) or not re.fullmatch(CORE_CONFIG[key]["pattern"], value):
         raise ConfigError(f"invalid sd.{key} policy")
     return value
@@ -3826,17 +3832,22 @@ def _raise_terminated(number: int, frame: object) -> None:
 
 
 def _end_group(process: subprocess.Popen) -> None:
-    """Kill whatever is left of the group `process` leads, and reap it."""
+    """End the group `process` leads, and reap it: SIGTERM, up to `GROUP_CLEANUP_SECONDS` for the leader, then SIGKILL.
+
+    SIGTERM first lets a leader end what it started in groups of its own (sd:2978): `sd-check`, killed outright by
+    `sd gate check`, left its `make check` running.
+    """
     import signal  # noqa: PLC0415 - only the group helpers need it
 
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        pass
-    try:
-        process.wait(timeout=GROUP_CLEANUP_SECONDS)
-    except subprocess.TimeoutExpired:
-        pass
+    for number in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(process.pid, number)
+        except (ProcessLookupError, PermissionError):
+            pass
+        try:
+            process.wait(timeout=GROUP_CLEANUP_SECONDS)
+        except subprocess.TimeoutExpired:
+            pass
     for stream in (process.stdin, process.stdout, process.stderr):
         if stream is not None:
             try:
@@ -3851,8 +3862,9 @@ def run_group(argv: list[str], *, cwd: pathlib.Path, env: dict[str, str], timeou
 
     sd:1482. `subprocess.run(timeout=)` kills the one process it started. A
     child with children of its own -- `sd-check` running `make check` -- left
-    them running with nothing to time them out. Here the group is killed when
+    them running with nothing to time them out. Here the group is ended when
     the call ends: at the deadline, on an interruption, and after a normal exit.
+    The leader gets SIGTERM and a moment to end its own groups before SIGKILL.
 
     A group of its own no longer receives what is sent to the caller's group,
     which is how `sd-ship` ends a review. So for the length of the call SIGTERM

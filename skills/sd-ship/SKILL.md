@@ -14,12 +14,12 @@ Use STE-Concise; report delivery state, decisive checks, blockers, and retained 
 
 ## Standing permission
 
-Read `sd config get sd.assistant_merge` before relying on standing permission.
-`controlled` means merge active, in-scope PR work in user-controlled repositories without asking, unless they explicitly say wait.
+Read `repo.runner_merge` on the repository row (`sd-db.sh repo list`, last field) before relying on standing permission.
+`auto` means merge active, in-scope PR work without asking, unless the operator explicitly says wait.
 Merge only through `sd-ship prepare` then `sd-ship merge`; the review lane and required CI are part of those gates.
-`controlled` never permits a merge that skips the review lane, such as a raw `gh pr merge` or a web squash.
-When the value is `controlled` and the gates pass, merge; do not ask the operator first.
-`ask`, or no setting, means ask the operator first.
+`auto` never permits a merge that skips the review lane, such as a raw `gh pr merge` or a web squash.
+When the value is `auto` and the gates pass, merge; do not ask the operator first.
+`manual`, no row, or an unreadable database means ask the operator first.
 Installation grants no permission.
 Shared contributors do not revoke permission; existing ownership, protection, review, and CI gates still apply.
 A refusal stops execution.
@@ -152,8 +152,7 @@ Never allocate another review ID to reset spent passes or discard history.
   Only an open PR binds: a merged or closed one that used the branch name is ignored, and prepare opens a new PR (sd:2656).
   The sd-ai-command-pack checkout's `WORKFLOW.md`, section **The path for a change**, lists the body lines sd-ship owns.
 - `sd-ship body --item ID [--body-file FILE] [--pr N]` prints the body prepare would publish and its body lint.
-  Its `scope` says whether the diff demands a scope line, such as `CI/review scope:` for `.github/**`, and whether the body has it.
-  The diff is the checkout's HEAD; `--pr N` lints that pull request's files and, without `--body-file`, its live body.
+  With `--pr N` and without `--body-file`, it lints that pull request's live body.
   It reads no sd state, calls GitHub only for `--pr`, and exits non-zero on a refusal or a lint failure.
 - Optional commits require `--path FILE` for each file, `--message-file FILE`, and `--author ENTRY`.
   Directories and a pre-populated index are invalid.

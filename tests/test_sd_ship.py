@@ -344,6 +344,17 @@ class CopiedRemote(FixtureRemote):
         _git(self.seed, "remote", "set-url", "origin", str(self.path))
         _git(self.seed, "update-index", "-q", "--refresh")
 
+    def rev_parse(self, ref: str) -> str:
+        """GitHub keeps a merged pull request's head after the merge deletes its branch (sd:3006)."""
+        try:
+            return super().rev_parse(ref)
+        except RuntimeError:
+            merged = [pull.merged_head for pull in self.pull_requests.values()
+                      if pull.head == ref and getattr(pull, "merged_head", None)]
+            if not merged:
+                raise
+            return merged[-1]
+
 
 def git_transport(binary: str, remote: pathlib.Path, url: str) -> str:
     """Keep real Git and local transport without starting Python for every call."""
@@ -931,73 +942,6 @@ roles:
         self.assertEqual(_git(self.root, "rev-parse", "HEAD"), before)
         self.assertFalse((self.root / ".git/MERGE_HEAD").exists())
         self.assertEqual(_git(self.root, "status", "--porcelain", "--untracked-files=no"), "")
-
-    CHANGELOG = "# Changelog\n\n## Unreleased\n\n### Fixed\n\n- **Old entry.** Kept.\n  Second line.\n"
-
-    def changelog_rivals(self, ours: str, theirs: str, files: dict | None = None) -> str:
-        """Both sides change CHANGELOG.md from a shared base; the branch's head before catch-up."""
-        self.remote.commit_on("main", "changelog\n\nAuthored-with: human", files={"CHANGELOG.md": self.CHANGELOG})
-        _git(self.root, "fetch", "-q", "origin", "main:refs/remotes/origin/main")
-        _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge origin/main into topic\n\nAuthored-with: human", "origin/main")
-        (self.root / "CHANGELOG.md").write_text(ours)
-        _git(self.root, "commit", "-qam", "ours\n\nAuthored-with: human")
-        self.remote.commit_on("main", "theirs\n\nAuthored-with: human", files={"CHANGELOG.md": theirs, **(files or {})})
-        return _git(self.root, "rev-parse", "HEAD")
-
-    def test_a_catch_up_keeps_both_changelog_entries_added_at_the_same_place(self):
-        # sd:2174: four of five lane catch-ups on 2026-09-29 stopped on two
-        # entries added at the top of one section, and each was kept both.
-        entry = "- **{0}.** Fixed {0}.\n  More about {0}.\n\n"
-        head = "# Changelog\n\n## Unreleased\n\n### Fixed\n\n"
-        before = self.changelog_rivals(self.CHANGELOG.replace(head, head + entry.format("Ours")),
-                                       self.CHANGELOG.replace(head, head + entry.format("Theirs")))
-        # A clean merge runs no pre-commit hook, so the resolved one does not
-        # either: the pack's outlasts the git timeout and would abort it.
-        hook = pathlib.Path(_git(self.root, "rev-parse", "--git-path", "hooks/pre-commit"))
-        if not hook.is_absolute():
-            hook = self.root / hook
-        hook.parent.mkdir(parents=True, exist_ok=True)
-        hook.write_text("#!/bin/sh\nexit 1\n")
-        hook.chmod(0o755)
-        self.assertEqual(self.prepare("--catch-up")["phase"], "ready_to_send")
-        merged = _git(self.root, "rev-parse", "HEAD")
-        self.assertEqual(_git(self.root, "rev-list", "--parents", "-n", "1", merged).split()[1:],
-                         [before, _git(self.root, "rev-parse", "refs/remotes/origin/main")])
-        self.assertEqual(_git(self.root, "log", "-1", "--format=%s", merged), "Merge origin/main into topic")
-        self.assertEqual((self.root / "CHANGELOG.md").read_text(),
-                         head + entry.format("Ours") + entry.format("Theirs") + "- **Old entry.** Kept.\n  Second line.\n")
-        self.assertEqual(_git(self.root, "status", "--porcelain", "--untracked-files=no"), "")
-        self.assertEqual(_git(self.remote.path, "rev-parse", "refs/heads/topic"), merged)
-        self.assertIn("catch-up resolved a CHANGELOG.md conflict keep-both: this branch's entries first, "
-                      "then origin/main's (sd:2174)", self.operation().state["warnings"])
-
-    def assert_catch_up_refused(self, before: str):
-        with patch.object(ship.Ship, "review") as review:
-            with self.assertRaisesRegex(ship.Refusal, "merging origin/main into topic conflicts; the branch is unchanged") as caught:
-                self.prepare("--catch-up")
-        review.assert_not_called()
-        self.assertEqual(caught.exception.workflow["blocker"]["code"], "merge_conflict")
-        self.assertEqual(caught.exception.workflow["next_action"],
-                         "Run git merge origin/main, resolve the conflict, commit, then run prepare again.")
-        self.assertEqual(_git(self.root, "rev-parse", "HEAD"), before)
-        self.assertFalse((self.root / ".git/MERGE_HEAD").exists())
-        self.assertEqual(_git(self.root, "status", "--porcelain", "--untracked-files=no"), "")
-
-    def test_a_catch_up_whose_changelog_conflict_edits_an_entry_is_refused(self):
-        # One side rewrote a line the other also rewrote, beside an addition:
-        # the hunk has a base, so it is a decision and not two additions.
-        ours = self.CHANGELOG.replace("- **Old entry.** Kept.", "- **Old entry.** Reworded here.")
-        theirs = self.CHANGELOG.replace("### Fixed\n\n- **Old entry.** Kept.", "### Fixed\n\n- **New.** Added.\n- **Old entry.** Reworded there.")
-        self.assert_catch_up_refused(self.changelog_rivals(ours, theirs))
-        self.assertIn("Reworded here", (self.root / "CHANGELOG.md").read_text())
-
-    def test_a_catch_up_with_a_changelog_and_another_conflict_is_refused(self):
-        head = "### Fixed\n\n"
-        before = self.changelog_rivals(self.CHANGELOG.replace(head, head + "- **Ours.** A.\n\n"),
-                                       self.CHANGELOG.replace(head, head + "- **Theirs.** B.\n\n"),
-                                       files={"src.py": "value = 2\n"})
-        self.assert_catch_up_refused(before)
-        self.assertNotIn("Theirs", (self.root / "CHANGELOG.md").read_text())
 
     def test_a_moved_binding_re_reviews_the_same_head_instead_of_bricking_it(self):
         # sd:1390, live on #1140. Reuse was decided on head equality and the
@@ -2397,7 +2341,7 @@ roles:
         linted = subprocess.run([sys.executable, str(ROOT / "bin/sd-docs-lint"), "--pr-body", str(body)],
                                 cwd=self.root, env=self.environment, text=True, capture_output=True, timeout=CLI_TIMEOUT)
         self.assertEqual(linted.returncode, 0, linted.stdout + linted.stderr)
-        self.assertIn(f"database association sd:{self.item}", linted.stdout)
+        self.assertIn("sd-docs-lint: clean", linted.stdout)  # rule 5 is retired (sd:2999)
         result = self.merge()
         self.assertEqual(result["phase"], "merged")
         self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "in_progress")
@@ -2885,6 +2829,150 @@ roles:
         again = self.operation("reconcile").reconcile()
         self.assertFalse(again["delivery_pending"], again)
 
+    def test_a_merge_removes_the_remote_branch_and_keeps_the_main_checkout(self):
+        """sd:3006. The fixture ships from its main checkout, which is never removed,
+        so the branch it has checked out stays too; the remote branch goes."""
+        self.prepare()
+        cleanup = self.merge()["cleanup"]
+        self.assertEqual(cleanup["removed"], ["origin/topic"])
+        self.assertEqual(cleanup["kept"], {str(self.root): "the main checkout", "topic": "a kept worktree has it checked out"})
+        self.assertEqual("", _git(self.root, "ls-remote", "origin", "refs/heads/topic"))
+
+    def merged_worktree(self, name: str) -> pathlib.Path:
+        """A linked worktree on a branch `name` whose head origin carries, as a merged pull request's is."""
+        tree = self.directory / name
+        _git(self.root, "worktree", "add", "-q", "-b", name, str(tree))
+        (tree / "target").mkdir()
+        (tree / "target/build.o").write_text("output")
+        _git(self.root, "push", "-q", "origin", name)
+        return tree
+
+    def test_a_merge_cleanup_removes_a_clean_worktree_and_keeps_a_dirty_or_busy_one(self):
+        """sd:3006, operator ruling 2026-10-08: leads removed these by hand after each merge."""
+        head = _git(self.root, "rev-parse", "HEAD")
+        with (self.root / ".git/info/exclude").open("a") as stream:
+            stream.write("target/\n")
+        clean = self.merged_worktree("clean")
+        with contextlib.chdir(clean):  # as `sd-ship -C <worktree> merge` runs: inside the tree it removes
+            self.assertEqual(ship.clean_up_merged(clean, "clean", head),
+                             {"removed": [str(clean), "clean", "origin/clean"], "kept": {}})
+        self.assertFalse(clean.exists())
+        dirty = self.merged_worktree("dirty")
+        (dirty / "notes.txt").write_text("unsaved")
+        busy = self.merged_worktree("busy")
+        ahead = self.merged_worktree("ahead")
+        _git(ahead, "commit", "-q", "--allow-empty", "-m", "not pushed\n\nAuthored-with: human")
+        sleeper = subprocess.Popen(["sleep", "60"], cwd=busy)
+        self.addCleanup(sleeper.wait)
+        self.addCleanup(sleeper.kill)
+        for name, tree, why in (("dirty", dirty, "it has uncommitted changes"),
+                                ("busy", busy, f"process {sleeper.pid} works inside it"),
+                                ("ahead", ahead, "it has commits past the merged head")):
+            with self.subTest(name):
+                cleanup = ship.clean_up_merged(self.root, name, head)
+                self.assertEqual(cleanup["kept"], {str(tree): why, name: "a kept worktree has it checked out"})
+                self.assertEqual(cleanup["removed"], [f"origin/{name}"])
+                self.assertTrue(tree.exists())
+
+    def test_a_merge_cleanup_keeps_a_worktree_holding_ignored_data_that_is_not_build_output(self):
+        """Review of sd:3013: `git status --porcelain` hides ignored files, and
+        `git worktree remove` deleted ignored local data with the tree."""
+        head = _git(self.root, "rev-parse", "HEAD")
+        with (self.root / ".git/info/exclude").open("a") as stream:
+            stream.write("target/\n*.env\n")
+        tree = self.merged_worktree("ignored")
+        (tree / "local.env").write_text("TOKEN=change-me\n")
+        cleanup = ship.clean_up_merged(self.root, "ignored", head)
+        self.assertEqual(cleanup["kept"], {str(tree): "it holds ignored local.env",
+                                           "ignored": "a kept worktree has it checked out"})
+        self.assertTrue((tree / "local.env").exists())
+
+    def cleanup_keeps(self, name: str, configure, why: str) -> pathlib.Path:
+        """Run the merge cleanup on a worktree `configure(tree)` set up, and assert it stays for `why`."""
+        head = _git(self.root, "rev-parse", "HEAD")
+        with (self.root / ".git/info/exclude").open("a") as stream:
+            stream.write("target/\n")
+        tree = self.merged_worktree(name)
+        configure(tree)
+        cleanup = ship.clean_up_merged(self.root, name, head)
+        self.assertEqual(cleanup.get("kept"), {str(tree): why, name: "a kept worktree has it checked out"}, cleanup)
+        self.assertTrue(tree.exists())
+        return tree
+
+    def test_cleanup_sees_an_untracked_file_that_status_config_hides(self):
+        """Cleanup failure table, row S1: `status.showUntrackedFiles=no` hid it, and `worktree remove` deleted it."""
+        def configure(tree):
+            _git(tree, "config", "status.showUntrackedFiles", "no")
+            (tree / "notes.txt").write_text("unsaved")
+        self.cleanup_keeps("hidden-untracked", configure, "it has uncommitted changes")
+
+    def test_cleanup_sees_ignored_data_that_status_config_hides(self):
+        """Cleanup failure table, row S2: review round 2 of sd:3013."""
+        def configure(tree):
+            _git(tree, "config", "status.showUntrackedFiles", "no")
+            with (self.root / ".git/info/exclude").open("a") as stream:
+                stream.write("*.env\n")
+            (tree / "local.env").write_text("TOKEN=change-me\n")
+        self.cleanup_keeps("hidden-ignored", configure, "it holds ignored local.env")
+
+    def test_cleanup_sees_data_a_global_excludes_file_ignores(self):
+        """Cleanup failure table, row S3: `core.excludesFile` turns untracked data into ignored data."""
+        def configure(tree):
+            excludes = self.directory / "global-excludes"
+            excludes.write_text("*.env\n")
+            _git(tree, "config", "core.excludesFile", str(excludes))
+            (tree / "local.env").write_text("TOKEN=change-me\n")
+        self.cleanup_keeps("global-ignored", configure, "it holds ignored local.env")
+
+    def test_cleanup_never_consults_a_repositorys_fsmonitor(self):
+        """Cleanup failure table, row S4: a daemon's stale answer is the one status would read."""
+        head = _git(self.root, "rev-parse", "HEAD")
+        with (self.root / ".git/info/exclude").open("a") as stream:
+            stream.write("target/\n")
+        tree = self.merged_worktree("monitored")
+        marker, hook = self.directory / "fsmonitor-ran", self.directory / "fsmonitor.sh"
+        hook.write_text(f'#!/bin/sh\necho "$PWD" >> "{marker}"\nexit 1\n')
+        hook.chmod(0o755)
+        _git(tree, "config", "core.fsmonitor", str(hook))
+        self.assertEqual(ship.clean_up_merged(self.root, "monitored", head)["kept"], {})
+        self.assertFalse(marker.exists(), marker.read_text() if marker.exists() else "")
+
+    def test_cleanup_keeps_a_worktree_with_a_submodule(self):
+        """Cleanup failure table, row S5: `submodule.*.ignore=all` hides a dirty submodule from status."""
+        _git(self.root, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(self.remote.path), "sub")
+        _git(self.root, "commit", "-qm", "submodule\n\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        tree = self.merged_worktree("with-submodule")
+        _git(tree, "-c", "protocol.file.allow=always", "submodule", "update", "-q", "--init")
+        _git(tree, "config", "submodule.sub.ignore", "all")
+        (tree / "sub/scratch.txt").write_text("unsaved")
+        cleanup = ship.clean_up_merged(self.root, "with-submodule", head)
+        self.assertNotIn(str(tree), cleanup.get("removed", []), cleanup)
+        self.assertTrue((tree / "sub/scratch.txt").exists())
+        self.assertEqual(cleanup.get("kept", {}).get(str(tree)), "it has uncommitted changes", cleanup)
+
+    def test_a_merge_closes_every_item_its_title_names(self):
+        """sd:3014, operator ruling 2026-10-08. A batched pull request names its
+        items in its title. The merge closes each one as it closes a `Closes:`
+        item, with the merge commit in the reason; the claimed item keeps its
+        own delivery path."""
+        self.task_item("task")
+        batched = self.closes_items()
+        title = "Three fixes (" + ", ".join(f"sd:{number}" for number in (self.item, *batched)) + ")"
+        self.unanswered("--deliver", "--title", title).prepare()
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        self.assert_closed_by_merge(result)
+        self.assertEqual(result.get("closed_items"), [f"sd:{number}" for number in batched])
+        commit = result["merge_commit"]
+        for number in batched:
+            with self.subTest(item=number):
+                self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (number,)).fetchone()[0], "done")
+        for number in batched[:2]:
+            reasons = [row[0] for row in self.connection.execute(
+                "SELECT body FROM note WHERE item = ? AND kind = 'status_change'", (number,))]
+            self.assertIn(f"planning -> done by sd-ship: delivered at {commit} on origin/main", reasons)
+
     def test_a_web_merge_without_the_closes_trailers_leaves_those_items_open(self):
         """A pull request merged on GitHub lands whatever message the web form
         held. Each `Closes:` item is verified against the landed message, as
@@ -2950,7 +3038,37 @@ roles:
                 with self.assertRaises(ship.Refusal) as caught:
                     self.unanswered("--deliver", "--body-file", str(body)).prepare()
                 self.assertEqual(caught.exception.workflow["blocker"]["code"], names)
+        with self.assertRaises(ship.Refusal) as caught:  # sd:3014: the title's items are closed the same way
+            self.unanswered("--deliver", "--title", "A change (sd:99999)").prepare()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "closes_item_unknown")
         self.assertFalse(self.remote.pull_requests)
+
+    def test_a_title_closes_only_a_whole_sd_token(self):
+        """Review of sd:3013: `sd:123abc` and `sd:123_legacy` closed item 123."""
+        self.task_item("task")
+        named = self.closes_items()[:2]
+        title = f"Fix sd:{named[0]}abc and sd:{named[1]}_legacy parsing (sd:{self.item})"
+        self.unanswered("--deliver", "--title", title).prepare()
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        self.assertFalse(result.get("closed_items"))
+        for number in named:
+            with self.subTest(item=number):
+                self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (number,)).fetchone()[0], "planning")
+
+    def test_a_live_title_naming_another_repositorys_item_is_refused_before_the_merge(self):
+        """Review of sd:3013: a title edited after prepare reached the squash unchecked."""
+        self.task_item("task")
+        elsewhere = self.directory / "elsewhere"
+        upsert_repo(self.connection, str(elsewhere), remote="https://github.com/example/elsewhere")
+        foreign = create_item(self.connection, kind="task", title="another repository", status="planning", repo=str(elsewhere))
+        number = self.unanswered("--deliver").prepare()["pull_request"]["number"]
+        self.remote.pull(number).title = f"A change (sd:{foreign})"
+        with patch.object(ship.time, "sleep"), self.assertRaises(ship.Refusal) as caught:
+            self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "closes_item_foreign")
+        self.assertIsNone(getattr(self.remote.pull(number), "merged_head", None))
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (foreign,)).fetchone()[0], "planning")
 
     def test_a_refs_item_stays_open_after_the_merge(self):
         """`Refs:` names a related or partial item, which stays open (sd:1481).
@@ -3749,11 +3867,12 @@ roles:
             deliver_work(self.connection, self.item, result["merge_commit"], who="sd-ship", verification_root=self.root)
 
     def test_forged_delivery_trailer_cannot_turn_a_slice_into_completion(self):
+        """sd:2999: the body's `Delivers:` line is stripped, so only `--deliver` delivers."""
         body = self.directory / "body.txt"
         body.write_text(f"A slice\n\nDelivers: sd:{self.item}\n")
-        with self.assertRaisesRegex(ship.Refusal, "owns association"):
-            self.prepare("--body-file", str(body))
-        self.assertFalse(any(call.method == "POST" for call in self.remote.calls))
+        self.prepare("--body-file", str(body))
+        self.merge()
+        self.assertNotEqual(ship.sd_lib.delivered(self.root, f"sd:{self.item}"), ship.sd_lib.YES)
 
     def test_a_blocking_review_names_its_findings_and_the_command_that_prints_them(self):
         """sd:2102. The refusal said `see item ship receipt`, and nothing in the CLI printed the receipt.

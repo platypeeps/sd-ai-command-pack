@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
-import json
 import os
 import pathlib
 import re
@@ -85,14 +84,13 @@ class LintFixture(unittest.TestCase):
         self.git("init", "-q")
         self.work = self.repo / "docs" / "work"
         self.spec = self.repo / "docs" / "spec"
-        # The claim-support reading off: since sd:2762 it runs in every
-        # repository, and a fixture must not reach the developer's `jev`.
-        # `Rule6ClaimSupportTests.jev` switches it back on, against a stub.
-        stage_off = mock.patch.dict(os.environ, {lint.JEV_STAGE: "0"})
-        stage_off.start()
-        self.addCleanup(stage_off.stop)
         self.write_item("2026-08-29-a-workable-item", GOOD_PRD)
         self.write_spec("backend", ["quality.md"])
+        # No test reads the operator's privacy-pattern file: the default is
+        # a directory that does not exist, and the privacy tests write their own.
+        env = mock.patch.dict(os.environ, {"SYSTEM_TOOLS_CONFIG": str(self.repo / "no-config")})
+        env.start()
+        self.addCleanup(env.stop)
 
     def write_item(self, name: str, prd: str, *, month: str | None = None) -> pathlib.Path:
         parent = self.work / "archive" / month if month else self.work
@@ -117,14 +115,12 @@ class LintFixture(unittest.TestCase):
             ["git", "-C", str(self.repo), *args], check=True, capture_output=True
         )
 
-    def run_lint(
-        self, pr_body: str | None = None, changed: list[str] | None = None, body_only: bool = False
-    ) -> lint.Report:
+    def run_lint(self, pr_body: str | None = None, body_only: bool = False) -> lint.Report:
         # Staged, not committed: `ls-files` reads the index, and every test
         # here writes its fixture immediately before asking for a verdict.
         self.git("add", "-A")
         mode = {"body_only": True} if body_only else {}
-        return lint.run(self.repo, "docs/work", "docs/spec", "docs/decisions", pr_body, changed, **mode)
+        return lint.run(self.repo, "docs/work", "docs/spec", "docs/decisions", pr_body, **mode)
 
     def assert_clean(self) -> None:
         report = self.run_lint()
@@ -134,20 +130,8 @@ class LintFixture(unittest.TestCase):
         """Every note one run printed, joined. What a rule says it did."""
         return "\n".join(self.run_lint().notes)
 
-    def cited_item(self) -> pathlib.Path:
-        item = self.write_item("2026-08-29-a-cited-item", GOOD_PRD)
-        (item / "design.md").write_text(
-            "# design\n\nThe ladder is at `prd.md:3`.\n", encoding="utf-8"
-        )
-        return item
-
-    def record(self) -> tuple[int, list[tuple[str, str, str, str]]]:
-        return lint.write_citation_manifest(self.cited_item(), self.work)[:2]
-
-    def assert_fails(
-        self, needle: str, pr_body: str | None = None, changed: list[str] | None = None
-    ) -> list[str]:
-        report = self.run_lint(pr_body, changed)
+    def assert_fails(self, needle: str, pr_body: str | None = None) -> list[str]:
+        report = self.run_lint(pr_body)
         joined = "\n".join(report.failures)
         self.assertIn(needle, joined)
         return report.failures
@@ -166,9 +150,16 @@ class Rule1ShapeTests(LintFixture):
         self.write_item("no-date-here", GOOD_PRD)
         self.assert_fails("named <YYYY-MM-DD>-<slug>")
 
-    def test_red_missing_prd(self) -> None:
+    def test_green_design_alone(self) -> None:
+        """sd:3000. One design.md is a whole work item; prd.md is legacy."""
+        item = self.work / "2026-08-30-a-design"
+        item.mkdir(parents=True)
+        (item / "design.md").write_text("# Design\n", encoding="utf-8")
+        self.assert_clean()
+
+    def test_red_no_document(self) -> None:
         (self.work / "2026-08-30-empty").mkdir(parents=True)
-        self.assert_fails("every work item has a prd.md")
+        self.assert_fails("a work item holds a design.md")
 
     def test_red_missing_frontmatter(self) -> None:
         self.write_item("2026-08-30-bare", "# PRD\n\n## Acceptance criteria\n")
@@ -187,7 +178,7 @@ class Rule1ShapeTests(LintFixture):
 
     def test_red_stray_file_in_a_work_item(self) -> None:
         (self.work / "2026-08-29-a-workable-item" / "task.json").write_text("{}", encoding="utf-8")
-        self.assert_fails("prd.md, design.md, implement.md and .citations.tsv only")
+        self.assert_fails("a work item holds design.md, or the legacy prd.md and implement.md, only")
 
     def test_red_archive_bucket_is_not_a_month(self) -> None:
         (self.work / "archive" / "july").mkdir(parents=True)
@@ -459,562 +450,78 @@ class Rule4SpecIndexTests(LintFixture):
         self.assert_fails("index does not link gates.md")
 
 
-class Rule5PullRequestLinkTests(LintFixture):
-    def test_green_work_line_resolving_to_an_item(self) -> None:
-        report = self.run_lint("Work: docs/work/2026-08-29-a-workable-item\n")
-        self.assertEqual(report.failures, [])
-
-    def test_database_associations_pass_without_claiming_verified_rows(self) -> None:
-        for value in ("sd:1", "sd:36", "sd:999999999999999999999999999999"):
-            with self.subTest(value=value):
-                report = self.run_lint(f"Work: {value}\n")
-                self.assertEqual(report.failures, [])
-                note = next(note for note in report.notes if "rule 5 PR link:" in note)
-                self.assertIn(f"database association {value}", note)
-                self.assertIn("row existence, ownership and delivery require sd-ship verification", note)
-
-    def test_malformed_database_associations_refuse(self) -> None:
-        for value in ("sd:", "sd:0", "sd:01", "sd:-1", "sd:+1", "sd:1.0",
-                      "sd: 1", "sd:1 extra", "sd:1/other", "sd:١", "SD:1"):
-            with self.subTest(value=value):
-                self.assert_fails("must use sd:<positive integer>", pr_body=f"Work: {value}\n")
-
-    def test_database_association_does_not_hide_another_work_line(self) -> None:
-        self.assert_fails("exactly one is allowed", pr_body=(
-            "Work: sd:36\nWork: docs/work/2026-08-29-a-workable-item\n"))
-
-    def test_database_association_does_not_bypass_work_directory_checks(self) -> None:
-        (self.work / "2026-08-30-empty").mkdir()
-        self.assert_fails("every work item has a prd.md", pr_body="Work: sd:36\n")
-
-    def test_green_no_work_line_claims_no_item(self) -> None:
-        """A change with no item carries no line, and is not asked for one.
-
-        Criterion 10 removes the `none - <reason>` form rather than replacing
-        it, so the absence of a `Work:` line is the whole of how a change says
-        it advances no item. There is no placeholder to write and none to
-        forget, and a body that says nothing cannot say it wrongly.
-        """
-        report = self.run_lint("Fixes a typo.\n")
-        self.assertEqual(report.failures, [])
-
-    def test_red_two_work_lines(self) -> None:
-        self.assert_fails(
-            "exactly one is allowed",
-            pr_body=(
-                "Work: docs/work/2026-08-29-a-workable-item\n"
-                "Work: docs/work/2026-08-29-another-item\n"
-            ),
-        )
-
-    def test_red_empty_work_line(self) -> None:
-        self.assert_fails("Work: line is empty", pr_body="Work: \t\n")
-
-    def test_red_the_none_form_is_no_longer_an_escape(self) -> None:
-        """`none - <reason>` is now a path that does not resolve, and fails.
-
-        The form used to pass rule 5 by naming no item. A body still carrying
-        it is stale rather than exempt, so it has to fail rather than quietly
-        keep working -- otherwise the form survives in every body written
-        before this change and criterion 10 is met only in the lint's source.
-        """
-        self.assert_fails(
-            "is not a path under",
-            pr_body="Work: none - typo fix in a comment\n",
-        )
-
-    def test_red_a_bare_none_is_a_path_that_does_not_resolve(self) -> None:
-        self.assert_fails("is not a path under", pr_body="Work: none\n")
-
-    def test_red_a_bare_item_name_is_an_unresolved_path(self) -> None:
-        """31(c): `Work: nonexistent-item` fails as a path, not as a reason.
-
-        The two messages send the author to different places. "is not a path
-        under" says the value names nothing; the missing-reason refusal says
-        the value is fine but under-explained. An author given the second for
-        a typo goes looking for a sentence to write instead of for an item
-        that exists.
-
-        The bug was a `startswith("none")` test, so every value beginning with
-        those four letters took the missing-reason branch. That is why the
-        spellings here start with them: `nonexistent-item` is the criterion's
-        own example and `nonesuch` is the shortest one, and a fix that
-        special-cases the first while leaving the prefix test in place fails
-        on the second. The plain `notaname` is the control -- it shares no
-        prefix with the bug and must give the same message, or the branch is
-        still deciding by spelling.
-        """
-        for value in ("nonexistent-item", "nonesuch", "notaname"):
-            with self.subTest(value=value):
-                self.assert_fails("is not a path under", pr_body=f"Work: {value}\n")
-
-    def test_red_item_does_not_exist(self) -> None:
-        self.assert_fails(
-            "does not resolve to a work item", pr_body="Work: docs/work/2026-01-01-ghost\n"
-        )
-
-    def test_red_path_outside_the_work_directory(self) -> None:
-        self.assert_fails("is not a path under", pr_body="Work: docs/spec/backend\n")
-
-    def test_red_path_traversing_outside_the_work_directory(self) -> None:
-        self.assert_fails("is not a path under", pr_body="Work: docs/work/../spec/backend\n")
-
-    def test_red_symlink_outside_the_work_directory(self) -> None:
-        (self.work / "2026-08-30-escape").symlink_to(self.spec / "backend", target_is_directory=True)
-        self.assert_fails("is not a path under", pr_body="Work: docs/work/2026-08-30-escape\n")
-
-    def test_red_work_root_is_not_an_item(self) -> None:
-        self.assert_fails("does not resolve to a work item", pr_body="Work: docs/work\n")
-
-    def test_green_non_final_slice_with_later_acceptance_criteria_pending(self) -> None:
-        item = self.write_item(
-            "2026-08-29-a-workable-item",
-            GOOD_PRD.replace(
-                "- [x] the thing works",
-                "- [x] database reads work\n- [ ] dashboard controls work",
-            ),
-        )
-        (item / "implement.md").write_text(
-            "# Implementation\n\n- [x] Add database reads\n- [ ] Add dashboard controls\n",
-            encoding="utf-8",
-        )
-        report = self.run_lint(
-            "Add database reads; dashboard controls follow in the next slice.\n\n"
-            "Work: docs/work/2026-08-29-a-workable-item\n"
-        )
-        self.assertEqual(report.failures, [])
-
-
-#: A policy file with the two classes this repository declares, in the shape
-#: rule 8 reads: a row per class, the line in the first cell, the globs in the
-#: second. The prose around the table is not what the rule reads.
-SCOPE_POLICY = """# Repository Copilot Instructions
-
-## Where to spend review budget
-
-- A diff that touches a path in the table below carries the matching line.
-
-| Scope line | Paths that demand it | Why |
-|---|---|---|
-| `CI/review scope:` | `.github/**`, `actions/**`, `Makefile` | What CI runs and a reviewer reads. |
-| `Automation scope:` | `bin/sd_setup_github.py` | What writes automation elsewhere. |
-"""
-
-#: The four paths #968 changed, the pull request whose body ran clean without
-#: a scope line and raised sd:931.
-PR_968_PATHS = [
-    ".github/scripts/check-zizmor-personas.py",
-    ".github/workflows/tests.yml",
-    "Makefile",
-    "tests/test_zizmor_persona_decisions.py",
-]
-
-
-class Rule8PullRequestScopeTests(LintFixture):
-    """A diff touching a scope class carries that class's line in the body.
-
-    `bin/sd-docs-lint --pr-body` ran clean on #968, whose diff touched
-    `.github/workflows/tests.yml` and whose body carried no scope line; the
-    template asked for one and only the reviewer noticed (sd:931). The
-    classes come from `.github/copilot-instructions.md`, so the fixture
-    writes that file and the rule is asserted against what it wrote.
-    """
-
-    def policy(self, text: str = SCOPE_POLICY) -> None:
-        path = self.repo / lint.SCOPE_POLICY
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
-
-    def rule_8(self, report: lint.Report) -> str:
-        return "\n".join(note for note in report.notes if note.startswith("rule 8"))
-
-    def test_no_policy_file_is_no_scope_classes_and_is_said(self) -> None:
-        # A consumer repository has no Copilot instructions of this shape;
-        # sd-ship runs this linter there, and a rule with nothing to read
-        # says so rather than failing every pull request in it.
-        report = self.run_lint("Work: sd:1\n", changed=PR_968_PATHS)
-        self.assertEqual(report.failures, [])
-        self.assertIn("declares no scope classes; not run", self.rule_8(report))
-
-    def test_a_policy_file_that_will_not_read_is_a_failure_not_an_absent_policy(self) -> None:
-        # Absent and unreadable are two answers, not one. A directory in the
-        # policy file's place read as "this repository declares no scope
-        # classes" and passed a diff that file may well have classified, so
-        # the rule failed open (#972 review).
-        (self.repo / lint.SCOPE_POLICY).mkdir(parents=True, exist_ok=True)
-        failures = self.assert_fails(
-            "rule 8 cannot read the scope policy: IsADirectoryError",
-            pr_body="Work: sd:876\n\nNo scope line anywhere.\n",
-            changed=PR_968_PATHS,
-        )
-        self.assertEqual(len(failures), 1, failures)
-
-    def test_a_policy_file_that_is_not_utf8_fails_by_name(self) -> None:
-        # The other half of the same guard: bytes that do not decode are an
-        # unreadable policy, reported by name rather than as a traceback.
-        # Rule 8 alone, because rule 7 reads every tracked file and this
-        # fixture is deliberately not text.
-        path = self.repo / lint.SCOPE_POLICY
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"| `CI/review scope:` | `\xff.github/**` | why |\n")
-        report = lint.Report()
-        lint.check_pr_scope(self.repo, "Work: sd:876\n", PR_968_PATHS, report)
-        self.assertIn(
-            "rule 8 cannot read the scope policy: UnicodeDecodeError",
-            "\n".join(report.failures),
-        )
-
-    def test_a_policy_symlink_to_nothing_is_unreadable_and_not_absent(self) -> None:
-        # `exists()` is False for a broken symlink, which is exactly the shape
-        # that would slip back into the absent-policy note.
-        path = self.repo / lint.SCOPE_POLICY
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.symlink_to("copilot-instructions-that-are-not-here.md")
-        self.assert_fails(
-            "rule 8 cannot read the scope policy: FileNotFoundError",
-            pr_body="Work: sd:876\n\nNo scope line anywhere.\n",
-            changed=PR_968_PATHS,
-        )
-
-    def test_no_body_is_not_run_whatever_changed(self) -> None:
-        self.policy()
-        report = self.run_lint(None, changed=PR_968_PATHS)
-        self.assertEqual(report.failures, [])
-        self.assertIn("no --pr-body supplied, not run", self.rule_8(report))
-
-    def test_red_the_968_diff_with_no_scope_line_names_the_path_and_the_line(self) -> None:
-        # The fail-first case. The path named is the first one the class
-        # claims, and the line named is the one the body must carry.
-        self.policy()
-        failures = self.assert_fails(
-            'touches .github/scripts/check-zizmor-personas.py, which '
-            '.github/copilot-instructions.md puts under "CI/review scope:", '
-            'and carries no "CI/review scope:" line',
-            pr_body="Work: sd:876\n\nNo scope line anywhere.\n",
-            changed=PR_968_PATHS,
-        )
-        self.assertEqual(len(failures), 1, failures)
-
-    def test_green_the_line_on_its_own_satisfies_the_class(self) -> None:
-        self.policy()
-        report = self.run_lint(
-            "Work: sd:876\n\nCI/review scope: one step added to the lint job.\n",
-            changed=PR_968_PATHS,
-        )
-        self.assertEqual(report.failures, [])
-        self.assertIn('demands "CI/review scope:", and the body carries it', self.rule_8(report))
-
-    def test_green_a_markdown_heading_is_the_line_on_its_own(self) -> None:
-        # How #968 wrote it once asked: `## CI/review scope:`.
-        self.policy()
-        report = self.run_lint("Work: sd:876\n\n## CI/review scope:\n\nThe CI surface.\n",
-                               changed=PR_968_PATHS)
-        self.assertEqual(report.failures, [])
-
-    def test_green_a_bold_or_list_form_is_the_line_on_its_own(self) -> None:
-        self.policy()
-        for form in ("**CI/review scope:** the lint job\n", "- CI/review scope: the lint job\n",
-                     "> ci/review scope: the lint job\n"):
-            with self.subTest(form=form):
-                report = self.run_lint(f"Work: sd:876\n\n{form}", changed=PR_968_PATHS)
-                self.assertEqual(report.failures, [], form)
-
-    def test_red_a_mention_in_prose_is_not_the_line(self) -> None:
-        # The template asks for the line on its own; a sentence that names
-        # the heading has not declared a scope.
-        self.policy()
-        self.assert_fails(
-            'carries no "CI/review scope:" line',
-            pr_body="Work: sd:876\n\nRemember to add the CI/review scope: line later.\n",
-            changed=PR_968_PATHS,
-        )
-
-    def test_red_another_class_s_line_does_not_stand_in(self) -> None:
-        self.policy()
-        self.assert_fails(
-            'carries no "CI/review scope:" line',
-            pr_body="Work: sd:876\n\nAutomation scope: none.\n",
-            changed=PR_968_PATHS,
-        )
-
-    def test_each_touched_class_is_demanded_and_failed_on_its_own(self) -> None:
-        self.policy()
-        failures = self.assert_fails(
-            'carries no "Automation scope:" line',
-            pr_body="Work: sd:876\n\nCI/review scope: the workflow.\n",
-            changed=[".github/workflows/tests.yml", "bin/sd_setup_github.py"],
-        )
-        self.assertEqual(len(failures), 1, failures)
-        self.assertNotIn("CI/review", "\n".join(failures))
-
-    def test_green_a_path_in_no_class_demands_nothing(self) -> None:
-        self.policy()
-        report = self.run_lint("Work: sd:1\n", changed=["bin/sd_lib.py", "docs/work/x/prd.md"])
-        self.assertEqual(report.failures, [])
-        self.assertIn("2 changed path(s) from --changed, 0 class(es) demanded", self.rule_8(report))
-
-    def test_the_glob_crosses_directories(self) -> None:
-        # `.github/**` claims `.github/scripts/x.py`, two levels down; a
-        # `*` that stopped at `/` would leave the scripts CI runs unclaimed.
-        self.policy()
-        self.assert_fails('touches .github/scripts/deep/er/x.py',
-                          pr_body="Work: sd:1\n", changed=[".github/scripts/deep/er/x.py"])
-        self.assertTrue(lint.matches_scope("Makefile", "Makefile"))
-        self.assertFalse(lint.matches_scope("sub/Makefile", "Makefile"))
-
-    def test_the_classes_are_read_from_the_table_and_not_from_the_linter(self) -> None:
-        # A row added to the policy is a class the linter enforces, with no
-        # edit here: the enumeration is the table's, which is the point of
-        # sd:931's "not retyped in the linter".
-        self.policy(SCOPE_POLICY + "| `Kitchen scope:` | `kitchen/**` | Everything and the sink. |\n")
-        self.assert_fails(
-            'touches kitchen/sink.py, which .github/copilot-instructions.md puts under '
-            '"Kitchen scope:", and carries no "Kitchen scope:" line',
-            pr_body="Work: sd:1\n", changed=["kitchen/sink.py"],
-        )
-        self.assertEqual(
-            [line for line, _ in lint.scope_classes(self.repo)],
-            ["CI/review scope:", "Automation scope:", "Kitchen scope:"],
-        )
-
-    def test_a_policy_file_with_no_table_declares_no_class_and_is_said(self) -> None:
-        self.policy("# Repository Copilot Instructions\n\nNo table here.\n")
-        report = self.run_lint("Work: sd:1\n", changed=PR_968_PATHS)
-        self.assertEqual(report.failures, [])
-        self.assertIn("tabulates no scope class; not run", self.rule_8(report))
-
-    def commit_all(self, message: str) -> None:
-        self.git("add", "-A")
-        self.git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", message)
-
-    def test_changed_paths_come_from_git_against_origin_head_when_not_listed(self) -> None:
-        # sd-ship pins `origin/HEAD` to the remote default branch before it
-        # runs this linter, and passes no list; the diff from the merge base
-        # is what the pull request will carry.
-        self.policy()
-        self.commit_all("base")
-        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
-        self.git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
-        (self.repo / ".github" / "workflows").mkdir(parents=True)
-        (self.repo / ".github" / "workflows" / "tests.yml").write_text("on: push\n", encoding="utf-8")
-        self.commit_all("touch a workflow")
-        report = self.run_lint("Work: sd:1\n")
-        self.assertEqual(len(report.failures), 1, report.failures)
-        self.assertIn("touches .github/workflows/tests.yml", report.failures[0])
-        self.assertIn("1 changed path(s) from origin/HEAD", self.rule_8(report))
-
-    def test_a_non_ascii_path_still_reaches_its_scope_class(self) -> None:
-        # `core.quotePath` is on by default, so a newline `--name-only`
-        # printed `.github/workflows/tëst.yml` quoted, no scope glob matched
-        # it, and the diff passed without its scope line (sd:1440).
-        self.policy()
-        self.commit_all("base")
-        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
-        (self.repo / ".github" / "workflows").mkdir(parents=True)
-        (self.repo / ".github" / "workflows" / "tëst.yml").write_text("on: push\n", encoding="utf-8")
-        self.commit_all("touch a workflow with a non-ASCII name")
-        report = self.run_lint("Work: sd:1\n")
-        self.assertIn("touches .github/workflows/tëst.yml", "\n".join(report.failures))
-
-    def test_cli_a_nul_terminated_list_keeps_a_quoted_path_whole(self) -> None:
-        # The body workflow passes the list as a file (sd:1408). Written with
-        # a newline `--name-only`, it quoted `.github/workflows/tëst.yml` and
-        # reopened the sd:1440 bypass (#1214 review). CI writes it with `-z`,
-        # and the linter reads that form path by path.
-        self.policy()
-        self.commit_all("base")
-        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
-        (self.repo / ".github" / "workflows").mkdir(parents=True)
-        (self.repo / ".github" / "workflows" / "tëst.yml").write_text("on: push\n", encoding="utf-8")
-        (self.repo / "notes.md").write_text("notes\n", encoding="utf-8")
-        self.commit_all("touch a workflow with a non-ASCII name")
-        quoted = lint.sd_lib.git_output(["diff", "--name-only", "--no-renames", "origin/main", "HEAD"], self.repo)
-        self.assertIn('"', quoted, "the newline listing quotes the path, or this tests nothing")
-        listed = self.repo / "changed.txt"
-        listed.write_text(
-            lint.sd_lib.git_output(["diff", "--name-only", "--no-renames", "-z", "origin/main", "HEAD"], self.repo),
-            encoding="utf-8",
-        )
-        body = self.repo / "body.md"
-        body.write_text("Work: sd:1\n", encoding="utf-8")
-        with in_directory(self.repo), contextlib.redirect_stderr(io.StringIO()) as said, \
-                contextlib.redirect_stdout(io.StringIO()) as printed:
-            self.assertEqual(lint.main(["--pr-body", str(body), "--changed", str(listed)]), 1)
-        self.assertIn("touches .github/workflows/tëst.yml", said.getvalue())
-        self.assertIn("2 changed path(s) from --changed", printed.getvalue())
-
-    def test_origin_main_is_read_when_origin_head_is_not_set(self) -> None:
-        self.policy()
-        self.commit_all("base")
-        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
-        (self.repo / "Makefile").write_text("check:\n", encoding="utf-8")
-        self.commit_all("touch the gate")
-        report = self.run_lint("Work: sd:1\n")
-        self.assertIn("touches Makefile", "\n".join(report.failures))
-        self.assertIn("from origin/main", self.rule_8(report))
-
-    def test_no_base_ref_and_no_list_is_a_failure_and_not_a_pass(self) -> None:
-        # The body is there, so the rule is supposed to run. A rule that
-        # cannot see the diff and reports clean is the bug in sd:931 with a
-        # different cause.
-        self.policy()
-        self.commit_all("base")
-        self.assert_fails(
-            "rule 8 cannot enumerate the changed paths: neither origin/HEAD nor origin/main "
-            "resolves; pass --changed <file> listing them, one per line",
-            pr_body="Work: sd:1\n",
-        )
-
-    def test_cli_reads_the_changed_list_and_fails_by_name(self) -> None:
-        self.policy()
-        self.git("add", "-A")
-        body = self.repo / "body.md"
-        body.write_text("Work: sd:876\n", encoding="utf-8")
-        listed = self.repo / "changed.txt"
-        listed.write_text("\n".join(PR_968_PATHS) + "\n  \n", encoding="utf-8")
-        with in_directory(self.repo), contextlib.redirect_stderr(io.StringIO()) as said:
-            self.assertEqual(lint.main(["--pr-body", str(body), "--changed", str(listed)]), 1)
-        self.assertIn('carries no "CI/review scope:" line', said.getvalue())
-
-    def test_cli_changed_without_a_body_is_an_argument_error(self) -> None:
-        listed = self.repo / "changed.txt"
-        listed.write_text("Makefile\n", encoding="utf-8")
-        with in_directory(self.repo), contextlib.redirect_stderr(io.StringIO()) as said:
-            self.assertEqual(lint.main(["--changed", str(listed)]), 2)
-        self.assertIn("--changed needs --pr-body", said.getvalue())
-
-    def test_cli_rejects_an_unreadable_changed_list(self) -> None:
-        body = self.repo / "body.md"
-        body.write_text("Work: sd:1\n", encoding="utf-8")
-        with in_directory(self.repo), contextlib.redirect_stderr(io.StringIO()) as said:
-            self.assertEqual(
-                lint.main(["--pr-body", str(body), "--changed", str(self.repo / "missing")]), 2)
-        self.assertIn("cannot read --changed", said.getvalue())
-
-    def test_a_rename_out_of_a_class_names_the_path_it_left(self) -> None:
-        # Git detects renames by default and `--name-only` then prints the
-        # new name alone, so a workflow moved out of `.github/` read as one
-        # changed path in no class and the diff that retired it passed
-        # clean (#972 review, measured at ac0f954b). Both paths of a move
-        # are what the pull request touches, and the one it left demands
-        # the line.
-        self.policy()
-        (self.repo / ".github" / "workflows").mkdir(parents=True)
-        (self.repo / ".github" / "workflows" / "tests.yml").write_text(
-            "on: push\njobs:\n  a:\n    runs-on: ubuntu\n    steps:\n      - run: echo hi\n",
-            encoding="utf-8",
-        )
-        self.commit_all("base")
-        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
-        self.git("mv", ".github/workflows/tests.yml", "docs/tests.yml.retired")
-        self.commit_all("retire the workflow")
-        self.assertEqual(
-            lint.sd_lib.git_output(["diff", "--name-status", "origin/main...HEAD"], self.repo).split(),
-            ["R100", ".github/workflows/tests.yml", "docs/tests.yml.retired"],
-            "the fixture is a rename git detects, or it tests nothing",
-        )
-        report = self.run_lint("Work: sd:1\n")
-        self.assertIn("touches .github/workflows/tests.yml", "\n".join(report.failures))
-        self.assertIn("2 changed path(s) from origin/main, 1 class(es) demanded", self.rule_8(report))
-
-    def test_cli_a_body_that_is_not_utf8_is_refused_by_name_and_not_by_traceback(self) -> None:
-        # `UnicodeDecodeError` is a `ValueError`, not an `OSError`, so a body
-        # file of bytes that do not decode escaped the argument guard as a
-        # traceback with exit 1, where every other bad argument is a named
-        # refusal with exit 2 (#972 review).
-        body = self.repo / "body.md"
-        body.write_bytes(b"Work: sd:1\n\xff\n")
-        with in_directory(self.repo), contextlib.redirect_stderr(io.StringIO()) as said:
-            self.assertEqual(lint.main(["--pr-body", str(body)]), 2)
-        self.assertIn("error: cannot read --pr-body: 'utf-8' codec can't decode", said.getvalue())
-
-    def test_cli_a_changed_list_that_is_not_utf8_is_refused_by_name(self) -> None:
-        body = self.repo / "body.md"
-        body.write_text("Work: sd:1\n", encoding="utf-8")
-        listed = self.repo / "changed.txt"
-        listed.write_bytes(b"Makefile\n\xff\n")
-        with in_directory(self.repo), contextlib.redirect_stderr(io.StringIO()) as said:
-            self.assertEqual(lint.main(["--pr-body", str(body), "--changed", str(listed)]), 2)
-        self.assertIn("error: cannot read --changed: 'utf-8' codec can't decode", said.getvalue())
-
-
 class BodyOnlyTests(LintFixture):
-    """`--body-only`: rules 5 and 8 with no work root, and nothing else.
-
-    Rule 8 was reached only inside `sd-ship`'s `if work.is_dir()` block,
-    because the linter fails on a missing work root before any rule runs
-    and `sd-ship` withheld the whole call rather than fail every repository
-    without a planning directory. So a pull request in such a repository
-    could change `.github/**` and ship without its scope line (#972 review,
-    the suppressed finding on `skills/sd-ship/SKILL.md:68`). The body rules
-    need no work root; this mode runs them alone.
-    """
+    """`--body-only`: the privacy rule with no work root, and nothing else."""
 
     def setUp(self) -> None:
         super().setUp()
         shutil.rmtree(self.work)
-        path = self.repo / lint.SCOPE_POLICY
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(SCOPE_POLICY, encoding="utf-8")
 
-    def test_red_the_968_diff_with_no_work_root_and_no_scope_line_fails_by_name(self) -> None:
-        # The fail-first case: before this mode, the only answer with no
-        # work root was the missing-root failure, and `sd-ship` skipped the
-        # call to avoid it.
-        report = self.run_lint("Work: sd:876\n\nNo scope line.\n", PR_968_PATHS, body_only=True)
-        self.assertEqual(
-            report.failures,
-            ['pull request body: touches .github/scripts/check-zizmor-personas.py, which '
-             '.github/copilot-instructions.md puts under "CI/review scope:", '
-             'and carries no "CI/review scope:" line'],
-        )
-
-    def test_green_the_line_passes_and_every_tree_rule_says_it_did_not_run(self) -> None:
-        report = self.run_lint("Work: sd:876\n\n## CI/review scope:\n\nthe lint job\n",
-                               PR_968_PATHS, body_only=True)
+    def test_green_every_tree_rule_says_it_did_not_run(self) -> None:
+        report = self.run_lint("## Summary\n", body_only=True)
         self.assertEqual(report.failures, [])
         notes = "\n".join(report.notes)
-        self.assertIn("rules 1-4, 6-7: --body-only, not run", notes)
-        self.assertIn("rule 5 PR link: database association sd:876", notes)
-        self.assertIn('demands "CI/review scope:", and the body carries it', notes)
-        for tree_rule in ("rules 1-2 work items", "rule 3 decision", "rule 4 spec", "rule 6 citations", "rule 7 work"):
+        self.assertIn("rules 1-4, 7: --body-only, not run", notes)
+        for tree_rule in ("rules 1-2 work items", "rule 3 decision", "rule 4 spec", "rule 7 work"):
             self.assertNotIn(tree_rule, notes)
-
-    def test_a_path_shaped_work_value_resolves_against_the_root_that_is_not_there(self) -> None:
-        # Rule 5 still runs, and a path claim in a repository with no work
-        # root is a claim onto nothing.
-        report = self.run_lint("Work: docs/work/2026-08-29-a-workable-item\n", ["src.py"], body_only=True)
-        self.assertEqual(
-            report.failures,
-            ["pull request body: Work: docs/work/2026-08-29-a-workable-item does not resolve to a work item"],
-        )
 
     def test_without_the_flag_no_work_root_is_still_the_failure_it_was(self) -> None:
         # The mode is opt-in. A mistyped `--work-dir` on a full run stays a
         # failure by name rather than a body-only run nobody asked for.
-        report = self.run_lint("Work: sd:876\n", PR_968_PATHS)
+        report = self.run_lint("## Summary\n")
         self.assertEqual(report.failures, [f"{self.work.resolve()}: the work directory does not exist"])
 
     def test_the_flag_without_a_body_is_a_failure_in_the_library_and_an_argument_error_at_the_cli(self) -> None:
-        report = self.run_lint(None, None, body_only=True)
-        self.assertEqual(report.failures, ["--body-only: needs --pr-body; rules 5 and 8 read it"])
+        report = self.run_lint(None, body_only=True)
+        self.assertEqual(report.failures, ["--body-only: needs --pr-body; the privacy rule reads it"])
         with in_directory(self.repo), contextlib.redirect_stderr(io.StringIO()) as said:
             self.assertEqual(lint.main(["--body-only"]), 2)
         self.assertIn("--body-only needs --pr-body", said.getvalue())
 
-    def test_cli_body_only_fails_by_name_on_the_968_diff(self) -> None:
-        self.git("add", "-A")
+    def test_cli_a_body_that_is_not_utf8_is_refused_by_name_and_not_by_traceback(self) -> None:
+        # `UnicodeDecodeError` is a `ValueError`, not an `OSError`; a body of
+        # bytes that do not decode is a named refusal with exit 2 (#972 review).
         body = self.repo / "body.md"
-        body.write_text("Work: sd:876\n", encoding="utf-8")
-        listed = self.repo / "changed.txt"
-        listed.write_text("\n".join(PR_968_PATHS) + "\n", encoding="utf-8")
-        with in_directory(self.repo), contextlib.redirect_stderr(io.StringIO()) as said, \
-                contextlib.redirect_stdout(io.StringIO()) as printed:
-            self.assertEqual(
-                lint.main(["--body-only", "--pr-body", str(body), "--changed", str(listed)]), 1)
-        self.assertIn('carries no "CI/review scope:" line', said.getvalue())
-        self.assertIn("rules 1-4, 6-7: --body-only, not run", printed.getvalue())
-        self.assertNotIn("the work directory does not exist", said.getvalue())
+        body.write_bytes(b"## Summary\n\xff\n")
+        with in_directory(self.repo), contextlib.redirect_stderr(io.StringIO()) as said:
+            self.assertEqual(lint.main(["--body-only", "--pr-body", str(body)]), 2)
+        self.assertIn("error: cannot read --pr-body: 'utf-8' codec can't decode", said.getvalue())
+
+
+class PullRequestPrivacyTests(LintFixture):
+    """sd:2999. `--pr-body` checks one thing: a public body leaks nothing private.
+
+    The patterns are the operator's privacy-pattern file, as `local-leak-guard`
+    reads it; the body lines it once carried (`Work:` and the scope lines) are
+    neither required nor refused.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        config = self.repo.parent / f"{self.repo.name}-config"
+        (config / "system").mkdir(parents=True)
+        self.patterns = config / "system" / "privacy-patterns"
+        self.patterns.write_text("# a comment\nsecret-host\\.example\\.test\n", encoding="utf-8")
+        env = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(config), "SYSTEM_TOOLS_CONFIG": str(config / "system")})
+        env.start()
+        self.addCleanup(env.stop)
+        self.addCleanup(shutil.rmtree, config, True)
+
+    def test_red_a_line_matching_a_pattern_is_named_by_number(self) -> None:
+        report = self.run_lint("## Summary\n\n- reach secret-host.example.test\n", body_only=True)
+        self.assertEqual(
+            report.failures,
+            [f"pull request body: line 3 matches a privacy pattern in {self.patterns}"])
+
+    def test_green_owned_and_scope_lines_are_neither_required_nor_refused(self) -> None:
+        body = "Work: sd:1\nWork: sd:2\nWork:\n\n## Summary\n\n- touches .github/workflows\n"
+        self.assertEqual(self.run_lint(body, body_only=True).failures, [])
+
+    def test_no_pattern_file_is_a_note(self) -> None:
+        self.patterns.unlink()
+        report = self.run_lint("## Summary\n", body_only=True)
+        self.assertEqual(report.failures, [])
+        self.assertIn(f"PR privacy: no pattern file at {self.patterns}; not run", report.notes)
 
 
 class NoDefaultWorkRootTests(LintFixture):
@@ -1040,76 +547,22 @@ class NoDefaultWorkRootTests(LintFixture):
     def test_red_the_default_root_missing_is_a_skip_and_exit_0(self) -> None:
         code, printed, said = self.cli()
         self.assertEqual(code, 0, said)
-        self.assertIn("rules 1-2, 6-7: no docs/work; nothing to lint", printed)
+        self.assertIn("rules 1-2, 7: no docs/work; nothing to lint", printed)
         self.assertIn("sd-docs-lint: clean", printed)
         self.assertNotIn("does not exist", said)
 
     def test_the_other_rules_still_run_without_the_default_root(self) -> None:
         body = self.repo / "body.md"
-        body.write_text("Work: docs/work/2026-08-29-a-workable-item\n", encoding="utf-8")
+        body.write_text("## Summary\n", encoding="utf-8")
         code, printed, said = self.cli("--pr-body", str(body))
-        self.assertEqual(code, 1)
-        self.assertIn("does not resolve to a work item", said)
+        self.assertEqual(code, 0, said)
+        self.assertIn("PR privacy: no pattern file at", printed)
         self.assertIn("rule 3 decision shape", printed)
 
     def test_an_explicit_work_dir_that_is_missing_still_fails(self) -> None:
         code, _, said = self.cli("--work-dir", "docs/work")
         self.assertEqual(code, 1)
         self.assertIn("the work directory does not exist", said)
-
-
-class ScopePolicyTests(unittest.TestCase):
-    """This repository's own table, and the template that points at it.
-
-    Rule 8 reads its classes from `.github/copilot-instructions.md`, so a
-    table deleted from that file switches the rule off with a note and no
-    failure. These pin the table's presence and its agreement with the
-    template, which is the only other place the lines are named.
-    """
-
-    TEMPLATE = REPO_ROOT / ".github" / "PULL_REQUEST_TEMPLATE.md"
-
-    def classes(self) -> list[tuple[str, tuple[str, ...]]]:
-        found = lint.scope_classes(REPO_ROOT)
-        assert found is not None, f"{lint.SCOPE_POLICY} is not here"
-        return found
-
-    def test_the_table_is_here_and_names_the_two_live_classes(self) -> None:
-        self.assertEqual([line for line, _ in self.classes()],
-                         ["CI/review scope:", "Automation scope:"])
-        for line, globs in self.classes():
-            with self.subTest(line=line):
-                self.assertTrue(globs, f"{line} has no path that demands it")
-
-    def test_the_template_names_exactly_the_lines_the_table_has(self) -> None:
-        # The template quotes the lines for an author; the table defines
-        # them for the linter. One dropped from either is drift.
-        quoted = re.findall(r'"([^"]*scope:)"', self.TEMPLATE.read_text(encoding="utf-8"))
-        self.assertEqual(sorted(set(quoted)), sorted(line for line, _ in self.classes()))
-
-    def test_every_glob_in_the_table_names_a_tracked_path(self) -> None:
-        # A row whose globs match nothing tracked is a class that demands
-        # nothing and reads as if it did.
-        tracked = subprocess.run(
-            ["git", "-C", str(REPO_ROOT), "ls-files", "--deduplicate"],
-            check=True, capture_output=True, text=True,
-        ).stdout.splitlines()
-        for line, globs in self.classes():
-            for glob in globs:
-                with self.subTest(line=line, glob=glob):
-                    self.assertTrue(any(lint.matches_scope(path, glob) for path in tracked), glob)
-
-    def test_the_968_diff_demands_the_ci_review_line_here(self) -> None:
-        # The fixture that raised sd:931, run against this repository's own
-        # table rather than the test's copy of it.
-        report = lint.Report()
-        lint.check_pr_scope(REPO_ROOT, "Work: sd:876\n", PR_968_PATHS, report)
-        self.assertEqual(len(report.failures), 1, report.failures)
-        self.assertIn('carries no "CI/review scope:" line', report.failures[0])
-        report = lint.Report()
-        lint.check_pr_scope(REPO_ROOT, "Work: sd:876\n\n## CI/review scope:\n\nOne step.\n",
-                            PR_968_PATHS, report)
-        self.assertEqual(report.failures, [])
 
 
 class RepositoryTests(unittest.TestCase):
@@ -1149,551 +602,6 @@ class RepositoryTests(unittest.TestCase):
     def test_cli_refuses_outside_a_git_repository(self) -> None:
         with tempfile.TemporaryDirectory() as raw, in_directory(pathlib.Path(raw)):
             self.assertEqual(lint.main([]), 2)
-
-
-class Rule6CitationTests(LintFixture):
-    """A `prd.md:N` citation still points at the line it was written against.
-
-    Across four adversarial review rounds of one planning batch, six findings
-    were citation drift, and twice the round that corrected the citations was
-    the round that invalidated them: a fix inserted four lines into `prd.md`
-    and re-anchored nothing below it. Rule 6 records what each citation points
-    at and reports where the text went, so re-anchoring is a read rather than
-    arithmetic.
-
-    What it does not do is certify that a citation was right when it was
-    recorded. The baseline is what the page says today; the rule watches it
-    from there.
-    """
-
-    def test_green_a_recorded_citation_that_has_not_moved(self) -> None:
-        self.record()
-        self.assert_clean()
-
-    def long_cited_item(self) -> tuple[pathlib.Path, str, int]:
-        item = self.cited_item()
-        prefix = "Cited source text stays meaningful across edits"
-        lines = (item / "prd.md").read_text().splitlines()
-        lines.append(prefix + " beyond the first phrase.")
-        (item / "prd.md").write_text("\n".join(lines) + "\n")
-        (item / "design.md").write_text(f"# design\n\nSee `prd.md:{len(lines)}`.\n")
-        self.assertEqual(lint.write_citation_manifest(item, self.work)[:2], (1, []))
-        return item, prefix, len(lines)
-
-    def test_manifest_writer_emits_no_space_at_the_truncation_boundary(self) -> None:
-        item, prefix, _ = self.long_cited_item()
-        rows = (item / lint.CITATION_MANIFEST).read_text().splitlines()
-        self.assertEqual(rows[0].split("\t")[-1], prefix)
-        self.assertTrue(all(row == row.rstrip() for row in rows))
-        self.assert_clean()
-
-    def test_legacy_trailing_space_anchor_still_detects_moved_and_changed_text(self) -> None:
-        item, _, start = self.long_cited_item()
-        manifest = item / lint.CITATION_MANIFEST
-        manifest.write_text(manifest.read_text().rstrip("\n") + " \n")
-        self.assert_clean()
-        source = item / "prd.md"
-        lines = source.read_text().splitlines()
-        lines.insert(start - 1, "New text before the cited sentence.")
-        source.write_text("\n".join(lines) + "\n")
-        self.assert_fails(f"that text is now at line {start + 1}")
-        lines[start] = "The original cited sentence has changed."
-        source.write_text("\n".join(lines) + "\n")
-        self.assert_fails("that text is gone from the file")
-
-    def test_red_an_insertion_above_the_target_moves_it(self) -> None:
-        self.record()
-        item = self.work / "2026-08-29-a-cited-item"
-        lines = (item / "prd.md").read_text(encoding="utf-8").splitlines()
-        lines.insert(1, "an inserted line")
-        (item / "prd.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-        failures = self.assert_fails("was written against")
-        self.assertIn("that text is now at line 4", "\n".join(failures))
-
-    def test_red_the_cited_text_deleted_altogether(self) -> None:
-        self.record()
-        item = self.work / "2026-08-29-a-cited-item"
-        lines = (item / "prd.md").read_text(encoding="utf-8").splitlines()
-        del lines[2]
-        (item / "prd.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-        self.assert_fails("that text is gone from the file")
-
-    def test_red_the_citing_page_no_longer_carries_the_citation(self) -> None:
-        """Backbone item sd:572. The rule only ever read the target side.
-
-        Every other check here asks whether the recorded text is still at the
-        recorded line in the page being cited. None asked whether the citing
-        page still cites it, so an edit that deleted a citation left its
-        manifest row behind, and the row reported as checked forever. The
-        count said `checked 25 citation(s)` while one of the twenty-five had
-        not existed for some time.
-        """
-
-        self.record()
-        item = self.work / "2026-08-29-a-cited-item"
-        (item / "design.md").write_text("# design\n\nNo citation here.\n", encoding="utf-8")
-        self.assert_fails("design.md no longer cites it")
-
-    def test_red_a_citation_added_after_recording_is_not_passed_over(self) -> None:
-        """sd:1000 (1698a5a1f448). The rule walked the manifest only.
-
-        A citation written after the last `--update-citations` was in no row,
-        so nothing checked it and nothing counted it, and the run said clean.
-        """
-
-        self.record()
-        item = self.work / "2026-08-29-a-cited-item"
-        page = item / "design.md"
-        page.write_text(page.read_text(encoding="utf-8") + "\nA second claim cites `prd.md:2`.\n",
-                        encoding="utf-8")
-        failures = self.assert_fails("is cited but not recorded")
-        self.assertIn("`prd.md:2`", "\n".join(failures))
-
-    def test_green_a_citation_that_moved_down_its_own_page_is_not_a_failure(self) -> None:
-        """The source side is searched, not read at the recorded line.
-
-        An edit above a citation moves it without changing what it says. If
-        this rule read `design.md:3` literally it would go red on ordinary
-        editing while catching nothing the page-wide search does not.
-        """
-
-        self.record()
-        item = self.work / "2026-08-29-a-cited-item"
-        page = item / "design.md"
-        lines = page.read_text(encoding="utf-8").splitlines()
-        lines.insert(1, "An inserted paragraph above the citation.")
-        page.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        self.assert_clean()
-
-    def test_red_a_deleted_citation_that_is_a_prefix_of_a_surviving_one(self) -> None:
-        """`prd.md:3` is a substring of `prd.md:35`.
-
-        Three pages in this repository carry a pair like that today, so a
-        source-side check written as a substring scan would report the
-        shorter citation as still present after it was deleted. The check
-        compares against `item_citations`, the same walk the recorder uses,
-        so the two halves of the comparison cannot disagree.
-        """
-
-        item = self.cited_item()
-        lines = (item / "prd.md").read_text(encoding="utf-8").splitlines()
-        while len(lines) < 35:
-            lines.append(f"filler line {len(lines) + 1}")
-        (item / "prd.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-        page = item / "design.md"
-        page.write_text(
-            "# design\n\nThe ladder is at `prd.md:3`.\n\nThe filler is at `prd.md:35`.\n",
-            encoding="utf-8",
-        )
-        self.assertEqual(lint.write_citation_manifest(item, self.work)[0], 2)
-        page.write_text("# design\n\nThe filler is at `prd.md:35`.\n", encoding="utf-8")
-        self.assert_fails("design.md no longer cites it")
-
-    def test_red_the_citing_page_is_gone_altogether(self) -> None:
-        """A deleted page and a deleted citation read differently to a reader.
-
-        Both end with a row asserting a citation nobody carries, but one is
-        fixed by restoring a page and the other by re-recording, so the rule
-        says which happened rather than making the reader look.
-        """
-
-        self.record()
-        item = self.work / "2026-08-29-a-cited-item"
-        (item / "design.md").unlink()
-        self.assert_fails("design.md, which does not exist")
-
-    def test_the_recorder_names_the_row_it_drops(self) -> None:
-        """Re-recording is where a row that outlived its citation leaves.
-
-        The survey walks the pages, so a deleted citation yields no row and
-        simply stops being written. That is correct, and it was silent.
-        """
-
-        self.record()
-        item = self.cited_item()
-        (item / "design.md").write_text("# design\n\nNo citation here.\n", encoding="utf-8")
-        count, _, dropped = lint.write_citation_manifest(item, self.work)
-        self.assertEqual(count, 0)
-        self.assertEqual(dropped, ["design.md:3 `prd.md:3`"])
-
-    def test_red_a_malformed_manifest_row(self) -> None:
-        item = self.cited_item()
-        (item / lint.CITATION_MANIFEST).write_text("two\tfields\n", encoding="utf-8")
-        self.assert_fails("a manifest row is not five fields")
-
-    def test_red_an_item_that_cites_and_was_never_recorded_is_named(self) -> None:
-        """Backbone item sd:440. The skip used to be the whole story.
-
-        `cited_item` writes a `design.md` naming `prd.md:3` and records
-        nothing. Before this, rule 6 reached the item, found no
-        `.citations.tsv`, moved on, and the run printed a clean verdict over a
-        citation it had never looked at. The only difference from a citation
-        that was checked and found sound was a count nobody compared against
-        anything.
-        """
-        self.cited_item()
-        failures = "\n".join(self.assert_fails(lint.CITATION_MANIFEST))
-        self.assertIn("2026-08-29-a-cited-item", failures)
-        self.assertIn("`prd.md:3`", failures)
-        self.assertIn("--update-citations", failures)
-
-    def test_the_note_says_how_many_items_are_active_beside_how_many_recorded(self) -> None:
-        """The two numbers a reader needs to see a gap, on the same line.
-
-        The fixture's own `2026-08-29-a-workable-item` cites nothing, so it is
-        active without being recorded and the numbers legitimately differ. That
-        is the case the old note could not express at all.
-        """
-        self.record()
-        report = self.run_lint()
-        self.assertEqual(report.failures, [])
-        self.assertIn(
-            "checked 1 citation(s) across 1 recorded item(s) of 2 active item(s)",
-            "\n".join(report.notes),
-        )
-
-    def test_an_item_with_nothing_to_cite_needs_no_manifest(self) -> None:
-        """A freshly planned item is not a finding.
-
-        The demand is for a recording of the citations an item has, not for a
-        file per directory: an item that cites nothing leaves nothing
-        unguarded, and failing it would make every item red on the day it was
-        created for a gap that cannot hide anything.
-        """
-        self.write_item("2026-08-29-an-uncitable-item", GOOD_PRD)
-        self.assert_clean()
-
-    def test_an_archived_item_that_cites_and_was_never_recorded_is_left_alone(self) -> None:
-        """The archive is a record of what was, and rule 6 has always read past it.
-
-        Demanding a baseline from it would ask for a recording of pages that
-        are finished changing, which is the one place citation drift cannot
-        happen.
-        """
-        archived = self.write_item(
-            "2026-08-29-an-archived-citer", GOOD_PRD, month="2026-08"
-        )
-        (archived / "design.md").write_text(
-            "# design\n\nThe ladder is at `prd.md:3`.\n", encoding="utf-8"
-        )
-        self.assert_clean()
-
-    def test_the_manifest_is_not_a_stray_file_under_rule_1(self) -> None:
-        self.record()
-        self.assert_clean()
-
-    def test_a_citation_that_leaves_the_work_root_does_not_resolve(self) -> None:
-        """Still not checked, and no longer not mentioned.
-
-        The escape stands -- this must never open `/etc/passwd` -- but a
-        refusal that vanishes is indistinguishable from a citation that was
-        read and found sound, which is the whole of this item.
-        """
-        item = self.cited_item()
-        (item / "design.md").write_text(
-            "See `../../../etc/passwd.md:1`.\n", encoding="utf-8"
-        )
-        found, skipped = lint.item_citations(item, self.work)
-        self.assertEqual(found, [])
-        self.assertEqual(
-            skipped, [("design.md:1", "../../../etc/passwd.md:1", lint.ELSEWHERE, "")]
-        )
-
-    def test_a_citation_into_code_is_left_to_the_adjacency_rule(self) -> None:
-        """And is not even seen: `CITATION_RE` requires a `.md` target.
-
-        Recorded rather than fixed. A code citation is another gate's work by
-        design, so rule 6 declining it is right; what this pins is that rule 6
-        cannot count what its own regex never matched, so `bin/sd:1378` is
-        absent from both halves rather than present in the census. The
-        citations the census does count as elsewhere are markdown outside the
-        work directory, which the regex does match.
-        """
-        item = self.cited_item()
-        (item / "design.md").write_text("The reader is at `bin/sd:1378`.\n", encoding="utf-8")
-        self.assertEqual(lint.item_citations(item, self.work), ([], []))
-
-    def test_a_citation_below_the_log_heading_is_a_quotation_not_a_claim(self) -> None:
-        item = self.cited_item()
-        (item / "design.md").write_text(
-            "# design\n\nThe ladder is at `prd.md:3`.\n\n"
-            "## Log\n\n- C-1: `prd.md:3` was wrong on the day.\n",
-            encoding="utf-8",
-        )
-        found, skipped = lint.item_citations(item, self.work)
-        self.assertEqual([entry[0] for entry in found], ["design.md:3"])
-        # The exemption keeps its reason and loses its silence: the quotation
-        # is still not compared, and is now counted as a quotation.
-        self.assertEqual(
-            skipped, [("design.md:7", "prd.md:3", lint.QUOTATION, "")]
-        )
-
-    def test_a_blank_target_line_anchors_to_the_text_under_it(self) -> None:
-        item = self.cited_item()
-        prd = item / "prd.md"
-        lines = prd.read_text(encoding="utf-8").splitlines()
-        lines[2] = ""
-        prd.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        lint.write_citation_manifest(item, self.work)
-        recorded = (item / lint.CITATION_MANIFEST).read_text(encoding="utf-8").split("\t")
-        self.assertNotEqual(recorded[4].strip(), "")
-
-
-class Rule6SilencerTests(LintFixture):
-    """Backbone item sd:5. Every decline rule 6 makes now says so.
-
-    Rule 6 declined more citations than it checked and reported only what it
-    checked. Measured on this repository at `06fb9de0`: 25 citations compared,
-    126 declined -- 69 naming markdown outside the work directory, 54 below a
-    Log heading, and 3 that the recorder silently refused to record. The run
-    printed `checked 25 citation(s)` and `clean`, which is the same output a
-    run that compared all 151 would have produced.
-
-    The three refusals are the ones that matter, because they are rule 6's own
-    corpus: a citation to a line the file does not have is a stale citation,
-    exactly what this rule exists to catch, and `--update-citations` dropped it
-    from the baseline so the rule never saw it again.
-
-    They are reported, not failed. Two of the three live instances are a
-    document *quoting* a citation while explaining this defect, and the gate
-    cannot tell a quotation from a claim -- open question 3 on the item, still
-    open. Failing them would make this repository red over prose that is
-    correct. The precedent is the item's own answer to open question 1:
-    compared and reported, nothing red, until there is a way to write an inert
-    citation.
-    """
-
-    def out_of_range_item(self) -> pathlib.Path:
-        """An item citing a line its own prd.md does not have."""
-        item = self.write_item("2026-08-29-a-citing-item", GOOD_PRD)
-        (item / "design.md").write_text(
-            "# design\n\nThe ladder is at `prd.md:900`.\n", encoding="utf-8"
-        )
-        return item
-
-    def test_red_a_citation_the_recorder_refused_is_named(self) -> None:
-        """The silencer, at its narrowest and most damning.
-
-        `prd.md:900` names a line of a twelve-line file. `write_citation_manifest`
-        dropped it, the manifest came out empty, rule 6 read an empty manifest
-        and reported a clean run, and no output anywhere in the program
-        mentioned the citation. Against the unfixed code the assertion below
-        finds nothing to match.
-        """
-        item = self.out_of_range_item()
-        lint.write_citation_manifest(item, self.work)
-        self.assertEqual((item / lint.CITATION_MANIFEST).read_text(encoding="utf-8"), "")
-        length = len((item / "prd.md").read_text(encoding="utf-8").splitlines())
-        notes = self.notes()
-        self.assertIn("rule 6 not recorded:", notes)
-        self.assertIn("`prd.md:900`", notes)
-        self.assertIn(f"names line 900 of 2026-08-29-a-citing-item/prd.md, which has {length}", notes)
-
-    def test_red_the_census_counts_each_kind_of_decline_apart(self) -> None:
-        """One line, three buckets, and a total that conserves them.
-
-        Kept apart on purpose: a citation into another tree is a handoff to
-        the adjacency rule, a citation below a Log heading is a deliberate
-        exemption, and a citation that could not be recorded is rule 6
-        failing to watch its own corpus. Rolling them into one number would
-        hide the third behind the first two, which outnumber it 41 to 1 in
-        this repository.
-        """
-        item = self.out_of_range_item()
-        (item / "implement.md").write_text(
-            "# implement\n\nSee `../../../etc/passwd.md:1`.\n\n"
-            "## Log\n\n- C-1: `prd.md:3` was right on the day.\n",
-            encoding="utf-8",
-        )
-        notes = self.notes()
-        self.assertIn("rule 6 not checked: 3 citation(s)", notes)
-        self.assertIn(f"1 {lint.ELSEWHERE}", notes)
-        self.assertIn(f"1 {lint.QUOTATION}", notes)
-        self.assertIn(f"1 {lint.UNRECORDABLE}", notes)
-
-    def test_red_update_citations_says_what_it_would_not_record(self) -> None:
-        """The recorder's own count was a count of what it wrote.
-
-        A person running `--update-citations` is looking straight at the
-        citation at the one moment it could have been caught, and was told
-        `recorded 0 citation(s)` with no hint that there had been one to
-        record.
-        """
-        self.out_of_range_item()
-        self.git("add", "-A")
-        with in_directory(self.repo):
-            with mock.patch("sys.stdout", new_callable=io.StringIO) as out:
-                self.assertEqual(lint.main(["--update-citations"]), 0)
-        printed = out.getvalue()
-        self.assertIn("2026-08-29-a-citing-item: recorded 0 of 1 citation(s)", printed)
-        self.assertIn("not recorded: design.md:3 `prd.md:900`", printed)
-
-    def test_a_recordable_citation_is_not_reported_as_declined(self) -> None:
-        """The control for this class: a sound citation stays out of the census.
-
-        Green before this change and after it. If the census ever starts
-        naming citations that were checked, the two halves have stopped
-        conserving and every count above is meaningless.
-        """
-        self.record()
-        notes = self.notes()
-        self.assertIn("checked 1 citation(s)", notes)
-        self.assertNotIn("rule 6 not recorded:", notes)
-        self.assertNotIn("rule 6 not checked:", notes)
-
-
-class CitationRecorderIdempotenceTests(LintFixture):
-    """sd:593. Re-recording a current manifest is a no-op, so it can be a check.
-
-    It was not. On a clean checkout `--update-citations` rewrote four rows of
-    one manifest and nothing else, every time: the snippet field of four rows
-    ended in a space, because an older writer truncated at 48 characters
-    without stripping and the boundary landed on one. Nothing was
-    mis-reported -- rule 6 reads both shapes on purpose, and
-    `test_legacy_trailing_space_anchor_still_detects_moved_and_changed_text`
-    says so -- but a recorder that moves the tree on a tree that is already
-    current cannot be asserted about. The assertion fails for a reason that is
-    not a defect, so the check is never added, and the only evidence a
-    manifest is current is that somebody says they ran the writer.
-
-    Tolerating the old shape on READ stays, forever. Writing it stops.
-    """
-
-    def test_re_recording_this_repository_changes_no_manifest(self) -> None:
-        """The property as a check, over the live corpus, without writing to it.
-
-        `citation_survey` is the walk the writer records from and
-        `manifest_body` is the bytes it writes, so comparing them against the
-        file on disk is exactly `--update-citations` followed by a porcelain
-        status, with nothing left behind when it fails.
-        """
-        work = REPO_ROOT / "docs" / "work"
-        compared = 0
-        for item in lint.item_directories(work):
-            if lint.is_archived(item, work):
-                continue
-            manifest = item / lint.CITATION_MANIFEST
-            if not manifest.is_file():
-                continue
-            rows, _ = lint.citation_survey(item, work)
-            compared += 1
-            self.assertEqual(
-                manifest.read_text(encoding="utf-8"),
-                lint.manifest_body(rows),
-                f"re-recording {item.name} would rewrite its manifest; run "
-                "bin/sd-docs-lint --update-citations and commit the result",
-            )
-        # The control for this test's own reach: an assertion that compared
-        # nothing would pass on an empty repository just as loudly.
-        self.assertGreater(compared, 0, "no recorded item was compared")
-
-    def test_a_legacy_trailing_space_row_is_rewritten_once_and_then_never(self) -> None:
-        """The fixture form: one re-record normalises, the next is byte-equal."""
-        item = self.cited_item()
-        lint.write_citation_manifest(item, self.work)
-        manifest = item / lint.CITATION_MANIFEST
-        current = manifest.read_text(encoding="utf-8")
-        manifest.write_text(current.replace("\n", " \n"), encoding="utf-8")
-        lint.write_citation_manifest(item, self.work)
-        first = manifest.read_text(encoding="utf-8")
-        self.assertEqual(first, current)
-        lint.write_citation_manifest(item, self.work)
-        self.assertEqual(manifest.read_text(encoding="utf-8"), first)
-
-    def test_the_writer_strips_a_snippet_that_truncates_onto_a_space(self) -> None:
-        """The guard itself, called directly, on the shape that produced the four.
-
-        A line whose 48th character is a space is the whole cause, so the
-        fixture builds one rather than hoping the corpus still contains one.
-        """
-        line = "a" * (lint.SNIPPET_CHARS - 1) + " trailing words follow"
-        self.assertEqual(lint.snippet_of(line), "a" * (lint.SNIPPET_CHARS - 1))
-        # CONTROL: a snippet that does not end on the boundary is untouched.
-        self.assertEqual(lint.snippet_of("  a  short   line  "), "a short line")
-
-
-class Rule6MisresolutionTests(LintFixture):
-    """sd:533. A citation that resolves onto the wrong file is an error.
-
-    The live instance: an implement.md wrote `README.md:34`, meaning the
-    repository README, and `resolve_citation` landed it on the seven-line
-    `docs/work/README.md` -- a real file, at a line it does not have. The
-    citation was stale AND mis-resolved, and rule 6's verdict was clean.
-
-    WHY AN ERROR AND NOT A SILENT NARROWING. The cheapest available fix was
-    to fail only when the cited line exceeds the resolved file's length,
-    which would have caught this instance. It does not catch the class: a
-    bare name that lands on a file long enough to have the cited line is
-    read, compared against unrelated text, and reported as sound. The second
-    cheapest was to stop resolving a bare name anywhere but beside the citing
-    page, which turns the wrong answer into no answer -- still silence, which
-    is the thing sd:5 closed and this must not reopen.
-
-    So the rule is stated positively: every citation rule 6 owns names a work
-    item document. A citation that resolved onto anything else resolved
-    through a fallback base rather than because its author meant it, and both
-    readings are named in the failure so the author can write the path.
-    """
-
-    def misresolving_item(self) -> pathlib.Path:
-        """An item whose page cites a sibling and a bare work-root filename.
-
-        `docs/work/README.md` is four lines long on purpose. The cited line
-        exists in it, so this fixture is the case a length check would miss:
-        without the guard the citation is recorded, compared against text
-        about something else, and reported as checked and clean.
-        """
-        (self.work / "README.md").write_text(
-            "# Work items\n\nOne directory per item.\nNothing here is a claim about installs.\n",
-            encoding="utf-8",
-        )
-        item = self.write_item("2026-08-29-a-misciting-item", GOOD_PRD)
-        (item / "design.md").write_text(
-            "# design\n\nThe ladder is at `prd.md:3`.\nThe claim is `README.md:3`.\n",
-            encoding="utf-8",
-        )
-        return item
-
-    def test_red_a_bare_name_resolving_onto_a_non_item_document_fails(self) -> None:
-        """The guard, called directly, and then through the run.
-
-        Called directly first because the same page carries a citation that
-        must still resolve: a fixture that only asserted a failure would pass
-        just as well against a resolver that refused everything.
-        """
-        item = self.misresolving_item()
-        found, skipped = lint.item_citations(item, self.work)
-        # CONTROL, in the same page and the same walk.
-        self.assertEqual(
-            [entry[:3] for entry in found],
-            [("design.md:3", "prd.md:3", "2026-08-29-a-misciting-item/prd.md")],
-        )
-        self.assertEqual(
-            [entry[:3] for entry in skipped],
-            [("design.md:4", "README.md:3", lint.MISRESOLVED)],
-        )
-        joined = "\n".join(self.assert_fails("`README.md:3`"))
-        self.assertIn("names no README.md beside design.md", joined)
-        self.assertIn("resolved onto README.md", joined)
-
-    def test_the_census_counts_a_misresolution_apart_from_a_decline(self) -> None:
-        """It is counted, because the census is a partition or it is nothing."""
-        self.misresolving_item()
-        notes = self.notes()
-        self.assertIn("rule 6 not checked: 1 citation(s)", notes)
-        self.assertIn(f"1 {lint.MISRESOLVED}", notes)
-
-    def test_green_a_bare_name_that_names_a_sibling_is_untouched(self) -> None:
-        """The control for the whole class: the ordinary citation still works.
-
-        `docs/work/README.md` exists here too, so this is not green merely
-        because the ambiguous file is absent -- it is green because the
-        citation names a document of the item it sits in.
-        """
-        (self.work / "README.md").write_text("# Work items\n", encoding="utf-8")
-        self.record()
-        self.assert_clean()
-        self.assertIn("checked 1 citation(s)", self.notes())
 
 
 class MetavariableTests(unittest.TestCase):
@@ -2031,9 +939,9 @@ class WorkDirSpellingTests(LintFixture):
     def test_a_root_outside_the_repository_refuses_rather_than_half_applies(self) -> None:
         """The recorded case: rules 1-2-6 read there, rule 7 read here.
 
-        Rule 7's enumeration, rule 2's row database and rule 5's `Work:`
-        resolution are all rooted at the checkout the caller stands in, so a
-        foreign work root is not a root this run can honour. It says so.
+        Rule 7's enumeration and rule 2's row database are rooted at the
+        checkout the caller stands in, so a foreign work root is not a root
+        this run can honour. It says so.
         """
         with tempfile.TemporaryDirectory() as elsewhere:
             outside = pathlib.Path(elsewhere) / "docs" / "work"
@@ -2123,527 +1031,6 @@ class WorkDirSpellingTests(LintFixture):
             self.assertEqual(lint.main(["--work-dir", str(self.work)]), 0)
 
 
-JEV_STUB = """#!/usr/bin/env python3
-import json
-import os
-import shutil
-import sys
-
-verb = sys.argv[1] if len(sys.argv) > 1 else ""
-argv_log = os.environ.get("JEV_STUB_ARGV")
-if argv_log:
-    with open(argv_log, "a") as log:
-        log.write(json.dumps(sys.argv[1:]) + "\\n")
-run_log = os.environ.get("JEV_STUB_RUN")
-if run_log:
-    with open(run_log, "a") as log:
-        log.write(os.environ.get("JEV_RUN", "") + "\\n")
-if verb == "enabled":
-    probed = os.environ.get("JEV_STUB_PROBED")
-    if probed:
-        open(probed, "w").close()
-    raise SystemExit(int(os.environ.get("JEV_STUB_ENABLED", "0")))
-state = sys.argv[sys.argv.index("--state") + 1]
-capture = os.environ.get("JEV_STUB_CAPTURE")
-if capture:
-    shutil.copyfile(state, capture)
-questions = json.loads(sys.stdin.read())
-if os.environ.get("JEV_STUB_SLEEP"):
-    import time
-    time.sleep(float(os.environ["JEV_STUB_SLEEP"]))
-if os.environ.get("JEV_STUB_DOWN") == "1":
-    # What `jev ask --fallback` does when the endpoint refuses: the fallback
-    # on stdout, exit 0, and the reason on stderr.
-    sys.stderr.write("jev: http://127.0.0.1:8009/v1/systemone: [Errno 61] "
-                     "Connection refused; using the fallback\\n")
-    sys.stdout.write(sys.argv[sys.argv.index("--fallback") + 1] + "\\n")
-    raise SystemExit(0)
-if os.environ.get("JEV_STUB_FAIL") == "1":
-    sys.stdout.write("not json at all\\n")
-    raise SystemExit(1)
-noul = float(os.environ.get("JEV_STUB_NOUL", "0.9"))
-answers = {key: {"noul": noul} for key in questions}
-sys.stdout.write(json.dumps({"model": "stub", "answers": answers}))
-"""
-
-
-class Rule6ClaimSupportTests(LintFixture):
-    """The optional second reading of rule 6, which asks a model a question.
-
-    Every test here runs against a stub on PATH and never against the real
-    command: a suite that reaches a paid endpoint is a suite that fails when
-    somebody else's invoice does, and none of what is being tested here is
-    the model's judgment. What is being tested is that the linter behaves the
-    same whatever the model says, and says what it was told.
-    """
-
-    def setUp(self) -> None:
-        super().setUp()
-        self.bin = self.repo / "stub-bin"
-        self.bin.mkdir()
-        stub = self.bin / "jev"
-        stub.write_text(JEV_STUB, encoding="utf-8")
-        stub.chmod(0o755)
-        self.capture = self.repo / "sent.json"
-        self.probed = self.repo / "probed"
-        # Opted in by default, so every case below that is not about the
-        # opt-in exercises the path a reading takes. The cases about the
-        # opt-in remove or rewrite the file themselves.
-        self.opt_in(True)
-
-    def opt_in(self, value: object) -> None:
-        """Write the repository's opt-in file; a `str` is written verbatim."""
-        path = self.repo / lint.JEV_OPT_IN_RELATIVE_PATH
-        path.parent.mkdir(parents=True, exist_ok=True)
-        text = value if isinstance(value, str) else json.dumps({lint.JEV_OPT_IN_KEY: value})
-        path.write_text(text, encoding="utf-8")
-
-    def opt_out(self) -> None:
-        (self.repo / lint.JEV_OPT_IN_RELATIVE_PATH).unlink()
-
-    @contextlib.contextmanager
-    def jev(self, **extra: str):
-        """The stub on PATH and nothing left behind.
-
-        The switch is unset unless a case sets it: unset leaves the
-        repository's opt-in to decide, so a fixture that set it would no
-        longer be testing the path every run takes. It is *removed* rather than merely not added, because
-        `patch.dict` layers over the real environment and `CONTRIBUTING.md`
-        now tells operators to export `JEV_SD_DOCS_LINT=0` -- a reader who
-        follows that advice would otherwise watch seven of these fail, and
-        conclude the suite is flaky rather than that the fixture is.
-        `patch.dict` restores the whole mapping on exit, so popping inside it
-        leaves nothing behind either.
-        """
-        environment = {
-            "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
-            "JEV_STUB_CAPTURE": str(self.capture),
-            "JEV_STUB_PROBED": str(self.probed),
-            **extra,
-        }
-        with mock.patch.dict(os.environ, environment):
-            if lint.JEV_STAGE not in extra:
-                os.environ.pop(lint.JEV_STAGE, None)
-            yield
-
-    def recorded_item(self) -> pathlib.Path:
-        item = self.cited_item()
-        lint.write_citation_manifest(item, self.work)
-        return item
-
-    def calls(self, argv_log: pathlib.Path) -> list[list[str]]:
-        """Every argv the stub was handed, in order; none when it was never run."""
-        if not argv_log.exists():
-            return []
-        return [json.loads(line) for line in argv_log.read_text().splitlines()]
-
-    def assert_local_only(self, calls: list[list[str]]) -> None:
-        """Both calls were made, and each one named `--local-only` (sd:2762)."""
-        self.assertEqual([call[0] for call in calls], ["enabled", "ask"])
-        for call in calls:
-            self.assertIn("--local-only", call, f"{call[0]} could reach hosted Jev")
-
-    def test_both_calls_name_themselves_for_the_judgment_ledger(self) -> None:
-        """sd:2136. A bare `jev enabled` and an unnamed `ask` land in the ledger
-        as caller "unknown", so this gate's calls could not be counted."""
-
-        argv_log = self.repo / "argv.jsonl"
-        self.recorded_item()
-        with self.jev(JEV_STUB_ARGV=str(argv_log)):
-            self.notes()
-        calls = self.calls(argv_log)
-        self.assertEqual(calls[0], ["enabled", lint.JEV_STAGE, "--record", "--caller", lint.JEV_CALLER])
-        ask = calls[1]
-        self.assertEqual(ask[0], "ask")
-        # Opted in, so hosted Jev: the local-only flag is the default's alone.
-        self.assertNotIn("--local-only", ask)
-        self.assertEqual(ask[ask.index("--caller") + 1], lint.JEV_CALLER)
-        self.assertEqual(ask[ask.index("--stage") + 1], lint.JEV_STAGE)
-
-    def test_the_ask_names_its_batch_by_hash_and_the_run_is_one_id(self) -> None:
-        """sd:2954. `--subject` hashes the batch's origins, never a path or a
-        citation, and the probe and the ask share one `JEV_RUN`."""
-
-        argv_log, run_log = self.repo / "argv.jsonl", self.repo / "runs"
-        self.recorded_item()
-        with self.jev(JEV_STUB_ARGV=str(argv_log), JEV_STUB_RUN=str(run_log)):
-            os.environ.pop("JEV_RUN", None)
-            self.notes()
-        ask = self.calls(argv_log)[1]
-        self.assertRegex(ask[ask.index("--subject") + 1], r"^sd-docs-lint:[0-9a-f]{16}$")
-        runs = run_log.read_text().split()
-        self.assertEqual(len(runs), 2, runs)
-        self.assertEqual(len(set(runs)), 1, runs)
-        self.assertRegex(runs[0], r"^sd-docs-lint-\d{8}T\d{6}-[0-9a-f]{4}$")
-
-    def test_an_opted_in_repository_with_the_switch_unset_takes_the_reading(self) -> None:
-        """The opt-in on, the switch unset: the one way a reading is taken."""
-
-        self.recorded_item()
-        with self.jev():
-            self.assertIn("claim support", self.notes())
-        self.assertTrue(self.capture.exists(), "an opted-in repository took no reading")
-
-    def test_a_repository_that_has_not_opted_in_reads_through_local_kev_only(self) -> None:
-        """The default (sd:2762). No file, the switch unset: the reading is
-        taken, and both calls name `--local-only`, so `jev` sends it to the
-        local Kev and nowhere else. Before sd:2762 this run took no reading
-        (sd:1304), because the only reader was hosted."""
-
-        argv_log = self.repo / "argv.jsonl"
-        self.opt_out()
-        self.recorded_item()
-        with self.jev(JEV_STUB_ARGV=str(argv_log)):
-            self.assertIn("1 of 1 recorded citation(s) answered", self.notes())
-        self.assert_local_only(self.calls(argv_log))
-
-    def test_no_environment_variable_can_send_a_repository_to_hosted_jev(self) -> None:
-        """The variable only ever subtracts. The operator's shell exports
-        `JEV_SD_DOCS_LINT=1` for other reasons; that must not take a
-        repository that did not opt in off the local-only path."""
-
-        argv_log = self.repo / "argv.jsonl"
-        self.opt_out()
-        self.recorded_item()
-        for value in ("1", "on", "true", "True", "TRUE", "yes", "enabled", ""):
-            with self.subTest(value=value), self.jev(JEV_SD_DOCS_LINT=value, JEV_STUB_ARGV=str(argv_log)):
-                self.notes()
-            self.assert_local_only(self.calls(argv_log))
-            argv_log.unlink()
-
-    def test_a_file_that_says_false_is_the_default(self) -> None:
-        argv_log = self.repo / "argv.jsonl"
-        self.opt_in(False)
-        self.recorded_item()
-        with self.jev(JEV_STUB_ARGV=str(argv_log)):
-            self.notes()
-        self.assert_local_only(self.calls(argv_log))
-
-    def test_the_switch_off_wins_over_the_local_default(self) -> None:
-        """The explicit opt-out: `0` takes no reading, not even a local one,
-        and does not probe `jev` either."""
-
-        self.opt_out()
-        self.recorded_item()
-        with self.jev(JEV_SD_DOCS_LINT="0"):
-            self.assertNotIn("claim support", self.notes())
-        self.assertFalse(self.probed.exists(), "a switched-off run probed jev")
-        self.assertFalse(self.capture.exists(), "a switched-off run sent a request")
-
-    def test_kev_down_is_a_stderr_note_and_never_a_failure(self) -> None:
-        """Local Kev down: `jev` answers the fallback and says why on stderr.
-        The run passes, and says on its own stderr that nothing answered and
-        why, so a dead reader cannot pass for a clean reading."""
-
-        self.opt_out()
-        self.recorded_item()
-        self.git("add", "-A")
-        out, err = io.StringIO(), io.StringIO()
-        with self.jev(JEV_STUB_DOWN="1"), in_directory(self.repo), \
-                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            code = lint.main(["--no-history"])
-        self.assertEqual(code, 0, err.getvalue())
-        self.assertIn("rule 6 claim support: no answer (jev: http://127.0.0.1:8009/v1/systemone: "
-                      "[Errno 61] Connection refused; using the fallback)", err.getvalue())
-        self.assertNotIn("Connection refused", out.getvalue())
-        self.assertIn("0 of 1 recorded citation(s) answered", out.getvalue())
-
-    def test_a_slow_reader_is_bounded_by_one_budget_and_said_as_it_starts(self) -> None:
-        """sd:2873: seven batches at 120s each, and nothing printed until the end, read as a hang."""
-
-        item = self.cited_item()
-        (item / "design.md").write_text("# design\n\nThe ladder is at `prd.md:3`.\n\n"
-                                        "The ladder is still at `prd.md:3`.\n", encoding="utf-8")
-        lint.write_citation_manifest(item, self.work)
-        self.git("add", "-A")
-        out, err = io.StringIO(), io.StringIO()
-        with self.jev(JEV_STUB_SLEEP="3"), mock.patch.object(lint, "CLAIM_BATCH", 1), \
-                mock.patch.object(lint, "CLAIM_BUDGET_SECONDS", 1), in_directory(self.repo), \
-                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            code = lint.main(["--no-history"])
-        self.assertEqual(code, 0, err.getvalue())
-        self.assertIn("rule 6 claim support: asking jev about 2 citation(s) in 2 batch(es), at most 1s", err.getvalue())
-        self.assertIn("rule 6 claim support: stopped after 1 of 2 batch(es); the 1s budget ran out", out.getvalue())
-        self.assertIn("0 of 2 recorded citation(s) answered", out.getvalue())
-
-    def test_the_switch_off_wins_over_the_opt_in(self) -> None:
-        """Silence, not a note: the operator asked for silence, and the
-        repository's `true` does not overrule them.
-
-        `patch.dict` adds to the environment it patches and removes nothing,
-        so the switch is stated by the fixture rather than inherited.
-        """
-        self.recorded_item()
-        self.assertEqual(lint.jev_opt_in(self.repo), (True, ""))
-        with self.jev(JEV_SD_DOCS_LINT="0"):
-            self.assertNotIn("claim support", self.notes())
-        self.assertFalse(self.capture.exists(), "a switched-off run sent a request")
-
-    def test_an_opt_in_that_cannot_mean_anything_is_a_note_and_sends_nothing(self) -> None:
-        """Fails closed, and says so. Only a JSON `true` opts in: a value that
-        opens an egress path is spelled one way. The note names the file and
-        the fault and never what the file held."""
-
-        self.recorded_item()
-        cases = {
-            "{not json": "not valid JSON",
-            "[true]": "the top level must be a JSON object",
-            json.dumps({lint.JEV_OPT_IN_KEY: True, "secret_tenant": True}): "1 unknown key(s)",
-            json.dumps({lint.JEV_OPT_IN_KEY: "true"}): f"{lint.JEV_OPT_IN_KEY} must be true or false",
-            json.dumps({lint.JEV_OPT_IN_KEY: 1}): f"{lint.JEV_OPT_IN_KEY} must be true or false",
-        }
-        for text, fault in cases.items():
-            with self.subTest(text=text):
-                self.opt_in(text)
-                with self.jev():
-                    report = self.run_lint()
-                joined = "\n".join(report.notes)
-                self.assertIn(
-                    f"rule 6 claim support: not run (.github/sd-docs-lint.json: {fault}", joined)
-                self.assertNotIn("secret_tenant", joined)
-                self.assertEqual(report.failures, [])
-                self.assertFalse(self.capture.exists(), f"{text!r} sent a request")
-                self.assertFalse(self.probed.exists(), f"{text!r} made the run probe jev")
-
-    def test_the_schema_names_the_keys_the_reader_accepts(self) -> None:
-        """Two statements of one vocabulary, pinned so they cannot drift."""
-
-        schema = json.loads(
-            (REPO_ROOT / ".github" / "sd-docs-lint.schema.json").read_text(encoding="utf-8"))
-        self.assertFalse(schema["additionalProperties"])
-        self.assertEqual(sorted(schema["properties"]), sorted(lint.JEV_OPT_IN_KNOWN_KEYS))
-        self.assertEqual(schema["properties"][lint.JEV_OPT_IN_KEY]["type"], "boolean")
-
-    def test_every_off_word_switches_it_off(self) -> None:
-        self.recorded_item()
-        for word in lint.sd_lib.JEV_FLAG_OFF:
-            for value in (word, word.upper(), f" {word} "):
-                with self.subTest(value=value):
-                    self.assertTrue(lint.sd_lib.jev_stage_off(value))
-        for value in (None, "", "1", "true", "yes", "offf"):
-            with self.subTest(value=value):
-                self.assertFalse(lint.sd_lib.jev_stage_off(value),
-                                 "a typo must not be an outage")
-
-    def test_no_jev_on_path_says_nothing_either(self) -> None:
-        """A PATH with git on it and no jev, which is every checkout but one.
-
-        Silent, and that is the half of this flip worth reviewing. `jev` is
-        absent from nearly every checkout, so a note here would be a line of
-        noise in every pull request in both repositories, forever -- which is
-        the exact cost `NOT_ASKED` was created to avoid. The flip must not
-        reintroduce it by turning "nobody opted in" into "nobody has jev".
-
-        git is symlinked in rather than the real PATH being kept, because the
-        operator running this suite has `jev` on theirs: a test that removed
-        nothing would pass by finding the real command, and a test that
-        removed everything would fail on `git` before reaching the question.
-        """
-        self.recorded_item()
-        gitless = self.repo / "git-only-bin"
-        gitless.mkdir()
-        (gitless / "git").symlink_to(shutil.which("git"))
-        with mock.patch.dict(os.environ, {"PATH": str(gitless)}):
-            os.environ.pop(lint.JEV_STAGE, None)
-            self.assertNotIn("claim support", self.notes())
-
-    def test_the_shared_fixture_never_reaches_a_jev_on_path(self) -> None:
-        """A rule test with a `jev` on PATH and the switch as the fixture left
-        it: no probe and no request, because the default reads everywhere."""
-
-        self.recorded_item()
-        with mock.patch.dict(os.environ, {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
-                                          "JEV_STUB_PROBED": str(self.probed)}):
-            self.notes()
-        self.assertFalse(self.probed.exists(), "a fixture run probed jev")
-
-    def test_a_jev_that_cannot_answer_is_silent_too(self) -> None:
-        """The third silent reason, and the one review caught.
-
-        Exit 3 is the only non-zero `jev enabled` returns, so a gate that
-        says "any non-zero is loud" is saying "every unkeyed machine is
-        loud". `jev off` is the documented fleet kill switch; using it would
-        then print a line in every pull request in both repositories, which
-        is what `NOT_ASKED` exists to prevent. `bin/sd_jev.py` already
-        treated 3 as silent, and two gates that disagree are a policy nobody
-        can state.
-        """
-
-        self.recorded_item()
-        with self.jev(JEV_STUB_ENABLED="3"):
-            notes = self.notes()
-        self.assertNotIn("claim support", notes)
-        self.assertFalse(self.capture.exists(), "a switched-off jev was sent a request")
-
-    def test_a_probe_that_fails_some_other_way_is_still_loud(self) -> None:
-        """The half that must not go silent with it.
-
-        0 and 3 are the codes `jev enabled` has today. Anything else is a
-        `jev` this gate does not understand -- a broken install, a shim, a
-        future version -- and that is a run that could have had a reading and
-        did not, which is the whole of what the note is for.
-        """
-
-        self.recorded_item()
-        with self.jev(JEV_STUB_ENABLED="4"):
-            notes = self.notes()
-        self.assertIn("not run (jev enabled exited 4)", notes)
-        self.assertFalse(self.capture.exists(), "a failing probe was sent a request")
-
-    def test_a_weak_answer_is_a_note_and_never_a_failure(self) -> None:
-        self.recorded_item()
-        with self.jev(JEV_STUB_NOUL="0.10"):
-            report = self.run_lint()
-        joined = "\n".join(report.notes)
-        self.assertIn("`prd.md:3`", joined)
-        self.assertIn("0.10", joined)
-        self.assertIn("1 of 1 recorded citation(s) answered, 1 under 0.5", joined)
-        self.assertEqual(report.failures, [])
-
-    def test_a_confident_answer_is_counted_and_not_named(self) -> None:
-        self.recorded_item()
-        with self.jev(JEV_STUB_NOUL="0.95"):
-            report = self.run_lint()
-        joined = "\n".join(report.notes)
-        self.assertIn("1 of 1 recorded citation(s) answered, 0 under 0.5", joined)
-        self.assertNotIn("may no longer support", joined)
-        self.assertEqual(report.failures, [])
-
-    def test_a_broken_jev_changes_neither_the_notes_nor_the_verdict(self) -> None:
-        self.recorded_item()
-        with self.jev(JEV_STUB_FAIL="1"):
-            report = self.run_lint()
-        # `0 of 1 ... answered`, not `1 ... 0 under the floor`. A pass that
-        # answered nothing and a pass that answered confidently printed the
-        # same line until this test was written, which is the whole of how a
-        # dead check goes on reading clean.
-        self.assertIn("0 of 1 recorded citation(s) answered", "\n".join(report.notes))
-        self.assertEqual(report.failures, [])
-
-    def test_only_the_two_passages_leave_the_machine(self) -> None:
-        """The payload cap, asserted against what the stub was handed.
-
-        A cap documented in a docstring is a cap nobody re-checks. This reads
-        the bytes the command received and refuses every name the linter knows
-        -- the item directory, the two file names, the absolute root -- so a
-        later edit that widens the state fails here rather than in somebody's
-        outbound traffic.
-        """
-        item = self.recorded_item()
-        with self.jev():
-            self.run_lint()
-        sent = self.capture.read_text(encoding="utf-8")
-        for forbidden in (item.name, "prd.md:3", "design.md", str(self.repo), "docs/work"):
-            self.assertNotIn(forbidden, sent, f"{forbidden!r} left the machine")
-        payload = json.loads(sent)
-        self.assertEqual(list(payload), ["citations"])
-        self.assertEqual(list(payload["citations"]), ["c1"])
-        self.assertEqual(sorted(payload["citations"]["c1"]), ["claim", "evidence"])
-
-    def test_a_long_passage_is_capped_before_it_is_sent(self) -> None:
-        item = self.cited_item()
-        (item / "prd.md").write_text(
-            "---\ntitle: A cited item\ndate: 2026-08-29\nstatus: planning\n---\n"
-            + "ladder " * 400 + "\n",
-            encoding="utf-8",
-        )
-        lint.write_citation_manifest(item, self.work)
-        with self.jev():
-            self.run_lint()
-        payload = json.loads(self.capture.read_text(encoding="utf-8"))
-        self.assertLessEqual(len(payload["citations"]["c1"]["evidence"]), lint.EVIDENCE_CHARS)
-        self.assertLessEqual(len(payload["citations"]["c1"]["claim"]), lint.CLAIM_CHARS)
-
-    def wrapped_claims(self, design: str) -> list[str]:
-        """The claims sent for the citations in a `design.md` of `design`, in order."""
-        item = self.cited_item()
-        (item / "design.md").write_text(design, encoding="utf-8")
-        lint.write_citation_manifest(item, self.work)
-        with self.jev():
-            self.run_lint()
-        sent = json.loads(self.capture.read_text(encoding="utf-8"))["citations"]
-        return [sent[f"c{number}"]["claim"] for number in range(1, len(sent) + 1)]
-
-    def wrapped_claim(self, design: str) -> str:
-        """The claim sent for the one citation in a `design.md` of `design`."""
-        return self.wrapped_claims(design)[0]
-
-    def test_a_marker_after_the_stop_claims_the_sentence_before_it(self) -> None:
-        """A marker placed after its sentence's full stop opens nothing: it
-        cites what came before it, not the sentence that follows."""
-        claim = self.wrapped_claim(
-            "# design\n\nRequests require authentication. (`prd.md:3`) Logging is optional.\n"
-        )
-        self.assertIn("Requests require authentication.", claim)
-        self.assertNotIn("Logging is optional", claim)
-
-    def test_an_abbreviation_does_not_end_the_sentence(self) -> None:
-        """`e.g.` followed by a lower-case word is not a sentence boundary."""
-        claim = self.wrapped_claim(
-            "# design\n\nRetries are forbidden for non-idempotent operations, "
-            "e.g. payments (`prd.md:3`).\n"
-        )
-        self.assertIn("Retries are forbidden for non-idempotent operations", claim)
-        # Enough words after the abbreviation that the short-sentence fallback
-        # does not rescue it: only the boundary rule keeps the assertion.
-        claim = self.wrapped_claim(
-            "# design\n\nRetries are forbidden for writes, "
-            "e.g. card payments and bank transfers (`prd.md:3`).\n"
-        )
-        self.assertIn("Retries are forbidden for writes", claim)
-
-    def test_a_fragment_too_short_to_assert_falls_back_to_the_block(self) -> None:
-        """`Fig. 3` reads as a boundary; a two-word sentence is no claim, so the
-        block up to the marker is sent instead."""
-        claim = self.wrapped_claim(
-            "# design\n\nThe cache holds for an hour, see Fig. 3 (`prd.md:3`).\n"
-        )
-        self.assertIn("The cache holds for an hour", claim)
-
-    def test_two_markers_on_one_line_each_claim_their_own_sentence(self) -> None:
-        """The same citation twice on one line is two rows, and each row's
-        claim is the sentence its own marker ends."""
-        claims = self.wrapped_claims(
-            "# design\n\nRetries are allowed (`prd.md:3`). Retries are forbidden (`prd.md:3`).\n"
-        )
-        self.assertEqual(len(claims), 2)
-        self.assertIn("Retries are allowed", claims[0])
-        self.assertNotIn("forbidden", claims[0])
-        self.assertIn("Retries are forbidden", claims[1])
-        self.assertNotIn("allowed", claims[1])
-
-    def test_a_marker_that_trails_its_sentence_sends_the_sentence(self) -> None:
-        """sd:1186. Prose is hard-wrapped, and the marker sits at the end of
-        its sentence, lines below the assertion. One physical line as the
-        claim sent the tail fragment and the next sentence's opening, so the
-        reading judged a question nobody asked. The claim is the sentence."""
-        claim = self.wrapped_claim(
-            "# design\n\n"
-            "- **the adoption gate**: the operator uses it for a week and the request log\n"
-            "  shows GET requests on five of seven days, recorded with the count\n"
-            "  (`prd.md:3`). Criterion 14's email-retirement ask cannot be made\n"
-            "  before that.\n"
-            "- the next item, which is not the claim.\n"
-        )
-        self.assertIn("the operator uses it for a week", claim)
-        self.assertIn("five of seven days", claim)
-        self.assertNotIn("Criterion 14", claim)
-        self.assertNotIn("next item", claim)
-        self.assertNotIn("prd.md", claim)
-
-    def test_a_long_sentence_keeps_the_text_before_its_marker(self) -> None:
-        """The cap still holds, and it cuts from the far end of the assertion,
-        not from the words beside the marker."""
-        claim = self.wrapped_claim(
-            "# design\n\n"
-            + "padding words " * 40 + "\n"
-            + "and the last words of it (`prd.md:3`). Then another sentence.\n"
-        )
-        self.assertLessEqual(len(claim), lint.CLAIM_CHARS)
-        self.assertIn("the last words of it ([cited]).", claim)
-        self.assertNotIn("another sentence", claim)
-
-
 class ArchiveIsBelowTheWorkRootTests(unittest.TestCase):
     """sd:1540. Only `archive/` below the work root is history.
 
@@ -2662,12 +1049,6 @@ class ArchiveIsBelowTheWorkRootTests(unittest.TestCase):
     def test_an_item_is_archived_only_below_the_work_root(self) -> None:
         self.assertFalse(lint.is_archived(self.item, self.work_root))
         self.assertTrue(lint.is_archived(self.work_root / "archive" / "2026-08" / "old", self.work_root))
-
-    def test_recording_reads_an_item_in_a_checkout_under_archive(self) -> None:
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            self.assertEqual(lint.record_citations(self.work_root), 0)
-        self.assertIn("2026-09-01-thing: recorded", out.getvalue())
 
     def test_no_check_reads_archive_from_the_absolute_path(self) -> None:
         source = LINT_PATH.read_text(encoding="utf-8")

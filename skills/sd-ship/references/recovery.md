@@ -84,8 +84,6 @@ A `--provider` that did not write that review re-reviews instead.
 A Copilot review of the earlier head carries forward the same way; the receipt records `review_carry_forward` (sd:1485).
 Otherwise the new head gets a full-branch pass: the review covers the branch's own diff, not the code the base brought in.
 A conflict aborts the merge and leaves the branch unchanged; resolve it by hand, then prepare again.
-One conflict is resolved for you: two additions to `CHANGELOG.md` at the root, and no other conflicted path.
-Both entries are kept, the branch's first, and the receipt warnings name the resolution.
 Merge again with the new `--expected-head`; the local gate runs at that head.
 A merge after a hand merge of the base, with no prepare between, refuses as a receipt that does not name the head.
 When that merge is the only change, the refusal says so and names its main commits; run `sd-ship prepare`, which carries or re-reviews as above (sd:2339).

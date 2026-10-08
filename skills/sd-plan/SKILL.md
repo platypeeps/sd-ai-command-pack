@@ -6,9 +6,9 @@ disable-model-invocation: true
 
 # sd-plan
 
-`sd-plan <slug>` turns an intention into one tracked work item:
-`docs/work/<YYYY-MM-DD>-<slug>/prd.md`, plus `design.md` and `implement.md`
-**only when you ask for them**. Invocation is explicit approval to write
+`sd-plan <slug>` turns an intention into one tracked work item: an sd row,
+plus `docs/work/<YYYY-MM-DD>-<slug>/design.md` **only when the shape needs
+agreement** (sd:3000). New items get no `prd.md` or `implement.md`. Invocation is explicit approval to write
 inside the selected work root, create the item's branch, and record that
 item's progress and decisions through `sd_db`. The work root defaults to
 `docs/work`; `--work-dir` selects another root within this repository. This
@@ -26,7 +26,7 @@ document for it.
 Use when requested for work spanning more than one session or more than about
 300 changed lines, as `WORKFLOW.md` describes. A smaller change follows the
 normal branch, check, review and ship path without a planning artifact. Do not
-create a PRD just to record routine progress or work already merged.
+write a design just to record routine progress or work already merged.
 
 ## The sequence
 
@@ -39,22 +39,24 @@ create a PRD just to record routine progress or work already merged.
    Do not restart an interview when a handoff or an existing decision supplies
    the answer. In an authorized unattended run, record routine choices on the
    item and continue under `WORKFLOW.md`'s stop conditions.
-2. **Write from the templates** in `skills/sd-plan/templates/` (`prd.md`,
-   `design.md`, `implement.md`, `decision.md`, `work-README.md`). Before
-   writing each page, run `sd-rules --for <work>/<item>/<page>.md` (the
-   selected work root, `docs/work` unless `--work-dir` chose another; or
-   `--for docs/decisions/<record>.md` under `--decision`) from the
-   repository root and cite the rule ids it prints in the page rather than
-   restating the rules. Create
-   `<work>/README.md` from the template if the directory is new. Add
-   `design.md` or `implement.md` only when explicitly requested. Adapt the
+2. **Track the item as a row.** Use the row the work already has, or
+   `sd task add`. Status, progress and decisions live on the row.
+3. **Write `design.md` from the template**, only when the shape needs
+   agreement. The templates are in `skills/sd-plan/templates/` (`design.md`,
+   `decision.md`, `work-README.md`). Name the row in its frontmatter as
+   `item: sd:<id>`, and add no `status:` field. Before writing it, run
+   `sd-rules --for <work>/<item>/design.md` (or `--for docs/decisions/<record>.md`
+   under `--decision`) from the repository root, and cite the rule ids it
+   prints rather than restating the rules. Create `<work>/README.md` from
+   the template if the directory is new. The file/row status rules stand
+   until sd:3015; for an item with a `prd.md`, adapt the
    templates to the selected work root's `.status-source` marker, including
    when `--work-dir` changes that root. When it says `row`, keep progress in
    the database and add no `status:` field. With `file` or no marker, add
    `status: planning` for the legacy reader. Report an
    unrecognized marker instead of falling back. Do not recreate retired
    frontmatter from a template.
-3. **Register the row**, when the item is under `docs/work` and that root's
+4. **Register the row**, when the item is under `docs/work` and that root's
    `.status-source` says `row`. Run `sd work register docs/work/<item>/prd.md`
    as soon as the file exists. Under a `--work-dir` root the step does not
    apply and the command will refuse: a row's identity is
@@ -73,9 +75,9 @@ create a PRD just to record routine progress or work already merged.
    field is the record there, and a row beside it would be a second answer to
    one question. `sd work register` refuses such a repository by name, so the
    step cannot create that state by mistake.
-4. **Review the plan.** Run `sd-review --scope planning`, which resolves one
-   active `planning`/`in_progress` item's `prd.md`/`design.md`/`implement.md`
-   and routes them to the reviewer the registry gives. Which one: the item
+5. **Review the plan.** Run `sd-review --scope planning`, which resolves one
+   active `planning`/`in_progress` item's `design.md` (and an older item's
+   `prd.md`/`implement.md`) and routes them to the reviewer the registry gives. Which one: the item
    whose `branch:` is the branch you are on. With several active items and
    none of them on this branch, it refuses and names them rather than
    reviewing them together — say which with `--item`. With one active item
@@ -85,14 +87,13 @@ create a PRD just to record routine progress or work already merged.
    `.claude/rules/sd-planning-adversarial-review.md` gives the cap on that row.
    That file lives only in the sd-ai-command-pack checkout, and planning runs
    in whatever repository encloses cwd (R10-D6), so read the cap there. Record
-   the findings under a `## Review` heading in the item.
-5. **Promote.** `planning → ready` only when acceptance criteria are present
+   the findings on the item's row.
+6. **Promote.** `planning → ready` only when acceptance criteria are present
    and **no open `BLOCKING` line remains**. An unresolved blocking concern is a
    stop, not a note. In a checkout using row status, write the transition
    through `sd_db`; a missing item row is reported as missing, never replaced
    by a status field or a GitHub issue.
-6. **Branch.** Create the branch and record it as `branch:` in the PRD
-   frontmatter when work starts. The branch's checkout holds one writer:
+7. **Branch.** Create the branch when work starts; the row records it. The branch's checkout holds one writer:
    this session in its own worktree (`--worktree`), or the runner in its
    clone. See the sd-ai-command-pack checkout's `WORKFLOW.md`, section
    **Parallel work**. An `in_progress` item still needs a branch
@@ -133,9 +134,8 @@ sd store item 455 --json
 
 Write one bullet from the row — the link, the title, the state, and the date
 the item was last seen — which goes verbatim under the PRD's `## References`
-heading, the one the template already ships. A reference the shadow does not
-hold is pasted by hand from the tracker page. Under `--decision`, where the
-template has no such heading, add it above the bullet.
+heading; add the heading if the page has none. A reference the shadow does
+not hold is pasted by hand from the tracker page.
 
 ### `sd:<id>` seeds the interview too
 
@@ -167,7 +167,7 @@ lives in this machine's database, so `sd:455` and `sd store item 455` are the
 whole reference. A URL there would look checkable and resolve nowhere.
 
 **The row is not the plan.** Seeding is a starting point, not permission to
-skip the interview — a one-line row does not become a PRD by being read
+skip the interview — a one-line row does not become a design by being read
 aloud.
 
 Read the exit code before pasting. **1** means the tracker was asked and the
@@ -205,8 +205,8 @@ interview, and leave its prose where it will still be current next month.
   them, so a guest checkout cannot reach `planning → ready` with a triad in the
   upstream tree. The refusal fires after the files are written, not before —
   move them to the fork's integration branch and re-run.
-- **Never generate a design or implement file to look thorough.** Three files
-  where one was warranted is the failure mode this command exists to avoid.
+- **Never write a design to look thorough.** One page at most, and none
+  when the shape needs no agreement.
 
 ## Reattaching
 
@@ -225,7 +225,4 @@ ref`, retired with sd:719 step 4. `sd-review`, `sd-check`, `sd-status`,
 
 `sd suggest add` can record a proposal on an existing imported work item, but
 `--from-suggestion` and `--from-proposal` have no resolution path yet. Do not
-invent one. `sd task add` captures a standalone task; it does not create or
-import a planning artifact. `sd work register` is the one command that makes
-the row for an artifact already on disk; `sd-status` only reports, and never
-registers the item it is complaining about.
+invent one. `sd task add` makes the row; `sd-status` only reports.

@@ -1,7 +1,7 @@
 """The Jev shadow stages: review triage (sd:2092) and the duplicate hint (sd:2093).
 
-A shadow stage records Jev's answer and never reads it back, and it sends text
-about a repository, so it may run for a public repository only. Every case
+A shadow stage records Jev's answer and never reads it back. The local Kev
+keeps the text on the machine; hosted Jev may read a public repository only. Every case
 puts a `jev` and a `gh` stub on the only `PATH` the run is handed, so the suite
 stays offline and neither real command is reached.
 """
@@ -24,6 +24,7 @@ from tests.test_sd_review import FakeRunner, ReviewFixture, namespace, sd_review
 
 sd_jev = sd_review.sd_jev
 #: Importable once `tests.test_sd_review` has put `bin/` on `sys.path`.
+import sd_jev_shadow  # noqa: E402
 import sd_work  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -121,13 +122,13 @@ class TriageTests(ReviewFixture):
         [call] = stubs.choices()
         argv = call["argv"]
         self.assertEqual((flag(argv, "--stage"), flag(argv, "--shadow"), flag(argv, "--caller")),
-                         (sd_jev.TRIAGE_STAGE, sd_jev.UNTRIAGED, "sd-review"))
-        self.assertEqual(set(sd_jev.TRIAGE_CRITERIA),
+                         (sd_jev_shadow.TRIAGE_STAGE, sd_jev_shadow.UNTRIAGED, "sd-review"))
+        self.assertEqual(set(sd_jev_shadow.TRIAGE_CRITERIA),
                          {part.split("=", 1)[0] for part in flag(argv, "--criteria").split(",")})
         self.assertEqual(json.loads(call["state"]), {
             "severity": "high", "disposition": "blocking", "family": "correctness",
             "path": "src.py", "summary": "bad, really"})
-        self.assertEqual(stubs.gh(), [["api", "--hostname", "github.com", "repos/example/demo", "--jq", ".private"]])
+        self.assertEqual(stubs.gh(), [])
         # No opt-in: the local Kev only, for the probe and the question alike.
         self.assertTrue(all(call["argv"][-1] == "--local-only" for call in stubs.jev()), stubs.jev())
 
@@ -148,9 +149,15 @@ class TriageTests(ReviewFixture):
         self.review(self.repo(), [])
         self.assertEqual((stubs.jev(), stubs.gh()), ([], []))
 
-    def test_a_private_repository_sends_nothing(self):
+    def test_the_local_kev_asks_github_nothing(self):
+        """sd:3013. The local path sends nothing off the machine, so no visibility probe runs."""
         stubs = Stubs(self.tool_bin, private="true")
         self.assertEqual(self.triage([FINDING]), "")
+        self.assertEqual((len(stubs.choices()), stubs.gh()), (1, []))
+
+    def test_a_private_repository_sends_nothing_hosted(self):
+        stubs = Stubs(self.tool_bin, private="true")
+        self.assertEqual(self.triage([FINDING], SD_JEV_SHADOW_HOSTED="1"), "")
         self.assertEqual(stubs.choices(), [])
         self.assertEqual(len(stubs.gh()), 1)
 
@@ -158,7 +165,7 @@ class TriageTests(ReviewFixture):
         """Review of 9b7c4daad: `GH_HOST` sends `gh api` to another host, where a
         public repository of the same name would vouch for a private one."""
         stubs = Stubs(self.tool_bin, private="true")
-        self.assertEqual(self.triage([FINDING], GH_HOST="ghe.example.test"), "")
+        self.assertEqual(self.triage([FINDING], GH_HOST="ghe.example.test", SD_JEV_SHADOW_HOSTED="1"), "")
         self.assertEqual(stubs.choices(), [])
 
     def test_the_hosted_opt_in_still_needs_a_public_repository(self):
@@ -179,7 +186,7 @@ class TriageTests(ReviewFixture):
 
     def test_a_failing_visibility_answer_reads_as_private(self):
         stubs = Stubs(self.tool_bin, private="")
-        self.assertEqual(self.triage([FINDING]), "")
+        self.assertEqual(self.triage([FINDING], SD_JEV_SHADOW_HOSTED="1"), "")
         self.assertEqual(stubs.choices(), [])
 
     def test_no_github_origin_asks_nobody(self):
@@ -198,7 +205,7 @@ class TriageTests(ReviewFixture):
         stubs = Stubs(self.tool_bin, gate=3)
         self.assertEqual(self.triage([FINDING]), "")
         self.assertEqual(stubs.gh(), [])
-        self.assertEqual([call["argv"][:2] for call in stubs.jev()], [["enabled", sd_jev.TRIAGE_STAGE]])
+        self.assertEqual([call["argv"][:2] for call in stubs.jev()], [["enabled", sd_jev_shadow.TRIAGE_STAGE]])
 
     def test_a_failing_jev_is_loud_and_stops(self):
         stubs = Stubs(self.tool_bin, code=2)
@@ -237,9 +244,9 @@ class TriageTests(ReviewFixture):
 
     def test_one_review_triages_at_most_the_cap(self):
         stubs = Stubs(self.tool_bin)
-        self.triage([dict(FINDING, line=n) for n in range(sd_jev.MAX_TRIAGE + 3)])
+        self.triage([dict(FINDING, line=n) for n in range(sd_jev_shadow.MAX_TRIAGE + 3)])
         subjects = [flag(call["argv"], "--subject") for call in stubs.choices()]
-        self.assertEqual(len(subjects), sd_jev.MAX_TRIAGE)
+        self.assertEqual(len(subjects), sd_jev_shadow.MAX_TRIAGE)
         self.assertTrue(subjects[0].startswith("sd-review-triage:example.demo:"), subjects[0])
 
 
@@ -299,7 +306,7 @@ class DedupeTests(ReviewFixture):
     def test_a_private_repository_sends_no_title(self):
         self.add("Fix the lane")
         stubs = Stubs(self.tool_bin, private="true")
-        self.add("Fix the lane too")
+        self.add("Fix the lane too", SD_JEV_SHADOW_HOSTED="1")
         self.assertEqual(stubs.choices(), [])
 
     def test_the_stage_switched_off_asks_nobody(self):

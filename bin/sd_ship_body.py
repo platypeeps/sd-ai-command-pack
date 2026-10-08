@@ -1,21 +1,21 @@
 """The pull-request body `sd-ship` publishes, read against the lines it owns (sd:1870).
 
 `sd-ship` writes `Work:` into the body it publishes, and `Item:`, `Delivers:`
-and the authorship lines into the squash message. A supplied body that says
-the same thing is not a conflict, so such a line is stripped and named in the
-result. A line that says something else -- another item, a delivery nobody
-claimed, an author no registry knows, a pre-squash sha -- is refused by line
-number, with the value `sd-ship` would have written.
+and the authorship lines into the squash message. A supplied `Item:`, `Work:`
+or `Delivers:` line is stripped and named in the result, whatever it says
+(sd:2999): `sd-ship` writes the links itself. A line that says something else
+-- an author no registry knows, a pre-squash sha -- is refused by line number,
+with the value `sd-ship` would have written.
 
 The fixpoint is the point: `normalize` of a body `sd-ship` published returns
 the body it published before appending `Work:`, so the live pull-request body
 fed back as `--body-file` prepares again without a refusal. Before this, the
 body `sd-ship` itself wrote was refused as input (#1236, #1238).
 
-A body with no item owns nothing: every owned line refuses there, indented
-or not, and nothing is stripped. With an item, only a line at column zero is
-read, because that is the only form git or rule 5 reads; an indented line is
-prose about a trailer, and the body keeps it.
+Only a line at column zero is read, because that is the only form git or
+rule 5 reads; an indented line is prose about a trailer, and the body keeps
+it. A body with no item owns nothing, so every column-zero owned line is
+stripped there, `Closes:` included.
 
 `Closes: sd:N[, sd:M]` is the one owned line a body keeps: it names the items
 the pull request co-delivers, and the merge closes each with a `Delivers:`
@@ -32,7 +32,6 @@ Indented, it is prose like any other example.
 from __future__ import annotations
 
 import dataclasses
-import functools
 import pathlib
 import re
 import tempfile
@@ -149,18 +148,14 @@ def known_author(value: str, readers: list) -> bool:
     return False
 
 
-def problem(line: OwnedLine, item: int, deliver: bool, readers: list | None) -> str | None:
+def problem(line: OwnedLine, item: int | None, readers: list | None) -> str | None:
     """Why `line` cannot be stripped from an item's body, or None when it can."""
     if line.quoted:
         return ("a code block or comment holds it, so it reads as an example; indent it to keep it as one, "
                 "or move it out of the block to make it a trailer")
+    if line.key in (sd_lib.ITEM_TRAILER, sd_lib.WORK_TRAILER, sd_lib.DELIVERS_TRAILER) or item is None:
+        return None  # sd:2999: sd-ship writes the links itself, so a stray one is dropped
     expected = f"sd:{item}"
-    if line.key in (sd_lib.ITEM_TRAILER, sd_lib.WORK_TRAILER):
-        return None if line.value == expected else f"expected `{line.key} {expected}`"
-    if line.key == sd_lib.DELIVERS_TRAILER:
-        if not deliver:
-            return "expected no line: delivery is claimed with --deliver, never by the body"
-        return None if line.value == expected else f"expected `{line.key} {expected}`"
     if line.key == sd_lib.AUTHORED_TRAILER:
         if known_author(line.value, registries() if readers is None else readers):
             return None
@@ -176,31 +171,26 @@ def problem(line: OwnedLine, item: int, deliver: bool, readers: list | None) -> 
     return f"expected no line: `{line.key}` rides a later merge or an empty commit, never this body"
 
 
-def normalize(body: str, item: int | None, *, deliver: bool = False,
-              readers: list | None = None) -> tuple[str, tuple[str, ...]]:
+def normalize(body: str, item: int | None, *, readers: list | None = None) -> tuple[str, tuple[str, ...]]:
     """`body` without the owned lines that agree with `sd-ship`, and those lines.
 
     Refuses, naming every offending line, when any owned line disagrees. With
-    no item, every owned line disagrees and `body` is returned unchanged.
-    With an item, the result carries no trailing whitespace, which is what
-    makes `normalize(published)` equal the body before `Work:` was appended.
+    no item and nothing to strip, `body` is returned unchanged. Otherwise the
+    result carries no trailing whitespace, which is what makes
+    `normalize(published)` equal the body before `Work:` was appended.
     """
-    found = owned_lines(body)
-    if item is None:
-        if found:
-            raise Refusal("no-item publication cannot carry item or caller-supplied authorship trailers: "
-                          + "; ".join(f"line {line.number}: `{line.text.strip()}`" for line in found))
+    read = [line for line in owned_lines(body) if not line.indented]
+    if item is None and not read:
         return body, ()
-    read = [line for line in found if not line.indented]
     problems = [(line, reason) for line in read
-                if (reason := problem(line, item, deliver, readers)) is not None]
+                if (reason := problem(line, item, readers)) is not None]
     if problems:
         raise Refusal("the ship adapter owns association and delivery trailers: "
                       + "; ".join(f"line {line.number}: `{line.text}`; {reason}" for line, reason in problems),
                       code="body_trailer_refused", boundary="input", state="operator_decision",
                       next_action="Remove or correct the named lines; sd-ship writes them itself.")
     # A `Closes:` line stays: it is the body's own claim, and the merge reads it there.
-    read = [line for line in read if line.key != sd_lib.CLOSES_TRAILER]
+    read = [line for line in read if line.key != sd_lib.CLOSES_TRAILER or item is None]
     stripped = {line.number for line in read}
     lines = body.split("\n")
     kept: list[str] = []
@@ -250,34 +240,32 @@ def published(body: str, item: int) -> str:
     return f"{body}\n\n{sd_lib.WORK_TRAILER} sd:{item}\n"
 
 
-@functools.cache
-def docs_lint():
-    """`sd-docs-lint` as a module, loaded once: rule 8 is the one reading of scope."""
-    return sd_lib.sibling("sd_docs_lint_scope", "sd-docs-lint")
-
-
-def lint_failures(tree: pathlib.Path, argv: list[str]) -> list[str]:
-    """The `FAIL` lines `argv` prints in `tree`, each path made relative to `tree`.
+def failures(result) -> list[str]:
+    """The `FAIL` lines of a finished lint.
 
     A non-zero exit that printed no `FAIL` line is refused with its raw output:
     the lint also exits 1 on an uncaught exception, and a traceback read as
     zero failures would let a lint that never finished pass.
     """
+    found = [line[len("FAIL "):] for line in result.stderr.splitlines() if line.startswith("FAIL ")]
+    if result.returncode and not found:
+        raise Refusal((result.stderr or result.stdout or "sd-docs-lint failed").strip()[-2000:],
+                      code="docs_lint_failed", state="retryable_failure",
+                      next_action="Inspect the lint error, resolve its cause, then prepare again.")
+    return found
+
+
+def lint_failures(tree: pathlib.Path, argv: list[str]) -> list[str]:
+    """`failures` of `argv` run in `tree`, each path made relative to `tree`."""
     result = completed_process(tree, argv, timeout=300, answers=frozenset({0, 1}))
     # Longest first: a resolved `/private/var/...` contains the `/var/...` form.
     prefixes = sorted({f"{tree}/", f"{tree.resolve()}/"}, key=len, reverse=True)
-    failures = []
-    for line in result.stderr.splitlines():
-        if line.startswith("FAIL "):
-            failure = line[len("FAIL "):]
-            for prefix in prefixes:
-                failure = failure.replace(prefix, "")
-            failures.append(failure)
-    if result.returncode and not failures:
-        raise Refusal((result.stderr or result.stdout or f"{argv[0]} failed").strip()[-2000:],
-                      code="docs_lint_failed", state="retryable_failure",
-                      next_action="Inspect the lint error, resolve its cause, then prepare again.")
-    return failures
+    found = []
+    for failure in failures(result):
+        for prefix in prefixes:
+            failure = failure.replace(prefix, "")
+        found.append(failure)
+    return found
 
 
 def base_lint_failures(root: pathlib.Path, argv: list[str], base: str) -> set[str]:
@@ -328,35 +316,3 @@ def lint_against_base(root: pathlib.Path, argv: list[str], base: str) -> list[st
                       next_action="Fix the failures this branch introduces, commit, then prepare again.")
     return [f"sd-docs-lint: {len(known)} failure(s) already on origin/{base}, not introduced by this branch, "
             "do not block it: " + "; ".join(known)] if known else []
-
-
-def pull_paths(files: list) -> list[str]:
-    """Every path a pull request's `files` listing touches, both ends of a rename.
-
-    GitHub lists a moved file under its new name and keeps the old one in
-    `previous_filename`. Rule 8 reads both, as `git diff --no-renames` does,
-    so a workflow moved out of `.github/` still demands its scope line.
-    """
-    paths: list[str] = []
-    for row in files:
-        for key in ("previous_filename", "filename"):
-            name = row.get(key) if isinstance(row, dict) else None
-            if isinstance(name, str) and name and name not in paths:
-                paths.append(name)
-    return paths
-
-
-def demanded_scope(root: pathlib.Path, body: str, changed: list[str]) -> list[dict]:
-    """Each scope line `changed` demands: the line, the first path demanding it, and whether `body` has it.
-
-    The classes, the glob match and the line match are rule 8's own, read from
-    `sd-docs-lint`, so this answer and the lint's verdict cannot disagree. An
-    empty list is a diff that demands nothing, or a repository with no policy.
-    """
-    lint = docs_lint()
-    demanded = []
-    for line, globs in lint.scope_classes(root) or []:
-        path = next((name for name in changed if any(lint.matches_scope(name, glob) for glob in globs)), None)
-        if path is not None:
-            demanded.append({"line": line, "path": path, "present": lint.scope_line_present(body, line)})
-    return demanded

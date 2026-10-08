@@ -109,8 +109,6 @@ else is. Its executables write these paths, and no others:
   when its owner is in `sd.fleet_owners`, comma-separated GitHub logins
   (unset: the deprecated `fleet.owners` list in the machine config, then
   `DEFAULT_OWNERS` in `bin/sd_fleet.py`); any other owner's protection stands.
-- `docs/work/<item>/.citations.tsv` — the citation baseline, one per active work
-  item, from `sd-docs-lint --update-citations`. **Tracked.**
 - `build/` — HTML from `sd-research-kit render`, into the research repository you
   are standing in. Gitignored.
 - `CLAUDE.md` — the research-repo standard in short form, from `sd-research-kit
@@ -169,13 +167,16 @@ because P1 has not passed and there is no all half to check yet.
 
 ## Standing operator authorization
 
-The pack supports standing permission across consuming repositories. Installation grants neither permission for a new user.
-After that operator explicitly grants permission, record it through the existing configuration commands:
+The pack supports standing permission across consuming repositories. Installation grants no permission for a new user.
+After that operator explicitly grants permission, record it:
 
 ```sh
 sd config set sd.external_reviews configured
-sd config set sd.assistant_merge controlled
+sd-db.sh repo runner-merge <path> auto
 ```
+
+Merge permission is one setting, `repo.runner_merge` on the repository row; the runner and the assistant both read it.
+`sd.assistant_merge` is retired.
 
 These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOME` overrides the configuration root.
 `sd config get`, `list`, and `unset` inspect or remove settings. No personal grant ships in this repository.
@@ -184,7 +185,7 @@ These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOM
 `sd.fleet_owners` names the GitHub logins whose repositories `sd fleet stamp` treats as the operator's own, comma-separated; it grants nothing.
 `sd.gate_cache_gb` bounds the local gate's warm Rust build folders (unset: 40 GB); past it the gate removes the least recently used free folder.
 `sd.bulk_storage_root` names the folder for large uncommitted data, as `<root>/<repository>/` (unset: none); build output stays on the system disk. It grants nothing.
-`sd.privacy_patterns` names the privacy-pattern file `sd changelog render` checks entries against (unset: `privacy-patterns` in `$SYSTEM_TOOLS_CONFIG`, else `~/.config/system`); with no file the render refuses. It grants nothing.
+`sd.privacy_patterns` names the privacy-pattern file `sd-docs-lint --pr-body` checks a pull request body against, one extended regular expression per line (unset: `privacy-patterns` in `$SYSTEM_TOOLS_CONFIG`, else `~/.config/system`); with no file the check is skipped with a note. It grants nothing.
 `sd-ship lane enqueue|list|cancel|move|hold|release|run|watch` keeps a serial prepare-and-merge queue per repository in a file under `sd.lane_root` (unset: `$XDG_STATE_HOME/sd/lanes`), so a queued chain outlives the session that filled it. After a merge the runner deletes the remote branch, notes the item with the command that removes the worktree, and fast-forwards the main checkout; it never removes a worktree, since removal can race a live builder.
 `sd gate run -- make check` queues any command the same way; `sd gate status` shows the queue.
 Wrap a plain `make check` in any repository that way, and drop a per-repository `lockf` from lane scripts: the pool orders gates across every repository.
@@ -527,7 +528,7 @@ This repository has `repo.ci = local`: it carries no GitHub Actions workflow.
 `sd-ship merge` runs `sd-check` (here `make precheck`, then `make check`) in a fresh worktree and
 posts the result as the `sd/local-gate` status on the head commit. The gate
 installs `sd_db` at the `platypeeps/system` ref in `.sd-system-rev`.
-`sd-ship prepare` grades the pull request body with `sd-docs-lint --body-only`.
+`sd-ship prepare` checks the public pull request body against the privacy patterns with `sd-docs-lint --body-only`.
 WORKFLOW.md "No-CI mode" describes the gate.
 
 `main` carries classic branch protection: pull requests with no required

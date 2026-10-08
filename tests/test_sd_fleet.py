@@ -679,7 +679,7 @@ class Owners(Fleet):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def test_a_configured_owner_is_owned_and_the_default_pair_is_not(self) -> None:
+    def test_a_configured_owner_is_owned_and_the_default_is_not(self) -> None:
         self.config({"config": {"sd": {"fleet_owners": "Example-Org"}}})
         mine, mine_url = self.repo("mine", owner="example-org")
         theirs, theirs_url = self.repo("theirs", owner="platypeeps")
@@ -688,12 +688,11 @@ class Owners(Fleet):
         self.assertNotIn(sd_fleet.STATUS_PATH, [change["path"] for change in second["changes"]])
         self.assertTrue(any("protection stands" in line for line in second["adapted"]))
 
-    def test_no_setting_reads_the_default_pair(self) -> None:
+    def test_no_setting_reads_the_default(self) -> None:
         self.config({"fleet": {}})
         self.assertEqual(sd_fleet.configured_owners(), sd_fleet.DEFAULT_OWNERS)
         self.config({})
         self.assertEqual(sd_fleet.configured_owners(), sd_fleet.DEFAULT_OWNERS)
-        self.assertEqual(sd_fleet.configured_owners(("example-org",)), ("example-org",))
 
     def test_a_malformed_setting_refuses_rather_than_guessing(self) -> None:
         for bad in ([], "example-org", [""], [1], ["example org"], {"owners": 1}):

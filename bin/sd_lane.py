@@ -54,9 +54,8 @@ The next entry's gate runs early (sd:2586). Its prepare used to start only
 after the entry ahead merged, then catch up and gate for 10 to 20 minutes.
 When the runner claims an entry that may merge, it predicts the landing: the
 entry's catch-up merge of the fetched base branch, as a commit on that base.
-It merges the next entry onto that commit as prepare's catch-up would,
-CHANGELOG resolver included, in a scratch worktree, and runs `sd gate check`'s
-gate there in the background. The real landing is another commit with the
+It merges the next entry onto that commit as prepare's catch-up would, in a
+scratch worktree, and runs `sd gate check`'s gate there in the background. The real landing is another commit with the
 same tree, so the next entry's catch-up makes the gated tree, and its prepare
 reuses the receipt. That needs the repository's tree key
 (`sd_gate_receipts`), which names the merge base by its tree; without it, or
@@ -120,7 +119,6 @@ import threading
 import time
 from typing import Any, Callable, Iterator
 
-import sd_changelog_merge
 import sd_lib
 
 BIN = pathlib.Path(__file__).resolve().parent
@@ -581,14 +579,10 @@ def publish_pack(hub: Hub) -> str:
 
     key = sd_gate_receipts.PACK_PREFIX + hub.slug
     try:
-        # A pack gating itself binds its tree, not this bin/, so it publishes what its receipts hold (sd:2613, sd:2722).
-        own = sd_gate_receipts.gates_itself(hub.main, hub.main, BIN)
-        # One digest per scope: the merge compares under the PR head's scope, which main's need not share (sd:2823).
-        # `pack_bin` stays for a satellite whose pack reads only that field.
-        digests = {scope: sd_gate_receipts.pack_bin(own, closure) for scope, closure in sd_gate_receipts.PACK_SCOPES.items()}
-        digest = digests["closure" if sd_gate_receipts.pack_scope(hub.main, "HEAD") else "every"]
+        # A pack gating itself binds its tree, not this bin/, so it publishes what its receipts hold (sd:2613).
+        digest = sd_gate_receipts.pack_bin(sd_gate_receipts.gates_itself(hub.main, hub.main, BIN))
         revision, _ = hub.store.read(hub.connection, key)
-        hub.store.save(hub.connection, key, revision, {"writer": "sd-lane", "pack_bin": digest, "pack_bins": digests,
+        hub.store.save(hub.connection, key, revision, {"writer": "sd-lane", "pack_bin": digest,
                                                        "published_at": stamp_now(),
                                                        "pack_rev": lane_git(BIN.parent, "rev-parse", "HEAD")})
     except Exception as error:  # a satellite only loses its early warning; the merge still compares
@@ -753,8 +747,6 @@ def scratch_git(tree: pathlib.Path, *args: str) -> str | None:
 def catch_up_in(tree: pathlib.Path, ref: str, message: str) -> bool:
     """Merge `ref` into the scratch worktree's HEAD as `sd-ship prepare --catch-up` does; False on a conflict."""
     if scratch_git(tree, "merge", "--no-ff", "--no-edit", "--no-verify", "-m", message, ref) is not None:
-        return True
-    if sd_changelog_merge.resolve_keep_both(tree) and scratch_git(tree, "commit", "--quiet", "--no-verify", "-m", message) is not None:
         return True
     scratch_git(tree, "merge", "--abort")
     return False
@@ -1166,10 +1158,10 @@ def add_lane_verbs(commands: Any) -> None:
 def lane_main(args: Any) -> int:
     """The `sd-ship lane` verbs; prints JSON and exits 0, or 3 with the refusal."""
     environ = dict(os.environ)
-    root = sd_lib.repo_root(None)
     try:
         if args.lane_command == "watch":
             return watch(lane_root(environ), once=args.once)
+        root = sd_lib.repo_root(None)  # a git that gave no answer says why, as a ConfigError (sd:2986)
         if root is None:
             raise LaneError("cwd is not inside a Git repository")
         if args.lane_command in QUEUE_VERBS:  # no `lane run` drains a satellite's queue (sd:2795)

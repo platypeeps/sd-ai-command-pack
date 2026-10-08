@@ -14,7 +14,6 @@
   "sensitive": [
     ".github/workflows/**",
     ".github/sd-review.json",
-    ".github/sd-docs-lint.json",
     ".github/sd-status.json",
     "bin/sd_install.py",
     "bin/sd-review"
