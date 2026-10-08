@@ -10,7 +10,7 @@ Three of them show the range:
 
 | Prefix | Repository | Declares |
 |---|---|---|
-| `sdw` | `sd-writing-pack` | three `kinds`, a vault `store`, three `config` keys, twelve `sdw-*` skills, four templates |
+| `write` | `sd-writing-pack` | four `kinds`, a vault `store`, three `config` keys, four templates, no skills |
 | `sys` | `system` | four `dashboard.actions` and nothing else |
 | `hoa` | `hoa` | `issues`, two `config` keys, seven `hoa-*` skills, no kinds |
 
@@ -81,7 +81,7 @@ other six are optional and the verb that needs one refuses at use time.
 | `initial-status` | the status `sd store add` creates the note in |
 | `transitions` | the status graph, as `{from: [to, …]}`. A self-transition refuses: it is a move that reads as a state change and does nothing |
 | `human-only` | `{action: status}` for transitions a machine may not make. `sd store set` refuses them and says so |
-| `protected-fields` | fields no machine may ever write. For a human judgement — `sdw` protects `my-rating` — not for a fact an agent should be able to record |
+| `protected-fields` | fields no machine may ever write. For a human judgement — `write` protects `my-rating` — not for a fact an agent should be able to record |
 | `unique-fields` | fields whose value may not repeat across notes of the kind |
 | `floor` | a numeric minimum per field |
 | `sections` | `order`, the `## ` headings in sequence, plus `template`, a file inside the checkout. Either alone is unusable |
@@ -127,7 +127,7 @@ shadow a root key, and are read back with `sd config get <prefix>.<key>`.
 **This is where a machine fact goes.** Anything carrying a home directory, a
 Google account, a Drive id or a mount point is a setting; the tree holds the key
 name and never the value. What it cannot express is a rule spanning two keys —
-`sdw`'s "the publishing folder and the writing folder must differ" is business
+`write`'s "the publishing folder and the writing folder must differ" is business
 logic and stays with the plugin.
 
 ### `issues`, `dashboard`, `vendor`
@@ -157,7 +157,7 @@ gets nothing from the file. To see whether a root carries one, run
 ## The halves that are not the manifest
 
 **Project-local skills.** `<repo>/.claude/skills/<prefix>-*/SKILL.md`, one
-directory each: twelve in `sd-writing-pack`, seven in `hoa`. They are the
+directory each: seven in `hoa`. `sd-writing-pack` keeps none; its skills moved into this pack. They are the
 domain's own verbs and the pack never installs, renders or lists them —
 `skills/paths.json` governs this repository's `sd-*` skills and says nothing
 about a domain repo's. Name them `<prefix>-<verb>` so a reader of the directory

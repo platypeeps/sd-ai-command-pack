@@ -622,7 +622,7 @@ def validate_config(manifest: dict[str, object]) -> dict[str, dict[str, str]]:
     registered clean and is broken anyway.
 
     What this deliberately cannot express is a rule spanning two keys --
-    sdw's "the publishing folder and the writing folder must differ", where
+    the writing plugin's "the publishing folder and the writing folder must differ", where
     which folder a document sits in is the only thing saying whether it
     cleared the gates. That is business logic and it stays with the plugin.
     Encoding it here would mean the backbone learning what a Drive folder is.
@@ -2239,7 +2239,7 @@ def read_pair_file(flag: str, name: str, path: str) -> str:
     Prose on a command line has already been through a shell, and a backtick
     there is a command substitution. The loss is silent: the note is written,
     it just comes out with the words between the backticks missing, under
-    somebody's name. That is why `sdw-tips` passed its tip text to `pack.py`
+    somebody's name. That is why the tips skill passed its tip text to `pack.py`
     as `--tip-file`, and why it could not move to `sd store add` until this
     existed -- moving it inline would have reintroduced exactly the loss the
     flag was added to prevent.
