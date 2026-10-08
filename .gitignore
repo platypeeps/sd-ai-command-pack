@@ -176,3 +176,5 @@ uv.lock
 
 # Local unittest transcript retained when make test needs skip/failure diagnostics.
 unittest-output.log
+# Generated HTML the local dashboard serves; never committed.
+docs/dashboard/
