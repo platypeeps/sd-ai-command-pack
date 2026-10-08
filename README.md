@@ -463,8 +463,7 @@ rest safe:
 - A rendered file you have since edited by hand is **kept** and reported, never
   silently deleted.
 - A stale path it could not remove stays in the receipt, so the next `--user`
-  tries again. A run killed before its receipt leaves a journal beside it,
-  and the next run removes what that run added and no receipt names.
+  tries again.
 - `--uninstall` removes those paths and nothing else. A recorded link that no
   longer points into this checkout is left and reported, a link the receipt
   never named is never touched, and the link directory stays. The global

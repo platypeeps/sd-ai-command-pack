@@ -45,7 +45,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Iterable
-from contextlib import ExitStack, contextmanager, suppress
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -2219,17 +2219,6 @@ def cmd_user(ctx: Context, out) -> int:
     """
     # Before the library: `expire_trials` writes, and a refusal writes nothing.
     recorded = read_receipt(ctx.receipt)
-    # A run killed before its receipt, such as a render child under `--pull`,
-    # leaves renders and links that no receipt names. The journal it wrote
-    # first names them; what the receipt does not name goes, digest-gated
-    # (sd:2932). First, so the link plan below sees what is left.
-    journal = ctx.receipt.with_name(ctx.receipt.name + ".pending")
-    retry: list[dict] = []
-    abandoned: list[tuple[str, str]] = []
-    if not ctx.dry_run:
-        killed = owned_entries(read_receipt(journal))
-        named = {row["path"] for row in owned_entries(recorded) if isinstance(row.get("path"), str)}
-        abandoned = prune_stale(killed, named, retry=retry) + prune_links(killed, named, retry=retry)
     bin_dir = link_directory(ctx, recorded)
     plans = link_plan(ctx.checkout, bin_dir, {
         row["path"]: row["target"] for row in owned_entries(recorded)
@@ -2327,15 +2316,6 @@ def cmd_user(ctx: Context, out) -> int:
             backups = [(path, data, path.read_bytes() if path.exists() else None)
                        for path, data, _ in render_files]
             recovery.callback(restore_policies, backups, out)
-            # What this run adds, written before it is, for the next run to
-            # remove if this one is killed before its receipt (sd:2932).
-            write_receipt(journal, {"schema": RECEIPT_SCHEMA, "owned": [
-                {"path": str(path), "sha256": digest(data), "kind": kind}
-                for path, data, kind in render_files if not path.exists()
-            ] + [
-                {"path": str(plan.path), "kind": "link", "target": str(plan.target)}
-                for plan in plans if plan.state == "absent"
-            ]})
         written = write_render_plan(render_files, ctx.dry_run)
         current = {str(item.path) for item in written}
 
@@ -2407,20 +2387,15 @@ def cmd_user(ctx: Context, out) -> int:
             payload["previousCommit"] = replaced
         if not ctx.dry_run:
             write_receipt(ctx.receipt, payload)
-            # Gone once the receipt names this run's files, so only a killed
-            # run leaves one, and an unreadable receipt later grants no deletion.
-            with suppress(OSError):
-                journal.unlink(missing_ok=True)
         recovery.pop_all()
 
         # After the receipt, so a failed install prunes nothing of the last
         # one, which keeps its receipt and stays whole (sd:1118).
-        skipped = abandoned + prune_stale(previous, current, dry_run=ctx.dry_run, retry=retry)
+        retry: list[dict] = []
+        skipped = prune_stale(previous, current, dry_run=ctx.dry_run, retry=retry)
         skipped += prune_links(previous, {row["path"] for row in links}, dry_run=ctx.dry_run, retry=retry)
         # A row that could not be removed stays in the receipt, so the next
         # install tries it again (sd:2927).
-        recorded_paths = {row["path"] for row in owned}
-        retry = [row for row in retry if row["path"] not in recorded_paths]
         if retry and not ctx.dry_run:
             payload["owned"] = sorted(owned + retry, key=lambda row: (row["path"], row.get("kind", "")))
             write_receipt(ctx.receipt, payload)

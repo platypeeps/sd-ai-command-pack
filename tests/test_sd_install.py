@@ -21,11 +21,9 @@ import importlib.util
 import io
 import json
 import os
-import signal
 import subprocess
 import sys
 import tempfile
-import textwrap
 import threading
 import unittest
 import unittest.mock
@@ -423,39 +421,6 @@ class ReconciliationTests(InstallerHarness):
         for target in targets:
             self.assertFalse(target.exists(), f"{target} was never tried again")
         self.assertFalse(recorded - {row["path"] for row in self.receipt["owned"]} - {str(t) for t in targets})
-
-    def test_renders_a_killed_run_added_go_at_the_next_install(self):
-        """sd:2932: a run killed after rendering, before its receipt, leaves renders the next run removes."""
-        checkout = self.make_checkout("sd-kept")
-        self.install(checkout)
-        receipt = self.home / ".local" / "state" / "sd-ai-command-pack" / "installed.json"
-        before = receipt.read_bytes()
-        added = checkout / "skills" / "sd-added"
-        added.mkdir()
-        (added / sd_install.SKILL_FILE).write_text("---\nname: sd-added\n---\n\nadded\n", encoding="utf-8")
-        self.write_paths(checkout, "sd-kept", "sd-added")
-        ctx = self.context(checkout)
-        killed = subprocess.run([sys.executable, "-c", textwrap.dedent(f"""
-            import importlib.util, io, os, signal, sys
-            from pathlib import Path
-            spec = importlib.util.spec_from_file_location("sd_install", {str(REPO_ROOT / "bin" / "sd_install.py")!r})
-            sd_install = importlib.util.module_from_spec(spec)
-            sys.modules["sd_install"] = sd_install
-            spec.loader.exec_module(sd_install)
-            sd_install.link_commands = lambda *args, **kwargs: os.kill(os.getpid(), signal.SIGKILL)
-            sd_install.cmd_user(sd_install.Context(checkout=Path({str(checkout)!r}), home=Path({str(self.home)!r}),
-                                                   environ={ctx.environ!r}), io.StringIO())
-        """)], capture_output=True, text=True, check=False)
-        self.assertEqual(killed.returncode, -signal.SIGKILL, killed.stderr)
-        orphans = self.rendered("sd-added")
-        self.assertTrue(all(path.exists() for path in orphans))
-        self.assertEqual(receipt.read_bytes(), before, "the killed run wrote its receipt")
-        subprocess.run(["rm", "-rf", str(added)], check=True)
-        self.write_paths(checkout, "sd-kept")
-        self.install(checkout)
-        for path in orphans:
-            self.assertFalse(path.exists(), f"{path} outlived the killed run that added it")
-        self.assertTrue(self.rendered("sd-kept")[0].exists())
 
     def test_a_corrupt_receipt_deletes_nothing(self):
         """The receipt is the delete authority, so an unreadable one grants none."""

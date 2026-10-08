@@ -566,10 +566,9 @@
 
 ### Fixed
 
-- **Installer follow-ups to the serving tree (sd:2945, sd:2927, sd:2932, sd:2913).**
+- **Installer follow-ups to the serving tree (sd:2945, sd:2927, sd:2913).**
   `--pull` renders the target with the activated slot's `.venv/bin/python`, so a library upgrade renders with the new `sd_db`; a slot with no python is a failed render and puts the tree back.
   A stale render or link that `--user` could not remove stays in the receipt, so the next install tries it again.
-  `--user` writes a journal, `installed.json.pending`, of what it adds before it adds it; the next run removes what a killed run added and no receipt names, digest-gated.
   `--serve` resolves a relative local origin, such as `../pack.git`, against the working checkout before it clones.
 
 - **`sd fleet stamp`'s secret-read rules cover files outside the project (sd:2982).**
