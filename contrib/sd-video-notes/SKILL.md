@@ -22,7 +22,7 @@ resources, candidate actions, or a common-frame comparison.
 
 Use `sd-capture` for a general single-source capture that does not require video
 coverage and timestamp semantics. `sd-fact-check` may verify extracted claims,
-and `sd-knowledge-capture` may persist an accepted artifact. Those are explicit
+and `sd-capture` may persist an accepted artifact. Those are explicit
 downstream handoffs and never implicit steps.
 
 ## Arguments
@@ -116,8 +116,8 @@ enough to change evidence coverage or the result.
     Do not merge or align multilingual captions without a disclosed, evidenced
     timestamp and semantic mapping.
 14. Produce destination-neutral Markdown with stable video, chapter, claim, and
-    resource IDs. Draft portable payloads for `sd-fact-check`, `sd-capture`, or
-    `sd-knowledge-capture` only when useful, each marked `not run` or
+    resource IDs. Draft portable payloads for `sd-fact-check` or `sd-capture`
+    only when useful, each marked `not run` or
     `unavailable`; never persist, publish, or invoke another workflow implicitly.
 15. Audit every summary statement, timestamp, quotation, chapter, claim,
     demonstration, resource, action, and comparison cell against the source
@@ -210,8 +210,8 @@ scope, the coverage-fidelity bar, or the `## Final report` contract.
   checklist for manual viewing, and transcript request path;
 - **Portable Markdown artifact** — destination-neutral note with stable video,
   chapter, claim, and resource IDs plus provenance labels;
-- **Downstream handoffs** — proposed `sd-fact-check`, `sd-capture`, and
-  `sd-knowledge-capture` payloads, each `not run` or `unavailable`; and
+- **Downstream handoffs** — proposed `sd-fact-check` and `sd-capture`
+  payloads, each `not run` or `unavailable`; and
 - **Execution boundary** — downloading, transcription, access bypass, channel or
   playlist mutation, subscription, comments, publication, persistence, and all
   external writes marked `not run`.

@@ -21,7 +21,7 @@ message-level traceability.
 Use `sd-digest` for synthesis across a generic multi-document collection and
 `sd-meeting-follow-through` when meeting intent, agenda, or expected-versus-
 actual outcomes must be reconciled. `sd-status-update`, `sd-continuity-packet`, and
-`sd-knowledge-capture` are optional downstream handoffs, never implicit steps.
+`sd-capture` are optional downstream handoffs, never implicit steps.
 
 ## Arguments
 
@@ -92,7 +92,7 @@ or sensitivity ambiguity could change coverage or disclosure.
     material-outcome conversation gets a short truthful result, not invented
     closure. Keep disputed, partial, corrected, and unresolved states visible.
 12. Draft portable, source-linked payloads for `sd-status-update`, `sd-continuity-packet`, or
-    `sd-knowledge-capture` only when useful. Mark each proposed handoff
+    `sd-capture` only when useful. Mark each proposed handoff
     `not run` or `unavailable`; never post, persist, assign, or invoke it.
 13. Audit every decision, commitment, owner, date, state transition, and
     quotation against message evidence. Verify privacy minimization, visible
@@ -135,7 +135,7 @@ or sensitivity ambiguity could change coverage or disclosure.
 - **Evidence and revision ledger** — message IDs or links, timestamps, parent
   context, edits, deletions, corrections, reactions, and supersession chain;
 - **Downstream payloads** — proposed `sd-status-update`, `sd-continuity-packet`, and
-  `sd-knowledge-capture` payloads, each `not run` or `unavailable`;
+  `sd-capture` payloads, each `not run` or `unavailable`;
 - **Coverage, privacy, and uncertainty** — accessible and missing regions,
   retrieval limits, private or restricted omissions, conflicts, and confidence
   effects; and
