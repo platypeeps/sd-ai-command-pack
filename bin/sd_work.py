@@ -939,7 +939,7 @@ def _capture(sd_db: Any, workflow: Any, args: argparse.Namespace,
             if filed is not None:
                 return {**_refile(workflow, connection, args, filed["id"], who), "created": False}
         state = workflow.capture_task(
-            connection, title=args.title, body=args.body, priority=args.priority,
+            connection, title=args.title, body=args.body or "", priority=args.priority,
             due=args.due, repo=_task_repo(args, connection, workflow),
             recurrence=args.recur, recurrence_anchor=args.recur_anchor, who=who,
         )
@@ -989,7 +989,7 @@ def _refile(workflow: Any, connection: Any, args: argparse.Namespace,
     no note when nothing changed.
     """
     changes: dict[str, Any] = {"title": args.title}
-    if args.body:
+    if args.body is not None:
         changes["body"] = args.body
     if args.priority is not None:
         changes["priority"] = args.priority
@@ -1338,7 +1338,8 @@ def register(groups: Any, store: Any) -> None:
     _register_contributions(verbs)
     add = verbs.add_parser("add", help="capture a standalone item, a task unless --kind says")
     add.add_argument("title")
-    add.add_argument("--body", default="")
+    # None, not "": a second `--ref` add tells "--body ''" (clear it) from no --body (keep it).
+    add.add_argument("--body")
     add.add_argument("--priority", type=int, choices=range(1, 5))
     add.add_argument("--due", help="YYYY-MM-DD")
     kind = add.add_argument(

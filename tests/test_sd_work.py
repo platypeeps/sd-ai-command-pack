@@ -769,6 +769,15 @@ class TaskRef(unittest.TestCase):
         shown = self.call("task", "show", first["item"]["id"]).stdout
         self.assertIn("  ref: job:repo-sync:42", shown)
 
+    def test_an_explicit_empty_body_clears_the_body_on_re_add(self):
+        """sd:2899: `--body ''` on a second add clears the body; no `--body` keeps it (above)."""
+        first = self.add("repo-sync failed", "--ref", "job:42", "--body", "stale")
+        cleared = self.add("repo-sync failed", "--ref", "job:42", "--body", "")
+        self.assertEqual(cleared["item"]["id"], first["item"]["id"])
+        fresh = self.add("repo-sync failed", "--ref", "job:43")
+        self.assertEqual(cleared["item"]["body"], fresh["item"]["body"])
+        self.assertNotEqual(cleared["item"]["body"], first["item"]["body"])
+
     def test_a_done_row_stays_done_and_the_next_run_files_a_new_row(self):
         first = self.add("repo-sync failed", "--kind", "followup", "--ref", "job:repo-sync:42")
         self.call("task", "status", first["item"]["id"], "done")
