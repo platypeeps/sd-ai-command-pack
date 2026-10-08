@@ -22,7 +22,6 @@ import tempfile
 import time
 from datetime import datetime, timezone
 
-import sd_changelog_merge
 import sd_lane
 import sd_lib
 import sd_local_gate
@@ -446,7 +445,6 @@ class Ship(SharedReview):
     #: `default` -- and the owned lines it stripped from it (sd:1870).
     body_source: str = "default"
     body_normalized: tuple[str, ...] = ()
-    catch_up_notes: tuple[str, ...] = ()
     #: The branch this checkout has open, None on a detached HEAD. It is
     #: `branch` except for a merge that ships the item's receipt branch from
     #: another checkout (sd:2037).
@@ -634,7 +632,7 @@ class Ship(SharedReview):
         if base:
             warnings.extend(self.squash_notes(base, head))
             warnings.extend(self.dropped_delivery_notes(base, head))
-        return warnings + list(self.catch_up_notes)
+        return warnings
 
     def dropped_delivery_notes(self, base: str, head: str) -> list[str]:
         """One advisory per `Delivers:` a no-item squash will not carry (sd:2171).
@@ -2005,20 +2003,14 @@ class Ship(SharedReview):
 
         A merge, never a rebase, so the next push is a fast-forward of the
         branch already pushed and no reviewed head is orphaned. A conflict is
-        aborted, so the branch is left exactly as it was, unless it is only two
-        additions to CHANGELOG.md, which are kept both (sd:2174). The review scopes
-        the new head from ancestry, and merge gates it like any other.
+        aborted, so the branch is left exactly as it was. The review scopes the
+        new head from ancestry, and merge gates it like any other.
         """
         if git(self.root, "status", "--porcelain", "--untracked-files=no"):
             raise Refusal("--catch-up needs a clean working tree", code="dirty_worktree", boundary="input",
                           state="operator_decision", next_action="Commit or stash the changes, then run prepare again.")
         remote, message = f"refs/remotes/origin/{base}", f"Merge origin/{base} into {self.branch}"
         merged = sd_lib.git_output(["merge", "--no-ff", "--no-edit", "-m", message, remote], self.root)
-        if merged is None and sd_changelog_merge.resolve_keep_both(self.root):
-            # No hooks: a clean merge runs no pre-commit hook, and the pack's
-            # outlasts the git timeout, so the resolved merge would time out.
-            merged = sd_lib.git_output(["commit", "--quiet", "--no-verify", "-m", message], self.root)
-            self.catch_up_notes = () if merged is None else (sd_changelog_merge.keep_both_note(base),)
         if merged is None:
             sd_lib.git_output(["merge", "--abort"], self.root)
             notes = "".join(f"; {note}" for note in self.squash_notes(base, head))

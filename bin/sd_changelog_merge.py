@@ -41,12 +41,6 @@ REGULAR_MODES = {"100644", "100755"}
 CONVERTING = ("filter", "working-tree-encoding", "ident", "eol")
 
 
-def keep_both_note(base: str) -> str:
-    """The receipt warning a resolved catch-up carries."""
-    return (f"catch-up resolved a {PATH} conflict keep-both: this branch's entries first, "
-            f"then origin/{base}'s (sd:2174)")
-
-
 def _git(root: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], cwd=str(root), capture_output=True, timeout=TIMEOUT_SECONDS,
                           check=False)  # fixed argv, no shell

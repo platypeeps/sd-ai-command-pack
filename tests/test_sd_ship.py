@@ -934,42 +934,15 @@ roles:
 
     CHANGELOG = "# Changelog\n\n## Unreleased\n\n### Fixed\n\n- **Old entry.** Kept.\n  Second line.\n"
 
-    def changelog_rivals(self, ours: str, theirs: str, files: dict | None = None) -> str:
+    def changelog_rivals(self, ours: str, theirs: str) -> str:
         """Both sides change CHANGELOG.md from a shared base; the branch's head before catch-up."""
         self.remote.commit_on("main", "changelog\n\nAuthored-with: human", files={"CHANGELOG.md": self.CHANGELOG})
         _git(self.root, "fetch", "-q", "origin", "main:refs/remotes/origin/main")
         _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge origin/main into topic\n\nAuthored-with: human", "origin/main")
         (self.root / "CHANGELOG.md").write_text(ours)
         _git(self.root, "commit", "-qam", "ours\n\nAuthored-with: human")
-        self.remote.commit_on("main", "theirs\n\nAuthored-with: human", files={"CHANGELOG.md": theirs, **(files or {})})
+        self.remote.commit_on("main", "theirs\n\nAuthored-with: human", files={"CHANGELOG.md": theirs})
         return _git(self.root, "rev-parse", "HEAD")
-
-    def test_a_catch_up_keeps_both_changelog_entries_added_at_the_same_place(self):
-        # sd:2174: four of five lane catch-ups on 2026-09-29 stopped on two
-        # entries added at the top of one section, and each was kept both.
-        entry = "- **{0}.** Fixed {0}.\n  More about {0}.\n\n"
-        head = "# Changelog\n\n## Unreleased\n\n### Fixed\n\n"
-        before = self.changelog_rivals(self.CHANGELOG.replace(head, head + entry.format("Ours")),
-                                       self.CHANGELOG.replace(head, head + entry.format("Theirs")))
-        # A clean merge runs no pre-commit hook, so the resolved one does not
-        # either: the pack's outlasts the git timeout and would abort it.
-        hook = pathlib.Path(_git(self.root, "rev-parse", "--git-path", "hooks/pre-commit"))
-        if not hook.is_absolute():
-            hook = self.root / hook
-        hook.parent.mkdir(parents=True, exist_ok=True)
-        hook.write_text("#!/bin/sh\nexit 1\n")
-        hook.chmod(0o755)
-        self.assertEqual(self.prepare("--catch-up")["phase"], "ready_to_send")
-        merged = _git(self.root, "rev-parse", "HEAD")
-        self.assertEqual(_git(self.root, "rev-list", "--parents", "-n", "1", merged).split()[1:],
-                         [before, _git(self.root, "rev-parse", "refs/remotes/origin/main")])
-        self.assertEqual(_git(self.root, "log", "-1", "--format=%s", merged), "Merge origin/main into topic")
-        self.assertEqual((self.root / "CHANGELOG.md").read_text(),
-                         head + entry.format("Ours") + entry.format("Theirs") + "- **Old entry.** Kept.\n  Second line.\n")
-        self.assertEqual(_git(self.root, "status", "--porcelain", "--untracked-files=no"), "")
-        self.assertEqual(_git(self.remote.path, "rev-parse", "refs/heads/topic"), merged)
-        self.assertIn("catch-up resolved a CHANGELOG.md conflict keep-both: this branch's entries first, "
-                      "then origin/main's (sd:2174)", self.operation().state["warnings"])
 
     def assert_catch_up_refused(self, before: str):
         with patch.object(ship.Ship, "review") as review:
@@ -983,19 +956,12 @@ roles:
         self.assertFalse((self.root / ".git/MERGE_HEAD").exists())
         self.assertEqual(_git(self.root, "status", "--porcelain", "--untracked-files=no"), "")
 
-    def test_a_catch_up_whose_changelog_conflict_edits_an_entry_is_refused(self):
-        # One side rewrote a line the other also rewrote, beside an addition:
-        # the hunk has a base, so it is a decision and not two additions.
-        ours = self.CHANGELOG.replace("- **Old entry.** Kept.", "- **Old entry.** Reworded here.")
-        theirs = self.CHANGELOG.replace("### Fixed\n\n- **Old entry.** Kept.", "### Fixed\n\n- **New.** Added.\n- **Old entry.** Reworded there.")
-        self.assert_catch_up_refused(self.changelog_rivals(ours, theirs))
-        self.assertIn("Reworded here", (self.root / "CHANGELOG.md").read_text())
-
-    def test_a_catch_up_with_a_changelog_and_another_conflict_is_refused(self):
-        head = "### Fixed\n\n"
-        before = self.changelog_rivals(self.CHANGELOG.replace(head, head + "- **Ours.** A.\n\n"),
-                                       self.CHANGELOG.replace(head, head + "- **Theirs.** B.\n\n"),
-                                       files={"src.py": "value = 2\n"})
+    def test_a_catch_up_with_two_changelog_additions_is_refused_like_any_conflict(self):
+        # sd:3014: CHANGELOG.md retires, so catch-up no longer keeps both sides of it.
+        entry = "- **{0}.** Fixed {0}.\n\n"
+        head = "# Changelog\n\n## Unreleased\n\n### Fixed\n\n"
+        before = self.changelog_rivals(self.CHANGELOG.replace(head, head + entry.format("Ours")),
+                                       self.CHANGELOG.replace(head, head + entry.format("Theirs")))
         self.assert_catch_up_refused(before)
         self.assertNotIn("Theirs", (self.root / "CHANGELOG.md").read_text())
 
