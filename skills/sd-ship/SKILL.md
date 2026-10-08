@@ -152,7 +152,7 @@ Never allocate another review ID to reset spent passes or discard history.
   Only an open PR binds: a merged or closed one that used the branch name is ignored, and prepare opens a new PR (sd:2656).
   The sd-ai-command-pack checkout's `WORKFLOW.md`, section **The path for a change**, lists the body lines sd-ship owns.
 - `sd-ship body --item ID [--body-file FILE] [--pr N]` prints the body prepare would publish and its body lint.
-  With `--pr N` and no `--body-file`, it lints that pull request's live body.
+  With `--pr N` and without `--body-file`, it lints that pull request's live body.
   It reads no sd state, calls GitHub only for `--pr`, and exits non-zero on a refusal or a lint failure.
 - Optional commits require `--path FILE` for each file, `--message-file FILE`, and `--author ENTRY`.
   Directories and a pre-populated index are invalid.
