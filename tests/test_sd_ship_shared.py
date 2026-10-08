@@ -113,7 +113,7 @@ class SharedCompatibilityTests(unittest.TestCase):
         automatic = [{"head": chr(ord("a") + index) * 40, "report": report} for index in range(CAP)]
         extra = chr(ord("a") + CAP) * 40
         request = {"head": extra, "reason": "explicit continuation", "allowed_passes": 1,
-                   "prior_history_digest": "47f27a1e3d5b70f7be7e1e1dab50f876d6295e9c746812469d6cb0542968d91d"}
+                   "prior_history_digest": "568aba84953c369768e8e41cc7432c5a2dc160a3f27c4c5fa5976a910fadd211"}
         state = {"passes": [*automatic, {"head": extra, "additional_review_request": request}]}
         ItemHistory().validate_requests(state)
         self.assertEqual(ItemHistory().aggregate(state, before_last=True),

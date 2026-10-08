@@ -19,7 +19,7 @@ Non-blocking findings hold nothing.
 | Research | After the brief and decisions | Claims against sources, gaps, wrong calls | 2 |
 | Research | Final product, before the send box | The piece, page or ticket as a reader sees it | 1 |
 | Development | prd and design | Scope, missing requirements, wrong assumptions | 5 |
-| Development | Code, before merge | Defects a second reader finds | 5 rounds |
+| Development | Code, before merge | Defects a second reader finds | 15 rounds |
 
 This file holds the only copy of that table. A skill that runs a review names its point here and reads its cap from
 that row; no skill carries a cap of its own.

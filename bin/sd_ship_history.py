@@ -12,7 +12,7 @@ from sd_ship_remote import Refusal
 #: The *Development / Code, before merge* row of the review table in
 #: `.claude/rules/sd-planning-adversarial-review.md` states this cap, and
 #: every site that counts passes reads it here rather than spelling a number.
-AUTOMATIC_CODE_REVIEW_PASSES = 5
+AUTOMATIC_CODE_REVIEW_PASSES = 15
 
 
 def digest(value) -> str:
