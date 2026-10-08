@@ -2858,7 +2858,7 @@ from a number the operator types.
     closing it. Addressed, with `README.md` in PR 4.
   - C-102, blocking: criterion 9's first clause, that no pack surface
     requests a Copilot review, needs `skills/sd-ship/SKILL.md:55`,
-    `skills/sd-handoff/SKILL.md:109`, `bin/sd-review:239` and
+    `skills/sd-handoff/SKILL.md`, `bin/sd-review:239` and
     `bin/sd-status:951,970`. PR 4 claimed the criterion and touched none of
     them, so the grep would have failed at its merge and the criterion would
     have closed on its documentation clause alone. Addressed.
@@ -3444,7 +3444,7 @@ from a number the operator types.
     `Claude Code` — which returns thirty-two hits across eight files today
     and is a rule rather than a list of exceptions. Three of those thirty-two
     are true positives the old reading would have let stand: `claude -p` in
-    `skills/sd-handoff/SKILL.md:84`, "Codex/OpenCode sessions" at `:73`, and
+    `skills/sd-handoff/SKILL.md`, "Codex/OpenCode sessions" at `:73`, and
     the `- claude` frontmatter tag at
     `skills/sd-propose-skills/SKILL.md:100`.
   - C-173, blocking, same run: criterion 5 cannot close in PR 1. PR 1 put all
@@ -4876,7 +4876,7 @@ from a number the operator types.
   and a delta to `bin/sd-handoff-restore`. It does not build
   `bin/sd-handoff-prompt`, and it registers no hook.
 
-  **`skills/sd-handoff/SKILL.md:102` says so in as many words**: "Never write a
+  **`skills/sd-handoff/SKILL.md` said so in as many words**: "Never write a
   packet automatically. No SessionEnd hook, no PreCompact hook, no 'I'll
   snapshot this just in case'. Writing stays an explicit act, because
   auto-writing every session is exactly how the journals started." The PR 8b
