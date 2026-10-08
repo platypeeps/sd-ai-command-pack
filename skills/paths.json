@@ -47,13 +47,17 @@
         "sd-author",
         "sd-decide",
         "sd-diagram",
+        "sd-draft",
+        "sd-draft-review",
         "sd-explain",
         "sd-humanizer",
         "sd-presentation",
         "sd-proposal",
         "sd-prose-lint",
         "sd-publish",
+        "sd-publish-drive",
         "sd-technical-editor",
+        "sd-tips",
         "sd-topic-radar"
       ]
     }

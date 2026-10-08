@@ -71,6 +71,8 @@ SHARED_DIR = "_shared"
 COMMANDS = frozenset({
     "sd-plan", "sd-check", "sd-review", "sd-ship", "sd-spec", "sd-status",
     "sd-skill-adopt", "sd-handoff",
+    # sd:3001 moved three user-started writing skills in from the writing pack.
+    "sd-draft-review", "sd-publish-drive", "sd-tips",
 })
 
 MARKER = "disable-model-invocation"

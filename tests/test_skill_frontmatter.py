@@ -59,6 +59,8 @@ ROOTS = (SKILLS, CONTRIB)
 COMMANDS = frozenset({
     "sd-plan", "sd-check", "sd-review", "sd-ship", "sd-spec", "sd-status",
     "sd-skill-adopt", "sd-handoff",
+    # sd:3001 moved three user-started writing skills in from the writing pack.
+    "sd-draft-review", "sd-publish-drive", "sd-tips",
 })
 # The stated exception: help/catalog surfaces are skills, so no marker.
 SKILL_KIND = frozenset({"sd-help"})
@@ -452,7 +454,7 @@ class RunsAsColumn(unittest.TestCase):
         return [(m.group(1), m.group(2)) for m in self.ROW.finditer(readme)]
 
     WORDS = {"Three": 3, "Four": 4, "Five": 5, "Six": 6, "Seven": 7, "Eight": 8, "Nine": 9,
-             "Ten": 10, "Eleven": 11, "Twelve": 12}
+             "Ten": 10, "Eleven": 11, "Twelve": 12, "Thirteen": 13}
     SENTENCE = re.compile(
         r"\b([A-Z][a-z]+) of the ([a-z]+) are\s+\n?prose", re.M)
 
