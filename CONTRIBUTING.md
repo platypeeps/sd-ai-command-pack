@@ -138,7 +138,7 @@ Git history preserves earlier wording.
 
 ### Citations
 
-Cite code declarations by symbol: `source:bin/sd-docs-lint::check_pr_link`.
+Cite code declarations by symbol: `source:bin/sd-docs-lint::check_shape`.
 The citation check requires one matching declaration.
 For a file without a supported declaration, name the file in prose.
 Use `path:line` only for markdown targets. Keep historical citations tied to their original version.
