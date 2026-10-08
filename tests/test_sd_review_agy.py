@@ -48,10 +48,11 @@ def registry_text(vendor: str = "google", model: str | None = "gemini-3.1-pro-hi
     return text.replace("model: MODEL, ", "") if model is None else text.replace("MODEL", model)
 
 
-def written(text: str) -> pathlib.Path:
+def written(case: unittest.TestCase, text: str) -> pathlib.Path:
     handle = tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False, encoding="utf-8")
     with handle:
         handle.write(text)
+    case.addCleanup(pathlib.Path(handle.name).unlink)  # sd:3032: the file outlived every run
     return pathlib.Path(handle.name)
 
 
@@ -263,7 +264,7 @@ class TheVendorMustMatchTheModel(unittest.TestCase):
         and `read_file` never does, so checking one would leave the entry
         refused on half the machines.
         """
-        path, outcomes = written(text), []
+        path, outcomes = written(self, text), []
         for reader in (sd_registry.read_file, sd_registry.read):
             try:
                 outcomes.append(reader(path))
@@ -353,7 +354,7 @@ class TheBillCannotBeCapped(unittest.TestCase):
     def test_a_capped_bill_refuses_the_entry(self) -> None:
         text = registry_text().replace("free: { cost: local }", "free: { cost: company, cap_usd_month: 50 }")
         with self.assertRaises(sd_registry.RegistryError) as caught:
-            sd_registry.read(written(text))
+            sd_registry.read(written(self, text))
         self.assertIn("nothing enforces", str(caught.exception))
 
 

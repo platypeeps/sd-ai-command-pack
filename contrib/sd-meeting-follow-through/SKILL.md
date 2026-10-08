@@ -23,7 +23,7 @@ draft.
 Do not use to prepare for a future meeting (`sd-meeting-prep`), design its
 agenda (`sd-agenda`), digest a generic thread without meeting-intent
 reconciliation (`sd-thread-digest`), or publish durable knowledge
-(`sd-knowledge-capture`). If a named sibling is unavailable, report it rather
+(`sd-capture`). If a named sibling is unavailable, report it rather
 than silently absorbing its workflow.
 
 ## Arguments
@@ -93,7 +93,7 @@ what occurred.
 10. Draft, but do not send or apply, the requested outputs: meeting recap,
     action-review table, unresolved-items ledger, participant-specific follow-up
     communications, `sd-continuity-packet` status payload, and portable
-    `sd-knowledge-capture` draft. Every draft retains its audience and evidence
+    `sd-capture` draft. Every draft retains its audience and evidence
     boundary.
 11. Audit the package: every claimed outcome, decision, and commitment must
     trace to the record; every unknown or dispute remains visible; sensitive
@@ -141,7 +141,7 @@ what occurred.
 - **Audience-safe recap draft** — concise meeting recap with restricted detail
   withheld or isolated for an authorized audience;
 - **Follow-through drafts** — requested participant messages, status or
-  `sd-continuity-packet` payload, and portable `sd-knowledge-capture` draft, all unsent
+  `sd-continuity-packet` payload, and portable `sd-capture` draft, all unsent
   and unapplied;
 - **Source coverage and sensitivity limits** — access states, partial or missing
   coverage, conflicts, material omissions, and confidence effects; and

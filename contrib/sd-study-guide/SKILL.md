@@ -19,7 +19,7 @@ Use when the user has a bounded source set and needs a reusable concept map,
 reference, retrieval set, practice set, and review sequence rather than an
 ordinary summary.
 
-Do not use for extreme compression (`sd-distill`), a learning path
+Do not use for extreme compression (`sd-digest target=...`), a learning path
 (`sd-learn`), one-concept teaching (`sd-explain`), a live adaptive assessment
 (`sd-socratic-review`), or a step-by-step teaching experience (`sd-tutorial`).
 Those are separate optional handoffs; report unavailable siblings honestly.
@@ -153,7 +153,7 @@ are ambiguous enough to change what must be retained or practiced.
   evidence;
 - **Review order** — prerequisite-first sequence, retrieval spacing,
   application, mixed review, cumulative transfer, and revisit triggers;
-- **Sibling handoffs** — proposed `sd-distill`, `sd-learn`, `sd-explain`,
+- **Sibling handoffs** — proposed `sd-digest target=...`, `sd-learn`, `sd-explain`,
   `sd-socratic-review`, or `sd-tutorial` work, each `not run` or `unavailable`;
   and
 - **Execution boundary** — source edits, external research, deck creation,

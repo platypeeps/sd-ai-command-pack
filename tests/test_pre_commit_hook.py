@@ -449,7 +449,8 @@ class TheLayout(unittest.TestCase):
             "import subprocess\nimport tempfile\nimport unittest\n\n\n"
             "class Fixture(unittest.TestCase):\n"
             "    def test_a_fixture_repository(self):\n"
-            "        subprocess.run(['git', 'init', '-q', '-b', 'main', '.'], cwd=tempfile.mkdtemp(), check=True)\n",
+            "        with tempfile.TemporaryDirectory() as fixture:\n"
+            "            subprocess.run(['git', 'init', '-q', '-b', 'main', '.'], cwd=fixture, check=True)\n",
             encoding="utf-8",
         )
         git("add", "--", "tests", cwd=self.root)

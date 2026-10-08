@@ -934,8 +934,8 @@ import both `sd_lib` and the new module.
 **`bin/sd-handoff-prompt` is cut, and its 119-line seam with it, for two
 independent reasons found while building.**
 
-1. **A shipped skill rule already forbids it.** `skills/sd-handoff/SKILL.md:102`
-   reads "Never write a packet automatically. **No SessionEnd hook, no
+1. **A shipped skill rule already forbids it.** `skills/sd-handoff/SKILL.md`
+   read "Never write a packet automatically. **No SessionEnd hook, no
    PreCompact hook**, no 'I'll snapshot this just in case'. Writing stays an
    explicit act, because auto-writing every session is exactly how the journals
    started." The plan above was written without reading it.
@@ -1622,7 +1622,7 @@ add 5, 6 and 27. The verification of #931 adds 11 and 13.
   case-insensitive grep of `bin/`, `skills/`, `agents/`, `dashboard/`,
   `.claude/`, `.github/`, `CLAUDE.md`, `AGENTS.md` and `README.md` for
   `copilot`, `requested_reviewers` and `request_copilot` finds 9 lines, and
-  none requests a review. The nearest is `skills/sd-handoff/SKILL.md:123`
+  none requests a review. The nearest is `skills/sd-handoff/SKILL.md`
   "**suppress the Copilot re-request**". The `WORKFLOW.md` clause failed on
   `main`: `:148-149` said "On a repository you pay for personally it is off".
   #931 changed it to say Copilot review there comes from the

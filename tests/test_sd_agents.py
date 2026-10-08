@@ -297,7 +297,7 @@ class RenderTests(unittest.TestCase):
         self.install("--user")
         codex_agents = self.home / ".codex" / "agents"
         # By stem and any extension, not by filename: Codex's native agent
-        # format is `.toml`, so a check for `sd-rust-fill.md` would pass over
+        # format is `.toml`, so a check for `<name>.md` would pass over
         # exactly the render this limit exists to forbid.
         landed = sorted(
             path.name

@@ -29,7 +29,10 @@ never runs the `finally` that removes it, so its entry stays registered.
 removes every gate worktree whose named process is gone. Only a worktree
 named `tree` in a folder `sd-local-gate-<pid>-<suffix>` directly in the temp
 dir counts as a gate's: a checkout elsewhere with a like name is never touched.
-A live gate's worktree stays; so does a folder from before this rule.
+A live gate's worktree stays; so does a folder from before this rule. The
+dead gate's whole folder goes with its worktree, the check's `TMPDIR` included (sd:3032).
+The same start removes what a run outside the gate left in the temp dir (`reap_temporary`): an sd folder whose
+named pid is gone. Nothing goes by age, so every other entry stays; macOS purges those.
 """
 
 from __future__ import annotations
@@ -65,6 +68,10 @@ GIB = 1024 ** 3
 GATE_PREFIX = "sd-local-gate-"
 #: The whole folder name `tempfile` makes from that prefix; nine digits keep a pid within `os.kill`'s range.
 GATE_FOLDER = re.compile(r"sd-local-gate-([0-9]{1,9})-[a-z0-9_]+")
+#: The check's own `TMPDIR`, beside the gate's worktree: the gate's cleanup removes what the check's tests leave (sd:3032).
+TEMPORARY = "tmp.noindex"
+#: An sd folder that names its owner's pid: a gate's, or a test run's (`tests/__init__.py`); it goes once the pid is gone.
+OWNED = re.compile(r"(?:sd-local-gate|sd-tests)-([0-9]{1,9})-[a-z0-9_]+")
 
 
 def running(pid: int) -> bool:
@@ -78,17 +85,57 @@ def running(pid: int) -> bool:
     return True
 
 
+def reap_temporary(temporary: pathlib.Path) -> int:
+    """Remove the user's entries directly in `temporary` that are `OWNED` by a dead pid; how many went.
+
+    Age proves nothing: a live process or the operator may still read an old entry (sd:3032 review). A dead gate's
+    folder counts too: its worktree was another repository's, so `worktree_prefix` never saw it.
+    """
+    try:
+        entries = list(os.scandir(temporary))
+    except OSError:
+        return 0
+    removed = 0
+    for entry in entries:
+        owned = OWNED.fullmatch(entry.name)
+        if not owned or running(int(owned[1])):
+            continue
+        try:
+            status = entry.stat(follow_symlinks=False)
+        except OSError:
+            continue
+        if status.st_uid != os.getuid():
+            continue
+        if entry.is_dir(follow_symlinks=False):
+            shutil.rmtree(entry.path, ignore_errors=True)
+        else:
+            with contextlib.suppress(OSError):
+                os.unlink(entry.path)
+        removed += not os.path.lexists(entry.path)
+    return removed
+
+
 def worktree_prefix(root: pathlib.Path) -> str:
-    """This gate's temporary folder prefix, after removing `root`'s gate worktrees whose gate process is gone."""
+    """This gate's temporary folder prefix, after removing `root`'s gate worktrees whose gate process is gone
+    and the temp dir's leftovers (`reap_temporary`)."""
     temporary = pathlib.Path(tempfile.gettempdir()).resolve()
+    if removed := reap_temporary(temporary):
+        print(f"sd gate: removed {removed} temp entries from {temporary} (sd:3032)", file=sys.stderr)
     listing = sd_lib.git_output(["worktree", "list", "--porcelain"], root) or ""
     for line in listing.splitlines():
         tree = pathlib.Path(line.removeprefix("worktree "))
         named = GATE_FOLDER.fullmatch(tree.parent.name)
         if line.startswith("worktree ") and named and tree.name == "tree" \
                 and tree.parent.parent.resolve() == temporary and not running(int(named[1])):
-            sd_lib.git_output(["worktree", "remove", "--force", str(tree)], root)  # its empty parent stays in the temp dir
+            sd_lib.git_output(["worktree", "remove", "--force", str(tree)], root)
+            shutil.rmtree(tree.parent, ignore_errors=True)  # and the check's `TMPDIR` beside it (sd:3032)
     return f"{GATE_PREFIX}{os.getpid()}-"
+
+
+def check_temporary(parent: str) -> str:
+    """The check's `TMPDIR`, made empty in the gate's folder `parent` (sd:3032)."""
+    (folder := pathlib.Path(parent) / TEMPORARY).mkdir()
+    return str(folder)
 
 
 def cache_root(environ: Mapping[str, str]) -> pathlib.Path:

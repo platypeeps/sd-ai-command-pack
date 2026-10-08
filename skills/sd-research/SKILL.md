@@ -1,6 +1,6 @@
 ---
 name: sd-research
-description: Use when the user asks for deep, multi-source research on a question or topic and wants a verified, source-graded written brief rather than a quick answer.
+description: Use when the user asks for deep, multi-source research on a question, topic, or writing piece and wants a verified, source-graded written brief or research notes rather than a quick answer.
 ---
 
 # sd-research
@@ -47,6 +47,11 @@ before the first search.
   written to be forwarded.
 - `audience=` — who will read the result; adjusts jargon and background.
   Default: the user.
+- `piece=<year>/<slug>` — research a piece in a writing content repository;
+  see *Writing piece mode*. Ask for the slug when it is missing; the year
+  defaults to the current year.
+- `from=idea` — take every vault blog idea at `drafting` that no piece links
+  yet, and run piece mode on each; see *Writing piece mode*.
 
 ## Workflow
 
@@ -71,6 +76,49 @@ before the first search.
    inline citations and confidence labels, open questions, and a short
    methodology note.
 7. Deliver the final report in the shape below.
+
+## Writing piece mode
+
+With `piece=` or `from=idea`, run from the root of the writing content
+repository: the checkout holding `scripts/pack.py`, `content/` and
+`templates/`. `pack` below means `python3 scripts/pack.py`. Keep to notes and
+sources; draft prose is `sd-draft` work.
+
+1. **Find the work.** `piece=`: `pack pieces get --piece <year>/<slug> --json`
+   and use the registered `item.path`; a revived piece may stay under
+   `content-parked/`, and never gets a second folder. `from=idea`: list
+   `sd store list sdw.blog-idea --status drafting`, read each with
+   `sd store get sdw.blog-idea "<title>"`, and skip any idea a piece
+   already links (`grep -rl 'obsidian_source: "<idea path>"' content/ content-parked/`).
+2. **Create a new piece, only for work that has none.** A registered piece
+   keeps its `index.md`: skip this step. Otherwise, when
+   `content/<year>/<slug>/index.md` does not exist, copy
+   `templates/piece-template.md` there and fill `title`, `type`, `created` and
+   `updated`. For an idea: a 5 to 8 word kebab-case slug from its title,
+   `type: blog`, `tags` from its `topics`, the extra field
+   `obsidian_source: "<the idea note's path in the vault>"`, and its
+   description and `Argument` section seeded into `## Notes / angle`. Then
+   `pack pieces register --piece <year>/<slug>`. Do not copy the template over
+   an existing `index.md`: it holds the piece's draft prose.
+3. **Read the topic notes first:** `sd store list sdw.topic --status active --full`.
+   Take `## Ground truth` as orientation (never a citation), `## Feeds` as
+   sources to read directly, and `## Boundaries` and `## Sweep notes` for scope
+   and query angles. An idea's `topics` match the printed `slug:` lines.
+   Entity profiles the repository's `CLAUDE.md` names are background too:
+   re-verify any claim from one at a public primary source.
+4. Run this skill's workflow on the piece's thesis, as an `Agent` sub-agent
+   with `model: opus` and `format=report` (`deep` for a paper). Bare web
+   search instead is a degradation: say so in the report, and let it show in
+   the claim markings.
+5. Fold the result into `research.md` beside `index.md`: sources, key facts,
+   quotes, counterarguments, open questions. Every claim gets a source and a
+   marking per the safety rules. Write down what the piece will tell the
+   reader to do, and the remedy evidence for it, or its absence.
+6. `pack pieces set-status --piece <year>/<slug> --status researching`.
+7. Report per piece: folder, source count, the topic notes and profiles that
+   fed in, ground truth that proved wrong (fix it in that topic note), what
+   the remedy evidence covers and does not, and open questions. For
+   `from=idea`, offer `sd-draft` for the first draft.
 
 ## Sub-agent dispatch
 
@@ -130,6 +178,15 @@ scope, the verification bar, or the `## Final report` contract.
   without a real source is not a finding.
 - Keep reported fact, sourced claim, and your own inference visibly
   distinct; label inference as such.
+- Mark how each load-bearing claim was established: read at the primary
+  source, taken from a search summary, or inferred, with the date. A link
+  says where a claim came from, not whether anyone read it.
+- Never infer what a thing does from its name. A flag, constant, field or
+  endpoint name is not documentation of its behavior: read the code or spec
+  that implements it, or write down that you have only the name.
+- When the question ends in a recommendation, source the remedy, not only
+  the problem: who ran it, what it cost, what it beat, how it fails. Record
+  missing remedy evidence as an open question.
 - Grade and date every source per `references/source-standards.md`; flag
   paywalled or inaccessible sources instead of guessing their contents.
 - Research is read-only: do not post, subscribe, sign up, purchase, or

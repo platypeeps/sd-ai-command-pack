@@ -154,7 +154,7 @@ The limit is a test, not
 a note: `tests/test_sd_agents.py` asserts nothing lands in `~/.codex/agents`.
 The pack neither renders there nor removes what it finds there; what the test
 guarantees is that the installer writes nothing, not that the directory is
-absent. The three skills naming the agent trio all make the delegation optional,
+absent. The skills that name an agent make the delegation optional,
 so a Codex session runs those passes inline rather than losing them.
 
 Antigravity is deliberately **not** rendered. Its skill format is byte-identical
@@ -474,7 +474,7 @@ rest safe:
 
 ## Commands
 
-There are ten named surfaces: nine commands plus `sd-help`.
+There are twelve named surfaces: eleven commands plus `sd-help`.
 The taxonomy makes `sd-help` a skill because a catalog authorizes nothing.
 All platforms preserve Markdown bodies.
 Codex invocation metadata uses the [adapter](#codex-invocation-metadata).
@@ -490,14 +490,14 @@ only two inventories that cannot go stale.
 `sd-skill-adopt` is the only named surface in `contrib/`.
 It installs with `sd skill try` instead of the default installer.
 It remains a command because it authorizes side effects.
-Each of the nine commands sets `disable-model-invocation`.
+Each of the eleven commands sets `disable-model-invocation`.
 Every other surface, including `sd-help`, omits that marker.
 
 **Runs as** identifies the execution form.
 `bin/` means the pack ships an executable entry point.
 **prose** means an agent follows the skill without a runner.
 For prose surfaces, the skill is the implementation.
-Four of the ten are prose.
+Six of the twelve are prose.
 Each prose skill has a "State of the tooling" section.
 `tests/test_skill_frontmatter.py` checks each claim against the filesystem.
 
@@ -510,9 +510,11 @@ Each prose skill has a "State of the tooling" section.
 | `sd-spec` | prose | Update `docs/spec/**` on the PR branch |
 | `sd-status` | `bin/` | Read-only: derived status, open PRs, branch-protection gaps and the states this repo accepts (`.github/sd-status.json`) |
 | `sd-help` | prose | Runtime catalog of installed `sd-*` surfaces |
-| `sd-suggest` | prose | Record framework friction as a local proposal; publish only when asked |
 | `sd-skill-adopt` | `bin/` | Safety pre-screen, lint, and canonical transform for an incoming skill |
 | `sd-handoff` | `bin/` | Write the local session packet for this directory; `/clear` restores it |
+| `sd-tips` | prose | File scored tips into a writing content repository's vault inbox |
+| `sd-draft-review` | prose | Push a draft to a private review Google Doc, or pull its comments and edits back |
+| `sd-publish-drive` | prose | Final gates, one tip, and the confirmed push to the Drive publishing folder |
 
 ## Maintaining
 

@@ -45,6 +45,9 @@ stop and identify them before reading personal or external sources.
 - `profile=auto|off|<locator>` — default `auto`; use only an explicitly
   available `sd-personal-profile/v1` artifact; and
 - `depth=brief|standard|deep` — default `standard`.
+- `file=vault` — only when the user types it: file the selected or
+  above-floor ideas into a writing content repository's vault inbox; see
+  *Filing into the vault*. Never add it yourself.
 
 ## Workflow
 
@@ -132,9 +135,60 @@ stop and identify them before reading personal or external sources.
     thesis, audience, evidence, gaps, constraints, confidentiality, and the
     explicit status `not run`.
 
+## Filing into the vault
+
+With `file=vault`, run from the root of the writing content repository (it
+holds `scripts/pack.py` and `profile/`). Its `sdw` plugin declares the
+`blog-idea` kind, its floor and its template.
+
+- **Extra sources.** `profile/personality-profile/PROFILE.md` and
+  `profile/brand-voice/VOICE.md` steer what is worth writing and what to
+  avoid. `python3 scripts/pack.py pieces list --all --json` is the prior
+  content, parked pieces included. Newsletters follow the labels in
+  `profile/newsletter-sweep.md`, read-only with `search_gmail_messages` and
+  `get_gmail_message_content`; without that file, skip them and say so.
+  `sd store list sdw.topic --status active` gives topic slugs to prefer.
+- **Past ratings.** `sd store list sdw.blog-idea` and read `my-rating`. A
+  blank is no signal; a rating beats an earlier `score` as evidence of taste.
+  Ratings steer which candidates you bring forward, never the rubric's
+  result. Never write `my-rating`.
+- **Score.** Evidence, falsifiability, durability and audience, 1 to 10 each;
+  the mean, rounded half up; any component at 1 or 2 caps it at 5. Below 6
+  is not filed: report it with its real score, and never re-score to clear
+  the floor.
+- **Dedupe** against every note in any status, `declined` included.
+- **File** each survivor once, with the thesis in a file, never inline (a
+  backtick in a shell argument drops words):
+
+  ```bash
+  sd store add sdw.blog-idea "<working title>" \
+    --field 'contexts+=Personal' --field "area=<area, default Observability>" \
+    --field content-type=blog-idea --field score=<total> \
+    --field dateCreated=YYYY-MM-DD \
+    --field-file 'description=<file with the one-line thesis>' \
+    --field "topics=<comma-separated slugs>" \
+    --field 'tags+=blog-idea' --field 'tags+=ai-generated' --field 'tags+=ideate' \
+    --section-file 'Thesis=<file with the thesis paragraph>' \
+    --section "Score=Evidence <n> · Falsifiability <n> · Durability <n> · Audience <n>. <why>" \
+    --section 'Argument=*Not drafted yet.*' \
+    --section-file 'Provenance=<file: surfaced <date> by sd-topic-radar, prompted by <what>, with the primary link>'
+  ```
+
+  The note starts at `inbox`; acceptance is the user's. Link the article a
+  newsletter pointed at, never the mail.
+- **Check.** Run `python3 "System/Scripts/vault-normalize.py"` from the
+  vault root (`$OBSIDIAN_VAULT`) without `--fix`, and fix what it flags in
+  the new notes. Then run the step 13 review as
+  `python3 "$OBSIDIAN_VAULT/System/Scripts/adversarial.py" --profile idea --target "<base>/<file>.md"`
+  on at most three notes, highest score first. Exit 3 means it did not run.
+- **Report** what was filed, what the floor dropped, duplicates, the newsletter
+  sweep (labels, window, issues, ideas it prompted, or the error), and that
+  filed ideas wait for the user's `inbox → accepted` triage.
+
 ## Safety rules
 
-- This skill is read-only. Never draft the article, update an editorial
+- This skill is read-only, except `file=vault` above, which adds `inbox`
+  notes only. Never draft the article, update an editorial
   calendar, create reminders, modify sources, publish, message, or schedule.
 - Search personal repositories, notes, messages, workspaces, profiles, or
   history only when their exact scope is supplied or explicitly authorized.

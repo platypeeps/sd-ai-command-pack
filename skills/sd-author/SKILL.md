@@ -35,7 +35,7 @@ before selecting either workflow.
 
 Do not use for research-paper methodology (`sd-paper`), isolated open research
 (`sd-research`), claim-only auditing (`sd-fact-check`), source distillation
-(`sd-distill`), final technical editing (`sd-technical-editor`), or publishing
+(`sd-digest target=...`), final technical editing (`sd-technical-editor`), or publishing
 (`sd-publish`). These are capability handoffs, not required runtime dependencies.
 
 ## Arguments
@@ -100,7 +100,7 @@ stop and identify them before reading sources or workspace artifacts.
    missing authorship and evidence inputs; it is not silent approval.
 7. Plan claim-specific evidence lanes after brief approval. Separate user
    experience, supplied facts, external evidence, inference, and assistant
-   framing. Use `sd-research` for deeper open research, `sd-distill` for
+   framing. Use `sd-research` for deeper open research, `sd-digest target=...` for
    source-faithful compression, and `sd-fact-check` for claim auditing when
    available. Research supports the approved thesis; a material thesis change
    returns to brief revision and approval.

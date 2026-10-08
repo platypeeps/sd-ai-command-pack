@@ -26,7 +26,7 @@ it as a side effect of other work.
 Typical explicit occasions: bringing a long-lived feature branch up to
 date with its base, cleaning up a branch before a pull request, or
 untangling a worktree whose base has moved. For pre-merge quality checks
-on the resulting diff, use `sd-gate-probes`; the review verdict stays
+on the resulting diff, use `sd-review`; the review verdict stays
 with the sd-review lane.
 
 ## Arguments

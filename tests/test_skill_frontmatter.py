@@ -14,10 +14,10 @@ mechanism in use, not a design aspiration. The exception has a measured
 precedent too: `se-help`, this surface's predecessor and still installed at
 `~/.claude/skills/se-help`, carries no marker. It is named here as evidence for
 the rule, not as a surface this suite asserts -- everything below is `sd-*`,
-where `sd-help` is the one skill among nine commands.
+where `sd-help` is the one skill among eleven commands.
 
 These run without an installer. That is the point: step 3e builds the renderer
-that consumes this tree, so without these assertions the ten surfaces would
+that consumes this tree, so without these assertions the twelve surfaces would
 sit unverified until then, and a missing marker would surface as a command that
 silently invokes itself.
 
@@ -25,10 +25,10 @@ Since 5-iii the tree also holds the sixty-four folded skills, so the inventory
 claim had to change shape. It used to be "the tree is exactly these surfaces",
 which is a list -- and a list of every surface is precisely what stops being
 maintainable at seventy-six. What survives is the half that is actually load-
-bearing: the *commands* are exactly these nine, and every other surface in the
+bearing: the *commands* are exactly these eleven, and every other surface in the
 tree is a skill -- `sd-help` included, per the taxonomy's stated exception --
 which is a property each file carries rather than a roster this file recites. A
-sixty-fifth skill needs no edit here; a tenth command still fails, which is
+sixty-fifth skill needs no edit here; a twelfth command still fails, which is
 the invariant: the verb inventory changes by decision record, not by commit.
 """
 
@@ -49,15 +49,18 @@ SKILLS = REPO_ROOT / "skills"
 CONTRIB = REPO_ROOT / "contrib"
 ROOTS = (SKILLS, CONTRIB)
 
-# The nine commands. With `sd-help` in SKILL_KIND below they are the ten
+# The eleven commands. With `sd-help` in SKILL_KIND below they are the twelve
 # surfaces the design names -- the split is the taxonomy's, which makes catalog
 # surfaces skills rather than commands. Pinned deliberately: the verb
-# inventory is a CI-tested invariant, so an eleventh surface fails here until
+# inventory is a CI-tested invariant, so a thirteenth surface fails here until
 # the design record grows to justify it. The dependency-triage command left
-# the roster when sd:10 requirement 13 cut its `contrib/` skill.
+# the roster when sd:10 requirement 13 cut its `contrib/` skill. The suggest
+# skill left it in sd:3040; the `sd suggest` verb stays.
 COMMANDS = frozenset({
     "sd-plan", "sd-check", "sd-review", "sd-ship", "sd-spec", "sd-status",
-    "sd-suggest", "sd-skill-adopt", "sd-handoff",
+    "sd-skill-adopt", "sd-handoff",
+    # sd:3001 moved three user-started writing skills in from the writing pack.
+    "sd-draft-review", "sd-publish-drive", "sd-tips",
 })
 # The stated exception: help/catalog surfaces are skills, so no marker.
 SKILL_KIND = frozenset({"sd-help"})
@@ -239,11 +242,11 @@ class KindMarkerTests(unittest.TestCase):
                 )
 
     def test_skills_do_not(self) -> None:
-        """Every surface that is not one of the nine commands.
+        """Every surface that is not one of the eleven commands.
 
         `sd-help` is among them: the taxonomy's stated exception makes a catalog
-        surface a skill, which is why `COMMANDS` holds nine names and the
-        ten of `EXPECTED` are surfaces rather than commands.
+        surface a skill, which is why `COMMANDS` holds eleven names and the
+        twelve of `EXPECTED` are surfaces rather than commands.
 
         Scoped by exclusion rather than by a roster, which is what lets the
         sixty-four folded skills be covered without being named. A folded skill
@@ -285,7 +288,7 @@ class DocumentedFlagTests(unittest.TestCase):
     def implemented(self) -> list[tuple[str, pathlib.Path, pathlib.Path]]:
         found = []
         for path in surfaces():
-            # The ten only. A folded skill is a procedure, not a CLI, and a
+            # The twelve only. A folded skill is a procedure, not a CLI, and a
             # folded name that happened to match a `bin/` file would otherwise
             # be dragged into a flag contract it was never written against.
             if path.parent.name not in EXPECTED:
@@ -382,14 +385,14 @@ class DocumentedFlagTests(unittest.TestCase):
 class UnbuiltSurfaceTests(unittest.TestCase):
     """A skill for a tool that does not exist must say so.
 
-    Some of the ten surfaces have no `bin/` implementation yet -- which ones,
+    Some of the twelve surfaces have no `bin/` implementation yet -- which ones,
     and how many, is `unbuilt()` below, derived from `bin/` at run time and
     deliberately not written down here. Their skills are written from the
     design, and a reader -- human or model -- who takes one at face value will
     try to run a command that is not there. Saying "not built yet" once is the
     whole requirement; this test only checks it is said.
 
-    Scoped to those ten. The folded skills name no `bin/` tool at all -- they
+    Scoped to those twelve. The folded skills name no `bin/` tool at all -- they
     are procedures the model follows, so there is nothing for them to disclose,
     and requiring the sentence would be requiring a denial of a claim never made.
     """
@@ -450,8 +453,8 @@ class RunsAsColumn(unittest.TestCase):
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
         return [(m.group(1), m.group(2)) for m in self.ROW.finditer(readme)]
 
-    WORDS = {"Four": 4, "Five": 5, "Six": 6, "Seven": 7, "Eight": 8, "Nine": 9,
-             "Ten": 10, "Eleven": 11, "Twelve": 12}
+    WORDS = {"Three": 3, "Four": 4, "Five": 5, "Six": 6, "Seven": 7, "Eight": 8, "Nine": 9,
+             "Ten": 10, "Eleven": 11, "Twelve": 12, "Thirteen": 13}
     SENTENCE = re.compile(
         r"\b([A-Z][a-z]+) of the ([a-z]+) are\s+\n?prose", re.M)
 
@@ -485,7 +488,7 @@ class RunsAsColumn(unittest.TestCase):
             "than letting the checks below pass on nothing",
         )
 
-    # README: "each of the nine commands sets `disable-model-invocation`, so
+    # README: "each of the eleven commands sets `disable-model-invocation`, so
     # invoking it is a deliberate act; every other surface, `sd-help` included,
     # does not." So the table is `COMMANDS` plus `SKILL_KIND` -- `sd-help`
     # earns its row by being a command you run while deliberately not carrying
@@ -493,10 +496,10 @@ class RunsAsColumn(unittest.TestCase):
     # to gate. That is `EXPECTED`, and the table is checked against it.
     #
     # An earlier cut of this derived the set from the marker instead, so that an
-    # tenth command would join the table by existing rather than by somebody
+    # ninth command would join the table by existing rather than by somebody
     # remembering a line. That is the wrong trade here and the module docstring
     # says so: the roster is pinned *because* the verb inventory is a
-    # CI-tested invariant, and a tenth command is supposed to
+    # CI-tested invariant, and a ninth command is supposed to
     # fail until the design record grows to justify it. Deriving silently
     # granted that growth to any skill that set the key.
     #
@@ -528,7 +531,7 @@ class RunsAsColumn(unittest.TestCase):
         return set(EXPECTED)
 
     def test_the_marker_agrees_with_the_pinned_roster(self) -> None:
-        """The filesystem and the design record name the same nine commands.
+        """The filesystem and the design record name the same eleven commands.
 
         `COMMANDS` is a roster, and a roster drifts. This is the check that it
         has not: every skill setting the marker is a pinned command, and every

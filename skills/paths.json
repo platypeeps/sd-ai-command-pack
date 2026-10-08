@@ -21,10 +21,8 @@
         "sd-capture",
         "sd-continuity-packet",
         "sd-digest",
-        "sd-distill",
         "sd-fact-check",
         "sd-handoff",
-        "sd-knowledge-capture",
         "sd-research",
         "sd-research-repo"
       ]
@@ -34,15 +32,13 @@
       "skills": [
         "sd-check",
         "sd-debug",
-        "sd-gate-probes",
         "sd-help",
         "sd-plan",
         "sd-receive-review",
         "sd-review",
         "sd-ship",
         "sd-spec",
-        "sd-status",
-        "sd-suggest"
+        "sd-status"
       ]
     },
     "act": {
@@ -51,14 +47,17 @@
         "sd-author",
         "sd-decide",
         "sd-diagram",
-        "sd-distill",
+        "sd-draft",
+        "sd-draft-review",
         "sd-explain",
         "sd-humanizer",
         "sd-presentation",
         "sd-proposal",
         "sd-prose-lint",
         "sd-publish",
+        "sd-publish-drive",
         "sd-technical-editor",
+        "sd-tips",
         "sd-topic-radar"
       ]
     }

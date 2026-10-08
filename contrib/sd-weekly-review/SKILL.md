@@ -24,8 +24,7 @@ Use `sd-status-update` when the primary need is objective progress for one proje
 stakeholder audience. Use `sd-retro` for deeper expected-versus-actual,
 contributing-condition, or causal analysis of one bounded event or effort. This
 skill may reuse their evidence distinctions, but it does not silently run or
-duplicate either workflow. `sd-capture` does not own weekly synthesis, and
-`sd-knowledge-capture` requires a separate explicit request to publish it.
+duplicate either workflow. `sd-capture` does not own weekly synthesis or its publication.
 
 ## Arguments
 
@@ -161,5 +160,5 @@ identify them before resolving profiles or reading sources.
 - **Next-week focus** — at most three ranked, evidence-linked focus items with
   rationale, progress signal, and proposal/commitment state; and
 - **Capture handoff and execution boundary** — portable Markdown plus profile
-  changes, `sd-capture`, `sd-knowledge-capture`, publication, notes, tasks,
+  changes, `sd-capture`, publication, notes, tasks,
   schedules, messages, and follow-ups, all marked `not run`.
