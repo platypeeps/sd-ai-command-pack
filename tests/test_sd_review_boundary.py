@@ -941,11 +941,15 @@ class LineBudgetTests(unittest.TestCase):
         # `bin/sd_jev_shadow.py`, which records and never reads, so it is not
         # review logic. `bin/sd-review` imports `sd_jev` only, so the cap no
         # longer counts them; `sd_jev.jev_triage` is the one delegate left.
+        #
+        # 4770 -> 4777 is sd:2993 and sd:2978: `bin/sd_gate_run.py` +7 for the
+        # gate's `core.fsmonitor=false` and its `sd-check` process group. That
+        # branch was cut before sd:3013 lowered the cap.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4770,
+            4777,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
