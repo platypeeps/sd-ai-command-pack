@@ -240,13 +240,8 @@ def published(body: str, item: int) -> str:
     return f"{body}\n\n{sd_lib.WORK_TRAILER} sd:{item}\n"
 
 
-#: Rule 8's failure: a diff whose scope line the body lacks. `sd-ship` ignores
-#: it, since no scope line is required any more (sd:2999).
-_SCOPE_FAILURE = re.compile(r'^pull request body: touches .+, and carries no ".+" line$')
-
-
 def failures(result) -> list[str]:
-    """The `FAIL` lines of a finished lint that `sd-ship` acts on: all but rule 8's.
+    """The `FAIL` lines of a finished lint.
 
     A non-zero exit that printed no `FAIL` line is refused with its raw output:
     the lint also exits 1 on an uncaught exception, and a traceback read as
@@ -257,7 +252,7 @@ def failures(result) -> list[str]:
         raise Refusal((result.stderr or result.stdout or "sd-docs-lint failed").strip()[-2000:],
                       code="docs_lint_failed", state="retryable_failure",
                       next_action="Inspect the lint error, resolve its cause, then prepare again.")
-    return [failure for failure in found if not _SCOPE_FAILURE.match(failure)]
+    return found
 
 
 def lint_failures(tree: pathlib.Path, argv: list[str]) -> list[str]:

@@ -2597,8 +2597,7 @@ BODY_EPILOG = """\
 body: `sd-ship body --item N [--body-file F] [--pr P]` prints the body prepare
 would publish and runs the body lint (sd-docs-lint --body-only). It strips
 every Item:, Work: and Delivers: line, and an Authored-with: line that says
-what sd-ship would write, and refuses any other owned line by number. A
-missing scope line is reported and does not fail the body (sd:2999). With
+what sd-ship would write, and refuses any other owned line by number. With
 --pr and no --body-file, that pull request's live body is the one read. It
 reads no sd state, and calls the GitHub API only for --pr.
 Exit 0 when the body would prepare, 3 on a refusal or a lint failure.

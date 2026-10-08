@@ -248,7 +248,7 @@ class BodyVerbTests(unittest.TestCase):
         self.assertEqual("A slice.\n\nWork: sd:7\n", result["body"])
         self.assertEqual(["Work: sd:7", "Authored-with: author/firstvendor"], result["normalized"])
         self.assertEqual(0, result["lint"]["exit"])
-        self.assertIn("rule 5 PR link: database association sd:7", result["lint"]["output"])
+        self.assertIn("sd-docs-lint: clean", result["lint"]["output"])
         self.assertEqual(before, self.database.read_bytes())
         self.assertEqual([], self.remote.calls)
 
@@ -257,7 +257,7 @@ class BodyVerbTests(unittest.TestCase):
         self.assertEqual(3, code)
         self.assertIn("line 3: `Closes: sd:7`; expected", result["error"])
 
-    def test_a_missing_scope_line_is_reported_and_does_not_fail_the_verb(self) -> None:
+    def test_a_ci_diff_with_no_scope_line_passes_the_verb(self) -> None:
         self.policy()
         (self.root / ".github/workflows").mkdir(parents=True, exist_ok=True)
         (self.root / ".github/workflows/ci.yml").write_text("on: push\n")
@@ -265,7 +265,7 @@ class BodyVerbTests(unittest.TestCase):
         _git(self.root, "commit", "-m", "touch the CI surface\n\nAuthored-with: human")
         code, result = self.body("A slice.\n")
         self.assertEqual(0, code, result)  # sd:2999: no scope line is required
-        self.assertIn('carries no "CI/review scope:" line', result["lint"]["output"])
+        self.assertNotIn("CI/review scope:", result["lint"]["output"])  # rule 8 is retired
         self.assertNotIn("scope", result)  # nothing reads the demanded scope lines any more
 
     def test_a_given_pull_request_is_linted_on_its_live_body_alone(self) -> None:
