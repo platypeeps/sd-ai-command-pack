@@ -1103,6 +1103,65 @@ class GateTemporaryFolder(Repository):
         self.assertEqual(sorted(path.name for path in outer.iterdir()), [])
 
 
+class TemporaryLeftovers(unittest.TestCase):
+    """sd:3032: a gate start removes what runs outside the gate left in the temp dir a day ago, and nothing else."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.temporary = pathlib.Path(tmp.name).resolve() / "T"
+        self.temporary.mkdir()
+        self.now = time.time()
+
+    def entry(self, name: str, *, age: float = 2 * 86400, folder: bool = True) -> pathlib.Path:
+        path = self.temporary / name
+        if folder:
+            path.mkdir()
+            (path / "sd.db").write_text("x", encoding="utf-8")
+        else:
+            path.write_text("x", encoding="utf-8")
+        os.utime(path, (self.now - age, self.now - age))
+        return path
+
+    def dead(self) -> int:
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        return gone.pid
+
+    def test_day_old_leftovers_go_and_young_or_unnamed_entries_stay(self) -> None:
+        gone = [self.entry("tmpab_d1234"), self.entry("tmp.AbCdEfGh12"), self.entry("tmpx_1w8w2y.yaml", folder=False),
+                *(self.entry(f"{prefix}x7") for prefix in ("sd-restore", "traces-poc", "trail-audit-", "sd-ship-template",
+                                                            "sd-ship-verify")),
+                self.entry(f"{sd_gate_cache.GATE_PREFIX}{self.dead()}-abc")]
+        kept = [self.entry("tmpab_d5678", age=3600), self.entry("tmpabc"), self.entry("tmp.short"), self.entry("keep-me"),
+                self.entry("tmpABCDEFGH"), self.entry(f"{sd_gate_cache.GATE_PREFIX}{os.getpid()}-abc")]
+        self.assertEqual(sd_gate_cache.reap_temporary(self.temporary, self.now), len(gone))
+        self.assertEqual(([path.name for path in gone if path.exists()], [path.exists() for path in kept]),
+                         ([], [True] * len(kept)))
+
+    def test_a_link_goes_and_its_target_stays(self) -> None:
+        target = self.entry("keep-me")
+        link = self.temporary / "tmpzzzzzzzz"
+        link.symlink_to(target)
+        os.utime(link, (self.now - 2 * 86400,) * 2, follow_symlinks=False)
+        self.assertEqual(sd_gate_cache.reap_temporary(self.temporary, self.now), 1)
+        self.assertEqual((os.path.lexists(link), (target / "sd.db").is_file()), (False, True))
+
+    def test_another_users_entry_stays(self) -> None:
+        path = self.entry("tmpab_d1234")
+        with mock.patch.object(os, "getuid", return_value=os.getuid() + 1):
+            self.assertEqual(sd_gate_cache.reap_temporary(self.temporary, self.now), 0)
+        self.assertTrue(path.exists())
+
+    def test_a_gate_start_reaps_its_temp_dir(self) -> None:
+        old = self.entry("tmpab_d1234")
+        with mock.patch.object(tempfile, "tempdir", str(self.temporary)), \
+                contextlib.redirect_stderr(io.StringIO()) as errors:
+            sd_gate_cache.worktree_prefix(pathlib.Path(self.temporary))
+        self.assertFalse(old.exists())
+        self.assertIn("removed 1 temp entries", errors.getvalue())
+
+
 class StaleGateWorktrees(Repository):
     """sd:2739: a killed gate skips its `finally`; the next gate start removes its worktree, never a live one's."""
 
