@@ -55,6 +55,7 @@ POINTER = "sd-rules --for"
 #: answer reads in one order.
 WRITER_SKILLS = (
     "sd-debug",
+    "sd-draft",
     "sd-handoff",
     "sd-humanizer",
     "sd-plan",
@@ -69,6 +70,9 @@ WRITER_SKILLS = (
 NOT_WRITERS = {
     "sd-presentation": "matches the negation `It does not create or edit "
                        "slide files`; the skill declares itself read-only",
+    "sd-draft-review": "matches `writes the draft and its research to "
+                       "Google Docs`; it writes Google Docs, and its one "
+                       "repository write goes through `scripts/pack.py`",
     "sd-research-repo": "matches `Write or edit through the file tools`; the "
                         "files it writes are another repository's, its own "
                         "`CLAUDE.md` among them, not this tree's",
