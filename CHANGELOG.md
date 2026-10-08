@@ -566,6 +566,10 @@
 
 ### Fixed
 
+- **`sd task add --ref` clears the body when a second add passes `--body ''` (sd:2899).**
+  The update checked the body for truthiness, so an explicit empty body kept the old one.
+  Now `--body ''` clears it and an add without `--body` keeps it.
+
 - **`sd-review-ack` fetches a merged pull request's head before it reads `fix-missing` (sd:2942).**
   A squash merge deletes the branch, so a clone that never fetched it lacked every commit a `fixed` record cites.
   One satellite clone read 164 such findings on 17 merged pull requests as `fix-missing`; all were landed.
