@@ -39,6 +39,7 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import hashlib
+import math
 import os
 import pathlib
 import re
@@ -73,9 +74,11 @@ TEMPORARY = "tmp.noindex"
 #: What a run outside the gate leaves directly in the temp dir (sd:3032): Python `tempfile` names, with or without an
 #: extension, `mktemp` names, and the named leakers the item measured.
 LEFT_BEHIND = re.compile(r"tmp[a-z0-9_]{8}(\.[A-Za-z0-9]{1,8})?|tmp\.[A-Za-z0-9]{10}"
-                         r"|(sd-restore|traces-poc|trail-audit-|sd-ship-template|sd-ship-verify).*")
+                         r"|(sd-restore|traces-poc|trail-audit-|sd-ship-template|sd-ship-verify|sd-tests-).*")
 # ponytail: a day is a guess at the longest any run keeps its temp folder; shorten it once runs are measured.
 LEFT_BEHIND_SECONDS = 24 * 3600
+#: How many paths the age walk reads in one entry; past it the entry counts as young and stays.
+LEFT_BEHIND_WALK = 10_000
 
 
 def running(pid: int) -> bool:
@@ -108,15 +111,41 @@ def reap_temporary(temporary: pathlib.Path, now: float | None = None) -> int:
             status = entry.stat(follow_symlinks=False)
         except OSError:
             continue
-        if status.st_uid != os.getuid() or now - status.st_mtime < LEFT_BEHIND_SECONDS:
+        if status.st_uid != os.getuid() or now - newest_mtime(entry, status) < LEFT_BEHIND_SECONDS:
             continue
         if entry.is_dir(follow_symlinks=False):
             shutil.rmtree(entry.path, ignore_errors=True)
         else:
             with contextlib.suppress(OSError):
                 os.unlink(entry.path)
-        removed += 1
+        removed += not os.path.lexists(entry.path)
     return removed
+
+
+def newest_mtime(entry: os.DirEntry, status: os.stat_result) -> float:
+    """The newest mtime anywhere in `entry`, links not followed; `inf` past `LEFT_BEHIND_WALK` paths or on an error.
+
+    A folder's own mtime moves only when an entry directly in it is added or removed, so a run still writing deep
+    inside a folder made a day ago would otherwise read as a day old.
+    """
+    newest = status.st_mtime
+    if not entry.is_dir(follow_symlinks=False):
+        return newest
+    seen = 0
+    try:
+        for folder, folders, files in os.walk(entry.path, onerror=raise_error):
+            for name in (*folders, *files):
+                seen += 1
+                if seen > LEFT_BEHIND_WALK:
+                    return math.inf
+                newest = max(newest, os.lstat(os.path.join(folder, name)).st_mtime)
+    except OSError:
+        return math.inf
+    return newest
+
+
+def raise_error(error: OSError) -> None:
+    raise error
 
 
 def worktree_prefix(root: pathlib.Path) -> str:
