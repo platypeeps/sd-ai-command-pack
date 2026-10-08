@@ -2079,6 +2079,7 @@ class Ship(SharedReview):
         reviewed = self.reviewed_base(head, base)
         # The title that lands names the items the merge closes (sd:3014).
         title = squash_title(observed, self.state["title"])
+        self.check_closes(self.state.get("body") or "", title)  # a title edited after prepare
         self.state["title"] = title
         body, closes = self.squash_message(head, reviewed)
         # The squash message is composed here and read by `git

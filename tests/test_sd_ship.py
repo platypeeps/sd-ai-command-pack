@@ -2979,6 +2979,20 @@ roles:
             with self.subTest(item=number):
                 self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (number,)).fetchone()[0], "planning")
 
+    def test_a_live_title_naming_another_repositorys_item_is_refused_before_the_merge(self):
+        """Review of sd:3013: a title edited after prepare reached the squash unchecked."""
+        self.task_item("task")
+        elsewhere = self.directory / "elsewhere"
+        upsert_repo(self.connection, str(elsewhere), remote="https://github.com/example/elsewhere")
+        foreign = create_item(self.connection, kind="task", title="another repository", status="planning", repo=str(elsewhere))
+        number = self.unanswered("--deliver").prepare()["pull_request"]["number"]
+        self.remote.pull(number).title = f"A change (sd:{foreign})"
+        with patch.object(ship.time, "sleep"), self.assertRaises(ship.Refusal) as caught:
+            self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "closes_item_foreign")
+        self.assertIsNone(getattr(self.remote.pull(number), "merged_head", None))
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (foreign,)).fetchone()[0], "planning")
+
     def test_a_refs_item_stays_open_after_the_merge(self):
         """`Refs:` names a related or partial item, which stays open (sd:1481).
         The lane writes it for rows a pull request touches without finishing,
