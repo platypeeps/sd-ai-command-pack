@@ -4,6 +4,11 @@
 
 ### Added
 
+- **`sd-review` asks a hint-blind twin of the tier question, in shadow (sd:2969).**
+  `JEV_SD_REVIEW_BLIND` sends the tier reading's state without `deterministic_routing_said`, the rule's reason, with the same criteria and subject.
+  `--shadow` prints the routed tier and nothing reads Jev's answer, so no tier, output or exit code changes; the ledger pairs it with the routed tier.
+  It runs only after the reading's gate passes, and `JEV_SD_REVIEW_BLIND=0` stops it alone. A failing twin is one note on stderr.
+
 - **Every `jev` call names its subject and its run (sd:2954).**
   `sd-docs-lint` passes `--subject sd-docs-lint:<16 hex>`, a hash of the batch's sorted origins, never their text.
   `sd-review`, `sd task add` and `sd-docs-lint` export one `JEV_RUN=<caller>-<UTC>-<4 hex>` per process and keep an inherited one.

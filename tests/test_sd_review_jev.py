@@ -41,6 +41,10 @@ STUB = """#!/usr/bin/env python3
 import json, pathlib, sys
 
 argv = sys.argv[1:]
+if "JEV_SD_REVIEW_BLIND" in argv:
+    pathlib.Path({record!r} + ".blind").write_text(json.dumps({{"argv": argv, "state": sys.stdin.read()}}))
+    sys.stdout.write(({blind!r} or argv[argv.index("--shadow") + 1]) + "\\n")
+    raise SystemExit({blind_code})
 if argv[:1] == ["enabled"]:
     pathlib.Path({record!r} + ".gate").write_text(json.dumps(argv))
     raise SystemExit({gate})
@@ -57,7 +61,7 @@ OLD_STUB = """#!/usr/bin/env python3
 import json, pathlib, sys
 
 argv = sys.argv[1:]
-if argv[:1] == ["enabled"]:
+if argv[:1] == ["enabled"] or "JEV_SD_REVIEW_BLIND" in argv:
     raise SystemExit(0)
 calls = pathlib.Path({record!r} + ".calls")
 calls.write_text(calls.read_text() + json.dumps(argv) + "\\n" if calls.exists() else json.dumps(argv) + "\\n")
@@ -87,10 +91,13 @@ class JevTierTests(ReviewFixture):
         subprocess.run(["git", "commit", "--quiet", "-m", "fixture"], cwd=str(root),
                        check=True, capture_output=True)
 
-    def install_stub(self, *, gate: int = 0, answer: str = "deep", code: int = 0) -> pathlib.Path:
+    def install_stub(self, *, gate: int = 0, answer: str = "deep", code: int = 0,
+                     blind: str = "", blind_code: int = 0) -> pathlib.Path:
+        """`blind` is what the hint-blind call prints; empty prints its `--shadow` answer, as `jev` does."""
         record = self.tmp / "jev-argv.json"
         stub = self.tool_bin / sd_jev.COMMAND
-        stub.write_text(STUB.format(gate=gate, answer=answer, code=code, record=str(record)))
+        stub.write_text(STUB.format(gate=gate, answer=answer, code=code, record=str(record),
+                                    blind=blind, blind_code=blind_code))
         stub.chmod(0o700)
         return record
 
@@ -442,3 +449,45 @@ class JevTierTests(ReviewFixture):
         self.assertEqual(same, baseline)
         self.assertIn("exited 2", said)
         self.assertEqual(len(pathlib.Path(str(record) + ".calls").read_text().splitlines()), 1)
+
+    # The hint-blind twin, `JEV_SD_REVIEW_BLIND` (sd:2969): the tier question
+    # without the rule's reason, in shadow, beside the reading.
+
+    def test_the_twin_asks_the_same_question_without_the_reason(self):
+        root = self.prepare()
+        record = self.install_stub(answer="standard")
+        self.run_review(root)
+        blind = json.loads(pathlib.Path(str(record) + ".blind").read_text())
+        hinted = json.loads(record.read_text())
+        hinted_state = json.loads(hinted["state"])
+        self.assertIn("deterministic_routing_said", hinted_state)
+        hinted_state.pop("deterministic_routing_said")
+        self.assertEqual(json.loads(blind["state"]), hinted_state)
+        expected = sd_jev._jev_without_baseline(hinted["argv"])
+        expected[expected.index("--stage") + 1] = sd_jev.BLIND_STAGE
+        self.assertEqual(blind["argv"], [*expected, "--shadow", "standard"])
+
+    def test_the_twins_answer_never_moves_the_tier(self):
+        root = self.prepare()
+        record = self.install_stub(answer="standard")
+        quiet, _ = self.run_review(root)
+        self.install_stub(answer="standard", blind="deep")
+        loud, said = self.run_review(root)
+        self.assertTrue(pathlib.Path(str(record) + ".blind").exists())
+        self.assertEqual((loud, said), (quiet, ""))
+
+    def test_its_own_switch_stops_the_twin_and_not_the_reading(self):
+        root = self.prepare()
+        record = self.install_stub(answer="standard")
+        self.run_review(root, JEV_SD_REVIEW_BLIND="0")
+        self.assertTrue(record.exists(), "the reading did not run")
+        self.assertFalse(pathlib.Path(str(record) + ".blind").exists())
+
+    def test_a_failing_twin_is_loud_and_changes_nothing(self):
+        root = self.prepare()
+        self.install_stub(answer="standard")
+        quiet, _ = self.run_review(root)
+        self.install_stub(answer="standard", blind_code=1)
+        loud, said = self.run_review(root)
+        self.assertEqual(loud, quiet)
+        self.assertIn(f"set {sd_jev.BLIND_STAGE}=0 to stop asking", said)

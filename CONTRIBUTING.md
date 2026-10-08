@@ -288,8 +288,16 @@ nothing, and nothing retries it hosted.
 could be taken, and sends nothing unless the answer is `private: false`. No
 `gh`, a failing `gh` and a private answer all read as private.
 
+**The hint-blind twin follows the tier reading instead.** `JEV_SD_REVIEW_BLIND`
+(sd:2969) asks, after the tier reading's gate passes, the same tier question
+without `deterministic_routing_said`, so the ledger shows how far the rule's
+reason steers the answer. Sent: the reading's state less that reason. It sends
+less than the reading, so it goes where the reading goes, hosted Jev and private
+repositories included. `--shadow` prints the routed tier, and nothing reads
+Jev's answer.
+
 ```bash
-JEV_SD_REVIEW_TRIAGE=0 JEV_SD_TASK_DEDUPE=0    # either, for a run or a shell
+JEV_SD_REVIEW_TRIAGE=0 JEV_SD_TASK_DEDUPE=0 JEV_SD_REVIEW_BLIND=0    # any, for a run or a shell
 ```
 
 #### Subject and run in the ledger
