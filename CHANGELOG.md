@@ -1406,6 +1406,11 @@
 
 ### Changed
 
+- **`.sd-system-rev` advances to system `24b1b714`, schema 22 (sd:2981).**
+  The range adds migration `022_judgment_batch_children.sql` (sd:2966): `judgment.parent`, plus machine-time pricing in `sd_db.judgment` (sd:2967), which no pack code calls.
+  The other three commits add a satellite stale-claim alarm to `sd_db` (sd:2918), stable Jev caller subjects (sd:2953), and a `local-scan-for-secrets` change (sd:1254).
+  With the old pin, a checkout whose library came from system main fails `tests.test_system_pin`: `AssertionError: 21 != 22`.
+
 - **`.sd-system-rev` advances to system `b3b067d7`, schema 21 (sd:2975).**
   The range adds migration `021_judgment_call_context.sql` (sd:2950): five nullable columns on `judgment`, written through `sd_db.judgment.record`, which no pack code calls.
   The other two commits change only `local-scan-for-secrets`.
