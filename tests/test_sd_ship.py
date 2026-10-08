@@ -344,6 +344,17 @@ class CopiedRemote(FixtureRemote):
         _git(self.seed, "remote", "set-url", "origin", str(self.path))
         _git(self.seed, "update-index", "-q", "--refresh")
 
+    def rev_parse(self, ref: str) -> str:
+        """GitHub keeps a merged pull request's head after the merge deletes its branch (sd:3006)."""
+        try:
+            return super().rev_parse(ref)
+        except RuntimeError:
+            merged = [pull.merged_head for pull in self.pull_requests.values()
+                      if pull.head == ref and getattr(pull, "merged_head", None)]
+            if not merged:
+                raise
+            return merged[-1]
+
 
 def git_transport(binary: str, remote: pathlib.Path, url: str) -> str:
     """Keep real Git and local transport without starting Python for every call."""
@@ -2850,6 +2861,51 @@ roles:
         self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (related,)).fetchone()[0], "planning")
         again = self.operation("reconcile").reconcile()
         self.assertFalse(again["delivery_pending"], again)
+
+    def test_a_merge_removes_the_remote_branch_and_keeps_the_main_checkout(self):
+        """sd:3006. The fixture ships from its main checkout, which is never removed,
+        so the branch it has checked out stays too; the remote branch goes."""
+        self.prepare()
+        cleanup = self.merge()["cleanup"]
+        self.assertEqual(cleanup["removed"], ["origin/topic"])
+        self.assertEqual(cleanup["kept"], {str(self.root): "the main checkout", "topic": "a kept worktree has it checked out"})
+        self.assertEqual("", _git(self.root, "ls-remote", "origin", "refs/heads/topic"))
+
+    def merged_worktree(self, name: str) -> pathlib.Path:
+        """A linked worktree on a branch `name` whose head origin carries, as a merged pull request's is."""
+        tree = self.directory / name
+        _git(self.root, "worktree", "add", "-q", "-b", name, str(tree))
+        (tree / "target").mkdir()
+        (tree / "target/build.o").write_text("output")
+        _git(self.root, "push", "-q", "origin", name)
+        return tree
+
+    def test_a_merge_cleanup_removes_a_clean_worktree_and_keeps_a_dirty_or_busy_one(self):
+        """sd:3006, operator ruling 2026-10-08: leads removed these by hand after each merge."""
+        head = _git(self.root, "rev-parse", "HEAD")
+        with (self.root / ".git/info/exclude").open("a") as stream:
+            stream.write("target/\n")
+        clean = self.merged_worktree("clean")
+        with contextlib.chdir(clean):  # as `sd-ship -C <worktree> merge` runs: inside the tree it removes
+            self.assertEqual(ship.clean_up_merged(clean, "clean", head),
+                             {"removed": [str(clean), "clean", "origin/clean"], "kept": {}})
+        self.assertFalse(clean.exists())
+        dirty = self.merged_worktree("dirty")
+        (dirty / "notes.txt").write_text("unsaved")
+        busy = self.merged_worktree("busy")
+        ahead = self.merged_worktree("ahead")
+        _git(ahead, "commit", "-q", "--allow-empty", "-m", "not pushed\n\nAuthored-with: human")
+        sleeper = subprocess.Popen(["sleep", "60"], cwd=busy)
+        self.addCleanup(sleeper.wait)
+        self.addCleanup(sleeper.kill)
+        for name, tree, why in (("dirty", dirty, "it has uncommitted changes"),
+                                ("busy", busy, f"process {sleeper.pid} works inside it"),
+                                ("ahead", ahead, "it has commits past the merged head")):
+            with self.subTest(name):
+                cleanup = ship.clean_up_merged(self.root, name, head)
+                self.assertEqual(cleanup["kept"], {str(tree): why, name: "a kept worktree has it checked out"})
+                self.assertEqual(cleanup["removed"], [f"origin/{name}"])
+                self.assertTrue(tree.exists())
 
     def test_a_merge_closes_every_item_its_title_names(self):
         """sd:3014, operator ruling 2026-10-08. A batched pull request names its

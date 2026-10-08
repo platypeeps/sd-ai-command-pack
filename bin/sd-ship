@@ -2242,8 +2242,8 @@ class Ship(SharedReview):
         if "closes_failed" in evidence:
             return evidence
         git(self.root, "fetch", "--prune", "origin")
-        return {**evidence, "delivery_pending": False, "retained_branch": self.branch,
-                "retained_worktrees": git(self.root, "worktree", "list", "--porcelain")}
+        return {**evidence, "delivery_pending": False,
+                "cleanup": clean_up_merged(self.root, self.branch, self.state["reviewed_head"])}
 
     def hold_at_merge(self, commit: str, parent: str, evidence: dict) -> dict | None:
         """The held answer when the base advanced at the merge and a close is still owed, else None.
@@ -2278,6 +2278,74 @@ class Ship(SharedReview):
         return {**evidence, "delivery_pending": True, "closes_failed": failed,
                 "workflow": {**evidence["workflow"], **pending}}
 
+
+
+def busy_in(path: pathlib.Path) -> str | None:
+    """Why `path` is in use: another process works inside it, or `lsof` cannot tell (sd:3006)."""
+    try:
+        # From `/`: started inside `path`, `lsof` would find itself working there.
+        listing = subprocess.run(["lsof", "-d", "cwd", "-Fpn"], cwd="/", capture_output=True, text=True,
+                                 timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError) as error:
+        return f"no process check ran ({error})"
+    pid, inside = None, str(path.resolve())
+    for line in listing.stdout.splitlines():
+        if line.startswith("p"):
+            pid = int(line[1:])
+        elif line.startswith("n") and pid != os.getpid() and (line[1:] == inside or line[1:].startswith(inside + "/")):
+            return f"process {pid} works inside it"
+    return None
+
+
+def clean_up_merged(root: pathlib.Path, branch: str, merged: str) -> dict:
+    """Remove a merged branch's clean worktrees, then its local and remote branch (sd:3006).
+
+    `git worktree remove` takes the tree's ignored build output with it.
+    Whatever stays is named with its reason: the main checkout, uncommitted
+    changes, commits past the merged head, or a process working inside.
+    The merge stands whatever happens here, so a failed step is reported in
+    the answer, never raised.
+    """
+    try:
+        return remove_merged(root, branch, merged)
+    except Refusal as error:
+        return {"error": str(error)}
+
+
+def remove_merged(root: pathlib.Path, branch: str, merged: str) -> dict:
+    """`clean_up_merged`'s steps, raising on the first git failure."""
+    removed: list[str] = []
+    kept: dict[str, str] = {}
+    blocks = [dict(line.partition(" ")[::2] for line in block.splitlines())
+              for block in git(root, "worktree", "list", "--porcelain").split("\n\n") if block.strip()]
+    main = pathlib.Path(blocks[0]["worktree"])
+    for path in (pathlib.Path(block["worktree"]) for block in blocks if block.get("branch") == f"refs/heads/{branch}"):
+        why = ("the main checkout" if path == main
+               else "it has uncommitted changes" if git(path, "status", "--porcelain")
+               else "it has commits past the merged head" if not is_ancestor(path, "HEAD", merged)
+               else busy_in(path))
+        if why:
+            kept[str(path)] = why
+        else:
+            git(main, "worktree", "remove", str(path))
+            removed.append(str(path))
+    local = sd_lib.git_output(["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], main)
+    if local and kept:
+        kept[branch] = "a kept worktree has it checked out"
+    elif local and not is_ancestor(main, local, merged):
+        kept[branch] = "it has commits past the merged head"
+    elif local:
+        git(main, "branch", "-D", branch)
+        removed.append(branch)
+    advertised = git(main, "ls-remote", "origin", f"refs/heads/{branch}").split()
+    if advertised and advertised[0] != merged:
+        kept[f"origin/{branch}"] = "it moved past the merged head"
+    elif advertised:
+        git(main, "push", "--quiet", "origin", "--delete", branch)
+        removed.append(f"origin/{branch}")
+    for name, why in kept.items():
+        print(f"sd-ship: kept {name}: {why}", file=sys.stderr)
+    return {"removed": removed, "kept": kept}
 
 
 def require_merge_on_base(root: pathlib.Path, commit: str, tip: str, base: str) -> None:
