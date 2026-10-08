@@ -2851,6 +2851,28 @@ roles:
         again = self.operation("reconcile").reconcile()
         self.assertFalse(again["delivery_pending"], again)
 
+    def test_a_merge_closes_every_item_its_title_names(self):
+        """sd:3014, operator ruling 2026-10-08. A batched pull request names its
+        items in its title. The merge closes each one as it closes a `Closes:`
+        item, with the merge commit in the reason; the claimed item keeps its
+        own delivery path."""
+        self.task_item("task")
+        batched = self.closes_items()
+        title = "Three fixes (" + ", ".join(f"sd:{number}" for number in (self.item, *batched)) + ")"
+        self.unanswered("--deliver", "--title", title).prepare()
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        self.assert_closed_by_merge(result)
+        self.assertEqual(result.get("closed_items"), [f"sd:{number}" for number in batched])
+        commit = result["merge_commit"]
+        for number in batched:
+            with self.subTest(item=number):
+                self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (number,)).fetchone()[0], "done")
+        for number in batched[:2]:
+            reasons = [row[0] for row in self.connection.execute(
+                "SELECT body FROM note WHERE item = ? AND kind = 'status_change'", (number,))]
+            self.assertIn(f"planning -> done by sd-ship: delivered at {commit} on origin/main", reasons)
+
     def test_a_web_merge_without_the_closes_trailers_leaves_those_items_open(self):
         """A pull request merged on GitHub lands whatever message the web form
         held. Each `Closes:` item is verified against the landed message, as
@@ -2916,6 +2938,9 @@ roles:
                 with self.assertRaises(ship.Refusal) as caught:
                     self.unanswered("--deliver", "--body-file", str(body)).prepare()
                 self.assertEqual(caught.exception.workflow["blocker"]["code"], names)
+        with self.assertRaises(ship.Refusal) as caught:  # sd:3014: the title's items are closed the same way
+            self.unanswered("--deliver", "--title", "A change (sd:99999)").prepare()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "closes_item_unknown")
         self.assertFalse(self.remote.pull_requests)
 
     def test_a_refs_item_stays_open_after_the_merge(self):

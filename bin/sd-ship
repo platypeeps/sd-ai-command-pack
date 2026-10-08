@@ -1279,7 +1279,7 @@ class Ship(SharedReview):
                 raise Refusal("existing PR delivery claim differs; reconcile the prepared scope first")
         self.assert_scope()
         if not self.args.no_item:
-            self.check_closes(body)
+            self.check_closes(body, title)
         if not self.state:
             self.save(repository=self.repository, branch=self.branch, item=self.args.item, phase="new")
         self.persist_copilot_direction()
@@ -1766,25 +1766,38 @@ class Ship(SharedReview):
                 body += f"{sd_lib.REVIEWED_BASE_TRAILER} {reviewed_base}\n"
         return body
 
-    def co_delivered(self) -> tuple[int, ...]:
-        """The items the prepared body's `Closes:` lines co-deliver (sd:1481)."""
-        return () if self.args.no_item else sd_ship_body.closes_named(self.state.get("body") or "", self.args.item)
+    def closing(self, body: str, title: str) -> tuple[int, ...]:
+        """The items a merge closes beside the claimed one: each `Closes:` item, then each sd:N in the title.
 
-    def check_closes(self, body: str) -> None:
-        """Refuse a `Closes:` item the merge could not close, before anything is published.
-
-        One pull request claims one item; `Closes:` names the others it
-        delivers, and the merge closes them (operator ruling 2026-10-03).
-        `Refs:` names related items and is not read here: they stay open.
+        A batched pull request names its items in its title, and the merge
+        closes each the way it closes a `Closes:` item (sd:3014).
         """
-        for number in sd_ship_body.closes_named(body, self.args.item):
+        if self.args.no_item:
+            return ()
+        named = (*sd_ship_body.closes_named(body, self.args.item), *map(int, re.findall(r"\bsd:([0-9]+)", title)))
+        return tuple(dict.fromkeys(number for number in named if number != self.args.item))
+
+    def co_delivered(self) -> tuple[int, ...]:
+        """The items the prepared body and title co-deliver (sd:1481, sd:3014)."""
+        return self.closing(self.state.get("body") or "", self.state.get("title") or "")
+
+    def check_closes(self, body: str, title: str) -> None:
+        """Refuse a co-delivered item the merge could not close, before anything is published.
+
+        One pull request claims one item; `Closes:` and the title name the
+        others it delivers, and the merge closes them (operator ruling
+        2026-10-03, sd:3014). `Refs:` names related items and is not read
+        here: they stay open.
+        """
+        for number in self.closing(body, title):
             row = self.connection.execute("SELECT repo FROM item WHERE id = ?", (number,)).fetchone()
             if row is None:
-                raise Refusal(f"Closes: names sd:{number}, which is no item; the merge closes every Closes: item",
+                raise Refusal(f"Closes: or the title names sd:{number}, which is no item; "
+                              "the merge closes every item they name",
                               code="closes_item_unknown", boundary="input", state="operator_decision",
-                              next_action="Correct the Closes: line, or move a related item to Refs:.")
+                              next_action="Correct the Closes: line or the title, or move a related item to Refs:.")
             if row["repo"] != self.item["repo"]:
-                raise Refusal(f"Closes: names sd:{number}, which belongs to another repository; "
+                raise Refusal(f"Closes: or the title names sd:{number}, which belongs to another repository; "
                               "a merge closes only this repository's items",
                               code="closes_item_foreign", boundary="input", state="operator_decision",
                               next_action="Close that item from its own repository, or move it to Refs:.")
@@ -2064,6 +2077,9 @@ class Ship(SharedReview):
         self.require_copilot_clearance(observed["number"], observed, head)
         self.save(phase="ci_passed", protection=protection)
         reviewed = self.reviewed_base(head, base)
+        # The title that lands names the items the merge closes (sd:3014).
+        title = squash_title(observed, self.state["title"])
+        self.state["title"] = title
         body, closes = self.squash_message(head, reviewed)
         # The squash message is composed here and read by `git
         # interpret-trailers --parse` afterwards, and those two only agree
@@ -2097,7 +2113,6 @@ class Ship(SharedReview):
         # passing `None` retracts what an earlier attempt recorded. An
         # ownership-only merge therefore cannot inherit a claim from a merge
         # that never happened (sd:1347).
-        title = squash_title(observed, self.state["title"])
         self.save(phase="merge_dispatch", merge_message=body, row_authorized_merge=self.row_authority, **closes,
                   warnings=self.dispatch_warnings(), merge_invoker=self.invoker())
         try:
