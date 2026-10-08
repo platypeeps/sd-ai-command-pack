@@ -245,6 +245,7 @@ class RunCheck(Repository):
         marker, hook = self.root.parent / "fsmonitor-ran", self.root.parent / "fsmonitor.sh"
         hook.write_text(f'#!/bin/sh\necho "$PWD $*" >> "{marker}"\nexit 1\n', encoding="utf-8")
         hook.chmod(0o755)
+        # ls-files-form: plain -- the check command only needs git to read the index; the fsmonitor hook is what this case tests
         head = self.commit("check:\n\t@git status --porcelain && git ls-files > /dev/null\n")
         git(self.root, "config", "core.fsmonitor", str(hook))
         self.assertEqual(sd_gate_run.check_in_worktree(self.root, head)["status"], "success")
