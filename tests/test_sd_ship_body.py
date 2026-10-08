@@ -142,11 +142,6 @@ class NormalizeTests(unittest.TestCase):
                 self.assertEqual(once, normalize(published)[0])
                 self.assertEqual(published, sd_ship_body.published(normalize(published)[0], 7))
 
-    def test_a_pull_request_rename_names_both_of_its_paths(self) -> None:
-        files = [{"filename": "ci/ci.yml", "previous_filename": ".github/workflows/ci.yml"},
-                 {"filename": "src.py"}, {"filename": "src.py"}, "not a row"]
-        self.assertEqual([".github/workflows/ci.yml", "ci/ci.yml", "src.py"], sd_ship_body.pull_paths(files))
-
     def test_the_parser_reads_the_one_constant(self) -> None:
         body = "".join(f"{key} sd:7\n" for key in sd_lib.OWNED_TRAILERS)
         self.assertEqual(list(sd_lib.OWNED_TRAILERS), [line.key for line in sd_ship_body.owned_lines(body)])
@@ -241,18 +236,10 @@ class BodyVerbTests(unittest.TestCase):
         policy.parent.mkdir(parents=True, exist_ok=True)
         policy.write_text(scope_fixture.SCOPE_POLICY)
 
-    def pull_request(self, body: str, files: list[dict]) -> int:
-        """A pull request opened by hand on another branch, and the files GitHub lists for it."""
+    def pull_request(self, body: str) -> int:
+        """A pull request opened by hand on another branch."""
         self.remote.commit_on("elsewhere", "a hand-opened change\n\nAuthored-with: human")
-        number = self.remote.open_pull_request("elsewhere", title="by hand", body=body).number
-        route = self.double._route
-
-        def files_route(method, path, payload):
-            if method == "GET" and path.split("?")[0] == f"/repos/{self.remote.slug}/pulls/{number}/files":
-                return 200, files
-            return route(method, path, payload)
-        self.double._route = files_route
-        return number
+        return self.remote.open_pull_request("elsewhere", title="by hand", body=body).number
 
     def test_the_verb_prints_the_published_body_and_its_lint(self) -> None:
         before = self.database.read_bytes()
@@ -279,30 +266,16 @@ class BodyVerbTests(unittest.TestCase):
         code, result = self.body("A slice.\n")
         self.assertEqual(0, code, result)  # sd:2999: no scope line is required
         self.assertIn('carries no "CI/review scope:" line', result["lint"]["output"])
-        self.assertEqual([{"line": "CI/review scope:", "path": ".github/workflows/ci.yml", "present": False}],
-                         result["scope"]["demanded"])
-        self.assertEqual("origin/HEAD...HEAD", result["scope"]["changed_from"])
-        code, result = self.body("A slice.\n\nCI/review scope: one workflow.\n")
-        self.assertEqual(0, code, result)
-        self.assertEqual([{"line": "CI/review scope:", "path": ".github/workflows/ci.yml", "present": True}],
-                         result["scope"]["demanded"])
+        self.assertNotIn("scope", result)  # nothing reads the demanded scope lines any more
 
-    def test_a_given_pull_request_is_linted_against_its_own_files_and_live_body(self) -> None:
-        # sd:1877: the pull request's diff, not the checkout's, is the one
-        # read, and the answer comes before prepare refuses.
-        self.policy()
-        number = self.pull_request("Opened by hand.\r\n", [
-            {"filename": "ci/ci.yml", "previous_filename": ".github/workflows/ci.yml", "status": "renamed"}])
+    def test_a_given_pull_request_is_linted_on_its_live_body_alone(self) -> None:
+        # sd:1877: the live body is the one read; sd:2999: its file listing is not.
+        number = self.pull_request("Opened by hand.\r\n")
         code, result = self.run_verb("--pr", str(number))
         self.assertEqual(0, code, result)
         self.assertEqual(("live_pr", "Opened by hand.\n\nWork: sd:7\n"), (result["body_source"], result["body"]))
-        self.assertEqual({"changed_from": f"pull request #{number}", "changed": 2,
-                          "demanded": [{"line": "CI/review scope:", "path": ".github/workflows/ci.yml",
-                                        "present": False}]}, result["scope"])
-        self.assertIn("touches .github/workflows/ci.yml", result["lint"]["output"])
-        self.assertNotIn(".github/workflows/ci.yml", str(self.run_verb()[1]["scope"]))
-        code, result = self.body("Opened by hand.\n\nCI/review scope: the workflow moves out.\n", "--pr", str(number))
-        self.assertEqual((0, "file", True), (code, result["body_source"], result["scope"]["demanded"][0]["present"]))
+        self.assertNotIn("scope", result)
+        self.assertFalse([call for call in self.remote.calls if call.path.split("?")[0].endswith("/files")])
 
     def test_a_pull_request_github_does_not_have_is_a_refusal(self) -> None:
         code, result = self.run_verb("--pr", "99")
