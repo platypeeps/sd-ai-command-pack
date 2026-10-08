@@ -11,12 +11,6 @@ not, say so in one plain sentence and continue with the judgment pass. This
 skill reports and dispositions — it never rewrites. Rewriting belongs to
 whoever owns the prose.
 
-The judgment pass returns an impression, and an impression cannot be
-thresholded or compared against the previous draft. When the user asks for
-prose scores and `jev` is available, `references/prose-score-dimensions.md`
-turns that pass into a number per dimension. It is optional, off by default,
-and nothing else in this skill changes when it does not run.
-
 ## When to use
 
 Use before committing or posting prose produced on the user's behalf:
@@ -94,22 +88,7 @@ Unknown argument names are an error — stop and report them before starting.
    for tells no rule covers — hedging stacks, filler, formulaic
    transitions, promotional puffery — and judge by clusters of tells, not
    isolated hits.
-7. Score the judgment dimensions only when the user asked for scores in this
-   session **and** `jev enabled` exits `0`. Read
-   `references/prose-score-dimensions.md` first: it holds the dimensions, the
-   levels, the single `ask` request that runs them in parallel, and the rule
-   that keeps the countable in code. Ask the model nothing a `grep` or a
-   `wc -w` already answers; the deterministic pass owns every literal match
-   and every length. Report each dimension's raw score and confidence, and
-   state any weighting separately, so a reader can rethreshold without paying
-   for inference again. Report how many dimensions answered against how many
-   were asked, as two numbers, and name any that did not come back: a count of
-   what you sent reads the same whether the pass worked or returned nothing.
-   Do not run the step when the user did not ask, when `jev` cannot answer
-   here, or when the draft is confidential. Name the reason in the **Scores**
-   bullet of the final report, in one sentence, and say nothing more about it
-   anywhere else. The report always accounts for an absent scoring pass.
-8. Hand rewrite-shaped findings back to whoever owns the prose, with the
+7. Hand rewrite-shaped findings back to whoever owns the prose, with the
    finding list attached, so the rewrite pass does not re-derive the
    deterministic results.
 
@@ -126,11 +105,6 @@ Unknown argument names are an error — stop and report them before starting.
   rules without an explicit request; promotion findings are proposals.
 - Skip code blocks, generated content, quoted verbatim text, and
   intentional examples of bad prose unless the user asks to lint them.
-- Never score a confidential draft. A scored call posts the draft text to a
-  third party, so an embargoed, customer-naming, or secret-bearing draft is
-  linted without scores and the **Scores** bullet says scoring was withheld.
-- Send the draft text and nothing else. A file path, a repository name, a
-  branch, or a credential never belongs in a scoring request.
 - This skill gates prose, not changes: review verdict authority stays with
   the sd-review lane.
 
@@ -143,11 +117,6 @@ Unknown argument names are an error — stop and report them before starting.
 - **Suppressions** — every suppression with its recorded justification;
 - **Judgment-pass findings** — tells found beyond the rules, with
   locations;
-- **Scores** — when the scoring step ran, each dimension's raw score and
-  confidence, how many dimensions answered out of how many were asked, and the
-  weighting used to combine them; otherwise one sentence naming the reason it
-  did not run: the user did not ask, `jev` could not answer here, or the draft
-  is confidential and scoring was withheld;
 - **Handoffs** — rewrite-shaped findings handed back and proposed config
   promotions awaiting the gate owner; and
 - **Residue** — anything left unlinted and why.
