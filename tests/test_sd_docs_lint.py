@@ -149,9 +149,16 @@ class Rule1ShapeTests(LintFixture):
         self.write_item("no-date-here", GOOD_PRD)
         self.assert_fails("named <YYYY-MM-DD>-<slug>")
 
-    def test_red_missing_prd(self) -> None:
+    def test_green_design_alone(self) -> None:
+        """sd:3000. One design.md is a whole work item; prd.md is legacy."""
+        item = self.work / "2026-08-30-a-design"
+        item.mkdir(parents=True)
+        (item / "design.md").write_text("# Design\n", encoding="utf-8")
+        self.assert_clean()
+
+    def test_red_no_document(self) -> None:
         (self.work / "2026-08-30-empty").mkdir(parents=True)
-        self.assert_fails("every work item has a prd.md")
+        self.assert_fails("a work item holds a design.md")
 
     def test_red_missing_frontmatter(self) -> None:
         self.write_item("2026-08-30-bare", "# PRD\n\n## Acceptance criteria\n")
@@ -170,7 +177,7 @@ class Rule1ShapeTests(LintFixture):
 
     def test_red_stray_file_in_a_work_item(self) -> None:
         (self.work / "2026-08-29-a-workable-item" / "task.json").write_text("{}", encoding="utf-8")
-        self.assert_fails("prd.md, design.md and implement.md only")
+        self.assert_fails("a work item holds design.md, or the legacy prd.md and implement.md, only")
 
     def test_red_archive_bucket_is_not_a_month(self) -> None:
         (self.work / "archive" / "july").mkdir(parents=True)
@@ -468,7 +475,7 @@ class Rule5PullRequestLinkTests(LintFixture):
 
     def test_database_association_does_not_bypass_work_directory_checks(self) -> None:
         (self.work / "2026-08-30-empty").mkdir()
-        self.assert_fails("every work item has a prd.md", pr_body="Work: sd:36\n")
+        self.assert_fails("a work item holds a design.md", pr_body="Work: sd:36\n")
 
     def test_green_no_work_line_claims_no_item(self) -> None:
         """A change with no item carries no line, and is not asked for one.

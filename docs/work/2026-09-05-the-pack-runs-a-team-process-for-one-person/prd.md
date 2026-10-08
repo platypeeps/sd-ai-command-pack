@@ -1011,7 +1011,7 @@ log, not here.
 
 - `skills/sd-plan/SKILL.md`: step 6, archive and park (:49-54), goes, with
   `sd-status --parked` (`skills/sd-status/SKILL.md:79`) and the sweep sentence
-  in `skills/sd-plan/templates/work-README.md:11`. The flags table for a
+  in `skills/sd-plan/templates/work-README.md`. The flags table for a
   `bin/sd-plan` that does not exist (:57) and
   `--from-suggestion`/`--from-proposal` (:122) go. One
   work-item threshold, the page's, more than one session or about 300 lines

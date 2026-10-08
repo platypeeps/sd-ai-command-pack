@@ -4,8 +4,9 @@
 Seven rules; numbers are stable, so retired rule 6 (citations) leaves a gap:
 
 1. Shape         -- a work item is a `<YYYY-MM-DD>-<slug>` directory holding a
-                    `prd.md` with a title, a date agreeing with the directory, and
-                    a known `status:` only where `.status-source` is not `row`.
+                    `design.md` (sd:3000). A legacy `prd.md` has a title, a date
+                    agreeing with the directory, and a known `status:` only where
+                    `.status-source` is not `row`.
 2. Ready         -- an item that claims to be workable can be worked: it states
                     acceptance criteria, carries no open BLOCKING line, and,
                     when `in_progress`, records the branch it lives on.
@@ -125,44 +126,56 @@ def check_shape(
             continue
 
         prd = item / "prd.md"
-        if not prd.is_file():
-            report.fail(str(item), "every work item has a prd.md")
+        design = item / "design.md"
+        if not prd.is_file() and not design.is_file():
+            report.fail(str(item), "a work item holds a design.md")
             continue
 
         for path in sorted(item.iterdir()):
             if path.is_dir():
                 report.fail(str(path), "a work item holds documents, not subdirectories")
             elif path.name not in ITEM_DOCUMENTS:
-                report.fail(str(path), "a work item holds prd.md, design.md and implement.md only")
-
-        fields = parse_frontmatter(prd.read_text(encoding="utf-8"))
-        if fields is None:
-            report.fail(str(prd), "prd.md opens with a --- frontmatter block")
-            continue
-        if not fields.get("title"):
-            report.fail(str(prd), "frontmatter needs a non-empty title")
-        check_item_key(prd, fields, report)
-        # The sign inverts outside the archive and holds inside it. Once the
-        # marker says `row`, an active item's status lives in the database
-        # and a `status:` line left in the file is a second answer that will
-        # drift. The archive is the opposite: its files are historical records.
-        # They keep their lines, and a naive inversion fails on all of them.
-        status = fields.get("status", "")
-        if archived_status_is_authoritative or is_archived(item, work_root):
-            if status not in ITEM_STATUSES:
                 report.fail(
-                    str(prd), f"status {status!r} is not one of {', '.join(ITEM_STATUSES)}"
+                    str(path), "a work item holds design.md, or the legacy prd.md and implement.md, only"
                 )
-        elif "status" in fields:
-            report.fail(str(prd), "the row is the status; prd.md carries no status: line")
-        created = fields.get("created", "")
-        if not DATE_RE.match(created):
-            report.fail(str(prd), f"created {created!r} is not a YYYY-MM-DD date")
-        elif created != match.group("date"):
-            report.fail(str(prd), f"created {created} disagrees with the directory date")
+
+        if not prd.is_file():
+            # sd:3000: design.md alone is a whole item. Its status is the row's,
+            # so only an `item:` key, when there is one, has a shape to check.
+            check_item_key(design, parse_frontmatter(design.read_text(encoding="utf-8")) or {}, report)
+            continue
+        status_is_authoritative = archived_status_is_authoritative or is_archived(item, work_root)
+        check_legacy_prd(prd, match.group("date"), status_is_authoritative, report)
 
 
-def check_item_key(prd: pathlib.Path, fields: dict[str, str], report: Report) -> None:
+def check_legacy_prd(prd: pathlib.Path, date: str, status_is_authoritative: bool, report: Report) -> None:
+    """Rule 1 over a legacy `prd.md`: frontmatter, title, key, status and date."""
+    fields = parse_frontmatter(prd.read_text(encoding="utf-8"))
+    if fields is None:
+        report.fail(str(prd), "prd.md opens with a --- frontmatter block")
+        return
+    if not fields.get("title"):
+        report.fail(str(prd), "frontmatter needs a non-empty title")
+    check_item_key(prd, fields, report)
+    # The sign inverts outside the archive and holds inside it. Once the
+    # marker says `row`, an active item's status lives in the database
+    # and a `status:` line left in the file is a second answer that will
+    # drift. The archive is the opposite: its files are historical records.
+    # They keep their lines, and a naive inversion fails on all of them.
+    status = fields.get("status", "")
+    if status_is_authoritative:
+        if status not in ITEM_STATUSES:
+            report.fail(str(prd), f"status {status!r} is not one of {', '.join(ITEM_STATUSES)}")
+    elif "status" in fields:
+        report.fail(str(prd), "the row is the status; prd.md carries no status: line")
+    created = fields.get("created", "")
+    if not DATE_RE.match(created):
+        report.fail(str(prd), f"created {created!r} is not a YYYY-MM-DD date")
+    elif created != date:
+        report.fail(str(prd), f"created {created} disagrees with the directory date")
+
+
+def check_item_key(document: pathlib.Path, fields: dict[str, str], report: Report) -> None:
     """Rule 1's `item:` key: optional, and `sd:` then digits when present.
 
     The key names the task or followup row a folder was written for
@@ -174,7 +187,7 @@ def check_item_key(prd: pathlib.Path, fields: dict[str, str], report: Report) ->
         return
     value = fields[sd_lib.ITEM_KEY].strip()
     if not sd_lib.ITEM_KEY_RE.match(value):
-        report.fail(str(prd), f"{sd_lib.ITEM_KEY} {value!r} is not sd: followed by digits")
+        report.fail(str(document), f"{sd_lib.ITEM_KEY} {value!r} is not sd: followed by digits")
 
 
 def check_ready(
