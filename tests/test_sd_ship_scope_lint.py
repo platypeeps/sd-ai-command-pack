@@ -80,13 +80,10 @@ class ScopeLintCase(unittest.TestCase):
         lint = self.lint_calls()
         self.assertEqual(lint[0][:2], ["env", "JEV_SD_DOCS_LINT=0"], lint)
 
-    def test_red_a_ci_diff_with_no_scope_line_and_no_work_root_is_refused_before_push(self) -> None:
-        # The fail-first case. Before #972's second push the linter was not
-        # run here at all, and this prepare reached `ready_to_send`.
+    def test_a_ci_diff_with_no_scope_line_still_reaches_ready_to_send(self) -> None:
+        # sd:2999: no scope line is required, so prepare ignores rule 8's failure.
         self.commit_a_ci_change()
-        with self.assertRaisesRegex(ship.Refusal, r'carries no "CI/review scope:" line'):
-            self.prepare()
-        self.assertEqual(self.remote.pull_requests, {}, "nothing was pushed or opened")
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
 
     def test_green_the_same_diff_with_the_line_reaches_ready_to_send(self) -> None:
         self.commit_a_ci_change()

@@ -40,21 +40,16 @@ class NormalizeTests(unittest.TestCase):
     def test_lines_that_agree_are_stripped_and_named(self) -> None:
         body = ("Summary.\n\nItem: sd:7\nWork: sd:7\nDelivers: sd:7\n"
                 "Authored-with: claude/anthropic\nAuthored-with: human\nRefs: sd:8\n")
-        text, stripped = normalize(body, deliver=True)
+        text, stripped = normalize(body)
         self.assertEqual("Summary.\n\nRefs: sd:8", text)
         self.assertEqual(("Item: sd:7", "Work: sd:7", "Delivers: sd:7",
                           "Authored-with: claude/anthropic", "Authored-with: human"), stripped)
 
-    def test_another_item_is_refused_by_line_with_the_expected_value(self) -> None:
-        with self.assertRaisesRegex(ship.Refusal, re.escape("line 3: `Item: sd:9`; expected `Item: sd:7`")):
-            normalize("Summary.\n\nItem: sd:9\n")
-        with self.assertRaisesRegex(ship.Refusal, re.escape("line 1: `Work: sd:70`; expected `Work: sd:7`")):
-            normalize("Work: sd:70\n")
-
-    def test_delivers_needs_the_delivery_claim(self) -> None:
-        with self.assertRaisesRegex(ship.Refusal, r"line 2: `Delivers: sd:7`; expected no line: delivery is claimed with --deliver"):
-            normalize("Summary.\nDelivers: sd:7\n")
-        self.assertEqual(("Delivers: sd:7",), normalize("Summary.\nDelivers: sd:7\n", deliver=True)[1])
+    def test_a_stray_item_work_or_delivers_line_is_stripped_not_refused(self) -> None:
+        """sd:2999: sd-ship writes the links itself, so another item's line is dropped."""
+        body = "Summary.\n\nItem: sd:9\nWork: sd:70\nDelivers: sd:7\nDelivers: sd:8\n"
+        self.assertEqual(("Summary.", ("Item: sd:9", "Work: sd:70", "Delivers: sd:7", "Delivers: sd:8")),
+                         normalize(body))
 
     def test_an_author_no_registry_resolves_is_refused(self) -> None:
         for value in ("nobody/anthropic", "claude/openai", "claude"):
@@ -119,7 +114,7 @@ class NormalizeTests(unittest.TestCase):
 
     def test_every_problem_is_named_in_one_refusal(self) -> None:
         with self.assertRaises(ship.Refusal) as caught:
-            normalize("Item: sd:1\nx\nWork: sd:2\n")
+            normalize("Closes: sd:7\nx\nAttributes: 0123456 claude/anthropic\n")
         self.assertIn("line 1:", str(caught.exception))
         self.assertIn("line 3:", str(caught.exception))
 
@@ -127,10 +122,12 @@ class NormalizeTests(unittest.TestCase):
         body = "Example:\n\n    Item: sd:9\n"
         self.assertEqual(("Example:\n\n    Item: sd:9", ()), normalize(body))
 
-    def test_with_no_item_every_owned_line_refuses_and_nothing_is_stripped(self) -> None:
-        for line in ("Work: sd:9", "Item: sd:9", " Work : sd:9", "authored-with: human", "Closes: sd:9"):
-            with self.subTest(line=line), self.assertRaisesRegex(ship.Refusal, r"no-item publication .*line 3:"):
-                normalize(f"Proposed change\n\n{line}\n", None)
+    def test_with_no_item_every_column_zero_owned_line_is_stripped(self) -> None:
+        """sd:2999: a no-item body owns nothing, so its stray links are dropped, not refused."""
+        for line in ("Work: sd:9", "Item: sd:9", "Delivers: sd:9", "authored-with: human", "Closes: sd:9"):
+            with self.subTest(line=line):
+                self.assertEqual(("Proposed change", (line,)), normalize(f"Proposed change\n\n{line}\n", None))
+        self.assertEqual(("Proposed change\n\n Work : sd:9\n", ()), normalize("Proposed change\n\n Work : sd:9\n", None))
         self.assertEqual(("Plain.\n", ()), normalize("Plain.\n", None))
 
     def test_normalize_is_a_fixpoint_and_the_published_body_round_trips(self) -> None:
@@ -139,8 +136,8 @@ class NormalizeTests(unittest.TestCase):
                   "Summary.\n\nCloses: sd:8\nItem: sd:7\n")
         for body in bodies:
             with self.subTest(body=body):
-                once, _ = normalize(body, deliver=True)
-                self.assertEqual(once, normalize(once, deliver=True)[0])
+                once, _ = normalize(body)
+                self.assertEqual(once, normalize(once)[0])
                 published = sd_ship_body.published(once, 7)
                 self.assertEqual(once, normalize(published)[0])
                 self.assertEqual(published, sd_ship_body.published(normalize(published)[0], 7))
@@ -216,12 +213,12 @@ class PrepareTests(unittest.TestCase):
         self.remote.open_pull_request("topic", title="by hand", body="  \n")
         self.assertEqual("default", self.prepare()["body_source"])
 
-    def test_a_different_item_in_the_body_file_is_refused_before_anything_is_pushed(self) -> None:
+    def test_a_different_item_in_the_body_file_is_dropped_and_the_own_link_written(self) -> None:
         body = self.directory / "body.md"
         body.write_text(f"A slice.\n\nWork: sd:{self.item + 1}\n")
-        with self.assertRaisesRegex(ship.Refusal, rf"line 3: `Work: sd:{self.item + 1}`; expected `Work: sd:{self.item}`"):
-            self.prepare("--body-file", str(body))
-        self.assertEqual({}, self.remote.pull_requests)
+        result = self.prepare("--body-file", str(body))
+        self.assertEqual(("ready_to_send", [f"Work: sd:{self.item + 1}"]), (result["phase"], result["normalized"]))
+        self.assertEqual(f"A slice.\n\nWork: sd:{self.item}\n", self.live().body)
 
 
 class BodyVerbTests(unittest.TestCase):
@@ -269,18 +266,18 @@ class BodyVerbTests(unittest.TestCase):
         self.assertEqual([], self.remote.calls)
 
     def test_the_verb_exits_nonzero_on_a_refusal(self) -> None:
-        code, result = self.body("A slice.\n\nItem: sd:8\n")
+        code, result = self.body("A slice.\n\nCloses: sd:7\n")
         self.assertEqual(3, code)
-        self.assertIn("line 3: `Item: sd:8`; expected `Item: sd:7`", result["error"])
+        self.assertIn("line 3: `Closes: sd:7`; expected", result["error"])
 
-    def test_the_verb_exits_nonzero_when_the_body_lint_fails(self) -> None:
+    def test_a_missing_scope_line_is_reported_and_does_not_fail_the_verb(self) -> None:
         self.policy()
         (self.root / ".github/workflows").mkdir(parents=True, exist_ok=True)
         (self.root / ".github/workflows/ci.yml").write_text("on: push\n")
         _git(self.root, "add", ".github/workflows")
         _git(self.root, "commit", "-m", "touch the CI surface\n\nAuthored-with: human")
         code, result = self.body("A slice.\n")
-        self.assertEqual(3, code, result)
+        self.assertEqual(0, code, result)  # sd:2999: no scope line is required
         self.assertIn('carries no "CI/review scope:" line', result["lint"]["output"])
         self.assertEqual([{"line": "CI/review scope:", "path": ".github/workflows/ci.yml", "present": False}],
                          result["scope"]["demanded"])
@@ -297,7 +294,7 @@ class BodyVerbTests(unittest.TestCase):
         number = self.pull_request("Opened by hand.\r\n", [
             {"filename": "ci/ci.yml", "previous_filename": ".github/workflows/ci.yml", "status": "renamed"}])
         code, result = self.run_verb("--pr", str(number))
-        self.assertEqual(3, code, result)
+        self.assertEqual(0, code, result)
         self.assertEqual(("live_pr", "Opened by hand.\n\nWork: sd:7\n"), (result["body_source"], result["body"]))
         self.assertEqual({"changed_from": f"pull request #{number}", "changed": 2,
                           "demanded": [{"line": "CI/review scope:", "path": ".github/workflows/ci.yml",

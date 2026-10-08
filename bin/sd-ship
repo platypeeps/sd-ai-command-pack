@@ -616,7 +616,7 @@ class Ship(SharedReview):
         deliver = bool(self.args.deliver) if self.args.deliver is not None else bool(self.state.get("deliver"))
         claim = self.acceptance() if self.args.deliver is not None or not self.state else self.state.get("acceptance")
         body, self.body_source = self.body_input(f"Code changes associated with sd:{self.args.item}.")
-        body, self.body_normalized = sd_ship_body.normalize(body, self.args.item, deliver=deliver)
+        body, self.body_normalized = sd_ship_body.normalize(body, self.args.item)
         local_work = bool(self.item["kind"] == "work" and self.item.get("path")
                           and git(self.root, "ls-files", "--deduplicate", "--", self.item["path"]))
         return body, deliver, claim, local_work
@@ -2461,7 +2461,6 @@ def parser():
                                description=BODY_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
     body.add_argument("--item", type=int, required=True)
     body.add_argument("--body-file", type=pathlib.Path, help="the body to read; - reads stdin; default is prepare's default body")
-    body.add_argument("--deliver", action="store_true", help="accept a matching Delivers: line, as prepare --deliver does")
     body.add_argument("--pr", type=int, metavar="N",
                       help="lint pull request N: its files are the diff, and without --body-file its live body is read")
     body.add_argument("--json", action="store_true")
@@ -2514,11 +2513,12 @@ def parser():
 BODY_EPILOG = """\
 body: `sd-ship body --item N [--body-file F] [--pr P]` prints the body prepare
 would publish and runs the body lint (sd-docs-lint --body-only: one Work:
-line, and the scope line a changed path demands). It strips an Item:, Work:,
-Delivers: or Authored-with: line that says what sd-ship would write, and
-refuses any other owned line by number. The result's `scope` names each
-scope line the diff demands, such as `CI/review scope:` for `.github/**`, the
-path that demands it, and whether the body carries it. The diff is the
+line, and the scope line a changed path demands). It strips every Item:,
+Work: and Delivers: line, and an Authored-with: line that says what sd-ship
+would write, and refuses any other owned line by number. The result's `scope`
+names each scope line the diff demands, such as `CI/review scope:` for
+`.github/**`, the path that demands it, and whether the body carries it; a
+missing one is reported and does not fail the body (sd:2999). The diff is the
 checkout's HEAD against origin/HEAD; with --pr it is that pull request's
 files, and without --body-file its live body is the one read. It reads no sd
 state, and calls the GitHub API only for --pr.
@@ -2571,7 +2571,7 @@ def body_command(args) -> int:
             raise outside_repository()
         api = None if args.pr is None else GitHub(root, slug(git(root, "config", "--get", "remote.origin.url")))
         text, source = body_text(args, root, api)
-        normalized, stripped = sd_ship_body.normalize(text, args.item, deliver=args.deliver)
+        normalized, stripped = sd_ship_body.normalize(text, args.item)
         body = sd_ship_body.published(normalized, args.item)
         changed, changed_from = body_diff(root, api, args.pr)
         demanded = None if changed is None else sd_ship_body.demanded_scope(root, body, changed)
@@ -2587,7 +2587,7 @@ def body_command(args) -> int:
                 lint += ["--changed", str(listing)]
             linted = subprocess.run(lint, cwd=root, capture_output=True, text=True, timeout=300, check=False)
         output = (linted.stdout + linted.stderr).strip()
-        result = {"ok": linted.returncode == 0, "body": body, "body_source": source,
+        result = {"ok": not sd_ship_body.failures(linted), "body": body, "body_source": source,
                   "normalized": list(stripped), "lint": {"exit": linted.returncode, "output": output},
                   "scope": {"changed_from": changed_from, "changed": None if changed is None else len(changed),
                             "demanded": demanded}}
