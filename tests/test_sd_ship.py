@@ -2341,7 +2341,7 @@ roles:
         linted = subprocess.run([sys.executable, str(ROOT / "bin/sd-docs-lint"), "--pr-body", str(body)],
                                 cwd=self.root, env=self.environment, text=True, capture_output=True, timeout=CLI_TIMEOUT)
         self.assertEqual(linted.returncode, 0, linted.stdout + linted.stderr)
-        self.assertIn(f"database association sd:{self.item}", linted.stdout)
+        self.assertIn("sd-docs-lint: clean", linted.stdout)  # rule 5 is retired (sd:2999)
         result = self.merge()
         self.assertEqual(result["phase"], "merged")
         self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "in_progress")
