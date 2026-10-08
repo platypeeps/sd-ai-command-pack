@@ -211,11 +211,19 @@ jev choice 'How does the evidence relate to the claim as written?' \
     --state "$scratch/claim.json" --state-format json \
     --criteria @"$scratch/criteria.json" \
     --unsure-below 0.8 --fallback not_asked \
-    --caller sd-fact-check --stage JEV_SD_FACT_CHECK
+    --caller sd-fact-check --stage JEV_SD_FACT_CHECK \
+    --subject "sd-fact-check:$key"
 ```
 
 `--caller` and `--stage` name this pass in the judgment ledger, and
 `JEV_SD_FACT_CHECK=0` switches it off.
+
+`--subject` names the claim so a later verdict can join the judgment. `$key`
+is the first 16 hex of the SHA-256 of the claim's exact original wording plus
+a newline: `printf '%s\n' "$claim" | shasum -a 256 | cut -c1-16`. Never pass
+the wording itself. Before the first call of an audit, export one run id,
+`JEV_RUN=sd-fact-check-<UTC yyyymmddThhmmss>-<4 hex>`, and keep it for every
+claim, so the ledger groups the audit as one run.
 
 `--fallback not_asked` prints `not_asked` and exits `0` when the command is
 switched off, unkeyed, or failing, and writes the reason to stderr. A failed

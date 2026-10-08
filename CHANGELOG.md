@@ -9,6 +9,12 @@
   `--shadow` prints the routed tier and nothing reads Jev's answer, so no tier, output or exit code changes; the ledger pairs it with the routed tier.
   It runs only after the reading's gate passes, and `JEV_SD_REVIEW_BLIND=0` stops it alone. A failing twin is one note on stderr.
 
+- **Every `jev` call names its subject and its run (sd:2954).**
+  `sd-docs-lint` passes `--subject sd-docs-lint:<16 hex>`, a hash of the batch's sorted origins, never their text.
+  `sd-review`, `sd task add` and `sd-docs-lint` export one `JEV_RUN=<caller>-<UTC>-<4 hex>` per process and keep an inherited one.
+  The `sd-fact-check`, `sd-publish` and prose-score pages show a hashed `--subject` and one run id per run.
+  CONTRIBUTING.md names each key and how an outcome recomputes it.
+
 - **`sd changelog render|show|import` renders `CHANGELOG.md` from the database's entry rows (sd:2783, step 2).**
   `render` writes the region between `<!-- sd-changelog:begin -->` and `<!-- sd-changelog:end -->` from the rows merged on the base's first-parent history since the newest `v*` tag; text outside the region stays byte for byte.
   Entries go by subsection, then newest merge first by first-parent position; neither write order nor a clock decides the order.
@@ -1399,6 +1405,11 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **`.sd-system-rev` advances to system `b3b067d7`, schema 21 (sd:2975).**
+  The range adds migration `021_judgment_call_context.sql` (sd:2950): five nullable columns on `judgment`, written through `sd_db.judgment.record`, which no pack code calls.
+  The other two commits change only `local-scan-for-secrets`.
+  With the old pin, a checkout whose library came from system main failed `tests.test_system_pin`: `AssertionError: 20 != 21`.
 
 - **`.sd-system-rev` advances to system `8797a036`, which estimates a prompt at three bytes a token (sd:2963, for sd:2935).**
   A `url` reviewer's reserved bound now errs high on the input side; settlement still bills the vendor's own count.

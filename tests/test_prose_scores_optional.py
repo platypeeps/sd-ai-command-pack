@@ -69,7 +69,7 @@ NOT_ON_ASK = ("--id", "--json", "--gate", "--levels", "--criteria",
 #: Options `ask` does take, so a typo in the reference is caught rather than
 #: read as an option this module has not heard of.
 ON_ASK = ("--questions", "--state", "--state-format", "--model", "--fallback",
-          "--caller", "--stage")
+          "--caller", "--stage", "--subject")
 
 #: A row of the reference's dimension table: `| `name` | question |`.
 TABLE_ROW = re.compile(r"^\|\s*`(\w+)`\s*\|", re.MULTILINE)
@@ -316,6 +316,13 @@ The shell example passes options this module does not recognise: {unknown}.
 Either the option is a typo, or `ask` gained one and `ON_ASK` has not caught
 up. Check it against the command's own help before widening the list.
 """)
+
+    def test_the_draft_is_named_by_hash_and_the_run_is_one_id(self) -> None:
+        """The ledger joins a later outcome by subject and groups a run (sd:2954)."""
+
+        self.assertIn("--subject <skill>:$(shasum -a 256 draft.txt | cut -c1-16)",
+                      self.command().replace('"', ""))
+        self.assertIn("JEV_RUN=<skill>-", read(REFERENCE))
 
     def test_at_most_one_source_reads_stdin(self) -> None:
         words = self.command().split()
