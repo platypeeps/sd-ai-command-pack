@@ -42,9 +42,8 @@ research kit lays out the repository; the item tracks what is open. You sit at
 the end: external publish or filing is the one gate, and it is yours.
 
 **Development.** Plan when warranted, then implement, test, review, push, and merge when authorized.
-Unattended merging requires `runner_merge: auto` on the repository row and a fresh sole-operator check before each merge.
-This runner rule is separate from active task permission under **Standing authorization**.
-Without either applicable authority, stop at pull-request-ready.
+Merging needs `runner_merge: auto` on the repository row, for the runner and the assistant alike, and a fresh sole-operator check before each merge.
+Without it, or an operator request for that merge, stop at pull-request-ready.
 
 The loop proceeds within the approved scope and existing permissions.
 Missing authority, unresolved scope, failed checks, or exhausted review allowance stops the affected operation.
@@ -62,9 +61,9 @@ These run without being asked.
 - `sd-status` reports. It never writes.
 - `sd-review --scope branch --challenge` runs on the machine before a push.
   Blocking findings are fixed or recorded before the branch leaves.
-  Under `repo.ci = local`, each round adds `--gate-check main` after an `sd gate check --base main` pass at that head (sd:2603).
-- CI runs on the pull request.
-  Wait for required checks on the exact head; preserve review, ownership, protection, and authorization gates.
+  Under `repo.ci = local`, see **Gate first, then review the same head** under [Parallel work](#parallel-work).
+- The required check runs on the exact head: `sd/local-gate` under `repo.ci = local`, CI otherwise.
+  Preserve review, ownership, protection, and authorization gates.
 - `sd-ship` commits enumerated paths, pushes, opens the pull request, waits
   for CI once in the background, merges with an explicit title and body
   whose trailer names the item, and runs `git fetch -p`. The repository
@@ -77,10 +76,7 @@ These run without being asked.
   machine-wide lock across that check and pip, so concurrent reconciles
   cannot interleave. The receipt's `library`
   says whether the install worked, or why it was skipped.
-  After each confirmed in-scope merge, the agent follows the ship skill's post-merge closeout procedure.
-  It dispositions remaining findings and inventories refs, branches, stashes, and worktrees.
-  It removes the merged PR's local and remote branches, stashes, refs and stale worktrees when they are safe, without asking.
-  It records each removed target's object ID or path first, and keeps anything that fails a safety condition.
+  After each confirmed in-scope merge, follow `skills/sd-ship/references/post-merge-closeout.md`.
 - Expected branch protection requires pull requests, current CI, and up-to-date branches, with no required approvals.
   Configure it deliberately in GitHub; installation does not grant a protection exception.
   `sd-status` reports gaps; executable merge stops when required protection is absent.
@@ -89,8 +85,7 @@ These run without being asked.
   One accepted gap changes that gate: an `unprotected` entry in `.github/sd-status.json` at the reviewed commit.
   Under it, `sd-ship merge` requires every check run, every status, and a `pull_request` run of every workflow at the head to pass.
   The receipt records `declared_gap: unprotected`. Any other gap, and a declaration only in the working tree, do not change the gate.
-- `make check` and the pack's `lint` CI job run `sd-docs-lint` against the
-  checkout's own `docs/work/`, `docs/spec/` and `docs/decisions/`.
+- `make check` runs `sd-docs-lint` against the checkout's own `docs/work/`, `docs/spec/` and `docs/decisions/`.
   `sd-ship` runs it again at delivery time. A consumer that wants the gate
   checks the pack out in its own workflow and runs `<pack>/bin/sd-docs-lint`
   from there; the machine-scope installer puts no `bin/` in a consumer,
@@ -103,27 +98,16 @@ These run without being asked.
 - A commit to the pack, the system repository or the writing repository names
   what needed it: `Needed-by: <item id>` or `Needed-by: cost | efficiency |
   visibility`. `sd-ship` warns when the trailer is missing and ships anyway.
-  The dashboard's weekly missing-trailer count reads `Authored-with:`, not
-  `Needed-by:`; nothing counts a missing `Needed-by:` after the warning.
 
 ## Opt-in
 
 These run only when asked by name.
 
-- A work item under `docs/work/<date>-<slug>/prd.md`. Create one when the
-  work spans more than one session or more than about 300 changed lines.
-  `design.md` and `implement.md` exist only when you ask for them. Where
-  status lives is what `docs/work/.status-source` says. A checkout whose
-  marker says `row` reads it from the item's row and nowhere in the file: an
-  active `prd.md` there carries no `status:` line, and `sd-docs-lint` fails
-  one that does. A checkout with no marker reads the prd's `status:` line,
-  because its lines were never retired -- `file` is the unmarked default, and
-  deliberately so (`source:bin/sd_lib.py::status_marker` answers `file` for an
-  absent marker: the path every reader took before rows existed, not a new
-  one that happens to agree with it). Under `row`, a checkout or CI runner
-  with no database asks git whether the item is delivered, by the merge
-  trailers, and nothing else. `ready_to_send` marks a finished artifact
-  waiting on you.
+- A work item is a row: `sd task add`. Its status, notes and progress live on the row.
+  Write `docs/work/<date>-<slug>/design.md` only when the shape needs agreement before the work starts.
+  The design names its row with `item: sd:<n>`; there is no `prd.md` or `implement.md` to write.
+  An older item keeps its `prd.md`; `docs/work/.status-source` says whether its status is the row or the prd's `status:` line.
+  `ready_to_send` marks a finished artifact waiting on you.
 - `sd-spec`. Run it when a change alters behaviour that `docs/spec/` documents.
 - A review pass beyond the table below. Ask for it by name; the item records
   that you did.
@@ -209,22 +193,13 @@ After the switch:
 ## Reviews
 
 Adversarial review runs at four points, each with a cap on automatic passes.
-When the cap is spent no further pass starts on its own. The artifact moves on,
-to the send box, to implementation, to merge, once every blocking finding is
-addressed or rebutted with evidence on the item. A blocking finding still open
-past the cap marks the item `blocked`; non-blocking findings hold nothing.
-
-| Flow | Point | What it checks | Cap |
-|---|---|---|---|
-| Research | After the brief and decisions | Claims against sources, gaps, wrong calls | 2 |
-| Research | Final product, before the send box | The piece, page or ticket as a reader sees it | 1 |
-| Development | prd and design | Scope, missing requirements, wrong assumptions | 5 |
-| Development | Code, before merge | Defects a second reader finds | 5 rounds |
+The points, the caps and the stop rule are in
+[.claude/rules/sd-planning-adversarial-review.md](.claude/rules/sd-planning-adversarial-review.md); this page does not copy them.
 
 The code pass reads a head. Under `repo.ci = local` a gate pass at that head
 comes first; see [Parallel work](#parallel-work). A fix that changes the head
 gets a further verification pass over the diff since the reviewed head, up
-to the cap above; `sd-ship` pushes only the reviewed head or a verified fix
+to the cap; `sd-ship` pushes only the reviewed head or a verified fix
 of it, and merges naming that head with
 `gh pr merge --squash --match-head-commit <the reviewed sha>` —
 equivalently `PUT /repos/{owner}/{repo}/pulls/{n}/merge`
@@ -235,29 +210,13 @@ and a body refuses nothing, whatever head moved under it.
 The reviewer is a different vendor from the author, always. Skills name the
 roles `author` and `reviewer`; the provider registry below maps them.
 
-The post-merge ten-pass experiment, `sd:777`, is cancelled.
-Its historical records remain evidence, not instructions to resume external reviews.
-Restart requires a new explicit user decision.
+No post-merge external review runs (sd:777).
 
 ## Advisory
 
-- Copilot is an optional second review after local review.
-  Repository policy can select automatic review for the high-value `deep` tier.
-  Other requests require explicit task direction.
-  Automatic review applies once per pull request, not after each push.
-  Task-scoped suppression persists until a later explicit request replaces it.
-  The shipping adapter caps total Copilot requests at three per pull request.
-  Shared repositories receive no pack reviewer requests.
-  Read and disposition independently posted findings.
-  Policy selection remains advisory until a review is requested.
-  After that request, completion and finding disposition become merge gates.
-  Existing repository merge rules still apply.
-
-After every confirmed in-scope merge, follow `skills/sd-ship/references/post-merge-closeout.md` in the sd-ai-command-pack checkout.
-Inspect all paginated threads and review bodies, including late findings.
-Local acknowledgement and remote thread resolution are separate operations.
-Authorized shipping closeout replies with evidence or a verified follow-up before resolving eligible threads.
-Uncertain findings remain open; no automatic Copilot request follows.
+- Copilot is an optional second review after local review; `sd.copilot_review` under
+  [Standing authorization](#standing-authorization) decides when `sd-ship` requests one.
+  `sd-ship` requests at most three per pull request. Read and disposition every posted finding.
 
 ## Never in a shared repository
 
@@ -286,12 +245,10 @@ In a shared repository:
   surface. `sd-review` and `sd-receive-review` never post.
 - No workflow files or repository settings unless the owner of that
   repository asked for them.
-- No merge without task-specific or standing operator permission. Shared contributors
-  do not revoke that permission. The assistant reads the permission, not
-  `sd-ship`, which never consults `sd.assistant_merge`. `controlled` is standing
-  permission to merge through `sd-ship prepare` then `sd-ship merge` without asking.
-  No permission covers a merge that skips the review lane. Existing ownership and
-  protection gates still decide whether the pack can execute it; a refusal remains a stop.
+- No merge without `runner_merge: auto` on the row or an operator request for that merge;
+  see [Standing authorization](#standing-authorization). No permission covers a merge that skips
+  the review lane. Ownership and protection gates still decide whether `sd-ship` can execute it;
+  a refusal is a stop.
 - No issue filed. `sd-suggest` writes a row everywhere; `sd suggest publish`
   files it as an sd item when you run it, in the checkout you name with
   `--belongs-to`. No pack surface files a GitHub issue.
@@ -304,49 +261,28 @@ After review, take a newer default branch with `git merge origin/<base>`, never 
 a rebase rewrites the reviewed commits, and the next push no longer fast-forwards
 the branch `sd-ship` pushed. `sd-ship prepare --catch-up` makes that merge.
 
-Change that earns a work item: `sd-plan` writes `prd.md` using the requirements
-already available and asks only for missing decisions. Then the small-change
+Change that earns a work item: `sd-plan` adds the row, and writes `design.md`
+only when the shape needs agreement; it asks only for missing decisions. Then the small-change
 path runs with the applicable review points. An item can span several pull
 requests. `Item: <item>` associates a merge without closing the item;
 `Delivers: <item>` declares the delivering merge. Changes without an associated
-item omit those trailers and create no placeholder record. The trailers are the
-last paragraph of the squash message, contiguous, with the attribution
-paragraph above them and nothing below: a squash merge concatenates the body
-into the commit message, git reads trailers only out of the final paragraph,
-and GitHub's appended `Co-authored-by:` joins a trailer block that ends the
-message but opens a new paragraph after anything else.
-`.github/PULL_REQUEST_TEMPLATE.md` ends in that order, with `Refs:` only.
+item omit those trailers and create no placeholder record. `sd-ship` writes the
+trailers as the last paragraph of the squash message, since git reads trailers
+only from the final paragraph.
 
 A criterion only the operator can observe, such as a command running unprompted
 on their machine, is not a checklist box. Record it in the item's `## Log` with
 its date when it is observed; the delivering pull request never ticks it in
-advance (operator ruling 2026-09-30, sd:1933).
+advance (sd:1933).
 
-`sd-ship` owns the lines `sd_lib.OWNED_TRAILERS` names: `Item:`, `Work:`,
-`Delivers:`, `Closes:`, `Authored-with:` and `Attributes:`. `prepare` appends
-`Work:` to the body it publishes, and `merge` appends `Item:`, `Delivers:`, any
-owed `Closes:` (sd:1600) and the authorship lines to the squash message, so a
-body written for `sd-ship` carries none of them. The one exception is
-`Closes: sd:N[, sd:M]`: the body keeps it, and the merge adds `Delivers:` for
-each item it names and closes them with the claimed item (sd:1481). Only a
-column-zero line outside fenced code and HTML comments counts; `prepare`
-refuses a quoted one, which an indent keeps as an example. `Refs:` is
-not owned; its items stay open. A supplied line that says what `sd-ship` would write is
-stripped and listed in the result's `normalized`; any other owned line is
-refused by line number, with the expected value. So the body `sd-ship`
-published, fed back as `--body-file`, prepares again. Without `--body-file`,
-`prepare` reads an open pull request's live body, so an edit made on GitHub
-survives; with no receipt, the pull request open for the branch is the one
-read, so a pull request opened by hand keeps its body. The result's
-`body_source` says `file`, `live_pr`, `state` or `default`.
-`sd-ship body --item <item> [--body-file <file>] [--pr <n>]` prints
-the body `prepare` would publish and runs the body lint on it. Its `scope`
-names each scope line the diff demands, such as `CI/review scope:` for a
-`.github/**` path, and whether the body carries it. The diff is the checkout's
-HEAD against `origin/HEAD`; with `--pr` it is that pull request's files, and
-without `--body-file` its live body is read. It reads no sd state, calls the
-GitHub API only for `--pr`, and exits non-zero on a refusal or a lint failure. A merge
-made without `sd-ship` writes the trailers by hand, in the order above.
+`sd-ship` owns the lines `sd_lib.OWNED_TRAILERS` names: `Item:`, `Work:`, `Delivers:` and `Closes:`.
+`prepare` writes `Work:` into the body it publishes; `merge` writes `Item:`, `Delivers:` and any owed
+`Closes:` (sd:1600) into the squash message. A body keeps `Closes: sd:N[, sd:M]` to co-deliver those
+items; the merge adds `Delivers:` for each (sd:1481). `prepare` strips any other owned line from the
+supplied body and lists it in the result's `normalized`. `Refs:` is not owned; its items stay open.
+Without `--body-file`, `prepare` reads the open pull request's live body; `body_source` names the source.
+`sd-ship body --item <item> [--body-file <file>] [--pr <n>]` prints the body `prepare` would publish
+and runs the body lint on it. A merge made without `sd-ship` writes `Item:` or `Delivers:` by hand.
 
 After the remote confirms the delivering merge, `sd work deliver <row-id>
 <full-commit-sha>` verifies the commit, default branch and delivery trailer. It
@@ -440,12 +376,13 @@ which the installer places in `~/.claude/agents`.
 - **Fan out only when three things hold.** The targets are independent, no
   mutable state is shared, and the results are cheap to verify. Work on the
   same files or the same metadata store stays in one lane, in sequence.
-- **Group rows that change the same files.** Every open row on one file or
-  folder goes to one worker, one branch and one pull request, so one review
-  covers them all. Keep a group near 300 changed lines, and split a larger one
-  by file. Do not group rows across unrelated folders: a wider diff draws more
-  review rounds, not fewer. Name every grouped row in the pull request, and
-  close each one when it merges.
+- **Batch a repository's small items into one pull request.** Its small rows
+  (follow-ups, P3 and P4 fixes, same-area tasks) go to one worker, one branch
+  and one pull request, one commit per row, across folders too; rows that
+  change the same files always group. Each pull request costs a review, a
+  catch-up and a serial gate, and overlapping ones conflict. Keep a group near
+  300 changed lines. Name every grouped row in the pull request, and close
+  each one when it merges.
 - **Iterate on the fast path; gate once before the push.** While fixing, run
   `make check CHANGED="<paths>"`, which runs only the tests those paths need
   plus an always-run set. Before the push, run the full gate once: under
@@ -502,9 +439,8 @@ which the installer places in `~/.claude/agents`.
 - **Gates wait in one queue (sd:2262).** Every waiter takes a place in one
   machine-wide queue, and only the head starts: first to wait, first to
   start, when a slot is free. Two starts are `sd.gate_settle_seconds` apart
-  (unset: 45). The slot count is the one limit (sd:2607): macOS counts threads
-  waiting on the disk in the load average, which read 124 on 2026-10-03 while
-  most cores idled. So do not wait on the load average or wrap a gate in
+  (unset: 45). The slot count is the one limit (sd:2607): macOS counts disk
+  waits in the load average, so it misreads CPU pressure. So do not wait on the load average or wrap a gate in
   `lockf`; the queue already orders every gate. `sd.gate_load_max` still adds
   a load1 condition where a machine sets it (unset: none). While load5 is
   above it, load1 must then stay below it for the settle time.
@@ -580,8 +516,7 @@ which the installer places in `~/.claude/agents`.
   Cargo's `target/` or `node_modules/`, and data whose mode or owner matters
   on the system disk: a bulk volume may be ejected mid-build, and a volume
   mounted `noowners` reports every file as yours. Unset, nothing moves.
-- **Test one version per language, the latest stable (Python 3.14, Node
-  26), in CI and locally; no version matrices.**
+- **Test one version per language, the latest stable (Python 3.14, Node 26); no version matrices.**
 
 | Step | Machine | Command | What it does |
 |---|---|---|---|
@@ -633,7 +568,7 @@ the block; the file is untracked by construction.
 the `Work: sd:<id>` line in `minimal`, as it does in `full`. Only `guest`
 refuses the review routing lane (R10-D5): `minimal` is written by hand and
 never detected, so it names the operator's own quiet repository, and may
-install the lane (operator ruling 2026-09-30, sd:1292).
+install the lane (sd:1292).
 
 Access decides where artifacts go, whichever namespace holds the
 repository. Without a `mode:` line, the pack asks three questions of the
@@ -665,9 +600,7 @@ set the row. `auto` answers it and a merge proceeds; `manual`, no row, or a
 database that cannot be read suspends it with the reason shown. A merge the
 row let through says so on its receipt, naming the repository, the setting and
 who else may push, so an ownership merge and a row-authorized one are not one
-sentence. Without that, the third question refused every co-authored
-repository permanently and the lane ended at `ready_to_send` for a human to
-finish by hand.
+sentence.
 
 ## Providers
 
@@ -677,24 +610,8 @@ Reusable skill procedures name roles; operator policy owns preferred entries.
 Cheap, standard, and deep changes require one completed independent local review.
 Skip requires none; planning and challenged reviews retain their minimum of one.
 Tier selection still follows repository policy, without adding automatic local reviewers.
-Complete local review before any Copilot request.
-The machine's `sd.copilot_review` selects remote review during shipping: `deep` (unset reads `deep`), `always` or `never`.
-A repository's `copilot_review.automatic_deep` overrides `deep` and `always` when the file names the key; a file that does not name it inherits.
-A machine `never` wins over the file (sd:1444).
-Shipping reads that override once, from the latest retained review report that names it, and applies it to the tiers every retained pass recorded.
-`sd-review --explain` names the effective policy and whether the repository, the machine config, or the machine default answered.
-Automatic review runs once per pull request after the local review and acknowledgement step.
-Later pushes still require exact-head local review and CI.
-A completed Copilot review must cover the merge head, or an ancestor of it.
-An ancestor clears only when the diff from it to the merge head touches nothing outside `docs/`.
-Each such path must also be one the repository's policy lets skip: in `docs_skip` and not in `never_skip`.
-`tests/` is inside that surface: a green suite does not say a test still asserts what the reviewer approved.
-The merge receipt carries a warning naming the ancestor whenever one clears the gate.
-Request an explicit later-head review only when the automatic review is stale.
-If that request cannot be recorded, a manual merge can abandon the latest request basis.
-An exact-head receipt replaces the latest prior receipt as that basis.
-Only submitted, non-pending reviews mark matching request heads complete.
-`false` keeps Copilot explicit-only.
+Complete local review before any Copilot request; [Standing authorization](#standing-authorization) holds the policy.
+A completed Copilot review must cover the merge head, or an ancestor whose diff to it touches only skippable `docs/` paths.
 
     bills:
       anthropic: { cost: subscription }
@@ -720,9 +637,7 @@ Only submitted, non-pending reviews mark matching request heads complete.
 
 A capped bill takes `url` entries only, because the library makes those
 calls and can refuse one before it is sent; a `start` entry on a capped
-bill is refused when the file is read. That is why `baseten` is one `url`
-entry and the `prism` and `gito` CLIs are gone: they pointed at the same
-endpoint and added limits of their own.
+bill is refused when the file is read.
 
 Each entry also carries `env`, the list of variables the entry's process
 receives beside `PATH`, `HOME`, `LANG`, `TERM` and `TMPDIR`, `env:
@@ -731,97 +646,15 @@ session inherits the variables its own entry names and no other entry's.
 That is inheritance, not isolation: the session runs as you, in your
 `HOME`, and can read the file the keys live in.
 
-Pins as of 2026-09-05, each read from the vendor's model list on that day:
-`kimi-k3` is Moonshot's current flagship with a one-million-token window;
-`MiniMax-M3` is MiniMax's newest, and it runs on the Token Plan the
-operator has already paid, so the entry's price is zero and the bill
-carries a meter instead: the plan grants use in a five-hour window and a
-weekly window, and `GET /v1/token_plan/remains` on `www.minimax.io`, with
-the same key, answers with `current_interval_remaining_percent` and
-`current_weekly_remaining_percent` for `model_name: general`, probed
-2026-09-05. The bill carries that meter as a URL and the variable holding
-its key as `meter_env`. A review reads it only for an eligible selected or fallback provider: one `GET` to
-that URL, and to no other -- the scheme, host, port and path are pinned in
-`bin/sd_registry.py` and any other value is refused naming the value and
-the four, with nothing sent -- then the two percents written as `meter`
-rows for every enabled entry on the bill, then the newest row per window
-read back. A window at zero, no row at all, or a newest row older than
-five hours puts the bill beside the capped ones, so fallthrough passes it
-over and `--provider` refuses it by name; a `GET` that fails writes nothing,
-names itself in the result's `meter_faults`, and the rows already there
-decide; `--explain` and `--dry-run` send nothing and read the rows alone. A
-`meter:` without a `meter_env:` reads, and caps the bill at that step naming
-the missing field, because a reinstall never rewrites this file in your
-home. The Baseten registry entry pins `deepseek-ai/DeepSeek-V4-Pro-0813`.
-`max_tokens` bounds generated reasoning and the final answer together;
-exhausting it does not establish that the review subject was too large.
-The shipped entries give each reviewer 65536, well under each model's
-documented output ceiling. At 16384, `kimi-k3` spent the whole budget
-reasoning on a 35k-token prompt and sent no answer (sd:1805); K3 always
-thinks, and its effort can only drop to `low`. A stop at the ceiling reads
-`<name> hit max_tokens (N) and it sent no answer`, with the completion
-tokens and reasoning bytes, and `sd-ship` repeats that detail in its
-refusal, one equal share of its bound per failed reviewer, each under its
-name. A `length` stop below the ceiling says the context window may be
-full and names shortening the review input first. An entry with no
-`max_tokens` reads `stopped on length with no max_tokens set`, and names
-setting one (sd:1819). The installer never rewrites the registry in your home, so a
-home copy still at 16384 keeps the old ceiling until you edit it.
-URL entries can declare one optional control: `thinking: disabled|adaptive`
-or `reasoning_effort: none|low|high|max`. The client sends `thinking` as
-`{"type": "disabled"}` or `{"type": "adaptive"}`, and effort as a top-level
-string. Both registry readers validate and preserve these fields; omission
-retains the endpoint default. These values require support from the selected
-model: MiniMax-M3 supports disabled thinking, and Baseten's DeepSeek-V4-Pro-0813
-supports effort `none`. Lower reasoning can change finding quality; full
-subject coverage and the required reviewer count remain mandatory.
-A URL entry can also declare `response_format: json_schema`. `sd-review`
-then sends the findings schema as a strict `response_format`, in the copy
-Moonshot's strict mode takes: every property typed, `line` as `anyOf`
-integer or null, and no `minLength` or `maxItems`. The answer is still parsed
-against the full schema. Only an entry that declares the field sends it; an
-endpoint that accepts it may ignore it, as MiniMax-M3 does (sd:1827).
-The shipped `kimi` entry declares it, and no other entry does. A home copy
-seeded before that keeps its own entry; add the line there by hand.
-Incomplete output still fails the review. A pin is changed by editing the
-registry file, never by a page.
-A `url` answer that fails the findings schema is retried once on the same
-entry only when its `price` names both `in` and `out` as zero, so a retry
-never doubles a bill; the failed attempt stays in the outcomes with any
-blocker it recovered. A priced entry falls through to the next reviewer as
-before. Temperature is not a registry field: `kimi-k3` refuses any value but
-1, and MiniMax-M3 at 0.2 broke the schema as often as at its default (sd:1821).
+Model pins, meters, token ceilings, reasoning controls and `response_format`: [docs/providers.md](docs/providers.md).
+Change a pin by editing the registry file, never by a page.
+A `url` answer that fails the findings schema retries once on the same entry only when its `price` is zero in and out;
+a priced entry falls through to the next reviewer.
 
 Adding a provider is an entry; adding money is a bill. Both role lines are
 read in order. `author` is picked when an assignment starts and never switched
-mid-item; outside the runner, `--author` names it to
-`sd-ship`, which stamps it on each commit it makes as `Authored-with:
-<name>/<vendor>`, the vendor as the registry gave it at commit time.
-`SD_AUTHOR=<name>` names it to the pack's `commit-msg` hook, which writes the
-same line on a commit whose message states none (sd:1295); a name nothing
-resolves refuses the commit, and `sd attribute` never amends. `make hooks`
-arms the pack's own clone, and `sd commit-hook` arms any other (sd:2546). Its own
-repair commit says `SD_AUTHOR`'s entry too, else `claude` under `CLAUDECODE=1`
-while the registry gives `claude` the vendor `anthropic` (another vendor
-refuses and asks for `SD_AUTHOR`), else `human` (sd:2009, sd:2689). Both
-places take `<name>/<vendor>` as well when the registry gives `<name>` that
-vendor. `human` is a
-commit a person wrote; `script` is one a deterministic job wrote, with no
-model and no person in the loop (sd:1637). Both are reserved and carry no
-vendor, so any provider may review them. The
-review reads no declaration: every commit in the reviewed range is attributed
-by its own trailer, or by an `Attributes: <sha> <name>/<vendor>` trailer on a
-later commit in the range that `sd attribute` makes, and a commit with neither
-refuses the review by name rather than being guessed. A Dependabot commit is
-the one exception: its author `dependabot[bot]` with that account's noreply
-address, and its committer `GitHub <noreply@github.com>`, read as
-`dependabot/github`, a reserved value like `human` and no registry entry.
-The pair is a claim, as a trailer is, and a local rewrite names another
-committer, so the commit says nothing again until `sd attribute <sha>
-dependabot` records it. `sd-ship merge` carries
-into the squash each `Attributes:` line that names a commit the base already
-holds, so a repair of landed history survives the merge. `reviewer` is the first entry that is enabled, is of no vendor the
-range's trailers carry, is on no bill at its cap this month, and answers
+mid-item. `reviewer` is the first entry that is enabled, is of no vendor that
+authored the change, is on no bill at its cap this month, and answers
 its preflight (the cap check is below). A rate limit,
 a missing binary, a failed run or a timeout falls through to the next, and the
 run says which one reviewed and why the earlier ones did not. With none left,
@@ -830,9 +663,6 @@ Only entries on the reviewer order participate in automatic fallback.
 Enabled reviewer-capable entries outside that order require an explicit `--provider` selection.
 With a database, the order in force is its rows: `sd providers configure` sets it, `sd providers list` shows it, and `sd-review --explain` names it on its `order from` line; the file's `roles:` lists only seed those rows. The shipped seed contains Codex, then Claude, then opencode; other providers remain explicit-only until an order names them.
 Existing provider files and database orders remain unchanged until the operator migrates them.
-`sd providers precision` reads every ship receipt and its adjudications and reports each reviewer's findings by outcome and severity.
-Its outcomes are fixed, parked, rebutted, undecided and advisory; precision is (fixed + parked) / (fixed + parked + rebutted).
-It reads only; the order stays the operator's choice (`source:bin/sd_review_precision.py::finding_outcomes` defines each outcome).
 The chain continues until the required count completes or eligible entries run out. A completed
 review with findings counts; it does not trigger a replacement. Consent, author
 exclusions and spending limits apply to every fallback, and earlier findings remain.
@@ -881,21 +711,18 @@ reviewer chain before vendor, transport, availability and spending gates run.
 
 Core settings use `sd config get|set|unset|list` and the existing atomic machine configuration writer.
 The file is `~/.config/sd-ai-command-pack/config.json`, honoring `XDG_CONFIG_HOME`.
-The reserved `sd` namespace declares four settings:
+Merge permission is one setting, `repo.runner_merge`: a column on the repository row in the workflow database, not an `sd` key.
+Set it with `sd-db.sh repo runner-merge <path> auto|manual`; `sd-db.sh repo list` shows it as each row's last field.
+`auto` lets the runner and the assistant merge active, in-scope work without asking, only through `sd-ship prepare` then `sd-ship merge`.
+No value permits a merge that skips the review lane, such as a raw `gh pr merge` or a web squash; a refusal from `sd-ship` is a stop.
+`manual`, no row, or an unreadable database means ask the operator first. An explicit instruction to wait wins.
+`sd.assistant_merge` is retired: `repo.runner_merge` is the assistant's setting too.
+
+The reserved `sd` namespace declares these settings:
 
 - `sd.external_reviews`: `configured` permits private code and scoped review context to eligible configured providers.
   It includes future registry entries; registry configuration chooses capability, while this explicit operator grant authorizes transmission.
   `deny` vetoes all local allowances. Absence supplies no standing grant.
-- `sd.assistant_merge`: `controlled` means merge without asking the operator, for active, in-scope PR work in repositories the user controls.
-  The merge goes only through `sd-ship prepare` then `sd-ship merge`; the review lane and required CI are part of those gates.
-  `controlled` never permits a merge that skips the review lane, such as a raw `gh pr merge` or a web squash.
-  A refusal from `sd-ship` is a stop, not a reason to merge another way.
-  When the value is `controlled` and the gates pass, merge; asking the operator "may I merge?" is wrong.
-  An explicit instruction to wait wins. `ask`, or absence, means ask the operator first.
-  `sd config` validates and stores the value; the assistant reads it, and `sd-ship` does not.
-  It was `sd.merge_authorization` until 1.1.0, which still reads that name; 1.2.0 stops.
-  It is the assistant's grant, where `repo.runner_merge` in the one database is the runner's.
-  Shared contributors do not revoke permission, but the current sole-operator ownership gate may still refuse execution.
 - `sd.copilot_review`: when `sd-ship` requests a Copilot review by itself. `deep` requests one on deep-tier changes only,
   `always` on every reviewing tier, `never` on none. Absence reads `deep`, so a repository with no
   `.github/sd-review.json` gets Copilot on deep changes and on nothing else.
@@ -922,14 +749,13 @@ The reserved `sd` namespace declares four settings:
   Absence reads `$XDG_STATE_HOME/sd/lanes`. `SD_LANE_ROOT` overrides it. It grants nothing.
 - `sd.bulk_storage_root`: the folder for large uncommitted data, as `<root>/<repository>/`; see
   [Parallel work](#parallel-work). Absence is no bulk root. It grants nothing.
-- `sd.privacy_patterns`: the privacy-pattern file `sd changelog render` checks every entry against, one
+- `sd.privacy_patterns`: the privacy-pattern file `sd-docs-lint --pr-body` checks a pull request body against, one
   extended regular expression per line. Absence reads `privacy-patterns` in `$SYSTEM_TOOLS_CONFIG`, else in
-  `${XDG_CONFIG_HOME:-~/.config}/system`. No file refuses the render. It grants nothing.
+  `${XDG_CONFIG_HOME:-~/.config}/system`. No file skips the check with a note. It grants nothing.
 
-Installation supplies neither grant. A new operator must state their own policy; never copy another user's personal permission.
+Installation supplies no grant. A new operator must state their own policy; never copy another user's personal permission.
 These settings start no background work, enable no runner policy, and bypass no ownership, review, CI, or protection gate.
 Review depth, author exclusions, spending limits, and the review table's automatic pass caps remain unchanged.
-The additional-review request still needs its separate explicit authorization when the automatic cap is spent.
 The upstream pull-request exception in `AGENTS.md` still requires permission for that specific PR.
 
 Review resolution is ordered: machine deny; present local restriction; configured standing policy; otherwise refusal.

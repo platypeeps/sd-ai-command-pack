@@ -19,22 +19,13 @@ Before expensive checks or external transmission, inspect `sd-review --explain -
 Check the complete fallback chain, required review count, authorship exclusions, and effective authorization.
 Stop if the plan includes an unrequested provider from outside the order.
 One completed independent local review satisfies each reviewing tier; risk classification does not add reviewers.
-Complete local review and fix verification before requesting any Copilot review.
-Copilot is an optional second review.
-Repository policy may request it automatically for the configured `deep` tier.
-Otherwise, request it only after explicit task direction.
-Do not repeat an automatic request after a later push.
-Honor repository restrictions on remote reviewer requests.
+Complete local review and fix verification before any Copilot request.
+`sd.copilot_review` decides automatic requests; otherwise request one only when the operator names the pull request.
 An unavailable local reviewer needs an operator decision, not an automatic remote escalation.
 
 The pack's consent and the agent runtime's execution approval are separate boundaries.
 Name the rejecting boundary and exact intended recipient when approval is missing.
 Do not request blanket approval for unused fallbacks or weaken the runtime's protections.
-
-## Writing and diagrams
-
-Writing style and diagram tooling come from each agent's global instructions.
-This file does not restate them.
 
 ## Reports
 
