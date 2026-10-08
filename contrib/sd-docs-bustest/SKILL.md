@@ -23,10 +23,9 @@ is about to become someone's only guide (onboarding, runbook, handoff,
 release procedure), or when the user asks whether docs are good enough
 for a newcomer.
 
-Do not use for prose style or tone — that is `sd-prose-lint`. Do not use for pre-merge scope and coherence probes over
-the surrounding change — that is `sd-gate-probes`, which routes
-checked-in docs changes here. The review verdict on a docs-touching pull
-request stays with the sd-review lane.
+Do not use for prose style or tone — that is `sd-prose-lint`. Do not use for pre-merge scope and coherence checks over
+the surrounding change — that is `sd-review`. The review verdict on a
+docs-touching pull request stays with the sd-review lane.
 
 ## Arguments
 
