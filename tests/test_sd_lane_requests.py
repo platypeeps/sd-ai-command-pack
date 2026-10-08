@@ -305,7 +305,7 @@ class PackDigest(Requests):
         return receipts.read(self.connection, sd_lane_receipts().PACK_PREFIX + SLUG)[1]
 
     def test_a_run_publishes_the_hubs_pack_digest_at_its_start(self) -> None:
-        with mock.patch.object(sd_lane_receipts(), "pack_bin", lambda own=False, closure=False: "tree" if own else "f" * 64):
+        with mock.patch.object(sd_lane_receipts(), "pack_bin", lambda own=False: "tree" if own else "f" * 64):
             answer = sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate, hub=self.hub)
         self.assertEqual(answer["pack"], "published")
         row = self.pack_row()
@@ -316,15 +316,6 @@ class PackDigest(Requests):
         with mock.patch.object(sd_lane_receipts(), "gates_itself", lambda root, tree, pack: True):
             answer = sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate, hub=self.hub)
         self.assertEqual((answer["pack"], self.pack_row()["pack_bin"]), ("published", "tree"))
-
-    def test_a_run_publishes_the_digest_under_each_scope(self) -> None:
-        """sd:2823: a satellite compares under its head's scope, which the hub's main need not share."""
-        digest = lambda own=False, closure=False: ("c" if closure else "e") * 64  # noqa: E731
-        with mock.patch.object(sd_lane_receipts(), "pack_bin", digest):
-            sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate, hub=self.hub)
-        row = self.pack_row()
-        # The fixture's main declares no `"pack": "sd-check"`, so its own digest is every file's.
-        self.assertEqual((row["pack_bins"], row["pack_bin"]), ({"every": "e" * 64, "closure": "c" * 64}, "e" * 64))
 
     def test_a_failed_digest_publishes_nothing_and_the_run_goes_on(self) -> None:
         with mock.patch.object(sd_lane_receipts(), "pack_bin", mock.Mock(side_effect=OSError("bin/ unreadable"))):
