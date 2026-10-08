@@ -32,7 +32,7 @@ dir counts as a gate's: a checkout elsewhere with a like name is never touched.
 A live gate's worktree stays; so does a folder from before this rule. The
 dead gate's whole folder goes with its worktree, the check's `TMPDIR` included (sd:3032).
 The same start removes what a run outside the gate left in the temp dir (`reap_temporary`): an sd folder whose
-named pid is gone, or a named leaker's entry a day old. Generic `tempfile` names stay; macOS purges them.
+named pid is gone. Nothing goes by age, so every other entry stays; macOS purges those.
 """
 
 from __future__ import annotations
@@ -40,14 +40,12 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import hashlib
-import math
 import os
 import pathlib
 import re
 import shutil
 import sys
 import tempfile
-import time
 from typing import Iterator, Mapping, TextIO
 
 import sd_lib
@@ -74,13 +72,6 @@ GATE_FOLDER = re.compile(r"sd-local-gate-([0-9]{1,9})-[a-z0-9_]+")
 TEMPORARY = "tmp.noindex"
 #: An sd folder that names its owner's pid: a gate's, or a test run's (`tests/__init__.py`); it goes once the pid is gone.
 OWNED = re.compile(r"(?:sd-local-gate|sd-tests)-([0-9]{1,9})-[a-z0-9_]+")
-#: The named leakers the item measured (sd:3032); they name no pid, so their age decides. Generic `tempfile` names
-#: are every app's, so their age proves nothing; macOS purges temp entries left unread for three days.
-LEFT_BEHIND = re.compile(r"(sd-restore|traces-poc|trail-audit-|sd-ship-template|sd-ship-verify).*")
-# ponytail: a day is a guess at the longest any run keeps its temp folder; shorten it once runs are measured.
-LEFT_BEHIND_SECONDS = 24 * 3600
-#: How many paths the age walk reads in one entry; past it the entry counts as young and stays.
-LEFT_BEHIND_WALK = 10_000
 
 
 def running(pid: int) -> bool:
@@ -94,13 +85,12 @@ def running(pid: int) -> bool:
     return True
 
 
-def reap_temporary(temporary: pathlib.Path, now: float | None = None) -> int:
-    """Remove the user's entries directly in `temporary` that are `OWNED` by a dead pid, or `LEFT_BEHIND` and a day
-    old by mtime; how many went.
+def reap_temporary(temporary: pathlib.Path) -> int:
+    """Remove the user's entries directly in `temporary` that are `OWNED` by a dead pid; how many went.
 
-    A dead gate's folder counts too: its worktree was another repository's, so `worktree_prefix` never saw it.
+    Age proves nothing: a live process or the operator may still read an old entry (sd:3032 review). A dead gate's
+    folder counts too: its worktree was another repository's, so `worktree_prefix` never saw it.
     """
-    now = time.time() if now is None else now
     try:
         entries = list(os.scandir(temporary))
     except OSError:
@@ -108,13 +98,13 @@ def reap_temporary(temporary: pathlib.Path, now: float | None = None) -> int:
     removed = 0
     for entry in entries:
         owned = OWNED.fullmatch(entry.name)
-        if owned and running(int(owned[1])) or not owned and not LEFT_BEHIND.fullmatch(entry.name):
+        if not owned or running(int(owned[1])):
             continue
         try:
             status = entry.stat(follow_symlinks=False)
         except OSError:
             continue
-        if status.st_uid != os.getuid() or not owned and now - newest_mtime(entry, status) < LEFT_BEHIND_SECONDS:
+        if status.st_uid != os.getuid():
             continue
         if entry.is_dir(follow_symlinks=False):
             shutil.rmtree(entry.path, ignore_errors=True)
@@ -123,32 +113,6 @@ def reap_temporary(temporary: pathlib.Path, now: float | None = None) -> int:
                 os.unlink(entry.path)
         removed += not os.path.lexists(entry.path)
     return removed
-
-
-def newest_mtime(entry: os.DirEntry, status: os.stat_result) -> float:
-    """The newest mtime anywhere in `entry`, links not followed; `inf` past `LEFT_BEHIND_WALK` paths or on an error.
-
-    A folder's own mtime moves only when an entry directly in it is added or removed, so a run still writing deep
-    inside a folder made a day ago would otherwise read as a day old.
-    """
-    newest = status.st_mtime
-    if not entry.is_dir(follow_symlinks=False):
-        return newest
-    seen = 0
-    try:
-        for folder, folders, files in os.walk(entry.path, onerror=raise_error):
-            for name in (*folders, *files):
-                seen += 1
-                if seen > LEFT_BEHIND_WALK:
-                    return math.inf
-                newest = max(newest, os.lstat(os.path.join(folder, name)).st_mtime)
-    except OSError:
-        return math.inf
-    return newest
-
-
-def raise_error(error: OSError) -> None:
-    raise error
 
 
 def worktree_prefix(root: pathlib.Path) -> str:
