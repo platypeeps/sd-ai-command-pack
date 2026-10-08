@@ -63,7 +63,7 @@
 - **`sd fleet stamp` lays a Claude Code settings baseline per repository class (sd:1661).**
   The baseline is `permissions.deny` rules that stop Claude Code's file tools reading secret files: `.env` variants, `secrets/`, private keys, `.netrc`, `.pypirc`, `~/.ssh`, AWS credentials and the `gh` token file.
   An owned or co-owned repository carries it in a tracked `.claude/settings.json`; a guest one gets the untracked `.claude/settings.local.json` in its plan.
-  Each rule is anchored at the project root or at home, so a session started in a subdirectory is covered too.
+  Each rule is anchored at the filesystem root or at home, so a session started in a subdirectory is covered too (sd:2982 moved the file-name rules from the project root).
   The stamp adds missing rules, removes none, leaves a complete file byte for byte, and refuses a file that does not read or decode.
   `.github/sd-fleet.json` may exempt either path. Nothing restamps the fleet: run `sd fleet stamp --dry-run`, then the write per repository.
 
@@ -560,6 +560,13 @@
   registry that sets it.
 
 ### Fixed
+
+- **`sd fleet stamp`'s secret-read rules cover files outside the project (sd:2982).**
+  The 16 file-name rules in `SECRET_READ_DENY` read `Read(/**/<name>)`, and Claude Code anchors a single leading `/` at the project.
+  So `Read(/**/.netrc)` never matched `~/.netrc`, and no rule matched a `.env` in a config folder outside the checkout.
+  Each now reads `Read(//**/<name>)`, anchored at the filesystem root, which holds the project too; the three `~/` rules stay.
+  A settings file stamped before this reads as drifted: the stamp rewrites each old rule to its replacement in place and keeps every other rule.
+  Nothing restamps the fleet: run `sd fleet stamp --dry-run`, then the write per repository.
 
 - **An opted-in gate finds the bound cargo subcommands again (sd:2921).**
   `offload_pins` set `CARGO_HOME` to the gate's cache folder, and cargo looks for subcommands in `$CARGO_HOME/bin`.

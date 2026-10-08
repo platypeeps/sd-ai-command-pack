@@ -113,32 +113,39 @@ EXEMPTABLE = (ROUTE_PATH, DEPENDABOT_PATH, CHECK_PATH, STATUS_PATH, GITIGNORE_PA
 #: must not make, in every repository class. Deny rules only, so the file
 #: grants nothing a collaborator's session did not already have. Named files
 #: rather than `.env.*`, because a committed `.env.example` is documentation an
-#: agent has to read. Each rule is anchored: `/` at the project, `~/` at home.
-#: A bare `**/` binds at the session's current directory, so a session started
-#: in a subdirectory could still read the root `.env`. The rules bind Claude
-#: Code's file tools; a shell command can still read the file, which the
-#: operator's sandbox settles.
+#: agent has to read. Each rule is anchored: `//` at the filesystem root, so a
+#: file-name rule covers the project and every file outside it (`~/.netrc`, a
+#: config folder's `.env`), and `~/` at home. A bare `**/` binds at the
+#: session's current directory, and a single `/` at the project (sd:2982), so
+#: neither reaches a secret outside the checkout. The rules bind Claude Code's
+#: file tools; a shell command can still read the file, which the operator's
+#: sandbox settles.
 SECRET_READ_DENY = (
-    "Read(/**/.env)",
-    "Read(/**/.env.local)",
-    "Read(/**/.env.*.local)",
-    "Read(/**/.env.development)",
-    "Read(/**/.env.staging)",
-    "Read(/**/.env.production)",
-    "Read(/**/secrets/**)",
-    "Read(/**/*.key)",
-    "Read(/**/*-key.pem)",
-    "Read(/**/*.p12)",
-    "Read(/**/*.pfx)",
-    "Read(/**/id_rsa)",
-    "Read(/**/id_ecdsa)",
-    "Read(/**/id_ed25519)",
-    "Read(/**/.netrc)",
-    "Read(/**/.pypirc)",
+    "Read(//**/.env)",
+    "Read(//**/.env.local)",
+    "Read(//**/.env.*.local)",
+    "Read(//**/.env.development)",
+    "Read(//**/.env.staging)",
+    "Read(//**/.env.production)",
+    "Read(//**/secrets/**)",
+    "Read(//**/*.key)",
+    "Read(//**/*-key.pem)",
+    "Read(//**/*.p12)",
+    "Read(//**/*.pfx)",
+    "Read(//**/id_rsa)",
+    "Read(//**/id_ecdsa)",
+    "Read(//**/id_ed25519)",
+    "Read(//**/.netrc)",
+    "Read(//**/.pypirc)",
     "Read(~/.ssh/**)",
     "Read(~/.aws/credentials)",
     "Read(~/.config/gh/hosts.yml)",
 )
+#: Each project-anchored rule the stamp laid before sd:2982, mapped to the rule
+#: that replaced it. The stamp rewrites one in place, so a repository stamped
+#: before then reads as drifted and its file keeps no rule that misses `~/.netrc`.
+RETIRED_READ_DENY = {rule.replace("Read(//", "Read(/", 1): rule
+                     for rule in SECRET_READ_DENY if rule.startswith("Read(//")}
 DASHBOARD_IGNORES = frozenset({
     "docs/dashboard", "docs/dashboard/", "/docs/dashboard", "/docs/dashboard/",
     "docs/dashboard/*", "/docs/dashboard/*",
@@ -477,8 +484,10 @@ def status_text(current: str | None) -> str:
 def settings_text(current: str | None) -> str:
     """Claude Code settings with every `SECRET_READ_DENY` rule in `permissions.deny`.
 
-    Additive only: every other key and rule stays, and a file that already
-    carries every rule comes back byte for byte. Raises ValueError on a file
+    Additive only: every other key and rule stays, except that a
+    `RETIRED_READ_DENY` rule becomes its replacement in place and a second
+    copy of a baseline rule goes. A file that already carries every rule once
+    and no retired one comes back byte for byte. Raises ValueError on a file
     that is not a settings object.
     """
     data = {} if current is None else json.loads(current)
@@ -487,10 +496,16 @@ def settings_text(current: str | None) -> str:
     permissions = data.setdefault("permissions", {})
     if not isinstance(permissions, dict) or not isinstance(permissions.setdefault("deny", []), list):
         raise ValueError("permissions.deny is not a list")
-    missing = [rule for rule in SECRET_READ_DENY if rule not in permissions["deny"]]
-    if current is not None and not missing:
+    deny = permissions["deny"]
+    kept: list = []
+    for rule in deny:
+        rule = RETIRED_READ_DENY.get(rule, rule) if isinstance(rule, str) else rule
+        if rule not in kept or rule not in SECRET_READ_DENY:
+            kept.append(rule)
+    missing = [rule for rule in SECRET_READ_DENY if rule not in kept]
+    if current is not None and kept == deny and not missing:
         return current
-    permissions["deny"].extend(missing)
+    permissions["deny"] = kept + missing
     return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
