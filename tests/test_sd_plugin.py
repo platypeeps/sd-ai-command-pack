@@ -1107,8 +1107,7 @@ class SharedPrefixTests(PluginFixture):
 class CorePolicyConfigTests(PluginFixture):
     def test_core_policy_round_trips_without_a_plugin_and_preserves_unrelated_settings(self):
         self.write_config({"plugins": [], "config": {"pp": {"kept": "value"}}})
-        for key, value in (("external_reviews", "configured"), ("assistant_merge", "controlled"),
-                           ("copilot_review", "never")):
+        for key, value in (("external_reviews", "configured"), ("copilot_review", "never")):
             with self.subTest(key=key):
                 result = self.run_sd("config", "set", "sd." + key, value)
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -1120,43 +1119,19 @@ class CorePolicyConfigTests(PluginFixture):
         self.assertEqual(self.run_sd("config", "unset", "sd.external_reviews").returncode, 0)
         self.assertNotIn("external_reviews", self.config()["config"]["sd"])
 
-    def test_a_config_written_before_the_rename_still_answers_under_the_new_name(self):
-        """The rename must not orphan a grant a machine already recorded.
-
-        `sd.merge_authorization` was the name until 1.1.0. A machine holding
-        it reads through to `sd.assistant_merge` rather than being told the
-        setting is unset, which would have read as a revoked grant.
-        """
+    def test_the_retired_merge_keys_are_declared_by_nobody(self):
+        """sd:3014: `repo.runner_merge` is the one merge setting; the old pair reads nothing."""
         self.write_config({"plugins": [], "config": {"sd": {"merge_authorization": "controlled"}}})
-        result = self.run_sd("config", "get", "sd.assistant_merge")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), "controlled")
-        listing = json.loads(self.run_sd("config", "list", "sd", "--json").stdout)
-        self.assertEqual(listing["assistant_merge"]["value"], "controlled")
-
-    def test_the_old_name_is_declared_by_nobody_and_writing_clears_it(self):
-        """The alias reads; it does not become a second place to store a value.
-
-        A file left holding both names could answer differently depending on
-        which reader asked, so the write that lands the new name takes the old
-        one out, and `unset` removes both.
-        """
-        self.write_config({"plugins": [], "config": {"sd": {"merge_authorization": "controlled"}}})
-        self.assertNotEqual(self.run_sd("config", "set", "sd.merge_authorization", "ask").returncode, 0)
-        result = self.run_sd("config", "set", "sd.assistant_merge", "ask")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("controlled -> ask", result.stdout)
-        self.assertEqual(self.config()["config"]["sd"], {"assistant_merge": "ask"})
-
-    def test_unset_removes_the_pre_rename_name_too(self):
-        self.write_config({"plugins": [], "config": {"sd": {"merge_authorization": "controlled"}}})
-        self.assertEqual(self.run_sd("config", "unset", "sd.assistant_merge").returncode, 0)
-        self.assertNotIn("sd", self.config().get("config", {}))
-        self.assertNotEqual(self.run_sd("config", "get", "sd.assistant_merge").returncode, 0)
+        for key in ("assistant_merge", "merge_authorization"):
+            with self.subTest(key=key):
+                self.assertNotEqual(self.run_sd("config", "set", "sd." + key, "controlled").returncode, 0)
+                self.assertNotEqual(self.run_sd("config", "get", "sd." + key).returncode, 0)
+        self.assertNotIn("assistant_merge", json.loads(self.run_sd("config", "list", "sd", "--json").stdout))
+        self.assertIn("not declared by sd any more: merge_authorization", self.run_sd("config", "list", "sd").stdout)
 
     def test_new_user_has_no_grant_and_invalid_policy_writes_nothing(self):
         self.assertNotEqual(self.run_sd("config", "get", "sd.external_reviews").returncode, 0)
-        for key, value in (("external_reviews", "true"), ("assistant_merge", "all"), ("copilot_review", "sometimes"),
+        for key, value in (("external_reviews", "true"), ("copilot_review", "sometimes"),
                            ("typo", "configured")):
             with self.subTest(key=key):
                 self.assertNotEqual(self.run_sd("config", "set", "sd." + key, value).returncode, 0)
