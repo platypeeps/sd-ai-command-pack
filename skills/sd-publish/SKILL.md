@@ -22,7 +22,8 @@ document for it.
 ## When to use
 
 Use when the source meaning is settled and the user wants a Slack message or
-canvas, Notion page, internal memo, announcement, briefing, or YouTube outline.
+canvas, Notion page, internal memo, announcement, briefing, YouTube outline, or a
+short personal-blog version of a published article.
 The output is a destination-specific draft, adaptation ledger, safety review,
 preview, and connector-ready handoff.
 
@@ -38,7 +39,7 @@ identify them before reading sources, profile content, or workspace artifacts.
 
 - `input=` — approved source artifact or bounded approved source set;
 - `audience=` — intended readers and their assumed context;
-- `destination=slack-message|slack-canvas|notion-page|memo|announcement|briefing|youtube-outline`;
+- `destination=slack-message|slack-canvas|notion-page|memo|announcement|briefing|youtube-outline|blog-short`;
 - `objective=` — what the destination draft should enable;
 - `tone=` — explicit voice guidance; never invent a personal or corporate voice;
 - `constraints=` — length, required sections, links, confidentiality,
@@ -85,7 +86,19 @@ identify them before reading sources, profile content, or workspace artifacts.
    - **Briefing** — purpose, key points, evidence, risks, questions, and next
      discussion or decision; and
    - **YouTube outline** — audience promise, ordered segments, source-backed
-     claims, demonstration or visual suggestions labeled by status, and close.
+     claims, demonstration or visual suggestions labeled by status, and close; and
+   - **Blog short** — a standalone piece about a third of the length of an
+     article already live at a canonical URL, for a personal blog that cannot
+     set a canonical URL (Substack, for one). A full copy there competes with
+     the original in search. Carry the hook and central claim in the author's
+     first-person voice, the one sharpest piece of evidence, and the personal
+     read the original does not say. Link the original prominently in the
+     body, not only at the end. It is never the full text with a link, a
+     truncation, or a summary that gives the conclusion away. It needs the
+     live original URL first: never use a placeholder link. It carries no
+     attached tip. Run `sd-humanizer` and `no-ai-slop` over it, since no gate
+     has read this new prose. In a writing content repository, save it as
+     `content/<year>/<slug>/publish/substack.md`.
 6. Draft against one content budget. Preserve source meaning, contradictory
    evidence, confidence, citations, limitations, and required calls to action.
    Channel convention is subordinate to evidence and accessibility; evidence

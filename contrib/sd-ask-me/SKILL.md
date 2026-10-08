@@ -126,6 +126,18 @@ would materially change the result. Otherwise state assumptions and proceed.
    not send, publish, schedule, purchase, decide, commit, update the profile, or
    modify any external system.
 
+## Writing profiles
+
+In a writing content repository, `profile=auto` may resolve to its two
+author profiles: `profile/brand-voice/VOICE.md` (how the author sounds) and
+`profile/personality-profile/PROFILE.md` (positions, boundaries, hard nos).
+Read both in full. A missing file, `status: seeded`, or a long
+`## Gaps / open questions` list means a low-confidence answer: say so first.
+A question the profile marks as needing the author's own authority gets no
+simulated answer; suggest asking the author, or `sd-profile` interview mode.
+Label every answer as simulated, never as something the author said, and
+never use it as a source in `research.md` or as sign-off.
+
 ## Safety rules
 
 - This skill is read-only. Only `sd-profile` may create, correct, review,
