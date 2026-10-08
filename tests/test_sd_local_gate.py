@@ -1103,6 +1103,106 @@ class GateTemporaryFolder(Repository):
         self.assertEqual(sorted(path.name for path in outer.iterdir()), [])
 
 
+class TemporaryLeftovers(unittest.TestCase):
+    """sd:3032: a gate start removes the sd folders of dead processes from the temp dir, and nothing else."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.temporary = pathlib.Path(tmp.name).resolve() / "T"
+        self.temporary.mkdir()
+        self.now = time.time()
+
+    def entry(self, name: str, *, age: float = 2 * 86400, folder: bool = True) -> pathlib.Path:
+        path = self.temporary / name
+        if folder:
+            path.mkdir()
+            (path / "sd.db").write_text("x", encoding="utf-8")
+            os.utime(path / "sd.db", (self.now - age, self.now - age))
+        else:
+            path.write_text("x", encoding="utf-8")
+        os.utime(path, (self.now - age, self.now - age))
+        return path
+
+    def dead(self) -> int:
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        return gone.pid
+
+    def test_nothing_goes_by_age(self) -> None:
+        """Review round 2: an old entry may still be a live process's or the operator's input, so no name and no age
+        removes it; the named leakers get fixed where they are made."""
+        kept = [self.entry(f"{prefix}x7", age=30 * 86400) for prefix in ("sd-restore", "traces-poc", "trail-audit-",
+                                                                         "sd-ship-template", "sd-ship-verify")]
+        kept += [self.entry("tmpab_d1234", age=30 * 86400), self.entry("tmp.AbCdEfGh12", age=30 * 86400),
+                 self.entry("tmpx_1w8w2y.yaml", age=30 * 86400, folder=False), self.entry("sd-tests-x7", age=30 * 86400),
+                 self.entry("keep-me", age=30 * 86400)]
+        self.assertEqual(sd_gate_cache.reap_temporary(self.temporary), 0)
+        self.assertEqual([path.exists() for path in kept], [True] * len(kept))
+
+    def test_a_pid_named_entry_goes_only_when_its_pid_is_dead_whatever_its_age(self) -> None:
+        """Review round 1: a gate's or a test run's folder names its pid; a live one stays however old, a dead one goes."""
+        live = [self.entry(f"{prefix}{os.getpid()}-abc", age=30 * 86400) for prefix in (sd_gate_cache.GATE_PREFIX, "sd-tests-")]
+        gone = [self.entry(f"{prefix}{self.dead()}-abc", age=60) for prefix in (sd_gate_cache.GATE_PREFIX, "sd-tests-")]
+        self.assertEqual(sd_gate_cache.reap_temporary(self.temporary), len(gone))
+        self.assertEqual(([path.exists() for path in live], [path.exists() for path in gone]), ([True, True], [False, False]))
+
+    def test_the_test_package_names_its_temp_dir_with_its_pid(self) -> None:
+        self.assertRegex(pathlib.Path(os.environ["TMPDIR"]).name, rf"sd-tests-{os.getpid()}-[a-z0-9_]+")
+
+    def test_a_link_goes_and_its_target_stays(self) -> None:
+        target = self.entry("keep-me")
+        link = self.temporary / f"sd-tests-{self.dead()}-zz"
+        link.symlink_to(target)
+        self.assertEqual(sd_gate_cache.reap_temporary(self.temporary), 1)
+        self.assertEqual((os.path.lexists(link), (target / "sd.db").is_file()), (False, True))
+
+    def test_a_removal_that_fails_is_not_counted(self) -> None:
+        path = self.entry(f"sd-tests-{self.dead()}-x7")
+        with mock.patch.object(shutil, "rmtree"):
+            self.assertEqual(sd_gate_cache.reap_temporary(self.temporary), 0)
+        self.assertTrue(path.exists())
+
+    def test_another_users_entry_stays(self) -> None:
+        path = self.entry(f"sd-tests-{self.dead()}-x7")
+        with mock.patch.object(os, "getuid", return_value=os.getuid() + 1):
+            self.assertEqual(sd_gate_cache.reap_temporary(self.temporary), 0)
+        self.assertTrue(path.exists())
+
+    def test_a_gate_start_reaps_its_temp_dir(self) -> None:
+        old = self.entry(f"sd-tests-{self.dead()}-x7")
+        with mock.patch.object(tempfile, "tempdir", str(self.temporary)), \
+                contextlib.redirect_stderr(io.StringIO()) as errors:
+            sd_gate_cache.worktree_prefix(pathlib.Path(self.temporary))
+        self.assertFalse(old.exists())
+        self.assertIn("removed 1 temp entries", errors.getvalue())
+
+
+class OuterTemporaryUntouched(unittest.TestCase):
+    """sd:3032: a test's gate start reaps the test run's own temp dir, never the one the run was started with.
+
+    The reaper's line on stderr broke `test_rule_registry` leg d: it landed inside a child's `... ok` line, so the
+    control read as no verdict. And a suite run outside the gate reaped the operator's real `$TMPDIR`.
+    """
+
+    def test_a_gate_start_under_the_test_package_leaves_the_outer_temp_dir_alone(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        outer = pathlib.Path(tmp.name).resolve() / "T"
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        leftover = f"sd-tests-{gone.pid}-x7"
+        (outer / leftover).mkdir(parents=True)
+        repo = pathlib.Path(tmp.name) / "repo"
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        code = ("import sys, pathlib; sys.path.insert(0, 'bin'); import tests, sd_gate_cache; "
+                f"sd_gate_cache.worktree_prefix(pathlib.Path({str(repo)!r}))")
+        done = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, capture_output=True, text=True,
+                              env={**os.environ, "TMPDIR": str(outer)}, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual((sorted(p.name for p in outer.iterdir() if p.name == leftover), done.stderr), ([leftover], ""))
+
+
 class StaleGateWorktrees(Repository):
     """sd:2739: a killed gate skips its `finally`; the next gate start removes its worktree, never a live one's."""
 
