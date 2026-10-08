@@ -70,6 +70,11 @@ code and findings are not this module's to change.
 **Shadow stages live at the end of this file**: review-finding triage
 (sd:2092) and the helpers `sd task add` uses for its duplicate hint (sd:2093).
 They record Jev's answer and never read it, for public repositories only.
+
+**The hint-blind twin** (`BLIND_STAGE`, sd:2969) asks the same tier question in
+shadow, without `deterministic_routing_said`, so the ledger shows how far the
+rule's reason steers Jev. It sends less than the reading and goes where it goes,
+after the reading's gate; `JEV_SD_REVIEW_BLIND=0` stops it alone.
 """
 
 from __future__ import annotations
@@ -95,6 +100,8 @@ STAGE = "JEV_SD_REVIEW"
 COMMAND = "jev"
 #: This lane's name in the judgment ledger, beside `STAGE` (sd:1253).
 CALLER = "sd-review"
+#: The hint-blind twin's stage and switch (sd:2969); unset means on.
+BLIND_STAGE = "JEV_SD_REVIEW_BLIND"
 
 #: Both calls are bounded. The gate answers locally and the judgment is a
 #: single request, so a run that hangs is a fault and not slow progress.
@@ -168,6 +175,7 @@ def jev_tier(
     fallback = _jev_fallback(options)
     argv = _jev_argv(binary, fallback, options, _jev_subject(root), tier, baseline_ms)
     state = _jev_state(paths, lines, reason)
+    _jev_blind(argv, tier, _jev_state(paths, lines, None), env, note)
     answer = _jev_run(argv, env, state)
     if _jev_lacks_baseline(answer):
         answer = _jev_run(_jev_without_baseline(argv), env, state)
@@ -185,6 +193,21 @@ def jev_tier(
         return tier, {"routed_tier": tier, "tier": tier, "moved": False, "source": "judged",
                       "below_routed": chosen}
     return chosen, {"routed_tier": tier, "tier": chosen, "moved": chosen != tier, "source": "judged"}
+
+
+def _jev_blind(argv: Sequence[str], tier: str, state: str, env: Mapping[str, str],
+               stream: TextIO) -> None:
+    """Ask `argv` as `BLIND_STAGE` over the reasonless `state`, in shadow; read nothing.
+
+    `jev` refuses `--shadow` beside `--baseline`, so the baseline flags go: the
+    shadow answer, the routed tier, is the pair's other row instead."""
+
+    if sd_lib.jev_stage_off(env.get(BLIND_STAGE)):
+        return
+    blind = [BLIND_STAGE if word == STAGE else word for word in _jev_without_baseline(argv)]
+    code = _jev_run([*blind, "--shadow", tier], env, state).returncode
+    if code not in (0, 3):
+        shadow_stopped(stream, CALLER, BLIND_STAGE, f"`{COMMAND}` exited {code}")
 
 
 def _jev_fallback(options: Sequence[str]) -> str:
@@ -284,8 +307,9 @@ def _jev_criteria(options: Sequence[str]) -> str:
         for name in options)
 
 
-def _jev_state(paths: Sequence[str], lines: int, reason: str) -> str:
-    """The state, and the whole of what leaves this machine besides the tiers."""
+def _jev_state(paths: Sequence[str], lines: int, reason: str | None) -> str:
+    """The state, and the whole of what leaves this machine besides the tiers.
+    No `reason` is the hint-blind twin's state, which lacks the key (sd:2969)."""
 
     shown = [str(path) for path in paths][:MAX_PATHS]
     return json.dumps({
@@ -293,7 +317,7 @@ def _jev_state(paths: Sequence[str], lines: int, reason: str) -> str:
         "changed_paths_omitted": len(paths) - len(shown),
         "path_count": len(paths),
         "lines_moved": lines,
-        "deterministic_routing_said": reason,
+        **({"deterministic_routing_said": reason} if reason is not None else {}),
     }, sort_keys=True)
 
 
