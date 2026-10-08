@@ -7,22 +7,23 @@ Instructions for AI assistants working in this repository.
 - Follow [.claude/rules/sd-operator-defaults.md](.claude/rules/sd-operator-defaults.md) for reviewer selection and report content.
   These defaults apply to both Claude and Codex.
   Writing style and diagram tooling come from each agent's global instructions.
+- Merge permission is one setting, `repo.runner_merge` on the repository row (`sd-db.sh repo list`, last field).
+  `auto`: merge active, in-scope PR work without asking, through `sd-ship prepare` then `sd-ship merge`,
+  unless the user says wait. `manual` or no row: ask the operator first.
+  No value permits a merge that skips `sd-ship`, such as `gh pr merge` or a web squash; an `sd-ship` refusal is a stop.
+- Reject a review finding with a reason note a reader can check; a rebuttal needs no operator acceptance.
+- Ask the operator before adding a command, flag, config key, state store, gate, check, file kind or document type; name what it replaces, and prefer deleting or reusing.
+- Record decisions, incidents and findings in sd notes, not in new `docs/` files.
 - Do not create pull requests in the upstream `Trellis` repository without
   explicit approval from the user for that specific upstream PR. If
   `sd-ai-command-pack` work uncovers a `Trellis`-owned change, document the
   finding and provide a paste-ready handoff instead of opening a `Trellis` PR.
 - At the planning convergence boundary, follow
   [.claude/rules/sd-planning-adversarial-review.md](.claude/rules/sd-planning-adversarial-review.md).
-  That file is the one statement of the rule and holds the review table every
-  review point reads its cap from; this bullet states nothing of its own, so
-  there is no second copy to drift.
+  That file holds the rule and the review table every review point reads its cap from.
 - Before dispatching a worker or opening a second checkout, follow
-  [WORKFLOW.md § Parallel work](WORKFLOW.md#parallel-work). That section is
-  the one statement of the rule; this bullet states nothing of its own.
-- `skills/**` holds the one copy of the payload. Nothing renders into this
-  repository, so there are no copies to keep synchronized: change the skill and
-  you have changed the
-  only copy.
+  [WORKFLOW.md § Parallel work](WORKFLOW.md#parallel-work).
+- `skills/**` holds the one copy of the payload; nothing renders into this repository.
 
 ## Companion Repository Scope
 
@@ -36,23 +37,9 @@ Do not request confirmation solely because an in-scope operation targets either 
 Read each repository's instructions and preserve its existing work before making changes.
 This scope exception does not authorize unrelated work or remove specific approval requirements for destructive actions or upstream Trellis PRs.
 External review uses the operator's standing machine policy, with local restrictions and existing spending limits.
-Read `sd config get sd.external_reviews` and `sd config get sd.assistant_merge`; these settings are never granted by installation.
-`sd.gate_slots` grants nothing: it caps how many repository gates run at once on the machine.
-`sd.gate_load_max` and `sd.gate_settle_seconds` grant nothing: they set the gate queue's load rule.
-`sd.review_slots` grants nothing: it caps how many reviews run their reviewers at once on the machine.
-`sd.gate_cache_gb` grants nothing: it bounds the gate's warm Rust build folders.
-`sd.fleet_owners` grants nothing: it names the owners whose repositories `sd fleet stamp` treats as the operator's own.
-`sd.lane_root` grants nothing: it names where `sd-ship lane` keeps each repository's queue.
-`sd.bulk_storage_root` grants nothing: it names where large uncommitted data goes, per [WORKFLOW.md § Parallel work](WORKFLOW.md#parallel-work).
-`sd.privacy_patterns` grants nothing: it names the privacy-pattern file `sd changelog render` checks entries against.
-`sd.copilot_review` is the one core setting with a default: unset reads `deep`, one Copilot review on deep-tier changes and none otherwise; a repository's `.github/sd-review.json` overrides `deep` and `always`, and `never` wins over the file.
-`sd.assistant_merge` is read by the assistant, not by `sd-ship`; the tool merges whatever the gates let through, and the setting decides whether to ask it to.
-With `sd.assistant_merge` at `controlled`, merge active in-scope PR work without asking, unless the user explicitly says wait.
-Merge only through `sd-ship prepare` then `sd-ship merge`; the review lane and required CI are part of those gates.
-`controlled` never permits a merge that skips the review lane, such as a raw `gh pr merge` or a web squash.
-When the value is `controlled` and the gates pass, merge; do not ask the operator "may I merge?".
-With `ask`, or no setting, ask the operator first.
-Shared contributors do not revoke user permission, but existing ownership gates still apply; a refusal from `sd-ship` is a stop, not a reason to merge another way.
+Read `sd config get sd.external_reviews`; installation never grants it.
+Every other `sd.*` setting grants nothing; `WORKFLOW.md` § Standing authorization lists them.
+Shared contributors do not revoke merge permission; ownership gates still apply.
 
 ## Contributor Entry Points
 
@@ -61,9 +48,8 @@ Shared contributors do not revoke user permission, but existing ownership gates 
 - Read [docs/current-architecture.md](docs/current-architecture.md) before changing the installer or command set.
 - Read each `docs/spec/**` notice before using that page.
   Some pages describe the retired pre-3e model.
-- Planning artifacts live in [docs/work](docs/work/README.md): one directory per
-  item, `prd.md` plus `design.md`/`implement.md` when warranted. That directory
-  is the whole tracked footprint of the workflow.
+- Work items are rows (`sd task add`). [docs/work](docs/work/README.md) holds one directory per
+  item whose shape needs agreement, with a single `design.md`.
 
 ## Calling Convention
 
@@ -94,11 +80,9 @@ Shell commands remain separate; not every skill has an executable.
 
 A document owns the scope it describes, never the argv that reached it. A page
 about this pack's rules describes this pack's rules whichever command opened
-it, and a path written for the reader's own checkout stays unqualified. One
-ruling settles all three of the questions that kept arriving separately, so
-there is nothing further to decide case by case.
+it, and a path written for the reader's own checkout stays unqualified.
 
-It applies to **live text only.** Preserved reviews, archived work items, and `CHANGELOG.md` record earlier statements.
+It applies to **live text only.** Preserved reviews and archived work items record earlier statements.
 Do not rewrite their prose to match current behavior.
 Archive moves can add lifecycle metadata without changing the recorded discussion.
 

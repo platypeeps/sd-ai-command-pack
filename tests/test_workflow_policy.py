@@ -293,20 +293,12 @@ class OverrideKeys(unittest.TestCase):
 
 
 class ReviewTable(unittest.TestCase):
-    def test_the_table_appears_in_exactly_two_files(self):
-        """Both copies are in the grep now. `WORKFLOW.md` used to sit outside
-        the governed pathspec -- the hand-typed copy named three top-level
-        markdown files and one of them, `CLAUDE.md`, was not tracked here then
-        -- so the page was asserted by a direct read beside a grep that could
-        not see it. The read stays as the control on the grep."""
+    def test_the_table_appears_in_exactly_one_file(self):
+        """The rule file holds the one copy; `WORKFLOW.md` links to it."""
         rows = governed_grep(re.escape(TABLE_HEADER))
         files = {row.split(":", 1)[0] for row in rows}
-        self.assertEqual(files, {".claude/rules/sd-planning-adversarial-review.md",
-                                 "WORKFLOW.md"})
-        self.assertTrue(TABLE_HEADER in WORKFLOW.read_text(encoding="utf-8"))
-
-    def test_the_two_copies_are_identical(self):
-        self.assertEqual(review_table(WORKFLOW), review_table(RULE))
+        self.assertEqual(files, {".claude/rules/sd-planning-adversarial-review.md"})
+        self.assertIn("sd-planning-adversarial-review.md", WORKFLOW.read_text(encoding="utf-8"))
 
     def test_the_table_has_a_cap_on_every_row(self):
         body = review_table(RULE)[2:]
@@ -685,11 +677,13 @@ class SkillsThatRunAReview(unittest.TestCase):
 
 class StandingAuthorizationInventory(unittest.TestCase):
     def test_core_settings_are_documented_without_shipping_a_personal_grant(self):
-        for relative in ("WORKFLOW.md", "README.md", "AGENTS.md"):
+        for relative in ("WORKFLOW.md", "README.md"):
             text = (REPO_ROOT / relative).read_text()
             for key in sd_lib.CORE_CONFIG:
                 with self.subTest(path=relative, key=key):
                     self.assertIn(f"sd.{key}", text)
+        # AGENTS.md points at the one inventory rather than copying it.
+        self.assertIn("WORKFLOW.md` § Standing authorization", (REPO_ROOT / "AGENTS.md").read_text())
         ship = (REPO_ROOT / "skills/sd-ship/SKILL.md").read_text()
         review = (REPO_ROOT / "skills/sd-review/SKILL.md").read_text()
         self.assertIn("sd.assistant_merge", ship)

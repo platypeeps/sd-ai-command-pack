@@ -7,10 +7,12 @@ paths:
 # SD planning adversarial review
 
 Adversarial review runs at four points, each with a cap on automatic passes.
-When the cap is spent no further pass starts on its own. The artifact moves on,
-to the send box, to implementation, to merge, once every blocking finding is
-addressed or rebutted with evidence on the item. A blocking finding still open
-past the cap marks the item `blocked`; non-blocking findings hold nothing.
+When the cap is spent with a blocking finding open, run one class pass (global review-rounds.md):
+name the finding class, table every instance from the code, fix each row with a fail-first test, then review again.
+The integrator decides further rounds and records each reason in `sd task note`.
+The artifact moves on once every blocking finding is fixed or rebutted with evidence on the item.
+A rebuttal needs no approval: record the finding, the reason and the evidence a reader can check.
+Non-blocking findings hold nothing.
 
 | Flow | Point | What it checks | Cap |
 |---|---|---|---|
@@ -19,13 +21,12 @@ past the cap marks the item `blocked`; non-blocking findings hold nothing.
 | Development | prd and design | Scope, missing requirements, wrong assumptions | 5 |
 | Development | Code, before merge | Defects a second reader finds | 5 rounds |
 
-This file and `WORKFLOW.md` hold the only two copies of that table, and they
-are identical. A skill that runs a review names its point here and reads its
-cap from that row; no skill carries a cap of its own.
+This file holds the only copy of that table. A skill that runs a review names its point here and reads its cap from
+that row; no skill carries a cap of its own.
 
 This file is also the one place the planning review rule is stated. When the
-current run creates or materially updates an active work item's `prd.md`,
-`design.md`, or `implement.md` under `docs/work/`, capture the pre-edit
+current run creates or materially updates an active work item's `design.md`
+(or a legacy `prd.md`) under `docs/work/`, capture the pre-edit
 existence and content hashes for those files. At the planning
 convergence boundary, before requesting implementation approval or moving the
 item to `in_progress`, read and follow
