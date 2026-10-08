@@ -13,6 +13,8 @@ import copy
 import dataclasses
 import importlib
 import io
+import os
+import pathlib
 import sys
 import unittest
 import unittest.mock
@@ -263,6 +265,8 @@ class AClearedReviewOutlivesItsGate(unittest.TestCase):
         argv = process.call_args_list[-1].args[1]
         self.assertEqual(argv[argv.index("--base") + 1], HEAD)
         self.assertIn("--verify-report", argv)
+        # sd:3059: a killed `sd-ship` skips the folder's cleanup; its pid in the name lets the next gate start remove it.
+        self.assertRegex(pathlib.Path(argv[argv.index("--verify-report") + 1]).parent.name, rf"sd-ship-verify-{os.getpid()}-")
         self.assertEqual(len(review.state["passes"]), 2)
         self.assertEqual(review.state["reviewed_head"], fixed)
 

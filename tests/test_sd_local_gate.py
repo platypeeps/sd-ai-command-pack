@@ -1142,10 +1142,10 @@ class TemporaryLeftovers(unittest.TestCase):
 
     def test_a_pid_named_entry_goes_only_when_its_pid_is_dead_whatever_its_age(self) -> None:
         """Review round 1: a gate's or a test run's folder names its pid; a live one stays however old, a dead one goes."""
-        live = [self.entry(f"{prefix}{os.getpid()}-abc", age=30 * 86400) for prefix in (sd_gate_cache.GATE_PREFIX, "sd-tests-")]
-        gone = [self.entry(f"{prefix}{self.dead()}-abc", age=60) for prefix in (sd_gate_cache.GATE_PREFIX, "sd-tests-")]
+        live = [self.entry(f"{prefix}{os.getpid()}-abc", age=30 * 86400) for prefix in (sd_gate_cache.GATE_PREFIX, "sd-tests-", "sd-ship-verify-")]
+        gone = [self.entry(f"{prefix}{self.dead()}-abc", age=60) for prefix in (sd_gate_cache.GATE_PREFIX, "sd-tests-", "sd-ship-verify-")]
         self.assertEqual(sd_gate_cache.reap_temporary(self.temporary), len(gone))
-        self.assertEqual(([path.exists() for path in live], [path.exists() for path in gone]), ([True, True], [False, False]))
+        self.assertEqual(([path.exists() for path in live], [path.exists() for path in gone]), ([True] * 3, [False] * 3))
 
     def test_the_test_package_names_its_temp_dir_with_its_pid(self) -> None:
         self.assertRegex(pathlib.Path(os.environ["TMPDIR"]).name, rf"sd-tests-{os.getpid()}-[a-z0-9_]+")
