@@ -111,6 +111,9 @@ CORE_CONFIG = {
                           "description": "The folder for large uncommitted data -- run outputs, logs, captures, "
                                          "scratch evidence -- as <root>/<repository>/; never build output or "
                                          "permission-dependent data. Unset is no bulk root. It grants nothing."},
+    "privacy_patterns": {"pattern": r"[~/][^\x00]*",
+                         "description": "The privacy-pattern file a pull request body is checked against, one "
+                                        "extended regular expression per line. It grants nothing."},
 }
 
 #: `{current name: the name it was stored under before 1.1.0}`. A rename must
