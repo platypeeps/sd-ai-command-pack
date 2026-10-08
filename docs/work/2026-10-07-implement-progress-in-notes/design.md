@@ -26,6 +26,11 @@ database schema do not change.
 Accepted. Operator ruling 2026-10-07: accept all Q1-Q11. Each question
 below keeps its recommendation, which is now the ruling.
 
+Planning review round 6 (codex, advisory) found that collapsing every run
+of whitespace let an indentation-only change inside a code example keep
+the digest. Point 1 now hashes fenced code verbatim and normalizes prose
+only.
+
 Planning review round 4 (codex) found that the writer read `item.repo`'s
 checkout, not the worktree the step was built in. Point 3 now has one
 function, `plan_checkout`, and a table of every command that reads or writes
@@ -123,9 +128,12 @@ Steps 3-5 merged in one squash; review codex, round 6 advisory.
   uses the digest.
 - A step's block is its step line and every line after it, up to the next
   step line or the end of the section. Before hashing, the box mark is
-  removed (`- [ ] ` and `- [x] ` read the same), runs of whitespace become
-  one space, and blank lines are dropped. A tick or a re-wrap therefore keeps
-  the digest; a changed word does not.
+  removed (`- [ ] ` and `- [x] ` read the same). Prose lines are
+  normalized: runs of whitespace become one space, and blank lines are
+  dropped. Lines inside a fenced code block, fence lines included, are
+  hashed verbatim: indentation there can change what a command or an
+  example does. A tick or a prose re-wrap therefore keeps the digest; a
+  changed word, or a changed indent inside a fence, does not.
 - Lines after the second are free text: the log, timings, a path under
   `/Volumes/local/repo-storage/<repo>/`.
 - One note per step. The lane's "Steps 3-5 merged" becomes three notes.
@@ -260,7 +268,8 @@ says whether a `done` note written before the edit still closes the step.
 | Plan edit after a `done` note on step 2 | Id only | Title | Block digest (chosen) | New id on scope change | Recovery | Test |
 | --- | --- | --- | --- | --- | --- | --- |
 | Reordered, block unchanged | `done`, right | `done`, right | `done`, right | `done`, right | none | criterion 10 |
-| Box ticked, text re-wrapped | `done`, right | `done`, right | `done`, right | `done`, right | none | criterion 10 |
+| Box ticked, prose re-wrapped | `done`, right | `done`, right | `done`, right | `done`, right | none | criterion 10 |
+| Indentation changed inside a fenced example; prose kept | wrong | wrong | `changed` | wrong if the author keeps the id | new note after review | criterion 9 |
 | Renumbered: id 2 now names other work | wrong | `changed` | `changed` | `changed` if the author obeys | new note on the moved step's new id | criterion 8 |
 | Removed; id 2 retired | `not in plan` | `not in plan` | `not in plan` | `not in plan` | none | criterion 8 |
 | Removed; id 2 reused for new work | wrong | `changed` | `changed` | wrong if the author reuses | new note when the new work lands | criterion 8 |

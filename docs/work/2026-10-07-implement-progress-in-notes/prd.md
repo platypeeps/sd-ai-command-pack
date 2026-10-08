@@ -144,10 +144,13 @@ R9. The plan template keeps `- [ ] <id>.` as the step marker. In a `row`
    `changed`. Hashing only the step line reads it `done` and fails the
    test. Each of these also reads `changed`: rewording only the title,
    merging step 3's block into step 2, cutting step 2's block to its
-   first half, and changing its size.
+   first half, changing its size, and re-indenting one line inside a
+   fenced code block in step 2 with every prose line unchanged. Collapsing
+   whitespace inside the fence reads that last case `done` and fails the
+   test.
 10. A test records `step 2: done`, then moves step 2 above step 1, ticks its
-   box and re-wraps its text. Step 2 still reads `done`. Hashing the box
-   mark or the raw whitespace fails the test.
+   box and re-wraps its prose. Step 2 still reads `done`. Hashing the box
+   mark or the raw prose whitespace fails the test.
 11. A fixture main checkout lists steps 1 to 3, and a worktree of it adds
    step 4. Run from the worktree, `step 4: done` is written with the
    worktree's block digest. Run from the main checkout, it refuses and names

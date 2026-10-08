@@ -37,8 +37,8 @@ fail on `main` before the step's code lands.
         plan changed after a `done` note: each row of design point 3's table
         (PRD criteria 8, 9 and 10). Swapping "newest" for "first" fails the
         two-note case. Dropping the digest comparison fails criterion 8;
-        hashing only the step line fails criterion 9; hashing the box mark
-        fails criterion 10.
+        hashing only the step line, or collapsing whitespace inside a
+        fence, fails criterion 9; hashing the box mark fails criterion 10.
 - [ ] 2. `sd task note --step` and `sd task steps`. Size M, 3 h. PR A.
       - In `bin/sd_work.py`, beside the existing `note` parser:
         `--step <id>:<status>` and `--evidence`; `--kind` absent or
