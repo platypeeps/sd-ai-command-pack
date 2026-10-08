@@ -200,7 +200,8 @@ class DashboardCut(unittest.TestCase):
 #: filters with the `or entry["parked"]` clause removed, so their text
 #: changed; the other eleven rows went. The dashboard row that read the
 #: archived count left the set when sd:719 step 6 retired the client script,
-#: and the grep stopped naming the directory when step 7 deleted it.
+#: and the grep stopped naming the directory when step 7 deleted it. The
+#: open-step producer's row went when sd:3013 cut that class.
 #:
 #: `archived` is kept, and this set is its ceiling: a reader added anywhere
 #: under `bin` is a row this set does not carry, and the test below fails it.
@@ -209,7 +210,6 @@ FROZEN_FIELD_READERS = frozenset({
     ("bin/sd-status", '"archived": item.archived,'),
     ("bin/sd-status", 'active = [entry for entry in listed if not entry["archived"]]'),
     ("bin/sd-status", 'if entry["archived"]:'),
-    ("bin/sd-status", 'if entry["archived"] or entry["status"] == "done":'),
     ("bin/sd-status", 'live = [entry for entry in work["items"] if not entry["archived"]]'),
 })
 

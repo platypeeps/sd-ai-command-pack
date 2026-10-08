@@ -99,7 +99,6 @@ this table before running the command.
 | 50 | `issue-needs-you` | `i` | no | `dashboard index` | an indexed issue the index says is waiting on you |
 | 60 | `pr-needs-action` | `p` | no | `open pull requests` | an open pull request waiting on a review or a merge |
 | 65 | `merged-pr-review-unacknowledged` | `p` | no | `merged PRs (14 days) + local acknowledgements` | a pull request merged in the last 14 days with a review finding nobody answered |
-| 70 | `open-step` | `s` | no | `- [ ] in item docs` | an unchecked box on an item nobody has closed |
 | 75 | `mirror-sync-pending` | `n` | no | `~/.claude/pending-mirror-syncs/` | a published document whose designated mirror is not written yet |
 | 80 | `unmerged-branch` | `b` | no | `origin heads` | a branch on origin with no open pull request carrying it |
 | 90 | `parked-concern` | `c` | no | `## Review ledger` | a concern parked behind a trigger nobody is watching |
@@ -235,8 +234,8 @@ fifteen days to 2026-09-13. Ten of them with one unanswered inline comment
 would fill all ten `pending` slots at 36, and `next` would point at the
 oldest. So three rules apply now:
 
-- **Rank 65**, below `pr-needs-action` at 60 and above `open-step` at 70. An
-  open pull request waiting on a review or a merge can still change; a merged
+- **Rank 65**, below `pr-needs-action` at 60 and above `mirror-sync-pending` at
+  75. An open pull request waiting on a review or a merge can still change; a merged
   one cannot, so the open one comes first.
 - **Newest merge first** within the class (`newest_first` in `CLASSES`), the
   reverse of every other class. A finding from yesterday's merge is still

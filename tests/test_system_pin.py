@@ -8,11 +8,12 @@ sat at schema 10 while every machine ran schema 13, and the retired CI was
 green about a library nobody runs. `sd_db` refuses a database newer than
 itself, so nothing crossed the versions there and nothing went red.
 
-This test is the alarm. It reads the pin's `SCHEMA_VERSION` through git and
-compares it with the installed library's. Locally the venv is installed from
-the system checkout (`make setup`), so a migration landed there and not in the
-pin fails here, on the next `make check`. In the local gate the library comes
-from the pin, so the comparison holds by construction there.
+This test is the alarm for a library older than the pin. It reads the pin's
+`SCHEMA_VERSION` through git and requires the installed library's to be at
+least that. A newer installed library passes (sd:3013): the system checkout
+moving ahead of the pin is normal, and an equality check forced a pin pull
+request for each migration. In the local gate the library comes from the pin,
+so the comparison holds by construction there.
 
 Schema, not commit: a migration is what makes the two libraries disagree about
 a database, and a commit count would fail on documentation changes.
@@ -28,6 +29,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bin"))
@@ -116,7 +118,7 @@ class TheOpencodePinIsWrittenOnce(unittest.TestCase):
 
 
 class ThePinCarriesTheInstalledSchema(unittest.TestCase):
-    def test_pin_schema_equals_installed_schema(self):
+    def test_installed_schema_is_not_older_than_the_pin(self):
         ref = pin()
         checkout = sd_install.system_checkout(dict(os.environ))
         installed = installed_schema()
@@ -124,11 +126,25 @@ class ThePinCarriesTheInstalledSchema(unittest.TestCase):
         pinned = pinned_schema(checkout, ref)
         self.assertIsNotNone(
             pinned, f"cannot read SCHEMA_VERSION at {ref[:12]} in {checkout}; fetch that checkout")
-        self.assertEqual(
-            pinned, installed,
+        self.assertGreaterEqual(
+            installed, pinned,
             f"The gate installs sd_db schema {pinned} (platypeeps/system {ref[:12]}), but this "
-            f"suite runs against schema {installed}. Move the ref in {PIN_FILE.relative_to(ROOT)} "
-            "to the system commit this library came from, and say why in the commit; or, if the pin is the newer one, reinstall with `make setup`.")
+            f"suite runs against the older schema {installed}. Reinstall with `make setup`.")
+
+
+class ANewerInstalledLibraryPasses(unittest.TestCase):
+    """sd:3013. A system checkout that moved past the pin is no failure; a library older than the pin is."""
+
+    def passes(self, offset: int) -> bool:
+        pinned = pinned_schema(sd_install.system_checkout(dict(os.environ)), pin())
+        self.assertIsNotNone(pinned, "cannot read the pin's SCHEMA_VERSION; fetch the system checkout")
+        result = unittest.TestResult()
+        with mock.patch.object(sys.modules[__name__], "installed_schema", return_value=pinned + offset):
+            unittest.defaultTestLoader.loadTestsFromTestCase(ThePinCarriesTheInstalledSchema).run(result)
+        return result.wasSuccessful()
+
+    def test_a_newer_installed_schema_passes_and_an_older_one_fails(self):
+        self.assertEqual((self.passes(1), self.passes(-1)), (True, False))
 
 
 if __name__ == "__main__":

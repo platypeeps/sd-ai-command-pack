@@ -399,8 +399,8 @@ class Reorder(Lane):
 class Speculation(Lane):
     """sd:2586: while one entry ships, the next one's gate runs on the predicted landing.
 
-    A bare `origin` holds main; two worktrees each add a file and a CHANGELOG
-    entry, and main moves after they fork. The recorder lands entry 1 as
+    A bare `origin` holds main; two worktrees each add a file, and main moves
+    after they fork. The recorder lands entry 1 as
     GitHub's squash would: its catch-up tree as a new commit on main.
     """
 
@@ -409,13 +409,12 @@ class Speculation(Lane):
         self.origin = self.tmp / "origin.git"
         git(self.tmp, "init", "-q", "--bare", "-b", "main", str(self.origin))
         self.commit_files(self.repo, {".github/sd-gate-reuse.json": json.dumps(
-            {"schema_version": 1, "key": "tree", "reason": "the check reads no history"}),
-            "CHANGELOG.md": "# Changelog\n\n## Unreleased\n\n- base\n"}, "declare")
+            {"schema_version": 1, "key": "tree", "reason": "the check reads no history"})}, "declare")
         git(self.repo, "remote", "add", "origin", str(self.origin))
         git(self.repo, "push", "-q", "origin", "main")
         git(self.repo, "remote", "set-head", "origin", "main")
-        self.first = self.branch("first", {"one.txt": "1\n"}, "- one\n")
-        self.second = self.branch("second", {"two.txt": "2\n"}, "- two\n")
+        self.first = self.branch("first", {"one.txt": "1\n"})
+        self.second = self.branch("second", {"two.txt": "2\n"})
         self.commit_files(self.repo, {"base.txt": "b\n"}, "main moved")
         git(self.repo, "push", "-q", "origin", "main")
         self.gates: list[tuple[pathlib.Path, str, str]] = []
@@ -429,25 +428,18 @@ class Speculation(Lane):
         git(tree, "add", "-A")
         git(tree, "commit", "-q", "-m", message)
 
-    def branch(self, name: str, files: dict[str, str], entry: str) -> pathlib.Path:
+    def branch(self, name: str, files: dict[str, str]) -> pathlib.Path:
         path = self.tmp / name
         git(self.repo, "worktree", "add", "-q", "-b", name, str(path), "origin/main")
-        changelog = (path / "CHANGELOG.md").read_text(encoding="utf-8").replace("## Unreleased\n\n", f"## Unreleased\n\n{entry}")
-        self.commit_files(path, {**files, "CHANGELOG.md": changelog}, name)
+        self.commit_files(path, files, name)
         return path
 
     def caught_up(self, head: str, ref: str) -> str:
         """The tree `sd-ship prepare --catch-up` makes at `head` against `ref`, built apart from the lane's code."""
-        import sd_changelog_merge
-
         scratch = self.tmp / f"scratch-{len(list(self.tmp.iterdir()))}"
         git(self.repo, "worktree", "add", "-q", "--detach", str(scratch), head)
         try:
-            merged = subprocess.run(["git", "-C", str(scratch), "merge", "--no-ff", "--no-edit", "-m", "catch up", ref],
-                                    capture_output=True, text=True, check=False)
-            if merged.returncode:
-                self.assertTrue(sd_changelog_merge.resolve_keep_both(scratch))
-                git(scratch, "commit", "-q", "--no-verify", "-m", "catch up")
+            git(scratch, "merge", "--no-ff", "--no-edit", "-m", "catch up", ref)
             return git(scratch, "rev-parse", "HEAD^{tree}")
         finally:
             git(self.repo, "worktree", "remove", "--force", str(scratch))
@@ -488,7 +480,7 @@ class Speculation(Lane):
         self.assertNotEqual(base, landed)
         self.assertEqual(git(self.repo, "rev-parse", f"{base}^"), fork)
         self.assertEqual(git(self.repo, "rev-parse", f"{base}^{{tree}}"), git(self.repo, "rev-parse", "origin/main^{tree}"))
-        # The gated tree is the one entry 2's catch-up makes after the real landing, CHANGELOG resolved.
+        # The gated tree is the one entry 2's catch-up makes after the real landing.
         self.assertEqual(git(self.repo, "rev-parse", f"{head}^{{tree}}"),
                          self.caught_up(git(self.second, "rev-parse", "HEAD"), "origin/main"))
         self.assertTrue(self.seen["gate ran while entry 1 shipped"])

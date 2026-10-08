@@ -936,11 +936,16 @@ class LineBudgetTests(unittest.TestCase):
         # operator approved the stage for the Jev experiment (sd:2968). Main sat
         # at 4848 when this was set; the 4849 left room for sd:2954's `JEV_RUN`
         # line, which may land before or after this.
+        #
+        # 4873 -> 4770 is sd:3013: the shadow triage and its helpers moved to
+        # `bin/sd_jev_shadow.py`, which records and never reads, so it is not
+        # review logic. `bin/sd-review` imports `sd_jev` only, so the cap no
+        # longer counts them; `sd_jev.jev_triage` is the one delegate left.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4873,
+            4770,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

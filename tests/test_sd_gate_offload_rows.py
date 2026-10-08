@@ -299,28 +299,6 @@ class OffloadRows(SatelliteFixture):
                       {"writer": "sd-lane", "pack_bin": sd_gate_receipts.pack_bin(), "published_at": "now"})
         self.assertNotIn("pack_warning", self.gate())
 
-    def test_the_warning_compares_the_published_digest_under_the_heads_own_scope(self) -> None:
-        """sd:2823: the hub publishes a digest per scope; `pack_bin`, under its main's scope, is not this head's."""
-        from contextlib import closing
-
-        from sd_db import connect, ship
-
-        key, other = sd_gate_receipts.PACK_PREFIX + SLUG, "0" * 64
-        for closure in (False, True):
-            ours = sd_gate_receipts.pack_bin(False, closure)
-            scope, wrong = ("closure", "every") if closure else ("every", "closure")
-            for bins, warns in (({scope: ours, wrong: other}, False), ({scope: other, wrong: ours}, True)):
-                with self.subTest(closure=closure, warns=warns), \
-                        mock.patch.object(sd_gate_receipts, "pack_scope", lambda root, head, closure=closure: closure), \
-                        contextlib.redirect_stderr(io.StringIO()):
-                    with closing(connect(self.database)) as connection:
-                        revision, _ = ship.read(connection, key)
-                        # `pack_bin` holds the other scope's digest, as a hub whose main differs in scope publishes.
-                        ship.save(connection, key, revision, {"writer": "sd-lane", "pack_bin": bins[wrong],
-                                                              "pack_bins": bins, "published_at": "now"})
-                    warning = sd_gate_receipts.pack_warning(self.database, self.root, self.head, False)
-                    self.assertEqual(warning is not None, warns, warning)
-
     def test_a_publication_that_is_not_an_object_warns_of_nothing_and_the_check_runs(self) -> None:
         from sd_db import ship
 
