@@ -1509,8 +1509,6 @@ CLASSES = (
           f"a pull request merged in the last {MERGED_REVIEW_DAYS} days with a review "
           "finding nobody answered",
           ("merged_pull_requests",), newest_first=True, pending_cap=MERGED_PENDING_CAP),
-    Class("open-step", "s", False, 70, "- [ ] in item docs",
-          "an unchecked box on an item nobody has closed"),
     Class("mirror-sync-pending", "n", False, 75, "~/.claude/pending-mirror-syncs/",
           "a published document whose designated mirror is not written yet"),
     Class("unmerged-branch", "b", False, 80, "origin heads",
@@ -1545,12 +1543,10 @@ BY_CHECK = {kind.check: kind for kind in CLASSES}
 #: learns the denominator from the output rather than from a design document
 #: they do not have open.
 EXCLUDED = (
-    "archived work items (docs/work/archive/**) for status, checkboxes and "
-    "branches -- closed by where they live; their review ledgers are still read",
+    "archived work items (docs/work/archive/**) for status and branches -- "
+    "closed by where they live; their review ledgers are still read",
     "concerns disposed addressed or rebutted -- two of the four dispositions "
     "are closures",
-    "checkboxes on done or archived items -- read as history rather "
-    "than as missed steps, a convention this asserts rather than observes",
     "Jira rows in the dashboard index -- no committed fact ties a Jira project "
     "key to a checkout, which is the exclusion `issues_section` already makes",
     "docs/review-learnings.md -- narrative history with no disposition field, "
@@ -1710,7 +1706,6 @@ def actionable_inventory(
         merged_pulls(root, protection) if source == sd_lib.FROM_FILE else Merged(None, ""),
         unchecked,
     )
-    rows += _step_rows(root, work)
     rows += _pull_rows(root, pulls, protection)
     rows += _review_rows(root, pulls, unchecked)
     rows += _merged_review_rows(root, sections.get("merged_pull_requests") or {}, day, unchecked)
@@ -2857,62 +2852,6 @@ def _accepted_rows(protection: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
-# -- the open-step producer -------------------------------------------------
-
-_BOX_RE = re.compile(r"^\s*[-*]\s*\[ \]\s*(?P<text>.+?)\s*$")
-_HEADING_RE = re.compile(r"^\s*#{1,6}\s+(?P<text>.+?)\s*$")
-
-
-def _step_rows(root: pathlib.Path, work: dict[str, Any]) -> list[dict[str, Any]]:
-    """Unchecked boxes on items nobody has closed.
-
-    The scope -- not `done`, not archived, not parked -- is what takes 1,747
-    boxes down to two dozen, and it **asserts a repository convention** rather
-    than observing one: it reads a box on a finished item as history. That is a
-    good assumption and it is still an assumption, so it is named in `EXCLUDED`
-    where a reader who disagrees can see what the counts leave out.
-
-    The key is heading, text and ordinal, never a line number, because a line
-    number moves on every edit above it while the heading and the text do not.
-    The ordinal is C-13: one box's text can appear under two implementation
-    steps and those are two tasks, so text alone would give them one id and
-    picking it would authorise an ambiguous action. It is the weakest component
-    here and it is stated as such -- inserting a duplicate *above* an existing
-    one shifts the existing one's ordinal.
-    """
-    rows: list[dict[str, Any]] = []
-    for entry in work.get("items") or []:
-        if entry["archived"] or entry["status"] == "done":
-            continue
-        item = pathlib.PurePosixPath(entry["path"]).name
-        where = str(entry["path"])
-        for path in sorted((root / entry["path"]).glob("*.md")):
-            try:
-                text = path.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                continue
-            heading = ""
-            seen: dict[tuple[str, str], int] = {}
-            for line in text.splitlines():
-                head = _HEADING_RE.match(line)
-                if head:
-                    heading = " ".join(head.group("text").split())
-                    continue
-                box = _BOX_RE.match(line)
-                if not box:
-                    continue
-                said = " ".join(box.group("text").split())
-                ordinal = seen.get((heading, said), 0)
-                seen[(heading, said)] = ordinal + 1
-                rows.append(_row(
-                    "open-step", f"{item}/{path.name}#{heading}#{said}#{ordinal}",
-                    said,
-                    f"{where}/{path.name}, under {heading or '(no heading)'}",
-                    f"do it, or strike the box in {where}/{path.name}",
-                ))
-    return rows
-
-
 # -- adapters over producers this file and `sd-pr-state` already have --------
 
 
@@ -3405,8 +3344,8 @@ def _marker_rows(root: pathlib.Path) -> list[dict[str, Any]]:
     zero is worth printing and does not deserve a section, which is what rank
     120 and the counted-not-enumerated rule in `design.md` mean.
 
-    Keyed on the marker text and an ordinal rather than on a line number, for
-    the reason `_step_rows` gives: a line number moves on every edit above it.
+    Keyed on the marker text and an ordinal rather than on a line number: a
+    line number moves on every edit above it.
     """
     listing = sd_lib.git_output(
         ["grep", "-n", "-E", _MARKER_PATTERN, "--", *_MARKER_PATHS], root
