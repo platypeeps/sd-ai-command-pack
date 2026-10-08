@@ -45,7 +45,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Iterable
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -1082,7 +1082,7 @@ def set_excludes_config(
 
 
 def prune_stale(
-    previous: list[dict], current: set[str], *, dry_run: bool = False
+    previous: list[dict], current: set[str], *, dry_run: bool = False, retry: list[dict] | None = None
 ) -> list[tuple[str, str]]:
     """Delete renders this checkout no longer produces.
 
@@ -1093,8 +1093,11 @@ def prune_stale(
     so a file edited by hand survives and is reported rather than deleted.
 
     Returns `(path, reason)` for everything skipped, so the caller can say what
-    it left behind rather than leave the user to discover it.
+    it left behind rather than leave the user to discover it. A row that failed
+    on an `OSError` is also appended to `retry`, for the receipt to carry
+    (sd:2927).
     """
+    retry = [] if retry is None else retry
     skipped: list[tuple[str, str]] = []
     for entry in previous:
         raw = entry.get("path")
@@ -1113,6 +1116,7 @@ def prune_stale(
             actual = digest(target.read_bytes())
         except OSError as exc:
             skipped.append((raw, f"unreadable ({exc.strerror or exc})"))
+            retry.append(entry)
             continue
         if recorded != actual:
             skipped.append((raw, "modified since it was installed"))
@@ -1122,6 +1126,7 @@ def prune_stale(
                 target.unlink()
             except OSError as exc:
                 skipped.append((raw, f"could not remove ({exc.strerror or exc})"))
+                retry.append(entry)
                 continue
             prune_empty_dirs(target.parent)
     return skipped
@@ -1281,7 +1286,7 @@ def _replace_link(path: Path, target: Path) -> None:
 
 
 def prune_links(
-    previous: list[dict], keep: set[str], *, dry_run: bool = False
+    previous: list[dict], keep: set[str], *, dry_run: bool = False, retry: list[dict] | None = None
 ) -> list[tuple[str, str]]:
     """Remove every recorded link this run did not produce, if it is still ours.
 
@@ -1294,8 +1299,10 @@ def prune_links(
     file at the path is left and reported. A link the receipt never named is
     never a candidate, and the directory itself stays.
 
-    Returns `(path, reason)` for everything left, as `prune_stale` does.
+    Returns `(path, reason)` for everything left, and fills `retry`, as
+    `prune_stale` does.
     """
+    retry = [] if retry is None else retry
     skipped: list[tuple[str, str]] = []
     for entry in previous:
         if entry.get("kind") != "link":
@@ -1323,6 +1330,7 @@ def prune_links(
                 path.unlink()
             except OSError as exc:
                 skipped.append((raw, f"could not remove ({exc.strerror or exc})"))
+                retry.append(entry)
     return skipped
 
 
@@ -2211,6 +2219,17 @@ def cmd_user(ctx: Context, out) -> int:
     """
     # Before the library: `expire_trials` writes, and a refusal writes nothing.
     recorded = read_receipt(ctx.receipt)
+    # A run killed before its receipt, such as a render child under `--pull`,
+    # leaves renders and links that no receipt names. The journal it wrote
+    # first names them; what the receipt does not name goes, digest-gated
+    # (sd:2932). First, so the link plan below sees what is left.
+    journal = ctx.receipt.with_name(ctx.receipt.name + ".pending")
+    retry: list[dict] = []
+    abandoned: list[tuple[str, str]] = []
+    if not ctx.dry_run:
+        killed = owned_entries(read_receipt(journal))
+        named = {row["path"] for row in owned_entries(recorded) if isinstance(row.get("path"), str)}
+        abandoned = prune_stale(killed, named, retry=retry) + prune_links(killed, named, retry=retry)
     bin_dir = link_directory(ctx, recorded)
     plans = link_plan(ctx.checkout, bin_dir, {
         row["path"]: row["target"] for row in owned_entries(recorded)
@@ -2308,6 +2327,15 @@ def cmd_user(ctx: Context, out) -> int:
             backups = [(path, data, path.read_bytes() if path.exists() else None)
                        for path, data, _ in render_files]
             recovery.callback(restore_policies, backups, out)
+            # What this run adds, written before it is, for the next run to
+            # remove if this one is killed before its receipt (sd:2932).
+            write_receipt(journal, {"schema": RECEIPT_SCHEMA, "owned": [
+                {"path": str(path), "sha256": digest(data), "kind": kind}
+                for path, data, kind in render_files if not path.exists()
+            ] + [
+                {"path": str(plan.path), "kind": "link", "target": str(plan.target)}
+                for plan in plans if plan.state == "absent"
+            ]})
         written = write_render_plan(render_files, ctx.dry_run)
         current = {str(item.path) for item in written}
 
@@ -2379,12 +2407,23 @@ def cmd_user(ctx: Context, out) -> int:
             payload["previousCommit"] = replaced
         if not ctx.dry_run:
             write_receipt(ctx.receipt, payload)
+            # Gone once the receipt names this run's files, so only a killed
+            # run leaves one, and an unreadable receipt later grants no deletion.
+            with suppress(OSError):
+                journal.unlink(missing_ok=True)
         recovery.pop_all()
 
         # After the receipt, so a failed install prunes nothing of the last
         # one, which keeps its receipt and stays whole (sd:1118).
-        skipped = prune_stale(previous, current, dry_run=ctx.dry_run)
-        skipped += prune_links(previous, {row["path"] for row in links}, dry_run=ctx.dry_run)
+        skipped = abandoned + prune_stale(previous, current, dry_run=ctx.dry_run, retry=retry)
+        skipped += prune_links(previous, {row["path"] for row in links}, dry_run=ctx.dry_run, retry=retry)
+        # A row that could not be removed stays in the receipt, so the next
+        # install tries it again (sd:2927).
+        recorded_paths = {row["path"] for row in owned}
+        retry = [row for row in retry if row["path"] not in recorded_paths]
+        if retry and not ctx.dry_run:
+            payload["owned"] = sorted(owned + retry, key=lambda row: (row["path"], row.get("kind", "")))
+            write_receipt(ctx.receipt, payload)
         # After the renders, so a predecessor goes only once its successor is
         # on disk; no receipt names it, so `prune_stale` above never sees it.
         retired, left = retire_predecessors(agents, ctx.agents, dry_run=ctx.dry_run)
@@ -2813,9 +2852,19 @@ def _forwarded(ctx: Context) -> list[str]:
 
 
 def _render_checked_out(ctx: Context, out) -> int:
-    """Run the installer the checkout now holds as `--user`, and relay what it says."""
-    argv = [sys.executable, str(ctx.checkout / "bin" / "sd_install.py"), "--user", *_forwarded(ctx)]
-    done = subprocess.run(argv, env=ctx.environ, capture_output=True, text=True, check=False)  # nosec B603 - fixed argv
+    """Run the installer the checkout now holds as `--user`, and relay what it says.
+
+    Under the python of the slot `.venv` now links to, not this process's:
+    the old slot's python imports the old slot's `sd_db` first, so a library
+    upgrade would render once with the old library (sd:2945).
+    """
+    python = ctx.checkout / ".venv" / "bin" / "python"
+    argv = [str(python), str(ctx.checkout / "bin" / "sd_install.py"), "--user", *_forwarded(ctx)]
+    try:
+        done = subprocess.run(argv, env=ctx.environ, capture_output=True, text=True, check=False)  # nosec B603 - fixed argv
+    except OSError as problem:
+        print(f"error: cannot run {python} to render {ctx.checkout}: {problem}", file=out)
+        return 1
     print(done.stdout + done.stderr, file=out, end="")
     return done.returncode
 
@@ -3135,6 +3184,11 @@ def _clone_serving_tree(ctx: Context, tree: Path, out) -> bool:
         print(f"error: {ctx.checkout} has no origin remote to clone the serving checkout from{': ' + err if err else ''}",
               file=out)
         return False
+    # A relative local path, such as `../pack.git`, names a place from the
+    # checkout, and the clone runs elsewhere (sd:2913). A `scheme://` URL and
+    # git's scp form, a colon before any slash, are not paths.
+    if "://" not in url and ":" not in url.split("/", 1)[0]:
+        url = os.path.normpath(os.path.join(ctx.checkout, url))
     if ctx.dry_run:
         print(f"would clone {url} into {tree}, detach it at origin/main and render", file=out)
         return True
