@@ -566,6 +566,16 @@
 
 ### Fixed
 
+- **`sd task add --ref` clears the body when a second add passes `--body ''` (sd:2899).**
+  The update checked the body for truthiness, so an explicit empty body kept the old one.
+  Now `--body ''` clears it and an add without `--body` keeps it.
+
+- **`sd-review-ack` fetches a merged pull request's head before it reads `fix-missing` (sd:2942).**
+  A squash merge deletes the branch, so a clone that never fetched it lacked every commit a `fixed` record cites.
+  One satellite clone read 164 such findings on 17 merged pull requests as `fix-missing`; all were landed.
+  Now a missing cited commit with merge evidence fetches that head from `origin` by sha, once per head per run, under the git timeout.
+  A fetch that fails leaves `fix-missing`; without merge evidence nothing is fetched.
+
 - **`sd fleet stamp`'s secret-read rules cover files outside the project (sd:2982).**
   The 16 file-name rules in `SECRET_READ_DENY` read `Read(/**/<name>)`, and Claude Code anchors a single leading `/` at the project.
   So `Read(/**/.netrc)` never matched `~/.netrc`, and no rule matched a `.env` in a config folder outside the checkout.

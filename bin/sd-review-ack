@@ -49,6 +49,8 @@ visible signal said the work was done. So `fixed` is not satisfied by a SHA
 being cited; it is satisfied by that SHA being an ancestor of the branch the
 work is landing on. A commit nobody can find is `fix-missing`, a commit that
 exists but never landed is `fix-not-landed`, and both keep the gate red.
+Before it reads `fix-missing`, a merged pull request's head is fetched from
+`origin`, because a squash deletes the branch that held the commit (sd:2942).
 
 A SQUASH IS A LANDING TOO. This repository merges by squash, so the commit a
 record names is never itself an ancestor of `main`; only the squash commit
@@ -336,7 +338,8 @@ VERDICT_HELP = {
     "fix-not-landed": "acknowledged as fixed by a commit that never reached the landing ref",
     "fix-restated": ("acknowledged as fixed by a commit the reviewer had already read when "
                      "it stated this finding"),
-    "fix-missing": "acknowledged as fixed by a commit this repository does not have",
+    "fix-missing": ("acknowledged as fixed by a commit this repository does not have, "
+                    "even after fetching the merged head"),
     "dismissed": "read and dismissed, with a reason on the record",
     "carried": "carried to an item, and that item is still a row somebody could work",
     "carry-dropped": ("carried to an item that has since been cancelled, so nothing holds "
@@ -1519,6 +1522,32 @@ def _lines(text: str) -> frozenset[str]:
     return frozenset(text.split("\n"))
 
 
+def _has_commit(root: pathlib.Path, commit: str) -> bool:
+    return sd_lib.git_output(["rev-parse", "--verify", f"{commit}^{{commit}}"], root) is not None
+
+
+#: `(root, head)` pairs already asked of `origin`, so a run asks each merged
+#: head once, and a head the remote refused is not asked again.
+_FETCHED_HEADS: set[tuple[str, str]] = set()
+
+
+def _fetch_merged_head(root: pathlib.Path, head: str) -> None:
+    """Fetch a merged pull request's head from `origin` when this clone lacks it (sd:2942).
+
+    A squash merge deletes the branch, so a clone that never fetched it holds
+    none of the commits a `fixed` record cites. 164 findings on 17 merged pull
+    requests read `fix-missing` that way, and every one read `landed` once
+    the heads were fetched. GitHub serves a merged head by its sha. Bounded by
+    `sd_lib`'s git timeout; a fetch that fails leaves the verdict as it was.
+    """
+    key = (str(root), head)
+    if not FULL_SHA.fullmatch(head) or key in _FETCHED_HEADS or _has_commit(root, head):
+        return
+    _FETCHED_HEADS.add(key)
+    # ponytail: one bounded fetch per head, serial; a hung remote costs the timeout per head.
+    sd_lib.git_output(["fetch", "--quiet", "--no-write-fetch-head", "origin", head], root)
+
+
 def fix_verdict(root: pathlib.Path, commit: str, ref: str, merge: dict[str, str] | None = None) -> str:
     """Whether a cited commit actually reached `ref`.
 
@@ -1531,14 +1560,17 @@ def fix_verdict(root: pathlib.Path, commit: str, ref: str, merge: dict[str, str]
     GitHub merged, and the commit GitHub merged it *as* is an ancestor of
     `ref` -- which is what a squash leaves behind, and every merge in this
     repository is one. Both ancestry facts are local `git`'s to settle, so a
-    branch whose objects this repository never fetched still reads
-    `fix-not-landed`: absent evidence is not evidence of a landing.
+    cited commit this clone lacks is first looked for in the merged head,
+    fetched from `origin` (`_fetch_merged_head`); one still missing after that
+    reads `fix-missing`: absent evidence is not evidence of a landing.
     """
-    if not commit or sd_lib.git_output(["rev-parse", "--verify", f"{commit}^{{commit}}"], root) is None:
+    squashed = merge or {}
+    if commit and not _has_commit(root, commit):
+        _fetch_merged_head(root, squashed.get("head", ""))
+    if not commit or not _has_commit(root, commit):
         return "fix-missing"
     if _is_ancestor(root, commit, ref):
         return "landed"
-    squashed = merge or {}
     if _is_ancestor(root, commit, squashed.get("head", "")) and _is_ancestor(root, squashed.get("merge", ""), ref):
         return "landed"
     return "fix-not-landed"
