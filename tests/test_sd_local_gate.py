@@ -1130,19 +1130,33 @@ class TemporaryLeftovers(unittest.TestCase):
         return gone.pid
 
     def test_day_old_leftovers_go_and_young_or_unnamed_entries_stay(self) -> None:
-        gone = [self.entry("tmpab_d1234"), self.entry("tmp.AbCdEfGh12"), self.entry("tmpx_1w8w2y.yaml", folder=False),
-                *(self.entry(f"{prefix}x7") for prefix in ("sd-restore", "traces-poc", "trail-audit-", "sd-ship-template",
-                                                            "sd-ship-verify", "sd-tests-")),
-                self.entry(f"{sd_gate_cache.GATE_PREFIX}{self.dead()}-abc")]
-        kept = [self.entry("tmpab_d5678", age=3600), self.entry("tmpabc"), self.entry("tmp.short"), self.entry("keep-me"),
-                self.entry("tmpABCDEFGH"), self.entry(f"{sd_gate_cache.GATE_PREFIX}{os.getpid()}-abc")]
+        gone = [*(self.entry(f"{prefix}x7") for prefix in ("sd-restore", "traces-poc", "trail-audit-", "sd-ship-template",
+                                                            "sd-ship-verify"))]
+        kept = [self.entry("sd-restorex8", age=3600), self.entry("keep-me")]
         self.assertEqual(sd_gate_cache.reap_temporary(self.temporary, self.now), len(gone))
         self.assertEqual(([path.name for path in gone if path.exists()], [path.exists() for path in kept]),
                          ([], [True] * len(kept)))
 
+    def test_generic_tempfile_names_stay_at_any_age(self) -> None:
+        """Review round 1: `tmp` + 8 and `tmp.` + 10 are every app's names, so their age proves nothing; macOS purges them."""
+        kept = [self.entry("tmpab_d1234", age=30 * 86400), self.entry("tmp.AbCdEfGh12", age=30 * 86400),
+                self.entry("tmpx_1w8w2y.yaml", age=30 * 86400, folder=False), self.entry("sd-tests-x7", age=30 * 86400)]
+        self.assertEqual(sd_gate_cache.reap_temporary(self.temporary, self.now), 0)
+        self.assertEqual([path.exists() for path in kept], [True] * len(kept))
+
+    def test_a_pid_named_entry_goes_only_when_its_pid_is_dead_whatever_its_age(self) -> None:
+        """Review round 1: a gate's or a test run's folder names its pid; a live one stays however old, a dead one goes."""
+        live = [self.entry(f"{prefix}{os.getpid()}-abc", age=30 * 86400) for prefix in (sd_gate_cache.GATE_PREFIX, "sd-tests-")]
+        gone = [self.entry(f"{prefix}{self.dead()}-abc", age=60) for prefix in (sd_gate_cache.GATE_PREFIX, "sd-tests-")]
+        self.assertEqual(sd_gate_cache.reap_temporary(self.temporary, self.now), len(gone))
+        self.assertEqual(([path.exists() for path in live], [path.exists() for path in gone]), ([True, True], [False, False]))
+
+    def test_the_test_package_names_its_temp_dir_with_its_pid(self) -> None:
+        self.assertRegex(pathlib.Path(os.environ["TMPDIR"]).name, rf"sd-tests-{os.getpid()}-[a-z0-9_]+")
+
     def test_a_link_goes_and_its_target_stays(self) -> None:
         target = self.entry("keep-me")
-        link = self.temporary / "tmpzzzzzzzz"
+        link = self.temporary / "sd-restorezz"
         link.symlink_to(target)
         os.utime(link, (self.now - 2 * 86400,) * 2, follow_symlinks=False)
         self.assertEqual(sd_gate_cache.reap_temporary(self.temporary, self.now), 1)
@@ -1150,7 +1164,7 @@ class TemporaryLeftovers(unittest.TestCase):
 
     def test_an_old_folder_with_a_young_file_stays(self) -> None:
         """Age is the newest mtime in the entry: a folder's own mtime does not move when a file deep in it is written."""
-        path = self.entry("tmpab_d1234")
+        path = self.entry("sd-restore-x7")
         (path / "deep").mkdir()
         (path / "deep" / "live.log").write_text("x", encoding="utf-8")
         os.utime(path / "deep", (self.now - 2 * 86400,) * 2)
@@ -1159,19 +1173,19 @@ class TemporaryLeftovers(unittest.TestCase):
         self.assertTrue((path / "deep" / "live.log").is_file())
 
     def test_a_removal_that_fails_is_not_counted(self) -> None:
-        path = self.entry("tmpab_d1234")
+        path = self.entry("sd-restore-x7")
         with mock.patch.object(shutil, "rmtree"):
             self.assertEqual(sd_gate_cache.reap_temporary(self.temporary, self.now), 0)
         self.assertTrue(path.exists())
 
     def test_another_users_entry_stays(self) -> None:
-        path = self.entry("tmpab_d1234")
+        path = self.entry("sd-restore-x7")
         with mock.patch.object(os, "getuid", return_value=os.getuid() + 1):
             self.assertEqual(sd_gate_cache.reap_temporary(self.temporary, self.now), 0)
         self.assertTrue(path.exists())
 
     def test_a_gate_start_reaps_its_temp_dir(self) -> None:
-        old = self.entry("tmpab_d1234")
+        old = self.entry("sd-restore-x7")
         with mock.patch.object(tempfile, "tempdir", str(self.temporary)), \
                 contextlib.redirect_stderr(io.StringIO()) as errors:
             sd_gate_cache.worktree_prefix(pathlib.Path(self.temporary))
@@ -1190,9 +1204,9 @@ class OuterTemporaryUntouched(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         outer = pathlib.Path(tmp.name).resolve() / "T"
-        (outer / "tmpab_d1234").mkdir(parents=True)
+        (outer / "sd-restore-x7").mkdir(parents=True)
         old = time.time() - 2 * 86400
-        os.utime(outer / "tmpab_d1234", (old, old))
+        os.utime(outer / "sd-restore-x7", (old, old))
         repo = pathlib.Path(tmp.name) / "repo"
         subprocess.run(["git", "init", "-q", str(repo)], check=True)
         code = ("import sys, pathlib; sys.path.insert(0, 'bin'); import tests, sd_gate_cache; "
@@ -1200,7 +1214,7 @@ class OuterTemporaryUntouched(unittest.TestCase):
         done = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, capture_output=True, text=True,
                               env={**os.environ, "TMPDIR": str(outer)}, timeout=60)
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual((sorted(p.name for p in outer.iterdir() if p.name == "tmpab_d1234"), done.stderr), (["tmpab_d1234"], ""))
+        self.assertEqual((sorted(p.name for p in outer.iterdir() if p.name == "sd-restore-x7"), done.stderr), (["sd-restore-x7"], ""))
 
 
 class StaleGateWorktrees(Repository):

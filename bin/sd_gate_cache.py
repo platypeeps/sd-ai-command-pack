@@ -31,7 +31,8 @@ named `tree` in a folder `sd-local-gate-<pid>-<suffix>` directly in the temp
 dir counts as a gate's: a checkout elsewhere with a like name is never touched.
 A live gate's worktree stays; so does a folder from before this rule. The
 dead gate's whole folder goes with its worktree, the check's `TMPDIR` included (sd:3032).
-The same start removes a day-old leftover of a run outside the gate (`reap_temporary`).
+The same start removes what a run outside the gate left in the temp dir (`reap_temporary`): an sd folder whose
+named pid is gone, or a named leaker's entry a day old. Generic `tempfile` names stay; macOS purges them.
 """
 
 from __future__ import annotations
@@ -71,10 +72,11 @@ GATE_PREFIX = "sd-local-gate-"
 GATE_FOLDER = re.compile(r"sd-local-gate-([0-9]{1,9})-[a-z0-9_]+")
 #: The check's own `TMPDIR`, beside the gate's worktree: the gate's cleanup removes what the check's tests leave (sd:3032).
 TEMPORARY = "tmp.noindex"
-#: What a run outside the gate leaves directly in the temp dir (sd:3032): Python `tempfile` names, with or without an
-#: extension, `mktemp` names, and the named leakers the item measured.
-LEFT_BEHIND = re.compile(r"tmp[a-z0-9_]{8}(\.[A-Za-z0-9]{1,8})?|tmp\.[A-Za-z0-9]{10}"
-                         r"|(sd-restore|traces-poc|trail-audit-|sd-ship-template|sd-ship-verify|sd-tests-).*")
+#: An sd folder that names its owner's pid: a gate's, or a test run's (`tests/__init__.py`); it goes once the pid is gone.
+OWNED = re.compile(r"(?:sd-local-gate|sd-tests)-([0-9]{1,9})-[a-z0-9_]+")
+#: The named leakers the item measured (sd:3032); they name no pid, so their age decides. Generic `tempfile` names
+#: are every app's, so their age proves nothing; macOS purges temp entries left unread for three days.
+LEFT_BEHIND = re.compile(r"(sd-restore|traces-poc|trail-audit-|sd-ship-template|sd-ship-verify).*")
 # ponytail: a day is a guess at the longest any run keeps its temp folder; shorten it once runs are measured.
 LEFT_BEHIND_SECONDS = 24 * 3600
 #: How many paths the age walk reads in one entry; past it the entry counts as young and stays.
@@ -93,7 +95,8 @@ def running(pid: int) -> bool:
 
 
 def reap_temporary(temporary: pathlib.Path, now: float | None = None) -> int:
-    """Remove the user's `LEFT_BEHIND` entries directly in `temporary` that are a day old by mtime; how many went.
+    """Remove the user's entries directly in `temporary` that are `OWNED` by a dead pid, or `LEFT_BEHIND` and a day
+    old by mtime; how many went.
 
     A dead gate's folder counts too: its worktree was another repository's, so `worktree_prefix` never saw it.
     """
@@ -104,14 +107,14 @@ def reap_temporary(temporary: pathlib.Path, now: float | None = None) -> int:
         return 0
     removed = 0
     for entry in entries:
-        gate = GATE_FOLDER.fullmatch(entry.name)
-        if not (LEFT_BEHIND.fullmatch(entry.name) or gate and not running(int(gate[1]))):
+        owned = OWNED.fullmatch(entry.name)
+        if owned and running(int(owned[1])) or not owned and not LEFT_BEHIND.fullmatch(entry.name):
             continue
         try:
             status = entry.stat(follow_symlinks=False)
         except OSError:
             continue
-        if status.st_uid != os.getuid() or now - newest_mtime(entry, status) < LEFT_BEHIND_SECONDS:
+        if status.st_uid != os.getuid() or not owned and now - newest_mtime(entry, status) < LEFT_BEHIND_SECONDS:
             continue
         if entry.is_dir(follow_symlinks=False):
             shutil.rmtree(entry.path, ignore_errors=True)
@@ -150,10 +153,10 @@ def raise_error(error: OSError) -> None:
 
 def worktree_prefix(root: pathlib.Path) -> str:
     """This gate's temporary folder prefix, after removing `root`'s gate worktrees whose gate process is gone
-    and the temp dir's day-old leftovers (`reap_temporary`)."""
+    and the temp dir's leftovers (`reap_temporary`)."""
     temporary = pathlib.Path(tempfile.gettempdir()).resolve()
     if removed := reap_temporary(temporary):
-        print(f"sd gate: removed {removed} temp entries a day old from {temporary} (sd:3032)", file=sys.stderr)
+        print(f"sd gate: removed {removed} temp entries from {temporary} (sd:3032)", file=sys.stderr)
     listing = sd_lib.git_output(["worktree", "list", "--porcelain"], root) or ""
     for line in listing.splitlines():
         tree = pathlib.Path(line.removeprefix("worktree "))
