@@ -90,13 +90,16 @@ sources; draft prose is `sd-draft` work.
    `sd store list sdw.blog-idea --status drafting`, read each with
    `sd store get sdw.blog-idea "<title>"`, and skip any idea a piece
    already links (`grep -rl 'obsidian_source: "<idea path>"' content/ content-parked/`).
-2. **Create a new piece.** Copy `templates/piece-template.md` to
-   `content/<year>/<slug>/index.md` and fill `title`, `type`, `created` and
+2. **Create a new piece, only for work that has none.** A registered piece
+   keeps its `index.md`: skip this step. Otherwise, when
+   `content/<year>/<slug>/index.md` does not exist, copy
+   `templates/piece-template.md` there and fill `title`, `type`, `created` and
    `updated`. For an idea: a 5 to 8 word kebab-case slug from its title,
    `type: blog`, `tags` from its `topics`, the extra field
    `obsidian_source: "<the idea note's path in the vault>"`, and its
    description and `Argument` section seeded into `## Notes / angle`. Then
-   `pack pieces register --piece <year>/<slug>`.
+   `pack pieces register --piece <year>/<slug>`. Do not copy the template over
+   an existing `index.md`: it holds the piece's draft prose.
 3. **Read the topic notes first:** `sd store list sdw.topic --status active --full`.
    Take `## Ground truth` as orientation (never a citation), `## Feeds` as
    sources to read directly, and `## Boundaries` and `## Sweep notes` for scope
