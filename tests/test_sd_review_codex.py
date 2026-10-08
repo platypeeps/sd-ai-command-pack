@@ -405,6 +405,21 @@ class SkillSuppressionProbeTests(ReviewFixture):
         self.assertEqual(handed["CODEX_HOME"], str(home))
         self.assertNotIn("CODEX_API_KEY", handed)
 
+    def test_the_probe_leaves_nothing_in_the_temp_dir(self) -> None:
+        """sd:3078: `codex debug prompt-input` leaves an empty `.tmpXXXXXX` folder in `TMPDIR` each run. A stub
+        that does the same stands in for it; the probe's own temp dir takes the folder and goes with it."""
+
+        outer = self.tmp / "outer-tmp"
+        outer.mkdir()
+        stub = self.tmp / "stub-codex"
+        stub.write_text(f"#!/bin/sh\nmkdir \"${{TMPDIR:?}}/.tmpSTUB01\"\nprintf '%s' '{self.SUPPRESSED}'\n",
+                        encoding="utf-8")
+        stub.chmod(0o755)
+        state = sd_review.codex_skill_state(self.entry(f"{stub} exec"), self.tmp, sd_review.subprocess_runner,
+                                            self.environment(TMPDIR=str(outer)), self.chatgpt_home())
+        self.assertEqual((state["state"], sorted(path.name for path in outer.iterdir())),
+                         (sd_review.SKILLS_SUPPRESSED, []))
+
     def review_with_probe(self, answer: Any, **options: Any) -> dict[str, Any]:
         root = self.make_repo()
         (root / "src.py").write_text("x = 1\n", encoding="utf-8")

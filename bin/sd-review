@@ -584,9 +584,9 @@ def codex_skill_state(provider: sd_registry.Provider, root: pathlib.Path, runner
     # read: the skill roots are read from that home, so another home would
     # answer about another run.
     child = child_environment(sd_registry.provider_environment(provider, env), provider.env)
-    child["CODEX_HOME"] = str(home)
     printable = shlex.join(argv)
-    result = runner(argv, child, root, timeout)
+    with tempfile.TemporaryDirectory() as scratch:  # codex leaves an empty `.tmpXXXXXX` in `TMPDIR` (sd:3078)
+        result = runner(argv, {**child, "CODEX_HOME": str(home), "TMPDIR": scratch}, root, timeout)
     if not result.launched or result.exit_code != 0:
         return skills_report(SKILLS_UNKNOWN, printable, f"the probe exited {result.exit_code}, so this "
                              "build cannot be asked whether the key took effect: "
