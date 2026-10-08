@@ -1774,7 +1774,7 @@ class Ship(SharedReview):
         """
         if self.args.no_item:
             return ()
-        named = (*sd_ship_body.closes_named(body, self.args.item), *map(int, re.findall(r"\bsd:([0-9]+)", title)))
+        named = (*sd_ship_body.closes_named(body, self.args.item), *map(int, re.findall(r"\bsd:([0-9]+)\b", title)))
         return tuple(dict.fromkeys(number for number in named if number != self.args.item))
 
     def co_delivered(self) -> tuple[int, ...]:

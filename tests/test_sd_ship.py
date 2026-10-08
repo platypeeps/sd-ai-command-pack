@@ -2966,6 +2966,19 @@ roles:
         self.assertEqual(caught.exception.workflow["blocker"]["code"], "closes_item_unknown")
         self.assertFalse(self.remote.pull_requests)
 
+    def test_a_title_closes_only_a_whole_sd_token(self):
+        """Review of sd:3013: `sd:123abc` and `sd:123_legacy` closed item 123."""
+        self.task_item("task")
+        named = self.closes_items()[:2]
+        title = f"Fix sd:{named[0]}abc and sd:{named[1]}_legacy parsing (sd:{self.item})"
+        self.unanswered("--deliver", "--title", title).prepare()
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        self.assertFalse(result.get("closed_items"))
+        for number in named:
+            with self.subTest(item=number):
+                self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (number,)).fetchone()[0], "planning")
+
     def test_a_refs_item_stays_open_after_the_merge(self):
         """`Refs:` names a related or partial item, which stays open (sd:1481).
         The lane writes it for rows a pull request touches without finishing,
