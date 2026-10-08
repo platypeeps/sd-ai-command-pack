@@ -1,7 +1,6 @@
-"""Accepted findings still pass through the canonical publication and merge guards."""
+"""Recorded dispositions still pass through the canonical publication and merge guards."""
 from __future__ import annotations
 
-import json
 import unittest
 from unittest.mock import patch
 
@@ -27,11 +26,8 @@ class DispositionGuardTests(unittest.TestCase):
     def accept_review(self):
         self.blocked()
         self.filled()
-        validated = self.command("--dispositions-file", str(self.proposal_file))
-        self.assertEqual(validated.returncode, 0, validated.stdout + validated.stderr)
-        digest = json.loads(validated.stdout)["acceptance_digest"]
-        accepted = self.command("--dispositions-file", str(self.proposal_file), "--accept-dispositions", digest)
-        self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
+        recorded = self.command("--dispositions-file", str(self.proposal_file))
+        self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
 
     def prepare_accepted(self):
         self.accept_review()
@@ -68,24 +64,8 @@ class DispositionGuardTests(unittest.TestCase):
         self.assertFalse(self.remote.pull_requests)
         self.unchanged_reviews_and_no_merge()
 
-    def test_evidence_change_after_review_clearance_refuses_before_push(self):
-        self.assert_pre_push_revalidation(
-            lambda: self.evidence.write_text("changed after the first gate"),
-            "disposition evidence changed",
-        )
-
     def test_policy_change_after_review_clearance_refuses_before_push(self):
         self.assert_pre_push_revalidation(self.change_policy, "review tools or repository policy changed")
-
-    def test_stale_evidence_refuses_at_first_merge_gate_before_authority_lookup(self):
-        self.prepare_accepted()
-        self.evidence.write_text("changed after publication")
-        operation = self.operation("merge", "--manual", "--expected-head", self.head)
-        with patch.object(operation.api, "owned", side_effect=AssertionError("authority lookup after stale evidence")):
-            with self.assertRaisesRegex(ship.Refusal, "disposition evidence changed"):
-                operation.merge()
-        self.assertEqual(self.operation().state["phase"], "ready_to_send")
-        self.unchanged_reviews_and_no_merge()
 
     def assert_final_merge_revalidation(self, mutate, message):
         self.prepare_accepted()
@@ -109,12 +89,6 @@ class DispositionGuardTests(unittest.TestCase):
         self.assertEqual(len(checks), 2)
         self.assertEqual(self.operation().state["phase"], "ci_passed")
         self.unchanged_reviews_and_no_merge()
-
-    def test_evidence_change_during_ci_refuses_at_final_merge_gate(self):
-        self.assert_final_merge_revalidation(
-            lambda: self.evidence.write_text("changed during remote readiness checks"),
-            "disposition evidence changed",
-        )
 
     def test_policy_change_during_ci_refuses_at_final_merge_gate(self):
         self.assert_final_merge_revalidation(self.change_policy, "review tools or repository policy changed")

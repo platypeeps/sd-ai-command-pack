@@ -70,7 +70,7 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    Dispose every blocker.
    Commit fixes and verify the diff since the preceding reviewed head, including current source for prior findings.
    An incomplete review needs full-branch coverage.
-   An unchanged complete review can use explicit evidence-backed acceptance; a reason alone grants no clearance.
+   An unchanged complete review can clear through recorded rebuttals (`sd-ship adjudicate`).
 3. **Push only the cleared head.**
    Push refuses unless the current sha matches the head the local review cleared.
    A changed head returns to review.
@@ -136,7 +136,7 @@ Before a head goes to the lane, run `sd gate check` on it under the repository's
 For itemless work, reuse its stable review ID.
 For genuinely new work, allocate it with `sd-ship review --no-item --create-record --assert-new-work --json`.
 Use `--no-item --review-id ID` instead of `--item ID` for prepare, merge, observe, and reconcile.
-Prepare reuses complete exact-head review evidence and acceptance; otherwise it follows the same review gates.
+Prepare reuses complete exact-head review evidence and recorded dispositions; otherwise it follows the same review gates.
 Itemless merge requires `--manual` and `--expected-head SHA`.
 After the merge, run itemless `reconcile` and `review --close-record REASON` from the default branch; the deleted feature branch needs no recreation.
 Itemless publication rejects commit flags, runner authority, and whole-item delivery flags.
@@ -258,17 +258,16 @@ A merged PR is evidence to inspect, not permission to merge again.
 Before interruption recovery, read `skills/sd-ship/references/recovery.md` in the sd-ai-command-pack checkout.
 Read its review-retry section only when a review stopped or exhausted its automatic allowance.
 
-## Evidence-backed disposition acceptance
+## Recorded rebuttals
 
 A blocking local review refuses with code `review_blocking`, naming each blocking finding in the error and in `findings`.
 Its `next_action` names the `sd-ship adjudicate` command that prints each finding in full.
-Use acceptance only for a complete review of the exact clean head with passing deterministic checks.
-It cannot waive missing depth, incomplete transport, failed checks, or changed source.
+Record dispositions only for a complete review of the exact clean head with passing deterministic checks.
+They cannot waive missing depth, incomplete transport, failed checks, or changed source.
 Fixes still require verification on their new head.
 A rejection that still stands after one review pass is recorded with `sd-ship adjudicate` before the next fix is pushed.
-Before proposing or accepting dispositions, read `skills/sd-ship/references/adjudication.md` in the sd-ai-command-pack checkout.
-Standing merge permission does not approve individual findings.
-Do not invent acceptance for the operator.
+A rebuttal needs a reason a reader can check, not operator acceptance.
+Before recording dispositions, read `skills/sd-ship/references/adjudication.md` in the sd-ai-command-pack checkout.
 
 ## Remote findings
 

@@ -158,7 +158,7 @@ Repeated incomplete runs exhaust the automatic allowance and grant no publicatio
 
 The repository gate runs after a review that does not block.
 A blocking review runs no gate; its refusal says so, and its `check.status` is `not_run`.
-After its dispositions are accepted, the next prepare runs the gate before clearance (`adjudication.md`, step 5).
+After its dispositions are recorded, the next prepare runs the gate before clearance (`adjudication.md`, step 4).
 A repository gate that fails spends no pass, even after a review that cleared.
 `sd-ship` removes that reservation and keeps the gate output under `review_preflight_error`.
 The next prepare reviews the branch again, without `--retry-review`.

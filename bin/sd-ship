@@ -2422,9 +2422,7 @@ def no_item_record_flags(action) -> None:
 
 def adjudication_flags(action) -> None:
     action.add_argument("--expected-head", required=True)
-    action.add_argument("--dispositions-file", type=pathlib.Path, help="canonical absolute path to an evidenced proposal")
-    action.add_argument("--prepare-evidence", action="store_true", help="copy the cited evidence into this record's durable archive; it never accepts in the same command")
-    action.add_argument("--accept-dispositions", metavar="SHA256", help="explicit acceptance of this exact validated proposal; not proof of user approval")
+    action.add_argument("--dispositions-file", type=pathlib.Path, help="the filled template to record: a disposition and a reason per blocking finding")
 
 
 def squash_title(pull: dict, prepared: str) -> str:
@@ -2799,7 +2797,7 @@ def main(argv=None) -> int:
             raise outside_repository()
         sd_lib.refuse_unmanaged(root, unmanaged_refusal, args.database)
         database = args.database or default_path()
-        readonly = args.command in ("observe", "verify-review") or (args.command == "adjudicate" and args.accept_dispositions is None)
+        readonly = args.command in ("observe", "verify-review") or (args.command == "adjudicate" and args.dispositions_file is None)
         connection = connect(database, write=not readonly)
         try:
             if args.command in ("review", "verify-review") and not args.no_item:

@@ -1,13 +1,11 @@
-"""Operator adjudication uses local evidence and keeps raw external reviews intact."""
+"""Recorded rebuttals clear blockers at once and keep raw external reviews intact."""
 
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import importlib
 import io
 import json
-import os
 import pathlib
 import re
 import shlex
@@ -56,8 +54,6 @@ class DispositionTests(unittest.TestCase):
             self.prepare()
         self.head = fixture._git(self.root, "rev-parse", "HEAD")
         self.raw = json.loads(json.dumps(self.operation().state["passes"]))
-        self.evidence = self.directory / "evidence.txt"
-        self.evidence.write_text("source and regression evidence for this fixture")
         self.proposal_file = self.directory / "dispositions.json"
 
     def command(self, *extra):
@@ -67,39 +63,21 @@ class DispositionTests(unittest.TestCase):
         result = self.command()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         proposal = json.loads(result.stdout)["proposal"]
-        proposal.update(
-            operator="fixture operator",
-            authority_context="explicit fixture acceptance; not authenticated",
-        )
         for row in proposal["findings"]:
             row.update(
                 response_disposition="rebutted",
-                reason="the retained fixture evidence contradicts the claim",
-                evidence=[
-                    {
-                        "path": str(self.evidence),
-                        "sha256": hashlib.sha256(
-                            self.evidence.read_bytes()
-                        ).hexdigest(),
-                    }
-                ],
+                reason="src.py:1 reads the value the finding says is missing",
             )
         self.proposal_file.write_text(json.dumps(proposal))
         return proposal
 
     def accepted(self, proposal=None):
+        """One command records the filled template; there is no digest step."""
         proposal = self.filled() if proposal is None else proposal
         self.proposal_file.write_text(json.dumps(proposal))
-        verified = self.command("--dispositions-file", str(self.proposal_file))
-        self.assertEqual(verified.returncode, 0, verified.stdout + verified.stderr)
-        acceptance_digest = json.loads(verified.stdout)["acceptance_digest"]
-        result = self.command(
-            "--dispositions-file",
-            str(self.proposal_file),
-            "--accept-dispositions",
-            acceptance_digest,
-        )
+        result = self.command("--dispositions-file", str(self.proposal_file))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)["phase"], "disposition_recorded")
         return proposal
 
     def rejected_proposal(self, proposal):
@@ -141,7 +119,7 @@ class DispositionTests(unittest.TestCase):
         self.assertEqual([row["path"] for row in findings], [f"f{n}.py" for n in range(7)])
         self.assertTrue(all(len(row["summary"]) == sd_ship_dispositions.SUMMARY_CHARS for row in findings))
 
-    def test_blank_template_missing_explicit_acceptance_and_wrong_digest_refuse(self):
+    def test_blank_template_and_retired_flags_refuse_without_writing(self):
         self.blocked()
         blank = json.loads(self.command().stdout)["proposal"]
         self.rejected_proposal(blank)
@@ -149,12 +127,7 @@ class DispositionTests(unittest.TestCase):
         before = list(self.connection.execute("SELECT * FROM state"))
         for args in (
             ("--accept-dispositions", "0" * 64),
-            (
-                "--dispositions-file",
-                str(self.proposal_file),
-                "--accept-dispositions",
-                "0" * 64,
-            ),
+            ("--dispositions-file", str(self.proposal_file), "--prepare-evidence"),
             ("--additional-review-for", self.head),
         ):
             with self.subTest(args=args):
@@ -173,7 +146,7 @@ class DispositionTests(unittest.TestCase):
         ):
             self.prepare()
 
-    def test_only_explicit_risk_with_owner_trigger_or_rebuttal_is_accepted(self):
+    def test_only_a_rebuttal_or_parked_risk_with_a_reason_is_recorded(self):
         self.blocked()
         proposal = self.filled()
         for value in ("addressed", "unresolved", "", "accepted"):
@@ -181,15 +154,18 @@ class DispositionTests(unittest.TestCase):
             trial["findings"][0]["response_disposition"] = value
             self.rejected_proposal(trial)
         for row in proposal["findings"]:
-            row.update(
-                response_disposition="parked",
-                owner="fixture owner",
-                trigger="revisit on the named scope change",
-            )
-        for field in ("owner", "trigger"):
+            row.update(response_disposition="parked", reason="revisit when the parser changes")
+        trial = json.loads(json.dumps(proposal))
+        trial["findings"][0]["reason"] = " "
+        self.rejected_proposal(trial)
+        # The retired fields are refused, not ignored, so an old proposal says so.
+        for field in ("owner", "trigger", "evidence"):
             trial = json.loads(json.dumps(proposal))
-            trial["findings"][0][field] = ""
+            trial["findings"][0][field] = "x"
             self.rejected_proposal(trial)
+        trial = json.loads(json.dumps(proposal))
+        trial.update(operator="fixture", authority_context="fixture")
+        self.rejected_proposal(trial)
         self.accepted(proposal)
         with patch.object(
             ship,
@@ -371,7 +347,7 @@ class DispositionTests(unittest.TestCase):
         proposal = self.accepted()
         self.prepare()
         previous = self.operation().state["review_clearance"]
-        proposal["authority_context"] = "a new explicit fixture decision"
+        proposal["findings"][0]["reason"] = "a new fixture rebuttal"
         self.accepted(proposal)
         with self.assertRaisesRegex(ship.Refusal, "prepare again"):
             self.merge()
@@ -409,20 +385,15 @@ class DispositionTests(unittest.TestCase):
             self.assertEqual(ship.main(args), 0)
         self.assertIs(connect.call_args.kwargs["write"], False)
 
-    def test_acceptance_checks_source_cas_inside_the_write_transaction(self):
+    def test_recording_checks_source_cas_inside_the_write_transaction(self):
         self.blocked()
         self.filled()
-        validated = json.loads(
-            self.command("--dispositions-file", str(self.proposal_file)).stdout
-        )["acceptance_digest"]
         op = self.operation(
             "adjudicate",
             "--expected-head",
             self.head,
             "--dispositions-file",
             str(self.proposal_file),
-            "--accept-dispositions",
-            validated,
         )
         original_read = fixture.receipts.read
         observations = []
@@ -441,36 +412,12 @@ class DispositionTests(unittest.TestCase):
             self.head,
             "--dispositions-file",
             str(self.proposal_file),
-            "--accept-dispositions",
-            validated,
         )
         self.operation().save(warnings=["concurrent phase update"])
         before = list(self.connection.execute("SELECT * FROM state"))
         with self.assertRaisesRegex(ship.Refusal, "changed before"):
             stale.adjudicate()
         self.assertEqual(list(self.connection.execute("SELECT * FROM state")), before)
-
-    def test_missing_changed_directory_symlink_and_hardlinked_evidence_refuse(self):
-        self.blocked()
-        proposal = self.filled()
-        original = self.evidence.read_bytes()
-        for kind in ("changed", "missing", "directory", "symlink", "hardlink"):
-            self.evidence.unlink(missing_ok=True)
-            if kind == "changed":
-                self.evidence.write_text("changed")
-            elif kind == "directory":
-                self.evidence.mkdir()
-            elif kind == "symlink":
-                self.evidence.symlink_to(self.root / "src.py")
-            elif kind == "hardlink":
-                os.link(self.root / "src.py", self.evidence)
-            with self.subTest(kind=kind):
-                self.rejected_proposal(proposal)
-            if self.evidence.is_dir():
-                self.evidence.rmdir()
-            else:
-                self.evidence.unlink(missing_ok=True)
-            self.evidence.write_bytes(original)
 
     def test_review_tool_adjudicator_tool_and_policy_changes_refuse(self):
         self.blocked()
@@ -567,29 +514,14 @@ class DispositionTests(unittest.TestCase):
             self.prepare()
         self.assertEqual(self.operation().state["passes"], previous)
 
-    def test_unreadable_oversized_and_raced_file_reads_refuse(self):
-        evidence = self.directory / "read-evidence.txt"
-        evidence.write_text("original evidence")
+    def test_unreadable_and_oversized_file_reads_refuse(self):
+        path = self.directory / "read-dispositions.json"
+        path.write_text("{}")
         read = ship.sd_ship_dispositions.read_file
         with self.assertRaisesRegex(ship.Refusal, "bounded input"):
-            read(evidence, 4)
-        with patch.object(
-            os, "open", side_effect=PermissionError(13, "fixture denied")
-        ):
-            with self.assertRaisesRegex(ship.Refusal, "cannot be read"):
-                read(evidence, 1024)
-        original_stat = os.fstat
-        calls = []
-
-        def race(descriptor):
-            calls.append(descriptor)
-            if len(calls) == 2:
-                evidence.write_text("changed during read")
-            return original_stat(descriptor)
-
-        with patch.object(os, "fstat", side_effect=race):
-            with self.assertRaisesRegex(ship.Refusal, "changed during"):
-                read(evidence, 1024)
+            read(path, 1)
+        with self.assertRaisesRegex(ship.Refusal, "cannot be read"):
+            read(self.directory / "missing.json", 1024)
 
     def test_duplicate_json_keys_and_oversized_proposals_refuse(self):
         self.blocked()
@@ -609,29 +541,18 @@ class DispositionTests(unittest.TestCase):
                 list(self.connection.execute("SELECT * FROM state")), before
             )
 
-    def test_template_and_validation_do_not_write_receipts(self):
+    def test_the_template_writes_no_receipt(self):
         self.blocked()
         before = list(self.connection.execute("SELECT * FROM state"))
         self.filled()
-        result = self.command("--dispositions-file", str(self.proposal_file))
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertRegex(
-            json.loads(result.stdout)["acceptance_digest"], r"^[0-9a-f]{64}$"
-        )
         self.assertEqual(list(self.connection.execute("SELECT * FROM state")), before)
 
-    def test_explicit_acceptance_reuses_blocking_review_without_provider_dispatch(self):
+    def test_a_recorded_rebuttal_reuses_blocking_review_without_provider_dispatch(self):
         self.blocked()
         self.filled()
-        verified = self.command("--dispositions-file", str(self.proposal_file))
-        digest = json.loads(verified.stdout)["acceptance_digest"]
-        result = self.command(
-            "--dispositions-file",
-            str(self.proposal_file),
-            "--accept-dispositions",
-            digest,
-        )
+        result = self.command("--dispositions-file", str(self.proposal_file))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertRegex(json.loads(result.stdout)["proposal_digest"], r"^[0-9a-f]{64}$")
         with patch.object(
             ship,
             "review_process",

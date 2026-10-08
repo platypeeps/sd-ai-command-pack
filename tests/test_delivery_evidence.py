@@ -61,8 +61,8 @@ CONTIGUOUS = (
 #: body did (dependabot's `Signed-off-by:`) got it joined to the block.
 GITHUB_COAUTHOR = "Co-authored-by: Someone <nobody@example.invalid>\n"
 
-#: The attribution paragraph every assistant-written pull-request body ends
-#: with, spelled as the template spells it.
+#: A prose paragraph above the trailers, spelled as assistant-written bodies
+#: ended before sd:3014 dropped it from the template.
 ATTRIBUTION = (
     "🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
     "https://claude.ai/code/session_01EXAMPLE\n"
@@ -144,8 +144,8 @@ class TrailerBlockTests(unittest.TestCase):
     def test_the_pull_request_template_ends_in_the_trailer_block(self) -> None:
         """The template is the shape every hand-written body starts from, so
         it is pinned here: its last paragraph is trailers and nothing else,
-        none of them a line `sd-ship` owns (sd:1870), and the attribution line
-        sits above it."""
+        none of them a line `sd-ship` owns (sd:1870), and it carries no
+        attribution paragraph (sd:3014)."""
         template = TEMPLATE.read_text(encoding="utf-8")
         block = sd_lib.trailer_block(template).splitlines()
         self.assertTrue(block)
@@ -153,7 +153,7 @@ class TrailerBlockTests(unittest.TestCase):
             self.assertRegex(line, r"^[A-Za-z-]+: \S")
         self.assertIn("Refs:", {line.partition(" ")[0] for line in block})
         self.assertFalse({line.partition(" ")[0] for line in block} & set(sd_lib.OWNED_TRAILERS))
-        self.assertLess(template.index("Generated with"), template.index(block[0]))
+        self.assertNotIn("Generated with", template)
         self.assertEqual((), sd_lib.demoted_trailers(template))
 
     def test_a_blank_line_before_the_last_block_demotes_the_trailer(self) -> None:

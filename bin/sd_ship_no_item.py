@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import sd_lib
-import sd_ship_evidence
 from sd_ship_history import (
     AUTOMATIC_CODE_REVIEW_PASSES,
     ItemHistory,
@@ -438,25 +437,14 @@ def write_allocation(connection: sqlite3.Connection, store, review_id: str, fact
 class NoItemIdentity(ReviewIdentity):
     review_id: str
     repository: str
-    root: pathlib.Path
 
     def _acceptance_namespace(self, review_key: str) -> str:
         return no_item_acceptance_key(self.repository, self.review_id)
 
     def _identity_bindings(self, state: dict) -> dict:
-        # The archive joins the bindings only once it exists, so a template and
-        # its unprepared proposal bind the same absence.
-        archive = sd_ship_evidence.archive_descriptor(self.root, self.review_id)
         return {"identity_mode": "no-item", "review_id": self.review_id,
                 "identity_revision": state.get("identity_revision"),
-                "schema_version": state.get("schema_version"),
-                **({"evidence_archive": archive} if archive else {})}
-
-    def _check_evidence(self, proposal: dict) -> None:
-        sd_ship_evidence.check_archive(self.root, self.review_id, proposal)
-
-    def _prepare_evidence(self, proposal: dict) -> dict:
-        return sd_ship_evidence.prepare_archive(self.root, self.review_id, proposal)
+                "schema_version": state.get("schema_version")}
 
     def _identity_output(self, state: dict) -> dict:
         return {"identity_mode": "no-item", "review_id": self.review_id,
@@ -489,7 +477,7 @@ def create_record(root: pathlib.Path, connection: sqlite3.Connection, database: 
         check_no_item_records(connection, store, facts)
         write_allocation(connection, store, review_id, facts, imported, evidence)
     _revision, state = store.read(connection, review_key(facts.repository, review_id))
-    return no_item_result(root, "created", review_id, facts.repository, state,
+    return no_item_result("created", review_id, facts.repository, state,
                           {"allocation": state["allocation"], "spent_passes": spent_passes(state)})
 
 
@@ -498,8 +486,8 @@ def spent_passes(state: dict) -> int:
     return len(state.get("historical_passes") or []) + len(state.get("passes") or [])
 
 
-def no_item_result(root: pathlib.Path, phase: str, review_id: str, repository: str, state: dict, extra: dict) -> dict:
-    result = NoItemIdentity(review_id, repository, root).result_fields(phase, state, observed_at(), extra)
+def no_item_result(phase: str, review_id: str, repository: str, state: dict, extra: dict) -> dict:
+    result = NoItemIdentity(review_id, repository).result_fields(phase, state, observed_at(), extra)
     result["workflow"] = success(phase)
     return result
 
@@ -551,7 +539,7 @@ def import_into_record(root: pathlib.Path, connection: sqlite3.Connection, datab
         state.update(historical_passes=imported, imported_history=evidence)
         store.save(connection, key, revision, with_digest(state))
     _revision, state = store.read(connection, key)
-    return no_item_result(root, "imported", args.review_id, facts.repository, state,
+    return no_item_result("imported", args.review_id, facts.repository, state,
                           {"spent_passes": spent_passes(state), "native_passes": len(state["passes"])})
 
 
@@ -668,7 +656,7 @@ def open_review(root: pathlib.Path, connection, database: pathlib.Path, args, st
                                                  require_diff=args.command not in ("reconcile", "merge") if require_diff is None else require_diff)
     return SharedReview(root, connection, database, args, store=store, repository=facts.repository,
                         branch=facts.branch, head=facts.head, key=key, revision=revision,
-                        state=stored_digest(state), identity=NoItemIdentity(args.review_id, facts.repository, root),
+                        state=stored_digest(state), identity=NoItemIdentity(args.review_id, facts.repository),
                         history=NoItemHistory(), runtime=runtime)
 
 
@@ -709,7 +697,7 @@ def publication_review(root: pathlib.Path, connection, database: pathlib.Path, a
         return review
     review = SharedReview(root, connection, database, args, store=store, repository=repository,
                           branch=state["branch"], head=state.get("head", ""), key=key, revision=revision,
-                          state=stored_digest(state), identity=NoItemIdentity(args.review_id, repository, root),
+                          state=stored_digest(state), identity=NoItemIdentity(args.review_id, repository),
                           history=NoItemHistory(), runtime=runtime)
     review.checkout_branch = default or state["branch"]
     return review
@@ -740,16 +728,16 @@ def verify_review(root: pathlib.Path, connection, database: pathlib.Path, args, 
         )
     # A standalone record has no prepared delivery receipt to hold a prior
     # clearance, so the acceptance record itself is the authority, and it is
-    # revalidated here against the current head, bindings and durable evidence.
+    # revalidated here against the current head and bindings.
     clearance = review.check_review(head, refresh_adjudication=True)
     return review.result("verified", clearance=clearance, spent_passes=spent_passes(review.state),
                          history_digest=review.state["history_digest"])
 
 
 def adjudicate_review(root: pathlib.Path, connection, database: pathlib.Path, args, store, runtime) -> dict:
-    """Template, preparation and validation read; only acceptance writes."""
+    """The template reads; recording a dispositions file writes."""
     review = open_review(root, connection, database, args, store, runtime)
-    if args.accept_dispositions is None:
+    if args.dispositions_file is None:
         return review.adjudicate()
     with store.repository_lock(database, review.repository):
         review.revision, review.state = store.read(connection, review.key)
@@ -818,7 +806,7 @@ def rebind_record(root: pathlib.Path, connection, database: pathlib.Path, args, 
         claim_branch(connection, store, facts.repository, facts.branch, args.review_id)
         write_identity(connection, store, key, revision, state, branch=facts.branch, branch_aliases=aliases)
     _revision, state = store.read(connection, key)
-    return no_item_result(root, "rebound", args.review_id, facts.repository, state,
+    return no_item_result("rebound", args.review_id, facts.repository, state,
                           {"spent_passes": spent_passes(state), "history_digest": state["history_digest"]})
 
 
@@ -846,7 +834,7 @@ def close_record(root: pathlib.Path, connection, database: pathlib.Path, args, s
                          closed={"reason": args.close_record.strip(), "closed_at": observed_at()})
             store.save(connection, key, revision, with_digest(state))
     _revision, state = store.read(connection, key)
-    return no_item_result(root, "closed", args.review_id, facts.repository, state,
+    return no_item_result("closed", args.review_id, facts.repository, state,
                           {"spent_passes": spent_passes(state), "history_digest": state["history_digest"]})
 
 
@@ -863,7 +851,7 @@ def reopen_record(root: pathlib.Path, connection, database: pathlib.Path, args, 
         # Reopening resumes the same spent count; abandonment never refunds budget.
         write_identity(connection, store, key, revision, state, lifecycle="active", closed=None)
     _revision, state = store.read(connection, key)
-    return no_item_result(root, "reopened", args.review_id, facts.repository, state,
+    return no_item_result("reopened", args.review_id, facts.repository, state,
                           {"spent_passes": spent_passes(state), "history_digest": state["history_digest"]})
 
 
