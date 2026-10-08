@@ -793,18 +793,14 @@ def _merge_settings(repo: dict[str, Any]) -> list[dict[str, Any]]:
 #: (sd:1807). Like the merge flags they ride in `merge_settings`, so no
 #: acknowledgement reaches them; `GapVocabularyTests` binds them to the system's.
 BASELINE_FLAG_IDS = ("protection_source", "required_check")
-#: The owners the baseline covers when `sd.fleet_owners` names none: the system
-#: collector's default, `sd_db.protection.BASELINE_OWNERS`, so sd-status raises
-#: a flag where the dashboard does. List more owners in `sd.fleet_owners`.
-BASELINE_OWNERS = ("platypeeps",)
 
 
 def _baseline_owners() -> tuple[tuple[str, ...], str]:
-    """The owners whose repositories carry the baseline, `sd.fleet_owners` else `BASELINE_OWNERS`, and why not."""
+    """The owners whose repositories carry the baseline, `sd_fleet.configured_owners`, and why not."""
     import sd_fleet  # noqa: PLC0415 - only the baseline flags read the fleet config
 
     try:
-        return sd_fleet.configured_owners(BASELINE_OWNERS), ""
+        return sd_fleet.configured_owners(), ""
     except sd_fleet.FleetRefusal as error:
         return (), str(error)
 

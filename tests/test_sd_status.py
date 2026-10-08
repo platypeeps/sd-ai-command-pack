@@ -622,14 +622,15 @@ class GapVocabularyTests(unittest.TestCase):
     def test_the_default_baseline_owners_are_the_systems(self) -> None:
         """sd:1807. With no `sd.fleet_owners`, sd-status flags the repositories the dashboard flags."""
         import sd_db.protection as system  # noqa: PLC0415 - provisioned by `make setup`
+        import sd_fleet  # noqa: PLC0415
 
         with mock.patch.dict(os.environ):
             os.environ.pop("SD_BASELINE_OWNERS", None)
             default = importlib.reload(system).BASELINE_OWNERS
         importlib.reload(system)
-        self.assertEqual(frozenset(status.BASELINE_OWNERS), default)
+        self.assertEqual(frozenset(sd_fleet.DEFAULT_OWNERS), default)
         with mock.patch.object(status.sd_lib, "machine_config", lambda path: {}):
-            self.assertEqual(status._baseline_owners(), (status.BASELINE_OWNERS, ""))
+            self.assertEqual(status._baseline_owners(), (sd_fleet.DEFAULT_OWNERS, ""))
 
     def test_the_baseline_flags_are_the_systems_ids_and_sentences(self) -> None:
         """sd:1807. Same ids, values and sentences as `sd_db.protection.baseline_flags`."""
