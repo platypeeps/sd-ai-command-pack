@@ -48,6 +48,7 @@ UNSURE = "unsure"
 CHOICE_OPTIONS = frozenset({
     "--criteria", "--unsure-below", "--state", "--state-format",
     "--model", "--id", "--json", "--fallback", "--caller", "--stage",
+    "--subject",
 })
 
 FENCE = re.compile(r"```(\w*)\n(.*?)```", re.DOTALL)
@@ -317,6 +318,14 @@ class TheCallIsSpelledAsTheCommandAcceptsIt(unittest.TestCase):
         """`--criteria` is not optional for `choice`."""
 
         self.assertIn("--criteria", self.command())
+
+    def test_the_claim_is_named_by_hash_and_the_audit_is_one_run(self) -> None:
+        """The ledger joins a later verdict by subject and groups an audit by run (sd:2954)."""
+
+        self.assertIn('--subject "sd-fact-check:$key"', self.command())
+        body = section_body(page())
+        self.assertIn("shasum -a 256 | cut -c1-16", body)
+        self.assertIn("JEV_RUN=sd-fact-check-", body)
 
 
 if __name__ == "__main__":

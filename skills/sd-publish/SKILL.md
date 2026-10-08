@@ -141,8 +141,14 @@ identify them before reading sources, profile content, or workspace artifacts.
 
     ```sh
     jev ask --questions q.json --state s.json --state-format json \
-        --caller sd-publish --stage JEV_SD_PUBLISH
+        --caller sd-publish --stage JEV_SD_PUBLISH \
+        --subject "sd-publish:$(shasum -a 256 s.json | cut -c1-16)"
     ```
+
+    `--subject` names the judged state by the first 16 hex of its SHA-256,
+    never by its text, so a later outcome can join the judgment by hashing
+    the same file. Export one `JEV_RUN=sd-publish-<UTC yyyymmddThhmmss>-<4
+    hex>` before the first call of a run and keep it for every call in it.
 
     State carries the exact draft, the source spans it was adapted from, the
     destination name, and the supplied length or register constraints. Send

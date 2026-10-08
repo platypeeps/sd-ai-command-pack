@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
 import json
 import os
 import pathlib
@@ -1144,7 +1145,7 @@ def jev_command(repo: pathlib.Path) -> tuple[str, str, list[str]]:
     try:
         probe = subprocess.run(  # fixed argv, no shell
             [found, "enabled", JEV_STAGE, "--record", "--caller", JEV_CALLER, *scope],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=10, env=sd_lib.jev_env(os.environ, JEV_CALLER),
         )
     except (OSError, subprocess.SubprocessError) as error:
         return "", f"jev enabled did not run: {error}", []
@@ -1345,8 +1346,20 @@ def collect_claims(work_root: pathlib.Path) -> tuple[dict[str, dict[str, str]], 
     return cases, origins
 
 
+def claims_subject(origins: list[str]) -> str:
+    """The ledger's name for one batch: `sd-docs-lint:<16 hex>` (sd:2954).
+
+    No path or citation leaves in it. The key is the first 16 hex of the
+    sha256 of the batch's origins -- `<item>/<file> `<citation>``, as a weak
+    reading's note prints them -- sorted, each followed by a newline.
+    """
+    text = "".join(f"{origin}\n" for origin in sorted(origins))
+    return f"sd-docs-lint:{hashlib.sha256(text.encode()).hexdigest()[:16]}"
+
+
 def ask_claims(
-    command: str, cases: dict[str, dict[str, str]], scope: list[str], timeout: float = CLAIM_BUDGET_SECONDS
+    command: str, cases: dict[str, dict[str, str]], scope: list[str], timeout: float = CLAIM_BUDGET_SECONDS,
+    subject: str | None = None,
 ) -> tuple[dict[str, dict], str]:
     """One request for a whole batch, and an empty answer set and why when it failed.
 
@@ -1369,8 +1382,10 @@ def ask_claims(
             done = subprocess.run(  # fixed argv, no shell
                 [command, "ask", "--questions", "-", "--state", str(state),
                  "--state-format", "json", "--fallback", "{}",
-                 "--caller", JEV_CALLER, "--stage", JEV_STAGE, *scope],
+                 "--caller", JEV_CALLER, "--stage", JEV_STAGE,
+                 *(["--subject", subject] if subject else []), *scope],
                 input=json.dumps(questions), capture_output=True, text=True, timeout=timeout,
+                env=sd_lib.jev_env(os.environ, JEV_CALLER),
             )
         except (OSError, subprocess.SubprocessError) as error:
             return {}, f"jev ask did not run: {error}"
@@ -1439,7 +1454,8 @@ def check_claim_support(repo: pathlib.Path, work_root: pathlib.Path, report: Rep
                         f"the {CLAIM_BUDGET_SECONDS}s budget ran out")
             break
         batch = keys[start:start + CLAIM_BATCH]
-        answers, why = ask_claims(command, {key: cases[key] for key in batch}, scope, left)
+        answers, why = ask_claims(command, {key: cases[key] for key in batch}, scope, left,
+                                  claims_subject([origins[key] for key in batch]))
         unanswered = unanswered or why
         for key in batch:
             support = answers.get(key, {}).get("noul")

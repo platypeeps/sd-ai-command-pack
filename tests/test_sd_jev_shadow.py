@@ -32,11 +32,11 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 #: `choice` exits with the case's code and prints the `--shadow` answer, as
 #: the real `jev` does in shadow mode.
 JEV_STUB = """#!/usr/bin/env python3
-import json, sys
+import json, os, sys
 argv = sys.argv[1:]
 stdin = "" if argv[:1] == ["enabled"] else sys.stdin.read()
 with open({log!r}, "a") as log:
-    log.write(json.dumps({{"argv": argv, "state": stdin}}) + "\\n")
+    log.write(json.dumps({{"argv": argv, "state": stdin, "run": os.environ.get("JEV_RUN")}}) + "\\n")
 if argv[:1] == ["enabled"]:
     raise SystemExit({gate})
 if {code}:
@@ -130,6 +130,18 @@ class TriageTests(ReviewFixture):
         self.assertEqual(stubs.gh(), [["api", "--hostname", "github.com", "repos/example/demo", "--jq", ".private"]])
         # No opt-in: the local Kev only, for the probe and the question alike.
         self.assertTrue(all(call["argv"][-1] == "--local-only" for call in stubs.jev()), stubs.jev())
+
+    def test_a_triage_run_is_one_jev_run(self):
+        """sd:2954. The probe and every question of one review share one `JEV_RUN`."""
+        root = self.repo()
+        stubs = Stubs(self.tool_bin)
+        with unittest.mock.patch.dict(os.environ):
+            os.environ.pop("JEV_RUN", None)
+            self.review(root, [FINDING, {**FINDING, "line": 2}])
+        runs = [call["run"] for call in stubs.jev()]
+        self.assertEqual(len(runs), 3, stubs.jev())
+        self.assertEqual(len(set(runs)), 1, runs)
+        self.assertRegex(runs[0], r"^sd-review-\d{8}T\d{6}-[0-9a-f]{4}$")
 
     def test_a_clean_review_asks_nothing(self):
         stubs = Stubs(self.tool_bin)
@@ -273,6 +285,16 @@ class DedupeTests(ReviewFixture):
                          f"none=no listed item tracks the same work,sd-{first}=Fix the lane; again")
         self.assertEqual(json.loads(call["state"]), {"new_item_title": "Fix the lane"})
         self.assertEqual(argv[-1], "--local-only")
+
+    def test_an_add_is_one_jev_run(self):
+        """sd:2954. The probe and the question of one `sd task add` share one `JEV_RUN`."""
+        self.add("Fix the lane, again")
+        stubs = Stubs(self.tool_bin)
+        self.add("Fix the lane")
+        runs = [call["run"] for call in stubs.jev()]
+        self.assertEqual(len(runs), 2, stubs.jev())
+        self.assertEqual(len(set(runs)), 1, runs)
+        self.assertRegex(runs[0], r"^sd-task-add-\d{8}T\d{6}-[0-9a-f]{4}$")
 
     def test_a_private_repository_sends_no_title(self):
         self.add("Fix the lane")
