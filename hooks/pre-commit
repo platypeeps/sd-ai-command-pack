@@ -17,8 +17,7 @@
 # set of .github/scripts/select-tests.py, because they walk the tree rather
 # than name a file, so there is no diff-scoped form of either: they run whole
 # here or not at all, and 5.2 s is inside the budget. bin/sd-docs-lint is not
-# run here: its `--changed` needs `--pr-body` and scopes rule 8 only, the tree
-# rules always read the whole corpus, and a profile attributes 20.7 of its
+# run here: the tree rules always read the whole corpus, and a profile attributes 20.7 of its
 # 21.2 s to seventy git subprocesses -- fetch and ls-remote -- from
 # `sd_lib.delivered` in rule 2. A commit hook that reaches the network is
 # the hook that gets bypassed. It stays in `make check` and CI.

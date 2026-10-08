@@ -288,7 +288,8 @@ advance (sd:1933).
 `sd-ship` owns the lines `sd_lib.OWNED_TRAILERS` names: `Item:`, `Work:`, `Delivers:` and `Closes:`.
 `prepare` writes `Work:` into the body it publishes; `merge` writes `Item:`, `Delivers:` and any owed
 `Closes:` (sd:1600) into the squash message. A body keeps `Closes: sd:N[, sd:M]` to co-deliver those
-items; the merge adds `Delivers:` for each (sd:1481). `prepare` strips any other owned line from the
+items; the merge adds `Delivers:` for each (sd:1481). Each `sd:N` the pull request title names closes
+the same way (sd:3014). `prepare` strips any other owned line from the
 supplied body and lists it in the result's `normalized`. `Refs:` is not owned; its items stay open.
 Without `--body-file`, `prepare` reads the open pull request's live body; `body_source` names the source.
 `sd-ship body --item <item> [--body-file <file>] [--pr <n>]` prints the body `prepare` would publish
@@ -752,7 +753,7 @@ The reserved `sd` namespace declares these settings:
 - `sd.gate_settle_seconds`: seconds between two gate starts, and of low load1 while load5 is high; `0` is none.
   Absence reads 45. `SD_GATE_SETTLE_SECONDS` overrides it for one run. It grants nothing.
 - `sd.fleet_owners`: comma-separated GitHub logins whose repositories `sd fleet stamp` treats as the operator's own.
-  Absence reads the deprecated `fleet.owners` list in the machine config, then the pack's default pair. It grants nothing.
+  Absence reads the deprecated `fleet.owners` list in the machine config, then the pack's default, `platypeeps`. It grants nothing.
 - `sd.gate_cache_gb`: the most gigabytes the local gate's warm Rust build folders may hold; `0` is no bound.
   Absence reads 40. `SD_GATE_CACHE_GB` overrides it for one run. It grants nothing.
 - `sd.lane_root`: the folder that holds each repository's `sd-ship lane` queue, as `<root>/<repository>/lane/queue/`.
