@@ -2832,6 +2832,70 @@ def demoted_trailers(message: str) -> tuple[str, ...]:
     )
 
 
+#: The trailer names `hooks/commit-msg` holds to the block git reads (sd:1931).
+#: A `Delivers:` or `Closes:` line in a prose paragraph reads as delivered to
+#: a line reader and as nothing to git, so the hook refuses it (sd:3014).
+#: `Work:` is not here; `sd-ship` writes it into a pull-request body, above
+#: the squash's own block.
+CHECKED_TRAILERS = ("Needed-by:", "Co-Authored-By:", "Claude-Session:",
+                    ITEM_TRAILER, DELIVERS_TRAILER, CLOSES_TRAILER)
+
+#: A checked trailer at column zero, the same anchor `_STATED_RE` uses.
+_CHECKED_RE = re.compile(
+    r"^(?P<key>" + "|".join(re.escape(name.rstrip(":")) for name in CHECKED_TRAILERS)
+    + r"):[ \t]*(?P<value>\S.*)$"
+)
+
+
+def _trailer_pair(key: str, value: str) -> tuple[str, str]:
+    """A trailer as a comparable pair: git matches keys without case and unfolds values."""
+    return key.lower(), " ".join(value.split())
+
+
+def unread_trailers(message: str, parsed: str) -> tuple[str, ...]:
+    """The checked trailer lines in `message` that git's own parse did not return.
+
+    `parsed` is `git interpret-trailers --parse --no-divider` over the same
+    message, which is the reader of record: `git log --format=%(trailers)`
+    reads the same block and, like `--no-divider`, does not stop at a `---`
+    line. `trailer_block` is not used here, because git's paragraph is not
+    always Python's: a whitespace-only line also ends one, and a final
+    paragraph that is mostly prose is not a trailer block at all. Asking git
+    covers both. A line counts once per time git returned it, so a trailer
+    written above the block and again inside it still names the stray copy.
+
+    A continuation line (indented, straight after a trailer) is folded into
+    its trailer before comparing, as `--parse` unfolds it.
+    """
+    returned: dict[tuple[str, str], int] = {}
+    for line in parsed.splitlines():
+        key, colon, value = line.partition(":")
+        if colon:
+            pair = _trailer_pair(key, value)
+            returned[pair] = returned.get(pair, 0) + 1
+    stated: list[tuple[str, tuple[str, str]]] = []
+    folding = False
+    for line in message.splitlines():
+        match = _CHECKED_RE.match(line)
+        if match:
+            stated.append((line, _trailer_pair(match["key"], match["value"])))
+            folding = True
+        elif folding and line[:1] in (" ", "\t") and line.strip():
+            first, (key, value) = stated[-1]
+            stated[-1] = (first, _trailer_pair(key, f"{value} {line}"))
+        else:
+            folding = False
+    # Last first, so a line git did read uses up its own return and a copy
+    # of it higher up is the one named.
+    stray = []
+    for line, pair in reversed(stated):
+        if returned.get(pair, 0) > 0:
+            returned[pair] -= 1
+        else:
+            stray.append(line)
+    return tuple(reversed(stray))
+
+
 def display_fields(
     row: dict[str, Any],
     order: tuple[str, ...],
