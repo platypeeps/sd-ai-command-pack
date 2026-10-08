@@ -17,13 +17,13 @@ progress belongs to the database.
 | Capture work without a PRD | Today, or `sd task add "Title"` — it takes the registered checkout enclosing cwd; `--no-repo` files one that belongs to none |
 | Prioritize, schedule, add details | Item screen, or `sd task edit ID` |
 | Move a task or followup to the right checkout | `sd task edit ID --belongs-to PATH` — `.` names the checkout enclosing cwd; `--no-repo` leaves it belonging to none, as it does on `add`. An unregistered path is refused, and the move is recorded as an item note. The move prints the checkout it landed in; ordinary output names a row's checkout only when it is not the one you are standing in |
-| Clear a stale branch name | `sd task edit ID --clear-branch` — sets the row's branch to none and records an "Updated branch" note. It sets no branch; `sd runner prepare --branch` does that |
+| Clear a stale branch name | `sd task edit ID --clear-branch` — sets the row's branch to none and records an "Updated branch" note. It sets no branch; `sd work register` records one from git |
 | Reclassify an item filed as the wrong kind | A task's item screen, or `sd task edit ID --kind KIND` — the kinds are `sd_db.workflow.HAND_KINDS`, the same five `sd task add --kind` offers. A move to `personal`, `work-idea` or `personal-idea` carries no repository, so a row that has one needs `--no-repo` in the same command. A `followup` keeps its repository (sd:809). `edit_item` refuses a produced row (a contribution or skill-review task), an `idea` that is a writing piece, and a row with a queued, running or ending assignment, and records every change as a "Changed kind" note naming who made it |
 | Change task status | Item screen, or `sd task status ID STATUS` |
 | Close a task or followup nobody will do | `sd task cancel ID --reason TEXT` — `done` with a `cancelled` receipt, as `sd work cancel` writes; a finding carried to the row reopens |
 | Record and resolve a followup | Item notes, or `sd task note ID --kind followup --body TEXT` / `sd task resolve NOTE_ID` — a note on a done item prints an advisory naming its delivery, and still lands |
 | See the same inventory as the dashboard | `sd today --json`, `sd store items --json` |
-| Register a planning folder as a row (row-status repositories only) | `sd work register docs/work/<item>/prd.md` — the row's branch is the local branch the checkout is on when it is not the default, and otherwise nothing; `sd runner prepare --branch` fills it in later |
+| Register a planning folder as a row (row-status repositories only) | `sd work register docs/work/<item>/prd.md` — the row's branch is the local branch the checkout is on when it is not the default, and otherwise nothing |
 | Relink a moved work artifact | Item screen, or `sd work relink ID PATH` |
 | Cancel repository work | Item screen, or `sd work cancel ID --reason TEXT` |
 | Record verified code delivery | `sd work deliver ID FULL_COMMIT_SHA` |
@@ -364,8 +364,8 @@ the observation changes. Running assignments without an owned cancellation
 backend cannot be stopped through the dashboard. The system now includes an
 owned queue runner and finite command execution. Their implementation does not
 activate the service: verify its configured work volume, installed build and
-observed runtime before dispatch. The pack exposes these controls through
-`sd runner`; `sd-ship` records reviewed delivery and verified remote merges.
+observed runtime before dispatch. The pack has no runner command;
+`sd-ship` records reviewed delivery and verified remote merges.
 
 The refreshed UI contains Today, Backlog, Writing, Operations and item details.
 Operations has Jobs, Services, Ports, Progress and Usage subtabs. Services lists

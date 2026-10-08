@@ -42,7 +42,6 @@ Read the sd-ai-command-pack checkout's [operator defaults](../.claude/rules/sd-o
 - **User:** desired outcome, provider exceptions, accepted risks, and permissions beyond existing authority.
 
 An active-session agent remains the coordinator.
-`sd runner` owns queue execution when that separate workflow is explicitly used.
 
 ## Current behavior and limits
 

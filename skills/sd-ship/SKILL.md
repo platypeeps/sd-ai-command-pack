@@ -25,7 +25,7 @@ Shared contributors do not revoke permission; existing ownership, protection, re
 A refusal stops execution.
 When another ship operation owns the repository, rerun `prepare` or `merge` with `--wait <seconds>`; do not write a retry loop.
 `reconcile` and `adjudicate` also take the lock but cannot wait for it; rerun them once the holder is gone.
-`sd runner status` names the holder under `ship_locks`; a file under `ship-locks/` is not a hold.
+The refusal names the holder; a file under `ship-locks/` is not a hold.
 A merge lane that ships one item across several commands holds the lane: `sd-ship hold --item ID --holder NAME [--for SECONDS]`.
 The hold is taken under the ship lock and lasts `--for` seconds, 3600 by default and 86400 at most; rerun it to renew.
 While it stands, `prepare` and `merge` for any other item refuse as `lane_held`, naming the item, holder and expiry.
@@ -298,5 +298,4 @@ Acknowledgement failures produce warnings, not review clearance.
 
 A remote mode reduction records a reason once per item and remote.
 That note grants no permission; the push or merge still stops.
-Queue execution, process ownership, and clone retention belong to `sd runner`.
 Refresh commands and the matching shared library together before claiming installed behavior.

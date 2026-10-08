@@ -961,7 +961,7 @@ class RuleTwoReadsTheRow(Fixture):
 class RuleTwoComparesTheBranchLine(Fixture):
     """sd:1476. A `branch:` line that disagrees with the row is named.
 
-    The row's `branch` column is what `sd runner prepare --branch` maintains,
+    The row's `branch` column is what `sd work register` records,
     and the frontmatter line is a second copy nothing reconciled. Many items
     still carry `branch: main`, so this is a note and never a failure: a lint
     that turned every such item red would be switched off, not read.
@@ -1318,7 +1318,7 @@ class AFollowupRowIsClearedByItsTrailerAlone(Fixture):
 class TheRowNamesTheBranch(Fixture):
     """sd:1382. The row's `branch` column is the maintained copy.
 
-    `sd runner prepare --branch` writes the column and `sd-status` prints it;
+    `sd work register` writes the column and `sd-status` prints it;
     the frontmatter `branch:` line is written once and never reconciled. On a
     checkout whose marker names the row, `sd-review --scope planning` picked
     its item by the line, so a stale line both refused a branch the row names

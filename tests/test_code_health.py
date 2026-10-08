@@ -96,7 +96,7 @@ SHEBANG_LIMIT = 4096
 
 #: How many public functions the dead-code check cannot speak for, because
 #: another function in the corpus carries the same name. Downward only.
-AMBIGUOUS_CEILING = 114  # 116 until sd:719 step 7 deleted bin/sd-dashboard's build_parser and main
+AMBIGUOUS_CEILING = 112  # 114 until sd:3050 deleted bin/sd_runner.py; 116 until sd:719 step 7
 
 
 def tracked(*pathspecs: str, root: pathlib.Path = REPO_ROOT) -> list[pathlib.Path]:
