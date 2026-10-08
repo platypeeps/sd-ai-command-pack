@@ -339,7 +339,7 @@ class BuilderReceipt(BuilderFixture):
 class TreeReceipt(BuilderFixture):
     """`.github/sd-gate-reuse.json` (sd:1912): a check that reads no commit history is keyed by its tree.
 
-    Two heads with one tree -- an `sd attribute` commit, a message-only amend --
+    Two heads with one tree -- an empty commit, a message-only amend --
     differ only in commit metadata. A repository that declares its check reads
     none of it reuses the first head's pass at the second; one that does not
     declare keeps the head key, since a commit-message lint can pass at one

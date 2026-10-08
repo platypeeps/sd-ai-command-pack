@@ -39,12 +39,6 @@ class FixReviewTests(ReviewFixture):
             with self.subTest(scope=scope, base=base), self.assertRaises(sd_review.UsageError):
                 sd_review.resolve_subject(root, scope, base=base)
 
-    def test_fix_commit_with_no_author_trailer_is_refused(self):
-        root, first = self.branch()
-        self.commit(root, "fix.py", "fix = 1\n", "unknown author")
-        with self.assertRaises(sd_review.Refusal):
-            sd_review.review(root, namespace(scope="branch", base=first), FakeRunner(), self.environment(), self.chatgpt_home())
-
     def test_unchanged_blocker_and_source_reach_the_fix_reviewer(self):
         root, first = self.branch()
         blocking = json.dumps({"findings": [{"path": "src.py", "line": 1, "summary": "original unresolved defect",
@@ -68,8 +62,8 @@ class FixReviewTests(ReviewFixture):
         root, first = self.branch()
         self.commit(root, "fix.py", "fix = True\n")
         report = self.tmp / "prior.json"
-        for prior in ({}, {"scope": "branch", "subject": {"head": "0" * 40}, "status": "clean", "findings": [], "authored_with": []},
-                      {"scope": "branch", "subject": {"head": first}, "status": "clean", "findings": ["forged"], "authored_with": []}):
+        for prior in ({}, {"scope": "branch", "subject": {"head": "0" * 40}, "status": "clean", "findings": []},
+                      {"scope": "branch", "subject": {"head": first}, "status": "clean", "findings": ["forged"]}):
             report.write_text(json.dumps(prior))
             runner = FakeRunner()
             with self.assertRaises(sd_review.UsageError):
@@ -119,7 +113,7 @@ class FixReviewTests(ReviewFixture):
         report = self.tmp / "prior.json"
         row = {"path": "src.py", "line": 1, "severity": "high", "family": "correctness",
                "disposition": "blocking", "summary": "x" * (sd_review.MAX_OUTPUT_BYTES + 1)}
-        prior = {"scope": "branch", "subject": {"head": first}, "findings": [row], "authored_with": []}
+        prior = {"scope": "branch", "subject": {"head": first}, "findings": [row]}
         for oversized in ("report", "source"):
             if oversized == "source":
                 row["summary"] = "original blocker"
@@ -147,7 +141,7 @@ class FixReviewTests(ReviewFixture):
             (root / name).write_text(marker)
             row = {"path": name, "line": 1, "disposition": "blocking", "summary": "model-selected path"}
             report.write_text(json.dumps({"scope": "branch", "subject": {"head": first},
-                                          "findings": [row], "authored_with": []}))
+                                          "findings": [row]}))
             runner = FakeRunner()
             with self.subTest(path=name):
                 try:
@@ -164,7 +158,7 @@ class FixReviewTests(ReviewFixture):
         report = self.tmp / "prior.json"
         row = {"path": "src.py", "line": 1, "disposition": "blocking", "summary": "original finding"}
         report.write_text(json.dumps({"scope": "branch", "subject": {"head": first},
-                                      "findings": [row], "authored_with": []}))
+                                      "findings": [row]}))
         marker = "harmless-uncommitted-replacement"
         (root / ".env").write_text(marker)
         for replacement in ("dirty", "symlink"):
@@ -190,7 +184,7 @@ class FixReviewTests(ReviewFixture):
         subprocess.run(["git", "commit", "-m", "link\n\nAuthored-with: human"], cwd=root, check=True, capture_output=True)
         report = self.tmp / "prior.json"
         for name in ("linked.py", "folder"):
-            report.write_text(json.dumps({"scope": "branch", "subject": {"head": first}, "authored_with": [],
+            report.write_text(json.dumps({"scope": "branch", "subject": {"head": first},
                                           "findings": [{"path": name, "disposition": "blocking", "summary": "finding"}]}))
             runner = FakeRunner()
             with self.subTest(path=name), self.assertRaisesRegex(sd_review.UsageError, "tracked regular file"):
@@ -204,7 +198,7 @@ class FixReviewTests(ReviewFixture):
         subprocess.run(["git", "commit", "-m", "remove\n\nAuthored-with: human"], cwd=root, check=True, capture_output=True)
         findings = [{"path": "src.py", "disposition": "blocking", "summary": "original blocker"}]
         report = self.tmp / "prior.json"
-        original = json.dumps({"scope": "branch", "subject": {"head": first}, "authored_with": [], "findings": findings})
+        original = json.dumps({"scope": "branch", "subject": {"head": first}, "findings": findings})
         report.write_text(original)
         runner = FakeRunner()
         sd_review.review(root, namespace(scope="branch", resume_report=str(report)), runner,
@@ -218,7 +212,7 @@ class FixReviewTests(ReviewFixture):
     def test_prior_blob_read_failure_refuses_before_check_or_provider(self):
         root, first = self.branch()
         report = self.tmp / "prior.json"
-        report.write_text(json.dumps({"scope": "branch", "subject": {"head": first}, "authored_with": [],
+        report.write_text(json.dumps({"scope": "branch", "subject": {"head": first},
                                       "findings": [{"path": "src.py", "disposition": "blocking", "summary": "finding"}]}))
         runner = FakeRunner()
         with patch.object(sd_review, "subprocess_runner", return_value=sd_review.Completed(1, "", "fixture failure")), \
@@ -234,7 +228,7 @@ class FixReviewTests(ReviewFixture):
                      "prior_review": {"pass": index, "head": first, "backend": "original", "status": "blocking"}}
                     for index in range(60)]
         prior = {"scope": "branch", "subject": {"head": first}, "status": "blocking",
-                 "findings": findings, "authored_with": []}
+                 "findings": findings}
         evidence = json.dumps(findings, sort_keys=True)
         self.assertGreater(len(evidence.encode()), 65536)
         report = self.tmp / "large-prior.json"
@@ -262,7 +256,7 @@ class FixReviewTests(ReviewFixture):
             kwargs = {}
             if history is not None:
                 report.write_text(json.dumps({"scope": "branch", "subject": {"head": first},
-                                              "findings": history, "authored_with": []}))
+                                              "findings": history}))
                 kwargs["resume_report"] = str(report)
             for text in ("x" * sd_review.MAX_OUTPUT_BYTES, "é" * (sd_review.MAX_OUTPUT_BYTES // 2 + 1)):
                 for explain in (True, False):
@@ -282,7 +276,7 @@ class FixReviewTests(ReviewFixture):
         for finding in findings:
             self.commit(root, finding["path"], "x" * (sd_review.MAX_OUTPUT_BYTES // 2))
         report.write_text(json.dumps({"scope": "branch", "subject": {"head": first},
-                                      "findings": findings, "authored_with": []}))
+                                      "findings": findings}))
         for explain in (True, False):
             runner = FakeRunner()
             with self.subTest(explain=explain):
@@ -304,7 +298,7 @@ class FixReviewTests(ReviewFixture):
             self.commit(root, "fix.py", "unrelated = True\n")
             report = self.tmp / "prior.json"
             original = json.dumps({"scope": "branch", "subject": {"head": first}, "status": "blocking",
-                                   "findings": findings, "authored_with": []})
+                                   "findings": findings})
             report.write_text(original)
             for mode in ({}, {"explain": True}, {"dry_run": True}):
                 runner = FakeRunner()
@@ -351,12 +345,6 @@ class FixReviewTests(ReviewFixture):
             sd_review.review(root, namespace(scope="branch", resume_report=str(report)), runner,
                              self.environment(), self.chatgpt_home())
         self.assertEqual(runner.calls, [])
-
-    def test_every_actual_squash_author_vendor_is_excluded(self):
-        root, first = self.branch()
-        self.commit(root, "combined.py", "combined = 1\n", "multi author\n\nAuthored-with: codex/openai\nAuthored-with: claude/anthropic")
-        vendors = sd_review.sd_lib.author_vendors(root, first, "HEAD")
-        self.assertEqual(set(vendors), {"openai", "anthropic"})
 
     def test_refreshed_default_code_is_reviewed_without_requiring_item_authorship(self):
         root, first = self.branch()

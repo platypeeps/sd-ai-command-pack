@@ -25,7 +25,7 @@ def select_ready_candidates(registry: sd_registry.Registry, name: str | None, *,
 def review_readiness(result: Mapping[str, Any], chosen: Sequence[sd_registry.Provider], env: Mapping[str, str]) -> dict[str, Any]:
     blockers, warnings = [], []
     for key, code in (("registry_refusal", "registry_unavailable"), ("consent_refusal", "consent_missing"),
-                      ("authorship_refusal", "authorship_unknown"), ("selection_refusal", "reviewer_unavailable")):
+                      ("selection_refusal", "reviewer_unavailable")):
         if result.get(key) and result["requested_reviews"]:
             blockers.append(blocker(code, "policy", str(result[key])))
     runnable = 0

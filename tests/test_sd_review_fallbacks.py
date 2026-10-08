@@ -8,7 +8,6 @@ import os
 import pathlib
 import pwd
 import socket
-import subprocess
 import sys
 from typing import Any
 from unittest import mock
@@ -192,16 +191,6 @@ class FallbackTests(ReviewRunFixture):
         self.assertEqual(result["status"], "unavailable")
         self.assertEqual([r["backend"] for r in result["outcomes"]], ["codex"])
 
-    def test_same_vendor_is_skipped_and_an_explicit_same_vendor_pick_refuses(self) -> None:
-        root = self.prepare()
-        for argv in (["checkout", "-b", "topic"], ["add", "."],
-                     ["commit", "-m", "change\n\nAuthored-with: codex/openai"]):
-            subprocess.run(["git", *argv], cwd=root, check=True, capture_output=True)
-        result = self.run_review(root, FakeRunner(), scope="branch")
-        self.assertEqual(result["reviewed_by"], ["second"])
-        self.assertEqual(result["authored_with"], ["openai"])
-        with self.assertRaises(sd_review.sd_registry.ConsentRefusal):
-            self.run_review(root, FakeRunner(), scope="branch", provider="codex")
 
 
 class ProviderEnvironmentTests(ReviewFixture):

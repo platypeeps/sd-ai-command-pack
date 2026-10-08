@@ -334,28 +334,12 @@ class TheChainReachesOpencode(unittest.TestCase):
         return [c.provider.name for c in sd_registry.reviewer_chain(
             self.registry, readers=self.readers, **kwargs) if c.eligible]
 
-    def test_claude_authored_with_codex_unconsented_routes_to_opencode(self) -> None:
-        names = self.eligible(consent=self.consent("claude", "opencode"), author_vendors=("anthropic",))
-        self.assertEqual(names, ["opencode"])
-
-    def test_claude_authored_with_codex_disabled_routes_to_opencode(self) -> None:
+    def test_codex_disabled_falls_through_to_the_next_entries(self) -> None:
         from dataclasses import replace
         self.registry.providers["codex"] = replace(self.registry.providers["codex"], enabled=False,
                                                    reason="rate limited this hour")
-        names = self.eligible(consent=self.consent("codex", "claude", "opencode"),
-                              author_vendors=("anthropic",))
-        self.assertEqual(names, ["opencode"])
-
-    def test_codex_authored_work_skips_opencode_by_vendor(self) -> None:
-        """The shipped pin is an OpenAI model, so the entry is honest about
-        being the author's vendor when codex wrote the branch."""
-        names = self.eligible(consent=self.consent("codex", "claude", "opencode"),
-                              author_vendors=("openai",))
-        self.assertEqual(names, ["claude"])
-        reasons = {c.provider.name: c.reason for c in sd_registry.reviewer_chain(
-            self.registry, readers=self.readers, consent=self.consent("codex", "claude", "opencode"),
-            author_vendors=("openai",))}
-        self.assertIn("different vendor from the author", reasons["opencode"])
+        names = self.eligible(consent=self.consent("codex", "claude", "opencode"))
+        self.assertEqual(names, ["claude", "opencode"])
 
 
 class TheLaunchIsIsolated(unittest.TestCase):

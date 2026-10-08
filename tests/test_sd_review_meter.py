@@ -218,14 +218,6 @@ class TheMeterSelection(MeterFixture):
             self.review(provider="metered")
         self.assertEqual((self.reader.read, self.meter_rows()), ([], []))
 
-    def test_an_author_provider_does_not_trigger_a_meter_request(self) -> None:
-        with mock.patch.object(sd_review, "author_vendors", return_value=("meteredvendor",)):
-            result = self.review()
-            self.assertEqual(result["reviewed_by"], ["free"])
-            with self.assertRaises(sd_review.sd_registry.ConsentRefusal):
-                self.review(provider="metered")
-        self.assertEqual((self.reader.read, self.meter_rows()), ([], []))
-
     def test_an_unsupported_reader_does_not_trigger_a_meter_request(self) -> None:
         self.set_registry(REGISTRY.replace("cost: plan,", "cost: subscription,").replace(
             'url: "https://metered.example.test/v1", model: fixture,',

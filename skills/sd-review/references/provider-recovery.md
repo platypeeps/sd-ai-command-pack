@@ -8,7 +8,7 @@ Do not treat recovery instructions as permission to select an explicit-only prov
 
 Inspect `sd-review --preflight --provider NAME --explain --json` first.
 This resolves one URL provider without calling it.
-It checks consent, enabled state, credentials, transport, and committed-branch authorship.
+It checks consent, enabled state, credentials, and transport.
 
 Without `--explain`, the command sends one fixed synthetic schema probe.
 It sends no repository source or local conventions.

@@ -213,9 +213,7 @@ endif
 
 # The pre-commit tier of sd:431. `hooks/pre-commit` runs Ruff over the staged
 # Python and the two whole-tree test passes that walk the tree, with a
-# wall-time budget in its header. `hooks/commit-msg` (sd:1931) refuses a
-# trailer line git will not read, and is linked the same way beside it; both
-# paths are checked before either link is made. The install is one relative symlink,
+# wall-time budget in its header. The install is one relative symlink,
 # <common .git>/hooks/pre-commit -> ../../hooks/pre-commit, in the clone's
 # common git directory: one hook per clone, read from the main checkout's
 # tracked file, shared by every linked worktree, whichever worktree ran
@@ -230,7 +228,8 @@ endif
 # alone. This is a
 # setting of the clone, not a render: the installer does not make it, and
 # folding it into `--user` is the owner's call. `SD_SKIP_HOOKS=1 git commit`
-# skips the hook with a notice.
+# skips the hook with a notice. A link to the retired `hooks/commit-msg`
+# (sd:3014) is removed.
 hooks:
 	@if set="$$(git config --get core.hooksPath)"; then \
 		printf '%s\n' "error: core.hooksPath is set to $$set; the pack's hook lives in .git/hooks -- run 'git config --unset core.hooksPath' (bin/sd-status names it as residue) and retry" >&2; \
@@ -241,14 +240,15 @@ hooks:
 		exit 1; \
 	}; \
 	dir="$$common/hooks"; \
-	for hook in pre-commit commit-msg; do \
+	for hook in pre-commit; do \
 		link="$$dir/$$hook"; target="../../hooks/$$hook"; \
 		if { [ -e "$$link" ] || [ -L "$$link" ]; } && [ "$$(readlink "$$link")" != "$$target" ]; then \
 			printf '%s\n' "error: $$link exists and is not the link to hooks/$$hook; move it aside first" >&2; \
 			exit 1; \
 		fi; \
 	done; \
-	mkdir -p "$$dir" && for hook in pre-commit commit-msg; do \
+	if [ "$$(readlink "$$dir/commit-msg" 2>/dev/null)" = ../../hooks/commit-msg ]; then rm -f "$$dir/commit-msg"; fi; \
+	mkdir -p "$$dir" && for hook in pre-commit; do \
 		ln -sfn "../../hooks/$$hook" "$$dir/$$hook" && printf '%s\n' "git hooks: $$dir/$$hook -> $$(readlink "$$dir/$$hook")" || exit 1; \
 	done
 

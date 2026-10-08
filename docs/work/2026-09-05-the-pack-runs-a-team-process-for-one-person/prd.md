@@ -4157,8 +4157,8 @@ from a number the operator types.
       in a database-free checkout every reader that picks an item asks
       `sd_lib.delivered` and nothing else, and that it answers from a merge
       commit's `Item:` and `Delivers:` trailers. The built trailer scan is
-      `attribution` (`source:bin/sd_lib.py::attribution`, 34) with `_in_range`
-      (`source:bin/sd_lib.py::_in_range`, 16). `author_vendors` (32) is *not*
+      `attribution` (`bin/sd_lib.py::attribution` (removed by sd:3014), 34) with `_in_range`
+      (`bin/sd_lib.py::_in_range` (removed by sd:3014), 16). `author_vendors` (32) is *not*
       re-reserved: it maps authors onto vendors and `delivered` has no
       equivalent of that.
     - `bin/sd-status`'s row read and its stale line — **38**.
@@ -4955,7 +4955,7 @@ from a number the operator types.
     failure is already turned into an operator-readable
     `Answer(UNKNOWN, "git fetch <remote> <ref>")` rather than a traceback.
   - The *mutating* git policy is built. `git commit` runs in `attribute`
-    (`source:bin/sd_lib.py::attribute`) with a `TrailerError` that carries
+    (`bin/sd_lib.py::attribute` (removed by sd:3014)) with a `TrailerError` that carries
     git's own stderr.
     R11-D42's "no `git push` exists anywhere in `bin/`" was true and incomplete:
     write-side git is not new, only the remote half of it is.

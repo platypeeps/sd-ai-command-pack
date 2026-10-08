@@ -145,8 +145,7 @@ class TheShippedRegistry(unittest.TestCase):
                 self.assertLessEqual(provider.max_tokens, self.OUTPUT_CEILINGS[provider.model])
 
     def test_every_entry_carries_a_vendor(self) -> None:
-        """Criterion 6: an entry whose vendor matches the author's is skipped,
-        which needs every entry to have one."""
+        """A review receipt names its reviewer's vendor, so every entry needs one."""
         for name, provider in self.registry.providers.items():
             with self.subTest(provider=name):
                 self.assertTrue(provider.vendor, f"{name} has no vendor")
@@ -1069,16 +1068,12 @@ class TheReviewerChain(unittest.TestCase):
         self.assertEqual(self.names(), ["codex", "claude", "opencode"])
 
     def test_unranked_reviewers_never_enter_automatic_fallback(self) -> None:
-        self.assertEqual(self.names(author_vendors=("openai", "anthropic")), [])
         self.assertEqual(
             [candidate.provider.name for candidate in sd_registry.reviewer_chain(
                 self.registry, consent=self.all,
             )],
             ["codex", "claude", "opencode"],
         )
-
-    def test_an_entry_of_the_author_s_vendor_is_skipped(self) -> None:
-        self.assertEqual(self.names(author_vendors=("openai",))[0], "claude")
 
     def test_a_bill_at_its_cap_is_passed_over(self) -> None:
         self.registry.providers["baseten"] = replace(
@@ -1096,27 +1091,24 @@ class TheReviewerChain(unittest.TestCase):
         chain = sd_registry.reviewer_chain(
             self.registry,
             consent=self.all,
-            author_vendors=("openai",),
             capped_bills={"baseten": AT_CAP},
         )
         skipped = {c.provider.name: c.reason for c in chain if not c.eligible}
-        self.assertIn("openai", skipped["codex"])
-        self.assertIn("openai", skipped["opencode"])
         self.assertEqual(skipped["baseten"], f"baseten is billed to baseten: {AT_CAP}")
         self.assertEqual(len(chain), 4)
 
     def test_consent_bounds_the_chain_absolutely(self) -> None:
-        """Two allowed, the author's vendor is one of them: one candidate, and
-        the fallthrough does not reach a third entry it was never allowed."""
+        """Two allowed: two candidates, and the fallthrough does not reach a
+        third entry it was never allowed."""
         two = sd_registry.parse_consent("claude@claude codex@codex")
         chain = [
             candidate.provider.name
             for candidate in sd_registry.reviewer_chain(
-                self.registry, consent=two, author_vendors=("anthropic",)
+                self.registry, consent=two
             )
             if candidate.eligible
         ]
-        self.assertEqual(chain, ["codex"])
+        self.assertEqual(chain, ["codex", "claude"])
 
     def test_a_disabled_entry_is_not_on_the_chain_at_all(self) -> None:
         self.assertNotIn("exo", [c.provider.name for c in sd_registry.reviewer_chain(
@@ -1595,7 +1587,7 @@ class StandingReviewConsentTests(unittest.TestCase):
             with self.subTest(policy=policy, line=line), self.assertRaises(sd_registry.ConsentRefusal):
                 sd_registry.resolve_consent(registry, line, policy)
 
-    def test_new_configured_providers_still_obey_vendor_bill_reader_and_transport_guards(self):
+    def test_new_configured_providers_still_obey_bill_reader_and_transport_guards(self):
         registry = sd_registry.read_file(SHIPPED)
         template = registry.providers["baseten"]
         entry = replace(template, name="future-reviewer", vendor="future-vendor", ranks={})
@@ -1604,9 +1596,8 @@ class StandingReviewConsentTests(unittest.TestCase):
         self.assertIn(entry.name, consent)
         self.assertNotIn(entry, registry.order("reviewer"))
         self.assertEqual(sd_registry.pick(registry, entry.name, consent=consent), entry)
-        for overrides in ({"author_vendors": (entry.vendor,)}, {"capped_bills": {entry.bill: AT_CAP}}):
-            with self.subTest(overrides=overrides), self.assertRaises(sd_registry.ConsentRefusal):
-                sd_registry.pick(registry, entry.name, consent=consent, **overrides)
+        with self.assertRaises(sd_registry.ConsentRefusal):
+            sd_registry.pick(registry, entry.name, consent=consent, capped_bills={entry.bill: AT_CAP})
         registry.providers[entry.name] = replace(entry, enabled=False)
         self.assertNotIn(entry.name, sd_registry.resolve_consent(registry, None, "configured")[0])
         with self.assertRaises(sd_registry.RegistryError):

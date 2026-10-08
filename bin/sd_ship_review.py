@@ -56,7 +56,7 @@ def is_ancestor(root: pathlib.Path, previous: str, head: str) -> bool:
 def empty_branch_base(root: pathlib.Path, head: str) -> str | None:
     """sd:1405. The merge base when `head` changes no file against it, else None.
 
-    An `sd attribute` repair branch is empty commits only. `sd-review` refuses
+    A branch of empty commits only changes no file. `sd-review` refuses
     such a subject as `subject_empty`, so the ship lane waives review for it.
     """
     for ref in ("origin/HEAD", "main", "master"):
@@ -202,7 +202,7 @@ GATE_NOT_RUN = sd_ship_dispositions.GATE_NOT_RUN
 
 
 #: The report fields `timing_plan` judges, kept whole in a refused plan's diagnostic (sd:2646): the stdout tail cut them off.
-PLAN_FIELDS = ("timing", "requested_reviews", "authorship_refusal", "selection_refusal")
+PLAN_FIELDS = ("timing", "requested_reviews", "selection_refusal")
 
 
 def plan_fields(output: str) -> dict | None:
@@ -435,7 +435,7 @@ class SharedReview:
             raise Refusal("--additional-review-for needs a nonempty --request-reason")
         if args.retry_review:
             raise Refusal("--retry-review and --additional-review-for do not combine; a retry spends an automatic pass")
-        if args.path or args.message_file or args.author:
+        if args.path or args.message_file:
             raise Refusal("additional review cannot commit; name an already committed exact head")
         self.request_history(args.review_history_digest)
         if self.runtime.current_head(self.root) != head:

@@ -132,8 +132,7 @@ to write, and neither writes anywhere else:
 
 Every other skill either edits documents that are already yours or reads only.
 
-`sd attribute` adds one empty commit to `HEAD` and writes no file. Everything
-else the pack writes lands outside the repository entirely.
+Everything else the pack writes lands outside the repository entirely.
 
 That `CLAUDE.local.md` block carries a `mode:` line with one of three values,
 and the workflow each selects is stated in [WORKFLOW.md](WORKFLOW.md):
@@ -425,13 +424,9 @@ links `.git/hooks/pre-commit` to the tracked `hooks/pre-commit`, which runs
 Ruff over the staged Python and the two whole-tree test passes
 (`tests.test_code_health`, `tests.test_doc_citations`) in about five seconds
 and prints its own wall time against the budget its header states.
-`SD_SKIP_HOOKS=1 git commit` skips it with a notice. The same target links
-`.git/hooks/commit-msg` to `hooks/commit-msg`, which refuses a message whose
-`Authored-with:`, `Needed-by:` or other checked trailer sits outside the final
-paragraph, where git does not read it; it names the line, and
-`SD_SKIP_HOOKS` does not skip it. With `SD_AUTHOR=<entry>` set (`claude`,
-`codex`, `human`, `script`, or a value such as `claude/anthropic`), it first writes `Authored-with:` into a message
-that has none, so no `sd attribute` commit follows. The hook is one per
+`SD_SKIP_HOOKS=1 git commit` skips it with a notice. Commits carry no
+attribution trailer, and the target removes a link to the retired
+`hooks/commit-msg` (sd:3014). The hook is one per
 clone: the link sits in the clone's common `.git/hooks`, its target is the
 relative `../../hooks/pre-commit`, so it reads the main checkout's tracked
 file and every linked worktree shares it, whichever worktree ran `make
@@ -443,12 +438,6 @@ stack's residue. This is
 a setting of the clone, not a render, so `--user` does not make it and
 `--uninstall` does not remove it; `bin/sd_install.py` is unchanged, and folding
 the hook into `--user` is the owner's call.
-
-Another repository gets the commit-msg hook alone from `sd commit-hook`, run
-inside it. It links that clone's common `.git/hooks/commit-msg` to this
-checkout's `hooks/commit-msg` by absolute path, and the hook reads `sd_lib`
-from the `bin/` beside its own real path. It refuses while `core.hooksPath` is
-set, and it refuses any other file already at the link's path.
 
 ### What it owns, and what it will not touch
 

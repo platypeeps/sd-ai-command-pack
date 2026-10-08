@@ -81,7 +81,7 @@ instead of head, in its reviewed tree:
     .github/sd-gate-reuse.json
     {"schema_version": 1, "key": "tree", "reason": "the check reads no commit message, range or tag"}
 
-Two heads with one tree -- an `sd attribute` commit, a reworded message, a
+Two heads with one tree -- an empty commit, a reworded message, a
 rebase that changed nothing -- then share one receipt: the key and the binding
 name the tree and the merge base with the base branch, and `inputs` hashes the
 tree in place of the head. The merge base is named by its tree, not its commit

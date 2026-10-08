@@ -85,7 +85,7 @@ A repository whose check reads no commit history may key its gate receipts by tr
 Track it as `.github/sd-gate-reuse.json`.
 A new head with the same tree, and a merge base with the base branch of the same tree, then reuses the earlier pass.
 The merge base binds by its tree, not its commit, so a predicted landing and the real one match (sd:2586).
-That covers an `sd attribute` commit, a reworded message, or a rebase that changed nothing (sd:1912).
+That covers an empty commit, a reworded message, or a rebase that changed nothing (sd:1912).
 Without the declaration a new head runs again, since a commit-message lint can pass at one head and fail at the next.
 A run with no base branch, a declaration that does not parse, or another `key` keeps the head key.
 A tree-keyed receipt stands for 6 hours (`TREE_REUSE_WINDOW_SECONDS`); a head-keyed one stays at 30 minutes.

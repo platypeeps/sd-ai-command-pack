@@ -1285,17 +1285,6 @@ class TheExplainRenderTests(ReviewFixture):
         sd_review.render(result, stream)
         return stream.getvalue()
 
-    def test_a_scope_with_no_commits_does_not_claim_human_authorship(self) -> None:
-        """Copilot found this. The fixture repository's only commit says
-        `Authored-with: human`, but a worktree scope never reads a trailer at
-        all, and printing "human-authored" there answers a question the run did
-        not ask. It printed exactly that over a repository whose only commit
-        said `claude/anthropic`."""
-
-        text = self.explain(self.make_repo())
-        self.assertIn("not read: worktree scope", text)
-        self.assertNotIn("human-authored", text)
-
     def test_the_chain_prints_when_nothing_is_refused(self) -> None:
         """The fixture repository consents to both entries and has a registry,
         so there is no refusal to carry the table into view."""
@@ -1472,23 +1461,6 @@ class AnEmptyChainThatWantedReviewersTests(ReviewFixture):
         self.assertIn("reviewers", printed)
         self.assertIn("unavailable", printed)
 
-    def test_every_entry_being_the_authors_vendor_is_unavailable(self) -> None:
-        """The chain empties for a third reason, and answers the same way."""
-
-        root = self.make_repo()
-        # A branch, so `base..head` holds the commit whose trailer is the point.
-        subprocess.run(["git", "checkout", "--quiet", "-b", "topic"], cwd=str(root), check=True)
-        (root / "src.py").write_text("x = 1\n", encoding="utf-8")
-        subprocess.run(["git", "add", "-A"], cwd=str(root), check=True, capture_output=True)
-        subprocess.run(
-            ["git", "commit", "--quiet", "-m", "c\n\nAuthored-with: codex/openai"],
-            cwd=str(root), check=True, capture_output=True,
-        )
-        result = self.review(root, scope="branch")
-        self.assertEqual(result["authored_with"], ["openai"])
-        reasons = " ".join(row["reason"] for row in result["chain"] if not row["eligible"])
-        self.assertIn("openai", reasons)
-
     def test_a_docs_only_change_is_still_skipped_and_exits_zero(self) -> None:
         """The control. Tier `skip` means nothing needed reviewing, which is a
         different sentence from "nobody could review", and still exits 0."""
@@ -1500,168 +1472,6 @@ class AnEmptyChainThatWantedReviewersTests(ReviewFixture):
         self.assertEqual(result["route"]["depth"], 0)
         self.assertEqual(result["status"], "skipped")
         self.assertEqual(sd_review.STATUS_EXIT.get(result["status"], sd_review.EXIT_OK), sd_review.EXIT_OK)
-
-
-class TheTrailerBlockTests(ReviewFixture):
-    """A trailer is the last paragraph, unindented. Not any matching line.
-
-    Found by running the tool on its own branch. A commit whose message
-    *quoted* a refusal -- "2 commit(s) carry no Authored-with: trailer" --
-    had that quoted line read as its own trailer, and the branch refused
-    itself with a value of "trailer, starting at 76fb9d750096.".
-    """
-
-    def commit(self, root: pathlib.Path, message: str) -> str:
-        (root / f"f{len(list(root.iterdir()))}.py").write_text("x = 1\n", encoding="utf-8")
-        subprocess.run(["git", "add", "-A"], cwd=str(root), check=True, capture_output=True)
-        subprocess.run(
-            ["git", "commit", "--quiet", "-m", message], cwd=str(root), check=True, capture_output=True
-        )
-        return subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True
-        ).stdout.strip()
-
-    def subject(self, root: pathlib.Path, base: str) -> Any:
-        return sd_review.Subject("branch", base, "HEAD", (), 0, "")
-
-    def test_a_quoted_trailer_in_the_body_is_not_this_commits_trailer(self) -> None:
-        root = self.make_repo()
-        base = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True
-        ).stdout.strip()
-        self.commit(
-            root,
-            "chore: describe a refusal\n\n"
-            "    sd-review: refused: a commit carries no\n"
-            "    Authored-with: trailer, starting at abc123.\n\n"
-            "Authored-with: human",
-        )
-        self.assertEqual(sd_review.author_vendors(root, self.subject(root, base)), ())
-
-    def test_an_indented_trailer_is_not_a_trailer(self) -> None:
-        """Git does not read one, so neither does this. A commit that only
-        mentions a trailer has said nothing, and saying nothing refuses."""
-
-        root = self.make_repo()
-        base = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True
-        ).stdout.strip()
-        self.commit(root, "chore: mention one\n\n    Authored-with: claude/anthropic")
-        with self.assertRaises(sd_review.Refusal) as caught:
-            sd_review.author_vendors(root, self.subject(root, base))
-        self.assertIn("carry no Authored-with:", str(caught.exception))
-
-    def test_a_commits_own_trailer_outranks_a_later_claim_about_it(self) -> None:
-        """Copilot found this, and it inverted the rule the trailers exist for.
-
-        Both dictionaries were merged in one walk with `setdefault`, and the
-        log is newest-first, so a later commit's `Attributes:` won. Relabelling
-        an anthropic-authored commit as an openai one -- and thereby buying it
-        an anthropic reviewer, the exact thing the vendor rule forbids -- took
-        one line in a later commit message.
-        """
-
-        root = self.make_repo()
-        base = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True
-        ).stdout.strip()
-        early = self.commit(root, "real work\n\nAuthored-with: claude/anthropic")
-        self.commit(root, f"later\n\nAuthored-with: human\nAttributes: {early} codex/openai")
-        self.assertEqual(
-            sd_review.sd_lib.attribution(root, base, "HEAD")[early], "claude/anthropic"
-        )
-        self.assertEqual(sd_review.author_vendors(root, self.subject(root, base)), ("anthropic",))
-
-    def test_attributes_names_an_earlier_commit_from_a_later_one(self) -> None:
-        root = self.make_repo()
-        base = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True
-        ).stdout.strip()
-        early = self.commit(root, "feat: written before the convention")
-        self.commit(root, f"chore: attribute it\n\nAuthored-with: human\nAttributes: {early} codex/openai")
-        self.assertEqual(sd_review.author_vendors(root, self.subject(root, base)), ("openai",))
-
-    def test_attributes_naming_a_commit_outside_the_range_says_nothing(self) -> None:
-        """Copilot's fourth pass. A claim about a commit nobody is reviewing
-        put its vendor in the author set anyway, and an author's vendor is
-        barred from reviewing -- so one line naming an already-merged sha
-        struck a reviewer off the chain for work it did not write."""
-
-        root = self.make_repo()
-        outsider = self.commit(root, "on main\n\nAuthored-with: kimi/moonshot")
-        subprocess.run(
-            ["git", "checkout", "--quiet", "-b", "work"],
-            cwd=str(root), check=True, capture_output=True,
-        )
-        self.commit(
-            root,
-            f"the only commit under review\n\nAuthored-with: human\n"
-            f"Attributes: {outsider} kimi/moonshot",
-        )
-        self.assertEqual(
-            sd_review.author_vendors(root, self.subject(root, outsider)), ()
-        )
-
-    def test_a_padded_or_capitalised_vendor_still_names_its_vendor(self) -> None:
-        """The chain compares `provider.vendor in author_vendors` by exact
-        match. `claude / anthropic` yielded " anthropic", which matched no
-        entry, so the branch's own vendor stayed eligible and reviewed what it
-        had written. The rule failed open, and said nothing."""
-
-        root = self.make_repo()
-        for value in ("claude / anthropic", "Claude/Anthropic", " claude/anthropic "):
-            with self.subTest(trailer=value):
-                base = subprocess.run(
-                    ["git", "rev-parse", "HEAD"],
-                    cwd=str(root), check=True, capture_output=True, text=True,
-                ).stdout.strip()
-                self.commit(root, f"work\n\nAuthored-with: {value}")
-                self.assertEqual(
-                    sd_review.author_vendors(root, self.subject(root, base)),
-                    ("anthropic",),
-                )
-
-    def test_a_merge_commit_is_not_work_and_is_not_asked(self) -> None:
-        """Found by merging `main` into this branch to land it. A merge commit
-        introduces no change of its own, so there is nobody for it to name,
-        and asking refused the whole range over a commit that wrote nothing.
-        The commits it brings in are in the range already, each answering for
-        itself."""
-
-        root = self.make_repo()
-        base = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True
-        ).stdout.strip()
-        subprocess.run(
-            ["git", "checkout", "--quiet", "-b", "side"],
-            cwd=str(root), check=True, capture_output=True,
-        )
-        self.commit(root, "side work\n\nAuthored-with: claude/anthropic")
-        subprocess.run(
-            ["git", "checkout", "--quiet", "-"],
-            cwd=str(root), check=True, capture_output=True,
-        )
-        self.commit(root, "main work\n\nAuthored-with: human")
-        subprocess.run(
-            ["git", "merge", "--no-ff", "--no-edit", "side"],
-            cwd=str(root), check=True, capture_output=True,
-        )
-        self.assertEqual(
-            sd_review.author_vendors(root, self.subject(root, base)), ("anthropic",)
-        )
-
-    def test_a_short_sha_still_names_its_commit(self) -> None:
-        """Git takes a prefix everywhere else, so the range check does too."""
-
-        root = self.make_repo()
-        base = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True
-        ).stdout.strip()
-        early = self.commit(root, "feat: written before the convention")
-        self.commit(
-            root, f"chore: attribute it\n\nAuthored-with: human\nAttributes: {early[:8]} codex/openai"
-        )
-        self.assertEqual(sd_review.author_vendors(root, self.subject(root, base)), ("openai",))
 
 
 class NoRegistryOnThisMachineTests(ReviewFixture):
@@ -1810,7 +1620,7 @@ class TheWorkstationLaneIsNotPrintedWhereItCannotBeReached(ReviewFixture):
         """The gate is five lines wide, not the whole report."""
 
         _, text = self.explained(self.bare())
-        for kept in ("scope", "subject", "route", "because", "authored"):
+        for kept in ("scope", "subject", "route", "because"):
             self.assertIn(kept, text)
         self.assertIn("explain only, nothing ran", text)
 

@@ -86,6 +86,12 @@ class JevTierTests(ReviewFixture):
         self.commit(root)
         return root
 
+    def chatgpt_home(self, *args, **kwargs) -> pathlib.Path:
+        """One home per test: the plan names its path, and two runs must compare equal."""
+        if not hasattr(self, "home"):
+            self.home = super().chatgpt_home(*args, **kwargs)
+        return self.home
+
     def commit(self, root: pathlib.Path) -> None:
         subprocess.run(["git", "add", "-A"], cwd=str(root), check=True, capture_output=True)
         subprocess.run(["git", "commit", "--quiet", "-m", "fixture"], cwd=str(root),

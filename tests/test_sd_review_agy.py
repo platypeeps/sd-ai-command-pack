@@ -322,7 +322,7 @@ class TheVendorMustMatchTheModel(unittest.TestCase):
 
     def test_the_chain_refuses_a_missing_model_where_no_file_was_parsed(self) -> None:
         candidate = sd_registry._reviewer_candidate(
-            provider(model=None), consent={}, author_vendors=(),
+            provider(model=None), consent={},
             capped_bills={}, readers=sd_review.READERS)
         self.assertFalse(candidate.eligible)
         self.assertIn("pins no model", candidate.reason)
@@ -339,7 +339,7 @@ class TheVendorMustMatchTheModel(unittest.TestCase):
         """`_adapt` builds providers from `sd_db` rows without `_provider`."""
         candidate = sd_registry._reviewer_candidate(
             provider(model="claude-opus-4-6-thinking"), consent={},
-            author_vendors=(), capped_bills={}, readers=sd_review.READERS)
+            capped_bills={}, readers=sd_review.READERS)
         self.assertFalse(candidate.eligible)
         self.assertIn("anthropic", candidate.reason)
 

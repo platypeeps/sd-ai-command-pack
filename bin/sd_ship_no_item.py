@@ -348,7 +348,7 @@ def index_owner(connection: sqlite3.Connection, store, facts: GitFacts, family: 
 def index_claims(facts: GitFacts) -> tuple[tuple[str, str], ...]:
     """The identities a record claims. The base's own tree is not one of them.
 
-    An empty commit, such as an `sd attribute` repair, has the tree the base
+    An empty commit has the tree the base
     already holds, which is the tree the last merged record landed. Claiming it
     refused every attribution repair as a continuation of that record (sd:2009);
     its commit is still claimed, so the same empty commit cannot allocate twice.

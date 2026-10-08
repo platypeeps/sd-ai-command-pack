@@ -1,11 +1,9 @@
 """The pull-request body `sd-ship` publishes, read against the lines it owns (sd:1870).
 
-`sd-ship` writes `Work:` into the body it publishes, and `Item:`, `Delivers:`
-and the authorship lines into the squash message. A supplied `Item:`, `Work:`
-or `Delivers:` line is stripped and named in the result, whatever it says
-(sd:2999): `sd-ship` writes the links itself. A line that says something else
--- an author no registry knows, a pre-squash sha -- is refused by line number,
-with the value `sd-ship` would have written.
+`sd-ship` writes `Work:` into the body it publishes, and `Item:` and
+`Delivers:` into the squash message. A supplied `Item:`, `Work:` or
+`Delivers:` line is stripped and named in the result, whatever it says
+(sd:2999): `sd-ship` writes the links itself.
 
 The fixpoint is the point: `normalize` of a body `sd-ship` published returns
 the body it published before appending `Work:`, so the live pull-request body
@@ -120,35 +118,7 @@ def owned_lines(body: str) -> list[OwnedLine]:
     return found
 
 
-def registries() -> list:
-    """The operator's registry and the pack's own `providers.yaml`, each that reads."""
-    import sd_registry  # noqa: PLC0415 - only a body naming an author needs it
-    found = []
-    home, reason = sd_registry.read_or_report()
-    if not reason:
-        found.append(home)
-    try:
-        found.append(sd_registry.read_file(sd_registry.shipped_path(pathlib.Path(__file__).resolve().parent.parent)))
-    except sd_registry.RegistryError:
-        pass
-    return found
-
-
-def known_author(value: str, readers: list) -> bool:
-    """Whether `value` is a reserved author or the `<entry>/<vendor>` a registry resolves."""
-    if value in sd_lib.RESERVED_AUTHORS.values():
-        return True
-    entry, separator, _vendor = value.partition("/")
-    for registry in readers:
-        try:
-            if separator and sd_lib.attribution_value(entry, registry) == value:
-                return True
-        except sd_lib.TrailerError:
-            continue
-    return False
-
-
-def problem(line: OwnedLine, item: int | None, readers: list | None) -> str | None:
+def problem(line: OwnedLine, item: int | None) -> str | None:
     """Why `line` cannot be stripped from an item's body, or None when it can."""
     if line.quoted:
         return ("a code block or comment holds it, so it reads as an example; indent it to keep it as one, "
@@ -156,22 +126,13 @@ def problem(line: OwnedLine, item: int | None, readers: list | None) -> str | No
     if line.key in (sd_lib.ITEM_TRAILER, sd_lib.WORK_TRAILER, sd_lib.DELIVERS_TRAILER) or item is None:
         return None  # sd:2999: sd-ship writes the links itself, so a stray one is dropped
     expected = f"sd:{item}"
-    if line.key == sd_lib.AUTHORED_TRAILER:
-        if known_author(line.value, registries() if readers is None else readers):
-            return None
-        return (f"expected `{line.key} {sd_lib.HUMAN_AUTHOR}`, `{sd_lib.SCRIPT_AUTHOR}` or an `<entry>/<vendor>` the provider "
-                f"registry resolves; the commits decide authorship")
-    if line.key == sd_lib.CLOSES_TRAILER:
-        if _CLOSES_VALUE.fullmatch(line.value) and expected not in _ids(line.value):
-            return None
-        return (f"expected `{line.key} sd:<n>[, sd:<m>]` naming co-delivered items other than {expected}, "
-                "which closes with --deliver")
-    if line.key == sd_lib.ATTRIBUTES_TRAILER:
-        return "expected no line: it names a pre-squash sha, and the squash carries authorship from the commits"
-    return f"expected no line: `{line.key}` rides a later merge or an empty commit, never this body"
+    if _CLOSES_VALUE.fullmatch(line.value) and expected not in _ids(line.value):
+        return None
+    return (f"expected `{line.key} sd:<n>[, sd:<m>]` naming co-delivered items other than {expected}, "
+            "which closes with --deliver")
 
 
-def normalize(body: str, item: int | None, *, readers: list | None = None) -> tuple[str, tuple[str, ...]]:
+def normalize(body: str, item: int | None) -> tuple[str, tuple[str, ...]]:
     """`body` without the owned lines that agree with `sd-ship`, and those lines.
 
     Refuses, naming every offending line, when any owned line disagrees. With
@@ -183,7 +144,7 @@ def normalize(body: str, item: int | None, *, readers: list | None = None) -> tu
     if item is None and not read:
         return body, ()
     problems = [(line, reason) for line in read
-                if (reason := problem(line, item, readers)) is not None]
+                if (reason := problem(line, item)) is not None]
     if problems:
         raise Refusal("the ship adapter owns association and delivery trailers: "
                       + "; ".join(f"line {line.number}: `{line.text}`; {reason}" for line, reason in problems),
