@@ -344,6 +344,17 @@ class CopiedRemote(FixtureRemote):
         _git(self.seed, "remote", "set-url", "origin", str(self.path))
         _git(self.seed, "update-index", "-q", "--refresh")
 
+    def rev_parse(self, ref: str) -> str:
+        """GitHub keeps a merged pull request's head after the merge deletes its branch (sd:3006)."""
+        try:
+            return super().rev_parse(ref)
+        except RuntimeError:
+            merged = [pull.merged_head for pull in self.pull_requests.values()
+                      if pull.head == ref and getattr(pull, "merged_head", None)]
+            if not merged:
+                raise
+            return merged[-1]
+
 
 def git_transport(binary: str, remote: pathlib.Path, url: str) -> str:
     """Keep real Git and local transport without starting Python for every call."""
@@ -2818,6 +2829,73 @@ roles:
         again = self.operation("reconcile").reconcile()
         self.assertFalse(again["delivery_pending"], again)
 
+    def test_a_merge_removes_the_remote_branch_and_keeps_the_main_checkout(self):
+        """sd:3006. The fixture ships from its main checkout, which is never removed,
+        so the branch it has checked out stays too; the remote branch goes."""
+        self.prepare()
+        cleanup = self.merge()["cleanup"]
+        self.assertEqual(cleanup["removed"], ["origin/topic"])
+        self.assertEqual(cleanup["kept"], {str(self.root): "the main checkout", "topic": "a kept worktree has it checked out"})
+        self.assertEqual("", _git(self.root, "ls-remote", "origin", "refs/heads/topic"))
+
+    def merged_worktree(self, name: str) -> pathlib.Path:
+        """A linked worktree on a branch `name` whose head origin carries, as a merged pull request's is."""
+        tree = self.directory / name
+        _git(self.root, "worktree", "add", "-q", "-b", name, str(tree))
+        (tree / "target").mkdir()
+        (tree / "target/build.o").write_text("output")
+        _git(self.root, "push", "-q", "origin", name)
+        return tree
+
+    def test_a_merge_cleanup_removes_a_clean_worktree_and_keeps_a_dirty_or_busy_one(self):
+        """sd:3006, operator ruling 2026-10-08: leads removed these by hand after each merge."""
+        head = _git(self.root, "rev-parse", "HEAD")
+        with (self.root / ".git/info/exclude").open("a") as stream:
+            stream.write("target/\n")
+        clean = self.merged_worktree("clean")
+        with contextlib.chdir(clean):  # as `sd-ship -C <worktree> merge` runs: inside the tree it removes
+            self.assertEqual(ship.clean_up_merged(clean, "clean", head),
+                             {"removed": [str(clean), "clean", "origin/clean"], "kept": {}})
+        self.assertFalse(clean.exists())
+        dirty = self.merged_worktree("dirty")
+        (dirty / "notes.txt").write_text("unsaved")
+        busy = self.merged_worktree("busy")
+        ahead = self.merged_worktree("ahead")
+        _git(ahead, "commit", "-q", "--allow-empty", "-m", "not pushed\n\nAuthored-with: human")
+        sleeper = subprocess.Popen(["sleep", "60"], cwd=busy)
+        self.addCleanup(sleeper.wait)
+        self.addCleanup(sleeper.kill)
+        for name, tree, why in (("dirty", dirty, "it has uncommitted changes"),
+                                ("busy", busy, f"process {sleeper.pid} works inside it"),
+                                ("ahead", ahead, "it has commits past the merged head")):
+            with self.subTest(name):
+                cleanup = ship.clean_up_merged(self.root, name, head)
+                self.assertEqual(cleanup["kept"], {str(tree): why, name: "a kept worktree has it checked out"})
+                self.assertEqual(cleanup["removed"], [f"origin/{name}"])
+                self.assertTrue(tree.exists())
+
+    def test_a_merge_closes_every_item_its_title_names(self):
+        """sd:3014, operator ruling 2026-10-08. A batched pull request names its
+        items in its title. The merge closes each one as it closes a `Closes:`
+        item, with the merge commit in the reason; the claimed item keeps its
+        own delivery path."""
+        self.task_item("task")
+        batched = self.closes_items()
+        title = "Three fixes (" + ", ".join(f"sd:{number}" for number in (self.item, *batched)) + ")"
+        self.unanswered("--deliver", "--title", title).prepare()
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        self.assert_closed_by_merge(result)
+        self.assertEqual(result.get("closed_items"), [f"sd:{number}" for number in batched])
+        commit = result["merge_commit"]
+        for number in batched:
+            with self.subTest(item=number):
+                self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (number,)).fetchone()[0], "done")
+        for number in batched[:2]:
+            reasons = [row[0] for row in self.connection.execute(
+                "SELECT body FROM note WHERE item = ? AND kind = 'status_change'", (number,))]
+            self.assertIn(f"planning -> done by sd-ship: delivered at {commit} on origin/main", reasons)
+
     def test_a_web_merge_without_the_closes_trailers_leaves_those_items_open(self):
         """A pull request merged on GitHub lands whatever message the web form
         held. Each `Closes:` item is verified against the landed message, as
@@ -2883,6 +2961,9 @@ roles:
                 with self.assertRaises(ship.Refusal) as caught:
                     self.unanswered("--deliver", "--body-file", str(body)).prepare()
                 self.assertEqual(caught.exception.workflow["blocker"]["code"], names)
+        with self.assertRaises(ship.Refusal) as caught:  # sd:3014: the title's items are closed the same way
+            self.unanswered("--deliver", "--title", "A change (sd:99999)").prepare()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "closes_item_unknown")
         self.assertFalse(self.remote.pull_requests)
 
     def test_a_refs_item_stays_open_after_the_merge(self):
@@ -3682,11 +3763,12 @@ roles:
             deliver_work(self.connection, self.item, result["merge_commit"], who="sd-ship", verification_root=self.root)
 
     def test_forged_delivery_trailer_cannot_turn_a_slice_into_completion(self):
+        """sd:2999: the body's `Delivers:` line is stripped, so only `--deliver` delivers."""
         body = self.directory / "body.txt"
         body.write_text(f"A slice\n\nDelivers: sd:{self.item}\n")
-        with self.assertRaisesRegex(ship.Refusal, "owns association"):
-            self.prepare("--body-file", str(body))
-        self.assertFalse(any(call.method == "POST" for call in self.remote.calls))
+        self.prepare("--body-file", str(body))
+        self.merge()
+        self.assertNotEqual(ship.sd_lib.delivered(self.root, f"sd:{self.item}"), ship.sd_lib.YES)
 
     def test_a_blocking_review_names_its_findings_and_the_command_that_prints_them(self):
         """sd:2102. The refusal said `see item ship receipt`, and nothing in the CLI printed the receipt.

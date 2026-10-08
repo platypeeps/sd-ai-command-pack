@@ -74,10 +74,6 @@ def copilot_automatic(policy: str, tier: str, depth: int) -> bool:
 CORE_CONFIG = {
     "external_reviews": {"pattern": "configured|deny",
                          "description": "Standing private-code/context review authorization; unset uses local consent."},
-    "assistant_merge": {"pattern": "controlled|ask",
-                        "description": "controlled: merge active in-scope PR work without asking, only via sd-ship "
-                                       "prepare then merge (never skipping the review lane); ask or unset: ask first; "
-                                       "explicit wait wins."},
     "copilot_review": {"pattern": "|".join(COPILOT_REVIEW_POLICIES),
                        "description": "When sd-ship requests a Copilot review by itself: deep (unset reads deep) on deep-tier "
                                       "changes only, always on every reviewing tier, never on none; a repository's "
@@ -115,32 +111,6 @@ CORE_CONFIG = {
                          "description": "The privacy-pattern file a pull request body is checked against, one "
                                         "extended regular expression per line. It grants nothing."},
 }
-
-#: `{current name: the name it was stored under before 1.1.0}`. A rename must
-#: not orphan a grant a machine already recorded, and this checkout cannot
-#: reach the machines that recorded one, so the old name is *read* rather than
-#: migrated: nothing has to have run, and an operator who rolls back to 1.0.0
-#: finds the file they left. `sd config set` and `unset` clear the old name as
-#: they write, so the two never disagree.
-#:
-#: Deprecated, not permanent. 1.1.0 reads these; 1.2.0 removes this map and
-#: the old names stop resolving. `sd config list sd` already names a stored
-#: key the declarations dropped, which is how a machine still holding one
-#: finds out.
-RENAMED_CORE_KEYS = {"assistant_merge": "merge_authorization"}
-
-
-def stored_name(stored: dict, key: str) -> str | None:
-    """The name `stored` actually holds one declared key under, or `None`.
-
-    The current name wins whenever it is present, so a file carrying both --
-    written by 1.0.0 and then set by 1.1.0 before the clearing landed --
-    reads the one the operator set last.
-    """
-    if key in stored:
-        return key
-    former = RENAMED_CORE_KEYS.get(key)
-    return former if former is not None and former in stored else None
 
 WORK_DIR = "docs/work"
 ARCHIVE_DIR = "archive"
@@ -598,10 +568,9 @@ def core_setting(key: str, environ: dict[str, str] | None = None) -> str | None:
     mine = config.get("sd", {}) if isinstance(config, dict) else None
     if not isinstance(mine, dict):
         raise ConfigError("machine config config.sd must be an object")
-    name = stored_name(mine, key)
-    if name is None:
+    if key not in mine:
         return None
-    value = mine[name]
+    value = mine[key]
     if not isinstance(value, str) or not re.fullmatch(CORE_CONFIG[key]["pattern"], value):
         raise ConfigError(f"invalid sd.{key} policy")
     return value

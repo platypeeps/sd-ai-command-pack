@@ -39,7 +39,7 @@ GATE_FILES = (
     "sd-ship", "sd-docs-lint", "sd_ship_dispositions.py", "sd_ship_remote.py", "sd_ship_review.py",
     "sd_ship_history.py", "sd_ship_identity.py", "sd_ship_item.py", "sd_ship_no_item.py",
     "sd_ship_evidence.py", "sd_ship_bindings.py", "sd_ship_workflow.py", "sd_ship_squash.py", "sd_ship_body.py",
-    "sd_ship_hold.py", "sd_protection.py", "sd_local_gate.py", "sd_changelog_merge.py", "sd_ship_claims.py",
+    "sd_ship_hold.py", "sd_protection.py", "sd_local_gate.py", "sd_ship_claims.py",
 )
 CHECK_FILES = (
     "sd-check", "sd_check_receipts.py", "sd_gate_slots.py",

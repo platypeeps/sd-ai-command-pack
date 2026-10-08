@@ -194,12 +194,14 @@ class NoItemPublication(unittest.TestCase):
                 self.assertEqual(result["workflow"]["blocker"]["code"], "no_item_flags_refused")
         self.assertEqual(list(self.connection.iterdump()), before)
 
-    def test_caller_cannot_smuggle_item_trailers_into_no_item_publication(self):
+    def test_item_trailers_are_stripped_from_a_no_item_publication(self):
+        """sd:2999: a stray link is dropped, so the published body links no item."""
         body = self.directory / "body.md"
-        for trailer in ("Work", "Item", "Delivers", " Work "):
-            body.write_text(f"Proposed change\n\n{trailer}: sd:9\n")
-            self.invoke("prepare", "--body-file", str(body), code=3)
-        self.assertFalse(self.remote.pull_requests)
+        for trailer in ("Work", "Item", "Delivers"):
+            with self.subTest(trailer=trailer):
+                body.write_text(f"Proposed change\n\n{trailer}: sd:9\n")
+                self.assertEqual(self.invoke("prepare", "--body-file", str(body))["normalized"], [f"{trailer}: sd:9"])
+                self.assertNotIn("sd:9", self.remote.pull_requests[1].body)
 
     def accepted_blocker(self):
         revision, state = receipts.read(self.connection, self.key)
