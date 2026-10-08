@@ -54,9 +54,8 @@ The next entry's gate runs early (sd:2586). Its prepare used to start only
 after the entry ahead merged, then catch up and gate for 10 to 20 minutes.
 When the runner claims an entry that may merge, it predicts the landing: the
 entry's catch-up merge of the fetched base branch, as a commit on that base.
-It merges the next entry onto that commit as prepare's catch-up would,
-CHANGELOG resolver included, in a scratch worktree, and runs `sd gate check`'s
-gate there in the background. The real landing is another commit with the
+It merges the next entry onto that commit as prepare's catch-up would, in a
+scratch worktree, and runs `sd gate check`'s gate there in the background. The real landing is another commit with the
 same tree, so the next entry's catch-up makes the gated tree, and its prepare
 reuses the receipt. That needs the repository's tree key
 (`sd_gate_receipts`), which names the merge base by its tree; without it, or
@@ -120,7 +119,6 @@ import threading
 import time
 from typing import Any, Callable, Iterator
 
-import sd_changelog_merge
 import sd_lib
 
 BIN = pathlib.Path(__file__).resolve().parent
@@ -749,8 +747,6 @@ def scratch_git(tree: pathlib.Path, *args: str) -> str | None:
 def catch_up_in(tree: pathlib.Path, ref: str, message: str) -> bool:
     """Merge `ref` into the scratch worktree's HEAD as `sd-ship prepare --catch-up` does; False on a conflict."""
     if scratch_git(tree, "merge", "--no-ff", "--no-edit", "--no-verify", "-m", message, ref) is not None:
-        return True
-    if sd_changelog_merge.resolve_keep_both(tree) and scratch_git(tree, "commit", "--quiet", "--no-verify", "-m", message) is not None:
         return True
     scratch_git(tree, "merge", "--abort")
     return False

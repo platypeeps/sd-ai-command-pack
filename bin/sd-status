@@ -1553,8 +1553,8 @@ EXCLUDED = (
     "than as missed steps, a convention this asserts rather than observes",
     "Jira rows in the dashboard index -- no committed fact ties a Jira project "
     "key to a checkout, which is the exclusion `issues_section` already makes",
-    "CHANGELOG.md and docs/review-learnings.md -- narrative history, and the "
-    "second has no disposition field, so nothing in it can ever be marked handled",
+    "docs/review-learnings.md -- narrative history with no disposition field, "
+    "so nothing in it can ever be marked handled",
     "markers outside bin/, dashboard/, tests/ and .github/scripts/ -- in "
     "skills/ and docs/ the word documents the convention instead of instancing it",
     f"review findings on pull requests merged more than {MERGED_REVIEW_DAYS} days ago "

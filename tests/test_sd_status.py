@@ -2447,7 +2447,7 @@ class ClassTableTests(unittest.TestCase):
         joined = " ".join(status.EXCLUDED)
         # `parked` left this list with the field, cut by 31(a) on 2026-09-19.
         # The archive sentence is what excludes every item that carried one.
-        for skipped in ("archive", "Jira", "CHANGELOG.md"):
+        for skipped in ("archive", "Jira", "review-learnings.md"):
             self.assertIn(skipped, joined)
         self.assertNotIn("parked", joined)
 
