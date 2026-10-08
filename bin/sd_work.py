@@ -219,8 +219,7 @@ def _edit_changes(args: argparse.Namespace) -> dict[str, Any]:
         changes["priority"] = None
     if args.clear_due:
         changes["due"] = None
-    # Clear only: `sd runner prepare --branch` sets a branch, checked against
-    # git, and `edit_item` refuses any other value (sd:2729).
+    # Clear only: `sd work register` records a branch from git, and `edit_item` refuses any other value (sd:2729).
     if args.clear_branch:
         changes["branch"] = None
     # The field `add` sets and nothing could change afterwards. It is not in
@@ -360,7 +359,7 @@ def _working_branch(docs_work: Any, root: pathlib.Path) -> str | None:
     branch that is not the default, as a runner clone on `plan/<slug>` is when
     `sd-plan` registers the folder it just wrote. On the default, or detached,
     the answer is None -- the state a task row starts in, and the one
-    `sd runner prepare --branch` exists to fill.
+    `sd work register` fills from a checkout on a branch.
 
     Mirrored from `sd_db.jobs.cli._working_branch` rather than imported: that
     module is a CLI whose import opens the library's own argument parser, and
@@ -738,7 +737,7 @@ DEFAULT_BRANCHES = ("main", "master")
 def _refuse_unlanded_branch(workflow: Any, connection: Any, args: argparse.Namespace) -> None:
     """Refuse a plain close of a row worked on its own branch (sd:1990).
 
-    `sd runner prepare --branch` records the branch an item is worked on.
+    `sd work register` records the branch an item is worked on.
     Three such items were closed with a plain `sd task status done` while
     their branches had no pull request, and one never reached main. A close
     now needs a recorded merge (the `Code delivery` comment `sd-ship` writes,
@@ -1371,7 +1370,7 @@ def register(groups: Any, store: Any) -> None:
     due.add_argument("--due", help="YYYY-MM-DD")
     due.add_argument("--clear-due", action="store_true")
     edit.add_argument("--clear-branch", action="store_true",
-                      help="clear a stale branch name; `sd runner prepare --branch` sets one")
+                      help="clear a stale branch name; `sd work register` records one")
     # `--belongs-to` and not `--repo`: see `_belongs_to`. `--no-repo` is the
     # word `add` already uses for the same idea, so the pair reads the same on
     # both verbs.

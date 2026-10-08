@@ -1570,7 +1570,7 @@ class Rows:
     def branch(self, item_dir: pathlib.Path) -> str | None:
         """The row's `branch` column, `""` for none, `None` when no row answers.
 
-        The column is what `sd runner prepare --branch` writes and what
+        The column is what `sd work register` writes and what
         `sd-status` and the dashboard print. The frontmatter `branch:` line is
         a second copy nothing reconciles (sd:1382), so a checkout whose marker
         names the row reads the branch from the row as it reads the status.

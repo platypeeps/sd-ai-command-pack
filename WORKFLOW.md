@@ -371,8 +371,7 @@ which the installer places in `~/.claude/agents`.
   position — is allocated when the work lands, never when the branch is cut,
   because two branches cut in parallel would claim the same slot. An item id
   is not that kind of metadata: `sd work register` allocates it at plan time,
-  before review and before any branch exists, and `sd runner prepare` and
-  `sd run` both require it to already exist. Run `sd-ship prepare` and
+  before review and before any branch exists. Run `sd-ship prepare` and
   `merge` back to back for one item; do not hold a prepared item while
   another merges ahead of it, or its merge needs a catch-up and a new review
   (sd:2339).
@@ -544,18 +543,10 @@ which the installer places in `~/.claude/agents`.
 Without `--manual` in step 4, step 7 stops before the merge as `prepared`,
 as a hub entry queued without it does.
 
-The pack has two write lanes, and each holds one writer. A session writes on
-its own branch in its own worktree: `sd runner prepare <item> --branch <name>`
-prepares the item branch in the current repository, and `sd-plan --worktree`
-puts a new branch in a worktree of its own. The runner writes in a clone it
-makes for each run of an assignment, under its work root. It holds a lease on
-the repository branch for the run, so a second run on that branch waits until
-the first ends. `sd worktree resume <assignment>` resumes a run whose checkout
-the runner kept. `sd worktree restore <assignment> --destination <path>`
-copies a retained clone to a new absolute path that does not exist yet.
-Neither verb makes a worktree for a session; `git worktree add` does that.
-Merging is one lane: `sd-ship` merges one pull request per run, and the
-runner's unattended merge stays under **Development** above.
+A session writes on its own branch in its own worktree, one writer per
+worktree: `sd-plan --worktree` puts a new branch in a worktree of its own, and
+`git worktree add` makes one for any other session. Merging is one lane:
+`sd-ship` merges one pull request per run.
 
 Before writing a fix, look on the remote for a branch or pull request that
 already claims it, by the item id or by the changed path. Two sessions that

@@ -90,7 +90,6 @@ import sd_notes  # noqa: E402
 import sd_operations  # noqa: E402
 import sd_registry  # noqa: E402
 import sd_restore  # noqa: E402
-import sd_runner  # noqa: E402
 import sd_shadow  # noqa: E402
 import sd_skill  # noqa: E402
 import sd_suggest  # noqa: E402
@@ -3314,7 +3313,6 @@ def build_parser() -> argparse.ArgumentParser:
     sd_writing.register(groups)
     sd_operations.register(groups)
     sd_controls.register(groups)
-    sd_runner.register(groups)
     sd_fleet.register_fleet(groups)
     sd_ci.register_ci(groups)
     sd_notes.register_note_group(groups)
@@ -3347,10 +3345,7 @@ def main(argv: list[str] | None = None) -> int:
         argv = sys.argv[1:]
     try:
         # The shared command parser owns every option, including leading flags.
-        if argv[:2] == ["runner", "commands"]:
-            args = argparse.Namespace(handler=sd_runner.commands, palette_args=argv[2:])
-        else:
-            args = parser.parse_args(argv)
+        args = parser.parse_args(argv)
     except SystemExit as exit_code:
         return 2 if exit_code.code else 0
     try:

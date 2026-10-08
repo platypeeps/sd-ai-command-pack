@@ -2687,7 +2687,7 @@ def body_command(args) -> int:
 
 
 def lock_options(args, store) -> dict:
-    """What the ship lock records about this holder, for a refusal and `sd runner status` (sd:1936),
+    """What the ship lock records about this holder, for a refusal (sd:1936),
     and how long it waits for another holder (sd:1937).
 
     An `sd_db` built before the holder record takes no options; the lock is

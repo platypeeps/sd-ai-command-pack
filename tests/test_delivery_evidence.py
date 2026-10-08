@@ -456,7 +456,7 @@ class TaskDeliveryCLITests(unittest.TestCase):
         self.assertNotIn("delivered at", self.statuses(case, item)[-1])
 
     def on_branch(self, case, root: pathlib.Path, branch: str) -> int:
-        """A task worked on `branch`, as `sd runner prepare --branch` records it."""
+        """A task worked on `branch`, as `sd work register` records it."""
         import sd_db
 
         item = json.loads(case.call("task", "add", "Fix the thing", "--json", cwd=root).stdout)["item"]["id"]
