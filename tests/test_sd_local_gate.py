@@ -1222,9 +1222,16 @@ class StaleGateWorktrees(Repository):
     def test_a_dead_gates_worktree_is_removed_at_the_next_gate_start(self) -> None:
         head = self.commit("check:\n\t@echo ok\n")
         tree = self.left(self.dead(), head)
-        (tree.parent / "tmp.noindex").mkdir()
+        (tree.parent / sd_gate_cache.TEMPORARY).mkdir()
         self.assertEqual(sd_gate_run.check_in_worktree(self.root, head)["status"], "success")
         self.assertEqual((self.worktrees(), tree.parent.exists()), (1, False), "sd:3032: its check's TMPDIR goes too")
+
+    def test_the_check_tmpdir_leaves_room_for_a_unix_socket_name(self) -> None:
+        """sd:3086: macOS caps a socket path at 104 bytes; tsx's `tsx-<uid>/<pid>.pipe` under the old name made 108."""
+        parent = tempfile.mkdtemp(prefix=f"{sd_gate_cache.GATE_PREFIX}{'9' * 7}-")
+        self.addCleanup(shutil.rmtree, parent, True)
+        temporary = sd_gate_cache.check_temporary(parent)
+        self.assertLessEqual(len(temporary) - len(tempfile.gettempdir()), 33, temporary)
 
     def test_a_live_gates_worktree_and_one_that_names_no_pid_stay(self) -> None:
         head = self.commit("check:\n\t@echo ok\n")
