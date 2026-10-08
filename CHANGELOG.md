@@ -4,6 +4,11 @@
 
 ### Added
 
+- **`sd-review` asks a hint-blind twin of the tier question, in shadow (sd:2969).**
+  `JEV_SD_REVIEW_BLIND` sends the tier reading's state without `deterministic_routing_said`, the rule's reason, with the same criteria and subject.
+  `--shadow` prints the routed tier and nothing reads Jev's answer, so no tier, output or exit code changes; the ledger pairs it with the routed tier.
+  It runs only after the reading's gate passes, and `JEV_SD_REVIEW_BLIND=0` stops it alone. A failing twin is one note on stderr.
+
 - **Every `jev` call names its subject and its run (sd:2954).**
   `sd-docs-lint` passes `--subject sd-docs-lint:<16 hex>`, a hash of the batch's sorted origins, never their text.
   `sd-review`, `sd task add` and `sd-docs-lint` export one `JEV_RUN=<caller>-<UTC>-<4 hex>` per process and keep an inherited one.
@@ -63,7 +68,7 @@
 - **`sd fleet stamp` lays a Claude Code settings baseline per repository class (sd:1661).**
   The baseline is `permissions.deny` rules that stop Claude Code's file tools reading secret files: `.env` variants, `secrets/`, private keys, `.netrc`, `.pypirc`, `~/.ssh`, AWS credentials and the `gh` token file.
   An owned or co-owned repository carries it in a tracked `.claude/settings.json`; a guest one gets the untracked `.claude/settings.local.json` in its plan.
-  Each rule is anchored at the project root or at home, so a session started in a subdirectory is covered too.
+  Each rule is anchored at the filesystem root or at home, so a session started in a subdirectory is covered too (sd:2982 moved the file-name rules from the project root).
   The stamp adds missing rules, removes none, leaves a complete file byte for byte, and refuses a file that does not read or decode.
   `.github/sd-fleet.json` may exempt either path. Nothing restamps the fleet: run `sd fleet stamp --dry-run`, then the write per repository.
 
@@ -560,6 +565,13 @@
   registry that sets it.
 
 ### Fixed
+
+- **`sd fleet stamp`'s secret-read rules cover files outside the project (sd:2982).**
+  The 16 file-name rules in `SECRET_READ_DENY` read `Read(/**/<name>)`, and Claude Code anchors a single leading `/` at the project.
+  So `Read(/**/.netrc)` never matched `~/.netrc`, and no rule matched a `.env` in a config folder outside the checkout.
+  Each now reads `Read(//**/<name>)`, anchored at the filesystem root, which holds the project too; the three `~/` rules stay.
+  A settings file stamped before this reads as drifted: the stamp rewrites each old rule to its replacement in place and keeps every other rule.
+  Nothing restamps the fleet: run `sd fleet stamp --dry-run`, then the write per repository.
 
 - **An opted-in gate finds the bound cargo subcommands again (sd:2921).**
   `offload_pins` set `CARGO_HOME` to the gate's cache folder, and cargo looks for subcommands in `$CARGO_HOME/bin`.
@@ -1400,6 +1412,16 @@
   gate runs `sd-check` to completion inside the merge, so it is the wait.
 
 ### Changed
+
+- **`.sd-system-rev` advances to system `24b1b714`, schema 22 (sd:2981).**
+  The range adds migration `022_judgment_batch_children.sql` (sd:2966): `judgment.parent`, plus machine-time pricing in `sd_db.judgment` (sd:2967), which no pack code calls.
+  The other three commits add a satellite stale-claim alarm to `sd_db` (sd:2918), stable Jev caller subjects (sd:2953), and a `local-scan-for-secrets` change (sd:1254).
+  With the old pin, a checkout whose library came from system main fails `tests.test_system_pin`: `AssertionError: 21 != 22`.
+
+- **`.sd-system-rev` advances to system `b3b067d7`, schema 21 (sd:2975).**
+  The range adds migration `021_judgment_call_context.sql` (sd:2950): five nullable columns on `judgment`, written through `sd_db.judgment.record`, which no pack code calls.
+  The other two commits change only `local-scan-for-secrets`.
+  With the old pin, a checkout whose library came from system main failed `tests.test_system_pin`: `AssertionError: 20 != 21`.
 
 - **`.sd-system-rev` advances to system `8797a036`, which estimates a prompt at three bytes a token (sd:2963, for sd:2935).**
   A `url` reviewer's reserved bound now errs high on the input side; settlement still bills the vendor's own count.

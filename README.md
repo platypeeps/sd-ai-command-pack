@@ -97,8 +97,12 @@ else is. Its executables write these paths, and no others:
   no tracked file of ours, so its plan proposes the untracked
   `.claude/settings.local.json` instead; a guest plan carries a refusal, so a
   write lays nothing there and the operator copies the file by hand.
-  Missing rules are added and none removed, and a settings file that does not
-  read refuses.
+  The file-name rules start `Read(//**/`, anchored at the filesystem root, so
+  they cover the project and secrets outside it such as `~/.netrc`; a single
+  `/` would anchor at the project only (sd:2982).
+  Missing rules are added. None is removed, except that a project-anchored
+  rule an older stamp laid becomes its `//` replacement in place.
+  A settings file that does not read refuses.
   It also adds the template's new lines to that checkout's `CLAUDE.local.md`
   block, removing none, and creates its untracked `docs/dashboard/`. `--dry-run` prints every auto repository's diff against
   its `origin/HEAD` and writes nothing. A repository is the operator's own
