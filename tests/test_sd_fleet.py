@@ -347,6 +347,13 @@ class DryRun(Fleet):
         self.assertIn("docs/dashboard/", sd_install.DEFAULT_BLOCK_BODY)
 
 
+#: The settings file `sd fleet stamp` wrote before sd:2982, rule for rule.
+STAMPED_BEFORE_2982 = [f"Read(/**/{name})" for name in (
+    ".env", ".env.local", ".env.*.local", ".env.development", ".env.staging", ".env.production", "secrets/**",
+    "*.key", "*-key.pem", "*.p12", "*.pfx", "id_rsa", "id_ecdsa", "id_ed25519", ".netrc", ".pypirc")] + [
+    "Read(~/.ssh/**)", "Read(~/.aws/credentials)", "Read(~/.config/gh/hosts.yml)"]
+
+
 class SettingsBaseline(Fleet):
     """sd:1661, ruling #6991: one `.claude/settings.json` baseline per repository class.
 
@@ -383,19 +390,29 @@ class SettingsBaseline(Fleet):
     def test_the_baseline_denies_reading_secrets_and_grants_nothing(self) -> None:
         written = json.loads(sd_fleet.settings_text(None))
         self.assertEqual(written, {"permissions": {"deny": list(sd_fleet.SECRET_READ_DENY)}})
-        for rule in ("Read(/**/.env)", "Read(/**/.env.*.local)", "Read(/**/secrets/**)", "Read(~/.ssh/**)"):
+        for rule in ("Read(//**/.env)", "Read(//**/.env.*.local)", "Read(//**/secrets/**)", "Read(~/.ssh/**)"):
             self.assertIn(rule, sd_fleet.SECRET_READ_DENY)
         self.assertTrue(all(rule.startswith("Read(") for rule in sd_fleet.SECRET_READ_DENY))
         # A committed example file is documentation an agent has to read.
-        self.assertNotIn("Read(/**/.env.*)", sd_fleet.SECRET_READ_DENY)
+        self.assertNotIn("Read(//**/.env.*)", sd_fleet.SECRET_READ_DENY)
+
+    def test_home_secrets_are_denied_outside_the_project(self) -> None:
+        """sd:2982: `Read(/**/.netrc)` anchors at the project, so it never
+        matched `~/.netrc`. `//` anchors at the filesystem root, which holds
+        the project too, so one rule covers both."""
+        for name in (".netrc", ".pypirc", ".env"):
+            with self.subTest(name=name):
+                self.assertIn(f"Read(//**/{name})", sd_fleet.SECRET_READ_DENY)
+                self.assertNotIn(f"Read(/**/{name})", sd_fleet.SECRET_READ_DENY)
 
     def test_every_rule_is_anchored_away_from_the_current_directory(self) -> None:
         """Review round 1: `Read(**/.env)` binds at and under the session's
         current directory, so a session started in a subdirectory could read
-        the root `.env`. `/` anchors at the project, `~/` at home."""
+        the root `.env`. `//` anchors at the filesystem root, `~/` at home;
+        a single `/` anchors at the project and misses home (sd:2982)."""
         for rule in sd_fleet.SECRET_READ_DENY:
             with self.subTest(rule=rule):
-                self.assertRegex(rule, r"^Read\((/|~/)")
+                self.assertRegex(rule, r"^Read\((//|~/)")
 
     def test_a_settings_file_that_does_not_decode_refuses_that_repository_only(self) -> None:
         """Review round 1: a non-UTF-8 file aborted the whole dry run."""
@@ -419,13 +436,30 @@ class SettingsBaseline(Fleet):
 
     def test_an_existing_file_keeps_its_rules_and_gains_the_missing_ones(self) -> None:
         current = json.dumps({"env": {"A": "1"}, "permissions": {
-            "allow": ["Bash(make check)"], "deny": ["Bash(gh issue create:*)", "Read(/**/.env)"]}}, indent=4) + "\n"
+            "allow": ["Bash(make check)"], "deny": ["Bash(gh issue create:*)", "Read(//**/.env)"]}}, indent=4) + "\n"
         after = json.loads(sd_fleet.settings_text(current))
         self.assertEqual(after["env"], {"A": "1"})
         self.assertEqual(after["permissions"]["allow"], ["Bash(make check)"])
         deny = after["permissions"]["deny"]
-        self.assertEqual(deny[:2], ["Bash(gh issue create:*)", "Read(/**/.env)"])
-        self.assertEqual(sorted(deny[2:] + ["Read(/**/.env)"]), sorted(sd_fleet.SECRET_READ_DENY))
+        self.assertEqual(deny[:2], ["Bash(gh issue create:*)", "Read(//**/.env)"])
+        self.assertEqual(sorted(deny[2:] + ["Read(//**/.env)"]), sorted(sd_fleet.SECRET_READ_DENY))
+
+    def test_a_file_stamped_before_2982_reads_as_drifted_and_is_rewritten_in_place(self) -> None:
+        """sd:2982: every project-anchored rule becomes its filesystem-wide
+        replacement at the same position; the operator's rules stay."""
+        current = json.dumps({"permissions": {"deny": ["Bash(gh issue create:*)", *STAMPED_BEFORE_2982]}},
+                             indent=2) + "\n"
+        after = sd_fleet.settings_text(current)
+        self.assertNotEqual(after, current)
+        self.assertEqual(json.loads(after)["permissions"]["deny"],
+                         ["Bash(gh issue create:*)", *sd_fleet.SECRET_READ_DENY])
+        self.assertEqual(sd_fleet.settings_text(after), after)
+
+    def test_a_retired_rule_beside_its_replacement_leaves_one_copy(self) -> None:
+        current = json.dumps({"permissions": {"deny": ["Read(/**/.netrc)", *sd_fleet.SECRET_READ_DENY]}}) + "\n"
+        deny = json.loads(sd_fleet.settings_text(current))["permissions"]["deny"]
+        self.assertEqual(deny[0], "Read(//**/.netrc)")
+        self.assertEqual(sorted(deny), sorted(sd_fleet.SECRET_READ_DENY))
 
     def test_a_file_that_already_carries_the_rules_is_left_byte_for_byte(self) -> None:
         current = json.dumps({"permissions": {"deny": list(reversed(sd_fleet.SECRET_READ_DENY))}}, indent=8) + "\n"
@@ -481,6 +515,24 @@ class Write(Fleet):
         self.assertFalse((root / sd_fleet.CHECK_PATH).exists())  # only the checkout the caller stands in
         [again] = self.plan([(root, remote)], cwd=into, dry_run=False)
         self.assertEqual(again["changes"], [])
+
+    def test_a_restamp_rewrites_a_repository_stamped_before_2982(self) -> None:
+        """sd:2982: the dry run names the drift, the write lays the new rules,
+        and the next run finds nothing."""
+        stamped = json.dumps({"permissions": {"deny": STAMPED_BEFORE_2982}}, indent=2) + "\n"
+        root, remote = self.repo("stamped-old", {sd_fleet.SETTINGS_PATH: stamped})
+        [dry] = self.plan([(root, remote)])
+        [change] = [change for change in dry["changes"] if change["path"] == sd_fleet.SETTINGS_PATH]
+        self.assertEqual(change["action"], "update")
+        self.assertIn('-      "Read(/**/.netrc)",', change["diff"])
+        self.assertIn('+      "Read(//**/.netrc)",', change["diff"])
+        into = self.worktree(root, "chore/restamp")
+        code, _ = self.run_stamp([(root, remote)], cwd=into, dry_run=False)
+        self.assertEqual(code, sd_fleet.EXIT_OK)
+        self.assertEqual(json.loads((into / sd_fleet.SETTINGS_PATH).read_text(encoding="utf-8")),
+                         {"permissions": {"deny": list(sd_fleet.SECRET_READ_DENY)}})
+        [again] = self.plan([(root, remote)], cwd=into, dry_run=False)
+        self.assertNotIn(sd_fleet.SETTINGS_PATH, [change["path"] for change in again["changes"]])
 
     def test_default_branch_gets_the_untracked_files_only(self) -> None:
         root, remote = self.repo("main-only")
