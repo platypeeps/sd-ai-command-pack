@@ -2315,11 +2315,20 @@ def clean_up_merged(root: pathlib.Path, branch: str, merged: str) -> dict:
 
 
 BUILD_OUTPUT = frozenset({"target", "node_modules", ".venv", "__pycache__"})
+# Config can hide untracked and ignored files from status, and `worktree
+# remove` deletes what status did not show, so cleanup pins the shape: every
+# untracked file, every submodule, and no fsmonitor or untracked cache.
+PINNED = ("-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false", "-c", "status.showUntrackedFiles=all")
+
+
+def tree_status(path: pathlib.Path, *flags: str) -> str:
+    """`git status --porcelain` in `path`, with an output shape no config changes."""
+    return git(path, *PINNED, "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none", *flags)
 
 
 def ignored_data(path: pathlib.Path) -> str | None:
     """Why to keep a tree whose ignored files are more than build output, or None."""
-    for line in git(path, "status", "--porcelain", "--ignored").splitlines():
+    for line in tree_status(path, "--ignored=matching").splitlines():
         name = line[3:]
         if line.startswith("!! ") and not BUILD_OUTPUT & set(name.rstrip("/").split("/")):
             return f"it holds ignored {name}"
@@ -2328,7 +2337,7 @@ def ignored_data(path: pathlib.Path) -> str | None:
 
 def kept_because(path: pathlib.Path, merged: str) -> str | None:
     """Why a merged branch's linked worktree stays, or None to remove it."""
-    if git(path, "status", "--porcelain"):
+    if tree_status(path):
         return "it has uncommitted changes"
     if not is_ancestor(path, "HEAD", merged):
         return "it has commits past the merged head"
@@ -2347,7 +2356,7 @@ def remove_merged(root: pathlib.Path, branch: str, merged: str) -> dict:
         if why:
             kept[str(path)] = why
         else:
-            git(main, "worktree", "remove", str(path))
+            git(main, *PINNED, "worktree", "remove", str(path))
             removed.append(str(path))
     local = sd_lib.git_output(["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], main)
     if local and kept:

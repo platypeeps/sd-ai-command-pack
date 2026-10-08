@@ -2887,6 +2887,70 @@ roles:
                                            "ignored": "a kept worktree has it checked out"})
         self.assertTrue((tree / "local.env").exists())
 
+    def cleanup_keeps(self, name: str, configure, why: str) -> pathlib.Path:
+        """Run the merge cleanup on a worktree `configure(tree)` set up, and assert it stays for `why`."""
+        head = _git(self.root, "rev-parse", "HEAD")
+        with (self.root / ".git/info/exclude").open("a") as stream:
+            stream.write("target/\n")
+        tree = self.merged_worktree(name)
+        configure(tree)
+        cleanup = ship.clean_up_merged(self.root, name, head)
+        self.assertEqual(cleanup.get("kept"), {str(tree): why, name: "a kept worktree has it checked out"}, cleanup)
+        self.assertTrue(tree.exists())
+        return tree
+
+    def test_cleanup_sees_an_untracked_file_that_status_config_hides(self):
+        """Cleanup failure table, row S1: `status.showUntrackedFiles=no` hid it, and `worktree remove` deleted it."""
+        def configure(tree):
+            _git(tree, "config", "status.showUntrackedFiles", "no")
+            (tree / "notes.txt").write_text("unsaved")
+        self.cleanup_keeps("hidden-untracked", configure, "it has uncommitted changes")
+
+    def test_cleanup_sees_ignored_data_that_status_config_hides(self):
+        """Cleanup failure table, row S2: review round 2 of sd:3013."""
+        def configure(tree):
+            _git(tree, "config", "status.showUntrackedFiles", "no")
+            with (self.root / ".git/info/exclude").open("a") as stream:
+                stream.write("*.env\n")
+            (tree / "local.env").write_text("TOKEN=change-me\n")
+        self.cleanup_keeps("hidden-ignored", configure, "it holds ignored local.env")
+
+    def test_cleanup_sees_data_a_global_excludes_file_ignores(self):
+        """Cleanup failure table, row S3: `core.excludesFile` turns untracked data into ignored data."""
+        def configure(tree):
+            excludes = self.directory / "global-excludes"
+            excludes.write_text("*.env\n")
+            _git(tree, "config", "core.excludesFile", str(excludes))
+            (tree / "local.env").write_text("TOKEN=change-me\n")
+        self.cleanup_keeps("global-ignored", configure, "it holds ignored local.env")
+
+    def test_cleanup_never_consults_a_repositorys_fsmonitor(self):
+        """Cleanup failure table, row S4: a daemon's stale answer is the one status would read."""
+        head = _git(self.root, "rev-parse", "HEAD")
+        with (self.root / ".git/info/exclude").open("a") as stream:
+            stream.write("target/\n")
+        tree = self.merged_worktree("monitored")
+        marker, hook = self.directory / "fsmonitor-ran", self.directory / "fsmonitor.sh"
+        hook.write_text(f'#!/bin/sh\necho "$PWD" >> "{marker}"\nexit 1\n')
+        hook.chmod(0o755)
+        _git(tree, "config", "core.fsmonitor", str(hook))
+        self.assertEqual(ship.clean_up_merged(self.root, "monitored", head)["kept"], {})
+        self.assertFalse(marker.exists(), marker.read_text() if marker.exists() else "")
+
+    def test_cleanup_keeps_a_worktree_with_a_submodule(self):
+        """Cleanup failure table, row S5: `submodule.*.ignore=all` hides a dirty submodule from status."""
+        _git(self.root, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(self.remote.path), "sub")
+        _git(self.root, "commit", "-qm", "submodule\n\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        tree = self.merged_worktree("with-submodule")
+        _git(tree, "-c", "protocol.file.allow=always", "submodule", "update", "-q", "--init")
+        _git(tree, "config", "submodule.sub.ignore", "all")
+        (tree / "sub/scratch.txt").write_text("unsaved")
+        cleanup = ship.clean_up_merged(self.root, "with-submodule", head)
+        self.assertNotIn(str(tree), cleanup.get("removed", []), cleanup)
+        self.assertTrue((tree / "sub/scratch.txt").exists())
+        self.assertEqual(cleanup.get("kept", {}).get(str(tree)), "it has uncommitted changes", cleanup)
+
     def test_a_merge_closes_every_item_its_title_names(self):
         """sd:3014, operator ruling 2026-10-08. A batched pull request names its
         items in its title. The merge closes each one as it closes a `Closes:`
