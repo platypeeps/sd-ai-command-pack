@@ -428,7 +428,6 @@ STRANDED_RULE_IDS: frozenset[str] = frozenset()
 UNCITED_SKILL_CLAIMS = {
     "skills/sd-plan/SKILL.md": 1,
     "skills/sd-research-repo/templates/CLAUDE.md": 1,
-    "skills/sd-suggest/SKILL.md": 1,
 }
 
 
