@@ -1,6 +1,6 @@
 ---
 name: sd-digest
-description: Use when the user provides multiple documents, threads, or links and wants them synthesized into one decision-ready brief with disagreements surfaced.
+description: Use when the user provides multiple documents, threads, or links and wants them synthesized into one decision-ready brief with disagreements surfaced, or wants supplied material compressed to an explicit information budget with a loss ledger.
 ---
 
 # sd-digest
@@ -10,6 +10,12 @@ several documents, threads, transcripts, or links in — one decision-ready
 brief out, with the points of agreement and conflict made explicit. The
 inputs are what the user supplied; the open web only fills gaps the user
 approves.
+
+With `target=`, the digest also compresses to a stated budget (distill mode).
+Treat the default 80/10 goal as a prioritization heuristic: target no more than
+10% of measured source size while keeping the material most likely to hold 80%
+of its value for the stated audience and purpose. Never present semantic value
+as objectively measured.
 
 Source attribution rules live in `references/source-standards.md`.
 
@@ -23,11 +29,15 @@ document for it.
 
 Use when the user hands over a set of inputs — reports, proposals, meeting
 notes, long threads, articles — and wants them read fully and merged into
-one view, especially when the inputs may disagree.
+one view, especially when the inputs may disagree. Set `target=` when the
+reader needs an unusually compact executive, study, decision, or technical
+artifact and must know what survived, what was lost, and whether the ratio was
+safe.
 
 Do not use when the material must first be found on the web
 (`sd-research`), when the job is a market inventory (`sd-scan`), or for a
-single short document — just read and summarize that directly.
+single short document without `target=` — just read and summarize that
+directly.
 
 ## Arguments
 
@@ -41,6 +51,16 @@ before reading anything.
   digest surfaces the inputs' own main tensions and takeaways.
 - `depth=brief|standard|deep` — default `standard`.
 - `audience=` — who will read the digest; adjusts background given.
+  Required with `target=`.
+- `target=10%|<words>|<tokens>` — maximum output size. Setting it selects
+  distill mode; `10%` is the default target once the mode is chosen.
+- `purpose=executive|study|decision|technical` — distill mode only, and
+  required there: what the reader must be able to understand or do.
+- `must_keep=` — distill mode only: exact facts, conclusions, constraints,
+  definitions, code, notation, or locators that may not be omitted.
+- `loss_tolerance=` — distill mode only: categories the user permits or
+  forbids omitting, such as examples, history, nuance, secondary evidence, or
+  implementation detail.
 
 ## Workflow
 
@@ -59,6 +79,39 @@ before reading anything.
 6. If a gap matters to the synthesis and the inputs cannot fill it, say so
    and ask before reaching for web search.
 7. Deliver the digest.
+
+## Distill mode
+
+These steps run only with `target=`. They sit between step 5 and step 7, and
+the synthesis is drafted from the importance map, not from source order.
+
+- **Measure.** Choose one size measure, words or tokens, for both input and
+  output, and state the method and exclusions. For a percentage target,
+  compute the maximum size from the measured accessible inputs; never estimate
+  and report the result as measured.
+- **Map importance.** Before drafting, give each load-bearing item a stable ID
+  and record its type, content, source locator, consequence to the purpose,
+  evidence strength, conflict state, and retention status.
+- **Mark the invariants.** The non-negotiable set always holds the thesis,
+  required decisions and constraints, strongest load-bearing evidence, major
+  risks, material conflicts, decision-changing exceptions, and every
+  `must_keep=` item. Technical purpose also keeps exact code, formulas,
+  notation, units, interfaces, and preconditions when a change would alter
+  behavior.
+- **Measure the ratio.** Measure the draft with the same method and compute
+  `output size / input size`. For a short source, give a minimum useful
+  artifact and say the ratio is not meaningful instead of producing fragments.
+- **Audit the invariants.** Every non-negotiable item appears in the artifact
+  or triggers the unsafe-target path. Every other mapped item appears in the
+  artifact or the loss ledger.
+- **Unsafe target.** When the target cannot hold every invariant, do not claim
+  it was met. Return the smallest safe result, its size and ratio, the
+  invariant pressure that made the target unsafe, and the smallest relaxation
+  that would fit. Never trade correctness for the number in silence.
+- **Loss ledger.** Group omitted examples, history, secondary evidence,
+  nuance, and detail, and name each omitted or compressed point that could
+  change a decision. End with a consult-the-source list keyed to risks,
+  conflicts, and detail the reader should not take from the digest alone.
 
 ## Sub-agent dispatch
 
@@ -115,6 +168,11 @@ scope, the synthesis discipline, or the `## Final report` contract.
   invent its contents.
 - Web search only fills an explicit, named gap and only after the user
   agrees.
+- Never claim that 80% of semantic or informational value was objectively
+  measured. Report it only as the prioritization goal.
+- Never silently omit a thesis, decision, constraint, strongest evidence,
+  major risk, material conflict, decision-changing exception, citation, or
+  `must_keep=` item to meet a numeric target.
 
 ## Final report
 
@@ -125,3 +183,16 @@ scope, the synthesis discipline, or the `## Final report` contract.
 - **Conflict table** — topic / what each side says / which documents;
 - **Unanswered questions** — gaps the inputs leave open, and whether web
   search could close them.
+
+In distill mode, add:
+
+- **Scope and measurement** — target, purpose, size method, source size,
+  output size, and actual ratio;
+- **Target safety** — `met` or `unsafe`; for `unsafe`, the smallest safe
+  result, actual ratio, exact reason, and smallest requested relaxation;
+- **Loss ledger** — omitted categories plus individually named
+  decision-changing details and where to recover them;
+- **Consult the source** — situations, risks, and details for which the
+  reader should use the full material;
+- **Limits** — the 80% value goal was not objectively measured, and no
+  external research was added without approval.
