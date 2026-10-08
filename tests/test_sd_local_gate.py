@@ -777,6 +777,19 @@ class FnmShells(ReceiptFixture):
         self.assertEqual(self.runs(), 1)
 
 
+class JevRunIds(ReceiptFixture):
+    """`JEV_RUN` names one run's `jev` calls (sd:2954), so prepare and merge always differ in it.
+
+    Bound, it made every merge miss prepare's receipt and run the gate a second time (sd:3013).
+    """
+
+    def test_two_runs_that_differ_only_in_jev_run_bind_one_receipt(self) -> None:
+        head = self.counted()
+        self.assertEqual(self.gate(head, environ={**os.environ, "JEV_RUN": "sd-ship-prepare"}).get("status"), "success")
+        merged = self.gate(head, environ={**os.environ, "JEV_RUN": "sd-ship-merge"}, record=False)
+        self.assertEqual(("reused" in merged, merged.get("reuse_miss"), self.runs()), (True, None, 1))
+
+
 class CargoBuildCache(Repository):
     """A Rust repository's gates share warm build folders instead of compiling every dependency cold (sd:2493)."""
 

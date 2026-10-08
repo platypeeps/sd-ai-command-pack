@@ -69,8 +69,8 @@ LOCAL_BLOCK = "CLAUDE.local.md"
 #: and the operator's Rust build folder, which `sd_gate_cache.cargo_target` replaces with the gate's own (sd:2493).
 DROPPED_ENVIRONMENT = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX", "__PYVENV_LAUNCHER__",
                        "FORCE_COLOR", "CLICOLOR_FORCE", "PY_COLORS", "CARGO_TARGET_DIR")
-#: Session variables, by name or prefix: dropped so two sessions' passes at one head bind equal (sd:1912, D1; fnm's per-shell folder, sd:2602).
-SESSION_ENVIRONMENT = ("CLAUDECODE", "TERM_SESSION_ID", "PWD", "OLDPWD", "SHLVL", "_", "FNM_MULTISHELL_PATH")
+#: Session variables, by name or prefix: dropped so two sessions' passes at one head bind equal (sd:1912, D1; fnm's per-shell folder, sd:2602; `jev`'s per-run id, sd:3013).
+SESSION_ENVIRONMENT = ("CLAUDECODE", "TERM_SESSION_ID", "PWD", "OLDPWD", "SHLVL", "_", "FNM_MULTISHELL_PATH", "JEV_RUN")
 SESSION_PREFIXES = ("CLAUDE_", "HERDR_", "ITERM_")
 #: Set in the child: the gate captures output, and the caller's terminal colour must not change a result (sd:2076).
 NO_COLOUR_ENVIRONMENT = {"NO_COLOR": "1", "PYTHON_COLORS": "0"}
