@@ -29,7 +29,8 @@ never runs the `finally` that removes it, so its entry stays registered.
 removes every gate worktree whose named process is gone. Only a worktree
 named `tree` in a folder `sd-local-gate-<pid>-<suffix>` directly in the temp
 dir counts as a gate's: a checkout elsewhere with a like name is never touched.
-A live gate's worktree stays; so does a folder from before this rule.
+A live gate's worktree stays; so does a folder from before this rule. The
+dead gate's whole folder goes with its worktree, the check's `TMPDIR` included (sd:3032).
 """
 
 from __future__ import annotations
@@ -65,6 +66,8 @@ GIB = 1024 ** 3
 GATE_PREFIX = "sd-local-gate-"
 #: The whole folder name `tempfile` makes from that prefix; nine digits keep a pid within `os.kill`'s range.
 GATE_FOLDER = re.compile(r"sd-local-gate-([0-9]{1,9})-[a-z0-9_]+")
+#: The check's own `TMPDIR`, beside the gate's worktree: the gate's cleanup removes what the check's tests leave (sd:3032).
+TEMPORARY = "tmp.noindex"
 
 
 def running(pid: int) -> bool:
@@ -87,8 +90,15 @@ def worktree_prefix(root: pathlib.Path) -> str:
         named = GATE_FOLDER.fullmatch(tree.parent.name)
         if line.startswith("worktree ") and named and tree.name == "tree" \
                 and tree.parent.parent.resolve() == temporary and not running(int(named[1])):
-            sd_lib.git_output(["worktree", "remove", "--force", str(tree)], root)  # its empty parent stays in the temp dir
+            sd_lib.git_output(["worktree", "remove", "--force", str(tree)], root)
+            shutil.rmtree(tree.parent, ignore_errors=True)  # and the check's `TMPDIR` beside it (sd:3032)
     return f"{GATE_PREFIX}{os.getpid()}-"
+
+
+def check_temporary(parent: str) -> str:
+    """The check's `TMPDIR`, made empty in the gate's folder `parent` (sd:3032)."""
+    (folder := pathlib.Path(parent) / TEMPORARY).mkdir()
+    return str(folder)
 
 
 def cache_root(environ: Mapping[str, str]) -> pathlib.Path:

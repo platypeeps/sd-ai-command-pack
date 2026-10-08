@@ -193,8 +193,8 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
             argv = [sys.executable, str((tree / "bin" if own else BIN) / "sd-check"), "--json", "--timeout", str(timeout),
                     *(["--base", base] if base else []), *(["--slot-timeout", str(slot_timeout)] * (slot_timeout > 0))]
             with sd_gate_cache.cargo_environment(root, tree, env) as child:
-                code, output, errors = (run or run_child)(argv, sd_gate_receipts.subcommand_path(child, tree), tree,
-                                                          timeout + slot_timeout + REPORT_GRACE_SECONDS)
+                code, output, errors = (run or run_child)(argv, {**sd_gate_receipts.subcommand_path(child, tree), "TMPDIR": sd_gate_cache.check_temporary(parent)},
+                                                          tree, timeout + slot_timeout + REPORT_GRACE_SECONDS)
             checked = gate_git(tree, "rev-parse", "HEAD")
             reading = check_reading(code, output, errors)
             if record and database and identity and reading["status"] == "success" and checked == head:

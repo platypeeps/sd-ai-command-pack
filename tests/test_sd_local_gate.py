@@ -1091,6 +1091,18 @@ class CacheBound(Repository):
         self.assertIn(f"sd gate: pruned {old}", errors.getvalue())
 
 
+class GateTemporaryFolder(Repository):
+    """sd:3032: a check's temp folders land in the gate's own folder, so the gate's cleanup removes them."""
+
+    def test_a_check_that_makes_a_temp_folder_leaves_nothing_in_the_outer_tmpdir(self) -> None:
+        outer = self.root.parent / "outer"
+        outer.mkdir()
+        head = self.commit(f"check:\n\t@{sys.executable} -c 'import tempfile; tempfile.mkdtemp()'\n")
+        with mock.patch.dict(os.environ, {"TMPDIR": str(outer)}), mock.patch.object(tempfile, "tempdir", str(outer)):
+            self.assertEqual(sd_gate_run.check_in_worktree(self.root, head)["status"], "success")
+        self.assertEqual(sorted(path.name for path in outer.iterdir()), [])
+
+
 class StaleGateWorktrees(Repository):
     """sd:2739: a killed gate skips its `finally`; the next gate start removes its worktree, never a live one's."""
 
@@ -1110,8 +1122,9 @@ class StaleGateWorktrees(Repository):
     def test_a_dead_gates_worktree_is_removed_at_the_next_gate_start(self) -> None:
         head = self.commit("check:\n\t@echo ok\n")
         tree = self.left(self.dead(), head)
+        (tree.parent / "tmp.noindex").mkdir()
         self.assertEqual(sd_gate_run.check_in_worktree(self.root, head)["status"], "success")
-        self.assertEqual((self.worktrees(), tree.exists()), (1, False))
+        self.assertEqual((self.worktrees(), tree.parent.exists()), (1, False), "sd:3032: its check's TMPDIR goes too")
 
     def test_a_live_gates_worktree_and_one_that_names_no_pid_stay(self) -> None:
         head = self.commit("check:\n\t@echo ok\n")
