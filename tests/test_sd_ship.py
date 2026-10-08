@@ -2874,6 +2874,19 @@ roles:
                 self.assertEqual(cleanup["removed"], [f"origin/{name}"])
                 self.assertTrue(tree.exists())
 
+    def test_a_merge_cleanup_keeps_a_worktree_holding_ignored_data_that_is_not_build_output(self):
+        """Review of sd:3013: `git status --porcelain` hides ignored files, and
+        `git worktree remove` deleted ignored local data with the tree."""
+        head = _git(self.root, "rev-parse", "HEAD")
+        with (self.root / ".git/info/exclude").open("a") as stream:
+            stream.write("target/\n*.env\n")
+        tree = self.merged_worktree("ignored")
+        (tree / "local.env").write_text("TOKEN=change-me\n")
+        cleanup = ship.clean_up_merged(self.root, "ignored", head)
+        self.assertEqual(cleanup["kept"], {str(tree): "it holds ignored local.env",
+                                           "ignored": "a kept worktree has it checked out"})
+        self.assertTrue((tree / "local.env").exists())
+
     def test_a_merge_closes_every_item_its_title_names(self):
         """sd:3014, operator ruling 2026-10-08. A batched pull request names its
         items in its title. The merge closes each one as it closes a `Closes:`

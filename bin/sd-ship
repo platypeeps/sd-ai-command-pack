@@ -2303,7 +2303,8 @@ def clean_up_merged(root: pathlib.Path, branch: str, merged: str) -> dict:
 
     `git worktree remove` takes the tree's ignored build output with it.
     Whatever stays is named with its reason: the main checkout, uncommitted
-    changes, commits past the merged head, or a process working inside.
+    changes, ignored files outside `BUILD_OUTPUT`, commits past the merged
+    head, or a process working inside.
     The merge stands whatever happens here, so a failed step is reported in
     the answer, never raised.
     """
@@ -2311,6 +2312,27 @@ def clean_up_merged(root: pathlib.Path, branch: str, merged: str) -> dict:
         return remove_merged(root, branch, merged)
     except Refusal as error:
         return {"error": str(error)}
+
+
+BUILD_OUTPUT = frozenset({"target", "node_modules", ".venv", "__pycache__"})
+
+
+def ignored_data(path: pathlib.Path) -> str | None:
+    """Why to keep a tree whose ignored files are more than build output, or None."""
+    for line in git(path, "status", "--porcelain", "--ignored").splitlines():
+        name = line[3:]
+        if line.startswith("!! ") and not BUILD_OUTPUT & set(name.rstrip("/").split("/")):
+            return f"it holds ignored {name}"
+    return None
+
+
+def kept_because(path: pathlib.Path, merged: str) -> str | None:
+    """Why a merged branch's linked worktree stays, or None to remove it."""
+    if git(path, "status", "--porcelain"):
+        return "it has uncommitted changes"
+    if not is_ancestor(path, "HEAD", merged):
+        return "it has commits past the merged head"
+    return ignored_data(path) or busy_in(path)
 
 
 def remove_merged(root: pathlib.Path, branch: str, merged: str) -> dict:
@@ -2321,10 +2343,7 @@ def remove_merged(root: pathlib.Path, branch: str, merged: str) -> dict:
               for block in git(root, "worktree", "list", "--porcelain").split("\n\n") if block.strip()]
     main = pathlib.Path(blocks[0]["worktree"])
     for path in (pathlib.Path(block["worktree"]) for block in blocks if block.get("branch") == f"refs/heads/{branch}"):
-        why = ("the main checkout" if path == main
-               else "it has uncommitted changes" if git(path, "status", "--porcelain")
-               else "it has commits past the merged head" if not is_ancestor(path, "HEAD", merged)
-               else busy_in(path))
+        why = "the main checkout" if path == main else kept_because(path, merged)
         if why:
             kept[str(path)] = why
         else:
