@@ -11,7 +11,6 @@ tools:
   - Bash
   - ToolSearch
   - Skill
-  - Monitor
 ---
 
 # Slice builder
@@ -56,7 +55,8 @@ Effort is `high` on purpose: multi-file code, tests and evidence. You hold no Ag
 - Put logs and other large uncommitted data under `<root>/<repository>/` when
   `sd config get sd.bulk_storage_root` names a root. Keep build output in your worktree.
 - Before a long build, read the free space with `df -h "$HOME"`. Below 20 GiB available, stop and report.
-- Wait on a run longer than 10 minutes with `Monitor` on its log, not a `sleep` loop.
+- Run a long gate or test in the foreground, or with Bash `run_in_background`, which wakes you when it exits.
+  Never use `Monitor` or a wrapped `sleep` to wait: `Monitor` stops at 30 minutes, and builders sat idle unreported.
 
 ## Report
 
