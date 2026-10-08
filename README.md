@@ -109,8 +109,6 @@ else is. Its executables write these paths, and no others:
   when its owner is in `sd.fleet_owners`, comma-separated GitHub logins
   (unset: the deprecated `fleet.owners` list in the machine config, then
   `DEFAULT_OWNERS` in `bin/sd_fleet.py`); any other owner's protection stands.
-- `docs/work/<item>/.citations.tsv` — the citation baseline, one per active work
-  item, from `sd-docs-lint --update-citations`. **Tracked.**
 - `build/` — HTML from `sd-research-kit render`, into the research repository you
   are standing in. Gitignored.
 - `CLAUDE.md` — the research-repo standard in short form, from `sd-research-kit

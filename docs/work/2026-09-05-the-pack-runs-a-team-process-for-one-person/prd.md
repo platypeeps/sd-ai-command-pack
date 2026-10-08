@@ -4208,8 +4208,8 @@ from a number the operator types.
       return that switches three checks off is its spine
       (`bin/sd-docs-lint:146`) and replacing it is not an edit at the edge.
     - rule 7, criterion 33's dangling-reference scan — **73**.
-      `check_citations` (`source:bin/sd-docs-lint::check_citations`, 52) with
-      `resolve_citation` (`source:bin/sd-docs-lint::resolve_citation`, 18) is the built rule of
+      `check_citations` (52) with `resolve_citation` (18), since retired with
+      rule 6, was the built rule of
       this shape — enumerate references, resolve each, report the ones that do
       not — plus 3 for the call in `run` (`source:bin/sd-docs-lint::run`).
     - the `sd_db` installer step — **19**, and not the 38 it looks like.
