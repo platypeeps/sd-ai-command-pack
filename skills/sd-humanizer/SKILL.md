@@ -411,4 +411,4 @@ Key insight from Wikipedia: "LLMs use statistical algorithms to guess what shoul
 
 ## Provenance
 
-Adopted by `sd-skill-adopt` on 2026-09-03 from `/Users/sven/repos/platypeeps/sd-writing-pack/.agents/skills/humanizer/SKILL.md` at revision `35a07c8 (sha256:70938f3cce25970e)`.
+Adopted by `sd-skill-adopt` on 2026-09-03 from `sd-writing-pack/.agents/skills/humanizer/SKILL.md` at revision `35a07c8 (sha256:70938f3cce25970e)`.
