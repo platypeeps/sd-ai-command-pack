@@ -44,7 +44,10 @@ write a design just to record routine progress or work already merged.
 3. **Write `design.md` from the template**, only when the shape needs
    agreement. The templates are in `skills/sd-plan/templates/` (`design.md`,
    `decision.md`, `work-README.md`). Name the row in its frontmatter as
-   `item: sd:<id>`, and add no `status:` field. Create `<work>/README.md` from
+   `item: sd:<id>`, and add no `status:` field. Before writing it, run
+   `sd-rules --for <work>/<item>/design.md` (or `--for docs/decisions/<record>.md`
+   under `--decision`) from the repository root, and cite the rule ids it
+   prints rather than restating the rules. Create `<work>/README.md` from
    the template if the directory is new. The file/row status rules stand
    until sd:3015; for an item with a `prd.md`, adapt the
    templates to the selected work root's `.status-source` marker, including
