@@ -486,7 +486,7 @@ agree on where a brief lives. The drain resolves the path and creates the repo
 folder when it is missing. `folder=` overrides it for a document that belongs
 somewhere a reader already looks.
 
-The folder `write.drive_publishing_folder` names is not this default. That one is
+The folder `sdw.drive_publishing_folder` names is not this default. That one is
 the primary blog's gate, and a brief placed in it would read as cleared for
 publication.
 

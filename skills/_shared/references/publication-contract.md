@@ -221,7 +221,7 @@ a new repo publishes without anyone provisioning a folder first. `folder=`
 overrides the default with a folder name or id, for a document that belongs
 somewhere a reader already looks.
 
-The Drive folder that `write.drive_publishing_folder` names is a different thing
+The Drive folder that `sdw.drive_publishing_folder` names is a different thing
 and is not this default. That folder is the primary blog's gate: a piece sitting
 in it has cleared every publishing check. A brief mirrored into it would read as
 approved for publication, which no designation here claims.

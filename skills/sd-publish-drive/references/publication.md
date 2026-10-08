@@ -11,8 +11,8 @@ only the concrete connector action dispatched once by the database.
 ## Prepare the destination and claim
 
 Read these current machine configuration values through `sd config get`:
-`write.google_account`, `write.drive_writing_folder`, and
-`write.drive_publishing_folder`. Missing values block publication. Use the
+`sdw.google_account`, `sdw.drive_writing_folder`, and
+`sdw.drive_publishing_folder`. Missing values block publication. Use the
 available `google_drive_get_profile` and `google_drive_get_file_metadata`
 connectors to read the account and each configured folder. They must return
 the configured email and native folders named `Drafts` and `Published`.

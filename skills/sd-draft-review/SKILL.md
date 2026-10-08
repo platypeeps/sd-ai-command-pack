@@ -20,8 +20,8 @@ It has no `bin/` command: the steps below are the procedure, and `scripts/pack.p
 ## Settings
 
 ```bash
-sd config get write.google_account
-sd config get write.drive_writing_folder
+sd config get sdw.google_account
+sd config get sdw.drive_writing_folder
 ```
 
 An unset value exits 1 and prints the `config set` command that fixes it. Stop and show the user that line. Never guess an address or a folder.
@@ -47,7 +47,7 @@ This skill writes only the drafts folder. It never writes the publishing folder:
 8. Read the doc back with `get_doc_as_markdown` (`comment_mode: "none"`). Check the header word count and push date, that images came back as `googleusercontent` URLs, and that headings arrived as `##`.
 9. `pack pieces set-review-url --piece <year>/<slug> --target gdocs --url <draft URL>`. It also stamps `review_urls.gdocs_digest`. It changes no stage.
 10. If the piece has `obsidian_source`, merge the links into its idea note's `Drive docs` section:
-    `sd store get write.blog-idea "<idea title>" --section 'Drive docs'`, merge, then `sd store set write.blog-idea "<idea title>" --section-file 'Drive docs=<file>'`.
+    `sd store get sdw.blog-idea "<idea title>" --section 'Drive docs'`, merge, then `sd store set sdw.blog-idea "<idea title>" --section-file 'Drive docs=<file>'`.
     The section is replaced whole, so carry the old lines over. One `- <label>: <url>` line per document: `Draft review copy`, `Research notes`, `Published copy`. Without `obsidian_source`, say so.
 
 Push report: the URL, word count, stage, and how comments come back (`/sd-draft-review pull`; nothing watches for them). A failed push leaves `review_urls.gdocs` unchanged.

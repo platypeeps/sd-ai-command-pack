@@ -87,8 +87,8 @@ sources; draft prose is `sd-draft` work.
 1. **Find the work.** `piece=`: `pack pieces get --piece <year>/<slug> --json`
    and use the registered `item.path`; a revived piece may stay under
    `content-parked/`, and never gets a second folder. `from=idea`: list
-   `sd store list write.blog-idea --status drafting`, read each with
-   `sd store get write.blog-idea "<title>"`, and skip any idea a piece
+   `sd store list sdw.blog-idea --status drafting`, read each with
+   `sd store get sdw.blog-idea "<title>"`, and skip any idea a piece
    already links (`grep -rl 'obsidian_source: "<idea path>"' content/ content-parked/`).
 2. **Create a new piece.** Copy `templates/piece-template.md` to
    `content/<year>/<slug>/index.md` and fill `title`, `type`, `created` and
@@ -97,7 +97,7 @@ sources; draft prose is `sd-draft` work.
    `obsidian_source: "<the idea note's path in the vault>"`, and its
    description and `Argument` section seeded into `## Notes / angle`. Then
    `pack pieces register --piece <year>/<slug>`.
-3. **Read the topic notes first:** `sd store list write.topic --status active --full`.
+3. **Read the topic notes first:** `sd store list sdw.topic --status active --full`.
    Take `## Ground truth` as orientation (never a citation), `## Feeds` as
    sources to read directly, and `## Boundaries` and `## Sweep notes` for scope
    and query angles. An idea's `topics` match the printed `slug:` lines.

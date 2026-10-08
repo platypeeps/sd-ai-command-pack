@@ -138,7 +138,7 @@ stop and identify them before reading personal or external sources.
 ## Filing into the vault
 
 With `file=vault`, run from the root of the writing content repository (it
-holds `scripts/pack.py` and `profile/`). Its `write` plugin declares the
+holds `scripts/pack.py` and `profile/`). Its `sdw` plugin declares the
 `blog-idea` kind, its floor and its template.
 
 - **Extra sources.** `profile/personality-profile/PROFILE.md` and
@@ -147,8 +147,8 @@ holds `scripts/pack.py` and `profile/`). Its `write` plugin declares the
   content, parked pieces included. Newsletters follow the labels in
   `profile/newsletter-sweep.md`, read-only with `search_gmail_messages` and
   `get_gmail_message_content`; without that file, skip them and say so.
-  `sd store list write.topic --status active` gives topic slugs to prefer.
-- **Past ratings.** `sd store list write.blog-idea` and read `my-rating`. A
+  `sd store list sdw.topic --status active` gives topic slugs to prefer.
+- **Past ratings.** `sd store list sdw.blog-idea` and read `my-rating`. A
   blank is no signal; a rating beats an earlier `score` as evidence of taste.
   Ratings steer which candidates you bring forward, never the rubric's
   result. Never write `my-rating`.
@@ -161,7 +161,7 @@ holds `scripts/pack.py` and `profile/`). Its `write` plugin declares the
   backtick in a shell argument drops words):
 
   ```bash
-  sd store add write.blog-idea "<working title>" \
+  sd store add sdw.blog-idea "<working title>" \
     --field 'contexts+=Personal' --field "area=<area, default Observability>" \
     --field content-type=blog-idea --field score=<total> \
     --field dateCreated=YYYY-MM-DD \
