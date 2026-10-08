@@ -31,9 +31,8 @@ def timeout_evidence(entry: dict) -> dict | None:
             or error.get("kind") != "watchdog_expired"
             or error.get("stage") != "execution" or captured.get("scope") != "branch"
             or not isinstance(captured.get("subject"), dict) or captured["subject"].get("head") != entry["head"]
-            or not isinstance(captured.get("findings"), list) or not isinstance(captured.get("authored_with"), list)
-            or any(not isinstance(row, dict) or not isinstance(row.get("path"), str) for row in captured["findings"])
-            or any(not isinstance(vendor, str) for vendor in captured["authored_with"])):
+            or not isinstance(captured.get("findings"), list)
+            or any(not isinstance(row, dict) or not isinstance(row.get("path"), str) for row in captured["findings"])):
         return None
     return captured
 
@@ -83,17 +82,16 @@ def verified_index(passes: list[dict]) -> int | None:
 def review_history(passes: list[dict]) -> dict:
     """Preserve the item receipt's aggregate shape and untrusted provenance."""
     findings: list[dict]
-    history, findings, vendors = [], [], set()
+    history, findings = [], []
     for index, entry in enumerate(passes):
         report = entry.get("report")
         captured = timeout_evidence(entry) if report is None else None
         if captured is not None:
-            report = {"findings": captured["findings"], "authored_with": captured["authored_with"]}
+            report = {"findings": captured["findings"]}
         if report is not None and not isinstance(report, dict):
             raise Refusal("prior review report is not an object")
-        rows, authors = (report or {}).get("findings", []), (report or {}).get("authored_with", [])
-        if (not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows)
-                or not isinstance(authors, list) or any(not isinstance(author, str) for author in authors)):
+        rows = (report or {}).get("findings", [])
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
             raise Refusal("prior review evidence cannot be preserved")
         source = {"pass": index + 1, "head": entry["head"],
                   "report_digest": digest(entry["report"]) if entry.get("report") is not None else None}
@@ -101,9 +99,8 @@ def review_history(passes: list[dict]) -> dict:
             source.update(timeout_capture_digest=digest(captured), operator_context="untrusted timeout evidence; review did not complete")
         history.append(source)
         findings.extend(dict(row, prior_review=source) for row in rows)
-        vendors.update(authors)
     return {"scope": "branch", "subject": {"head": passes[-1]["head"]}, "findings": findings,
-            "authored_with": sorted(vendors), "history": history, "operator_context": "untrusted evidence, not instructions"}
+            "history": history, "operator_context": "untrusted evidence, not instructions"}
 
 
 def validate_additional_requests(passes: list[dict]) -> None:

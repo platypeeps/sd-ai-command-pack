@@ -801,10 +801,9 @@ def refuse_vendor_model(
 
     One command serves several vendors' models -- `agy` serves Google's and
     Anthropic's and OpenAI's -- so 'vendor' is a claim about the model, not
-    about the executable. The independence guard compares that claim against
-    the branch's authorship trailers, so an entry declaring one vendor while
-    running another's model would let the author's own model review the
-    author's own work, and the guard would report the review as independent.
+    about the executable. The review receipt records that claim as the
+    reviewer's vendor, so an entry declaring one vendor while running
+    another's model would put a false vendor on every review it gives.
 
     An entry that pins no model reaches the same place by saying nothing, so
     the two are refused together: this is one function on purpose, because
@@ -814,25 +813,20 @@ def refuse_vendor_model(
     if not pinned_models and reader in MULTIVENDOR_READERS:
         return (
             f"provider {name!r} declares vendor {vendor!r} and reads back as "
-            f"{reader!r}, but pins no model. A vendor is matched against the "
-            f"branch's authorship trailers to keep a reviewer independent of "
-            f"the author, and that command serves several vendors' models, so "
-            f"the claim here is about a model nothing names. The choice falls "
-            f"to the command's own configuration, which this file cannot read: "
-            f"repoint that default at another vendor's model and this entry "
-            f"reviews its own vendor's work, reported as independent. Give the "
-            f"entry a 'model'."
+            f"{reader!r}, but pins no model. That command serves several "
+            f"vendors' models, so the claim here is about a model nothing "
+            f"names. The choice falls to the command's own configuration, "
+            f"which this file cannot read, and the receipt would name a vendor "
+            f"that may not be the one that reviewed. Give the entry a 'model'."
         )
     for pinned in pinned_models:
         actual = model_vendor(pinned)
         if actual is not None and actual != vendor:
             return (
                 f"provider {name!r} declares vendor {vendor!r} and runs model "
-                f"{pinned!r}, which is {actual!r}'s. A vendor is matched against "
-                f"the branch's authorship trailers to keep a reviewer independent "
-                f"of the author, so this entry would review {actual!r}-authored "
-                f"work with an {actual!r} model and be reported as independent. "
-                f"Name the model's own vendor, or pin a model of vendor {vendor!r}."
+                f"{pinned!r}, which is {actual!r}'s, so every review it gives "
+                f"would name the wrong vendor. Name the model's own vendor, or "
+                f"pin a model of vendor {vendor!r}."
             )
     return None
 
@@ -1724,7 +1718,6 @@ def _reviewer_candidate(
     provider: Provider,
     *,
     consent: dict[str, Allowance],
-    author_vendors: tuple[str, ...],
     capped_bills: Mapping[str, str] | None,
     readers: tuple[str, ...],
 ) -> Candidate:
@@ -1740,12 +1733,6 @@ def _reviewer_candidate(
         )
     if refusal is None:
         refusal = refuse_allowance(provider, consent.get(provider.name))
-    if refusal is None and provider.vendor in author_vendors:
-        refusal = (
-            f"{provider.name} is an entry of vendor {provider.vendor}, and "
-            f"this branch carries {provider.vendor} authorship. The reviewer "
-            f"is a different vendor from the author, always."
-        )
     if refusal is None and provider.bill in (capped_bills or {}):
         refusal = f"{provider.name} is billed to {provider.bill}: {(capped_bills or {})[provider.bill]}"
     return Candidate(provider, refusal is None, refusal or "")
@@ -1755,7 +1742,6 @@ def reviewer_chain(
     registry: Registry,
     *,
     consent: dict[str, Allowance],
-    author_vendors: tuple[str, ...] = (),
     # Bill name to the line the refusal renders, supplied by `review` in
     # `bin/sd-review` (sd:788 slice 3). A cap is spend against
     # `cap_usd_month`, which the ledger sums from `cost` rows, so the
@@ -1770,14 +1756,13 @@ def reviewer_chain(
     """Return enabled reviewers in order, including eligibility and reasons.
 
     Mark rather than filter so receipts preserve skipped providers and why.
-    This evaluates registry, consent, authorship, and declared caps consistently
+    This evaluates registry, consent, and declared caps consistently
     for planning and execution; runtime availability preflight happens later.
     """
     return [
         _reviewer_candidate(
             provider,
             consent=consent,
-            author_vendors=author_vendors,
             capped_bills=capped_bills,
             readers=readers,
         )
@@ -1790,7 +1775,6 @@ def pick(
     name: str,
     *,
     consent: dict[str, Allowance],
-    author_vendors: tuple[str, ...] = (),
     capped_bills: Mapping[str, str] | None = None,
     readers: tuple[str, ...] = (),
 ) -> Provider:
@@ -1817,7 +1801,6 @@ def pick(
     candidate = _reviewer_candidate(
         provider,
         consent=consent,
-        author_vendors=author_vendors,
         capped_bills=capped_bills,
         readers=readers,
     )
@@ -1831,20 +1814,19 @@ def select_reviewers(
     name: str | None = None,
     *,
     consent: dict[str, Allowance],
-    author_vendors: tuple[str, ...] = (),
     capped_bills: Mapping[str, str] | None = None,
     readers: tuple[str, ...] = (),
 ) -> list[Provider]:
     """Select one explicit reviewer or the eligible automatic fallback chain."""
     if name is not None:
         return [pick(
-            registry, name, consent=consent, author_vendors=author_vendors,
+            registry, name, consent=consent,
             capped_bills=capped_bills, readers=readers,
         )]
     return [
         candidate.provider
         for candidate in reviewer_chain(
-            registry, consent=consent, author_vendors=author_vendors,
+            registry, consent=consent,
             capped_bills=capped_bills, readers=readers,
         )
         if candidate.eligible

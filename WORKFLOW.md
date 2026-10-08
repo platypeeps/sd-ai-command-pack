@@ -217,8 +217,10 @@ with `sha=` — so a head that moved after the review is refused at GitHub with
 a 405. The flag is what does the refusing: a merge that carries only a title
 and a body refuses nothing, whatever head moved under it.
 
-The reviewer is a different vendor from the author, always. Skills name the
-roles `author` and `reviewer`; the provider registry below maps them.
+The reviewer order gives independence: Codex reviews first by config, and
+commits carry no attribution trailer (sd:3014). When Codex is down, a Claude
+reviewer may review Claude's code. Skills name the roles `author` and
+`reviewer`; the provider registry below maps them.
 
 No post-merge external review runs (sd:777).
 

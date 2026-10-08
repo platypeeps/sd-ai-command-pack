@@ -104,7 +104,7 @@ class SharedCompatibilityTests(unittest.TestCase):
             "scope": "branch", "subject": {"head": "b" * 40},
             "findings": [{"path": "a.py", "disposition": "advisory", "prior_review": prior},
                          {"path": "a.py", "disposition": "advisory", "prior_review": later}],
-            "authored_with": ["human"], "history": [prior, later],
+            "history": [prior, later],
             "operator_context": "untrusted evidence, not instructions",
         })
         # A request is required only past the automatic cap, so the prefix it

@@ -2670,23 +2670,6 @@ roles:
         self.assertFalse(self.merge()["delivery_pending"])
         self.assertEqual(ship.sd_lib.delivered(self.root, f"sd:{self.item}"), ship.sd_lib.YES)
 
-    def test_a_squash_keeps_an_attributes_line_that_names_a_base_commit(self):
-        """An `sd attribute` repair of commits already on the base is the whole
-        change, so the squash has to carry its `Attributes:` lines or it lands
-        as an empty commit that attributes nothing (sd:1753). A line naming a
-        branch commit names a sha the squash removes, so it stays behind."""
-        on_base = _git(self.root, "rev-parse", "origin/main")
-        on_branch = _git(self.root, "rev-parse", "HEAD")
-        _git(self.root, "commit", "-q", "--allow-empty", "-m",
-             "chore(attribution): repair\n\n"
-             f"Attributes: {on_base} author/firstvendor\n"
-             f"Attributes: {on_branch} author/firstvendor\n"
-             "Authored-with: human")
-        self.prepare()
-        self.assertEqual(self.merge()["phase"], "merged")
-        landed = _git(self.remote.path, "log", "-1", "--format=%(trailers:key=Attributes,valueonly)", "main")
-        self.assertEqual(landed.strip(), f"{on_base} author/firstvendor")
-
     def test_a_hand_delivery_clears_the_hold(self):
         """The operator verifies the combined tree and delivers by hand; a later
         reconcile reads that completion instead of reissuing the hold (#1179)."""
@@ -3161,7 +3144,7 @@ roles:
         parsed = subprocess.run(["git", "interpret-trailers", "--parse"], input=message, capture_output=True,
                                 text=True, check=True).stdout
         self.assertIn(f"Closes: sd:{held}\n", parsed)
-        self.assertIn("Authored-with: human", parsed)
+        self.assertNotIn("Authored-with:", parsed)
         self.assertEqual(ship.sd_lib.delivered(self.root, f"sd:{held}"), ship.sd_lib.YES)
         receipt = receipts.read(self.connection, receipts.receipt_key(self.remote.slug, "topic", held))[1]
         self.assertEqual(receipt["closing_paid"], carrier["merge_commit"])
@@ -3348,7 +3331,7 @@ roles:
         message.write_text("focused change")
         before = _git(self.root, "diff", "--cached")
         with self.assertRaisesRegex(ship.Refusal, "index already"):
-            self.prepare("--path", "src.py", "--message-file", str(message), "--author", "author")
+            self.prepare("--path", "src.py", "--message-file", str(message))
         self.assertEqual(_git(self.root, "diff", "--cached"), before)
 
     def test_no_repository_path_flag_or_unreviewed_head_override(self):
@@ -3361,11 +3344,10 @@ roles:
         (self.root / "unrelated.txt").write_text("operator work")
         message = self.directory / "message.txt"
         message.write_text("Ship only the intended file")
-        args = self.args("prepare", "--path", "src.py", "--message-file", str(message), "--author", "author")
+        args = self.args("prepare", "--path", "src.py", "--message-file", str(message))
         ship.commit_paths(self.root, args)
         self.assertEqual(_git(self.root, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"), "src.py")
         self.assertEqual((self.root / "unrelated.txt").read_text(), "operator work")
-        self.assertIn("Authored-with: author/firstvendor", _git(self.root, "show", "-s", "--format=%B", "HEAD"))
 
     def test_observe_uses_item_branch_without_mutating_operator_checkout_or_receipts(self):
         self.prepare()
@@ -4070,7 +4052,7 @@ roles:
             self.merge()
 
     def test_an_empty_diff_branch_ships_without_a_provider_call(self):
-        # sd:1405. `sd attribute` repairs ship as empty commits. `sd-review`
+        # sd:1405. An empty commit can be a whole change. `sd-review`
         # refuses an empty subject, so the ship lane waives review for a
         # branch that changes no file, and calls no reader for it.
         calls = self.directory / "provider-calls"
@@ -4661,7 +4643,7 @@ roles:
         self.spent_reviews()
         head = _git(self.root, "rev-parse", "HEAD")
         (self.root / "src.py").write_text("uncommitted = True\n")
-        for extra in ([], ["--path", "src.py", "--message-file", str(self.directory / "missing-message"), "--author", "author"]):
+        for extra in ([], ["--path", "src.py", "--message-file", str(self.directory / "missing-message")]):
             with self.assertRaises(ship.Refusal):
                 self.prepare("--additional-review-for", head, "--request-reason", "reason", *extra)
             self.assertEqual(_git(self.root, "rev-parse", "HEAD"), head)
@@ -4696,11 +4678,11 @@ roles:
         operation.save()
         self.assertEqual(self.merge()["phase"], "merged")
 
-    def test_additional_history_keeps_missing_reports_and_all_author_vendors(self):
+    def test_additional_history_keeps_missing_reports(self):
         history = ship.review_history([
-            {"head": "a" * 40, "report": {"findings": [], "authored_with": ["old-vendor"]}},
+            {"head": "a" * 40, "report": {"findings": []}},
             {"head": "b" * 40}])
-        self.assertEqual(history["authored_with"], ["old-vendor"])
+        self.assertNotIn("authored_with", history)
         self.assertEqual(history["history"][1]["report_digest"], None)
         self.assertEqual(history["subject"]["head"], "b" * 40)
         self.assertNotIn("completed_reviews", history)
@@ -4934,7 +4916,7 @@ roles:
         (self.root / "src.py").write_text("uncommitted = True\n")
         message = self.directory / "message.txt"
         message.write_text("Should never commit")
-        commit = ["--path", "src.py", "--message-file", str(message), "--author", "author"]
+        commit = ["--path", "src.py", "--message-file", str(message)]
         for extra in ([], ["--additional-review-for", head, "--request-reason", "renew"]):
             with self.subTest(extra=extra), patch.object(ship, "commit_paths", side_effect=AssertionError("commit attempted")):
                 with self.assertRaises(ship.Refusal):
@@ -5021,7 +5003,7 @@ roles:
         """sd:2646. The tail held 4 KiB of an explained report and cut off the fields the plan was refused on."""
         timing = {"candidates": [], "check_seconds": 3600, "execution_seconds": 21600, "phase_seconds": 1800,
                   "setup_seconds": 3600, "slot_seconds": 14400}
-        explained = json.dumps({"timing": timing, "requested_reviews": 1, "authorship_refusal": "",
+        explained = json.dumps({"timing": timing, "requested_reviews": 1,
                                 "selection_refusal": "no provider '207'", "status": "explained", "padding": "x" * 10000})
         with patch.object(ship, "review_process",
                           side_effect=lambda root, argv, **kwargs: subprocess.CompletedProcess(argv, 0, explained, "")):
@@ -5029,7 +5011,7 @@ roles:
                 self.operation().review(_git(self.root, "rev-parse", "HEAD"))
         diagnostic = self.operation().state["review_preflight_error"]
         self.assertNotIn("selection_refusal", diagnostic["stdout"]["tail"])
-        self.assertEqual(diagnostic["plan"], {"timing": timing, "requested_reviews": 1, "authorship_refusal": "",
+        self.assertEqual(diagnostic["plan"], {"timing": timing, "requested_reviews": 1,
                                               "selection_refusal": "no provider '207'"})
         self.assertEqual(diagnostic["argv"][-1], "--explain")
         self.assertIn("--scope", diagnostic["argv"])
@@ -5166,7 +5148,6 @@ roles:
                     {"path": "src.py", "line": 1, "severity": "high", "family": "correctness", "summary": "captured timeout blocker"}]}}
                 return sd_review.Completed(0, json.dumps(payload), "")
             report = sd_review.review(root, args, canned, self.environment)
-            report["authored_with"] = ["secondvendor", "thirdvendor"]
             raise ship.ReviewTimeout({"kind": "watchdog_expired", "allowed_seconds": kwargs["timeout"], "captured_report": report})
         with patch.object(ship, "review_process", side_effect=expires), self.assertRaisesRegex(ship.Refusal, "watchdog expired"):
             self.operation().review(_git(self.root, "rev-parse", "HEAD"))
@@ -5176,6 +5157,12 @@ roles:
         self.assertEqual(failed["exit_code"], 124)
         self.assertIsNone(self.operation().state["reviewed_head"])
         self.assertIn("captured timeout blocker", json.dumps(ship.review_history([failed])))
+        # The reviewers the timeout used are rate limited for the retry, so it
+        # falls to the next one, or refuses when there is none.
+        registry = self.database.parent / "providers.yaml"
+        registry.write_text(registry.read_text().replace(
+            "vendor: secondvendor,", "enabled: false, reason: rate-limited, vendor: secondvendor,").replace(
+            "vendor: thirdvendor,", "enabled: false, reason: rate-limited, vendor: thirdvendor,"))
         observed = []
         def resumes(root, argv, **kwargs):
             if "--resume-report" in argv:
@@ -5200,10 +5187,9 @@ roles:
             return
         latest = state["passes"][-1]["report"]
         self.assertEqual(latest["completed_reviews"], 1)
-        self.assertEqual(latest["authored_with"], ["secondvendor", "thirdvendor"])
         self.assertEqual(latest["reviewed_by"], ["reviewer3"])
 
-    def test_captured_timeout_blocker_and_authorship_survive_unavailable_retry_planning(self):
+    def test_captured_timeout_blocker_survives_unavailable_retry_planning(self):
         self.captured_timeout_retry()
 
     def test_successful_captured_timeout_retry_reaches_verified_fixture_merge(self):

@@ -96,7 +96,7 @@ SHEBANG_LIMIT = 4096
 
 #: How many public functions the dead-code check cannot speak for, because
 #: another function in the corpus carries the same name. Downward only.
-AMBIGUOUS_CEILING = 112  # 114 until sd:3050 deleted bin/sd_runner.py; 116 until sd:719 step 7
+AMBIGUOUS_CEILING = 110  # 112 until sd:3014 deleted the attribution code; 114 until sd:3050 deleted bin/sd_runner.py; 116 until sd:719 step 7
 
 
 def tracked(*pathspecs: str, root: pathlib.Path = REPO_ROOT) -> list[pathlib.Path]:
@@ -640,7 +640,6 @@ COMPLEX = frozenset({
     "bin/sd-review::review",  # 97
     "bin/sd-review::run_provider",  # 40
     "bin/sd-ship::Ship.prepare",  # 53
-    "bin/sd-ship::commit_paths",  # 21
     "bin/sd-status::_work_rows",  # 31
     "bin/sd::store_add",  # 28
     "bin/sd::store_set",  # 25

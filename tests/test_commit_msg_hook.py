@@ -32,50 +32,50 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "bin"))
 
 import sd_lib  # noqa: E402
-import sd_registry  # noqa: E402
 
 HOOK = REPO_ROOT / "hooks" / "commit-msg"
 
 CONTIGUOUS = (
     "fix: a thing\n\nBody.\n\n"
-    "Needed-by: sd:1910\nAuthored-with: claude/anthropic\n"
+    "Needed-by: sd:1910\nDelivers: sd:7\n"
     "Co-Authored-By: Claude <noreply@example.test>\n"
 )
-# The b0c440ad shape: one blank line above the authorship block.
+# The b0c440ad shape: one blank line above the delivery block.
 SPLIT = (
     "fix: a thing\n\nBody.\n\nNeeded-by: sd:1910\n\n"
-    "Authored-with: claude/anthropic\nCo-Authored-By: Claude <noreply@example.test>\n"
+    "Delivers: sd:7\nCo-Authored-By: Claude <noreply@example.test>\n"
 )
-# The CLAUDE.md shape: `Authored-with:` alone, above the harness lines.
-AUTHORED_SPLIT = (
-    "fix: a thing\n\nAuthored-with: claude/anthropic\n\n"
+# `Delivers:` alone, above the harness lines.
+DELIVERS_SPLIT = (
+    "fix: a thing\n\nDelivers: sd:7\n\n"
     "Co-Authored-By: Claude <noreply@example.test>\nClaude-Session: abc\n"
 )
-# A final paragraph that is prose with one trailer in it is not a trailer block.
+# A final paragraph that is prose with one trailer in it is not a trailer
+# block: git reads no `Delivers:` there, though a line reader would (sd:3014).
 PROSE_LAST = (
-    "fix: a thing\n\nAuthored-with: claude/anthropic\n"
+    "fix: a thing\n\nDelivers: sd:7\n"
     "and then a sentence that is not a trailer\nand another one\nand a third\n"
 )
 PLAIN = "fix: a thing\n\nNo trailers at all.\n"
-QUOTED = "docs: explain\n\n    Authored-with: claude/anthropic\n\nsays who wrote it.\n"
+QUOTED = "docs: explain\n\n    Delivers: sd:7\n\nsays who wrote it.\n"
 FOLDED = (
-    "fix: a thing\n\nAuthored-with: claude/anthropic\n"
+    "fix: a thing\n\nDelivers: sd:7\n"
     "Co-Authored-By: Claude\n  <noreply@example.test>\n"
 )
 DIVIDER = (
     "fix: a thing\n\nBody.\n---\nmore body\n\n"
-    "Needed-by: sd:3\nAuthored-with: claude/anthropic\n"
+    "Needed-by: sd:3\nDelivers: sd:7\n"
 )
 REPEATED = (
     "fix: a thing\n\nNeeded-by: sd:4\n\n"
-    "Needed-by: sd:4\nAuthored-with: claude/anthropic\n"
+    "Needed-by: sd:4\nDelivers: sd:7\n"
 )
 
 FIXTURES = {
     "CONTIGUOUS": (CONTIGUOUS, ()),
     "SPLIT": (SPLIT, ("Needed-by: sd:1910",)),
-    "AUTHORED_SPLIT": (AUTHORED_SPLIT, ("Authored-with: claude/anthropic",)),
-    "PROSE_LAST": (PROSE_LAST, ("Authored-with: claude/anthropic",)),
+    "DELIVERS_SPLIT": (DELIVERS_SPLIT, ("Delivers: sd:7",)),
+    "PROSE_LAST": (PROSE_LAST, ("Delivers: sd:7",)),
     "PLAIN": (PLAIN, ()),
     "QUOTED": (QUOTED, ()),
     "FOLDED": (FOLDED, ()),
@@ -93,8 +93,6 @@ def git(*args: str, cwd: pathlib.Path, stdin: str | None = None) -> str:
 def clean_env(**extra: str) -> dict[str, str]:
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     env.pop("SD_SKIP_HOOKS", None)
-    # The operator's harness sets SD_AUTHOR; a test that wants an author names it.
-    env.pop("SD_AUTHOR", None)
     # Git runs the hook through `#!/usr/bin/env python3`, which under the gate
     # can be an interpreter without coverage.py; the harness's sitecustomize
     # then prints its warning on stderr. The hook is outside `.coveragerc`'s
@@ -152,36 +150,6 @@ class UnreadTrailersAgreeWithGit(unittest.TestCase):
         )
 
 
-class CommitAuthor(unittest.TestCase):
-    """`sd_lib.commit_author` and `states_author`, the two halves the hook calls (sd:1295)."""
-
-    def unread(self):
-        raise AssertionError("a reserved author must not read the registry")
-
-    def test_reserved_vendorless_authors_read_no_registry(self):
-        for name in ("human", " script "):
-            with self.subTest(name):
-                self.assertEqual(sd_lib.commit_author(name, self.unread), name.strip())
-
-    def test_an_unreadable_registry_refuses_naming_the_variable(self):
-        with self.assertRaisesRegex(sd_lib.TrailerError, "SD_AUTHOR='claude'.*no such file"):
-            sd_lib.commit_author("claude", lambda: (None, "no such file"))
-
-    def test_the_value_itself_names_its_entry_and_a_slash_hides_no_dependabot(self):
-        registry = sd_registry.Registry(pathlib.Path("/fixture/providers.yaml"), {}, {
-            "claude": sd_registry.Provider(name="claude", vendor="anthropic", bill="b", start="x")})
-        self.assertEqual(sd_lib.commit_author("claude/anthropic", lambda: (registry, "")), "claude/anthropic")
-        for name in ("claude/openai", "human/anthropic"):
-            with self.subTest(name), self.assertRaises(sd_lib.TrailerError):
-                sd_lib.commit_author(name, lambda: (registry, ""))
-        with self.assertRaisesRegex(sd_lib.TrailerError, "never Dependabot"):
-            sd_lib.commit_author("dependabot/github", self.unread)
-
-    def test_only_an_unindented_line_states_the_author(self):
-        self.assertTrue(sd_lib.states_author("x\n\nAuthored-with: human\n"))
-        self.assertFalse(sd_lib.states_author(QUOTED))
-        self.assertFalse(sd_lib.states_author(PLAIN))
-
 class HookFixture(unittest.TestCase):
     """`hooks/commit-msg` through a real `git commit`, installed by `make hooks`."""
 
@@ -197,8 +165,7 @@ class HookFixture(unittest.TestCase):
         stub = self.root / "hooks" / "pre-commit"
         stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         stub.chmod(0o755)
-        for name in ("sd_lib.py", "sd_registry.py"):
-            shutil.copy2(REPO_ROOT / "bin" / name, self.root / "bin" / name)
+        shutil.copy2(REPO_ROOT / "bin" / "sd_lib.py", self.root / "bin" / "sd_lib.py")
         shutil.copy2(REPO_ROOT / "Makefile", self.root / "Makefile")
         made = subprocess.run(["make", "hooks"], cwd=self.root, env=clean_env(),
                               capture_output=True, text=True, check=False)
@@ -233,20 +200,21 @@ class TheHook(HookFixture):
         self.assertIn("commit-msg: refused", result.stderr)
         self.assertIn("    Needed-by: sd:1910", result.stderr)
         self.assertIn("final paragraph", result.stderr)
-        self.assertIn("%(trailers:key=Authored-with,valueonly)", result.stderr)
+        self.assertIn("%(trailers:key=Delivers,valueonly)", result.stderr)
         self.assertEqual(0, self.commits(), "a commit landed")
 
-    def test_an_authored_with_line_split_from_the_harness_lines_is_refused(self):
-        result = self.commit(AUTHORED_SPLIT)
+    def test_a_delivers_line_in_a_prose_paragraph_is_refused(self):
+        """sd:3014: git reads no trailer there, yet a line reader would call sd:7 delivered."""
+        result = self.commit(PROSE_LAST)
         self.assertNotEqual(result.returncode, 0, "the commit went through")
-        self.assertIn("    Authored-with: claude/anthropic", result.stderr)
+        self.assertIn("    Delivers: sd:7", result.stderr)
         self.assertEqual(0, self.commits(), "a commit landed")
 
-    def test_a_contiguous_block_commits_and_git_reads_the_author(self):
+    def test_a_contiguous_block_commits_and_git_reads_the_delivery(self):
         result = self.commit(CONTIGUOUS)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual("claude/anthropic", git(
-            "log", "-1", "--format=%(trailers:key=Authored-with,valueonly)", cwd=self.root).strip())
+        self.assertEqual("sd:7", git(
+            "log", "-1", "--format=%(trailers:key=Delivers,valueonly)", cwd=self.root).strip())
 
     def test_a_message_with_no_checked_trailer_commits_as_before(self):
         for message in (PLAIN, QUOTED):
@@ -259,128 +227,6 @@ class TheHook(HookFixture):
         result = self.commit(SPLIT, SD_SKIP_HOOKS="1")
         self.assertNotEqual(result.returncode, 0, "SD_SKIP_HOOKS skipped the trailer check")
         self.assertEqual(0, self.commits(), "a commit landed")
-
-
-
-class TheHookWritesTheAuthor(HookFixture):
-    """sd:1295: `SD_AUTHOR` names the author, and the hook writes `Authored-with:` at commit time.
-
-    Without it a branch whose commits said nothing took one empty `sd
-    attribute` commit per review round. The value is what `sd attribute`
-    writes for the same name (`sd_lib.attribution_value`), so the two agree.
-    """
-
-    def setUp(self):
-        super().setUp()
-        self.home = pathlib.Path(tempfile.mkdtemp(prefix="sd-1295-home-"))
-        self.addCleanup(shutil.rmtree, self.home, ignore_errors=True)
-        shared = self.home / ".local" / "share" / "sd"
-        shared.mkdir(parents=True)
-        shutil.copy2(REPO_ROOT / "providers.yaml", shared / "providers.yaml")
-
-    def authored(self, message: str, author: str) -> tuple[subprocess.CompletedProcess[str], str]:
-        result = self.commit(message, SD_AUTHOR=author, HOME=str(self.home))
-        said = git("log", "-1", "--format=%(trailers:key=Authored-with,valueonly)",
-                   cwd=self.root).strip() if self.commits() else ""
-        return result, said
-
-    def test_a_registry_entry_is_written_as_entry_and_vendor(self):
-        result, said = self.authored(PLAIN, "claude")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(said, "claude/anthropic")
-
-    def test_it_joins_the_final_trailer_paragraph_first(self):
-        message = "fix: a thing\n\nBody.\n\nCo-Authored-By: Claude <noreply@example.test>\nClaude-Session: abc\n"
-        result, said = self.authored(message, "codex")
-        self.assertEqual((result.returncode, said), (0, "codex/openai"), result.stderr)
-        body = git("log", "-1", "--format=%B", cwd=self.root).rstrip()
-        self.assertTrue(body.endswith("\n\nAuthored-with: codex/openai\nCo-Authored-By: Claude "
-                                      "<noreply@example.test>\nClaude-Session: abc"), body)
-
-    def test_script_and_human_need_no_registry(self):
-        shutil.rmtree(self.home / ".local")
-        for author in ("script", "human"):
-            with self.subTest(author):
-                result, said = self.authored(PLAIN, author)
-                self.assertEqual((result.returncode, said), (0, author), result.stderr)
-
-    def test_a_message_that_says_its_author_keeps_it(self):
-        result, said = self.authored("fix: a thing\n\nAuthored-with: human\n", "claude")
-        self.assertEqual((result.returncode, said), (0, "human"), result.stderr)
-
-    def test_a_name_nothing_resolves_is_refused_and_lands_nothing(self):
-        result, _ = self.authored(PLAIN, "nosuch")
-        self.assertNotEqual(result.returncode, 0, "the commit went through")
-        self.assertIn("commit-msg: refused", result.stderr)
-        self.assertIn("SD_AUTHOR", result.stderr)
-        self.assertIn("no registry entry named 'nosuch'", result.stderr)
-        self.assertEqual(0, self.commits(), "a commit landed")
-
-    def test_dependabot_is_refused(self):
-        """A local commit is never Dependabot's; that claim rests on the identity GitHub writes."""
-        result, _ = self.authored(PLAIN, "dependabot")
-        self.assertIn("dependabot", result.stderr)
-        self.assertEqual(0, self.commits(), "a commit landed")
-
-    def test_without_sd_author_nothing_is_written(self):
-        result = self.commit(PLAIN, HOME=str(self.home))
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual("", git("log", "-1", "--format=%(trailers:key=Authored-with,valueonly)",
-                                 cwd=self.root).strip())
-
-
-class TheHookInAnotherRepository(unittest.TestCase):
-    """sd:2546: `sd commit-hook` arms a repository that holds no pack files.
-
-    The hook used to import `sd_lib` from the repository it ran in, so it
-    could only run in a clone of the pack. It now reads `sd_lib` beside its
-    own real path, and `sd commit-hook` links the clone's hook to this one.
-    """
-
-    def setUp(self):
-        self.root = scratch_repository("sd-2546-other-")
-        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
-        self.home = pathlib.Path(tempfile.mkdtemp(prefix="sd-2546-home-"))
-        self.addCleanup(shutil.rmtree, self.home, ignore_errors=True)
-        self.link = self.root / ".git" / "hooks" / "commit-msg"
-
-    def install(self) -> subprocess.CompletedProcess[str]:
-        return subprocess.run([sys.executable, str(REPO_ROOT / "bin" / "sd"), "commit-hook"],
-                              cwd=self.root, env=clean_env(HOME=str(self.home)),
-                              capture_output=True, text=True, check=False)
-
-    def test_it_links_the_pack_hook_and_the_hook_writes_the_author(self):
-        made = self.install()
-        self.assertEqual(made.returncode, 0, made.stderr)
-        self.assertEqual(self.link.resolve(), HOOK.resolve())
-        result = subprocess.run(
-            ["git", "commit", "-q", "--allow-empty", "-F", "-"], cwd=self.root, input=PLAIN,
-            env=clean_env(SD_AUTHOR="script", HOME=str(self.home)),
-            capture_output=True, text=True, check=False)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual("script", git(
-            "log", "-1", "--format=%(trailers:key=Authored-with,valueonly)", cwd=self.root).strip())
-
-    def test_a_second_install_changes_nothing(self):
-        self.assertEqual(self.install().returncode, 0)
-        again = self.install()
-        self.assertEqual(again.returncode, 0, again.stderr)
-        self.assertIn("already", again.stdout)
-
-    def test_a_hook_already_there_is_refused_and_kept(self):
-        self.link.parent.mkdir(parents=True, exist_ok=True)
-        self.link.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        made = self.install()
-        self.assertEqual(made.returncode, 1)
-        self.assertIn("move it aside", made.stderr)
-        self.assertEqual(self.link.read_text(encoding="utf-8"), "#!/bin/sh\nexit 0\n")
-
-    def test_core_hooks_path_is_refused(self):
-        git("config", "core.hooksPath", ".husky", cwd=self.root)
-        made = self.install()
-        self.assertEqual(made.returncode, 1)
-        self.assertIn("core.hooksPath", made.stderr)
-        self.assertFalse(self.link.exists() or self.link.is_symlink())
 
 
 if __name__ == "__main__":

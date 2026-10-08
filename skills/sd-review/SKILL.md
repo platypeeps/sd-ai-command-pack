@@ -207,7 +207,7 @@ Read only the applicable reference in the sd-ai-command-pack checkout:
 
 Ship fix verification uses `--scope branch --base <full ancestor SHA> --verify-report <prior JSON>`.
 It reviews the committed fix range and current source for prior blockers.
-The report must name that exact base; original and fix-author vendors remain excluded.
+The report must name that exact base.
 Changed default-branch code remains within the reviewed tree diff.
 This evidence does not authorize replacing a ship receipt with a claimed reviewed head.
 

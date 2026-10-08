@@ -88,7 +88,7 @@ class NoItemPublication(unittest.TestCase):
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM item").fetchone()[0], 0)
         body = state["merge_message"]
         self.assertNotRegex(body, r"(?m)^(?:Item|Delivers|Work):")
-        self.assertIn("Authored-with: human", body)
+        self.assertNotIn("Authored-with:", body)
         self.assertEqual(len([call for call in self.remote.calls if call.method == "PUT"]), 1)
 
     def test_observe_is_read_only_after_checkout_moves_and_becomes_dirty(self):

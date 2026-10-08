@@ -50,7 +50,7 @@ class ProviderSelection(unittest.TestCase):
                 "timing": {"phase_seconds": 60, "setup_seconds": 3600, "execution_seconds": 3720,
                            "candidates": [{"name": chosen, "recipient": chosen + "@local"}]}}
         report = {**copy.deepcopy(plan), "status": "clean", "subject": {"head": head, "base": BASE},
-                  "scope": "branch", "authorship_base": BASE, "authored_with": [], "check": {"status": "pass"},
+                  "scope": "branch", "authorship_base": BASE, "check": {"status": "pass"},
                   "completed_reviews": 1, "reviewed_by": [chosen], "findings": [],
                   "outcomes": [{"backend": chosen, "status": "clean"}]}
         plan.update(plan_changes or {})
@@ -367,7 +367,7 @@ class ProviderPublication(unittest.TestCase):
         self.assertEqual(state["passes"][0]["report"]["fallback_candidates"], [])
         self.assertEqual(registry.read_bytes(), before)
 
-    def test_unranked_explicit_reviewer_recovers_mixed_authorship_without_automatic_fallback(self):
+    def test_an_unranked_explicit_reviewer_runs_without_automatic_fallback(self):
         import sd_registry
         registry = self.database.with_name("providers.yaml")
         provider = self.programs / "review-fixture"
@@ -376,20 +376,12 @@ class ProviderPublication(unittest.TestCase):
         selected = sd_registry.read_file(registry).providers["requested"]
         local = self.root / "CLAUDE.local.md"
         local.write_text(local.read_text().replace("reviewers: ", f"reviewers: {sd_registry.recipient(selected)}, "))
-        for author in ("reviewer/secondvendor", "reviewer2/thirdvendor"):
-            fixture._git(self.root, "commit", "--allow-empty", "-m", f"fixture authorship\n\nAuthored-with: {author}")
-        head = fixture._git(self.root, "rev-parse", "HEAD")
-        automatic = self.operation()
-        with self.assertRaises(ship.Refusal):
-            automatic.review(head)
-        self.assertFalse(automatic.state.get("passes"))
         before = registry.read_bytes(), list(self.connection.execute("SELECT * FROM provider"))
         self.prepare("--provider", "requested")
         report = self.operation().state["passes"][0]["report"]
         self.assertEqual(report["reviewed_by"], ["requested"])
         self.assertEqual(report["fallback_candidates"], [])
         self.assertTrue(report["chain"])
-        self.assertTrue(all(not row["eligible"] for row in report["chain"]))
         self.assertNotIn("requested", [row["provider"] for row in report["chain"]])
         self.assertEqual((registry.read_bytes(), list(self.connection.execute("SELECT * FROM provider"))), before)
 
@@ -439,10 +431,6 @@ class ProviderEligibility(unittest.TestCase):
                                                   "vendor: thirdvendor, bill: fixture, roles: [reviewer], " + change))
             with self.subTest(change=change):
                 self.assert_not_dispatched("reviewer2")
-
-    def test_author_vendor_is_still_excluded(self):
-        fixture._git(self.root, "commit", "--allow-empty", "-m", "fixture authorship\n\nAuthored-with: reviewer2/thirdvendor")
-        self.assert_not_dispatched("reviewer2")
 
     def test_absent_consent_and_missing_executable_never_reserve(self):
         local = self.root / "CLAUDE.local.md"

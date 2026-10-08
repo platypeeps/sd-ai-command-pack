@@ -25,25 +25,25 @@ ship = ship_fixture.ship
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 import sd_lib  # noqa: E402 - bin/ is on sys.path once the fixture module loads
-import sd_registry  # noqa: E402
 import sd_ship_body  # noqa: E402
 
-READERS = [sd_registry.read_file(ROOT / "providers.yaml")]
 TEMPLATE = ROOT / ".github" / "PULL_REQUEST_TEMPLATE.md"
 
 
 def normalize(body: str, item: int | None = 7, **flags) -> tuple[str, tuple[str, ...]]:
-    return sd_ship_body.normalize(body, item, readers=READERS, **flags)
+    return sd_ship_body.normalize(body, item, **flags)
 
 
 class NormalizeTests(unittest.TestCase):
     def test_lines_that_agree_are_stripped_and_named(self) -> None:
-        body = ("Summary.\n\nItem: sd:7\nWork: sd:7\nDelivers: sd:7\n"
-                "Authored-with: claude/anthropic\nAuthored-with: human\nRefs: sd:8\n")
+        body = "Summary.\n\nItem: sd:7\nWork: sd:7\nDelivers: sd:7\nRefs: sd:8\n"
         text, stripped = normalize(body)
         self.assertEqual("Summary.\n\nRefs: sd:8", text)
-        self.assertEqual(("Item: sd:7", "Work: sd:7", "Delivers: sd:7",
-                          "Authored-with: claude/anthropic", "Authored-with: human"), stripped)
+        self.assertEqual(("Item: sd:7", "Work: sd:7", "Delivers: sd:7"), stripped)
+
+    def test_an_authored_with_line_is_prose_the_body_keeps(self) -> None:
+        """sd:3014: sd-ship owns no attribution line, so the body keeps it unread."""
+        self.assertEqual(("Summary.\n\nAuthored-with: nobody", ()), normalize("Summary.\n\nAuthored-with: nobody\n"))
 
     def test_a_stray_item_work_or_delivers_line_is_stripped_not_refused(self) -> None:
         """sd:2999: sd-ship writes the links itself, so another item's line is dropped."""
@@ -51,14 +51,7 @@ class NormalizeTests(unittest.TestCase):
         self.assertEqual(("Summary.", ("Item: sd:9", "Work: sd:70", "Delivers: sd:7", "Delivers: sd:8")),
                          normalize(body))
 
-    def test_an_author_no_registry_resolves_is_refused(self) -> None:
-        for value in ("nobody/anthropic", "claude/openai", "claude"):
-            with self.subTest(value=value), self.assertRaisesRegex(ship.Refusal, r"line 1: .*registry resolves"):
-                normalize(f"Authored-with: {value}\n")
-
-    def test_attributes_and_a_closes_line_naming_the_claimed_item_are_refused(self) -> None:
-        with self.assertRaisesRegex(ship.Refusal, r"line 1: `Attributes: 0123456 claude/anthropic`; expected no line: it names a pre-squash sha"):
-            normalize("Attributes: 0123456 claude/anthropic\n")
+    def test_a_closes_line_naming_the_claimed_item_is_refused(self) -> None:
         with self.assertRaisesRegex(ship.Refusal, r"line 1: `Closes: sd:7`; expected `Closes: sd:<n>\[, sd:<m>\]` naming co-delivered items other than sd:7"):
             normalize("Closes: sd:7\n")
         for value in ("sd:8, sd:7", "#12", "sd:08", ""):
@@ -114,7 +107,7 @@ class NormalizeTests(unittest.TestCase):
 
     def test_every_problem_is_named_in_one_refusal(self) -> None:
         with self.assertRaises(ship.Refusal) as caught:
-            normalize("Closes: sd:7\nx\nAttributes: 0123456 claude/anthropic\n")
+            normalize("Closes: sd:7\nx\nCloses: #12\n")
         self.assertIn("line 1:", str(caught.exception))
         self.assertIn("line 3:", str(caught.exception))
 
@@ -124,7 +117,7 @@ class NormalizeTests(unittest.TestCase):
 
     def test_with_no_item_every_column_zero_owned_line_is_stripped(self) -> None:
         """sd:2999: a no-item body owns nothing, so its stray links are dropped, not refused."""
-        for line in ("Work: sd:9", "Item: sd:9", "Delivers: sd:9", "authored-with: human", "Closes: sd:9"):
+        for line in ("Work: sd:9", "Item: sd:9", "Delivers: sd:9", "Closes: sd:9"):
             with self.subTest(line=line):
                 self.assertEqual(("Proposed change", (line,)), normalize(f"Proposed change\n\n{line}\n", None))
         self.assertEqual(("Proposed change\n\n Work : sd:9\n", ()), normalize("Proposed change\n\n Work : sd:9\n", None))
@@ -243,10 +236,10 @@ class BodyVerbTests(unittest.TestCase):
 
     def test_the_verb_prints_the_published_body_and_its_lint(self) -> None:
         before = self.database.read_bytes()
-        code, result = self.body("A slice.\n\nWork: sd:7\nAuthored-with: author/firstvendor\n")
+        code, result = self.body("A slice.\n\nWork: sd:7\n")
         self.assertEqual(0, code, result)
         self.assertEqual("A slice.\n\nWork: sd:7\n", result["body"])
-        self.assertEqual(["Work: sd:7", "Authored-with: author/firstvendor"], result["normalized"])
+        self.assertEqual(["Work: sd:7"], result["normalized"])
         self.assertEqual(0, result["lint"]["exit"])
         self.assertIn("sd-docs-lint: clean", result["lint"]["output"])
         self.assertEqual(before, self.database.read_bytes())

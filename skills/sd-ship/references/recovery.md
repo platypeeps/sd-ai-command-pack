@@ -139,7 +139,6 @@ Published Copilot findings still require disposition before merge.
 A completed initial review covers the branch.
 For a committed fix, the adapter supplies `--base <previous-head> --verify-report <saved report>` to the review lane.
 The report carries prior blockers; current source accompanies each finding, including source outside the fix diff.
-Both original and fix-author vendors remain excluded.
 
 Repeat `--provider NAME` on each retry, fix verification, or additional attempt that should use that reviewer.
 An omitted flag uses the normal automatic policy for a new dispatch, not the preceding explicit selection.
@@ -195,7 +194,6 @@ A fix delta then fits the 2,000,000-byte review input cap even when the whole br
 Otherwise the request reviews the whole branch again.
 That covers the same head, an incomplete last pass, a moved binding, a catch-up merge, and imported history.
 A whole-branch request preserves earlier findings with source heads and report digests.
-It retains the union of author vendors.
 A pass in which no reviewer completed and no finding survived reviewed nothing.
 It does not consume the request; repeat the same request after resolving the refusals.
 Any other failed additional review remains spent.

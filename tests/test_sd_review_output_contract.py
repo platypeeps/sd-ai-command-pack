@@ -37,7 +37,7 @@ class URLContractTests(ReviewFixture):
         subprocess.run(["git", "checkout", "-qb", "work"], cwd=root, check=True)
         (root / "src.py").write_text("# first input marker\n" + "value = '完整'\n" * 10000 + "# final input marker\n")
         self.commit(root)
-        prior = {"scope": "branch", "subject": {"head": base}, "authored_with": ["priorvendor"],
+        prior = {"scope": "branch", "subject": {"head": base},
                  "findings": [{"path": "prior.py", "line": 2, "severity": "high", "family": "correctness",
                                "summary": "unresolved original blocker", "disposition": "blocking"}]}
         report = self.tmp / "prior.json"
@@ -80,7 +80,6 @@ class URLContractTests(ReviewFixture):
                 self.assertIn(key, footer)
         expected = hashlib.sha256(json.dumps(prior, sort_keys=True).encode()).hexdigest()
         self.assertEqual(result["resume_report_digest"], expected)
-        self.assertIn("priorvendor", result["authored_with"])
 
     def test_selection_timing_and_checks_still_control_dispatch(self):
         root, args, _ = self.prepare()

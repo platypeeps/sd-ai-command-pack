@@ -154,9 +154,8 @@ Never allocate another review ID to reset spent passes or discard history.
 - `sd-ship body --item ID [--body-file FILE] [--pr N]` prints the body prepare would publish and its body lint.
   With `--pr N` and without `--body-file`, it lints that pull request's live body.
   It reads no sd state, calls GitHub only for `--pr`, and exits non-zero on a refusal or a lint failure.
-- Optional commits require `--path FILE` for each file, `--message-file FILE`, and `--author ENTRY`.
+- Optional commits require `--path FILE` for each file and `--message-file FILE`.
   Directories and a pre-populated index are invalid.
-  Actual provider/vendor attribution belongs on the commit.
 - `sd-ship merge --item ID --expected-head SHA --manual --json` performs an explicit operator merge.
 - `sd-ship merge --item ID --expected-head SHA --run RUN-ID --json` requires its exclusive runner lease and matching clone.
 - Merge may run from any checkout of the repository, such as a lane's checkout on the default branch.

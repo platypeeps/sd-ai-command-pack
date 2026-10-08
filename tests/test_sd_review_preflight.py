@@ -140,29 +140,13 @@ class ProviderPreflight(PreflightFixture):
         self.assertIn("credential", result["probe_refusal"])
         self.assertEqual((result["probe_calls"], self.client.sent), (0, []))
 
-    def test_consent_disabled_provider_and_matching_author_send_nothing(self):
+    def test_consent_and_disabled_provider_send_nothing(self):
         self.consent("")
         with self.assertRaises(sd_review.sd_registry.ConsentRefusal):
             self.probe()
         self.consent("minimax@minimax.invalid")
         self.registry_path.write_text(REGISTRY.replace("model: fixture-minimax", "enabled: false, reason: fixture, model: fixture-minimax"))
         with self.assertRaises(sd_review.sd_registry.RegistryError):
-            self.probe()
-        self.registry_path.write_text(REGISTRY)
-        (self.root / "other.py").write_text("x = 1\n")
-        self.commit("minimax/minimax")
-        with self.assertRaises(sd_review.sd_registry.RegistryError):
-            self.probe()
-        self.assertEqual(self.client.sent, [])
-
-    def test_unknown_authorship_explain_is_advisory_and_execution_refuses(self):
-        (self.root / "other.py").write_text("x = 1\n")
-        subprocess.run(["git", "add", "-A"], cwd=self.root, check=True, capture_output=True)
-        subprocess.run(["git", "commit", "-qm", "unattributed"], cwd=self.root, check=True, capture_output=True)
-        result = self.probe(explain=True)
-        self.assertTrue(result["authorship_refusal"])
-        self.assertEqual(result["probe_refusal"], "no eligible provider")
-        with self.assertRaises(sd_review.Refusal):
             self.probe()
         self.assertEqual(self.client.sent, [])
 

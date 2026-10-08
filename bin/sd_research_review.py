@@ -757,10 +757,8 @@ The half no script can do — work it before publishing, per document:
          mkdir -p 90-scratch && sd-review --scope branch --lens research-brief \
            > 90-scratch/second-reader.txt 2>&1
 
-       `--scope worktree` has no commit to read an `Authored-with:` trailer
-       from, so it cannot pass over the author's vendor: check that the
-       reviewer the output names is another vendor's, or commit with the
-       trailer first and use `--scope branch`, which does the check itself.
+       `--scope worktree` reviews the uncommitted change; `--scope branch`
+       reviews what is committed.
        Add `--explain` to see which reviewer the chain would pick, and why,
        without running one. It runs the repository's own check first, as for
        any change. Exit 0 is clean and 1 is findings; any other exit means no

@@ -88,7 +88,6 @@ import sd_handoff_rows  # noqa: E402
 import sd_lib  # noqa: E402
 import sd_notes  # noqa: E402
 import sd_operations  # noqa: E402
-import sd_registry  # noqa: E402
 import sd_restore  # noqa: E402
 import sd_shadow  # noqa: E402
 import sd_skill  # noqa: E402
@@ -98,8 +97,6 @@ import sd_writing  # noqa: E402
 
 MANIFEST_NAME = "sd-plugin.json"
 LOCK_NAME = "sd-plugin.lock"
-#: What `sd commit-hook` links a clone's commit-msg hook to: this checkout's, by real path.
-PACK_COMMIT_HOOK = pathlib.Path(__file__).resolve().parents[1] / "hooks" / "commit-msg"
 
 # The closed vocabulary a plugin may use to describe one kind (R11-D14). Eight
 # keys, and a ninth is a decision record rather than a commit. The invariant
@@ -2895,54 +2892,6 @@ class Pair(argparse.Action):
         entries.append((bool(self.const), str(values)))
 
 
-def cmd_attribute(args: argparse.Namespace) -> int:
-    """`sd attribute` -- the write side of the trailer the review lane reads."""
-    root = sd_lib.repo_root()
-    if root is None:
-        raise Refusal("not inside a git repository")
-    registry, reason = sd_registry.read_or_report()
-    if reason and args.entry.strip() not in sd_lib.RESERVED_AUTHORS:
-        raise Refusal(f"{reason}; an attribution names an entry the registry has")
-    # The repair commit says who made it: `SD_AUTHOR`, else a harness marker, else `human` (sd:2009, sd:2689).
-    invoker = sd_lib.invoking_author(os.environ, registry)
-    writer = sd_lib.commit_author(invoker, lambda: (registry, reason)) if invoker else sd_lib.HUMAN_AUTHOR
-    sha, value, covered = sd_lib.attribute(root, args.commits, args.entry, registry, writer)
-    print(f"{sha[:12]} attributes {len(covered)} commit(s) to {value}")
-    for target in covered:
-        print(f"  {target[:12]}")
-    return 0
-
-
-def cmd_commit_hook(args: argparse.Namespace) -> int:
-    """`sd commit-hook` -- arm a clone outside the pack with the pack's commit-msg hook (sd:2546).
-
-    One absolute link in the clone's common `.git/hooks`, shared by its
-    worktrees, to the `hooks/commit-msg` of the checkout this `sd` runs from.
-    `make hooks` stays the pack's own path. A set `core.hooksPath` and any
-    other file at the link's path are refused, not replaced.
-    """
-    root = sd_lib.repo_root()
-    if root is None:
-        raise Refusal("not inside a git repository")
-    hooks_path = sd_lib.git_output(["config", "--get", "core.hooksPath"], root)
-    if hooks_path:
-        raise Refusal(f"core.hooksPath is set to {hooks_path}, so git would not run a hook in .git/hooks; "
-                      f"unset it, or call {PACK_COMMIT_HOOK} from the hook in {hooks_path}")
-    common = sd_lib.git_output(["rev-parse", "--path-format=absolute", "--git-common-dir"], root)
-    if not common:
-        raise Refusal("git could not name this clone's common git directory")
-    link = pathlib.Path(common) / "hooks" / "commit-msg"
-    if link.is_symlink() and link.resolve() == PACK_COMMIT_HOOK.resolve():
-        print(f"git hooks: {link} already links to {PACK_COMMIT_HOOK}")
-        return 0
-    if link.exists() or link.is_symlink():
-        raise Refusal(f"{link} exists and is not a link to {PACK_COMMIT_HOOK}; move it aside first")
-    link.parent.mkdir(parents=True, exist_ok=True)
-    link.symlink_to(PACK_COMMIT_HOOK)
-    print(f"git hooks: {link} -> {PACK_COMMIT_HOOK}")
-    return 0
-
-
 def cmd_gate(args: argparse.Namespace) -> int:
     """`sd gate run|status` -- the sd:2262 gate queue, with the machine's `sd.gate_*` settings.
 
@@ -3278,20 +3227,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="mark the restore reconciled, naming what was blocked and what is frozen")
     resumer.set_defaults(handler=sd_restore.resume)
 
-    attributer = groups.add_parser(
-        "attribute",
-        help="record who wrote commits that did not say, as one empty commit")
-    attributer.add_argument("commits", help="a commit, or a `<from>..<to>` range, on this branch")
-    attributer.add_argument(
-        "entry", help=f"a registry entry or its `<entry>/<vendor>` value, `{sd_lib.HUMAN_AUTHOR}` for the operator, `{sd_lib.SCRIPT_AUTHOR}` "
-                      f"for an unattended job, or `{sd_lib.DEPENDABOT_ENTRY}` for a bump rewritten after GitHub made it")
-    attributer.set_defaults(handler=cmd_attribute)
-
-    hooker = groups.add_parser(
-        "commit-hook",
-        help="link this clone's commit-msg hook to the pack's, which writes `Authored-with:` from SD_AUTHOR")
-    hooker.set_defaults(handler=cmd_commit_hook)
-
     gate = groups.add_parser("gate", help="the machine-wide gate queue: run a command in it, or show it; "
                                  "post the local gate at a commit")
     gating = gate.add_subparsers(dest="command_name", required=True)
@@ -3354,7 +3289,7 @@ def main(argv: list[str] | None = None) -> int:
     except Refusal as refusal:
         print(f"sd: {refusal}", file=sys.stderr)
         return 1
-    except (sd_lib.ConfigError, sd_lib.TrailerError) as error:
+    except sd_lib.ConfigError as error:
         print(f"sd: {error}", file=sys.stderr)
         return 1
     except sd_restore.RestoreRefusal as refusal:

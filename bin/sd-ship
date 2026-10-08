@@ -307,7 +307,7 @@ def timing_plan(result: subprocess.CompletedProcess) -> dict:
         # without it is one phase for the gate and each reviewer, as before.
         check = plan.get("check_seconds", phase)
         slot = slot_phase(plan)
-        valid = (result.returncode == 0 and report.get("status") == "explained" and not report.get("authorship_refusal")
+        valid = (result.returncode == 0 and report.get("status") == "explained"
                  and all(type(bound) is int and bound > 0 for bound in (phase, check))
                  and type(setup) is int and setup == REVIEW_SETUP_SECONDS
                  and type(total) is int and isinstance(candidates, list)
@@ -318,26 +318,8 @@ def timing_plan(result: subprocess.CompletedProcess) -> dict:
     except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
         valid = False
     if not valid:
-        refuse_authorship(result.stdout)
         raise Refusal("local review emitted no valid timing plan; no provider pass was reserved")
     return plan
-
-
-def refuse_authorship(output: str) -> None:
-    """Refuse with `sd-review`'s own authorship refusal, when its plan carries one (sd:2067).
-
-    "No valid timing plan" hid it: the cause, a commit with no `Authored-with:`
-    trailer, was readable only from `sd-review --scope branch`.
-    """
-    try:
-        said = json.loads(output).get("authorship_refusal")
-    except (ValueError, TypeError, AttributeError, RecursionError):
-        return
-    if isinstance(said, str) and said.strip():
-        raise Refusal(f"local review refused: unknown authorship: {said.strip()}; no provider pass was reserved",
-                      code="authorship_unknown", boundary="policy", state="operator_decision",
-                      next_action="Give each named commit an Authored-with: trailer (sd attribute <sha> <entry> "
-                                  "repairs one without a rewrite), then prepare again.")
 
 
 def moment() -> str:
@@ -367,11 +349,11 @@ def review_runtime() -> ReviewRuntime:
 
 def commit_paths(root: pathlib.Path, args) -> None:
     if not args.path:
-        if args.message_file or args.author:
-            raise Refusal("--message-file and --author require enumerated --path arguments")
+        if args.message_file:
+            raise Refusal("--message-file requires enumerated --path arguments")
         return
-    if not args.message_file or not args.author:
-        raise Refusal("committing paths requires --message-file and --author")
+    if not args.message_file:
+        raise Refusal("committing paths requires --message-file")
     if git(root, "diff", "--cached", "--name-only"):
         raise Refusal("the index already contains changes; preserve them before using the commit stage")
     paths = []
@@ -382,17 +364,10 @@ def commit_paths(root: pathlib.Path, args) -> None:
         if (root / path).is_dir():
             raise Refusal("enumerate files, not directories, in --path")
         paths.append(name)
-    import sd_registry
-    registry, error = sd_registry.read_or_report(with_database=True, database_path=args.database)
-    provider = registry.providers.get(args.author)
-    if error or provider is None or not provider.enabled or "author" not in provider.roles:
-        raise Refusal(error or "--author is not an enabled author provider")
     message = args.message_file.read_text(encoding="utf-8").strip()
     if not message or re.match(r"(?i)wip\b", message):
         raise Refusal("commit message needs a final title")
-    if re.search(r"(?im)^Authored-with:", message):
-        raise Refusal("the commit stage owns the Authored-with trailer")
-    message += f"\n\nNeeded-by: sd:{args.item}\nAuthored-with: {provider.name}/{provider.vendor}\n"
+    message += f"\n\nNeeded-by: sd:{args.item}\n"
     git(root, "--literal-pathspecs", "add", "--", *paths)
     run(root, ["git", "--literal-pathspecs", "commit", "--only", "--file=-", "--", *paths], input=message)
 
@@ -1243,7 +1218,7 @@ class Ship(SharedReview):
             return self.reconcile()
         self.require_claim()
         if (any(value is not None for value in (self.args.additional_review_for, self.args.request_reason, self.args.review_history_digest))
-                and (self.args.path or self.args.message_file or self.args.author)):
+                and (self.args.path or self.args.message_file)):
             raise Refusal("additional review cannot commit; name an already committed exact head")
         if getattr(self.args, "catch_up", False) and self.args.additional_review_for is not None:
             raise Refusal("--catch-up makes a new head; an additional review names an existing one")
@@ -1835,22 +1810,6 @@ class Ship(SharedReview):
                 failed[f"sd:{number}"] = str(error)
         return closed, failed
 
-    def squash_authorship(self, head: str, reviewed_base: str) -> str:
-        """The squash's `Attributes:` and `Authored-with:` trailers, in that order."""
-        # Preserve actual authorship through the squash, including its vendor
-        # at authoring time. No declaration supplied to merge can rewrite it.
-        start = self.authorship_start()
-        sd_lib.author_vendors(self.root, start, head)
-        # A repair of commits the base already holds survives the squash;
-        # one naming a branch commit becomes an `Authored-with:` below (sd:1753).
-        lines = sd_lib.base_attributions(self.root, start, head, reviewed_base)
-        authors = set(sd_lib.attribution(self.root, start, head).values())
-        for _, message in sd_lib.commit_messages(self.root, start, head):
-            authors.update(line.partition(":")[2].strip() for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines()
-                           if line.startswith(sd_lib.AUTHORED_TRAILER))
-        lines += [f"{sd_lib.AUTHORED_TRAILER} {author}" for author in sorted(authors)]
-        return "".join(line + "\n" for line in lines)
-
     def reviewed_base(self, head: str, base: str) -> str:
         """The newest `base` commit `head` contains, read after a fresh fetch."""
         git(self.root, "fetch", "--no-tags", "origin", f"refs/heads/{base}")
@@ -1881,14 +1840,14 @@ class Ship(SharedReview):
         else:
             self.close_task(commit, ref)
 
-    def squash_message(self, head: str, reviewed: str) -> tuple[str, dict]:
+    def squash_message(self, reviewed: str) -> tuple[str, dict]:
         """The squash message, with the owed `Closes:` lines inside its one trailer block (sd:1600)."""
         body = self.squash_body(reviewed)
         carried, left = sd_ship_squash.owed_closes(
             self.connection, self.repository, body,
             lambda item: slug(self.store.identity(self.connection, item)["repo"]["remote"] or ""))
         body += "".join(f"{sd_lib.CLOSES_TRAILER} sd:{debt['item']}\n" for debt in carried)
-        return body + self.squash_authorship(head, reviewed), {
+        return body, {
             "carried_closes": carried, "closes_left": [debt["item"] for debt in left]}
 
     def settle_closes(self, held: bool, commit: str, evidence: dict) -> None:
@@ -2081,7 +2040,7 @@ class Ship(SharedReview):
         title = squash_title(observed, self.state["title"])
         self.check_closes(self.state.get("body") or "", title)  # a title edited after prepare
         self.state["title"] = title
-        body, closes = self.squash_message(head, reviewed)
+        body, closes = self.squash_message(reviewed)
         # The squash message is composed here and read by `git
         # interpret-trailers --parse` afterwards, and those two only agree
         # while the trailers sit in the message's *last* paragraph. One blank
@@ -2458,7 +2417,7 @@ def no_item_record_flags(action) -> None:
     action.add_argument("--review-history-digest", metavar="SHA256", help="one-use digest of the complete combined history; required to continue after any import")
     action.add_argument("--request-reason", help="nonempty operator context, valid only with --additional-review-for; this assertion is not proof of user approval")
     # No-item review takes no commit, runner or delivery flags at all.
-    action.set_defaults(path=[], message_file=None, author=None)
+    action.set_defaults(path=[], message_file=None)
 
 
 def adjudication_flags(action) -> None:
@@ -2536,7 +2495,7 @@ def validate_identity(args) -> None:
     if getattr(args, "provider", None) is not None and any(getattr(args, name, None) for name in
             ("create_record", "import_history", "rebind_branch", "close_record", "reopen_record")):
         raise Refusal("--provider cannot combine with metadata-only record operations")
-    forbidden = [name for name in ("path", "message_file", "author", "run", "deliver", "associate_only", "acceptance_file")
+    forbidden = [name for name in ("path", "message_file", "run", "deliver", "associate_only", "acceptance_file")
                  if getattr(args, name, None)]
     if forbidden:
         raise Refusal("no-item publication does not accept commit, runner, or delivery flags: "
@@ -2594,7 +2553,6 @@ def parser():
             action.add_argument("--request-reason", help="nonempty operator context, valid only with --additional-review-for; this assertion is not proof of user approval")
             action.add_argument("--path", action="append", default=[])
             action.add_argument("--message-file", type=pathlib.Path)
-            action.add_argument("--author")
             publication_flags(action)
             claim = action.add_mutually_exclusive_group()
             claim.add_argument("--deliver", action="store_true", default=None,
@@ -2625,10 +2583,10 @@ def parser():
 BODY_EPILOG = """\
 body: `sd-ship body --item N [--body-file F] [--pr P]` prints the body prepare
 would publish and runs the body lint (sd-docs-lint --body-only). It strips
-every Item:, Work: and Delivers: line, and an Authored-with: line that says
-what sd-ship would write, and refuses any other owned line by number. With
---pr and no --body-file, that pull request's live body is the one read. It
-reads no sd state, and calls the GitHub API only for --pr.
+every Item:, Work: and Delivers: line, and refuses a Closes: line naming the
+claimed item or no item, by number. With --pr and no --body-file, that pull
+request's live body is the one read. It reads no sd state, and calls the
+GitHub API only for --pr.
 Exit 0 when the body would prepare, 3 on a refusal or a lint failure.
 """
 
@@ -2852,7 +2810,7 @@ def main(argv=None) -> int:
                 result = dispatch(root, connection, database, args, ship, readonly)
         finally:
             connection.close()
-    except (Refusal, WorkflowError, SdDbError, sd_lib.ConfigError, sd_lib.TrailerError, OSError, sqlite3.Error, ValueError, subprocess.SubprocessError) as error:
+    except (Refusal, WorkflowError, SdDbError, sd_lib.ConfigError, OSError, sqlite3.Error, ValueError, subprocess.SubprocessError) as error:
         result = failure(args.command, error)
     print(json.dumps(result, indent=2, sort_keys=True) if args.json else result)
     return 0 if result["ok"] else 3

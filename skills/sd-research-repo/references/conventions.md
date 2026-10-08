@@ -353,9 +353,7 @@ Three things to get right:
 
 - **Pick the scope that matches the commit state.** `--scope worktree` reviews
   the uncommitted change; `--scope branch` reviews what is committed on the
-  branch. Worktree scope has no commit to read an `Authored-with:` trailer
-  from, so it cannot pass over the author's vendor; check who reviewed, or
-  commit with the trailer first.
+  branch.
 - **Keep the lens.** Without `--lens research-brief` the lane's framing is a
   code review, and a change of only Markdown is routed to no reviewer at all.
 - **The registry-independent fallback is for a lane that cannot run** — not

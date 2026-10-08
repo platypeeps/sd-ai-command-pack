@@ -260,8 +260,6 @@ class NoItemContracts(unittest.TestCase):
                 prior = pathlib.Path(argv[argv.index("--resume-report") + 1])
                 aggregate = json.loads(prior.read_bytes())
                 self.assertEqual(len(aggregate["history"]), imported + initial_native + len(calls) - 1)
-                if imported:
-                    self.assertIn("historical-author", aggregate["authored_with"])
                 report["resume_report_digest"] = ship.digest(aggregate)
             if shape is not None:
                 shape(report, state, argv)
@@ -443,7 +441,7 @@ class NoItemContracts(unittest.TestCase):
         self.assertEqual(len(self.keys()), 2)
 
     def test_an_empty_commit_on_merged_work_allocates_its_own_record(self):
-        """sd:2009. An `sd attribute` repair is an empty commit: its tree is the
+        """sd:2009. An empty commit: its tree is the
         base's, which a merged record already claimed, so allocation refused
         with "already owns this tree". The base tree is no claim; the commit is."""
         merged = self.create()
