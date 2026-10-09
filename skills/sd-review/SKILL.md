@@ -99,6 +99,19 @@ An unreadable database stops execution instead of ignoring operator controls.
 Never run the plain branch form there: it runs a second full check in the checkout, outside any lock around the gate, and reuses no pass.
 `WORKFLOW.md`, section **Parallel work**, holds the rule (sd:2603).
 
+### A repeating finding class
+
+Trigger: two findings of the same class in different rounds, or three blocking rounds in a row.
+Then stop single-finding fixes and run one class pass:
+
+1. Name the class.
+2. Enumerate every instance from the code, not from the findings.
+3. Put each instance in a table in `design.md` or the PR body: step, state moved, failure, recovery, test.
+4. Fix each row that lacks a recovery or a test, with a test that fails first.
+5. Send the next round with the table.
+
+If the table shows the PR does too much, split it.
+
 ## Flags and results
 
 | Flag | Meaning |
