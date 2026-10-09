@@ -2670,6 +2670,7 @@ def lane_host_refusal(root, connection, database) -> str | None:
 
     Ownership this machine cannot read refuses as `lane_unknown`; it never reads as the hub's.
     """
+    sd_lib.import_sd_db()  # the gateway's order: resolve the library before importing from it
     from sd_db.workflow import WorkflowError
     repository = slug(git(root, "config", "--get", "remote.origin.url"))
     try:

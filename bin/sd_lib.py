@@ -1179,6 +1179,7 @@ def lane_elsewhere(connection: Any, database: Any, repository: str) -> str | Non
 
 def lane_host(connection: Any, repository: str) -> tuple[str | None, str | None]:
     """`(repo.lane_host, path)` of the first row whose remote gives `repository`; None names the hub (sd:3003)."""
+    import_sd_db()  # the gateway's order: resolve the library before importing from it
     from sd_db.protection import github_slug  # noqa: PLC0415
 
     for row in connection.execute("SELECT * FROM repo ORDER BY path"):
