@@ -229,8 +229,6 @@ Otherwise, it contains the latest receipt for that pull request.
 No local receipt means there is nothing to abandon, and the command refuses.
 It preserves request history and records a separate abandonment.
 Only submitted, non-pending reviews mark matching request heads complete.
-Published Copilot findings still require disposition.
-Every other reviewer's findings require disposition too; the merge refuses with `review_findings_open` before it merges (R14-D2, sd:998).
 
 The additive `workflow` object reports `schema_version`, `phase`, `state`, `blocker`, and `next_action`.
 States are `success`, `retryable_failure`, `operator_decision`, and `policy_block`.

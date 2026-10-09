@@ -297,11 +297,6 @@ def git_read_memo() -> Iterator[None]:
         _GIT_READS, _FETCHED = saved
 
 
-def git_reads_memoized() -> bool:
-    """Whether a `git_read_memo()` block is open."""
-    return _GIT_READS is not None
-
-
 def _git(args: list[str], cwd: pathlib.Path) -> str | None:
     """Run one `git` command; None when git cannot answer."""
     key = (str(cwd), *args)

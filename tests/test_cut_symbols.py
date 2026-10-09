@@ -35,15 +35,8 @@ literally. It enumerates requirement 13's cut list from the `prd.md` that
 states it, rather than reciting a list here, so a cut added to the document
 lands in this file's verdict without anyone remembering to copy it across.
 
-Two things the tree carries by name and this file leaves alone. `docs/work/`
-and `CHANGELOG.md` are history, excluded by the criterion's own definition of
-the governed tree. `tests/fixtures/*-round.json` are captured review rounds --
-`tests/test_sd_review_ack.py` says of the first one, "not an invented
-fixture", twelve pull requests read from the GitHub API "as they stand" -- and
-a Copilot body in one of them summarises a change to `bin/sd_sweep.py`.
-Editing a capture to satisfy a grep would falsify the record the capture is
-kept for, so the captures are excluded here by name, as history, and the
-exclusion is stated rather than buried in a pattern.
+`docs/work/` and `CHANGELOG.md` are history, excluded by the criterion's own
+definition of the governed tree.
 """
 
 # This module reads the whole checkout, so no changed-files fast path may
@@ -72,8 +65,8 @@ import sd_rules  # noqa: E402
 from tests.governed import GOVERNED  # noqa: E402
 
 #: Excluded from every grep below. This file quotes each symbol it searches
-#: for, and the review captures are history, see the module docstring.
-EXCLUDED = ("tests/test_cut_symbols.py", "tests/fixtures/*-round.json")
+#: for.
+EXCLUDED = ("tests/test_cut_symbols.py",)
 
 
 def governed_grep(pattern: str) -> list[str]:
@@ -188,6 +181,26 @@ class DashboardCut(unittest.TestCase):
         self.assertEqual(listed, [], f"still tracked: {listed}")
         present = [path for path in RETIRED_DASHBOARD if (REPO_ROOT / path).exists()]
         self.assertEqual(present, [], f"still on disk: {present}")
+
+
+class ReviewAckCut(unittest.TestCase):
+    """sd:3098: `sd-review-ack` and everything built on it are not in the tree.
+
+    The finding parser, the acknowledgement store, the `sd-status` rows and
+    counts over it, and `sd-ship`'s merge gate and post-push writer left
+    together. A review is a plain rebuttal now, so none of them has a reader.
+    """
+
+    def test_no_governed_file_names_the_tool_or_what_read_it(self) -> None:
+        rows = governed_grep(
+            r"sd-review-ack|sd_review_ack|review_findings_open|answer_review|merged_review_count"
+            r"|pr-review-unacknowledged|expired_reviews|late_reviews")
+        self.assertEqual(rows, [], "the cut review-ack surface is still named: " + "; ".join(rows))
+
+    def test_the_tool_and_its_suites_are_gone(self) -> None:
+        for path in ("bin/sd-review-ack", "tests/test_sd_review_ack.py",
+                     "tests/test_sd_review_ack_carried.py", "tests/test_sd_review_ack_hub.py"):
+            self.assertFalse((REPO_ROOT / path).exists(), f"{path} still exists")
 
 
 #: Every site under `bin` that reads the `archived` field, as `path` and the

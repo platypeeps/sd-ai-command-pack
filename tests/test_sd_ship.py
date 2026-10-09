@@ -204,9 +204,7 @@ class ShipDouble(GitHubDouble):
                     if (wanted_sha is None or run.get("head_sha") == wanted_sha)
                     and (wanted_event is None or run.get("event") == wanted_event)]
             return 200, {"total_count": len(runs), "workflow_runs": runs}
-        # The review a `prepare` reads to record the findings its push answers.
-        # Empty unless a test says otherwise, and answered here rather than by
-        # the shared double because the adapter is the only caller of it.
+        # Reviews and review comments: empty unless a test says otherwise.
         if method == "GET" and path.startswith(f"{prefix}/pulls/") and path.endswith("/files"):
             return 200, [{"filename": name} for name in self.pull_files.get(int(path.split("/")[-2]), [])]
         if method == "GET" and path.startswith(f"{prefix}/pulls/") and path.rsplit("/", 1)[1] in self.review_payload:
@@ -1489,8 +1487,7 @@ roles:
     def test_a_merge_refused_after_the_copilot_gate_records_no_ancestor_clearance(self):
         """sd:1373. The ancestor note says the gate cleared a merge, so the step
         that dispatches the merge writes it. Written when the gate cleared, it
-        survived every later refusal -- the findings check a dozen lines below
-        it first -- and each retry appended another copy."""
+        survived every later refusal, and each retry appended another copy."""
         self.enable_automatic_copilot()
         self.prepare()
         reviewed = _git(self.root, "rev-parse", "HEAD")
@@ -1503,19 +1500,14 @@ roles:
         self.prepare()
         pull = self.remote.pull(1)
         pull.checks = [{**row, "head_sha": head} for row in pull.checks]
-        real_sibling = ship.sd_lib.sibling
-        open_finding = SimpleNamespace(review_state=lambda *_: {"unsatisfied": [{"id": "finding-1"}]})
-
-        def sibling(name, *rest):
-            return open_finding if name == "sd_review_ack_ship_gate" else real_sibling(name, *rest)
-
         def ancestor_notes():
             return [warning for warning in (self.operation().state.get("warnings") or [])
                     if "ancestor of the merge head" in warning]
 
-        with patch.object(ship.sd_lib, "sibling", sibling), patch.object(ship.time, "sleep"):
+        refusal = ship.Refusal("refused after the Copilot gate")
+        with patch.object(ship.Ship, "reviewed_base", side_effect=refusal), patch.object(ship.time, "sleep"):
             for _ in range(2):
-                with self.assertRaisesRegex(ship.Refusal, "remain unacknowledged"):
+                with self.assertRaisesRegex(ship.Refusal, "after the Copilot gate"):
                     self.merge()
         self.assertEqual(ancestor_notes(), [])
         with patch.object(ship.time, "sleep"):
@@ -1812,23 +1804,6 @@ roles:
         self.assertEqual(self.operation().state.get("copilot_reviews"), None)
         self.assertEqual(self.double.copilot_requests, [])
 
-    def test_failed_explicit_dispatch_keeps_prior_finding_acknowledgements(self):
-        acknowledgements = ship.sd_lib.sibling("sd_review_ack_ship_explicit", "sd-review-ack")
-        self.prepare()
-        prior = _git(self.root, "rev-parse", "HEAD")
-        self.double.review_payload["reviews"] = [{
-            "user": {"login": "Copilot"}, "commit_id": prior,
-            "body": "| File | Summary |\n|---|---|\n| `src.py` | Moderate finding (2 votes): fix. |\n",
-        }]
-        (self.root / "src.py").write_text("value = 2\n")
-        _git(self.root, "commit", "-am", "answer finding\n\nAuthored-with: human")
-        self.double.lose_copilot_request = True
-        with self.assertRaisesRegex(ship.Refusal, "review request transport failed"):
-            self.prepare("--copilot-review", "request")
-        recorded = list(acknowledgements.read_store(self.root)[0].values())
-        self.assertEqual([row["path"] for row in recorded], ["src.py"])
-        self.assertEqual(self.operation().state["phase"], "ready_to_send")
-
     def test_invalid_new_prepare_creates_no_receipt_or_suppression(self):
         self.enable_automatic_copilot()
         with self.assertRaisesRegex(ship.Refusal, "provide a final --title"):
@@ -1903,21 +1878,6 @@ roles:
         with self.assertRaisesRegex(ship.Refusal, "limit of 3"):
             operation.prepare_copilot_review(1, {"draft": False}, "4" * 40, "full")
 
-    def test_copilot_findings_require_disposition_before_merge(self):
-        self.enable_automatic_copilot()
-        self.prepare()
-        head = _git(self.root, "rev-parse", "HEAD")
-        self.double.review_payload["reviews"] = [{
-            "user": {"login": "copilot-pull-request-reviewer[bot]"},
-            "commit_id": head,
-            "state": "COMMENTED",
-            "submitted_at": "2026-09-19T20:00:00Z",
-            "body": "| File | Summary |\n|---|---|\n| `src.py` | Moderate finding (2 votes): verify the value. |\n",
-        }]
-        with self.assertRaisesRegex(ship.Refusal, "remain unacknowledged"):
-            with patch.object(ship.time, "sleep"):
-                self.merge()
-
     def test_remote_copilot_request_does_not_gate_without_a_local_request_receipt(self):
         self.enable_automatic_copilot()
         self.prepare()
@@ -1961,19 +1921,6 @@ roles:
             self.merge("--abandon-copilot-review", "   ")
         self.assertNotIn("copilot_review_abandonments", self.operation().state)
 
-    def test_abandonment_does_not_clear_published_copilot_findings(self):
-        self.enable_automatic_copilot()
-        self.prepare()
-        head = _git(self.root, "rev-parse", "HEAD")
-        self.double.review_payload["reviews"] = [{
-            "user": {"login": "Copilot"}, "commit_id": head, "state": "COMMENTED",
-            "submitted_at": "2026-09-19T20:00:00Z",
-            "body": "| File | Summary |\n|---|---|\n| `src.py` | Moderate finding (2 votes): verify. |\n",
-        }]
-        with self.assertRaisesRegex(ship.Refusal, "remain unacknowledged"):
-            with patch.object(ship.time, "sleep"):
-                self.merge("--abandon-copilot-review", "provider result is no longer required")
-
     def test_completion_during_failed_merge_does_not_duplicate_abandonment(self):
         self.enable_automatic_copilot()
         self.prepare()
@@ -1984,9 +1931,10 @@ roles:
             "body": "| File | Summary |\n|---|---|\n| `src.py` | Moderate finding (2 votes): verify. |\n",
         }]
         reason = "provider result is no longer required"
+        refusal = ship.Refusal("refused after the Copilot gate")
         for _ in range(2):
-            with self.assertRaisesRegex(ship.Refusal, "remain unacknowledged"):
-                with patch.object(ship.time, "sleep"):
+            with self.assertRaisesRegex(ship.Refusal, "after the Copilot gate"):
+                with patch.object(ship.Ship, "reviewed_base", side_effect=refusal), patch.object(ship.time, "sleep"):
                     self.merge("--abandon-copilot-review", reason)
             state = self.operation().state
             self.assertEqual(state["copilot_reviews"][0]["status"], "completed")
@@ -2088,89 +2036,6 @@ roles:
         self.assertEqual(state["copilot_reviews"][0]["status"], "completed")
         self.assertEqual(len(state["copilot_review_abandonments"]), 1)
 
-    def test_remote_copilot_findings_block_without_a_local_request_receipt(self):
-        self.enable_automatic_copilot()
-        self.prepare()
-        head = _git(self.root, "rev-parse", "HEAD")
-        self.operation().save(copilot_reviews=[])
-        self.double.copilot_pending.clear()
-        self.double.review_payload["reviews"] = [{
-            "user": {"login": "Copilot"},
-            "commit_id": head,
-            "state": "COMMENTED",
-            "submitted_at": "2026-09-19T20:00:00Z",
-            "body": "| File | Summary |\n|---|---|\n| `src.py` | Moderate finding (2 votes): verify the value. |\n",
-        }]
-        with self.assertRaisesRegex(ship.Refusal, "remain unacknowledged"):
-            with patch.object(ship.time, "sleep"):
-                self.merge()
-
-    def test_another_reviewers_finding_refuses_the_merge_with_no_copilot_review(self):
-        """sd:998. The merge step is the gate, and a finding is unread whoever
-        wrote it: an inline finding by another reviewer refuses before the PUT,
-        with no Copilot request or review on the pull request at all."""
-        self.prepare()
-        self.double.review_payload["comments"] = [{
-            "id": 9, "user": {"login": "human-reviewer"}, "commit_id": _git(self.root, "rev-parse", "HEAD"),
-            "path": "src.py", "line": 1, "in_reply_to_id": None, "body": "This human finding remains open.",
-        }]
-        with self.assertRaisesRegex(ship.Refusal, "1 pull-request review finding\\(s\\) remain unacknowledged") as caught:
-            self.merge()
-        self.assertEqual(caught.exception.workflow["blocker"]["code"], "review_findings_open")
-        self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
-
-    def test_human_review_findings_gate_the_merge_beside_copilots(self):
-        """Read apart from Copilot's material, so neither becomes the other's,
-        and gated with it (sd:998); before, both human findings merged unread."""
-        self.enable_automatic_copilot()
-        self.prepare()
-        head = _git(self.root, "rev-parse", "HEAD")
-        self.double.review_payload["reviews"] = [{
-            "user": {"login": "Copilot"},
-            "commit_id": head,
-            "state": "COMMENTED",
-            "submitted_at": "2026-09-19T20:00:00Z",
-            "body": "",
-        }, {
-            "user": {"login": "human-reviewer"},
-            "commit_id": head,
-            "state": "COMMENTED",
-            "submitted_at": "2026-09-19T20:00:01Z",
-            "body": "| File | Summary |\n|---|---|\n| `src.py` | Moderate finding (1 vote): human note. |\n",
-        }]
-        human = {"id": 7, "user": {"login": "human-reviewer"},
-                 "path": "src.py", "line": 1, "in_reply_to_id": None,
-                 "body": "This human finding remains open."}
-        self.double.review_sequences["comments"] = [[], [human], [human]]
-        with self.assertRaisesRegex(ship.Refusal, "2 pull-request review finding\\(s\\) remain unacknowledged"):
-            with patch.object(ship.time, "sleep"):
-                self.merge()
-        self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
-
-    def test_copilot_inline_comment_requires_disposition(self):
-        self.enable_automatic_copilot()
-        self.prepare()
-        head = _git(self.root, "rev-parse", "HEAD")
-        self.double.review_payload["reviews"] = [{
-            "user": {"login": "copilot-pull-request-reviewer[bot]"},
-            "commit_id": head,
-            "state": "COMMENTED",
-            "submitted_at": "2026-09-19T20:00:00Z",
-            "body": "",
-        }]
-        self.double.review_payload["comments"] = [{
-            "id": 8,
-            "user": {"login": "Copilot"},
-            "commit_id": head,
-            "path": "src.py",
-            "line": 1,
-            "in_reply_to_id": None,
-            "body": "Copilot inline finding remains open.",
-        }]
-        with self.assertRaisesRegex(ship.Refusal, "remain unacknowledged"):
-            with patch.object(ship.time, "sleep"):
-                self.merge()
-
     def test_pending_copilot_review_does_not_clear_merge(self):
         self.enable_automatic_copilot()
         self.prepare()
@@ -2222,23 +2087,6 @@ roles:
         with self.assertRaisesRegex(ship.Refusal, "not an ancestor"):
             self.merge()
 
-    def test_late_copilot_findings_are_included_before_merge(self):
-        self.enable_automatic_copilot()
-        self.prepare()
-        head = _git(self.root, "rev-parse", "HEAD")
-        base = {"user": {"login": "copilot-pull-request-reviewer[bot]"},
-                "commit_id": head, "state": "COMMENTED",
-                "submitted_at": "2026-09-19T20:00:00Z"}
-        finding = "| File | Summary |\n|---|---|\n| `src.py` | Moderate finding (2 votes): late result. |\n"
-        self.double.review_sequences["reviews"] = [
-            [{**base, "body": ""}],
-            [{**base, "body": finding}],
-            [{**base, "body": finding}],
-        ]
-        with self.assertRaisesRegex(ship.Refusal, "remain unacknowledged"):
-            with patch.object(ship.time, "sleep"):
-                self.merge()
-
     def test_final_late_update_refuses_an_unstable_review_snapshot(self):
         self.enable_automatic_copilot()
         self.prepare()
@@ -2255,85 +2103,6 @@ roles:
         with self.assertRaisesRegex(ship.Refusal, "did not stabilize"):
             with patch.object(ship.time, "sleep"):
                 self.merge()
-
-    def test_prepare_records_the_review_findings_its_push_answers(self):
-        """The write that was missing between a review and a merge.
-
-        `sd-status` reports a pull request carrying a review finding nobody has
-        answered, and nothing on the way to a merge ever wrote an
-        acknowledgement, so the row stood on every reviewed pull request. Here
-        the reviewer states two findings, the next push answers one of them,
-        and only that one is recorded -- a `prepare` that acknowledged both
-        would clear the row for the act of pushing.
-        """
-        acknowledgements = ship.sd_lib.sibling("sd_review_ack_ship_case", "sd-review-ack")
-        self.prepare()
-        self.double.review_payload["reviews"] = [{
-            "user": {"login": "copilot-pull-request-reviewer[bot]"},
-            "commit_id": _git(self.root, "rev-parse", "HEAD"),
-            "body": ("| File | Summary |\n|---|---|\n"
-                     "| `src.py` | Moderate finding (2 votes): the value is wrong. |\n"
-                     "| `Makefile` | Moderate finding (1 vote): nobody went near this. |\n"),
-        }]
-        (self.root / "src.py").write_text("value = 2\n")
-        _git(self.root, "commit", "-am", "answer the finding\n\nAuthored-with: human")
-        answered = _git(self.root, "rev-parse", "HEAD")
-        result = self.prepare()
-        recorded = list(acknowledgements.read_store(self.root)[0].values())
-        self.assertEqual([row["path"] for row in recorded], ["src.py"])
-        self.assertEqual(recorded[0]["disposition"], "fixed")
-        self.assertEqual(recorded[0]["commit"], answered)
-        self.assertIn("recorded 1 review finding(s) on #1 as fixed", "\n".join(result["warnings"]))
-
-    def test_a_review_github_will_not_enumerate_warns_and_never_refuses(self):
-        """Bookkeeping may not stop a push that has already happened."""
-        self.prepare()
-        self.double.review_payload["reviews"] = {"message": "Not Found"}
-        (self.root / "src.py").write_text("value = 2\n")
-        _git(self.root, "commit", "-am", "answer the finding\n\nAuthored-with: human")
-        result = self.prepare()
-        self.assertEqual(result["phase"], "ready_to_send")
-        self.assertIn("review findings on #1 were not read", "\n".join(result["warnings"]))
-
-    def test_a_helper_that_will_not_load_warns_and_never_refuses(self):
-        """The load is part of the advisory step, not a precondition of the push.
-
-        With the load outside the guard a broken `bin/sd-review-ack` aborted
-        `prepare` with a traceback after the push had already happened, which
-        is a refusal over bookkeeping wearing a different exception.
-        """
-        self.prepare()
-        real = ship.sd_lib.sibling
-
-        def broken(module_name, filename):
-            if filename == "sd-review-ack":
-                raise OSError("sd-review-ack cannot be loaded")
-            return real(module_name, filename)
-
-        with patch.object(ship.sd_lib, "sibling", side_effect=broken):
-            result = self.prepare()
-        self.assertEqual(result["phase"], "ready_to_send")
-        self.assertIn("were not read (sd-review-ack cannot be loaded)", "\n".join(result["warnings"]))
-
-    def test_a_store_that_cannot_be_read_is_said_on_the_receipt(self):
-        """Nothing recorded because the store is broken is not nothing to record."""
-        acknowledgements = ship.sd_lib.sibling("sd_review_ack_ship_broken", "sd-review-ack")
-        self.prepare()
-        self.double.review_payload["reviews"] = [{
-            "user": {"login": "copilot-pull-request-reviewer[bot]"},
-            "commit_id": _git(self.root, "rev-parse", "HEAD"),
-            "body": ("| File | Summary |\n|---|---|\n"
-                     "| `src.py` | Moderate finding (2 votes): the value is wrong. |\n"),
-        }]
-        (self.root / "src.py").write_text("value = 2\n")
-        _git(self.root, "commit", "-am", "answer the finding\n\nAuthored-with: human")
-        acknowledgements.store_path(self.root).write_text("{not json", encoding="utf-8")
-        result = self.prepare()
-        self.assertEqual(result["phase"], "ready_to_send")
-        warned = "\n".join(result["warnings"])
-        self.assertIn("review findings on #1 were read and none recorded", warned)
-        self.assertIn("is not valid JSON", warned)
-        self.assertEqual(acknowledgements.store_path(self.root).read_text(), "{not json")
 
     def test_the_real_cli_bound_guards_a_hang_not_a_load_average(self):
         """sd:1539. A 30 s bound failed three gates on one loaded afternoon; alone the run takes about 7 s."""

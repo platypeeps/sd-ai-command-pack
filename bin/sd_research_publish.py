@@ -901,10 +901,9 @@ def queue_locked() -> Iterator[None]:
     comparison keeps it, or wholly after its unlink, where nothing is left to
     remove.
 
-    Blocking, as `bin/sd-review-ack`'s lock is and for the same reason: the
-    holder is a render or a drain's last step, nothing a session start waits
-    on, and each holds it for one document's worth of work. An `OSError`
-    here is the queue being unwritable, which is the caller's to report.
+    Blocking: the holder is a render or a drain's last step, nothing a
+    session start waits on, and each holds it for one document's worth of
+    work. An `OSError` here is the queue being unwritable, which is the caller's to report.
     """
     path = queue_lock_path()
     path.parent.mkdir(parents=True, exist_ok=True)

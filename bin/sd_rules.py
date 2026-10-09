@@ -180,7 +180,7 @@ RULES: tuple[Rule, ...] = (
                 "directory and takes no path to another one, so a session "
                 "that can be pointed at another checkout cannot exist; the "
                 "one exception is `-C <dir>` on the lane commands `sd-ship`, "
-                "`sd-check`, `sd-review`, `sd-review-ack` and `sd-pr-state`, "
+                "`sd-check`, `sd-review` and `sd-pr-state`, "
                 "which changes the working directory before anything resolves, "
                 "as `git -C` does, because the permission layer that approves "
                 "a command line sees `-C` and does not see a `cd &&` in front",
@@ -556,24 +556,6 @@ RULES: tuple[Rule, ...] = (
               "`bin/sd_ship_remote.py` with the first entry carrying the "
               "gap's id; a bypass list that no longer equals the live one is then "
               "honoured and `test_a_declared_bypass_list_must_equal_the_live_one` "
-              "goes red",
-        scope="code",
-        teaches="skills/sd-ship/SKILL.md#Executable interface",
-    ),
-    #: sd-ship's merge-step ack gate for every reviewer (sd:998), registered
-    #: so the skill line that teaches it cites a row instead of avoiding the
-    #: claim check the way #1167 did.
-    Rule(
-        id="R14-D2",
-        subject="sd-ship's merge refuses with `review_findings_open` while any "
-                "pull-request review finding has no disposition, whoever "
-                "wrote it: a human or another bot's finding gates the merge "
-                "as a Copilot finding does, with or without a Copilot review",
-        checker="bin/sd-ship::require_copilot_clearance",
-        proof="replace the `self.other_review_material(number)` call in "
-              "`bin/sd-ship` with two empty lists; another reviewer's open "
-              "finding then merges and "
-              "`test_another_reviewers_finding_refuses_the_merge_with_no_copilot_review` "
               "goes red",
         scope="code",
         teaches="skills/sd-ship/SKILL.md#Executable interface",

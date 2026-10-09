@@ -333,9 +333,8 @@ establish the evidence reports uncertainty.
 `sd task cancel <row-id> --reason TEXT` closes a task or followup nobody will
 do. It writes the same `done` status and `cancelled` receipt, through the same
 library call with the task guard (sd:1005). `sd task status <row-id> done`
-writes no receipt, so the row reads as finished work. A finding that
-`sd-review-ack` carried to a cancelled row reads `carry-dropped` and holds
-again. The guard refuses a recurring task and a row with an active assignment.
+writes no receipt, so the row reads as finished work.
+The guard refuses a recurring task and a row with an active assignment.
 An `sd_db` older than the guard refuses the verb by name.
 
 The item directory stays in place. Use `sd work relink <row-id> <path>` when an

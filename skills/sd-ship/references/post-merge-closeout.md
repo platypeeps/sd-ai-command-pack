@@ -8,9 +8,6 @@ A closed PR is not necessarily merged.
 ## Review findings
 
 Read every inline thread and review-body finding, including all result pages and late Copilot comments.
-Use `sd-review-ack --pr N --json` to inspect the explicit PR, including a merged PR.
-Use `--check` to identify findings without local acknowledgements.
-Local acknowledgement does not post a response or resolve a GitHub thread.
 
 Apply the `sd-receive-review` disposition procedure to each finding.
 That skill remains local-only.
@@ -21,9 +18,7 @@ Choose one supported result:
 - Carried forward: verify a durable successor, its scope, owner, and acceptance condition.
   Link it where the reviewer can access it.
 
-Record local acknowledgements through `--ack ID` with `--fixed COMMIT`, `--dismiss REASON`, or `--carried ITEM`.
-Answer a cosmetic finding with `--dismiss 'cosmetic: ...'`; never `--carried`.
-Confirm that the chosen evidence and destination satisfy the command's checks.
+Answer a cosmetic finding as rebutted with a `cosmetic: ...` reason; never carry it forward.
 A reason string alone does not establish a valid disposition.
 
 Authorized shipping closeout owns remote replies and resolution.
@@ -35,7 +30,7 @@ Do not dismiss formal reviews, delete comments, or request another Copilot revie
 
 Create follow-ups only within existing authorization.
 For an authorized local follow-up, use `sd task add TITLE --kind followup --here --body BODY --json`.
-Read back its identity and scope before acknowledging a carried finding.
+Read back its identity and scope before naming it as a carried finding's successor.
 Creating an external issue needs authorization for that destination.
 If that authorization is absent, record the follow-up locally and disclose its limited visibility.
 Do not present a local path as a public successor link.

@@ -45,7 +45,6 @@ import re
 import shlex
 import shutil
 import sys
-from collections.abc import Sequence
 from typing import Any, NamedTuple, TextIO
 
 #: Read-only means read-only, and importing a sibling module would otherwise
@@ -1425,13 +1424,6 @@ class Class(NamedTuple):
     the reason the table exists at all: a check's data dependency is a fact
     about the check, and a producer that forgot to declare it would go on
     reporting clear over a question nobody asked.
-
-    `newest_first` orders a class's rows youngest first instead of oldest,
-    and `pending_cap` is the most rows of the class `pending` shows (0 is no
-    cap). Both exist for a class whose rows can outnumber the list: its
-    freshest rows are the ones still worth acting on, and a cap keeps it from
-    pushing every other class out of `pending`. `--actions` and `--json` stay
-    uncapped.
     """
 
     check: str
@@ -1441,28 +1433,7 @@ class Class(NamedTuple):
     source: str
     what: str
     needs: tuple[str, ...] = ()
-    newest_first: bool = False
-    pending_cap: int = 0
 
-
-#: How many days after its merge a pull request's unanswered review findings
-#: stay a row, inclusive: merged fourteen days ago is in, fifteen is out. The
-#: number is the owner's decision on sd:631. Without a window the class would
-#: grow into a list of every finding this repository never answered.
-MERGED_REVIEW_DAYS = 14
-
-#: How many days past that window `expired_reviews` still counts a finding
-#: nobody answered, so expiry is not read as resolution (sd:998, decision of
-#: 2026-09-26). A count, not rows: the window's rows stay the action list.
-MERGED_AGED_DAYS = 14
-
-#: The most merged-pull-request rows `pending` shows. Lanes that push without
-#: `bin/sd-ship` leave hundreds of merges a fortnight with nothing recorded,
-#: and uncapped those rows would fill all ten slots (review-925 N-4).
-MERGED_PENDING_CAP = 3
-
-#: The merged class, which `merged_review_change` counts for `open threads`.
-MERGED_CHECK = "merged-pr-review-unacknowledged"
 
 #: The enumeration. This tuple is the *only* answer to "which checks exist":
 #: the renderer iterates it, the ranking reads `rank` off it, the banner reads
@@ -1491,10 +1462,6 @@ CLASSES = (
     Class("dirty-tree-with-open-pr", "p", True, 30, "git + open PRs",
           "uncommitted work on a branch that already has a pull request",
           ("pull_requests",)),
-    Class("pr-review-unacknowledged", "p", True, 35,
-          "review findings + local acknowledgements",
-          "an open pull request carrying a review finding nobody has answered",
-          ("pull_requests",)),
     Class("protection-gap", "g", True, 40, "protection",
           "an enforcement leg missing on the default branch", ("protection",)),
     Class("accepted-gap-standing", "g", False, 45,
@@ -1504,11 +1471,6 @@ CLASSES = (
           "an indexed issue the index says is waiting on you"),
     Class("pr-needs-action", "p", False, 60, "open pull requests",
           "an open pull request waiting on a review or a merge"),
-    Class(MERGED_CHECK, "p", False, 65,
-          f"merged PRs ({MERGED_REVIEW_DAYS} days) + local acknowledgements",
-          f"a pull request merged in the last {MERGED_REVIEW_DAYS} days with a review "
-          "finding nobody answered",
-          ("merged_pull_requests",), newest_first=True, pending_cap=MERGED_PENDING_CAP),
     Class("mirror-sync-pending", "n", False, 75, "~/.claude/pending-mirror-syncs/",
           "a published document whose designated mirror is not written yet"),
     Class("unmerged-branch", "b", False, 80, "origin heads",
@@ -1553,9 +1515,6 @@ EXCLUDED = (
     "so nothing in it can ever be marked handled",
     "markers outside bin/, dashboard/, tests/ and .github/scripts/ -- in "
     "skills/ and docs/ the word documents the convention instead of instancing it",
-    f"review findings on pull requests merged more than {MERGED_REVIEW_DAYS} days ago "
-    "-- past that window a finding nobody answered stops being a row (sd:631); those "
-    f"up to {MERGED_REVIEW_DAYS + MERGED_AGED_DAYS} days are counted as expired, not as answered (sd:998)",
 )
 
 
@@ -1675,8 +1634,7 @@ def actionable_inventory(
 
     Ranking is `(rank, -age_days, id)`: the class first, the oldest of a class
     next, the id last so the order is total and reproducible. Requirement 4 is
-    that a reader can predict it without running it. A class marked
-    `newest_first` puts its youngest row first instead.
+    that a reader can predict it without running it.
 
     Everything comes from `sections` -- the state `collect` already gathered --
     plus local git and the filesystem, never from a maintained list of known
@@ -1707,8 +1665,6 @@ def actionable_inventory(
         unchecked,
     )
     rows += _pull_rows(root, pulls, protection)
-    rows += _review_rows(root, pulls, unchecked)
-    rows += _merged_review_rows(root, sections.get("merged_pull_requests") or {}, day, unchecked)
     rows += _protection_rows(protection)
     rows += _issue_rows(sections.get("issues") or {})
     rows += _branch_rows(root, pulls, protection)
@@ -1719,10 +1675,7 @@ def actionable_inventory(
     rows += _accepted_rows(protection)
     _mark_unasked(sections, unchecked)
     _widen_collisions(rows)
-    rows.sort(key=lambda row: (
-        row["rank"],
-        row["age_days"] if BY_CHECK[row["check"]].newest_first else -row["age_days"],
-        row["id"]))
+    rows.sort(key=lambda row: (row["rank"], -row["age_days"], row["id"]))
     return Inventory(rows, unchecked)
 
 
@@ -2911,294 +2864,6 @@ def _pull_rows(
     return rows
 
 
-def _review_rows(
-    root: pathlib.Path, pulls: dict[str, Any], unchecked: dict[str, str]
-) -> list[dict[str, Any]]:
-    """Open pull requests carrying a review finding nobody has answered.
-
-    The class this repository learned the hard way. Twelve pull requests merged
-    on green CI in one session with an automated review on every one of them;
-    the reviews were opened afterwards, and the unread comments held real
-    defects, three of which reached the default branch. A review that runs and
-    is never read produces exactly the signal a review that found nothing
-    produces, and nothing in the report told those two apart.
-
-    An adapter and not a producer, the same way `_pull_rows` is one. Which
-    findings a pull request carries was decided by `sd-pr-state.describe`,
-    which reads both places a reviewer states one; whether a finding has been
-    answered is decided by `sd-review-ack`, which owns the acknowledgement
-    record and the rule that a cited fix must have actually landed. Nothing
-    here holds a second opinion about either, and no call here touches the
-    network -- `actionable_inventory` reads `sections`, local git and the
-    filesystem, and that is the whole of it.
-
-    A pull request whose inline comments could not be read gets no row and
-    marks the class `unchecked`: a partial count presented as a count is the
-    failure this class is about. The others keep their rows, since `pending`
-    and `next` read rows alone (sd:631), and the reason names every such pull
-    request, not the first (sd:761). A broken acknowledgement store is also
-    `unchecked`, yet every finding still gets its row, and the row says to
-    repair the store first, since `--ack` refuses one it cannot read. `setdefault`,
-    so this sentence survives `_mark_unasked`'s generic one.
-    """
-    listed = [(pull, None, "") for pull in pulls.get("pull_requests") or []]
-    return _unanswered_rows("pr-review-unacknowledged", root, pulls.get("repo"), listed, unchecked)
-
-
-def _unanswered_rows(
-    check: str, root: pathlib.Path, slug: str | None,
-    listed: Sequence[tuple[dict[str, Any], dict[str, str] | None, str]],
-    unchecked: dict[str, str], reasons: list[str] | None = None,
-) -> list[dict[str, Any]]:
-    """`_review_rows`'s rule, for any list of `(pull, merge evidence, detail tail)`.
-
-    One body for both review classes, so the open class and the merged class
-    cannot come to disagree about what unreadable, broken or answered means.
-    `reasons` are the caller's own sentences, kept after the store's.
-
-    No rows when the record's hub does not answer: every finding would read
-    unread there, and a row would call an answered finding unanswered (sd:2750).
-    """
-    ack = sd_lib.sibling("sd_review_ack", "sd-review-ack")
-    held = ack.read_store(root)
-    unknown = ack.store_unreachable(root)
-    if unknown:
-        unchecked.setdefault(check, "; ".join([f"review acknowledgements {unknown}", *(reasons or [])]))
-        return []
-    return _read_unanswered_rows(ack, check, root, slug, listed, unchecked, reasons, held)
-
-
-def _read_unanswered_rows(
-    ack: Any, check: str, root: pathlib.Path, slug: str | None,
-    listed: Sequence[tuple[dict[str, Any], dict[str, str] | None, str]],
-    unchecked: dict[str, str], reasons: list[str] | None,
-    held: tuple[dict[str, dict], str],
-) -> list[dict[str, Any]]:
-    """`_unanswered_rows` with the record reachable, read once as `held`."""
-    record, broken = held
-    reasons, blind = ([broken] if broken else []) + (reasons or []), []
-    ref = ack.landing_ref(root)
-    rows: list[dict[str, Any]] = []
-    for pull, merge, tail in listed:
-        stated = pull.get("review_findings") or {}
-        if stated.get("unreadable"):
-            blind.append((int(pull["number"]), stated["unreadable"]))
-            continue
-        found = list(stated.get("ids") or [])
-        standing = ack.unacknowledged(root, found, ref, stated.get("stated") or {}, merge, record)
-        if not standing:
-            continue
-        # A reviewer that writes `(3 votes each)` has stated more than one
-        # finding under one marker and has not said where they split, so the
-        # count is a floor rather than a total. `sd-review-ack` decides which
-        # rows those are and phrases the hedge; this asks it, so the report and
-        # the tool cannot disagree about the same pull request.
-        many = set(stated.get("indeterminate") or ())
-        rows.append(_row(
-            check, f"{slug or '?'}!{pull['number']}",
-            f"#{pull['number']} {pull['title']}",
-            f"{ack.at_least_ids(standing, many)} of {ack.at_least_ids(found, many)}"
-            f" review finding(s) unanswered{tail}",
-            f"read them with `sd-review-ack --pr {pull['number']}`, then " + (
-                "repair or move the acknowledgement store first; --ack refuses while it is"
-                " unreadable" if broken else "acknowledge each with --fixed SHA or --dismiss 'why'"),
-            int(pull.get("age_days") or 0),
-        ))
-    if blind:
-        blind.sort(key=lambda pair: pair[0])
-        more = f" and {len(blind) - 5} more" if len(blind) > 5 else ""
-        cause = blind[0][1] + ("" if len({c for _, c in blind}) == 1 else ", among others")
-        reasons.append(f"the inline comments on {', '.join(f'#{n}' for n, _ in blind[:5])}{more} "
-                       f"could not be read ({cause})")
-    # Asked after the loop, because the library is only reached while the
-    # verdicts are computed. `sd_review_ack.library_problem` says why an
-    # interpreter with no `sd_db` is a condition of its own rather than a
-    # verdict about a finding: read from a checkout with no `.venv`, every
-    # carried finding reads `carry-unreadable` and the counts above are an
-    # infrastructure failure wearing a content verdict's clothes (sd:1019).
-    # It goes where `unreadable-concern-row` goes -- beside the rows, saying
-    # this reader could not classify them -- not into them.
-    absent = ack.library_problem()
-    if absent:
-        reasons.append(f"carried findings could not be resolved ({absent}), so any "
-                       "`carried` acknowledgement above reads unanswered on this "
-                       "checkout rather than on its merits; run `make setup`")
-    if reasons:
-        unchecked.setdefault(check, "; ".join(reasons))
-    return rows
-
-
-def _merged_on(pull: dict[str, Any]) -> datetime.date | None:
-    """The UTC calendar day GitHub says a pull request merged, or None."""
-    try:
-        return datetime.datetime.fromisoformat(
-            str(pull.get("merged_at") or "").replace("Z", "+00:00")).date()
-    except ValueError:
-        return None
-
-
-def _merged_review_rows(
-    root: pathlib.Path, merged: dict[str, Any], day: datetime.date,
-    unchecked: dict[str, str],
-) -> list[dict[str, Any]]:
-    """Merged pull requests, inside the window, carrying a finding nobody answered.
-
-    `pr-review-unacknowledged` reads open pull requests, so its row goes the
-    moment one merges, answered or not. PR #896 merged with seven of seven
-    findings unread and surfaced nowhere (sd:631, note 1355). This class keeps
-    such a pull request in the report for `MERGED_REVIEW_DAYS` after its merge,
-    counted from `day` so a test pins the boundary without the wall clock.
-
-    Not abnormal and ranked below 35, the owner's decision. Rank 65, newest
-    merge first and at most `MERGED_PENDING_CAP` rows in `pending`, so these
-    rows cannot crowd `pending` or take `next` from an open pull request
-    (review-925 N-4). `day` is local and the merge day is UTC, so the edge
-    can move by the local offset. The unreadable rule is the open class's, through
-    the same body: a merged pull request whose comments could not be read gets
-    no row and marks this class `unchecked`, and every other pull request
-    keeps its row. A pull request with no readable merge date is skipped the
-    same way, and a list that stopped at its limit marks the class too.
-
-    The merge evidence is the head GitHub merged and the commit it merged as,
-    so a `fixed <branch commit>` that landed through a squash reads answered.
-    """
-    reasons: list[str] = []
-    if merged.get("truncated"):
-        reasons.append(f"the merged list stopped at its limit of {merged.get('limit')}, "
-                       "so some pull requests in the window were not read")
-    listed, undated = _merged_window(merged, day)
-    if undated:
-        reasons.append(f"GitHub gave no merge date for {', '.join(undated)}")
-    return _unanswered_rows(MERGED_CHECK, root, merged.get("repo"), listed, unchecked, reasons)
-
-
-def _merged_window(
-    merged: dict[str, Any], day: datetime.date,
-) -> tuple[list[tuple[dict[str, Any], dict[str, str], str]], list[str]]:
-    """The pull requests merged in the window ending `day`, as `_unanswered_rows` lists them, and the undated."""
-    listed, undated = [], []
-    for pull in merged.get("pull_requests") or []:
-        when = _merged_on(pull)
-        if when is None:
-            undated.append(f"#{pull.get('number')}")
-            continue
-        age = max((day - when).days, 0)
-        if age > MERGED_REVIEW_DAYS:
-            continue
-        merge = {"head": str(pull.get("head_oid") or ""), "merge": str(pull.get("merge_oid") or "")}
-        listed.append((dict(pull, age_days=age), merge, f", merged {age} day{_s(age)} ago"))
-    return listed, undated
-
-
-def merged_review_change(root: pathlib.Path, merged: dict[str, Any], day: datetime.date,
-                         now: datetime.datetime, inventory: "Inventory") -> dict[str, Any]:
-    """The merged class's row count and its change since yesterday (sd:1179).
-
-    Unbounded and report-only, the class grew to 219 rows unnoticed; the
-    operator's ruling (2026-09-30) is a count plus a change warning, with no
-    ceiling and nothing that blocks. Stateless, as `late_reviews` is: this
-    tool writes nothing, so it cannot say "since the last run", which needs a
-    stored count. Yesterday's count is derived from timestamps instead. It
-    shifts the window back a day and leaves out acknowledgements recorded in
-    the 24 hours before `now`. A review posted within the day still counts a
-    day earlier, so the change can understate an increase. An unchecked
-    class gets no change, its count being a floor; nor does an earlier
-    window that could not be read whole.
-    """
-    count = sum(1 for row in inventory.rows if row["check"] == MERGED_CHECK)
-    if MERGED_CHECK in inventory.unchecked:
-        return {"count": count, "day_before": None, "change": None,
-                "unchecked": inventory.unchecked[MERGED_CHECK]}
-    ack = sd_lib.sibling("sd_review_ack", "sd-review-ack")
-    record, broken = ack.read_store(root)
-    cutoff = now - datetime.timedelta(days=1)
-    earlier = {key: row for key, row in record.items() if not _recorded_after(row, cutoff)}
-    before = day - datetime.timedelta(days=1)
-    pulls = [pull for pull in merged.get("pull_requests") or [] if (_merged_on(pull) or day) <= before]
-    listed, _ = _merged_window({"pull_requests": pulls}, before)
-    missed: dict[str, str] = {}
-    then = len(_read_unanswered_rows(ack, MERGED_CHECK, root, merged.get("repo"), listed, missed, None,
-                                     (earlier, broken)))
-    if missed:  # a pull request only the earlier window holds could not be read
-        return {"count": count, "day_before": None, "change": None,
-                "unchecked": f"yesterday's window: {missed[MERGED_CHECK]}"}
-    return {"count": count, "day_before": then, "change": count - then, "unchecked": ""}
-
-
-def _recorded_after(row: dict[str, Any], cutoff: datetime.datetime) -> bool:
-    """Whether an acknowledgement's `at` is later than `cutoff`; one with no readable `at` is older."""
-    try:
-        return datetime.datetime.fromisoformat(str(row.get("at") or "")) > cutoff
-    except (TypeError, ValueError):
-        return False
-
-
-def expired_reviews(root: pathlib.Path, merged: dict[str, Any], day: datetime.date) -> dict[str, Any]:
-    """The findings nobody answered on pull requests that left the window, counted.
-
-    `merged-pr-review-unacknowledged` drops a pull request on day fifteen,
-    answered or not, so its findings stopped reading as anything: expiry looked
-    like resolution (sd:998). This counts each unanswered finding on a pull
-    request merged `MERGED_REVIEW_DAYS + 1` to `MERGED_REVIEW_DAYS +
-    MERGED_AGED_DAYS` days before `day`.
-    """
-    return _unread_between(root, merged, day, MERGED_REVIEW_DAYS + 1, MERGED_REVIEW_DAYS + MERGED_AGED_DAYS)
-
-
-def late_reviews(root: pathlib.Path, merged: dict[str, Any], day: datetime.date) -> dict[str, Any]:
-    """The unread findings on pull requests merged inside the window, counted (sd:1178).
-
-    A review posted after the merge reaches no merge gate, and the window's
-    rows are capped in `pending`, so nothing totalled them. Stateless by the
-    operator's ruling (2026-10-03, go D): `sd-review-ack` clears a finding
-    here as it clears its row.
-    """
-    return _unread_between(root, merged, day, 0, MERGED_REVIEW_DAYS)
-
-
-def _unread_between(root: pathlib.Path, merged: dict[str, Any], day: datetime.date,
-                    first: int, last: int) -> dict[str, Any]:
-    """Unanswered findings on pull requests merged `first` to `last` days before `day`.
-
-    The verdict is the window rows'. A read that failed or stopped at its
-    limit is named in `unchecked`, so a short count is never read as a
-    complete one. Unreadable pull requests are counted with the first reason,
-    not listed: under a `gh` timeout every one of them fails the same way.
-    """
-    findings, numbers, reasons, unreadable = 0, [], [], []
-    if not merged.get("available", True):
-        reasons.append(str(merged.get("reason") or "the merged pull requests could not be read"))
-        return {"days": [first, last], "findings": 0, "pull_requests": [], "unchecked": reasons[0]}
-    if merged.get("truncated"):
-        reasons.append(f"the merged list stopped at its limit of {merged.get('limit')}")
-    ack = sd_lib.sibling("sd_review_ack", "sd-review-ack")
-    record, broken = ack.read_store(root)
-    unknown = ack.store_unreachable(root)
-    if unknown:  # a count, not a zero: `findings` is None (sd:2750)
-        return {"days": [first, last], "findings": None, "pull_requests": [],
-                "unchecked": f"review acknowledgements {unknown}"}
-    if broken:
-        reasons.append(broken)
-    ref = ack.landing_ref(root)
-    for pull in merged.get("pull_requests") or []:
-        when = _merged_on(pull)
-        if when is None or not first <= (day - when).days <= last:
-            continue
-        stated = pull.get("review_findings") or {}
-        if stated.get("unreadable"):
-            unreadable.append(f"#{pull.get('number')}: {stated['unreadable']}")
-            continue
-        merge = {"head": str(pull.get("head_oid") or ""), "merge": str(pull.get("merge_oid") or "")}
-        standing = ack.unacknowledged(root, list(stated.get("ids") or []), ref,
-                                      stated.get("stated") or {}, merge, record)
-        if standing:
-            findings += len(standing)
-            numbers.append(pull.get("number"))
-    if unreadable:
-        reasons.append(f"{len(unreadable)} pull request(s) unreadable, first {unreadable[0]}")
-    return {"days": [first, last], "findings": findings, "pull_requests": numbers, "unchecked": "; ".join(reasons)}
-
-
 def _protection_rows(protection: dict[str, Any]) -> list[dict[str, Any]]:
     """Each open enforcement gap, as `_protection_gaps` already found it.
 
@@ -3638,17 +3303,6 @@ def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str
         "pack": pack_banner(),
         "work": work_section(root),
         "pull_requests": pulls,
-        # One day wider than the window: GitHub's `merged:` dates are UTC and
-        # `today` is local, so the producer cuts the exact edge, not the query.
-        "merged_pull_requests": pr_state.collect_merged(root, gh, (
-            datetime.date.today() - datetime.timedelta(days=MERGED_REVIEW_DAYS + 1)).isoformat()),
-        # Its own read, so a busy fortnight past the window cannot truncate the
-        # window's list; a day wider at each end for the same UTC reason.
-        "expired_reviews": expired_reviews(root, pr_state.collect_merged(
-            root, gh,
-            (datetime.date.today() - datetime.timedelta(days=MERGED_REVIEW_DAYS + MERGED_AGED_DAYS + 1)).isoformat(),
-            until=(datetime.date.today() - datetime.timedelta(days=MERGED_REVIEW_DAYS)).isoformat(),
-        ), datetime.date.today()),
         "setup": setup_section(root),
         "protection": protection_section(root, gh),
         "handoff": handoff_section(root, environ),
@@ -3658,16 +3312,12 @@ def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str
         "jira": jira_section(),
         "contributions": contributions_section(root),
     }
-    result["late_reviews"] = late_reviews(root, result["merged_pull_requests"], datetime.date.today())
     inventory = actionable_inventory(root, result, environ=environ)
-    result["merged_review_count"] = merged_review_change(
-        root, result["merged_pull_requests"], datetime.date.today(),
-        datetime.datetime.now(datetime.timezone.utc), inventory)
     result["inventory"] = {"rows": inventory.rows, "unchecked": inventory.unchecked}
     result["abnormalities"] = banner(inventory)
-    # `actions` is the uncapped list and `pending` is the first ten of it after
-    # each class's `pending_cap` (`pending_rows`), so a consumer that wants a
-    # row `pending` leaves out has it without re-deriving anything.
+    # `actions` is the uncapped list and `pending` is the first ten of it, so a
+    # consumer that wants a row `pending` leaves out has it without
+    # re-deriving anything.
     # `next` is an object rather than a string because a caller that acts on
     # the suggestion needs the id it belongs to in the same breath.
     result["actions"] = inventory.rows
@@ -3857,64 +3507,11 @@ def _render_pending(rows: list[dict[str, Any]], write: Any) -> None:
     if not rows:
         write("  nothing pending\n")
         return
-    shown, held = pending_rows(rows)
+    shown = rows[:PENDING_LIMIT]
     write(f"  {len(shown)} of {len(rows)}, by rank\n")
     for row in shown:
         write(f"  {row['id']}  {row['check']:<{CHECK_WIDTH}} {row['title']}\n")
-    totals: dict[str, int] = {}
-    for row in rows:
-        totals[row["check"]] = totals.get(row["check"], 0) + 1
-    for check, count in held.items():
-        write(_held_back_line(check, count, totals[check]))
     _widened_note(rows, write)
-
-
-def _held_back_line(check: str, held: int, total: int) -> str:
-    """Why `held` of the class's `total` rows are not in `pending`.
-
-    The count is every row of the class the list does not show, the reading
-    `pending_rows` settled, and the line used to name the cap for all of them.
-    That misread the ordinary case: one row of a class capped at three, crowded
-    out by ten higher-ranked rows, read as "(its cap is 3)" when the cap had no
-    part in it, while a displaced row of an uncapped class got no line at all.
-    `past` is what the cap alone removes -- those rows stay out however short
-    the list above them is -- and the rest lost their slot to higher rank,
-    which a quieter day gives back.
-    """
-
-    cap = BY_CHECK[check].pending_cap
-    past = max(0, total - cap)
-    ranked = held - past
-    crowded = f"ranked below the first {PENDING_LIMIT}"
-    if not ranked:
-        cause = f", past its cap of {cap}"
-    elif not past:
-        cause = f", {crowded}"
-    else:
-        cause = f": {past} past its cap of {cap}, {ranked} {crowded}"
-    return (f"  {held} {check} row{'' if held == 1 else 's'} not shown"
-            f"{cause}, in --actions\n")
-
-
-def pending_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    """The first `PENDING_LIMIT` rows, no class past its `pending_cap`.
-
-    Also returns how many rows of each capped class the list does not show, so
-    it can say so rather than elide in silence. That is the class's rows minus
-    the ones shown, not the rows past the cap: when higher classes fill the
-    list, none of the class shows and every row of it is missing. A row past
-    the cap frees its slot for the next class down, which is the point of the cap.
-    """
-    shown: list[dict[str, Any]] = []
-    seen: dict[str, int] = {}
-    for row in rows:
-        cap = BY_CHECK[row["check"]].pending_cap
-        seen[row["check"]] = seen.get(row["check"], 0) + 1
-        if len(shown) < PENDING_LIMIT and not (cap and seen[row["check"]] > cap):
-            shown.append(row)
-    held = {check: count - sum(1 for row in shown if row["check"] == check)
-            for check, count in seen.items() if BY_CHECK[check].pending_cap}
-    return shown, {check: count for check, count in held.items() if count}
 
 
 def _render_next(rows: list[dict[str, Any]], write: Any) -> None:
@@ -3932,9 +3529,7 @@ def _render_next(rows: list[dict[str, Any]], write: Any) -> None:
     write(f"  {top['id']}  {top['suggest']}\n")
 
 
-def _render_threads(rows: list[dict[str, Any]], write: Any,
-                    expired: dict[str, Any] | None = None, late: dict[str, Any] | None = None,
-                    change: dict[str, Any] | None = None) -> None:
+def _render_threads(rows: list[dict[str, Any]], write: Any) -> None:
     """Per-source counts over the same list, and what was not swept.
 
     The counts give `pending`'s cap a denominator per source. The exclusions
@@ -3953,38 +3548,6 @@ def _render_threads(rows: list[dict[str, Any]], write: Any,
     write("  not swept, and named so the counts above are not read as total:\n")
     for reason in EXCLUDED:
         write(f"    - {reason}\n")
-    if change:
-        _render_change(change, write)
-    if late:
-        _render_unread("late", late, f"merged in the last {late['days'][1]} days are unread", write)
-    if expired:
-        first, last = expired["days"]
-        _render_unread("expired", expired, f"merged {first}-{last} days ago expired unanswered", write)
-
-
-def _render_change(counted: dict[str, Any], write: Any) -> None:
-    """The merged class's count and its change since yesterday (sd:1179)."""
-    if counted["change"] is None:
-        write(f"  {MERGED_CHECK}: at least {counted['count']} row(s), change since yesterday unknown ({counted['unchecked']})\n")
-        return
-    moved = counted["change"]
-    said = ("unchanged since yesterday" if not moved
-            else f"{'up' if moved > 0 else 'down'} {abs(moved)} since yesterday ({counted['day_before']} then)")
-    write(f"  {MERGED_CHECK}: {counted['count']} row(s), {said}\n")
-
-
-def _render_unread(label: str, counted: dict[str, Any], said: str, write: Any) -> None:
-    """One `late:` or `expired:` line: the count, the first pull requests, the hedge."""
-    if counted["findings"] is None:
-        write(f"  {label}: {counted['unchecked']}\n")
-        return
-    pulls = counted["pull_requests"]
-    line = f"{counted['findings']} review finding(s) on {len(pulls)} pull request(s) {said}"
-    if pulls:
-        line += f": {', '.join(f'#{n}' for n in pulls[:5])}" + (f" and {len(pulls) - 5} more" if len(pulls) > 5 else "")
-    if counted.get("unchecked"):
-        line += f" (at least; {counted['unchecked']})"
-    write(f"  {label}: {line}\n")
 
 
 def render(result: dict[str, Any], stream: TextIO) -> None:
@@ -3994,8 +3557,7 @@ def render(result: dict[str, Any], stream: TextIO) -> None:
     _render_banner(result["abnormalities"], write)
     _render_pending(rows, write)
     _render_next(rows, write)
-    _render_threads(rows, write, result.get("expired_reviews"), result.get("late_reviews"),
-                    result.get("merged_review_count"))
+    _render_threads(rows, write)
     _render_work(result["work"], write)
     _render_contributions(result.get("contributions"), write)
 
