@@ -512,14 +512,17 @@ installs `sd_db` at the `platypeeps/system` ref in `.sd-system-rev`.
 `sd-ship prepare` checks the public pull request body against the privacy patterns with `sd-docs-lint --body-only`.
 WORKFLOW.md "No-CI mode" describes the gate.
 
-`main` carries classic branch protection: pull requests with no required
-approvals, the strict `sd/local-gate` check, and enforce_admins.
+`main` is protected by a repository ruleset named `main`, which targets the default
+branch and has no bypass actors. Its rules block deletion and non-fast-forward
+pushes, require a pull request with no required approvals, and require the strict
+`sd/local-gate` status check.
 `.github/sd-status.json` accepts one gap, `reviews`: the approval count is 0
 because the sole maintainer cannot approve their own pull request. `sd-ship merge`
 reads the protection object before it reads the pull request's checks and
 refuses a missing or weaker one (`bin/sd_ship_remote.py`, `gate()`). The
 object is the classic one or, when classic answers 404, the branch's active
-rulesets reduced to the same shape (`bin/sd_protection.py`). An `unprotected`
+rulesets reduced to the same shape (`bin/sd_protection.py`); this repository
+answers with the ruleset. An `unprotected`
 entry in that file is the documented way to accept a branch without
 protection; `WORKFLOW.md` describes how the merge gate honours it.
 
