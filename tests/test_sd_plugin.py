@@ -668,6 +668,97 @@ class IssuesAndVendorTests(PluginFixture):
         self.assert_refused(root, "inside the plugin")
 
 
+# `WELL_FORMED_KIND`'s ladder is inbox, approved, declined and published: its
+# `initial-status` plus every word its `transitions` name.
+WORKFLOW_STATUS = {"inbox": "planning", "approved": "ready",
+                   "declined": "done", "published": "done"}
+STORE = {"driver": "vault", "root": "$OBSIDIAN_VAULT", "bases": {"tip": "Tips"}}
+
+
+class WorkflowTests(PluginFixture):
+    """`workflow`: the kinds a plugin wants imported as rows (sd:1425, sd:1098).
+
+    Every refusal must name its fault. Before the block existed, any `workflow`
+    refused as outside the vocabulary, so a case asserting only exit 1 would
+    pass against the code it is meant to change.
+    """
+
+    def declared(self, workflow: object, *, store: object = STORE,
+                 kind: dict[str, object] | None = None) -> pathlib.Path:
+        body = dict(WELL_FORMED_KIND, fields=["status", "score", "my-rating", "due"])
+        manifest: dict[str, object] = {"workflow": workflow}
+        if store is not None:
+            manifest["store"] = store
+        return self.kinded(kind=body if kind is None else kind, **manifest)
+
+    def assert_refused(self, root: pathlib.Path, because: str) -> None:
+        result = self.run_sd("plugin", "add", str(root))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(because, result.stderr)
+
+    def test_a_declaration_registers_and_lists(self) -> None:
+        workflow = {"tip": {"status": WORKFLOW_STATUS, "due-field": "due"}}
+        added = self.run_sd("plugin", "add", str(self.declared(workflow)))
+        self.assertEqual(added.returncode, 0, added.stderr)
+        listed = self.run_sd("plugin", "list", "--json")
+        self.assertEqual(json.loads(listed.stdout)[0]["workflow"], workflow)
+        self.assertIn("workflow: tip", self.run_sd("plugin", "list").stdout)
+
+    def test_a_kind_with_no_transitions_maps_its_initial_status(self) -> None:
+        kind = {"fields": ["status"], "initial-status": "open"}
+        root = self.declared({"tip": {"status": {"open": "planning"}}}, kind=kind)
+        added = self.run_sd("plugin", "add", str(root))
+        self.assertEqual(added.returncode, 0, added.stderr)
+
+    def test_a_kind_that_is_not_declared_refuses(self) -> None:
+        workflow = {"tip": {"status": WORKFLOW_STATUS}, "topic": {"status": {"a": "done"}}}
+        self.assert_refused(self.declared(workflow), "names 'topic', which is not a declared kind")
+
+    def test_a_kind_with_no_base_refuses(self) -> None:
+        root = self.declared({"tip": {"status": WORKFLOW_STATUS}}, store=None)
+        self.assert_refused(root, "`workflow['tip']` has no `store.bases` entry")
+
+    def test_a_ladder_word_with_no_status_refuses(self) -> None:
+        status = {k: v for k, v in WORKFLOW_STATUS.items() if k != "published"}
+        self.assert_refused(self.declared({"tip": {"status": status}}),
+                            "maps no status for ladder word(s): published")
+
+    def test_a_word_the_ladder_cannot_hold_refuses(self) -> None:
+        status = dict(WORKFLOW_STATUS, drafting="in_progress")
+        self.assert_refused(self.declared({"tip": {"status": status}}),
+                            "maps 'drafting', which the kind's ladder cannot hold")
+
+    def test_a_status_outside_the_six_refuses(self) -> None:
+        status = dict(WORKFLOW_STATUS, published="shipped")
+        self.assert_refused(self.declared({"tip": {"status": status}}),
+                            "`workflow['tip'].status` maps 'published' to 'shipped', not one of")
+
+    def test_a_due_field_the_kind_does_not_have_refuses(self) -> None:
+        workflow = {"tip": {"status": WORKFLOW_STATUS, "due-field": "deadline"}}
+        self.assert_refused(self.declared(workflow),
+                            "due-field` is 'deadline', which is not one of the kind's `fields`")
+
+    def test_an_unknown_key_refuses(self) -> None:
+        workflow = {"tip": {"status": WORKFLOW_STATUS, "due_field": "due"}}
+        self.assert_refused(self.declared(workflow), "`workflow['tip']` carries unknown key(s): due_field")
+
+    def test_an_empty_block_or_status_refuses(self) -> None:
+        self.assert_refused(self.declared({}), "`workflow` is not a non-empty object")
+        self.assert_refused(self.declared({"tip": {"status": {}}}),
+                            "`workflow['tip'].status` is not a non-empty object")
+        self.assert_refused(self.declared({"tip": {}}), "`workflow['tip'].status` is not a non-empty object")
+
+    def test_a_declaration_that_goes_bad_after_registration_is_reported(self) -> None:
+        root = self.declared({"tip": {"status": WORKFLOW_STATUS}})
+        self.assertEqual(self.run_sd("plugin", "add", str(root)).returncode, 0)
+        manifest = json.loads((root / "sd-plugin.json").read_text(encoding="utf-8"))
+        manifest["workflow"]["tip"]["status"]["published"] = "shipped"
+        (root / "sd-plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
+        entry = json.loads(self.run_sd("plugin", "list", "--json").stdout)[0]
+        self.assertNotIn("workflow", entry)
+        self.assertIn("'shipped', not one of", entry["manifestError"])
+
+
 class LockTests(PluginFixture):
     def test_lock_writes_a_pin_for_the_manifest_and_each_vendor_entry(self) -> None:
         root = self.kinded(vendor={"up": {"source": "o/up", "path": "vendor"}})

@@ -187,9 +187,11 @@ def read_manifest(path: pathlib.Path) -> dict[str, object]:
 #: Every key `sd` reads out of a manifest. Each one is a `manifest.get()` call
 #: site in this file, and `validate_manifest_keys` is what keeps the two lists
 #: the same: a key added to one without the other either refuses a manifest
-#: that works or accepts one nothing reads.
+#: that works or accepts one nothing reads. `workflow` is the ninth, by the
+#: decision recorded on sd:1425.
 MANIFEST_KEYS = frozenset(
-    {"prefix", "interface", "kinds", "store", "config", "issues", "dashboard", "vendor"}
+    {"prefix", "interface", "kinds", "store", "config", "issues", "dashboard", "vendor",
+     "workflow"}
 )
 
 
@@ -215,7 +217,7 @@ def validate_manifest_keys(manifest: dict[str, object]) -> None:
     if unknown:
         raise Refusal(
             f"manifest carries key(s) outside the closed vocabulary: "
-            f"{', '.join(unknown)} (the eight are {', '.join(sorted(MANIFEST_KEYS))})"
+            f"{', '.join(unknown)} (the vocabulary is {', '.join(sorted(MANIFEST_KEYS))})"
         )
 
 
@@ -768,6 +770,80 @@ def validate_store(manifest: dict[str, object], kinds: dict[str, object]) -> dic
     return {"driver": driver, "root": root, "bases": checked}
 
 
+def validate_workflow_status(value: object, kind: dict[str, object], what: str) -> dict[str, str]:
+    """`workflow.<kind>.status`: every ladder word mapped to one of `ROW_STATUSES`.
+
+    The ladder is `initial-status` plus every word `transitions` names, the
+    same set `validate_transitions` returns. Coverage is checked both ways, as
+    `store.bases` is: a word the map misses is a note the import refuses, and a
+    word the ladder cannot hold is a mapping nothing ever reads.
+    """
+
+    if not isinstance(value, dict) or not value:
+        raise Refusal(f"{what} is not a non-empty object")
+    initial = kind["initial-status"]
+    transitions = kind.get("transitions", {})
+    assert isinstance(initial, str) and isinstance(transitions, dict)  # validate_kind checks both
+    ladder: set[str] = {initial}
+    for source, targets in transitions.items():
+        assert isinstance(targets, list)  # validate_transitions checks it
+        ladder.update([source, *targets])
+    missing = sorted(ladder - set(value))
+    if missing:
+        raise Refusal(f"{what} maps no status for ladder word(s): {', '.join(missing)}")
+    for word, status in value.items():
+        if word not in ladder:
+            raise Refusal(f"{what} maps {word!r}, which the kind's ladder cannot hold")
+        if status not in sd_lib.ROW_STATUSES:
+            raise Refusal(f"{what} maps {word!r} to {status!r}, not one of {', '.join(sd_lib.ROW_STATUSES)}")
+    return dict(value)
+
+
+def validate_workflow(manifest: dict[str, object], kinds: dict[str, object],
+                      store: dict[str, object] | None) -> dict[str, dict[str, object]]:
+    """`workflow`: the kinds the vault importer turns into rows (sd:1098).
+
+    A top-level block rather than a ninth `kinds.*` key, for the reason
+    `store` is one: whether a kind becomes a row is a fact about the
+    backbone's database, not about the note. Each kind needs a `store.bases`
+    entry, because the importer reads the base, and may name the field that
+    holds its due date.
+    """
+
+    workflow = manifest.get("workflow")
+    if workflow is None:
+        return {}
+    if not isinstance(workflow, dict) or not workflow:
+        raise Refusal("`workflow` is not a non-empty object")
+    bases = store["bases"] if store is not None else {}
+    assert isinstance(bases, dict)  # validate_store builds it; narrows for the type checker
+    checked: dict[str, dict[str, object]] = {}
+    for name, entry in workflow.items():
+        what = f"`workflow[{name!r}]`"
+        if name not in kinds:
+            raise Refusal(f"`workflow` names {name!r}, which is not a declared kind")
+        if name not in bases:
+            raise Refusal(f"{what} has no `store.bases` entry, so the importer has nothing to read")
+        if not isinstance(entry, dict):
+            raise Refusal(f"{what} is not an object")
+        unknown = sorted(set(entry) - {"status", "due-field"})
+        if unknown:
+            raise Refusal(f"{what} carries unknown key(s): {', '.join(unknown)}")
+        kind = kinds[name]
+        assert isinstance(kind, dict)  # validate_kinds builds it
+        status = validate_workflow_status(entry.get("status"), kind, f"`workflow[{name!r}].status`")
+        checked[name] = {"status": status}
+        if "due-field" in entry:
+            due = entry["due-field"]
+            fields = kind["fields"]
+            assert isinstance(fields, list)  # validate_kind builds it
+            if due not in fields:
+                raise Refusal(f"`workflow[{name!r}].due-field` is {due!r}, "
+                              f"which is not one of the kind's `fields`")
+            checked[name]["due-field"] = due
+    return checked
+
+
 def registry(config: dict[str, object]) -> list[str]:
     """The registered plugin roots. A config without plugins simply lacks it."""
 
@@ -916,7 +992,8 @@ def add(args: argparse.Namespace) -> int:
     validate_config(manifest)
     validate_issues(manifest)
     validate_vendor(manifest, manifest_path.parent)
-    validate_store(manifest, kinds)
+    store = validate_store(manifest, kinds)
+    validate_workflow(manifest, kinds, store)
 
     config["plugins"] = sorted({*roots, plugin_root})
     write_config(config, config_path)
@@ -957,6 +1034,7 @@ def describe(root: str) -> dict[str, object]:
         issues = validate_issues(manifest)
         vendor = validate_vendor(manifest, pathlib.Path(root))
         store = validate_store(manifest, kinds)
+        workflow = validate_workflow(manifest, kinds, store)
     except Refusal as refusal:
         # Same treatment as `dashboardError` and for the same reason: a
         # manifest that has gone bad since registration is a store that
@@ -973,6 +1051,8 @@ def describe(root: str) -> dict[str, object]:
         entry["vendor"] = sorted(vendor)
     if store is not None:
         entry["store"] = store
+    if workflow:
+        entry["workflow"] = workflow
     return entry
 
 
@@ -1047,6 +1127,9 @@ def plugin_list(args: argparse.Namespace) -> int:
         store = entry.get("store")
         if isinstance(store, dict):
             suffix += f"  store: {store['driver']} at {store['root']}"
+        workflow = entry.get("workflow")
+        if isinstance(workflow, dict):
+            suffix += f"  workflow: {', '.join(sorted(workflow))}"
         print(f"{entry.get('prefix', '?')}  {entry['root']}{suffix}")
     return 0
 

@@ -45,15 +45,13 @@ Two consequences worth knowing before you go looking for a re-register verb:
 
 `sd-plugin.json`, at the root of the checkout. Each block below has a closed
 vocabulary — R11-D14 — enforced in one reader: a key inside `kinds`, `config`,
-`store`, `issues` or `vendor` that its table does not name refuses by name.
+`store`, `issues`, `vendor` or `workflow` that its table does not name refuses by name.
 
-**The top level itself is unchecked, and that is the trap.** `add` runs one
-validator per block it knows, and a block it does not know is never read. Spell
-`config` as `configg` and registration succeeds while `validate_config` returns
-`{}`: the manifest declares nothing, and the first sign is a skill refusing a
-setting months later. Registration proves a manifest parses. It does not prove
-your block arrived. Read it back with `sd plugin list --json`, or run the
-command your skills run — `sd config get <prefix>.<key>`.
+The top level is closed too. `validate_manifest_keys` refuses a key outside
+`MANIFEST_KEYS`, so `configg` for `config` refuses by name. Registration still
+proves only that each block is well formed, not that it holds what your skills
+need. Read it back with `sd plugin list --json`, or run the command your skills
+run — `sd config get <prefix>.<key>`.
 
 | Key | Required | What it buys | Validator |
 |---|---|---|---|
@@ -65,6 +63,7 @@ command your skills run — `sd config get <prefix>.<key>`.
 | `issues` | no | `repo`, as `owner/name`, so a reader of `sd plugin list` need not guess | `validate_issues` |
 | `dashboard` | no | a `tile` plus its `tabs`, and `actions` the dashboard may offer | `validate_dashboard`, `validate_actions` |
 | `vendor` | no | upstream content this checkout carries a copy of, named and hashed | `validate_vendor` |
+| `workflow` | no | the kinds the vault importer turns into rows, each ladder word mapped to a row status | `validate_workflow` |
 
 All validators are in `bin/sd`. An empty block is refused rather than treated as
 absent — `"kinds": {}` is a block somebody meant to fill.
@@ -130,6 +129,20 @@ name and never the value. What it cannot express is a rule spanning two keys —
 `sdw`'s "the publishing folder and the writing folder must differ" is business
 logic and stays with the plugin.
 
+### `workflow`
+
+```json
+"workflow": {"tip": {"status": {"inbox": "planning", "published": "done"},
+                     "due-field": "due"}}
+```
+
+Each key is a declared kind with a `store.bases` entry. `status` is required and
+maps every word the kind's ladder can hold — `initial-status`, every
+`transitions` key and every target — to one of the row statuses in
+`ROW_STATUSES` (`source:bin/sd_lib.py::ROW_STATUSES`). A word the map misses and a mapped
+word the ladder cannot hold each refuse. `due-field` is optional and must be
+one of the kind's `fields`. A plugin without the block imports nothing.
+
 ### `issues`, `dashboard`, `vendor`
 
 - `issues.repo` is printed by `sd plugin list` and read by nothing else. That is
@@ -176,7 +189,8 @@ exactly what it caught, three runs before anyone read the line.
 
 **Rows.** A domain repo's work reaches `sd today` and the dashboard through the
 shared database, by repository path. That needs no manifest key. `kinds` and
-`store` are for notes the plugin keeps *outside* the database, in a vault.
+`store` are for notes the plugin keeps *outside* the database, in a vault;
+`workflow` names the kinds whose notes the vault importer copies into rows.
 
 ## What a domain pack may not do
 
