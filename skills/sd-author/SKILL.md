@@ -115,12 +115,15 @@ stop and identify them before reading sources or workspace artifacts.
      its cost, its baseline, and how it fails. Record missing remedy evidence
      as an open gap.
    - Internal notes, topic primers, and entity profiles orient research; they
-     are never citations. Re-verify their claims against a public primary
-     source before prose uses them.
+     are never citations. Re-verify their claims about third-party sources
+     against a public primary source before prose uses them. The user's own
+     records and experience are supplied facts: label them, and do not
+     demand a public source.
    - Read known primary feeds, such as a vendor blog or changelog, directly.
      A search-only pass misses announcements published only there.
    - If `sd-research` cannot run, report the fallback search as a
-     degradation and mark its claims search-summary only.
+     degradation. Mark search-summary only just the claims that rest on the
+     summary; a claim already read in a primary source keeps that mark.
 8. Offer two or three outline structures only when they are materially
    different, recommend one with reasons, and obtain approval for a skeleton in
    which each section has a reader purpose, claim, evidence need, and example.
