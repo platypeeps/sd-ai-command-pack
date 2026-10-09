@@ -185,6 +185,32 @@ class Runner(Lane):
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual((self.calls, self.entries()[0]["status"]), ([], "skipped"))
 
+    def incomplete_review(self, retried: bool):
+        """A recorder whose prepare refuses for an incomplete review, also on its retry when `retried`."""
+        refused = {"ok": False, "phase": "prepare",
+                   "error": "the preceding review did not complete its requested depth; use --retry-review",
+                   "workflow": {"blocker": {"code": "review_incomplete"}}}
+        def ship(argv: list[str], log: pathlib.Path) -> dict:
+            answer = self.ship(argv, log)
+            return refused if argv[2] == "prepare" and (retried or "--retry-review" not in argv) else answer
+        return ship
+
+    def test_an_incomplete_review_spends_the_one_automatic_retry(self) -> None:
+        """sd:3037. The lane retries as an operator would, with prepare --retry-review."""
+        sd_lane.enqueue_entry(self.repo, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.run_lane(self.repo, self.environ, self.incomplete_review(retried=False))
+        self.assertEqual([(c[2], "--retry-review" in c) for c in self.calls],
+                         [("prepare", False), ("prepare", True), ("merge", False)])
+        self.assertEqual(self.entries()[0]["status"], "merged")
+
+    def test_the_lane_retries_an_incomplete_review_only_once(self) -> None:
+        sd_lane.enqueue_entry(self.repo, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.run_lane(self.repo, self.environ, self.incomplete_review(retried=True))
+        self.assertEqual([(c[2], "--retry-review" in c) for c in self.calls], [("prepare", False), ("prepare", True)])
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], entry["step"]), ("failed", "prepare"))
+        self.assertIn("did not complete", entry["reason"])
+
     def test_the_whole_prepare_output_is_kept(self) -> None:
         sd_lane.enqueue_entry(self.repo, 1, "one", self.body, self.environ, claim="deliver")
         sd_lane.run_lane(self.repo, self.environ, self.ship)

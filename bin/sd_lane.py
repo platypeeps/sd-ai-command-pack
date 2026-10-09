@@ -14,7 +14,8 @@ runs it under one lock per repository:
            these three take `--expected-revision`, the `revision` `list`
            prints, and refuse a queue that changed since (sd:2717);
   run      take the queue's first pending entry that is not held, read again
-           before each item: head check, `prepare --catch-up`,
+           before each item: head check, `prepare --catch-up` (once more
+           with `--retry-review` after an incomplete review, sd:3037),
            then `merge`; a failed entry is marked and the runner goes on.
            While one entry ships, the next one's gate runs on its predicted
            landing (sd:2586, below). After a merge it deletes the remote
@@ -734,8 +735,13 @@ def process(entry: dict[str, Any], logs: pathlib.Path, ship: Ship) -> dict[str, 
     stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
     prepare_log = logs / f"prepare-{item}-{stamp}.log"
     claim = [f"--{entry['claim']}"] + (["--acceptance-file", entry["acceptance_file"]] if entry.get("acceptance_file") else [])
-    prepared = ship(["-C", str(worktree), "prepare", "--item", str(item), *claim, "--catch-up",
-                     "--title", entry["title"], "--body-file", entry["body_file"], "--json"], prepare_log)
+    argv = ["-C", str(worktree), "prepare", "--item", str(item), *claim, "--catch-up",
+            "--title", entry["title"], "--body-file", entry["body_file"], "--json"]
+    prepared = ship(argv, prepare_log)
+    # sd:3037. An incomplete review gets the one retry an operator would give it, and no second.
+    if ((prepared.get("workflow") or {}).get("blocker") or {}).get("code") == "review_incomplete":
+        prepare_log = logs / f"prepare-{item}-{stamp}-retry.log"
+        prepared = ship([*argv, "--retry-review"], prepare_log)
     fields: dict[str, Any] = {"prepare_log": str(prepare_log), "head": prepared.get("head")}
     if not (prepared.get("ok") and prepared.get("phase") == "ready_to_send"):
         return {**fields, "status": "failed", "step": "prepare", "phase": prepared.get("phase"),
