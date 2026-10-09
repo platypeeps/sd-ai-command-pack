@@ -67,7 +67,7 @@ The local gate and the review lane's gate check pass the pull request's base bra
 A check that needs a running service, such as a database on a local port, declares it in the `CLAUDE.local.md` block:
 `services: db=127.0.0.1:5433`, whitespace-separated `[name=]host:port` entries, and optionally `services_start: docker compose up -d db`.
 Before any step, sd-check connects to each; one that does not answer within 2 seconds fails every check unrun, naming it and the start hint (sd:1649).
-sd-check never starts a service. A dry run and a docs-only scope probe nothing, and a malformed entry exits 2.
+sd-check only probes; starting the service is the operator's step. A dry run and a docs-only scope probe nothing, and a malformed entry exits 2.
 
 ## Local gate receipts
 
