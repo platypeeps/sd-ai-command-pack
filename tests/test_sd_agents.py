@@ -262,6 +262,16 @@ class SliceBuilderDecisionNote(unittest.TestCase):
         self.assertNotIn("Decision needed", body)
 
 
+class SliceBuilderTestPause(unittest.TestCase):
+    """sd:3173. Lane gates timed out while builders ran their focused tests beside them;
+    run through `sd gate run`, a builder's tests wait in the machine gate queue."""
+
+    def test_the_slice_builder_runs_focused_tests_in_the_gate_queue(self) -> None:
+        _, body = (AGENTS / "sd-slice-builder.md").read_text(encoding="utf-8").split("\n---\n", 1)
+        self.assertIn("sd gate run --label", body)
+        self.assertIn("every gate slot is held", body)
+
+
 class RenderTests(unittest.TestCase):
     def setUp(self) -> None:
         scratch = tempfile.TemporaryDirectory()
