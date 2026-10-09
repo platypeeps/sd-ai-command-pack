@@ -1202,6 +1202,7 @@ class Ship(SharedReview):
                               state="operator_decision",
                               next_action="Run sd work deliver with --associated and --reason.")
             return self.reconcile()
+        self.refuse_live_review()
         self.require_claim()
         if (any(value is not None for value in (self.args.additional_review_for, self.args.request_reason, self.args.review_history_digest))
                 and (self.args.path or self.args.message_file)):

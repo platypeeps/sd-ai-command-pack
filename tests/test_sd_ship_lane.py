@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import shlex
+import socket
 import subprocess
 import sys
 import unittest
@@ -24,6 +26,7 @@ from sd_db.testing.remote import _git
 
 from tests import test_sd_lane_requests as requests_suite
 from tests import test_sd_ship as fixture
+from tests.clean_env import clean_environment
 
 ship = fixture.ship
 ROOT = fixture.ROOT
@@ -233,6 +236,96 @@ class SatellitePrepare(LaneCase):
         with self.assertRaisesRegex(ship.Refusal, "runs on the sd hub only"):
             self.dispatch("prepare")
         self.assertEqual(self.entered, ["fixture/repo"])
+
+
+class LockFreePrepare(LaneCase):
+    """sd:1938. Prepare takes no ship lock; a reserved pass names its process, and a second prepare reads it.
+
+    Failure table: two prepares before review, one loses at the revision check; a second prepare during a
+    live review refuses naming the pid; a dead or reused pid lets the retry run; another host's pid counts as live.
+    """
+
+    def receipt(self):
+        return receipts.read(self.connection, receipts.receipt_key("fixture/repo", "topic", self.item))[1]
+
+    def during_review(self, step):
+        """Patch the reviewer so `step` runs once while the provider pass runs, its pass reserved; `step`'s answers."""
+        real, answers = ship.review_process, []
+
+        def process(root, argv, **kwargs):
+            if "--explain" not in argv and not answers:
+                answers.append(None)
+                try:
+                    answers[0] = step()
+                except ship.Refusal as refusal:
+                    answers[0] = refusal
+            return real(root, argv, **kwargs)
+
+        return patch.object(ship, "review_process", process), answers
+
+    def dead_pid(self):
+        child = subprocess.Popen(["true"], env=clean_environment())
+        child.wait()
+        return child.pid
+
+    def test_a_second_prepare_during_a_live_review_refuses_naming_its_pid(self):
+        patcher, answers = self.during_review(lambda: self.operation("prepare", "--retry-review").prepare())
+        with patcher:
+            first = self.operation("prepare").prepare()
+        (second,) = answers
+        self.assertIsInstance(second, ship.Refusal)
+        self.assertEqual(second.workflow["blocker"]["code"], "review_running")
+        self.assertIn(f"pid {os.getpid()} on {socket.gethostname()} is still reviewing", str(second))
+        self.assertEqual(first["phase"], "ready_to_send")
+        self.assertEqual(len(self.receipt()["passes"]), 1)
+
+    def test_a_dead_reviewers_pass_takes_the_one_retry(self):
+        class Killed(Exception):
+            pass
+
+        def killed():
+            raise Killed
+
+        patcher, _ = self.during_review(killed)
+        with patcher, self.assertRaises(Killed):
+            self.operation("prepare").prepare()
+        key = receipts.receipt_key("fixture/repo", "topic", self.item)
+        revision, row = receipts.read(self.connection, key)
+        self.assertEqual((row["phase"], row["passes"][-1]["process"]["pid"]), ("reviewing", os.getpid()))
+        row["passes"][-1]["process"]["pid"] = self.dead_pid()
+        receipts.save(self.connection, key, revision, row)
+        with self.assertRaises(ship.Refusal) as refused:
+            self.operation("prepare").prepare()
+        self.assertEqual(refused.exception.workflow["blocker"]["code"], "review_incomplete")
+        self.assertEqual(self.operation("prepare", "--retry-review").prepare()["phase"], "ready_to_send")
+        self.assertEqual([entry["retry"] for entry in self.receipt()["passes"]], [False, True])
+
+    def test_a_reused_pid_reads_dead_and_another_hosts_reads_live(self):
+        child = subprocess.Popen(["sleep", "60"], env=clean_environment())
+        self.addCleanup(child.wait)
+        self.addCleanup(child.kill)
+        now = datetime.now(timezone.utc)
+        reviewing, here = {"phase": "reviewing"}, socket.gethostname()
+
+        def reserved(pid, started=now, host=here, **entry):
+            return [{"head": "0" * 40, "started_at": started.isoformat(), "process": {"pid": pid, "host": host}, **entry}]
+
+        live = fixture.sd_ship_review.live_reviewer
+        self.assertEqual(live(reviewing, reserved(child.pid))["pid"], child.pid)
+        self.assertIsNone(live(reviewing, reserved(child.pid, started=now - timedelta(hours=1))), "a reused pid")
+        self.assertIsNone(live(reviewing, reserved(self.dead_pid())))
+        self.assertEqual(live(reviewing, reserved(self.dead_pid(), host="satellite.example.test"))["host"],
+                         "satellite.example.test")
+        self.assertIsNone(live({"phase": "reviewed"}, reserved(child.pid)))
+        self.assertIsNone(live(reviewing, reserved(child.pid, report={})))
+        self.assertIsNone(live(reviewing, [{"head": "0" * 40, "started_at": now.isoformat()}]), "a pass before sd:1938")
+
+    def test_two_prepares_before_review_one_loses_at_the_revision_check(self):
+        first, second = self.operation("prepare"), self.operation("prepare")
+        self.assertEqual(second.prepare()["phase"], "ready_to_send")
+        with self.assertRaisesRegex(Exception, "changed concurrently"):
+            first.prepare()
+        self.assertEqual(len(self.receipt()["passes"]), 1)
 
 
 class LaneHost(LaneCase):
