@@ -2788,7 +2788,7 @@ def guest_artifact_refusal(root: pathlib.Path, paths: Any, *, ask: Asker = gh_ap
         shown += f" and {len(refused) - 3} more"
     return (
         f"this repository is in guest mode, so {shown} cannot be written into the "
-        "upstream tree; planning artifacts live on the fork's integration branch "
+        "upstream tree; planning artifacts stay out of the repository on every branch, a fork's too "
         "(WORKFLOW.md, `mode: guest`), and detection is a ceiling, so a `mode: full` line "
         "the remote lowers, or a remote that cannot be asked, resolves guest here too."
     )
