@@ -20,13 +20,13 @@ import tempfile
 import unittest
 from typing import Any
 
+from tests.clean_env import clean_environment
 from tests.test_changed_files_fast_path import (
     ALWAYS_RUN_NAMES,
     MARKER_LINE,
     OPTIONAL_TESTS,
     SCRIPTS,
     MakefileTree,
-    clean_environment,
     ran_modules,
 )
 
@@ -74,7 +74,8 @@ class PrecheckTree(MakefileTree):
         for tool in ("python", "bandit"):
             path = venv_bin / tool
             path.chmod(path.stat().st_mode | stat.S_IXUSR)
-        subprocess.run(["git", "init", "-q", "-b", "main"], cwd=self.root, check=True)
+        subprocess.run(["git", "init", "-q", "-b", "main"], cwd=self.root, check=True,
+                       env=clean_environment())
 
     def gate(self, *arguments: str, expect: int) -> tuple[dict[str, Any], set[str]]:
         """`sd-check --json` in the tree: its report and the fixture modules that ran."""
