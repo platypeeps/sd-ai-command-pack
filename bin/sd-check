@@ -42,6 +42,13 @@ A Makefile that defines `precheck` has it run first, before the slot wait
 (sd:2604). It is the minute of checks that catches most failed full runs; a
 failure there fails every check unrun, takes no slot, and the report's
 `precheck` record says what failed. `--only` and a docs-only scope skip it.
+
+A repository whose check needs a running service declares it in its
+`CLAUDE.local.md` block (sd:1649): `services: db=127.0.0.1:5433`, and
+optionally `services_start: <how to start them>`. Before any step, sd-check
+connects to each; one that does not answer fails every check unrun, naming it
+and the start hint, so a stopped database does not read as a code error.
+sd-check never starts a service. A dry run and a docs-only scope probe nothing.
 """
 
 from __future__ import annotations
@@ -53,6 +60,7 @@ import os
 import pathlib
 import re
 import signal
+import socket
 import sys
 import time
 from typing import Mapping, TextIO
@@ -72,6 +80,11 @@ SKIPPED = "skipped"
 ABSENT = "absent"
 
 DEFAULT_TIMEOUT_SECONDS = 900
+#: The `CLAUDE.local.md` keys naming the services a check needs and how to start them (sd:1649).
+SERVICES_KEY = "services"
+SERVICES_START_KEY = "services_start"
+#: How long one service has to accept a connection.
+PROBE_SECONDS = 2.0
 OUTPUT_TAIL_CHARS = 4000
 SCHEMA_VERSION = 1
 
@@ -472,6 +485,37 @@ def take_slot(environ: Mapping[str, str], timeout: int) -> tuple[sd_gate_slots.S
     return slot, report
 
 
+def required_services(root: pathlib.Path) -> tuple[list[tuple[str, str, int]], str]:
+    """`([(label, host, port)], start hint)` from the local block (sd:1649); a malformed entry is a `ConfigError`.
+
+    Each whitespace-separated entry is `[name=]host:port`; a bracketed host is IPv6.
+    """
+    block = sd_lib.local_block(root)
+    services = []
+    for entry in block.get(SERVICES_KEY, "").split():
+        name, _, address = entry.rpartition("=")
+        host, _, port = address.rpartition(":")
+        if not host or not port.isascii() or not port.isdigit() or not 0 < int(port) < 65536:
+            raise sd_lib.ConfigError(f"{sd_lib.LOCAL_FILE_NAME}: {SERVICES_KEY}: {entry!r} is not [name=]host:port")
+        services.append((f"{name} ({address})" if name else address, host.strip("[]"), int(port)))
+    return services, block.get(SERVICES_START_KEY, "").strip()
+
+
+def service_refusal(declared: tuple[list[tuple[str, str, int]], str] | None) -> str | None:
+    """Why the run may not start: each declared service nothing answers at, then the start hint; None when all answer."""
+    services, start = declared or ([], "")
+    closed = []
+    for label, host, port in services:
+        try:
+            socket.create_connection((host, port), timeout=PROBE_SECONDS).close()
+        except OSError:
+            closed.append(label)
+    if not closed:
+        return None
+    hint = f"; start with: {start}" if start else ""
+    return f"required service not answering, so this did not run: {', '.join(closed)}{hint}"
+
+
 def run_precheck(root: pathlib.Path, detection: sd_lib.Detection, args: argparse.Namespace,
                  environ: Mapping[str, str]) -> dict[str, object] | None:
     """The repository's precheck, run before the slot wait (sd:2604); None when it defines none or the run is narrowed.
@@ -506,6 +550,10 @@ def gated_execute(root: pathlib.Path, detection: sd_lib.Detection, args: argpars
     base = environ if environ is not None else os.environ
     started = time.monotonic()
     unslotted = sd_gate_slots.holder_environment(base, 0)
+    docs_only = scope is not None and scope.mode == sd_check_scope.DOCS_ONLY
+    refused = None if docs_only else service_refusal(getattr(args, "services", None))
+    if refused is not None:
+        return execute(root, detection, args.only, False, args.timeout, unslotted, refused, scope)
     first = run_precheck(root, detection, args, unslotted)
     if first is not None and first["status"] == FAIL:
         result = execute(root, detection, args.only, False, args.timeout, unslotted,
@@ -568,6 +616,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.record_receipt and (args.only or args.dry_run):
             raise UsageError("--record-receipt requires an actual full check")
         args.scope = run_scope(args, root, detection)
+        args.services = required_services(root)
         before, controlled = None, None
         with contextlib.ExitStack() as outputs:  # a recorded run's build folders go when it ends (sd:2327)
             if args.record_receipt:
