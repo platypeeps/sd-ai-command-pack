@@ -174,6 +174,8 @@ Prepare then refuses with `reviewed_head_orphaned`.
 If the old history must not be pushed, as after a privacy amend, do not reset.
 Run `sd-ship prepare --item ID --restart-review REASON --json` instead.
 It applies only while a reviewed head is orphaned, and it takes no other review flag.
+After gc prunes the reviewed head, prepare fails with `Not a valid commit name` instead.
+The restart still applies: it sets aside a reviewed head the object store no longer holds.
 It moves the orphaned passes, with the reason, to `superseded_reviews` in the ship receipt.
 Then it reviews the whole branch again from nothing; the earlier findings cannot be resumed against a head the branch cannot reach.
 The set-aside passes still count against the automatic cap, and the restart spends one more.

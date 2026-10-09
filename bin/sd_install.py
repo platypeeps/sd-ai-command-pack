@@ -37,6 +37,7 @@ import importlib
 import json
 import os
 import re
+import secrets
 import shlex
 import shutil
 import subprocess
@@ -1146,23 +1147,28 @@ class Link:
     name: str
     path: Path
     target: Path
-    state: str  # "absent", "ours" or "foreign"
+    state: str  # "absent", "ours", "recorded" or "foreign"
 
 
 class LinkFailed(Exception):
     """A link could not be made; whatever this run linked has been unlinked."""
 
 
-def link_plan(checkout: Path, bin_dir: Path) -> list[Link]:
+def link_plan(checkout: Path, bin_dir: Path, recorded: dict[str, str] | None = None) -> list[Link]:
     """Classify `bin_dir/<name>` for every command, before anything is written.
 
     "Ours" is a symlink, absolute or relative, that resolves to this checkout's
-    copy; it is kept as it is, inode and all. Anything else at the path -- a
-    regular file, a dangling link, a link into another checkout -- is foreign,
-    and one foreign entry refuses the whole run. The plan runs first thing in
-    `cmd_user`, before the library is opened, because `expire_trials` writes
-    to the shared database and a refusal must leave nothing changed.
+    copy; it is kept as it is, inode and all. "Recorded" is a symlink still at
+    the target `recorded`, the receipt's link rows, names for that path: an
+    earlier install made it, `prune_links` could remove it, so this run may
+    retarget it. Only the serving tree passes `recorded` (sd:3141). Anything
+    else at the path -- a regular file, a dangling link, a link into another
+    checkout no row names -- is foreign, and one foreign entry refuses the
+    whole run. The plan runs first thing in `cmd_user`, before the library is
+    opened, because `expire_trials` writes to the shared database and a
+    refusal must leave nothing changed.
     """
+    recorded = recorded or {}
     plans: list[Link] = []
     for name in bin_commands(checkout):
         path = bin_dir / name
@@ -1171,6 +1177,8 @@ def link_plan(checkout: Path, bin_dir: Path) -> list[Link]:
             state = "absent"
         elif path.is_symlink() and _resolves_to(path, target):
             state = "ours"
+        elif path.is_symlink() and str(path) in recorded and _resolves_to(path, Path(recorded[str(path)])):
+            state = "recorded"
         else:
             state = "foreign"
         plans.append(Link(name, path, target, state))
@@ -1184,8 +1192,10 @@ def link_commands(plans: list[Link], bin_dir: Path, recovery: ExitStack, *, dry_
     no bytes of its own, and a digest read through it would be the script's.
     An `OSError` on any link unlinks every link this call made and raises
     `LinkFailed`, so no link exists that no receipt names; `cmd_user` then
-    puts the renders made before this back. `recovery` keeps that undo armed
-    after this returns, for a failure later in the install; the caller
+    puts the renders made before this back. A recorded link is replaced by a
+    rename over it, and a failure points every link this call replaced back at
+    its old target, so the old receipt still holds. `recovery` keeps that undo
+    armed after this returns, for a failure later in the install; the caller
     disarms it once the receipt is written. A checkout with no commands links
     nothing and makes no directory.
     """
@@ -1196,7 +1206,8 @@ def link_commands(plans: list[Link], bin_dir: Path, recovery: ExitStack, *, dry_
     if dry_run or not plans:
         return rows
     made: list[Path] = []
-    recovery.callback(_undo_links, made)
+    moved: list[tuple[Path, str]] = []
+    recovery.callback(_undo_links, made, moved)
     for plan in plans:
         if plan.state == "ours":
             continue
@@ -1205,21 +1216,49 @@ def link_commands(plans: list[Link], bin_dir: Path, recovery: ExitStack, *, dry_
         # line and rc 1, not a traceback (C-31).
         try:
             bin_dir.mkdir(parents=True, exist_ok=True)
-            os.symlink(plan.target, plan.path)
-            made.append(plan.path)
+            if plan.state == "recorded":
+                old = os.readlink(plan.path)
+                _replace_link(plan.path, plan.target)
+                moved.append((plan.path, old))
+            else:
+                os.symlink(plan.target, plan.path)
+                made.append(plan.path)
         except OSError as exc:
-            _undo_links(made)
+            _undo_links(made, moved)
             raise LinkFailed(
                 f"could not link {plan.path} ({exc.strerror or exc})"
             ) from exc
     return rows
 
 
-def _undo_links(made: list[Path]) -> None:
-    """Remove the links one `link_commands` call made; once."""
+def _undo_links(made: list[Path], moved: list[tuple[Path, str]]) -> None:
+    """Remove the links one `link_commands` call made and point the ones it moved back; once."""
     for path in made:
         path.unlink(missing_ok=True)
+    for path, old in moved:
+        _replace_link(path, Path(old))
     made.clear()
+    moved.clear()
+
+
+def _replace_link(path: Path, target: Path) -> None:
+    """Point the link at `path` to `target` in one rename, so no moment finds it missing.
+
+    The spare link takes a name no file holds, because `os.symlink` refuses
+    one that exists; so the only file this removes is the spare it made.
+    """
+    while True:
+        spare = path.with_name(f".{path.name}.sd-install-{secrets.token_hex(8)}")
+        try:
+            os.symlink(target, spare)
+            break
+        except FileExistsError:
+            continue
+    try:
+        os.replace(spare, path)
+    except OSError:
+        spare.unlink()
+        raise
 
 
 def prune_links(
@@ -2151,7 +2190,14 @@ def cmd_user(ctx: Context, out) -> int:
     # Before the library: `expire_trials` writes, and a refusal writes nothing.
     recorded = read_receipt(ctx.receipt)
     bin_dir = link_directory(ctx, recorded)
-    plans = link_plan(ctx.checkout, bin_dir)
+    # The serving tree takes over the links an earlier install recorded, such
+    # as one from the working checkout before sd:3009; any other checkout
+    # still refuses them, so a worktree's `--user` moves no machine link (sd:3141).
+    serving = ctx.checkout.resolve() == serving_tree(ctx.home, ctx.environ).resolve()
+    plans = link_plan(ctx.checkout, bin_dir, {
+        row["path"]: row["target"] for row in owned_entries(recorded)
+        if row.get("kind") == "link" and isinstance(row.get("path"), str) and isinstance(row.get("target"), str)
+    } if serving else None)
     for plan in plans:
         if plan.state == "foreign":
             print(

@@ -192,6 +192,36 @@ class ProviderSelection(unittest.TestCase):
         self.assertEqual(len(review.state["superseded_reviews"]), 1)
         self.assertEqual([entry["head"] for entry in review.state["passes"]], [HEAD])
 
+    def test_a_restart_sets_aside_only_a_head_the_store_lacks_when_ancestry_cannot_answer(self):
+        """sd:3167: after exit 128, only a commit absent from a full clone is orphaned; else the failure stands."""
+        reviewed, _process = self.context("minimax")
+        reviewed.review(HEAD)
+        fixed_head = "c" * 40
+
+        def git(merge_base, verify, shallow="false"):
+            def run(argv, **_kwargs):
+                code, out = {"merge-base": (merge_base, ""), "--verify": (verify, ""),
+                             "--is-shallow-repository": (0, shallow + "\n")}[argv[2] if argv[1] == "rev-parse" else argv[1]]
+                return subprocess.CompletedProcess(argv, code, out, "fatal: Not a valid commit name" if code > 1 else "")
+            return run
+
+        for name, answers, outcome in (("absent", git(128, 1), None),
+                                       ("present", git(128, 0), "command_failed"),
+                                       ("shallow", git(128, 1, "true"), "command_failed"),
+                                       ("unanswered", git(128, 128), "command_failed")):
+            with self.subTest(name):
+                review, _process = self.context("minimax", state=copy.deepcopy(reviewed.state), head=fixed_head)
+                review.args.restart_review = "privacy amend"
+                with patch("sd_ship_remote.subprocess.run", side_effect=answers):
+                    if outcome is None:
+                        review.restart_review(fixed_head)
+                        self.assertEqual(review.state["superseded_reviews"][0]["orphaned"], [HEAD])
+                        continue
+                    with self.assertRaises(ship.Refusal) as caught:
+                        review.restart_review(fixed_head)
+                self.assertEqual(caught.exception.workflow["blocker"]["code"], outcome)
+                self.assertNotIn("superseded_reviews", review.state)
+
     def test_a_no_item_prepare_refuses_a_restart(self):
         """sd:2600: the restart is item-path only; a no-item record starts fresh with --create-record."""
         args = ship.parser().parse_args(["prepare", "--no-item", "--review-id", "record", "--restart-review", "amend"])
