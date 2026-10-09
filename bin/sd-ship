@@ -42,7 +42,9 @@ from sd_ship_review import (
     ReviewRuntime,
     ReviewTimeout,
     SharedReview,
+    adjudicated_check,
     carry_forward,
+    failing_check_tails,
     is_ancestor,
     named_commits,
     restart_reason,
@@ -145,6 +147,17 @@ DELIVERING_KINDS = ("work", "task", "followup")
 #: repository root, so a nested `src/docs/` stays inside the surface and a
 #: repository that wants a wider exemption does not get one by accident.
 UNSHIPPED_PREFIXES = ("docs/",)
+#: sd:2998. The pack pin a consumer repository carries; a branch changing only
+#: these is a pin bump, which gets the gate and no model review.
+PIN_FILES = (".sd-pack-rev",)
+#: sd:2998. Directories whose files run or steer an agent, prose included: a
+#: path under one is never docs-only, whatever a repository's `docs_skip` says.
+#: `skills/` is the pack's payload, so a `SKILL.md` is code here.
+CODE_DIRECTORIES = frozenset({"bin", "tests", "skills", "hooks", ".githooks", "scripts"})
+#: sd:2998. A design record gets the planning review in `sd-plan`, not a skip here.
+DESIGN_RECORDS = "docs/work/"
+#: The prepare flags that ask for a model review; any one keeps it.
+REVIEW_REQUEST_FLAGS = ("provider", "additional_review_for", "retry_review", "restart_review")
 #: How many shipped paths a stale-review refusal names before it counts the rest.
 UNSHIPPED_NAMED = 5
 #: What a decoded value is called when the receipt refuses it for not being an
@@ -1088,6 +1101,62 @@ class Ship(SharedReview):
         return frozenset(path for path in paths
                          if route._all_match([path], allowed) and route._first_match([path], denied) is None)
 
+    def review_tier(self, head: str) -> dict:
+        """The branch's risk tier against its fork from the default branch, and why (sd:2998).
+
+        `pin-bump`: every changed path is a `PIN_FILES` entry. `docs-only`:
+        every changed path is in the repository's `docs_skip` and no
+        `never_skip` (`repository_skippable`), and none is a design record or
+        under a `CODE_DIRECTORIES` entry. Anything else is `code`, and so is a
+        diff git cannot list: a doubtful branch is reviewed.
+        """
+        fork = sd_lib.git_output(["merge-base", head, f"refs/remotes/origin/{self.state['base']}"], self.root)
+        listed = sd_lib.git_output(["diff", "--name-only", "--no-renames", "-z", fork, head], self.root) if fork else None
+        paths = sorted(set(filter(None, (listed or "").split("\0"))))
+        tier, reason = "docs-only", f"all {len(paths)} changed paths are prose"
+        if not paths:
+            tier, reason = "code", "no changed path could be listed"
+        elif all(path in PIN_FILES for path in paths):
+            tier, reason = "pin-bump", f"only {', '.join(paths)} changed"
+        elif doubtful := [path for path in paths if path.startswith(DESIGN_RECORDS)
+                          or CODE_DIRECTORIES & set(path.split("/")[:-1])] or sorted(
+                              set(paths) - self.repository_skippable(paths)):
+            tier, reason = "code", f"{doubtful[0]} is not prose the review may skip"
+        return {"tier": tier, "reason": reason, "base": fork}
+
+    def gate_only(self, head: str) -> bool:
+        """Run the gate alone for a branch `review_tier` calls docs-only or a pin bump (sd:2998).
+
+        Only before any review pass and with no review flag: a branch already
+        reviewed keeps verifying its fixes. The record is `review_skipped` in
+        the ship receipt; `review_inputs` reads it as a clean review of this
+        head, so publication and merge need nothing else. A failed gate spends
+        no pass and the next prepare runs it again.
+        """
+        if self.history.native(self.state) or any(getattr(self.args, name, None) for name in REVIEW_REQUEST_FLAGS):
+            return False
+        skipped = self.state.get("review_skipped") or {}
+        if skipped.get("head") == head and (skipped.get("check") or {}).get("status") == "pass":
+            return True
+        tiered = self.review_tier(head)
+        if tiered["tier"] == "code":
+            return False
+        base = self.gate_check_base()
+        check = adjudicated_check(self.root, head, base, self.database if base else None,
+                                  getattr(self.args, "review_timeout", None) or sd_lib.GATE_CHECK_SECONDS)
+        passed = check["status"] == "pass"
+        self.save(review_skipped={**tiered, "head": head, "check": check, "recorded_at": self.runtime.clock()},
+                  reviewed_head=head if passed else None)
+        if not passed:
+            said = "\n".join(failing_check_tails(check.get("checks"))) or check.get("detail") or "no check output"
+            raise Refusal(f"review skipped: {tiered['tier']}; the repository gate failed at {head[:12]}: {said}",
+                          code="gate_failed", boundary="runtime", state="retryable_failure",
+                          next_action="Fix the gate, or rerun prepare when the machine is less loaded "
+                                      "(--review-timeout raises the limit); no review pass was spent.")
+        print(f"sd-ship: review skipped: {tiered['tier']} ({tiered['reason']}); the gate passed at {head[:12]}, "
+              "no provider called", file=sys.stderr)
+        return True
+
     def stable_copilot_material(self, number: int, pull: dict, head: str,
                                 *, required: bool) -> tuple[list, list] | None:
         previous = ""
@@ -1276,7 +1345,9 @@ class Ship(SharedReview):
         claims = [] if self.args.no_item else self.claim_lines(base, head)
         for line in claims:
             print(f"sd-ship: {line}", file=sys.stderr)
-        self.review(head)
+        # sd:2998. A docs-only or pin-bump branch gets the gate alone; any other gets the review.
+        if not self.gate_only(head):
+            self.review(head)
         self.save(warnings=lint_warnings + claims + self.commit_warnings(head))
         self.assert_scope()
         # Artifact exposure is checked again against the actual push target.
