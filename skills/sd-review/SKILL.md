@@ -99,6 +99,43 @@ An unreadable database stops execution instead of ignoring operator controls.
 Never run the plain branch form there: it runs a second full check in the checkout, outside any lock around the gate, and reuses no pass.
 `WORKFLOW.md`, section **Parallel work**, holds the rule (sd:2603).
 
+### The builder chain
+
+A builder runs one chain per round, in its own worktree, at HEAD.
+Make no edit while it runs; a new commit starts the next round.
+`LOG` is the lane log folder, `<lane root>/<repository>/lane/`.
+The lane root is `SD_LANE_ROOT`, else `sd.lane_root`, else `$XDG_STATE_HOME/sd/lanes`.
+`<item>` is the sd item number; `N` is the round, from 1.
+
+```
+sd gate check --base main > "$LOG/gate-<item>-rN.log" 2>&1; echo "gate exit $?" >> "$LOG/gate-<item>-rN.log"
+sd-review --scope branch --gate-check main > "$LOG/review-<item>-rN.log" 2>&1; echo "review exit $?" >> "$LOG/review-<item>-rN.log"
+```
+
+1. Run the gate line first. Run the review line only after `gate exit 0`.
+2. Read the gate verdict from its `gate exit N` line.
+   Read the review verdict from the `sd-review: <status>` line, which comes just before `review exit N`.
+   Report both as one line: `gate-<item>-rN exit 0; review-<item>-rN clean`.
+3. Run each line in the foreground, or as a background command that wakes the agent on exit.
+   Never wait with `Monitor` or `sleep`: `Monitor` stops at 30 minutes and leaves the agent idle.
+4. Use these names and no others.
+   `sd-ship lane watch` scans every `*.log` under the lane root for gate ends, so a fixed name keeps each round findable.
+
+The chain adds no verb and no PR body check.
+
+### A repeating finding class
+
+Trigger: two findings of the same class in different rounds, or three blocking rounds in a row.
+Then stop single-finding fixes and run one class pass:
+
+1. Name the class.
+2. Enumerate every instance from the code, not from the findings.
+3. Put each instance in a table in `design.md` or the PR body: step, state moved, failure, recovery, test.
+4. Fix each row that lacks a recovery or a test, with a test that fails first.
+5. Send the next round with the table.
+
+If the table shows the PR does too much, split it.
+
 ## Flags and results
 
 | Flag | Meaning |
