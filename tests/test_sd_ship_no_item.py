@@ -267,18 +267,7 @@ class NoItemContracts(unittest.TestCase):
 
         return reviewer, calls
 
-    def evidence_snapshot(self):
-        folder = self.root / ".git" / "sd-review-evidence"
-        if not folder.exists():
-            return {}
-        return {
-            str(path.relative_to(folder)): (
-                hashlib.sha256(path.read_bytes()).hexdigest(), path.stat().st_mtime_ns
-            )
-            for path in folder.rglob("*") if path.is_file()
-        }
-
-    def blocking_proposal(self, *, duplicate=False, prepare=True):
+    def blocking_proposal(self, *, duplicate=False):
         review_id = self.create()
         reviewer, calls = self.native_reviewer(review_id, blocking=True, duplicate=duplicate)
         code, value, diagnostic = self.cli("review", "--review-id", review_id, reviewer=reviewer)
@@ -291,59 +280,19 @@ class NoItemContracts(unittest.TestCase):
         )
         self.assertEqual(self.snapshot(), before)
         proposal = result["proposal"]
-        proposal.update(operator="fixture operator", authority_context="fixture assertion; not authenticated approval")
-        data = b"fixture source and regression evidence\n"
-        sha256 = hashlib.sha256(data).hexdigest()
-        path = self.directory / "temporary-source-evidence.txt"
-        path.write_bytes(data)
-        self.source_evidence = path
         for row in proposal["findings"]:
-            row.update(
-                response_disposition="rebutted", reason="fixture evidence contradicts this claim",
-                owner="", trigger="", evidence=[{"path": str(path), "sha256": sha256}],
-            )
+            row.update(response_disposition="rebutted", reason="src.py:1 already handles the case the finding names")
         proposal_path = self.directory / "dispositions.json"
         proposal_path.write_text(json.dumps(proposal))
-        if prepare:
-            result = self.success(
-                "adjudicate", "--review-id", review_id, "--expected-head", self.head,
-                "--dispositions-file", str(proposal_path), "--prepare-evidence",
-            )
-            proposal = result["proposal"]
-            proposal_path.write_text(json.dumps(proposal))
-            self.assertEqual(self.keys("ship-adjudication-no-item:"), [])
-            path = pathlib.Path(proposal["findings"][0]["evidence"][0]["path"])
-            folder = self.root / ".git" / "sd-review-evidence" / review_id
-            self.assertNotEqual(path, self.source_evidence)
-            self.assertTrue(path.is_relative_to(folder))
-            self.assertEqual(path.resolve(strict=True), path)
-            self.assertEqual(path.stat().st_nlink, 1)
-            self.assertEqual(path.read_bytes(), data)
-            self.assertEqual(self.source_evidence.read_bytes(), data)
-            self.evidence_archive = proposal["bindings"]["evidence_archive"]
-            self.assertEqual(self.evidence_archive["schema_version"], 1)
-            self.assertTrue(self.evidence_archive["members"])
-            archive = pathlib.Path(self.evidence_archive["path"])
-            self.assertTrue(archive.is_relative_to(folder))
-            self.assertEqual(archive.resolve(strict=True), archive)
-            self.assertEqual(archive.stat().st_nlink, 1)
-            self.assertEqual(hashlib.sha256(archive.read_bytes()).hexdigest(), self.evidence_archive["sha256"])
-        return review_id, proposal, proposal_path, path
+        return review_id, proposal, proposal_path
 
     def accept(self, review_id, proposal_path):
-        args = (
-            "--review-id", review_id, "--expected-head", self.head,
+        """One command records the filled template; there is no digest step."""
+        result = self.success(
+            "adjudicate", "--review-id", review_id, "--expected-head", self.head,
             "--dispositions-file", str(proposal_path),
         )
-        before = self.snapshot()
-        evidence_before = self.evidence_snapshot()
-        validated = self.success("adjudicate", *args)
-        self.assertEqual(self.snapshot(), before)
-        self.assertEqual(self.evidence_snapshot(), evidence_before)
-        result = self.success(
-            "adjudicate", *args, "--accept-dispositions", validated["acceptance_digest"]
-        )
-        self.assertEqual(result["acceptance_digest"], validated["acceptance_digest"])
+        self.assertEqual(result["phase"], "disposition_recorded")
         return result
 
     def test_fixture_starts_without_items_and_uses_only_local_git_transport(self):
@@ -693,16 +642,11 @@ class NoItemContracts(unittest.TestCase):
         self.assertIn(f"sd-ship adjudicate --no-item --review-id {review_id} --expected-head {self.head}",
                       value["workflow"]["next_action"])
 
-    def test_acceptance_requires_exact_digest_and_never_dispatches_a_provider(self):
-        review_id, _proposal, proposal_path, _evidence = self.blocking_proposal()
-        self.refused(
-            "adjudicate", "--review-id", review_id, "--expected-head", self.head,
-            "--dispositions-file", str(proposal_path), "--accept-dispositions", "0" * 64,
-            pattern="digest|accept-dispositions",
-        )
+    def test_recording_clears_at_once_and_never_dispatches_a_provider(self):
+        review_id, _proposal, proposal_path = self.blocking_proposal()
         self.refused(
             "verify-review", "--review-id", review_id, "--expected-head", self.head,
-            pattern="blocking|accepted dispositions",
+            pattern="blocking|recorded dispositions",
         )
         self.accept(review_id, proposal_path)
         suffix = hashlib.sha256(("fixture/repo\0" + review_id).encode()).hexdigest()
@@ -712,30 +656,6 @@ class NoItemContracts(unittest.TestCase):
         for _ in range(2):
             self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
         self.assertEqual(self.snapshot(), before)
-
-    def test_accepted_clearance_refuses_changed_durable_evidence(self):
-        review_id, _proposal, proposal_path, evidence = self.blocking_proposal()
-        self.accept(review_id, proposal_path)
-        self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
-        evidence.write_text("changed evidence\n")
-        self.refused(
-            "verify-review", "--review-id", review_id, "--expected-head", self.head,
-            pattern="evidence|SHA256|digest",
-        )
-
-    def test_prepared_evidence_survives_missing_temporary_source(self):
-        review_id, proposal, proposal_path, durable = self.blocking_proposal()
-        source_bytes = self.source_evidence.read_bytes()
-        self.source_evidence.rename(self.source_evidence.with_suffix(".unavailable"))
-        self.assertFalse(self.source_evidence.exists())
-        self.assertEqual(durable.read_bytes(), source_bytes)
-        self.assertEqual(proposal["bindings"]["evidence_archive"], self.evidence_archive)
-        self.accept(review_id, proposal_path)
-        before = self.snapshot()
-        evidence_before = self.evidence_snapshot()
-        self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
-        self.assertEqual(self.snapshot(), before)
-        self.assertEqual(self.evidence_snapshot(), evidence_before)
 
     def test_a_library_reinstalled_mid_test_does_not_move_the_adjudicator_binding(self):
         """sd:1459. The shared environment is not this test's to hold still.
@@ -747,7 +667,7 @@ class NoItemContracts(unittest.TestCase):
         head": the flake the row names. The reinstall is simulated as the
         installed file reading different bytes after the proposal is written.
         """
-        review_id, _proposal, proposal_path, _durable = self.blocking_proposal()
+        review_id, _proposal, proposal_path = self.blocking_proposal()
         original = pathlib.Path.read_bytes
 
         def reinstalled(path):
@@ -757,56 +677,10 @@ class NoItemContracts(unittest.TestCase):
             self.accept(review_id, proposal_path)
             self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
 
-    def test_prepare_evidence_cannot_accept_dispositions_in_the_same_command(self):
-        review_id, _proposal, proposal_path, _source = self.blocking_proposal(prepare=False)
-        before = self.evidence_snapshot()
-        self.refused(
-            "adjudicate", "--review-id", review_id, "--expected-head", self.head,
-            "--dispositions-file", str(proposal_path), "--prepare-evidence",
-            "--accept-dispositions", "0" * 64, pattern="prepare-evidence|prepare|accept",
-        )
-        self.assertEqual(self.evidence_snapshot(), before)
-        self.assertEqual(self.keys("ship-adjudication-no-item:"), [])
-
-    def test_unprepared_temporary_evidence_cannot_validate_or_implicitly_copy(self):
-        review_id, _proposal, proposal_path, _source = self.blocking_proposal(prepare=False)
-        before = self.evidence_snapshot()
-        self.refused(
-            "adjudicate", "--review-id", review_id, "--expected-head", self.head,
-            "--dispositions-file", str(proposal_path), pattern="prepare|durable|archive|evidence",
-        )
-        self.assertEqual(self.evidence_snapshot(), before)
-
-    def test_accepted_clearance_refuses_missing_archive_without_restoring_it(self):
-        review_id, _proposal, proposal_path, _durable = self.blocking_proposal()
-        self.accept(review_id, proposal_path)
-        archive = pathlib.Path(self.evidence_archive["path"])
-        archive.rename(archive.with_suffix(archive.suffix + ".unavailable"))
-        before = self.evidence_snapshot()
-        self.refused(
-            "verify-review", "--review-id", review_id, "--expected-head", self.head,
-            pattern="archive|evidence|cannot be read|missing",
-        )
-        self.assertFalse(archive.exists())
-        self.assertEqual(self.evidence_snapshot(), before)
-
-    def test_accepted_clearance_refuses_changed_archive(self):
-        review_id, _proposal, proposal_path, _durable = self.blocking_proposal()
-        self.accept(review_id, proposal_path)
-        archive = pathlib.Path(self.evidence_archive["path"])
-        archive.write_bytes(archive.read_bytes() + b"fixture archive mutation")
-        before = self.evidence_snapshot()
-        self.refused(
-            "verify-review", "--review-id", review_id, "--expected-head", self.head,
-            pattern="archive|evidence|SHA256|digest",
-        )
-        self.assertEqual(self.evidence_snapshot(), before)
-
-    def test_repeated_validate_and_clearance_open_database_read_only(self):
-        review_id, _proposal, proposal_path, _durable = self.blocking_proposal()
+    def test_repeated_template_and_clearance_open_database_read_only(self):
+        review_id, _proposal, proposal_path = self.blocking_proposal()
         self.accept(review_id, proposal_path)
         before = self.snapshot()
-        evidence_before = self.evidence_snapshot()
         opened = []
 
         def readonly(database, *, write=True):
@@ -817,18 +691,14 @@ class NoItemContracts(unittest.TestCase):
 
         with patch("sd_db.database.connect", side_effect=readonly):
             for _ in range(2):
-                self.success(
-                    "adjudicate", "--review-id", review_id, "--expected-head", self.head,
-                    "--dispositions-file", str(proposal_path),
-                )
+                self.success("adjudicate", "--review-id", review_id, "--expected-head", self.head)
                 self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
         # Two opens per command: the managed-repository check (sd:2566), then the command.
         self.assertEqual(len(opened), 8)
         self.assertEqual(self.snapshot(), before)
-        self.assertEqual(self.evidence_snapshot(), evidence_before)
 
     def test_accepted_clearance_refuses_changed_head(self):
-        review_id, _proposal, proposal_path, _evidence = self.blocking_proposal()
+        review_id, _proposal, proposal_path = self.blocking_proposal()
         self.accept(review_id, proposal_path)
         (self.root / "src.py").write_text("value = 2\n")
         _git(self.root, "commit", "-am", "later change\n\nAuthored-with: human")
@@ -841,26 +711,26 @@ class NoItemContracts(unittest.TestCase):
                 )
 
     def test_invalid_or_incomplete_dispositions_cannot_clear_blockers(self):
-        review_id, original, proposal_path, _evidence = self.blocking_proposal()
-        for mutation in ("missing", "addressed", "parked_without_owner", "changed_finding"):
+        review_id, original, proposal_path = self.blocking_proposal()
+        for mutation in ("missing", "addressed", "parked_without_reason", "changed_finding"):
             proposal = json.loads(json.dumps(original))
             if mutation == "missing":
                 proposal["findings"].clear()
             elif mutation == "addressed":
                 proposal["findings"][0]["response_disposition"] = "addressed"
-            elif mutation == "parked_without_owner":
-                proposal["findings"][0]["response_disposition"] = "parked"
+            elif mutation == "parked_without_reason":
+                proposal["findings"][0].update(response_disposition="parked", reason="")
             else:
                 proposal["findings"][0]["raw_finding"]["summary"] = "rewritten raw finding"
             proposal_path.write_text(json.dumps(proposal))
             with self.subTest(mutation=mutation):
                 self.refused(
                     "adjudicate", "--review-id", review_id, "--expected-head", self.head,
-                    "--dispositions-file", str(proposal_path), pattern="finding|risk|disposition|owner",
+                    "--dispositions-file", str(proposal_path), pattern="finding|risk|disposition|reason",
                 )
 
     def test_duplicate_blockers_require_separate_response_indices(self):
-        review_id, proposal, proposal_path, _evidence = self.blocking_proposal(duplicate=True)
+        review_id, proposal, proposal_path = self.blocking_proposal(duplicate=True)
         self.assertEqual([row["index"] for row in proposal["findings"]], [1, 2])
         self.assertEqual(proposal["findings"][0]["finding_digest"], proposal["findings"][1]["finding_digest"])
         incomplete = json.loads(json.dumps(proposal))
@@ -945,7 +815,7 @@ class NoItemContracts(unittest.TestCase):
         passes and only the identity bindings stand in its way.
         """
 
-        review_id, _proposal, proposal_path, _durable = self.blocking_proposal()
+        review_id, _proposal, proposal_path = self.blocking_proposal()
         self.accept(review_id, proposal_path)
         self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
         key = no_item.no_item_acceptance_key("fixture/repo", review_id)
@@ -991,45 +861,6 @@ class NoItemContracts(unittest.TestCase):
                     self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
         self.assertEqual(len(calls), 1)
         self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
-
-    def test_relocated_durable_evidence_needs_its_bytes_back_or_a_new_approval(self):
-        """A path is not the evidence. The bytes at that path are.
-
-        Relocation is the ordinary accident: a cleanup moves a file. Clearance
-        must refuse, the original approval must not carry over to the moved
-        copy, and returning the exact bytes must restore it.
-        """
-
-        review_id, _proposal, proposal_path, durable = self.blocking_proposal()
-        accepted = self.accept(review_id, proposal_path)
-        moved = durable.with_name(durable.name + "-relocated")
-        durable.rename(moved)
-        self.refused(
-            "verify-review", "--review-id", review_id, "--expected-head", self.head,
-            pattern="evidence|archive|member|cannot be read",
-        )
-        self.refused(
-            "adjudicate", "--review-id", review_id, "--expected-head", self.head,
-            "--dispositions-file", str(proposal_path),
-            "--accept-dispositions", accepted["acceptance_digest"],
-            pattern="evidence|archive|member|cannot be read",
-        )
-        moved.rename(durable)
-        self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
-        # A readable copy with the right bytes is still not the durable archive,
-        # so pointing the proposal at the relocated file cannot stand in for it.
-        outside = self.directory / "relocated-evidence.txt"
-        outside.write_bytes(durable.read_bytes())
-        rewritten = json.loads(proposal_path.read_text())
-        for row in rewritten["findings"]:
-            for entry in row["evidence"]:
-                entry["path"] = str(outside)
-        relocated_file = self.directory / "relocated-dispositions.json"
-        relocated_file.write_text(json.dumps(rewritten))
-        self.refused(
-            "adjudicate", "--review-id", review_id, "--expected-head", self.head,
-            "--dispositions-file", str(relocated_file), pattern="durable|archive|member",
-        )
 
     def test_capacity_limits_refuse_actionably_and_keep_every_record_readable(self):
         """A limit refuses the operation. It never prunes to make room.
@@ -1169,71 +1000,6 @@ class NoItemContracts(unittest.TestCase):
         self.assertEqual(request["prior_history_digest"], no_item.combined_digest(state, passes[:CAP]))
         self.assertNotEqual(request["prior_history_digest"], ship.digest(passes[:CAP]))
 
-    def test_a_linked_worktree_keeps_its_durable_evidence_in_the_common_git_directory(self):
-        """A linked worktree's `.git` is a file, so no path can be built from it.
-
-        Preparation asks Git where the repository is. The archive then lands in
-        the directory every worktree of this repository shares, which is the
-        scope the record itself has, and acceptance reads it from the worktree
-        that wrote it.
-        """
-
-        linked = self.directory / "linked"
-        _git(self.root, "worktree", "add", "-q", "-b", "linked", str(linked), "topic")
-        self.addCleanup(_git, self.root, "worktree", "remove", "--force", str(linked))
-        self.assertTrue((linked / ".git").is_file())
-
-        review_id = self.success(
-            "review", "--create-record", "--assert-new-work", root=linked
-        )["review_id"]
-        reviewer, calls = self.native_reviewer(review_id, blocking=True)
-        code, value, diagnostic = self.cli("review", "--review-id", review_id, reviewer=reviewer, root=linked)
-        self.assertEqual(code, 3, diagnostic)
-        self.assertIn("blocking", value["error"])
-        self.assertEqual(len(calls), 1)
-
-        data = b"fixture evidence written from a linked worktree\n"
-        source = self.directory / "linked-evidence.txt"
-        source.write_bytes(data)
-        template = self.success(
-            "adjudicate", "--review-id", review_id, "--expected-head", self.head, root=linked
-        )["proposal"]
-        template.update(operator="fixture operator", authority_context="fixture assertion; not authenticated approval")
-        for row in template["findings"]:
-            row.update(
-                response_disposition="rebutted", reason="fixture evidence contradicts this claim",
-                owner="", trigger="", evidence=[{"path": str(source), "sha256": hashlib.sha256(data).hexdigest()}],
-            )
-        proposal_path = self.directory / "linked-dispositions.json"
-        proposal_path.write_text(json.dumps(template))
-        prepared = self.success(
-            "adjudicate", "--review-id", review_id, "--expected-head", self.head,
-            "--dispositions-file", str(proposal_path), "--prepare-evidence", root=linked,
-        )["proposal"]
-        proposal_path.write_text(json.dumps(prepared))
-
-        common = self.root / ".git" / "sd-review-evidence" / review_id
-        archive = pathlib.Path(prepared["bindings"]["evidence_archive"]["path"])
-        member = pathlib.Path(prepared["findings"][0]["evidence"][0]["path"])
-        for path in (archive, member):
-            self.assertTrue(path.is_relative_to(common), path)
-            self.assertFalse(path.is_relative_to(linked), path)
-            self.assertEqual(path.resolve(strict=True), path)
-        self.assertEqual(member.read_bytes(), data)
-        # The evidence is inside the Git directory, so the worktree that wrote
-        # it stays clean and acceptance can still read the exact same bytes.
-        self.assertEqual(_git(linked, "status", "--porcelain", "--untracked-files=all"), "")
-        validated = self.success(
-            "adjudicate", "--review-id", review_id, "--expected-head", self.head,
-            "--dispositions-file", str(proposal_path), root=linked,
-        )
-        self.success(
-            "adjudicate", "--review-id", review_id, "--expected-head", self.head,
-            "--dispositions-file", str(proposal_path),
-            "--accept-dispositions", validated["acceptance_digest"], root=linked,
-        )
-        self.success("verify-review", "--review-id", review_id, "--expected-head", self.head, root=linked)
-
     def test_a_second_import_never_overwrites_the_import_that_landed_first(self):
         """Eligibility is read before the lock, so it is read again inside it.
 
@@ -1313,7 +1079,7 @@ class NoItemContracts(unittest.TestCase):
         write that lands between the in-lock read and the identity write leaves
         the close refusing rather than overwriting it.
         """
-        review_id, _proposal, proposal_path, _evidence = self.blocking_proposal()
+        review_id, _proposal, proposal_path = self.blocking_proposal()
         self.accept(review_id, proposal_path)
         self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
         key, (_revision, before) = self.record(review_id)
@@ -1367,34 +1133,31 @@ class NoItemContracts(unittest.TestCase):
             "the refused close released the branch claim anyway",
         )
 
-    def test_a_concurrent_record_change_refuses_acceptance(self):
-        """The proposal an operator approved belongs to the record they read.
+    def test_a_concurrent_record_change_refuses_the_recording(self):
+        """The dispositions belong to the record their template was read from.
 
-        Validation and acceptance are separate commands, so a record can move
-        between them. The proposal binds the identity revision the lifecycle
-        raises, so a record that changed no longer binds its own proposal and
-        no acceptance receipt is written.
+        The template and the recording are separate commands, so a record can
+        move between them. The proposal binds the identity revision the
+        lifecycle raises, so a record that changed no longer binds its own
+        proposal and no adjudication receipt is written.
         """
-        review_id, _proposal, proposal_path, _evidence = self.blocking_proposal()
+        review_id, _proposal, proposal_path = self.blocking_proposal()
         args = (
             "--review-id", review_id, "--expected-head", self.head,
             "--dispositions-file", str(proposal_path),
         )
-        validated = self.success("adjudicate", *args)
         original = no_item.open_review
         landed = []
 
         def racing_open(root, connection, database, cli_args, store, runtime):
             review = original(root, connection, database, cli_args, store, runtime)
-            if cli_args.accept_dispositions is not None and not landed:
+            if cli_args.dispositions_file is not None and not landed:
                 landed.append(None)
                 self.success("review", "--review-id", review_id, "--rebind-branch", "topic")
             return review
 
         with patch.object(no_item, "open_review", racing_open):
-            code, value, diagnostic = self.cli(
-                "adjudicate", *args, "--accept-dispositions", validated["acceptance_digest"]
-            )
+            code, value, diagnostic = self.cli("adjudicate", *args)
         self.assertEqual(landed, [None], diagnostic)
         self.assertEqual(code, 3, diagnostic)
         self.assertRegex(value.get("error", ""), "does not bind the current review")
@@ -1465,10 +1228,8 @@ class NoItemContracts(unittest.TestCase):
     def test_each_clearance_precondition_refuses_on_its_own(self):
         """Missing depth, a failed check and a stale source each refuse alone.
 
-        The criterion names five conditions and the other two already have
-        cases: changed evidence is
-        `test_accepted_clearance_refuses_changed_durable_evidence`, and stale
-        tool bindings is
+        The criterion names four conditions and the fourth already has a
+        case: stale tool bindings is
         `test_each_review_manifest_member_mutation_refuses_no_item_clearance`,
         which enumerates the manifest rather than naming a file.
 

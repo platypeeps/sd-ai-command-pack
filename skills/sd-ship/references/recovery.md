@@ -121,7 +121,7 @@ It preserves review acknowledgements and returns a refusal for the operator to r
 Use `sd-ship merge --item ID --expected-head SHA --manual --abandon-copilot-review REASON --json`
 only after an operator decides to stop waiting.
 The reason must be nonempty.
-The exception requires explicit manual merge authority; runner authority cannot use it.
+The exception requires explicit manual merge authority.
 The command binds the abandonment to the current pull request and exact reviewed head.
 It binds exact-head receipts when present.
 Otherwise, it binds the latest receipt for that pull request.
@@ -158,7 +158,7 @@ Repeated incomplete runs exhaust the automatic allowance and grant no publicatio
 
 The repository gate runs after a review that does not block.
 A blocking review runs no gate; its refusal says so, and its `check.status` is `not_run`.
-After its dispositions are accepted, the next prepare runs the gate before clearance (`adjudication.md`, step 5).
+After its dispositions are recorded, the next prepare runs the gate before clearance (`adjudication.md`, step 4).
 A repository gate that fails spends no pass, even after a review that cleared.
 `sd-ship` removes that reservation and keeps the gate output under `review_preflight_error`.
 The next prepare reviews the branch again, without `--retry-review`.

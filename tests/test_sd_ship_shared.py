@@ -224,11 +224,8 @@ class SharedBindingTests(unittest.TestCase):
 
     def test_each_adjudicator_manifest_member_mutation_refuses_stale_proposal(self):
         context, rows = dispositions.context(self.operation, self.head)
-        evidence = self.root / "evidence"
-        evidence.write_bytes(b"fixture evidence")
-        proposal = {"schema_version": 1, "bindings": context, "operator": "fixture", "authority_context": "fixture assertion",
-                    "findings": [dict(rows[0], response_disposition="parked", reason="fixture reason", owner="fixture",
-                                      trigger="scope changes", evidence=[{"path": str(evidence), "sha256": hashlib.sha256(evidence.read_bytes()).hexdigest()}])]}
+        proposal = {"schema_version": 1, "bindings": context,
+                    "findings": [dict(rows[0], response_disposition="parked", reason="revisit when the scope changes")]}
         self.assertEqual(dispositions.validate(self.operation, self.head, proposal), dispositions.digest(proposal))
         # Isolate the adjudicator manifest from the earlier review-binding check.
         self.operation.review_inputs = types.MethodType(lambda operation, head: self.report, self.operation)
