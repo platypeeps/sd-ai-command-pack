@@ -204,6 +204,16 @@ class SatellitePrepare(LaneCase):
         self.assertEqual((row["phase"], row["pull_request"]["number"]), ("ready_to_send", number))
         self.assertEqual((row["invoker"]["lock_holder"], row["invoker"]["served_by"]), (None, self.HUB))
 
+    def test_a_hold_for_another_item_refuses_the_lock_free_prepare(self):
+        """sd:1938. The hold is read off the lane host too, before anything is reviewed or pushed."""
+        import sd_ship_hold
+        sd_ship_hold.take(self.database, "fixture/repo", self.other_item(), window=60, holder="pack lane", command="test")
+        with patch.object(ship.Ship, "review", side_effect=AssertionError("reviewed under a hold for another item")), \
+                self.assertRaises(ship.Refusal) as refused:
+            self.dispatch("prepare")
+        self.assertEqual(refused.exception.workflow["blocker"]["code"], "lane_held")
+        self.assertEqual((self.entered, self.remote.pull_requests), ([], {}))
+
     def test_merge_refuses_before_it_reads_a_row(self):
         """sd:2795 (sd:2782 L3): merge used to read the ship: and hold rows, then meet HubOnly at the lock."""
         self.assertEqual(self.dispatch("prepare")["phase"], "ready_to_send")

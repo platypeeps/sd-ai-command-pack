@@ -2635,14 +2635,15 @@ def dispatch(root, connection, database, args, store, readonly):
     # sd:2679. Off the lane host prepare runs without the ship lock, which only
     # the host takes: each save is checked against the row's revision. A merged
     # record's prepare, which reconciles, still meets LaneElsewhere at the lock.
-    if args.command == "prepare" and elsewhere and delivery.state.get("phase") not in ("merged", "merge_dispatch"):
-        delivery.served_by, delivery.lock_free = hub_serving(database), True
-        return delivery.prepare()
     # A hold for another item refuses before the lock, so a held lane's lock
     # is not contended, and again under it, where the answer holds (sd:2035).
+    # A lock-free prepare reads it too (sd:1938).
     held = args.command in ("prepare", "merge")
     if held:
         sd_ship_hold.refuse_other(database, delivery.repository, args.item)
+    if args.command == "prepare" and elsewhere and delivery.state.get("phase") not in ("merged", "merge_dispatch"):
+        delivery.served_by, delivery.lock_free = hub_serving(database), True
+        return delivery.prepare()
     with store.repository_lock(database, delivery.repository, **lock_options(args, store)):
         if held:
             sd_ship_hold.refuse_other(database, delivery.repository, args.item)
