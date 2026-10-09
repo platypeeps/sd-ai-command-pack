@@ -3934,14 +3934,18 @@ roles:
             self.operation().check_review(_git(self.root, "rev-parse", "HEAD"))
         self.assertFalse(calls.exists())
 
-    def tiered_branch(self, files: dict[str, str], *, check: str = "true") -> pathlib.Path:
-        """sd:2998. A branch off main changing only `files`, a counting reader, and main's Makefile `check`."""
+    def tiered_branch(self, files: dict[str, str], *, check: str = "true", policy: str | None = None) -> pathlib.Path:
+        """sd:2998. A branch off main changing only `files`, a counting reader, and main's Makefile `check`.
+
+        `policy` is main's `.github/sd-review.json`, so it is not in the branch's diff.
+        """
         calls = self.directory / "provider-calls"
         (self.programs / "review-fixture").write_text(
             "#!/usr/bin/env python3\nimport json, pathlib\n"
             f"pathlib.Path({str(calls)!r}).open('a').write('call\\n')\n"
             "print(json.dumps({'type':'result','subtype':'success','structured_output':{'findings':[]}}))\n")
-        self.remote.commit_on("main", "gate\n\nAuthored-with: human", files={"Makefile": f"check:\n\t@{check}\n"})
+        main = {"Makefile": f"check:\n\t@{check}\n"} | ({".github/sd-review.json": policy} if policy else {})
+        self.remote.commit_on("main", "gate\n\nAuthored-with: human", files=main)
         _git(self.root, "fetch", "-q", "origin")
         _git(self.root, "checkout", "-q", "-b", "tiered", "origin/main")
         for name, text in files.items():
@@ -3989,7 +3993,7 @@ roles:
         self.assertIsNone(reviewed["base"], "the first review after a skip must cover the whole branch")
 
     def test_a_malformed_review_policy_refuses_the_classification(self):
-        calls = self.tiered_branch({"README.md": "words\n", ".github/sd-review.json": "{"})
+        calls = self.tiered_branch({"README.md": "words\n"}, policy="{")
         with self.assertRaisesRegex(ship.Refusal, "review policy does not parse"):
             self.prepare()
         self.assertFalse(calls.exists())
@@ -4017,8 +4021,8 @@ roles:
         with self.assertRaisesRegex(ship.Refusal, "no completed local review receipt"):
             self.operation().check_review(_git(self.root, "rev-parse", "HEAD"))
 
-    def assert_tier_reviews(self, files: dict[str, str]) -> None:
-        calls = self.tiered_branch(files)
+    def assert_tier_reviews(self, files: dict[str, str], policy: str | None = None) -> None:
+        calls = self.tiered_branch(files, policy=policy)
         with contextlib.redirect_stderr(io.StringIO()):
             result = self.prepare()
         self.assertNotIn("review_skipped", result)
@@ -4042,6 +4046,43 @@ roles:
 
     def test_an_unknown_path_is_reviewed(self):
         self.assert_tier_reviews({"notes.txt": "unknown\n"})
+
+    #: A policy that lets Markdown anywhere skip review, so only the agent-instruction rule can keep a path reviewed.
+    WIDE_DOCS_SKIP = '{"docs_skip": ["**/*.md"]}'
+
+    def test_a_wide_docs_skip_still_skips_nested_prose(self):
+        calls = self.tiered_branch({"guide/usage.md": "words\n"}, policy=self.WIDE_DOCS_SKIP)
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(self.prepare()["review_skipped"], "docs-only")
+        self.assertFalse(calls.exists())
+
+    def test_a_root_agents_md_is_reviewed(self):
+        self.assert_tier_reviews({"AGENTS.md": "rules\n"})
+
+    def test_a_root_claude_md_is_reviewed(self):
+        self.assert_tier_reviews({"CLAUDE.md": "rules\n"})
+
+    def test_a_claude_rule_is_reviewed(self):
+        self.assert_tier_reviews({".claude/rules/example.md": "rule\n"}, self.WIDE_DOCS_SKIP)
+
+    def test_a_claude_command_is_reviewed(self):
+        self.assert_tier_reviews({".claude/commands/example.md": "command\n"}, self.WIDE_DOCS_SKIP)
+
+    def test_a_nested_agents_md_is_reviewed(self):
+        self.assert_tier_reviews({"sub/AGENTS.md": "rules\n"}, self.WIDE_DOCS_SKIP)
+
+    def test_prose_under_an_unknown_dot_directory_is_reviewed(self):
+        self.assert_tier_reviews({".newagent/notes.md": "notes\n"}, self.WIDE_DOCS_SKIP)
+
+    def test_every_agent_instruction_shape_steers_agents(self):
+        for path in ("CLAUDE.local.md", "docs/GEMINI.md", "docs/claude.md", ".github/copilot-instructions.md",
+                     "docs/rules.mdc", "docs/api.instructions.md", ".cursorrules", "docs/.agents/x.md",
+                     "skills/sd-x/SKILL.md", "hooks/notes.md"):
+            with self.subTest(path=path):
+                self.assertTrue(ship.steers_agents(path))
+        for path in ("README.md", "docs/guide.md", "guide/usage.md", "docs/instructions.md"):
+            with self.subTest(path=path):
+                self.assertFalse(ship.steers_agents(path))
 
     def test_status_contexts_are_bound_by_exact_sha_endpoint_without_an_invented_sha_field(self):
         self.prepare()

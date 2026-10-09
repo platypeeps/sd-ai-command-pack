@@ -153,7 +153,12 @@ PIN_FILES = (".sd-pack-rev",)
 #: sd:2998. Directories whose files run or steer an agent, prose included: a
 #: path under one is never docs-only, whatever a repository's `docs_skip` says.
 #: `skills/` is the pack's payload, so a `SKILL.md` is code here.
-CODE_DIRECTORIES = frozenset({"bin", "tests", "skills", "hooks", ".githooks", "scripts"})
+CODE_DIRECTORIES = frozenset({"bin", "tests", "skills", "hooks", "scripts"})
+#: sd:2998. Agent-instruction files by name, compared case-folded, anywhere in
+#: the tree: they steer automation however Markdown-shaped they are.
+AGENT_INSTRUCTION_NAMES = frozenset({"agents.md", "claude.md", "claude.local.md", "gemini.md",
+                                     "copilot-instructions.md"})
+AGENT_INSTRUCTION_SUFFIXES = (".mdc", ".instructions.md")
 #: sd:2998. A design record gets the planning review in `sd-plan`, not a skip here.
 DESIGN_RECORDS = "docs/work/"
 #: The prepare flags that ask for a model review; any one keeps it.
@@ -164,6 +169,19 @@ UNSHIPPED_NAMED = 5
 #: object. JSON's names, not Python's: the reader is looking at a review's
 #: output. `bool` is looked up by exact type, so it does not fall into `int`.
 JSON_KINDS = {list: "array", str: "string", int: "number", float: "number", bool: "boolean", type(None): "null"}
+
+
+def steers_agents(path: str) -> bool:
+    """Whether `path` may run or steer an agent, so it is never docs-only (sd:2998).
+
+    Any dot-directory or dotfile counts (`.claude/`, `.github/`, `.cursorrules`,
+    and every tool's next one), as do the `CODE_DIRECTORIES` and the
+    agent-instruction names: docs-only is the allow-list, plain prose outside them.
+    """
+    parts = path.split("/")
+    name = parts[-1].casefold()
+    return (any(part.startswith(".") for part in parts) or bool(CODE_DIRECTORIES & set(parts[:-1]))
+            or name in AGENT_INSTRUCTION_NAMES or name.endswith(AGENT_INSTRUCTION_SUFFIXES))
 
 
 def capture_too_deep(data: bytes, limit: int = REVIEW_CAPTURE_DEPTH) -> bool:
@@ -1107,7 +1125,7 @@ class Ship(SharedReview):
         `pin-bump`: every changed path is a `PIN_FILES` entry. `docs-only`:
         every changed path is in the repository's `docs_skip` and no
         `never_skip` (`repository_skippable`), and none is a design record or
-        under a `CODE_DIRECTORIES` entry. Anything else is `code`, and so is a
+        steers agents (`steers_agents`). Anything else is `code`, and so is a
         diff git cannot list: a doubtful branch is reviewed.
         """
         fork = sd_lib.git_output(["merge-base", head, f"refs/remotes/origin/{self.state['base']}"], self.root)
@@ -1119,7 +1137,7 @@ class Ship(SharedReview):
         elif all(path in PIN_FILES for path in paths):
             tier, reason = "pin-bump", f"only {', '.join(paths)} changed"
         elif doubtful := [path for path in paths if path.startswith(DESIGN_RECORDS)
-                          or CODE_DIRECTORIES & set(path.split("/")[:-1])] or sorted(
+                          or steers_agents(path)] or sorted(
                               set(paths) - self.repository_skippable(paths)):
             tier, reason = "code", f"{doubtful[0]} is not prose the review may skip"
         return {"tier": tier, "reason": reason, "base": fork}
