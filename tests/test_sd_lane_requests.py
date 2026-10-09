@@ -455,18 +455,30 @@ class HostedRun(LaneHosts):
         self.lane_repo("alpha", 11)
         self.lane_repo("bravo", 12, host="build-2")
         busy = self.lane_repo("charlie", 13)
-        quiet = self.lane_repo("delta", None)
+        self.lane_repo("delta", None)
         self.lane_repo("echo", 15)
         with open(sd_lane.queue_path(busy, self.environ).parent / "runner.lock", "a", encoding="utf-8") as held:
             fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)  # another runner drains charlie's lane
             answer = sd_lane.run_hosted(self.environ, self.ship, self.gate)
         self.assertEqual([int(call[call.index("--item") + 1]) for call in self.calls], [11, 11, 15, 15])
         lanes = {pathlib.Path(lane["path"]).name: lane for lane in answer["lanes"]}
-        self.assertEqual(sorted(lanes), ["alpha", "charlie", "echo"])
+        self.assertEqual(sorted(lanes), ["alpha", "charlie", "delta", "echo", self.repo.name])
+        self.assertEqual((lanes["delta"]["ran"], lanes[self.repo.name]["ran"]), ([], []))  # no queue file: still runs
         self.assertEqual([row["item"] for row in lanes["alpha"]["ran"]], [11])
         self.assertIn("another runner holds", lanes["charlie"]["busy"])
-        self.assertFalse(sd_lane.lane_dir(quiet, self.environ).exists())
         self.assertEqual(sd_lane.read_queue(sd_lane.queue_path(self.tmp / "bravo", self.environ))[0]["status"], "pending")
+
+    def test_a_hosted_lane_with_no_queue_file_takes_a_satellite_request_in(self) -> None:
+        """Review round 1: `lane request` writes only a row, so a hosted lane that never queued here still runs."""
+        self.prepared()
+        self.ask()
+        self.assertFalse(self.path.exists())
+        with mock.patch.object(sd_lane, "default_hub", sd_lane_default_hub()):
+            answer = sd_lane.run_hosted(self.environ, self.ship, self.gate)
+        [lane] = answer["lanes"]
+        self.assertEqual((lane["path"], [(row["item"], row["status"]) for row in lane["ran"]]),
+                         (str(self.repo), [(7, "merged")]))
+        self.assertEqual(self.row()["status"], "merged")
 
     def test_a_lane_whose_host_cannot_be_read_is_skipped_and_the_rest_run(self) -> None:
         self.lane_repo("alpha", 11)
@@ -476,7 +488,7 @@ class HostedRun(LaneHosts):
         self.connection.commit()
         self.lane_repo("bravo", 12)
         answer = sd_lane.run_hosted(self.environ, self.ship, self.gate)
-        skipped, ran = answer["lanes"]
+        skipped, ran, _ = answer["lanes"]  # the suite's own repository runs last, with nothing queued
         self.assertEqual((pathlib.Path(skipped["path"]).name, skipped["code"]), ("alpha", "lane_unknown"))
         self.assertEqual((pathlib.Path(ran["path"]).name, [row["item"] for row in ran["ran"]]), ("bravo", [12]))
 

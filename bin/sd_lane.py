@@ -1139,10 +1139,10 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
     """`lane run --hosted`: `run_lane` for each repository this machine hosts, one after another (sd:3003).
 
     The same job runs on every machine. Its lanes are the managed `repo` rows,
-    in path order, whose checkout is on this disk with a queue in it and whose
-    lane host is this machine; a lane that never queued here has nothing to
-    drain, and no folder is made for it. Ownership this machine cannot read
-    skips that lane with the reason. A held runner lock skips it too
+    in path order, whose checkout is on this disk and whose lane host is this
+    machine. A hosted lane runs with no queue file: a satellite's `lane request`
+    is a row only intake reads (review round 1). Ownership this machine cannot
+    read skips that lane with the reason. A held runner lock skips it too
     (`run_lane` answers `busy`), and a refusal in one lane leaves the next to run.
     """
     imported = sd_lib.import_sd_db()
@@ -1164,7 +1164,7 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
     try:
         for row in rows:
             found, checkout = github_slug(row["remote"]), sd_lib.repo_disk(row["path"])
-            if found is None or not (checkout / ".git").exists() or not queue_path(checkout, environ).is_file():
+            if found is None or not (checkout / ".git").exists():
                 continue
             try:
                 if sd_lib.hosts_lane(connection, database, "/".join(found)):
