@@ -781,10 +781,12 @@ def validate_workflow_status(value: object, kind: dict[str, object], what: str) 
 
     if not isinstance(value, dict) or not value:
         raise Refusal(f"{what} is not a non-empty object")
-    ladder = {kind["initial-status"]}
+    initial = kind["initial-status"]
     transitions = kind.get("transitions", {})
-    assert isinstance(transitions, dict)  # validate_kind checks it
+    assert isinstance(initial, str) and isinstance(transitions, dict)  # validate_kind checks both
+    ladder: set[str] = {initial}
     for source, targets in transitions.items():
+        assert isinstance(targets, list)  # validate_transitions checks it
         ladder.update([source, *targets])
     missing = sorted(ladder - set(value))
     if missing:
