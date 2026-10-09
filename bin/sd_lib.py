@@ -2633,13 +2633,18 @@ def upstream(root: pathlib.Path) -> tuple[str, str]:
     tracked = git_output(["config", "--get", f"branch.{head}.remote"], root)
     fallback = "origin" if "origin" in names else (names[0] if names else "")
     remote = tracked if tracked in names else fallback
+    return remote, remote_default(root, remote)
+
+
+def remote_default(root: pathlib.Path, remote: str) -> str:
+    """`remote`'s default branch: what it publishes, else the first of `main` and `master` this checkout resolves."""
     published = git_output(["symbolic-ref", "--short", f"refs/remotes/{remote}/HEAD"], root)
     if published:
-        return remote, published.partition("/")[2] or published
+        return published.partition("/")[2] or published
     for name in ("main", "master"):
         if git_output(["rev-parse", "--verify", "--quiet", name], root) is not None:
-            return remote, name
-    return remote, "main"
+            return name
+    return "main"
 
 
 def _fetched(root: pathlib.Path, remote: str, ref: str) -> str | None:
@@ -2800,13 +2805,17 @@ def shared_tree_artifacts(root: pathlib.Path) -> tuple[str, ...]:
     tree holds, not what this branch does. Nothing is fetched: `sd-status`
     reports, and a report does not reach the network on the reader's behalf.
 
-    Empty for a checkout with no remote, for a remote-tracking ref this clone
+    The remote is `origin`, the one `remote_permits_full` asks, and not the
+    branch's upstream: the list belongs to the answer that lowered the mode
+    (sd:3136).
+
+    Empty for a checkout with no `origin`, for a remote-tracking ref this clone
     does not have, and for a shared tree holding none of the three trees --
     all of which are the same answer to the reader, "nothing to move".
     """
-    remote, default = upstream(root)
-    if not remote:
+    if not git_output(["remote", "get-url", "origin"], root):
         return ()
+    remote, default = "origin", remote_default(root, "origin")
     try:
         trees = guest_refused_dirs(root)
     except ConfigError:
