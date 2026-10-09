@@ -40,6 +40,8 @@ class LaneCase(unittest.TestCase):
     args = fixture.ShipCase.args
     operation = fixture.ShipCase.operation
     hold_ship_lock = fixture.ShipCase.hold_ship_lock
+    amend_after_a_blocking_review = fixture.ShipCase.amend_after_a_blocking_review
+    prepare = fixture.ShipCase.prepare
 
     def run_cli(self, *argv, cwd=None):
         completed = subprocess.run([sys.executable, str(ROOT / "bin/sd-ship"), *argv, "--json"],
@@ -308,7 +310,8 @@ class LockFreePrepare(LaneCase):
         reviewing, here = {"phase": "reviewing"}, socket.gethostname()
 
         def reserved(pid, started=now, host=here, **entry):
-            return [{"head": "0" * 40, "started_at": started.isoformat(), "process": {"pid": pid, "host": host}, **entry}]
+            process = {"pid": pid, "host": host, "execution_seconds": 3600}
+            return [{"head": "0" * 40, "started_at": started.isoformat(), "process": process, **entry}]
 
         live = fixture.sd_ship_review.live_reviewer
         self.assertEqual(live(reviewing, reserved(child.pid))["pid"], child.pid)
@@ -319,6 +322,51 @@ class LockFreePrepare(LaneCase):
         self.assertIsNone(live({"phase": "reviewed"}, reserved(child.pid)))
         self.assertIsNone(live(reviewing, reserved(child.pid, report={})))
         self.assertIsNone(live(reviewing, [{"head": "0" * 40, "started_at": now.isoformat()}]), "a pass before sd:1938")
+        expired = now - timedelta(seconds=3600 + fixture.sd_ship_review.RESERVATION_MARGIN_SECONDS + 1)
+        self.assertIsNone(live(reviewing, reserved(child.pid, started=expired, host="satellite.example.test")))
+        self.assertIsNone(live(reviewing, reserved(child.pid, started=expired)), "the bound backs up a live pid")
+
+    def remote_reservation(self, head, started):
+        """Leave the record mid-review, its pass reserved by a process on another machine."""
+        key = receipts.receipt_key("fixture/repo", "topic", self.item)
+        revision, row = receipts.read(self.connection, key)
+        row["passes"].append({"head": head, "started_at": started.isoformat(), "base": None, "retry": False,
+                              "requested_provider": None,
+                              "process": {"pid": 1, "host": "satellite.example.test", "execution_seconds": 3600}})
+        receipts.save(self.connection, key, revision, {**row, "phase": "reviewing", "reviewed_head": None})
+
+    def remote_reservation_replaced(self, started):
+        """Move the reserved pass's start to `started`."""
+        key = receipts.receipt_key("fixture/repo", "topic", self.item)
+        revision, row = receipts.read(self.connection, key)
+        row["passes"][-1]["started_at"] = started.isoformat()
+        receipts.save(self.connection, key, revision, row)
+
+    def test_a_remote_reservation_refuses_within_its_bound_and_expires_past_it(self):
+        """sd:1938 review: a satellite that died mid-review blocks the item until its pass's bound, no longer."""
+        self.assertEqual(self.operation("prepare").prepare()["phase"], "ready_to_send")
+        _git(self.root, "commit", "-q", "--allow-empty", "-m", "fix\n\nAuthored-with: human")
+        self.remote_reservation(self.head(), datetime.now(timezone.utc))
+        with self.assertRaises(ship.Refusal) as refused:
+            self.operation("prepare", "--retry-review").prepare()
+        self.assertEqual(refused.exception.workflow["blocker"]["code"], "review_running")
+        self.assertIn("pid 1 on satellite.example.test", str(refused.exception))
+        stale = datetime.now(timezone.utc) - timedelta(seconds=3600 + fixture.sd_ship_review.RESERVATION_MARGIN_SECONDS + 1)
+        self.remote_reservation_replaced(stale)
+        self.assertEqual(self.operation("prepare", "--retry-review").prepare()["phase"], "ready_to_send")
+
+    def test_restart_review_sets_aside_a_pass_that_still_reads_live(self):
+        """sd:1938 review: `--restart-review REASON` is the operator's word, so the live-review guard yields to it."""
+        reviewed, amended, payload, program = self.amend_after_a_blocking_review()
+        self.remote_reservation(reviewed, datetime.now(timezone.utc))
+        with self.assertRaises(ship.Refusal) as refused:
+            self.operation("prepare").prepare()
+        self.assertEqual(refused.exception.workflow["blocker"]["code"], "review_running")
+        payload["structured_output"]["findings"] = []
+        program.write_text("#!/usr/bin/env python3\nimport json\nprint(" + repr(json.dumps(payload)) + ")\n")
+        prepared = self.operation("prepare", "--restart-review", "satellite died mid-review").prepare()
+        self.assertEqual(prepared["reviewed_head"], amended)
+        self.assertEqual([entry["head"] for entry in self.receipt()["passes"]], [amended])
 
     def test_a_prepare_in_review_holds_no_lock_so_another_items_lane_step_runs(self):
         """The point of sd:1938: a hand prepare's review no longer refuses the lane for its whole run.

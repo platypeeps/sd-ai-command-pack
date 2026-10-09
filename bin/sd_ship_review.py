@@ -187,6 +187,8 @@ def carry_forward(root: pathlib.Path, reviewed: str, head: str, base_ref: str) -
 
 #: How much younger than its reserved pass a process may read and still be its reviewer: `ps` rounds to seconds.
 REVIEWER_AGE_SLACK_SECONDS = 5
+#: How long past its planned execution a reserved pass still reads live: its planning ran before that bound started.
+RESERVATION_MARGIN_SECONDS = 600
 
 
 def reviewer_process() -> dict:
@@ -224,18 +226,24 @@ def live_reviewer(state: dict, passes: list[dict]) -> dict | None:
     Prepare takes no ship lock, so a second prepare can start while the first
     reviews. It would read the reserved pass as incomplete and spend another on
     `--retry-review`, and the first would lose its receipt to the revision check.
-    A pid that now names a process younger than the pass was reused, so it is
-    dead. Another host's process cannot be read here, so it counts as live.
+    A pass expires once its planned execution and `RESERVATION_MARGIN_SECONDS`
+    have passed: the watchdog has stopped its reviewer by then, so a crash on
+    any machine blocks the item for that long at most. Before that, another
+    host's process cannot be read here, so it counts as live. A pid that now
+    names a process younger than the pass was reused, so it is dead.
     """
     last = passes[-1] if passes else {}
     process = last.get("process")
     if state.get("phase") != "reviewing" or "report" in last or last.get("execution_error") or not isinstance(process, dict):
         return None
+    since = (datetime.now(timezone.utc) - datetime.fromisoformat(last["started_at"])).total_seconds()
+    bound = process.get("execution_seconds")
+    if type(bound) is not int or since > bound + RESERVATION_MARGIN_SECONDS:
+        return None
     if process.get("host") != socket.gethostname():
         return process
     pid = process.get("pid")
     age = process_age(pid) if type(pid) is int and pid > 0 else None
-    since = (datetime.now(timezone.utc) - datetime.fromisoformat(last["started_at"])).total_seconds()
     return None if age is None or age + REVIEWER_AGE_SLACK_SECONDS < since else process
 
 
@@ -334,7 +342,12 @@ class SharedReview:
         self.revision = self.store.save(self.connection, self.key, self.revision, self.history.stamp(self.state))
 
     def refuse_live_review(self) -> None:
-        """Refuse before anything is saved while another process reviews this record (sd:1938)."""
+        """Refuse before anything is saved while another process reviews this record (sd:1938).
+
+        `--restart-review REASON` is the operator's explicit word, so it sets aside a pass that still reads live.
+        """
+        if getattr(self.args, "restart_review", None) is not None:
+            return
         process = live_reviewer(self.state, self.history.native(self.state))
         if process is not None:
             raise Refusal(f"pid {process.get('pid')} on {process.get('host')} is still reviewing this record; "
@@ -882,6 +895,8 @@ class SharedReview:
             except Refusal:
                 self.save(review_preflight_error=self.preflight_diagnostic(planned))
                 raise
+            # The pass's bound, so a reservation whose process cannot be read still expires (sd:1938).
+            passes[-1]["process"]["execution_seconds"] = plan["execution_seconds"]
             # sd:1397. What the reviewers are asked, so a moved binding can replay it.
             explained = json.loads(planned.stdout)
             passes[-1]["review_request"] = {"sha256": explained.get("request_sha256"),
