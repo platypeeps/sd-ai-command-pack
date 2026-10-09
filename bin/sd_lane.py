@@ -95,10 +95,19 @@ accepts the satellite's receipt under the trust rule in `sd_local_gate`
 instead of a gate on the hub. A request without `--manual` stops there as
 `prepared`, as a hub entry queued without it does. Its outcome goes back to
 the request row, and a hand-back or failure notes the item, with the trust
-rule's next action for its code. `lane run --satellite-only` claims satellite entries only, starts no
-speculative gate, and exits when none is pending; a scheduled job on the hub
-runs it. Each run publishes the hub's pack digest to `sd-lane-pack:v1:<slug>`
-at its start and after a fast-forward of the pack checkout.
+rule's next action for its code. `lane run --satellite-only` claims satellite
+entries only, starts no speculative gate, and exits when none is pending; a
+scheduled job on the hub runs it until every job runs `--hosted`. Each hub run
+publishes the hub's pack digest to `sd-lane-pack:v1:<slug>` at its start and
+after a fast-forward of the pack checkout.
+
+Only a repository's lane host drains its queue (sd:3003): the machine
+`repo.lane_host` names, or the hub when it is NULL. Elsewhere `run`,
+`enqueue`, `move`, `hold` and `release` refuse with `lane_elsewhere`, and a
+host that cannot be read refuses with `lane_unknown`. The runner reads the
+host again before each claim, so a move stops it at the next item. The same
+scheduled job runs on every machine: `lane run --hosted` runs each lane this
+machine hosts, one after another, and skips one whose runner is busy.
 """
 
 from __future__ import annotations
@@ -135,8 +144,9 @@ WATCH_MINUTES = 3
 CLAIMS = ("deliver", "associate-only")
 #: The relative places `move` takes besides a 1-based position among pending entries.
 PLACES = ("up", "down", "top")
-#: The verbs on this machine's queue file, which only the hub's `lane run` drains; a satellite refuses them (sd:2795).
-QUEUE_VERBS = ("enqueue", "list", "cancel", "move", "hold", "release")
+#: The verbs that fill or reorder a queue only its lane host drains; off the host they refuse (sd:2795, sd:3003).
+#: `list` and `cancel` still answer there, so an old host's pending entries can be read and cancelled after a move.
+HOST_VERBS = ("enqueue", "move", "hold", "release")
 #: `(argv, log) -> sd-ship's JSON answer`; the log receives the step's whole output.
 Ship = Callable[[list[str], pathlib.Path], dict[str, Any]]
 #: `(root, head, base) -> the gate's result`: the next entry's gate on a predicted landing (sd:2586).
@@ -361,9 +371,10 @@ def request_key(slug: str, item: int) -> str:
 def request(root: pathlib.Path, item: int, *, manual: bool, database: pathlib.Path | None = None) -> dict[str, Any]:
     """`lane request` on a satellite: write the item's request row for the hub's lane (sd:2704).
 
-    Refused on the hub, where `lane enqueue` queues the item, and for an item
-    whose `ship:` row is not `ready_to_send` at the branch's pushed head, which
-    intake would refuse.
+    Refused on the hub, where `lane enqueue` queues the item; for a lane the
+    hub does not host, since only the hub's run takes requests in (sd:3003);
+    and for an item whose `ship:` row is not `ready_to_send` at the branch's
+    pushed head, which intake would refuse.
     """
     imported = sd_lib.import_sd_db()
     if imported.module is None:
@@ -393,6 +404,7 @@ def request(root: pathlib.Path, item: int, *, manual: bool, database: pathlib.Pa
     except SdDbError as error:
         raise LaneError(f"the hub {hub} did not answer, so no request was written; rerun once it does: {error}") from None
     try:
+        refuse_unhosted(connection, database, own)
         _, shipped = store.read(connection, store.receipt_key(own, branch, item))
         if shipped.get("phase") != "ready_to_send" or not pushed or shipped.get("head") != pushed:
             raise LaneError(f"sd:{item} is not ready_to_send at the pushed head of {branch} ({str(pushed)[:12]}); "
@@ -408,6 +420,21 @@ def request(root: pathlib.Path, item: int, *, manual: bool, database: pathlib.Pa
     finally:
         connection.close()
     return {"request": key, "revision": written, **value}
+
+
+def refuse_unhosted(connection: Any, database: pathlib.Path, own: str) -> None:
+    """Refuse a request no run would take in: only the hub's run reads request rows (`default_hub`)."""
+    try:
+        elsewhere = sd_lib.lane_elsewhere(connection, database, own)
+        host, _ = sd_lib.lane_host(connection, own)
+    except Exception as error:  # noqa: BLE001 -- `LaneUnknown`, or a read fault it did not wrap
+        raise LaneError(str(error), code=getattr(error, "code", None) or "lane_unknown") from None
+    if elsewhere is None:
+        raise LaneError(f"The lane for {own} runs on this machine, not on the hub, so no run would take a "
+                        "request in. Queue the item here with sd-ship lane enqueue.", code="lane_elsewhere")
+    if host is not None:
+        raise LaneError(f"{elsewhere}\nNo run there takes a request in: queue the item on {host} with "
+                        "sd-ship lane enqueue.", code="lane_elsewhere")
 
 
 def requests(hub: Hub) -> list[tuple[str, int, dict[str, Any]]]:
@@ -592,10 +619,11 @@ def publish_pack(hub: Hub) -> str:
 
 @contextlib.contextmanager
 def default_hub(root: pathlib.Path) -> Iterator[Hub | None]:
-    """The run's view of the workflow database; None without `sd_db`, a database, or a GitHub origin."""
+    """The run's view of the workflow database; None without `sd_db`, a database, or a GitHub origin, and off the hub."""
     if sd_lib.import_sd_db().module is None:
         yield None
         return
+    import sd_gate_receipts  # noqa: PLC0415
     from sd_db import ship as store  # noqa: PLC0415
     from sd_db.database import connect, default_path  # noqa: PLC0415
     from sd_ship_remote import slug  # noqa: PLC0415
@@ -603,8 +631,10 @@ def default_hub(root: pathlib.Path) -> Iterator[Hub | None]:
     main = sd_lib.main_worktree_root(root).resolve()
     try:
         own = slug(lane_git(main, "config", "--get", "remote.origin.url") or "")
+        if sd_gate_receipts.served_hub(default_path()) is not None:  # a satellite host reads no request (sd:3003)
+            raise LaneError("a satellite")
         connection = connect(default_path())
-    except Exception:  # no GitHub origin, or no database: no request can be read; hub entries still run
+    except Exception:  # no GitHub origin, no database, or not the hub: no request can be read; entries still run
         yield None
         return
     try:
@@ -971,17 +1001,52 @@ def settle(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, st
     return fields
 
 
-def refuse_on_satellite(verb: str, remedy: str = "Run it on the hub") -> None:
-    """Refuse a hub-only verb on a satellite, as `sd_db`'s `HubOnly` does, before it reads or writes a row."""
-    if sd_lib.import_sd_db().module is None:
-        return  # no database: no request or pack row to reach
-    import sd_gate_receipts  # noqa: PLC0415
-    from sd_db.database import default_path  # noqa: PLC0415
+def lane_host_reason(root: pathlib.Path) -> str | None:
+    """Why this machine does not run `root`'s lane, or None on its lane host (sd:3003).
 
-    served = sd_gate_receipts.served_hub(default_path())
-    if served:
-        raise LaneError(f"{verb} runs on the sd hub only; this machine reaches the database on {served}. "
-                        + remedy, code="hub_only")
+    `sd_lib.lane_elsewhere` reads `repo.lane_host` on a connection opened for
+    this read. Without `sd_db` there is no database and no other host. A
+    checkout whose origin names no GitHub repository matches no row, so only
+    the hub hosts it. A database that does not answer, or rows that disagree,
+    raise `lane_unknown`: uncertain ownership never reads as the hub's.
+    """
+    if sd_lib.import_sd_db().module is None:
+        return None
+    import sd_gate_receipts  # noqa: PLC0415
+    from sd_db.database import connect, default_path  # noqa: PLC0415
+    from sd_db.protection import github_slug  # noqa: PLC0415
+
+    try:
+        database = default_path()
+        found = github_slug(lane_git(sd_lib.main_worktree_root(root), "config", "--get", "remote.origin.url"))
+        if found is None:
+            served = sd_gate_receipts.served_hub(database)
+            return None if served is None else f"The lane for {root.name} runs on the hub {served}, not on this machine."
+        connection = connect(database, write=False)
+    except Exception as error:  # noqa: BLE001 -- every fault is "cannot tell", which refuses
+        raise LaneError(f"Cannot read the lane host for {root}: {error}. Nothing was changed; "
+                        "retry when the database answers.", code="lane_unknown") from None
+    try:
+        return sd_lib.lane_elsewhere(connection, database, "/".join(found))
+    except Exception as error:  # noqa: BLE001 -- `LaneUnknown`, or a read fault it did not wrap
+        raise LaneError(str(error), code=getattr(error, "code", None) or "lane_unknown") from None
+    finally:
+        connection.close()
+
+
+def refuse_elsewhere(root: pathlib.Path) -> None:
+    """Refuse a host verb off `root`'s lane host, before it reads or writes the queue (sd:3003)."""
+    elsewhere = lane_host_reason(root)
+    if elsewhere is not None:
+        raise LaneError(elsewhere, code="lane_elsewhere")
+
+
+def lane_moved(root: pathlib.Path) -> str | None:
+    """`lane_host_reason` for a runner between items: a refusal is a reason to stop, never to claim."""
+    try:
+        return lane_host_reason(root)
+    except LaneError as error:
+        return str(error)
 
 
 def runner_alive(pid: Any) -> bool:
@@ -1026,11 +1091,13 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
     call, so a suite can replace it; `hub` defaults to `default_hub`'s, the
     same way. Before each claim the runner takes in satellite requests
     (`intake`). `satellite_only` claims only satellite entries and starts no
-    speculative gate (ruling Q4). A satellite entry is claimed only while
-    its request row acknowledges it (`claimable`). On a satellite it refuses before any of
-    that: the requests and the pack row are the hub's (prepare review).
+    speculative gate (ruling Q4). A satellite entry is claimed only while its
+    request row acknowledges it (`claimable`). Off the lane host it refuses before any of
+    that (sd:3003). It reads the host again before each claim, under the
+    runner lock: after a move it finishes the running entry, claims no next
+    one, and says why in `stopped`.
     """
-    refuse_on_satellite("lane run")
+    refuse_elsewhere(root)
     path = queue_path(root, environ)
     path.parent.mkdir(parents=True, exist_ok=True)
     own_lock = path.parent / "runner.lock"
@@ -1048,7 +1115,8 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
             ahead: threading.Thread | None = None
             deferred: set[tuple[Any, Any]] = set()  # entries put back this run; the next run retries them
             while True:
-                if hub is not None:
+                stopped = lane_moved(root)  # sd:3003: a move stops the lane at an item boundary, never mid-merge
+                if hub is not None and stopped is None:
                     answer["intake"] += intake(hub, path)
 
                 def claim_next(entries: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -1059,8 +1127,10 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
                             row.update(status="running", started_at=stamp_now(), runner_pid=os.getpid())
                             return dict(row)
                     return None
-                entry = update(path, claim_next)
+                entry = None if stopped else update(path, claim_next)
                 if entry is None:
+                    if stopped:
+                        answer["stopped"] = stopped
                     if ahead is not None:
                         ahead.join()
                     return answer
@@ -1087,6 +1157,53 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
                     deferred.add((entry["item"], entry.get("enqueued_at")))
                 if ahead is not None and outcome.get("status") == "merged":
                     ahead.join(PREPARE_SECONDS)  # the next prepare reads its receipt
+
+
+def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = default_gate,
+               note: Note | None = None) -> dict[str, Any]:
+    """`lane run --hosted`: `run_lane` for each repository this machine hosts, one after another (sd:3003).
+
+    The same job runs on every machine. Its lanes are the managed `repo` rows,
+    in path order, whose checkout is on this disk and whose lane host is this
+    machine. A hosted lane runs with no queue file: a satellite's `lane request`
+    is a row only intake reads (review round 1). Ownership this machine cannot
+    read skips that lane with the reason. A held runner lock skips it too
+    (`run_lane` answers `busy`), and a refusal in one lane leaves the next to run.
+    """
+    imported = sd_lib.import_sd_db()
+    if imported.module is None:
+        raise LaneError(f"lane run --hosted reads the repo table: {imported.problem}")
+    from sd_db.database import connect, default_path  # noqa: PLC0415
+    from sd_db.protection import github_slug  # noqa: PLC0415
+    from sd_db.repos import registered  # noqa: PLC0415
+
+    database = default_path()
+    try:
+        connection = connect(database, write=False)
+        rows = sd_lib.managed_rows(registered(connection))
+    except Exception as error:  # noqa: BLE001 -- no list of lanes is no lane to run
+        raise LaneError(f"Cannot read the repositories this machine hosts: {error}. Nothing ran; "
+                        "the next run retries.", code="lane_unknown") from None
+    lanes: list[dict[str, Any]] = []
+    hosted: list[tuple[str, pathlib.Path]] = []
+    try:
+        for row in rows:
+            found, checkout = github_slug(row["remote"]), sd_lib.repo_disk(row["path"])
+            if found is None or not (checkout / ".git").exists():
+                continue
+            try:
+                if sd_lib.hosts_lane(connection, database, "/".join(found)):
+                    hosted.append((row["path"], checkout))
+            except Exception as error:  # noqa: BLE001 -- `LaneUnknown` skips this lane; it never runs as the hub's
+                lanes.append({"path": row["path"], "skipped": str(error), "code": getattr(error, "code", "lane_unknown")})
+    finally:
+        connection.close()  # a lane runs for hours; each reads its host again on its own connection
+    for path, checkout in hosted:
+        try:
+            lanes.append({"path": path, **run_lane(checkout, environ, ship, gate, note)})
+        except (LaneError, sd_lib.ConfigError, OSError) as error:
+            lanes.append({"path": path, **refusal(error)})
+    return {"lanes": lanes}
 
 
 def gate_ends(root: pathlib.Path, seen: set[str], minutes: int = WATCH_MINUTES) -> list[str]:
@@ -1146,8 +1263,12 @@ def add_lane_verbs(commands: Any) -> None:
         editor.add_argument("--expected-revision", help=f"refuse with {STALE_REVISION} unless `lane list` still prints "
                                                         "this revision, checked under the queue's lock")
     runner = verbs.add_parser("run", help="drain the queue in order; exits at once if another runner holds the lane")
-    runner.add_argument("--satellite-only", action="store_true",
-                        help="claim satellite entries only, start no speculative gate, exit when none is pending")
+    which = runner.add_mutually_exclusive_group()
+    which.add_argument("--hosted", action="store_true",
+                       help="run the lane of each repository this machine hosts, one after another (sd:3003)")
+    which.add_argument("--satellite-only", action="store_true",
+                       help="claim satellite entries only, start no speculative gate, exit when none is pending; "
+                            "it goes once the scheduled jobs run --hosted")
     asker = verbs.add_parser("request", help="on a satellite: ask the hub's lane to merge this worktree's prepared item")
     asker.add_argument("--item", type=int, required=True)
     asker.add_argument("--manual", action="store_true", help="authorize the hub's runner to merge, as enqueue --manual")
@@ -1161,12 +1282,13 @@ def lane_main(args: Any) -> int:
     try:
         if args.lane_command == "watch":
             return watch(lane_root(environ), once=args.once)
+        if args.lane_command == "run" and args.hosted:  # from any folder: it reads the repo table, not the cwd
+            return succeed(run_hosted(environ))
         root = sd_lib.repo_root(None)  # a git that gave no answer says why, as a ConfigError (sd:2986)
         if root is None:
             raise LaneError("cwd is not inside a Git repository")
-        if args.lane_command in QUEUE_VERBS:  # no `lane run` drains a satellite's queue (sd:2795)
-            refuse_on_satellite(f"lane {args.lane_command}", "Run it on the hub; from this machine, ask the hub's lane "
-                                "to merge with `sd-ship lane request`")
+        if args.lane_command in HOST_VERBS:  # no `lane run` drains this machine's queue (sd:2795, sd:3003)
+            refuse_elsewhere(root)
         if args.lane_command == "enqueue":
             result: Any = enqueue_entry(root, args.item, args.title, args.body_file, environ,
                                         expected_head=args.expected_head, manual=args.manual, claim=args.claim,
@@ -1187,9 +1309,18 @@ def lane_main(args: Any) -> int:
         else:
             result = run_lane(root, environ, satellite_only=args.satellite_only)
     except (LaneError, sd_lib.ConfigError, OSError) as error:
-        code = {"code": error.code} if isinstance(error, LaneError) and error.code else {}
-        print(json.dumps({"ok": False, "error": str(error), **code}, indent=2, sort_keys=True))
+        print(json.dumps({"ok": False, **refusal(error)}, indent=2, sort_keys=True))
         return 3
+    return succeed(result)
+
+
+def refusal(error: Exception) -> dict[str, Any]:
+    """A lane command's refusal: its text, and its code when it has one."""
+    code = {"code": error.code} if isinstance(error, LaneError) and error.code else {}
+    return {"error": str(error), **code}
+
+
+def succeed(result: Any) -> int:
     print(json.dumps({"ok": True, **(result if isinstance(result, dict) else {"result": result})}, indent=2,
                      sort_keys=True))
     return 0

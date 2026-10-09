@@ -168,7 +168,7 @@ class HeldLane(LaneCase):
 
 class SatellitePrepare(LaneCase):
     """sd:2679. Over a remote connection prepare binds the pull request and writes
-    the ship: row without the ship lock; merge still meets the lock's HubOnly."""
+    the ship: row without the ship lock; merge refuses before it reads a row (sd:3003)."""
 
     HUB = "hub.example.test:8769"
 
@@ -187,9 +187,8 @@ class SatellitePrepare(LaneCase):
         def served_by(target, home=None):
             return self.HUB if str(target) == str(self.database) else None
 
-        # `create=True`: the pinned sd_db predates `served_by`.
         for patcher in (patch.object(receipts, "repository_lock", lock_on_a_satellite),
-                        patch("sd_db.database.served_by", served_by, create=True)):
+                        patch("sd_db.database.served_by", served_by), patch.object(receipts, "served_by", served_by)):
             patcher.start()
             self.addCleanup(patcher.stop)
 
@@ -210,9 +209,9 @@ class SatellitePrepare(LaneCase):
         self.assertEqual(self.dispatch("prepare")["phase"], "ready_to_send")
         with patch.object(ship, "Ship", side_effect=AssertionError("read the ship: row")), \
                 patch.object(ship.sd_ship_hold, "refuse_other", side_effect=AssertionError("read the hold")), \
-                self.assertRaisesRegex(ship.Refusal, f"sd-ship merge runs on the sd hub only; .* {self.HUB}") as refused:
+                self.assertRaisesRegex(ship.Refusal, "The lane for fixture/repo runs on the hub, not on this machine") as refused:
             self.dispatch("merge", "--manual", "--expected-head", self.head())
-        self.assertEqual(refused.exception.workflow["blocker"]["code"], "hub_only")
+        self.assertEqual(refused.exception.workflow["blocker"]["code"], "lane_elsewhere")
         self.assertEqual(self.entered, [])
         self.assertEqual(self.puts(), [])
 
@@ -224,6 +223,119 @@ class SatellitePrepare(LaneCase):
         with self.assertRaisesRegex(ship.Refusal, "runs on the sd hub only"):
             self.dispatch("prepare")
         self.assertEqual(self.entered, ["fixture/repo"])
+
+
+class LaneHost(LaneCase):
+    """sd:3003, acceptance 8 to 10: `dispatch` asks `hosts_lane`, not whether a hub serves the database."""
+
+    HUB = "hub.example.test:8769"
+
+    def lane_host(self, host):
+        self.connection.execute("UPDATE repo SET lane_host = ?", (host,))
+        self.connection.commit()
+
+    def on_a_satellite(self, host=None):
+        """`served_by` names a hub wherever `sd_db` reads it; `host` is this machine's name."""
+        def served_by(target, home=None):
+            return self.HUB if str(target) == str(self.database) else None
+        stack = contextlib.ExitStack()
+        stack.enter_context(patch("sd_db.database.served_by", served_by))
+        stack.enter_context(patch.object(receipts, "served_by", served_by))
+        if host is not None:
+            stack.enter_context(patch.object(receipts, "this_host", lambda: host))
+        return stack
+
+    def rows(self):
+        return self.connection.execute("SELECT id, key, body FROM state ORDER BY id").fetchall()
+
+    def test_off_the_host_merge_and_a_no_item_verb_refuse_before_any_row_changes(self):
+        """Acceptance 8, on the hub with the lane on build-2 and on a satellite with it on the hub."""
+        self.assertEqual(self.dispatch("prepare")["phase"], "ready_to_send")
+        before = self.rows()
+        no_item = ["review", "--no-item", "--create-record", "--assert-new-work", "--json"]
+        for machine, host, context in (("the hub", "build-2", contextlib.nullcontext), ("a satellite", None, self.on_a_satellite)):
+            self.lane_host(host)
+            for argv in (["merge", "--item", str(self.item), "--manual", "--expected-head", self.head(), "--json"], no_item):
+                with self.subTest(machine=machine, verb=argv[0]), context(), \
+                        patch.object(ship, "Ship", side_effect=AssertionError("read the ship: row")), \
+                        self.assertRaises(ship.Refusal) as refused:
+                    ship.dispatch(self.root, self.connection, self.database, ship.parser().parse_args(argv), receipts, False)
+                self.assertEqual(refused.exception.workflow["blocker"]["code"], "lane_elsewhere")
+                self.assertIn(f"runs on {host or 'the hub'}, not on this machine", str(refused.exception))
+        self.assertEqual((self.rows(), self.puts()), (before, []))
+
+    def test_on_a_satellite_that_hosts_the_lane_merge_merges(self):
+        """Acceptance 9: the satellite host takes its own ship lock, under its state folder, and merges."""
+        state = self.directory / "state"
+        self.lane_host("build-2")
+        with self.on_a_satellite(host="build-2"), patch.dict("os.environ", {"XDG_STATE_HOME": str(state)}):
+            prepared = self.dispatch("prepare")
+            self.assertEqual(prepared["phase"], "ready_to_send")
+            self.assertIsNotNone(prepared["invoker"]["lock_holder"])  # a host's prepare holds the lock
+            merged = self.dispatch("merge", "--manual", "--expected-head", self.head())
+        self.assertEqual(merged["phase"], "merged")
+        self.assertEqual(len(list((state / "sd" / receipts.LOCK_DIRECTORY).glob("*.lock"))), 1)
+        self.assertFalse((self.database.parent / receipts.LOCK_DIRECTORY).exists())
+
+    def test_on_the_hub_a_lane_hosted_elsewhere_prepares_without_the_lock(self):
+        """Acceptance 10: the hub prepares lock-free, and its save is checked against the row's revision."""
+        self.lane_host("build-2")
+        with patch.object(receipts, "repository_lock", side_effect=AssertionError("took the ship lock")):
+            prepared = self.dispatch("prepare")
+        self.assertEqual(prepared["phase"], "ready_to_send")
+        key = receipts.receipt_key("fixture/repo", "topic", self.item)
+        revision, row = receipts.read(self.connection, key)
+        self.assertEqual((row["phase"], row["invoker"]["lock_holder"], row["invoker"].get("served_by")),
+                         ("ready_to_send", None, None))
+        with self.assertRaisesRegex(Exception, "changed concurrently"):
+            receipts.save(self.connection, key, revision - 1, {**row, "phase": "stale"})
+        self.assertEqual(receipts.read(self.connection, key)[0], revision)
+
+    def test_clones_that_disagree_refuse_lane_unknown_and_prepare_takes_no_side(self):
+        """Unknown ownership refuses; it never falls back to the hub or to a lock-free prepare."""
+        clone = self.directory / "clone-2"
+        fixture.upsert_repo(self.connection, str(clone), remote=self.remote_url, managed=1)
+        self.connection.execute("UPDATE repo SET lane_host = 'build-2' WHERE path = ?", (str(clone),))
+        self.connection.commit()
+        for command in ("prepare", "merge"):
+            with self.subTest(command=command), patch.object(ship, "Ship", side_effect=AssertionError("read a row")), \
+                    self.assertRaises(ship.Refusal) as refused:
+                self.dispatch(command, *(["--manual", "--expected-head", self.head()] if command == "merge" else []))
+            self.assertEqual(refused.exception.workflow["blocker"]["code"], "lane_unknown")
+            self.assertIn("name different lane hosts", str(refused.exception))
+        self.assertEqual(self.remote.pull_requests, {})
+
+    def test_a_move_after_dispatch_reads_the_host_is_refused_at_the_lock(self):
+        """The lock reads the host again; dispatch's answer is an early refusal, not the authority."""
+        self.assertEqual(self.dispatch("prepare")["phase"], "ready_to_send")
+        self.lane_host("build-2")
+        with patch.object(ship.sd_lib, "lane_elsewhere", lambda connection, database, repository: None), \
+                self.assertRaisesRegex(receipts.LaneElsewhere, "runs on build-2"):
+            self.dispatch("merge", "--manual", "--expected-head", self.head())
+        self.assertEqual(self.puts(), [])
+
+    def test_an_sd_db_without_hosts_lane_hosts_every_lane_on_the_hub_only(self):
+        for served, hosted in ((None, True), (self.HUB, False)):
+            with self.subTest(served=served), patch.dict(receipts.__dict__), \
+                    patch("sd_db.database.served_by", lambda target, home=None, served=served: served):
+                del receipts.__dict__["hosts_lane"]
+                self.assertIs(ship.sd_lib.hosts_lane(self.connection, self.database, "fixture/repo"), hosted)
+
+    def test_a_fresh_process_refuses_off_the_host(self):
+        """A fresh `sd-ship` has not imported `sd_db.ship`; that must not read as a library without `hosts_lane`."""
+        self.assertEqual(self.dispatch("prepare")["phase"], "ready_to_send")
+        self.lane_host("build-2")
+        for argv, code in ((["lane", "run"], lambda answer: answer["code"]),
+                           (["merge", "--item", str(self.item), "--manual", "--expected-head", self.head(), "--json"],
+                            lambda answer: answer["workflow"]["blocker"]["code"])):
+            with self.subTest(verb=argv[0]):
+                completed = subprocess.run([sys.executable, str(ROOT / "bin/sd-ship"), *argv], cwd=self.root,
+                                           env=self.environment, text=True, capture_output=True,
+                                           timeout=fixture.CLI_TIMEOUT)
+                answer = json.loads(completed.stdout)
+                self.assertEqual((completed.returncode, code(answer)), (3, "lane_elsewhere"), completed.stderr)
+                self.assertIn("runs on build-2, not on this machine", answer["error"])
+        self.assertEqual(self.puts(), [])
 
 
 class MergeFromTheLane(LaneCase):

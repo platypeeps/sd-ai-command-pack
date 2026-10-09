@@ -558,9 +558,20 @@ The rules for them:
   in the repository, on the hub too, to the variables the hub compares plus
   `HOME`, `USER` and `PATH` (sd:2782): a check that needs a credential or
   another variable off that list fails, so leave such a repository off. The
-  table below is who does what. On a satellite, `sd-ship merge` and the queue
-  verbs (`lane enqueue`, `list`, `cancel`, `move`, `hold`, `release`) refuse
-  with `hub_only` before they read a row (sd:2795).
+  table below is who does what.
+- **Each lane runs on its lane host (sd:3003).** `repo.lane_host` names the
+  machine that runs a repository's lane; NULL means the hub. Off that host,
+  `sd-ship merge`, `reconcile`, `review`, `adjudicate --accept-dispositions`
+  and `lane enqueue`, `move`, `hold`, `release` and `run` refuse with
+  `lane_elsewhere` before they read a row (sd:2795); the text names the host,
+  the dashboard's Move lane control, and the verb. A host that cannot be read
+  refuses with `lane_unknown` and never counts as the hub. `prepare` runs
+  there without the ship lock, and `lane list` and `cancel` still answer, so
+  an old host's pending entries can be cancelled after a move. Every machine
+  runs the same scheduled `sd-ship lane run --hosted`: each lane it hosts, in
+  path order, skipping one whose runner is busy. The runner reads the host
+  again before each claim, so a move stops it at the next item. `lane run
+  --satellite-only` still works until every scheduled job runs `--hosted`.
 - **Large uncommitted data goes under the bulk root (sd:1792).** When
   `sd.bulk_storage_root` names a folder, put run outputs, logs, captures,
   agent scratch evidence and large downloaded fixtures under
@@ -576,7 +587,7 @@ The rules for them:
 | 2 | satellite | `sd gate check --base main` | Runs `sd-check`; writes the satellite's receipt and the offload receipt to the hub |
 | 3 | satellite | `sd-ship prepare --item N --title T --body-file F` | Reviews (its gate reuses step 2), pushes, binds the pull request, posts `sd/local-gate` from the offload receipt |
 | 4 | satellite | `sd-ship lane request --item N --manual` | Writes `lane-request:v1:<slug>:<item>` to the hub |
-| 5 | hub | `sd-ship -C <checkout> lane run --satellite-only`, from a scheduled job | Takes requests in and runs satellite entries only; exits when none is pending or another runner holds the lane |
+| 5 | hub | `sd-ship lane run --hosted`, from a scheduled job | Runs each lane the hub hosts; each takes requests in before each claim; skips a lane another runner holds |
 | 6 | hub | intake, before each claim | Refuses a request the repository did not opt into, a malformed one, or one not prepared at its head; else queues a `gate: satellite` entry and writes `queued` |
 | 7 | hub | the entry | Fetches the branch and the base; hands back on `head_moved` or `base_moved`; no prepare, no catch-up, no speculative gate; then `sd-ship merge --satellite-gate` |
 | 8 | hub | `sd-ship merge --satellite-gate` | Accepts the offload receipt under the trust rule, posts no status, merges |

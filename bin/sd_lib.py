@@ -1139,6 +1139,56 @@ def repo_satellite_gate(connection: Any, root: pathlib.Path | str) -> str:
     return value if value in SATELLITE_GATE_MODES else "off"
 
 
+def hosts_lane(connection: Any, database: Any, repository: str) -> bool:
+    """Whether this machine runs the lane of `repository`, an `owner/name` (sd:3003).
+
+    `sd_db.ship.hosts_lane` answers, and raises its `LaneUnknown` when it
+    cannot tell; that refusal passes through, since uncertain ownership must
+    not read as the hub's. An `sd_db` older than `repo.lane_host` opens no
+    database that has the column, so its lanes are all the hub's: True on the
+    hub, False on a satellite, as that library's ship lock decides.
+    """
+    import_sd_db()  # the caller holds a connection, so this is the one it has
+    # Imported by name: `import sd_db` loads no `ship`, and a missing attribute would read as an older library.
+    from sd_db import database as store  # noqa: PLC0415
+    from sd_db import ship
+
+    reader = getattr(ship, "hosts_lane", None)
+    if reader is not None:
+        return bool(reader(connection, database, repository))
+    served_by = getattr(store, "served_by", None)
+    return served_by is None or served_by(database) is None
+
+
+def lane_elsewhere(connection: Any, database: Any, repository: str) -> str | None:
+    """The refusal for a lane verb off `repository`'s lane host, or None on its host (sd:3003).
+
+    The text is `sd_db.ship.LaneElsewhere`'s, which the ship lock raises:
+    the host, then the dashboard control, then the verb. `hosts_lane` already
+    refused clones that disagree, so the first matching row names the host.
+    """
+    if hosts_lane(connection, database, repository):
+        return None
+    from sd_db import ship  # noqa: PLC0415 -- `hosts_lane` imported the library
+
+    elsewhere = getattr(ship, "LaneElsewhere", None)
+    if elsewhere is None:
+        return f"The lane for {repository} runs on the hub, not on this machine. Run it there."
+    return str(elsewhere(repository, *lane_host(connection, repository)))
+
+
+def lane_host(connection: Any, repository: str) -> tuple[str | None, str | None]:
+    """`(repo.lane_host, path)` of the first row whose remote gives `repository`; None names the hub (sd:3003)."""
+    import_sd_db()  # the gateway's order: resolve the library before importing from it
+    from sd_db.protection import github_slug  # noqa: PLC0415
+
+    for row in connection.execute("SELECT * FROM repo ORDER BY path"):
+        found = github_slug(row["remote"])
+        if found is not None and "/".join(found).lower() == repository.lower():
+            return (row["lane_host"] if "lane_host" in row.keys() else None), row["path"]
+    return None, None
+
+
 def ci_mode(root: pathlib.Path | str) -> str:
     """`repo_ci` over a read-only connection this call opens and closes.
 

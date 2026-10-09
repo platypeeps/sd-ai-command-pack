@@ -2,13 +2,15 @@
 
 The satellite writes `lane-request:v1:<slug>:<item>` with `sd-ship lane
 request`; the hub's `lane run` takes it in before each claim (design.md,
-"Intake") and `--satellite-only` runs satellite entries alone (ruling Q4).
+"Intake").
 A real workflow database in a temporary folder holds the rows; `sd-ship` is
 the lane suite's recorder, so nothing reaches GitHub.
 """
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import io
 import json
 import pathlib
@@ -53,9 +55,11 @@ class Requests(lane_suite.Lane):
         self.path = sd_lane.queue_path(self.repo, self.environ)
         self.opt_in = "accept"
         self.gates: list[tuple] = []
-        patcher = mock.patch.object(sd_lane.sd_lib, "repo_satellite_gate", lambda connection, root: self.opt_in)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        # The lane host is read from this database, never the machine's (sd:3003).
+        for patcher in (mock.patch.object(sd_lane.sd_lib, "repo_satellite_gate", lambda connection, root: self.opt_in),
+                        mock.patch("sd_db.database.default_path", lambda *args, **kwargs: self.database)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def gate(self, root: pathlib.Path, head: str, base: str) -> dict:
         self.gates.append((root, head, base))
@@ -227,8 +231,28 @@ class Intake(Requests):
         self.assertEqual(receipts.read(self.connection, key)[1]["status"], "requested")
 
 
+class PlainRun(Requests):
+    def test_a_plain_run_runs_hub_and_satellite_entries(self) -> None:
+        hub_tree = self.worktree("hubitem")
+        sd_lane.enqueue_entry(hub_tree, 3, "hub item", self.body, self.environ, manual=True, claim="deliver")
+        self.prepared()
+        self.ask()
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate, hub=self.hub)
+        self.assertEqual([(row["item"], row["status"]) for row in answer["ran"]], [(3, "merged"), (7, "merged")])
+
+    def test_hosted_parses_and_satellite_only_stays_until_the_jobs_move(self) -> None:
+        """sd:3003, review round 1: scheduled jobs still pass `--satellite-only`; the two flags do not combine."""
+        self.assertTrue(sd_lane_parser().parse_args(["lane", "run", "--hosted"]).hosted)
+        self.assertTrue(sd_lane_parser().parse_args(["lane", "run", "--satellite-only"]).satellite_only)
+        with mock.patch("sys.stderr", new_callable=io.StringIO), self.assertRaises(SystemExit):
+            sd_lane_parser().parse_args(["lane", "run", "--hosted", "--satellite-only"])
+
+
 class SatelliteOnly(Requests):
-    """Ruling Q4: the scheduled run takes in and runs satellite entries; hub entries wait for an integrator."""
+    """Ruling Q4: the scheduled run takes in and runs satellite entries; hub entries wait for an integrator.
+
+    Kept until every scheduled job runs `--hosted` (review round 1); design.md, "What retires", row 2.
+    """
 
     def queue_hub_then_satellite(self) -> None:
         hub_tree = self.worktree("hubitem")
@@ -248,20 +272,21 @@ class SatelliteOnly(Requests):
         self.assertEqual(self.gates, [])
         self.assertEqual([row["status"] for row in answer["intake"]], ["queued"])
 
-    def test_a_plain_run_still_runs_both(self) -> None:
-        self.queue_hub_then_satellite()
-        answer = sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate, hub=self.hub)
-        self.assertEqual([(row["item"], row["status"]) for row in answer["ran"]], [(3, "merged"), (7, "merged")])
-
     def test_a_satellite_only_run_with_only_hub_entries_exits_at_once(self) -> None:
         sd_lane.enqueue_entry(self.worktree("hubitem"), 3, "hub item", self.body, self.environ, manual=True,
                               claim="deliver")
         answer = sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate, satellite_only=True, hub=self.hub)
         self.assertEqual((answer["ran"], self.calls, self.entries()[0]["status"]), ([], [], "pending"))
 
-    def test_the_cli_takes_satellite_only(self) -> None:
-        args = sd_lane_parser().parse_args(["lane", "run", "--satellite-only"])
-        self.assertTrue(args.satellite_only)
+    def test_the_cli_passes_satellite_only_to_the_run(self) -> None:
+        seen = []
+        with mock.patch.object(sd_lane, "run_lane", lambda root, environ, **kwargs: seen.append(kwargs) or {}), \
+                mock.patch.object(sd_lane.sd_lib, "repo_root", lambda start: self.repo), \
+                mock.patch.object(sd_lane, "refuse_elsewhere", lambda root: None), \
+                mock.patch("sys.stdout", new_callable=io.StringIO):
+            for argv, expected in ((["run", "--satellite-only"], True), (["run"], False)):
+                self.assertEqual(sd_lane.lane_main(sd_lane_parser().parse_args(["lane", *argv])), 0)
+                self.assertEqual(seen.pop(), {"satellite_only": expected})
 
 
 class HeldLock(Requests):
@@ -276,7 +301,7 @@ class HeldLock(Requests):
                                   "retry after it finishes", "workflow": {"blocker": {"code": "prerequisite_failed"}}}
 
     def run_once(self) -> dict:
-        return sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate, satellite_only=True, hub=self.hub)
+        return sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate, hub=self.hub)
 
     def test_a_held_lock_leaves_the_request_queued_for_the_next_run(self) -> None:
         self.run_once()
@@ -324,48 +349,213 @@ class PackDigest(Requests):
         self.assertEqual(self.pack_row(), {})
 
 
-class SatelliteRun(Requests):
-    """Prepare review at 9cbbbec5: `lane run` on a satellite took the hub's requests into its own queue."""
+class LaneHosts(Requests):
+    """The request suite's fixture with `repo.lane_host` to set (sd:3003); it holds no test."""
 
-    def test_a_run_on_a_satellite_refuses_before_intake_or_publication(self) -> None:
+    def lane_host(self, host: str | None) -> None:
+        self.connection.execute("UPDATE repo SET lane_host = ?", (host,))
+        self.connection.commit()
+
+    def satellite(self) -> contextlib.ExitStack:
+        """`served_by` names a hub for the database, wherever `sd_db` reads it."""
+        stack = contextlib.ExitStack()
+        for target in ("sd_db.database.served_by", "sd_db.ship.served_by"):
+            stack.enter_context(mock.patch(target, lambda target, home=None: HUB, create=True))
+        return stack
+
+    def machines(self):
+        """`(name, context factory, host the refusal names)` for each machine off the host."""
+        self.lane_host("build-2")
+        yield "the hub", contextlib.nullcontext, "build-2"
+        self.lane_host(None)
+        yield "a satellite", self.satellite, "the hub"
+
+    def lane(self, *argv: str) -> tuple[int, dict]:
+        with mock.patch.dict(sd_lane.os.environ, self.environ), \
+                mock.patch.object(sd_lane.sd_lib, "repo_root", lambda start: self.topic), \
+                mock.patch("sys.stdout", new_callable=io.StringIO) as printed:
+            code = sd_lane.lane_main(sd_lane_parser().parse_args(["lane", *argv]))
+        return code, json.loads(printed.getvalue())
+
+
+class OffTheLaneHost(LaneHosts):
+    """sd:3003, acceptance 11: off the lane host `lane run` and the host verbs refuse `lane_elsewhere`.
+
+    Two machines are off the host: the hub when `repo.lane_host` names
+    another machine, and a satellite when it is NULL.
+    """
+
+    def test_a_run_off_the_host_refuses_before_intake_or_publication(self) -> None:
         self.prepared()
         revision = self.ask()
         pack = receipts.read(self.connection, sd_lane_receipts().PACK_PREFIX + SLUG)
-        for satellite_only in (False, True):
-            with self.subTest(satellite_only=satellite_only), \
-                    mock.patch("sd_db.database.served_by", lambda target, home=None: HUB, create=True):
+        for machine, context, host in self.machines():
+            with self.subTest(machine=machine), context():
                 with self.assertRaises(sd_lane.LaneError) as refused:
-                    sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate, hub=self.hub,
-                                     satellite_only=satellite_only)
-                self.assertEqual(refused.exception.code, "hub_only")
-                self.assertIn(HUB, str(refused.exception))
+                    sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate, hub=self.hub)
+                self.assertEqual(refused.exception.code, "lane_elsewhere")
+                self.assertIn(f"The lane for {SLUG} runs on {host}, not on this machine.", str(refused.exception))
+                self.assertIn("dashboard, Management", str(refused.exception))
         key = sd_lane.request_key(SLUG, 7)
         self.assertEqual((receipts.read(self.connection, key)[0], self.row()["status"]), (revision, "requested"))
         self.assertEqual(receipts.read(self.connection, sd_lane_receipts().PACK_PREFIX + SLUG), pack)
         self.assertEqual((self.entries(), self.calls), ([], []))
 
-    def test_the_queue_verbs_refuse_on_a_satellite_and_name_lane_request(self) -> None:
-        """sd:2795 (sd:2782 L3): no `lane run` drains a satellite's queue, so its verbs refuse rather than fill it."""
-        for argv in (["enqueue", "--item", "7", "--title", "t", "--body-file", str(self.body)], ["list"], ["cancel", "7"],
-                     ["move", "7", "top"], ["hold", "7"], ["release", "7"]):
-            with self.subTest(verb=argv[0]), \
-                    mock.patch("sd_db.database.served_by", lambda target, home=None: HUB, create=True), \
-                    mock.patch.dict(sd_lane.os.environ, self.environ), \
-                    mock.patch.object(sd_lane.sd_lib, "repo_root", lambda start: self.topic), \
-                    mock.patch("sys.stdout", new_callable=io.StringIO) as printed:
-                code = sd_lane.lane_main(sd_lane_parser().parse_args(["lane", *argv]))
-                answer = json.loads(printed.getvalue())
-                self.assertEqual((code, answer["ok"], answer.get("code")), (3, False, "hub_only"))
-                self.assertIn(f"lane {argv[0]} runs on the sd hub only", answer["error"])
-                self.assertIn("sd-ship lane request", answer["error"])
+    def test_enqueue_and_the_reorder_verbs_refuse_and_run_refuses_from_the_cli(self) -> None:
+        for machine, context, host in self.machines():
+            for argv in (["enqueue", "--item", "7", "--title", "t", "--body-file", str(self.body), "--deliver"],
+                         ["move", "7", "top"], ["hold", "7"], ["release", "7"], ["run"]):
+                with self.subTest(machine=machine, verb=argv[0]), context():
+                    code, answer = self.lane(*argv)
+                    self.assertEqual((code, answer["ok"], answer.get("code")), (3, False, "lane_elsewhere"))
+                    self.assertIn(f"runs on {host}, not on this machine", answer["error"])
         self.assertFalse(self.path.exists())
+
+    def test_the_old_host_still_lists_and_cancels_after_a_move(self) -> None:
+        """design.md, "Moving a lane", step 3: cancel each pending entry on the old host."""
+        sd_lane.enqueue_entry(self.topic, 7, "t", self.body, self.environ, manual=True, claim="deliver")
+        self.lane_host("build-2")
+        code, listed = self.lane("list")
+        self.assertEqual((code, [row["status"] for row in listed["entries"]]), (0, ["pending"]))
+        code, cancelled = self.lane("cancel", "7")
+        self.assertEqual((code, cancelled["status"]), (0, "cancelled"))
+
+    def test_clones_that_disagree_refuse_lane_unknown_and_never_run_as_the_hub(self) -> None:
+        sd_lane.enqueue_entry(self.topic, 7, "t", self.body, self.environ, manual=True, claim="deliver")
+        clone = self.tmp / "clone"
+        upsert_repo(self.connection, str(clone), remote=URL, managed=1)
+        self.connection.execute("UPDATE repo SET lane_host = 'build-2' WHERE path = ?", (str(clone),))
+        self.connection.commit()
+        for argv in (["run"], ["enqueue", "--item", "8", "--title", "t", "--body-file", str(self.body), "--deliver"]):
+            with self.subTest(verb=argv[0]):
+                code, answer = self.lane(*argv)
+                self.assertEqual((code, answer.get("code")), (3, "lane_unknown"))
+                self.assertIn("name different lane hosts", answer["error"])
+        self.assertEqual(([row["status"] for row in self.entries()], self.calls), (["pending"], []))
+
+    def test_a_database_that_does_not_answer_refuses_lane_unknown(self) -> None:
+        with mock.patch("sd_db.database.default_path", lambda *args, **kwargs: self.tmp / "absent" / "sd.db"):
+            code, answer = self.lane("run")
+        self.assertEqual((code, answer.get("code")), (3, "lane_unknown"))
+        self.assertEqual(self.calls, [])
+
+    def test_a_satellite_that_hosts_the_lane_runs_it_and_reads_no_request(self) -> None:
+        """Acceptance 9's lane half: the host's run is the hub's run, without the hub's request rows."""
+        self.prepared()
+        revision = self.ask()
+        sd_lane.enqueue_entry(self.worktree("hubitem"), 3, "hub item", self.body, self.environ, manual=True,
+                              claim="deliver")
+        self.lane_host("build-2")
+        with self.satellite(), mock.patch.object(receipts, "this_host", lambda: "build-2"), \
+                mock.patch.object(sd_lane, "default_hub", sd_lane_default_hub()):
+            answer = sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate)
+        self.assertEqual([(row["item"], row["status"]) for row in answer["ran"]], [(3, "merged")])
+        self.assertNotIn("intake", answer)
+        self.assertEqual(receipts.read(self.connection, sd_lane.request_key(SLUG, 7))[0], revision)
+
+
+class AMoveStopsTheRunner(LaneHosts):
+    """sd:3003, acceptance 13: the runner reads the host before each claim, so a move lands between items."""
+
+    def test_the_running_entry_finishes_and_no_next_entry_is_claimed(self) -> None:
+        for item in (3, 4):
+            sd_lane.enqueue_entry(self.worktree(f"item{item}"), item, "t", self.body, self.environ, manual=True,
+                                  claim="deliver")
+        recorder = self.ship
+
+        def moved_mid_merge(argv: list[str], log: pathlib.Path) -> dict:
+            if argv[2] == "merge":
+                self.lane_host("build-2")  # the operator moves the lane while item 3 merges
+            return recorder(argv, log)
+
+        answer = sd_lane.run_lane(self.repo, self.environ, moved_mid_merge, self.gate, hub=self.hub)
+        self.assertEqual([(row["item"], row["status"]) for row in answer["ran"]], [(3, "merged")])
+        self.assertEqual([(row["item"], row["status"]) for row in self.entries()], [(3, "merged"), (4, "pending")])
+        self.assertIn(f"The lane for {SLUG} runs on build-2", answer["stopped"])
+        self.assertEqual([call[2] for call in self.calls], ["prepare", "merge"])
+
+
+class HostedRun(LaneHosts):
+    """sd:3003, acceptance 12: `lane run --hosted` runs only hosted lanes, in path order, past a busy one."""
+
+    def lane_repo(self, name: str, item: int | None, host: str | None = None) -> pathlib.Path:
+        """A managed repository with a GitHub origin and, with `item`, one queued entry."""
+        root = self.tmp / name
+        root.mkdir()
+        git(root, "init", "-q", "-b", "main")
+        git(root, "-c", "user.email=t@example.test", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "a")
+        url = f"https://github.com/example/{name}.git"
+        git(root, "remote", "add", "origin", url)
+        upsert_repo(self.connection, str(root), remote=url, managed=1)
+        self.connection.execute("UPDATE repo SET lane_host = ? WHERE path = ?", (host, str(root)))
+        self.connection.commit()
+        if item is not None:
+            sd_lane.enqueue_entry(root, item, name, self.body, self.environ, manual=True, claim="deliver")
+        return root
+
+    def test_only_hosted_lanes_run_in_path_order_and_a_busy_one_is_skipped(self) -> None:
+        self.lane_repo("alpha", 11)
+        self.lane_repo("bravo", 12, host="build-2")
+        busy = self.lane_repo("charlie", 13)
+        self.lane_repo("delta", None)
+        self.lane_repo("echo", 15)
+        with open(sd_lane.queue_path(busy, self.environ).parent / "runner.lock", "a", encoding="utf-8") as held:
+            fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)  # another runner drains charlie's lane
+            answer = sd_lane.run_hosted(self.environ, self.ship, self.gate)
+        self.assertEqual([int(call[call.index("--item") + 1]) for call in self.calls], [11, 11, 15, 15])
+        lanes = {pathlib.Path(lane["path"]).name: lane for lane in answer["lanes"]}
+        self.assertEqual(sorted(lanes), ["alpha", "charlie", "delta", "echo", self.repo.name])
+        self.assertEqual((lanes["delta"]["ran"], lanes[self.repo.name]["ran"]), ([], []))  # no queue file: still runs
+        self.assertEqual([row["item"] for row in lanes["alpha"]["ran"]], [11])
+        self.assertIn("another runner holds", lanes["charlie"]["busy"])
+        self.assertEqual(sd_lane.read_queue(sd_lane.queue_path(self.tmp / "bravo", self.environ))[0]["status"], "pending")
+
+    def test_a_hosted_lane_with_no_queue_file_takes_a_satellite_request_in(self) -> None:
+        """Review round 1: `lane request` writes only a row, so a hosted lane that never queued here still runs."""
+        self.prepared()
+        self.ask()
+        self.assertFalse(self.path.exists())
+        with mock.patch.object(sd_lane, "default_hub", sd_lane_default_hub()):
+            answer = sd_lane.run_hosted(self.environ, self.ship, self.gate)
+        [lane] = answer["lanes"]
+        self.assertEqual((lane["path"], [(row["item"], row["status"]) for row in lane["ran"]]),
+                         (str(self.repo), [(7, "merged")]))
+        self.assertEqual(self.row()["status"], "merged")
+
+    def test_a_lane_whose_host_cannot_be_read_is_skipped_and_the_rest_run(self) -> None:
+        self.lane_repo("alpha", 11)
+        clone = self.tmp / "alpha-clone"
+        upsert_repo(self.connection, str(clone), remote="https://github.com/example/alpha.git", managed=1)
+        self.connection.execute("UPDATE repo SET lane_host = 'build-2' WHERE path = ?", (str(clone),))
+        self.connection.commit()
+        self.lane_repo("bravo", 12)
+        answer = sd_lane.run_hosted(self.environ, self.ship, self.gate)
+        skipped, ran, _ = answer["lanes"]  # the suite's own repository runs last, with nothing queued
+        self.assertEqual((pathlib.Path(skipped["path"]).name, skipped["code"]), ("alpha", "lane_unknown"))
+        self.assertEqual((pathlib.Path(ran["path"]).name, [row["item"] for row in ran["ran"]]), ("bravo", [12]))
+
+    def test_a_repo_table_that_does_not_answer_runs_nothing(self) -> None:
+        self.lane_repo("alpha", 11)
+        with mock.patch("sd_db.database.default_path", lambda *args, **kwargs: self.tmp / "absent" / "sd.db"), \
+                self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.run_hosted(self.environ, self.ship, self.gate)
+        self.assertEqual((refused.exception.code, self.calls), ("lane_unknown", []))
+
+    def test_the_cli_runs_from_any_folder(self) -> None:
+        with mock.patch.object(sd_lane, "run_hosted", lambda environ: {"lanes": []}), \
+                mock.patch.object(sd_lane.sd_lib, "repo_root", side_effect=AssertionError("read the cwd")), \
+                mock.patch("sys.stdout", new_callable=io.StringIO) as printed:
+            code = sd_lane.lane_main(sd_lane_parser().parse_args(["lane", "run", "--hosted"]))
+        self.assertEqual((code, json.loads(printed.getvalue())), (0, {"ok": True, "lanes": []}))
 
 
 class RequestVerb(Requests):
     """`sd-ship lane request`, on the satellite's worktree of the item."""
 
     def request(self, served_by: str | None = HUB) -> dict:
+        """`served_by` names the hub wherever `sd_db` reads it, `hosts_lane` included."""
         with mock.patch("sd_db.database.served_by", lambda target, home=None: served_by, create=True), \
+                mock.patch("sd_db.ship.served_by", lambda target, home=None: served_by, create=True), \
                 mock.patch.object(sd_lane_receipts(), "satellite_identity", lambda: SATELLITE):
             return sd_lane.request(self.topic, 7, manual=True, database=self.database)
 
@@ -390,6 +580,20 @@ class RequestVerb(Requests):
         self.assertIn("sd-ship lane enqueue", str(refused.exception))
         self.assertEqual(self.row(), {})
 
+    def test_a_lane_the_hub_does_not_host_is_refused_and_writes_no_row(self) -> None:
+        """Review round 1 class pass: only the hub's run takes requests in, so no other host drains the row."""
+        self.prepared()
+        self.connection.execute("UPDATE repo SET lane_host = 'build-2'")
+        self.connection.commit()
+        for here, says in (("build-2", "runs on this machine"), ("build-3", "runs on build-2, not on this machine")):
+            with self.subTest(here=here), mock.patch.object(receipts, "this_host", lambda here=here: here):
+                with self.assertRaises(sd_lane.LaneError) as refused:
+                    self.request()
+                self.assertEqual(refused.exception.code, "lane_elsewhere")
+                self.assertIn(says, str(refused.exception))
+        self.assertIn("sd-ship lane enqueue", str(refused.exception))
+        self.assertEqual(self.row(), {})
+
     def test_an_item_not_ready_at_the_pushed_head_is_refused(self) -> None:
         git(self.topic, "commit", "-q", "--allow-empty", "-m", "pushed past the prepared head")
         git(self.topic, "push", "-q", "origin", "topic")
@@ -408,6 +612,14 @@ def sd_lane_parser():
     parser = argparse.ArgumentParser()
     sd_lane.add_lane_verbs(parser.add_subparsers(dest="command"))
     return parser
+
+
+def sd_lane_default_hub():
+    """The real `default_hub`, which the lane suite replaces for every test."""
+    return sd_lane_default_hub.real
+
+
+sd_lane_default_hub.real = sd_lane.default_hub
 
 
 def sd_lane_receipts():
