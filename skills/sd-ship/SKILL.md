@@ -229,6 +229,7 @@ Otherwise, it contains the latest receipt for that pull request.
 No local receipt means there is nothing to abandon, and the command refuses.
 It preserves request history and records a separate abandonment.
 Only submitted, non-pending reviews mark matching request heads complete.
+The merge refuses while any review thread is unresolved, outdated or not; a fix or a rebuttal reply, then a resolve, answers it (R14-D2, sd:3098).
 
 The additive `workflow` object reports `schema_version`, `phase`, `state`, `blocker`, and `next_action`.
 States are `success`, `retryable_failure`, `operator_decision`, and `policy_block`.

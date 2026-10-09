@@ -1139,6 +1139,28 @@ class Ship(SharedReview):
             number, pull, head, required=bool(entries) and not abandoned)
         if material is not None:
             self.note_copilot_clearance(entries, material[0], head)
+        # Every reviewer's threads are gated too, once Copilot's have landed (sd:998, sd:3098).
+        self.refuse_unresolved_threads(number)
+
+    def refuse_unresolved_threads(self, number: int) -> None:
+        """Refuse the merge while any review thread is unresolved, naming each (sd:3098).
+
+        A thread is the finding's record: a fix or a rebuttal reply, then a
+        resolve, answers it. An outdated thread still holds the merge.
+        """
+        threads = self.api.unresolved_threads(number)
+        if not threads:
+            return
+        named = []
+        for thread in threads:
+            comment = ((thread.get("comments") or {}).get("nodes") or [{}])[0] or {}
+            author = (comment.get("author") or {}).get("login") or "ghost"
+            line = thread.get("line") or thread.get("originalLine") or "?"
+            first = (str(comment.get("body") or "").strip().splitlines() or [""])[0][:200]
+            named.append(f"{thread.get('path') or '?'}:{line} {author}: {first}")
+        raise Refusal(f"{len(threads)} unresolved review thread(s) on #{number}: " + "; ".join(named),
+                      code="review_threads_open", boundary="review", state="operator_decision",
+                      next_action="Fix each finding or reply with a rebuttal, resolve its thread, then retry merge.")
 
     def dispatch_warnings(self) -> list[str]:
         """The receipt's warnings with this attempt's ancestor note, if any.

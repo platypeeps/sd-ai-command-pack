@@ -89,6 +89,14 @@ FAILED_WITH_BLOCKER = ("#!/usr/bin/env python3\nimport json,sys\nprint(json.dump
                        "'summary':'kept from a failed answer'}]}}))\nsys.exit(1)\n")
 
 
+def review_thread(*, resolved=False, outdated=False, path="src.py", line=1, original=None,
+                  author="reviewer", body="A finding."):
+    """One GraphQL `reviewThreads` node, with its first comment, as GitHub answers it."""
+    return {"isResolved": resolved, "isOutdated": outdated, "path": path, "line": line,
+            "originalLine": line if original is None else original,
+            "comments": {"nodes": [{"author": {"login": author}, "body": body}]}}
+
+
 class ShipDouble(GitHubDouble):
     """Adds precisely the write/read surfaces this adapter calls to the shared double."""
     def __init__(self, remote):
@@ -128,6 +136,10 @@ class ShipDouble(GitHubDouble):
         self.blocked_pull_reads = 0
         #: What `GET /pulls/{n}/files` answers, by pull number (sd:1151).
         self.pull_files = {}
+        #: The review threads `POST /graphql` pages a hundred at a time, and
+        #: what it answers instead when a test sets one (sd:3098).
+        self.review_threads = []
+        self.threads_answer = None
 
     def _pull(self, pull):
         head = getattr(pull, "merged_head", None) or pull.head_sha(self.remote)
@@ -204,6 +216,17 @@ class ShipDouble(GitHubDouble):
                     if (wanted_sha is None or run.get("head_sha") == wanted_sha)
                     and (wanted_event is None or run.get("event") == wanted_event)]
             return 200, {"total_count": len(runs), "workflow_runs": runs}
+        if method == "POST" and path == "/graphql":
+            if isinstance(self.threads_answer, RemoteRefusal):
+                raise self.threads_answer
+            if self.threads_answer is not None:
+                return 200, self.threads_answer
+            start = int(body["variables"]["after"] or 0)
+            nodes = self.review_threads[start:start + 100]
+            return 200, {"data": {"repository": {"pullRequest": {"reviewThreads": {
+                "pageInfo": {"hasNextPage": start + 100 < len(self.review_threads),
+                             "endCursor": str(start + len(nodes))},
+                "nodes": nodes}}}}}
         # Reviews and review comments: empty unless a test says otherwise.
         if method == "GET" and path.startswith(f"{prefix}/pulls/") and path.endswith("/files"):
             return 200, [{"filename": name} for name in self.pull_files.get(int(path.split("/")[-2]), [])]
@@ -2103,6 +2126,59 @@ roles:
         with self.assertRaisesRegex(ship.Refusal, "did not stabilize"):
             with patch.object(ship.time, "sleep"):
                 self.merge()
+
+    def test_an_unresolved_review_thread_refuses_the_merge_by_name(self):
+        """sd:3098. A COMMENTED review can report data loss; its open thread, outdated or not, holds the merge."""
+        self.prepare()
+        self.double.review_threads = [
+            review_thread(path="src.py", line=3, author="reviewer", body="Data loss on retry.\nDetails."),
+            review_thread(path="lib.py", line=None, original=7, outdated=True, author="copilot-pull-request-reviewer",
+                          body="Stale cursor."),
+            review_thread(resolved=True, path="done.py", body="Fixed."),
+        ]
+        with self.assertRaises(ship.Refusal) as caught:
+            self.merge()
+        message = str(caught.exception)
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "review_threads_open")
+        self.assertIn("2 unresolved review thread(s) on #1", message)
+        self.assertIn("src.py:3 reviewer: Data loss on retry.", message)
+        self.assertIn("lib.py:7 copilot-pull-request-reviewer: Stale cursor.", message)
+        self.assertNotIn("done.py", message)
+        self.assertNotIn("Details.", message)
+        self.assertEqual(self.remote.pull(1).state, "OPEN")
+
+    def test_resolved_review_threads_let_the_merge_go_out(self):
+        """sd:3098. A rebuttal is a reply plus a resolve; a resolved thread does not hold the merge."""
+        self.prepare()
+        self.double.review_threads = [review_thread(resolved=True), review_thread(resolved=True, outdated=True)]
+        self.assertEqual(self.merge()["phase"], "merged")
+
+    def test_a_failed_review_thread_read_refuses_the_merge(self):
+        """sd:3098. A thread list that could not be read is never an empty one."""
+        self.prepare()
+        for answer in (RemoteRefusal(502, "bad gateway"),
+                       {"errors": [{"message": "rate limited"}]},
+                       {"data": {"repository": {"pullRequest": None}}},
+                       {"data": {"repository": {"pullRequest": {"reviewThreads": {
+                           "pageInfo": {"hasNextPage": False, "endCursor": None},
+                           "nodes": [{"path": "src.py"}]}}}}},
+                       {"data": {"repository": {"pullRequest": {"reviewThreads": {
+                           "pageInfo": {"hasNextPage": True, "endCursor": None}, "nodes": []}}}}}):
+            with self.subTest(answer=answer):
+                self.double.threads_answer = answer
+                with self.assertRaises(ship.Refusal) as caught:
+                    self.merge()
+                self.assertEqual(caught.exception.workflow["blocker"]["code"], "review_threads_unread")
+                self.assertIn("review threads on #1 could not be read", str(caught.exception))
+        self.assertEqual(self.remote.pull(1).state, "OPEN")
+
+    def test_an_unresolved_thread_past_the_first_page_refuses_the_merge(self):
+        """sd:3098. A hundred resolved threads fill page one; the open one on page two still holds the merge."""
+        self.prepare()
+        self.double.review_threads = [review_thread(resolved=True) for _ in range(100)] + [
+            review_thread(path="late.py", line=9, author="reviewer", body="Second page.")]
+        with self.assertRaisesRegex(ship.Refusal, r"1 unresolved review thread\(s\) on #1: late\.py:9 reviewer: Second page\."):
+            self.merge()
 
     def test_the_real_cli_bound_guards_a_hang_not_a_load_average(self):
         """sd:1539. A 30 s bound failed three gates on one loaded afternoon; alone the run takes about 7 s."""

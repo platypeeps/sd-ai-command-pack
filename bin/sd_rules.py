@@ -560,6 +560,23 @@ RULES: tuple[Rule, ...] = (
         scope="code",
         teaches="skills/sd-ship/SKILL.md#Executable interface",
     ),
+    #: sd-ship's merge gate for every reviewer (sd:998), registered so the
+    #: skill line that teaches it cites a row. The operator ruled on sd:3098
+    #: that an unresolved review thread replaces the acknowledgement store.
+    Rule(
+        id="R14-D2",
+        subject="sd-ship's merge refuses with `review_threads_open` while the "
+                "pull request has an unresolved review thread, outdated or "
+                "not, whoever wrote it, and with `review_threads_unread` when "
+                "the threads cannot be read to the last page",
+        checker="bin/sd-ship::refuse_unresolved_threads",
+        proof="replace the `self.api.unresolved_threads(number)` call in "
+              "`bin/sd-ship` with an empty list; an open thread then merges and "
+              "`test_an_unresolved_review_thread_refuses_the_merge_by_name` "
+              "goes red",
+        scope="code",
+        teaches="skills/sd-ship/SKILL.md#Executable interface",
+    ),
     #: Gate receipt reuse (sd:1912), registered so the skill line that tells a
     #: builder to run `sd gate check` can cite what prepare does with the pass.
     #: The operator ruled on 2026-10-04 that this route supersedes the

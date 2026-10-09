@@ -1967,6 +1967,13 @@ MUTATIONS: dict[str, Mutation] = {
         test="tests.test_sd_ship_remote.RulesetCase"
              ".test_a_declared_bypass_list_must_equal_the_live_one",
     ),
+    "bin/sd-ship::refuse_unresolved_threads": Mutation(
+        path="bin/sd-ship",
+        old="        threads = self.api.unresolved_threads(number)",
+        new="        threads = []  # leg d: the unresolved-thread gate, defeated",
+        test="tests.test_sd_ship.ShipCase"
+             ".test_an_unresolved_review_thread_refuses_the_merge_by_name",
+    ),
     "bin/sd_gate_receipts.py::from_receipts": Mutation(
         path="bin/sd_gate_receipts.py",
         old="    found, miss = examine(database, key, identity) if reuse and database and offload != \"require\" else (None, None)",
