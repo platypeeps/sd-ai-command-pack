@@ -128,7 +128,7 @@ class DispositionGuardTests(unittest.TestCase):
     def test_accepted_dispositions_preserve_manual_ownership_protection_and_runner_guards(self):
         self.prepare_accepted()
         operation = self.operation("merge", "--expected-head", self.head)
-        with self.assertRaisesRegex(ship.Refusal, "separate owned --run assignment or explicit --manual"):
+        with self.assertRaisesRegex(ship.Refusal, "explicit --manual invocation"):
             operation.merge()
         self.double.admin = False
         with self.assertRaisesRegex(ship.Refusal, "administer"):

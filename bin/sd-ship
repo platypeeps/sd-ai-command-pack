@@ -1697,23 +1697,18 @@ class Ship(SharedReview):
         A merge nobody claimed could not be traced: its receipt named the head
         and the review, and no pid, checkout, authority or lock holder.
         """
-        run, manual = getattr(self.args, "run", None), getattr(self.args, "manual", False)
         return {"pid": os.getpid(), "ppid": os.getppid(), "started_at": PROCESS_STARTED,
                 "checkout": str(self.root), "chdir": getattr(self.args, "chdir", None),
-                "authority": f"--run {run}" if run else "--manual" if manual else None,
+                "authority": "--manual" if getattr(self.args, "manual", False) else None,
                 "lock_holder": None if self.served_by else lock_options(self.args, self.store).get("holder"),
                 **({"served_by": self.served_by} if self.served_by else {})}
 
-    def merge_authority(self, head: str) -> None:
-        from sd_db import runner
-        if self.args.run:
-            authority = runner.merge_authority(self.connection, self.args.run, head)
-            if pathlib.Path(authority["work_path"]).resolve() != self.root.resolve() or authority["item"] != self.args.item:
-                raise Refusal("merge assignment does not own this checkout and item")
-        elif not self.args.manual:
-            raise Refusal("merge needs a separate owned --run assignment or explicit --manual invocation",
+    def merge_authority(self) -> None:
+        # sd:3085. `--manual` is the one authority; the runner lease went with the sd runner (sd:3050).
+        if not self.args.manual:
+            raise Refusal("merge needs an explicit --manual invocation",
                           code="merge_authority_required", state="operator_decision", approval_required=True,
-                          next_action="Obtain merge authorization, then use the appropriate --run or --manual invocation.")
+                          next_action="Obtain merge authorization, then merge with --manual.")
         elif self.args.no_item:
             try:
                 self.store.manual_merge_guard(self.connection, str(self.root), repository=self.repository)
@@ -1834,7 +1829,7 @@ class Ship(SharedReview):
     def record_delivery(self, commit: str, ref: str) -> None:
         from sd_db.progress import deliver_work
         # The tool that verified the merge is the actor, as sd_db's own
-        # ship transition names it; a `--run` merge has no operator.
+        # ship transition names it.
         if self.item["kind"] == "work":
             deliver_work(self.connection, self.args.item, commit, who="sd-ship", verification_root=self.root)
         else:
@@ -2005,7 +2000,7 @@ class Ship(SharedReview):
             raise Refusal("--expected-head must name the current exact reviewed commit")
         self.require_copilot_abandonment_authority()
         self.check_review(head)
-        self.merge_authority(head)
+        self.merge_authority()
         # The one validated reader of the `mode:` line, as `merge_ownership`
         # and `resolve_mode` read it: a word that is not a mode is named here
         # instead of failing to match "guest" and passing (sd:930).
@@ -2064,7 +2059,7 @@ class Ship(SharedReview):
         self.check_review(head)
         if self.merge_head() != head:
             raise Refusal("HEAD moved immediately before merge")
-        self.merge_authority(head)
+        self.merge_authority()
         self.still_gated(base, head, protection)
         # `row_authorized_merge` is written here, with the phase that says a
         # merge is going out, and it is written on every dispatch rather than
@@ -2452,9 +2447,7 @@ def merge_flags(action) -> None:
     action.add_argument("--expected-head", required=True)
     action.add_argument("--branch", help="the item's prepared branch, when this checkout has another open "
                                          "and the item has more than one ship receipt (sd:2037)")
-    authority = action.add_mutually_exclusive_group()
-    authority.add_argument("--run")
-    authority.add_argument("--manual", action="store_true")
+    action.add_argument("--manual", action="store_true")
     action.add_argument("--watch", action="store_true")
     action.add_argument("--wait-seconds", type=int, default=900)
     action.add_argument("--abandon-copilot-review", metavar="REASON",
@@ -2493,13 +2486,13 @@ def validate_identity(args) -> None:
     if getattr(args, "provider", None) is not None and any(getattr(args, name, None) for name in
             ("create_record", "import_history", "rebind_branch", "close_record", "reopen_record")):
         raise Refusal("--provider cannot combine with metadata-only record operations")
-    forbidden = [name for name in ("path", "message_file", "run", "deliver", "associate_only", "acceptance_file")
+    forbidden = [name for name in ("path", "message_file", "deliver", "associate_only", "acceptance_file")
                  if getattr(args, name, None)]
     if forbidden:
-        raise Refusal("no-item publication does not accept commit, runner, or delivery flags: "
+        raise Refusal("no-item publication does not accept commit or delivery flags: "
                       + ", ".join("--" + name.replace("_", "-") for name in forbidden),
                       code="no_item_flags_refused", boundary="input", state="operator_decision",
-                      next_action="Commit separately and use --review-id without item, runner, or delivery flags.")
+                      next_action="Commit separately and use --review-id without item or delivery flags.")
     if not args.review_id and not getattr(args, "create_record", False):
         from sd_ship_no_item import review_identity_required
         raise review_identity_required()

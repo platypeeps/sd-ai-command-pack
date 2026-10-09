@@ -121,7 +121,7 @@ It preserves review acknowledgements and returns a refusal for the operator to r
 Use `sd-ship merge --item ID --expected-head SHA --manual --abandon-copilot-review REASON --json`
 only after an operator decides to stop waiting.
 The reason must be nonempty.
-The exception requires explicit manual merge authority; runner authority cannot use it.
+The exception requires explicit manual merge authority.
 The command binds the abandonment to the current pull request and exact reviewed head.
 It binds exact-head receipts when present.
 Otherwise, it binds the latest receipt for that pull request.

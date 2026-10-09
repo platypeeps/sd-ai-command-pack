@@ -139,7 +139,7 @@ Use `--no-item --review-id ID` instead of `--item ID` for prepare, merge, observ
 Prepare reuses complete exact-head review evidence and recorded dispositions; otherwise it follows the same review gates.
 Itemless merge requires `--manual` and `--expected-head SHA`.
 After the merge, run itemless `reconcile` and `review --close-record REASON` from the default branch; the deleted feature branch needs no recreation.
-Itemless publication rejects commit flags, runner authority, and whole-item delivery flags.
+Itemless publication rejects commit flags and whole-item delivery flags.
 It creates no task row, `Work:` line, `Item:`, or `Delivers:` trailer.
 A branch commit's `Delivers:` does not reach the squash; prepare warns and suggests `--item N`.
 Never allocate another review ID to reset spent passes or discard history.
@@ -156,15 +156,14 @@ Never allocate another review ID to reset spent passes or discard history.
   It reads no sd state, calls GitHub only for `--pr`, and exits non-zero on a refusal or a lint failure.
 - Optional commits require `--path FILE` for each file and `--message-file FILE`.
   Directories and a pre-populated index are invalid.
-- `sd-ship merge --item ID --expected-head SHA --manual --json` performs an explicit operator merge.
-- `sd-ship merge --item ID --expected-head SHA --run RUN-ID --json` requires its exclusive runner lease and matching clone.
+- `sd-ship merge --item ID --expected-head SHA --manual --json` performs an explicit operator merge; `--manual` is the one merge authority.
 - Merge may run from any checkout of the repository, such as a lane's checkout on the default branch.
   When the checkout's own branch holds no receipt for the item, the item's one receipt names the branch.
   `--branch BRANCH` names it when the item has more than one receipt.
   From another checkout, `--expected-head` must equal the branch's tip fetched from origin; no checkout moves.
   Matching item/head and `runner_merge: auto` on the repository row are also required.
   An author assignment cannot use this authority.
-- Both merge forms require fresh ownership, enforcing protection, current default branch, exact reviewed head, and passing required checks.
+- Merge requires fresh ownership, enforcing protection, current default branch, exact reviewed head, and passing required checks.
   `runner_merge: auto` on the repository row answers the sole-operator question, and only that one.
   Admin you do not hold, a fork, and a remote that cannot answer still refuse.
   A merge the row allowed records that on its receipt as `row_authorized_merge`.

@@ -186,8 +186,7 @@ class NoItemPublication(unittest.TestCase):
     def test_item_runner_and_commit_flags_refuse_before_any_database_write(self):
         before = list(self.connection.iterdump())
         for command, flags in (("prepare", ["--deliver"]), ("prepare", ["--path", "src.py"]),
-                               ("prepare", ["--acceptance-file", "missing"]),
-                               ("merge", ["--run", "assignment", "--expected-head", self.head])):
+                               ("prepare", ["--acceptance-file", "missing"])):
             with self.subTest(flags=flags):
                 result = self.invoke(command, *flags, code=3)
                 self.assertEqual(result["workflow"]["blocker"]["code"], "no_item_flags_refused")

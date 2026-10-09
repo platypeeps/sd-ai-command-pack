@@ -733,10 +733,11 @@ class TheAuthorStopsAtPullRequestReady(unittest.TestCase):
         for command in commands(prepare):
             self.assertNotIn("pr merge", command, command)
 
-    def test_merge_is_a_separate_owned_assignment(self) -> None:
+    def test_merge_needs_explicit_manual_authority(self) -> None:
+        """sd:3085. `--manual` is the one merge authority; no runner lease is named."""
         lane = executable_section()
-        self.assertIn("--run RUN-ID", lane)
-        self.assertIn("exclusive", lane)
+        self.assertIn("--manual` is the one merge authority", lane)
+        self.assertNotIn("--run RUN-ID", lane)
         self.assertIn("runner_merge: auto", lane)
         self.assertIn("An author assignment cannot use this authority", lane)
         self.assertIn("enforcing protection", lane)
