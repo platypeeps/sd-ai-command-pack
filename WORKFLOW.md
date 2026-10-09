@@ -622,6 +622,7 @@ the block; the file is untracked by construction.
 | `guest` | nowhere in the repository; both checks below refuse them | the small-change path to pull-request-ready; no posts, no labels |
 
 `minimal` holds no work items by agreement, not by a check.
+`sd-docs-lint` skips its `docs/work` rules there: a local folder and the pages that name it are not linted.
 `sd_lib.guest_artifact_refusal` and `sd-ship`'s push check refuse
 `docs/work/`, `docs/spec/` and `docs/decisions/` in `guest` only, so a
 `minimal` repository can commit and push them unrefused. `sd-ship` also adds

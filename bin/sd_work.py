@@ -247,6 +247,9 @@ def _edit_changes(args: argparse.Namespace) -> dict[str, Any]:
         changes["recurrence"] = None
     if args.recur_anchor is not None:
         changes["recurrence_anchor"] = args.recur_anchor
+    # Clear only: the nightly prune parks, and `edit_item` refuses a writing piece (sd:3007).
+    if args.unpark:
+        changes["parked_at"] = None
     if not changes:
         raise WorkRefusal("edit requires a field to change")
     return changes
@@ -1384,6 +1387,9 @@ def register(groups: Any, store: Any) -> None:
                        "the same command")
     kind.choices = LibraryKinds()  # after add_argument: see `LibraryKinds`
     _recurrence_flags(edit, clear=True)
+    edit.add_argument("--unpark", action="store_true",
+                      help="bring back an item the nightly prune parked; a writing piece "
+                           "revives with `sd writing park --revive`")
     _output(edit, "edit", revision=True)
 
     status = verbs.add_parser("status", help="change status with an atomic history entry")

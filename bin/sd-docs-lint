@@ -19,6 +19,7 @@ PR privacy        -- a pull request body is public, so no line of it matches
                     the operator's privacy-pattern file (sd:2999). The body
                     carries no required or refused line.
 Rules 1 to 4 and 7 read the tree; the privacy rule needs `--pr-body`.
+A `mode: minimal` repository keeps `docs/work` local, so rules 1, 2 and 7 skip.
 `--body-only` runs the privacy rule alone, for a repository with no work
 root. `--no-history` reads no commit history: rule 2 asks no item whether it
 was delivered, so nothing fetches or runs `git log`, and the run says so.
@@ -632,6 +633,12 @@ def run(
         report.note("rules 1-4, 7: --body-only, not run")
         check_pr_privacy(pr_body, report)
         return report
+    if keeps_work_local(repo, report):
+        report.note(f"rules 1-2, 7: mode: minimal keeps {work_dir} local; not run")
+        check_decisions(repo / decisions_dir, report)
+        check_spec_index(repo / spec_dir, report)
+        check_pr_privacy(pr_body, report)
+        return report
     if not work_root.is_dir():
         if work_dir_named:
             report.fail(str(work_root), "the work directory does not exist")
@@ -652,6 +659,20 @@ def run(
     check_pr_privacy(pr_body, report)
     check_work_references(repo, work_dir, report)
     return report
+
+
+def keeps_work_local(repo: pathlib.Path, report: Report) -> bool:
+    """Whether the `mode:` line says `minimal`, so rules 1, 2 and 7 skip (sd:3177).
+
+    A minimal repository keeps `docs/work` local by policy: its tracked pages
+    name records a fresh clone never holds, and its local folder has no shape
+    to keep. A line that cannot be read is a failure, and every rule runs.
+    """
+    try:
+        return sd_lib.written_mode(repo) == "minimal"
+    except sd_lib.ConfigError as error:
+        report.fail("mode", str(error))
+        return False
 
 
 def check_work_items(repo: pathlib.Path, work_dir: str, report: Report, history: bool) -> None:

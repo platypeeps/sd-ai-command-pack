@@ -575,6 +575,52 @@ class NoDefaultWorkRootTests(LintFixture):
         self.assertIn("the work directory does not exist", said)
 
 
+class MinimalModeTests(LintFixture):
+    """A `mode: minimal` repository keeps `docs/work` local by policy (sd:3177).
+
+    Its tracked pages name `docs/work/` records a fresh clone never holds, and
+    an untracked local folder carries whatever shape it likes. Rules 1, 2 and
+    7 read that folder and those names, so they skip with a note; the rules
+    that read tracked trees still run.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.local_file = self.repo / "CLAUDE.local.md"
+        self.write_mode("minimal")
+        (self.repo / "README.md").write_text(
+            "# readme\n\nSee `docs/work/2026-01-01-local-only/design.md`.\n", encoding="utf-8"
+        )
+        (self.work / "2026-08-29-a-workable-item" / "notes.txt").write_text("local\n", encoding="utf-8")
+
+    def write_mode(self, value: str) -> None:
+        self.local_file.write_text(
+            f"{lint.sd_lib.LOCAL_BLOCK_START}\nmode: {value}\n{lint.sd_lib.LOCAL_BLOCK_END}\n",
+            encoding="utf-8",
+        )
+
+    def test_green_work_rules_skip_with_a_note(self) -> None:
+        report = self.run_lint()
+        self.assertEqual(report.failures, [])
+        self.assertIn("rules 1-2, 7: mode: minimal keeps docs/work local; not run", report.notes)
+
+    def test_red_the_same_tree_in_full_mode_still_fails_both_rules(self) -> None:
+        self.write_mode("full")
+        joined = "\n".join(self.run_lint().failures)
+        self.assertIn("docs/work/2026-01-01-local-only/design.md names nothing in the checkout", joined)
+        self.assertIn("design.md, or the legacy prd.md and implement.md, only", joined)
+
+    def test_red_the_tracked_tree_rules_still_run(self) -> None:
+        self.write_spec("tooling", ["lanes.md", "gates.md"], index="# tooling\n\n- [lanes](./lanes.md)\n")
+        self.assert_fails("index does not link gates.md")
+
+    def test_red_an_unreadable_mode_line_is_a_failure_not_a_skip(self) -> None:
+        self.write_mode("tiny")
+        joined = "\n".join(self.run_lint().failures)
+        self.assertIn("mode 'tiny' is not one of", joined)
+        self.assertIn("names nothing in the checkout", joined)
+
+
 class RepositoryTests(unittest.TestCase):
     def test_this_repository_is_clean(self) -> None:
         # No history, as `make check` lints it: this runs inside the gate too,
