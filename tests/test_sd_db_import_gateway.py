@@ -73,7 +73,6 @@ REACHED_WITH_THE_LIBRARY = {
     "sd-ship::Ship.__init__": "main() calls sd_lib.import_sd_db() before building Ship",
     "sd-ship::Ship.close_task": "a Ship exists only after main() called the helper",
     "sd-ship::Ship.delivered_at": "a Ship exists only after main() called the helper",
-    "sd-ship::Ship.merge_authority": "a Ship exists only after main() called the helper",
     "sd-ship::Ship.merge_branch": "a Ship exists only after main() called the helper",
     "sd-ship::Ship.note_demotion": "a Ship exists only after main() called the helper",
     "sd-ship::Ship.reconcile": "a Ship exists only after main() called the helper",
