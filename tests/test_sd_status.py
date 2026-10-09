@@ -4261,12 +4261,12 @@ class ReportSectionTests(InventoryFixture):
         self.item("2026-08-01-alpha", status="in_progress")
         summary = status.banner(self.inventory())["summary"]
         self.assertIn("1 finding across 1 check;", summary)
-        self.assertIn("the other 12 checks clear", summary)
+        self.assertIn("the other 11 checks clear", summary)
         self.assertNotIn("all 12 checks clear", summary)
 
     def test_nothing_found_still_says_all_of_them_are_clear(self) -> None:
         summary = status.banner(self.inventory())["summary"]
-        self.assertEqual("no findings; all 13 checks clear", summary)
+        self.assertEqual("no findings; all 12 checks clear", summary)
 
     def test_a_blind_class_keeps_the_word_out_even_when_others_fired(self) -> None:
         """The never-say-clear rule outranks the new middle tail.
@@ -4778,16 +4778,11 @@ class SkillPageClaimTests(StatusFixture):
     TENS = (
         "at most {w} actionable rows by rank",
         "stating the denominator — `{n} of 123, by rank`",
-        "{W} of them with one unanswered inline comment",
-        "would fill all {w} `pending` slots at 36",
-        "When higher classes fill all {w} slots",
-        'rows "ranked below the first {n}"',
         "{W} pending rows do not fit",
         "Rows 5 to {n} are addressable by typing the id",
-        "`--json`: `pending` is the first {w} after each class's",
-        "can make rows 1 to {n} of `actions` differ from it",
+        "`--json`: `pending` is the first {w} of it",
         "`pending` caps at {w} because a report is read whole",
-        "of which `pending` is the first {w} after each class's",
+        "of which `pending` is the first {w}",
         "It is capped at {w} and says so",
     )
 
@@ -4795,7 +4790,7 @@ class SkillPageClaimTests(StatusFixture):
         """Every ten on the page is the list's length, and each one is named.
 
         The sites are enumerated, not chosen, and now identified rather than
-        counted: `TENS` names all thirteen, each phrase must be on the page
+        counted: `TENS` names all eight, each phrase must be on the page
         exactly once, each must hold exactly one ten, and the positions they
         cover must be every ten the page carries. A total alone let one site
         say "twelve" while another grew a second `ten`, because the two
