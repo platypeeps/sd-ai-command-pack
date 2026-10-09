@@ -250,12 +250,15 @@ class LockFreePrepare(LaneCase):
     def receipt(self):
         return receipts.read(self.connection, receipts.receipt_key("fixture/repo", "topic", self.item))[1]
 
-    def during_review(self, step):
-        """Patch the reviewer so `step` runs once while the provider pass runs, its pass reserved; `step`'s answers."""
+    def during_review(self, step, planning=False):
+        """Patch the reviewer so `step` runs once while the provider pass runs, its pass reserved; `step`'s answers.
+
+        With `planning`, `step` runs during `--explain` instead, before anything is reserved.
+        """
         real, answers = ship.review_process, []
 
         def process(root, argv, **kwargs):
-            if "--explain" not in argv and not answers:
+            if ("--explain" in argv) == planning and not answers:
                 answers.append(None)
                 try:
                     answers[0] = step()
@@ -309,8 +312,8 @@ class LockFreePrepare(LaneCase):
         now = datetime.now(timezone.utc)
         reviewing, here = {"phase": "reviewing"}, socket.gethostname()
 
-        def reserved(pid, started=now, host=here, **entry):
-            process = {"pid": pid, "host": host, "execution_seconds": 3600}
+        def reserved(pid, started=now, host=here, deadline=now + timedelta(hours=1), **entry):
+            process = {"pid": pid, "host": host, "execution_seconds": 3600, "deadline": deadline.isoformat()}
             return [{"head": "0" * 40, "started_at": started.isoformat(), "process": process, **entry}]
 
         live = fixture.sd_ship_review.live_reviewer
@@ -321,44 +324,96 @@ class LockFreePrepare(LaneCase):
                          "satellite.example.test")
         self.assertIsNone(live({"phase": "reviewed"}, reserved(child.pid)))
         self.assertIsNone(live(reviewing, reserved(child.pid, report={})))
+        self.assertIsNone(live(reviewing, reserved(child.pid, execution_error={"kind": "watchdog_expired"})))
         self.assertIsNone(live(reviewing, [{"head": "0" * 40, "started_at": now.isoformat()}]), "a pass before sd:1938")
-        expired = now - timedelta(seconds=3600 + fixture.sd_ship_review.RESERVATION_MARGIN_SECONDS + 1)
-        self.assertIsNone(live(reviewing, reserved(child.pid, started=expired, host="satellite.example.test")))
-        self.assertIsNone(live(reviewing, reserved(child.pid, started=expired)), "the bound backs up a live pid")
+        past = now - timedelta(seconds=1)
+        self.assertIsNone(live(reviewing, reserved(child.pid, host="satellite.example.test", deadline=past)))
+        self.assertIsNone(live(reviewing, reserved(child.pid, deadline=past)), "the deadline backs up a live pid")
+        without = reserved(child.pid, host="satellite.example.test")
+        del without[0]["process"]["deadline"]
+        self.assertIsNone(live(reviewing, without), "a reservation with no deadline holds nothing")
 
-    def remote_reservation(self, head, started):
-        """Leave the record mid-review, its pass reserved by a process on another machine."""
+    def remote_reservation(self, head, deadline):
+        """Leave the record mid-review, its pass reserved until `deadline` by a process on another machine."""
         key = receipts.receipt_key("fixture/repo", "topic", self.item)
         revision, row = receipts.read(self.connection, key)
-        row["passes"].append({"head": head, "started_at": started.isoformat(), "base": None, "retry": False,
-                              "requested_provider": None,
-                              "process": {"pid": 1, "host": "satellite.example.test", "execution_seconds": 3600}})
+        process = {"pid": 1, "host": "satellite.example.test", "execution_seconds": 3600, "deadline": deadline.isoformat()}
+        row["passes"].append({"head": head, "started_at": datetime.now(timezone.utc).isoformat(), "base": None,
+                              "retry": False, "requested_provider": None, "process": process})
         receipts.save(self.connection, key, revision, {**row, "phase": "reviewing", "reviewed_head": None})
 
-    def remote_reservation_replaced(self, started):
-        """Move the reserved pass's start to `started`."""
+    def remote_reservation_expires(self):
+        """Move the reserved pass's deadline into the past."""
         key = receipts.receipt_key("fixture/repo", "topic", self.item)
         revision, row = receipts.read(self.connection, key)
-        row["passes"][-1]["started_at"] = started.isoformat()
+        row["passes"][-1]["process"]["deadline"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
         receipts.save(self.connection, key, revision, row)
 
     def test_a_remote_reservation_refuses_within_its_bound_and_expires_past_it(self):
         """sd:1938 review: a satellite that died mid-review blocks the item until its pass's bound, no longer."""
         self.assertEqual(self.operation("prepare").prepare()["phase"], "ready_to_send")
         _git(self.root, "commit", "-q", "--allow-empty", "-m", "fix\n\nAuthored-with: human")
-        self.remote_reservation(self.head(), datetime.now(timezone.utc))
+        self.remote_reservation(self.head(), datetime.now(timezone.utc) + timedelta(hours=1))
         with self.assertRaises(ship.Refusal) as refused:
             self.operation("prepare", "--retry-review").prepare()
         self.assertEqual(refused.exception.workflow["blocker"]["code"], "review_running")
         self.assertIn("pid 1 on satellite.example.test", str(refused.exception))
-        stale = datetime.now(timezone.utc) - timedelta(seconds=3600 + fixture.sd_ship_review.RESERVATION_MARGIN_SECONDS + 1)
-        self.remote_reservation_replaced(stale)
+        self.remote_reservation_expires()
         self.assertEqual(self.operation("prepare", "--retry-review").prepare()["phase"], "ready_to_send")
+
+    def test_a_reservation_holds_through_its_execution_bound_however_long_planning_took(self):
+        """sd:1938 round 2: planning ran 790 s, and 100 s of the execution watchdog remain; the pass still reads live.
+
+        The pass's `started_at` is taken before planning, the watchdog's clock starts at the reservation's
+        save. A bound counted from `started_at` expired while the reviewer ran. A clock moved by `offset`
+        stands in for the time; the second prepare runs on another machine, so only the bound can answer.
+        """
+        offset, real, bound = [-790.0], ship.review_process, []
+
+        class Clock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return datetime.now(tz) + timedelta(seconds=offset[0])
+
+        def second():
+            with patch("socket.gethostname", return_value="lane.example.test"):
+                return self.operation("prepare", "--retry-review").prepare()
+
+        def process(root, argv, **kwargs):
+            if "--explain" in argv:
+                planned = real(root, argv, **kwargs)
+                bound.append(json.loads(planned.stdout)["timing"]["execution_seconds"])
+                offset[0] = 0.0  # planning is over: the reservation is saved now
+                return planned
+            if len(bound) == 1:
+                offset[0] = bound[0] - 100.0
+                try:
+                    bound.append(second())
+                except ship.Refusal as refusal:
+                    bound.append(refusal)
+            return real(root, argv, **kwargs)
+
+        with patch.object(ship, "review_process", process), patch.object(fixture.sd_ship_review, "datetime", Clock), \
+                patch.object(ship, "moment", lambda: Clock.now(timezone.utc).isoformat()):
+            first = self.operation("prepare").prepare()
+        refusal = bound[1]
+        self.assertIsInstance(refusal, ship.Refusal)
+        self.assertEqual(refusal.workflow["blocker"]["code"], "review_running")
+        self.assertEqual(first["phase"], "ready_to_send")
+        self.assertEqual(len(self.receipt()["passes"]), 1)
+
+    def test_a_second_prepare_during_planning_wins_and_the_first_loses_at_its_reservation(self):
+        """Planning reserves nothing, so the revision check settles it: one pass, no lost receipt."""
+        patcher, answers = self.during_review(lambda: self.operation("prepare").prepare(), planning=True)
+        with patcher, self.assertRaisesRegex(Exception, "changed concurrently"):
+            self.operation("prepare").prepare()
+        self.assertEqual(answers[0]["phase"], "ready_to_send")
+        self.assertEqual(len(self.receipt()["passes"]), 1)
 
     def test_restart_review_sets_aside_a_pass_that_still_reads_live(self):
         """sd:1938 review: `--restart-review REASON` is the operator's word, so the live-review guard yields to it."""
         reviewed, amended, payload, program = self.amend_after_a_blocking_review()
-        self.remote_reservation(reviewed, datetime.now(timezone.utc))
+        self.remote_reservation(reviewed, datetime.now(timezone.utc) + timedelta(hours=1))
         with self.assertRaises(ship.Refusal) as refused:
             self.operation("prepare").prepare()
         self.assertEqual(refused.exception.workflow["blocker"]["code"], "review_running")

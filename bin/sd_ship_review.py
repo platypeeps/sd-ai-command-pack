@@ -16,7 +16,7 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any, Callable
 
@@ -187,7 +187,7 @@ def carry_forward(root: pathlib.Path, reviewed: str, head: str, base_ref: str) -
 
 #: How much younger than its reserved pass a process may read and still be its reviewer: `ps` rounds to seconds.
 REVIEWER_AGE_SLACK_SECONDS = 5
-#: How long past its planned execution a reserved pass still reads live: its planning ran before that bound started.
+#: How long past its execution watchdog a reserved pass still reads live: the watchdog's cleanup and the result's save.
 RESERVATION_MARGIN_SECONDS = 600
 
 
@@ -220,28 +220,41 @@ def process_age(pid: int) -> float | None:
         return float("inf")
 
 
+def reservation_deadline(execution_seconds: int) -> str:
+    """When a pass reserved now stops reading live: its execution watchdog, from now, plus the margin (sd:1938).
+
+    From the reservation's save, not the pass's `started_at`: planning ran
+    between them, for up to the setup bound, and nothing was reserved yet.
+    """
+    return (datetime.now(timezone.utc) + timedelta(seconds=execution_seconds + RESERVATION_MARGIN_SECONDS)).isoformat()
+
+
 def live_reviewer(state: dict, passes: list[dict]) -> dict | None:
     """The process still running the reserved pass, or None when no review is in flight (sd:1938).
 
     Prepare takes no ship lock, so a second prepare can start while the first
     reviews. It would read the reserved pass as incomplete and spend another on
     `--retry-review`, and the first would lose its receipt to the revision check.
-    A pass expires once its planned execution and `RESERVATION_MARGIN_SECONDS`
-    have passed: the watchdog has stopped its reviewer by then, so a crash on
-    any machine blocks the item for that long at most. Before that, another
-    host's process cannot be read here, so it counts as live. A pid that now
-    names a process younger than the pass was reused, so it is dead.
+    A pass expires at its `deadline`, written with the reservation (`reservation_deadline`):
+    the watchdog has stopped its reviewer by then, so a crash on any machine
+    blocks the item for that long at most. Before it, another host's process
+    cannot be read here, so it counts as live. A pid that now names a process
+    younger than the pass was reused, so it is dead.
     """
     last = passes[-1] if passes else {}
     process = last.get("process")
     if state.get("phase") != "reviewing" or "report" in last or last.get("execution_error") or not isinstance(process, dict):
         return None
-    since = (datetime.now(timezone.utc) - datetime.fromisoformat(last["started_at"])).total_seconds()
-    bound = process.get("execution_seconds")
-    if type(bound) is not int or since > bound + RESERVATION_MARGIN_SECONDS:
+    now = datetime.now(timezone.utc)
+    try:
+        expired = now > datetime.fromisoformat(process["deadline"])
+    except (KeyError, TypeError, ValueError):
+        expired = True
+    if expired:
         return None
     if process.get("host") != socket.gethostname():
         return process
+    since = (now - datetime.fromisoformat(last["started_at"])).total_seconds()
     pid = process.get("pid")
     age = process_age(pid) if type(pid) is int and pid > 0 else None
     return None if age is None or age + REVIEWER_AGE_SLACK_SECONDS < since else process
@@ -895,8 +908,6 @@ class SharedReview:
             except Refusal:
                 self.save(review_preflight_error=self.preflight_diagnostic(planned))
                 raise
-            # The pass's bound, so a reservation whose process cannot be read still expires (sd:1938).
-            passes[-1]["process"]["execution_seconds"] = plan["execution_seconds"]
             # sd:1397. What the reviewers are asked, so a moved binding can replay it.
             explained = json.loads(planned.stdout)
             passes[-1]["review_request"] = {"sha256": explained.get("request_sha256"),
@@ -907,6 +918,9 @@ class SharedReview:
             bound: dict[str, Any] = {"binding": self.runtime.binding(self.root)}
             if self.runtime.manifest is not None:
                 bound["binding_manifest"] = self.runtime.manifest(self.root)
+            # The reservation's bound, so one whose process cannot be read still expires (sd:1938).
+            passes[-1]["process"].update(execution_seconds=plan["execution_seconds"],
+                                         deadline=reservation_deadline(plan["execution_seconds"]))
             self.save(passes=passes, phase="reviewing", head=head, **bound, review_preflight_error=None, review_clearance=None)
             stage = "execution"
             return self.runtime.process(self.root, argv + ["--expected-timing", digest(plan)], timeout=plan["execution_seconds"])
