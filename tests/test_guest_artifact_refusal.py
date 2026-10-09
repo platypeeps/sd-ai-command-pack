@@ -149,7 +149,7 @@ class TheRule(Fixture):
         )
         self.assertIn("guest mode", sentence)
         self.assertIn("docs/work/2026-01-01-a-thing/prd.md", sentence)
-        self.assertIn("fork's integration branch", sentence)
+        self.assertIn("stay out of the repository on every branch", sentence)  # no integration branch (sd:3136)
 
     def test_all_three_refused_trees_are_named(self) -> None:
         self.assertEqual(
@@ -293,7 +293,7 @@ class TheReviewGate(Fixture):
         self.assertEqual(done.returncode, 2, f"stdout={done.stdout}\nstderr={done.stderr}")
         self.assertIn("guest mode", done.stderr)
         self.assertIn("docs/work/2026-01-01-a-thing/prd.md", done.stderr)
-        self.assertIn("fork's integration branch", done.stderr)
+        self.assertIn("stay out of the repository on every branch", done.stderr)
         self.assertNotIn("Traceback", done.stderr)
 
     def test_the_same_repository_unforked_reaches_the_reviewer(self) -> None:
@@ -318,7 +318,7 @@ class TheReviewGate(Fixture):
         self.assertRegex(done.stdout, r"(?m)^sd-review: explain only[,;] ")
         self.assertNotIn("Traceback", done.stderr)
         self.assertNotIn("guest mode", done.stderr)
-        self.assertNotIn("fork's integration branch", done.stderr)
+        self.assertNotIn("stay out of the repository", done.stderr)
 
 
 #: sd:789 -- a `gh api` for the ship adapter's own transport, which appends a

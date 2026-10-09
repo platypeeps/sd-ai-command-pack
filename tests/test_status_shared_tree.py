@@ -138,6 +138,24 @@ class SharedTree(unittest.TestCase):
         (self.root / "docs/spec/uncommitted.md").write_text("draft\n", encoding="utf-8")
         self.assertEqual(sd_lib.shared_tree_artifacts(self.root), ())
 
+    def test_the_list_is_read_off_origin_whose_answer_lowered_the_mode(self) -> None:
+        """sd:3136 (42c5faf0e124): `remote_permits_full` asks about `origin`, so a branch tracking another
+        remote must not send the list to that remote's default branch."""
+
+        carried = self.commit("docs/work/2026-01-01-a-thing/prd.md", "docs/spec/a.md")
+        self.publish(carried)
+        self.git("remote", "add", "mirror", "https://github.com/example/thing-mirror.git")
+        self.git("checkout", "-q", "--orphan", "bare-mirror")
+        self.git("rm", "-rq", "--cached", ".")
+        (self.root / "README.md").write_text("mirror\n", encoding="utf-8")
+        self.git("add", "README.md")
+        self.git("commit", "-q", "-m", "mirror")
+        self.git("update-ref", "refs/remotes/mirror/main", self.git("rev-parse", "HEAD"))
+        self.git("checkout", "-q", "-f", "main")
+        self.git("config", "branch.main.remote", "mirror")
+        self.assertEqual(list(sd_lib.shared_tree_artifacts(self.root)), self.carried())
+        self.assertEqual(len(self.carried()), 2)
+
     def test_a_checkout_with_no_remote_has_no_shared_tree(self) -> None:
         self.git("remote", "remove", "origin")
         self.commit("docs/work/i/prd.md")

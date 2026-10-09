@@ -241,7 +241,9 @@ In a shared repository:
 - No `Work:` line in a pull request body unless the pull request resolves a
   work item that lives in that repository.
 - No `docs/work/`, `docs/spec/`, or `docs/decisions/` commits. `mode: guest`
-  already carries this: planning artifacts go to the fork's integration branch.
+  already carries this: planning artifacts stay out of the repository, on
+  every branch and every remote, a fork's included; no integration branch
+  holds them.
   Two machines enforce that refusal. `sd-review --scope planning` calls
   `sd_lib.guest_artifact_refusal`, which resolves the mode and names refused
   paths. `sd-plan` uses that review before promotion. `sd-ship` checks the
@@ -617,7 +619,7 @@ the block; the file is untracked by construction.
 |---|---|---|
 | `full` | `docs/work/` in the repository | everything above; merge only with `runner_merge: auto` on the row |
 | `minimal` | nowhere, by convention only; nothing enforces it | the small-change path only |
-| `guest` | the fork's integration branch | the small-change path to pull-request-ready; no posts, no labels |
+| `guest` | nowhere in the repository; both checks below refuse them | the small-change path to pull-request-ready; no posts, no labels |
 
 `minimal` holds no work items by agreement, not by a check.
 `sd_lib.guest_artifact_refusal` and `sd-ship`'s push check refuse
@@ -641,9 +643,9 @@ run `guest` whatever the line says: a `mode: full` you wrote is a ceiling,
 never a floor: detection lowers it and never raises it, so a repository
 that gains a collaborator stops
 receiving your planning artifacts before the next push, not after the
-next merge. The push check is of the destination: your fork's integration
-branch is your own remote, and the guest push there proceeds while the
-same branch offered upstream is refused. A lowered run leaves a note on the
+next merge. The push check reads what the push adds over `origin/<base>`
+and refuses a guest push that carries planning paths, to an upstream or to
+your own fork alike; no fork integration branch exists. A lowered run leaves a note on the
 item saying which answer lowered it, once per item and remote however many
 runs it takes, and `sd-status` names the planning artifacts the shared tree
 was already carrying, which are yours to move. Mode never decides merging.
