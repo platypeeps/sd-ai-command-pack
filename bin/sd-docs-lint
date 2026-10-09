@@ -636,10 +636,13 @@ def run(
         if work_dir_named:
             report.fail(str(work_root), "the work directory does not exist")
             return report
-        report.note(f"rules 1-2, 7: no {work_dir}; nothing to lint")
+        report.note(f"rules 1-2: no {work_dir}; nothing to lint")
         check_decisions(repo / decisions_dir, report)
         check_spec_index(repo / spec_dir, report)
         check_pr_privacy(pr_body, report)
+        # Rule 7 reads every tracked page, so a reference to a root that is
+        # not there is a dangling one (sd:3134).
+        check_work_references(repo, work_dir, report)
         return report
 
     with sd_lib.git_read_memo():  # one fetch per remote and ref, not one per item (sd:2873)
