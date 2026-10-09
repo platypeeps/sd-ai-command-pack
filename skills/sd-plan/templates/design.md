@@ -24,3 +24,4 @@ The item's row holds status, progress and decisions; this page holds the shape.
 ## Risks
 
 <What could make this wrong. Name the risks you accept, not only the ones you mitigate.>
+<For each check that grants a pass, name what ties its evidence to the subject: head, event, repository or inputs.>
