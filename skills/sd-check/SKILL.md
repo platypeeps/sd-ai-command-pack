@@ -62,6 +62,13 @@ A change to the declaration, a Makefile, the entrypoint's source file, `CLAUDE.l
 The full check also runs without a declaration, without `--base`, or on an empty range.
 The local gate and the review lane's gate check pass the pull request's base branch.
 
+## Required services
+
+A check that needs a running service, such as a database on a local port, declares it in the `CLAUDE.local.md` block:
+`services: db=127.0.0.1:5433`, whitespace-separated `[name=]host:port` entries, and optionally `services_start: docker compose up -d db`.
+Before any step, sd-check connects to each; one that does not answer within 2 seconds fails every check unrun, naming it and the start hint (sd:1649).
+sd-check only probes; starting the service is the operator's step. A dry run and a docs-only scope probe nothing, and a malformed entry exits 2.
+
 ## Local gate receipts
 
 Under `repo.ci = local`, `sd-ship prepare` runs the check as the merge gate does, and a pass leaves a gate receipt.
