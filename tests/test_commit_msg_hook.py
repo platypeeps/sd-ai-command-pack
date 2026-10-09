@@ -171,7 +171,8 @@ class HookFixture(unittest.TestCase):
 
     def commits(self) -> int:
         result = subprocess.run(["git", "rev-list", "--count", "HEAD"], cwd=self.root,
-                                capture_output=True, text=True, check=False)
+                                env=clean_environment(), capture_output=True, text=True,
+                                check=False)
         return int(result.stdout.strip()) if result.returncode == 0 else 0
 
 
