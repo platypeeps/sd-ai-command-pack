@@ -547,9 +547,19 @@ class NoDefaultWorkRootTests(LintFixture):
     def test_red_the_default_root_missing_is_a_skip_and_exit_0(self) -> None:
         code, printed, said = self.cli()
         self.assertEqual(code, 0, said)
-        self.assertIn("rules 1-2, 7: no docs/work; nothing to lint", printed)
+        self.assertIn("rules 1-2: no docs/work; nothing to lint", printed)
         self.assertIn("sd-docs-lint: clean", printed)
         self.assertNotIn("does not exist", said)
+
+    def test_red_rule_7_still_runs_without_the_default_root(self) -> None:
+        """A dangling `docs/work` reference in a page fails with no work root (sd:3134)."""
+        (self.repo / "README.md").write_text(
+            "# readme\n\nSee `docs/work/2026-01-01-gone/design.md`.\n", encoding="utf-8"
+        )
+        self.git("add", "-A")
+        code, printed, said = self.cli()
+        self.assertEqual(code, 1, printed)
+        self.assertIn("docs/work/2026-01-01-gone/design.md names nothing in the checkout", said)
 
     def test_the_other_rules_still_run_without_the_default_root(self) -> None:
         body = self.repo / "body.md"
