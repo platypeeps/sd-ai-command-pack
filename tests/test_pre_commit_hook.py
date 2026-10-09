@@ -50,6 +50,8 @@ import sys
 import tempfile
 import unittest
 
+from tests.clean_env import clean_environment
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 HOOK = REPO_ROOT / "hooks" / "pre-commit"
 LINK_TARGET = "../../hooks/pre-commit"
@@ -216,6 +218,17 @@ class TheHookRun(unittest.TestCase):
         self.assertIn("tests.test_doc_citations", output)
         self.assertNotIn("Ran ", output, "a pass ran with one of the two deleted")
 
+    def test_a_staged_symlink_is_not_linted_through_its_target(self):
+        """sd:3136 (f31710eaba15): the commit holds the link's text, not the file it names, so Ruff on
+        `link.py` judged a file the commit does not carry."""
+        (self.root / "notes.txt").write_text("import os\n", encoding="utf-8")
+        (self.root / "link.py").symlink_to("notes.txt")
+        git("add", "--", "link.py", cwd=self.root)
+        result = self.run_hook()
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        self.assertNotIn("F401", output, "Ruff followed the staged link")
+
     def test_a_suffixless_path_that_cannot_be_opened_counts_as_python(self):
         """Fail closed, as `_is_python_script` does: "not Python" for a file
         nobody could open would skip Ruff on it silently (sd:1000)."""
@@ -333,14 +346,17 @@ class TheHookRun(unittest.TestCase):
 
 
 def scratch_checkout(prefix: str) -> pathlib.Path:
-    """A repository laid out as this one is for hooks: `hooks/pre-commit` tracked."""
+    """A repository laid out as this one is for hooks: `hooks/pre-commit` and `hooks/commit-msg` tracked."""
     root = pathlib.Path(tempfile.mkdtemp(prefix=prefix))
     git("init", "-q", cwd=root)
     git("config", "user.email", "hook@example.invalid", cwd=root)
     git("config", "user.name", "hook", cwd=root)
     (root / "hooks").mkdir()
     shutil.copy2(HOOK, root / "hooks" / "pre-commit")
-    git("add", "--", "hooks/pre-commit", cwd=root)
+    # A stand-in: `make hooks` links both, and the real one reads `bin/`, which this layout has not got.
+    (root / "hooks" / "commit-msg").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (root / "hooks" / "commit-msg").chmod(0o755)
+    git("add", "--", "hooks", cwd=root)
     return root
 
 
@@ -543,6 +559,23 @@ class TheLayout(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn("is not a git checkout", result.stderr)
         self.assertNotIn("/hooks/pre-commit", result.stdout + result.stderr)
+
+    def test_make_hooks_refuses_a_separated_git_directory_instead_of_a_dangling_link(self):
+        """sd:3136 (0574019d9201): `../../hooks/pre-commit` from `<gitdir>/hooks` is the checkout only when the
+        git directory is `<checkout>/.git`; elsewhere the link dangled and the run said it was installed."""
+        root = pathlib.Path(tempfile.mkdtemp(prefix="sd-3136-separate-"))
+        self.addCleanup(subprocess.run, ["rm", "-rf", str(root)], check=False)
+        (root / "work").mkdir()
+        store = root / "store" / ".git"
+        store.parent.mkdir()
+        git("init", "-q", f"--separate-git-dir={store}", ".", cwd=root / "work")
+        shutil.copytree(self.root / "hooks", root / "work" / "hooks")
+        shutil.copy2(REPO_ROOT / "Makefile", root / "work" / "Makefile")
+        result = subprocess.run(["make", "hooks"], cwd=root / "work", capture_output=True, text=True, check=False,
+                                env=clean_environment())
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("is not <checkout>/.git", result.stderr)
+        self.assertFalse((store / "hooks" / "pre-commit").is_symlink(), "a dangling link was made")
 
     def test_make_hooks_refuses_while_core_hooks_path_is_set(self):
         git("config", "core.hooksPath", ".githooks", cwd=self.root)

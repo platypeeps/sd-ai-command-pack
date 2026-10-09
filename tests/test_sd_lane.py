@@ -392,6 +392,18 @@ class Reorder(Lane):
             sd_lane.set_hold(self.repo, 2, self.environ, held=False, expected_revision=sd_lane.queue_revision(before))
         self.assertEqual((caught.exception.code, self.pending()), (sd_lane.STALE_REVISION, [3, 1, 2]))
 
+    def test_cancel_takes_an_expected_revision_as_the_other_editors_do(self) -> None:
+        """sd:3137. A cancel against a queue that changed since its read is refused with the same code."""
+        self.queue(1, 2, 3)
+        read = sd_lane.queue_revision(self.entries())
+        sd_lane.move(self.repo, 3, "top", self.environ)
+        before = self.entries()
+        with self.assertRaises(sd_lane.LaneError) as caught:
+            sd_lane.cancel(self.repo, 2, self.environ, expected_revision=read)
+        self.assertEqual((caught.exception.code, self.entries()), (sd_lane.STALE_REVISION, before))
+        cancelled = sd_lane.cancel(self.repo, 2, self.environ, expected_revision=sd_lane.queue_revision(before))
+        self.assertEqual((cancelled["status"], self.pending()), ("cancelled", [3, 1]))
+
     def test_the_revision_is_compared_under_the_queue_lock(self) -> None:
         """A write that lands while the verb waits for the lock is caught; a check before the lock would miss it."""
         self.queue(1, 2)
@@ -428,6 +440,9 @@ class Reorder(Lane):
         code, refused = lane("release", "2", "--expected-revision", listed["revision"])
         self.assertEqual((code, refused["code"]), (3, sd_lane.STALE_REVISION))
         self.assertEqual(lane("move", "2", "top")[1]["pending"], [2, 1])  # unset keeps today's behaviour
+        code, refused = lane("cancel", "1", "--expected-revision", listed["revision"])
+        self.assertEqual((code, refused["code"]), (3, sd_lane.STALE_REVISION))
+        self.assertEqual(lane("cancel", "1")[1]["status"], "cancelled")  # unset keeps today's behaviour
 
 
 class Speculation(Lane):
