@@ -2091,7 +2091,7 @@ def insertion_point(lines: list[str], headings: list[tuple[int, str]],
 
     `pack.py` anchored each new section on a *named* neighbour -- `## Feeds`
     before `## Provenance`, `## Ground truth` before `## Feeds` -- and died
-    when the anchor was missing (`sd-writing-pack/scripts/pack.py:1082`). The
+    when the anchor was missing (`sd-writing/scripts/pack.py:1082`). The
     backbone does not need that knowledge and must not hold it: `sections.order`
     already declares where every section sits, so the position is read from the
     manifest and a note missing some other section is no longer a failure.
@@ -2241,7 +2241,7 @@ def read_pair_file(flag: str, name: str, path: str) -> str:
     flag was added to prevent.
 
     `.strip()`, and the refusal on an empty result, are the incumbent's
-    (`resolve_text_pairs`, `sd-writing-pack/scripts/pack.py:2226`). Kept rather
+    (`resolve_text_pairs`, `sd-writing/scripts/pack.py:2226`). Kept rather
     than reconsidered: both writers are live until 10b lands, and the notes
     they write have to stay identical while that is true.
     """

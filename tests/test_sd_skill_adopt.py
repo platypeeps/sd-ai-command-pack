@@ -462,7 +462,7 @@ class SurveyTests(unittest.TestCase):
         """The one-level reader reported "no skills found" for a real repo.
 
         Skills live under `.claude/skills/`, or `.agents/skills/`, or
-        `templates/skills/`. Surveying `sd-writing-pack` with the flat reader
+        `templates/skills/`. Surveying `sd-writing` with the flat reader
         found none of its twelve, and a hardcoded list of conventional locations
         would reproduce that the next time somebody invents a thirteenth. So the
         survey walks, and only what it refuses to descend into is spelled out.

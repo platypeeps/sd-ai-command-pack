@@ -600,7 +600,7 @@ class Ship(SharedReview):
 
     def commit_warnings(self, head: str) -> list[str]:
         warnings = []
-        if not self.args.no_item and pathlib.Path(self.repo["path"]).name in {"sd-ai-command-pack", "system", "sd-writing-pack"}:
+        if not self.args.no_item and pathlib.Path(self.repo["path"]).name in {"sd-ai-command-pack", "system", "sd-writing"}:
             start = self.authorship_start()
             for commit, message in sd_lib.commit_messages(self.root, start, head):
                 if not any(line.startswith("Needed-by:") for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines()):

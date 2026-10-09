@@ -6213,5 +6213,22 @@ class RawCaptureTests(unittest.TestCase):
         self.assertTrue(diagnostic["raw_capture"].startswith("not written: "))
 
 
+class NeededByRepositories(unittest.TestCase):
+    """sd:3036: the `Needed-by:` warning follows the writing repository's checkout folder name."""
+
+    def warnings(self, folder: str) -> list[str]:
+        stub = SimpleNamespace(
+            args=SimpleNamespace(no_item=False), repo={"path": f"/example.test/repos/{folder}"},
+            authorship_start=lambda: "start", root=pathlib.Path("."), state={})
+        with patch.object(ship.sd_lib, "commit_messages", return_value=[("abc1234", "subject\n\nbody")]):
+            return ship.Ship.commit_warnings(stub, "head")
+
+    def test_the_writing_repository_warns_about_a_missing_trailer(self) -> None:
+        self.assertEqual(self.warnings("sd-writing"), ["commit abc1234 has no Needed-by trailer; delivery continues"])
+
+    def test_an_unrelated_repository_does_not(self) -> None:
+        self.assertEqual(self.warnings("elsewhere"), [])
+
+
 if __name__ == "__main__":
     unittest.main()

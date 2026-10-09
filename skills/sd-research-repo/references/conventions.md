@@ -326,7 +326,7 @@ the pass to the next enabled one. The lens is what keeps the framing: the
 prompt says the subject is a markdown brief, not code, and attacks the
 argument. Its axes and caveats come from
 `local-adversarial-gate/lenses/research-brief.md` and `core.md` in the `system`
-repo, shared with `sd-writing-pack`; the lane carries them in its findings
+repo, shared with `sd-writing`; the lane carries them in its findings
 schema, so each finding states what would have to be true and a confidence tag
 inside its summary.
 

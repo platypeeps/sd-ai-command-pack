@@ -419,7 +419,7 @@ def repo_skill_files(root: pathlib.Path) -> list[pathlib.Path]:
     `skill_files` above looks one level down, which is right for a flat skills
     root and wrong for a repository: skills live under `.claude/skills/`, or
     `.agents/skills/`, or `templates/skills/`, or somewhere this list has not
-    thought of. Surveying `sd-writing-pack` with the one-level reader reported
+    thought of. Surveying `sd-writing` with the one-level reader reported
     "no skills found" for a repository holding twelve, which is the failure a
     hardcoded list of conventional locations would reproduce the next time
     somebody invents a thirteenth. So the walk enumerates, and the only thing

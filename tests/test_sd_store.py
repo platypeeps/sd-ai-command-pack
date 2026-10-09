@@ -1681,7 +1681,7 @@ class SetSectionTests(StoreFixture):
 
     **Dropped: the named anchor.** `topics add-feed` created `## Feeds` by
     substituting ahead of `## Provenance` and died outright when that heading
-    was missing (`sd-writing-pack/scripts/pack.py:1082`). The backbone has
+    was missing (`sd-writing/scripts/pack.py:1082`). The backbone has
     `sections.order`, which already declares where each section sits, so
     position is read from the manifest and a note missing some other section is
     no longer a failure. That is what lets the absent-section read below return
