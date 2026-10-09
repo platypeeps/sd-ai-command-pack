@@ -1860,7 +1860,7 @@ that affects exact-head CI.
   --before-sha SHA --after-sha SHA --runs-json PATH --checks-json PATH`
 - Aggregate helper: `check-ci-result.sh EVENT SCOPE_RESULT MODE UNIT LINT
   SECURITY RELEASE MAIN_PUSH`
-- Required branch-protection context: `CI Result`
+- Required branch-protection context: `sd/local-gate`, required by the `main` ruleset
 - Scope result is one compact JSON document with this schema-version-1 shape:
 
   ```json
