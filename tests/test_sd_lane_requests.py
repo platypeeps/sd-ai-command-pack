@@ -553,7 +553,9 @@ class RequestVerb(Requests):
     """`sd-ship lane request`, on the satellite's worktree of the item."""
 
     def request(self, served_by: str | None = HUB) -> dict:
+        """`served_by` names the hub wherever `sd_db` reads it, `hosts_lane` included."""
         with mock.patch("sd_db.database.served_by", lambda target, home=None: served_by, create=True), \
+                mock.patch("sd_db.ship.served_by", lambda target, home=None: served_by, create=True), \
                 mock.patch.object(sd_lane_receipts(), "satellite_identity", lambda: SATELLITE):
             return sd_lane.request(self.topic, 7, manual=True, database=self.database)
 
@@ -575,6 +577,20 @@ class RequestVerb(Requests):
         with self.assertRaises(sd_lane.LaneError) as refused:
             self.request(served_by=None)
         self.assertEqual(refused.exception.code, "hub_request")
+        self.assertIn("sd-ship lane enqueue", str(refused.exception))
+        self.assertEqual(self.row(), {})
+
+    def test_a_lane_the_hub_does_not_host_is_refused_and_writes_no_row(self) -> None:
+        """Review round 1 class pass: only the hub's run takes requests in, so no other host drains the row."""
+        self.prepared()
+        self.connection.execute("UPDATE repo SET lane_host = 'build-2'")
+        self.connection.commit()
+        for here, says in (("build-2", "runs on this machine"), ("build-3", "runs on build-2, not on this machine")):
+            with self.subTest(here=here), mock.patch.object(receipts, "this_host", lambda here=here: here):
+                with self.assertRaises(sd_lane.LaneError) as refused:
+                    self.request()
+                self.assertEqual(refused.exception.code, "lane_elsewhere")
+                self.assertIn(says, str(refused.exception))
         self.assertIn("sd-ship lane enqueue", str(refused.exception))
         self.assertEqual(self.row(), {})
 

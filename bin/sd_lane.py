@@ -371,9 +371,10 @@ def request_key(slug: str, item: int) -> str:
 def request(root: pathlib.Path, item: int, *, manual: bool, database: pathlib.Path | None = None) -> dict[str, Any]:
     """`lane request` on a satellite: write the item's request row for the hub's lane (sd:2704).
 
-    Refused on the hub, where `lane enqueue` queues the item, and for an item
-    whose `ship:` row is not `ready_to_send` at the branch's pushed head, which
-    intake would refuse.
+    Refused on the hub, where `lane enqueue` queues the item; for a lane the
+    hub does not host, since only the hub's run takes requests in (sd:3003);
+    and for an item whose `ship:` row is not `ready_to_send` at the branch's
+    pushed head, which intake would refuse.
     """
     imported = sd_lib.import_sd_db()
     if imported.module is None:
@@ -403,6 +404,7 @@ def request(root: pathlib.Path, item: int, *, manual: bool, database: pathlib.Pa
     except SdDbError as error:
         raise LaneError(f"the hub {hub} did not answer, so no request was written; rerun once it does: {error}") from None
     try:
+        refuse_unhosted(connection, database, own)
         _, shipped = store.read(connection, store.receipt_key(own, branch, item))
         if shipped.get("phase") != "ready_to_send" or not pushed or shipped.get("head") != pushed:
             raise LaneError(f"sd:{item} is not ready_to_send at the pushed head of {branch} ({str(pushed)[:12]}); "
@@ -418,6 +420,21 @@ def request(root: pathlib.Path, item: int, *, manual: bool, database: pathlib.Pa
     finally:
         connection.close()
     return {"request": key, "revision": written, **value}
+
+
+def refuse_unhosted(connection: Any, database: pathlib.Path, own: str) -> None:
+    """Refuse a request no run would take in: only the hub's run reads request rows (`default_hub`)."""
+    try:
+        elsewhere = sd_lib.lane_elsewhere(connection, database, own)
+        host, _ = sd_lib.lane_host(connection, own)
+    except Exception as error:  # noqa: BLE001 -- `LaneUnknown`, or a read fault it did not wrap
+        raise LaneError(str(error), code=getattr(error, "code", None) or "lane_unknown") from None
+    if elsewhere is None:
+        raise LaneError(f"The lane for {own} runs on this machine, not on the hub, so no run would take a "
+                        "request in. Queue the item here with sd-ship lane enqueue.", code="lane_elsewhere")
+    if host is not None:
+        raise LaneError(f"{elsewhere}\nNo run there takes a request in: queue the item on {host} with "
+                        "sd-ship lane enqueue.", code="lane_elsewhere")
 
 
 def requests(hub: Hub) -> list[tuple[str, int, dict[str, Any]]]:

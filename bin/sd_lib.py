@@ -1174,13 +1174,18 @@ def lane_elsewhere(connection: Any, database: Any, repository: str) -> str | Non
     elsewhere = getattr(ship, "LaneElsewhere", None)
     if elsewhere is None:
         return f"The lane for {repository} runs on the hub, not on this machine. Run it there."
+    return str(elsewhere(repository, *lane_host(connection, repository)))
+
+
+def lane_host(connection: Any, repository: str) -> tuple[str | None, str | None]:
+    """`(repo.lane_host, path)` of the first row whose remote gives `repository`; None names the hub (sd:3003)."""
     from sd_db.protection import github_slug  # noqa: PLC0415
 
     for row in connection.execute("SELECT * FROM repo ORDER BY path"):
         found = github_slug(row["remote"])
         if found is not None and "/".join(found).lower() == repository.lower():
-            return str(elsewhere(repository, row["lane_host"] if "lane_host" in row.keys() else None, row["path"]))
-    return str(elsewhere(repository, None, None))
+            return (row["lane_host"] if "lane_host" in row.keys() else None), row["path"]
+    return None, None
 
 
 def ci_mode(root: pathlib.Path | str) -> str:
