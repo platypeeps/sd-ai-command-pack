@@ -66,6 +66,7 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    Before the review, `sd-ship prepare` warns about open PRs and origin branches that name the item or change the same files (sd:1151).
    The warning refuses nothing; read it before the review spends a pass.
    Use `sd-review --scope branch --challenge` for the *code, before merge* point.
+   A branch of only plain prose (not `skills/`, `bin/`, `tests/`, hooks, `docs/work/`, any dot-path or agent-instruction file such as `AGENTS.md`) or only `.sd-pack-rev` gets the gate alone; prepare says `review skipped: docs-only` or `pin-bump` (sd:2998).
    Read its cap on that row in the sd-ai-command-pack checkout's `.claude/rules/sd-planning-adversarial-review.md`.
    Run `sd-docs-lint` against the built PR body.
    With no work root, use `--body-only`; do not create planning files to satisfy tree checks.
