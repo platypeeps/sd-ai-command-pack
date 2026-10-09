@@ -3833,6 +3833,23 @@ class LinkEdgeCaseTests(InstallerHarness):
         self.assertEqual(link.resolve(), (work / "bin" / "sd").resolve())
         self.assertEqual(self.receipt["checkout"], str(work))
 
+    def test_links_into_the_working_checkout_outside_the_bin_dir_are_left_and_reported(self):
+        """sd:3009: `~/bin/common` links the installer never made shadow the tree's commands; no refusal, no edit."""
+        work = self.checkout_with_commands("sd", "sd-review", name="work")
+        serving = self.checkout_with_commands("sd", "sd-review")
+        common = self.home / "bin" / "common"
+        common.mkdir(parents=True)
+        for name in ("sd", "sd-review"):
+            (common / name).symlink_to(work / "bin" / name)
+        ctx = self.context_for(serving)
+        ctx.environ["PATH"] = os.pathsep.join([str(common), str(self.home / ".local" / "bin")])
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(ctx, out), 0, out.getvalue())
+        self.assertEqual({path.name: path.readlink() for path in common.iterdir()},
+                         {name: work / "bin" / name for name in ("sd", "sd-review")})
+        self.assertEqual((self.home / ".local" / "bin" / "sd").resolve(), (serving / "bin" / "sd").resolve())
+        self.assertIn("[2 shadowed by another install: sd]", sd_install.command_report(serving, ctx.environ))
+
     def test_a_move_to_the_next_checkout_leaves_one_copy_of_each_hook(self):
         """Review round 6: the hooks the receipt recorded for the last checkout go when the next one installs."""
         work = self.checkout_with_commands("sd", name="work")
