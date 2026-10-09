@@ -47,9 +47,11 @@ What the hand-run chains taught, kept here:
   - Every prepare and merge keeps its whole output in a log beside the queue,
     so a failure can be read without running the step again.
 
-The merge needs authority: an entry merges only when it was enqueued with
-`--manual`, which the runner passes on. Without it the runner stops at a
-prepared head and marks the entry `prepared`.
+The merge needs authority (sd:3132): `repo.runner_merge` `auto` for the
+repository, or `--manual` on the entry, the operator's explicit grant on a
+`manual` repository. The runner then merges with `--manual`. Otherwise, or
+when the setting cannot be read, it stops at a prepared head, marks the entry
+`prepared` and says why in its `code` and `reason` (`merge_refusal`).
 
 The next entry's gate runs early (sd:2586). Its prepare used to start only
 after the entry ahead merged, then catch up and gate for 10 to 20 minutes.
@@ -95,8 +97,8 @@ write left out. A satellite entry runs no prepare and no catch-up: the
 runner fetches the branch and the base, hands the entry back when the branch
 moved or the head lacks the base, and merges with `--satellite-gate`, which
 accepts the satellite's receipt under the trust rule in `sd_local_gate`
-instead of a gate on the hub. A request without `--manual` stops there as
-`prepared`, as a hub entry queued without it does. Its outcome goes back to
+instead of a gate on the hub. A request the runner may not merge stops there
+as `prepared`, as a hub entry does. Its outcome goes back to
 the request row, and a hand-back or failure notes the item, with the trust
 rule's next action for its code. `lane run --satellite-only` claims satellite
 entries only, starts no speculative gate, and exits when none is pending; a
@@ -173,6 +175,9 @@ COMMIT_ID = re.compile(r"[0-9a-f]{40}")
 LOCK_HELD = "another ship operation owns this repository"
 #: How many runs a satellite entry waits out a held lock before it fails; the scheduled run comes every 5 minutes.
 LOCK_RETRIES = 12
+#: The codes of an entry that stops `prepared` for want of merge authority (sd:3132).
+RUNNER_MERGE_MANUAL = "runner_merge_manual"
+RUNNER_MERGE_UNKNOWN = "runner_merge_unknown"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -691,6 +696,64 @@ def hand_merge(entry: dict[str, Any]) -> str:
                                         "--manual", "--satellite-gate"])
 
 
+def default_runner_merge(root: pathlib.Path) -> str:
+    """`repo.runner_merge` of the repository `root` is a checkout of, `auto` or `manual` (sd:3132).
+
+    Resolved as `sd-ship`'s `row_merges` resolves it: `registered_for`, then
+    the row's remote must name the GitHub repository the origin names. Raises
+    `LaneError` with the reason when it cannot tell: no `sd_db`, a database
+    that does not answer, no row, a row for another repository, or another
+    value. A doubt never reads as `auto`.
+    """
+    imported = sd_lib.import_sd_db()
+    if imported.module is None:
+        raise LaneError(str(imported.problem), code=RUNNER_MERGE_UNKNOWN)
+    from sd_db.database import connect, default_path  # noqa: PLC0415
+    from sd_db.protection import github_slug  # noqa: PLC0415
+    from sd_db.repos import registered_for  # noqa: PLC0415
+
+    origin = lane_git(root, "config", "--get", "remote.origin.url")
+    try:
+        connection = connect(default_path(), write=False)
+    except Exception as error:  # noqa: BLE001 -- every fault is "cannot tell", which merges nothing
+        raise LaneError(f"the database did not answer: {error}", code=RUNNER_MERGE_UNKNOWN) from None
+    try:
+        row = sd_lib.repo_row(connection, registered_for(connection, str(root.resolve()), origin))
+        value = row["runner_merge"] if row is not None and "runner_merge" in row.keys() else None
+        own = github_slug(origin) if origin else None
+        if row is None or own is None or github_slug(row["remote"] or "") != own:
+            why = f"no repo row has the remote {origin}"
+        elif value not in ("auto", "manual"):
+            why = f"the repo row says {value!r}, neither auto nor manual"
+        else:
+            return str(value)
+    except Exception as error:  # noqa: BLE001 -- as above
+        why = f"{type(error).__name__}: {error}"
+    finally:
+        connection.close()
+    raise LaneError(why, code=RUNNER_MERGE_UNKNOWN)
+
+
+def merge_refusal(entry: dict[str, Any]) -> dict[str, str] | None:
+    """Why the runner may not merge `entry`, as a code and a reason; None when it may (sd:3132).
+
+    The one authority check: `--manual` on the entry, or `repo.runner_merge`
+    `auto` for its repository. `default_runner_merge` is read at the call, so
+    a suite can replace it.
+    """
+    if entry.get("authority") == "manual":
+        return None
+    try:
+        setting = default_runner_merge(pathlib.Path(entry["worktree"]))
+    except Exception as error:  # noqa: BLE001 -- an unread setting authorises nothing
+        return {"code": RUNNER_MERGE_UNKNOWN,
+                "reason": f"repo.runner_merge cannot be read ({error}), and the entry has no --manual; merge by hand"}
+    if setting == "auto":
+        return None
+    return {"code": RUNNER_MERGE_MANUAL, "reason": "repo.runner_merge is manual and the entry has no --manual; "
+                                                   "merge by hand"}
+
+
 def process_satellite(entry: dict[str, Any], logs: pathlib.Path, ship: Ship) -> dict[str, Any]:
     """A satellite entry: fetch, the head and base checks of design.md "Freshness", then merge; no prepare."""
     main, branch, base, head = pathlib.Path(entry["worktree"]), entry["branch"], entry["base"], entry["expected_head"]
@@ -703,9 +766,11 @@ def process_satellite(entry: dict[str, Any], logs: pathlib.Path, ship: Ship) -> 
         return {"head": head, **handed_back(entry, "head_moved", f"origin/{branch} is at {tip}, not the requested head")}
     if lane_git(main, "merge-base", "--is-ancestor", onto, head) is None:
         return {"head": head, **handed_back(entry, "base_moved", f"{head[:12]} does not contain origin/{base}")}
-    if entry.get("authority") != "manual":
-        return {"head": head, "status": "prepared", "reason": "requested without --manual; merge by hand",
-                "next_action": hand_merge(entry)}
+    refused = merge_refusal(entry)
+    if refused is not None:
+        again = shlex.join(["sd-ship", "lane", "request", "--item", str(entry["item"]), "--manual"])
+        return {"head": head, "status": "prepared", **refused,
+                "next_action": f"{hand_merge(entry)}; or on the satellite: {again}"}
     log = logs / f"merge-{entry['item']}-{time.strftime('%Y%m%dT%H%M%S', time.gmtime())}.log"
     merged = ship(satellite_merge_argv(entry), log)
     fields = {"head": head, "merge_log": str(log)}
@@ -746,8 +811,9 @@ def process(entry: dict[str, Any], logs: pathlib.Path, ship: Ship) -> dict[str, 
     if not (prepared.get("ok") and prepared.get("phase") == "ready_to_send"):
         return {**fields, "status": "failed", "step": "prepare", "phase": prepared.get("phase"),
                 "reason": str(prepared.get("error") or prepared.get("code") or "prepare did not reach ready_to_send")[:600]}
-    if entry.get("authority") != "manual":
-        return {**fields, "status": "prepared", "reason": "queued without --manual; merge by hand"}
+    refused = merge_refusal(entry)
+    if refused is not None:
+        return {**fields, "status": "prepared", **refused}
     merge_log = logs / f"merge-{item}-{stamp}.log"
     merged = ship(["-C", str(worktree), "merge", "--item", str(item), "--expected-head", str(prepared.get("head")),
                    "--manual", "--watch", "--wait-seconds", str(MERGE_WAIT_SECONDS), "--json"], merge_log)
@@ -835,13 +901,14 @@ def predict(entry: dict[str, Any], following: dict[str, Any]) -> dict[str, Any]:
 def speculate(entry: dict[str, Any], path: pathlib.Path, gate: Gate, busy: bool = False) -> threading.Thread | None:
     """Start the next pending entry's gate on `entry`'s predicted landing; None when no gate started.
 
-    An entry queued without `--manual` stops prepared and never lands, so
-    nothing follows it to predict. `busy` says an earlier speculative gate
-    still runs; one at a time. What happened goes on the next entry as
-    `speculation`, and the gate's whole result to a log beside the others.
+    An entry the runner may not merge (`merge_refusal`) stops prepared and
+    never lands, so nothing follows it to predict. `busy` says an earlier
+    speculative gate still runs; one at a time. What happened goes on the
+    next entry as `speculation`, and the gate's whole result to a log beside
+    the others.
     """
     following = next((row for row in read_queue(path) if row.get("status") == "pending" and not row.get("held")), None)
-    if entry.get("authority") != "manual" or following is None or following.get("gate") == SATELLITE:
+    if following is None or following.get("gate") == SATELLITE or merge_refusal(entry) is not None:
         return None  # a satellite entry gated on the satellite, and its merge runs no gate here
 
     def record_speculation(fields: dict[str, Any]) -> None:
@@ -1268,7 +1335,8 @@ def add_lane_verbs(commands: Any) -> None:
     adder.add_argument("--title", required=True)
     adder.add_argument("--body-file", type=pathlib.Path, required=True)
     adder.add_argument("--expected-head", help="the head the worktree must still be at (default: HEAD now)")
-    adder.add_argument("--manual", action="store_true", help="authorize the runner to merge with sd-ship merge --manual")
+    adder.add_argument("--manual", action="store_true",
+                       help="authorize the runner to merge when repo.runner_merge is manual; auto needs no flag")
     choice = adder.add_mutually_exclusive_group()
     for claim, text in zip(CLAIMS, ("the item's last pull request, as prepare --deliver",
                                     "an earlier pull request of the item, as prepare --associate-only"), strict=True):
@@ -1297,7 +1365,8 @@ def add_lane_verbs(commands: Any) -> None:
                             "it goes once the scheduled jobs run --hosted")
     asker = verbs.add_parser("request", help="on a satellite: ask the hub's lane to merge this worktree's prepared item")
     asker.add_argument("--item", type=int, required=True)
-    asker.add_argument("--manual", action="store_true", help="authorize the hub's runner to merge, as enqueue --manual")
+    asker.add_argument("--manual", action="store_true",
+                       help="authorize the hub's runner to merge when repo.runner_merge is manual, as enqueue --manual")
     watcher = verbs.add_parser("watch", help="print each gate end a log under the lane root records, once")
     watcher.add_argument("--once", action="store_true", help="scan once and exit")
 
