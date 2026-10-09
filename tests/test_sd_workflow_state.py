@@ -19,6 +19,7 @@ ship = fixture.ship
 ItemHistory, ItemIdentity = ship.ItemHistory, ship.ItemIdentity
 ReviewRuntime, SharedReview = ship.ReviewRuntime, ship.SharedReview
 validate_review_readiness = importlib.import_module("sd_ship_review").validate_review_readiness
+reviewer_process = importlib.import_module("sd_ship_review").reviewer_process
 workflow = importlib.import_module("sd_ship_workflow")
 bindings = importlib.import_module("sd_ship_bindings")
 failure, success = workflow.failure, workflow.success
@@ -120,9 +121,11 @@ class ReadinessReservation(unittest.TestCase):
         ready = {"status": "ready", "blockers": [], "runtime_approval": "not_observable", "warnings": []}
         validate_review_readiness(explained(ready))
         review, process, _store = self.context(explained(ready))
-        review.execute_review(["review"], "head", [{"head": "head"}])
+        # `review` reserves each pass with its process (sd:1938); execution adds the deadline.
+        review.execute_review(["review"], "head", [{"head": "head", "process": reviewer_process()}])
         self.assertEqual(process.call_count, 2)
         self.assertEqual(len(review.state["passes"]), 1)
+        self.assertEqual(review.state["passes"][0]["process"]["execution_seconds"], 3720)
 
     def test_claimed_runtime_approval_is_not_accepted_as_pack_authority(self):
         ready = {"status": "ready", "blockers": [], "warnings": [], "runtime_approval": "granted"}
