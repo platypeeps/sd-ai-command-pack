@@ -25,6 +25,7 @@ from __future__ import annotations
 import importlib.machinery
 import importlib.util
 import io
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -268,6 +269,39 @@ class ProvenanceTests(unittest.TestCase):
         self.assertEqual(twice.count("## Provenance"), 1)
         self.assertIn("r2", twice)
         self.assertNotIn("r1", twice)
+
+    def test_a_source_under_home_is_recorded_home_relative(self) -> None:
+        """sd:3044. The Provenance line of a public skill must not carry the account directory."""
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw).resolve()
+            source = home / "notes" / "cand" / "SKILL.md"
+            source.parent.mkdir(parents=True)
+            source.write_text(CLEAN, encoding="utf-8")
+            self.assertEqual(adopt.recorded_source(str(source), home), "~/notes/cand/SKILL.md")
+            self.assertEqual(adopt.recorded_source("https://x.test/s.md", home), "https://x.test/s.md")
+            self.assertEqual(adopt.recorded_source("-", home), "-")
+
+    def test_a_source_inside_a_checkout_is_recorded_checkout_relative(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = Path(raw).resolve() / "home" / "repos" / "pack"
+            source = repo / "skills" / "cand" / "SKILL.md"
+            source.parent.mkdir(parents=True)
+            source.write_text(CLEAN, encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            self.assertEqual(adopt.recorded_source(str(source), Path(raw).resolve() / "home"),
+                             "skills/cand/SKILL.md")
+
+    def test_the_adopted_file_names_no_home_path(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            home = root / "home"
+            (home / ".claude" / "skills").mkdir(parents=True)
+            source = skill(home / "drafts", "candidate", CLEAN)
+            out, err = io.StringIO(), io.StringIO()
+            self.assertEqual(adopt.run_adopt(str(source), "user", home, out, err, "2026-08-31"), 0, out.getvalue())
+            written = (home / ".claude" / "skills" / "candidate" / "SKILL.md").read_text(encoding="utf-8")
+            self.assertNotIn(str(home), written)
+            self.assertIn("`~/drafts/candidate`", written)
 
     def test_a_content_digest_exists_even_with_no_git_and_no_file(self) -> None:
         self.assertTrue(adopt.source_revision("https://x.test/s.md", b"body").startswith("sha256:"))
