@@ -1058,12 +1058,12 @@ class SetupStaysLocalTests(unittest.TestCase):
         recipe = self.make("setup", f"VENV={self.tmp}/chosen")
         self.assertIn(f'-m venv "{self.tmp}/chosen"', recipe)
 
-    def test_a_live_venv_reaches_the_library_guards(self) -> None:
-        """sd:1118 review round 18: a serving build's `LIVE_VENV` becomes `--live-venv`; unset, none is passed."""
+    def test_the_library_goes_into_the_environment_setup_builds(self) -> None:
+        """`--venv` names the environment setup built; `LIVE_VENV` went with the A/B slots (sd:3009)."""
 
         recipe = self.make("setup", f"VENV={self.tmp}/chosen", f"LIVE_VENV={self.tmp}/live")
-        self.assertIn(f'--provision-library --venv "{self.tmp}/chosen" --live-venv "{self.tmp}/live"', recipe)
-        self.assertNotIn("--live-venv", self.make("setup", f"VENV={self.tmp}/chosen"))
+        self.assertIn(f'--provision-library --venv "{self.tmp}/chosen"\n', recipe)
+        self.assertNotIn(f"{self.tmp}/live", recipe)
 
     def test_setup_ends_by_serving_from_the_dedicated_checkout(self) -> None:
         """sd:1118: `make setup` is what refreshes the serving checkout; `SERVE=no` skips it."""
