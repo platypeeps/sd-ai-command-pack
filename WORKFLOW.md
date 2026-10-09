@@ -570,7 +570,8 @@ The rules for them:
   an old host's pending entries can be cancelled after a move. Every machine
   runs the same scheduled `sd-ship lane run --hosted`: each lane it hosts, in
   path order, skipping one whose runner is busy. The runner reads the host
-  again before each claim, so a move stops it at the next item.
+  again before each claim, so a move stops it at the next item. `lane run
+  --satellite-only` still works until every scheduled job runs `--hosted`.
 - **Large uncommitted data goes under the bulk root (sd:1792).** When
   `sd.bulk_storage_root` names a folder, put run outputs, logs, captures,
   agent scratch evidence and large downloaded fixtures under

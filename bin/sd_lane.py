@@ -95,8 +95,11 @@ accepts the satellite's receipt under the trust rule in `sd_local_gate`
 instead of a gate on the hub. A request without `--manual` stops there as
 `prepared`, as a hub entry queued without it does. Its outcome goes back to
 the request row, and a hand-back or failure notes the item, with the trust
-rule's next action for its code. Each hub run publishes the hub's pack digest to `sd-lane-pack:v1:<slug>`
-at its start and after a fast-forward of the pack checkout.
+rule's next action for its code. `lane run --satellite-only` claims satellite
+entries only, starts no speculative gate, and exits when none is pending; a
+scheduled job on the hub runs it until every job runs `--hosted`. Each hub run
+publishes the hub's pack digest to `sd-lane-pack:v1:<slug>` at its start and
+after a fast-forward of the pack checkout.
 
 Only a repository's lane host drains its queue (sd:3003): the machine
 `repo.lane_host` names, or the hub when it is NULL. Elsewhere `run`,
@@ -1061,7 +1064,8 @@ def reclaim_dead(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_ship,
-             gate: Gate = default_gate, note: Note | None = None, *, hub: Hub | None = None) -> dict[str, Any]:
+             gate: Gate = default_gate, note: Note | None = None, *, satellite_only: bool = False,
+             hub: Hub | None = None) -> dict[str, Any]:
     """Drain this repository's queue in order under its lane lock; never wait for the lock.
 
     One speculative gate runs at a time (`speculate`); after a merge the
@@ -1069,8 +1073,9 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
     prepare finds its receipt. `note` defaults to `default_note`, read at the
     call, so a suite can replace it; `hub` defaults to `default_hub`'s, the
     same way. Before each claim the runner takes in satellite requests
-    (`intake`). A satellite entry is claimed only while its request row
-    acknowledges it (`claimable`). Off the lane host it refuses before any of
+    (`intake`). `satellite_only` claims only satellite entries and starts no
+    speculative gate (ruling Q4). A satellite entry is claimed only while its
+    request row acknowledges it (`claimable`). Off the lane host it refuses before any of
     that (sd:3003). It reads the host again before each claim, under the
     runner lock: after a move it finishes the running entry, claims no next
     one, and says why in `stopped`.
@@ -1101,7 +1106,7 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
                     for row in entries:
                         if (row.get("status") == "pending" and not row.get("held")
                                 and (row.get("item"), row.get("enqueued_at")) not in deferred
-                                and claimable(hub, row)):
+                                and (not satellite_only or row.get("gate") == SATELLITE) and claimable(hub, row)):
                             row.update(status="running", started_at=stamp_now(), runner_pid=os.getpid())
                             return dict(row)
                     return None
@@ -1112,10 +1117,13 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
                     if ahead is not None:
                         ahead.join()
                     return answer
-                if ahead is not None and ahead.is_alive():
-                    speculate(entry, path, gate, busy=True)  # notes the skip: one speculative gate at a time
-                else:
-                    ahead = speculate(entry, path, gate)
+                # A satellite-only run gates nothing: a satellite follower is never
+                # gated early, and a hub entry is not this run's to prepare.
+                if not satellite_only:
+                    if ahead is not None and ahead.is_alive():
+                        speculate(entry, path, gate, busy=True)  # notes the skip: one speculative gate at a time
+                    else:
+                        ahead = speculate(entry, path, gate)
                 try:
                     outcome = process(entry, path.parent.parent / "logs", ship)
                 except Exception as error:  # a broken entry is marked; the next one still runs
@@ -1238,8 +1246,12 @@ def add_lane_verbs(commands: Any) -> None:
         editor.add_argument("--expected-revision", help=f"refuse with {STALE_REVISION} unless `lane list` still prints "
                                                         "this revision, checked under the queue's lock")
     runner = verbs.add_parser("run", help="drain the queue in order; exits at once if another runner holds the lane")
-    runner.add_argument("--hosted", action="store_true",
-                        help="run the lane of each repository this machine hosts, one after another (sd:3003)")
+    which = runner.add_mutually_exclusive_group()
+    which.add_argument("--hosted", action="store_true",
+                       help="run the lane of each repository this machine hosts, one after another (sd:3003)")
+    which.add_argument("--satellite-only", action="store_true",
+                       help="claim satellite entries only, start no speculative gate, exit when none is pending; "
+                            "it goes once the scheduled jobs run --hosted")
     asker = verbs.add_parser("request", help="on a satellite: ask the hub's lane to merge this worktree's prepared item")
     asker.add_argument("--item", type=int, required=True)
     asker.add_argument("--manual", action="store_true", help="authorize the hub's runner to merge, as enqueue --manual")
@@ -1278,7 +1290,7 @@ def lane_main(args: Any) -> int:
         elif args.lane_command == "request":
             result = request(root, args.item, manual=args.manual)
         else:
-            result = run_lane(root, environ)
+            result = run_lane(root, environ, satellite_only=args.satellite_only)
     except (LaneError, sd_lib.ConfigError, OSError) as error:
         print(json.dumps({"ok": False, **refusal(error)}, indent=2, sort_keys=True))
         return 3

@@ -240,11 +240,53 @@ class PlainRun(Requests):
         answer = sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate, hub=self.hub)
         self.assertEqual([(row["item"], row["status"]) for row in answer["ran"]], [(3, "merged"), (7, "merged")])
 
-    def test_satellite_only_is_gone_and_hosted_takes_its_place(self) -> None:
-        """sd:3003: `--hosted` replaces `--satellite-only`, so the flag count does not grow."""
+    def test_hosted_parses_and_satellite_only_stays_until_the_jobs_move(self) -> None:
+        """sd:3003, review round 1: scheduled jobs still pass `--satellite-only`; the two flags do not combine."""
         self.assertTrue(sd_lane_parser().parse_args(["lane", "run", "--hosted"]).hosted)
+        self.assertTrue(sd_lane_parser().parse_args(["lane", "run", "--satellite-only"]).satellite_only)
         with mock.patch("sys.stderr", new_callable=io.StringIO), self.assertRaises(SystemExit):
-            sd_lane_parser().parse_args(["lane", "run", "--satellite-only"])
+            sd_lane_parser().parse_args(["lane", "run", "--hosted", "--satellite-only"])
+
+
+class SatelliteOnly(Requests):
+    """Ruling Q4: the scheduled run takes in and runs satellite entries; hub entries wait for an integrator.
+
+    Kept until every scheduled job runs `--hosted` (review round 1); design.md, "What retires", row 2.
+    """
+
+    def queue_hub_then_satellite(self) -> None:
+        hub_tree = self.worktree("hubitem")
+        sd_lane.enqueue_entry(hub_tree, 3, "hub item", self.body, self.environ, manual=True, claim="deliver")
+        self.prepared()
+        self.ask()
+
+    def test_a_hub_entry_ahead_stays_pending_in_place_and_nothing_is_prepared_or_gated(self) -> None:
+        self.queue_hub_then_satellite()
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate, satellite_only=True, hub=self.hub)
+        hub_entry, satellite = self.entries()
+        self.assertEqual((hub_entry["item"], hub_entry["status"]), (3, "pending"))
+        self.assertNotIn("speculation", hub_entry)
+        self.assertEqual((satellite["item"], satellite["status"], [row["item"] for row in answer["ran"]]),
+                         (7, "merged", [7]))
+        self.assertNotIn("prepare", [call[2] for call in self.calls])
+        self.assertEqual(self.gates, [])
+        self.assertEqual([row["status"] for row in answer["intake"]], ["queued"])
+
+    def test_a_satellite_only_run_with_only_hub_entries_exits_at_once(self) -> None:
+        sd_lane.enqueue_entry(self.worktree("hubitem"), 3, "hub item", self.body, self.environ, manual=True,
+                              claim="deliver")
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate, satellite_only=True, hub=self.hub)
+        self.assertEqual((answer["ran"], self.calls, self.entries()[0]["status"]), ([], [], "pending"))
+
+    def test_the_cli_passes_satellite_only_to_the_run(self) -> None:
+        seen = []
+        with mock.patch.object(sd_lane, "run_lane", lambda root, environ, **kwargs: seen.append(kwargs) or {}), \
+                mock.patch.object(sd_lane.sd_lib, "repo_root", lambda start: self.repo), \
+                mock.patch.object(sd_lane, "refuse_elsewhere", lambda root: None), \
+                mock.patch("sys.stdout", new_callable=io.StringIO):
+            for argv, expected in ((["run", "--satellite-only"], True), (["run"], False)):
+                self.assertEqual(sd_lane.lane_main(sd_lane_parser().parse_args(["lane", *argv])), 0)
+                self.assertEqual(seen.pop(), {"satellite_only": expected})
 
 
 class HeldLock(Requests):
