@@ -1967,12 +1967,12 @@ MUTATIONS: dict[str, Mutation] = {
         test="tests.test_sd_ship_remote.RulesetCase"
              ".test_a_declared_bypass_list_must_equal_the_live_one",
     ),
-    "bin/sd-ship::require_copilot_clearance": Mutation(
+    "bin/sd-ship::refuse_unresolved_threads": Mutation(
         path="bin/sd-ship",
-        old="        other_reviews, other_comments = self.other_review_material(number)",
-        new="        other_reviews, other_comments = [], []  # leg d: the other reviewers' gate, defeated",
+        old="        threads = self.api.unresolved_threads(number)",
+        new="        threads = []  # leg d: the unresolved-thread gate, defeated",
         test="tests.test_sd_ship.ShipCase"
-             ".test_another_reviewers_finding_refuses_the_merge_with_no_copilot_review",
+             ".test_an_unresolved_review_thread_refuses_the_merge_by_name",
     ),
     "bin/sd_gate_receipts.py::from_receipts": Mutation(
         path="bin/sd_gate_receipts.py",

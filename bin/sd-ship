@@ -600,7 +600,7 @@ class Ship(SharedReview):
 
     def commit_warnings(self, head: str) -> list[str]:
         warnings = []
-        if not self.args.no_item and pathlib.Path(self.repo["path"]).name in {"sd-ai-command-pack", "system", "sd-writing-pack"}:
+        if not self.args.no_item and pathlib.Path(self.repo["path"]).name in {"sd-ai-command-pack", "system", "sd-writing"}:
             start = self.authorship_start()
             for commit, message in sd_lib.commit_messages(self.root, start, head):
                 if not any(line.startswith("Needed-by:") for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines()):
@@ -1129,17 +1129,6 @@ class Ship(SharedReview):
                                else "the commits since it touch no shipped surface") + ", so the gate cleared")
         self.record_copilot_completion(entries, reviews)
 
-    def other_review_material(self, number: int) -> tuple[list, list]:
-        """Reviews and inline comments by every reviewer but Copilot, whose material is read apart.
-
-        No author is excluded: `sd-status` reads the same set as unanswered, and
-        a gate that read less would let a pull request merge with a row standing.
-        """
-        reviews = self.api.pages(f"{self.api.prefix}/pulls/{number}/reviews")
-        comments = self.api.pages(f"{self.api.prefix}/pulls/{number}/comments")
-        return ([review for review in reviews if isinstance(review, dict) and not self.api.is_copilot(review)],
-                [comment for comment in comments if isinstance(comment, dict) and not self.api.is_copilot(comment)])
-
     def require_copilot_clearance(self, number: int, pull: dict, head: str) -> None:
         entries = [entry for entry in self.copilot_entries() if entry["pull"] == number]
         request_digest = self.copilot_abandonment_digest(entries, head) if entries else None
@@ -1148,35 +1137,30 @@ class Ship(SharedReview):
                         for entry in self.copilot_abandonments())
         material = self.stable_copilot_material(
             number, pull, head, required=bool(entries) and not abandoned)
-        # Every other reviewer's findings are gated too: the gate is the merge
-        # step, and a finding is unread whoever wrote it (sd:998).
-        other_reviews, other_comments = self.other_review_material(number)
-        if material is None and not (other_reviews or other_comments):
-            return
-        reviews, comments = material or ([], [])
         if material is not None:
-            self.note_copilot_clearance(entries, reviews, head)
-        self.refuse_unacknowledged(number, pull, head, reviews + other_reviews, comments + other_comments)
+            self.note_copilot_clearance(entries, material[0], head)
+        # Every reviewer's threads are gated too, once Copilot's have landed (sd:998, sd:3098).
+        self.refuse_unresolved_threads(number)
 
-    def refuse_unacknowledged(self, number: int, pull: dict, head: str, reviews: list, comments: list) -> None:
-        """Refuse the merge while any finding in this review material has no disposition."""
-        try:
-            ack = sd_lib.sibling("sd_review_ack_ship_gate", "sd-review-ack")
-            report = ack.review_state(
-                self.root, {number: {"reviews": reviews, "comments": comments, "pull": pull}}, head)
-        except (OSError, SyntaxError, TypeError, sd_lib.ConfigError, ValueError) as error:
-            raise Refusal(f"review finding disposition could not be verified: {error}") from None
-        if report.get("store_error") or report.get("library_error"):
-            raise Refusal("review finding disposition evidence is unreadable")
-        unresolved = report.get("unsatisfied") or []
-        if unresolved:
-            ids = ", ".join(str(row.get("id") or "unknown") for row in unresolved[:3])
-            extra = "" if len(unresolved) <= 3 else f" and {len(unresolved) - 3} more"
-            raise Refusal(
-                f"{len(unresolved)} pull-request review finding(s) remain unacknowledged: {ids}{extra}",
-                code="review_findings_open", boundary="review", state="operator_decision",
-                next_action=f"Run sd-review-ack --pr {number}, disposition each finding, then retry merge.",
-            )
+    def refuse_unresolved_threads(self, number: int) -> None:
+        """Refuse the merge while any review thread is unresolved, naming each (sd:3098).
+
+        A thread is the finding's record: a fix or a rebuttal reply, then a
+        resolve, answers it. An outdated thread still holds the merge.
+        """
+        threads = self.api.unresolved_threads(number)
+        if not threads:
+            return
+        named = []
+        for thread in threads:
+            comment = ((thread.get("comments") or {}).get("nodes") or [{}])[0] or {}
+            author = (comment.get("author") or {}).get("login") or "ghost"
+            line = thread.get("line") or thread.get("originalLine") or "?"
+            first = (str(comment.get("body") or "").strip().splitlines() or [""])[0][:200]
+            named.append(f"{thread.get('path') or '?'}:{line} {author}: {first}")
+        raise Refusal(f"{len(threads)} unresolved review thread(s) on #{number}: " + "; ".join(named),
+                      code="review_threads_open", boundary="review", state="operator_decision",
+                      next_action="Fix each finding or reply with a rebuttal, resolve its thread, then retry merge.")
 
     def dispatch_warnings(self) -> list[str]:
         """The receipt's warnings with this attempt's ancestor note, if any.
@@ -1336,7 +1320,6 @@ class Ship(SharedReview):
         if str(pull.get("html_url", "")).lower() != reference["url"]:
             raise Refusal("GitHub pull-request URL does not match the prepared repository")
         self.save(pull_request=reference, phase="ready_to_send")
-        self.save(warnings=list(self.state.get("warnings") or []) + self.answer_review(number, head))
         copilot = self.prepare_copilot_review(number, pull, head, mode)
         if copilot.get("warning"):
             self.save(warnings=list(self.state.get("warnings") or []) + [copilot["warning"]])
@@ -1439,50 +1422,6 @@ class Ship(SharedReview):
                           code="base_moved", boundary="ci", state="retryable_failure",
                           next_action=f"Run sd-ship prepare --catch-up, or git merge origin/{base} on the branch "
                                       "and then prepare again.") from None
-
-    def answer_review(self, number: int, head: str) -> list[str]:
-        """Record the review findings this push answers, and never block on it.
-
-        `sd-status` reports a pull request carrying a review finding nobody has
-        answered, and until now nothing on the way to a merge ever wrote an
-        acknowledgement: the store stayed empty, so the row fired on every
-        reviewed pull request and went on firing. This is the write that was
-        missing, placed where the evidence for it exists -- the push has
-        happened, the head is known, and `sd-review-ack` can ask git which of
-        those commits changed the file each finding names.
-
-        `fixed` only. A finding the reviewer got wrong needs a reason a person
-        writes, so `dismissed` stays a manual acknowledgement, and there is no
-        bulk form of either here.
-
-        Deliberately advisory. Nothing about a push becomes invalid because
-        GitHub would not enumerate its reviews, and a refusal here would stop a
-        merge over bookkeeping. Failures come back as a warning on the receipt
-        -- the helper failing to load included, which is why the load sits
-        inside the guard: an advisory step that can abort the push is not
-        advisory.
-        """
-        unread = f"review findings on #{number} were not read ({{}}); acknowledge them with sd-review-ack"
-        try:
-            ack = sd_lib.sibling("sd_review_ack_ship", "sd-review-ack")
-        except (OSError, SyntaxError, sd_lib.ConfigError) as error:
-            return [unread.format(error)]
-        try:
-            rows = ack.findings(
-                number,
-                self.api.pages(f"{self.api.prefix}/pulls/{number}/reviews"),
-                self.api.pages(f"{self.api.prefix}/pulls/{number}/comments"),
-            )
-            written, broken = ack.record_answers(self.root, rows, head)
-        except (Refusal, OSError, ValueError, ack.UsageError) as error:
-            return [unread.format(error)]
-        if broken:
-            # Read, but nothing could be recorded: the store is unreadable and
-            # was left alone. Silence here would look exactly like a pull
-            # request with nothing to record.
-            return [f"review findings on #{number} were read and none recorded: {broken}"]
-        return [f"recorded {len(written)} review finding(s) on #{number} as fixed by "
-                f"commits this push carries"] if written else []
 
     def _mode_ask(self, endpoint):
         try:

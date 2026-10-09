@@ -180,7 +180,7 @@ RULES: tuple[Rule, ...] = (
                 "directory and takes no path to another one, so a session "
                 "that can be pointed at another checkout cannot exist; the "
                 "one exception is `-C <dir>` on the lane commands `sd-ship`, "
-                "`sd-check`, `sd-review`, `sd-review-ack` and `sd-pr-state`, "
+                "`sd-check`, `sd-review` and `sd-pr-state`, "
                 "which changes the working directory before anything resolves, "
                 "as `git -C` does, because the permission layer that approves "
                 "a command line sees `-C` and does not see a `cd &&` in front",
@@ -560,20 +560,19 @@ RULES: tuple[Rule, ...] = (
         scope="code",
         teaches="skills/sd-ship/SKILL.md#Executable interface",
     ),
-    #: sd-ship's merge-step ack gate for every reviewer (sd:998), registered
-    #: so the skill line that teaches it cites a row instead of avoiding the
-    #: claim check the way #1167 did.
+    #: sd-ship's merge gate for every reviewer (sd:998), registered so the
+    #: skill line that teaches it cites a row. The operator ruled on sd:3098
+    #: that an unresolved review thread replaces the acknowledgement store.
     Rule(
         id="R14-D2",
-        subject="sd-ship's merge refuses with `review_findings_open` while any "
-                "pull-request review finding has no disposition, whoever "
-                "wrote it: a human or another bot's finding gates the merge "
-                "as a Copilot finding does, with or without a Copilot review",
-        checker="bin/sd-ship::require_copilot_clearance",
-        proof="replace the `self.other_review_material(number)` call in "
-              "`bin/sd-ship` with two empty lists; another reviewer's open "
-              "finding then merges and "
-              "`test_another_reviewers_finding_refuses_the_merge_with_no_copilot_review` "
+        subject="sd-ship's merge refuses with `review_threads_open` while the "
+                "pull request has an unresolved review thread, outdated or "
+                "not, whoever wrote it, and with `review_threads_unread` when "
+                "the threads cannot be read to the last page",
+        checker="bin/sd-ship::refuse_unresolved_threads",
+        proof="replace the `self.api.unresolved_threads(number)` call in "
+              "`bin/sd-ship` with an empty list; an open thread then merges and "
+              "`test_an_unresolved_review_thread_refuses_the_merge_by_name` "
               "goes red",
         scope="code",
         teaches="skills/sd-ship/SKILL.md#Executable interface",

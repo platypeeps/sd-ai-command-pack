@@ -77,10 +77,8 @@ means adding a row there and a producer — never editing a renderer, a sort, or
 a list.** That is how those drift apart.
 
 Rows are ordered `(rank, -age_days, id)`: the class first, the oldest of a
-class next, the id last so the order is total and reproducible. One class,
-`merged-pr-review-unacknowledged`, orders its rows newest first instead, and
-`pending` shows at most three of them. A reader can predict `pending` from
-this table before running the command.
+class next, the id last so the order is total and reproducible. A reader can
+predict `pending` from this table before running the command.
 
 | Rank | Check | Id prefix | In the banner | Source | What it means |
 |---|---|---|---|---|---|
@@ -93,12 +91,10 @@ this table before running the command.
 | 30 | `pr-check-failing` | `p` | yes | `open pull requests` | an open pull request with a failing check |
 | 30 | `pr-check-missing` | `p` | yes | `open PRs + protection` | an open pull request reporting no check the branch requires |
 | 30 | `dirty-tree-with-open-pr` | `p` | yes | `git + open PRs` | uncommitted work on a branch that already has a pull request |
-| 35 | `pr-review-unacknowledged` | `p` | yes | `review findings + local acknowledgements` | an open pull request carrying a review finding nobody has answered |
 | 40 | `protection-gap` | `g` | yes | `protection` | an enforcement leg missing on the default branch |
 | 45 | `accepted-gap-standing` | `g` | no | `.github/sd-status.json accepted_gaps[]` | a written acceptance whose until condition nothing re-reads |
 | 50 | `issue-needs-you` | `i` | no | `dashboard index` | an indexed issue the index says is waiting on you |
 | 60 | `pr-needs-action` | `p` | no | `open pull requests` | an open pull request waiting on a review or a merge |
-| 65 | `merged-pr-review-unacknowledged` | `p` | no | `merged PRs (14 days) + local acknowledgements` | a pull request merged in the last 14 days with a review finding nobody answered |
 | 75 | `mirror-sync-pending` | `n` | no | `~/.claude/pending-mirror-syncs/` | a published document whose designated mirror is not written yet |
 | 80 | `unmerged-branch` | `b` | no | `origin heads` | a branch on origin with no open pull request carrying it |
 | 90 | `parked-concern` | `c` | no | `## Review ledger` | a concern parked behind a trigger nobody is watching |
@@ -112,164 +108,6 @@ The `idle-planning` row is rule R10-D1, a registry row. `bin/sd-status` cites
 R10-D1 in the comments beside the `CLASSES` row and the reason text, never
 inside either string, so no string in the tool is a second copy of the
 registry.
-
-### `pr-review-unacknowledged`, and why it sits at 35
-
-A review that runs and is never read produces exactly the signal a review that
-found nothing produces. Twelve pull requests merged on green CI in one session
-with an automated review on each; the reviews were opened afterwards and held
-real defects, three of which reached the default branch under threads that all
-read as answered. Nothing in this report told the two apart.
-
-The rank is deliberate. Below the three rank-30 `p` classes, because a red
-check is a machine-verified fact and a review finding still needs a human to
-judge it. Above `protection-gap` at 40, because a gap in branch protection is a
-standing configuration question while an unanswered finding is attached to a
-pull request that is about to merge, and the merge is the last point where
-answering it can keep a defect off the default branch. Abnormal, so it reaches
-the banner: the whole failure was that this was invisible where the operator
-already looked.
-
-A finding is answered when `bin/sd-review-ack` says so — acknowledged as fixed
-by a commit that actually reached the landing ref, or dismissed with a reason.
-Reached it directly, or through a squash: the commit is in the head of a pull
-request GitHub merged and the commit it merged as is on the ref, both facts
-local `git` settles. A fix the reviewer had already read when it stated the
-finding again is `fix-restated`, not answered, and the row stays up.
-`sd-status` holds no second opinion about any of this; it counts what that
-tool reports unanswered.
-
-Most of those acknowledgements are written by `bin/sd-ship`, not typed. A row
-whose store nothing ever fills is a row that is always on, and a report that is
-always red is a report nobody reads, so the push records `fixed <commit>` for
-each finding it can show an answer for: a commit that did not exist when the
-reviewer read the file, that changes the file the finding names, and that is
-reachable from the head being pushed. Those are facts `git` settles, and a
-finding on a file the push never touched stays unanswered — which is the half
-that makes the other half worth anything. `dismissed <reason>` is never
-written by a machine: a finding the reviewer got wrong is answered by a
-sentence a person writes, and there is no bulk form of either disposition.
-
-Findings are read from inline comments **and** from review bodies, where an
-automated reviewer states the ones no comment count sees. The bodies arrive in
-the `gh pr list` call this report already makes; the inline comments cost one
-`gh api` call per pull request, the same per-pull-request price `behind_by`
-already pays. A pull request whose comments cannot be read marks the class
-`unchecked` rather than reporting the body findings as the total — a partial
-count presented as a count is the failure this class is about. That pull
-request gets no row; every other pull request whose findings were read keeps
-its row, so one failed read does not empty `pending` of the rest. The reason
-names every pull request whose comments could not be read, sorted by number:
-the lowest five named, the rest as a count. An acknowledgement store
-that cannot be read also marks the class `unchecked`, but it hides no row: the
-store then reads as empty, so every finding is unanswered and every pull
-request with one keeps its row. Those rows say to repair or move the store
-first, because `sd-review-ack --ack` stops with an error on a store it could
-not read rather than replace the acknowledgements still in it.
-
-The acknowledgements live in the workflow database, so a satellite reads the
-hub's (sd:2750). A satellite whose hub does not answer is the one exception to
-"hides no row": every finding would read unanswered there, so both review
-classes get no row and are `unchecked` with `review acknowledgements unknown
-(hub unreachable: ...)`, and the `late:` and `expired:` lines print that in
-place of a count; `--json` carries their `findings` as `null`.
-
-The count is sometimes a floor. A reviewer that writes `Moderate findings
-(3 votes each)` has stated more than one finding under one marker and has not
-said where they split; `sd-review-ack` keeps the whole text, marks the row
-indeterminate, and the detail then reads `at least 2 of at least 2` rather
-than `2 of 2`. Splitting that text on "and" would be guessing how many, and
-counting it flat as one would understate — an undercount on a gate reads as
-progress. Rows with no such marker keep an exact count.
-
-### `merged-pr-review-unacknowledged`, and why it sits at 65
-
-The open class loses its row when the pull request merges, answered or not.
-PR #896 merged with seven of seven findings unread, its fixes pushed without
-`bin/sd-ship`, and the report showed it nowhere. This class keeps such a pull
-request on the report for 14 days after the merge: merged fourteen days ago is
-in, fifteen is out. Past that it is no longer a row, and `open threads` names
-the exclusion.
-
-Expiry is not an answer (sd:998). `open threads` ends with an `expired:` line
-that counts the findings nobody answered on pull requests merged 15 to 28 days
-ago (`MERGED_AGED_DAYS`), names those pull requests, and says "at least" with
-the reason when its read failed or stopped at its limit. It is a count, not
-rows: it never reaches `pending` or the banner. `--json` carries it as
-`expired_reviews`.
-
-A review posted after the merge reaches no merge gate (sd:1178).
-Above `expired:`, a `late:` line counts the unread findings on pull requests merged in the last 14 days.
-It reads the window's own list, so it costs no extra `gh` call, and `sd-review-ack` clears a finding there as it clears the row.
-It warns only; `--json` carries it as `late_reviews`.
-
-An unbounded report-only class is not a signal: this one reached 219 rows unnoticed (sd:1179).
-So `open threads` also prints the class's row count and its change since yesterday.
-The line reads `merged-pr-review-unacknowledged: 12 row(s), up 3 since yesterday (9 then)`.
-It warns only, by the operator's ruling of 2026-09-30: no ceiling, and nothing blocks `sd-ship`.
-It is stateless like `late:`, so it says "since yesterday", not "since the last run": that needs a stored count.
-Yesterday's count shifts the window back a day and leaves out acknowledgements recorded in the last 24 hours.
-A review posted within the day counts yesterday too, so the change can understate a rise.
-When the class is `unchecked`, the count is a floor and the line says the change is unknown.
-The change is unknown too when a pull request only the earlier window holds could not be read.
-`--json` carries it as `merged_review_count`.
-
-The days are counted from the UTC calendar day GitHub records the merge on to
-the local date `sd-status` runs on. So the edge can move by the local offset
-from UTC: in California a pull request merged in the evening falls on the next
-UTC day, so it stays in the window one local day longer. The query to GitHub reaches
-one day further back than the window, so no pull request inside the window
-goes unread because of that difference.
-
-Sorted after the open class at 35, and not abnormal, both by the owner's
-decision (sd:631). Not
-abnormal, so it never reaches the banner and never changes its count.
-Automatic acknowledgement stays with `bin/sd-ship`; a push or a merge made
-another way records nothing, which is the case this row exists to show.
-
-It sat at 36 at first, and review of #925 showed why that cannot hold here.
-Lanes in this repository push with plain `git` instead of `bin/sd-ship`, so
-nothing records their answers, and about 278 pull requests merged in the
-fifteen days to 2026-09-13. Ten of them with one unanswered inline comment
-would fill all ten `pending` slots at 36, and `next` would point at the
-oldest. So three rules apply now:
-
-- **Rank 65**, below `pr-needs-action` at 60 and above `mirror-sync-pending` at
-  75. An open pull request waiting on a review or a merge can still change; a merged
-  one cannot, so the open one comes first.
-- **Newest merge first** within the class (`newest_first` in `CLASSES`), the
-  reverse of every other class. A finding from yesterday's merge is still
-  fresh in someone's head; one from two weeks ago is the least likely to be
-  acted on.
-- **At most three of its rows in `pending`** (`pending_cap`). The rows it holds
-  back leave their slots to the classes below, and a line under the list says
-  how many of its rows the list does not show. When higher classes fill all ten
-  slots, that is every row of the class, not just the rows past the cap — so
-  the line splits the count by cause (`_held_back_line`): rows "past its cap of
-  3", rows "ranked below the first 10", or both with a number each. A class
-  crowded out while under its cap names rank alone, never the cap.
-  `--actions` and `--json` still carry every row.
-
-It asks the same question through the same code as the open class. A finding
-is answered when `bin/sd-review-ack` says so, and the merged pull request's
-head and merge commit go with the question, so a fix that landed through a
-squash reads answered. The rule for unreadable data is the open class's too. A
-merged pull request whose comments could not be read gets no row and marks
-the class `unchecked`, and every other pull request keeps its row. A pull
-request with no merge date does the same, and so does a merged list that
-stopped at its limit.
-
-The read runs two `gh` commands, however many pull requests merged: `gh pr list
---state merged` for the window, and one `gh api --paginate` over the
-repository's review comments. The `expired:` count runs the same two over its
-own days, so a busy fortnight past the window cannot truncate the window's list. That call's `since` is the oldest merged pull
-request's creation time, since no review comment predates its pull request. It
-is still as many HTTP pages as there are comments since then, and one
-long-lived pull request that merges widens it. If it runs past `sd-pr-state`'s
-60-second limit on each `gh` call, every merged pull request reads unreadable
-and the class is `unchecked`.
-The data arrives in `--json` as `merged_pull_requests`. The text report has no section for it;
-its rows print in `pending`.
 
 ## Ids: `<letter><4 hex digits, 8 on collision>`, from the data alone
 
@@ -306,9 +144,7 @@ options are pending rows 1 to 4, each labelled by its id. Rows 5 to 10 are
 addressable by typing the id, which the component's own free-text answer
 already supports, and `--actions` lists every row, the ones `pending` leaves
 out included. Take the options from the text report's `pending`, not from
-`actions` in `--json`: `pending` is the first ten after each class's
-`pending_cap` (`pending_rows`), so a class past its cap can make rows 1 to 10
-of `actions` differ from it.
+`actions` in `--json`: `pending` is the first ten of it.
 
 Three rules on that question:
 
@@ -403,12 +239,9 @@ at ten because a report is read whole; `--actions` is the list a caller pipes,
 so capping it would make the cap the interface.
 
 The `--json` schema is version **3**. Beyond the section keys it carries
-`merged_pull_requests` (the pull requests merged inside the review window, with
-the findings each carries), `expired_reviews` (the `expired:` count, its
-days, its pull requests and why it is short, if it is), `late_reviews` (the `late:` count, in the same shape), `merged_review_count`
-(the merged class's row count and its change since yesterday), `inventory` (`rows` plus the `unchecked` map),
+`inventory` (`rows` plus the `unchecked` map),
 `abnormalities`, `actions` — the uncapped inventory, of which `pending` is the
-first ten after each class's `pending_cap` (`pending_rows`) — and `next`. It
+first ten — and `next`. It
 has no top-level `pending` key, and the two nested ones are something else
 again: `handoff.packet.pending` is a boolean about the handoff packet, and
 `pull_requests.pull_requests[].checks.pending` an integer count of that pull

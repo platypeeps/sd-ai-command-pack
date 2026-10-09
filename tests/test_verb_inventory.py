@@ -46,7 +46,7 @@ REPO_PATH_OPTIONS = frozenset({"--repo", "--repo-path", "--root", "--checkout", 
 # the pre-parser a lane command uses when it dispatches a subcommand before
 # its own parser runs; the library is named here so the scan stays whole.
 DIRECTORY_OPTION = "-C"
-LANE_COMMANDS = frozenset({"sd-ship", "sd-check", "sd-review", "sd-review-ack", "sd-pr-state"})
+LANE_COMMANDS = frozenset({"sd-ship", "sd-check", "sd-review", "sd-pr-state"})
 DIRECTORY_OPTION_DECLARERS = LANE_COMMANDS | {"sd_lib.py"}
 
 

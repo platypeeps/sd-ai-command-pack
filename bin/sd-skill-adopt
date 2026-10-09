@@ -320,6 +320,26 @@ def source_revision(source: str, raw: bytes) -> str:
     return f"sha256:{digest}"
 
 
+def recorded_source(source: str, home: pathlib.Path) -> str:
+    """The source as the Provenance line should name it, with no home path in it.
+
+    A URL and `-` stay as given. A local file inside a checkout is named
+    relative to that checkout's root, and any other file under `home` as
+    `~/...`, so the line a public skill carries never holds the adopter's
+    account directory (sd:3044).
+    """
+
+    if source == "-" or source.startswith(("http://", "https://")):
+        return source
+    path = pathlib.Path(source).expanduser().resolve()
+    root = repo_root(path.parent) if path.parent.is_dir() else None
+    if root is not None and path.is_relative_to(root.resolve()):
+        return path.relative_to(root.resolve()).as_posix()
+    if path.is_relative_to(home.resolve()):
+        return "~/" + path.relative_to(home.resolve()).as_posix()
+    return source
+
+
 def with_provenance(text: str, source: str, revision: str, today: str) -> str:
     """Stage 4. Append the record, or refresh it if one is already there.
 
@@ -399,7 +419,7 @@ def repo_skill_files(root: pathlib.Path) -> list[pathlib.Path]:
     `skill_files` above looks one level down, which is right for a flat skills
     root and wrong for a repository: skills live under `.claude/skills/`, or
     `.agents/skills/`, or `templates/skills/`, or somewhere this list has not
-    thought of. Surveying `sd-writing-pack` with the one-level reader reported
+    thought of. Surveying `sd-writing` with the one-level reader reported
     "no skills found" for a repository holding twelve, which is the failure a
     hardcoded list of conventional locations would reproduce the next time
     somebody invents a thirteenth. So the walk enumerates, and the only thing
@@ -557,7 +577,7 @@ def run_adopt(
         err.write(f"refused: {target} is taken; nothing written\n")
         return 1
 
-    adopted = with_provenance(text, source, source_revision(source, raw), today)
+    adopted = with_provenance(text, recorded_source(source, home), source_revision(source, raw), today)
     if target != claimed:
         # The name lives in two places and both have to move together, or the
         # lint this tool just ran would fail on its own output.

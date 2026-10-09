@@ -70,7 +70,9 @@ It never removes the worktree: no lock excludes its builder, and a write
 through a handle opened before removal is lost. The entry's `remove` holds
 the command that removes the worktree and its branch once the builder stops.
 It notes the item with the merge commit, what the cleanup did, a `git
-branch` recover command and that command. Then it fast-forwards the main
+branch` recover command and that command. A worktree `sd-ship merge` has
+already removed (sd:3006) is noted as such, from the lane's own checkout
+(sd:3096). Then it fast-forwards the main
 checkout. When that checkout holds the running `sd-ship`, as the pack's does
 for every lane, it tries each other lane's runner lock once and skips if one
 is held: a lane mid-prepare must not have its tools change under it, and no
@@ -944,22 +946,40 @@ def fast_forward(main: pathlib.Path, environ: dict[str, str], own_lock: pathlib.
 
 
 def land(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, str], note: Note,
-         own_lock: pathlib.Path) -> dict[str, Any]:
-    """After a merge: delete the remote branch, note the item with the removal and recover commands, fast-forward."""
+         own_lock: pathlib.Path, root: pathlib.Path) -> dict[str, Any]:
+    """After a merge: delete the remote branch, note the item with the removal and recover commands, fast-forward.
+
+    `root` is the repository the lane runs for. `sd-ship merge` removes a clean
+    worktree itself (sd:3006), and git cannot name the main checkout from a
+    directory that is gone, so the lane's own root answers (sd:3096).
+    """
     worktree = pathlib.Path(entry["worktree"])
-    main = sd_lib.main_worktree_root(worktree).resolve()
+    gone = not worktree.is_dir() and entry.get("gate") != SATELLITE
+    main = sd_lib.main_worktree_root(root if gone else worktree).resolve()
     head, merged = outcome.get("head"), str(outcome.get("merge_commit") or "")
+    if gone:  # the merge removed the worktree with its branches; nothing is left to clean
+        branch, tip = "", None
+        cleanup, remove = f"Cleanup: worktree {worktree} was already removed by the merge", None
+        fields: dict[str, Any] = {"cleanup": cleanup, "remove": remove}
+        body = f"Landed: merged at {merged[:12]} (head {str(head)[:12]}). {cleanup}."
+        return land_note(fields, body, entry, environ, note, own_lock, main)
     if entry.get("gate") == SATELLITE:  # the branch is open on the satellite; its tip here is the merged head
         branch, tip = entry["branch"], head
     else:
         branch, tip = lane_git(worktree, "branch", "--show-current") or "", lane_git(worktree, "rev-parse", "HEAD")
     cleanup, remove = clean_up(entry, head, main, branch, tip)
-    fields: dict[str, Any] = {"cleanup": cleanup, "remove": remove}
+    fields = {"cleanup": cleanup, "remove": remove}
     body = f"Landed: merged at {merged[:12]} (head {str(head)[:12]}). {cleanup}."
     if branch and tip:
         body += f" Recover: git branch {branch} {tip}."
     if remove:
         body += f" Remove: {remove}"  # last and bare, so it copies whole
+    return land_note(fields, body, entry, environ, note, own_lock, main)
+
+
+def land_note(fields: dict[str, Any], body: str, entry: dict[str, Any], environ: dict[str, str], note: Note,
+              own_lock: pathlib.Path, main: pathlib.Path) -> dict[str, Any]:
+    """Note the item from the main checkout, then fast-forward it; both land on `fields`."""
     try:
         fields["note"] = note(entry["item"], body, main)
     except Exception as error:  # the merge stands; the record says the note did not land
@@ -981,14 +1001,14 @@ def note_hand_back(entry: dict[str, Any], outcome: dict[str, Any], note: Note) -
 
 
 def settle(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, str], note: Note,
-           own_lock: pathlib.Path, hub: Hub | None) -> dict[str, Any]:
+           own_lock: pathlib.Path, hub: Hub | None, root: pathlib.Path) -> dict[str, Any]:
     """What follows an entry's outcome: the landing of a merge, and a satellite entry's row and note."""
     fields: dict[str, Any] = {}
     if outcome.get("status") == "pending":  # put back (sd:2861): nothing to settle, and the row still acknowledges it
         return fields
     if outcome.get("status") == "merged":
         try:
-            fields.update(land(entry, outcome, environ, note, own_lock))
+            fields.update(land(entry, outcome, environ, note, own_lock, root))
         except Exception as error:  # the merge stands; the entry says what did not follow it
             fields["cleanup"] = f"failed: {type(error).__name__}: {error}"[:600]
         if hub is not None and BIN.is_relative_to(hub.main) and str(fields.get("fast_forward")).startswith("fast-forwarded"):
@@ -1145,7 +1165,7 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
                     outcome = process(entry, path.parent.parent / "logs", ship)
                 except Exception as error:  # a broken entry is marked; the next one still runs
                     outcome = {"status": "failed", "reason": f"{type(error).__name__}: {error}"[:600]}
-                outcome.update(settle(entry, outcome, environ, note or default_note, own_lock, hub))
+                outcome.update(settle(entry, outcome, environ, note or default_note, own_lock, hub, root))
 
                 def finish(entries: list[dict[str, Any]], entry=entry, outcome=outcome) -> None:
                     for row in entries:

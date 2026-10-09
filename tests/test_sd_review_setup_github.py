@@ -927,9 +927,8 @@ class EveryEntryTests(SetupFixture):
     `directory:` scopes, or the same scope twice -- and each carries its own
     `ignore:` list. The reader stopped at the first match and reported the
     answer as though it covered the file, so a consumer whose second entry is
-    unguarded or carries a stale wording read `same`. The Copilot round in
-    `tests/fixtures/sd-543-review-round.json` named it: "aggregate verdicts
-    must inspect all matching action blocks."
+    unguarded or carries a stale wording read `same`. A Copilot round
+    named it: "aggregate verdicts must inspect all matching action blocks."
     """
 
     def consumer(self, second: str) -> str:

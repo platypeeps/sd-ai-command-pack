@@ -24,7 +24,6 @@ BIN = REPO_ROOT / "bin"
 LANE_COMMANDS = {
     "sd-check": ["--dry-run", "--json"],
     "sd-review": ["--explain", "--json"],
-    "sd-review-ack": ["--check", "--json"],
     "sd-pr-state": ["--json"],
 }
 
