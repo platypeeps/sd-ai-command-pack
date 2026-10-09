@@ -230,6 +230,8 @@ class TheArchiveBoundary(unittest.TestCase):
 #: cache, never a work item. The tenth, for sd:3032, removes a dead gate's
 #: folder in the temp dir, the check's `TMPDIR` with it: temp files, never a work item.
 #: The eleventh, for sd:3032 too, removes an sd folder there whose named pid is dead.
+#: The twelfth, for sd:3009, removes the serving tree's retired `.venv-a` and `.venv-b`:
+#: built environments, never a work item.
 FROZEN_DELETION_SITES = frozenset({
     ("bin/sd-status", "git rm -r --cached --ignore-unmatch .trellis && rm -rf .trellis"),
     ("bin/sd-status", "git config --unset core.hooksPath; git rm -r --ignore-unmatch .githooks"),
@@ -242,6 +244,7 @@ FROZEN_DELETION_SITES = frozenset({
     ("bin/sd_gate_cache.py", "shutil.rmtree(folder, ignore_errors=True)"),
     ("bin/sd_gate_cache.py", "shutil.rmtree(tree.parent, ignore_errors=True)  # and the check's `TMPDIR` beside it (sd:3032)"),
     ("bin/sd_gate_cache.py", "shutil.rmtree(entry.path, ignore_errors=True)"),
+    ("bin/sd_install.py", "shutil.rmtree(slot)  # the tree's own retired environment, never a work item (sd:3009)"),
 })
 
 DELETION_VERBS = r"git rm|rmtree|rmdir"
