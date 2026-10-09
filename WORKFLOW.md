@@ -361,13 +361,32 @@ that dispatches workers cites this section and restates nothing.
 The pack ships a writer for multi-file code: the `sd-slice-builder` agent,
 which the installer places in `~/.claude/agents`.
 
+Four roles share the work:
+
+- **The lead plans and lands.** One lead session per machine plans, starts
+  builders, runs the merge lane and records state in `sd task note`; a
+  repository's lane runs on one machine (sd:3003), so a second lead races it.
+- **A builder writes code in its own worktree.** It runs only the suites its
+  change touches, never `make check`, and ends with commits, a pull-request
+  body file and a report; the lead's `sd-ship prepare` runs the one full gate.
+- **A reader is read-only and unlimited.** Investigation, review, planning
+  and audits fan out across readers; a reader changes no file, so it needs no
+  worktree.
+- **An integrator is a builder that merges several builders' work.** It
+  applies their commits or patches on one branch, so the lane lands one pull
+  request instead of several that conflict.
+
+The rules for them:
+
+- **Run at most 6 code-writing builders per machine.** More starve the gates
+  and reviews they all wait on.
+- **Start no builder while load5 is above 40.** A machine that busy already
+  stretches every running builder past its deadline.
 - **A writer runs alone in its checkout.** One checkout holds one writer. An
   agent or session that changes files works in its own git worktree or clone.
   Prefer a patch-only worker: it returns a diff, and one integrator applies
   it. Never start a second writer in a checkout that already has one.
-- **Readers fan out.** Investigation, review, planning and audits run in
-  parallel across read-only workers. A read-only worker needs no isolation.
-- **One integrator lands the work.** Several workers may produce patches or
+- **One lane lands the work.** Several workers may produce patches or
   pull requests. One lane merges them, one at a time. Metadata that orders
   the landings — a session number, a journal or ledger entry, a changelog
   position — is allocated when the work lands, never when the branch is cut,
@@ -378,8 +397,9 @@ which the installer places in `~/.claude/agents`.
   another merges ahead of it, or its merge needs a catch-up and a new review
   (sd:2339).
 - **No worker fails silently.** Every worker gets a budget, in wall clock or
-  tokens. It runs in the background and reports when it finishes. No report
-  by the deadline is a failure. Do not poll, and do not assume success.
+  tokens. It runs in the background and reports the moment its last step
+  ends, pass or fail. No report by the deadline is a failure, and so is a
+  worker gone idle without one. Do not poll, and do not assume success.
   A missing report does not mean the worker stopped: cancel it and confirm
   it is gone before starting a replacement, or two attempts run at once and
   the second writer lands in a checkout the first still holds. When the
@@ -410,6 +430,18 @@ which the installer places in `~/.claude/agents`.
   A fix commit moves the head, so the next round needs a new gate pass first.
   Never run plain `sd-review --scope branch` there: it runs a second full
   check in the checkout and reuses no pass.
+- **A change that moves state in steps carries a failure table before review
+  round 1.** Its `design.md` or pull-request body lists each step, the state
+  it moved, the failure, the recovery and the test, so round 1 reviews the
+  recovery paths and not only the success path.
+- **A repeating finding starts a class pass.** The trigger is two findings of
+  one class in different rounds, or three blocking rounds in a row; one more
+  single-finding fix lets the class come back next round. Name the class,
+  list every instance from the code rather than from the findings, add each
+  to the failure table, and fix each row that lacks a recovery or a test,
+  fail-first. The integrator names the class in the next round's brief and
+  records the trigger in `sd task note`. Split the pull request when the
+  table shows it does too much.
 - **Gates share the machine through slots.** Every `sd-check` run, and so
   every gate `sd-ship prepare` or `merge` runs in any repository, first takes
   one of `sd.gate_slots` machine-wide slots (unset: a quarter of the cores,
@@ -493,6 +525,14 @@ which the installer places in `~/.claude/agents`.
   <item>`. These verbs edit the queue under its lock and refuse a running
   entry. The runner reads the queue's top before each item, so a change takes
   effect at the next item, never mid-merge.
+- **The lead ships only through the lane.** It enqueues with `sd-ship lane
+  enqueue` and drains with `sd-ship lane run`; a hand-run prepare-and-merge
+  chain jumps the queue's order and leaves no log under `<lane>/logs/`.
+- **Stop an item's queued ship before its builder merges main.** Run
+  `sd-ship lane cancel <item>` first: the ship merges in the same worktree,
+  and its abort can discard the builder's merge.
+- **Stop a running ship chain by its process group** (`kill -- -<pgid>`).
+  A killed shell alone leaves its children holding a gate slot.
 - **After a lane merge, the runner lands the entry (sd:2568).** It deletes
   the remote branch with `--force-with-lease` while the worktree's tip is
   the merged head. It never removes the worktree or its local branch: no
