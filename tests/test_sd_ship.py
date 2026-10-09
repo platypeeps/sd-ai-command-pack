@@ -4013,6 +4013,9 @@ roles:
         self.assertEqual(result["review_skipped"], "pin-bump")
         self.assertIn("review skipped: pin-bump", said.getvalue())
         self.assertFalse(calls.exists(), "a reader was called for a pin bump")
+        _git(self.root, "commit", "--allow-empty", "-q", "-m", "moved\n\nAuthored-with: human")
+        with self.assertRaisesRegex(ship.Refusal, "no completed local review receipt"):
+            self.operation().check_review(_git(self.root, "rev-parse", "HEAD"))
 
     def assert_tier_reviews(self, files: dict[str, str]) -> None:
         calls = self.tiered_branch(files)
