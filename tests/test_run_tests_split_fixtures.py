@@ -117,6 +117,20 @@ def load_tests(loader, standard_tests, pattern):
     return loader.loadTestsFromTestCase(Plain)
 """
 
+# Prints the `git` a shard finds first on PATH, through any link (sd:3179).
+GIT_PROBE = """import os
+import shutil
+import unittest
+
+
+class Probe(unittest.TestCase):
+    def test_git(self):
+        found = shutil.which("git")
+        share = os.path.join(os.path.dirname(os.path.dirname(found)), "share")
+        print(f"shard git={os.path.realpath(found)}")
+        print(f"shard share={os.path.realpath(share)}")
+"""
+
 # Prints the niceness the shard runs at, so a test can compare it with its own.
 # `getpriority` reads it; `os.nice(0)` raises EPERM on macOS at niceness 20,
 # which a nested run reaches under an outer gate's `nice -n 10`.
@@ -202,6 +216,38 @@ class SplitModuleFixtures(unittest.TestCase):
                 result = self.run_harness(workers=None, environment=environment)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn(f"test runner: workers={workers} ", result.stdout)
+
+    def test_shards_skip_the_xcrun_trampoline_for_the_git_it_would_start(self) -> None:
+        """sd:3179. `/usr/bin/git` starts xcrun, then the git xcrun names; shards start that git directly.
+
+        A failed `xcrun`, or a `git` on PATH that is not the trampoline, leaves PATH as it was.
+        The link's prefix mirrors the real one: a bare link left git without its templates.
+        """
+        direct = self.root / "developer" / "usr" / "bin" / "git"
+        direct.parent.mkdir(parents=True)
+        (direct.parent.parent / "share").mkdir()
+        direct.write_text('#!/bin/sh\nexec /usr/bin/git "$@"\n')
+        direct.chmod(0o755)
+        xcrun, git = self.programs / "xcrun", self.programs / "git"
+        own = '#!/bin/sh\nexec /usr/bin/git "$@"\n'
+        for answer, path_git, expected in ((f'printf "%s\\n" "{direct}"', None, direct),
+                                           ("exit 1", None, pathlib.Path("/usr/bin/git")),
+                                           (f'printf "%s\\n" "{direct}"', own, git)):
+            with self.subTest(xcrun=answer, own_git=path_git is not None):
+                git.unlink(missing_ok=True)
+                if path_git is None:
+                    git.symlink_to("/usr/bin/git")
+                else:
+                    git.write_text(path_git)
+                    git.chmod(0o755)
+                xcrun.write_text(f"#!/bin/sh\n{answer}\n")
+                xcrun.chmod(0o755)
+                result = self.run_harness(test_sd_ship=GIT_PROBE)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn(f"shard git={expected}\n", result.stdout)
+                if expected == direct:
+                    # git reads its templates and helpers off the folder above its `bin`.
+                    self.assertIn(f"shard share={direct.parent.parent / 'share'}\n", result.stdout)
 
     def test_local_shards_run_below_the_launcher_priority_and_ci_shards_do_not(self) -> None:
         """sd:1955. A local gate yields the CPU to the runner daemon and the sessions."""

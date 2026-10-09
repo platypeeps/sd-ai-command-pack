@@ -152,6 +152,27 @@ export GIT_CONFIG_VALUE_1=0
 export GIT_CONFIG_KEY_2=receive.autogc
 export GIT_CONFIG_VALUE_2=false
 
+# sd:3179. On macOS `/usr/bin/git` is a trampoline: each call starts xcrun,
+# which asks opendirectoryd for the developer folder, then the git it names.
+# The suite starts git thousands of times, so shards start that git directly
+# through a link first on PATH. On tests.test_sd_status alone this cut 73 s
+# wall and 22 s sys to 41 s and 15 s. Only a git that resolves to the
+# trampoline is replaced; with no xcrun answer, PATH stays as it was.
+# git finds its templates and helpers from the folder above the `bin` it
+# started from, so the link's folder links every other entry of the real one.
+if command -v xcrun >/dev/null 2>&1 &&
+  path_git="$(command -v git 2>/dev/null)" &&
+  [ "$(readlink -f "$path_git" 2>/dev/null)" = /usr/bin/git ] &&
+  direct_git="$(xcrun --find git 2>/dev/null)" && [ -x "$direct_git" ] &&
+  [ "${direct_git%/bin/git}" != "$direct_git" ] && mkdir -p "$work_dir/git/bin"; then
+  linked=0
+  for entry in "${direct_git%/bin/git}"/*; do
+    [ "${entry##*/}" = bin ] || [ ! -e "$entry" ] || ln -s "$entry" "$work_dir/git/" || linked=1
+  done
+  ln -s "$direct_git" "$work_dir/git/bin/git" || linked=1
+  [ "$linked" -ne 0 ] || export PATH="$work_dir/git/bin:$PATH"
+fi
+
 # Largest test file first (size approximates runtime) to shorten the tail.
 modules=()
 while IFS= read -r path; do
