@@ -14,12 +14,14 @@ import fcntl
 import io
 import json
 import pathlib
+import sqlite3
 import subprocess
 import types
 from unittest import mock
 
 from sd_db import connect, initialise, upsert_repo
 from sd_db import ship as receipts
+from sd_db.repos import set_runner_merge
 
 from tests import test_sd_lane as lane_suite
 
@@ -33,6 +35,8 @@ SATELLITE = {"hostname": "satellite.example.test", "login": "fixture@example.tes
 
 class Requests(lane_suite.Lane):
     """The lane suite's repository with a GitHub-named origin, a workflow database and a pushed `topic` branch."""
+
+    runner_merge = None  # read from this suite's database
 
     def setUp(self) -> None:
         super().setUp()
@@ -246,6 +250,106 @@ class PlainRun(Requests):
         self.assertTrue(sd_lane_parser().parse_args(["lane", "run", "--satellite-only"]).satellite_only)
         with mock.patch("sys.stderr", new_callable=io.StringIO), self.assertRaises(SystemExit):
             sd_lane_parser().parse_args(["lane", "run", "--hosted", "--satellite-only"])
+
+
+class MergeAuthority(Requests):
+    """sd:3132. `repo.runner_merge` `auto` merges without `--manual`; on `manual`, or when the setting cannot be
+    read, the entry stops `prepared` and says why. `--manual` still merges on a `manual` repository."""
+
+    def satellite(self, setting: str, authority: str | None = None, *, fault=contextlib.nullcontext) -> tuple:
+        """One request through intake and the run; the entry and its request row."""
+        set_runner_merge(self.connection, str(self.repo), setting)
+        self.prepared()
+        self.ask(authority=authority)
+        with fault():
+            sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate, hub=self.hub)
+        return self.entries()[-1], self.row()
+
+    def local(self, setting: str, manual: bool = False, *, fault=contextlib.nullcontext) -> dict:
+        """One hub entry through prepare and the run; the entry."""
+        set_runner_merge(self.connection, str(self.repo), setting)
+        sd_lane.enqueue_entry(self.worktree(f"hub-{len(self.entries())}"), 3, "hub item", self.body, self.environ,
+                              manual=manual, claim="deliver")
+        with fault():
+            sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate, hub=self.hub)
+        return self.entries()[-1]
+
+    def faults(self) -> dict:
+        """Each way the setting cannot be read: a row for another repository, and a read that fails."""
+        @contextlib.contextmanager
+        def other_repository():
+            self.connection.execute("UPDATE repo SET remote = 'https://github.com/fixture/other.git'")
+            self.connection.commit()
+            try:
+                yield
+            finally:
+                self.connection.execute("UPDATE repo SET remote = ?", (URL,))
+                self.connection.commit()
+        locked = sqlite3.OperationalError("database is locked")
+        return {"no repo row has the remote": other_repository,
+                "database is locked": lambda: mock.patch.object(sd_lane.sd_lib, "repo_row", side_effect=locked)}
+
+    def test_a_request_without_manual_on_an_auto_repository_merges(self) -> None:
+        entry, row = self.satellite("auto")
+        self.assertEqual((entry["status"], row["status"], [call[2] for call in self.calls]),
+                         ("merged", "merged", ["merge"]))
+        self.assertIn("--manual", self.calls[0])
+
+    def test_a_request_without_manual_on_a_manual_repository_stops_prepared_and_says_why(self) -> None:
+        entry, row = self.satellite("manual")
+        self.assertEqual((entry["status"], row["status"], row["code"], self.calls),
+                         ("prepared", "prepared", "runner_merge_manual", []))
+        self.assertIn("repo.runner_merge is manual", row["reason"])
+        self.assertIn("--satellite-gate", row["next_action"])
+        self.assertIn("sd-ship lane request --item 7 --manual", row["next_action"])
+
+    def test_a_request_whose_setting_cannot_be_read_stops_prepared_naming_the_reason(self) -> None:
+        for why, fault in self.faults().items():
+            with self.subTest(why=why):
+                entry, row = self.satellite("auto", fault=fault)
+                self.assertEqual((entry["status"], row["status"], row["code"]),
+                                 ("prepared", "prepared", "runner_merge_unknown"))
+                self.assertIn("repo.runner_merge cannot be read", row["reason"])
+                self.assertIn(why, row["reason"])
+        self.assertEqual(self.calls, [])
+
+    def test_a_request_with_manual_on_a_manual_repository_merges(self) -> None:
+        entry, row = self.satellite("manual", authority="manual")
+        self.assertEqual((entry["status"], row["status"]), ("merged", "merged"))
+
+    def test_a_hub_entry_without_manual_on_an_auto_repository_merges(self) -> None:
+        entry = self.local("auto")
+        self.assertEqual((entry["status"], [call[2] for call in self.calls]), ("merged", ["prepare", "merge"]))
+        self.assertIn("--manual", self.calls[1])
+
+    def test_a_hub_entry_without_manual_on_a_manual_repository_stops_prepared_and_says_why(self) -> None:
+        entry = self.local("manual")
+        self.assertEqual((entry["status"], entry["code"], [call[2] for call in self.calls]),
+                         ("prepared", "runner_merge_manual", ["prepare"]))
+        self.assertIn("repo.runner_merge is manual", entry["reason"])
+
+    def test_a_hub_entry_whose_setting_cannot_be_read_stops_prepared_naming_the_reason(self) -> None:
+        for why, fault in self.faults().items():
+            with self.subTest(why=why):
+                entry = self.local("auto", fault=fault)
+                self.assertEqual((entry["status"], entry["code"]), ("prepared", "runner_merge_unknown"))
+                self.assertIn("repo.runner_merge cannot be read", entry["reason"])
+                self.assertIn(why, entry["reason"])
+        self.assertNotIn("merge", [call[2] for call in self.calls])
+
+    def test_a_hub_entry_with_manual_on_a_manual_repository_merges(self) -> None:
+        entry = self.local("manual", manual=True)
+        self.assertEqual(entry["status"], "merged")
+
+    def test_an_auto_entry_gates_the_next_one_early(self) -> None:
+        """The speculative gate reads the same authority: an entry that will land predicts the next landing."""
+        set_runner_merge(self.connection, str(self.repo), "auto")
+        for item in (3, 4):
+            sd_lane.enqueue_entry(self.worktree(f"hub-{item}"), item, "hub item", self.body, self.environ,
+                                  claim="deliver")
+        with mock.patch.object(sd_lane, "predict", lambda entry, following: {"skipped": "predicted"}):
+            sd_lane.run_lane(self.repo, self.environ, self.ship, self.gate, hub=self.hub)
+        self.assertEqual(self.entries()[1]["speculation"], {"after": 3, "status": "skipped", "reason": "predicted"})
 
 
 class SatelliteOnly(Requests):

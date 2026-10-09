@@ -354,6 +354,9 @@ class SharedReview:
             carried = self.state.get("review_carry_forward") or {}
             if carried.get("to") and carried.get("to") == self.state.get("reviewed_head"):
                 result["review_carry_forward"] = carried
+        skipped = self.state.get("review_skipped") or {}
+        if skipped.get("head") and skipped.get("head") == self.state.get("reviewed_head"):
+            result["review_skipped"] = skipped["tier"]  # sd:2998
         return result
 
     def review_inputs(self, head: str) -> dict:
@@ -361,6 +364,11 @@ class SharedReview:
         waived = self.state.get("empty_diff") or {}
         if not passes and waived.get("head") == head and empty_branch_base(self.root, head) == waived.get("base"):
             return {"status": "clean", "findings": [], "subject": {"base": waived["base"], "head": head, "paths": []}}
+        skipped = self.state.get("review_skipped") or {}
+        if not passes and skipped.get("head") == head and (skipped.get("check") or {}).get("status") == "pass":
+            # sd:2998. The gate alone cleared a docs-only or pin-bump head.
+            return {"status": "clean", "findings": [], "review_skipped": skipped["tier"],
+                    "subject": {"base": skipped["base"], "head": head, "paths": []}}
         if not passes:
             raise Refusal("no completed local review receipt for this head")
         if not self.binding_holds():
@@ -730,7 +738,7 @@ class SharedReview:
         """Where this branch's commits begin, for trailer and vendor reads."""
         passes = self.state.get("passes") or []
         if not passes:
-            return self.state["empty_diff"]["base"]
+            return (self.state.get("empty_diff") or self.state["review_skipped"])["base"]
         return passes[-1]["report"].get("authorship_base") or passes[0]["report"]["subject"]["base"]
 
     def gate_check_base(self) -> str | None:

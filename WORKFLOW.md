@@ -241,7 +241,9 @@ In a shared repository:
 - No `Work:` line in a pull request body unless the pull request resolves a
   work item that lives in that repository.
 - No `docs/work/`, `docs/spec/`, or `docs/decisions/` commits. `mode: guest`
-  already carries this: planning artifacts go to the fork's integration branch.
+  already carries this: planning artifacts stay out of the repository, on
+  every branch and every remote, a fork's included; no integration branch
+  holds them.
   Two machines enforce that refusal. `sd-review --scope planning` calls
   `sd_lib.guest_artifact_refusal`, which resolves the mode and names refused
   paths. `sd-plan` uses that review before promotion. `sd-ship` checks the
@@ -508,13 +510,15 @@ The rules for them:
   to its repository's queue file, which outlives the session. `sd-ship lane
   run` drains it in order under one lock per repository: head check,
   `prepare --catch-up` with the entry's delivery claim and acceptance file,
-  then `merge` for an entry queued with `--manual`. An entry with no claim is
+  then `merge` when `repo.runner_merge` is `auto` or the entry was queued
+  with `--manual` (sd:3132); otherwise, or when the setting cannot be read,
+  the entry stops `prepared` and its `code` says why. An entry with no claim is
   refused at enqueue, as prepare refuses it. A
   failed entry is marked and the next one runs. A second runner exits at once
   rather than wait. Each prepare and merge keeps its whole output under
   `<lane>/logs/`. `list` and `cancel` read and edit the queue; `watch` prints
   each gate end a log under `sd.lane_root` records, once. While an entry
-  queued with `--manual` ships, the runner gates the next entry on its
+  the runner may merge ships, the runner gates the next entry on its
   predicted landing in the background, and waits for that gate after the
   merge, so the next prepare reuses its receipt (sd:2586). That needs the
   tree key above; the next entry's `speculation` field says what ran.
@@ -585,15 +589,17 @@ The rules for them:
 | 1 | satellite | `git merge origin/main` on the branch, or `sd-ship prepare --catch-up` | The head contains the current base before any gate |
 | 2 | satellite | `sd gate check --base main` | Runs `sd-check`; writes the satellite's receipt and the offload receipt to the hub |
 | 3 | satellite | `sd-ship prepare --item N --title T --body-file F` | Reviews (its gate reuses step 2), pushes, binds the pull request, posts `sd/local-gate` from the offload receipt |
-| 4 | satellite | `sd-ship lane request --item N --manual` | Writes `lane-request:v1:<slug>:<item>` to the hub |
+| 4 | satellite | `sd-ship lane request --item N [--manual]` | Writes `lane-request:v1:<slug>:<item>` to the hub; `--manual` is needed only when `repo.runner_merge` is `manual` |
 | 5 | hub | `sd-ship lane run --hosted`, from a scheduled job | Runs each lane the hub hosts; each takes requests in before each claim; skips a lane another runner holds |
 | 6 | hub | intake, before each claim | Refuses a request the repository did not opt into, a malformed one, or one not prepared at its head; else queues a `gate: satellite` entry and writes `queued` |
 | 7 | hub | the entry | Fetches the branch and the base; hands back on `head_moved` or `base_moved`; no prepare, no catch-up, no speculative gate; then `sd-ship merge --satellite-gate` |
 | 8 | hub | `sd-ship merge --satellite-gate` | Accepts the offload receipt under the trust rule, posts no status, merges |
 | 9 | hub | landing | Deletes `origin/<branch>` with a lease on the merged head; writes the outcome to the request row; notes the item |
 
-Without `--manual` in step 4, step 7 stops before the merge as `prepared`,
-as a hub entry queued without it does.
+Step 7 merges when `repo.runner_merge` is `auto` or step 4 passed `--manual`.
+Otherwise, or when the setting cannot be read, it stops before the merge as
+`prepared`, as a hub entry does; the request row's `reason` and `next_action`
+say why and how to merge.
 
 A session writes on its own branch in its own worktree, one writer per
 worktree: `sd-plan --worktree` puts a new branch in a worktree of its own, and
@@ -613,7 +619,7 @@ the block; the file is untracked by construction.
 |---|---|---|
 | `full` | `docs/work/` in the repository | everything above; merge only with `runner_merge: auto` on the row |
 | `minimal` | nowhere, by convention only; nothing enforces it | the small-change path only |
-| `guest` | the fork's integration branch | the small-change path to pull-request-ready; no posts, no labels |
+| `guest` | nowhere in the repository; both checks below refuse them | the small-change path to pull-request-ready; no posts, no labels |
 
 `minimal` holds no work items by agreement, not by a check.
 `sd_lib.guest_artifact_refusal` and `sd-ship`'s push check refuse
@@ -637,9 +643,9 @@ run `guest` whatever the line says: a `mode: full` you wrote is a ceiling,
 never a floor: detection lowers it and never raises it, so a repository
 that gains a collaborator stops
 receiving your planning artifacts before the next push, not after the
-next merge. The push check is of the destination: your fork's integration
-branch is your own remote, and the guest push there proceeds while the
-same branch offered upstream is refused. A lowered run leaves a note on the
+next merge. The push check reads what the push adds over `origin/<base>`
+and refuses a guest push that carries planning paths, to an upstream or to
+your own fork alike; no fork integration branch exists. A lowered run leaves a note on the
 item saying which answer lowered it, once per item and remote however many
 runs it takes, and `sd-status` names the planning artifacts the shared tree
 was already carrying, which are yours to move. Mode never decides merging.

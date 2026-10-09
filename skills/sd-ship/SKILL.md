@@ -34,6 +34,8 @@ While it stands, `prepare` and `merge` for any other item refuse as `lane_held`,
 The held item's merge ends it; `sd-ship release --item ID` ends it sooner, and only for the held item.
 On an sd satellite, `merge`, and `prepare` on a merged record, refuse as hub-only; the hub's lane merges (sd:2679).
 `sd-ship lane run` leaves a merged worktree and its branch in place: removal can race a live builder's open file handles.
+`sd-ship lane run` merges an entry when `repo.runner_merge` is `auto`, or when it carries `--manual` (sd:3132).
+Otherwise, or when the setting cannot be read, the entry stops `prepared` with `runner_merge_manual` or `runner_merge_unknown`.
 Stop the builder, then run the entry's `remove` command, also in the item note.
 Do not change gates to obtain a merge.
 An existing manual operator path needs separate authorization; a gate refusal does not grant it.
@@ -65,6 +67,7 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    Before the review, `sd-ship prepare` warns about open PRs and origin branches that name the item or change the same files (sd:1151).
    The warning refuses nothing; read it before the review spends a pass.
    Use `sd-review --scope branch --challenge` for the *code, before merge* point.
+   A branch of only plain prose (not `skills/`, `bin/`, `tests/`, hooks, `docs/work/`, any dot-path or agent-instruction file such as `AGENTS.md`) or only `.sd-pack-rev` gets the gate alone; prepare says `review skipped: docs-only` or `pin-bump` (sd:2998).
    Read its cap on that row in the sd-ai-command-pack checkout's `.claude/rules/sd-planning-adversarial-review.md`.
    Run `sd-docs-lint` against the built PR body.
    With no work root, use `--body-only`; do not create planning files to satisfy tree checks.

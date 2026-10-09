@@ -141,8 +141,8 @@ and the workflow each selects is stated in [WORKFLOW.md](WORKFLOW.md):
   whole path runs; an unattended merge additionally needs `runner_merge: auto`
   on the repository row, set with `sd-db.sh repo runner-merge <path> auto`.
 - `minimal` — no work items anywhere, and the small-change path only.
-- `guest` — planning artifacts go to the fork's integration branch, the loop
-  stops at pull-request-ready, and nothing is posted upstream.
+- `guest` — planning artifacts stay out of the repository, a fork's branches
+  included; the loop stops at pull-request-ready, and nothing is posted upstream.
 
 Without a `mode:` line the mode is detected, and detection only ever lowers a
 line you wrote.
