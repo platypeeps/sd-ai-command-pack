@@ -411,8 +411,6 @@ class Ship(SharedReview):
     copilot_carried: bool = False
     #: The sd hub a satellite prepare reached, unlocked (sd:2679); None on the hub.
     served_by: str | None = None
-    #: A prepare off the lane host runs without the ship lock (sd:3003).
-    lock_free: bool = False
     #: The warning that ancestor clearance earns, held until dispatch. It says
     #: the gate cleared a merge, so the step that sends the merge writes it;
     #: written when the gate cleared, it outlived every later refusal and each
@@ -1642,7 +1640,7 @@ class Ship(SharedReview):
         return {"pid": os.getpid(), "ppid": os.getppid(), "started_at": PROCESS_STARTED,
                 "checkout": str(self.root), "chdir": getattr(self.args, "chdir", None),
                 "authority": "--manual" if getattr(self.args, "manual", False) else None,
-                "lock_holder": None if self.lock_free else lock_options(self.args, self.store).get("holder"),
+                "lock_holder": None if self.args.command == "prepare" else lock_options(self.args, self.store).get("holder"),
                 **({"served_by": self.served_by} if self.served_by else {})}
 
     def merge_authority(self) -> None:
@@ -2633,17 +2631,17 @@ def dispatch(root, connection, database, args, store, readonly):
     delivery = Ship(root, connection, database, args)
     if readonly:
         return getattr(delivery, args.command)()
-    # sd:2679. Off the lane host prepare runs without the ship lock, which only
-    # the host takes: each save is checked against the row's revision. A merged
-    # record's prepare, which reconciles, still meets LaneElsewhere at the lock.
     # A hold for another item refuses before the lock, so a held lane's lock
     # is not contended, and again under it, where the answer holds (sd:2035).
-    # A lock-free prepare reads it too (sd:1938).
     held = args.command in ("prepare", "merge")
     if held:
         sd_ship_hold.refuse_other(database, delivery.repository, args.item)
-    if args.command == "prepare" and elsewhere and delivery.state.get("phase") not in ("merged", "merge_dispatch"):
-        delivery.served_by, delivery.lock_free = hub_serving(database), True
+    # sd:1938. Prepare runs without the ship lock (sd:2679 began it off the lane
+    # host): each save is checked against the row's revision, and a reserved
+    # pass names its process (`refuse_live_review`). A merged record's prepare
+    # reconciles under the lock, so off the lane host it meets LaneElsewhere there.
+    if args.command == "prepare" and delivery.state.get("phase") not in ("merged", "merge_dispatch"):
+        delivery.served_by = hub_serving(database)
         return delivery.prepare()
     with store.repository_lock(database, delivery.repository, **lock_options(args, store)):
         if held:

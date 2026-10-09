@@ -88,7 +88,7 @@ class HeldLane(LaneCase):
         # The merge that the hold was for ends it; nothing waits out the expiry.
         self.assertFalse(self.hold_path().exists())
 
-    def test_a_hold_that_lands_while_a_prepare_waits_for_the_lock_refuses_it_under_the_lock(self):
+    def test_a_hold_that_lands_while_a_merge_waits_for_the_lock_refuses_it_under_the_lock(self):
         """The check before the lock is an early answer; the one under it is the answer."""
         import sd_ship_hold
         other = self.other_item()
@@ -101,9 +101,9 @@ class HeldLane(LaneCase):
                 yield
 
         with patch.object(receipts, "repository_lock", hold_lands_first), \
-                patch.object(ship.Ship, "prepare", side_effect=AssertionError("ran under a hold for another item")):
+                patch.object(ship.Ship, "merge", side_effect=AssertionError("ran under a hold for another item")):
             with self.assertRaisesRegex(ship.Refusal, f"held for sd:{self.item}"):
-                self.dispatch("prepare", item=other)
+                self.dispatch("merge", "--manual", "--expected-head", self.head(), item=other)
 
     def test_a_hold_refuses_another_items_merge_before_any_merge_call(self):
         self.assertEqual(self.dispatch("prepare")["phase"], "ready_to_send")
@@ -320,6 +320,43 @@ class LockFreePrepare(LaneCase):
         self.assertIsNone(live(reviewing, reserved(child.pid, report={})))
         self.assertIsNone(live(reviewing, [{"head": "0" * 40, "started_at": now.isoformat()}]), "a pass before sd:1938")
 
+    def test_a_prepare_in_review_holds_no_lock_so_another_items_lane_step_runs(self):
+        """The point of sd:1938: a hand prepare's review no longer refuses the lane for its whole run.
+
+        The lane's step here is `hold` for another item, which takes the same ship lock a lane merge takes.
+        The hold lands mid-prepare, so this item's merge then refuses the held lane.
+        """
+        other = self.other_item()
+        patcher, answers = self.during_review(lambda: (receipts.held_locks(self.database),
+                                                       self.run_cli("hold", "--item", str(other), "--holder", "pack lane")))
+        with patcher:
+            prepared = self.dispatch("prepare")
+        ((locks, (code, held)),) = answers
+        self.assertEqual((locks, code), ([], 0), held)
+        self.assertEqual(held["hold"]["item"], other)
+        self.assertEqual((prepared["phase"], prepared["invoker"]["lock_holder"]), ("ready_to_send", None))
+        with self.assertRaisesRegex(ship.Refusal, f"held for sd:{other}"):
+            self.dispatch("merge", "--manual", "--expected-head", self.head())
+        self.assertEqual(self.puts(), [])
+
+    def test_a_merged_records_prepare_still_reconciles_under_the_lock(self):
+        self.assertEqual(self.dispatch("prepare")["phase"], "ready_to_send")
+        key = receipts.receipt_key("fixture/repo", "topic", self.item)
+        revision, row = receipts.read(self.connection, key)
+        receipts.save(self.connection, key, revision, {**row, "phase": "merged"})
+        entered, lock = [], receipts.repository_lock
+
+        @contextlib.contextmanager
+        def recording(database, repository, **options):
+            entered.append(repository)
+            with lock(database, repository, **options):
+                yield
+
+        with patch.object(receipts, "repository_lock", recording), \
+                patch.object(ship.Ship, "reconcile", return_value={"ok": True, "phase": "merged"}):
+            self.dispatch("prepare")
+        self.assertEqual(entered, ["fixture/repo"])
+
     def test_two_prepares_before_review_one_loses_at_the_revision_check(self):
         first, second = self.operation("prepare"), self.operation("prepare")
         self.assertEqual(second.prepare()["phase"], "ready_to_send")
@@ -374,7 +411,7 @@ class LaneHost(LaneCase):
         with self.on_a_satellite(host="build-2"), patch.dict("os.environ", {"XDG_STATE_HOME": str(state)}):
             prepared = self.dispatch("prepare")
             self.assertEqual(prepared["phase"], "ready_to_send")
-            self.assertIsNotNone(prepared["invoker"]["lock_holder"])  # a host's prepare holds the lock
+            self.assertIsNone(prepared["invoker"]["lock_holder"])  # no prepare holds the lock (sd:1938)
             merged = self.dispatch("merge", "--manual", "--expected-head", self.head())
         self.assertEqual(merged["phase"], "merged")
         self.assertEqual(len(list((state / "sd" / receipts.LOCK_DIRECTORY).glob("*.lock"))), 1)
