@@ -218,6 +218,17 @@ class TheHookRun(unittest.TestCase):
         self.assertIn("tests.test_doc_citations", output)
         self.assertNotIn("Ran ", output, "a pass ran with one of the two deleted")
 
+    def test_a_staged_symlink_is_not_linted_through_its_target(self):
+        """sd:3136 (f31710eaba15): the commit holds the link's text, not the file it names, so Ruff on
+        `link.py` judged a file the commit does not carry."""
+        (self.root / "notes.txt").write_text("import os\n", encoding="utf-8")
+        (self.root / "link.py").symlink_to("notes.txt")
+        git("add", "--", "link.py", cwd=self.root)
+        result = self.run_hook()
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        self.assertNotIn("F401", output, "Ruff followed the staged link")
+
     def test_a_suffixless_path_that_cannot_be_opened_counts_as_python(self):
         """Fail closed, as `_is_python_script` does: "not Python" for a file
         nobody could open would skip Ruff on it silently (sd:1000)."""

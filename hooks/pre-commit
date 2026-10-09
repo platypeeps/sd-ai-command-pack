@@ -334,7 +334,9 @@ def main() -> int:
         print(f"pre-commit: {len(unstaged)} staged path(s) differ from the working "
               f"tree, so the gates would read what is not being committed: "
               f"{', '.join(unstaged)}; git add them again, or stash the change")
-    python_files = [path for path in staged if is_python(root / path)]
+    # A staged symlink commits its target's name, not its text; Ruff would follow it and judge a file
+    # the commit does not carry (sd:3136). `diverged` has refused a link whose type differs from the index's.
+    python_files = [path for path in staged if not (root / path).is_symlink() and is_python(root / path)]
     if status == 0 and python_files:
         status = run([python, "-m", "ruff", "check", "--", *python_files], root)
         if status != 0:
