@@ -178,16 +178,13 @@ SETUP_PYTHON = $(SETUP_VENV)/bin/python
 # write alone -- measured, not assumed -- which is why the marker survives
 # the step that rebuilds the interpreter around it.
 #
-# The last step serves the machine (sd:1118). The operator ruled on 2026-09-30
-# that the commands run from a clean clone of origin/main that nobody works
-# in and that only `make setup` updates: `--serve` clones it on the first run
-# and moves it to the exact commit origin/main names on every run. Each move
-# builds that commit's environment with this recipe and `SERVE=no` before it
-# renders. `--venv` takes sd_db into the environment this recipe builds, which
-# `VENV=...` may put outside `.venv`; a serving build also passes `LIVE_VENV`,
-# the environment it replaces, and the sd_db guards protect both. `SERVE=no`
-# skips the serving step, for a rollback that should stay put. README
-# "A dedicated serving tree" has the rest.
+# The last step serves the machine (sd:3009). The commands run from a plain
+# clone of origin/main that nobody works in. In the clone, `--serve` renders
+# it; in any other checkout, it clones the tree the first time, detaches it at
+# origin/main and runs this recipe there. `--venv` takes sd_db into the
+# environment this recipe builds, which `VENV=...` may put outside `.venv`.
+# `SERVE=no` skips the serving step. README "A dedicated serving tree" has
+# the rest.
 setup:
 	@venv="$(SETUP_VENV)"; \
 	  [ -n "$$venv" ] || { printf '%s\n' "error: VENV is empty; there is no path to provision" >&2; exit 1; }; \
@@ -202,7 +199,7 @@ setup:
 	  rm -rf "$$venv/sd-requirements" "$$venv/.sd-requirements.new"
 	"$(PYTHON)" -m venv "$(SETUP_VENV)"
 	"$(SETUP_PYTHON)" -m pip install --require-hashes -r requirements-dev.txt -r requirements-security.txt
-	"$(SETUP_PYTHON)" bin/sd_install.py --provision-library --venv "$(SETUP_VENV)" $(if $(LIVE_VENV),--live-venv "$(LIVE_VENV)")
+	"$(SETUP_PYTHON)" bin/sd_install.py --provision-library --venv "$(SETUP_VENV)"
 	@mkdir -p "$(SETUP_VENV)/.sd-requirements.new"
 	cp requirements-dev.txt requirements-security.txt "$(SETUP_VENV)/.sd-requirements.new/"
 	@mv "$(SETUP_VENV)/.sd-requirements.new" "$(SETUP_VENV)/sd-requirements"

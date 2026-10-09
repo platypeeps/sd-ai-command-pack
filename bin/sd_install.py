@@ -37,13 +37,11 @@ import importlib
 import json
 import os
 import re
-import secrets
 import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
-import time
 from collections.abc import Iterable
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
@@ -87,15 +85,6 @@ GIT_TIMEOUT = 15
 #: waits forever for a remote is an install nobody can script.
 PULL_TIMEOUT = 120
 
-#: The serving-tree activation contract (sd:1118). An installer that declares
-#: it moves a detached serving tree by commit on `--pull`, records
-#: `previousCommit` in the receipt, and answers `--rollback`. The next
-#: activation runs the target commit's installer, so `--pull` and `--rollback`
-#: refuse a target whose `bin/sd_install.py` does not declare it: from there
-#: no second rollback could come back (review round 1). Raise the number when
-#: a serving tree's activation changes in a way an older installer cannot
-#: follow; a target needs at least 1.
-ACTIVATION_CONTRACT = 1
 
 
 def sibling(name: str):
@@ -615,20 +604,6 @@ def git_context(checkout: Path) -> dict:
         "branch": git(["rev-parse", "--abbrev-ref", "HEAD"], checkout) or "",
         "dirty": bool(git(["status", "--porcelain"], checkout)),
     }
-
-
-def previous_commit(recorded: dict, commit: str) -> str:
-    """The commit `--rollback` returns to, after an activation of `commit` (sd:1118).
-
-    A run that activates a new commit records the one the receipt held; a run
-    at the same commit keeps what the receipt already recorded, so re-rendering
-    in place does not forget the way back. Empty when there is none.
-    """
-    held = recorded.get("commit")
-    if isinstance(held, str) and held and held != commit:
-        return held
-    kept = recorded.get("previousCommit")
-    return kept if isinstance(kept, str) and kept != commit else ""
 
 
 # --------------------------------------------------------------------- render
@@ -1171,28 +1146,23 @@ class Link:
     name: str
     path: Path
     target: Path
-    state: str  # "absent", "ours", "recorded" or "foreign"
+    state: str  # "absent", "ours" or "foreign"
 
 
 class LinkFailed(Exception):
     """A link could not be made; whatever this run linked has been unlinked."""
 
 
-def link_plan(checkout: Path, bin_dir: Path, recorded: dict[str, str] | None = None) -> list[Link]:
+def link_plan(checkout: Path, bin_dir: Path) -> list[Link]:
     """Classify `bin_dir/<name>` for every command, before anything is written.
 
     "Ours" is a symlink, absolute or relative, that resolves to this checkout's
-    copy; it is kept as it is, inode and all. "Recorded" is a symlink still at
-    the target the receipt's link row for that path names: the last install
-    made it, `prune_links` could remove it, so this run may retarget it. That
-    is how the links follow an install to a serving checkout (sd:1118).
-    Anything else at the path -- a regular file, a dangling link, a link into
-    another checkout no receipt names -- is foreign, and one foreign entry
-    refuses the whole run. The plan runs first thing in `cmd_user`, before the
-    library is opened, because `expire_trials` writes to the shared database
-    and a refusal must leave nothing changed.
+    copy; it is kept as it is, inode and all. Anything else at the path -- a
+    regular file, a dangling link, a link into another checkout -- is foreign,
+    and one foreign entry refuses the whole run. The plan runs first thing in
+    `cmd_user`, before the library is opened, because `expire_trials` writes
+    to the shared database and a refusal must leave nothing changed.
     """
-    recorded = recorded or {}
     plans: list[Link] = []
     for name in bin_commands(checkout):
         path = bin_dir / name
@@ -1201,8 +1171,6 @@ def link_plan(checkout: Path, bin_dir: Path, recorded: dict[str, str] | None = N
             state = "absent"
         elif path.is_symlink() and _resolves_to(path, target):
             state = "ours"
-        elif path.is_symlink() and str(path) in recorded and _resolves_to(path, Path(recorded[str(path)])):
-            state = "recorded"
         else:
             state = "foreign"
         plans.append(Link(name, path, target, state))
@@ -1216,12 +1184,10 @@ def link_commands(plans: list[Link], bin_dir: Path, recovery: ExitStack, *, dry_
     no bytes of its own, and a digest read through it would be the script's.
     An `OSError` on any link unlinks every link this call made and raises
     `LinkFailed`, so no link exists that no receipt names; `cmd_user` then
-    puts the renders made before this back. A recorded link
-    is replaced by a rename over it, and a failure points every link this
-    call replaced back at its old target, so the old receipt still holds.
-    `recovery` keeps that undo armed after this returns, for a failure later
-    in the install; the caller disarms it once the receipt is written. A
-    checkout with no commands links nothing and makes no directory.
+    puts the renders made before this back. `recovery` keeps that undo armed
+    after this returns, for a failure later in the install; the caller
+    disarms it once the receipt is written. A checkout with no commands links
+    nothing and makes no directory.
     """
     rows = [
         {"path": str(plan.path), "kind": "link", "target": str(plan.target)}
@@ -1230,8 +1196,7 @@ def link_commands(plans: list[Link], bin_dir: Path, recovery: ExitStack, *, dry_
     if dry_run or not plans:
         return rows
     made: list[Path] = []
-    moved: list[tuple[Path, str]] = []
-    recovery.callback(_undo_links, made, moved)
+    recovery.callback(_undo_links, made)
     for plan in plans:
         if plan.state == "ours":
             continue
@@ -1240,49 +1205,21 @@ def link_commands(plans: list[Link], bin_dir: Path, recovery: ExitStack, *, dry_
         # line and rc 1, not a traceback (C-31).
         try:
             bin_dir.mkdir(parents=True, exist_ok=True)
-            if plan.state == "recorded":
-                old = os.readlink(plan.path)
-                _replace_link(plan.path, plan.target)
-                moved.append((plan.path, old))
-            else:
-                os.symlink(plan.target, plan.path)
-                made.append(plan.path)
+            os.symlink(plan.target, plan.path)
+            made.append(plan.path)
         except OSError as exc:
-            _undo_links(made, moved)
+            _undo_links(made)
             raise LinkFailed(
                 f"could not link {plan.path} ({exc.strerror or exc})"
             ) from exc
     return rows
 
 
-def _undo_links(made: list[Path], moved: list[tuple[Path, str]]) -> None:
-    """Remove the links one `link_commands` call made and point the ones it moved back; once."""
+def _undo_links(made: list[Path]) -> None:
+    """Remove the links one `link_commands` call made; once."""
     for path in made:
         path.unlink(missing_ok=True)
-    for path, old in moved:
-        _replace_link(path, Path(old))
     made.clear()
-    moved.clear()
-
-
-def _replace_link(path: Path, target: Path) -> None:
-    """Point the link at `path` to `target` in one rename, so no moment finds it missing.
-
-    The spare link takes a name no file holds, because `os.symlink` refuses
-    one that exists; so the only file this removes is the spare it made.
-    """
-    while True:
-        spare = path.with_name(f".{path.name}.sd-install-{secrets.token_hex(8)}")
-        try:
-            os.symlink(target, spare)
-            break
-        except FileExistsError:
-            continue
-    try:
-        os.replace(spare, path)
-    except OSError:
-        spare.unlink()
-        raise
 
 
 def prune_links(
@@ -1910,7 +1847,7 @@ def provision_library(ctx: Context, out, ref: str | None = None) -> tuple[bool, 
     machine the exit code exists for, the one with no library, exited zero.
     """
     del out
-    python = ctx.venv / "bin" / "python" if ctx.venv else ctx.checkout / VENV_RELATIVE
+    python = library_venv(ctx) / "bin" / "python"
     source = library_source(ctx.environ)
     if not python.is_file():
         return False, f"no virtualenv at {python}; run `make setup` for sd_db"
@@ -1922,10 +1859,10 @@ def provision_library(ctx: Context, out, ref: str | None = None) -> tuple[bool, 
         ref, why = library_pin(checkout)
         if not ref:
             return False, f"sd_db not installed, trials unavailable: {why}"
-    for venv in guarded_environments(ctx):
-        refusal = sibling("sd_library_guard").downgrade_refusal(venv, checkout, ref, sibling("sd_lib").git_output)
-        if refusal:
-            return False, refusal
+    refusal = sibling("sd_library_guard").downgrade_refusal(
+        library_venv(ctx), checkout, ref, sibling("sd_lib").git_output)
+    if refusal:
+        return False, refusal
     target = f"git+file://{checkout}@{ref}#subdirectory={LIBRARY_RELATIVE}"
     git = sibling("sd_lib").git_output
     # The note is about the checkout's HEAD: a `ref` that is not it installs
@@ -1975,15 +1912,13 @@ def provisioning_lock(ctx: Context):
         yield
 
 
-def guarded_environments(ctx: Context) -> tuple[Path, ...]:
-    """Every environment a provisioning run must not put older `sd_db` into (review round 18).
+def library_venv(ctx: Context) -> Path:
+    """The environment a provisioning run installs `sd_db` into: `--venv`, else the checkout's `.venv`.
 
-    The destination it writes, `--venv` or the checkout's `.venv`; and, for a
-    serving build, the live environment the built one replaces, `--live-venv`.
-    The guards read exactly these, so neither a custom `VENV` nor an empty
-    inactive slot hides a newer install.
+    The guards read the same one, so a custom `VENV` with a newer install is
+    protected like `.venv` (sd:1118 review round 18).
     """
-    return (ctx.venv or ctx.checkout / ".venv", *((ctx.live_venv,) if ctx.live_venv else ()))
+    return ctx.venv or ctx.checkout / ".venv"
 
 
 def installed_library_commit(venv: Path) -> str | None:
@@ -2003,8 +1938,8 @@ def installed_library_commit(venv: Path) -> str | None:
     return None
 
 
-def ancestry_refusal(venvs: tuple[Path, ...], system: Path, ref: str, *, merged: bool) -> str:
-    """Why installing `ref` would put older `sd_db` than one of `venvs` holds, or "".
+def ancestry_refusal(venv: Path, system: Path, ref: str, *, merged: bool) -> str:
+    """Why installing `ref` would put older `sd_db` than `venv` holds, or "".
 
     The schema guard compares schema numbers, so two library commits under
     one schema pass it in either order. A `ref` that is an ancestor of the
@@ -2016,19 +1951,18 @@ def ancestry_refusal(venvs: tuple[Path, ...], system: Path, ref: str, *, merged:
     nothing here; the install reports the latter.
     """
     git = sibling("sd_lib").git_output
+    present = installed_library_commit(venv)
     commit = git(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], system)
-    for venv in venvs:
-        present = installed_library_commit(venv)
-        if not present or not commit or present == commit:
-            continue
-        if merged:
-            if git(["merge-base", "--is-ancestor", present, commit], system) is None:
-                return (f"kept installed sd_db {present}: installed sd_db {present} is not an ancestor of "
-                        f"{commit}, so installing would replace newer or unrelated library code")
-            continue
-        if git(["merge-base", "--is-ancestor", commit, present], system) is not None:
-            return (f"preserving installed sd_db {present}: {ref} ({commit}) is an ancestor of it, so "
-                    f"installing would replace newer library code; update {system} before provisioning")
+    if not present or not commit or present == commit:
+        return ""
+    if merged:
+        if git(["merge-base", "--is-ancestor", present, commit], system) is None:
+            return (f"kept installed sd_db {present}: installed sd_db {present} is not an ancestor of "
+                    f"{commit}, so installing would replace newer or unrelated library code")
+        return ""
+    if git(["merge-base", "--is-ancestor", commit, present], system) is not None:
+        return (f"preserving installed sd_db {present}: {ref} ({commit}) is an ancestor of it, so "
+                f"installing would replace newer library code; update {system} before provisioning")
     return ""
 
 
@@ -2046,9 +1980,9 @@ def provision_guarded(ctx: Context, out, ref: str | None = None, *, merged: bool
         if candidate is None:
             candidate, _ = library_pin(system)
         if candidate:
-            if merged and installed_library_commit(guarded_environments(ctx)[0]) == candidate:
+            if merged and installed_library_commit(library_venv(ctx)) == candidate:
                 return False, f"sd_db {candidate} is already installed"
-            refusal = ancestry_refusal(guarded_environments(ctx), system, candidate, merged=merged)
+            refusal = ancestry_refusal(library_venv(ctx), system, candidate, merged=merged)
             if refusal:
                 return False, refusal
             return provision_library(ctx, out, ref=candidate)
@@ -2148,9 +2082,6 @@ class Context:
     bin_dir: Path | None = None
     # `--venv`, when given: the environment `--provision-library` installs into.
     venv: Path | None = None
-    # `--live-venv`, when given: the environment a serving build replaces,
-    # which the library guards protect as well as the destination.
-    live_venv: Path | None = None
 
     @property
     def sandboxed(self) -> bool:
@@ -2220,10 +2151,7 @@ def cmd_user(ctx: Context, out) -> int:
     # Before the library: `expire_trials` writes, and a refusal writes nothing.
     recorded = read_receipt(ctx.receipt)
     bin_dir = link_directory(ctx, recorded)
-    plans = link_plan(ctx.checkout, bin_dir, {
-        row["path"]: row["target"] for row in owned_entries(recorded)
-        if row.get("kind") == "link" and isinstance(row.get("path"), str) and isinstance(row.get("target"), str)
-    })
+    plans = link_plan(ctx.checkout, bin_dir)
     for plan in plans:
         if plan.state == "foreign":
             print(
@@ -2373,18 +2301,14 @@ def cmd_user(ctx: Context, out) -> int:
         # way would churn every row without changing a single installed file, and a
         # diff that noisy is a diff nobody reads.
         owned.sort(key=lambda row: (row["path"], row.get("kind", "")))
-        source = git_context(ctx.checkout)
         payload = {
             "schema": RECEIPT_SCHEMA,
             "checkout": str(ctx.checkout),
-            **source,
+            **git_context(ctx.checkout),
             "platformHomes": {home.key: str(home.root) for home in ctx.homes},
             "binDir": str(bin_dir),
             "owned": owned,
         }
-        replaced = previous_commit(recorded, source["commit"])
-        if replaced:
-            payload["previousCommit"] = replaced
         if not ctx.dry_run:
             write_receipt(ctx.receipt, payload)
         recovery.pop_all()
@@ -2813,286 +2737,29 @@ def _git_in(directory: Path, args: list[str], timeout: float = GIT_TIMEOUT) -> t
     return done.returncode, done.stdout.strip(), done.stderr.strip()
 
 
-def activation_contract(ctx: Context, commit: str) -> int:
-    """The `ACTIVATION_CONTRACT` that `commit`'s installer declares; 0 when it declares none."""
-    code, text, _ = _git(ctx, ["show", f"{commit}:bin/sd_install.py"])
-    found = None if code else re.search(r"^ACTIVATION_CONTRACT = (\d+)$", text, re.MULTILINE)
-    return int(found.group(1)) if found else 0
-
-
-def _forwarded(ctx: Context) -> list[str]:
-    """The flags another installer needs to act on the same home and link directory as this run."""
-    argv = ["--home", str(ctx.home)] if ctx.sandboxed else []
-    return argv + (["--bin-dir", str(ctx.bin_dir)] if ctx.bin_dir is not None else [])
-
-
-def _render_checked_out(ctx: Context, out) -> int:
-    """Run the installer the checkout now holds as `--user`, and relay what it says.
-
-    Under the python of the slot `.venv` now links to, not this process's:
-    the old slot's python imports the old slot's `sd_db` first, so a library
-    upgrade would render once with the old library (sd:2945).
-    """
-    python = ctx.checkout / ".venv" / "bin" / "python"
-    argv = [str(python), str(ctx.checkout / "bin" / "sd_install.py"), "--user", *_forwarded(ctx)]
-    try:
-        done = subprocess.run(argv, env=ctx.environ, capture_output=True, text=True, check=False)  # nosec B603 - fixed argv
-    except OSError as problem:
-        print(f"error: cannot run {python} to render {ctx.checkout}: {problem}", file=out)
-        return 1
-    print(done.stdout + done.stderr, file=out, end="")
-    return done.returncode
-
-
-def _activate(ctx: Context, commit: str, out) -> int:
-    """Detach the serving tree at exactly `commit` and render it; on any failure, put the install back.
-
-    The target commit's own installer renders it (review round 2 of sd:1118),
-    so a change to rendering takes effect in the update that brings it. This
-    installer, already loaded, supervises: a target render that fails or
-    cannot run returns the tree to the commit it started from, the receipt to
-    its bytes, and renders that commit again with this code, which is that
-    commit's. The target's `cmd_user` has already put its own renders back.
-    """
-    if activation_contract(ctx, commit) < 1:
-        print(f"error: the installer at {commit} declares no ACTIVATION_CONTRACT: it predates the serving "
-              "tree, so after it no --pull or --rollback could move this tree by commit. Refusing; "
-              "nothing moved.", file=out)
-        return 1
-    code, original, err = _git(ctx, ["rev-parse", "--verify", "HEAD^{commit}"])
-    if code or not original:
-        print(f"error: cannot read the serving tree's HEAD:\n{err}", file=out)
-        return 1
-    receipt = ctx.receipt.read_bytes() if ctx.receipt.exists() else None
-    # One order (review rounds 14 and 17): build the target's environment
-    # from a scratch checkout while the tree serves on untouched, then move
-    # the code and `.venv` back to back, then render. Recovery covers every
-    # step after the first change, raised or returned.
-    venv = ctx.checkout / ".venv"
-    moved = rendering = False
-    rendered = 1
-    try:
-        previous = os.readlink(venv) if venv.is_symlink() else None
-        slot = _provision(ctx, commit, out)
-        if slot is None:
-            print(f"error: the serving tree stays at {original}, with its environment and install as they were.",
-                  file=out)
-            return 1
-        moved = True
-        code, _, err = _git(ctx, ["checkout", "--quiet", "--detach", commit])
-        if code:
-            print(f"error: git checkout --detach {commit} failed:\n{err}", file=out)
-            return 1
-        _replace_link(venv, Path(slot.name))
-        print(f"serving {commit}", file=out)
-        rendering = True
-        rendered = _render_checked_out(ctx, out)
-    finally:
-        if rendered and moved:
-            _put_back(ctx, original, previous, receipt if rendering else None, commit, out, rendered=rendering)
-    return rendered
-
-
-#: The two environments a serving tree alternates between; `.venv` links to
-#: the one in use, so building the next never touches it.
-ENV_SLOTS = (".venv-a", ".venv-b")
-
-#: What a calling `make` hands its children. `make setup VENV=...` puts the
-#: override in `MAKEFLAGS`, and a sub-make would provision that path.
-MAKE_VARIABLES = frozenset({"MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES", "VENV", "LIVE_VENV"})
-
-
-def _provision(ctx: Context, commit: str, out) -> Path | None:
-    """Build the slot `.venv` does not name, for the checked-out `commit`; None after reporting (sd:1118).
-
-    The checked-out commit's own `make setup SERVE=no` builds it, so the
-    requirements match the code. The environment is the tree's own: removing
-    the checkout that ran `make setup` takes nothing a served command needs.
-    """
-    venv = ctx.checkout / ".venv"
-    slots = [ctx.checkout / name for name in ENV_SLOTS]
-    # By where the link resolves, not its text: `.venv -> /abs/.venv-a` is
-    # live on `.venv-a`, and rebuilding that would damage what is served
-    # (review round 16).
-    live = os.path.realpath(venv) if venv.is_symlink() else None
-    targets = [os.path.realpath(path) for path in slots]
-    if live is None and not venv.exists():
-        slot = slots[0]
-    elif live in targets:
-        slot = slots[1 - targets.index(live)]
-    else:
-        print(f"error: {venv} is not a link to {' or '.join(ENV_SLOTS)}; move it aside and run `make setup` again",
-              file=out)
-        return None
-    environ = {key: value for key, value in ctx.environ.items() if key not in MAKE_VARIABLES}
-    # Built from a scratch checkout of `commit` beside the tree, so the tree
-    # keeps serving its own code on its own environment for the whole build
-    # (review round 17). The environment holds copies, never a path into the
-    # code. `LIVE_VENV` names the environment the build will replace, which
-    # the `sd_db` guards protect as well as the slot (review round 18).
-    try:
-        with tempfile.TemporaryDirectory(prefix=f".{ctx.checkout.name}-build-", dir=ctx.checkout.parent,
-                                         ignore_cleanup_errors=True) as scratch:
-            build = Path(scratch) / "tree"
-            code, _, err = _git(ctx, ["worktree", "add", "--quiet", "--detach", str(build), commit])
-            if code:
-                print(f"error: git could not check out {commit} to build {slot}:\n{err}", file=out)
-                return None
-            argv = ["make", "-C", str(build), "setup", "SERVE=no", f"VENV={slot}"]
-            done = subprocess.run(argv + ([f"LIVE_VENV={live}"] if live else []),  # nosec B603 B607 - fixed argv
-                                  env=environ, capture_output=True, text=True, check=False)
-    except OSError as problem:
-        print(f"error: provisioning {slot} for {commit} could not start make: {problem}", file=out)
-        return None
-    finally:
-        _git(ctx, ["worktree", "prune"])
-    print(done.stdout + done.stderr, file=out, end="")
-    if done.returncode:
-        print(f"error: provisioning {slot} for {commit} failed", file=out)
-        return None
-    return slot
-
-
-def _put_back(ctx: Context, original: str, previous: str | None, receipt: bytes | None, commit: str, out, *,
-              rendered: bool) -> None:
-    """Return the tree to `original`, then `.venv` to `previous`; after a render, the receipt and install too.
-
-    The code goes back first: if git cannot move it, `.venv` stays with the
-    code it was built for, and the error names the command. Each later step
-    is attempted even when an earlier one fails (review round 17).
-    """
-    code, _, err = _git(ctx, ["checkout", "--quiet", "--force", "--detach", original])
-    if code:
-        print(f"error: activating {commit} failed, and git could not return the serving tree to {original}:\n"
-              f"{err}\nIt holds {commit}'s code; run "
-              f"`git -C {ctx.checkout} checkout --detach {original}`, then `make setup`.", file=out)
-        return
-    venv = ctx.checkout / ".venv"
-    try:
-        if previous is None:
-            if venv.is_symlink():
-                venv.unlink()
-        else:
-            _replace_link(venv, Path(previous))
-    except OSError as problem:
-        print(f"error: the serving tree is back at {original}, but {venv} could not be put back to "
-              f"{previous or 'nothing'}: {problem}; run `make setup` again.", file=out)
-    if not rendered:
-        print(f"error: the serving tree is back at {original}, with its environment and install as they were.",
-              file=out)
-        return
-    try:
-        if receipt is None:
-            ctx.receipt.unlink(missing_ok=True)
-        else:
-            atomic_policy_write(ctx.receipt, receipt)
-    except OSError as problem:
-        print(f"error: the render at {commit} failed; the serving tree is back at {original}, but its receipt "
-              f"could not be put back: {problem}; run `make setup` again.", file=out)
-        return
-    # Render the tree again only if it was what the machine served. On a first
-    # `--serve` the restored receipt names the working checkout, or nothing,
-    # and rendering here would activate the clone the failed run left (sd:1118).
-    if read_receipt(ctx.receipt).get("checkout") != str(ctx.checkout):
-        print(f"error: the render at {commit} failed; the serving tree is back at {original}; it was not "
-              "serving, so nothing was rendered from it and the install it found is left as it was.", file=out)
-        return
-    if cmd_user(ctx, out):
-        print(f"error: the render at {commit} failed, the serving tree is back at {original}, and "
-              f"rendering {original} again failed too; run `--user` in {ctx.checkout}.", file=out)
-        return
-    print(f"error: the render at {commit} failed; the serving tree is back at {original} "
-          "and rendered from it again.", file=out)
-
-
-#: Seconds a move of the serving tree waits for another to end before it refuses.
-SERVE_LOCK_WAIT = 600
-
-
-@contextmanager
-def serving_lock(tree: Path, out, dry_run: bool = False):
-    """Hold `<tree>.lock`, beside the serving tree, for one whole move of it; yields False if never held.
-
-    Two `make setup` runs at once each read the slot `.venv` did not link
-    to, built it together and published it while the other still wrote it
-    (review round 15). The hold spans the fetch, the checkout, the build,
-    the render and any put-back, so the second run waits, then starts from
-    what the first left. It waits `SERVE_LOCK_WAIT` seconds, then refuses
-    with nothing moved, so a stuck run cannot hang every later one. The lock
-    is beside the tree, so `--verify` never sees it, and the kernel drops it
-    with the process, so nothing cleans it up. A dry run takes none.
-    """
-    if dry_run:
-        yield True
-        return
-    tree.parent.mkdir(parents=True, exist_ok=True)
-    path = tree.with_name(f"{tree.name}.lock")
-    with open(path, "a", encoding="utf-8") as handle:
-        deadline = time.monotonic() + SERVE_LOCK_WAIT
-        while True:
-            try:
-                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
-                if time.monotonic() >= deadline:
-                    print(f"error: another `make setup` has held {path} for {SERVE_LOCK_WAIT} seconds; "
-                          "nothing moved. Run `make setup` again once it ends.", file=out)
-                    yield False
-                    return
-                time.sleep(1)
-        yield True
-
-
-def cmd_pull_serving(ctx: Context, out) -> int:
-    """`--pull` in a serving tree: detach at the exact commit `origin/main` names, then re-render (sd:1118).
-
-    A serving tree is a clean checkout on a detached HEAD that nobody works in.
-    It moves by commit, not by branch, so the receipt names an exact merged
-    commit and `--verify` keeps comparing against it. `cmd_user` records the
-    commit it replaced as `previousCommit`, which `--rollback` returns to.
-    """
-    with serving_lock(ctx.checkout, out, ctx.dry_run) as held:
-        if not held:
-            return 1
-        code, _, err = _git(ctx, ["fetch", "--quiet", "origin"], timeout=PULL_TIMEOUT)
-        if code:
-            print(f"error: git fetch origin failed:\n{err}", file=out)
-            return 1
-        code, target, err = _git(ctx, ["rev-parse", "--verify", "--quiet", "refs/remotes/origin/main^{commit}"])
-        if code or not target:
-            print(f"error: origin/main does not name a commit after the fetch{': ' + err if err else ''}", file=out)
-            return 1
-        return _activate(ctx, target, out)
-
-
 def cmd_pull(ctx: Context, out) -> int:
     """Fast-forward the serving checkout, then re-render.
 
     Refuses off main and refuses dirty, because the serving checkout is what
     every rendered surface points at: fast-forwarding a branch someone is
     working on, or one with uncommitted edits, would change what is installed
-    on the machine as a side effect of an update. A detached checkout is a
-    serving tree (sd:1118) and moves to the exact commit `origin/main` names
-    instead (`cmd_pull_serving`).
+    on the machine as a side effect of an update. A detached serving tree
+    moves with `git checkout` and `make setup` instead (`cmd_serve`).
     """
     live = git_context(ctx.checkout)
-    if live["branch"] not in ("main", "HEAD"):
+    if live["branch"] != "main":
         print(
-            f"error: serving checkout is on {live['branch'] or '(unknown)'}, not main or a "
-            "detached serving tree; --pull refuses to move it.",
+            f"error: serving checkout is on {live['branch'] or '(detached)'}, not main; "
+            "--pull refuses to move it.",
             file=out,
         )
         return 1
     if live["dirty"]:
         print("error: serving checkout has uncommitted changes; --pull refuses.", file=out)
         return 1
-    serving = live["branch"] == "HEAD"
     if ctx.dry_run:
-        print(f"would {'detach' if serving else 'fast-forward'} {ctx.checkout} "
-              f"{'at origin/main ' if serving else ''}and re-render", file=out)
+        print(f"would fast-forward {ctx.checkout} and re-render", file=out)
         return 0
-    if serving:
-        return cmd_pull_serving(ctx, out)
     try:
         done = subprocess.run(  # nosec B603 - fixed argv, no shell
             ["git", "-C", str(ctx.checkout), "pull", "--ff-only"],
@@ -3111,44 +2778,22 @@ def cmd_pull(ctx: Context, out) -> int:
     return cmd_user(ctx, out)
 
 
-def cmd_rollback(ctx: Context, out) -> int:
-    """Return a serving tree to the receipt's `previousCommit`, then re-render (sd:1118).
+#: What a calling `make` hands its children. `make setup VENV=...` puts the
+#: override in `MAKEFLAGS`, and the tree's `make setup` would build that path.
+MAKE_VARIABLES = frozenset({"MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES", "VENV"})
 
-    Only a clean, detached serving tree rolls back: detaching a checkout on a
-    branch would take it off the branch someone works on. The rollback is an
-    activation like any other, so the commit it leaves becomes the new
-    `previousCommit`, and a second `--rollback` undoes the first.
-    """
-    with serving_lock(ctx.checkout, out, ctx.dry_run) as held:
-        if not held:
-            return 1
-        live = git_context(ctx.checkout)
-        if live["branch"] != "HEAD":
-            print(
-                f"error: {ctx.checkout} is on {live['branch'] or '(unknown)'}, not a detached serving "
-                "tree; --rollback refuses to move it.",
-                file=out,
-            )
-            return 1
-        if live["dirty"]:
-            print("error: serving tree has uncommitted changes; --rollback refuses.", file=out)
-            return 1
-        target = read_receipt(ctx.receipt).get("previousCommit")
-        if not isinstance(target, str) or not target:
-            print(f"error: the receipt at {ctx.receipt} records no previousCommit; nothing to roll back to.", file=out)
-            return 1
-        code, _, _ = _git(ctx, ["cat-file", "-e", f"{target}^{{commit}}"])
-        if code:
-            print(f"error: previousCommit {target} is not a commit in {ctx.checkout}; fetch it or pull instead.", file=out)
-            return 1
-        if ctx.dry_run:
-            print(f"would detach {ctx.checkout} at {target} and re-render", file=out)
-            return 0
-        return _activate(ctx, target, out)
+#: The two environments an sd:1118 serving tree alternated between; sd:3009 retired them.
+RETIRED_SLOTS = (".venv-a", ".venv-b")
+
+
+def _forwarded(ctx: Context) -> list[str]:
+    """The flags another installer needs to act on the same home and link directory as this run."""
+    argv = ["--home", str(ctx.home)] if ctx.sandboxed else []
+    return argv + (["--bin-dir", str(ctx.bin_dir)] if ctx.bin_dir is not None else [])
 
 
 def _clone_serving_tree(ctx: Context, tree: Path, out) -> bool:
-    """Clone this checkout's origin into `tree`, detached at `origin/main`; False with the reason on `out`.
+    """Clone this checkout's origin into `tree`, nothing checked out yet; False with the reason on `out`.
 
     Built in a fresh directory beside `tree` and renamed into place, so a
     clone cut short leaves no half-made serving tree for the next run to
@@ -3165,59 +2810,82 @@ def _clone_serving_tree(ctx: Context, tree: Path, out) -> bool:
     if "://" not in url and ":" not in url.split("/", 1)[0]:
         url = os.path.normpath(os.path.join(ctx.checkout, url))
     if ctx.dry_run:
-        print(f"would clone {url} into {tree}, detach it at origin/main and render", file=out)
+        print(f"would clone {url} into {tree}", file=out)
         return True
     tree.parent.mkdir(parents=True, exist_ok=True)
     spare = Path(tempfile.mkdtemp(prefix=f".{tree.name}-", dir=tree.parent))
-    for where, args in ((tree.parent, ["clone", "--quiet", "--no-checkout", url, str(spare)]),
-                        (spare, ["checkout", "--quiet", "--detach", "refs/remotes/origin/main"])):
-        code, _, err = _git_in(where, args, timeout=PULL_TIMEOUT)
-        if code:
-            print(f"error: git {' '.join(args[:2])} failed for the serving checkout:\n{err}\n"
-                  f"{spare} holds what it left; remove it once read.", file=out)
-            return False
-    # The tree's environments are built, not committed: excluded here, so
-    # `--verify` and `--pull` never read them as somebody's work.
-    with open(spare / ".git" / "info" / "exclude", "a", encoding="utf-8") as exclude:
-        exclude.write("".join(f"/{name}\n" for name in (".venv", *ENV_SLOTS)))
+    code, _, err = _git_in(tree.parent, ["clone", "--quiet", "--no-checkout", url, str(spare)], timeout=PULL_TIMEOUT)
+    if code:
+        print(f"error: git clone failed for the serving checkout:\n{err}\n"
+              f"{spare} holds what it left; remove it once read.", file=out)
+        return False
     spare.rename(tree)
     print(f"cloned {url} into {tree}", file=out)
     return True
 
 
-def cmd_serve(ctx: Context, out) -> int:
-    """Serve this machine from a dedicated clone of `origin/main`; `make setup` runs it (sd:1118).
+def _retire_slots(tree: Path, out) -> None:
+    """Remove the A/B environments and the lock an sd:1118 tree kept, once `.venv` is a directory (sd:3009).
 
-    The operator ruled on 2026-09-30 that the commands are served from a
-    clean checkout nobody works in, which only `make setup` updates. The
-    first run clones it; every run then hands it to the clone's own
-    installer as `--pull`, which detaches it at the exact commit `origin/main`
-    names, builds that commit's environment and only then renders from it.
+    `make setup` detaches a `.venv` link and builds a directory in its place,
+    so an old tree moves over on its first run, and this removes what it no
+    longer reads. A tree without them is left as it is.
+    """
+    if (tree / ".venv").is_symlink():
+        return
+    for name in RETIRED_SLOTS:
+        slot = tree / name
+        if slot.is_dir() and not slot.is_symlink():
+            shutil.rmtree(slot)  # the tree's own retired environment, never a work item (sd:3009)
+            print(f"removed {slot}, an environment the serving tree no longer uses", file=out)
+    tree.with_name(f"{tree.name}.lock").unlink(missing_ok=True)
+
+
+def cmd_serve(ctx: Context, out) -> int:
+    """Serve this machine from a plain clone of `origin/main`; `make setup` runs it (sd:3009).
+
+    The operator ruled on 2026-10-08 that the serving tree is a plain clone
+    nobody works in. `git fetch`, `git checkout --detach origin/main` and
+    `make setup` in the tree update it; `git checkout <commit>` and `make
+    setup` roll it back. In the tree, `--serve` is that last step's render.
+    In any other checkout it clones the tree the first time, then runs the
+    update: the tree's `make setup SERVE=no` builds its `.venv`, and the
+    tree's own installer renders under that `.venv`'s python, so it reads
+    the `sd_db` it just built, with this run's `--home` and `--bin-dir`.
     """
     tree = serving_tree(ctx.home, ctx.environ)
     if tree.resolve() == ctx.checkout.resolve():
-        print(f"error: {tree} is the serving checkout, and nobody works in it; "
-              "run `make setup` in your working checkout", file=out)
-        return 1
+        if not ctx.dry_run:
+            _retire_slots(tree, out)
+        return cmd_user(ctx, out)
     if tree.exists() and not (tree / ".git").is_dir():
         print(f"error: {tree} is not a git checkout; move it aside and run `make setup` again", file=out)
         return 1
-    if not tree.exists():
-        # A second first run waits here, then finds the tree; the lock is
-        # released before the hand-over, whose `--pull` takes it again.
-        with serving_lock(tree, out, ctx.dry_run) as held:
-            cloned = held and (tree.exists() or _clone_serving_tree(ctx, tree, out))
-        if not cloned:
-            return 1
-        if ctx.dry_run:
-            return 0
-    elif ctx.dry_run:
-        print(f"would detach {tree} at origin/main and render", file=out)
+    if not tree.exists() and not _clone_serving_tree(ctx, tree, out):
+        return 1
+    if ctx.dry_run:
+        print(f"would detach {tree} at origin/main, run `make setup` there and render", file=out)
         return 0
-    argv = [sys.executable, str(tree / "bin" / "sd_install.py"), "--pull", *_forwarded(ctx)]
-    done = subprocess.run(argv, env=ctx.environ, capture_output=True, text=True, check=False)  # nosec B603 - fixed argv
-    print(done.stdout + done.stderr, file=out, end="")
-    return done.returncode
+    for args in (["fetch", "--quiet", "origin"], ["checkout", "--quiet", "--detach", "refs/remotes/origin/main"]):
+        code, _, err = _git_in(tree, args, timeout=PULL_TIMEOUT)
+        if code:
+            print(f"error: git {args[0]} failed in the serving tree {tree}:\n{err}", file=out)
+            return 1
+    environ = {key: value for key, value in ctx.environ.items() if key not in MAKE_VARIABLES}
+    python = tree / ".venv" / "bin" / "python"
+    for argv in (["make", "-C", str(tree), "setup", "SERVE=no"],
+                 [str(python), str(tree / "bin" / "sd_install.py"), "--serve", *_forwarded(ctx)]):
+        try:
+            done = subprocess.run(argv, env=environ, capture_output=True, text=True, check=False)  # nosec B603 B607 - fixed argv
+        except OSError as problem:
+            print(f"error: cannot run {argv[0]} in the serving tree {tree}: {problem}", file=out)
+            return 1
+        print(done.stdout + done.stderr, file=out, end="")
+        if done.returncode:
+            print(f"error: the serving tree {tree} is at origin/main, and its `make setup` failed; "
+                  f"fix the cause, then run `make setup` in {tree}", file=out)
+            return done.returncode
+    return 0
 
 
 def cmd_uninstall(ctx: Context, out) -> int:
@@ -3330,7 +2998,7 @@ def cmd_repo(ctx: Context, repo: Path, out, reviewers: str | None = None) -> int
 # ------------------------------------------------------------------------ CLI
 
 USAGE = """\
-usage: python3 bin/sd_install.py (--user | --status | --verify | --pull | --rollback | --serve
+usage: python3 bin/sd_install.py (--user | --status | --verify | --pull | --serve
                    | --uninstall | --adopt-legacy | --repo [PATH]) [--dry-run] [--home DIR]
                    [--bin-dir DIR]
 
@@ -3339,11 +3007,9 @@ usage: python3 bin/sd_install.py (--user | --status | --verify | --pull | --roll
   --status         report what is installed, what drifted, what legacy remains
   --verify         read-only strict receipt, source, render, PATH and help checks
   --json           with --verify, emit typed verification results
-  --pull           fast-forward the serving checkout (main, clean) and re-render;
-                   a detached serving tree moves to the exact origin/main commit
-  --rollback       return a detached serving tree to the receipt's previousCommit
-                   and re-render
-  --serve          clone the serving checkout if it is missing, then --pull in it;
+  --pull           fast-forward the serving checkout (main, clean) and re-render
+  --serve          in the serving tree, render it; elsewhere, clone the tree if it is
+                   missing, detach it at origin/main and run its `make setup`;
                    `make setup` runs this last
   --uninstall      remove exactly what the receipt records having written
   --adopt-legacy   delete the old fleet installer's successor-less renders (M1)
@@ -3352,8 +3018,6 @@ usage: python3 bin/sd_install.py (--user | --status | --verify | --pull | --roll
                    install sd_db into this pack's virtualenv and stop
   --venv DIR       with --provision-library, install into DIR instead; `make setup` passes
                    the environment it builds
-  --live-venv DIR  with --provision-library, refuse older sd_db than DIR holds too; a
-                   serving build passes the environment it will replace
 
   --reviewers NAMES
                    with --repo, the registry entries this repo consents to
@@ -3361,13 +3025,12 @@ usage: python3 bin/sd_install.py (--user | --status | --verify | --pull | --roll
 
   --dry-run        print what would happen; write nothing
   --home DIR       treat DIR as the home directory (tests and scratch installs)
-  --bin-dir DIR    with --user, --pull, --rollback or --serve, link the bin/ commands into DIR
+  --bin-dir DIR    with --user, --pull or --serve, link the bin/ commands into DIR
                    (default: the directory the last run linked into, else
                    ~/.local/bin); the installer never edits PATH
 """
 
-MODES = ("user", "status", "verify", "pull", "rollback", "serve", "uninstall", "adopt-legacy", "repo",
-         "provision-library")
+MODES = ("user", "status", "verify", "pull", "serve", "uninstall", "adopt-legacy", "repo", "provision-library")
 
 
 def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> int:
@@ -3382,7 +3045,6 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
     home_arg = None
     bin_dir_arg = None
     venv_arg = None
-    live_venv_arg = None
     index = 0
     while index < len(argv):
         token = argv[index]
@@ -3417,12 +3079,6 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
                 print("error: --venv needs a directory", file=out)
                 return 2
             venv_arg = argv[index]
-        elif token == "--live-venv":
-            index += 1
-            if index >= len(argv):
-                print("error: --live-venv needs a directory", file=out)
-                return 2
-            live_venv_arg = argv[index]
         elif token == "--reviewers":
             # Taken positionally: an empty string is a real answer, nobody.
             index += 1
@@ -3444,10 +3100,9 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
     if as_json and mode != "verify":
         print("error: --json requires --verify", file=out)
         return 2
-    for flag, value in (("--venv", venv_arg), ("--live-venv", live_venv_arg)):
-        if value is not None and mode != "provision-library":
-            print(f"error: {flag} requires --provision-library", file=out)
-            return 2
+    if venv_arg is not None and mode != "provision-library":
+        print("error: --venv requires --provision-library", file=out)
+        return 2
 
     home = Path(home_arg).expanduser().resolve() if home_arg else Path(
         os.path.expanduser("~")
@@ -3467,7 +3122,6 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
     ctx = Context(
         checkout=checkout, home=home, environ=environ, dry_run=dry_run, bin_dir=bin_dir,
         venv=Path(venv_arg).expanduser().absolute() if venv_arg else None,
-        live_venv=Path(live_venv_arg).expanduser().absolute() if live_venv_arg else None,
     )
     # Checked here, before any mode runs: `--pull` fast-forwards the serving
     # checkout before it calls `cmd_user`, so a check inside the link step
@@ -3483,7 +3137,7 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
     # (C-30): a receipt is a file anyone can edit, and a stale or tampered
     # `binDir` would otherwise be written to unchecked. Refused by name, and
     # `--bin-dir` is the way past it (review 1, finding 2).
-    if bin_dir is None and mode in ("user", "pull", "rollback", "serve") and ctx.sandboxed:
+    if bin_dir is None and mode in ("user", "pull", "serve") and ctx.sandboxed:
         recorded_dir = link_directory(ctx, read_receipt(ctx.receipt))
         if not _is_within(recorded_dir.resolve(), home.resolve()):
             print(
@@ -3509,8 +3163,6 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
         return cmd_verify(ctx, out, as_json=as_json)
     if mode == "pull":
         return cmd_pull(ctx, out)
-    if mode == "rollback":
-        return cmd_rollback(ctx, out)
     if mode == "serve":
         return cmd_serve(ctx, out)
     if mode == "uninstall":

@@ -2,6 +2,8 @@
 
 One pull request. The design is in [design.md](design.md).
 
+sd:3009 deleted steps 1, 3 and 7 and the slot build, lock and put-back of step 2; design.md has the plain clone.
+
 ## Step checklist
 
 - [x] 1. `previous_commit` and the receipt's `previousCommit`, in

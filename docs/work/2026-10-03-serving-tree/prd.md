@@ -27,17 +27,15 @@ checkout of `origin/main` that only setup updates, and that nobody works in.
 
 ## Requirements
 
-1. Activation reads an exact merged commit. `--pull` in a clean, detached
-   serving tree fetches `origin` and detaches at the commit `origin/main`
-   names, then re-renders.
+1. The tree serves an exact merged commit: `git checkout --detach
+   origin/main` in the tree, then `make setup`, which re-renders.
 2. Strict verification stays sensitive to drift. `--verify` does not change.
 3. Active planning work stays preserved. Nothing here touches the working
-   checkout. `--pull` and `--rollback` refuse a dirty serving tree.
-4. Refresh and rollback are documented and tested. The receipt records
-   `previousCommit`, and `--rollback` returns to it.
+   checkout. Git refuses a checkout over conflicting changes in the tree.
+4. Update and rollback are documented and tested. Rollback is `git checkout
+   <commit>` and `make setup` in the tree (sd:3009).
 5. Default paths do not change. A checkout on `main` keeps today's `--pull`.
-6. `make setup` creates and refreshes the serving tree (`--serve`), so no
-   other step moves it. The receipt's command links follow the install there.
+6. `make setup` creates and refreshes the serving tree (`--serve`).
 
 ## Out of scope
 
