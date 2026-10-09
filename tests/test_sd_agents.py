@@ -250,6 +250,18 @@ class SliceBuilderDiskRules(unittest.TestCase):
                 self.assertIn(needle, body)
 
 
+class SliceBuilderDecisionNote(unittest.TestCase):
+    """sd:3112. A builder that skips an item for an operator decision writes a
+    `question` note with `Option:` lines, which the dashboard shows as buttons;
+    a free-text `Decision needed:` comment gave the operator nothing to click."""
+
+    def test_the_slice_builder_records_a_decision_as_a_question_with_options(self) -> None:
+        _, body = (AGENTS / "sd-slice-builder.md").read_text(encoding="utf-8").split("\n---\n", 1)
+        self.assertIn("--kind question", body)
+        self.assertIn("Option: <a>", body)
+        self.assertNotIn("Decision needed", body)
+
+
 class RenderTests(unittest.TestCase):
     def setUp(self) -> None:
         scratch = tempfile.TemporaryDirectory()
