@@ -148,10 +148,9 @@ for the controls a run passes through.
 >    finding set: a suppressed finding has no thread and appears only in the
 >    body, and an unsuppressed inline finding lives in its thread — the body's
 >    per-file table may summarise it, but the thread is where its text is. One
->    round of this repository's own history has both at once
->    (`tests/fixtures/sd-631-unanswered-round.json`: four suppressed in the
->    body, one inline finding that the body's table summarises and the thread
->    quotes). Read both, every time, and paginate both to the end rather than
+>    round of this repository's own history had both at once: four suppressed
+>    in the body, one inline finding that the body's table summarises and the
+>    thread quotes. Read both, every time, and paginate both to the end rather than
 >    trusting one page. They paginate differently: `get_reviews` by
 >    `page`/`perPage`, `get_review_comments` by cursor, `after` set to the
 >    previous page's `endCursor` until `hasNextPage` is false; `after` is not

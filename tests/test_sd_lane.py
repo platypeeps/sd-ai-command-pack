@@ -617,6 +617,31 @@ class Landing(Lane):
         self.assertFalse(tree.exists())
         self.assertEqual(git(self.repo, "branch", "--list", "topic"), "")
 
+    def test_a_worktree_the_merge_removed_is_landed_from_the_lane_root(self) -> None:
+        """sd:3096. `sd-ship merge` removes a clean worktree (sd:3006); git cannot name the main
+        checkout from a directory that is gone, so the landing used to read the dead path as the main
+        checkout, note from it (FileNotFoundError) and see a detached HEAD."""
+        tree, head = self.topic()
+        landed = self.advance_origin_main()
+        self.merge_lands(tree, 1, head)
+        ship = self.ship
+
+        def remove_after_merge(argv: list[str], log: pathlib.Path) -> dict:
+            answer = ship(argv, log)
+            if argv[2] == "merge":
+                git(self.repo, "worktree", "remove", "--force", str(tree))
+            return answer
+        self.drain(remove_after_merge)
+        entry = self.entries()[0]
+        self.assertEqual(entry["note"], "written")
+        [(item, body, main)] = self.notes
+        self.assertEqual((item, main), (1, self.repo))
+        self.assertIn("was already removed by the merge", body)
+        self.assertIn("was already removed by the merge", entry["cleanup"])
+        self.assertIsNone(entry["remove"])
+        self.assertIn("fast-forwarded", entry["fast_forward"])
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), landed)
+
     def test_a_builder_write_through_an_open_handle_survives_the_landing(self) -> None:
         """The second review's case: a handle opened before the landing, written after it."""
         tree, head = self.topic()

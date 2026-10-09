@@ -494,7 +494,7 @@ class PostMergeCloseout(unittest.TestCase):
 
     def test_threads_need_supported_dispositions_and_readback(self) -> None:
         for token in ("inline thread", "review-body", "all result pages", "late Copilot",
-                      "Local acknowledgement does not post", "durable successor",
+                      "durable successor",
                       "eligible inline thread", "read back", "leave the thread open",
                       "Authorized shipping closeout owns remote replies",
                       "That skill remains local-only"):

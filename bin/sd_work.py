@@ -886,9 +886,8 @@ def _cancel_guard(progress: Any, action: str) -> dict[str, Any]:
     `cancel_work` is the one cancellation the library has, and its default
     guard admits work rows only. A task or followup passes `task_guard`
     instead, so the row reads `done` with the same `cancelled` receipt a
-    cancelled work item carries, and `sd-review-ack` reopens a finding
-    carried to it. A library from before the guard has neither the guard nor
-    the keyword, so it is refused by name rather than reaching a TypeError.
+    cancelled work item carries. A library from before the guard has neither
+    the guard nor the keyword, so it is refused by name rather than reaching a TypeError.
     """
     if action == "cancel":
         return {}

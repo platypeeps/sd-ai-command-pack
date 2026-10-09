@@ -16,6 +16,14 @@ from sd_ship_workflow import blocked
 COPILOT_REVIEWER = "copilot-pull-request-reviewer[bot]"
 COPILOT_LOGINS = frozenset({COPILOT_REVIEWER, "copilot-pull-request-reviewer", "copilot"})
 
+#: One page of a pull request's review threads, each with its first comment (sd:3098).
+REVIEW_THREADS = """query($owner: String!, $name: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+    reviewThreads(first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes { isResolved path line originalLine comments(first: 1) { nodes { author { login } body } } }
+    } } } }"""
+
 
 def gate_creator(status: dict) -> str:
     """The lower-cased login that posted a commit status, or "" when GitHub named none."""
@@ -54,6 +62,12 @@ def completed_process(root: Path, argv: list[str], *, input: str | None = None, 
                       code="command_failed", boundary="runtime", state="retryable_failure",
                       next_action="Inspect the command error, resolve its cause, then retry.")
     return result
+
+
+def unread_threads(number: int, reason: str) -> Refusal:
+    return Refusal(f"the review threads on #{number} could not be read: {reason}", code="review_threads_unread",
+                   boundary="runtime", state="retryable_failure",
+                   next_action="Restore GitHub access, then retry merge; it does not go out with its threads unread.")
 
 
 def run(root: Path, argv: list[str], *, input: str | None = None, timeout: int = 60) -> str:
@@ -246,6 +260,36 @@ class GitHub:
         if not isinstance(value, dict) or value.get("number") != number:
             raise Refusal("GitHub did not return the requested pull request")
         return value
+
+    def unresolved_threads(self, number: int) -> list[dict]:
+        """Every unresolved review thread on pull request `number`, outdated ones too (sd:3098).
+
+        A read that fails or answers in a shape this does not know refuses:
+        a thread list that was not read is never an empty one.
+        """
+        owner, name = self.repository.split("/", 1)
+        threads: list[dict] = []
+        after = None
+        for _ in range(100):
+            try:
+                value = self.api("graphql", method="POST", body={"query": REVIEW_THREADS, "variables": {
+                    "owner": owner, "name": name, "number": number, "after": after}})
+            except Refusal as error:
+                raise unread_threads(number, str(error)) from None
+            try:
+                page = value["data"]["repository"]["pullRequest"]["reviewThreads"]
+                nodes, more, after = page["nodes"], page["pageInfo"]["hasNextPage"], page["pageInfo"]["endCursor"]
+            except (KeyError, TypeError):
+                raise unread_threads(number, "GitHub answered without them") from None
+            if value.get("errors") or not isinstance(nodes, list) or type(more) is not bool \
+                    or any(not isinstance(node, dict) or type(node.get("isResolved")) is not bool for node in nodes):
+                raise unread_threads(number, "GitHub answered with errors or an unknown shape")
+            threads.extend(node for node in nodes if not node["isResolved"])
+            if not more:
+                return threads
+            if not isinstance(after, str) or not after:
+                raise unread_threads(number, "GitHub named no cursor for the next page")
+        raise unread_threads(number, "they exceeded the bounded pagination limit")
 
     @staticmethod
     def is_copilot(record: object) -> bool:

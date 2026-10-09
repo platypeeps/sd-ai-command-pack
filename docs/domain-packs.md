@@ -10,7 +10,7 @@ Three of them show the range:
 
 | Prefix | Repository | Declares |
 |---|---|---|
-| `sdw` | `sd-writing-pack` | four `kinds`, a vault `store`, three `config` keys, four templates, no skills |
+| `sdw` | `sd-writing` | four `kinds`, a vault `store`, three `config` keys, four templates, no skills |
 | `sys` | `system` | four `dashboard.actions` and nothing else |
 | `hoa` | `hoa` | `issues`, two `config` keys, seven `hoa-*` skills, no kinds |
 
@@ -157,14 +157,14 @@ gets nothing from the file. To see whether a root carries one, run
 ## The halves that are not the manifest
 
 **Project-local skills.** `<repo>/.claude/skills/<prefix>-*/SKILL.md`, one
-directory each: seven in `hoa`. `sd-writing-pack` keeps none; its skills moved into this pack. They are the
+directory each: seven in `hoa`. `sd-writing` keeps none; its skills moved into this pack. They are the
 domain's own verbs and the pack never installs, renders or lists them —
 `skills/paths.json` governs this repository's `sd-*` skills and says nothing
 about a domain repo's. Name them `<prefix>-<verb>` so a reader of the directory
 can tell them from the machine-wide ones.
 
 **Templates.** One file per kind with `sections`, anywhere inside the checkout;
-`sd-writing-pack` keeps them in `templates/`. The path is checked at
+`sd-writing` keeps them in `templates/`. The path is checked at
 registration and must be a regular file — a directory there satisfies "it is
 there" and fails when somebody renders a note.
 

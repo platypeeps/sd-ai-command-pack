@@ -28,7 +28,8 @@ Effort is `high` on purpose: multi-file code, tests and evidence. You hold no Ag
    Work only there. Never edit the main checkout.
 2. Read each item (`sd task show N`), the repository's `CLAUDE.md` and the `.claude/rules/` files for your paths.
    An item already fixed: say so with evidence. One that needs an operator decision or is bigger than one slice:
-   record the question with `sd task note N --body "Decision needed: <question>"` and skip it.
+   record the question with `sd task note N --kind question --body $'<question>\nOption: <a>\nOption: <b>'` and skip it.
+   Each `Option:` line becomes a dashboard button.
 3. Write a test that fails on `origin/main` before each fix, then make it pass. Quote both lines in the report.
    No skipped tests.
 4. Commit one item per commit. Add no attribution lines: no Co-Authored-By, session or generated-with lines.

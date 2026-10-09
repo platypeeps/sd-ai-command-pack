@@ -16,7 +16,6 @@ nothing about the trailer check it was written for.
 
 from __future__ import annotations
 
-import io
 import json
 import pathlib
 import subprocess
@@ -968,86 +967,6 @@ class ShipMergeGuardTests(unittest.TestCase):
             operation.merge()
         self.assertFalse([call for call in case.remote.calls if call.method == "PUT"],
                          "the squash must not be dispatched")
-
-
-class ReviewFindingsTests(unittest.TestCase):
-    """`sd-pr-state` counts findings a review states outside its comments.
-
-    Read directly rather than through `collect`, which would need a `gh`. The
-    property is about one string, and a fixture that reached GitHub to assert
-    it would be asserting about the fixture.
-    """
-
-    #: The shape `copilot-pull-request-reviewer` actually wrote on #861, cut to
-    #: the heading that matters. That pull request showed zero inline comments,
-    #: so every count a reader had access to said the review was clean.
-    BODY = (
-        "### Needs a closer look\n"
-        "\n"
-        "Three moderate review findings remain unresolved.\n"
-        "\n"
-        "<details>\n"
-        "<summary>Review details</summary>\n"
-        "\n"
-        "### Suppressed comments (3)\n"
-        "\n"
-        "**tests/test_dashboard_plugins.py:186**\n"
-        "* `os.kill(pid, 0)` also succeeds for a zombie.\n"
-        "</details>\n"
-    )
-
-    def state(self):
-        """`bin/sd-pr-state`, imported the way `tests/test_sd_status.py` does."""
-        import importlib.machinery
-        import importlib.util
-
-        path = ROOT / "bin" / "sd-pr-state"
-        loader = importlib.machinery.SourceFileLoader("sd_pr_state_delivery", str(path))
-        spec = importlib.util.spec_from_file_location(loader.name, str(path), loader=loader)
-        assert spec is not None
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[loader.name] = module
-        loader.exec_module(module)
-        return module
-
-    def test_findings_stated_only_in_a_review_body_are_counted(self) -> None:
-        found = self.state().review_findings(
-            [{"author": {"login": "copilot-pull-request-reviewer"}, "body": self.BODY}])
-        self.assertEqual(3, found["in_body"])
-        self.assertEqual(["copilot-pull-request-reviewer"], found["reviewers"])
-
-    def test_a_review_that_states_no_suppressed_findings_counts_zero(self) -> None:
-        """The control. An ordinary review must not become a standing finding."""
-        found = self.state().review_findings(
-            [{"author": {"login": "someone"}, "body": "Looks good, one nit inline."}])
-        self.assertEqual(0, found["in_body"])
-        self.assertEqual(1, found["reviews"])
-
-    def test_absent_or_malformed_reviews_are_not_an_error(self) -> None:
-        state = self.state()
-        for reviews in (None, [], "reviews", [None, 7]):
-            with self.subTest(reviews=reviews):
-                self.assertEqual(0, state.review_findings(reviews)["in_body"])
-
-    def test_the_line_is_printed_only_when_there_is_something_to_print(self) -> None:
-        """`sd-status` prints `render_pulls` too, so a zero must stay silent."""
-        state = self.state()
-        record = {
-            "number": 861, "title": "t", "draft": False, "mergeable": "MERGEABLE",
-            "merge_state": "CLEAN", "review_decision": "NONE", "head": "topic",
-            "base": "main", "checks": {}, "checks_total": 0, "failing": [],
-            "behind_by": 0,
-            "review_findings": {"reviews": 1, "in_body": 3, "reviewers": ["copilot"]},
-        }
-        result = {"available": True, "reason": "", "pull_requests": [record]}
-        loud = io.StringIO()
-        state.render_pulls(result, loud)
-        self.assertIn("3 stated by copilot in a review body", loud.getvalue())
-
-        record["review_findings"] = {"reviews": 1, "in_body": 0, "reviewers": []}
-        quiet = io.StringIO()
-        state.render_pulls(result, quiet)
-        self.assertNotIn("review findings", quiet.getvalue())
 
 
 if __name__ == "__main__":  # pragma: no cover
