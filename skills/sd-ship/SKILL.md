@@ -23,15 +23,16 @@ When the value is `auto` and the gates pass, merge; do not ask the operator firs
 Installation grants no permission.
 Shared contributors do not revoke permission; existing ownership, protection, review, and CI gates still apply.
 A refusal stops execution.
-When another ship operation owns the repository, rerun `prepare` or `merge` with `--wait <seconds>`; do not write a retry loop.
+`prepare` takes no ship lock: it reviews, pushes, binds the pull request and writes the `ship:` row, each save checked against the row's revision (sd:1938).
+A second `prepare` for an item whose review still runs refuses as `review_running`, naming the pid; after that process dies, `--retry-review` continues the pass.
+When another ship operation owns the repository, rerun `merge`, or `prepare` on a merged record, with `--wait <seconds>`; do not write a retry loop.
 `reconcile` and `adjudicate` also take the lock but cannot wait for it; rerun them once the holder is gone.
 The refusal names the holder; a file under `ship-locks/` is not a hold.
 A merge lane that ships one item across several commands holds the lane: `sd-ship hold --item ID --holder NAME [--for SECONDS]`.
 The hold is taken under the ship lock and lasts `--for` seconds, 3600 by default and 86400 at most; rerun it to renew.
 While it stands, `prepare` and `merge` for any other item refuse as `lane_held`, naming the item, holder and expiry.
 The held item's merge ends it; `sd-ship release --item ID` ends it sooner, and only for the held item.
-On an sd satellite, `prepare` takes no ship lock: it reviews, pushes, binds the pull request and writes the `ship:` row.
-`merge`, and `prepare` on a merged record, refuse there as hub-only; the hub's lane merges (sd:2679).
+On an sd satellite, `merge`, and `prepare` on a merged record, refuse as hub-only; the hub's lane merges (sd:2679).
 `sd-ship lane run` leaves a merged worktree and its branch in place: removal can race a live builder's open file handles.
 `sd-ship lane run` merges an entry when `repo.runner_merge` is `auto`, or when it carries `--manual` (sd:3132).
 Otherwise, or when the setting cannot be read, the entry stops `prepared` with `runner_merge_manual` or `runner_merge_unknown`.

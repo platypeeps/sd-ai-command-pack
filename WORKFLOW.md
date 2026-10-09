@@ -569,7 +569,7 @@ The rules for them:
   `lane_elsewhere` before they read a row (sd:2795); the text names the host,
   the dashboard's Move lane control, and the verb. A host that cannot be read
   refuses with `lane_unknown` and never counts as the hub. `prepare` runs
-  there without the ship lock, and `lane list` and `cancel` still answer, so
+  everywhere without the ship lock (sd:1938), and `lane list` and `cancel` still answer, so
   an old host's pending entries can be cancelled after a move. Every machine
   runs the same scheduled `sd-ship lane run --hosted`: each lane it hosts, in
   path order, skipping one whose runner is busy. The runner reads the host

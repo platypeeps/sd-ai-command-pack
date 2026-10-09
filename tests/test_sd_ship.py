@@ -2414,7 +2414,7 @@ roles:
         named no pid, checkout, authority or lock holder."""
         prepared = self.prepare()
         self.assertEqual((prepared["invoker"]["pid"], prepared["invoker"]["checkout"]), (os.getpid(), str(self.root)))
-        self.assertEqual(prepared["invoker"]["lock_holder"]["command"], f"sd-ship prepare --item {self.item}")
+        self.assertIsNone(prepared["invoker"]["lock_holder"])  # prepare takes no ship lock (sd:1938)
         merged = self.merge()
         invoker = merged["invoker"]
         self.assertEqual((invoker["pid"], invoker["ppid"], invoker["authority"]), (os.getpid(), os.getppid(), "--manual"))
@@ -3423,54 +3423,58 @@ roles:
         self.assertEqual(child.stdout.readline().strip(), "held")
         return child
 
-    def test_the_ship_lock_records_this_prepare_as_its_holder(self):
+    def locked_merge(self, *extra):
+        """Merge's arguments: since sd:1938 prepare takes no ship lock, so merge is the verb that waits for it."""
+        return self.args("merge", "--manual", "--expected-head", "0" * 40, *extra)
+
+    def test_the_ship_lock_records_this_merge_as_its_holder(self):
         """sd:1936. The lock names this command and item while dispatch holds it."""
         seen = []
 
-        def prepare(operation):
+        def merge(operation):
             seen.extend(receipts.held_locks(self.database))
             return {"ok": True}
 
-        with patch.object(ship.Ship, "prepare", prepare):
-            ship.dispatch(self.root, self.connection, self.database, self.args("prepare"), receipts, False)
+        with patch.object(ship.Ship, "merge", merge):
+            ship.dispatch(self.root, self.connection, self.database, self.locked_merge(), receipts, False)
         (record,) = seen
         self.assertEqual(record["pid"], os.getpid())
         self.assertEqual(record["item"], self.item)
-        self.assertEqual(record["command"], f"sd-ship prepare --item {self.item}")
+        self.assertEqual(record["command"], f"sd-ship merge --item {self.item}")
         self.assertEqual(receipts.held_locks(self.database), [])
 
     def test_a_held_ship_lock_refusal_names_the_holder(self):
-        """sd:1936. A second prepare is refused with the holder's pid and command."""
+        """sd:1936. A merge is refused with the holder's pid and command."""
         from sd_db.workflow import WorkflowError
         child = self.hold_ship_lock(self.operation().repository)
-        with patch.object(ship.Ship, "prepare", side_effect=AssertionError("ran under a held lock")):
+        with patch.object(ship.Ship, "merge", side_effect=AssertionError("ran under a held lock")):
             with self.assertRaises(WorkflowError) as refused:
-                ship.dispatch(self.root, self.connection, self.database, self.args("prepare"), receipts, False)
+                ship.dispatch(self.root, self.connection, self.database, self.locked_merge(), receipts, False)
         self.assertIn("another ship operation owns this repository", str(refused.exception))
         self.assertIn(f"pid {child.pid}", str(refused.exception))
         self.assertIn("sd-ship prepare --item 1872", str(refused.exception))
 
-    def test_prepare_wait_refuses_at_its_deadline_and_names_the_holder(self):
+    def test_merge_wait_refuses_at_its_deadline_and_names_the_holder(self):
         """sd:1937. `--wait 5` against a held lock refuses after about 5 s, naming the holder."""
         from sd_db.workflow import WorkflowError
         child = self.hold_ship_lock(self.operation().repository)
         started = time.monotonic()
-        with patch.object(ship.Ship, "prepare", side_effect=AssertionError("ran under a held lock")):
+        with patch.object(ship.Ship, "merge", side_effect=AssertionError("ran under a held lock")):
             with self.assertRaises(WorkflowError) as refused:
-                ship.dispatch(self.root, self.connection, self.database, self.args("prepare", "--wait", "5"), receipts, False)
+                ship.dispatch(self.root, self.connection, self.database, self.locked_merge("--wait", "5"), receipts, False)
         elapsed = time.monotonic() - started
         self.assertGreaterEqual(elapsed, 5)
         self.assertLess(elapsed, 5 + receipts.WAIT_POLL_SECONDS + 2)
         self.assertIn(f"pid {child.pid}", str(refused.exception))
         self.assertIn("waited 5s", str(refused.exception))
 
-    def test_prepare_wait_runs_once_the_holder_releases(self):
-        """sd:1937. With the lock released at 2 s, `--wait 5` runs the prepare once."""
+    def test_merge_wait_runs_once_the_holder_releases(self):
+        """sd:1937. With the lock released at 2 s, `--wait 5` runs the merge once."""
         self.hold_ship_lock(self.operation().repository, seconds=2)
         started = time.monotonic()
-        with patch.object(ship.Ship, "prepare", return_value={"ok": True}) as prepare:
-            ship.dispatch(self.root, self.connection, self.database, self.args("prepare", "--wait", "5"), receipts, False)
-        self.assertEqual(prepare.call_count, 1)
+        with patch.object(ship.Ship, "merge", return_value={"ok": True}) as merge:
+            ship.dispatch(self.root, self.connection, self.database, self.locked_merge("--wait", "5"), receipts, False)
+        self.assertEqual(merge.call_count, 1)
         self.assertLess(time.monotonic() - started, 2 + receipts.WAIT_POLL_SECONDS + 2)
 
     def test_without_wait_a_held_lock_refuses_at_once(self):
@@ -3503,9 +3507,9 @@ roles:
                 yield
 
         with patch.object(receipts, "repository_lock", switching), \
-                patch.object(ship.Ship, "prepare", side_effect=AssertionError("ran on a switched checkout")):
+                patch.object(ship.Ship, "merge", side_effect=AssertionError("ran on a switched checkout")):
             with self.assertRaisesRegex(ship.Refusal, "left .* while this command waited"):
-                ship.dispatch(self.root, self.connection, self.database, self.args("prepare"), receipts, False)
+                ship.dispatch(self.root, self.connection, self.database, self.locked_merge(), receipts, False)
 
     def test_an_item_reassigned_while_waiting_refuses_before_the_command_runs(self):
         """sd:1937 review. The item row is read again under the lock, not trusted from before it."""
@@ -3519,9 +3523,9 @@ roles:
                 yield
 
         with patch.object(receipts, "repository_lock", reassigning), \
-                patch.object(ship.Ship, "prepare", side_effect=AssertionError("ran for a reassigned item")):
+                patch.object(ship.Ship, "merge", side_effect=AssertionError("ran for a reassigned item")):
             with self.assertRaisesRegex(ship.Refusal, "changed repository or branch while this command waited"):
-                ship.dispatch(self.root, self.connection, self.database, self.args("prepare"), receipts, False)
+                ship.dispatch(self.root, self.connection, self.database, self.locked_merge(), receipts, False)
 
     def test_a_repository_remote_changed_while_waiting_refuses_before_the_command_runs(self):
         """sd:1937 review. The repository row's remote is read again under the lock, as `Ship.__init__` reads it."""
@@ -3535,9 +3539,9 @@ roles:
                 yield
 
         with patch.object(receipts, "repository_lock", re_registering), \
-                patch.object(ship.Ship, "prepare", side_effect=AssertionError("ran for a re-registered repository")):
+                patch.object(ship.Ship, "merge", side_effect=AssertionError("ran for a re-registered repository")):
             with self.assertRaisesRegex(ship.Refusal, "repository remote changed while this command waited"):
-                ship.dispatch(self.root, self.connection, self.database, self.args("prepare"), receipts, False)
+                ship.dispatch(self.root, self.connection, self.database, self.locked_merge(), receipts, False)
 
     def test_a_no_item_record_refuses_a_live_branch_switch(self):
         """sd:1937 review. `--no-item` compares the live checkout too, not only its stored record."""
