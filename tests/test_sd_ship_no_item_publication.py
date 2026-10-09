@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import io
 import json
 import os
@@ -187,8 +186,7 @@ class NoItemPublication(unittest.TestCase):
     def test_item_runner_and_commit_flags_refuse_before_any_database_write(self):
         before = list(self.connection.iterdump())
         for command, flags in (("prepare", ["--deliver"]), ("prepare", ["--path", "src.py"]),
-                               ("prepare", ["--acceptance-file", "missing"]),
-                               ("merge", ["--run", "assignment", "--expected-head", self.head])):
+                               ("prepare", ["--acceptance-file", "missing"])):
             with self.subTest(flags=flags):
                 result = self.invoke(command, *flags, code=3)
                 self.assertEqual(result["workflow"]["blocker"]["code"], "no_item_flags_refused")
@@ -209,29 +207,23 @@ class NoItemPublication(unittest.TestCase):
         state["reviewed_head"] = None
         receipts.save(self.connection, self.key, revision, no_item.with_digest(state))
         proposal = self.invoke("adjudicate", "--expected-head", self.head)["proposal"]
-        proposal.update(operator="fixture operator", authority_context="fixture assertion, not authenticated approval")
-        source = self.directory / "evidence.txt"
-        source.write_text("fixture retained evidence")
         for row in proposal["findings"]:
-            row.update(response_disposition="rebutted", reason="retained fixture evidence contradicts this claim",
-                       evidence=[{"path": str(source), "sha256": hashlib.sha256(source.read_bytes()).hexdigest()}])
+            row.update(response_disposition="rebutted", reason="src.py:1 already handles the case the finding names")
         path = self.directory / "proposal.json"
         path.write_text(json.dumps(proposal))
-        flags = ["--expected-head", self.head, "--dispositions-file", str(path)]
-        prepared = self.invoke("adjudicate", *flags, "--prepare-evidence")["proposal"]
-        path.write_text(json.dumps(prepared))
-        value = self.invoke("adjudicate", *flags)
-        self.invoke("adjudicate", *flags, "--accept-dispositions", value["acceptance_digest"])
-        return pathlib.Path(prepared["findings"][0]["evidence"][0]["path"])
+        self.invoke("adjudicate", "--expected-head", self.head, "--dispositions-file", str(path))
+        return proposal, path
 
-    def test_durable_accepted_dispositions_survive_prepare_and_are_rechecked_at_merge(self):
-        evidence = self.accepted_blocker()
+    def test_recorded_dispositions_survive_prepare_and_are_rechecked_at_merge(self):
+        proposal, path = self.accepted_blocker()
         history = no_item.combined_digest(receipts.read(self.connection, self.key)[1])
         prepared = self.prepare()
         self.assertEqual(prepared["review_clearance"]["kind"], "adjudicated")
-        evidence.write_text("changed after acceptance")
+        proposal["findings"][0]["reason"] = "a later rebuttal recorded after prepare"
+        path.write_text(json.dumps(proposal))
+        self.invoke("adjudicate", "--expected-head", self.head, "--dispositions-file", str(path))
         refused = self.merge(code=3)
-        self.assertRegex(refused["error"], "evidence|archive")
+        self.assertRegex(refused["error"], "prepare again")
         self.assertEqual(no_item.combined_digest(receipts.read(self.connection, self.key)[1]), history)
         self.assertFalse([call for call in self.remote.calls if call.method == "PUT"])
 

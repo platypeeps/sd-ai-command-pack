@@ -51,6 +51,12 @@ class Controls(unittest.TestCase):
             timeout=10,
         )
 
+    def test_providers_has_no_precision_verb(self):
+        """sd:3034. Plain rebuttals need no reviewer scoring, so `sd providers precision` is gone."""
+        result = self.cli("providers", "precision", "--json")
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("invalid choice: 'precision'", result.stderr)
+
     def test_provider_complete_proposal_and_invalid_disable(self):
         result = self.cli("providers", "list", "--json")
         self.assertEqual(result.returncode, 0, result.stderr)

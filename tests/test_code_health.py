@@ -652,7 +652,6 @@ COMPLEX = frozenset({
     "bin/sd_registry.py::parse",  # 26
     "bin/sd_registry.py::url_response",  # 26
     "bin/sd_research_pins.py::report",  # 25
-    "bin/sd_ship_dispositions.py::validate",  # 27
     "bin/sd_ship_remote.py::GitHub.ready",  # 29
     "bin/sd_work.py::run",  # 29
     "bin/sd_writing.py::register",  # 22

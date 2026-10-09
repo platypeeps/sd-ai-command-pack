@@ -2053,14 +2053,25 @@ roles:
         with self.assertRaisesRegex(ship.Refusal, "has not completed"):
             self.merge()
 
-    def test_runner_authority_cannot_abandon_a_copilot_request(self):
+    def test_only_manual_authority_can_abandon_a_copilot_request(self):
         self.enable_automatic_copilot()
         self.prepare()
         head = _git(self.root, "rev-parse", "HEAD")
-        operation = self.operation("merge", "--run", "fixture-run", "--expected-head", head,
-                                   "--abandon-copilot-review", "runner chose to stop waiting")
+        operation = self.operation("merge", "--expected-head", head,
+                                   "--abandon-copilot-review", "chose to stop waiting")
         with self.assertRaisesRegex(ship.Refusal, "requires explicit manual merge authority"):
             operation.merge()
+
+    def test_merge_takes_no_runner_lease(self):
+        """sd:3085. The sd runner is gone, so `--run` and its lease went with it."""
+        self.prepare()
+        head = _git(self.root, "rev-parse", "HEAD")
+        result = self.cli("merge", "--run", "fixture-run", "--expected-head", head)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("unrecognized arguments: --run", result.stderr)
+        with self.assertRaisesRegex(ship.Refusal, "merge needs an explicit --manual invocation"):
+            self.operation("merge", "--expected-head", head).merge()
+        self.assertEqual(self.merge()["phase"], "merged")
 
     def test_abandoned_completed_review_marks_matching_receipt_complete(self):
         self.enable_automatic_copilot()
@@ -4077,93 +4088,6 @@ roles:
         with self.assertRaisesRegex(ship.Refusal, "no completed local review receipt"):
             self.operation().check_review(_git(self.root, "rev-parse", "HEAD"))
         self.assertFalse(calls.exists())
-
-    def prepare_owned_delivery(self):
-        from sd_db import runner
-        acceptance = self.directory / "acceptance.json"
-        acceptance.write_text(json.dumps({"item": self.item, "complete": True, "criteria": [
-            {"criterion": "scope", "passed": True, "evidence": "real fixture check"}]}))
-        self.prepare("--deliver", "--acceptance-file", str(acceptance))
-        assignment = runner.enqueue(self.connection, [self.item], role="merge", who="user")[0]
-        claimed = runner.claim(self.connection, assignment["id"], owner="fixture", work_root=self.directory / "work",
-                               retention_root=self.directory / "retained")
-        run = claimed["run"]
-        target = pathlib.Path(run["work_path"])
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(self.root, target)
-        self.root = target
-        head = _git(self.root, "rev-parse", "HEAD")
-        runner.update_run(self.connection, run["id"], authored_head=head, reviewed_head=head)
-        result = self.operation("merge", "--run", run["id"], "--expected-head", head).merge()
-        self.assertTrue(result["delivery_pending"])
-        runner.record_merge(self.connection, self.item, run_id=run["id"], evidence={
-            "url": result["pull_request"]["url"], "head": head, "merge_commit": result["merge_commit"],
-            "base": result["pull_request"]["base"], "repository": result["pull_request"]["repository"], "observed_at": result["observed_at"]})
-        proof = receipts.prepare_delivery(self.connection, run["id"], verification_root=self.root)
-        runner.update_run(self.connection, run["id"], delivery_proof=json.dumps(proof))
-        runner.begin_ending(self.connection, run["id"], outcome="done", detail="merged")
-        retained = pathlib.Path(run["retained_path"])
-        retained.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(self.root, retained)
-        runner.update_run(self.connection, run["id"], end_step="retained")
-        return run["id"], proof
-
-    def test_owned_delivery_finalizes_atomically_after_retention_without_network(self):
-        from sd_db import runner
-        run_id, proof = self.prepare_owned_delivery()
-        with patch("sd_db.progress._git", side_effect=AssertionError("no Git after retention")):
-            result = runner.release(self.connection, run_id)
-        self.assertTrue(result["released_at"])
-        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "done")
-        self.assertIsNotNone(self.connection.execute("SELECT resolved_at FROM state WHERE id=?", (proof["receipt"],)).fetchone()[0])
-
-    def test_scope_change_rolls_back_release_and_preserves_the_lease(self):
-        from sd_db import add_note, runner
-        from sd_db.workflow import StaleItem
-        run_id, _ = self.prepare_owned_delivery()
-        add_note(self.connection, self.item, "decision", "new acceptance requirement")
-        with self.assertRaises(StaleItem):
-            runner.release(self.connection, run_id)
-        self.assertIsNone(runner.run_state(self.connection, run_id)["released_at"])
-        self.assertIsNone(self.connection.execute("SELECT released_at FROM runner_lease WHERE run=?", (run_id,)).fetchone()[0])
-        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "in_progress")
-
-    def test_forged_delivery_descriptor_cannot_close_or_release_work(self):
-        from sd_db import runner
-        from sd_db.workflow import WorkflowError
-        run_id, proof = self.prepare_owned_delivery()
-        proof["receipt"] += 10000
-        runner.update_run(self.connection, run_id, delivery_proof=json.dumps(proof))
-        with self.assertRaisesRegex(WorkflowError, "proof is missing"):
-            runner.release(self.connection, run_id)
-        self.assertIsNone(runner.run_state(self.connection, run_id)["released_at"])
-
-    def test_delayed_release_keeps_the_durable_historical_merge_proof(self):
-        from sd_db import runner
-        with patch("sd_db.ship.now", return_value="2000-01-01T00:00:00+00:00"):
-            run_id, proof = self.prepare_owned_delivery()
-        with patch("sd_db.progress._git", side_effect=AssertionError("no Git after retention")):
-            runner.release(self.connection, run_id)
-        assignment = runner.queue_state(self.connection, runner.run_state(self.connection, run_id)["assignment"])
-        self.assertEqual(assignment["phase"], "merged")
-        self.assertEqual(json.loads(assignment["result"])["merge_commit"], proof["commit"])
-        self.assertEqual(assignment["status"], "done")
-        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "done")
-
-    def test_conflicting_merge_receipt_rolls_back_release_without_losing_merge(self):
-        from sd_db import runner
-        from sd_db.workflow import WorkflowError
-        run_id, proof = self.prepare_owned_delivery()
-        key = receipts.receipt_key(self.remote.slug, "topic", self.item)
-        revision, state = receipts.read(self.connection, key)
-        state["merge_commit"] = "f" * 40
-        receipts.save(self.connection, key, revision, state)
-        with self.assertRaisesRegex(WorkflowError, "merge evidence conflicts"):
-            runner.release(self.connection, run_id)
-        self.assertIsNone(runner.run_state(self.connection, run_id)["released_at"])
-        assignment = runner.queue_state(self.connection, runner.run_state(self.connection, run_id)["assignment"])
-        self.assertEqual(json.loads(assignment["result"])["merge_commit"], proof["commit"])
-        self.assertIsNone(self.connection.execute("SELECT released_at FROM runner_lease WHERE run=?", (run_id,)).fetchone()[0])
 
     def test_status_contexts_are_bound_by_exact_sha_endpoint_without_an_invented_sha_field(self):
         self.prepare()

@@ -1,15 +1,14 @@
-"""Explicit operator acceptance, separate from immutable external review reports.
+"""Recorded rebuttals and parked risks, separate from immutable external review reports.
 
-Hashes bind evidence and assertions within the trusted OS account. They neither
-prove user authorization nor establish whether a rebuttal is substantively true.
+A row needs a disposition and a reason a reader can check; it needs no operator
+acceptance. Hashes bind the dispositions to the exact review, history, tools and
+head they answer; they do not establish whether a rebuttal is substantively true.
 """
 from __future__ import annotations
 
 import hashlib
 import json
-import os
 import pathlib
-import stat
 from datetime import datetime, timezone
 from typing import Any
 
@@ -17,7 +16,6 @@ from sd_ship_bindings import adjudicator_binding
 from sd_ship_remote import Refusal, git
 
 MAX_PROPOSAL_BYTES = 2_000_000
-MAX_EVIDENCE_BYTES = 32_000_000
 
 
 def digest(value: Any) -> str:
@@ -29,26 +27,14 @@ def digest(value: Any) -> str:
 
 
 def read_file(path: pathlib.Path, limit: int) -> bytes:
-    """Refuse aliases, special files and oversized reads; never follow a final link."""
     try:
-        if not path.is_absolute() or path.resolve(strict=True) != path:
-            raise Refusal("disposition evidence must name a canonical absolute file")
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-        with os.fdopen(descriptor, "rb") as stream:
-            before = os.fstat(stream.fileno())
-            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
-                raise Refusal("disposition evidence must be a regular file with one hard link")
+        with path.open("rb") as stream:
             data = stream.read(limit + 1)
-            after = os.fstat(stream.fileno())
-            current = path.lstat()
-            fields = ("st_dev", "st_ino", "st_mode", "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns")
-            if any(getattr(before, name) != getattr(after, name) or getattr(after, name) != getattr(current, name) for name in fields):
-                raise Refusal("disposition evidence changed during its read")
-        if len(data) > limit:
-            raise Refusal("disposition file exceeds its bounded input size")
-        return data
     except OSError as error:
-        raise Refusal(f"disposition evidence cannot be read: {path}: {error.strerror}") from None
+        raise Refusal(f"dispositions file cannot be read: {path}: {error.strerror}") from None
+    if len(data) > limit:
+        raise Refusal("dispositions file exceeds its bounded input size")
+    return data
 
 
 def unique_object(pairs: list[tuple[str, Any]]) -> dict:
@@ -153,44 +139,22 @@ def text(value: Any, label: str) -> None:
         raise Refusal(f"disposition {label} needs nonempty bounded text")
 
 
-def validate(operation: Any, head: str, proposal: Any, *, durable: bool = True) -> str:
+def validate(operation: Any, head: str, proposal: Any) -> str:
     bindings, expected = context(operation, head)
-    if (not isinstance(proposal, dict) or set(proposal) != {"schema_version", "bindings", "operator", "authority_context", "findings"}
-            or type(proposal["schema_version"]) is not int or proposal["schema_version"] != 1):
+    if (not isinstance(proposal, dict) or set(proposal) != {"schema_version", "bindings", "findings"}
+            or type(proposal["schema_version"]) is not int or proposal["schema_version"] != 1
+            or digest(proposal["bindings"]) != digest(bindings)):
         raise Refusal("disposition proposal does not bind the current review, history, tools and head")
-    # Before the binding digest, so a missing or changed evidence store names
-    # itself instead of surfacing as an unexplained binding mismatch.
-    if durable:
-        operation.identity.check_evidence(proposal)
-    if digest(proposal["bindings"]) != digest(bindings):
-        raise Refusal("disposition proposal does not bind the current review, history, tools and head")
-    text(proposal["operator"], "operator")
-    text(proposal["authority_context"], "authority context")
     rows = proposal["findings"]
     if not isinstance(rows, list) or len(rows) != len(expected):
-        raise Refusal("every blocking finding needs one separate accepted disposition")
+        raise Refusal("every blocking finding needs one separate disposition")
     for row, identity in zip(rows, expected, strict=True):
-        if (not isinstance(row, dict) or set(row) != set(identity) | {"response_disposition", "reason", "owner", "trigger", "evidence"}
+        if (not isinstance(row, dict) or set(row) != set(identity) | {"response_disposition", "reason"}
                 or type(row.get("index")) is not int or digest({name: row.get(name) for name in identity}) != digest(identity)):
             raise Refusal("disposition finding indices, raw findings or digests changed")
         if row["response_disposition"] not in ("rebutted", "parked"):
-            raise Refusal("only evidenced rebuttals or explicit parked-risk acceptance can clear a blocker")
+            raise Refusal("only a rebuttal or a parked risk can clear a blocker")
         text(row["reason"], "reason")
-        if not isinstance(row["owner"], str) or not isinstance(row["trigger"], str):
-            raise Refusal("disposition owner and trigger must be text")
-        if row["response_disposition"] == "parked":
-            text(row["owner"], "risk owner")
-            text(row["trigger"], "risk revisit trigger")
-        evidence = row["evidence"]
-        if not isinstance(evidence, list) or not evidence or len(evidence) > 32:
-            raise Refusal("each disposition needs bounded local file evidence")
-        for entry in evidence:
-            if (not isinstance(entry, dict) or set(entry) != {"path", "sha256"}
-                    or not isinstance(entry["path"], str) or not isinstance(entry["sha256"], str)):
-                raise Refusal("disposition evidence needs a file path and SHA256")
-            data = read_file(pathlib.Path(entry["path"]), MAX_EVIDENCE_BYTES)
-            if hashlib.sha256(data).hexdigest() != entry["sha256"]:
-                raise Refusal("disposition evidence changed or its SHA256 is wrong")
     return digest(proposal)
 
 
@@ -198,55 +162,34 @@ def accepted(operation: Any, head: str) -> dict:
     revision, value = operation.store.read(operation.connection, key(operation))
     if not revision or value.get("decision") != "accepted":
         raise blocking_refusal(operation, head, operation.review_inputs(head),
-                               "local review contains blocking findings without accepted dispositions")
+                               "local review contains blocking findings without recorded dispositions")
     proposal_digest = validate(operation, head, value.get("proposal"))
     if value.get("proposal_digest") != proposal_digest:
-        raise Refusal("accepted disposition receipt digest does not match")
+        raise Refusal("recorded disposition receipt digest does not match")
     return {"kind": "adjudicated", "key": key(operation), "revision": revision, "digest": proposal_digest}
 
 
 def adjudicate(operation: Any) -> dict:
+    """Print the template, or record a filled one at once; a reason is the whole rebuttal."""
     args = operation.args
-    prepare = bool(getattr(args, "prepare_evidence", False))
-    # Preparation and acceptance are two decisions, and the operator reads the
-    # durable archive between them. One command could only accept what it had
-    # just written for itself.
-    if prepare and args.accept_dispositions is not None:
-        raise Refusal("--prepare-evidence never accepts dispositions in the same command; prepare, read the archive, then accept")
-    if prepare and args.dispositions_file is None:
-        raise Refusal("--prepare-evidence needs the --dispositions-file whose evidence it makes durable")
     bindings, rows = context(operation, args.expected_head)
     if args.dispositions_file is None:
-        if args.accept_dispositions is not None:
-            raise Refusal("acceptance requires a validated --dispositions-file")
-        proposal = {"schema_version": 1, "bindings": bindings, "operator": "", "authority_context": "",
-                    "findings": [dict(row, response_disposition="", reason="", owner="", trigger="", evidence=[]) for row in rows]}
+        proposal = {"schema_version": 1, "bindings": bindings,
+                    "findings": [dict(row, response_disposition="", reason="") for row in rows]}
         return operation.result("disposition_template", proposal=proposal)
     try:
         proposal = json.loads(read_file(args.dispositions_file, MAX_PROPOSAL_BYTES), object_pairs_hook=unique_object)
     except (ValueError, RecursionError):
         raise Refusal("disposition proposal is not bounded valid JSON") from None
-    if prepare:
-        validate(operation, args.expected_head, proposal, durable=False)
-        prepared = operation.identity.prepare_evidence(proposal)
-        # The returned proposal is validated as it will later be read, so the
-        # operator is offered an artifact that is already acceptable.
-        validate(operation, args.expected_head, prepared)
-        return operation.result("disposition_evidence_prepared", proposal=prepared)
     proposal_digest = validate(operation, args.expected_head, proposal)
-    if args.accept_dispositions is None:
-        return operation.result("disposition_validated", proposal=proposal, acceptance_digest=proposal_digest)
-    if args.accept_dispositions != proposal_digest:
-        raise Refusal("--accept-dispositions must equal the exact validated proposal digest")
     from sd_db.database import transaction
     with transaction(operation.connection):
         source_revision, source_state = operation.store.read(operation.connection, operation.key)
         if source_revision != operation.revision or source_state != operation.state:
-            raise Refusal("ship receipt changed before disposition acceptance")
+            raise Refusal("ship receipt changed before the dispositions were recorded")
         previous, prior = operation.store.read(operation.connection, key(operation))
         revision = operation.store.save(operation.connection, key(operation), previous, {
             "decision": "accepted", "proposal": proposal, "proposal_digest": proposal_digest,
             "source_checkpoint": source_revision, "previous_adjudication_digest": digest(prior),
-            "accepted_at": datetime.now(timezone.utc).isoformat(), "invoked_by_uid": os.getuid(),
-            "authority_boundary": "explicit operator assertion within a trusted OS account; not authenticated user approval"})
-    return operation.result("disposition_accepted", acceptance_digest=proposal_digest, adjudication_revision=revision)
+            "accepted_at": datetime.now(timezone.utc).isoformat()})
+    return operation.result("disposition_recorded", proposal_digest=proposal_digest, adjudication_revision=revision)

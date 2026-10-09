@@ -20,10 +20,9 @@
 - [ ] Work item pages under `docs/work/` carry real content, no placeholders
 - [ ] Review fixes are batched: address all comments, re-run the gate, push once
 
-<!-- Closing block. Keep this order: attribution paragraph first, trailers
-LAST, and nothing after them. A squash merge concatenates this body into the
-commit message, and git reads trailers only out of the message's final
-paragraph. GitHub appends its own `Co-authored-by:` line on squash: to an
+<!-- Closing block. Keep the trailers LAST, with nothing after them. A squash
+merge concatenates this body into the commit message, and git reads trailers
+only out of the message's final paragraph. GitHub appends its own `Co-authored-by:` line on squash: to an
 existing trailer block it appends contiguously, which is fine because that is
 a trailer too; after anything else it opens a new paragraph, which demotes
 every trailer above it to prose no tool can read (sd:640, sd:5). Keep the
@@ -33,8 +32,5 @@ Write no association, delivery or authorship line here. sd-ship appends the
 lines to the squash message; `sd-ship body` shows the result
 (sd:1870). A merge made without sd-ship writes them by hand, as WORKFLOW.md
 says. -->
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
-https://claude.ai/code/session_<id>
 
 Refs: sd:<other>
