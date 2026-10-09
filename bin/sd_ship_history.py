@@ -20,8 +20,16 @@ def digest(value) -> str:
 
 
 def completed_depth(report: dict) -> bool:
+    """Every requested reviewer answered, and sd-review kept the result.
+
+    A review whose inputs changed during its gate is `refused` after every
+    reviewer answered. sd-review verifies no refused prior, so reading the
+    counts alone dispatched a fix verification that failed planning on every
+    later prepare, and `--retry-review` refused it as complete (sd:3109).
+    """
     requested, completed = report.get("requested_reviews"), report.get("completed_reviews")
-    return type(requested) is int and type(completed) is int and requested > 0 and completed >= requested
+    return (type(requested) is int and type(completed) is int and requested > 0 and completed >= requested
+            and report.get("status") != "refused")
 
 
 def timeout_evidence(entry: dict) -> dict | None:

@@ -603,7 +603,10 @@ class SharedReview:
         # asked for, which is why `binding_moved` is last in this condition.
         if passes and not retry and not additional and not self.binding_moved():
             if not completed_depth(prior):
-                raise Refusal("the preceding review did not complete its requested depth; use --retry-review for a full-branch retry")
+                # The code is what the lane reads to spend its one automatic retry (sd:3037).
+                raise Refusal("the preceding review did not complete its requested depth; use --retry-review for a full-branch retry",
+                              code="review_incomplete", boundary="review", state="operator_decision",
+                              next_action="Prepare again with --retry-review; it spends one automatic pass.")
             if passes[-1].get("head") == head:
                 raise Refusal("this head was already reviewed; address its findings before the fix verification")
         for previous in self.history.ancestry_heads(self.state):

@@ -4128,8 +4128,10 @@ roles:
             with self.assertRaisesRegex(ship.Refusal, "no valid receipt"):
                 operation.review(head)
         first = self.operation().state["passes"][0]
-        with self.assertRaisesRegex(ship.Refusal, "retry-review"):
+        with self.assertRaisesRegex(ship.Refusal, "retry-review") as raised:
             self.prepare()
+        # The lane spends its one automatic retry on this code (sd:3037).
+        self.assertEqual(raised.exception.workflow["blocker"]["code"], "review_incomplete")
         self.prepare("--retry-review")
         state = self.operation().state
         self.assertEqual(state["passes"][0], first)
@@ -4167,6 +4169,34 @@ roles:
         _git(self.root, "commit", "--allow-empty", "-m", "fix\n\nAuthored-with: human")
         with self.assertRaisesRegex(ship.Refusal, "only an incomplete"):
             self.prepare("--retry-review")
+
+    def test_a_refused_review_whose_reviewers_all_answered_is_retried_not_wedged(self):
+        """sd:3109. sd-review refuses a review whose inputs changed during its gate.
+
+        Every reviewer answered, so the counts read complete, but sd-review
+        verifies no refused prior. After a new commit each prepare dispatched a
+        fix verification that failed planning, and --retry-review refused too.
+        """
+        original = ship.review_process
+        def refused(root, argv, **kwargs):
+            result = original(root, argv, **kwargs)
+            if "--explain" in argv:
+                return result
+            report = dict(json.loads(result.stdout), status="refused")
+            return subprocess.CompletedProcess(result.args, 3, json.dumps(report), result.stderr)
+        with patch.object(ship, "review_process", side_effect=refused):
+            with self.assertRaisesRegex(ship.Refusal, "local review refused"):
+                self.prepare()
+        first = self.operation().state["passes"][0]
+        self.assertEqual((first["report"]["findings"], first["report"]["completed_reviews"]),
+                         ([], first["report"]["requested_reviews"]))
+        _git(self.root, "commit", "--allow-empty", "-m", "fix\n\nAuthored-with: human")
+        with self.assertRaisesRegex(ship.Refusal, "use --retry-review"):
+            self.prepare()
+        self.prepare("--retry-review")
+        passes = self.operation().state["passes"]
+        self.assertEqual(passes[0], first)
+        self.assertEqual((len(passes), passes[1]["retry"], passes[1]["report"]["status"]), (2, True, "clean"))
 
     def spent_reviews(self, blockers=False):
         provider = self.programs / "review-fixture"
