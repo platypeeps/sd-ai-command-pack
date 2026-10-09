@@ -203,6 +203,26 @@ class Runner(Lane):
         self.assertEqual(self.entries()[-1]["status"], "merged")
         self.assertTrue(older.is_file(), "an older entry's body file was removed")
 
+    def test_a_queue_write_that_fails_keeps_the_entry_and_its_body(self) -> None:
+        """sd:3170 review: the copy goes only once the queue records the end; a failed write leaves both."""
+        real = sd_lane.write_queue
+
+        def fails_on_an_end(path: pathlib.Path, entries: list[dict]) -> None:
+            if any(row.get("status") in ("cancelled", "merged") for row in entries):
+                raise OSError(28, "No space left on device")
+            real(path, entries)
+
+        sd_lane.enqueue_entry(self.repo, 1, "t", self.body, self.environ, manual=True, claim="deliver")
+        [entry] = self.entries()
+        body = pathlib.Path(entry["body_file"])
+        with mock.patch.object(sd_lane, "write_queue", side_effect=fails_on_an_end):
+            with self.assertRaises(OSError):
+                sd_lane.cancel(self.repo, 1, self.environ)
+            self.assertEqual((self.entries()[0]["status"], body.is_file()), ("pending", True), "cancel")
+            with self.assertRaises(OSError):
+                sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual((self.entries()[0]["status"], body.is_file()), ("running", True), "run")
+
     def test_a_refused_enqueue_leaves_no_copy(self) -> None:
         """sd:3170: the copy is made before the queue write; a refusal there takes it back."""
         sd_lane.enqueue_entry(self.repo, 3, "t", self.body, self.environ, claim="deliver")

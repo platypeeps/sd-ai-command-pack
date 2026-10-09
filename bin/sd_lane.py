@@ -360,9 +360,10 @@ def cancel(root: pathlib.Path, item: int, environ: dict[str, str], *,
         check_revision(entries, expected_revision)
         row = pending_entry(entries, item)
         row.update(status="cancelled", finished_at=stamp_now())
-        drop_body(row, path.parent.parent)
         return row
-    return update(path, mark)
+    row = update(path, mark)
+    drop_body(row, path.parent.parent)  # after the write, so a failed write leaves the body with its entry
+    return row
 
 
 def position(where: str) -> str:
@@ -1205,6 +1206,17 @@ def reclaim_dead(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return reclaimed
 
 
+def finish_entry(path: pathlib.Path, entry: dict[str, Any], outcome: dict[str, Any]) -> None:
+    """Record a run entry's outcome, then drop its body copy unless the entry waits for another run (sd:3170)."""
+    def mark_finished(entries: list[dict[str, Any]]) -> None:
+        for row in entries:
+            if row.get("item") == entry["item"] and row.get("status") == "running":
+                row.update(outcome, finished_at=stamp_now())
+    update(path, mark_finished)
+    if outcome.get("status") != "pending":
+        drop_body(entry, path.parent.parent)  # after the write, as in `cancel`
+
+
 def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_ship,
              gate: Gate = default_gate, note: Note | None = None, *, satellite_only: bool = False,
              hub: Hub | None = None) -> dict[str, Any]:
@@ -1271,14 +1283,7 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
                 except Exception as error:  # a broken entry is marked; the next one still runs
                     outcome = {"status": "failed", "reason": f"{type(error).__name__}: {error}"[:600]}
                 outcome.update(settle(entry, outcome, environ, note or default_note, own_lock, hub, root))
-
-                def finish(entries: list[dict[str, Any]], entry=entry, outcome=outcome) -> None:
-                    for row in entries:
-                        if row.get("item") == entry["item"] and row.get("status") == "running":
-                            row.update(outcome, finished_at=stamp_now())
-                            if outcome.get("status") != "pending":
-                                drop_body(row, path.parent.parent)
-                update(path, finish)
+                finish_entry(path, entry, outcome)
                 ran.append({"item": entry["item"], **outcome})
                 if outcome.get("status") == "pending":
                     deferred.add((entry["item"], entry.get("enqueued_at")))
