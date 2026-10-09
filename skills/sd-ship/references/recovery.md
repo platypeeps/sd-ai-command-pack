@@ -156,6 +156,7 @@ The retry spends one automatic pass.
 It supplies prior evidence through `--resume-report` and verifies every previous blocker.
 Failed attempts, findings, and the initial receipt remain unchanged.
 Repeated incomplete runs exhaust the automatic allowance and grant no publication clearance.
+`sd-ship lane run` takes the retry once by itself after a `review_incomplete` refusal of its prepare (sd:3037).
 
 The repository gate runs after a review that does not block.
 A blocking review runs no gate; its refusal says so, and its `check.status` is `not_run`.

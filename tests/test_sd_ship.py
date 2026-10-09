@@ -4128,8 +4128,10 @@ roles:
             with self.assertRaisesRegex(ship.Refusal, "no valid receipt"):
                 operation.review(head)
         first = self.operation().state["passes"][0]
-        with self.assertRaisesRegex(ship.Refusal, "retry-review"):
+        with self.assertRaisesRegex(ship.Refusal, "retry-review") as raised:
             self.prepare()
+        # The lane spends its one automatic retry on this code (sd:3037).
+        self.assertEqual(raised.exception.workflow["blocker"]["code"], "review_incomplete")
         self.prepare("--retry-review")
         state = self.operation().state
         self.assertEqual(state["passes"][0], first)
