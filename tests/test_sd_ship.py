@@ -3873,6 +3873,24 @@ roles:
                          "the orphaned review's findings stay in the receipt")
         self.assertEqual(ship.ItemHistory().spent(state), 2, "the set-aside pass still counts against the cap")
 
+    def drop_from_the_object_store(self, commit: str) -> None:
+        """Remove `commit` from the checkout's object store, as gc does to an unreachable amend."""
+        _git(self.root, "reflog", "expire", "--expire=now", "--all")
+        _git(self.root, "gc", "--quiet", "--prune=now")
+        with self.assertRaises(RuntimeError, msg="the commit is still there"):
+            _git(self.root, "cat-file", "-e", f"{commit}^{{commit}}")
+
+    def test_a_restart_sets_aside_a_reviewed_head_the_object_store_no_longer_holds(self):
+        """sd:3167: the orphaned head gc removed is set aside, not a 'Not a valid commit name' runtime failure."""
+        reviewed, amended, payload, program = self.amend_after_a_blocking_review()
+        self.drop_from_the_object_store(reviewed)
+        payload["structured_output"]["findings"] = []
+        program.write_text("#!/usr/bin/env python3\nimport json\nprint(" + repr(json.dumps(payload)) + ")\n")
+        prepared = self.prepare("--restart-review", "the reviewed head was pruned")
+        self.assertEqual(prepared["reviewed_head"], amended)
+        [restart] = self.operation().state["superseded_reviews"]
+        self.assertEqual(restart["orphaned"], [reviewed])
+
     def test_a_restart_refuses_while_every_reviewed_head_is_reachable(self):
         """sd:2600: a restart is for an orphaned review, not a way to drop live findings."""
         program = self.programs / "review-fixture"

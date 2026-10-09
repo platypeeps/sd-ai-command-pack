@@ -55,6 +55,20 @@ def is_ancestor(root: pathlib.Path, previous: str, head: str) -> bool:
     return completed_process(root, argv, answers=frozenset({0, 1})).returncode == 0
 
 
+def commit_absent(root: pathlib.Path, commit: str) -> bool:
+    """sd:3167. Whether the object store holds no commit `commit`, as after gc prunes an amended-away head.
+
+    `rev-parse --verify --quiet` answers exit 1 for a name that names no
+    commit; any other failure raises, as `is_ancestor` does. A shallow clone
+    answers False: a commit past its boundary is absent and may still be an
+    ancestor.
+    """
+    argv = ["git", "rev-parse", "--verify", "--quiet", f"{commit}^{{commit}}"]
+    if completed_process(root, argv, answers=frozenset({0, 1})).returncode == 0:
+        return False
+    return completed_process(root, ["git", "rev-parse", "--is-shallow-repository"]).stdout.strip() != "true"
+
+
 def empty_branch_base(root: pathlib.Path, head: str) -> str | None:
     """sd:1405. The merge base when `head` changes no file against it, else None.
 
@@ -741,7 +755,7 @@ class SharedReview:
         """
         reason = restart_reason(self.args)
         orphaned = [previous for previous in self.history.ancestry_heads(self.state)
-                    if not is_ancestor(self.root, previous, head)]
+                    if self.unreachable(previous, head)]
         if not orphaned:
             raise Refusal("--restart-review applies only when a reviewed head is not an ancestor of HEAD; "
                           "this branch still contains every reviewed head, so their findings stand",
@@ -759,6 +773,21 @@ class SharedReview:
         print(f"sd-ship: set aside {len(restart['passes'])} pass(es) whose heads this branch cannot reach "
               f"({', '.join(previous[:12] for previous in orphaned)}); reviewing {head[:12]} in full",
               file=sys.stderr)
+
+    def unreachable(self, previous: str, head: str) -> bool:
+        """Whether `head` cannot reach the reviewed head `previous`, for a restart (sd:3167).
+
+        A head gc pruned after an amend is the orphan a restart exists for, so
+        when `is_ancestor` cannot answer, a commit the store no longer holds
+        counts as unreachable; any other failure still raises. `validate_dispatch`
+        keeps `is_ancestor` strict (sd:1348).
+        """
+        try:
+            return not is_ancestor(self.root, previous, head)
+        except Refusal:
+            if commit_absent(self.root, previous):
+                return True
+            raise
 
     def authorship_start(self) -> str:
         """Where this branch's commits begin, for trailer and vendor reads."""

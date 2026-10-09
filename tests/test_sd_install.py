@@ -3847,7 +3847,7 @@ class LinkEdgeCaseTests(InstallerHarness):
         self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
 
     def test_a_link_into_the_last_checkout_is_foreign(self):
-        """sd:3009: no link moves to another checkout; a link the receipt names there refuses the run."""
+        """sd:3009: no link moves to a checkout other than the serving tree (sd:3141); a recorded one refuses the run."""
         work = self.checkout_with_commands("sd", "sd-review", name="work")
         serving = self.checkout_with_commands("sd", "sd-review")
         self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
@@ -3857,6 +3857,130 @@ class LinkEdgeCaseTests(InstallerHarness):
         self.assertIn(f"error: {link} exists and is not a link to {serving / 'bin' / 'sd'}", out.getvalue())
         self.assertEqual(link.resolve(), (work / "bin" / "sd").resolve())
         self.assertEqual(self.receipt["checkout"], str(work))
+
+    def serving_checkout(self, *names: str) -> Path:
+        """A checkout at the serving tree's own path, the one `--serve` renders in place."""
+        tree = sd_install.serving_tree(self.home, dict(os.environ))
+        return self.checkout_with_commands(*names, name=str(tree.relative_to(self.home)))
+
+    def test_the_serving_tree_takes_over_the_links_the_receipt_names(self):
+        """sd:3141: links an earlier install made into the working checkout move to the tree, not refuse it."""
+        work = self.checkout_with_commands("sd", "sd-review", "sd-old", name="work")
+        serving = self.serving_checkout("sd", "sd-review", "sd-new")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_serve(self.context_for(serving), out), 0, out.getvalue())
+        bin_dir = self.home / ".local" / "bin"
+        for name in ("sd", "sd-review", "sd-new"):
+            self.assertEqual(os.readlink(bin_dir / name), str(serving / "bin" / name))
+        self.assertFalse((bin_dir / "sd-old").is_symlink(), "a recorded link the tree does not ship stayed")
+        self.assertEqual(sorted(path.name for path in bin_dir.iterdir()), ["sd", "sd-new", "sd-review"])
+        self.assertEqual(self.receipt["checkout"], str(serving))
+        self.assertEqual(
+            [row["target"] for row in self.receipt["owned"] if row.get("kind") == "link"],
+            [str(serving / "bin" / name) for name in ("sd", "sd-new", "sd-review")],
+        )
+
+    def test_the_serving_tree_still_refuses_what_no_receipt_row_names(self):
+        """sd:3141: a link into another checkout, a retargeted recorded link and a file at a recorded path refuse."""
+
+        def unrecorded_checkout(link: Path, work: Path) -> None:
+            other = self.checkout_with_commands("sd", name="other")
+            link.unlink()
+            link.symlink_to(other / "bin" / "sd")
+
+        def retargeted(link: Path, work: Path) -> None:
+            link.unlink()
+            link.symlink_to(self.home / "elsewhere" / "sd")
+
+        def regular_file(link: Path, work: Path) -> None:
+            link.unlink()
+            link.write_text("#!/bin/sh\n", encoding="utf-8")
+
+        for shape in (unrecorded_checkout, retargeted, regular_file):
+            with self.subTest(shape=shape.__name__):
+                self.setUp()
+                work = self.checkout_with_commands("sd", "sd-review", name="work")
+                serving = self.serving_checkout("sd", "sd-review")
+                self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+                bin_dir = self.home / ".local" / "bin"
+                shape(bin_dir / "sd", work)
+                before = {path.name: path.lstat().st_ino for path in bin_dir.iterdir()}
+                receipt = self.receipt
+                out = io.StringIO()
+                self.assertEqual(sd_install.cmd_serve(self.context_for(serving), out), 1)
+                self.assertIn(f"error: {bin_dir / 'sd'} exists and is not a link to {serving / 'bin' / 'sd'}",
+                              out.getvalue())
+                self.assertEqual({path.name: path.lstat().st_ino for path in bin_dir.iterdir()}, before)
+                self.assertEqual(os.readlink(bin_dir / "sd-review"), str(work / "bin" / "sd-review"))
+                self.assertEqual(self.receipt, receipt)
+
+    def test_a_failed_takeover_points_the_moved_links_back(self):
+        """sd:3141: a link that cannot move, or a failure after the links, leaves every link at the working checkout."""
+        bin_dir = self.home / ".local" / "bin"
+        work = self.checkout_with_commands("sd", "sd-review", name="work")
+        serving = self.serving_checkout("sd", "sd-review", "sd-new")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        receipt = self.receipt
+        real = sd_install._replace_link
+        calls: list[Path] = []
+
+        def second_fails(path, target):
+            calls.append(target)
+            if len(calls) == 2:
+                raise OSError(28, "No space left on device")
+            return real(path, target)
+
+        out = io.StringIO()
+        with unittest.mock.patch.object(sd_install, "_replace_link", side_effect=second_fails):
+            self.assertEqual(sd_install.cmd_serve(self.context_for(serving), out), 1)
+        self.assertIn(f"error: could not link {bin_dir / 'sd-review'} (No space left on device)", out.getvalue())
+        with unittest.mock.patch.object(sd_install, "install_hook", side_effect=OSError(13, "Permission denied")):
+            with self.assertRaises(OSError):
+                sd_install.cmd_serve(self.context_for(serving), io.StringIO())
+        self.assertEqual({path.name: os.readlink(path) for path in bin_dir.iterdir()},
+                         {name: str(work / "bin" / name) for name in ("sd", "sd-review")})
+        self.assertEqual(self.receipt, receipt)
+        self.assertEqual(sd_install.cmd_serve(self.context_for(serving), io.StringIO()), 0)
+        self.assertEqual(os.readlink(bin_dir / "sd"), str(serving / "bin" / "sd"))
+
+    def test_a_takeover_stopped_before_the_receipt_finishes_on_the_next_run(self):
+        """sd:3141: links already at the tree under a receipt that names the working checkout are ours next time."""
+        bin_dir = self.home / ".local" / "bin"
+        work = self.checkout_with_commands("sd", "sd-review", name="work")
+        serving = self.serving_checkout("sd", "sd-review")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        sd_install._replace_link(bin_dir / "sd", serving / "bin" / "sd")
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_serve(self.context_for(serving), out), 0, out.getvalue())
+        self.assertEqual({path.name: os.readlink(path) for path in bin_dir.iterdir()},
+                         {name: str(serving / "bin" / name) for name in ("sd", "sd-review")})
+        self.assertEqual(self.receipt["checkout"], str(serving))
+
+    def test_a_retarget_leaves_every_other_file_beside_the_link(self):
+        """sd:3141: the spare link's name is new to the call, so a file at any sibling name stays."""
+        work = self.checkout_with_commands("sd", name="work")
+        serving = self.serving_checkout("sd")
+        self.assertEqual(sd_install.cmd_user(self.context_for(work), io.StringIO()), 0)
+        bin_dir = self.home / ".local" / "bin"
+        taken = bin_dir / ".sd.sd-install-taken"
+        taken.write_text("mine\n", encoding="utf-8")
+        with unittest.mock.patch.object(sd_install.secrets, "token_hex", side_effect=["taken", "free"]):
+            self.assertEqual(sd_install.cmd_serve(self.context_for(serving), io.StringIO()), 0)
+        self.assertEqual(taken.read_text(encoding="utf-8"), "mine\n")
+        self.assertEqual(os.readlink(bin_dir / "sd"), str(serving / "bin" / "sd"))
+        self.assertEqual(sorted(path.name for path in bin_dir.iterdir()), [".sd.sd-install-taken", "sd"])
+
+    def test_a_retarget_whose_rename_fails_removes_only_its_own_spare(self):
+        bin_dir = self.home / "links"
+        bin_dir.mkdir()
+        link = bin_dir / "sd"
+        link.symlink_to("/old/bin/sd")
+        with unittest.mock.patch("os.replace", side_effect=OSError(1, "Operation not permitted")):
+            with self.assertRaises(OSError):
+                sd_install._replace_link(link, Path("/new/bin/sd"))
+        self.assertEqual(os.readlink(link), "/old/bin/sd")
+        self.assertEqual([path.name for path in bin_dir.iterdir()], ["sd"])
 
     def test_links_into_the_working_checkout_outside_the_bin_dir_are_left_and_reported(self):
         """sd:3009: `~/bin/common` links the installer never made shadow the tree's commands; no refusal, no edit."""

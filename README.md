@@ -185,7 +185,7 @@ These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOM
 `sd.gate_cache_gb` bounds the local gate's warm Rust build folders (unset: 40 GB); past it the gate removes the least recently used free folder.
 `sd.bulk_storage_root` names the folder for large uncommitted data, as `<root>/<repository>/` (unset: none); build output stays on the system disk. It grants nothing.
 `sd.privacy_patterns` names the privacy-pattern file `sd-docs-lint --pr-body` checks a pull request body against, one extended regular expression per line (unset: `privacy-patterns` in `$SYSTEM_TOOLS_CONFIG`, else `~/.config/system`); with no file the check is skipped with a note. It grants nothing.
-`sd-ship lane enqueue|list|cancel|move|hold|release|run|watch` keeps a serial prepare-and-merge queue per repository in a file under `sd.lane_root` (unset: `$XDG_STATE_HOME/sd/lanes`), so a queued chain outlives the session that filled it. After a merge the runner deletes the remote branch, notes the item with the command that removes the worktree, and fast-forwards the main checkout; it never removes a worktree, since removal can race a live builder.
+`sd-ship lane enqueue|list|cancel|move|hold|release|run|watch` keeps a serial prepare-and-merge queue per repository in a file under `sd.lane_root` (unset: `$XDG_STATE_HOME/sd/lanes`), so a queued chain outlives the session that filled it. Enqueue copies the body file into the lane's `bodies/` folder, so a reboot that clears `/tmp` loses no queued body; the copy goes when its entry ends. After a merge the runner deletes the remote branch, notes the item with the command that removes the worktree, and fast-forwards the main checkout; it never removes a worktree, since removal can race a live builder.
 `sd gate run -- make check` queues any command the same way; `sd gate status` shows the queue.
 Wrap a plain `make check` in any repository that way, and drop a per-repository `lockf` from lane scripts: the pool orders gates across every repository.
 A waiting gate names who holds each slot and since when.
@@ -355,6 +355,11 @@ plain clone on a detached `HEAD` that nobody works in, at
 - **From the A/B slots:** a tree from before sd:3009 moves over on its first
   `make setup`. It replaces the `.venv` link with a directory, then removes
   `.venv-a`, `.venv-b` and `serving.lock`.
+- **From links into the working checkout:** an install from before sd:3009
+  linked the commands in `~/.local/bin` to the working checkout's `bin/`.
+  The tree's render moves each link the receipt records to the tree's `bin/`
+  (sd:3141). It still refuses a regular file, or a link the receipt does not
+  record. `--user` in any other checkout moves no link.
 - **Verify:** `--verify --json` is as strict as in any checkout. Planning
   drafts or a `HEAD` moved without a render fail the source check, which is why
   nobody works in the serving tree.
