@@ -1480,5 +1480,195 @@ class LintPaths(unittest.TestCase):
                     f"check` and by the lint job; drop it from the Makefile.")
 
 
+#: `subprocess` entry points that start a child.
+SUBPROCESS_CALLS = frozenset({"run", "Popen", "check_output", "check_call", "call"})
+
+#: Test modules that start git or a `bin/` entrypoint without `env=` from
+#: `tests/clean_env.py`, and how many such calls each holds (sd:3133). A child
+#: that inherits `GIT_DIR`, the operator's git config or `$HOME` reads the live
+#: checkout instead of its fixture. The reason is one for every entry: the call
+#: predates the shared helper, and rewriting them all is a change of its own.
+#: The table is a ratchet. A module not named here may start none; a count
+#: here may fall and never rise. Lower the number, or delete the entry at
+#: zero, in the change that adds `env=clean_environment()`.
+UNSHIELDED = {
+    "test_archive_untouched.py": 8,
+    "test_code_health.py": 5,
+    "test_cut_symbols.py": 3,
+    "test_delivered.py": 1,
+    "test_delivery_evidence.py": 9,
+    "test_doc_citations.py": 1,
+    "test_docs_gate_action.py": 1,
+    "test_gate_harness_isolation.py": 3,
+    "test_governed_pathspec.py": 4,
+    "test_guest_artifact_refusal.py": 2,
+    "test_home_relative.py": 2,
+    "test_installer_coverage_gate.py": 2,
+    "test_lane_chdir.py": 4,
+    "test_loc_caps.py": 4,
+    "test_ls_files_form.py": 4,
+    "test_mode_detection.py": 1,
+    "test_no_root_walk.py": 3,
+    "test_no_shipped_shell.py": 6,
+    "test_no_trellis_residue.py": 1,
+    "test_pack_bin_by_name.py": 2,
+    "test_pre_commit_hook.py": 4,
+    "test_prose_counts.py": 1,
+    "test_pull_request_template_links.py": 3,
+    "test_requirements_target.py": 1,
+    "test_rule_registry.py": 1,
+    "test_run_tests_split_fixtures.py": 3,
+    "test_sd_check.py": 8,
+    "test_sd_check_scope.py": 1,
+    "test_sd_ci.py": 3,
+    "test_sd_codex.py": 1,
+    "test_sd_controls.py": 2,
+    "test_sd_docs_lint.py": 2,
+    "test_sd_fleet.py": 2,
+    "test_sd_gate_offload_rows.py": 1,
+    "test_sd_gate_queue.py": 5,
+    "test_sd_gate_slots.py": 4,
+    "test_sd_handoff.py": 2,
+    "test_sd_handoff_restore.py": 9,
+    "test_sd_handoff_rows.py": 9,
+    "test_sd_install.py": 24,
+    "test_sd_install_reprovision.py": 1,
+    "test_sd_issue_guard.py": 2,
+    "test_sd_jev_shadow.py": 4,
+    "test_sd_lane.py": 7,
+    "test_sd_lane_requests.py": 1,
+    "test_sd_lib.py": 9,
+    "test_sd_local_gate.py": 3,
+    "test_sd_managed.py": 3,
+    "test_sd_plugin.py": 1,
+    "test_sd_pr_state.py": 1,
+    "test_sd_research_kit.py": 6,
+    "test_sd_research_pins.py": 5,
+    "test_sd_research_publish.py": 1,
+    "test_sd_restore.py": 4,
+    "test_sd_review.py": 16,
+    "test_sd_review_check_receipt.py": 1,
+    "test_sd_review_empty_subject.py": 2,
+    "test_sd_review_gate_check.py": 1,
+    "test_sd_review_jev.py": 7,
+    "test_sd_review_lens.py": 2,
+    "test_sd_review_opencode.py": 1,
+    "test_sd_review_output_contract.py": 4,
+    "test_sd_review_oversize.py": 17,
+    "test_sd_review_preflight.py": 3,
+    "test_sd_review_receipts.py": 2,
+    "test_sd_review_setup_github.py": 5,
+    "test_sd_review_ship.py": 12,
+    "test_sd_review_slots.py": 2,
+    "test_sd_rules_for.py": 1,
+    "test_sd_ship.py": 7,
+    "test_sd_ship_body.py": 1,
+    "test_sd_ship_dispositions.py": 1,
+    "test_sd_ship_lane.py": 3,
+    "test_sd_ship_no_item.py": 1,
+    "test_sd_ship_squash.py": 2,
+    "test_sd_size_report.py": 5,
+    "test_sd_skill.py": 3,
+    "test_sd_skill_adopt.py": 1,
+    "test_sd_skill_promotion.py": 1,
+    "test_sd_skill_use.py": 2,
+    "test_sd_status.py": 1,
+    "test_sd_store.py": 2,
+    "test_sd_suggest.py": 2,
+    "test_sd_work.py": 13,
+    "test_sd_work_contributions.py": 5,
+    "test_sd_workflow_state.py": 1,
+    "test_sd_writing.py": 1,
+    "test_status_shared_tree.py": 1,
+    "test_status_source.py": 4,
+    "test_suite_shape.py": 5,
+    "test_system_pin.py": 2,
+    "test_workflow_policy.py": 7,
+    "test_writer_skills_consult_the_registry.py": 1,
+}
+
+
+def unshielded_lines(source: str) -> list[int]:
+    """Lines of `subprocess` calls on git or a `bin/` path that pass no `clean_environment`.
+
+    Static, so it reads only a call whose first argument is a list literal.
+    A `bin/` path is a list element that names `bin`, or a module-level name
+    assigned from an expression that does. `from subprocess import run` and
+    an argv built in a variable are not read.
+    """
+
+    tree = ast.parse(source)
+    named_bin = {
+        target.id
+        for node in tree.body if isinstance(node, ast.Assign)
+        for target in node.targets if isinstance(target, ast.Name)
+        if re.search(r"\bbin\b", ast.unparse(node.value))
+    }
+    reaches = re.compile(r"\b(?:bin|%s)\b" % "|".join(sorted(named_bin) or ["bin"]))
+    lines = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr in SUBPROCESS_CALLS
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "subprocess"
+                and node.args and isinstance(node.args[0], ast.List)):
+            continue
+        argv = node.args[0].elts
+        first = argv[0] if argv else None
+        starts_git = isinstance(first, ast.Constant) and first.value == "git"
+        if not (starts_git or any(reaches.search(ast.unparse(item)) for item in argv)):
+            continue
+        shielded = any(
+            keyword.arg == "env" and "clean_environment" in ast.unparse(keyword.value)
+            for keyword in node.keywords)
+        if not shielded:
+            lines.append(node.lineno)
+    return lines
+
+
+class CleanEnvironment(unittest.TestCase):
+    """A test module's git and `bin/` children run in the shared clean environment."""
+
+    def test_no_test_module_starts_an_unshielded_child_beyond_its_entry(self):
+        modules = {path.name: path for path in tracked("tests") if re.fullmatch(r"test_\w+\.py", path.name)}
+        for name in sorted(set(modules) | set(UNSHIELDED)):
+            with self.subTest(module=name):
+                found = len(unshielded_lines(modules[name].read_text(encoding="utf-8"))) if name in modules else 0
+                allowed = UNSHIELDED.get(name, 0)
+                self.assertLessEqual(
+                    found, allowed,
+                    f"{name} starts {found} git or bin/ child(ren) with no "
+                    f"env=clean_environment(...) from tests/clean_env.py, {allowed} allowed. "
+                    f"Pass it, so the child cannot read the live checkout or HOME (sd:3133).")
+                self.assertGreaterEqual(
+                    found, allowed,
+                    f"{name} now has {found} unshielded child(ren), and UNSHIELDED allows "
+                    f"{allowed}. Lower the entry, or delete it at zero.")
+
+    def test_an_unshielded_git_call_is_found_and_a_shielded_one_is_not(self):
+        source = textwrap.dedent("""\
+            import subprocess
+            from tests.clean_env import clean_environment
+            subprocess.run(["git", "init"], check=True)
+            subprocess.run(["git", "init"], env=os.environ)
+            subprocess.run(["git", "init"], env=clean_environment())
+            subprocess.check_output(["git", "log"], env=clean_environment(A="1"))
+            subprocess.run(["rm", "-rf", "x"])
+            subprocess.run(command)
+            """)
+        self.assertEqual(unshielded_lines(source), [3, 4])
+
+    def test_a_bin_entrypoint_is_found_by_path_or_by_the_name_that_holds_it(self):
+        source = textwrap.dedent("""\
+            import subprocess
+            SD_CHECK = REPO_ROOT / "bin" / "sd-check"
+            subprocess.run([sys.executable, str(SD_CHECK), "--json"])
+            subprocess.Popen([sys.executable, "bin/sd-lane"])
+            subprocess.run([sys.executable, str(OTHER)])
+            subprocess.run([sys.executable, str(SD_CHECK)], env=clean_environment())
+            """)
+        self.assertEqual(unshielded_lines(source), [3, 4])
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

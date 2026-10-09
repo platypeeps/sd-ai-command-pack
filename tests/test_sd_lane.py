@@ -33,6 +33,9 @@ def git(root: pathlib.Path, *args: str) -> str:
 
 
 class Lane(unittest.TestCase):
+    #: `repo.runner_merge` for a suite with no database (sd:3132); None reads the suite's own database.
+    runner_merge: str | None = "manual"
+
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -54,6 +57,10 @@ class Lane(unittest.TestCase):
         # Nor does a run read requests from one (sd:2704): a suite passes its own `hub`.
         for name, double in (("default_note", self.note), ("default_hub", lambda root: contextlib.nullcontext())):
             patcher = mock.patch.object(sd_lane, name, double)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        if self.runner_merge is not None:
+            patcher = mock.patch.object(sd_lane, "default_runner_merge", lambda root: self.runner_merge)
             patcher.start()
             self.addCleanup(patcher.stop)
         # And each runs as the hub would: `lane run` refuses on a satellite (sd:2704).

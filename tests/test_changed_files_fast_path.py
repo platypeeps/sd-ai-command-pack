@@ -32,6 +32,8 @@ import types
 import unittest
 import unittest.mock
 
+from tests.clean_env import clean_environment
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCRIPTS = REPO_ROOT / ".github/scripts"
 SELECTOR = SCRIPTS / "select-tests.py"
@@ -113,17 +115,6 @@ def build_tree(root: pathlib.Path) -> None:
     (root / "docs/nowhere.md").write_text("# Named by no test\n")
     (root / "docs/it's.md").write_text("# A name with a quote in it\n")
     (root / ".coveragerc").write_text(COVERAGERC)
-
-
-def clean_environment(**extra: str) -> dict[str, str]:
-    """This process's environment without anything that would steer the run under test."""
-
-    dropped = {"PYTHONPATH", "CI", "GITHUB_ACTIONS", "TEST_CHANGED_FILES", "CHANGED",
-               "MAKEFLAGS", "MFLAGS", "MAKELEVEL"}
-    environment = {key: value for key, value in os.environ.items()
-                   if not key.startswith(("COVERAGE_", "SD_COVERAGE_")) and key not in dropped}
-    environment.update({"TEST_WORKERS": "4", "PYTHONDONTWRITEBYTECODE": "1", **extra})
-    return environment
 
 
 def ran_modules(ran_dir: pathlib.Path) -> set[str]:
