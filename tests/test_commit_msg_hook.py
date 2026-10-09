@@ -33,6 +33,8 @@ sys.path.insert(0, str(REPO_ROOT / "bin"))
 
 import sd_lib  # noqa: E402
 
+from tests.clean_env import clean_environment  # noqa: E402
+
 HOOK = REPO_ROOT / "hooks" / "commit-msg"
 
 CONTIGUOUS = (
@@ -86,20 +88,9 @@ FIXTURES = {
 
 def git(*args: str, cwd: pathlib.Path, stdin: str | None = None) -> str:
     return subprocess.run(
-        ["git", *args], cwd=cwd, input=stdin, capture_output=True, text=True, check=True
+        ["git", *args], cwd=cwd, input=stdin, capture_output=True, text=True, check=True,
+        env=clean_environment(),
     ).stdout
-
-
-def clean_env(**extra: str) -> dict[str, str]:
-    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-    env.pop("SD_SKIP_HOOKS", None)
-    # Git runs the hook through `#!/usr/bin/env python3`, which under the gate
-    # can be an interpreter without coverage.py; the harness's sitecustomize
-    # then prints its warning on stderr. The hook is outside `.coveragerc`'s
-    # include, so nothing is lost by not asking for subprocess coverage.
-    env.pop("SD_COVERAGE_PROCESS_START", None)
-    env.update(extra)
-    return env
 
 
 def scratch_repository(prefix: str) -> pathlib.Path:
@@ -167,7 +158,7 @@ class HookFixture(unittest.TestCase):
         stub.chmod(0o755)
         shutil.copy2(REPO_ROOT / "bin" / "sd_lib.py", self.root / "bin" / "sd_lib.py")
         shutil.copy2(REPO_ROOT / "Makefile", self.root / "Makefile")
-        made = subprocess.run(["make", "hooks"], cwd=self.root, env=clean_env(),
+        made = subprocess.run(["make", "hooks"], cwd=self.root, env=clean_environment(),
                               capture_output=True, text=True, check=False)
         self.assertEqual(made.returncode, 0, made.stdout + made.stderr)
         self.made = made
@@ -175,12 +166,13 @@ class HookFixture(unittest.TestCase):
     def commit(self, message: str, **extra: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["git", "commit", "-q", "--allow-empty", "-F", "-"], cwd=self.root, input=message,
-            env=clean_env(**extra), capture_output=True, text=True, check=False,
+            env=clean_environment(**extra), capture_output=True, text=True, check=False,
         )
 
     def commits(self) -> int:
         result = subprocess.run(["git", "rev-list", "--count", "HEAD"], cwd=self.root,
-                                capture_output=True, text=True, check=False)
+                                env=clean_environment(), capture_output=True, text=True,
+                                check=False)
         return int(result.stdout.strip()) if result.returncode == 0 else 0
 
 
