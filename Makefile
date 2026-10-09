@@ -179,9 +179,9 @@ SETUP_PYTHON = $(SETUP_VENV)/bin/python
 # the step that rebuilds the interpreter around it.
 #
 # The last step serves the machine (sd:3009). The commands run from a plain
-# clone of origin/main that nobody works in. In the clone, `--serve` renders
-# it; in any other checkout, it clones the tree the first time, detaches it at
-# origin/main and runs this recipe there. `--venv` takes sd_db into the
+# clone that nobody works in, at this checkout's HEAD (sd:3111). In the clone,
+# `--serve` renders it; in any other checkout, it clones the tree the first
+# time, fetches this HEAD into it, detaches there and runs this recipe there. `--venv` takes sd_db into the
 # environment this recipe builds, which `VENV=...` may put outside `.venv`.
 # `SERVE=no` skips the serving step. README "A dedicated serving tree" has
 # the rest.

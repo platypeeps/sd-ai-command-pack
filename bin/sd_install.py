@@ -2842,17 +2842,19 @@ def _retire_slots(tree: Path, out) -> None:
 
 
 def cmd_serve(ctx: Context, out) -> int:
-    """Serve this machine from a plain clone of `origin/main`; `make setup` runs it (sd:3009).
+    """Serve this machine from a plain clone at this checkout's `HEAD`; `make setup` runs it.
 
     The operator ruled on 2026-10-08 that the serving tree is a plain clone
-    nobody works in. `git fetch`, `git checkout --detach origin/main` and
-    `make setup` in the tree update it; README "A dedicated serving tree"
-    has the rollback, which skips this step: an older commit's `--serve`
-    refuses in the tree. In the tree, `--serve` is `make setup`'s render.
-    In any other checkout it clones the tree the first time, then runs the
-    update: the tree's `make setup SERVE=no` builds its `.venv`, and the
-    tree's own installer renders under that `.venv`'s python, so it reads
-    the `sd_db` it just built, with this run's `--home` and `--bin-dir`.
+    nobody works in (sd:3009), and that it serves the working checkout's
+    `HEAD`, not `origin/main` (sd:3111), so a pinned checkout pins the
+    commands too. In the tree, `--serve` is `make setup`'s render; README
+    "A dedicated serving tree" has the rollback, which skips it. In any
+    other checkout it clones `origin` into the tree the first time, fetches
+    this checkout's `HEAD` into it, which reaches a commit `origin` lacks,
+    and detaches it there. The tree's `make setup SERVE=no` builds its
+    `.venv`, and the tree's own installer renders under that `.venv`'s
+    python, so it reads the `sd_db` it just built, with this run's `--home`
+    and `--bin-dir`.
     """
     tree = serving_tree(ctx.home, ctx.environ)
     if tree.resolve() == ctx.checkout.resolve():
@@ -2865,12 +2867,13 @@ def cmd_serve(ctx: Context, out) -> int:
     if not tree.exists() and not _clone_serving_tree(ctx, tree, out):
         return 1
     if ctx.dry_run:
-        print(f"would detach {tree} at origin/main, run `make setup` there and render", file=out)
+        print(f"would detach {tree} at the HEAD of {ctx.checkout}, run `make setup` there and render", file=out)
         return 0
-    for args in (["fetch", "--quiet", "origin"], ["checkout", "--quiet", "--detach", "refs/remotes/origin/main"]):
+    for args in (["fetch", "--quiet", str(ctx.checkout), "HEAD"], ["checkout", "--quiet", "--detach", "FETCH_HEAD"]):
         code, _, err = _git_in(tree, args, timeout=PULL_TIMEOUT)
         if code:
-            print(f"error: git {args[0]} failed in the serving tree {tree}:\n{err}", file=out)
+            print(f"error: git {args[0]} failed in the serving tree {tree}, which cannot reach the HEAD of "
+                  f"{ctx.checkout}; nothing moved:\n{err}", file=out)
             return 1
     environ = {key: value for key, value in ctx.environ.items() if key not in MAKE_VARIABLES}
     python = tree / ".venv" / "bin" / "python"
@@ -2883,7 +2886,7 @@ def cmd_serve(ctx: Context, out) -> int:
             return 1
         print(done.stdout + done.stderr, file=out, end="")
         if done.returncode:
-            print(f"error: the serving tree {tree} is at origin/main, and its `make setup` failed; "
+            print(f"error: the serving tree {tree} is at the HEAD of {ctx.checkout}, and its `make setup` failed; "
                   f"fix the cause, then run `make setup` in {tree}", file=out)
             return done.returncode
     return 0
@@ -3010,8 +3013,8 @@ usage: python3 bin/sd_install.py (--user | --status | --verify | --pull | --serv
   --json           with --verify, emit typed verification results
   --pull           fast-forward the serving checkout (main, clean) and re-render
   --serve          in the serving tree, render it; elsewhere, clone the tree if it is
-                   missing, detach it at origin/main and run its `make setup`;
-                   `make setup` runs this last
+                   missing, detach it at this checkout's HEAD and run its
+                   `make setup`; `make setup` runs this last
   --uninstall      remove exactly what the receipt records having written
   --adopt-legacy   delete the old fleet installer's successor-less renders (M1)
   --repo [PATH]    write the marked block into PATH/CLAUDE.local.md (default: .)

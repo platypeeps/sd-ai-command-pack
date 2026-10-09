@@ -27,8 +27,8 @@ checkout of `origin/main` that only setup updates, and that nobody works in.
 
 ## Requirements
 
-1. The tree serves an exact merged commit: `git checkout --detach
-   origin/main` in the tree, then `make setup`, which re-renders.
+1. The tree serves an exact commit, the working checkout's `HEAD`
+   (sd:3111): `make setup` there detaches the tree at it and re-renders.
 2. Strict verification stays sensitive to drift. `--verify` does not change.
 3. Active planning work stays preserved. Nothing here touches the working
    checkout. Git refuses a checkout over conflicting changes in the tree.

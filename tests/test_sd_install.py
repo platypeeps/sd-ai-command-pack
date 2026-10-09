@@ -2231,12 +2231,12 @@ class PullBehaviourTests(InstallerHarness):
 
 
 class ServeTests(InstallerHarness):
-    """`make setup` serves the machine from a plain clone of origin/main (sd:3009).
+    """`make setup` serves the machine from a plain clone (sd:3009) at the working checkout's HEAD (sd:3111).
 
     In a working checkout, `--serve` clones the tree the first time, then
-    runs the update an operator would run in it: fetch, detach at
-    origin/main, `make setup`. The origin's Makefile and installer are
-    recorders; `.venv/bin/python` is a shim that marks the run as the tree's.
+    fetches that checkout's HEAD into it, detaches there and runs its
+    `make setup`. The origin's Makefile and installer are recorders;
+    `.venv/bin/python` is a shim that marks the run as the tree's.
     """
 
     RECORDER = (
@@ -2274,6 +2274,12 @@ class ServeTests(InstallerHarness):
         self.git(self.origin, "add", "-A")
         self.git(self.origin, "-c", "user.email=t@example.test", "-c", "user.name=t", "commit", "-qm", message)
         return self.git(self.origin, "rev-parse", "HEAD")
+
+    def merge(self, message: str) -> str:
+        """A commit on origin that the working checkout then pulls."""
+        commit = self.commit_origin(message)
+        self.git(self.work, "pull", "-q", "--ff-only")
+        return commit
 
     def setUp(self):
         super().setUp()
@@ -2319,11 +2325,11 @@ class ServeTests(InstallerHarness):
         self.assertEqual(record["via"], "tree", "the tree's installer ran under another python than its .venv's")
         self.assertIn(f"cloned {self.origin} into {self.tree}", output)
 
-    def test_a_second_serve_moves_the_tree_to_the_new_origin_main_and_passes_the_link_directory(self):
+    def test_a_second_serve_moves_the_tree_to_the_checkouts_new_head_and_passes_the_link_directory(self):
         self.assertEqual(self.serve()[0], 0)
         marker = self.tree / ".git" / "kept"
         marker.write_text("x", encoding="utf-8")
-        merged = self.commit_origin("two")
+        merged = self.merge("two")
         links = self.home / "links"
         ctx = self.context()
         ctx.bin_dir = links
@@ -2336,13 +2342,29 @@ class ServeTests(InstallerHarness):
         self.assertEqual((self.tree / ".venv" / "built").read_text(encoding="utf-8").strip(), merged)
         self.assertEqual(self.recorded()["argv"], ["--serve", "--home", str(self.home), "--bin-dir", str(links)])
 
+    def test_a_checkout_pinned_behind_origin_main_serves_the_pinned_commit(self):
+        """sd:3111: the tree serves the working checkout's HEAD, so a pin holds the commands too."""
+        self.commit_origin("two")
+        rc, output = self.serve()
+        self.assertEqual(rc, 0, output)
+        self.assertEqual(self.git(self.tree, "rev-parse", "HEAD"), self.merged)
+        self.assertEqual((self.tree / ".venv" / "built").read_text(encoding="utf-8").strip(), self.merged)
+
+    def test_a_commit_origin_lacks_is_fetched_from_the_working_checkout(self):
+        self.assertEqual(self.serve()[0], 0)
+        (self.work / "file.txt").write_text("local\n", encoding="utf-8")
+        self.git(self.work, "-c", "user.email=t@example.test", "-c", "user.name=t", "commit", "-qam", "local")
+        rc, output = self.serve()
+        self.assertEqual(rc, 0, output)
+        self.assertEqual(self.git(self.tree, "rev-parse", "HEAD"), self.git(self.work, "rev-parse", "HEAD"))
+
     def readme_command(self, step: str, marker: str) -> str:
         bullet = (REPO_ROOT / "README.md").read_text(encoding="utf-8").split(f"- **{step}:**", 1)[1].split("\n- ", 1)[0]
         return next(span for span in " ".join(bullet.split()).split("`") if marker in span)
 
     def test_the_documented_rollback_and_update_cross_a_commit_from_before_the_plain_clone(self):
-        """sd:3009 review 1: README's rollback reaches an older commit's `make setup`, and its update comes back."""
-        rollback, update = self.readme_command("Roll back", "<commit>"), self.readme_command("Update", "origin/main")
+        """sd:3009 review 1: README's rollback reaches an older commit's `make setup`, and `--serve` comes back."""
+        rollback = self.readme_command("Roll back", "<commit>")
         makefile, installer = self.origin / "Makefile", self.origin / "bin" / "sd_install.py"
         older = {}
         for era, recipe, script in (("slot era", self.MAKEFILE, self.REFUSING),
@@ -2352,20 +2374,21 @@ class ServeTests(InstallerHarness):
             older[era] = self.commit_origin(era)
         makefile.write_text(self.MAKEFILE, encoding="utf-8")
         installer.write_text(self.RECORDER, encoding="utf-8")
-        merged = self.commit_origin("plain clone")
+        merged = self.merge("plain clone")
         self.assertEqual(self.serve()[0], 0)
         environ = {"PATH": os.environ.get("PATH", ""), "HOME": str(self.home),
                    "SERVE_RECORD": str(self.record), "SERVE_SHIM": str(self.shim)}
         for era, commit in older.items():
             with self.subTest(era):
-                for command, head, argv in ((rollback.replace("<commit>", commit), commit, ["--user"]),
-                                            (update, merged, ["--serve"])):
-                    self.record.unlink(missing_ok=True)
-                    done = subprocess.run(["sh", "-c", command], cwd=self.tree, env=environ,
-                                          capture_output=True, text=True, check=False)
-                    self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
-                    self.assertEqual(self.git(self.tree, "rev-parse", "HEAD"), head)
-                    self.assertEqual((self.recorded()["argv"], self.recorded()["via"]), (argv, "tree"))
+                self.record.unlink(missing_ok=True)
+                done = subprocess.run(["sh", "-c", rollback.replace("<commit>", commit)], cwd=self.tree, env=environ,
+                                      capture_output=True, text=True, check=False)
+                self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+                self.assertEqual(self.git(self.tree, "rev-parse", "HEAD"), commit)
+                self.assertEqual((self.recorded()["argv"], self.recorded()["via"]), (["--user"], "tree"))
+                rc, output = self.serve()
+                self.assertEqual(rc, 0, output)
+                self.assertEqual((self.git(self.tree, "rev-parse", "HEAD"), self.recorded()["argv"][0]), (merged, "--serve"))
 
     def test_a_relative_local_origin_is_cloned_from_the_checkout(self):
         """sd:2913: `../origin` names a path from the working checkout, not from the serving tree's parent."""
@@ -2386,10 +2409,11 @@ class ServeTests(InstallerHarness):
         self.assertFalse((self.home / "x").exists())
 
     def test_a_failed_setup_is_reported_and_nothing_renders(self):
-        """Failure row 4: the tree is at origin/main, its `.venv` half built; `make setup` in the tree is the retry."""
+        """Failure row 4: the tree is at the checkout's HEAD, its `.venv` half built; `make setup` there is the retry."""
         rc, output = self.serve(self.context(SERVE_MAKE_EXIT="2"))
         self.assertEqual(rc, 2)
-        self.assertIn(f"error: the serving tree {self.tree} is at origin/main, and its `make setup` failed", output)
+        self.assertIn(f"error: the serving tree {self.tree} is at the HEAD of {self.work}, and its `make setup` failed",
+                      output)
         self.assertIn(f"run `make setup` in {self.tree}", output)
         self.assertFalse(self.record.exists())
 
@@ -2405,15 +2429,16 @@ class ServeTests(InstallerHarness):
         self.assertFalse(self.record.exists())
 
     def test_a_fetch_or_checkout_that_fails_moves_nothing(self):
-        """Failure rows 2 and 3: git refuses; the tree serves on at its commit."""
+        """Failure rows 2 and 3: git refuses by name; the tree serves on at its commit."""
         self.assertEqual(self.serve()[0], 0)
         self.record.unlink()
-        self.commit_origin("two")
-        self.git(self.tree, "remote", "set-url", "origin", str(self.home / "gone"))
+        self.git(self.work, "checkout", "-q", "--orphan", "unborn")
         rc, output = self.serve()
         self.assertEqual(rc, 1)
-        self.assertIn(f"error: git fetch failed in the serving tree {self.tree}", output)
-        self.git(self.tree, "remote", "set-url", "origin", str(self.origin))
+        self.assertIn(f"error: git fetch failed in the serving tree {self.tree}, which cannot reach the HEAD of "
+                      f"{self.work}; nothing moved", output)
+        self.git(self.work, "checkout", "-q", "-f", "main")
+        self.merge("two")
         (self.tree / "file.txt").write_text("edited\n", encoding="utf-8")
         rc, output = self.serve()
         self.assertEqual(rc, 1)
@@ -2491,12 +2516,12 @@ class ServeTests(InstallerHarness):
     def test_a_dry_run_serve_of_an_existing_clone_runs_nothing(self):
         self.assertEqual(self.serve()[0], 0)
         self.record.unlink()
-        merged = self.commit_origin("two")
+        merged = self.merge("two")
         ctx = self.context()
         ctx.dry_run = True
         rc, output = self.serve(ctx)
         self.assertEqual(rc, 0)
-        self.assertIn(f"would detach {self.tree} at origin/main, run `make setup` there and render", output)
+        self.assertIn(f"would detach {self.tree} at the HEAD of {self.work}, run `make setup` there and render", output)
         self.assertFalse(self.record.exists())
         self.assertNotEqual(self.git(self.tree, "rev-parse", "HEAD"), merged)
 

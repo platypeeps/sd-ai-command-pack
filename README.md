@@ -335,18 +335,18 @@ Work in one checkout and serve from another (sd:3009). The serving tree is a
 plain clone on a detached `HEAD` that nobody works in, at
 `${XDG_DATA_HOME:-~/.local/share}/sd-ai-command-pack/serving`.
 
-- **Update:** in the tree, `git fetch && git checkout --detach origin/main &&
-  make setup`. `make setup` builds the tree's own `.venv`, and its last step,
-  `bin/sd_install.py --serve`, renders from the tree. `make setup` in your
-  working checkout does the same for you: its `--serve` clones `origin` into
-  the tree the first time, then fetches, detaches at `origin/main` and runs the
-  tree's `make setup`.
+- **Update:** `make setup` in your working checkout. The tree serves that
+  checkout's `HEAD` (sd:3111), so a pinned checkout pins the commands too.
+  Its last step, `bin/sd_install.py --serve`, clones `origin` into the tree
+  the first time. It then fetches the working checkout's `HEAD` into the tree,
+  which reaches a commit `origin` lacks, detaches the tree there and runs the
+  tree's `make setup`. That builds the tree's own `.venv` and renders from it.
 - **Roll back:** in the tree, `git checkout --detach <commit> && make setup
   SERVE=no && .venv/bin/python bin/sd_install.py --user`. It works for any
   commit: `SERVE=no` skips the `--serve` step, which a commit from before
   sd:3009 refuses in the tree and one from before sd:1118 does not have.
-  `git reflog` there lists the commits it served. The update command brings
-  the tree back to `origin/main`.
+  `git reflog` there lists the commits it served. `make setup` in the working
+  checkout brings the tree back to that checkout's `HEAD`.
 - **A failure** stops where it happened and says so. A failed fetch or
   checkout moves nothing. A failed build leaves the tree at its new commit
   with `.venv` marked mid-provision, so served commands load no `sd_db` from
@@ -365,7 +365,7 @@ plain clone on a detached `HEAD` that nobody works in, at
 | `python3 bin/sd_install.py --status` | Report installed source, drift, legacy residue, and remaining predecessor agents without failing on drift |
 | `python3 bin/sd_install.py --verify --json` | Read-only: fail on receipt, source, rendered-file, command-resolution, or bounded help-probe errors |
 | `python3 bin/sd_install.py --pull` | Fast-forward the clean serving checkout on `main`, then render |
-| `python3 bin/sd_install.py --serve` | In the serving tree, render it; elsewhere, clone the tree if it is missing, detach it at `origin/main` and run its `make setup`; `make setup` runs this |
+| `python3 bin/sd_install.py --serve` | In the serving tree, render it; elsewhere, clone the tree if it is missing, detach it at this checkout's `HEAD` and run its `make setup`; `make setup` runs this |
 | `python3 bin/sd_install.py --uninstall` | Remove receipt-owned renders, hooks, and command links; preserve modified files and retargeted links |
 | `python3 bin/sd_install.py --adopt-legacy` | Delete the pre-3e fleet installer's successor-less renders |
 | `python3 bin/sd_install.py --repo [PATH]` | Write the marked block into `PATH/CLAUDE.local.md` |
