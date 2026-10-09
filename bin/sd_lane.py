@@ -265,6 +265,27 @@ def stamp_now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+def keep_body(body_file: pathlib.Path, lane: pathlib.Path, item: int) -> pathlib.Path:
+    """A private copy of the pull request body under the lane's own folder (sd:3170).
+
+    The runner passes the body to prepare later, and a body under /tmp did not
+    outlive a reboot. The copy is the entry's own, so two entries never share one.
+    """
+    bodies = lane / "bodies"
+    bodies.mkdir(mode=0o700, parents=True, exist_ok=True)
+    handle, name = tempfile.mkstemp(prefix=f"{item}-", suffix=".md", dir=bodies)
+    with os.fdopen(handle, "wb") as copy:  # mkstemp makes it 0600
+        copy.write(body_file.read_bytes())
+    return pathlib.Path(name)
+
+
+def drop_body(row: dict[str, Any], lane: pathlib.Path) -> None:
+    """Remove an ended entry's body copy; a body an earlier version queued by its own path stays (sd:3170)."""
+    body = pathlib.Path(str(row.get("body_file") or ""))
+    if body.parent == lane / "bodies":
+        body.unlink(missing_ok=True)
+
+
 def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: pathlib.Path, environ: dict[str, str], *,
                   expected_head: str | None = None, manual: bool = False, claim: str | None = None,
                   acceptance_file: pathlib.Path | None = None) -> dict[str, Any]:
@@ -286,8 +307,10 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
         raise LaneError(f"{expected_head or 'HEAD'} names no commit in {worktree}")
     if not body_file.is_file():
         raise LaneError(f"the body file {body_file} does not exist")
+    path = queue_path(worktree, environ)
+    body = keep_body(body_file, path.parent.parent, item)
     entry = {"worktree": str(worktree), "item": item, "expected_head": head, "title": title,
-             "body_file": str(body_file.resolve()), "authority": "manual" if manual else None, "claim": claim,
+             "body_file": str(body), "authority": "manual" if manual else None, "claim": claim,
              "acceptance_file": str(acceptance_file.resolve()) if acceptance_file else None,
              "status": "pending", "enqueued_at": stamp_now()}
 
@@ -296,7 +319,11 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
             raise LaneError(f"sd:{item} is already queued in this lane")
         entries.append(entry)
         return entry
-    return update(queue_path(worktree, environ), add_entry)
+    try:
+        return update(path, add_entry)
+    except BaseException:
+        body.unlink(missing_ok=True)
+        raise
 
 
 def pending_entry(entries: list[dict[str, Any]], item: int) -> dict[str, Any]:
@@ -327,12 +354,15 @@ def check_revision(entries: list[dict[str, Any]], expected: str | None) -> None:
 
 def cancel(root: pathlib.Path, item: int, environ: dict[str, str], *,
            expected_revision: str | None = None) -> dict[str, Any]:
+    path = queue_path(root, environ)
+
     def mark(entries: list[dict[str, Any]]) -> dict[str, Any]:
         check_revision(entries, expected_revision)
         row = pending_entry(entries, item)
         row.update(status="cancelled", finished_at=stamp_now())
+        drop_body(row, path.parent.parent)
         return row
-    return update(queue_path(root, environ), mark)
+    return update(path, mark)
 
 
 def position(where: str) -> str:
@@ -1246,6 +1276,8 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
                     for row in entries:
                         if row.get("item") == entry["item"] and row.get("status") == "running":
                             row.update(outcome, finished_at=stamp_now())
+                            if outcome.get("status") != "pending":
+                                drop_body(row, path.parent.parent)
                 update(path, finish)
                 ran.append({"item": entry["item"], **outcome})
                 if outcome.get("status") == "pending":
