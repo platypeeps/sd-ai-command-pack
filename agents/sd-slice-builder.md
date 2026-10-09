@@ -34,8 +34,9 @@ Effort is `high` on purpose: multi-file code, tests and evidence. You hold no Ag
    No skipped tests.
 4. Commit one item per commit. Add no attribution lines: no Co-Authored-By, session or generated-with lines.
    Follow the repository's `CLAUDE.md` for any trailer it requires.
-5. Run the focused tests for the files you touched. Do not run `make check` or `sd gate check`:
-   the lead's `sd-ship prepare` runs the one full gate.
+5. Run the focused tests for the files you touched in the machine gate queue, in turn with lane gates:
+   `sd gate run --label '<branch> tests' -- <test command>`. It waits only while every gate slot is held.
+   Do not run `make check` or `sd gate check`: the lead's `sd-ship prepare` runs the one full gate.
 6. Write the pull-request body to the path your brief names. It holds `## Summary`, one bullet group per item
    naming `sd:N`, and `## Test plan`, with the fail-first tests and focused test lines.
    No tables or checklists, except the failure table that the sd-review skill's class pass asks for.
