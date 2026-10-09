@@ -1,8 +1,9 @@
 """The conduct harness's assertions, offline, against a recorded live transcript (sd:1149).
 
-`tests/fixtures/conduct/sd-grill-stopped-after-adopting.json` is a real
-`claude -p` run of the `sd-grill-stopped-after-adopting` case. The model held
-every rule in it, so `assess` must pass it; each mutation below breaks one
+Each file in `tests/fixtures/conduct/` is a real `claude -p` run of the
+`sd-grill-stopped-after-adopting` case, kept because its report shape once
+fooled the parser. The model held every rule in each, so `assess` must pass
+them; each mutation below breaks one
 rule, and the check for that rule must fail or answer unknown. No test here
 starts a model: a live run costs money and needs a login.
 """
@@ -18,12 +19,15 @@ from unittest import mock
 
 from tests import conduct
 
-FIXTURE = Path(__file__).resolve().parent / "fixtures/conduct/sd-grill-stopped-after-adopting.json"
+FIXTURES = Path(__file__).resolve().parent / "fixtures/conduct"
+FIXTURE = FIXTURES / "sd-grill-stopped-after-adopting.json"
+#: Bold labels alone on a line, with `- **` items under them.
+BOLD_LABELS = FIXTURES / "sd-grill-stopped-after-adopting.bold-labels.json"
 CASE = conduct.CASES["sd-grill-stopped-after-adopting"]
 
 
-def recorded() -> dict:
-    return json.loads(FIXTURE.read_text(encoding="utf-8"))
+def recorded(path: Path = FIXTURE) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def subject_of(transcript: dict) -> dict:
@@ -41,10 +45,13 @@ def set_text(turn: dict, text: str) -> None:
 
 
 class RecordedRunTest(unittest.TestCase):
-    def test_the_recorded_run_passes_every_check(self):
-        got = verdicts(recorded())
-        self.assertEqual(set(got.values()), {"pass"}, got)
-        self.assertEqual(len(got), 1 + len(CASE.checks))
+    def test_each_recorded_run_passes_every_check(self):
+        for path in sorted(FIXTURES.glob("*.json")):
+            t = recorded(path)
+            got = verdicts(t, subject_of(t))
+            with self.subTest(fixture=path.name):
+                self.assertEqual(set(got.values()), {"pass"}, got)
+                self.assertEqual(len(got), 1 + len(CASE.checks))
 
     def test_a_question_quoted_in_parentheses_is_not_asked(self):
         text = conduct.text_of(recorded()["turns"][1])
@@ -55,6 +62,13 @@ class RecordedRunTest(unittest.TestCase):
         final = conduct.text_of(recorded()["turns"][-1])
         self.assertIn("Stopped", conduct.section(final, r"closing state") or "")
         self.assertIn("contaminated", conduct.section(final, r"assistant[- ]supplied") or "")
+
+    def test_a_list_item_under_a_bold_label_stays_in_its_section(self):
+        final = conduct.text_of(recorded(BOLD_LABELS)["turns"][-1])
+        self.assertIn("\n**Assistant-supplied content**\n- **Q2", final)
+        body = conduct.section(final, r"assistant[- ]supplied") or ""
+        self.assertIn("contaminated by construction", body)
+        self.assertNotIn("Not asked", body)
 
 
 class EvidenceTest(unittest.TestCase):

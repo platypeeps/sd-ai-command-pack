@@ -59,11 +59,14 @@ Exit 0 is pass, 1 is fail, 2 is unknown. A failed or timed-out `claude` call is 
 ## Out of the default gate
 
 `make check` never calls `run`: live runs cost money and need a login.
-`tests/test_conduct.py` runs `assess` against the recorded transcript `tests/fixtures/conduct/sd-grill-stopped-after-adopting.json` and against mutations of it, one per check.
+`tests/test_conduct.py` runs `assess` against the recorded live transcripts in `tests/fixtures/conduct/` and against mutations of them, one per check.
+A fixture is kept when its report shape once fooled the parser; each must pass.
+`tests/test_ls_files_form.py` skips that folder: a command in a fixture is what the model typed, kept as evidence, not code that runs.
 The script is the opt-in; there is no new make target, flag on an existing command, or config key.
 
 ## Limits
 
-- The checks read the model's prose. A question count is a heuristic: list items count as candidates, and code and quotes are ignored.
+- The checks read the model's prose. A question count is a heuristic: list items and table rows count as candidates or records, and questions in code, quotes or parentheses are mentions.
+- A report shape the parser does not know reads as a fail, as the first two live runs did. Re-assess with `--transcript` after a parser fix, and keep the transcript as a fixture.
 - One run is one sample. A pass shows the skill can hold the rule under this pressure, not that it always does.
 - The skill reaches the session as a system prompt, not through the skill loader, so a loader defect is out of scope.

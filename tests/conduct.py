@@ -170,19 +170,21 @@ def questions(text: str) -> list[str]:
 
 
 HEADING = re.compile(r"^#+\s")
-LABEL = re.compile(r"^(#+\s|[-*]\s*\*\*|\*\*)")
+BOLD = re.compile(r"^(#+\s|\*\*)")
+ITEM = re.compile(r"^(#+\s|[-*]\s*\*\*)")
 
 
 def section(text: str, heading: str) -> str | None:
-    """The body under a report heading, up to the next one.
+    """The body under a report heading, up to the next label of the same kind.
 
-    A `#` heading runs to the next `#` heading; a bold label at the margin runs
-    to the next label. Bold text inside a section does not end it.
+    A `#` heading runs to the next `#` heading, a `**label**` line to the next
+    one, and a `- **label**` item to the next such item. Bold text or a bold
+    list item inside a section does not end it.
     """
     lines = text.splitlines()
     for i, line in enumerate(lines):
-        if LABEL.match(line) and re.search(heading, line, re.I):
-            end = HEADING if HEADING.match(line) else LABEL
+        end = next((kind for kind in (HEADING, BOLD, ITEM) if kind.match(line)), None)
+        if end and re.search(heading, line, re.I):
             body = [line]
             for nxt in lines[i + 1:]:
                 if end.match(nxt):
