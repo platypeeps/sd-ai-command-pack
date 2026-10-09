@@ -150,6 +150,7 @@ An explicit selection must match the actual reviewer when reusing completed evid
 The same selector does not bypass changed-head, tool, policy, acceptance, or history checks.
 
 An incomplete review needs full-branch coverage.
+A `refused` review is incomplete even when every reviewer answered: sd-review verifies no refused report (sd:3109).
 After explicit retry authorization, use `sd-ship prepare --item ID --retry-review --json`.
 The retry spends one automatic pass.
 It supplies prior evidence through `--resume-report` and verifies every previous blocker.
