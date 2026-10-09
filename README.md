@@ -341,13 +341,17 @@ plain clone on a detached `HEAD` that nobody works in, at
   working checkout does the same for you: its `--serve` clones `origin` into
   the tree the first time, then fetches, detaches at `origin/main` and runs the
   tree's `make setup`.
-- **Roll back:** in the tree, `git checkout --detach <commit> && make setup`.
-  `git reflog` there lists the commits it served.
+- **Roll back:** in the tree, `git checkout --detach <commit> && make setup
+  SERVE=no && .venv/bin/python bin/sd_install.py --user`. It works for any
+  commit: `SERVE=no` skips the `--serve` step, which a commit from before
+  sd:3009 refuses in the tree and one from before sd:1118 does not have.
+  `git reflog` there lists the commits it served. The update command brings
+  the tree back to `origin/main`.
 - **A failure** stops where it happened and says so. A failed fetch or
   checkout moves nothing. A failed build leaves the tree at its new commit
   with `.venv` marked mid-provision, so served commands load no `sd_db` from
-  it; a failed render puts its files back. Fix the cause and run `make setup`
-  in the tree.
+  it; a failed render puts its files back. Fix the cause and run the same
+  command again.
 - **From the A/B slots:** a tree from before sd:3009 moves over on its first
   `make setup`. It replaces the `.venv` link with a directory, then removes
   `.venv-a`, `.venv-b` and `serving.lock`.

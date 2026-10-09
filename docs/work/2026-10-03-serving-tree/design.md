@@ -16,9 +16,11 @@ Git and `make setup` move it; the installer keeps no state of its own for it:
 | Action | In the tree |
 | --- | --- |
 | Update | `git fetch && git checkout --detach origin/main && make setup` |
-| Roll back | `git checkout --detach <commit> && make setup`; `git reflog` lists the commits it served |
+| Roll back | `git checkout --detach <commit> && make setup SERVE=no && .venv/bin/python bin/sd_install.py --user`; `git reflog` lists the commits it served |
 
 `make setup` builds the tree's own `.venv` and ends with `bin/sd_install.py --serve`.
+A rollback skips that step with `SERVE=no` and renders with `--user`: a commit from before sd:3009 refuses `--serve`
+in the tree, and one from before sd:1118 has no such step.
 In the tree, `--serve` renders it with `--user`.
 In any other checkout, `--serve` clones `origin` into the tree the first time, then runs the update.
 It splits `make setup` into `make setup SERVE=no` and the tree's own `--serve` under the tree's `.venv` python,

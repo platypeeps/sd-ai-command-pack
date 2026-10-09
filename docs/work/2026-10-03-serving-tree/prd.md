@@ -33,7 +33,8 @@ checkout of `origin/main` that only setup updates, and that nobody works in.
 3. Active planning work stays preserved. Nothing here touches the working
    checkout. Git refuses a checkout over conflicting changes in the tree.
 4. Update and rollback are documented and tested. Rollback is `git checkout
-   <commit>` and `make setup` in the tree (sd:3009).
+   <commit>`, `make setup SERVE=no` and `--user` in the tree, for any older
+   commit (sd:3009).
 5. Default paths do not change. A checkout on `main` keeps today's `--pull`.
 6. `make setup` creates and refreshes the serving tree (`--serve`).
 

@@ -2846,8 +2846,9 @@ def cmd_serve(ctx: Context, out) -> int:
 
     The operator ruled on 2026-10-08 that the serving tree is a plain clone
     nobody works in. `git fetch`, `git checkout --detach origin/main` and
-    `make setup` in the tree update it; `git checkout <commit>` and `make
-    setup` roll it back. In the tree, `--serve` is that last step's render.
+    `make setup` in the tree update it; README "A dedicated serving tree"
+    has the rollback, which skips this step: an older commit's `--serve`
+    refuses in the tree. In the tree, `--serve` is `make setup`'s render.
     In any other checkout it clones the tree the first time, then runs the
     update: the tree's `make setup SERVE=no` builds its `.venv`, and the
     tree's own installer renders under that `.venv`'s python, so it reads

@@ -2253,7 +2253,18 @@ class ServeTests(InstallerHarness):
         "\t@git rev-parse HEAD > .venv/built\n"
         "\t@echo 'SERVE=$(SERVE) VENV=$(VENV)' > .venv/variables\n"
         "\t@exit $${SERVE_MAKE_EXIT:-0}\n"
+        "ifneq ($(SERVE),no)\n"
+        "\t.venv/bin/python bin/sd_install.py --serve\n"
+        "endif\n"
     )
+    # Older commits a rollback may reach: before sd:3009 the same recipe ends with
+    # a `--serve` that refuses in the tree; before sd:1118 it renders nothing.
+    PRE_SERVING = "setup:\n\t@mkdir -p .venv/bin\n\t@cp \"$$SERVE_SHIM\" .venv/bin/python\n"
+    REFUSING = (
+        "import sys\n"
+        "if '--serve' in sys.argv:\n"
+        "    sys.exit('error: this is the serving checkout, and nobody works in it')\n"
+    ) + RECORDER
 
     def git(self, repo: Path, *args: str) -> str:
         return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout.strip()
@@ -2324,6 +2335,37 @@ class ServeTests(InstallerHarness):
                          (merged, "HEAD"))
         self.assertEqual((self.tree / ".venv" / "built").read_text(encoding="utf-8").strip(), merged)
         self.assertEqual(self.recorded()["argv"], ["--serve", "--home", str(self.home), "--bin-dir", str(links)])
+
+    def readme_command(self, step: str, marker: str) -> str:
+        bullet = (REPO_ROOT / "README.md").read_text(encoding="utf-8").split(f"- **{step}:**", 1)[1].split("\n- ", 1)[0]
+        return next(span for span in " ".join(bullet.split()).split("`") if marker in span)
+
+    def test_the_documented_rollback_and_update_cross_a_commit_from_before_the_plain_clone(self):
+        """sd:3009 review 1: README's rollback reaches an older commit's `make setup`, and its update comes back."""
+        rollback, update = self.readme_command("Roll back", "<commit>"), self.readme_command("Update", "origin/main")
+        makefile, installer = self.origin / "Makefile", self.origin / "bin" / "sd_install.py"
+        older = {}
+        for era, recipe, script in (("slot era", self.MAKEFILE, self.REFUSING),
+                                    ("before sd:1118", self.PRE_SERVING, self.RECORDER)):
+            makefile.write_text(recipe, encoding="utf-8")
+            installer.write_text(script, encoding="utf-8")
+            older[era] = self.commit_origin(era)
+        makefile.write_text(self.MAKEFILE, encoding="utf-8")
+        installer.write_text(self.RECORDER, encoding="utf-8")
+        merged = self.commit_origin("plain clone")
+        self.assertEqual(self.serve()[0], 0)
+        environ = {"PATH": os.environ.get("PATH", ""), "HOME": str(self.home),
+                   "SERVE_RECORD": str(self.record), "SERVE_SHIM": str(self.shim)}
+        for era, commit in older.items():
+            with self.subTest(era):
+                for command, head, argv in ((rollback.replace("<commit>", commit), commit, ["--user"]),
+                                            (update, merged, ["--serve"])):
+                    self.record.unlink(missing_ok=True)
+                    done = subprocess.run(["sh", "-c", command], cwd=self.tree, env=environ,
+                                          capture_output=True, text=True, check=False)
+                    self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+                    self.assertEqual(self.git(self.tree, "rev-parse", "HEAD"), head)
+                    self.assertEqual((self.recorded()["argv"], self.recorded()["via"]), (argv, "tree"))
 
     def test_a_relative_local_origin_is_cloned_from_the_checkout(self):
         """sd:2913: `../origin` names a path from the working checkout, not from the serving tree's parent."""
