@@ -7,8 +7,8 @@ paths:
 # SD planning adversarial review
 
 Adversarial review runs at four points, each with a cap on automatic passes.
-When the cap is spent with a blocking finding open, run one class pass (global review-rounds.md):
-name the finding class, table every instance from the code, fix each row with a fail-first test, then review again.
+When the cap is spent with a blocking finding open, run one class pass, as the pack's
+[`WORKFLOW.md` § Parallel work](../../WORKFLOW.md#parallel-work) describes, then review again.
 The integrator decides further rounds and records each reason in `sd task note`.
 The artifact moves on once every blocking finding is fixed or rebutted with evidence on the item.
 A rebuttal needs no approval: record the finding, the reason and the evidence a reader can check.
