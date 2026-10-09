@@ -355,6 +355,11 @@ plain clone on a detached `HEAD` that nobody works in, at
 - **From the A/B slots:** a tree from before sd:3009 moves over on its first
   `make setup`. It replaces the `.venv` link with a directory, then removes
   `.venv-a`, `.venv-b` and `serving.lock`.
+- **From links into the working checkout:** an install from before sd:3009
+  linked the commands in `~/.local/bin` to the working checkout's `bin/`.
+  The tree's render moves each link the receipt records to the tree's `bin/`
+  (sd:3141). It still refuses a regular file, or a link the receipt does not
+  record. `--user` in any other checkout moves no link.
 - **Verify:** `--verify --json` is as strict as in any checkout. Planning
   drafts or a `HEAD` moved without a render fail the source check, which is why
   nobody works in the serving tree.
