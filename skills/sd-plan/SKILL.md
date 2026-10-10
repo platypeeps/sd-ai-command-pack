@@ -51,7 +51,9 @@ write a design just to record routine progress or work already merged.
    the template if the directory is new. For an item with a `prd.md`, keep
    progress in the database and add no `status:` field. Do not recreate
    retired frontmatter from a template.
-4. **Register the row**, when the item is under `docs/work`. Run
+4. **Register the row**, when the item is under `docs/work` and has a `prd.md`.
+   A folder with `design.md` alone names its row with `item: sd:<id>` and is
+   not registered (sd:3255). Run
    `sd work register docs/work/<item>/prd.md` as soon as the file exists. Under a `--work-dir` root the step does not
    apply and the command will refuse: a row's identity is
    `<checkout>::docs/work/<item>/prd.md`, where `<checkout>` is the
