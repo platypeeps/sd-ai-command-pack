@@ -223,9 +223,10 @@ class ContractTests(unittest.TestCase):
 class SliceBuilderTools(unittest.TestCase):
     """sd:2526, sd:3014. A builder runs gates that outlast one Bash call and
     skills its brief names; without `Skill` it cannot run `sd-review` as a
-    skill. It waits on a gate in the foreground or with Bash
-    `run_in_background`, which wakes it on exit: `Monitor` stops at 30
-    minutes, and builders sat idle about 3,400 minutes in 7 days."""
+    skill. It runs tests in the foreground only, 10 minutes or less a run:
+    `Monitor` stops at 30 minutes, builders sat idle about 3,400 minutes in
+    7 days, and a `run_in_background` exit left idle builders unwoken for
+    about 4 hours on 2026-10-10."""
 
     def test_the_slice_builder_holds_skill_and_waits_without_monitor(self) -> None:
         text = (AGENTS / "sd-slice-builder.md").read_text(encoding="utf-8")
@@ -233,7 +234,8 @@ class SliceBuilderTools(unittest.TestCase):
         self.assertIn("Skill", tools)
         self.assertNotIn("Monitor", tools)
         _, body = text.split("\n---\n", 1)
-        self.assertIn("run_in_background", body)
+        self.assertIn("Run tests in the foreground only, in runs of 10 minutes or less", body)
+        self.assertIn("Never use Bash `run_in_background`", body)
         self.assertNotIn("with `Monitor`", body)
 
 
