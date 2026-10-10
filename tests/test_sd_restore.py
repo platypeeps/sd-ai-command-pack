@@ -337,7 +337,7 @@ class AgainstADatabase(unittest.TestCase):
 
 
 class AgainstARepoTableWithoutStatusSource(unittest.TestCase):
-    """The column is going (sd:3244); the read must work on a table without it."""
+    """System sd:3231 dropped the column; the read works on a table without it."""
 
     def test_the_unproven_read_names_no_column_the_table_lacks(self) -> None:
         connection = sqlite3.connect(":memory:")
@@ -350,21 +350,6 @@ class AgainstARepoTableWithoutStatusSource(unittest.TestCase):
         )
 
         self.assertEqual(sd_restore.unproven_repositories(connection, None), [("/repos/one", "pieces_source")])
-
-    def test_an_older_table_still_holding_a_retiring_status_is_unproven(self) -> None:
-        """A snapshot from before sd:3231 can still carry status_source."""
-        connection = sqlite3.connect(":memory:")
-        connection.row_factory = sqlite3.Row
-        self.addCleanup(connection.close)
-        connection.execute(
-            "CREATE TABLE repo (path TEXT PRIMARY KEY, status_source TEXT NOT NULL, pieces_source TEXT NOT NULL)"
-        )
-        connection.executemany(
-            "INSERT INTO repo (path, status_source, pieces_source) VALUES (?, ?, ?)",
-            [("/repos/one", "retiring", "row"), ("/repos/two", "row", "row")],
-        )
-
-        self.assertEqual(sd_restore.unproven_repositories(connection, None), [("/repos/one", "status_source")])
 
 
 if __name__ == "__main__":

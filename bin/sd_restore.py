@@ -43,9 +43,7 @@ NOT_INSTALLED = (
 
 #: The column a repository's source authority is held in, and the word it
 #: carries while its sitting is incomplete.
-# status_source goes in system sd:3231; an older table or snapshot still has
-# it, and a retiring value there must still block resume (sd:3244).
-AUTHORITY = ("status_source", "pieces_source")
+AUTHORITY = ("pieces_source",)
 RETIRING = "retiring"
 
 

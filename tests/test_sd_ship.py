@@ -34,7 +34,6 @@ from sd_db.repos import set_runner_merge
 from sd_db.testing.github import GitHubDouble
 from sd_db.testing.remote import FixtureRemote, RemoteRefusal, _git
 
-from tests import row_seed
 from tests.clean_env import clean_environment
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -422,7 +421,6 @@ class ShipCase(unittest.TestCase):
         self.addCleanup(self.connection.close)
         upsert_repo(self.connection, str(self.operator), remote=self.remote_url, runner_merge="auto",
                     managed=1)
-        row_seed.own_by_row(self.connection, str(self.operator))
         self.item = create_item(self.connection, kind="work", title="fixture work", status="in_progress", repo=str(self.operator), branch="topic")
         self.double = ShipDouble(self.remote)
         self.double.__enter__()
@@ -3035,7 +3033,6 @@ roles:
         """
         other = self.directory / "other"
         upsert_repo(self.connection, str(other), remote="https://github.com/example-org/other.git")
-        row_seed.own_by_row(self.connection, str(other))
         self.item = create_item(self.connection, kind="task", title="elsewhere", status="in_progress", repo=str(other))
         allocate = "sd-ship review --no-item --create-record --assert-new-work"
         for command, extra in (("prepare", ()), ("merge", ("--manual", "--expected-head", "a" * 40))):
@@ -3062,7 +3059,6 @@ roles:
         repository's debts, and only for an item whose row names it (sd:1600)."""
         other = self.directory / "other"
         upsert_repo(self.connection, str(other), remote="https://github.com/example-org/other.git")
-        row_seed.own_by_row(self.connection, str(other))
         here = create_item(self.connection, kind="task", title="owed here", status="done", repo=str(self.operator))
         there = create_item(self.connection, kind="task", title="owed there", status="done", repo=str(other))
         moved = create_item(self.connection, kind="task", title="row elsewhere", status="done", repo=str(other))

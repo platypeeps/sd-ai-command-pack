@@ -36,16 +36,3 @@ def seed_row(home: pathlib.Path, repo: pathlib.Path, item: pathlib.Path, status:
     finally:
         connection.close()
 
-
-def own_by_row(connection, path: str) -> None:
-    """Make the row the owner of `path` on a database that still has the choice.
-
-    A library built before `repo.status_source` was dropped refuses work on a
-    repository whose column reads `file`, and a new repository starts there.
-    A library without the column owns every status by row already, so this
-    does nothing (sd:3244); delete it once no supported library has the column.
-    """
-    columns = {row[1] for row in connection.execute("PRAGMA table_info(repo)")}
-    if "status_source" in columns:
-        connection.execute("UPDATE repo SET status_source = 'row' WHERE path = ?", (path,))
-        connection.commit()
