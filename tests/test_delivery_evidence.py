@@ -29,6 +29,8 @@ sys.path.insert(0, str(ROOT / "bin"))
 import sd_lib  # noqa: E402
 import sd_work  # noqa: E402
 
+from tests import row_seed  # noqa: E402
+
 #: The message that cost sd:5 its delivery, reduced to the line that did it.
 DEMOTED = (
     "chore(work): record the delivery\n"
@@ -404,7 +406,8 @@ class TaskDeliveryCLITests(unittest.TestCase):
                         ("config", "user.email", "fixture@example.invalid")):
             subprocess.run(["git", "-C", str(root), *command], check=True, timeout=30)
         with sd_db.connect(sd_db.default_path(case.home), write=True) as connection:
-            sd_db.repos.upsert_repo(connection, sd_lib.stored_repo(root), status_source="row", managed=1)
+            sd_db.repos.upsert_repo(connection, sd_lib.stored_repo(root), managed=1)
+            row_seed.own_by_row(connection, sd_lib.stored_repo(root))
         return root
 
     def commit(self, root: pathlib.Path, message: str, content: str) -> str:
@@ -536,8 +539,9 @@ class TaskDeliveryCLITests(unittest.TestCase):
             subprocess.run(["git", "-C", str(root), *command], check=True, timeout=30)
         if register:
             with sd_db.connect(sd_db.default_path(case.home), write=True) as connection:
-                sd_db.repos.upsert_repo(connection, sd_lib.stored_repo(root),
-                                        status_source="row", managed=1)
+                sd_db.repos.upsert_repo(connection, sd_lib.stored_repo(root), managed=1)
+                row_seed.own_by_row(connection, sd_lib.stored_repo(root))
+            row_seed.own_by_row(connection, sd_lib.stored_repo(root))
         return root
 
     def test_a_fix_shipped_in_another_repository_closes_the_task_where_it_was_filed(
