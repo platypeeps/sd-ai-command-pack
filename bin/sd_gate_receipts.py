@@ -22,6 +22,9 @@ The binding is what this module can name about a run, and nothing weaker:
   scope        the `sd_check_scope` decision, with its merge base (its tree under a tree key);
   commands     the detected entrypoints and the detection source;
   tools        path and bytes of each command's executable on the gate's PATH;
+  bound_tools  the bytes of each `BOUND_TOOLS` name on that PATH, which a check reaches
+               through `make` or a script, and `cargo -vV` and `rustc -vV` beside a
+               rustup proxy's bytes, which name no toolchain (`bound_tools`, sd:3216);
   python       the interpreter that runs `sd-check`;
   environment  every variable the check's child is given, by name and
                value: `sd_gate_run.gate_environment`'s whole output, so a
@@ -71,8 +74,8 @@ tree-keyed receipt stands for `TREE_REUSE_WINDOW_SECONDS` (6 hours, ruling
 D2'), long enough for a builder's pass to serve the lane's prepare and merge;
 the head key keeps `REUSE_WINDOW_SECONDS`.
 
-A receipt stored with the retired `offload_tools` or `environment_mode` fields (sd:3216) differs from
-every new binding, so it runs the check once more and the pass it leaves is bound without them.
+A receipt stored with the retired `offload_tools` and `environment_mode` fields (sd:3216) differs from
+every new binding, so it runs the check once more and the pass it leaves binds `bound_tools` in their place.
 
 Every fault here -- no library, no database, an unreadable row, a tool that
 does not resolve -- means "no receipt", and the check runs. Evidence that
@@ -82,11 +85,15 @@ cannot be read never grants a pass.
 from __future__ import annotations
 
 import dataclasses
+import functools
 import hashlib
 import json
 import os
 import pathlib
+import plistlib
+import shutil
 import socket
+import subprocess
 import sys
 import time
 from contextlib import closing
@@ -113,10 +120,27 @@ REUSE_DECLARATION = ".github/sd-gate-reuse.json"
 REUSE_FIELDS = {"schema_version", "key", "reason"}
 #: Optional in the declaration: `"tool": "tree"` says the gate runs this tree's own `bin/sd-check` (sd:2613).
 TOOL_FIELD = "tool"
+#: Names whose bytes a binding binds beside each command's own (sd:2879, sd:3216): what a check reaches through `make`
+#: or a script, such as the `npm ci` or `uv sync` that `make check` runs. `cargo-nextest` is what `cargo nextest` runs.
+BOUND_TOOLS = ("sh", "bash", "make", "python3", "git", "cc", "c++", "clang", "cargo", "cargo-nextest", "rustc", "node",
+               "npm", "uv")
+#: Names whose `-vV` build lines bind beside their bytes (sd:2881): a rustup proxy's bytes name no toolchain.
+#: Only these two: `cargo-clippy -vV` runs clippy, and `rustdoc` and `clippy-driver` answer as `rustc` does.
+VERSIONED_TOOLS = ("cargo", "rustc")
+#: macOS's own folders: a tool found here binds `developer_tools` beside its bytes (sd:2936).
+SYSTEM_FOLDERS = ("/bin/", "/sbin/", "/usr/bin/", "/usr/sbin/")
+#: The `-vV` lines that name a compiler build; `os:` and the library lines follow the machine, not the compiler.
+VERSION_KEYS = ("release", "commit-hash", "commit-date", "host", "LLVM version")
 
 
 def _digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+
+
+def _content_digest(path: str | pathlib.Path) -> str:
+    """sha256 of the bytes at `path`; unlike `sd_check_receipts.file_digest`, not of its mode."""
+    with open(path, "rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def keyed_by_tree(tree: pathlib.Path) -> bool:
@@ -189,13 +213,15 @@ def gate_binding(tree: pathlib.Path, head: str, inputs: str, base: str | None, e
 
     `fork` is the merge base's tree under a tree key (`tree_key`); the binding then names it in place of
     `head`, and names the scope's merge base by its tree too. It is the union of `tree_binding`, the
-    pack code over the tree, and `machine_binding`, this machine's tools, interpreter and environment.
+    pack code over the tree, and `machine_binding`, this machine's tools, interpreter and environment,
+    plus `bound_tools`: a tool behind `make`, or the toolchain behind a rustup proxy, moves the binding
+    when it changes (sd:2921, sd:3216).
     """
     part = tree_binding(tree, head, inputs, base, fork)
     if part is None:
         return None
     try:
-        return {**part, **machine_binding(tree, binding_commands(part), env)}
+        return {**part, **machine_binding(tree, binding_commands(part), env), "bound_tools": bound_tools(env, tree)}
     except Exception:  # an input that cannot be named binds nothing; the check runs
         return None
 
@@ -240,6 +266,88 @@ def machine_binding(tree: pathlib.Path, commands: list[list[str]], env: Mapping[
                                        "sha256": sd_check_receipts.file_digest(python)},
             "environment_sha256": _digest(dict(env)), "threads": sd_gate_slots.thread_caps(env),
             "machine": socket.gethostname()}
+
+
+def bound_tools(environment: Mapping[str, str], tree: pathlib.Path) -> dict[str, str | None]:
+    """The digest of each `BOUND_TOOLS` name on `environment`'s `PATH`, or None for one that does not resolve.
+
+    A file in `SYSTEM_FOLDERS` binds `developer_tools` beside its bytes, since a `/usr/bin/cc` shim is the same
+    bytes under every Command Line Tools version. A `VERSIONED_TOOLS` name binds `tool_version` in `tree`, the
+    check's worktree, where it answers; one that answers nothing binds its bytes alone.
+    """
+    search = environment.get("PATH", "")
+    tools: dict[str, str | None] = {}
+    for name in BOUND_TOOLS:
+        found = shutil.which(name, path=search)
+        if not found:
+            tools[name] = None
+            continue
+        digest = _content_digest(found)
+        if name in VERSIONED_TOOLS:
+            extra = tool_version(found, environment, tree)
+        elif os.path.realpath(found).startswith(SYSTEM_FOLDERS):
+            extra = developer_tools(environment)
+        else:
+            extra = None
+        tools[name] = f"{digest} {hashlib.sha256(extra.encode()).hexdigest()}" if extra is not None else digest
+    return tools
+
+
+def developer_tools(environment: Mapping[str, str]) -> str:
+    """The developer tools `xcrun` runs, `DEVELOPER_DIR` first: what a system file binds beside its bytes (sd:2936)."""
+    return developer_version(environment.get("DEVELOPER_DIR") or "")
+
+
+@functools.cache
+def developer_version(developer: str) -> str:
+    """`developer_tools` for one developer folder, asked once per process; a part that does not answer reads `unknown`.
+
+    Each command is named by its absolute path: a gate's `PATH` (a fixture's `/bin:/usr/bin`, a launchd lane's) must
+    not decide whether `pkgutil` in `/usr/sbin` answers, or two gates on one machine bind two versions. Off macOS a
+    system compiler is the file itself, not a shim, so its bytes suffice and this is empty.
+    """
+    if sys.platform != "darwin":
+        return ""
+    developer = os.path.normpath(developer or system_answer(["/usr/bin/xcode-select", "-p"]))
+    # An Xcode developer folder is `Xcode.app/Contents/Developer`, beside the app's `version.plist`;
+    # `DEVELOPER_DIR` may also name the app itself, as `xcode-select -s` takes it.
+    plist = (pathlib.Path(developer, "Contents") if developer.endswith(".app") else pathlib.Path(developer).parent)
+    try:
+        with open(plist / "version.plist", "rb") as stream:
+            plist = plistlib.load(stream)
+        return f"Xcode {plist.get('CFBundleShortVersionString')} ({plist.get('ProductBuildVersion')})"
+    except (OSError, ValueError):
+        clt = system_answer(["/usr/sbin/pkgutil", "--pkg-info=com.apple.pkg.CLTools_Executables"])
+        return "CLT " + next((line.split(":", 1)[1].strip() for line in clt.splitlines() if line.startswith("version:")),
+                             "unknown")
+
+
+def system_answer(argv: list[str]) -> str:
+    """`argv`'s stripped output, or `unknown` when it fails."""
+    try:
+        result = subprocess.run(argv, text=True, capture_output=True, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    return result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else "unknown"
+
+
+def tool_version(found: str, environment: Mapping[str, str], tree: pathlib.Path) -> str | None:
+    """The first line and `VERSION_KEYS` lines of `found -vV`, run as the gate runs it; None when it fails (sd:2881).
+
+    It runs the `PATH` tool in `tree` under the gate's `environment`, so a wrapper's settings and the tree's
+    `rust-toolchain.toml` choose the toolchain as they do for the check; `RUSTUP_AUTO_INSTALL=0` installs nothing.
+    This catches accidental toolchain drift, such as a `rustup default` change or a Homebrew `cargo` ahead of the
+    proxy on `PATH`; it does not defend against a wrapper built to lie. One commit-hash is one compiler source.
+    """
+    try:
+        result = subprocess.run([found, "-vV"], cwd=tree, env={**environment, "RUSTUP_AUTO_INSTALL": "0"}, text=True,
+                                capture_output=True, timeout=60, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    lines = result.stdout.splitlines()
+    if result.returncode != 0 or not lines:
+        return None
+    return "\n".join([lines[0], *(line for line in lines[1:] if line.split(":", 1)[0] in VERSION_KEYS)])
 
 
 def gate_path(search: str, root: pathlib.Path | None) -> list[str]:

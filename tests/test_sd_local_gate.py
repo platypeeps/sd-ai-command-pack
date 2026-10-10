@@ -576,6 +576,35 @@ class Receipts(ReceiptFixture):
             self.assertNotIn("reused", self.gate(head))
         self.assertEqual(self.runs(), 2)
 
+    def tool(self, name: str, body: str) -> dict[str, str]:
+        """`name` on a folder ahead of `PATH`, running `body`: the environment that puts it there."""
+        folder = self.root.parent / "tools"
+        folder.mkdir(exist_ok=True)
+        (folder / name).write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+        (folder / name).chmod(0o755)
+        return {"PATH": str(folder) + os.pathsep + os.environ["PATH"]}
+
+    def test_a_changed_tool_behind_make_runs_the_check_again(self) -> None:
+        """sd:3216 review: `make check` binds `make`, but the check runs `node` through it; its bytes bind too."""
+        head = self.counted()
+        with mock.patch.dict(os.environ, self.tool("node", "exit 0")):
+            self.gate(head)
+        with mock.patch.dict(os.environ, self.tool("node", "exit 0 # another release")):
+            again, third = self.gate(head), self.gate(head)
+        self.assertEqual((again.get("reuse_miss"), "reused" in third, self.runs()),
+                         ({"reason": "binding", "fields": ["bound_tools"]}, True, 2))
+
+    def test_another_toolchain_behind_the_same_cargo_runs_the_check_again(self) -> None:
+        """sd:3216 review: a rustup proxy's bytes name no toolchain, so `cargo -vV`'s commit-hash binds beside them."""
+        head = self.counted()
+        answer = self.root.parent / "cargo-vV"
+        environment = self.tool("cargo", f"cat {answer}")
+        with mock.patch.dict(os.environ, environment):
+            for commit in ("797e8a9bca276c1c", "48a229ceaefd4985", "48a229ceaefd4985"):
+                answer.write_text(f"cargo 1.98.1\nrelease: 1.98.1\ncommit-hash: {commit}\nos: Mac OS 27\n", encoding="utf-8")
+                result = self.gate(head)
+        self.assertEqual(("reused" in result, self.runs()), (True, 2))
+
     def test_a_changed_forwarded_variable_runs_the_check_again(self) -> None:
         """The gate forwards the environment whole, so the receipt binds it whole.
 
@@ -628,25 +657,26 @@ class Receipts(ReceiptFixture):
         self.assertNotEqual(one["environment_sha256"], two["environment_sha256"])
 
     def test_the_binding_names_no_offload_field(self) -> None:
-        """sd:3216: `offload_tools` and `environment_mode` served the satellite hand-off, which is gone."""
+        """sd:3216: `environment_mode` served the satellite hand-off, which is gone; `bound_tools` keeps the tool bytes."""
         head = self.counted()
         self.gate(head)
         _, row = self.stored(head)
-        self.assertEqual(sorted(set(row["binding"]) & {"offload_tools", "environment_mode"}), [])
+        self.assertEqual(sorted(set(row["binding"]) & {"offload_tools", "environment_mode", "bound_tools"}), ["bound_tools"])
+        self.assertEqual(set(row["binding"]["bound_tools"]), set(sd_gate_receipts.BOUND_TOOLS))
 
     def test_a_receipt_written_with_the_offload_fields_is_not_reused(self) -> None:
         """sd:3216, older state: a pass the previous version stored carries both fields; it reruns once and does not crash."""
         head = self.counted()
         self.gate(head)
         revision, row = self.stored(head)
-        row["binding"] = {**row["binding"], "offload_tools": {"make": "0" * 64}, "environment_mode": "whole"}
+        row["binding"] = {**row["binding"], "offload_tools": row["binding"].pop("bound_tools"), "environment_mode": "whole"}
         with contextlib.closing(sd_gate_receipts._connect(self.database, write=True)) as connection:
             from sd_db import ship
 
             ship.save(connection, sd_gate_receipts.receipt_key(self.root, head), revision, row)
         again = self.gate(head)
         self.assertEqual((again["status"], "reused" in again, again["reuse_miss"], self.runs()),
-                         ("success", False, {"reason": "binding", "fields": ["environment_mode", "offload_tools"]}, 2))
+                         ("success", False, {"reason": "binding", "fields": ["bound_tools", "environment_mode", "offload_tools"]}, 2))
         self.assertIn("reused", self.gate(head))  # the rerun rebinds: one rerun per stored receipt
 
     def stored(self, head: str) -> tuple[int, dict]:
