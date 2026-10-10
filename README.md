@@ -270,7 +270,7 @@ and files a new row. `sd task show` prints the reference as `ref:`, and
 `sd today --json` and every `--json` row carry it as `ref`. Only a task or a
 followup takes `--ref`, and not with `--recur`.
 
-`sd store items --open` lists the backlog; `sd store item 42 --json` includes
+`sd store items --open` lists the backlog, and `--here` narrows it to this registered checkout; `sd store item 42 --json` includes
 history and a revision that edits can require with `--if-revision`.
 `sd task show 42` is an alias that prints the same thing.
 `sd task cancel 42 --reason TEXT` closes a task or followup nobody will do,

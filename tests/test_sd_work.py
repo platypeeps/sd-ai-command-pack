@@ -22,6 +22,8 @@ import sd_lib  # noqa: E402
 import sd_work  # noqa: E402
 from sd_db.workflow import NOTE_KINDS  # noqa: E402
 
+from tests.clean_env import clean_environment  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -545,6 +547,28 @@ class TaskCLI(unittest.TestCase):
         self.assertIsNone(outside["item"]["repo"])
 
         self.call("task", "add", "Both", "--here", "--no-repo", cwd=root, code=2)
+
+    def test_store_items_here_lists_only_this_checkouts_items(self):
+        """sd:3197. `--here` resolves the checkout as `task add --here` does, and refuses as it does."""
+        root, other = self._checkout("listed"), self._checkout("elsewhere")
+        self.assertIn("not a registered repository",
+                      self.call("store", "items", "--here", cwd=root, code=1).stderr)
+        self.assertIn("Git checkout", self.call("store", "items", "--here", code=1).stderr)
+        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+            sd_db.repos.add(connection, root, home=self.home)
+            sd_db.repos.add(connection, other, home=self.home)
+        self.call("task", "add", "Mine", cwd=root)
+        self.call("task", "add", "Theirs", cwd=other)
+        self.call("task", "add", "Nobody's", "--no-repo", cwd=root)
+        done = json.loads(self.call("task", "add", "Mine, done", "--json", cwd=root).stdout)["item"]["id"]
+        self.call("task", "status", done, "done")
+        linked = self.home / "listed-linked"
+        subprocess.run(["git", "worktree", "add", "-q", "-b", "side", str(linked)],
+                       cwd=str(root), check=True, capture_output=True, text=True, env=clean_environment())
+        for cwd in (root, linked):
+            with self.subTest(cwd=cwd.name):
+                listed = json.loads(self.call("store", "items", "--open", "--here", "--json", cwd=cwd).stdout)
+                self.assertEqual([row["title"] for row in listed], ["Mine"])
 
     def test_a_filed_task_can_be_moved_between_repositories_and_off_them(self):
         """The move a hand-written `UPDATE item.repo` used to be (sd:507, sd:452).
