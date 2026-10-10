@@ -711,8 +711,6 @@ OFFLOAD_WRITER = "sd-satellite-gate"
 OFFLOAD_WINDOW_SECONDS = TREE_REUSE_WINDOW_SECONDS
 #: How far ahead of the hub's clock a satellite's `recorded_at` may be.
 OFFLOAD_SKEW_SECONDS = 300
-#: The pack digest the hub's lane publishes, which a satellite compares before its run; `<slug>` follows.
-PACK_PREFIX = "sd-lane-pack:v1:"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -801,33 +799,6 @@ def read_offload(database: pathlib.Path | None, key: str) -> tuple[int, dict[str
         from sd_db import ship  # noqa: PLC0415
         revision, row = ship.read(connection, key)
     return revision, row if isinstance(row, dict) else {}
-
-
-def pack_warning(database: pathlib.Path | None, root: pathlib.Path, head: str, own: bool) -> str | None:
-    """On an opted-in satellite, warn on stderr why the hub's merge would refuse this run's receipt as another pack.
-
-    It compares with the digest the hub's lane last published. A warning only: the hub's pack can still
-    move after the run, and its merge compares again (clause 6). Any fault warns of nothing.
-    """
-    try:
-        if served_hub(database) is None or (slug := repository_slug(root)) is None:
-            return None
-        with closing(_connect(database, write=False)) as connection:
-            if sd_lib.repo_satellite_gate(connection, root) != "accept":
-                return None
-            from sd_db import ship  # noqa: PLC0415
-            _, published = ship.read(connection, PACK_PREFIX + slug)
-    except Exception:
-        return None
-    published = published if isinstance(published, dict) else {}
-    theirs, ours = published.get("pack_bin"), pack_bin(own)
-    if not theirs or theirs == ours:
-        return None
-    warning = (f"this pack's bin/ digest {ours[:12]} (rev {str(pack_rev())[:12]}) is not the hub's {str(theirs)[:12]} "
-               f"(rev {str(published.get('pack_rev'))[:12]}, published {published.get('published_at')}): the hub will refuse "
-               "this receipt as satellite_pack_mismatch. Bring both packs to one revision, then run sd gate check again")
-    print(f"sd gate: warning: {warning}", file=sys.stderr)
-    return warning
 
 
 def record_offload(database: pathlib.Path | None, run: Worktree, identity: Mapping[str, Any], reading: Mapping[str, Any],
