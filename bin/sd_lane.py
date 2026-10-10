@@ -115,12 +115,16 @@ from the receipt is incomplete, and spends the one `--retry-review`.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import fcntl
+import functools
 import hashlib
 import json
 import os
 import pathlib
 import re
+import secrets
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -159,7 +163,7 @@ RUNNER_MERGE_MANUAL = "runner_merge_manual"
 RUNNER_MERGE_UNKNOWN = "runner_merge_unknown"
 #: The runs that put an entry back after a hub fault before the next fault fails it (sd:3239).
 HUB_RETRIES = 2
-#: The ends short of a merge: such an entry keeps its body copy, and `retry` queues it again (sd:3254).
+#: The ends short of a merge: `retry` queues such an entry again, with its texts (sd:3254).
 BLOCKED = ("failed", "skipped", "prepared")
 
 
@@ -171,10 +175,46 @@ class LaneError(RuntimeError):
         self.code = code
 
 
+class Stop(LaneError):
+    """A runner write that cannot land: its claim was voided, or the hub stayed down past `WRITE_RETRY_SECONDS`."""
+
+
 #: The refusal code of a cancel, move, hold or release whose `--expected-revision` no longer matches (sd:2717).
 STALE_REVISION = "stale_revision"
 #: The refusal code of a retry whose `--expected-head` is not the head of the item's last entry (sd:3268).
 STALE_HEAD = "stale_head"
+#: The refusal code of a lane verb whose hub database did not answer; a write may have landed (sd:3282).
+HUB_UNAVAILABLE = "hub_unavailable"
+#: The code of a runner write whose claim token no longer holds its entry: a reclaim or a release voided it.
+CLAIM_LOST = "claim_lost"
+#: A publish whose read, fetch or push failed: `origin` may have moved, so the answer is unknown, not "no".
+PUBLISH_UNKNOWN = "publish_unknown"
+#: The definite publish answers: the head's commit is in neither place, or the remote branch and the head diverged.
+HEAD_GONE, BRANCH_DIVERGED = "head_gone", "branch_diverged"
+#: Each entry is the latest `state` row, kind `checkpoint`, of its key `lane:v1:<owner/repo>:<id>` (sd:3282).
+KEY_PREFIX = "lane:v1:"
+#: A runner write that meets a hub fault is tried every `WRITE_PAUSE` seconds for this long, then the run stops.
+WRITE_RETRY_SECONDS = 600
+WRITE_PAUSE = 30
+#: The reclaim of a dead holder in prepare that fails its entry instead of putting it back, so a crash loop stops.
+RECLAIMS = 3
+#: A merge lease is `MERGE_SECONDS` and this long for the landing.
+LANDING_SECONDS = 1800
+#: The bound on one `git` step of a publish: a fetch or a push crosses the network.
+PUBLISH_SECONDS = 300
+
+
+@dataclasses.dataclass(frozen=True)
+class Queue:
+    """One repository's queue in the hub database, and this machine's lane folder for its logs and its runner lock."""
+
+    repository: str
+    lane: pathlib.Path
+    environ: dict[str, str]
+
+    @property
+    def lock_file(self) -> pathlib.Path:
+        return self.lane / "queue" / "runner.lock"
 
 
 def lane_root(environ: dict[str, str]) -> pathlib.Path:
@@ -192,44 +232,144 @@ def lane_dir(root: pathlib.Path, environ: dict[str, str]) -> pathlib.Path:
 
 
 def queue_path(root: pathlib.Path, environ: dict[str, str]) -> pathlib.Path:
+    """Where an earlier version kept the queue file; `import_file_queue` reads it once, and `lane list` names it."""
     return lane_dir(root, environ) / "queue" / "queue.json"
+
+
+def hub_database(environ: dict[str, str]) -> Any:
+    """The workflow database: the file on the hub, the hub's over the tailnet on a satellite."""
+    from sd_db.database import default_path  # noqa: PLC0415
+    return default_path(environ.get("HOME"))
+
+
+def this_host() -> str:
+    from sd_db.ship import (
+        this_host as host,  # noqa: PLC0415 -- the one host name the lane host rows use
+    )
+    return host()
+
+
+def repository_of(root: pathlib.Path) -> str | None:
+    """`owner/name`, lower-cased, of the GitHub repository `root`'s origin names, or None."""
+    from sd_db.protection import github_slug  # noqa: PLC0415
+    found = github_slug(lane_git(sd_lib.main_worktree_root(root), "config", "--get", "remote.origin.url") or "")
+    return "/".join(found).lower() if found else None
+
+
+def queue_for(root: pathlib.Path, environ: dict[str, str]) -> Queue:
+    """The queue of the repository `root` is a checkout of; one whose origin names no GitHub repository has none."""
+    imported = sd_lib.import_sd_db()
+    if imported.module is None:
+        raise LaneError(f"the lane queue lives in the workflow database: {imported.problem}", code=HUB_UNAVAILABLE)
+    repository = repository_of(root)
+    if repository is None:
+        raise LaneError(f"{root} has no lane: its origin names no GitHub repository, so prepare could not open "
+                        "its pull request either")
+    return Queue(repository, lane_dir(root, environ), environ)
+
+
+def on_hub(queue: Queue, work: Callable[[Any], Any]) -> Any:
+    """`work(connection)` in one hub database transaction, `BEGIN IMMEDIATE`; it replaces the queue file's lock.
+
+    Local on the hub, over the tailnet session on a satellite. The read, the
+    check and the write sit in one transaction, so a revision or head check
+    keeps its meaning. A fault of the database or its session refuses with
+    `HUB_UNAVAILABLE`: an unknown answer, since a write may have landed.
+    """
+    from sd_db.database import connect, transaction  # noqa: PLC0415
+    from sd_db.errors import SdDbError  # noqa: PLC0415
+    try:
+        connection = connect(hub_database(queue.environ), write=True)
+        try:
+            with transaction(connection):
+                return work(connection)
+        finally:
+            connection.close()
+    except (SdDbError, sqlite3.Error, OSError, EOFError) as error:
+        raise LaneError(f"The hub database did not answer: {type(error).__name__}: {error}. A write may have "
+                        "landed; `sd-ship lane list` shows the queue once the hub answers.",
+                        code=HUB_UNAVAILABLE) from None
+
+
+def stored(connection: Any, repository: str) -> list[dict[str, Any]]:
+    """The latest row of each of `repository`'s entry keys, in queue order; older rows are each entry's history."""
+    prefix = f"{KEY_PREFIX}{repository}:"
+    rows = connection.execute(
+        "SELECT body FROM state WHERE id IN (SELECT MAX(id) FROM state WHERE kind = 'checkpoint' "
+        "AND substr(key, 1, ?) = ? GROUP BY key)", (len(prefix), prefix)).fetchall()
+    return sorted((json.loads(row["body"]) for row in rows), key=lambda row: (row.get("position") or 0, row["id"]))
+
+
+def store(connection: Any, repository: str, entry: dict[str, Any]) -> None:
+    from sd_db.writes import now  # noqa: PLC0415
+    connection.execute("INSERT INTO state(kind, key, timestamp, body) VALUES ('checkpoint', ?, ?, ?)",
+                       (f"{KEY_PREFIX}{repository}:{entry['id']}", now(), json.dumps(entry, sort_keys=True)))
+
+
+def update(queue: Queue, change: Callable[[list[dict[str, Any]]], Any],
+           check: Callable[[Any], None] | None = None) -> Any:
+    """One read-modify-write: `change` edits the entries, each entry it changed or added gets a new row.
+
+    `check(connection)` runs first in the same transaction, and refuses by raising.
+    """
+    def work(connection: Any) -> Any:
+        if check is not None:
+            check(connection)
+        entries = stored(connection, queue.repository)
+        before = {row["id"]: json.dumps(row, sort_keys=True) for row in entries}
+        answer = change(entries)
+        for row in entries:
+            if before.get(row["id"]) != json.dumps(row, sort_keys=True):
+                store(connection, queue.repository, row)
+        return answer
+    return on_hub(queue, work)
+
+
+def read_queue(queue: Queue) -> list[dict[str, Any]]:
+    return on_hub(queue, lambda connection: stored(connection, queue.repository))
+
+
+def runner_write(queue: Queue, change: Callable[[list[dict[str, Any]]], Any],
+                 check: Callable[[Any], None] | None = None) -> Any:
+    """`update` for the runner: a hub fault is tried again every `WRITE_PAUSE` seconds, up to `WRITE_RETRY_SECONDS`.
+
+    Then it raises `Stop`, and the run stops; a write that landed unseen is
+    found by the next try or the next run, under the claim's token.
+    """
+    deadline = time.monotonic() + WRITE_RETRY_SECONDS
+    while True:
+        try:
+            return update(queue, change, check)
+        except Stop:
+            raise
+        except LaneError as error:
+            if error.code != HUB_UNAVAILABLE:
+                raise
+            if time.monotonic() >= deadline:
+                raise Stop(f"{error} The runner stops; the next run settles the entry.", code=HUB_UNAVAILABLE) from None
+        time.sleep(WRITE_PAUSE)
 
 
 @contextlib.contextmanager
 def queue_lock(path: pathlib.Path) -> Iterator[None]:
-    """A short exclusive hold on the queue file for one read-modify-write."""
+    """The queue file's lock, which an earlier `sd-ship` takes to append to that file; the import takes it too."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path.with_suffix(".lock"), "a", encoding="utf-8") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
         yield
 
 
-def read_queue(path: pathlib.Path) -> list[dict[str, Any]]:
-    try:
-        entries = json.loads(path.read_text(encoding="utf-8")).get("entries")
-    except FileNotFoundError:
-        return []
-    except (OSError, ValueError, AttributeError) as error:
-        raise LaneError(f"cannot read the lane queue {path}: {error}") from None
-    if not isinstance(entries, list):
-        raise LaneError(f"the lane queue {path} holds no entry list")
-    return entries
-
-
-def write_queue(path: pathlib.Path, entries: list[dict[str, Any]]) -> None:
-    """Replace the queue in one rename, so a reader never sees half a file."""
-    with tempfile.NamedTemporaryFile("w", dir=path.parent, delete=False, encoding="utf-8") as handle:
-        json.dump({"entries": entries}, handle, indent=2, sort_keys=True)
-        handle.write("\n")
-    os.replace(handle.name, path)
-
-
-def update(path: pathlib.Path, change: Callable[[list[dict[str, Any]]], Any]) -> Any:
-    with queue_lock(path):
-        entries = read_queue(path)
-        answer = change(entries)
-        write_queue(path, entries)
-        return answer
+@contextlib.contextmanager
+def runner_lock(queue: Queue) -> Iterator[bool]:
+    """This machine's runner lock for the repository, never waited for: True when held, False when busy."""
+    queue.lock_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(queue.lock_file, "a", encoding="utf-8") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        yield True
 
 
 def lane_git(worktree: pathlib.Path, *args: str) -> str | None:
@@ -240,37 +380,106 @@ def stamp_now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def keep_body(body_file: pathlib.Path, lane: pathlib.Path, item: int) -> pathlib.Path:
-    """A private copy of the pull request body under the lane's own folder (sd:3170).
+def stamp_at(seconds: float) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(seconds))
 
-    The runner passes the body to prepare later, and a body under /tmp did not
-    outlive a reboot. The copy is the entry's own, so two entries never share one.
+
+def entry_id() -> str:
+    """`<UTC stamp>-<8 hex>`, made once at enqueue: the last part of the entry's key."""
+    return f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{secrets.token_hex(4)}"
+
+
+def shown(row: Any) -> Any:
+    """An entry as a verb prints it: the body and acceptance texts as their sizes."""
+    if not isinstance(row, dict):
+        return row
+    texts = {f"{key}_bytes": len(row[key].encode()) for key in ("body", "acceptance") if isinstance(row.get(key), str)}
+    return {**{key: value for key, value in row.items() if key not in ("body", "acceptance")}, **texts}
+
+
+def publish_git(root: pathlib.Path, *args: str) -> subprocess.CompletedProcess[str] | None:
+    try:
+        return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, timeout=PUBLISH_SECONDS,
+                              check=False, env=sd_lib.without_fsmonitor(os.environ))
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def publish_head(root: pathlib.Path, branch: str, head: str) -> str | None:
+    """Put `head` on `origin/<branch>`; None once it is there, else `HEAD_GONE` or `BRANCH_DIVERGED` (sd:3282).
+
+    Another host runs an entry only from a commit on `origin`. The one push is
+    `<head>:refs/heads/<branch>`, never the branch tip and never with force,
+    so a branch the builder moved after enqueue still publishes the head the
+    entry names. A tip that is `head` or contains it pushes nothing. The two
+    answers are definite: the same push can never succeed. A failed read,
+    fetch or push raises `PUBLISH_UNKNOWN`: `origin` may have moved.
     """
-    bodies = lane / "bodies"
-    bodies.mkdir(mode=0o700, parents=True, exist_ok=True)
-    handle, name = tempfile.mkstemp(prefix=f"{item}-", suffix=".md", dir=bodies)
-    with os.fdopen(handle, "wb") as copy:  # mkstemp makes it 0600
-        copy.write(body_file.read_bytes())
-    return pathlib.Path(name)
+    ref = f"refs/heads/{branch}"
+
+    def answer(*args: str, ok: tuple[int, ...] = (0,)) -> subprocess.CompletedProcess[str]:
+        done = publish_git(root, *args)
+        if done is None or done.returncode not in ok:
+            said = (done.stderr or done.stdout).strip()[-400:] if done is not None else "no answer"
+            raise LaneError(f"Cannot tell whether {head} is on origin/{branch}: git {args[0]} failed ({said}). "
+                            "Nothing was queued; retry when origin answers.", code=PUBLISH_UNKNOWN)
+        return done
+
+    def has(commit: str) -> bool:
+        return answer("rev-parse", "--verify", "--quiet", f"{commit}^{{commit}}", ok=(0, 1)).returncode == 0
+
+    def descends(newer: str, older: str) -> bool:
+        return answer("merge-base", "--is-ancestor", older, newer, ok=(0, 1)).returncode == 0
+    listed = answer("ls-remote", "origin", ref).stdout.split()
+    tip = listed[0] if listed else None
+    if tip == head:
+        return None
+    if tip and not has(tip):
+        answer("fetch", "-q", "--no-tags", "origin", ref)
+    if not has(head):
+        return HEAD_GONE
+    if tip and descends(tip, head):
+        return None
+    if tip and not descends(head, tip):
+        return BRANCH_DIVERGED
+    answer("push", "-q", "origin", f"{head}:{ref}")
+    return None
 
 
-def drop_body(row: dict[str, Any], lane: pathlib.Path) -> None:
-    """Remove an ended entry's body copy; a body an earlier version queued by its own path stays (sd:3170)."""
-    body = pathlib.Path(str(row.get("body_file") or ""))
-    if body.parent == lane / "bodies":
-        body.unlink(missing_ok=True)
+def require_published(root: pathlib.Path, branch: str, head: str, gone: str) -> None:
+    """`publish_head`, refusing a definite answer: `gone` says what to do when the head's commit is nowhere."""
+    found = publish_head(root, branch, head)
+    if found == HEAD_GONE:
+        raise LaneError(gone, code=HEAD_GONE)
+    if found == BRANCH_DIVERGED:
+        raise LaneError(f"origin/{branch} and {head} each lack the other's commits; nothing was queued. "
+                        "Push the branch yourself, or enqueue a head that contains origin's.", code=BRANCH_DIVERGED)
+
+
+def add_entry(queue: Queue, entry: dict[str, Any],
+              guard: Callable[[list[dict[str, Any]]], None] | None = None) -> dict[str, Any]:
+    """Append `entry` at the largest position plus one; `guard` reads the queue in the same transaction first."""
+    def append_last(entries: list[dict[str, Any]]) -> dict[str, Any]:
+        if guard is not None:
+            guard(entries)
+        if any(row.get("item") == entry["item"] and row.get("status") in ("pending", "running") for row in entries):
+            raise LaneError(f"sd:{entry['item']} is already queued in this lane")
+        entry["position"] = max((int(row.get("position") or 0) for row in entries), default=0) + 1
+        entries.append(entry)
+        return entry
+    return update(queue, append_last)
 
 
 def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: pathlib.Path, environ: dict[str, str], *,
                   expected_head: str | None = None, manual: bool = False, claim: str | None = None,
-                  acceptance_file: pathlib.Path | None = None,
-                  guard: Callable[[list[dict[str, Any]]], None] | None = None) -> dict[str, Any]:
+                  acceptance_file: pathlib.Path | None = None) -> dict[str, Any]:
     """Add one entry; the head defaults to the worktree's, and must name a commit there.
 
     `claim` is prepare's delivery choice, `deliver` or `associate-only`, and
-    is refused when absent as prepare refuses it; it and `acceptance_file`
-    reach prepare unchanged. `guard` reads the queue under its lock first,
-    and refuses by raising.
+    is refused when absent as prepare refuses it; it reaches prepare
+    unchanged. The entry holds the body and acceptance texts, not their
+    paths. The head is published first (`publish_head`); any answer but published
+    refuses, and nothing is queued.
     """
     worktree = worktree.resolve()
     sd_lib.refuse_unmanaged(worktree, LaneError)  # its prepare would refuse; do not queue it
@@ -284,25 +493,17 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
         raise LaneError(f"{expected_head or 'HEAD'} names no commit in {worktree}")
     if not body_file.is_file():
         raise LaneError(f"the body file {body_file} does not exist")
-    path = queue_path(worktree, environ)
-    body = keep_body(body_file, path.parent.parent, item)
-    entry = {"worktree": str(worktree), "item": item, "expected_head": head, "title": title,
-             "body_file": str(body), "authority": "manual" if manual else None, "claim": claim,
-             "acceptance_file": str(acceptance_file.resolve()) if acceptance_file else None,
-             "status": "pending", "enqueued_at": stamp_now()}
-
-    def add_entry(entries: list[dict[str, Any]]) -> dict[str, Any]:
-        if guard is not None:
-            guard(entries)
-        if any(row.get("item") == item and row.get("status") in ("pending", "running") for row in entries):
-            raise LaneError(f"sd:{item} is already queued in this lane")
-        entries.append(entry)
-        return entry
-    try:
-        return update(path, add_entry)
-    except BaseException:
-        body.unlink(missing_ok=True)
-        raise
+    branch = lane_git(worktree, "branch", "--show-current")
+    if not branch:
+        raise LaneError(f"{worktree} has no branch checked out; the lane publishes and prepares a branch")
+    queue = queue_for(worktree, environ)
+    entry = {"id": entry_id(), "repository": queue.repository, "item": item, "branch": branch, "expected_head": head,
+             "title": title, "body": body_file.read_text(encoding="utf-8"),
+             "acceptance": acceptance_file.read_text(encoding="utf-8") if acceptance_file else None,
+             "authority": "manual" if manual else None, "claim": claim, "enqueued_on": this_host(),
+             "worktree": str(worktree), "status": "pending", "enqueued_at": stamp_now()}
+    require_published(worktree, branch, head, f"{head} names no commit in {worktree}")
+    return add_entry(queue, entry)
 
 
 def pending_entry(entries: list[dict[str, Any]], item: int) -> dict[str, Any]:
@@ -331,32 +532,70 @@ def check_revision(entries: list[dict[str, Any]], expected: str | None) -> None:
                         "read it again with `sd-ship lane list`", code=STALE_REVISION)
 
 
+def reclaim(row: dict[str, Any], *, released: bool = False) -> dict[str, Any]:
+    """Settle a running entry whose holder is dead, or that the operator released; what was done.
+
+    At `step: prepare` it goes back to pending at its place, with `reclaims`
+    plus one; prepare saves under revision checks and runs again safely. The
+    `RECLAIMS`th reclaim fails it instead. At `step: merge` it fails: a merge
+    may have landed. The holder goes, so its token holds nothing any more.
+    """
+    holder = row.pop("holder", None) or {}
+    pid, step = holder.get("pid"), row.pop("step", None)
+    reclaims = int(row.get("reclaims") or 0) + 1
+    who = f"the operator released it from {holder.get('host')} pid {pid}" if released else f"runner pid {pid} died"
+    for key in ("lease_until", "started_at"):
+        row.pop(key, None)
+    row.update(last_holder=holder, reclaims=reclaims, **({"released": True} if released else {}))
+    if step == "prepare" and reclaims < RECLAIMS:
+        row.update(status="pending")
+    elif step == "prepare":
+        row.update(status="failed", step="runner", finished_at=stamp_now(), reclaimed_by=os.getpid(),
+                   reason=f"{who} in prepare, reclaim {reclaims} of {RECLAIMS}; the lane stops retrying it, so "
+                          "read its prepare logs before enqueueing it again")
+    else:
+        row.update(status="failed", step="runner", finished_at=stamp_now(), reclaimed_by=os.getpid(),
+                   reason=f"{who} with the entry running; a merge may have landed, so read its logs and pull "
+                          "request before enqueueing it again")
+    return {"item": row.get("item"), "runner_pid": pid, "step": step, "status": row["status"]}
+
+
 def cancel(root: pathlib.Path, item: int, environ: dict[str, str], *,
            expected_revision: str | None = None) -> dict[str, Any]:
-    path = queue_path(root, environ)
+    """Cancel a pending entry, or release a running one (D3 of sd:3174) by the reclaim rule (`reclaim`).
 
+    A release refuses while the holder is on this machine and its pid is
+    alive. A holder on another machine counts as stuck on the operator's word.
+    """
     def mark(entries: list[dict[str, Any]]) -> dict[str, Any]:
         check_revision(entries, expected_revision)
+        running = next((row for row in entries if row.get("item") == item and row.get("status") == "running"), None)
+        if running is not None:
+            holder = running.get("holder") or {}
+            if holder.get("host") == this_host() and runner_alive(holder.get("pid")):
+                raise LaneError(f"sd:{item} is running under pid {holder.get('pid')} on this machine; "
+                                "it is not stuck, so it is not released", code="holder_alive")
+            reclaim(running, released=True)
+            return running
         row = pending_entry(entries, item)
         row.update(status="cancelled", finished_at=stamp_now())
         return row
-    row = update(path, mark)
-    drop_body(row, path.parent.parent)  # after the write, so a failed write leaves the body with its entry
-    return row
+    return update(queue_for(root, environ), mark)
 
 
 def retry(root: pathlib.Path, item: int, environ: dict[str, str], *, manual: bool = False,
           expected_head: str | None = None) -> dict[str, Any]:
     """Queue `item`'s last entry again when it stopped short of a merge (sd:3254).
 
-    A new entry, as `enqueue` makes it, from the old one's worktree, title,
-    claim, acceptance file and kept body copy, at its head or prepare's
-    catch-up of it (`caught_up`). `manual` grants the merge as `enqueue
-    --manual` does; an entry that had that grant keeps it. The old entry
-    stays as history, and its copy goes when the new entry ends.
+    A new entry with the old one's branch, title, claim, texts and worktree
+    hint, at its head, or at prepare's catch-up of it (`caught_up`) when the
+    worktree is on this host. The head is published now (`publish_head`); a
+    refusal queues nothing and the old entry stays blocked. `manual` grants
+    the merge as `enqueue --manual` does; an entry that had that grant keeps
+    it. The old entry stays as history.
 
-    `expected_head`, a full commit id, is the head the caller showed: under
-    the queue's lock, a last entry at another head is refused with
+    `expected_head`, a full commit id, is the head the caller showed: in the
+    write's transaction, a last entry at another head is refused with
     `STALE_HEAD` (sd:3268). None checks nothing.
     """
     def at_expected_head(entries: list[dict[str, Any]]) -> None:
@@ -365,7 +604,8 @@ def retry(root: pathlib.Path, item: int, environ: dict[str, str], *, manual: boo
         if expected_head is not None and head != expected_head:
             raise LaneError(f"sd:{item}'s last entry is at {head}, not the expected head {expected_head}; "
                             "read it again with `sd-ship lane list`", code=STALE_HEAD)
-    rows = [row for row in read_queue(queue_path(root, environ)) if row.get("item") == item]
+    queue = queue_for(root, environ)
+    rows = [row for row in read_queue(queue) if row.get("item") == item]
     if not rows:
         raise LaneError(f"sd:{item} has no entry in this lane")
     last = rows[-1]
@@ -375,16 +615,22 @@ def retry(root: pathlib.Path, item: int, environ: dict[str, str], *, manual: boo
     if last.get("status") not in BLOCKED:
         raise LaneError(f"sd:{item}'s last entry is {last.get('status')}; retry takes a failed, skipped or "
                         "prepared one")
-    body = pathlib.Path(str(last.get("body_file") or ""))
-    if not body.is_file():
-        raise LaneError(f"sd:{item}'s last entry kept no body copy ({body}); enqueue it again with --body-file")
-    worktree = pathlib.Path(last["worktree"])
-    acceptance = last.get("acceptance_file")
-    entry = enqueue_entry(worktree, item, last["title"], body, environ,
-                          expected_head=caught_up(worktree, last["expected_head"]),
-                          manual=manual or last.get("authority") == "manual", claim=last.get("claim"),
-                          acceptance_file=pathlib.Path(acceptance) if acceptance else None, guard=at_expected_head)
-    return {**entry, "retried": {"status": last["status"], "finished_at": last.get("finished_at")}}
+    if not last.get("branch"):
+        raise LaneError(f"sd:{item}'s last entry names no branch; queue it with `sd-ship lane enqueue`")
+    if not isinstance(last.get("body"), str):
+        raise LaneError(f"sd:{item}'s last entry kept no body; enqueue it again with --body-file")
+    worktree, head = pathlib.Path(str(last.get("worktree"))), last["expected_head"]
+    if last.get("enqueued_on") == this_host() and worktree.is_dir():
+        head = caught_up(worktree, head)
+    require_published(root, last["branch"], head,
+              f"sd:{item}'s head {head} is not on `origin` or in this checkout; run the retry on "
+              f"{last.get('enqueued_on')}, or enqueue again from a worktree that has it")
+    keep = ("repository", "item", "branch", "title", "body", "acceptance", "claim", "enqueued_on", "worktree")
+    entry = {**{key: last.get(key) for key in keep}, "id": entry_id(), "expected_head": head,
+             "authority": "manual" if manual or last.get("authority") == "manual" else None,
+             "status": "pending", "enqueued_at": stamp_now()}
+    added = add_entry(queue, entry, guard=at_expected_head)
+    return {**added, "retried": {"status": last["status"], "finished_at": last.get("finished_at")}}
 
 
 def position(where: str) -> str:
@@ -396,21 +642,21 @@ def position(where: str) -> str:
 
 def move(root: pathlib.Path, item: int, where: str, environ: dict[str, str], *,
          expected_revision: str | None = None) -> dict[str, Any]:
-    """Reorder the pending entries; finished entries keep their place as history."""
+    """Reorder the pending entries among their own positions; finished entries keep theirs as history."""
     where = position(where)
 
     def reorder(entries: list[dict[str, Any]]) -> dict[str, Any]:
         check_revision(entries, expected_revision)
         row = pending_entry(entries, item)
-        slots = [index for index, entry in enumerate(entries) if entry.get("status") == "pending"]
-        rows = [entries[index] for index in slots]
+        rows = [entry for entry in entries if entry.get("status") == "pending"]
+        slots = [entry.get("position") for entry in rows]
         now = rows.index(row)
         target = {"top": 0, "up": now - 1, "down": now + 1}[where] if where in PLACES else int(where) - 1
         rows.insert(max(0, min(target, len(rows) - 1)), rows.pop(now))
-        for index, entry in zip(slots, rows, strict=True):
-            entries[index] = entry
+        for entry, slot in zip(rows, slots, strict=True):
+            entry["position"] = slot
         return {"item": item, "position": rows.index(row) + 1, "pending": [entry.get("item") for entry in rows]}
-    return update(queue_path(root, environ), reorder)
+    return update(queue_for(root, environ), reorder)
 
 
 def set_hold(root: pathlib.Path, item: int, environ: dict[str, str], *, held: bool,
@@ -423,7 +669,128 @@ def set_hold(root: pathlib.Path, item: int, environ: dict[str, str], *, held: bo
             raise LaneError(f"sd:{item} is {'already' if held else 'not'} held")
         row.update(held=held, held_at=stamp_now() if held else None)
         return row
-    return update(queue_path(root, environ), toggle_hold)
+    return update(queue_for(root, environ), toggle_hold)
+
+
+def import_id(host: str, path: pathlib.Path, row: dict[str, Any]) -> str:
+    """The fixed id of an imported file entry, so a second pass skips what the first one wrote."""
+    seed = json.dumps([host, str(path), row.get("item"), row.get("enqueued_at")])
+    return f"import-{hashlib.sha256(seed.encode()).hexdigest()[:16]}"
+
+
+def file_text(name: Any) -> str | None:
+    try:
+        return pathlib.Path(str(name)).read_text(encoding="utf-8") if name else None
+    except (OSError, ValueError):
+        return None
+
+
+def imported_row(queue: Queue, path: pathlib.Path, old: dict[str, Any], host: str) -> dict[str, Any]:
+    """A file entry as a row, by the rules in "Migration" of the sd:3174 design; no publish yet."""
+    row = {key: value for key, value in old.items() if key not in ("body_file", "acceptance_file", "runner_pid")}
+    worktree = pathlib.Path(str(old.get("worktree") or ""))
+    branch = old.get("branch") or (lane_git(worktree, "branch", "--show-current") if worktree.is_dir() else None)
+    row.update(id=import_id(host, path, old), repository=queue.repository, branch=branch or None,
+               body=file_text(old.get("body_file")), acceptance=file_text(old.get("acceptance_file")),
+               enqueued_on=host, imported_from=str(path), imported_body_file=old.get("body_file"))
+    if any(key in old for key in ("prepare_log", "merge_log")):
+        row["log_host"] = host
+    status, now = old.get("status"), stamp_now()
+    if status == "running":  # no runner holds the lock, so the one that claimed it died
+        row.update(status="failed", step="runner", finished_at=now, reclaimed_by=os.getpid(),
+                   reason=f"runner pid {old.get('runner_pid')} died with the entry running; a merge may have landed, "
+                          "so read its logs and pull request before enqueueing it again")
+    elif status == "pending" and not row["branch"]:
+        row.update(status="failed", code="no_branch", finished_at=now,
+                   reason="no branch and no worktree to read one from; queue it with `sd-ship lane enqueue`")
+    elif status == "pending" and (row["body"] is None or (old.get("acceptance_file") and row["acceptance"] is None)):
+        row.update(status="failed", code="no_body", finished_at=now,
+                   reason="its body or acceptance file is gone; enqueue it again with --body-file")
+    return row
+
+
+def import_file_queue(root: pathlib.Path, queue: Queue, *, runner_locked: bool = False) -> dict[str, Any]:
+    """Move this host's queue file, from an earlier version, into the hub database once (sd:3282).
+
+    Under the runner lock, never waited for, and the file's own lock, which an
+    older `sd-ship` takes to append. Pending entries are published first; an
+    unknown answer stops the import and keeps the file. Then one transaction
+    writes a row per entry, in file order, under a fixed id that a rerun
+    skips. Then the file is renamed, its bytes kept, and the body copies the
+    committed rows name are deleted; any other body stays, since an older
+    enqueue may have copied it before its queue write. What happened, or {}.
+    """
+    path = queue_path(root, queue.environ)
+    report: dict[str, Any] = {}
+    if path.exists():
+        with contextlib.nullcontext(True) if runner_locked else runner_lock(queue) as held:
+            report = import_locked(root, queue, path) if held else {"skipped": "a runner holds the lock; the next pass imports"}
+    bodies = queue.lane / "bodies"
+    if bodies.is_dir() and any(bodies.iterdir()):
+        drop_imported_bodies(queue)
+    return report
+
+
+def import_locked(root: pathlib.Path, queue: Queue, path: pathlib.Path) -> dict[str, Any]:
+    host = this_host()
+    with queue_lock(path):
+        try:
+            old = json.loads(path.read_text(encoding="utf-8")).get("entries")
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError, AttributeError) as error:
+            return {"stopped": f"cannot read {path}: {error}"}
+        if not isinstance(old, list):
+            return {"stopped": f"{path} holds no entry list"}
+        present = {row["id"]: row for row in read_queue(queue)}
+        active = {row.get("item") for row in present.values() if row.get("status") in ("pending", "running")}
+        rows = [imported_row(queue, path, entry, host) for entry in old if isinstance(entry, dict)]
+        for row in rows:
+            if row["status"] != "pending" or row["id"] in present or row.get("item") in active:
+                continue
+            try:
+                found = publish_head(root, str(row["branch"]), str(row.get("expected_head")))
+            except LaneError as error:
+                return {"stopped": f"sd:{row.get('item')}: {error}", "file": str(path)}
+            if found is not None:
+                row.update(status="skipped", code=found, finished_at=stamp_now(),
+                           reason=f"{found}: {row.get('expected_head')} could not be published to "
+                                  f"origin/{row['branch']}; `sd-ship lane retry` publishes it once the branch is fixed")
+
+        def write(entries: list[dict[str, Any]]) -> list[Any]:
+            ids = {entry["id"] for entry in entries}
+            queued = {entry.get("item") for entry in entries if entry.get("status") in ("pending", "running")}
+            top = max((int(entry.get("position") or 0) for entry in entries), default=0)
+            written = []
+            for row in rows:
+                if row["id"] in ids:
+                    continue
+                if row["status"] == "pending" and row.get("item") in queued:
+                    row.update(status="cancelled", code="duplicate_on_import", finished_at=stamp_now(),
+                               reason=f"sd:{row.get('item')} is already queued in the shared queue")
+                queued |= {row.get("item")} if row["status"] in ("pending", "running") else set()
+                top += 1
+                entries.append({**row, "position": top})
+                written.append(row.get("item"))
+            return written
+        written = update(queue, write)
+        kept = path.with_name(f"queue.json.imported-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}")
+        for count in range(2, 1000):  # a second file in the same second must not replace the first one's bytes
+            if not kept.exists():
+                break
+            kept = kept.with_name(f"{kept.name.split('~')[0]}~{count}")
+        path.rename(kept)
+    drop_imported_bodies(queue)
+    return {"imported": written, "file": str(path)}
+
+
+def drop_imported_bodies(queue: Queue) -> None:
+    """Delete each body copy an imported row names, under this lane's `bodies/` only; other files there stay."""
+    bodies = queue.lane / "bodies"
+    for row in read_queue(queue):
+        named = pathlib.Path(str(row.get("imported_body_file") or ""))
+        if named.parent == bodies:
+            named.unlink(missing_ok=True)
 
 
 def ship_process(argv: list[str], log: pathlib.Path, timeout: int) -> dict[str, Any]:
@@ -512,22 +879,33 @@ def answered_hub_fault(answer: dict[str, Any]) -> bool:
     return ((answer.get("workflow") or {}).get("blocker") or {}).get("code") == sd_ship_workflow.HUB_UNAVAILABLE
 
 
-def process(entry: dict[str, Any], logs: pathlib.Path, ship: Ship) -> dict[str, Any]:
-    """One entry, start to end; the fields to record on it."""
-    worktree, item = pathlib.Path(entry["worktree"]), entry["item"]
+def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[], None]) -> dict[str, Any]:
+    """One entry, start to end; the fields to record on it.
+
+    The body and acceptance texts go to private temporary files for prepare.
+    `advance` is the before-merge write (`step: merge`); it raises `Stop`
+    when the claim is lost or the hub stays down, and no merge starts.
+    """
+    worktree, item, logs = pathlib.Path(entry["worktree"]), entry["item"], queue.lane / "logs"
     if lane_git(worktree, "rev-parse", "HEAD") != entry["expected_head"]:
         return {"status": "skipped", "reason": "the worktree's HEAD moved from the queued head"}
     stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
     prepare_log = logs / f"prepare-{item}-{stamp}.log"
-    claim = [f"--{entry['claim']}"] + (["--acceptance-file", entry["acceptance_file"]] if entry.get("acceptance_file") else [])
-    argv = ["-C", str(worktree), "prepare", "--item", str(item), *claim, "--catch-up",
-            "--title", entry["title"], "--body-file", entry["body_file"], "--json"]
-    prepared = ship(argv, prepare_log)
-    # sd:3037. An incomplete review gets the one retry an operator would give it, and no second.
-    if ((prepared.get("workflow") or {}).get("blocker") or {}).get("code") == "review_incomplete":
-        prepare_log = logs / f"prepare-{item}-{stamp}-retry.log"
-        prepared = ship([*argv, "--retry-review"], prepare_log)
-    fields: dict[str, Any] = {"prepare_log": str(prepare_log), "head": prepared.get("head")}
+    with tempfile.TemporaryDirectory(prefix="sd-lane-texts-") as private:  # 0700, removed with the step
+        body = pathlib.Path(private) / "body.md"
+        body.write_text(str(entry.get("body") or ""), encoding="utf-8")
+        claim = [f"--{entry['claim']}"]
+        if isinstance(entry.get("acceptance"), str):
+            (pathlib.Path(private) / "acceptance.md").write_text(entry["acceptance"], encoding="utf-8")
+            claim += ["--acceptance-file", str(pathlib.Path(private) / "acceptance.md")]
+        argv = ["-C", str(worktree), "prepare", "--item", str(item), *claim, "--catch-up",
+                "--title", entry["title"], "--body-file", str(body), "--json"]
+        prepared = ship(argv, prepare_log)
+        # sd:3037. An incomplete review gets the one retry an operator would give it, and no second.
+        if ((prepared.get("workflow") or {}).get("blocker") or {}).get("code") == "review_incomplete":
+            prepare_log = logs / f"prepare-{item}-{stamp}-retry.log"
+            prepared = ship([*argv, "--retry-review"], prepare_log)
+    fields: dict[str, Any] = {"prepare_log": str(prepare_log), "log_host": this_host(), "head": prepared.get("head")}
     if not (prepared.get("ok") and prepared.get("phase") == "ready_to_send"):
         return {**fields, "status": "failed", "step": "prepare", "phase": prepared.get("phase"),
                 "reason": str(prepared.get("error") or prepared.get("code") or "prepare did not reach ready_to_send")[:600],
@@ -535,6 +913,7 @@ def process(entry: dict[str, Any], logs: pathlib.Path, ship: Ship) -> dict[str, 
     refused = merge_refusal(entry)
     if refused is not None:
         return {**fields, "status": "prepared", **refused}
+    advance()
     merge_log = logs / f"merge-{item}-{stamp}.log"
     merged = ship(["-C", str(worktree), "merge", "--item", str(item), "--expected-head", str(prepared.get("head")),
                    "--manual", "--watch", "--wait-seconds", str(MERGE_WAIT_SECONDS), "--json"], merge_log)
@@ -618,7 +997,7 @@ def predict(entry: dict[str, Any], following: dict[str, Any]) -> dict[str, Any]:
     return {"head": head, "base": landed} if head else {"skipped": "the merged head could not be read"}
 
 
-def speculate(entry: dict[str, Any], path: pathlib.Path, gate: Gate, busy: bool = False) -> threading.Thread | None:
+def speculate(entry: dict[str, Any], queue: Queue, gate: Gate, busy: bool = False) -> threading.Thread | None:
     """Start the next pending entry's gate on `entry`'s predicted landing; None when no gate started.
 
     An entry the runner may not merge (`merge_refusal`) stops prepared and
@@ -627,17 +1006,17 @@ def speculate(entry: dict[str, Any], path: pathlib.Path, gate: Gate, busy: bool 
     next entry as `speculation`, and the gate's whole result to a log beside
     the others.
     """
-    following = next((row for row in read_queue(path) if row.get("status") == "pending" and not row.get("held")), None)
+    following = next((row for row in read_queue(queue) if row.get("status") == "pending" and not row.get("held")), None)
     if following is None or merge_refusal(entry) is not None:
         return None
 
     def record_speculation(fields: dict[str, Any]) -> None:
         def on_follower(entries: list[dict[str, Any]]) -> None:
             for row in entries:
-                if row.get("item") == following["item"] and row.get("enqueued_at") == following.get("enqueued_at"):
+                if row["id"] == following["id"]:
                     row["speculation"] = {"after": entry["item"], **fields}
         with contextlib.suppress(LaneError, OSError):  # a note that cannot be written stops nothing
-            update(path, on_follower)
+            update(queue, on_follower)
     try:
         plan = {"skipped": "an earlier speculative gate still runs"} if busy else predict(entry, following)
     except Exception as error:  # a speculation that cannot be set up gates nothing; the lane goes on
@@ -645,8 +1024,8 @@ def speculate(entry: dict[str, Any], path: pathlib.Path, gate: Gate, busy: bool 
     if "skipped" in plan:
         record_speculation({"status": "skipped", "reason": plan["skipped"]})
         return None
-    log = path.parent.parent / "logs" / f"speculate-{following['item']}-{time.strftime('%Y%m%dT%H%M%S', time.gmtime())}.log"
-    record_speculation({"status": "running", **plan, "log": str(log)})
+    log = queue.lane / "logs" / f"speculate-{following['item']}-{time.strftime('%Y%m%dT%H%M%S', time.gmtime())}.log"
+    record_speculation({"status": "running", **plan, "log": str(log), "log_host": this_host()})
 
     def run_gate() -> None:
         try:
@@ -658,7 +1037,7 @@ def speculate(entry: dict[str, Any], path: pathlib.Path, gate: Gate, busy: bool 
             result = fields = {"status": "error", "reason": f"{type(error).__name__}: {error}"[:600]}
         log.parent.mkdir(parents=True, exist_ok=True)
         log.write_text(json.dumps(result, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
-        record_speculation({**plan, "log": str(log), **fields})
+        record_speculation({**plan, "log": str(log), "log_host": this_host(), **fields})
     thread = threading.Thread(target=run_gate, name=f"sd-lane-speculate-{following['item']}")
     thread.start()
     return thread
@@ -787,31 +1166,36 @@ def settle(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, st
     return fields
 
 
-def lane_host_reason(root: pathlib.Path) -> str | None:
+def lane_host_reason(root: pathlib.Path, environ: dict[str, str] | None = None) -> str | None:
     """Why this machine does not run `root`'s lane, or None on its lane host (sd:3003).
 
     `sd_lib.lane_elsewhere` reads `repo.lane_host` on a connection opened for
     this read. Without `sd_db` there is no database and no other host. A
     checkout whose origin names no GitHub repository matches no row, so only
-    the hub hosts it. A database that does not answer, or rows that disagree,
-    raise `lane_unknown`: uncertain ownership never reads as the hub's.
+    the hub hosts it. A database that does not open refuses `hub_unavailable`
+    (sd:3282); rows that disagree, or a read fault, refuse `lane_unknown`:
+    uncertain ownership never reads as the hub's.
     """
     if sd_lib.import_sd_db().module is None:
         return None
     import sd_gate_receipts  # noqa: PLC0415
-    from sd_db.database import connect, default_path  # noqa: PLC0415
+    from sd_db.database import connect  # noqa: PLC0415
     from sd_db.protection import github_slug  # noqa: PLC0415
 
     try:
-        database = default_path()
+        database = hub_database(environ if environ is not None else dict(os.environ))
         found = github_slug(lane_git(sd_lib.main_worktree_root(root), "config", "--get", "remote.origin.url"))
         if found is None:
             served = sd_gate_receipts.served_hub(database)
             return None if served is None else f"The lane for {root.name} runs on the hub {served}, not on this machine."
-        connection = connect(database, write=False)
     except Exception as error:  # noqa: BLE001 -- every fault is "cannot tell", which refuses
         raise LaneError(f"Cannot read the lane host for {root}: {error}. Nothing was changed; "
                         "retry when the database answers.", code="lane_unknown") from None
+    try:
+        connection = connect(database, write=False)
+    except Exception as error:  # noqa: BLE001 -- the hub is down: every lane verb refuses the same way
+        raise LaneError(f"The hub database did not answer: {type(error).__name__}: {error}. Nothing was changed; "
+                        "retry when the hub answers.", code=HUB_UNAVAILABLE) from None
     try:
         return sd_lib.lane_elsewhere(connection, database, "/".join(found))
     except Exception as error:  # noqa: BLE001 -- `LaneUnknown`, or a read fault it did not wrap
@@ -820,19 +1204,23 @@ def lane_host_reason(root: pathlib.Path) -> str | None:
         connection.close()
 
 
-def refuse_elsewhere(root: pathlib.Path) -> None:
+def refuse_elsewhere(root: pathlib.Path, environ: dict[str, str] | None = None) -> None:
     """Refuse a host verb off `root`'s lane host, before it reads or writes the queue (sd:3003)."""
-    elsewhere = lane_host_reason(root)
+    elsewhere = lane_host_reason(root, environ)
     if elsewhere is not None:
         raise LaneError(elsewhere, code="lane_elsewhere")
 
 
-def lane_moved(root: pathlib.Path) -> str | None:
-    """`lane_host_reason` for a runner between items: a refusal is a reason to stop, never to claim."""
-    try:
-        return lane_host_reason(root)
-    except LaneError as error:
-        return str(error)
+def host_check(queue: Queue) -> Callable[[Any], None]:
+    """A `check` for `update` that refuses unless this machine runs the lane, read in the write's transaction."""
+    def on_lane_host(connection: Any) -> None:
+        try:
+            elsewhere = sd_lib.lane_elsewhere(connection, hub_database(queue.environ), queue.repository)
+        except Exception as error:  # noqa: BLE001 -- `LaneUnknown`, or a read fault it did not wrap
+            raise LaneError(str(error), code=getattr(error, "code", None) or "lane_unknown") from None
+        if elsewhere is not None:
+            raise LaneError(elsewhere, code="lane_elsewhere")
+    return on_lane_host
 
 
 def runner_alive(pid: Any) -> bool:
@@ -849,43 +1237,70 @@ def runner_alive(pid: Any) -> bool:
 
 
 def reclaim_dead(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Mark failed each `running` entry whose runner died (sd:2821); called with the runner lock held.
+    """Settle each `running` entry whose holder on this machine died (sd:2821, sd:3282), by `reclaim`.
 
-    Every runner holds that lock while an entry runs, so holding it proves no
-    runner is live; the entry's pid must also be gone, which a reused pid only
-    makes wait. A pid that cannot be read keeps the entry `running`.
+    Called with this machine's runner lock held, so no runner here is live;
+    the holder's pid must also be gone, which a reused pid only makes wait.
+    A pid that cannot be read keeps the entry `running`. A holder on another
+    machine is left to its lease.
     """
-    reclaimed = []
+    host = this_host()
+    return [reclaim(row) for row in entries if row.get("status") == "running"
+            and (row.get("holder") or {}).get("host") == host and not runner_alive(row["holder"].get("pid"))]
+
+
+def held(entries: list[dict[str, Any]], entry: dict[str, Any], token: str) -> dict[str, Any]:
+    """The running row `entry` names, while its holder is still `token`; else the claim is lost."""
     for row in entries:
-        pid = row.get("runner_pid")
-        if row.get("status") == "running" and not runner_alive(pid):
-            row.update(status="failed", step="runner", finished_at=stamp_now(), reclaimed_by=os.getpid(),
-                       reason=f"runner pid {pid} died with the entry running; a merge may have landed, so read "
-                              "its logs and pull request before enqueueing it again")
-            reclaimed.append({"item": row.get("item"), "runner_pid": pid})
-    return reclaimed
+        if row["id"] == entry["id"] and row.get("status") == "running" and (row.get("holder") or {}).get("token") == token:
+            return row
+    raise Stop(f"sd:{entry['item']}'s claim was reclaimed or released; this runner writes nothing more for it "
+               "and stops", code=CLAIM_LOST)
 
 
-def finish_entry(path: pathlib.Path, entry: dict[str, Any], outcome: dict[str, Any]) -> None:
-    """Record a run entry's outcome, then drop the item's earlier body copies, and its own unless it is blocked.
+def claim_entry(queue: Queue, token: str) -> dict[str, Any] | None:
+    """Take the first pending entry not held, by position, under a new holder; None when there is none.
 
-    sd:3170 dropped every ended entry's copy; sd:3254 keeps a blocked one's for `retry`.
+    One transaction reads the lane host and claims, so a move is before the
+    claim or after it. It refuses while another entry of the repository
+    runs. A retried claim that finds its own token running landed before.
     """
-    def mark_finished(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        earlier = []
+    def claim_first(entries: list[dict[str, Any]]) -> dict[str, Any] | None:
         for row in entries:
-            if row.get("item") != entry["item"]:
+            if row.get("status") != "running":
                 continue
-            if row.get("status") == "running":
-                row.update(outcome, finished_at=stamp_now())
-            elif row.get("status") != "pending":
-                earlier.append(dict(row))
-        return earlier
-    lane = path.parent.parent
-    for row in update(path, mark_finished):  # after the write, as in `cancel`
-        drop_body(row, lane)
-    if outcome.get("status") not in BLOCKED:
-        drop_body(entry, lane)
+            holder = row.get("holder") or {}
+            if holder.get("token") == token:
+                return dict(row)
+            raise LaneError(f"sd:{row.get('item')} is running under {holder.get('host')} pid {holder.get('pid')}; "
+                            "one entry of a repository runs at a time", code="lane_busy")
+        for row in entries:
+            if row.get("status") == "pending" and not row.get("held"):
+                row.update(status="running", started_at=stamp_now(), step="prepare",
+                           holder={"host": this_host(), "pid": os.getpid(), "token": token},
+                           lease_until=stamp_at(time.time() + 2 * PREPARE_SECONDS))
+                return dict(row)
+        return None
+    return runner_write(queue, claim_first, check=host_check(queue))
+
+
+def advance(queue: Queue, entry: dict[str, Any], token: str) -> None:
+    """The before-merge write: `step: merge` and the merge lease, while `token` still holds the entry."""
+    def to_merge(entries: list[dict[str, Any]]) -> None:
+        held(entries, entry, token).update(step="merge", lease_until=stamp_at(time.time() + MERGE_SECONDS + LANDING_SECONDS))
+    runner_write(queue, to_merge)
+
+
+def finish_entry(queue: Queue, entry: dict[str, Any], token: str, outcome: dict[str, Any]) -> None:
+    """Record a run entry's outcome while `token` holds it; a retry that finds its own outcome is done."""
+    def mark_finished(entries: list[dict[str, Any]]) -> None:
+        row = next((row for row in entries if row["id"] == entry["id"]), {})
+        if (row.get("holder") or {}).get("token") == token and row.get("status") != "running":
+            if row.get("status") == outcome.get("status"):
+                return  # an earlier try landed unseen
+        held(entries, entry, token).update(outcome, finished_at=stamp_now())
+        row.pop("lease_until", None)
+    runner_write(queue, mark_finished)
 
 
 def caught_up(worktree: pathlib.Path, expected: str) -> str:
@@ -900,11 +1315,11 @@ def caught_up(worktree: pathlib.Path, expected: str) -> str:
     return expected
 
 
-def requeue(path: pathlib.Path, entry: dict[str, Any], outcome: dict[str, Any]) -> bool:
+def requeue(queue: Queue, entry: dict[str, Any], token: str, outcome: dict[str, Any]) -> bool:
     """Put a running entry back as pending after a hub fault, or False once its retries are spent (sd:3239).
 
-    It keeps its place and its body copy, and `hub_fault` says what failed
-    where; a later outcome writes its own fields beside it. Its `expected_head` moves to the
+    It keeps its place, and `hub_fault` says what failed where; a later
+    outcome writes its own fields beside it. Its `expected_head` moves to the
     worktree's HEAD only when that is prepare's catch-up: a merge whose first
     parent is the queued head.
     """
@@ -912,78 +1327,89 @@ def requeue(path: pathlib.Path, entry: dict[str, Any], outcome: dict[str, Any]) 
     if not outcome.pop("hub_fault", False) or retries >= HUB_RETRIES:
         return False
     expected = caught_up(pathlib.Path(entry["worktree"]), entry["expected_head"])
-    fault: dict[str, Any] = {key: outcome[key] for key in ("step", "reason", "prepare_log", "merge_log") if key in outcome}
+    fault: dict[str, Any] = {key: outcome[key] for key in ("step", "reason", "prepare_log", "merge_log", "log_host")
+                             if key in outcome}
 
     def put_back(entries: list[dict[str, Any]]) -> None:
-        for row in entries:
-            if row.get("item") == entry["item"] and row.get("status") == "running":
-                for key in ("started_at", "runner_pid"):
-                    row.pop(key, None)
-                row.update(status="pending", expected_head=expected, hub_retries=retries + 1,
-                           hub_fault={**fault, "at": stamp_now()})
-    update(path, put_back)
+        row = held(entries, entry, token)
+        for key in ("started_at", "holder", "step", "lease_until"):
+            row.pop(key, None)
+        row.update(status="pending", expected_head=expected, hub_retries=retries + 1,
+                   hub_fault={**fault, "at": stamp_now()})
+    runner_write(queue, put_back)
     return True
+
+
+def settle_checkout(root: pathlib.Path, queue: Queue) -> dict[str, Any]:
+    """Under the runner lock already held: import the file queue, then reclaim dead holders; what happened."""
+    imported = import_file_queue(root, queue, runner_locked=True)
+    reclaimed = runner_write(queue, reclaim_dead)
+    return {**({"import": imported} if imported else {}), **({"reclaimed": reclaimed} if reclaimed else {})}
 
 
 def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_ship,
              gate: Gate = default_gate, note: Note | None = None) -> dict[str, Any]:
-    """Drain this repository's queue in order under its lane lock; never wait for the lock.
+    """Drain this repository's queue in order under its runner lock; never wait for the lock.
 
-    One speculative gate runs at a time (`speculate`); after a merge the
-    runner lands the entry (`land`), then waits for that gate, so the next
-    prepare finds its receipt. `note` defaults to `default_note`, read at the
-    call, so a suite can replace it. Off the lane host it refuses before any of
-    that (sd:3003). It reads the host again before each claim, under the
-    runner lock: after a move it finishes the running entry, claims no next
-    one, and says why in `stopped`. After a hub fault it puts the entry back
-    and stops the same way (`requeue`, sd:3239).
+    It first imports the file queue and reclaims dead holders here
+    (`settle_checkout`). One speculative gate runs at a time (`speculate`);
+    after a merge the runner lands the entry (`land`), then waits for that
+    gate, so the next prepare finds its receipt. `note` defaults to
+    `default_note`, read at the call, so a suite can replace it. Off the lane
+    host it refuses before any of that (sd:3003). Each claim reads the host
+    in its own transaction (`claim_entry`): after a move it claims nothing and
+    says why in `stopped`. After a hub fault it puts the entry back and stops
+    the same way (`requeue`, sd:3239). A runner write it cannot land stops
+    the run (`Stop`), and the next run settles the entry.
     """
-    refuse_elsewhere(root)
-    path = queue_path(root, environ)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    own_lock = path.parent / "runner.lock"
-    with open(own_lock, "a", encoding="utf-8") as handle:
-        try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
+    refuse_elsewhere(root, environ)
+    queue = queue_for(root, environ)
+    own_lock = queue.lock_file
+    with runner_lock(queue) as locked:
+        if not locked:
             return {"ran": [], "busy": f"another runner holds {own_lock}"}
-        reclaimed = update(path, reclaim_dead)
         ran: list[dict[str, Any]] = []
-        answer: dict[str, Any] = {"ran": ran, **({"reclaimed": reclaimed} if reclaimed else {})}
+        answer: dict[str, Any] = {"ran": ran, **settle_checkout(root, queue)}
         ahead: threading.Thread | None = None
         while True:
-            stopped = lane_moved(root)  # sd:3003: a move stops the lane at an item boundary, never mid-merge
-
-            def claim_next(entries: list[dict[str, Any]]) -> dict[str, Any] | None:
-                for row in entries:
-                    if row.get("status") == "pending" and not row.get("held"):
-                        row.update(status="running", started_at=stamp_now(), runner_pid=os.getpid())
-                        return dict(row)
-                return None
-            entry = None if stopped else update(path, claim_next)
+            token = secrets.token_hex(16)
+            try:
+                entry = claim_entry(queue, token)
+            except LaneError as error:  # moved, unknown, busy, or a hub that stayed down
+                answer["stopped"], entry = str(error), None
             if entry is None:
-                if stopped:
-                    answer["stopped"] = stopped
                 if ahead is not None:
                     ahead.join()
                 return answer
             if ahead is not None and ahead.is_alive():
-                speculate(entry, path, gate, busy=True)  # notes the skip: one speculative gate at a time
+                speculate(entry, queue, gate, busy=True)  # notes the skip: one speculative gate at a time
             else:
-                ahead = speculate(entry, path, gate)
+                ahead = speculate(entry, queue, gate)
             try:
-                outcome = process(entry, path.parent.parent / "logs", ship)
-            except Exception as error:  # a broken entry is marked; the next one still runs
-                outcome = {"status": "failed", "reason": f"{type(error).__name__}: {error}"[:600]}
-            if requeue(path, entry, outcome):
-                ran.append({"item": entry["item"], **outcome, "status": "pending"})
-                answer["stopped"] = (f"sd:{entry['item']} met a hub fault in {outcome.get('step')}; "
-                                     "it is pending again, and the next run retries it")
+                outcome = process(entry, queue, ship, functools.partial(advance, queue, entry, token))
+                if requeue(queue, entry, token, outcome):
+                    ran.append({"item": entry["item"], **outcome, "status": "pending"})
+                    answer["stopped"] = (f"sd:{entry['item']} met a hub fault in {outcome.get('step')}; "
+                                         "it is pending again, and the next run retries it")
+                    if ahead is not None:
+                        ahead.join()
+                    return answer
+            except Stop as error:
+                answer["stopped"] = str(error)
                 if ahead is not None:
                     ahead.join()
                 return answer
+            except Exception as error:  # a broken entry is marked; the next one still runs
+                outcome = {"status": "failed", "reason": f"{type(error).__name__}: {error}"[:600]}
             outcome.update(settle(entry, outcome, environ, note or default_note, own_lock, root))
-            finish_entry(path, entry, outcome)
+            try:
+                finish_entry(queue, entry, token, outcome)
+            except Stop as error:
+                ran.append({"item": entry["item"], **outcome, "recorded": False})
+                answer["stopped"] = str(error)
+                if ahead is not None:
+                    ahead.join()
+                return answer
             ran.append({"item": entry["item"], **outcome})
             if ahead is not None and outcome.get("status") == "merged":
                 ahead.join(PREPARE_SECONDS)  # the next prepare reads its receipt
@@ -998,15 +1424,17 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
     machine. Ownership this machine cannot
     read skips that lane with the reason. A held runner lock skips it too
     (`run_lane` answers `busy`), and a refusal in one lane leaves the next to run.
+    Every other checkout here, hosted or not, has its file queue imported and
+    its dead holders reclaimed under its runner lock (sd:3282).
     """
     imported = sd_lib.import_sd_db()
     if imported.module is None:
         raise LaneError(f"lane run --hosted reads the repo table: {imported.problem}")
-    from sd_db.database import connect, default_path  # noqa: PLC0415
+    from sd_db.database import connect  # noqa: PLC0415
     from sd_db.protection import github_slug  # noqa: PLC0415
     from sd_db.repos import registered  # noqa: PLC0415
 
-    database = default_path()
+    database = hub_database(environ)
     try:
         connection = connect(database, write=False)
         rows = sd_lib.managed_rows(registered(connection))
@@ -1015,18 +1443,29 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
                         "the next run retries.", code="lane_unknown") from None
     lanes: list[dict[str, Any]] = []
     hosted: list[tuple[str, pathlib.Path]] = []
+    others: list[tuple[str, pathlib.Path]] = []
     try:
         for row in rows:
             found, checkout = github_slug(row["remote"]), sd_lib.repo_disk(row["path"])
             if found is None or not (checkout / ".git").exists():
                 continue
             try:
-                if sd_lib.hosts_lane(connection, database, "/".join(found)):
-                    hosted.append((row["path"], checkout))
+                (hosted if sd_lib.hosts_lane(connection, database, "/".join(found)) else others).append(
+                    (row["path"], checkout))
             except Exception as error:  # noqa: BLE001 -- `LaneUnknown` skips this lane; it never runs as the hub's
                 lanes.append({"path": row["path"], "skipped": str(error), "code": getattr(error, "code", "lane_unknown")})
+                others.append((row["path"], checkout))
     finally:
         connection.close()  # a lane runs for hours; each reads its host again on its own connection
+    for path, checkout in others:
+        try:
+            queue = queue_for(checkout, environ)
+            with runner_lock(queue) as locked:
+                settled = settle_checkout(checkout, queue) if locked else {}
+        except (LaneError, sd_lib.ConfigError, OSError) as error:
+            settled = refusal(error)
+        if settled:
+            lanes.append({"path": path, "settled": settled})
     for path, checkout in hosted:
         try:
             lanes.append({"path": path, **run_lane(checkout, environ, ship, gate, note)})
@@ -1080,12 +1519,12 @@ def add_lane_verbs(commands: Any) -> None:
     adder.add_argument("--acceptance-file", type=pathlib.Path, help="forwarded to prepare unchanged")
     verbs.add_parser("list", help="print this repository's queue")
     retrier = verbs.add_parser("retry", help="queue the item's last failed, skipped or prepared entry again, "
-                                             "at its head with its kept body (sd:3254)")
+                                             "at its head with its body text (sd:3254)")
     retrier.add_argument("item", type=int)
     retrier.add_argument("--manual", action="store_true",
                          help="authorize the runner to merge when repo.runner_merge is manual, as enqueue --manual")
     retrier.add_argument("--expected-head", help=f"refuse with {STALE_HEAD} unless the item's last entry is at this "
-                                                 "full commit id, checked under the queue's lock (sd:3268)")
+                                                 "full commit id, checked in the write's transaction (sd:3268)")
     canceller = verbs.add_parser("cancel", help="mark a pending entry cancelled")
     canceller.add_argument("item", type=int)
     mover = verbs.add_parser("move", help="move a pending entry; the runner reads the new order at the next item")
@@ -1098,7 +1537,7 @@ def add_lane_verbs(commands: Any) -> None:
         editors[-1].add_argument("item", type=int)
     for editor in editors:
         editor.add_argument("--expected-revision", help=f"refuse with {STALE_REVISION} unless `lane list` still prints "
-                                                        "this revision, checked under the queue's lock")
+                                                        "this revision, checked in the write's transaction")
     runner = verbs.add_parser("run", help="drain the queue in order; exits at once if another runner holds the lane")
     runner.add_argument("--hosted", action="store_true",
                         help="run the lane of each repository this machine hosts, one after another (sd:3003)")
@@ -1118,15 +1557,16 @@ def lane_main(args: Any) -> int:
         if root is None:
             raise LaneError("cwd is not inside a Git repository")
         if args.lane_command in HOST_VERBS:  # no `lane run` drains this machine's queue (sd:2795, sd:3003)
-            refuse_elsewhere(root)
+            refuse_elsewhere(root, environ)
+        imported = {} if args.lane_command == "run" else import_file_queue(root, queue_for(root, environ))
         if args.lane_command == "enqueue":
             result: Any = enqueue_entry(root, args.item, args.title, args.body_file, environ,
                                         expected_head=args.expected_head, manual=args.manual, claim=args.claim,
                                         acceptance_file=args.acceptance_file)
         elif args.lane_command == "list":
-            path = queue_path(root, environ)
-            entries = read_queue(path)
-            result = {"queue": str(path), "revision": queue_revision(entries), "entries": entries}
+            entries = read_queue(queue_for(root, environ))
+            result = {"queue": str(queue_path(root, environ)), "revision": queue_revision(entries),
+                      "entries": [shown(row) for row in entries], **({"import": imported} if imported else {})}
         elif args.lane_command == "retry":
             result = retry(root, args.item, environ, manual=args.manual, expected_head=args.expected_head)
         elif args.lane_command == "cancel":
@@ -1141,7 +1581,7 @@ def lane_main(args: Any) -> int:
     except (LaneError, sd_lib.ConfigError, OSError) as error:
         print(json.dumps({"ok": False, **refusal(error)}, indent=2, sort_keys=True))
         return 3
-    return succeed(result)
+    return succeed(shown(result))
 
 
 def refusal(error: Exception) -> dict[str, Any]:
