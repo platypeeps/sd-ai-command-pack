@@ -182,7 +182,7 @@ class PolicyReferenceBinding(unittest.TestCase):
                 reference.unlink()
                 self.assertEqual(bindings.adjudicator_binding(str(library)), before)
 
-    def test_required_policy_files_bind_content_and_refuse_missing_files(self):
+    def test_required_policy_files_bind_content_and_a_missing_file_moves_the_binding(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             library = root / "library.py"
@@ -198,10 +198,10 @@ class PolicyReferenceBinding(unittest.TestCase):
                     with self.subTest(policy=name):
                         path = root / name
                         path.write_text("changed policy")
-                        self.assertNotEqual(bindings.adjudicator_binding(str(library)), before)
-                        path.unlink()
-                        with self.assertRaisesRegex(ship.Refusal, "required review binding file cannot be read"):
-                            bindings.adjudicator_binding(str(library))
+                        changed = bindings.adjudicator_binding(str(library))
+                        self.assertNotEqual(changed, before)
+                        path.unlink()  # stale, never a refusal (sd:3272)
+                        self.assertNotIn(bindings.adjudicator_binding(str(library)), (before, changed))
                         path.write_text("fixture policy")
                         self.assertEqual(bindings.adjudicator_binding(str(library)), before)
 

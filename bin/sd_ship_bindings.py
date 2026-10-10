@@ -75,15 +75,26 @@ NORMALIZER = f"ast-docstring-1+local-block-1/py{sys.version_info.major}.{sys.ver
 LEGACY_ENTRY = "receipt predates the per-file manifest"
 
 
-def read_bound(path: pathlib.Path) -> bytes:
+#: A bound file that is not there (sd:3272). sd:3216 retired `sd_gate_tools.py`
+#: under receipts and running processes that still named it, and prepare refused
+#: them all as a prerequisite failure. Recorded, never dropped: it matches no
+#: content hash, so the binding reads as moved. Any other failed read refuses.
+ABSENT = "absent"
+
+
+def read_bound(path: pathlib.Path) -> bytes | None:
+    """The file's bytes; None when it does not exist."""
     try:
         return path.read_bytes()
+    except FileNotFoundError:
+        return None
     except OSError as error:
         raise Refusal(f"required review binding file cannot be read: {path}: {error.strerror}") from None
 
 
 def file_hash(path: pathlib.Path) -> str:
-    return hashlib.sha256(read_bound(path)).hexdigest()
+    data = read_bound(path)
+    return ABSENT if data is None else hashlib.sha256(data).hexdigest()
 
 
 def normalized_source(data: bytes) -> str | None:
@@ -110,6 +121,8 @@ _NORMALIZED: dict[str, str] = {}
 def normalized_hash(path: pathlib.Path) -> str:
     """A file that does not parse is hashed raw, never skipped."""
     data = read_bound(path)
+    if data is None:
+        return ABSENT
     raw = hashlib.sha256(data).hexdigest()
     known = _NORMALIZED.get(raw)
     if known is None:
@@ -120,7 +133,7 @@ def normalized_hash(path: pathlib.Path) -> str:
 
 
 def tool_manifest() -> dict:
-    """Every class is read, so a missing member of any class refuses."""
+    """Every class is read: a missing member reads `ABSENT`, an unreadable one refuses."""
     return {"verdict": {name: normalized_hash(BIN / name) for name in VERDICT_FILES},
             "gate": {name: file_hash(BIN / name) for name in GATE_FILES},
             "check": {name: file_hash(BIN / name) for name in CHECK_FILES}}
