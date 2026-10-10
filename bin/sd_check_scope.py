@@ -91,7 +91,7 @@ def declaration(root: pathlib.Path) -> tuple[list[str], list[str], list[str] | N
         if not isinstance(entries, list) or not entries or any(not isinstance(v, str) or not v for v in entries):
             raise DeclarationError(f"{DECLARATION}: {name} must be a non-empty list of non-empty strings")
     tools = value.get("docs_tools")
-    # A bare name resolves on `PATH`, where an offload view hashes it; a path names a file no binding covers (sd:2881).
+    # A bare name resolves on `PATH`, where the binding hashes it; a path names a file no binding covers (sd:2881).
     if tools is not None and (not isinstance(tools, list)
                               or any(not isinstance(v, str) or not v or "/" in v or v in (".", "..") for v in tools)):
         raise DeclarationError(f"{DECLARATION}: docs_tools must be a list of bare command names, resolved on PATH")

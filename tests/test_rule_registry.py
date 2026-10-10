@@ -1975,7 +1975,7 @@ MUTATIONS: dict[str, Mutation] = {
     ),
     "bin/sd_gate_receipts.py::from_receipts": Mutation(
         path="bin/sd_gate_receipts.py",
-        old="    found, miss = examine(database, key, identity) if reuse and database and offload != \"require\" else (None, None)",
+        old="    found, miss = examine(database, key, identity) if reuse and database else (None, None)",
         new="    found, miss = (None, None)  # leg d: receipt reuse, defeated",
         test="tests.test_sd_review_gate_check.BuilderReceipt"
              ".test_prepare_reuses_the_builders_pass_at_the_same_head",

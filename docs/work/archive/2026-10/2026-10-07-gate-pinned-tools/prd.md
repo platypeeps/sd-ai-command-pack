@@ -3,6 +3,7 @@ title: Offload gate runs pinned copies of the drifting tools, so hub and satelli
 created: 2026-10-07
 branch: feat/gate-pinned-tools-2936
 item: sd:2936
+status: done
 ---
 # PRD — gate pinned tools
 
