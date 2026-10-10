@@ -1458,7 +1458,8 @@ def register(groups: Any, store: Any) -> None:
     register_verb = working.add_parser(
         "register", help="make the row that owns a docs/work folder on disk")
     register_verb.add_argument(
-        "path", help="docs/work/<item>/prd.md, relative to the repository")
+        "path", help="docs/work/<item>/prd.md, relative to the repository; "
+        "a design.md-only folder names its row with `item: sd:<id>` instead")
     _output(register_verb, "register")
 
     deliver = working.add_parser("deliver", help="verify a delivery commit and complete its item")
