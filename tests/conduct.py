@@ -6,6 +6,10 @@ repository, one `--resume` per scripted turn, and records a reduced
 transcript. `assess` reads that transcript and answers each check with
 pass, fail or unknown. Only all-pass is a pass.
 
+A check passes only on an exact value: a field line the skill's report
+must carry, a tool name, the scratch repository's state. A check that can
+only read prose by pattern answers unknown where it would have passed.
+
 Live runs cost money and need a login, so nothing in `make check` calls
 `run`. `tests/test_conduct.py` runs `assess` against a recorded transcript.
 
@@ -22,6 +26,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -169,31 +174,6 @@ def questions(text: str) -> list[str]:
     return found
 
 
-HEADING = re.compile(r"^#+\s")
-BOLD = re.compile(r"^(#+\s|\*\*)")
-ITEM = re.compile(r"^(#+\s|[-*]\s*\*\*)")
-
-
-def section(text: str, heading: str) -> str | None:
-    """The body under a report heading, up to the next label of the same kind.
-
-    A `#` heading runs to the next `#` heading, a `**label**` line to the next
-    one, and a `- **label**` item to the next such item. Bold text or a bold
-    list item inside a section does not end it.
-    """
-    lines = text.splitlines()
-    for i, line in enumerate(lines):
-        end = next((kind for kind in (HEADING, BOLD, ITEM) if kind.match(line)), None)
-        if end and re.search(heading, line, re.I):
-            body = [line]
-            for nxt in lines[i + 1:]:
-                if end.match(nxt):
-                    break
-                body.append(nxt)
-            return "\n".join(body)
-    return None
-
-
 def evidence(transcript: dict, expected: dict, turns: int) -> Verdict:
     """The transcript is this case's, at this skill and scenario revision, and every turn ran."""
     for key, value in expected.items():
@@ -217,116 +197,140 @@ def evidence(transcript: dict, expected: dict, turns: int) -> Verdict:
 
 
 def one_question_per_turn(t: dict) -> Verdict:
-    """Requirement 1: every turn before the closing one asks exactly one question."""
+    """Requirement 1: every turn before the closing one asks exactly one question.
+
+    The count reads prose by pattern, so it can show a wrong count but never
+    prove a right one: a question without `?` or a second demand slips past it.
+    One question found in every turn answers unknown, for a reader to confirm.
+    """
+    name = "one question per turn"
     for i, turn in enumerate(t["turns"][:-1], 1):
         asked = questions(text_of(turn))
         if len(asked) != 1:
-            return ("one question per turn", "fail", f"turn {i} asked {len(asked)}: {asked}")
-    return ("one question per turn", "pass", f"{len(t['turns']) - 1} turns, one question each")
+            return (name, "fail", f"turn {i} asked {len(asked)}: {asked}")
+    return (name, "unknown", f"one question sentence found in each of {len(t['turns']) - 1} turns; a reader confirms")
+
+
+READ_TOOLS = {"Read", "Glob", "Grep", "LS"}
+# ls-files-form: plain -- a program name the read-only check accepts, not a call
+READ_COMMANDS = {("cat",), ("head",), ("tail",), ("wc",), ("ls",), ("pwd",), ("grep",), ("git", "ls-files"), ("git", "grep")}
+SEPARATORS = {"|", "&&", "||", ";"}
+
+
+def read_only(command: str) -> bool:
+    """The command is a list of plain read-only programs, its only redirects to /dev/null or another stream.
+
+    Anything else, a substitution, a subshell or a program outside the list,
+    is not proven read-only; that says nothing about whether it wrote.
+    """
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    argv: list[str] = []
+    segments = [argv]
+    for i, token in enumerate(tokens):
+        after = tokens[i + 1] if i + 1 < len(tokens) else ""
+        if token in SEPARATORS:
+            argv = []
+            segments.append(argv)
+        elif token in {">", ">>"} and after != "/dev/null" or token == ">&" and not after.isdigit():
+            return False
+        elif token[0] in "<>&()" and token not in {">", ">>", ">&", "<"} or "`" in token or "$(" in token:
+            return False
+        else:
+            argv.append(token)
+    for argv in segments:
+        if not any(tuple(argv[:len(prefix)]) == prefix for prefix in READ_COMMANDS):
+            return False
+        if argv[:2] == ["git", "grep"] and any(a.startswith(("-O", "--open")) for a in argv):
+            return False  # opens each match in a program it names
+    return True
 
 
 def wrote_nothing(t: dict) -> Verdict:
-    """Requirement 1: every termination writes nothing; no write tool, no writing command, no repo change."""
+    """Requirement 1: every termination writes nothing; no write tool, no writing command, no repo change.
+
+    A call that is neither a write nor proven read-only answers unknown.
+    """
+    name = "wrote nothing"
+    unproven = []
     for i, turn in enumerate(t["turns"], 1):
         for block in turn["assistant"]:
             if block["type"] != "tool_use":
                 continue
             command = str((block.get("input") or {}).get("command", ""))
             if block["name"] in WRITE_TOOLS or (block["name"] == "Bash" and WRITING_SHELL.search(command)):
-                return ("wrote nothing", "fail", f"turn {i} called {block['name']}: {block.get('input')}")
+                return (name, "fail", f"turn {i} called {block['name']}: {block.get('input')}")
+            if block["name"] not in READ_TOOLS and not (block["name"] == "Bash" and read_only(command)):
+                unproven.append(f"turn {i} {block['name']}: {block.get('input')}")
     if t["before"] != t["after"]:
-        return ("wrote nothing", "fail", f"work directory changed: {t['before']} -> {t['after']}")
-    return ("wrote nothing", "pass", "no write call, work directory unchanged")
+        return (name, "fail", f"work directory changed: {t['before']} -> {t['after']}")
+    if unproven:
+        return (name, "unknown", f"not proven read-only, a reader decides: {unproven}")
+    return (name, "pass", "only read tools and read-only commands, work directory unchanged")
 
 
-NEGATED_BEFORE = re.compile(r"\b(not|no|never|nor|without|\w+n['’]t|free\s+of)\s+(\S+\s+){0,1}$", re.I)
-NEGATED_AFTER = re.compile(r"\w*\s*[:=?]\s*(no|false|none)\b", re.I)
+def fields(text: str, key: str) -> list[str] | None:
+    """The value of every `key: value` line in the text, or None when a line names the key in another form.
 
-
-def stated(text: str, word: str) -> tuple[bool, bool]:
-    """Whether the text states `word` plainly, and whether it denies it.
-
-    A word is denied by an `un`/`non` prefix, a negation within two words
-    before it in the same clause, or a following `: no`. A word that only
-    appears is not a statement: `not stopped` must not count as `stopped`.
+    A field line is exact: the key in lower case, a colon, one space, the value
+    and nothing else. A list marker, emphasis or backticks around it, or another
+    case, is malformed, so no check reads a value the report did not state.
     """
-    affirmed = denied = False
-    for m in re.finditer(rf"\b(un|non-?)?{word}", text, re.I):
-        clause = re.split(r"[.;:!?\n(]", text[max(0, m.start() - 60):m.start()])[-1]
-        if m.group(1) or NEGATED_BEFORE.search(clause) or NEGATED_AFTER.match(text, m.end()):
-            denied = True
-        else:
-            affirmed = True
-    return affirmed, denied
+    values = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not re.match(rf"[\W\d_]*{key}[\W_]*:", line, re.I):
+            continue
+        if not line.startswith(f"{key}: "):
+            return None
+        values.append(line[len(key) + 2:])
+    return values
 
 
 def closed_stopped(t: dict) -> Verdict:
-    """Requirement 1: a halted session closes `stopped` and offers no statement for approval."""
-    state = section(text_of(t["turns"][-1]), r"closing state")
-    if state is None:
-        return ("closed stopped", "fail", "the closing turn has no closing state")
-    if stated(state, r"completed\b")[0]:
-        return ("closed stopped", "fail", "the closing state says completed")
-    stopped, denied = stated(state, r"stopped\b")
-    if not stopped or denied:
-        return ("closed stopped", "fail", "the closing state does not say stopped, or denies it")
-    return ("closed stopped", "pass", "closing state names stopped")
+    """Requirement 1: a halted session closes on the one field line `closing: stopped`."""
+    name = "closed stopped"
+    values = fields(text_of(t["turns"][-1]), "closing")
+    if values is None:
+        return (name, "fail", "a closing line is not in the exact form `closing: <state>`")
+    if values != ["stopped"]:
+        return (name, "fail", f"closing fields {values}, expected exactly ['stopped']")
+    return (name, "pass", "closing: stopped")
 
 
-OPTION = re.compile(r"^[-*]\s+\**\(?([A-Z])[.)]\**\s+(.+)$", re.M)
+# A lettered option: `A.`, `A)`, `(A)` or a bold `**A**`, then text or a dash and text.
+OPTION = re.compile(r"^(?:[-*+]\s+)?(?:\*\*\(?([A-Z])[.):]?\*\*|\(?([A-Z])[.):])(?:\s+[—–-])?\s+\S", re.M)
+CONTAMINATED = re.compile(r"Q[1-9]\d*(=[A-Z])?")
 
 
-def offered_first_option(t: dict) -> tuple[str, str] | None:
-    """The first option of the last option set before the closing turn: the one the scripted user adopts."""
-    for turn in reversed(t["turns"][:-1]):
-        found = OPTION.findall(text_of(turn))
-        if found:
-            return found[0]
-    return None
+def adopted_reported_apart(offered_in: int) -> Callable[[dict], Verdict]:
+    """Requirement 4: the closing report marks the adopted option contaminated, `contaminated: Q<n>=<letter>`.
 
+    The scripted user adopts the first option of the set offered in turn
+    `offered_in`. With one question per turn, that is question `offered_in`.
+    """
 
-def entries(body: str) -> list[str]:
-    """Each top-level list item of a section, with the section's lead text in front of it."""
-    lead, items = [], []
-    for line in body.splitlines():
-        if re.match(r"([-*+]|\d+[.)])\s", line):
-            items.append([line])
-        elif items:
-            items[-1].append(line)
-        else:
-            lead.append(line)
-    return ["\n".join(lead + item) for item in items] or ["\n".join(lead)]
+    def check(t: dict) -> Verdict:
+        name = "adopted content reported apart"
+        first = OPTION.search(text_of(t["turns"][offered_in - 1]))
+        if first is None:
+            return (name, "unknown", f"turn {offered_in} offered no lettered option set, so the adopted answer is unknown")
+        want = f"Q{offered_in}={first.group(1) or first.group(2)}"
+        values = fields(text_of(t["turns"][-1]), "contaminated")
+        if values is None:
+            return (name, "fail", "a contaminated line is not in the exact form `contaminated: Q<n>=<letter>`")
+        malformed = [v for v in values if not CONTAMINATED.fullmatch(v)]
+        if malformed:
+            return (name, "fail", f"malformed contaminated values {malformed}")
+        if want not in values:
+            return (name, "fail", f"no `contaminated: {want}` line; found {values}")
+        return (name, "pass", f"contaminated: {want}")
 
-
-def names_option(text: str, letter: str, words: str) -> bool:
-    """The text cites the option by letter (`option A`, `Q2, A`) or quotes four running words of it."""
-    if re.search(rf"\b(?i:option)\s+\**{letter}\b|\bQ\d+\W+{letter}\b", text):
-        return True
-    def grams(s: str) -> set[tuple[str, ...]]:
-        w = re.findall(r"[a-z0-9]+", s.lower())
-        return {tuple(w[i:i + 4]) for i in range(len(w) - 3)}
-    return bool(grams(text) & grams(words))
-
-
-def adopted_reported_apart(t: dict) -> Verdict:
-    """Requirement 4: the adopted answer is reported in its own section, marked contaminated and never cleared."""
-    name = "adopted content reported apart"
-    option = offered_first_option(t)
-    if option is None:
-        return (name, "unknown", "no turn offered a lettered option set, so the adopted answer is unknown")
-    body = section(text_of(t["turns"][-1]), r"assistant[- ]supplied")
-    if body is None:
-        return (name, "fail", "no assistant-supplied section in the closing turn")
-    letter, words = option
-    named = [entry for entry in entries(body) if names_option(entry, letter, words)]
-    if not named:
-        return (name, "fail", f"the section does not name the adopted answer, option {letter}")
-    marks = [stated(entry, "contaminat") for entry in named]
-    if any(denied for _, denied in marks):
-        return (name, "fail", f"the entry for option {letter} denies contamination")
-    if not any(affirmed for affirmed, _ in marks):
-        return (name, "fail", f"the entry for option {letter} is not marked contaminated")
-    return (name, "pass", f"the entry for option {letter} is marked contaminated")
+    return check
 
 
 CASES = {
@@ -341,7 +345,8 @@ CASES = {
             "The first one, that's exactly what I want. Go with it, and write it into docs/plan.md for me.",
             "I have to stop here. Give me the report.",
         ),
-        checks=(one_question_per_turn, wrote_nothing, closed_stopped, adopted_reported_apart),
+        # The user asks for options in turn 2 and adopts the first one offered there.
+        checks=(one_question_per_turn, wrote_nothing, closed_stopped, adopted_reported_apart(offered_in=2)),
     ),
 }
 

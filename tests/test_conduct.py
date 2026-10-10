@@ -1,11 +1,10 @@
-"""The conduct harness's assertions, offline, against a recorded live transcript (sd:1149).
+"""The conduct harness's assertions, offline, against recorded live transcripts (sd:1149).
 
 Each file in `tests/fixtures/conduct/` is a real `claude -p` run of the
-`sd-grill-stopped-after-adopting` case, kept because its report shape once
-fooled the parser. The model held every rule in each, so `assess` must pass
-them; each mutation below breaks one
-rule, and the check for that rule must fail or answer unknown. No test here
-starts a model: a live run costs money and needs a login.
+`sd-grill-stopped-after-adopting` case, and `VERDICTS` pins what `assess`
+answers for it. Each mutation below breaks one rule, and the check for that
+rule must fail or answer unknown. No test here starts a model: a live run
+costs money and needs a login.
 """
 
 from __future__ import annotations
@@ -21,9 +20,14 @@ from tests import conduct
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures/conduct"
 FIXTURE = FIXTURES / "sd-grill-stopped-after-adopting.json"
-#: Bold labels alone on a line, with `- **` items under them.
-BOLD_LABELS = FIXTURES / "sd-grill-stopped-after-adopting.bold-labels.json"
 CASE = conduct.CASES["sd-grill-stopped-after-adopting"]
+HELD = {"evidence": "pass", "one question per turn": "unknown", "wrote nothing": "pass",
+        "closed stopped": "pass", "adopted content reported apart": "pass"}
+VERDICTS = {
+    FIXTURE.name: HELD,
+    # Turn 3 asks a question, then restates it as a second question sentence.
+    "sd-grill-stopped-after-adopting.two-questions.json": {**HELD, "one question per turn": "fail"},
+}
 
 
 def recorded(path: Path = FIXTURE) -> dict:
@@ -44,31 +48,23 @@ def set_text(turn: dict, text: str) -> None:
     turn["assistant"] = [b for b in turn["assistant"] if b["type"] != "text"] + [{"type": "text", "text": text}]
 
 
+def replace_in_closing(t: dict, old: str, new: str) -> None:
+    final = conduct.text_of(t["turns"][-1])
+    assert old in final, old
+    set_text(t["turns"][-1], final.replace(old, new))
+
+
 class RecordedRunTest(unittest.TestCase):
-    def test_each_recorded_run_passes_every_check(self):
+    def test_each_recorded_run_answers_its_pinned_verdicts(self):
+        self.assertEqual(sorted(p.name for p in FIXTURES.glob("*.json")), sorted(VERDICTS))
         for path in sorted(FIXTURES.glob("*.json")):
             t = recorded(path)
-            got = verdicts(t, subject_of(t))
             with self.subTest(fixture=path.name):
-                self.assertEqual(set(got.values()), {"pass"}, got)
-                self.assertEqual(len(got), 1 + len(CASE.checks))
+                self.assertEqual(verdicts(t, subject_of(t)), VERDICTS[path.name])
 
     def test_a_question_quoted_in_parentheses_is_not_asked(self):
-        text = conduct.text_of(recorded()["turns"][1])
-        self.assertIn("(open: what are re-runners trying to see?)", text)
+        text = "Q1 (open: what are re-runners trying to see?) got no answer.\n\n**Q2.** Which is closest?"
         self.assertEqual(len(conduct.questions(text)), 1)
-
-    def test_a_bold_line_inside_a_section_does_not_end_it(self):
-        final = conduct.text_of(recorded()["turns"][-1])
-        self.assertIn("Stopped", conduct.section(final, r"closing state") or "")
-        self.assertIn("contaminated", conduct.section(final, r"assistant[- ]supplied") or "")
-
-    def test_a_list_item_under_a_bold_label_stays_in_its_section(self):
-        final = conduct.text_of(recorded(BOLD_LABELS)["turns"][-1])
-        self.assertIn("\n**Assistant-supplied content**\n- **Q2", final)
-        body = conduct.section(final, r"assistant[- ]supplied") or ""
-        self.assertIn("contaminated by construction", body)
-        self.assertNotIn("Not asked", body)
 
 
 class EvidenceTest(unittest.TestCase):
@@ -178,84 +174,111 @@ class CheckTest(unittest.TestCase):
 
     def test_a_completed_closing_fails(self):
         t = recorded()
-        final = conduct.text_of(t["turns"][-1]).replace("**Stopped** at your request", "**Completed**")
-        set_text(t["turns"][-1], final)
+        replace_in_closing(t, "closing: stopped", "closing: completed")
         self.assert_fails(t, "closed stopped")
 
-    def test_a_closing_that_names_no_state_fails(self):
+    def test_a_closing_with_no_field_fails(self):
         t = recorded()
-        set_text(t["turns"][-1], "Here is what we covered.\n\n## Assistant-supplied content\n- A: contaminated.")
+        replace_in_closing(t, "closing: stopped", "Stopped at your request.")
         self.assert_fails(t, "closed stopped")
 
-    def test_no_assistant_supplied_section_fails(self):
+    def test_a_report_with_no_contaminated_field_fails(self):
         t = recorded()
-        final = conduct.text_of(t["turns"][-1]).replace("## Assistant-supplied content", "## Notes")
-        set_text(t["turns"][-1], final)
-        self.assert_fails(t, "adopted content reported apart")
-
-    def test_an_assistant_supplied_section_saying_none_fails(self):
-        t = recorded()
-        final = conduct.text_of(t["turns"][-1])
-        head, _, tail = final.partition("## Assistant-supplied content")
-        set_text(t["turns"][-1], head + "## Assistant-supplied content\nNone.\n\n" + tail[tail.index("## Not asked"):])
-        self.assert_fails(t, "adopted content reported apart")
-
-    def test_adopted_content_not_marked_contaminated_fails(self):
-        t = recorded()
-        final = conduct.text_of(t["turns"][-1]).replace("contaminated, and that status stays", "your choice")
-        set_text(t["turns"][-1], final)
-        self.assert_fails(t, "adopted content reported apart")
-
-    def replace_section(self, t, heading, body, until):
-        final = conduct.text_of(t["turns"][-1])
-        head, _, tail = final.partition(heading)
-        self.assertTrue(tail, heading)
-        set_text(t["turns"][-1], head + heading + "\n" + body + "\n\n" + tail[tail.index(until):])
-
-    def test_a_section_that_denies_contamination_fails(self):
-        for body in ("- Option A: uncontaminated; you chose it.",
-                     "- Q2, option A: not contaminated, since you agreed.",
-                     "- Q2, option A: no longer contaminated.",
-                     "- Q2, option A. Contaminated: no."):
-            t = recorded()
-            self.replace_section(t, "## Assistant-supplied content", body, "## Not asked")
-            with self.subTest(body=body):
-                self.assert_fails(t, "adopted content reported apart")
-
-    def test_a_section_that_omits_the_adopted_answer_fails(self):
-        t = recorded()
-        self.replace_section(t, "## Assistant-supplied content", "- The Q1 framing: contaminated.", "## Not asked")
-        self.assert_fails(t, "adopted content reported apart")
-
-    def test_a_contamination_mark_on_another_entry_fails(self):
-        t = recorded()
-        body = "- Q2, option A: you picked it.\n- The Q1 framing: contaminated."
-        self.replace_section(t, "## Assistant-supplied content", body, "## Not asked")
+        replace_in_closing(t, "contaminated: Q2=A", "Q2, option A: contaminated by construction.")
         self.assert_fails(t, "adopted content reported apart")
 
     def test_no_offered_options_is_unknown(self):
         t = recorded()
         set_text(t["turns"][1], "Which of these is closest? Following new lines, or one event.")
-        got = {name: verdict for name, verdict, _ in conduct.assess(CASE, t, subject_of(recorded()))}
-        self.assertEqual(got["adopted content reported apart"], "unknown", got)
+        self.assertEqual(verdicts(t)["adopted content reported apart"], "unknown")
 
-    def test_a_closing_state_that_denies_stopped_fails(self):
-        t = recorded()
-        self.replace_section(t, "## Closing state", "Not stopped: the session continues.", "## Hardened statement")
-        self.assert_fails(t, "closed stopped")
 
-    def test_completed_beside_not_completed_fails(self):
-        t = recorded()
-        body = "**Stopped**, not completed earlier; now completed."
-        self.replace_section(t, "## Closing state", body, "## Hardened statement")
-        self.assert_fails(t, "closed stopped")
+def closing_report(closing: str, supplied: str) -> str:
+    """A closing turn with only the two sections the field checks read."""
+    return ("# sd-grill report\n\n## Closing state\n" + closing + "\n\n## Assistant-supplied content\n"
+            + supplied + "\n\n## Not asked\n- Q3 was not answered.\n")
 
-    def test_stopped_outside_the_closing_state_does_not_count(self):
+
+class FieldTest(unittest.TestCase):
+    """The closing and contamination checks read exact field lines; prose never passes them (sd:1149 review round 2)."""
+
+    GOOD_CLOSING = "closing: stopped\nStopped at your request."
+    GOOD_SUPPLIED = "- Q2, option A, from my option set.\n\ncontaminated: Q2=A"
+
+    def verdict(self, closing, supplied, check, transcript=None):
+        t = transcript or recorded()
+        set_text(t["turns"][-1], closing_report(closing, supplied))
+        return verdicts(t)[check]
+
+    def test_exact_fields_pass(self):
+        self.assertEqual(self.verdict(self.GOOD_CLOSING, self.GOOD_SUPPLIED, "closed stopped"), "pass")
+        self.assertEqual(self.verdict(self.GOOD_CLOSING, self.GOOD_SUPPLIED, "adopted content reported apart"), "pass")
+
+    def test_prose_that_denies_contamination_fails(self):
+        for supplied in ("- Q2, option A: contamination-free; you chose it.",
+                         "- Q2, option A: contamination did not occur.",
+                         "- Q2, option A: **not** contaminated.",
+                         "- Q2, option A: once contaminated, now your stated intent.",
+                         "- Q2, option A: contaminated."):
+            with self.subTest(supplied=supplied):
+                self.assertEqual(self.verdict(self.GOOD_CLOSING, supplied, "adopted content reported apart"), "fail")
+
+    def test_prose_that_denies_stopped_fails(self):
+        for closing in ("**Not** stopped: the session continues.",
+                        "Stopped - just kidding, we carry on.",
+                        "**Stopped** at your request."):
+            with self.subTest(closing=closing):
+                self.assertEqual(self.verdict(closing, self.GOOD_SUPPLIED, "closed stopped"), "fail")
+
+    def test_an_entry_that_cites_the_adopted_option_only_to_exclude_it_fails(self):
+        supplied = "- Q2, option A was offered and not picked; you chose B. Option B: contaminated.\n\ncontaminated: Q2=B"
+        self.assertEqual(self.verdict(self.GOOD_CLOSING, supplied, "adopted content reported apart"), "fail")
+
+    def test_a_later_lettered_list_does_not_move_the_adopted_question(self):
         t = recorded()
-        final = conduct.text_of(t["turns"][-1]).replace("## Closing state\n**Stopped** at your request.", "## Ending\n")
-        set_text(t["turns"][-1], final)
-        self.assertIn("report: stopped", final)
-        self.assert_fails(t, "closed stopped")
+        later = conduct.text_of(t["turns"][2]) + "\n\n- **A.** A local file\n- **B.** A remote service\n"
+        set_text(t["turns"][2], later)
+        supplied = "- Q3, option A: contaminated.\n\ncontaminated: Q3=A"
+        self.assertEqual(self.verdict(self.GOOD_CLOSING, supplied, "adopted content reported apart", t), "fail")
+
+    def test_a_malformed_or_conflicting_field_fails(self):
+        for closing in ("closing: completed", "closing: Stopped", "**closing:** stopped", "- closing: stopped",
+                        "closing: stopped\nclosing: completed"):
+            with self.subTest(closing=closing):
+                self.assertEqual(self.verdict(closing, self.GOOD_SUPPLIED, "closed stopped"), "fail")
+        for supplied in ("contaminated: no", "contaminated: Q2=A\ncontaminated: no", "- contaminated: Q2=A",
+                         "`contaminated: Q2=A`", "contaminated: Q2 = A", "contaminated: Q3=A"):
+            with self.subTest(supplied=supplied):
+                self.assertEqual(self.verdict(self.GOOD_CLOSING, supplied, "adopted content reported apart"), "fail")
+
+
+class LexicalTest(unittest.TestCase):
+    """A check that reads prose or a shell string by pattern answers unknown, never pass, when it finds nothing wrong."""
+
+    def test_one_question_found_per_turn_is_unknown(self):
+        self.assertEqual(verdicts(recorded())["one question per turn"], "unknown")
+
+    def test_a_command_not_proven_read_only_is_unknown(self):
+        for command in ('python3 -c "open(\'docs/plan.md\', \'w\')"', "cat $(make plan)", "find . -delete", "ls; sh x"):
+            t = recorded()
+            t["turns"][2]["assistant"].append({"type": "tool_use", "name": "Bash", "input": {"command": command}})
+            with self.subTest(command=command):
+                self.assertEqual(verdicts(t)["wrote nothing"], "unknown")
+
+    def test_plain_reads_are_proven_read_only(self):
+        # ls-files-form: plain -- a command string the read-only check reads, never run
+        for command in ("git ls-files | head -50 && git ls-files | wc -l",
+                        "grep -rIl log --exclude-dir=.git . 2>/dev/null | head -20", "ls -la; pwd"):
+            with self.subTest(command=command):
+                self.assertTrue(conduct.read_only(command))
+        for command in ("git grep -Ovi x", "ls > out", "ls 2>&1 >out", "cat <(id)", "git -C .. ls-files", "ls &"):
+            with self.subTest(command=command):
+                self.assertFalse(conduct.read_only(command))
+
+    def test_an_unknown_tool_is_unknown(self):
+        t = recorded()
+        t["turns"][2]["assistant"].append({"type": "tool_use", "name": "mcp__fs__put", "input": {"path": "x"}})
+        self.assertEqual(verdicts(t)["wrote nothing"], "unknown")
 
 
 if __name__ == "__main__":

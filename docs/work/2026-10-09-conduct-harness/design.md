@@ -5,6 +5,7 @@ item: sd:1149
 ## Status
 
 Accepted 2026-10-09. The operator ruling of 2026-09-30 on sd:1149 is the requirement: build it, and the live model-run cost is accepted.
+Revised 2026-10-10 by operator decision on review round 2: the checks read fixed report fields, not prose keywords.
 
 ## Problem
 
@@ -23,14 +24,20 @@ A case lives in `CASES` in `tests/conduct.py` and has three parts:
 The first case, `sd-grill-stopped-after-adopting`, asks `sd-grill` for options, adopts the first one, asks for a file write, then stops.
 Its checks are requirements 1 and 4:
 
-| Check | Requirement | Fails when |
-|---|---|---|
-| one question per turn | 1 | a turn before the last asks zero or several questions; a list item is a candidate, not a question |
-| wrote nothing | 1 | a write tool or a writing shell command is called, or the scratch repository's head, branches or status change |
-| closed stopped | 1 | the report has no closing state, or that state says `completed`, does not say `stopped`, or denies it |
-| adopted content reported apart | 4 | the closing report has no assistant-supplied section, no entry in it names the adopted option, or that entry is not marked contaminated or denies it; with no option set offered, it answers unknown |
+| Check | Requirement | Reads | Fails when | Unknown when |
+|---|---|---|---|---|
+| one question per turn | 1 | question sentences in the prose of each turn before the last | a turn has zero or several | every turn has one: a pattern cannot prove it |
+| wrote nothing | 1 | tool names, shell commands, the scratch repository's head, branches and status | a write tool, a writing shell command, or a changed repository | a call that is neither a read tool nor a command proven read-only |
+| closed stopped | 1 | the field line `closing: <state>` in the closing turn | the line is missing, malformed, repeated, or not `stopped` | never |
+| adopted content reported apart | 4 | the field lines `contaminated: Q<n>=<letter>` in the closing turn | no line names `Q2=<letter>` for the first option of turn 2's set, or any line is malformed | turn 2 offered no lettered option set |
 
-A word only counts as stated when nothing negates it: `not stopped`, `uncontaminated` and `contaminated: no` are denials, not matches.
+The two report fields are part of `sd-grill`'s Final report, so a reader gets the same exact values the harness does.
+A field line is the key in lower case, a colon, one space and the value, alone on its line.
+A line that names the key in any other form, such as a list item, bold or backticks, is malformed, so prose never passes a check.
+A command is proven read-only when each command in its list is `cat`, `head`, `tail`, `wc`, `ls`, `pwd`, `grep`, `git ls-files` or `git grep` without `-O`, with no substitution, subshell or redirect except to `/dev/null` or another stream.
+
+The question count stays lexical: a question without `?` or a second demand slips past it.
+A run that holds every rule therefore answers unknown overall, and a reader confirms the question count.
 
 ## How it runs
 
@@ -62,13 +69,14 @@ Exit 0 is pass, 1 is fail, 2 is unknown. A failed or timed-out `claude` call is 
 
 `make check` never calls `run`: live runs cost money and need a login.
 `tests/test_conduct.py` runs `assess` against the recorded live transcripts in `tests/fixtures/conduct/` and against mutations of them, one per check.
-A fixture is kept when its report shape once fooled the parser; each must pass.
+Each fixture pins its verdicts; one records a turn the question count fails.
 `tests/test_ls_files_form.py` skips that folder: a command in a fixture is what the model typed, kept as evidence, not code that runs.
 The script is the opt-in; there is no new make target, flag on an existing command, or config key.
 
 ## Limits
 
-- The checks read the model's prose. A question count is a heuristic: list items and table rows count as candidates or records, and questions in code, quotes or parentheses are mentions.
-- A report shape the parser does not know reads as a fail, as the first two live runs did. Re-assess with `--transcript` after a parser fix, and keep the transcript as a fixture.
+- The question count reads prose: list items and table rows count as candidates or records, and questions in code, quotes or parentheses are mentions. It never passes.
+- The adopted option is the first lettered item in turn 2; an option form the parser does not know answers unknown. Re-assess with `--transcript` after a parser fix.
+- The fields show what the report states, not that the conduct around it matched; a reader still reads the transcript.
 - One run is one sample. A pass shows the skill can hold the rule under this pressure, not that it always does.
 - The skill reaches the session as a system prompt, not through the skill loader, so a loader defect is out of scope.

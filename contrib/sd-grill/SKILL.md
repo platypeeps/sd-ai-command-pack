@@ -237,6 +237,7 @@ interrogation that ended early.
 - **Question and answer ledger** — each question, the answer summary, its
   response class, and why the next question followed;
 - **Closing state** — `completed`, `handed off`, or `stopped`, and what ended it;
+  its first line is the field `closing: <state>`;
 - **Hardened statement**, on a `completed` session only — problem as an outsider
   would recognise it, requirements each testable by someone who did not write
   them, and acceptance criteria that each name a check and its result. A
@@ -249,13 +250,21 @@ interrogation that ended early.
 - **Assistant-supplied content** — every contaminated answer with its origin,
   including whether it came from an assistant-authored option set, and beside it
   any later independent answer to a question that did not carry the assistant's
-  version. A contaminated entry is never removed, cleared, or reclassified as
-  stated intent;
+  version. Each contaminated entry carries the field `contaminated: Q<n>=<letter>`,
+  or `contaminated: Q<n>` for an answer not picked from a lettered option set. A
+  contaminated entry is never removed, cleared, or reclassified as stated intent;
 - **Not asked** — coverage the bound, a defect, or a stop cut short; and
 - **Handoffs** — proposed `sd-plan`, `sd-decide`, `sd-premortem`,
   `sd-red-team`, or `sd-socratic-review` work, each `not run` or `unavailable`,
   plus the statement that nothing was written, branched, or implemented. A
   `handed off` closing state names its sibling here.
+
+Number the questions `Q1`, `Q2`, … in the order asked, and letter an
+assistant-authored option set `A`, `B`, `C`. Write each field on a line of its
+own, exactly as shown: the key in lower case, a colon, one space, the value, and
+nothing else on the line, with no list marker, emphasis, or backticks. A reader
+or a test reads the field, not the prose around it, so a malformed or missing
+field counts as not reported.
 
 ## Lineage
 
