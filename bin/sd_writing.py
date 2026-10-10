@@ -43,11 +43,15 @@ def run(args: argparse.Namespace) -> int:
     checkout: Any = getattr(writing, "checkout", None)
     if linked and checkout is None:
         raise WorkRefusal("install the current system/local-sd-db build to run writing controls from a worktree")
-    if action in CONTENT_ONLY and not any((root / name).is_dir() for name in ("content", "content-parked")):
+    promote: Any = getattr(writing, "promote", None)
+    if action == "promote" and promote is None:
+        raise WorkRefusal("install the current system/local-sd-db build to promote an idea")
+    pieces = any((root / name).is_dir() for name in ("content", "content-parked"))
+    if action in CONTENT_ONLY and not pieces:
         # Another checkout has no pieces, so these would answer on zero files and zero rows (sd:1660, sd:1803).
         raise WorkRefusal(f"{root} holds no content/ folder, so there is nothing to {action}; "
                           f"run sd writing {action} from the writing Git checkout")
-    write = action in {"cutover", "recover", "register", "stage", "metadata", "gate", "park",
+    write = action in {"cutover", "recover", "register", "promote", "stage", "metadata", "gate", "park",
                        "publication-claim", "publication-dispatch", "publication-receipt", "publication-reconcile", "publication-abandon", "publication-recover"} or (
         action == "import" and args.apply)
     connection = sd_handoff_rows.connect(sd_db, write=write)
@@ -74,6 +78,16 @@ def run(args: argparse.Namespace) -> int:
             result = writing.recover_cutover(connection, repo, who=who)
         elif action == "register":
             result = writing.import_piece(connection, repo, args.piece, path=args.path, who=who)
+        elif action == "promote":
+            # A writing checkout is the target; from any other the library picks the one
+            # repository that registers pieces and refuses several (sd:1994, R10-D6).
+            try:
+                result = promote(connection, args.item, slug=args.slug, repo=repo if pieces else None, who=who,
+                                 expected_revision=revision)
+            except sd_db.SdDbError as error:
+                if pieces:
+                    raise
+                raise WorkRefusal(f"{error}; run sd writing promote from that repository's checkout") from error
         else:
             row = writing.piece_for_key(connection, repo, args.piece)
             if row is None:
@@ -146,7 +160,7 @@ def run(args: argparse.Namespace) -> int:
 def register(groups: Any) -> None:
     writing = groups.add_parser("writing", help="shared piece stages, evidence, and database cutover")
     verbs = writing.add_subparsers(dest="verb", required=True)
-    for action in ("list", "get", "readiness", "import", "verify", "cutover", "recover", "register",
+    for action in ("list", "get", "readiness", "import", "verify", "cutover", "recover", "register", "promote",
                    "stage", "metadata", "gate", "park", "publication-render", "publication-recover", "publication-claim", "publication-status",
                    "publication-dispatch", "publication-receipt", "publication-reconcile", "publication-abandon"):
         parser = verbs.add_parser(action)
@@ -177,7 +191,7 @@ def register(groups: Any) -> None:
                 parser.add_argument("--leave", action="store_true")
         elif action in {"get", "readiness", "register", "stage", "metadata", "gate", "park"}:
             parser.add_argument("--piece", required=True, help="YEAR/slug")
-        if action in {"stage", "metadata", "gate", "park"}:
+        if action in {"promote", "stage", "metadata", "gate", "park"}:
             parser.add_argument("--if-revision")
         if action == "list":
             parser.add_argument("--all", action="store_true", help="include parked pieces")
@@ -188,6 +202,9 @@ def register(groups: Any) -> None:
             parser.add_argument("--expected-digest", required=True, help="fingerprint from the preview")
         elif action == "register":
             parser.add_argument("--path", help="relative index.md path for a parked piece")
+        elif action == "promote":
+            parser.add_argument("item", type=int, help="the idea row to register as a piece")
+            parser.add_argument("--slug", help="piece slug; default from the idea title")
         elif action == "stage":
             parser.add_argument("--stage", required=True)
             parser.add_argument("--correct", action="store_true")

@@ -189,7 +189,6 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
             answer, miss = sd_gate_receipts.from_receipts(database, gated, identity, reuse=reuse, record=record, offload=offload)
             if answer is not None:
                 return {"head": gate_git(tree, "rev-parse", "HEAD"), **answer}
-            warning = sd_gate_receipts.pack_warning(database, root, head, own) if record and database else None
             argv = [sys.executable, str((tree / "bin" if own else BIN) / "sd-check"), "--json", "--timeout", str(timeout),
                     *(["--base", base] if base else []), *(["--slot-timeout", str(slot_timeout)] * (slot_timeout > 0))]
             with sd_gate_cache.cargo_environment(root, tree, env) as child:
@@ -199,7 +198,6 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
             reading = check_reading(code, output, errors)
             if record and database and identity and reading["status"] == "success" and checked == head:
                 sd_gate_receipts.record_gate_pass(database, gated, identity, reading, before)
-            reading.update({"pack_warning": warning} if warning else {})
         finally:
             # The administrative entry goes with the directory; the temporary
             # directory's own cleanup removes whatever the removal left.

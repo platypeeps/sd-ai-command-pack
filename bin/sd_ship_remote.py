@@ -78,15 +78,12 @@ def git(root: Path, *args: str) -> str:
     return run(root, ["git", *args])
 
 
-def refuse_behind(pull: dict, base: str, next_action: str | None = None) -> None:
-    """Name GitHub's BEHIND answer, which strict protection gives a branch missing `base` (sd:2023).
-
-    `next_action` replaces the catch-up for a satellite's merge, which hands the entry back (sd:2704).
-    """
+def refuse_behind(pull: dict, base: str) -> None:
+    """Name GitHub's BEHIND answer, which strict protection gives a branch missing `base` (sd:2023)."""
     if pull.get("mergeable_state") == "behind":
         raise Refusal(f"the pull request is BEHIND {base}: strict branch protection requires the branch "
                       f"to contain the current {base}", code="base_moved", boundary="ci", state="retryable_failure",
-                      next_action=next_action or catch_up_action(base))
+                      next_action=catch_up_action(base))
 
 
 def catch_up_action(base: str) -> str:
