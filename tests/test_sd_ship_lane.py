@@ -10,6 +10,7 @@ CLI children and the shared GitHub double, as in `test_sd_ship`.
 from __future__ import annotations
 
 import contextlib
+import io
 import json
 import os
 import socket
@@ -578,6 +579,19 @@ class LaneHost(LaneCase):
                 self.assertEqual((completed.returncode, code(answer)), (3, "lane_elsewhere"), completed.stderr)
                 self.assertIn("runs on build-2, not on this machine", answer["error"])
         self.assertEqual(self.puts(), [])
+
+
+class RetiredHandOff(unittest.TestCase):
+    """sd:3003, acceptance 14: with a lane host per repository, no verb hands an item from a satellite to the hub."""
+
+    def test_the_hand_off_verbs_are_unknown_arguments(self):
+        for argv in (["lane", "request", "--item", "7"], ["lane", "run", "--satellite-only"],
+                     ["merge", "--item", "7", "--expected-head", "a" * 40, "--satellite-gate"]):
+            with self.subTest(argv=argv):
+                with contextlib.redirect_stderr(io.StringIO()) as said, self.assertRaises(SystemExit) as raised:
+                    ship.parser().parse_args(argv)
+                self.assertEqual(raised.exception.code, 2)
+                self.assertRegex(said.getvalue(), "invalid choice: 'request'|unrecognized arguments: --sat")
 
 
 class MergeFromTheLane(LaneCase):
