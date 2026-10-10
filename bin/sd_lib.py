@@ -1347,7 +1347,16 @@ def import_sd_db() -> Imported:
     stay apart for the reason the retry below states: a provisioned copy that
     will not import is not a machine without the library, and one message over
     both sends half its readers to the wrong remedy.
+
+    The checkout's own `lib/` goes first on `sys.path` (sd:3278): the pack
+    owns `sd_db` now, so `bin/` and `lib/` come from one commit and a
+    worktree runs its own library. The two tries stay behind it, so a `lib/`
+    that will not import still falls back to the provisioned copy.
     """
+    tree = str(pathlib.Path(__file__).resolve().parent.parent / "lib")
+    if tree in sys.path:
+        sys.path.remove(tree)
+    sys.path.insert(0, tree)
     try:
         import sd_db  # noqa: PLC0415 - `make setup` provisions it; absent is a state
     except ImportError as error:

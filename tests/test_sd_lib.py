@@ -1797,5 +1797,49 @@ class ProvisionedLibraryTests(unittest.TestCase):
             self.assertEqual(sd_lib._checkouts_that_may_hold_a_venv(), [loose])
 
 
+class TheCheckoutLibraryAnswersFirst(unittest.TestCase):
+    """sd:3278. `import_sd_db` reads `<checkout>/lib` before any installed copy.
+
+    Each `sd_db` below names where it came from. The checkout's `bin/` and
+    `lib/` then come from one commit, whatever the interpreter has installed.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = pathlib.Path(self._tmp.name).resolve() / "pack"
+        (self.root / "bin").mkdir(parents=True)
+        (self.root / "bin" / "sd_lib.py").write_text(
+            (REPO_ROOT / "bin" / "sd_lib.py").read_text(encoding="utf-8"), encoding="utf-8")
+        self.copy(self.root / "lib", "lib")
+        self.copy(self.root / ".venv/lib/python3.13/site-packages", "venv")
+        self.copy(self.root.parent / "elsewhere", "pythonpath")
+
+    @staticmethod
+    def copy(where: pathlib.Path, name: str, body: str = "") -> None:
+        (where / "sd_db").mkdir(parents=True, exist_ok=True)
+        (where / "sd_db" / "__init__.py").write_text(f"{body}WHERE = {name!r}\n", encoding="utf-8")
+
+    def answer(self, **extra: str) -> str:
+        from tests.clean_env import clean_environment
+        code = ("import sys; sys.path.insert(0, sys.argv[1]); import sd_lib; "
+                "got = sd_lib.import_sd_db(); print(got.module.WHERE if got.module else got.problem)")
+        done = subprocess.run([sys.executable, "-S", "-c", code, str(self.root / "bin")],
+                              capture_output=True, text=True, check=False,
+                              env=clean_environment(**extra))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return done.stdout.strip()
+
+    def test_the_checkout_lib_wins_over_the_venv_copy(self) -> None:
+        self.assertEqual(self.answer(), "lib")
+
+    def test_the_checkout_lib_wins_over_an_importable_pythonpath_copy(self) -> None:
+        self.assertEqual(self.answer(PYTHONPATH=str(self.root.parent / "elsewhere")), "lib")
+
+    def test_a_lib_that_will_not_import_falls_back_to_the_venv_copy(self) -> None:
+        self.copy(self.root / "lib", "lib", body="raise ImportError('broken on purpose')\n")
+        self.assertEqual(self.answer(), "venv")
+
+
 if __name__ == "__main__":
     unittest.main()
