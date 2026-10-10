@@ -1005,14 +1005,67 @@ class MergeSettingsTests(unittest.TestCase):
 
 
 class StatusFixture(ToolFixture):
-    """The full report, run as a subprocess against a fixture repository."""
+    """The full report, run as a subprocess against a fixture repository.
+
+    Every status is the item's row. `HOME` is the fixture's own for the whole
+    test, so the operator's database is never opened in process, and the
+    subprocess runs read the same database in-process readers do.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        patched = mock.patch.dict(os.environ, {"HOME": str(self.home)})
+        patched.start()
+        self.addCleanup(patched.stop)
+        self._ready = False
+
+    def row(
+        self, directory: pathlib.Path, status: str, *, branch: str | None = None,
+        stamp: str = "2026-08-01T00:00:00+00:00",
+    ) -> None:
+        """The row that owns `directory`'s status, in the fixture's database.
+
+        Stamped on the day the fixture items date themselves, not now: ages
+        here are measured from a pinned day, and a row stamped by the wall
+        clock would always be newer than it.
+        """
+        import sd_db
+
+        if not self._ready:
+            sd_db.initialise(home=self.home)
+            self._ready = True
+        connection = sd_db.connect(home=self.home)
+        try:
+            sd_db.upsert_repo(connection, str(self.repo), managed=1)
+            sd_db.upsert_item(
+                connection, source="docs/work",
+                external_id=f"{self.repo}::docs/work/{directory.name}/prd.md",
+                kind="work", title=directory.name, status=status, who="test",
+                repo=str(self.repo), branch=branch,
+            )
+            with connection:
+                found = connection.execute(
+                    "SELECT id FROM item WHERE external_id = ?",
+                    (f"{self.repo}::docs/work/{directory.name}/prd.md",),
+                ).fetchone()
+                connection.execute(
+                    "UPDATE item SET created_at = ?, updated_at = ? WHERE id = ?",
+                    (stamp, stamp, found["id"]))
+                connection.execute(
+                    "UPDATE note SET timestamp = ? WHERE item = ?", (stamp, found["id"]))
+        finally:
+            connection.close()
 
     def item(self, name: str, *, status: str = "planning", extra: str = "") -> pathlib.Path:
+        """A work folder as the retire leaves it -- no `status:` line -- and its row."""
         directory = self.repo / "docs" / "work" / name
         directory.mkdir(parents=True)
         (directory / "prd.md").write_text(
-            PRD.format(title=name, status=status, extra=extra), encoding="utf-8"
+            PRD.format(title=name, status=status, extra=extra).replace(f"status: {status}\n", ""),
+            encoding="utf-8",
         )
+        branch = re.search(r"^branch: (.+)$", extra, re.MULTILINE)
+        self.row(directory, status, branch=branch.group(1) if branch else None)
         return directory
 
     def report(self, *args: str) -> dict[str, Any]:
@@ -1401,10 +1454,16 @@ class WorkItemTests(StatusFixture):
         self.assertEqual(completed.returncode, 2, completed.stdout)
         self.assertIn("unrecognized arguments: --parked", completed.stderr)
 
-    def test_a_broken_frontmatter_status_is_an_inconsistency_not_a_crash(self) -> None:
-        self.item("2026-08-01-alpha", status="sideways")
+    def test_an_item_with_no_row_is_an_inconsistency_not_a_crash(self) -> None:
+        self.item("2026-08-02-beta")
+        orphan = self.repo / "docs" / "work" / "2026-08-01-alpha"
+        orphan.mkdir(parents=True)
+        (orphan / "prd.md").write_text(
+            PRD.format(title="alpha", status="", extra="").replace("status: \n", ""),
+            encoding="utf-8",
+        )
         result = self.report()
-        entry = result["work"]["items"][0]
+        entry = next(row for row in result["work"]["items"] if row["slug"] == "alpha")
         self.assertEqual(entry["status"], "unknown")
         self.assertTrue(entry["inconsistencies"])
 
@@ -2015,10 +2074,18 @@ class ReadOnlyTests(StatusFixture):
         (self.repo / ".github" / "workflows" / "tests.yml").write_text(
             WORKFLOW, encoding="utf-8"
         )
-        before = tree_digest(self.base)
+        # SQLite mode=ro may maintain these two lock files for a WAL database.
+        # Main database bytes and every repository file still must be unchanged.
+        lock_files = {"home/.local/share/sd/sd.db-wal", "home/.local/share/sd/sd.db-shm"}
+
+        def snapshot():
+            return {path: value for path, value in tree_digest(self.base).items()
+                    if path not in lock_files}
+
+        before = snapshot()
         completed = self.run_tool(SD_STATUS)
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertEqual(tree_digest(self.base), before)
+        self.assertEqual(snapshot(), before)
 
     def test_the_state_directory_is_never_created(self) -> None:
         self.with_github(pulls=[])
@@ -2314,9 +2381,10 @@ class WorkItemInventoryTests(InventoryFixture):
         directory = self.repo / "docs" / "work" / name
         directory.mkdir(parents=True)
         (directory / "prd.md").write_text(
-            f"---\ntitle: {name}\nstatus: planning\ncreated: 2026-01-01\n---\n",
+            f"---\ntitle: {name}\ncreated: 2026-01-01\n---\n",
             encoding="utf-8",
         )
+        self.row(directory, "planning", stamp="2026-01-01T00:00:00+00:00")
         return directory
 
     def committed(self, when: str) -> None:
@@ -2456,14 +2524,11 @@ class WorkItemInventoryTests(InventoryFixture):
         path is now the only suppressor, and the `parked:` line is inert
         text that must change nothing.
 
-        **The frontmatter's `in_progress` is not what the reader sees.**
-        `sd_lib.py:701` returns `done` for any archived item without opening
-        `prd.md`, so archiving decides the status and the declared one is never
-        read. Since sd:2729 no check fires on a done item, so in a `file`
-        checkout `done` suppresses these too, and no file fixture can prove the
-        archive guard. A `row` checkout reads an archived item's status from
-        its row, which may be open; the direct `_work_rows` call at the end
-        is that case, and it fails with the guard deleted.
+        **The frontmatter's `in_progress` is not what the reader sees.** With
+        no row for an archived item the reader answers from where it lives,
+        and since sd:2729 no check fires on a done item. A database holding
+        the archived item's row may say it is open; the direct `_work_rows`
+        call at the end is that case, and it fails with the guard deleted.
 
         The two live items are the contrast that makes the rest able to fail.
         One of them carries the cut `parked:` line and must fire exactly like
@@ -2492,12 +2557,11 @@ class WorkItemInventoryTests(InventoryFixture):
             "both live items fire, including the one whose `parked:` line "
             "nothing reads any more",
         )
-        work = {"status_source": status.sd_lib.FROM_ROW, "items": [
+        work = {"items": [
             {"path": "docs/work/archive/2026-09/2026-08-03-filed", "slug": "filed",
              "status": "in_progress", "branch": "feat/nope", "archived": True}]}
         with mock.patch.object(status.sd_lib, "upstream", return_value=(None, "main")):
-            archived = status._work_rows(
-                self.repo, work, self.TODAY, "main", status.Merged(None, ""), {})
+            archived = status._work_rows(self.repo, work, self.TODAY)
         self.assertEqual([], archived, "an archived row is suppressed whatever its status")
         self.assertEqual(
             len(rows), len({(row["check"], row["key"]) for row in rows}),
@@ -2891,181 +2955,6 @@ class SkillSurfaceTests(unittest.TestCase):
             )
 
 
-class BranchLandedTests(StatusFixture):
-    """`branch_landed`, against real git and injected pull-request rows.
-
-    Real git because the whole point of the derivation is which git commands
-    answer correctly in a repository that squash-merges, and a mocked `git`
-    would be asserting the design rather than testing it.
-    """
-
-    def commit(self, path: str, text: str, message: str) -> str:
-        (self.repo / path).parent.mkdir(parents=True, exist_ok=True)
-        (self.repo / path).write_text(text, encoding="utf-8")
-        self.git("add", "-A")
-        self.git("commit", "-q", "-m", message)
-        return self.git("rev-parse", "HEAD").strip()
-
-    def squash_merge(self, branch: str) -> None:
-        """What this repository does: one new commit, no ancestry to `branch`."""
-        self.git("checkout", "-q", "main")
-        self.git("merge", "-q", "--squash", branch)
-        self.git("commit", "-q", "-m", f"squash {branch}")
-
-    def pull(self, **overrides: Any) -> dict[str, Any]:
-        row = {
-            "headRefName": "feature",
-            "baseRefName": "main",
-            "mergedAt": "2026-09-04T22:11:09Z",
-            "headRefOid": self.git("rev-parse", "feature").strip(),
-        }
-        row.update(overrides)
-        return row
-
-    # -- tier 1 -------------------------------------------------------------
-
-    def test_a_squash_merged_branch_is_landed_with_no_pull_requests_at_all(self) -> None:
-        self.git("checkout", "-q", "-b", "feature")
-        self.commit("b.txt", "two\n", "add b")
-        self.squash_merge("feature")
-        self.assertEqual(status.LANDED, status.branch_landed(self.repo, "feature", "main", []))
-
-    def test_ancestry_alone_resolves_nothing_a_squash_merge_leaves(self) -> None:
-        """C-1: the obvious test finds nothing in the repository it is for.
-
-        Asserted rather than assumed, because the whole two-tier design rests
-        on it. If this ever passes, this repository stopped squash-merging and
-        the derivation above is answering a question nobody has.
-        """
-        self.git("checkout", "-q", "-b", "feature")
-        self.commit("b.txt", "two\n", "add b")
-        self.squash_merge("feature")
-        ancestor = subprocess.run(
-            ["git", "merge-base", "--is-ancestor", "feature", "main"],
-            cwd=str(self.repo), capture_output=True, text=True,
-        )
-        self.assertEqual(1, ancestor.returncode)
-        self.assertEqual(
-            status.LANDED, status.branch_landed(self.repo, "feature", "main", [])
-        )
-
-    def test_a_branch_whose_paths_main_has_since_edited_is_not_landed_by_tier_1(self) -> None:
-        """The measured 40% false negative: tier 1 abstains, it does not lie."""
-        self.git("checkout", "-q", "-b", "feature")
-        self.commit("b.txt", "two\n", "add b")
-        self.squash_merge("feature")
-        self.commit("b.txt", "two, edited later\n", "main moves on")
-        self.assertEqual(
-            status.NOT_LANDED, status.branch_landed(self.repo, "feature", "main", [])
-        )
-
-    def test_an_unmerged_branch_is_not_landed(self) -> None:
-        self.git("checkout", "-q", "-b", "feature")
-        self.commit("b.txt", "two\n", "add b")
-        self.git("checkout", "-q", "main")
-        self.assertEqual(
-            status.NOT_LANDED, status.branch_landed(self.repo, "feature", "main", [])
-        )
-
-    # -- tier 2, and C-19's two regressions ---------------------------------
-
-    def test_tier_2_resolves_what_tier_1_misses(self) -> None:
-        self.git("checkout", "-q", "-b", "feature")
-        self.commit("b.txt", "two\n", "add b")
-        self.squash_merge("feature")
-        self.commit("b.txt", "two, edited later\n", "main moves on")
-        self.assertEqual(
-            status.LANDED,
-            status.branch_landed(self.repo, "feature", "main", [self.pull()]),
-        )
-
-    def test_a_branch_extended_after_its_merge_is_not_landed(self) -> None:
-        """C-19: the stale `mergedAt` must not overrule tier 1's correct no."""
-        self.git("checkout", "-q", "-b", "feature")
-        self.commit("b.txt", "two\n", "add b")
-        merged_tip = self.git("rev-parse", "HEAD").strip()
-        self.squash_merge("feature")
-        self.commit("b.txt", "two, edited later\n", "main moves on")
-        self.git("checkout", "-q", "feature")
-        self.commit("c.txt", "three\n", "more work after the merge")
-        self.git("checkout", "-q", "main")
-        stale = self.pull(headRefOid=merged_tip)
-        self.assertEqual(
-            status.NOT_LANDED, status.branch_landed(self.repo, "feature", "main", [stale])
-        )
-
-    def test_a_pull_request_merged_into_another_base_does_not_count(self) -> None:
-        """C-19: merged into `some-other-base` says nothing about `main`."""
-        self.git("checkout", "-q", "-b", "feature")
-        self.commit("b.txt", "two\n", "add b")
-        self.squash_merge("feature")
-        self.commit("b.txt", "two, edited later\n", "main moves on")
-        self.assertEqual(
-            status.NOT_LANDED,
-            status.branch_landed(
-                self.repo, "feature", "main", [self.pull(baseRefName="release")]
-            ),
-        )
-
-    def test_an_unmerged_pull_request_does_not_count(self) -> None:
-        self.git("checkout", "-q", "-b", "feature")
-        self.commit("b.txt", "two\n", "add b")
-        self.squash_merge("feature")
-        self.commit("b.txt", "two, edited later\n", "main moves on")
-        self.assertEqual(
-            status.NOT_LANDED,
-            status.branch_landed(self.repo, "feature", "main", [self.pull(mergedAt=None)]),
-        )
-
-    # -- the third answer ---------------------------------------------------
-
-    def test_no_pull_request_lookup_is_unknown_and_never_not_landed(self) -> None:
-        self.git("checkout", "-q", "-b", "feature")
-        self.commit("b.txt", "two\n", "add b")
-        self.squash_merge("feature")
-        self.commit("b.txt", "two, edited later\n", "main moves on")
-        answer = status.branch_landed(self.repo, "feature", "main", None)
-        self.assertEqual(status.sd_lib.UNKNOWN, answer)
-        self.assertEqual(status.GH_MERGED_QUERY, answer.repair)
-        self.assertIn("headRefOid", answer.repair)
-
-    def test_a_branch_git_cannot_resolve_is_unknown_with_the_repair(self) -> None:
-        answer = status.branch_landed(self.repo, "no-such-branch", "main", [])
-        self.assertEqual(status.sd_lib.UNKNOWN, answer)
-        self.assertEqual(
-            "git rev-parse --verify 'no-such-branch^{commit}'", answer.repair
-        )
-
-    def test_tier_1_fires_before_the_lookup_so_an_absent_gh_still_answers(self) -> None:
-        """Positive evidence is offline, which is what makes tier 3 rare."""
-        self.git("checkout", "-q", "-b", "feature")
-        self.commit("b.txt", "two\n", "add b")
-        self.squash_merge("feature")
-        self.assertEqual(
-            status.LANDED, status.branch_landed(self.repo, "feature", "main", None)
-        )
-
-    # -- C-12 ---------------------------------------------------------------
-
-    def test_a_rename_the_default_branch_did_not_take_is_not_landed(self) -> None:
-        """C-12: with rename detection on, this case reports landed and is wrong.
-
-        The branch renames `a.txt` to `renamed.txt`. `main` gains an identical
-        `renamed.txt` without removing `a.txt`, so the branch's *removal* never
-        landed. `--no-renames` puts `a.txt` on both sides and the intersection
-        is non-empty; with renames detected, `touched` holds `renamed.txt`
-        alone and the two sets miss each other.
-        """
-        self.git("checkout", "-q", "-b", "feature")
-        self.git("mv", "a.txt", "renamed.txt")
-        self.git("commit", "-q", "-m", "rename a to renamed")
-        self.git("checkout", "-q", "main")
-        self.commit("renamed.txt", "one\n", "main adds a copy, keeps the original")
-        self.assertEqual(
-            status.NOT_LANDED, status.branch_landed(self.repo, "feature", "main", [])
-        )
-
-
 class RowWorkItemInventoryTests(InventoryFixture):
     """Retired status files cannot be the repair for database-owned work."""
 
@@ -3076,28 +2965,18 @@ class RowWorkItemInventoryTests(InventoryFixture):
         import sd_db
 
         self.db = sd_db
-        environment = mock.patch.dict(os.environ, {"HOME": str(self.home)})
-        environment.start()
-        self.addCleanup(environment.stop)
         self.db.initialise(home=self.home)
+        self._ready = True
 
     def row_item(self, *, branch: str = "feature", missing: bool = False) -> pathlib.Path:
-        directory = self.item(self.ITEM, extra=f"branch: {branch}\n")
-        path = directory / "prd.md"
-        path.write_text(path.read_text().replace("status: planning\n", ""))
-        (directory.parent / ".status-source").write_text("row\n")
-        connection = self.db.connect(home=self.home)
-        try:
-            self.db.upsert_repo(connection, str(self.repo), status_source="row")
-            if not missing:
-                self.db.upsert_item(
-                    connection, source="docs/work",
-                    external_id=f"{self.repo}::docs/work/{self.ITEM}/prd.md",
-                    kind="work", title="alpha", status="in_progress", who="test",
-                    repo=str(self.repo), branch=branch,
-                )
-        finally:
-            connection.close()
+        if not missing:
+            return self.item(self.ITEM, status="in_progress", extra=f"branch: {branch}\n")
+        directory = self.repo / "docs" / "work" / self.ITEM
+        directory.mkdir(parents=True)
+        (directory / "prd.md").write_text(
+            PRD.format(title=self.ITEM, status="", extra=f"branch: {branch}\n").replace("status: \n", ""),
+            encoding="utf-8",
+        )
         return directory
 
     def test_unmerged_feature_closing_trailer_is_not_already_merged(self) -> None:
@@ -3111,13 +2990,13 @@ class RowWorkItemInventoryTests(InventoryFixture):
     def test_row_closing_history_is_read_once_per_default_ref(self) -> None:
         self.git("commit", "-q", "--allow-empty", "-m", "Delivered item\n\nCloses: item-0")
         self.git("update-ref", "refs/remotes/origin/main", "HEAD")
-        work = {"status_source": status.sd_lib.FROM_ROW, "items": [
+        work = {"items": [
             {"path": f"docs/work/item-{index}", "slug": f"item-{index}",
              "status": "in_progress", "branch": "main", "archived": False}
             for index in range(40)]}
         with mock.patch.object(status.sd_lib, "upstream", return_value=("origin", "main")), \
                 mock.patch.object(status.sd_lib, "git_output", wraps=status.sd_lib.git_output) as git_calls:
-            rows = status._work_rows(self.repo, work, self.TODAY, "main", status.Merged(None, ""), {})
+            rows = status._work_rows(self.repo, work, self.TODAY)
         walks = [call.args[0] for call in git_calls.call_args_list
                  if call.args[0][0] == "log" and "--grep" in call.args[0]]
         self.assertEqual([argv[-1] for argv in walks], ["main", "origin/main"])
@@ -3133,15 +3012,6 @@ class RowWorkItemInventoryTests(InventoryFixture):
         self.branch("feature", land=True)
         self.row_item()
         result = self.inventory(protection=self.BLIND)
-        self.assertEqual([], self.by_check(result.rows, "branch-already-merged"))
-        self.assertNotIn("branch-already-merged", result.unchecked)
-
-    def test_an_open_row_needs_no_github_lookup_to_check_a_slice(self) -> None:
-        self.branch("feature", land=False)
-        self.row_item()
-        with mock.patch.object(status, "merged_pulls") as lookup:
-            result = self.inventory(protection=self.BLIND)
-        lookup.assert_not_called()
         self.assertEqual([], self.by_check(result.rows, "branch-already-merged"))
         self.assertNotIn("branch-already-merged", result.unchecked)
 
@@ -3196,22 +3066,12 @@ class RowWorkItemInventoryTests(InventoryFixture):
                        if row["check"] == "status-unreadable")
         self.assertEqual(status.FINDINGS, checked["state"])
 
-    def test_an_invalid_marker_is_repaired_instead_of_inventing_file_authority(self) -> None:
-        directory = self.row_item(missing=True)
-        (directory.parent / ".status-source").write_text("broken\n")
-        found = self.by_check(self.inventory(protection=self.BLIND).rows, "status-unreadable")
-        self.assertEqual(1, len(found))
-        self.assertIn(".status-source says 'broken'", found[0]["detail"])
-        self.assertIn(".status-source", found[0]["suggest"])
-        self.assertNotIn("frontmatter", found[0]["suggest"])
-
 
 class BannerTests(InventoryFixture):
     """The three per-class states, and the one substring `prd.md:134` checks.
 
-    Against real git for the same reason `BranchLandedTests` is: the state
-    under test is produced by asking git a question, and a mock would assert
-    the arrangement rather than the answer.
+    Against real git: the state under test is produced by asking git a
+    question, and a mock would assert the arrangement rather than the answer.
     """
 
     def state_of(self, result: dict[str, Any], check: str) -> dict[str, Any]:
@@ -3264,26 +3124,25 @@ class BannerTests(InventoryFixture):
         self.branch("feature", land=False)
         self.item("2026-08-01-alpha", status="in_progress", extra="branch: feature\n")
         result = status.banner(self.inventory(protection=self.BLIND))
-        row = self.state_of(result, "branch-already-merged")
+        row = self.state_of(result, "protection-gap")
         self.assertEqual(status.UNCHECKED, row["state"])
         self.assertEqual("unchecked: gh is not installed", row["label"])
         self.assertNotIn("clear", result["summary"])
-        # The count is not 1. A blind `protection` also puts every class that
-        # declares it out of reach, which is sd:600 -- so the assertion names
-        # the set rather than a number that would grow silently.
+        # A blind `protection` puts every class that declares it out of reach,
+        # which is sd:600 -- so the assertion names the set rather than a
+        # number that would grow silently. The merge class reads rows and
+        # local history, so it is not in it.
         self.assertEqual(
-            {"branch-already-merged", "protection-gap", "pr-check-missing"},
+            {"protection-gap", "pr-check-missing"},
             {row["check"] for row in result["classes"]
              if row["state"] == status.UNCHECKED},
         )
 
     def test_an_unresolvable_branch_leaves_the_merge_check_clear(self) -> None:
-        """The `elif` in `_work_rows`, and what it stops.
+        """A stale `branch:` field is a finding of its own class.
 
-        A stale `branch:` field is a finding of its own class. Asked of
-        `branch_landed` it would answer `unknown` -- and one such item would
-        then mark the merge class unchecked on every run, for a reason that
-        has nothing to do with whether GitHub could be read.
+        It says nothing about whether GitHub could be read, so it must not
+        mark the merge class unchecked.
         """
         self.item(
             "2026-08-01-alpha", status="in_progress", extra="branch: gone-away\n"
@@ -3408,53 +3267,11 @@ class BannerTests(InventoryFixture):
 
     # -- the producer -------------------------------------------------------
 
-    def test_a_landed_branch_is_a_finding_and_a_done_item_is_not(self) -> None:
-        self.branch("feature", land=True)
-        self.item("2026-08-01-alpha", status="in_progress", extra="branch: feature\n")
-        fired = self.by_check(self.inventory().rows, "branch-already-merged")
-        self.assertEqual(["2026-08-01-alpha"], [row["key"] for row in fired])
-        self.assertIn("already in main", fired[0]["detail"])
-
     def test_a_done_item_whose_branch_landed_is_not_a_finding(self) -> None:
         self.branch("feature", land=True)
         self.item("2026-08-01-alpha", status="done", extra="branch: feature\n")
         self.assertEqual(
             [], self.by_check(self.inventory().rows, "branch-already-merged")
-        )
-
-    def test_the_repair_names_the_command_that_actually_ran(self) -> None:
-        """The `--limit` was in the call and not in the sentence beside it.
-
-        A repair is a command the reader is being told to run. Typed beside
-        the argument vector instead of derived from it, it hands out a command
-        that was never the one that failed -- which is the defect this file
-        already fixed once, in `delivered`'s repairs.
-        """
-        seen: list[list[str]] = []
-
-        def record(args: list[str], root: pathlib.Path) -> tuple[Any, str]:
-            seen.append(args)
-            return [], ""
-
-        original = status.pr_state.gh_json
-        status.pr_state.gh_json = record
-        try:
-            status.merged_pulls(self.repo, {"available": True})
-        finally:
-            status.pr_state.gh_json = original
-        self.assertEqual([status.GH_MERGED_ARGS], seen)
-        for token in status.GH_MERGED_ARGS:
-            self.assertIn(token, status.GH_MERGED_QUERY)
-        self.assertIn(str(status.MERGED_LIMIT), status.GH_MERGED_QUERY)
-
-    def test_merged_pulls_hands_back_the_reason_github_could_not_be_read(self) -> None:
-        self.assertEqual(
-            status.Merged(None, "gh is not installed"),
-            status.merged_pulls(self.repo, self.BLIND),
-        )
-        self.assertEqual(
-            status.Merged(None, "GitHub is unreachable"),
-            status.merged_pulls(self.repo, {"available": False}),
         )
 
 
