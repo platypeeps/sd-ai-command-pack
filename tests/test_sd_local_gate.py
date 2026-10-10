@@ -34,6 +34,8 @@ import sd_lib  # noqa: E402
 import sd_local_gate  # noqa: E402
 from sd_ship_remote import Refusal  # noqa: E402
 
+from tests.clean_env import clean_environment  # noqa: E402
+
 BLOCK_START, BLOCK_END = sd_lib.LOCAL_BLOCK_START, sd_lib.LOCAL_BLOCK_END
 
 
@@ -625,6 +627,34 @@ class Receipts(ReceiptFixture):
         self.assertEqual((one["threads"], two["threads"]), (dict.fromkeys(sd_gate_slots.CPU_VARIABLES, "8"),) * 2)
         self.assertNotEqual(one["environment_sha256"], two["environment_sha256"])
 
+    def test_the_binding_names_no_offload_field(self) -> None:
+        """sd:3216: `offload_tools` and `environment_mode` served the satellite hand-off, which is gone."""
+        head = self.counted()
+        self.gate(head)
+        _, row = self.stored(head)
+        self.assertEqual(sorted(set(row["binding"]) & {"offload_tools", "environment_mode"}), [])
+
+    def test_a_receipt_written_with_the_offload_fields_is_not_reused(self) -> None:
+        """sd:3216, older state: a pass the previous version stored carries both fields; it reruns once and does not crash."""
+        head = self.counted()
+        self.gate(head)
+        revision, row = self.stored(head)
+        row["binding"] = {**row["binding"], "offload_tools": {"make": "0" * 64}, "environment_mode": "whole"}
+        with contextlib.closing(sd_gate_receipts._connect(self.database, write=True)) as connection:
+            from sd_db import ship
+
+            ship.save(connection, sd_gate_receipts.receipt_key(self.root, head), revision, row)
+        again = self.gate(head)
+        self.assertEqual((again["status"], "reused" in again, again["reuse_miss"], self.runs()),
+                         ("success", False, {"reason": "binding", "fields": ["environment_mode", "offload_tools"]}, 2))
+        self.assertIn("reused", self.gate(head))  # the rerun rebinds: one rerun per stored receipt
+
+    def stored(self, head: str) -> tuple[int, dict]:
+        with contextlib.closing(sd_gate_receipts._connect(self.database, write=False)) as connection:
+            from sd_db import ship
+
+            return ship.read(connection, sd_gate_receipts.receipt_key(self.root, head))
+
     def test_a_receipt_older_than_the_window_is_not_reused(self) -> None:
         """The window is one prepare-to-merge handoff: 30 minutes, not hours.
 
@@ -668,6 +698,15 @@ class Receipts(ReceiptFixture):
         head = self.counted()
         self.assertNotEqual(sd_gate_receipts.receipt_key(self.root, head),
                             sd_gate_receipts.receipt_key(self.root.parent, head))
+
+
+class GateToolsRetired(unittest.TestCase):
+    def test_sd_gate_tools_is_an_unknown_verb(self) -> None:
+        """sd:3216: the pinned tool copies served the offload environment, which is gone."""
+        result = subprocess.run([sys.executable, str(REPO_ROOT / "bin" / "sd"), "gate", "tools", "status"],
+                                capture_output=True, text=True, check=False, env=clean_environment())
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("invalid choice: 'tools'", result.stderr)
 
 
 class MergeReuse(ReceiptFixture):
@@ -767,7 +806,7 @@ class MergeReuse(ReceiptFixture):
         self.assertEqual(json.loads(json.dumps(merged))["reuse_miss"], merged["reuse_miss"])
 
     def test_a_session_with_another_home_still_misses_on_the_environment(self) -> None:
-        """C-17 (sd:2704): the offload view leaves `HOME` out; local reuse still binds the whole environment."""
+        """Local reuse binds the whole environment, `HOME` included (C-17)."""
         head = self.declare()
         homes = [self.root.parent / name for name in ("one", "two")]
         for home in homes:

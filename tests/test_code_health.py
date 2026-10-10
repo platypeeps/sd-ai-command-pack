@@ -1525,7 +1525,6 @@ UNSHIELDED = {
     "test_sd_controls.py": 2,
     "test_sd_docs_lint.py": 2,
     "test_sd_fleet.py": 2,
-    "test_sd_gate_offload_rows.py": 1,
     "test_sd_gate_queue.py": 5,
     "test_sd_gate_slots.py": 4,
     "test_sd_handoff.py": 2,
