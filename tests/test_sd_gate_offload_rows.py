@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-import io
 import json
 import os
 import pathlib
@@ -273,45 +272,6 @@ class OffloadRows(SatelliteFixture):
         self.assertEqual(result["offload_error"], "ValueError: malformed hub configuration")
         self.assertIn("receipt_revision", result)
         self.assertEqual(self.offload_row(), {})
-
-    def test_a_differing_published_pack_digest_warns_before_the_run(self) -> None:
-        from contextlib import closing
-
-        from sd_db import connect, ship
-
-        with closing(connect(self.database)) as connection:
-            ship.save(connection, sd_gate_receipts.PACK_PREFIX + SLUG, 0,
-                      {"writer": "sd-lane", "pack_bin": "0" * 64, "pack_rev": "1" * 40, "published_at": "now"})
-        stderr = io.StringIO()
-        with contextlib.redirect_stderr(stderr):
-            result = self.gate()
-        self.assertEqual(self.runs, 1)
-        self.assertIn("satellite_pack_mismatch", result["pack_warning"])
-        self.assertIn("is not the hub's 000000000000", stderr.getvalue())
-
-    def test_an_equal_published_pack_digest_warns_of_nothing(self) -> None:
-        from contextlib import closing
-
-        from sd_db import connect, ship
-
-        with closing(connect(self.database)) as connection:
-            ship.save(connection, sd_gate_receipts.PACK_PREFIX + SLUG, 0,
-                      {"writer": "sd-lane", "pack_bin": sd_gate_receipts.pack_bin(), "published_at": "now"})
-        self.assertNotIn("pack_warning", self.gate())
-
-    def test_a_publication_that_is_not_an_object_warns_of_nothing_and_the_check_runs(self) -> None:
-        from sd_db import ship
-
-        real = ship.read
-
-        def read(connection, key):  # type: ignore[no-untyped-def]
-            # `ship.save` writes objects only; a body written by other means can be anything.
-            return (1, ["not", "an", "object"]) if key == sd_gate_receipts.PACK_PREFIX + SLUG else real(connection, key)
-
-        with mock.patch.object(ship, "read", read):
-            result = self.gate()
-        self.assertEqual((result["status"], self.runs), ("success", 1))
-        self.assertNotIn("pack_warning", result)
 
 
 class OffloadedEnvironment(SatelliteFixture):

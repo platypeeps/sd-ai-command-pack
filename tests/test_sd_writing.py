@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import nullcontext, redirect_stdout
+from contextlib import nullcontext, redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -72,6 +72,85 @@ class WritingImport(unittest.TestCase):
         self.preview.assert_called_once_with(self.connection, str(self.repo))
         self.connect.assert_called_once_with(sd_db, write=False)
         self.imported.assert_not_called()
+
+
+class WritingPromote(unittest.TestCase):
+    """`sd writing promote` hands an idea row to the library that registers it (sd:1994).
+
+    The library call is an autospec mock, so a keyword the library lacks is
+    its own TypeError rather than a mock that accepts anything.
+    """
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.repo = Path(tmp.name).resolve()
+        self.parser = argparse.ArgumentParser()
+        cli.register(self.parser.add_subparsers(required=True))
+        self.connection = Mock()
+        self.connect = Mock(return_value=self.connection)
+        for patcher in (
+            patch.object(cli.sd_handoff_rows, "library", return_value=sd_db),
+            patch.object(cli.sd_handoff_rows, "connect", self.connect),
+            patch.object(cli.sd_lib, "repo_root", return_value=self.repo),
+            patch.object(cli.sd_lib, "stored_repo", side_effect=str),
+            patch.object(cli.getpass, "getuser", return_value="operator"),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = patch.object(writing, "promote", autospec=True, return_value={"item": {"piece": "2026/a"}})
+        self.promoted = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def call(self, *argv):
+        arguments = self.parser.parse_args(["writing", "promote", *argv, "--json"])
+        with redirect_stdout(io.StringIO()) as output:
+            code = arguments.handler(arguments)
+        return code, json.loads(output.getvalue())
+
+    def test_a_writing_checkout_is_the_target(self):
+        """The current checkout names the repository, never a flag (R10-D6)."""
+        (self.repo / "content").mkdir()
+        self.assertEqual((0, {"item": {"piece": "2026/a"}}), self.call("12"))
+        self.promoted.assert_called_once_with(self.connection, 12, slug=None, repo=str(self.repo),
+                                              who="operator", expected_revision=None)
+        self.connect.assert_called_once_with(sd_db, write=True)
+        self.connection.close.assert_called_once()
+
+    def test_another_checkout_lets_the_library_pick_the_target(self):
+        """With no pieces here, the library picks the one repository that registers them."""
+        self.assertEqual(0, self.call("12")[0])
+        self.promoted.assert_called_once_with(self.connection, 12, slug=None, repo=None, who="operator",
+                                              expected_revision=None)
+
+    def test_promote_passes_slug_and_revision(self):
+        (self.repo / "content-parked").mkdir()
+        self.call("12", "--slug", "a", "--if-revision", "r1")
+        self.promoted.assert_called_once_with(self.connection, 12, slug="a", repo=str(self.repo),
+                                              who="operator", expected_revision="r1")
+
+    def test_promote_takes_no_repository_flag(self):
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.parser.parse_args(["writing", "promote", "12", "--repo", "~/repos/writing"])
+
+    def test_a_library_refusal_is_a_work_refusal(self):
+        self.promoted.side_effect = sd_db.SdDbError("several repositories register pieces; name the target repository")
+        with self.assertRaisesRegex(cli.WorkRefusal, "name the target repository; run sd writing promote "
+                                                     "from that repository's checkout"):
+            self.call("12")
+        self.connection.close.assert_called_once()
+
+    def test_a_refusal_in_a_writing_checkout_names_no_other_checkout(self):
+        (self.repo / "content").mkdir()
+        self.promoted.side_effect = sd_db.SdDbError("item 12 is not an idea")
+        with self.assertRaisesRegex(cli.WorkRefusal, r"^item 12 is not an idea$"):
+            self.call("12")
+
+    def test_an_older_library_refuses_by_name(self):
+        with patch.object(writing, "promote", None):
+            with self.assertRaisesRegex(cli.WorkRefusal, "current system/local-sd-db build to promote"):
+                self.call("12")
+        self.connect.assert_not_called()
 
 
 class WritingVerifyCheckout(unittest.TestCase):
@@ -238,6 +317,14 @@ class WritingFromWorktree(unittest.TestCase):
                 with self.assertRaisesRegex(cli.WorkRefusal, "only in the main checkout"):
                     self.run_in(self.linked, *argv)
         self.connect.assert_not_called()
+
+    def test_promote_scaffolds_in_the_worktree(self):
+        """Promote writes the new piece file, so a worktree's own copy takes it (sd:1994, sd:2024)."""
+        (self.linked / "content").mkdir()
+        with patch.object(writing, "promote", return_value={"ok": True}) as promoted:
+            self.assertEqual(self.run_in(self.linked, "promote", "12"), 0)
+        self.assertEqual(promoted.call_args.kwargs["repo"], str(self.main))
+        self.checkout.assert_called_once_with(str(self.main), self.linked)
 
     def test_an_older_library_refuses_a_worktree_by_name(self):
         with patch.object(writing, "checkout", None, create=True):

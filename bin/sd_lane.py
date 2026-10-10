@@ -24,9 +24,7 @@ runs it under one lock per repository:
            runner lock it first marks failed a running entry whose runner
            pid is gone, with `reclaimed_by`, and lists it as `reclaimed`
            (sd:2821);
-  watch    print each gate end a lane or builder log records, once;
-  request  on a satellite: ask the hub's lane to merge an item the satellite
-           gated and prepared, through a row in the workflow database (sd:2704).
+  watch    print each gate end a lane or builder log records, once.
 
 The verbs are the queue's only writers, each under the queue file's lock, so
 a terminal and a dashboard reorder it the same way. A change takes effect at
@@ -81,51 +79,26 @@ for every lane, it tries each other lane's runner lock once and skips if one
 is held: a lane mid-prepare must not have its tools change under it, and no
 lane waits on another's lock. The next landing retries.
 
-A satellite gates on its own machine and asks the hub to merge (sd:2704).
-`lane request` writes `lane-request:v1:<slug>:<item>` over the wire. Before
-each claim the runner takes in this repository's requests (`intake`). It
-first looks for an entry that names the request's revision: one is there when
-the row's `queued` write failed, and a finished one gives the row its outcome.
-The runner claims a satellite entry only while the request's newest revision
-is the `queued` write naming it, so a failed write or a newer request keeps it.
-It then refuses a request the repository did not opt into, one whose branch
-or head is malformed, and one whose `ship:` row is not `ready_to_send` at its
-head; it supersedes the item's pending entry, leaves a request whose item is
-running for the next intake, and adds a `gate: satellite` entry, the queue
-before the row. A `queued` row whose entry finished gets the outcome a failed
-write left out. A satellite entry runs no prepare and no catch-up: the
-runner fetches the branch and the base, hands the entry back when the branch
-moved or the head lacks the base, and merges with `--satellite-gate`, which
-accepts the satellite's receipt under the trust rule in `sd_local_gate`
-instead of a gate on the hub. A request the runner may not merge stops there
-as `prepared`, as a hub entry does. Its outcome goes back to
-the request row, and a hand-back or failure notes the item, with the trust
-rule's next action for its code. `lane run --satellite-only` claims satellite
-entries only, starts no speculative gate, and exits when none is pending; a
-scheduled job on the hub runs it until every job runs `--hosted`. Each hub run
-publishes the hub's pack digest to `sd-lane-pack:v1:<slug>` at its start and
-after a fast-forward of the pack checkout.
-
 Only a repository's lane host drains its queue (sd:3003): the machine
 `repo.lane_host` names, or the hub when it is NULL. Elsewhere `run`,
 `enqueue`, `move`, `hold` and `release` refuse with `lane_elsewhere`, and a
 host that cannot be read refuses with `lane_unknown`. The runner reads the
 host again before each claim, so a move stops it at the next item. The same
 scheduled job runs on every machine: `lane run --hosted` runs each lane this
-machine hosts, one after another, and skips one whose runner is busy.
+machine hosts, one after another, and skips one whose runner is busy. A
+satellite that hosts a lane gates and merges on its own machine, so no item
+passes from one machine to another.
 """
 
 from __future__ import annotations
 
 import contextlib
-import dataclasses
 import fcntl
 import hashlib
 import json
 import os
 import pathlib
 import re
-import shlex
 import subprocess
 import sys
 import tempfile
@@ -158,36 +131,9 @@ Ship = Callable[[list[str], pathlib.Path], dict[str, Any]]
 Gate = Callable[[pathlib.Path, str, str], dict[str, Any]]
 #: `(item, body, main checkout) -> what happened`: the landing's item note (sd:2568).
 Note = Callable[[int, str, pathlib.Path], str]
-#: An entry's `gate` when a satellite gated it and asked for the merge (sd:2704).
-SATELLITE = "satellite"
-#: The request row a satellite writes, one per repository and item; `<slug>:<item>` follows.
-REQUEST_PREFIX = "lane-request:v1:"
-REQUEST_WRITER = "sd-lane-request"
-#: What a refused request's row says to do, by refusal code.
-REFUSAL_ACTIONS = {
-    "satellite_gate_off": "Opt the repository in on the hub with sd-db.sh repo satellite-gate <path> accept, "
-                          "or ship the item from the hub with sd-ship lane enqueue.",
-    "invalid_request": "Request again from the item's worktree with sd-ship lane request.",
-    "satellite_not_prepared": "On the satellite: sd-ship prepare at the pushed head, then sd-ship lane request again.",
-}
-COMMIT_ID = re.compile(r"[0-9a-f]{40}")
-#: `sd_db.ship.HELD`: the merge met another live ship operation's repository lock, which passes (sd:2861).
-LOCK_HELD = "another ship operation owns this repository"
-#: How many runs a satellite entry waits out a held lock before it fails; the scheduled run comes every 5 minutes.
-LOCK_RETRIES = 12
 #: The codes of an entry that stops `prepared` for want of merge authority (sd:3132).
 RUNNER_MERGE_MANUAL = "runner_merge_manual"
 RUNNER_MERGE_UNKNOWN = "runner_merge_unknown"
-
-
-@dataclasses.dataclass(frozen=True)
-class Hub:
-    """The lane's rows in the workflow database: the hub's connection, `sd_db.ship`, the lane's slug and main checkout."""
-
-    connection: Any
-    store: Any
-    slug: str
-    main: pathlib.Path
 
 
 class LaneError(RuntimeError):
@@ -265,6 +211,27 @@ def stamp_now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+def keep_body(body_file: pathlib.Path, lane: pathlib.Path, item: int) -> pathlib.Path:
+    """A private copy of the pull request body under the lane's own folder (sd:3170).
+
+    The runner passes the body to prepare later, and a body under /tmp did not
+    outlive a reboot. The copy is the entry's own, so two entries never share one.
+    """
+    bodies = lane / "bodies"
+    bodies.mkdir(mode=0o700, parents=True, exist_ok=True)
+    handle, name = tempfile.mkstemp(prefix=f"{item}-", suffix=".md", dir=bodies)
+    with os.fdopen(handle, "wb") as copy:  # mkstemp makes it 0600
+        copy.write(body_file.read_bytes())
+    return pathlib.Path(name)
+
+
+def drop_body(row: dict[str, Any], lane: pathlib.Path) -> None:
+    """Remove an ended entry's body copy; a body an earlier version queued by its own path stays (sd:3170)."""
+    body = pathlib.Path(str(row.get("body_file") or ""))
+    if body.parent == lane / "bodies":
+        body.unlink(missing_ok=True)
+
+
 def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: pathlib.Path, environ: dict[str, str], *,
                   expected_head: str | None = None, manual: bool = False, claim: str | None = None,
                   acceptance_file: pathlib.Path | None = None) -> dict[str, Any]:
@@ -286,8 +253,10 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
         raise LaneError(f"{expected_head or 'HEAD'} names no commit in {worktree}")
     if not body_file.is_file():
         raise LaneError(f"the body file {body_file} does not exist")
+    path = queue_path(worktree, environ)
+    body = keep_body(body_file, path.parent.parent, item)
     entry = {"worktree": str(worktree), "item": item, "expected_head": head, "title": title,
-             "body_file": str(body_file.resolve()), "authority": "manual" if manual else None, "claim": claim,
+             "body_file": str(body), "authority": "manual" if manual else None, "claim": claim,
              "acceptance_file": str(acceptance_file.resolve()) if acceptance_file else None,
              "status": "pending", "enqueued_at": stamp_now()}
 
@@ -296,7 +265,11 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
             raise LaneError(f"sd:{item} is already queued in this lane")
         entries.append(entry)
         return entry
-    return update(queue_path(worktree, environ), add_entry)
+    try:
+        return update(path, add_entry)
+    except BaseException:
+        body.unlink(missing_ok=True)
+        raise
 
 
 def pending_entry(entries: list[dict[str, Any]], item: int) -> dict[str, Any]:
@@ -327,12 +300,16 @@ def check_revision(entries: list[dict[str, Any]], expected: str | None) -> None:
 
 def cancel(root: pathlib.Path, item: int, environ: dict[str, str], *,
            expected_revision: str | None = None) -> dict[str, Any]:
+    path = queue_path(root, environ)
+
     def mark(entries: list[dict[str, Any]]) -> dict[str, Any]:
         check_revision(entries, expected_revision)
         row = pending_entry(entries, item)
         row.update(status="cancelled", finished_at=stamp_now())
         return row
-    return update(queue_path(root, environ), mark)
+    row = update(path, mark)
+    drop_body(row, path.parent.parent)  # after the write, so a failed write leaves the body with its entry
+    return row
 
 
 def position(where: str) -> str:
@@ -374,285 +351,6 @@ def set_hold(root: pathlib.Path, item: int, environ: dict[str, str], *, held: bo
     return update(queue_path(root, environ), toggle_hold)
 
 
-def request_key(slug: str, item: int) -> str:
-    return f"{REQUEST_PREFIX}{slug}:{item}"
-
-
-def request(root: pathlib.Path, item: int, *, manual: bool, database: pathlib.Path | None = None) -> dict[str, Any]:
-    """`lane request` on a satellite: write the item's request row for the hub's lane (sd:2704).
-
-    Refused on the hub, where `lane enqueue` queues the item; for a lane the
-    hub does not host, since only the hub's run takes requests in (sd:3003);
-    and for an item whose `ship:` row is not `ready_to_send` at the branch's
-    pushed head, which intake would refuse.
-    """
-    imported = sd_lib.import_sd_db()
-    if imported.module is None:
-        raise LaneError(str(imported.problem))
-    import sd_gate_receipts  # noqa: PLC0415
-    from sd_db import ship as store  # noqa: PLC0415
-    from sd_db.database import connect, default_path  # noqa: PLC0415
-    from sd_db.errors import SdDbError  # noqa: PLC0415 -- a revision conflict is one
-    from sd_ship_remote import Refusal, slug  # noqa: PLC0415
-
-    database = database or default_path()
-    hub = sd_gate_receipts.served_hub(database)
-    if not hub:
-        raise LaneError("this machine is the sd hub: a request asks the hub to merge what a satellite gated; "
-                        "queue a hub item with sd-ship lane enqueue", code="hub_request")
-    try:
-        own = slug(lane_git(root, "config", "--get", "remote.origin.url") or "")
-    except Refusal as error:
-        raise LaneError(str(error)) from None
-    branch = lane_git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
-    if not branch:
-        raise LaneError(f"{root} has no branch checked out; request from the item's worktree")
-    listed = lane_git(root, "ls-remote", "origin", f"refs/heads/{branch}")
-    pushed = listed.split()[0] if listed else None
-    try:
-        connection = connect(database)
-    except SdDbError as error:
-        raise LaneError(f"the hub {hub} did not answer, so no request was written; rerun once it does: {error}") from None
-    try:
-        refuse_unhosted(connection, database, own)
-        _, shipped = store.read(connection, store.receipt_key(own, branch, item))
-        if shipped.get("phase") != "ready_to_send" or not pushed or shipped.get("head") != pushed:
-            raise LaneError(f"sd:{item} is not ready_to_send at the pushed head of {branch} ({str(pushed)[:12]}); "
-                            f"{REFUSAL_ACTIONS['satellite_not_prepared']}", code="satellite_not_prepared")
-        key = request_key(own, item)
-        revision, _ = store.read(connection, key)
-        value = {"writer": REQUEST_WRITER, "repository": own, "item": item, "branch": branch, "head": pushed,
-                 "base": shipped.get("base"), "authority": "manual" if manual else None,
-                 "satellite": sd_gate_receipts.satellite_identity(), "requested_at": stamp_now(), "status": "requested"}
-        written = store.save(connection, key, revision, value)
-    except SdDbError as error:
-        raise LaneError(f"the request was not written to the hub {hub}; rerun sd-ship lane request: {error}") from None
-    finally:
-        connection.close()
-    return {"request": key, "revision": written, **value}
-
-
-def refuse_unhosted(connection: Any, database: pathlib.Path, own: str) -> None:
-    """Refuse a request no run would take in: only the hub's run reads request rows (`default_hub`)."""
-    try:
-        elsewhere = sd_lib.lane_elsewhere(connection, database, own)
-        host, _ = sd_lib.lane_host(connection, own)
-    except Exception as error:  # noqa: BLE001 -- `LaneUnknown`, or a read fault it did not wrap
-        raise LaneError(str(error), code=getattr(error, "code", None) or "lane_unknown") from None
-    if elsewhere is None:
-        raise LaneError(f"The lane for {own} runs on this machine, not on the hub, so no run would take a "
-                        "request in. Queue the item here with sd-ship lane enqueue.", code="lane_elsewhere")
-    if host is not None:
-        raise LaneError(f"{elsewhere}\nNo run there takes a request in: queue the item on {host} with "
-                        "sd-ship lane enqueue.", code="lane_elsewhere")
-
-
-def requests(hub: Hub) -> list[tuple[str, int, dict[str, Any]]]:
-    """This lane's request rows whose newest revision is `requested` or `queued`, oldest first."""
-    prefix = f"{REQUEST_PREFIX}{hub.slug}:"
-    keys = hub.connection.execute("SELECT DISTINCT key FROM state WHERE kind = 'checkpoint' AND substr(key, 1, ?) = ?",
-                                  (len(prefix), prefix)).fetchall()
-    found = []
-    for (key,) in keys:
-        try:
-            revision, row = hub.store.read(hub.connection, key)
-        except Exception:  # an unreadable row is not a request; nothing here can repair it
-            continue
-        if row.get("status") in ("requested", "queued"):
-            found.append((key, revision, row))
-    return sorted(found, key=lambda request: request[1])
-
-
-def git_name(main: pathlib.Path, name: Any) -> bool:
-    """A branch name `git` accepts as given and no option can hide in."""
-    return (isinstance(name, str) and bool(name) and not name.startswith("-")
-            and lane_git(main, "check-ref-format", "--branch", name) == name)
-
-
-def malformed(hub: Hub, key: str, row: dict[str, Any]) -> str | None:
-    """Why a request cannot be taken in as written, or None. Its branch and base reach `git` argv on the hub."""
-    import sd_gate_receipts  # noqa: PLC0415
-
-    item, head = row.get("item"), row.get("head")
-    if row.get("writer") != REQUEST_WRITER or not sd_gate_receipts.names_node(row.get("satellite")):
-        return f"the request is not a {REQUEST_WRITER} row from a satellite named by host, tailnet login and address"
-    if type(item) is not int or key != request_key(hub.slug, item) or row.get("repository") != hub.slug:
-        return "the request's item or repository does not match its key"
-    if not git_name(hub.main, row.get("branch")) or not git_name(hub.main, row.get("base")):
-        return "the request's branch or base is not a branch name"
-    if not (isinstance(head, str) and COMMIT_ID.fullmatch(head)):
-        return "the request's head is not a full commit id"
-    if row.get("authority") not in (None, "manual"):
-        return "the request's authority is neither manual nor none"
-    return None
-
-
-def take_in(hub: Hub, path: pathlib.Path, key: str, revision: int, row: dict[str, Any]) -> dict[str, Any]:
-    """One request through intake's six steps (design.md, "Intake"); what happened."""
-    def answer(status: str, **fields: Any) -> dict[str, Any]:
-        hub.store.save(hub.connection, key, revision, {**row, "status": status, "decided_at": stamp_now(), **fields})
-        return {"request": key, "revision": revision, "status": status, **fields}
-
-    def refuse(code: str, reason: str) -> dict[str, Any]:
-        return answer("refused", code=code, reason=reason, next_action=REFUSAL_ACTIONS[code])
-    taken = {"key": key, "revision": revision}
-    # Step 4 first: an entry naming this revision means its `queued` write failed. It may have run since,
-    # and its merge moved the ship: row on, so the checks below would misjudge it (review round 1).
-    found = next((entry for entry in read_queue(path) if entry.get("request") == taken), None)
-    if found is not None and found.get("status") in ("pending", "running"):
-        return answer("queued", entry={"enqueued_at": found.get("enqueued_at"), "revision": revision})
-    if found is not None:
-        return answer(str(found["status"]), **outcome_fields(found))
-    if sd_lib.repo_ci(hub.connection, hub.main) != "local" or sd_lib.repo_satellite_gate(hub.connection, hub.main) != "accept":
-        return refuse("satellite_gate_off", "the repository does not take satellite gates: "
-                                            "repo.ci must be local and repo.satellite_gate accept")
-    why = malformed(hub, key, row)
-    if why:
-        return refuse("invalid_request", why)
-    item, branch, head = row["item"], row["branch"], row["head"]
-    _, shipped = hub.store.read(hub.connection, hub.store.receipt_key(hub.slug, branch, item))
-    if shipped.get("phase") != "ready_to_send" or shipped.get("head") != head:
-        return refuse("satellite_not_prepared", f"the ship: row for {branch} is {shipped.get('phase') or 'absent'} "
-                                                f"at {str(shipped.get('head'))[:12]}, not ready_to_send at {head[:12]}")
-    if shipped.get("base") != row["base"]:  # the merge would check the ship: row's base, not the one intake pre-checked
-        return refuse("invalid_request", f"the request's base {row['base']} is not the ship: row's {shipped.get('base')}")
-
-    def queue_request(entries: list[dict[str, Any]]) -> dict[str, Any] | None:
-        if any(entry.get("item") == item and entry.get("status") == "running" for entry in entries):
-            return None
-        for entry in entries:
-            if entry.get("item") == item and entry.get("status") == "pending":
-                entry.update(status="cancelled", finished_at=stamp_now(), superseded_by=taken)
-        entry = {"worktree": str(hub.main), "item": item, "gate": SATELLITE, "branch": branch, "base": row["base"],
-                 "expected_head": head, "title": shipped.get("title"), "authority": row.get("authority"),
-                 "request": taken, "status": "pending", "enqueued_at": stamp_now()}
-        entries.append(entry)
-        return entry
-    entry = update(path, queue_request)
-    if entry is None:
-        return {"request": key, "revision": revision, "status": "requested",
-                "reason": f"sd:{item} is running; the next intake takes the request in"}
-    # A failed write leaves the entry unclaimable (`claimable`): the next intake writes `queued` (step 4),
-    # or a newer request supersedes it (step 5).
-    return answer("queued", entry={"enqueued_at": entry["enqueued_at"], "revision": revision})
-
-
-def intake(hub: Hub, path: pathlib.Path) -> list[dict[str, Any]]:
-    """Take this lane's requests in, oldest first; a request that cannot be decided now waits for the next intake.
-
-    A `queued` row whose entry finished gets the outcome a failed `write_outcome` left unwritten (review round 2).
-    """
-    done: list[dict[str, Any]] = []
-    try:
-        found, entries = requests(hub), read_queue(path)
-    except Exception as error:  # the database would not answer; hub entries still run, and the next intake reads again
-        return [{"status": "unread", "error": f"{type(error).__name__}: {error}"[:300]}]
-    for key, revision, row in found:
-        try:
-            if row["status"] == "requested":
-                done.append(take_in(hub, path, key, revision, row))
-                continue
-            taken = {"key": key, "revision": entry_revision(row)}
-            finished = next((entry for entry in entries if entry.get("request") == taken
-                             and entry.get("status") not in ("pending", "running")), None)
-            if finished is not None:
-                done.append({"request": key, "status": finished["status"],
-                             "request_row": write_outcome(hub, finished, finished)})
-        except Exception as error:  # e.g. the row changed under intake: its newest revision is read again next time
-            done.append({"request": key, "revision": revision, "status": row.get("status"),
-                         "error": f"{type(error).__name__}: {error}"[:300]})
-    return done
-
-
-def outcome_fields(outcome: dict[str, Any]) -> dict[str, Any]:
-    """What a request row keeps of its entry's outcome."""
-    return {name: outcome.get(name) for name in ("code", "reason", "next_action", "merge_commit")}
-
-
-def entry_revision(row: dict[str, Any]) -> Any:
-    """The request revision a row's `entry` names; None when the entry is not an object, so a bad write
-    from a satellite acknowledges nothing and stops no runner (sd:2792)."""
-    entry = row.get("entry")
-    return entry.get("revision") if isinstance(entry, dict) else None
-
-
-def acknowledges(row: dict[str, Any], taken: dict[str, Any]) -> bool:
-    """The request row says `queued` for the entry that took in revision `taken`."""
-    revision = entry_revision(row)
-    return row.get("status") == "queued" and revision is not None and revision == taken.get("revision")
-
-
-def claimable(hub: Hub | None, entry: dict[str, Any]) -> bool:
-    """Whether the runner may claim `entry`. A satellite entry needs its request's newest revision to be the
-    `queued` write naming it: a failed write, a newer request or a row that cannot be read keeps it pending
-    until an intake settles it, so it never runs on a superseded authority (review rounds 5 and 6)."""
-    if entry.get("gate") != SATELLITE:
-        return True
-    taken = entry.get("request") or {}
-    try:
-        _, row = hub.store.read(hub.connection, taken["key"]) if hub is not None else (None, {})
-    except Exception:  # an unread row authorises nothing
-        return False
-    return acknowledges(row, taken)
-
-
-def write_outcome(hub: Hub, entry: dict[str, Any], outcome: dict[str, Any]) -> str:
-    """Write a satellite entry's outcome to its request row, unless a newer request replaced the one it took in."""
-    taken = entry.get("request") or {}
-    try:
-        revision, row = hub.store.read(hub.connection, taken.get("key"))
-        if not acknowledges(row, taken):
-            return "skipped: the request row moved on from this entry"
-        hub.store.save(hub.connection, taken["key"], revision, {
-            **row, "status": outcome.get("status"), **outcome_fields(outcome), "decided_at": stamp_now()})
-    except Exception as error:  # the outcome stands on the entry; the row says what it last knew
-        return f"failed: {type(error).__name__}: {error}"[:300]
-    return "written"
-
-
-def publish_pack(hub: Hub) -> str:
-    """Publish the pack digest this hub's merges compare, for a satellite's warning before its gate."""
-    import sd_gate_receipts  # noqa: PLC0415
-
-    key = sd_gate_receipts.PACK_PREFIX + hub.slug
-    try:
-        # A pack gating itself binds its tree, not this bin/, so it publishes what its receipts hold (sd:2613).
-        digest = sd_gate_receipts.pack_bin(sd_gate_receipts.gates_itself(hub.main, hub.main, BIN))
-        revision, _ = hub.store.read(hub.connection, key)
-        hub.store.save(hub.connection, key, revision, {"writer": "sd-lane", "pack_bin": digest,
-                                                       "published_at": stamp_now(),
-                                                       "pack_rev": lane_git(BIN.parent, "rev-parse", "HEAD")})
-    except Exception as error:  # a satellite only loses its early warning; the merge still compares
-        return f"failed: {type(error).__name__}: {error}"[:300]
-    return "published"
-
-
-@contextlib.contextmanager
-def default_hub(root: pathlib.Path) -> Iterator[Hub | None]:
-    """The run's view of the workflow database; None without `sd_db`, a database, or a GitHub origin, and off the hub."""
-    if sd_lib.import_sd_db().module is None:
-        yield None
-        return
-    import sd_gate_receipts  # noqa: PLC0415
-    from sd_db import ship as store  # noqa: PLC0415
-    from sd_db.database import connect, default_path  # noqa: PLC0415
-    from sd_ship_remote import slug  # noqa: PLC0415
-
-    main = sd_lib.main_worktree_root(root).resolve()
-    try:
-        own = slug(lane_git(main, "config", "--get", "remote.origin.url") or "")
-        if sd_gate_receipts.served_hub(default_path()) is not None:  # a satellite host reads no request (sd:3003)
-            raise LaneError("a satellite")
-        connection = connect(default_path())
-    except Exception:  # no GitHub origin, no database, or not the hub: no request can be read; entries still run
-        yield None
-        return
-    try:
-        yield Hub(connection, store, own, main)
-    finally:
-        connection.close()
-
-
 def ship_process(argv: list[str], log: pathlib.Path, timeout: int) -> dict[str, Any]:
     """Run `sd-ship` with `--json`; its whole output goes to `log`, its answer comes back."""
     log.parent.mkdir(parents=True, exist_ok=True)
@@ -674,28 +372,6 @@ def ship_process(argv: list[str], log: pathlib.Path, timeout: int) -> dict[str, 
 
 def default_ship(argv: list[str], log: pathlib.Path) -> dict[str, Any]:
     return ship_process(argv, log, MERGE_SECONDS if "merge" in argv[2:4] else PREPARE_SECONDS)
-
-
-def satellite_merge_argv(entry: dict[str, Any]) -> list[str]:
-    """The one `sd-ship merge` a satellite entry runs: the satellite's receipt in place of a gate (sd:2704 step 4)."""
-    return ["-C", entry["worktree"], "merge", "--item", str(entry["item"]), "--branch", entry["branch"],
-            "--expected-head", entry["expected_head"], "--manual", "--satellite-gate",
-            "--watch", "--wait-seconds", str(MERGE_WAIT_SECONDS), "--json"]
-
-
-def handed_back(entry: dict[str, Any], code: str, reason: str) -> dict[str, Any]:
-    """The satellite acts next: its branch moved, the base moved, or the hub would not take its receipt."""
-    from sd_local_gate import HAND_BACK, SATELLITE_REFUSALS  # noqa: PLC0415
-
-    return {"status": "handed_back", "code": code, "reason": reason[:600],
-            "next_action": SATELLITE_REFUSALS.get(code, HAND_BACK).format(base=entry["base"])}
-
-
-def hand_merge(entry: dict[str, Any]) -> str:
-    """The hub's merge of a satellite entry for a person to run, quoted: the path and branch reach a shell."""
-    return "On the hub: " + shlex.join(["sd-ship", "-C", entry["worktree"], "merge", "--item", str(entry["item"]),
-                                        "--branch", entry["branch"], "--expected-head", entry["expected_head"],
-                                        "--manual", "--satellite-gate"])
 
 
 def default_runner_merge(root: pathlib.Path) -> str:
@@ -756,46 +432,8 @@ def merge_refusal(entry: dict[str, Any]) -> dict[str, str] | None:
                                                    "merge by hand"}
 
 
-def process_satellite(entry: dict[str, Any], logs: pathlib.Path, ship: Ship) -> dict[str, Any]:
-    """A satellite entry: fetch, the head and base checks of design.md "Freshness", then merge; no prepare."""
-    main, branch, base, head = pathlib.Path(entry["worktree"]), entry["branch"], entry["base"], entry["expected_head"]
-    remote, onto = f"refs/remotes/origin/{branch}", f"refs/remotes/origin/{base}"
-    if scratch_git(main, "fetch", "--quiet", "--no-tags", "origin", f"+refs/heads/{branch}:{remote}",
-                   f"+refs/heads/{base}:{onto}") is None:
-        return {"status": "failed", "step": "fetch", "reason": f"origin/{branch} or origin/{base} could not be fetched"}
-    tip = lane_git(main, "rev-parse", "--verify", "--quiet", remote)
-    if tip != head:
-        return {"head": head, **handed_back(entry, "head_moved", f"origin/{branch} is at {tip}, not the requested head")}
-    if lane_git(main, "merge-base", "--is-ancestor", onto, head) is None:
-        return {"head": head, **handed_back(entry, "base_moved", f"{head[:12]} does not contain origin/{base}")}
-    refused = merge_refusal(entry)
-    if refused is not None:
-        again = shlex.join(["sd-ship", "lane", "request", "--item", str(entry["item"]), "--manual"])
-        return {"head": head, "status": "prepared", **refused,
-                "next_action": f"{hand_merge(entry)}; or on the satellite: {again}"}
-    log = logs / f"merge-{entry['item']}-{time.strftime('%Y%m%dT%H%M%S', time.gmtime())}.log"
-    merged = ship(satellite_merge_argv(entry), log)
-    fields = {"head": head, "merge_log": str(log)}
-    if merged.get("ok") and merged.get("phase") == "merged":
-        return {**fields, "status": "merged", "merge_commit": merged.get("merge_commit")}
-    workflow = merged.get("workflow") or {}
-    code = str((workflow.get("blocker") or {}).get("code") or merged.get("code") or "")
-    reason = str(merged.get("error") or code or "merge did not confirm")
-    if code in ("head_moved", "base_moved") or code.startswith("satellite_"):
-        return {**fields, **handed_back(entry, code, reason)}
-    if LOCK_HELD in reason:  # the next run retries; the request row stays `queued`
-        retries = int(entry.get("lock_retries") or 0)
-        if retries < LOCK_RETRIES:
-            return {**fields, "status": "pending", "lock_retries": retries + 1, "reason": reason[:600]}
-        reason = f"{reason}; still held after {retries} runs"
-    return {**fields, "status": "failed", "step": "merge", "phase": merged.get("phase"), "code": code or None,
-            "reason": reason[:600], "next_action": workflow.get("next_action")}
-
-
 def process(entry: dict[str, Any], logs: pathlib.Path, ship: Ship) -> dict[str, Any]:
     """One entry, start to end; the fields to record on it."""
-    if entry.get("gate") == SATELLITE:
-        return process_satellite(entry, logs, ship)
     worktree, item = pathlib.Path(entry["worktree"]), entry["item"]
     if lane_git(worktree, "rev-parse", "HEAD") != entry["expected_head"]:
         return {"status": "skipped", "reason": "the worktree's HEAD moved from the queued head"}
@@ -868,15 +506,13 @@ def predict(entry: dict[str, Any], following: dict[str, Any]) -> dict[str, Any]:
     import sd_gate_receipts  # noqa: PLC0415 -- the declaration reader loads only for a speculation
     root = pathlib.Path(following["worktree"])
     for row, whose in ((entry, f"sd:{entry['item']}'s"), (following, "its")):
-        if row.get("gate") != SATELLITE and lane_git(pathlib.Path(row["worktree"]), "rev-parse", "HEAD") != row["expected_head"]:
+        if lane_git(pathlib.Path(row["worktree"]), "rev-parse", "HEAD") != row["expected_head"]:
             return {"skipped": f"{whose} worktree's HEAD moved from the queued head"}
     remote = lane_git(root, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD") or ""
     branch = remote.removeprefix("refs/remotes/origin/")
     if not branch or branch == remote:
         return {"skipped": "origin/HEAD names no base branch"}
-    # A satellite entry ahead has no worktree here: its head comes from its branch on origin.
-    ahead = [f"+refs/heads/{entry['branch']}:refs/remotes/origin/{entry['branch']}"] if entry.get("gate") == SATELLITE else []
-    if scratch_git(root, "fetch", "--quiet", "--no-tags", "origin", f"refs/heads/{branch}:{remote}", *ahead) is None:
+    if scratch_git(root, "fetch", "--quiet", "--no-tags", "origin", f"refs/heads/{branch}:{remote}") is None:
         return {"skipped": f"origin/{branch} could not be fetched"}
     fork, message = lane_git(root, "rev-parse", "--verify", "--quiet", remote), f"Merge origin/{branch}"
     with tempfile.TemporaryDirectory(prefix="sd-lane-speculate-") as parent:
@@ -910,8 +546,8 @@ def speculate(entry: dict[str, Any], path: pathlib.Path, gate: Gate, busy: bool 
     the others.
     """
     following = next((row for row in read_queue(path) if row.get("status") == "pending" and not row.get("held")), None)
-    if following is None or following.get("gate") == SATELLITE or merge_refusal(entry) is not None:
-        return None  # a satellite entry gated on the satellite, and its merge runs no gate here
+    if following is None or merge_refusal(entry) is not None:
+        return None
 
     def record_speculation(fields: dict[str, Any]) -> None:
         def on_follower(entries: list[dict[str, Any]]) -> None:
@@ -964,8 +600,7 @@ def clean_up(entry: dict[str, Any], head: str | None, main: pathlib.Path, branch
     and `update-ref -d` refuses a branch that moved past the merged head.
     """
     worktree = pathlib.Path(entry["worktree"]).resolve()
-    satellite = entry.get("gate") == SATELLITE  # merged from the main checkout; the satellite removes its own worktree
-    if worktree == main and not satellite:
+    if worktree == main:
         return f"Cleanup skipped: {worktree} is the main checkout", None
     if not branch:
         return "Cleanup skipped: the worktree has no branch checked out", None
@@ -979,8 +614,6 @@ def clean_up(entry: dict[str, Any], head: str | None, main: pathlib.Path, branch
         done.append(f"removed origin/{branch}" if deleted is not None else f"origin/{branch} kept: the delete failed")
     elif remote:
         done.append(f"origin/{branch} kept: it is at {remote}, not the merged head")
-    if satellite:
-        return "Cleanup: " + (", ".join(done) or f"origin/{branch} was already gone"), None
     remove = f"git -C {main} worktree remove {worktree} && git -C {main} update-ref -d refs/heads/{branch} {tip}"
     done.append(f"worktree {worktree} and branch {branch} kept for removal once the builder stops")
     return "Cleanup: " + ", ".join(done), remove
@@ -1029,7 +662,7 @@ def land(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, str]
     directory that is gone, so the lane's own root answers (sd:3096).
     """
     worktree = pathlib.Path(entry["worktree"])
-    gone = not worktree.is_dir() and entry.get("gate") != SATELLITE
+    gone = not worktree.is_dir()
     main = sd_lib.main_worktree_root(root if gone else worktree).resolve()
     head, merged = outcome.get("head"), str(outcome.get("merge_commit") or "")
     if gone:  # the merge removed the worktree with its branches; nothing is left to clean
@@ -1038,10 +671,7 @@ def land(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, str]
         fields: dict[str, Any] = {"cleanup": cleanup, "remove": remove}
         body = f"Landed: merged at {merged[:12]} (head {str(head)[:12]}). {cleanup}."
         return land_note(fields, body, entry, environ, note, own_lock, main)
-    if entry.get("gate") == SATELLITE:  # the branch is open on the satellite; its tip here is the merged head
-        branch, tip = entry["branch"], head
-    else:
-        branch, tip = lane_git(worktree, "branch", "--show-current") or "", lane_git(worktree, "rev-parse", "HEAD")
+    branch, tip = lane_git(worktree, "branch", "--show-current") or "", lane_git(worktree, "rev-parse", "HEAD")
     cleanup, remove = clean_up(entry, head, main, branch, tip)
     fields = {"cleanup": cleanup, "remove": remove}
     body = f"Landed: merged at {merged[:12]} (head {str(head)[:12]}). {cleanup}."
@@ -1063,36 +693,15 @@ def land_note(fields: dict[str, Any], body: str, entry: dict[str, Any], environ:
     return fields
 
 
-def note_hand_back(entry: dict[str, Any], outcome: dict[str, Any], note: Note) -> str:
-    """Note a satellite entry's hand-back or failure on its item, with who acts next."""
-    code = f" ({outcome['code']})" if outcome.get("code") else ""
-    body = f"Lane: {outcome.get('status')}{code}: {outcome.get('reason')}."
-    if outcome.get("next_action"):
-        body += f" Next: {outcome['next_action']}"
-    try:
-        return note(entry["item"], body, pathlib.Path(entry["worktree"]))
-    except Exception as error:  # the outcome stands on the entry and the row
-        return f"failed: {type(error).__name__}: {error}"[:400]
-
-
 def settle(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, str], note: Note,
-           own_lock: pathlib.Path, hub: Hub | None, root: pathlib.Path) -> dict[str, Any]:
-    """What follows an entry's outcome: the landing of a merge, and a satellite entry's row and note."""
+           own_lock: pathlib.Path, root: pathlib.Path) -> dict[str, Any]:
+    """What follows an entry's outcome: the landing of a merge."""
     fields: dict[str, Any] = {}
-    if outcome.get("status") == "pending":  # put back (sd:2861): nothing to settle, and the row still acknowledges it
-        return fields
     if outcome.get("status") == "merged":
         try:
             fields.update(land(entry, outcome, environ, note, own_lock, root))
         except Exception as error:  # the merge stands; the entry says what did not follow it
             fields["cleanup"] = f"failed: {type(error).__name__}: {error}"[:600]
-        if hub is not None and BIN.is_relative_to(hub.main) and str(fields.get("fast_forward")).startswith("fast-forwarded"):
-            fields["pack"] = publish_pack(hub)  # the hub's tools just changed
-    if entry.get("gate") == SATELLITE:
-        if hub is not None:
-            fields["request_row"] = write_outcome(hub, entry, {**outcome, **fields})
-        if outcome.get("status") in ("handed_back", "failed"):
-            fields["note"] = note_hand_back(entry, outcome, note)
     return fields
 
 
@@ -1175,19 +784,24 @@ def reclaim_dead(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return reclaimed
 
 
+def finish_entry(path: pathlib.Path, entry: dict[str, Any], outcome: dict[str, Any]) -> None:
+    """Record a run entry's outcome, then drop its body copy (sd:3170)."""
+    def mark_finished(entries: list[dict[str, Any]]) -> None:
+        for row in entries:
+            if row.get("item") == entry["item"] and row.get("status") == "running":
+                row.update(outcome, finished_at=stamp_now())
+    update(path, mark_finished)
+    drop_body(entry, path.parent.parent)  # after the write, as in `cancel`
+
+
 def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_ship,
-             gate: Gate = default_gate, note: Note | None = None, *, satellite_only: bool = False,
-             hub: Hub | None = None) -> dict[str, Any]:
+             gate: Gate = default_gate, note: Note | None = None) -> dict[str, Any]:
     """Drain this repository's queue in order under its lane lock; never wait for the lock.
 
     One speculative gate runs at a time (`speculate`); after a merge the
     runner lands the entry (`land`), then waits for that gate, so the next
     prepare finds its receipt. `note` defaults to `default_note`, read at the
-    call, so a suite can replace it; `hub` defaults to `default_hub`'s, the
-    same way. Before each claim the runner takes in satellite requests
-    (`intake`). `satellite_only` claims only satellite entries and starts no
-    speculative gate (ruling Q4). A satellite entry is claimed only while its
-    request row acknowledges it (`claimable`). Off the lane host it refuses before any of
+    call, so a suite can replace it. Off the lane host it refuses before any of
     that (sd:3003). It reads the host again before each claim, under the
     runner lock: after a move it finishes the running entry, claims no next
     one, and says why in `stopped`.
@@ -1202,56 +816,38 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
         except BlockingIOError:
             return {"ran": [], "busy": f"another runner holds {own_lock}"}
         reclaimed = update(path, reclaim_dead)
-        with contextlib.nullcontext(hub) if hub is not None else default_hub(root) as hub:
-            ran: list[dict[str, Any]] = []
-            answer: dict[str, Any] = {"ran": ran, **({"reclaimed": reclaimed} if reclaimed else {})}
-            if hub is not None:
-                answer.update(pack=publish_pack(hub), intake=[])
-            ahead: threading.Thread | None = None
-            deferred: set[tuple[Any, Any]] = set()  # entries put back this run; the next run retries them
-            while True:
-                stopped = lane_moved(root)  # sd:3003: a move stops the lane at an item boundary, never mid-merge
-                if hub is not None and stopped is None:
-                    answer["intake"] += intake(hub, path)
+        ran: list[dict[str, Any]] = []
+        answer: dict[str, Any] = {"ran": ran, **({"reclaimed": reclaimed} if reclaimed else {})}
+        ahead: threading.Thread | None = None
+        while True:
+            stopped = lane_moved(root)  # sd:3003: a move stops the lane at an item boundary, never mid-merge
 
-                def claim_next(entries: list[dict[str, Any]]) -> dict[str, Any] | None:
-                    for row in entries:
-                        if (row.get("status") == "pending" and not row.get("held")
-                                and (row.get("item"), row.get("enqueued_at")) not in deferred
-                                and (not satellite_only or row.get("gate") == SATELLITE) and claimable(hub, row)):
-                            row.update(status="running", started_at=stamp_now(), runner_pid=os.getpid())
-                            return dict(row)
-                    return None
-                entry = None if stopped else update(path, claim_next)
-                if entry is None:
-                    if stopped:
-                        answer["stopped"] = stopped
-                    if ahead is not None:
-                        ahead.join()
-                    return answer
-                # A satellite-only run gates nothing: a satellite follower is never
-                # gated early, and a hub entry is not this run's to prepare.
-                if not satellite_only:
-                    if ahead is not None and ahead.is_alive():
-                        speculate(entry, path, gate, busy=True)  # notes the skip: one speculative gate at a time
-                    else:
-                        ahead = speculate(entry, path, gate)
-                try:
-                    outcome = process(entry, path.parent.parent / "logs", ship)
-                except Exception as error:  # a broken entry is marked; the next one still runs
-                    outcome = {"status": "failed", "reason": f"{type(error).__name__}: {error}"[:600]}
-                outcome.update(settle(entry, outcome, environ, note or default_note, own_lock, hub, root))
-
-                def finish(entries: list[dict[str, Any]], entry=entry, outcome=outcome) -> None:
-                    for row in entries:
-                        if row.get("item") == entry["item"] and row.get("status") == "running":
-                            row.update(outcome, finished_at=stamp_now())
-                update(path, finish)
-                ran.append({"item": entry["item"], **outcome})
-                if outcome.get("status") == "pending":
-                    deferred.add((entry["item"], entry.get("enqueued_at")))
-                if ahead is not None and outcome.get("status") == "merged":
-                    ahead.join(PREPARE_SECONDS)  # the next prepare reads its receipt
+            def claim_next(entries: list[dict[str, Any]]) -> dict[str, Any] | None:
+                for row in entries:
+                    if row.get("status") == "pending" and not row.get("held"):
+                        row.update(status="running", started_at=stamp_now(), runner_pid=os.getpid())
+                        return dict(row)
+                return None
+            entry = None if stopped else update(path, claim_next)
+            if entry is None:
+                if stopped:
+                    answer["stopped"] = stopped
+                if ahead is not None:
+                    ahead.join()
+                return answer
+            if ahead is not None and ahead.is_alive():
+                speculate(entry, path, gate, busy=True)  # notes the skip: one speculative gate at a time
+            else:
+                ahead = speculate(entry, path, gate)
+            try:
+                outcome = process(entry, path.parent.parent / "logs", ship)
+            except Exception as error:  # a broken entry is marked; the next one still runs
+                outcome = {"status": "failed", "reason": f"{type(error).__name__}: {error}"[:600]}
+            outcome.update(settle(entry, outcome, environ, note or default_note, own_lock, root))
+            finish_entry(path, entry, outcome)
+            ran.append({"item": entry["item"], **outcome})
+            if ahead is not None and outcome.get("status") == "merged":
+                ahead.join(PREPARE_SECONDS)  # the next prepare reads its receipt
 
 
 def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = default_gate,
@@ -1260,8 +856,7 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
 
     The same job runs on every machine. Its lanes are the managed `repo` rows,
     in path order, whose checkout is on this disk and whose lane host is this
-    machine. A hosted lane runs with no queue file: a satellite's `lane request`
-    is a row only intake reads (review round 1). Ownership this machine cannot
+    machine. Ownership this machine cannot
     read skips that lane with the reason. A held runner lock skips it too
     (`run_lane` answers `busy`), and a refusal in one lane leaves the next to run.
     """
@@ -1359,16 +954,8 @@ def add_lane_verbs(commands: Any) -> None:
         editor.add_argument("--expected-revision", help=f"refuse with {STALE_REVISION} unless `lane list` still prints "
                                                         "this revision, checked under the queue's lock")
     runner = verbs.add_parser("run", help="drain the queue in order; exits at once if another runner holds the lane")
-    which = runner.add_mutually_exclusive_group()
-    which.add_argument("--hosted", action="store_true",
-                       help="run the lane of each repository this machine hosts, one after another (sd:3003)")
-    which.add_argument("--satellite-only", action="store_true",
-                       help="claim satellite entries only, start no speculative gate, exit when none is pending; "
-                            "it goes once the scheduled jobs run --hosted")
-    asker = verbs.add_parser("request", help="on a satellite: ask the hub's lane to merge this worktree's prepared item")
-    asker.add_argument("--item", type=int, required=True)
-    asker.add_argument("--manual", action="store_true",
-                       help="authorize the hub's runner to merge when repo.runner_merge is manual, as enqueue --manual")
+    runner.add_argument("--hosted", action="store_true",
+                        help="run the lane of each repository this machine hosts, one after another (sd:3003)")
     watcher = verbs.add_parser("watch", help="print each gate end a log under the lane root records, once")
     watcher.add_argument("--once", action="store_true", help="scan once and exit")
 
@@ -1401,10 +988,8 @@ def lane_main(args: Any) -> int:
         elif args.lane_command in ("hold", "release"):
             result = set_hold(root, args.item, environ, held=args.lane_command == "hold",
                               expected_revision=args.expected_revision)
-        elif args.lane_command == "request":
-            result = request(root, args.item, manual=args.manual)
         else:
-            result = run_lane(root, environ, satellite_only=args.satellite_only)
+            result = run_lane(root, environ)
     except (LaneError, sd_lib.ConfigError, OSError) as error:
         print(json.dumps({"ok": False, **refusal(error)}, indent=2, sort_keys=True))
         return 3

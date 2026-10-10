@@ -185,7 +185,7 @@ These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOM
 `sd.gate_cache_gb` bounds the local gate's warm Rust build folders (unset: 40 GB); past it the gate removes the least recently used free folder.
 `sd.bulk_storage_root` names the folder for large uncommitted data, as `<root>/<repository>/` (unset: none); build output stays on the system disk. It grants nothing.
 `sd.privacy_patterns` names the privacy-pattern file `sd-docs-lint --pr-body` checks a pull request body against, one extended regular expression per line (unset: `privacy-patterns` in `$SYSTEM_TOOLS_CONFIG`, else `~/.config/system`); with no file the check is skipped with a note. It grants nothing.
-`sd-ship lane enqueue|list|cancel|move|hold|release|run|watch` keeps a serial prepare-and-merge queue per repository in a file under `sd.lane_root` (unset: `$XDG_STATE_HOME/sd/lanes`), so a queued chain outlives the session that filled it. After a merge the runner deletes the remote branch, notes the item with the command that removes the worktree, and fast-forwards the main checkout; it never removes a worktree, since removal can race a live builder.
+`sd-ship lane enqueue|list|cancel|move|hold|release|run|watch` keeps a serial prepare-and-merge queue per repository in a file under `sd.lane_root` (unset: `$XDG_STATE_HOME/sd/lanes`), so a queued chain outlives the session that filled it. Enqueue copies the body file into the lane's `bodies/` folder, so a reboot that clears `/tmp` loses no queued body; the copy goes when its entry ends. After a merge the runner deletes the remote branch, notes the item with the command that removes the worktree, and fast-forwards the main checkout; it never removes a worktree, since removal can race a live builder.
 `sd gate run -- make check` queues any command the same way; `sd gate status` shows the queue.
 Wrap a plain `make check` in any repository that way, and drop a per-repository `lockf` from lane scripts: the pool orders gates across every repository.
 A waiting gate names who holds each slot and since when.
@@ -302,7 +302,9 @@ every worker.
 From the writing checkout, `sd writing list`, `sd writing readiness --piece
 YEAR/slug`, and `sd writing stage` share the dashboard's writing controls.
 Import and cutover have separate preview and verification commands. `list`,
-`import` and `verify` refuse a checkout with no `content/` folder. Once the
+`import` and `verify` refuse a checkout with no `content/` folder.
+`sd writing promote ID` turns an idea row into a registered piece in the
+current writing checkout, from its piece template. Once the
 repository uses rows, routine stage, parking and metadata changes leave content
 files untouched. See the writing pack's `.claude/reference/database-workflow.md`
 for review evidence and recovery commands.
@@ -355,6 +357,11 @@ plain clone on a detached `HEAD` that nobody works in, at
 - **From the A/B slots:** a tree from before sd:3009 moves over on its first
   `make setup`. It replaces the `.venv` link with a directory, then removes
   `.venv-a`, `.venv-b` and `serving.lock`.
+- **From links into the working checkout:** an install from before sd:3009
+  linked the commands in `~/.local/bin` to the working checkout's `bin/`.
+  The tree's render moves each link the receipt records to the tree's `bin/`
+  (sd:3141). It still refuses a regular file, or a link the receipt does not
+  record. `--user` in any other checkout moves no link.
 - **Verify:** `--verify --json` is as strict as in any checkout. Planning
   drafts or a `HEAD` moved without a render fail the source check, which is why
   nobody works in the serving tree.
@@ -507,14 +514,17 @@ installs `sd_db` at the `platypeeps/system` ref in `.sd-system-rev`.
 `sd-ship prepare` checks the public pull request body against the privacy patterns with `sd-docs-lint --body-only`.
 WORKFLOW.md "No-CI mode" describes the gate.
 
-`main` carries classic branch protection: pull requests with no required
-approvals, the strict `sd/local-gate` check, and enforce_admins.
+`main` is protected by a repository ruleset named `main`, which targets the default
+branch and has no bypass actors. Its rules block deletion and non-fast-forward
+pushes, require a pull request with no required approvals, and require the strict
+`sd/local-gate` status check.
 `.github/sd-status.json` accepts one gap, `reviews`: the approval count is 0
 because the sole maintainer cannot approve their own pull request. `sd-ship merge`
 reads the protection object before it reads the pull request's checks and
 refuses a missing or weaker one (`bin/sd_ship_remote.py`, `gate()`). The
 object is the classic one or, when classic answers 404, the branch's active
-rulesets reduced to the same shape (`bin/sd_protection.py`). An `unprotected`
+rulesets reduced to the same shape (`bin/sd_protection.py`); this repository
+answers with the ruleset. An `unprotected`
 entry in that file is the documented way to accept a branch without
 protection; `WORKFLOW.md` describes how the merge gate honours it.
 

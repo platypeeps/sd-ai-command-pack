@@ -39,10 +39,10 @@ class TaskCLI(unittest.TestCase):
         home.start()
         self.addCleanup(home.stop)
 
-    def call(self, *arguments, code=0, cwd=None):
+    def call(self, *arguments, code=0, cwd=None, env=None):
         result = subprocess.run(
             [sys.executable, str(ROOT / "bin" / "sd"), *map(str, arguments)],
-            cwd=str(cwd or self.home), env=self.environment,
+            cwd=str(cwd or self.home), env=env or self.environment,
             capture_output=True, text=True,
         )
         self.assertEqual(result.returncode, code, result.stdout + result.stderr)
@@ -405,6 +405,31 @@ class TaskCLI(unittest.TestCase):
             "--if-revision", before["revision"], "--json").stdout)
         self.assertIsNone(cleared["item"]["branch"])
         self.assertEqual(cleared["notes"][-1]["body"], f"Updated branch by {getpass.getuser()}")
+
+    # Stands in for the library's `edit_item` and records what it was handed:
+    # the pin may predate the unpark (sd:3007), and the library's own tests
+    # cover what it does with `parked_at`.
+    RECORDING_EDIT = (
+        "import json, os\n"
+        "import sd_db.workflow as workflow\n"
+        "def edit_item(connection, item, changes, **keywords):\n"
+        "    with open(os.environ['SD_TEST_EDIT'], 'w') as handle:\n"
+        "        json.dump({'item': item, 'changes': changes, **keywords}, handle)\n"
+        "    return workflow.item_state(connection, item)\n"
+        "workflow.edit_item = edit_item\n")
+
+    def test_edit_unpark_hands_edit_item_a_parked_at_clear_and_the_revision(self):
+        """sd:3007. `--unpark` clears `parked_at`, checked against `--if-revision`."""
+        environment = self.shimmed(self.RECORDING_EDIT)
+        record = self.home / "edit.json"
+        environment["SD_TEST_EDIT"] = str(record)
+        state = json.loads(self.call("task", "add", "Parked at P4", "--json").stdout)
+        item = state["item"]["id"]
+        self.call("task", "edit", item, "--unpark", "--if-revision", state["revision"], env=environment)
+        self.assertEqual(json.loads(record.read_text()), {
+            "item": item, "changes": {"parked_at": None}, "who": getpass.getuser(),
+            "expected_revision": state["revision"]})
+        self.assertIn("--unpark", self.call("task", "edit", "--help").stdout)
 
     def test_edit_moves_a_followup_and_changes_its_details(self):
         """sd:809. `edit_item` edits a followup's title, body, priority, due

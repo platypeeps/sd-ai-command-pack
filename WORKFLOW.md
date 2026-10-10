@@ -550,18 +550,6 @@ The rules for them:
   checkout when it is on the default branch. When that checkout holds the
   running `sd-ship`, it first tries every other lane's runner lock once and
   skips if one is held; the next landing retries.
-- **A satellite gates; the hub's lane merges (sd:2704).** In a repository
-  with `repo.ci = local` and `repo.satellite_gate = accept`, a satellite runs
-  the gate and the prepare, and asks the hub's lane to merge with `sd-ship
-  lane request`. The hub runs no gate for that item: its merge compares the
-  satellite's offload receipt under the trust rule and refuses with a
-  `satellite_*` or `base_moved` code. A refusal, or a branch or base that
-  moved, hands the item back to the satellite with the next action on the
-  request row and the item. Opting in also cuts the environment of every gate
-  in the repository, on the hub too, to the variables the hub compares plus
-  `HOME`, `USER` and `PATH` (sd:2782): a check that needs a credential or
-  another variable off that list fails, so leave such a repository off. The
-  table below is who does what.
 - **Each lane runs on its lane host (sd:3003).** `repo.lane_host` names the
   machine that runs a repository's lane; NULL means the hub. Off that host,
   `sd-ship merge`, `reconcile`, `review`, `adjudicate --accept-dispositions`
@@ -569,12 +557,12 @@ The rules for them:
   `lane_elsewhere` before they read a row (sd:2795); the text names the host,
   the dashboard's Move lane control, and the verb. A host that cannot be read
   refuses with `lane_unknown` and never counts as the hub. `prepare` runs
-  there without the ship lock, and `lane list` and `cancel` still answer, so
+  everywhere without the ship lock (sd:1938), and `lane list` and `cancel` still answer, so
   an old host's pending entries can be cancelled after a move. Every machine
   runs the same scheduled `sd-ship lane run --hosted`: each lane it hosts, in
   path order, skipping one whose runner is busy. The runner reads the host
-  again before each claim, so a move stops it at the next item. `lane run
-  --satellite-only` still works until every scheduled job runs `--hosted`.
+  again before each claim, so a move stops it at the next item. A satellite
+  that hosts a lane gates and merges there; no item passes between machines.
 - **Large uncommitted data goes under the bulk root (sd:1792).** When
   `sd.bulk_storage_root` names a folder, put run outputs, logs, captures,
   agent scratch evidence and large downloaded fixtures under
@@ -583,23 +571,6 @@ The rules for them:
   on the system disk: a bulk volume may be ejected mid-build, and a volume
   mounted `noowners` reports every file as yours. Unset, nothing moves.
 - **Test one version per language, the latest stable (Python 3.14, Node 26); no version matrices.**
-
-| Step | Machine | Command | What it does |
-|---|---|---|---|
-| 1 | satellite | `git merge origin/main` on the branch, or `sd-ship prepare --catch-up` | The head contains the current base before any gate |
-| 2 | satellite | `sd gate check --base main` | Runs `sd-check`; writes the satellite's receipt and the offload receipt to the hub |
-| 3 | satellite | `sd-ship prepare --item N --title T --body-file F` | Reviews (its gate reuses step 2), pushes, binds the pull request, posts `sd/local-gate` from the offload receipt |
-| 4 | satellite | `sd-ship lane request --item N [--manual]` | Writes `lane-request:v1:<slug>:<item>` to the hub; `--manual` is needed only when `repo.runner_merge` is `manual` |
-| 5 | hub | `sd-ship lane run --hosted`, from a scheduled job | Runs each lane the hub hosts; each takes requests in before each claim; skips a lane another runner holds |
-| 6 | hub | intake, before each claim | Refuses a request the repository did not opt into, a malformed one, or one not prepared at its head; else queues a `gate: satellite` entry and writes `queued` |
-| 7 | hub | the entry | Fetches the branch and the base; hands back on `head_moved` or `base_moved`; no prepare, no catch-up, no speculative gate; then `sd-ship merge --satellite-gate` |
-| 8 | hub | `sd-ship merge --satellite-gate` | Accepts the offload receipt under the trust rule, posts no status, merges |
-| 9 | hub | landing | Deletes `origin/<branch>` with a lease on the merged head; writes the outcome to the request row; notes the item |
-
-Step 7 merges when `repo.runner_merge` is `auto` or step 4 passed `--manual`.
-Otherwise, or when the setting cannot be read, it stops before the merge as
-`prepared`, as a hub entry does; the request row's `reason` and `next_action`
-say why and how to merge.
 
 A session writes on its own branch in its own worktree, one writer per
 worktree: `sd-plan --worktree` puts a new branch in a worktree of its own, and
@@ -622,6 +593,7 @@ the block; the file is untracked by construction.
 | `guest` | nowhere in the repository; both checks below refuse them | the small-change path to pull-request-ready; no posts, no labels |
 
 `minimal` holds no work items by agreement, not by a check.
+`sd-docs-lint` skips its `docs/work` rules there: a local folder and the pages that name it are not linted.
 `sd_lib.guest_artifact_refusal` and `sd-ship`'s push check refuse
 `docs/work/`, `docs/spec/` and `docs/decisions/` in `guest` only, so a
 `minimal` repository can commit and push them unrefused. `sd-ship` also adds

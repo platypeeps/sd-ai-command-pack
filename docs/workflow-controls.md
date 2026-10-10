@@ -18,6 +18,7 @@ progress belongs to the database.
 | Prioritize, schedule, add details | Item screen, or `sd task edit ID` |
 | Move a task or followup to the right checkout | `sd task edit ID --belongs-to PATH` — `.` names the checkout enclosing cwd; `--no-repo` leaves it belonging to none, as it does on `add`. An unregistered path is refused, and the move is recorded as an item note. The move prints the checkout it landed in; ordinary output names a row's checkout only when it is not the one you are standing in |
 | Clear a stale branch name | `sd task edit ID --clear-branch` — sets the row's branch to none and records an "Updated branch" note. It sets no branch; `sd work register` records one from git |
+| Bring back a parked item | The dashboard's Unpark control, or `sd task edit ID --unpark` — clears the park the nightly prune set and records an "Unparked" note. A writing piece revives with `sd writing park --revive` |
 | Reclassify an item filed as the wrong kind | A task's item screen, or `sd task edit ID --kind KIND` — the kinds are `sd_db.workflow.HAND_KINDS`, the same five `sd task add --kind` offers. A move to `personal`, `work-idea` or `personal-idea` carries no repository, so a row that has one needs `--no-repo` in the same command. A `followup` keeps its repository (sd:809). `edit_item` refuses a produced row (a contribution or skill-review task), an `idea` that is a writing piece, and a row with a queued, running or ending assignment, and records every change as a "Changed kind" note naming who made it |
 | Change task status | Item screen, or `sd task status ID STATUS` |
 | Close a task or followup nobody will do | `sd task cancel ID --reason TEXT` — `done` with a `cancelled` receipt, as `sd work cancel` writes; a finding carried to the row reopens |
@@ -28,6 +29,7 @@ progress belongs to the database.
 | Cancel repository work | Item screen, or `sd work cancel ID --reason TEXT` |
 | Record verified code delivery | `sd work deliver ID FULL_COMMIT_SHA` |
 | Close a work item, task or followup whose merge carried `Item:` without `Delivers:` | `sd work deliver ID FULL_COMMIT_SHA --associated --reason TEXT` |
+| Promote an idea to a registered writing piece | `sd writing promote ID [--slug SLUG]` — the row keeps its id and becomes piece `YEAR/slug`, scaffolded from the repository's `templates/piece-template.md`; the writing checkout it runs from is the target, and elsewhere the one repository that registers pieces is |
 | Move a writing piece through its stages | Writing screen, or `sd writing stage --piece YEAR/slug --stage STAGE` |
 | Inspect current writing evidence | Item screen, or `sd writing readiness --piece YEAR/slug` |
 | Park or revive a piece | Item screen, or `sd writing park --piece YEAR/slug [--revive]` |

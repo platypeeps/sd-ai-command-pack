@@ -42,6 +42,7 @@ so `--home` and `--bin-dir` reach the tree's installer and the render reads the 
 | Roll back in the tree to an older commit | `HEAD`, `.venv`, renders | that commit's `--serve` refuses in the tree, or it has none | `SERVE=no` skips it; the commit's own `--user` renders; `make setup` in the working checkout returns | `test_the_documented_rollback_and_update_cross_a_commit_from_before_the_plain_clone` |
 | `make setup` in a working checkout on a pre-sd:3009 commit | nothing | its `--serve` calls the tree's `--pull`, which refuses | update the working checkout, then `make setup` | `test_pull_refuses_a_detached_checkout` |
 | Retire the A/B slots | `.venv-a`, `.venv-b`, `serving.lock` | `.venv` is still a link | nothing removed; the next `make setup` retires them | `test_serve_in_a_tree_the_ab_slots_served_retires_them` |
+| Move the links an earlier install recorded, such as into the working checkout (sd:3141) | links in the bin directory | a link cannot move, or a later step fails before the receipt | every moved link points back at its recorded target and the old receipt holds; stopped after the move, the next render finds the links ours | `test_a_failed_takeover_points_the_moved_links_back`, `test_a_takeover_stopped_before_the_receipt_finishes_on_the_next_run` |
 | Links outside the bin directory, such as `~/bin/common` | nothing | they shadow the tree's commands | left alone; `--status` and `--verify` report the shadow | `test_links_into_the_working_checkout_outside_the_bin_dir_are_left_and_reported` |
 
 ## What it gives up
@@ -69,3 +70,4 @@ and at the rendered commit.
   cleanup and the fleet views would see it as work.
 - A serving branch: the tree would follow a moving name, not a commit.
 - The sd:1118 slots, lock and receipt-driven link moves: sd:3009 deleted them.
+  sd:3141 brought the link moves back for the tree alone, so its render takes over links an earlier install made.
