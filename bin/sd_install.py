@@ -44,7 +44,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Iterable
-from contextlib import ExitStack, contextmanager, nullcontext
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -2964,7 +2964,9 @@ def cmd_serve(ctx: Context, out) -> int:
     A lane runs `sd-ship` from the tree, so a move under a running prepare
     changes its code between steps (sd:3273). The move holds every lane's
     runner lock, trying each once as a landing's fast-forward does; a held
-    one leaves the tree where it is, and the next `make setup` moves it.
+    one leaves the tree where it is, and the next `make setup` moves it. It
+    holds the lane root too, so a lane that starts during the move runs
+    nothing; a root it cannot lock moves nothing.
     """
     tree = serving_tree(ctx.home, ctx.environ)
     if tree.resolve() == ctx.checkout.resolve():
@@ -2985,7 +2987,12 @@ def cmd_serve(ctx: Context, out) -> int:
     except lane.sd_lib.ConfigError as error:
         print(f"error: {tree} not moved: cannot tell whether a lane is running from it ({error})", file=out)
         return 1
-    with lane.other_lanes_idle(lanes) if lanes is not None else nullcontext() as busy:
+    with ExitStack() as held:
+        try:
+            busy = held.enter_context(lane.other_lanes_idle(lanes)) if lanes is not None else None
+        except OSError as error:
+            print(f"error: {tree} not moved: cannot tell whether a lane is running from it ({error})", file=out)
+            return 1
         if busy:
             print(f"{tree} not moved: the {busy} lane is running from it; run `make setup` again once it is idle",
                   file=out)

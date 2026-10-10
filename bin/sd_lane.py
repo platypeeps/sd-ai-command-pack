@@ -88,7 +88,9 @@ already removed (sd:3006) is noted as such, from the lane's own checkout
 checkout. When that checkout holds the running `sd-ship`, as the pack's does
 for every lane, it tries each other lane's runner lock once and skips if one
 is held: a lane mid-prepare must not have its tools change under it, and no
-lane waits on another's lock. The next landing retries.
+lane waits on another's lock. The next landing retries. It holds the lane
+root folder's lock meanwhile, and a runner that starts then runs nothing
+(sd:3273): a lane with no runner lock yet has none to try.
 
 Only a repository's lane host drains its queue (sd:3003): the machine
 `repo.lane_host` names, or the hub when it is NULL. Elsewhere `run`,
@@ -702,13 +704,30 @@ def clean_up(entry: dict[str, Any], head: str | None, main: pathlib.Path, branch
 
 
 @contextlib.contextmanager
+def lane_root_lock(lanes: pathlib.Path, mode: int) -> Iterator[None]:
+    """`flock` the lane root folder itself, made first, so no lane can start outside the lock (sd:3273)."""
+    lanes.mkdir(parents=True, exist_ok=True)
+    handle = os.open(lanes, os.O_RDONLY)
+    try:
+        fcntl.flock(handle, mode)
+        yield
+    finally:
+        os.close(handle)
+
+
+@contextlib.contextmanager
 def other_lanes_idle(lanes: pathlib.Path, own: pathlib.Path | None = None) -> Iterator[str | None]:
     """Hold every other lane's runner lock for one step, trying each once; yields the busy lane, or None.
 
     `own` is the caller's lock, or None for a caller that is no lane: the
-    installer's move of the serving tree (sd:3273).
+    installer's move of the serving tree (sd:3273). The scan finds only the
+    runner locks that exist, so it holds the lane root too: a runner checks
+    that root once it holds its own lock (`run_lane`), so a lane that starts
+    after the scan runs nothing. A runner holds the root only for that check
+    and waits on nothing meanwhile, so the wait here is at most that check.
     """
     with contextlib.ExitStack() as held:
+        held.enter_context(lane_root_lock(lanes, fcntl.LOCK_EX))
         for lock in sorted(lanes.glob("*/lane/queue/runner.lock")):
             if own is not None and lock.resolve() == own.resolve():
                 continue
@@ -940,7 +959,9 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
     that (sd:3003). It reads the host again before each claim, under the
     runner lock: after a move it finishes the running entry, claims no next
     one, and says why in `stopped`. After a hub fault it puts the entry back
-    and stops the same way (`requeue`, sd:3239).
+    and stops the same way (`requeue`, sd:3239). With its lock held it tries
+    the lane root once: `other_lanes_idle` holds that root while the serving
+    tree or the tools checkout moves, and then the runner runs nothing (sd:3273).
     """
     refuse_elsewhere(root)
     path = queue_path(root, environ)
@@ -951,6 +972,11 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return {"ran": [], "busy": f"another runner holds {own_lock}"}
+        try:
+            with lane_root_lock(lane_root(environ), fcntl.LOCK_SH | fcntl.LOCK_NB):
+                pass
+        except BlockingIOError:
+            return {"ran": [], "busy": "the tools this lane runs are moving; the next run retries"}
         reclaimed = update(path, reclaim_dead)
         ran: list[dict[str, Any]] = []
         answer: dict[str, Any] = {"ran": ran, **({"reclaimed": reclaimed} if reclaimed else {})}

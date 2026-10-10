@@ -2406,6 +2406,17 @@ class ServeTests(InstallerHarness):
         self.assertIn("cannot tell whether a lane is running", output)
         self.assertEqual(self.git(self.tree, "rev-parse", "HEAD"), self.merged)
 
+    def test_a_lane_root_that_cannot_be_locked_moves_nothing(self):
+        """sd:3273 review 1: the move holds the lane root; a root it cannot open is no idle machine."""
+        self.assertEqual(self.serve()[0], 0)
+        self.merge("two")
+        lanes = self.home / "lanes"
+        lanes.write_text("not a folder\n", encoding="utf-8")
+        rc, output = self.serve(self.context(SD_LANE_ROOT=str(lanes)))
+        self.assertEqual(rc, 1, output)
+        self.assertIn("cannot tell whether a lane is running", output)
+        self.assertEqual(self.git(self.tree, "rev-parse", "HEAD"), self.merged)
+
     def readme_command(self, step: str, marker: str) -> str:
         bullet = (REPO_ROOT / "README.md").read_text(encoding="utf-8").split(f"- **{step}:**", 1)[1].split("\n- ", 1)[0]
         return next(span for span in " ".join(bullet.split()).split("`") if marker in span)
