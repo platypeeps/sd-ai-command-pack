@@ -168,7 +168,10 @@ D2: inside `refresh`'s existing drain, when `lib/sd_db/schema.py` changed betwee
 1. Stop the dashboard, the runner and `sd-serve` (launchd `bootout`).
 2. `bin/sd-db backup`. A failure refuses with nothing moved.
 3. Move system, then the pack; run `make setup`.
-4. `bin/sd-db migrate`. A failure moves the pack back to the old sha (the follow rollback, sd:3218).
+4. `bin/sd-db migrate`. Each migration is its own transaction, so a failure can leave earlier ones committed.
+   On failure, read the database's schema version. If it is still the old version, move the pack back to the old sha (the follow rollback, sd:3218).
+   If it moved, first restore the step 2 backup with `bin/sd-db restore`, which proves the copy, then move the pack back. Old code never starts on a newer database.
+   If that restore fails, leave the services stopped, push no `hub-pin`, and report both errors: the operator decides.
 5. Start the three services. A library change without a schema change restarts them too:
    the running `sd-serve` refuses sessions with `HubRestartNeeded` once its files change.
 6. Push `hub-pin` only after step 5. Satellites follow only a migrated hub.
@@ -188,7 +191,9 @@ D2: inside `refresh`'s existing drain, when `lib/sd_db/schema.py` changed betwee
 | 3 merge | `.venv` has no `sd_db` | a missed caller imports the venv copy | it fails with `ImportError`, not stale code; fix the caller | new: after `make setup`, `.venv/bin/python -I -c 'import sd_db'` fails |
 | 3 older state | a satellite venv copy from self-install | stale copy imported | follow's `make setup` uninstalls it | same test, run against a venv with a planted copy |
 | migrate (D2) | services stopped | backup fails | refuse, start services, nothing moved | new `refresh` test with a failing backup double |
-| migrate (D2) | pack moved, schema new | migrate fails | each migration is one transaction; move the pack back; start services; no `hub-pin` push | new test: failing migrate double leaves the old sha and no tag push |
+| migrate (D2) | pack moved, schema unchanged | the first pending migration fails | its transaction rolls back; move the pack back; start services; no `hub-pin` push | new `refresh` test against a real database: a first migration that fails leaves the old version, the old sha and no tag push |
+| migrate (D2) | pack moved, schema partly moved | a later migration fails after an earlier one committed | restore the step 2 backup, then move the pack back; start services; no `hub-pin` push | new `refresh` test against a real database with two real migrations, the second failing: the version reads the old one after recovery, the restore row names the step 2 backup, old code opens it |
+| migrate (D2) | schema partly moved, pack moved | the restore also fails | services stay stopped; no `hub-pin` push; both errors reported; the operator decides | same test with a failing restore: services stay down and the report names both errors |
 | migrate (D2) | migrated, services down | `refresh` killed before start | the next `refresh` starts the services whenever it ends, moved or not | new test: second run with checkouts at target starts services |
 | rollback | revert step 3 | `.venv` copy returns | `make setup` installs from `lib/` again | none new: step 1 tests cover that path |
 | rollback | revert step 2 after a later schema bump | system's frozen copy is older than the database | `SchemaTooNew` refuses; nothing is written | none new: existing `SchemaTooNew` tests; revert in reverse order only |
