@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import importlib.util
 import json
 import pathlib
 import re
@@ -55,6 +56,28 @@ class WorkflowState(unittest.TestCase):
     def test_runtime_error_and_unclassified_policy_error_remain_failures(self):
         self.assertEqual(failure("prepare", OSError("unavailable"))["workflow"]["state"], "retryable_failure")
         self.assertEqual(failure("merge", ValueError("bad policy"))["workflow"]["state"], "policy_block")
+
+    def test_a_hub_fault_is_retryable_and_an_unknown_outcome_is_not(self):
+        """sd:3239. A hub upgrade broke a satellite's session mid-prepare, and that read as a policy block."""
+        def sd_db_error(name, module="sd_db.remote"):
+            base = type("SdDbError", (Exception,), {"__module__": "sd_db.errors"})
+            return type(name, (base,), {"__module__": module})("[Errno 32] Broken pipe")
+        for error in (sd_db_error("HubUnreachable"), sd_db_error("TransactionLost"), sd_db_error("BuildMismatch"),
+                      sd_db_error("HubRestartNeeded"), sd_db_error("SchemaTooNew", "sd_db.errors")):
+            with self.subTest(error=type(error).__name__):
+                result = failure("prepare", error)["workflow"]
+                self.assertEqual((result["state"], result["blocker"]["code"], result["blocker"]["retryable"]),
+                                 ("retryable_failure", "hub_unavailable", True))
+        # Its write may have committed, and a class of that name outside sd_db is not the hub's.
+        for error in (sd_db_error("UnknownOutcome"), sd_db_error("SdDbError"), sd_db_error("HubUnreachable", "other")):
+            with self.subTest(error=f"{type(error).__module__}.{type(error).__name__}"):
+                self.assertEqual(failure("merge", error)["workflow"]["state"], "policy_block")
+        # Each name is one the installed library raises, so a rename there fails here.
+        if importlib.util.find_spec("sd_db") is not None:
+            remote, errors = importlib.import_module("sd_db.remote"), importlib.import_module("sd_db.errors")
+            self.assertEqual({name for name in workflow.HUB_FAULTS if not hasattr(remote, name) and not hasattr(errors, name)},
+                             set())
+            self.assertTrue(workflow.is_hub_fault(remote.HubUnreachable("hub.example.test", 8769, "[Errno 32] Broken pipe")))
 
     def test_success_adds_state_without_changing_phase_or_identity(self):
         runtime = SimpleNamespace(clock=lambda: "now")
