@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import nullcontext, redirect_stdout
+from contextlib import nullcontext, redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -93,6 +93,7 @@ class WritingPromote(unittest.TestCase):
             patch.object(cli.sd_handoff_rows, "library", return_value=sd_db),
             patch.object(cli.sd_handoff_rows, "connect", self.connect),
             patch.object(cli.sd_lib, "repo_root", return_value=self.repo),
+            patch.object(cli.sd_lib, "stored_repo", side_effect=str),
             patch.object(cli.getpass, "getuser", return_value="operator"),
         ):
             patcher.start()
@@ -107,29 +108,43 @@ class WritingPromote(unittest.TestCase):
             code = arguments.handler(arguments)
         return code, json.loads(output.getvalue())
 
-    def test_promote_names_the_idea_and_the_operator(self):
-        """No slug or repository: the library picks both, and refuses an ambiguous target."""
+    def test_a_writing_checkout_is_the_target(self):
+        """The current checkout names the repository, never a flag (R10-D6)."""
+        (self.repo / "content").mkdir()
         self.assertEqual((0, {"item": {"piece": "2026/a"}}), self.call("12"))
-        self.promoted.assert_called_once_with(self.connection, 12, slug=None, repo=None, who="operator",
-                                              expected_revision=None)
+        self.promoted.assert_called_once_with(self.connection, 12, slug=None, repo=str(self.repo),
+                                              who="operator", expected_revision=None)
         self.connect.assert_called_once_with(sd_db, write=True)
         self.connection.close.assert_called_once()
 
-    def test_promote_passes_slug_repository_and_revision(self):
-        self.call("12", "--slug", "a", "--repo", "~/repos/writing", "--if-revision", "r1")
-        self.promoted.assert_called_once_with(self.connection, 12, slug="a", repo="~/repos/writing",
+    def test_another_checkout_lets_the_library_pick_the_target(self):
+        """With no pieces here, the library picks the one repository that registers them."""
+        self.assertEqual(0, self.call("12")[0])
+        self.promoted.assert_called_once_with(self.connection, 12, slug=None, repo=None, who="operator",
+                                              expected_revision=None)
+
+    def test_promote_passes_slug_and_revision(self):
+        (self.repo / "content-parked").mkdir()
+        self.call("12", "--slug", "a", "--if-revision", "r1")
+        self.promoted.assert_called_once_with(self.connection, 12, slug="a", repo=str(self.repo),
                                               who="operator", expected_revision="r1")
 
-    def test_promote_runs_outside_a_content_checkout(self):
-        """The target is a repository the library names, not the checkout's own pieces."""
-        self.assertFalse((self.repo / "content").exists())
-        self.assertEqual(0, self.call("12")[0])
+    def test_promote_takes_no_repository_flag(self):
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.parser.parse_args(["writing", "promote", "12", "--repo", "~/repos/writing"])
 
     def test_a_library_refusal_is_a_work_refusal(self):
         self.promoted.side_effect = sd_db.SdDbError("several repositories register pieces; name the target repository")
-        with self.assertRaisesRegex(cli.WorkRefusal, "name the target repository"):
+        with self.assertRaisesRegex(cli.WorkRefusal, "name the target repository; run sd writing promote "
+                                                     "from that repository's checkout"):
             self.call("12")
         self.connection.close.assert_called_once()
+
+    def test_a_refusal_in_a_writing_checkout_names_no_other_checkout(self):
+        (self.repo / "content").mkdir()
+        self.promoted.side_effect = sd_db.SdDbError("item 12 is not an idea")
+        with self.assertRaisesRegex(cli.WorkRefusal, r"^item 12 is not an idea$"):
+            self.call("12")
 
     def test_an_older_library_refuses_by_name(self):
         with patch.object(writing, "promote", None):
@@ -305,9 +320,10 @@ class WritingFromWorktree(unittest.TestCase):
 
     def test_promote_scaffolds_in_the_worktree(self):
         """Promote writes the new piece file, so a worktree's own copy takes it (sd:1994, sd:2024)."""
+        (self.linked / "content").mkdir()
         with patch.object(writing, "promote", return_value={"ok": True}) as promoted:
             self.assertEqual(self.run_in(self.linked, "promote", "12"), 0)
-        promoted.assert_called_once()
+        self.assertEqual(promoted.call_args.kwargs["repo"], str(self.main))
         self.checkout.assert_called_once_with(str(self.main), self.linked)
 
     def test_an_older_library_refuses_a_worktree_by_name(self):

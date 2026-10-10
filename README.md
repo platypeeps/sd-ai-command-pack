@@ -303,8 +303,8 @@ From the writing checkout, `sd writing list`, `sd writing readiness --piece
 YEAR/slug`, and `sd writing stage` share the dashboard's writing controls.
 Import and cutover have separate preview and verification commands. `list`,
 `import` and `verify` refuse a checkout with no `content/` folder.
-`sd writing promote ID` turns an idea row into a registered piece and writes
-its `index.md` from the writing repository's piece template. Once the
+`sd writing promote ID` turns an idea row into a registered piece in the
+current writing checkout, from its piece template. Once the
 repository uses rows, routine stage, parking and metadata changes leave content
 files untouched. See the writing pack's `.claude/reference/database-workflow.md`
 for review evidence and recovery commands.

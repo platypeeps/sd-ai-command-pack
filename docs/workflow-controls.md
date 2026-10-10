@@ -29,7 +29,7 @@ progress belongs to the database.
 | Cancel repository work | Item screen, or `sd work cancel ID --reason TEXT` |
 | Record verified code delivery | `sd work deliver ID FULL_COMMIT_SHA` |
 | Close a work item, task or followup whose merge carried `Item:` without `Delivers:` | `sd work deliver ID FULL_COMMIT_SHA --associated --reason TEXT` |
-| Promote an idea to a registered writing piece | `sd writing promote ID [--slug SLUG] [--repo PATH]` — the row keeps its id and becomes piece `YEAR/slug`, scaffolded from the repository's `templates/piece-template.md`; `--repo` is needed when several repositories register pieces |
+| Promote an idea to a registered writing piece | `sd writing promote ID [--slug SLUG]` — the row keeps its id and becomes piece `YEAR/slug`, scaffolded from the repository's `templates/piece-template.md`; the writing checkout it runs from is the target, and elsewhere the one repository that registers pieces is |
 | Move a writing piece through its stages | Writing screen, or `sd writing stage --piece YEAR/slug --stage STAGE` |
 | Inspect current writing evidence | Item screen, or `sd writing readiness --piece YEAR/slug` |
 | Park or revive a piece | Item screen, or `sd writing park --piece YEAR/slug [--revive]` |

@@ -46,7 +46,8 @@ def run(args: argparse.Namespace) -> int:
     promote: Any = getattr(writing, "promote", None)
     if action == "promote" and promote is None:
         raise WorkRefusal("install the current system/local-sd-db build to promote an idea")
-    if action in CONTENT_ONLY and not any((root / name).is_dir() for name in ("content", "content-parked")):
+    pieces = any((root / name).is_dir() for name in ("content", "content-parked"))
+    if action in CONTENT_ONLY and not pieces:
         # Another checkout has no pieces, so these would answer on zero files and zero rows (sd:1660, sd:1803).
         raise WorkRefusal(f"{root} holds no content/ folder, so there is nothing to {action}; "
                           f"run sd writing {action} from the writing Git checkout")
@@ -78,9 +79,15 @@ def run(args: argparse.Namespace) -> int:
         elif action == "register":
             result = writing.import_piece(connection, repo, args.piece, path=args.path, who=who)
         elif action == "promote":
-            # The library picks the target repository, so the checkout need hold no pieces (sd:1994).
-            result = promote(connection, args.item, slug=args.slug, repo=args.repo, who=who,
-                             expected_revision=revision)
+            # A writing checkout is the target; from any other the library picks the one
+            # repository that registers pieces and refuses several (sd:1994, R10-D6).
+            try:
+                result = promote(connection, args.item, slug=args.slug, repo=repo if pieces else None, who=who,
+                                 expected_revision=revision)
+            except sd_db.SdDbError as error:
+                if pieces:
+                    raise
+                raise WorkRefusal(f"{error}; run sd writing promote from that repository's checkout") from error
         else:
             row = writing.piece_for_key(connection, repo, args.piece)
             if row is None:
@@ -198,7 +205,6 @@ def register(groups: Any) -> None:
         elif action == "promote":
             parser.add_argument("item", type=int, help="the idea row to register as a piece")
             parser.add_argument("--slug", help="piece slug; default from the idea title")
-            parser.add_argument("--repo", help="target repository; needed when several register pieces")
         elif action == "stage":
             parser.add_argument("--stage", required=True)
             parser.add_argument("--correct", action="store_true")
