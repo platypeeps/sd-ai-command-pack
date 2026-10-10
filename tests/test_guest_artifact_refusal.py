@@ -33,6 +33,8 @@ if str(REPO_ROOT / "bin") not in sys.path:
 
 import sd_lib  # noqa: E402
 
+from tests import row_seed  # noqa: E402
+
 VIEWER = ({"login": "sven"}, "")
 
 #: A `gh api` that answers from a fixture: the transport is real, the network
@@ -128,13 +130,15 @@ class Fixture(unittest.TestCase):
         (item / "prd.md").write_text(
             "---\n"
             "title: A thing\n"
-            "status: planning\n"
             "created: 2026-01-01\n"
-            "branch: topic\n"
             "---\n"
             "\n## Requirements\n\n- [ ] one\n",
             encoding="utf-8",
         )
+        # The status and branch are the row's; `run_review` reads this home.
+        home = self.tmp / "home"
+        home.mkdir(exist_ok=True)
+        row_seed.seed_row(home, root, item, "planning", branch="topic")
         return item
 
 

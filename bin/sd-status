@@ -129,7 +129,6 @@ def pack_banner() -> dict[str, Any]:
 
 
 def work_section(root: pathlib.Path) -> dict[str, Any]:
-    source, _ = sd_lib.status_marker(root)
     items = sd_lib.work_items(root)
     counts: dict[str, int] = {}
     listed = []
@@ -153,7 +152,6 @@ def work_section(root: pathlib.Path) -> dict[str, Any]:
         )
     active = [entry for entry in listed if not entry["archived"]]
     return {
-        "status_source": source,
         "total": len(listed),
         "active": len(active),
         "counts": counts,
@@ -1445,7 +1443,7 @@ class Class(NamedTuple):
 #: key)`, for the reason `action_id` states.
 CLASSES = (
     Class("branch-already-merged", "w", True, 10, "work item + git",
-          "an open item with delivery evidence, or a landed branch in file mode"),
+          "an open item with delivery evidence"),
     Class("in-progress-without-branch", "w", True, 10, "work item",
           "status: in_progress with no branch: field to work on"),
     Class("branch-unresolvable", "w", True, 10, "work item + git",
@@ -1651,19 +1649,11 @@ def actionable_inventory(
     # variable that is absent on almost every machine.
     env = environ if environ is not None else dict(os.environ)
     work = sections.get("work") or {}
-    source = work.get("status_source")
-    if source is None:
-        source, _ = sd_lib.status_marker(root)
     pulls = sections.get("pull_requests") or {}
     protection = sections.get("protection") or {}
     unchecked: dict[str, str] = {}
     rows: list[dict[str, Any]] = []
-    rows += _work_rows(
-        root, work, day,
-        str(protection.get("default_branch") or "main"),
-        merged_pulls(root, protection) if source == sd_lib.FROM_FILE else Merged(None, ""),
-        unchecked,
-    )
+    rows += _work_rows(root, work, day)
     rows += _pull_rows(root, pulls, protection)
     rows += _protection_rows(protection)
     rows += _issue_rows(sections.get("issues") or {})
@@ -1841,134 +1831,6 @@ def _branch_names(root: pathlib.Path) -> set[str] | None:
     return names
 
 
-#: `branch_landed`'s two positive words. `sd_lib.Answer` carries them because
-#: this is the same never-a-bare-boolean contract `delivered` has -- a word plus
-#: the repair an `unknown` asks for -- and `sd_lib.UNKNOWN` is the third. The
-#: words differ from `delivered`'s `yes`/`no` because the question does: "did
-#: this branch land" answered `yes` reads as agreement rather than as a finding.
-LANDED, NOT_LANDED = "landed", "not landed"
-
-#: `gh pr list --state all` capped, so the cap is a decision rather than
-#: `gh`'s own undocumented default of 30 -- which would have stopped answering
-#: at the thirty-first pull request without saying so. An item whose branch
-#: has fallen 200 pull requests behind is not the case this check exists for.
-MERGED_LIMIT = 200
-
-#: The tier 2 query, in one place, as the argument vector that actually runs.
-#: `design.md:119` writes it out; the four fields after `number` are the three
-#: tier 2 compares plus the branch it matches on.
-GH_MERGED_ARGS = [
-    "pr", "list", "--state", "all", "--limit", str(MERGED_LIMIT),
-    "--json", "number,headRefName,headRefOid,baseRefName,mergedAt",
-]
-
-#: The same call as a sentence, **derived** from the vector rather than typed
-#: beside it. A repair is a command the reader is being told to run, so the two
-#: drifting apart hands out a command that was never the one that failed --
-#: the defect this file already fixed once, in `delivered`'s repairs.
-GH_MERGED_QUERY = "gh " + " ".join(GH_MERGED_ARGS)
-
-
-class Merged(NamedTuple):
-    """Tier 2's corpus, and the sentence saying why it is absent when it is."""
-
-    pulls: list[dict[str, Any]] | None
-    reason: str
-
-
-def merged_pulls(root: pathlib.Path, protection: dict[str, Any]) -> Merged:
-    """Every pull request this repository has, or `None` and why not.
-
-    Fetched once per run whether or not tier 1 has already answered. Deferring
-    it until a tier 1 miss would save a call on a clean checkout and cost the
-    report its determinism: whether GitHub gets asked would then depend on
-    which items happen to be open, so two runs a minute apart could say
-    `clear` and `unchecked` with nothing having changed.
-
-    The reason is `probe`'s when GitHub is unreachable at all -- no `gh`, no
-    remote, not authenticated -- and `gh`'s own first line otherwise, because
-    "I could not look" is only actionable with the reason attached.
-    """
-    if not protection.get("available"):
-        return Merged(None, str(protection.get("reason") or "GitHub is unreachable"))
-    payload, error = pr_state.gh_json(GH_MERGED_ARGS, root)
-    if not isinstance(payload, list):
-        return Merged(None, error or f"`{GH_MERGED_QUERY}` returned no list")
-    return Merged([entry for entry in payload if isinstance(entry, dict)], "")
-
-
-def branch_landed(
-    root: pathlib.Path,
-    branch: str,
-    default: str,
-    pulls: list[dict[str, Any]] | None,
-) -> sd_lib.Answer:
-    """Whether `branch`'s work is in `default`: two tiers, three answers.
-
-    **Tier 1 is offline and only ever produces positive evidence.** Every path
-    the branch touched holds, in the default branch, exactly what the branch
-    holds. That is what landing means after a squash merge -- which is how this
-    repository merges, and why the ancestor test, run first as a cheap
-    short-circuit, resolves none of its five merged branches. `--no-renames` on
-    both calls is load-bearing (C-12): with rename detection on, a branch
-    renaming `A` to `B` reports `B` alone, so `A`'s removal is invisible on one
-    side of the comparison and unlanded work is called landed.
-
-    **A tier 1 negative is not an answer** -- 3 of 5 measured here, because
-    `main` has since edited paths those branches touched -- so tier 2 asks the
-    pull requests, and accepts one only when `mergedAt`, `baseRefName` and
-    `headRefOid` all agree (C-19). `headRefName` alone says a branch of this
-    name was merged once, which is not the question: a branch extended after
-    its merge still matches that old row, and tier 1's correct not-landed would
-    be overruled by a stale fact.
-
-    **`pulls` of `None` means the lookup could not be made**, and is the whole
-    of the difference between the two negatives. A branch nothing merged is
-    `not landed`; a branch nobody could ask about is `unknown`, never `clear`.
-
-    Both repairs name the exact call that did not answer, as `delivered`'s do:
-    a reader who runs the string gets the failure itself rather than a nearby
-    command that fails differently. Found in review, where the first draft
-    named `git rev-parse <branch>` for a probe that is `--verify` on a
-    `^{commit}` peel, and `gh pr list --state all` for a query useless without
-    the four fields tier 2 reads.
-    """
-    resolved = tip = ""
-    for candidate in (f"origin/{branch}", branch):
-        found = sd_lib.git_output(["rev-parse", "--verify", f"{candidate}^{{commit}}"], root)
-        if found:
-            resolved, tip = candidate, found
-            break
-    if not tip:
-        return sd_lib.Answer(sd_lib.UNKNOWN, f"git rev-parse --verify '{branch}^{{commit}}'")
-    # `--is-ancestor` answers by exit status and prints nothing, so `""` is
-    # yes and `None` is no -- the one place an empty string is the signal.
-    if sd_lib.git_output(["merge-base", "--is-ancestor", resolved, default], root) is not None:
-        return sd_lib.Answer(LANDED)
-    base = sd_lib.git_output(["merge-base", default, resolved], root)
-    if base:
-        touched = _changed(root, base, resolved)
-        if touched and not (touched & _changed(root, default, resolved)):
-            return sd_lib.Answer(LANDED)
-    if pulls is None:
-        return sd_lib.Answer(sd_lib.UNKNOWN, GH_MERGED_QUERY)
-    for pull in pulls:
-        if (str(pull.get("headRefName") or "") == branch
-                and pull.get("mergedAt")
-                and str(pull.get("baseRefName") or "") == default
-                and str(pull.get("headRefOid") or "") == tip):
-            return sd_lib.Answer(LANDED)
-    return sd_lib.Answer(NOT_LANDED)
-
-
-def _changed(root: pathlib.Path, left: str, right: str) -> set[str]:
-    """Paths differing between two revisions, renames off for C-12's reason."""
-    listing = sd_lib.git_output(
-        ["diff", "--no-renames", "--name-only", left, right], root
-    )
-    return {path for path in (listing or "").split("\n") if path}
-
-
 def _closing_items(root: pathlib.Path, refs: tuple[str, ...]) -> set[str]:
     """Read each default ref once; the shared trailer parser decides closure."""
     closed: set[str] = set()
@@ -1994,9 +1856,6 @@ def _work_rows(
     root: pathlib.Path,
     work: dict[str, Any],
     today: datetime.date,
-    default: str,
-    merged: Merged,
-    unchecked: dict[str, str],
 ) -> list[dict[str, Any]]:
     """The work-item contradictions, one pass over the items already collected.
 
@@ -2004,30 +1863,16 @@ def _work_rows(
     is closed by where it lives, and parked is a disposition rather than an
     open thread. Both exclusions are printed, in `EXCLUDED`.
 
-    In row mode a slice merge says nothing about completion. Only an explicit
-    closing trailer in local default-branch history can contradict an open row.
+    A slice merge says nothing about completion. Only an explicit closing
+    trailer in local default-branch history can contradict an open row.
     No fetch or GitHub lookup is needed to find that positive evidence; the row remains
     authoritative when local history has no closing trailer.
-
-    In file mode, `branch-already-merged` is asked only of a branch that
-    resolves, in the `elif` below and not a second `if`. A `branch:` naming no ref is already a
-    finding of its own class, and `branch_landed` would answer `unknown` on
-    it for a reason that has nothing to do with whether GitHub could be read
-    -- marking the whole class unchecked, on every run, because one item
-    carries a stale field. Unchecked has to mean *I could not look*, or the
-    banner's third state degrades into a second way of saying "something is
-    wrong over there".
     """
-    source = work.get("status_source")
-    if source is None:
-        source, _ = sd_lib.status_marker(root)
-    closing_refs: tuple[str, ...] = ()
     closing_items: set[str] | None = None
-    if source == sd_lib.FROM_ROW:
-        remote, local_default = sd_lib.upstream(root)
-        closing_refs = (local_default,)
-        if remote:
-            closing_refs += (f"{remote}/{local_default}",)
+    remote, local_default = sd_lib.upstream(root)
+    closing_refs: tuple[str, ...] = (local_default,)
+    if remote:
+        closing_refs += (f"{remote}/{local_default}",)
     heads = _branch_names(root)
     # Once per run, not once per item: `touched` is one `git log` over the item
     # tree, and asking it per item would put a subprocess behind every row.
@@ -2044,22 +1889,10 @@ def _work_rows(
                 "; ".join(entry.get("inconsistencies") or [])
                 or f"{where} yields no status this reader recognises"
             )
-            if source == sd_lib.FROM_ROW:
-                repair = (
-                    f"resolve the status-source error for {item}: {detail}; "
-                    "then rerun sd-status"
-                )
-            elif source == sd_lib.FROM_FILE:
-                repair = f"give the frontmatter of {where}/prd.md a status: line"
-            else:
-                repair = (
-                    f"repair {sd_lib.WORK_DIR}/{sd_lib.STATUS_MARKER} from the "
-                    "repository's recorded status-source decision, then rerun sd-status"
-                )
             rows.append(_row(
                 "status-unreadable", item, slug,
                 detail,
-                repair,
+                f"resolve the status error for {item}: {detail}; then rerun sd-status",
             ))
         if status == "in_progress" and not branch:
             rows.append(_row(
@@ -2075,19 +1908,7 @@ def _work_rows(
                 f"{where} names branch {branch}, which no local or remote head has",
                 f"fetch, or correct the branch: field in {where}/prd.md",
             ))
-        elif branch and status not in ("done", "unknown") and source == sd_lib.FROM_FILE:
-            answer = branch_landed(root, branch, default, merged.pulls)
-            if answer == LANDED:
-                rows.append(_row(
-                    "branch-already-merged", item, slug,
-                    f"{where} is {status} and branch {branch} is already in {default}",
-                    f"set status: done in {where}/prd.md, or say what is left",
-                ))
-            elif answer == sd_lib.UNKNOWN:
-                unchecked.setdefault(
-                    "branch-already-merged", merged.reason or answer.repair
-                )
-        if source == sd_lib.FROM_ROW and status not in ("done", "unknown"):
+        if status not in ("done", "unknown"):
             if closing_items is None:
                 closing_items = _closing_items(root, closing_refs)
             if item in closing_items:

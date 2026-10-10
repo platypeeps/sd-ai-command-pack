@@ -428,7 +428,6 @@ STRANDED_RULE_IDS: frozenset[str] = frozenset()
 #: floor claim when sd:3001 moved it in; `refuse_below_floor` in `bin/sd`
 #: enforces it, and no rule id covers it yet.
 UNCITED_SKILL_CLAIMS = {
-    "skills/sd-plan/SKILL.md": 1,
     "skills/sd-research-repo/templates/CLAUDE.md": 1,
     "skills/sd-tips/SKILL.md": 1,
 }
