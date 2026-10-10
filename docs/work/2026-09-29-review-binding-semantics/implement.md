@@ -30,8 +30,8 @@ picks, so open receipts pay once.
         each `verdict` member refuses on an appended statement and accepts
         an edited docstring; each `gate` and `check` member accepts any
         edit; an unparsable `verdict` file is hashed raw; a `verdict` file
-        that reads `__doc__` fails the guard test; missing members still
-        refuse with "required review binding file cannot be read".
+        that reads `__doc__` fails the guard test; missing members read
+        `absent` and unreadable ones refuse (sd:3272).
       - Fail-first: with `gate` files put back into the digest, the gate
         acceptance test fails naming the member.
 - [x] 2. Manifest and refusal, in `bin/sd_ship_bindings.py`,
