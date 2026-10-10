@@ -480,6 +480,21 @@ class Runner(Lane):
         self.assertIn("another runner holds", answer["busy"])
         self.assertEqual((self.calls, self.entries()[0]["status"]), ([], "pending"))
 
+    def test_a_lane_that_starts_after_the_scan_runs_nothing_until_the_move_ends(self) -> None:
+        """sd:3273 review 1: a lane queued after `other_lanes_idle` scanned, with no runner lock yet, waits."""
+        with sd_lane.other_lanes_idle(self.root) as busy:
+            self.assertIsNone(busy)
+            sd_lane.enqueue_entry(self.repo, 1, "one", self.body, self.environ, claim="deliver")
+            lock = sd_lane.queue_path(self.repo, self.environ).parent / "runner.lock"
+            self.assertFalse(lock.exists(), "the lane already had a runner lock for the scan to find")
+            started = time.monotonic()
+            answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertIn("the tools this lane runs are moving", answer.get("busy", ""))
+        self.assertEqual((self.calls, self.entries()[0]["status"]), ([], "pending"))
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(([call[4] for call in self.calls], self.entries()[0]["status"]), (["1"], "prepared"))
+
     def left_running(self, pid: int | None, step: str = "prepare") -> None:
         """Item 1 claimed by the runner `pid` and never finished, as a killed runner leaves it (sd:2821)."""
         if not self.entries():

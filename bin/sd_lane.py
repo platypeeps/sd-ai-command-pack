@@ -112,7 +112,9 @@ already removed (sd:3006) is noted as such, from the lane's own checkout
 checkout. When that checkout holds the running `sd-ship`, as the pack's does
 for every lane, it tries each other lane's runner lock once and skips if one
 is held: a lane mid-prepare must not have its tools change under it, and no
-lane waits on another's lock. The next landing retries.
+lane waits on another's lock. The next landing retries. It holds the lane
+root folder's lock meanwhile, and a runner that starts then runs nothing
+(sd:3273): a lane with no runner lock yet has none to try.
 
 Only a repository's lane host drains its queue (sd:3003): the machine
 `repo.lane_host` names, or the hub when it is NULL. Elsewhere `run`,
@@ -1106,11 +1108,32 @@ def clean_up(entry: dict[str, Any], head: str | None, main: pathlib.Path, branch
 
 
 @contextlib.contextmanager
-def other_lanes_idle(lanes: pathlib.Path, own: pathlib.Path) -> Iterator[str | None]:
-    """Hold every other lane's runner lock for one step, trying each once; yields the busy lane, or None."""
+def lane_root_lock(lanes: pathlib.Path, mode: int) -> Iterator[None]:
+    """`flock` the lane root folder itself, made first, so no lane can start outside the lock (sd:3273)."""
+    lanes.mkdir(parents=True, exist_ok=True)
+    handle = os.open(lanes, os.O_RDONLY)
+    try:
+        fcntl.flock(handle, mode)
+        yield
+    finally:
+        os.close(handle)
+
+
+@contextlib.contextmanager
+def other_lanes_idle(lanes: pathlib.Path, own: pathlib.Path | None = None) -> Iterator[str | None]:
+    """Hold every other lane's runner lock for one step, trying each once; yields the busy lane, or None.
+
+    `own` is the caller's lock, or None for a caller that is no lane: the
+    installer's move of the serving tree (sd:3273). The scan finds only the
+    runner locks that exist, so it holds the lane root too: a runner checks
+    that root once it holds its own lock (`run_lane`), so a lane that starts
+    after the scan runs nothing. A runner holds the root only for that check
+    and waits on nothing meanwhile, so the wait here is at most that check.
+    """
     with contextlib.ExitStack() as held:
+        held.enter_context(lane_root_lock(lanes, fcntl.LOCK_EX))
         for lock in sorted(lanes.glob("*/lane/queue/runner.lock")):
-            if lock.resolve() == own.resolve():
+            if own is not None and lock.resolve() == own.resolve():
                 continue
             handle = held.enter_context(open(lock, "a", encoding="utf-8"))
             try:
@@ -1385,7 +1408,10 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
     in its own transaction (`claim_entry`): after a move it claims nothing and
     says why in `stopped`. After a hub fault it puts the entry back and stops
     the same way (`requeue`, sd:3239). A runner write it cannot land stops
-    the run (`Stop`), and the next run settles the entry.
+    the run (`Stop`), and the next run settles the entry. With its lock held
+    it tries the lane root once: `other_lanes_idle` holds that root while
+    the serving tree or the tools checkout moves, and then the runner runs
+    nothing (sd:3273).
     """
     refuse_elsewhere(root, environ)
     queue = queue_for(root, environ)
@@ -1393,6 +1419,11 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
     with runner_lock(queue) as locked:
         if not locked:
             return {"ran": [], "busy": f"another runner holds {own_lock}"}
+        try:
+            with lane_root_lock(lane_root(environ), fcntl.LOCK_SH | fcntl.LOCK_NB):
+                pass
+        except BlockingIOError:
+            return {"ran": [], "busy": "the tools this lane runs are moving; the next run retries"}
         ran: list[dict[str, Any]] = []
         answer: dict[str, Any] = {"ran": ran, **settle_checkout(root, queue)}
         ahead: threading.Thread | None = None
@@ -1403,41 +1434,43 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
             except LaneError as error:  # moved, unknown, busy, or a hub that stayed down
                 answer["stopped"], entry = str(error), None
             if entry is None:
-                if ahead is not None:
-                    ahead.join()
-                return answer
+                break
             if ahead is not None and ahead.is_alive():
                 speculate(entry, queue, gate, busy=True)  # notes the skip: one speculative gate at a time
             else:
                 ahead = speculate(entry, queue, gate)
-            try:
-                outcome = process(entry, queue, ship, functools.partial(advance, queue, entry, token))
-                if requeue(queue, entry, token, outcome):
-                    ran.append({"item": entry["item"], **outcome, "status": "pending"})
-                    answer["stopped"] = (f"sd:{entry['item']} met a hub fault in {outcome.get('step')}; "
-                                         "it is pending again, and the next run retries it")
-                    if ahead is not None:
-                        ahead.join()
-                    return answer
-            except Stop as error:
-                answer["stopped"] = str(error)
-                if ahead is not None:
-                    ahead.join()
-                return answer
-            except Exception as error:  # a broken entry is marked; the next one still runs
-                outcome = {"status": "failed", "reason": f"{type(error).__name__}: {error}"[:600]}
-            outcome.update(settle(entry, outcome, environ, note or default_note, own_lock, root))
-            try:
-                finish_entry(queue, entry, token, outcome)
-            except Stop as error:
-                ran.append({"item": entry["item"], **outcome, "recorded": False})
-                answer["stopped"] = str(error)
-                if ahead is not None:
-                    ahead.join()
-                return answer
-            ran.append({"item": entry["item"], **outcome})
-            if ahead is not None and outcome.get("status") == "merged":
+            row, stopped = run_entry(root, queue, entry, token, environ, ship, note or default_note)
+            if row is not None:
+                ran.append(row)
+            if stopped is not None:
+                answer["stopped"] = stopped
+                break
+            if ahead is not None and row is not None and row.get("status") == "merged":
                 ahead.join(PREPARE_SECONDS)  # the next prepare reads its receipt
+        if ahead is not None:
+            ahead.join()
+        return answer
+
+
+def run_entry(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token: str, environ: dict[str, str],
+              ship: Ship, note: Note) -> tuple[dict[str, Any] | None, str | None]:
+    """Prepare, merge and record one claimed entry; its row for `ran`, and why the run stops, or None."""
+    try:
+        outcome = process(entry, queue, ship, functools.partial(advance, queue, entry, token))
+        if requeue(queue, entry, token, outcome):
+            return ({"item": entry["item"], **outcome, "status": "pending"},
+                    f"sd:{entry['item']} met a hub fault in {outcome.get('step')}; "
+                    "it is pending again, and the next run retries it")
+    except Stop as error:
+        return None, str(error)
+    except Exception as error:  # a broken entry is marked; the next one still runs
+        outcome = {"status": "failed", "reason": f"{type(error).__name__}: {error}"[:600]}
+    outcome.update(settle(entry, outcome, environ, note, queue.lock_file, root))
+    try:
+        finish_entry(queue, entry, token, outcome)
+    except Stop as error:
+        return {"item": entry["item"], **outcome, "recorded": False}, str(error)
+    return {"item": entry["item"], **outcome}, None
 
 
 def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = default_gate,

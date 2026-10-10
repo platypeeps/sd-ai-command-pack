@@ -341,6 +341,12 @@ plain clone on a detached `HEAD` that nobody works in, at
   the first time. It then fetches the working checkout's `HEAD` into the tree,
   which reaches a commit `origin` lacks, detaches the tree there and runs the
   tree's `make setup`. That builds the tree's own `.venv` and renders from it.
+- **A running lane:** a lane runs `sd-ship` from the tree, so `--serve` holds
+  every lane's runner lock while it moves the tree (sd:3273). When a lane is
+  running, it leaves the tree where it is, says so and exits 0; run
+  `make setup` again once the lane is idle. repo-sync's refresh and follow
+  hold the locks themselves and set `REPO_SYNC_LANES_HELD=1`, so their
+  `make setup` moves the tree.
 - **Roll back:** in the tree, `git checkout --detach <commit> && make setup
   SERVE=no && .venv/bin/python bin/sd_install.py --user`. It works for any
   commit: `SERVE=no` skips the `--serve` step, which a commit from before

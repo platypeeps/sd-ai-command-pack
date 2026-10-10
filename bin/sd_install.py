@@ -2883,6 +2883,10 @@ def cmd_pull(ctx: Context, out) -> int:
 #: override in `MAKEFLAGS`, and the tree's `make setup` would build that path.
 MAKE_VARIABLES = frozenset({"MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES", "VENV"})
 
+#: Set to `1` by repo-sync's refresh and follow, which hold every lane's runner
+#: lock while their `make setup` runs (sd:3099, sd:3168), so `--serve` tries none.
+LANES_HELD = "REPO_SYNC_LANES_HELD"
+
 #: The two environments an sd:1118 serving tree alternated between; sd:3009 retired them.
 RETIRED_SLOTS = (".venv-a", ".venv-b")
 
@@ -2956,6 +2960,13 @@ def cmd_serve(ctx: Context, out) -> int:
     `.venv`, and the tree's own installer renders under that `.venv`'s
     python, so it reads the `sd_db` it just built, with this run's `--home`
     and `--bin-dir`.
+
+    A lane runs `sd-ship` from the tree, so a move under a running prepare
+    changes its code between steps (sd:3273). The move holds every lane's
+    runner lock, trying each once as a landing's fast-forward does; a held
+    one leaves the tree where it is, and the next `make setup` moves it. It
+    holds the lane root too, so a lane that starts during the move runs
+    nothing; a root it cannot lock moves nothing.
     """
     tree = serving_tree(ctx.home, ctx.environ)
     if tree.resolve() == ctx.checkout.resolve():
@@ -2970,6 +2981,27 @@ def cmd_serve(ctx: Context, out) -> int:
     if ctx.dry_run:
         print(f"would detach {tree} at the HEAD of {ctx.checkout}, run `make setup` there and render", file=out)
         return 0
+    lane = sibling("sd_lane")
+    try:
+        lanes = None if ctx.environ.get(LANES_HELD) == "1" else lane.lane_root({"HOME": str(ctx.home), **ctx.environ})
+    except lane.sd_lib.ConfigError as error:
+        print(f"error: {tree} not moved: cannot tell whether a lane is running from it ({error})", file=out)
+        return 1
+    with ExitStack() as held:
+        try:
+            busy = held.enter_context(lane.other_lanes_idle(lanes)) if lanes is not None else None
+        except OSError as error:
+            print(f"error: {tree} not moved: cannot tell whether a lane is running from it ({error})", file=out)
+            return 1
+        if busy:
+            print(f"{tree} not moved: the {busy} lane is running from it; run `make setup` again once it is idle",
+                  file=out)
+            return 0
+        return _move_serving_tree(ctx, tree, out)
+
+
+def _move_serving_tree(ctx: Context, tree: Path, out) -> int:
+    """Detach `tree` at the checkout's HEAD, run its `make setup` and render; the caller holds every lane."""
     for args in (["fetch", "--quiet", str(ctx.checkout), "HEAD"], ["checkout", "--quiet", "--detach", "FETCH_HEAD"]):
         code, _, err = _git_in(tree, args, timeout=PULL_TIMEOUT)
         if code:
