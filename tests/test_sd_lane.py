@@ -54,16 +54,14 @@ class Lane(unittest.TestCase):
         self.answers: dict[tuple[int, str], dict] = {}
         # A landing notes its item (sd:2568); no test writes to a real workflow database.
         self.notes: list[tuple[int, str, pathlib.Path]] = []
-        # Nor does a run read requests from one (sd:2704): a suite passes its own `hub`.
-        for name, double in (("default_note", self.note), ("default_hub", lambda root: contextlib.nullcontext())):
-            patcher = mock.patch.object(sd_lane, name, double)
-            patcher.start()
-            self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(sd_lane, "default_note", self.note)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         if self.runner_merge is not None:
             patcher = mock.patch.object(sd_lane, "default_runner_merge", lambda root: self.runner_merge)
             patcher.start()
             self.addCleanup(patcher.stop)
-        # And each runs as the hub would: `lane run` refuses on a satellite (sd:2704).
+        # And each runs as the hub would, which hosts every lane whose `repo.lane_host` is NULL (sd:3003).
         if importlib.util.find_spec("sd_db") is not None:
             patcher = mock.patch("sd_db.database.served_by", lambda target, home=None: None, create=True)
             patcher.start()
@@ -662,11 +660,8 @@ class Speculation(Lane):
         self.assertEqual([entry["status"] for entry in self.entries()], ["merged", "merged"])
         self.assertEqual(self.entries()[1]["speculation"]["status"], "error")
 
-    def test_a_satellite_entry_ahead_is_predicted_from_its_branch_on_origin(self) -> None:
-        """sd:2704. Its worktree is the main checkout, whose HEAD is not its head; the branch on origin is.
-
-        The satellite commits in its own clone, so the hub holds the head only once it fetches the branch.
-        """
+    def test_a_satellite_entry_an_older_version_queued_is_skipped_and_never_shipped(self) -> None:
+        """sd:3003. A `gate: satellite` entry the retired hand-off left names the main checkout, not its head."""
         satellite = self.tmp / "satellite"
         git(self.tmp, "clone", "-q", str(self.origin), str(satellite))
         self.commit_files(satellite, {"sat.txt": "s\n"}, "satellite")
@@ -676,11 +671,9 @@ class Speculation(Lane):
             "expected_head": git(satellite, "rev-parse", "HEAD"), "authority": "manual", "status": "pending",
             "enqueued_at": sd_lane.stamp_now()}))
         sd_lane.enqueue_entry(self.second, 2, "two", self.body, self.environ, manual=True, claim="deliver")
-        with mock.patch.object(sd_lane, "claimable", lambda hub, entry: True):  # no request row here: see SatelliteEntry
-            sd_lane.run_lane(self.repo, self.environ, super().ship, lambda root, head, base: self.gates.append(
-                (root, head, base)) or {"status": "success"})
-        [(root, _, _)] = self.gates
-        self.assertEqual((root, self.entries()[1]["speculation"]["status"]), (self.second, "success"))
+        sd_lane.run_lane(self.repo, self.environ, super().ship, lambda root, head, base: {"status": "success"})
+        self.assertEqual([(entry["item"], entry["status"]) for entry in self.entries()], [(1, "skipped"), (2, "merged")])
+        self.assertEqual([call[call.index("--item") + 1] for call in self.calls], ["2", "2"])
 
 
 class Landing(Lane):
