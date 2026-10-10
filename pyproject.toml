@@ -18,8 +18,12 @@ packages = []
 [tool.uv]
 package = false
 
+# `lib/` and `tests/sd_db/` are `sd_db` as copied from the system checkout
+# (sd:3278), which never ran Ruff over it. Excluded until it is linted on its
+# own terms; `force-exclude` keeps the pre-commit hook's file arguments out too.
 [tool.ruff]
 line-length = 88
+force-exclude = true
 extend-exclude = [
     ".agents",
     ".build",
@@ -31,7 +35,9 @@ extend-exclude = [
     ".ruff_cache",
     ".sd-ai-command-pack",
     ".venv",
+    "lib",
     "node_modules",
+    "tests/sd_db",
 ]
 
 [tool.ruff.lint]

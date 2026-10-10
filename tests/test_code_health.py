@@ -1625,7 +1625,9 @@ class CleanEnvironment(unittest.TestCase):
     """A test module's git and `bin/` children run in the shared clean environment."""
 
     def test_no_test_module_starts_an_unshielded_child_beyond_its_entry(self):
-        modules = {path.name: path for path in tracked("tests") if re.fullmatch(r"test_\w+\.py", path.name)}
+        # The modules `.github/scripts/run-tests.sh` runs: `tests/test_*.py`, not
+        # the copied `tests/sd_db/` suite (sd:3278), whose names would collide.
+        modules = {path.name: path for path in tracked("tests/test_*.py") if re.fullmatch(r"test_\w+\.py", path.name)}
         for name in sorted(set(modules) | set(UNSHIELDED)):
             with self.subTest(module=name):
                 found = len(unshielded_lines(modules[name].read_text(encoding="utf-8"))) if name in modules else 0
