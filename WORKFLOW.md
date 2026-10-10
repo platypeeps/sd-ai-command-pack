@@ -546,7 +546,7 @@ The rules for them:
 - **Each lane runs on its lane host (sd:3003).** `repo.lane_host` names the
   machine that runs a repository's lane; NULL means the hub. Off that host,
   `sd-ship merge`, `reconcile`, `review`, `adjudicate --accept-dispositions`
-  and `lane enqueue`, `move`, `hold`, `release` and `run` refuse with
+  and `lane enqueue`, `retry`, `move`, `hold`, `release` and `run` refuse with
   `lane_elsewhere` before they read a row (sd:2795); the text names the host,
   the dashboard's Move lane control, and the verb. A host that cannot be read
   refuses with `lane_unknown` and never counts as the hub. `prepare` runs

@@ -9,6 +9,8 @@ runs it under one lock per repository:
            and a body file to the repository's queue;
   list     print the queue;
   cancel   mark a pending entry cancelled;
+  retry    queue the item's last failed, skipped or prepared entry again, at
+           its head with its kept body; `--manual` grants the merge (sd:3254);
   move     put a pending entry up, down, on top or at a position (sd:2584);
   hold     keep a pending entry in place but skip it; `release` ends that;
            these four take `--expected-revision`, the `revision` `list`
@@ -52,6 +54,11 @@ repository, or `--manual` on the entry, the operator's explicit grant on a
 `manual` repository. The runner then merges with `--manual`. Otherwise, or
 when the setting cannot be read, it stops at a prepared head, marks the entry
 `prepared` and says why in its `code` and `reason` (`merge_refusal`).
+
+An entry that stops short of a merge (`failed`, `skipped` or `prepared`)
+keeps its body copy until the item's next entry ends (sd:3254), so `retry`
+needs no body file. That next entry takes a copy of its own, and its end
+drops every earlier entry's copy; a merged or cancelled entry drops its own.
 
 The next entry's gate runs early (sd:2586). Its prepare used to start only
 after the entry ahead merged, then catch up and gate for 10 to 20 minutes.
@@ -138,7 +145,7 @@ CLAIMS = ("deliver", "associate-only")
 PLACES = ("up", "down", "top")
 #: The verbs that fill or reorder a queue only its lane host drains; off the host they refuse (sd:2795, sd:3003).
 #: `list` and `cancel` still answer there, so an old host's pending entries can be read and cancelled after a move.
-HOST_VERBS = ("enqueue", "move", "hold", "release")
+HOST_VERBS = ("enqueue", "move", "hold", "release", "retry")
 #: `(argv, log) -> sd-ship's JSON answer`; the log receives the step's whole output.
 Ship = Callable[[list[str], pathlib.Path], dict[str, Any]]
 #: `(root, head, base) -> the gate's result`: the next entry's gate on a predicted landing (sd:2586).
@@ -150,6 +157,8 @@ RUNNER_MERGE_MANUAL = "runner_merge_manual"
 RUNNER_MERGE_UNKNOWN = "runner_merge_unknown"
 #: The runs that put an entry back after a hub fault before the next fault fails it (sd:3239).
 HUB_RETRIES = 2
+#: The ends short of a merge: such an entry keeps its body copy, and `retry` queues it again (sd:3254).
+BLOCKED = ("failed", "skipped", "prepared")
 
 
 class LaneError(RuntimeError):
@@ -326,6 +335,36 @@ def cancel(root: pathlib.Path, item: int, environ: dict[str, str], *,
     row = update(path, mark)
     drop_body(row, path.parent.parent)  # after the write, so a failed write leaves the body with its entry
     return row
+
+
+def retry(root: pathlib.Path, item: int, environ: dict[str, str], *, manual: bool = False) -> dict[str, Any]:
+    """Queue `item`'s last entry again when it stopped short of a merge (sd:3254).
+
+    A new entry, as `enqueue` makes it, from the old one's worktree, title,
+    claim, acceptance file and kept body copy, at its head or prepare's
+    catch-up of it (`caught_up`). `manual` grants the merge as `enqueue
+    --manual` does; an entry that had that grant keeps it. The old entry
+    stays as history, and its copy goes when the new entry ends.
+    """
+    rows = [row for row in read_queue(queue_path(root, environ)) if row.get("item") == item]
+    if not rows:
+        raise LaneError(f"sd:{item} has no entry in this lane")
+    last = rows[-1]
+    if last.get("status") in ("pending", "running"):
+        raise LaneError(f"sd:{item} is already queued in this lane")
+    if last.get("status") not in BLOCKED:
+        raise LaneError(f"sd:{item}'s last entry is {last.get('status')}; retry takes a failed, skipped or "
+                        "prepared one")
+    body = pathlib.Path(str(last.get("body_file") or ""))
+    if not body.is_file():
+        raise LaneError(f"sd:{item}'s last entry kept no body copy ({body}); enqueue it again with --body-file")
+    worktree = pathlib.Path(last["worktree"])
+    acceptance = last.get("acceptance_file")
+    entry = enqueue_entry(worktree, item, last["title"], body, environ,
+                          expected_head=caught_up(worktree, last["expected_head"]),
+                          manual=manual or last.get("authority") == "manual", claim=last.get("claim"),
+                          acceptance_file=pathlib.Path(acceptance) if acceptance else None)
+    return {**entry, "retried": {"status": last["status"], "finished_at": last.get("finished_at")}}
 
 
 def position(where: str) -> str:
@@ -808,13 +847,37 @@ def reclaim_dead(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def finish_entry(path: pathlib.Path, entry: dict[str, Any], outcome: dict[str, Any]) -> None:
-    """Record a run entry's outcome, then drop its body copy (sd:3170)."""
-    def mark_finished(entries: list[dict[str, Any]]) -> None:
+    """Record a run entry's outcome, then drop the item's earlier body copies, and its own unless it is blocked.
+
+    sd:3170 dropped every ended entry's copy; sd:3254 keeps a blocked one's for `retry`.
+    """
+    def mark_finished(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        earlier = []
         for row in entries:
-            if row.get("item") == entry["item"] and row.get("status") == "running":
+            if row.get("item") != entry["item"]:
+                continue
+            if row.get("status") == "running":
                 row.update(outcome, finished_at=stamp_now())
-    update(path, mark_finished)
-    drop_body(entry, path.parent.parent)  # after the write, as in `cancel`
+            elif row.get("status") != "pending":
+                earlier.append(dict(row))
+        return earlier
+    lane = path.parent.parent
+    for row in update(path, mark_finished):  # after the write, as in `cancel`
+        drop_body(row, lane)
+    if outcome.get("status") not in BLOCKED:
+        drop_body(entry, lane)
+
+
+def caught_up(worktree: pathlib.Path, expected: str) -> str:
+    """`expected`, or the worktree's HEAD when that is prepare's catch-up of it: a merge whose first parent it is.
+
+    A retried entry starts there (sd:3239, sd:3254); any other move of HEAD still skips the entry.
+    """
+    head = lane_git(worktree, "rev-parse", "HEAD")
+    if (head and head != expected and lane_git(worktree, "rev-parse", "HEAD^1") == expected
+            and lane_git(worktree, "rev-parse", "--verify", "--quiet", "HEAD^2")):
+        return head
+    return expected
 
 
 def requeue(path: pathlib.Path, entry: dict[str, Any], outcome: dict[str, Any]) -> bool:
@@ -828,11 +891,7 @@ def requeue(path: pathlib.Path, entry: dict[str, Any], outcome: dict[str, Any]) 
     retries = int(entry.get("hub_retries") or 0)
     if not outcome.pop("hub_fault", False) or retries >= HUB_RETRIES:
         return False
-    worktree, expected = pathlib.Path(entry["worktree"]), entry["expected_head"]
-    head = lane_git(worktree, "rev-parse", "HEAD")
-    if (head and head != expected and lane_git(worktree, "rev-parse", "HEAD^1") == expected
-            and lane_git(worktree, "rev-parse", "--verify", "--quiet", "HEAD^2")):
-        expected = head
+    expected = caught_up(pathlib.Path(entry["worktree"]), entry["expected_head"])
     fault: dict[str, Any] = {key: outcome[key] for key in ("step", "reason", "prepare_log", "merge_log") if key in outcome}
 
     def put_back(entries: list[dict[str, Any]]) -> None:
@@ -1000,6 +1059,11 @@ def add_lane_verbs(commands: Any) -> None:
         choice.add_argument(f"--{claim}", dest="claim", action="store_const", const=claim, help=text)
     adder.add_argument("--acceptance-file", type=pathlib.Path, help="forwarded to prepare unchanged")
     verbs.add_parser("list", help="print this repository's queue")
+    retrier = verbs.add_parser("retry", help="queue the item's last failed, skipped or prepared entry again, "
+                                             "at its head with its kept body (sd:3254)")
+    retrier.add_argument("item", type=int)
+    retrier.add_argument("--manual", action="store_true",
+                         help="authorize the runner to merge when repo.runner_merge is manual, as enqueue --manual")
     canceller = verbs.add_parser("cancel", help="mark a pending entry cancelled")
     canceller.add_argument("item", type=int)
     mover = verbs.add_parser("move", help="move a pending entry; the runner reads the new order at the next item")
@@ -1041,6 +1105,8 @@ def lane_main(args: Any) -> int:
             path = queue_path(root, environ)
             entries = read_queue(path)
             result = {"queue": str(path), "revision": queue_revision(entries), "entries": entries}
+        elif args.lane_command == "retry":
+            result = retry(root, args.item, environ, manual=args.manual)
         elif args.lane_command == "cancel":
             result = cancel(root, args.item, environ, expected_revision=args.expected_revision)
         elif args.lane_command == "move":

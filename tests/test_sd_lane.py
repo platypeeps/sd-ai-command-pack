@@ -112,6 +112,17 @@ class QueueOutlivesTheProcess(Lane):
         self.assertEqual((body.parent, body.read_text(encoding="utf-8")),
                          (self.root / "pack/lane/bodies", self.body.read_text(encoding="utf-8")))
 
+    def test_retry_prints_json_as_the_other_verbs_do(self) -> None:
+        """sd:3254. The system Queue page calls `lane retry`; it reads the same JSON shape."""
+        sd_lane.enqueue_entry(self.repo, 7, "Topic", self.body, self.environ, claim="deliver")
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        done = self.sd_ship(self.repo, "retry", "7", "--manual")
+        self.assertEqual(done.returncode, 0, done.stderr + done.stdout)
+        answer = json.loads(done.stdout)
+        self.assertEqual((answer["ok"], answer["item"], answer["authority"], answer["status"]), (True, 7, "manual", "pending"))
+        again = self.sd_ship(self.repo, "retry", "7")
+        self.assertEqual((again.returncode, json.loads(again.stdout)["ok"]), (3, False))
+
     def test_an_entry_without_a_delivery_claim_is_refused_with_exit_3(self) -> None:
         done = self.sd_ship(self.repo, "enqueue", "--item", "7", "--title", "Topic", "--body-file", str(self.body))
         self.assertEqual(done.returncode, 3, done.stderr + done.stdout)
@@ -173,7 +184,10 @@ class Runner(Lane):
         self.assertEqual((pathlib.Path(named).parent, text), (lane / "bodies", "Item: sd:1\n"))
 
     def test_the_body_copy_is_private_and_goes_when_its_entry_ends(self) -> None:
-        """sd:3170: merged, failed and cancelled entries drop their copy; an older entry's own file stays."""
+        """sd:3170: merged and cancelled entries drop their copy; an older entry's own file stays.
+
+        sd:3254: a failed entry keeps its copy, for `lane retry`, until the item's next entry ends.
+        """
         first, second = self.worktree("first"), self.worktree("second")
         for tree, item in ((first, 1), (second, 2), (self.repo, 3)):
             sd_lane.enqueue_entry(tree, item, "t", self.body, self.environ, manual=True, claim="deliver")
@@ -186,7 +200,7 @@ class Runner(Lane):
         self.answers[(2, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual([row["status"] for row in self.entries()], ["merged", "failed", "cancelled"])
-        self.assertEqual({item: path.exists() for item, path in copies.items()}, {1: False, 2: False, 3: False})
+        self.assertEqual({item: path.exists() for item, path in copies.items()}, {1: False, 2: True, 3: False})
         self.assertTrue(self.body.is_file(), "the caller's own body file went with the copies")
         # An entry an earlier version queued names the caller's file, which stays when the entry ends.
         older = self.tmp / "older.md"
@@ -200,6 +214,77 @@ class Runner(Lane):
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual(self.entries()[-1]["status"], "merged")
         self.assertTrue(older.is_file(), "an older entry's body file was removed")
+
+    def test_a_blocked_entry_is_retried_at_its_head_with_its_kept_body(self) -> None:
+        """sd:3254. A failed entry could not be queued again without its body file; retry needs none."""
+        tree, acceptance = self.worktree("topic"), self.tmp / "acceptance.md"
+        acceptance.write_text("accepted\n", encoding="utf-8")
+        sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, manual=True, claim="deliver",
+                              acceptance_file=acceptance)
+        self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        failed = self.entries()[0]
+        kept = pathlib.Path(failed["body_file"])
+        self.assertTrue(kept.is_file(), "the failed entry's body copy went")
+        self.body.unlink()
+        retried = sd_lane.retry(self.repo, 1, self.environ)
+        self.assertEqual({key: retried[key] for key in ("item", "expected_head", "title", "authority", "claim",
+                                                        "acceptance_file", "status")},
+                         {"item": 1, "expected_head": failed["expected_head"], "title": "one", "authority": "manual",
+                          "claim": "deliver", "acceptance_file": failed["acceptance_file"], "status": "pending"})
+        self.assertEqual(retried["retried"], {"status": "failed", "finished_at": failed["finished_at"]})
+        fresh = pathlib.Path(retried["body_file"])
+        self.assertEqual(fresh.read_text(encoding="utf-8"), "Item: sd:1\n")
+        with self.assertRaisesRegex(sd_lane.LaneError, "already queued"):
+            sd_lane.retry(self.repo, 1, self.environ)
+        del self.answers[(1, "prepare")]
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual([row["status"] for row in self.entries()], ["failed", "merged"])
+        # The next entry ended, so the earlier copy goes, and a merged entry keeps none.
+        self.assertEqual((kept.exists(), fresh.exists()), (False, False))
+
+    def test_retry_manual_approves_an_entry_that_stopped_prepared(self) -> None:
+        sd_lane.enqueue_entry(self.repo, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(self.entries()[0]["code"], sd_lane.RUNNER_MERGE_MANUAL)
+        self.assertEqual(sd_lane.retry(self.repo, 1, self.environ, manual=True)["authority"], "manual")
+        self.calls.clear()
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(([c[2] for c in self.calls], self.entries()[-1]["status"]), (["prepare", "merge"], "merged"))
+
+    def test_retry_starts_from_prepares_catch_up_merge(self) -> None:
+        tree = self.worktree("topic")
+        sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "base moved")
+
+        def catch_up_then_block(argv: list[str], log: pathlib.Path) -> dict:
+            git(tree, "merge", "-q", "--no-ff", "-m", "Merge origin/main", "main")
+            self.ship(argv, log)
+            return {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
+        sd_lane.run_lane(self.repo, self.environ, catch_up_then_block)
+        self.assertEqual(sd_lane.retry(self.repo, 1, self.environ)["expected_head"], git(tree, "rev-parse", "HEAD"))
+
+    def test_retry_refuses_what_it_cannot_retry(self) -> None:
+        with self.assertRaisesRegex(sd_lane.LaneError, "no entry"):
+            sd_lane.retry(self.repo, 1, self.environ)
+        sd_lane.enqueue_entry(self.repo, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        with self.assertRaisesRegex(sd_lane.LaneError, "already queued"):
+            sd_lane.retry(self.repo, 1, self.environ)
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        with self.assertRaisesRegex(sd_lane.LaneError, "last entry is merged"):
+            sd_lane.retry(self.repo, 1, self.environ)
+        sd_lane.enqueue_entry(self.repo, 2, "two", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.cancel(self.repo, 2, self.environ)
+        with self.assertRaisesRegex(sd_lane.LaneError, "last entry is cancelled"):
+            sd_lane.retry(self.repo, 2, self.environ)
+        # An entry that ended before its copy was kept has none to queue again.
+        sd_lane.enqueue_entry(self.repo, 3, "three", self.body, self.environ, manual=True, claim="deliver")
+        self.answers[(3, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        pathlib.Path(self.entries()[-1]["body_file"]).unlink()
+        with self.assertRaisesRegex(sd_lane.LaneError, "--body-file"):
+            sd_lane.retry(self.repo, 3, self.environ)
+        self.assertEqual([row["status"] for row in self.entries()], ["merged", "cancelled", "failed"])
 
     def test_a_queue_write_that_fails_keeps_the_entry_and_its_body(self) -> None:
         """sd:3170 review: the copy goes only once the queue records the end; a failed write leaves both."""
