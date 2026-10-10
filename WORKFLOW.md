@@ -499,16 +499,23 @@ The rules for them:
   under `$XDG_STATE_HOME/sd/review-slots`, so a dead holder's slot is free.
 - **Ship a run of items through one lane queue (sd:2524).** `sd-ship lane
   enqueue --item N --title T --body-file F --deliver|--associate-only
-  [--acceptance-file A] [--manual]` adds a worktree's item
-  to its repository's queue file, which outlives the session. `sd-ship lane
-  run` drains it in order under one lock per repository: head check,
+  [--acceptance-file A] [--manual]` adds a worktree's item to its
+  repository's queue in the hub database, which outlives the session
+  (sd:3282). The entry holds the branch and the body and acceptance texts;
+  enqueue first pushes `<head>:refs/heads/<branch>`, never with force, and a
+  failed or diverged push queues nothing. `sd-ship lane
+  run` drains it in order under one runner lock per repository: head check,
   `prepare --catch-up` with the entry's delivery claim and acceptance file,
   then `merge` when `repo.runner_merge` is `auto` or the entry was queued
   with `--manual` (sd:3132); otherwise, or when the setting cannot be read,
   the entry stops `prepared` and its `code` says why. An entry with no claim is
   refused at enqueue, as prepare refuses it. A
   failed entry is marked and the next one runs. A second runner exits at once
-  rather than wait. Each prepare and merge keeps its whole output under
+  rather than wait. A claim takes a holder token and a lease and refuses
+  while another entry of the repository runs; a dead holder here goes back to
+  pending in prepare, failing at the third time, and fails in merge. `lane
+  cancel` on a stuck running entry releases it the same way. With the hub
+  down every lane verb refuses `hub_unavailable`. Each prepare and merge keeps its whole output under
   `<lane>/logs/`. `list` and `cancel` read and edit the queue; `watch` prints
   each gate end a log under `sd.lane_root` records, once. While an entry
   the runner may merge ships, the runner gates the next entry on its
@@ -518,8 +525,8 @@ The rules for them:
 - **Reorder a lane queue between items (sd:2584).** `sd-ship lane move <item>
   up|down|top|<position>` reorders the pending entries; `hold <item>` keeps an
   entry in place but skips it, and its speculative gate, until `release
-  <item>`. These verbs edit the queue under its lock and refuse a running
-  entry. The runner reads the queue's top before each item, so a change takes
+  <item>`. These verbs edit the queue in one hub transaction and refuse a
+  running entry. The runner reads the queue's top before each item, so a change takes
   effect at the next item, never mid-merge.
 - **The lead ships only through the lane.** It enqueues with `sd-ship lane
   enqueue` and drains with `sd-ship lane run`; a hand-run prepare-and-merge
@@ -770,7 +777,8 @@ The reserved `sd` namespace declares these settings:
   Absence reads the deprecated `fleet.owners` list in the machine config, then the pack's default, `platypeeps`. It grants nothing.
 - `sd.gate_cache_gb`: the most gigabytes the local gate's warm Rust build folders may hold; `0` is no bound.
   Absence reads 40. `SD_GATE_CACHE_GB` overrides it for one run. It grants nothing.
-- `sd.lane_root`: the folder that holds each repository's `sd-ship lane` queue, as `<root>/<repository>/lane/queue/`.
+- `sd.lane_root`: the folder that holds each repository's `sd-ship lane` logs and runner lock, as `<root>/<repository>/lane/`.
+  The queue is in the hub database; a `queue/queue.json` an earlier version left there is imported once and kept as `queue.json.imported-<stamp>`.
   Absence reads `$XDG_STATE_HOME/sd/lanes`. `SD_LANE_ROOT` overrides it. It grants nothing.
 - `sd.bulk_storage_root`: the folder for large uncommitted data, as `<root>/<repository>/`; see
   [Parallel work](#parallel-work). Absence is no bulk root. It grants nothing.

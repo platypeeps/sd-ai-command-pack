@@ -2,17 +2,17 @@
 
 An integrator session used to chain `sd-ship prepare` and `merge` by hand, in
 shell scripts kept in its scratchpad. The chain died with the session, and a
-second chain started beside it raced it. This keeps the chain in a file and
-runs it under one lock per repository:
+second chain started beside it raced it. This keeps the chain in the hub
+database and runs it under one runner lock per repository:
 
-  enqueue  add a worktree, its item, the head it must still be at, a title
-           and a body file to the repository's queue;
-  list     print the queue;
-  cancel   mark a pending entry cancelled;
+  enqueue  publish the head, then add a worktree, its item, branch and head,
+           a title and the body text to the repository's queue;
+  list     print the queue, each body as its size;
+  cancel   mark a pending entry cancelled, or release a stuck running one;
   retry    queue the item's last failed, skipped or prepared entry again, at
-           its head with its kept body; `--manual` grants the merge (sd:3254);
-           `--expected-head` refuses, under the queue's lock, a last entry
-           at another head (sd:3268);
+           its head with its texts; `--manual` grants the merge (sd:3254);
+           `--expected-head` refuses, in the write's transaction, a last
+           entry at another head (sd:3268);
   move     put a pending entry up, down, on top or at a position (sd:2584);
   hold     keep a pending entry in place but skip it; `release` ends that;
            these four take `--expected-revision`, the `revision` `list`
@@ -25,19 +25,44 @@ runs it under one lock per repository:
            landing (sd:2586, below). After a merge it deletes the remote
            branch, notes the item with the worktree's removal command and
            fast-forwards the main checkout (sd:2568, below). Under the
-           runner lock it first marks failed a running entry whose runner
-           pid is gone, with `reclaimed_by`, and lists it as `reclaimed`
-           (sd:2821). An entry whose prepare or merge met a hub fault goes
+           runner lock it first reclaims a running entry whose holder here
+           is gone, and lists it as `reclaimed` (sd:2821, below). An entry
+           whose prepare or merge met a hub fault goes
            back to pending, at most `HUB_RETRIES` times, and the run stops
            (sd:3239, below);
   watch    print each gate end a lane or builder log records, once.
 
-The verbs are the queue's only writers, each under the queue file's lock, so
-a terminal and a dashboard reorder it the same way. A change takes effect at
-the next item boundary, never mid-merge; a running entry refuses every edit.
+The verbs are the queue's only writers, each in one hub database
+transaction, so a terminal and a dashboard reorder it the same way. A change
+takes effect at the next item boundary, never mid-merge; a running entry
+refuses every edit.
 
-The queue is `<lane root>/<repository>/lane/queue/queue.json`. The lane root
-is `SD_LANE_ROOT`, else `sd.lane_root`, else `$XDG_STATE_HOME/sd/lanes`.
+The queue is in the hub database (sd:3282): each entry is the latest `state`
+row, kind `checkpoint`, of its key `lane:v1:<owner/repo>:<id>`, and older
+rows are its history. A write is one `BEGIN IMMEDIATE` transaction, local on
+the hub and over the tailnet session on a satellite; with the hub down every
+verb refuses `hub_unavailable`. A checkout whose origin names no GitHub
+repository has no lane. The lane folder, `<lane root>/<repository>/lane/`,
+keeps this machine's logs and runner lock. The lane root is `SD_LANE_ROOT`,
+else `sd.lane_root`, else `$XDG_STATE_HOME/sd/lanes`. A `queue/queue.json` an
+earlier version left there is imported once (`import_file_queue`).
+
+Another host runs an entry only from a commit on `origin`, so enqueue,
+retry and the import of a pending entry publish its head first, by
+`<head>:refs/heads/<branch>`, never the tip and never with force
+(`publish_head`). A failed read, fetch or push is an unknown answer, not a
+"no": nothing is queued.
+
+A claim reads the lane host and takes the first pending entry in one
+transaction, and refuses while another entry of the repository runs. A
+running entry carries a `holder` (host, pid, a token per claim), its `step`
+and `lease_until`. Every runner write checks the token, so a reclaimed or
+released claim writes nothing more; a hub fault is tried again for
+`WRITE_RETRY_SECONDS`, then the run stops. A holder on this machine is dead
+when the runner lock is free and its pid is gone: in prepare its entry goes
+back to pending, failing at the `RECLAIMS`th time; in merge it fails, since a
+merge may have landed. `lane cancel` on a running entry releases it by the
+same rule, unless its holder here is alive.
 
 What the hand-run chains taught, kept here:
 
@@ -58,9 +83,8 @@ when the setting cannot be read, it stops at a prepared head, marks the entry
 `prepared` and says why in its `code` and `reason` (`merge_refusal`).
 
 An entry that stops short of a merge (`failed`, `skipped` or `prepared`)
-keeps its body copy until the item's next entry ends (sd:3254), so `retry`
-needs no body file. That next entry takes a copy of its own, and its end
-drops every earlier entry's copy; a merged or cancelled entry drops its own.
+keeps its texts as every row does (sd:3254), so `retry` needs no body file.
+The runner writes them to private temporary files for prepare.
 
 The next entry's gate runs early (sd:2586). Its prepare used to start only
 after the entry ahead merged, then catch up and gate for 10 to 20 minutes.
@@ -93,10 +117,11 @@ lane waits on another's lock. The next landing retries.
 Only a repository's lane host drains its queue (sd:3003): the machine
 `repo.lane_host` names, or the hub when it is NULL. Elsewhere `run`,
 `enqueue`, `move`, `hold` and `release` refuse with `lane_elsewhere`, and a
-host that cannot be read refuses with `lane_unknown`. The runner reads the
-host again before each claim, so a move stops it at the next item. The same
-scheduled job runs on every machine: `lane run --hosted` runs each lane this
-machine hosts, one after another, and skips one whose runner is busy. A
+host that cannot be read refuses with `lane_unknown`. Each claim reads the
+host in its own transaction, so a move stops the runner at the next item. The
+same scheduled job runs on every machine: `lane run --hosted` runs each lane
+this machine hosts, one after another, and skips one whose runner is busy;
+for every other checkout here it imports the file queue and reclaims. A
 satellite that hosts a lane gates and merges on its own machine, so no item
 passes from one machine to another.
 
