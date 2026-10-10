@@ -63,10 +63,46 @@ Fields another machine needs to run it:
 - `enqueued_on` (host) and `worktree`: a hint, valid only on that host.
 - `status`, `held` and the outcome fields, as today. Each log path gets the `host` that wrote it; logs stay on that disk.
 
-`lane enqueue` pushes the branch at the expected head first (`git push origin <head>:refs/heads/<branch>`, no force).
-A refused push refuses the enqueue; nothing is queued.
+`lane enqueue` publishes the expected head first, by the rule in "Publishing a head".
+A refused or failed publish refuses the enqueue; nothing is queued.
 `lane list` prints `body_bytes`, not the body, and keeps its `queue` key, now the local lane folder, for the dashboard.
 A checkout whose origin names no GitHub repository has no lane: prepare could not open its pull request either.
+
+## Publishing a head
+
+Review rounds 1 and 2 found one class: what a step publishes, and when. Another host runs an entry only from a commit
+on `origin`, so each step that names a head for another host publishes exactly that head, or names one already there.
+
+One rule for every publish: push `<head>:refs/heads/<branch>`, never the branch tip and never with force.
+A builder can move its branch after enqueue, and `--expected-head` takes any local commit; the explicit refspec still
+publishes the head the entry names. The steps, from the repository's checkout, whose worktrees share one object store:
+
+1. Read the tip of `branch` on `origin` (`git ls-remote`), and fetch it when this checkout lacks it.
+   A failed read or fetch is an unknown answer, not "no branch".
+2. The tip is `head` or contains it: published, push nothing. The runner's head rule decides the rest, as today:
+   a catch-up merge runs, any other move skips with `head_moved`.
+3. This checkout has no `head` commit: `head_gone`. The tip and `head` each lack the other: `branch_diverged`.
+   Both answers are definite: the same push can never succeed.
+4. Else push; with no branch, or a tip that `head` contains, it is a fast-forward. A failed or refused push is
+   unknown: `origin` may have moved between the read and the push.
+
+Every step that publishes, or depends on a published head:
+
+- `lane enqueue` publishes `expected_head`. Any answer but published refuses the enqueue; nothing is queued.
+- `lane retry` of a blocked entry, imported or not, publishes at retry time. Its head is the catch-up merge in the
+  worktree when that is on this host, else `expected_head`. `head_gone` refuses with "sd:N's head <sha> is not on
+  `origin` or in this checkout; run the retry on <enqueued_on>, or enqueue again from a worktree that has it".
+  `branch_diverged` and unknown refuse with git's answer. A refusal queues nothing, and the old entry stays blocked.
+- The import publishes pending entries only (see "Migration"). An unknown answer stops the import for the repository
+  and keeps the file. `head_gone` or `branch_diverged` imports that entry `skipped` with the reason, so one dead branch
+  cannot hold the live queue; `lane retry` publishes it once the operator fixes the branch.
+- The import publishes no blocked (`failed`, `skipped`, `prepared`) or terminal entry: those rows are history.
+  Their worktrees or branches may be gone. `lane retry` is the one way back to pending, and it publishes then.
+- `prepare`, unchanged, pushes its reviewed head, catch-up merge included, by the same refspec.
+- A put-back (move, reclaim, operator release, hub-fault requeue) publishes nothing. It reads `origin/<branch>` only
+  to move `expected_head` to a catch-up merge that prepare pushed (see "Claim and lease").
+- A claim and the worktree step publish nothing. On another host the worktree step fetches `origin/<branch>`.
+  A failed fetch is unknown, not a skip: the runner puts the entry back pending at its place and stops this run.
 
 ## Claim and lease
 
@@ -105,8 +141,10 @@ stuck on the operator's word: the dashboard Queue row shows the holder host, ste
 confirms first. The released claim's token is void, so a holder that comes back has every queue write refused.
 A merge the old holder already started can still land; branch protection's up-to-date rule stops a second one (sd:3003).
 
-`expected_head` moves to prepare's catch-up merge on put-back, as `caught_up` does today, read from the worktree on its
-host or from `origin/<branch>` elsewhere.
+A put-back (move, reclaim, release, hub-fault requeue) moves `expected_head` to prepare's catch-up merge, as
+`caught_up` does today, only when `origin/<branch>` is that merge: prepare pushed it. A catch-up that exists only in
+the worktree, or a failed read of `origin`, leaves `expected_head` as it was, still published; the worktree rules
+below accept the catch-up on the host that made it. So `expected_head` always names a published commit.
 
 ## When the lane moves
 
@@ -128,9 +166,11 @@ gate at a time per lane.
 
 The runner needs a checkout at the entry's head on its own disk. In order:
 
-1. The entry's `worktree`, when `enqueued_on` is this host and that worktree's HEAD is `expected_head`.
-2. Any worktree on this host with `branch` checked out at `expected_head`.
+1. The entry's `worktree`, when `enqueued_on` is this host and that worktree's HEAD is `expected_head` or its
+   catch-up merge.
+2. Any worktree on this host with `branch` checked out at `expected_head` or its catch-up merge.
 3. Else fetch `origin/<branch>` and require `expected_head` there, or its catch-up merge.
+   No `origin/<branch>` skips the entry with `head_gone`; `lane retry` publishes it again from a checkout that has it.
    With no local branch of that name, make a lane worktree at `<lane folder>/worktrees/<item>` on a new local branch
    at that head, tracking `origin/<branch>`.
    A local branch at another commit, or one checked out elsewhere at another head, skips the entry with `branch_busy`.
@@ -147,10 +187,12 @@ and any lane verb does it for its repository, whenever a `queue.json` exists.
 
 1. Take the repository's runner lock without waiting, then the old queue flock. A busy runner lock skips the import
    until the next run, so an older runner mid-entry keeps its file.
-2. Publish: for each pending or blocked file entry, push its branch at `expected_head`, as the new enqueue does
-   (`git push origin <branch>`, no force). Older `sd-ship` never pushed, so these heads may exist only here.
-   Any push that fails or is refused stops the import for this repository: nothing is written, the file stays,
-   and the pass reports the entry. The next pass tries again.
+2. Publish each pending file entry's `expected_head` by the rule in "Publishing a head". Older `sd-ship` never
+   pushed, so these heads may exist only here. An unknown answer stops the import for this repository: nothing is
+   written, the file stays, and the pass reports the entry. The next pass tries again.
+   `head_gone` or `branch_diverged` is definite: that entry imports `skipped` with the reason, and the rest import.
+   Blocked (`failed`, `skipped`, `prepared`) and terminal entries are not published: they import as history, and
+   `lane retry` publishes one when it makes it runnable.
 3. In one transaction, write one row per file entry, in file order, under a fixed id:
    `import-<16 hex of sha256(host, queue path, item, enqueued_at)>`. An id already present is skipped.
    Each row records the body file it read.
@@ -162,8 +204,10 @@ and any lane verb does it for its repository, whenever a `queue.json` exists.
 What the import does with older rows:
 
 - `running`: no live runner holds the lock, so its runner died; imported `failed` with today's reclaim text.
-- No `branch`: read from the worktree; with no worktree, `failed` with `no_branch` (pending ones only).
-- A pending or blocked entry whose body file is gone: `failed` with `no_body`.
+- No `branch`: read from the worktree; with no worktree, a pending entry imports `failed` with `no_branch`,
+  and a blocked one keeps its status. `lane retry` refuses either and names `lane enqueue`.
+- A pending entry whose body file is gone: `failed` with `no_body`. A blocked one keeps its status with no body;
+  `lane retry` refuses it, as today, and names `lane enqueue --body-file`.
 - A status this version does not know, such as the retired `handed_back`: kept as history, terminal.
 - An item already pending or running in the shared queue: imported `cancelled` with `duplicate_on_import`.
 
@@ -192,7 +236,9 @@ Today a satellite already refuses `lane enqueue` with `lane_unknown` while the h
 
 | Step | State moved | Failure | Recovery | Test |
 | --- | --- | --- | --- | --- |
-| enqueue | branch pushed | push refused or fails | enqueue refuses; nothing queued | new: a failing push double leaves no row |
+| enqueue | branch pushed | push refused or fails, or `branch_diverged` | enqueue refuses; nothing queued | new: a failing push double leaves no row; a diverged remote refuses |
+| enqueue | branch pushed | the branch tip moved past `--expected-head` before enqueue | the explicit refspec publishes `expected_head`, not the tip | new: enqueue an older commit; `origin/<branch>` is that commit |
+| enqueue | branch pushed, no row | killed or hub fault between the push and the row write | the rerun finds the head published, pushes nothing, and writes one row | new: kill after the push; rerun gives one entry and no second push |
 | enqueue | entry row | hub fault; the write may have landed | verb says `hub_unavailable`; rerun queues it, or refuses `already queued` if it landed | new: a write that lands but reports failure; rerun gives one entry |
 | claim | entry `running` | hub fault or unknown outcome | runner starts no step; a landed claim has a dead holder, and reclaim puts it back pending | new: claim lands, answer lost; next run gives one pending entry |
 | claim | none | lane moved after the runner's last read | host read in the claim's transaction; no claim | new: move between read and claim claims nothing |
@@ -208,14 +254,23 @@ Today a satellite already refuses `lane enqueue` with `lane_unknown` while the h
 | finish | none | token reclaimed while the holder slept | nothing written; runner reports `claim_lost` and stops | new: reclaim, then a late finish writes nothing |
 | finish | outcome row | unknown outcome; retried | the retry finds its own outcome under its token | new: double finish gives one outcome row |
 | worktree | none | fetched head is neither `expected_head` nor its catch-up | entry `skipped`, `head_moved` | new: moved remote skips |
+| worktree | none | `origin/<branch>` deleted after enqueue | entry `skipped`, `head_gone`; `lane retry` publishes it again from a checkout that has it | new: deleted remote branch skips `head_gone` |
+| worktree | entry `running` | the fetch fails | unknown, not a skip: put back pending at its place; next run tries again | new: failing fetch double leaves the entry pending |
+| put-back | `expected_head` | the catch-up merge exists only in the worktree, or the `origin` read fails | `expected_head` stays, still published; the same-host worktree rule accepts the catch-up | new: put-back with an unpushed catch-up keeps `expected_head`, and the same host runs it |
 | worktree | none | local branch at another commit | entry `skipped`, `branch_busy` | new: conflicting local branch skips |
 | worktree | lane worktree made | killed before claim or step | next run reuses it at the head, or removes and remakes a lane worktree it made | new: leftover lane worktree at another head |
 | import | rows | killed mid-transaction | nothing written; next pass imports | new: fault inside the transaction leaves no row |
 | import | rows written | killed before the rename | fixed ids exist and are skipped; the file is renamed | new: rerun gives one row per entry |
 | import | file renamed | killed before the named body files go | next pass reads the committed rows and deletes the body files they name | new: leftover named bodies removed, an unnamed body kept |
 | import | none | an older `sd-ship` copied a body, not yet its queue write | the body is not named by any row, so it stays; its entry lands in a new file and imports with it | new: a body written between import and the old enqueue's queue write survives and imports |
-| import publish | branches pushed | a push fails or is refused | nothing written, file kept, entry reported; next pass retries | new: a failing push leaves the file and writes no row |
-| import publish | some branches pushed | killed before the transaction | pushed branches are harmless; the rerun pushes again (no-op) and imports | new: rerun after a kill between push and write gives one row per entry |
+| import publish | pending branches pushed | a read, fetch or push fails or is refused | unknown: nothing written, file kept, entry reported; next pass retries | new: a failing push leaves the file and writes no row |
+| import publish | some branches pushed | killed before the transaction | pushed branches are harmless; the rerun finds them published, pushes nothing, and imports | new: rerun after a kill between push and write gives one row per entry |
+| import publish | branch pushed | the builder moved the branch after enqueue | the refspec publishes `expected_head`, not the tip; a remote tip that already contains it is left alone, and the runner skips `head_moved` as today | new: pending entry behind its branch tip; `origin/<branch>` gets `expected_head` |
+| import publish | entry row | a pending entry's commit is gone, or its remote branch diverged | definite: that entry imports `skipped` with `head_gone` or `branch_diverged`; the rest import | new: one dead pending branch among live ones; live rows import, the file is renamed |
+| import | rows | a blocked entry's worktree and branch were deleted | no publish: it imports as history with its status; the pending rows import | new: blocked entry with no branch or commit; no push attempted, every row written |
+| retry | branch pushed | the retried entry's commit is in this checkout but not on `origin` | retry publishes `<head>:refs/heads/<branch>` at retry time, then queues | new: retry an imported blocked entry; `origin/<branch>` is its head |
+| retry | none | the commit is gone here and on `origin`, or the remote diverged | refuses with `head_gone` naming `enqueued_on`, or with git's answer; nothing queued; the old entry stays blocked | new: retry after the branch and worktree were deleted refuses and writes no row |
+| retry | branch pushed, no row | killed or hub fault between the push and the row write | the rerun finds the head published, pushes nothing, and queues one entry | new: kill after the retry push; rerun gives one entry |
 | import | rows | an older `sd-ship` enqueues during the import | the old queue flock orders it; a later entry lands in a new file, imported next pass | new: append after rename imported once |
 | import | rows | older rows: `running`, no branch, no body, `handed_back`, duplicate item | the rules in "Migration" | new: one fixture per older row |
 | rollback | file renamed | the pack goes back to before slice 1 | the old code finds no queue file and runs nothing; rename the `imported` file back, or roll forward | new: the `imported` file holds the original bytes |
@@ -244,17 +299,17 @@ Today a satellite already refuses `lane enqueue` with `lane_unknown` while the h
   An entry that merged after it reads pending, and its prepare then meets the merged pull request.
 - Evidence ties: a claim's writes are tied to its token; a step to the repository's lane host read in the same
   transaction; an imported row to its host, queue path, item and enqueue time; a worktree to `expected_head` or its
-  catch-up merge.
+  catch-up merge; a published branch to `expected_head` by the explicit refspec, never to the branch tip.
 
 ## Slices
 
 Each slice leaves the hub and every satellite working.
 
 1. **Pack: the queue in the database.** `bin/sd_lane.py`: the store, the entry shape with body texts and `branch`,
-   the pushing enqueue, claim with holder and lease, token checks, reclaim by step, the 10-minute write retry, and the
+   the publish rule for enqueue, retry and the import of pending entries, claim with holder and lease, token checks, reclaim by step, the 10-minute write retry, and the
    import. Lane verbs still refuse off the lane host, and the runner still uses the entry's own worktree.
    Only the storage changes on one host. The module docstring and `WORKFLOW.md`'s queue file prose follow. Opus.
-2. **Pack: any host runs any entry.** Worktrees on the new host, the before-merge host check and put-back,
+2. **Pack: any host runs any entry.** Worktrees on the new host, the before-merge host check and put-back that reads only a pushed catch-up,
    `lane_elsewhere` as a move, cross-host lease reclaim, and host names in the landing note. `enqueue`, `list`,
    `move`, `hold`, `release`, `retry` and `cancel` work from any host, so `HOST_VERBS` retires; only `run` stays
    host-bound. Starts once every machine runs slice 1. Opus.
