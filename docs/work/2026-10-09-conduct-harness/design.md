@@ -27,8 +27,10 @@ Its checks are requirements 1 and 4:
 |---|---|---|
 | one question per turn | 1 | a turn before the last asks zero or several questions; a list item is a candidate, not a question |
 | wrote nothing | 1 | a write tool or a writing shell command is called, or the scratch repository's head, branches or status change |
-| closed stopped | 1 | the closing state says `completed`, or does not name `stopped` |
-| adopted content reported apart | 4 | the closing report has no assistant-supplied section, the section says none, or it does not mark the answer contaminated |
+| closed stopped | 1 | the report has no closing state, or that state says `completed`, does not say `stopped`, or denies it |
+| adopted content reported apart | 4 | the closing report has no assistant-supplied section, no entry in it names the adopted option, or that entry is not marked contaminated or denies it; with no option set offered, it answers unknown |
+
+A word only counts as stated when nothing negates it: `not stopped`, `uncontaminated` and `contaminated: no` are denials, not matches.
 
 ## How it runs
 
