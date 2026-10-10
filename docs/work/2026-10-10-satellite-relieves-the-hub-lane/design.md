@@ -8,8 +8,8 @@ item: sd:3174
 
 ## Status
 
-Draft for review. Three operator decisions are open (D0 to D2 below).
-D0 comes first: the proposed flow builds on parts that merged away on 2026-10-10.
+The operator decided D0 to D2 on 2026-10-10 (see Decisions): shape A, a manual trigger, no merge while the hub is down.
+The planned flow built on parts that merged away on 2026-10-10; shape A replaces it.
 
 ## Problem
 
@@ -40,21 +40,22 @@ That is the rule the 2026-10-08 ruling retired.
 
 ## Approach
 
-Three shapes meet the need; D0 picks one.
+Three shapes met the need; D0 chose A.
 
-**Shape A: move the lane, and its queue follows (Recommended).**
+**Shape A, chosen: move the lane, and its queue follows.**
 The operator moves a repository's lane to the satellite with the existing control.
 The pending entries move with it, so no one cancels and enqueues them again by hand.
 The satellite gates and merges them, one order per repository, as sd:3003 does.
 New: portable entries (below) and a carry-over in `lane run --hosted`. No trust rule. No new command.
 
-**Shape B: adopt one entry, as planned.**
+**Shape B, rejected: adopt one entry, as planned.**
 The satellite marks one hub entry adopted, gates it, and records a pass; the hub merges on that pass.
 New: portable entries, an entry state `adopted` with a lease, one lane verb or flag to adopt,
 a pass row the hub's merge gate trusts at the exact head and tree, and an ordering rule.
-It brings back a narrow form of what sd:3216 deleted.
+It brings back a narrow form of what sd:3216 deleted. A merge on the hub needs the branch up to date with the base,
+so any merge between the satellite's gate and the hub's merge voids the pass; under load that is the common case.
 
-**Shape C: build nothing.**
+**Shape C, rejected: build nothing.**
 Move the lane with sd:3003's "Moving a lane" steps: cancel the pending entries on the old host,
 make worktrees on the new host and enqueue them there. Each step is by hand.
 
@@ -70,7 +71,8 @@ and a line on Move lane saying pending entries follow. No system change and no s
 
 - Cross-repository merge order; each repository keeps its own lane.
 - A merge while the hub is down (see "Hub down").
-- An automatic trigger unless D1 picks it.
+- An automatic trigger (D1).
+- Adopting one entry while the hub keeps the lane (shape B).
 - Bringing back gate receipts that cross machines, in shape A or C.
 
 ## Shared part: a portable entry
@@ -81,7 +83,7 @@ Another machine can read neither.
 - `lane enqueue` pushes the branch at the expected head before it writes the queue
   (`git push origin <branch>`, no force). A push refusal refuses the enqueue; nothing is queued.
 - The entry keeps `branch` beside `worktree`.
-- The body and acceptance texts go to the database only when an entry leaves its host (shape A) or is adopted (shape B).
+- The body and acceptance texts go to the database only when an entry leaves its host.
   They go in the existing `state` table, the store the ship rows use, under one key per entry:
   `lane-carry:v1:<owner/repo>:<item>`. No new table.
 
@@ -106,26 +108,7 @@ Another machine can read neither.
 A move costs one extra gate per carried entry, as sd:3003 accepted:
 the new host's `prepare --catch-up` gates again. Same-machine receipt reuse then applies.
 
-## Shape B in steps (if D0 picks it)
-
-1. **Choose.** `sd-ship lane adopt --item N` on the satellite (new verb), or a dashboard button on a pending entry.
-2. **Claim.** `lane enqueue` on the hub writes each entry's portable row at enqueue time, not at a move.
-   The adopt verb writes `adopted_by`, `lease_until` on that row with its revision.
-   The hub runner reads the row before each claim and skips an adopted entry. A running entry refuses adoption.
-3. **Code.** The satellite fetches the branch at the row's head and makes a worktree.
-4. **Gate.** The satellite runs `sd-ship prepare` (review, then gate), as off-host prepare does today.
-5. **Hand back.** It writes `gated_head`, `tree`, `pack_sha` and its host name on the row.
-6. **Merge.** The hub runner takes gated entries first. Its merge gate accepts the row's pass when the head, the tree and the pack sha equal its own.
-   That trust rule is new. It binds no tools, per the 2026-10-08 ruling.
-7. **Lease.** The satellite renews `lease_until` while it works. An expired lease clears `adopted_by`; the entry returns to the hub queue.
-
-A merge on the hub needs the branch up to date with the base.
-If any entry merges between the satellite's gate and the hub's merge, the catch-up moves the head, the pass no longer applies,
-and the hub gates again. Under load that is the common case, so shape B saves less than it seems.
-
 ## Failure table
-
-Shape A:
 
 | Step | State moved | Failure | Recovery | Test |
 | --- | --- | --- | --- | --- |
@@ -141,43 +124,23 @@ Shape A:
 | run | merge on the new host | old host still merging its running entry | branch protection's up-to-date rule stops the stale merge (sd:3003) | existing sd:3003 tests |
 | older state | queue files without `branch` | entry from before this change | hand-over reads the branch from the worktree; with no worktree, entry `failed` with `no_branch` | new: hand-over of an old-format entry |
 
-Shape B adds these rows to the enqueue and take-in rows above:
-
-| Step | State moved | Failure | Recovery | Test |
-| --- | --- | --- | --- | --- |
-| 2 claim | `adopted_by` written | hub claimed the entry first | revision check refuses adoption | new: race double, hub claim first |
-| 2 claim | hub runner | row unreadable | unknown: the runner skips the entry this pass, never claims it as unadopted | new: failing read skips, does not run |
-| 4 gate | satellite prepare | gate or review fails | row records the failure; adoption ends; entry returns to the hub queue | new |
-| 5 hand back | pass on the row | killed before the write | the lease expires; the entry returns; the satellite's receipt is not reused on the hub | new: expired lease returns the entry |
-| 6 merge | hub catch-up | base moved after the gate | head changes; the pass no longer applies; the hub gates again | new: catch-up after a base move runs the gate |
-| 6 merge | trust | pass from another head, tree or pack sha | refused; the hub gates | new: pass with each field changed is refused |
-| 7 lease | satellite dies | no renewal | expiry returns the entry; a late pass write fails its revision check | new: late write after expiry refused |
-
 ## Hub down
 
 The database, the ship lock and the delivery rows are on the hub.
-With the hub down, no `sd-ship` verb that writes can run on any machine, so no merge happens in any shape.
+With the hub down, no `sd-ship` verb that writes can run on any machine, so no merge happens (D2).
 A satellite merge with the hub down would need an offline merge path that writes no database row and is reconciled later.
 That is a new mechanism; this design does not draw it.
 
-## Open decisions
+## Decisions
 
-D0. The shape.
-- Option: A, move the lane and carry its pending entries; merges follow the host (Recommended).
-- Option: B, adopt one entry; the hub merges on a satellite pass (a new trust rule).
-- Option: C, build nothing; move lanes by hand with the sd:3003 steps.
+Operator, 2026-10-10.
 
-D1. The trigger.
-- Option: manual, a dashboard control or one command (Recommended).
-- Option: automatic, past a queue wait or load threshold. It needs a threshold setting, a cool-down and a way back, and can move lanes back and forth.
-
-D2. Hub down.
-- Option: no merge until the hub returns (Recommended; the database lives there).
-- Option: a satellite merge with operator approval; a separate item would design the offline path.
+- D0. Shape A: move the whole lane with the existing control; its pending entries carry over; merges follow the host.
+- D1. The trigger is manual: the dashboard's Move lane or `sd-db.sh repo lane-host`.
+- D2. No merge while the hub is down; the database lives there.
 
 ## Acceptance criteria
 
-For shape A:
 
 1. With two pending entries on the hub, Move lane to the satellite. Within two lane-job runs both are pending on the satellite, in the same order, and `moved` on the hub.
 2. The satellite merges both. Each item gets the landing note from the satellite.
@@ -188,4 +151,3 @@ For shape A:
 
 - The carry-over is a hand-off between machines, the class sd:3003 removed. It runs once per move, not once per entry; its failure rows each need a test.
 - A carried entry gates once more on the new host. Moving a lane with many pending entries costs that many extra gates.
-- Under shape B, a base that moves between the satellite's gate and the hub's merge voids the pass; under load that is common.

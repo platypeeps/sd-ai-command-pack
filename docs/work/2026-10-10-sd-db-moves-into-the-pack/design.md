@@ -8,8 +8,7 @@ item: sd:2997
 
 ## Status
 
-Draft for review. The operator ruled the direction on 2026-10-08.
-Five questions under "Open decisions" need the operator before step 1 starts.
+The operator ruled the direction on 2026-10-08 and accepted D1 to D5 on 2026-10-10 (see Decisions).
 
 ## Problem
 
@@ -83,7 +82,7 @@ Recorded as a routine choice (sd note).
 
 ## Non-goals
 
-- Moving the dashboard (`local-project-dashboard`); decision D3 names it as a later item.
+- Moving the dashboard (`local-project-dashboard`); D3 makes it a later item.
 - Changing the schema, a migration or any `sd_db` behavior during the move.
 - Automatic migration on a satellite: satellites never migrate; they follow a migrated hub.
 - Carrying system's commit history into the pack.
@@ -101,7 +100,7 @@ Deleted at the end: `.sd-system-rev`, `test_system_pin.py`, the `sd_db` part of 
 `provision_library`, `library_pin`, `LIBRARY_TAGS`, `provision_guarded`, `provisioning_lock`, `ancestry_refusal`,
 `installed_library_commit`, `reprovision_after_merge`, `schema_refusal`, `sd_library_guard.py`,
 `sd-db.sh release` and the `sd-db-v*` tags, `SD_DB_LIBRARY` and `choose_library`,
-the dashboard's library-staleness refusal (sd:962), and `sd_db.self_install` if decision D4 says so.
+the dashboard's library-staleness refusal (sd:962), and `sd_db.self_install` (D4).
 Each deletion greps both repositories first; the step's PR body quotes the grep.
 
 ## Slices
@@ -146,7 +145,7 @@ Leaves working: installed cron jobs and LaunchAgents through the shim; the dashb
    so a caller that still reads the venv copy fails loudly instead of running stale code.
 2. Delete the provisioning code, the guards, `reprovision_after_merge` and its `sd-ship` call (list above).
 3. Reword the "install the current system/local-sd-db build" refusals in `bin/` to name `make setup` in the pack.
-4. Apply decision D4 to `sd_db.self_install`.
+4. Delete `sd_db.self_install` (D4); `BuildMismatch` names `repo-sync.sh follow`.
 
 Leaves working: every caller reads the pack's `lib/`; a missed caller fails with `ImportError` rather than running stale code.
 
@@ -162,9 +161,9 @@ Today a system merge that bumps the schema installs nothing until a hand migrate
 Then `refresh` prints the steps and the operator runs them.
 
 After step 3, a merge installs nothing at all: the hub's pack checkout is pinned and the lane skips its fast-forward.
-`refresh` is the one point where new library code reaches the hub. Decision D2 picks what it does there.
+`refresh` is the one point where new library code reaches the hub. D2 sets what it does there.
 
-D2 option 1, the recommended flow, inside `refresh`'s existing drain, when `lib/sd_db/schema.py` changed between the old and new pack sha:
+D2: inside `refresh`'s existing drain, when `lib/sd_db/schema.py` changed between the old and new pack sha:
 
 1. Stop the dashboard, the runner and `sd-serve` (launchd `bootout`).
 2. `bin/sd-db backup`. A failure refuses with nothing moved.
@@ -173,9 +172,6 @@ D2 option 1, the recommended flow, inside `refresh`'s existing drain, when `lib/
 5. Start the three services. A library change without a schema change restarts them too:
    the running `sd-serve` refuses sessions with `HubRestartNeeded` once its files change.
 6. Push `hub-pin` only after step 5. Satellites follow only a migrated hub.
-
-D2 option 2 keeps today's flow: `refresh` prints the steps.
-Every database command refuses from the move until the operator migrates, as on 2026-10-10 (sd:3217 note).
 
 ## Failure table
 
@@ -191,9 +187,9 @@ Every database command refuses from the move until the operator migrates, as on 
 | 2 older state | `repo-sync` knew system by `local-sd-db/sd_db/schema.py` | system read as an unknown checkout | detect by `local-repo-sync/repo-sync.sh` | new `repo-sync` test on a system tree without `local-sd-db/sd_db` |
 | 3 merge | `.venv` has no `sd_db` | a missed caller imports the venv copy | it fails with `ImportError`, not stale code; fix the caller | new: after `make setup`, `.venv/bin/python -I -c 'import sd_db'` fails |
 | 3 older state | a satellite venv copy from self-install | stale copy imported | follow's `make setup` uninstalls it | same test, run against a venv with a planted copy |
-| migrate (D2 opt 1) | services stopped | backup fails | refuse, start services, nothing moved | new `refresh` test with a failing backup double |
-| migrate (D2 opt 1) | pack moved, schema new | migrate fails | each migration is one transaction; move the pack back; start services; no `hub-pin` push | new test: failing migrate double leaves the old sha and no tag push |
-| migrate (D2 opt 1) | migrated, services down | `refresh` killed before start | the next `refresh` starts the services whenever it ends, moved or not | new test: second run with checkouts at target starts services |
+| migrate (D2) | services stopped | backup fails | refuse, start services, nothing moved | new `refresh` test with a failing backup double |
+| migrate (D2) | pack moved, schema new | migrate fails | each migration is one transaction; move the pack back; start services; no `hub-pin` push | new test: failing migrate double leaves the old sha and no tag push |
+| migrate (D2) | migrated, services down | `refresh` killed before start | the next `refresh` starts the services whenever it ends, moved or not | new test: second run with checkouts at target starts services |
 | rollback | revert step 3 | `.venv` copy returns | `make setup` installs from `lib/` again | none new: step 1 tests cover that path |
 | rollback | revert step 2 after a later schema bump | system's frozen copy is older than the database | `SchemaTooNew` refuses; nothing is written | none new: existing `SchemaTooNew` tests; revert in reverse order only |
 
@@ -204,27 +200,15 @@ Every database command refuses from the move until the operator migrates, as on 
 - Step 3 deletes the post-merge schema refusal (sd:3249). A merge installs nothing, so nothing can install a schema-bumping copy.
 - Step 2 deletes the dashboard's staleness refusal (sd:962). The dashboard reads the deployed checkout; there is no copy to go stale.
 
-## Open decisions
+## Decisions
 
-D1. Where system callers read the library after step 2.
-- Option: the pack checkout's `lib/`, path from `SD_PACK_CHECKOUT` (Recommended).
-- Option: a `.venv` copy the pack keeps installing for outside callers; step 3 then keeps the provisioning code.
+Operator, 2026-10-10.
 
-D2. Schema migration at `refresh`.
-- Option: `refresh` stops services, backs up, migrates and restarts inside its drain; `hub-pin` waits for it (Recommended).
-- Option: keep today's printed steps and the outage until a hand migrate.
-
-D3. The dashboard, also a caller.
-- Option: it stays in system for this item and reads the pack's `lib/`; its own move is a later item (Recommended).
-- Option: move it in this sequence, after step 2.
-
-D4. Satellite self-install (sd:2802) after step 3.
-- Option: delete it; follow moves the pack to the hub's sha, which is the hub's build; `BuildMismatch` names `follow` (Recommended).
-- Option: keep it, exporting `HEAD:lib` from the pack checkout.
-
-D5. The `sd-db.sh` entrypoint.
-- Option: move it to the pack as `bin/sd-db`; a system shim keeps old paths until step 4 (Recommended).
-- Option: keep `sd-db.sh` in system as the front door, calling into the pack's `lib/`.
+- D1. System callers read the library from the pack checkout's `lib/`, path from `SD_PACK_CHECKOUT`.
+- D2. `refresh` stops services, backs up, migrates and restarts inside its drain; `hub-pin` waits for it.
+- D3. The dashboard stays in system for this item and reads the pack's `lib/`; its own move is a later item.
+- D4. Satellite self-install (sd:2802) is deleted in step 3; follow moves the pack to the hub's sha, which is the hub's build.
+- D5. `sd-db.sh` moves to the pack as `bin/sd-db`; a system shim keeps old paths until step 4.
 
 ## Acceptance criteria
 
@@ -241,4 +225,4 @@ D5. The `sd-db.sh` entrypoint.
   Step 3's uninstall turns that into a loud failure; the step 2 builder greps for `sd_db` outside `local-sd-db` first.
 - The freeze depends on the lane: a system PR touching `local-sd-db` after step 1 must not merge.
   Step 2's precondition catches it late, not early; the accepted cost is one port.
-- D2 option 1 stops services on every library change at `refresh`. A refresh with no library change stops nothing.
+- The D2 flow stops services on every library change at `refresh`. A refresh with no library change stops nothing.
