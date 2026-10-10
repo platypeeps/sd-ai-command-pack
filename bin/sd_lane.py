@@ -23,7 +23,9 @@ runs it under one lock per repository:
            fast-forwards the main checkout (sd:2568, below). Under the
            runner lock it first marks failed a running entry whose runner
            pid is gone, with `reclaimed_by`, and lists it as `reclaimed`
-           (sd:2821);
+           (sd:2821). An entry whose prepare or merge met a hub fault goes
+           back to pending, at most `HUB_RETRIES` times, and the run stops
+           (sd:3239, below);
   watch    print each gate end a lane or builder log records, once.
 
 The verbs are the queue's only writers, each under the queue file's lock, so
@@ -88,6 +90,17 @@ scheduled job runs on every machine: `lane run --hosted` runs each lane this
 machine hosts, one after another, and skips one whose runner is busy. A
 satellite that hosts a lane gates and merges on its own machine, so no item
 passes from one machine to another.
+
+A hub fault is retried (sd:3239). A hub upgrade broke a satellite's sessions
+mid-prepare, and the entries failed for good. When `sd-ship` names the
+blocker `hub_unavailable` (`sd_ship_workflow.HUB_FAULTS`), the runner puts the
+entry back as pending with its `hub_retries` count and stops: the next entry
+would meet the same hub. The next run starts after the satellite's
+self-install, in a new process. When prepare's catch-up merge moved HEAD,
+the entry's `expected_head` moves to it; any other move still skips the entry.
+The retry's prepare reuses a review that cleared before the fault, as at any
+head the ship receipt records reviewed; a review whose report the fault kept
+from the receipt is incomplete, and spends the one `--retry-review`.
 """
 
 from __future__ import annotations
@@ -107,6 +120,7 @@ import time
 from typing import Any, Callable, Iterator
 
 import sd_lib
+import sd_ship_workflow
 
 BIN = pathlib.Path(__file__).resolve().parent
 ROOT_VARIABLE = "SD_LANE_ROOT"
@@ -134,6 +148,8 @@ Note = Callable[[int, str, pathlib.Path], str]
 #: The codes of an entry that stops `prepared` for want of merge authority (sd:3132).
 RUNNER_MERGE_MANUAL = "runner_merge_manual"
 RUNNER_MERGE_UNKNOWN = "runner_merge_unknown"
+#: The runs that put an entry back after a hub fault before the next fault fails it (sd:3239).
+HUB_RETRIES = 2
 
 
 class LaneError(RuntimeError):
@@ -432,6 +448,11 @@ def merge_refusal(entry: dict[str, Any]) -> dict[str, str] | None:
                                                    "merge by hand"}
 
 
+def answered_hub_fault(answer: dict[str, Any]) -> bool:
+    """Whether `sd-ship` answered with a hub fault, which the next run retries (sd:3239)."""
+    return ((answer.get("workflow") or {}).get("blocker") or {}).get("code") == sd_ship_workflow.HUB_UNAVAILABLE
+
+
 def process(entry: dict[str, Any], logs: pathlib.Path, ship: Ship) -> dict[str, Any]:
     """One entry, start to end; the fields to record on it."""
     worktree, item = pathlib.Path(entry["worktree"]), entry["item"]
@@ -450,7 +471,8 @@ def process(entry: dict[str, Any], logs: pathlib.Path, ship: Ship) -> dict[str, 
     fields: dict[str, Any] = {"prepare_log": str(prepare_log), "head": prepared.get("head")}
     if not (prepared.get("ok") and prepared.get("phase") == "ready_to_send"):
         return {**fields, "status": "failed", "step": "prepare", "phase": prepared.get("phase"),
-                "reason": str(prepared.get("error") or prepared.get("code") or "prepare did not reach ready_to_send")[:600]}
+                "reason": str(prepared.get("error") or prepared.get("code") or "prepare did not reach ready_to_send")[:600],
+                **({"hub_fault": True} if answered_hub_fault(prepared) else {})}
     refused = merge_refusal(entry)
     if refused is not None:
         return {**fields, "status": "prepared", **refused}
@@ -460,7 +482,8 @@ def process(entry: dict[str, Any], logs: pathlib.Path, ship: Ship) -> dict[str, 
     fields["merge_log"] = str(merge_log)
     if not (merged.get("ok") and merged.get("phase") == "merged"):
         return {**fields, "status": "failed", "step": "merge", "phase": merged.get("phase"),
-                "reason": str(merged.get("error") or merged.get("code") or "merge did not confirm")[:600]}
+                "reason": str(merged.get("error") or merged.get("code") or "merge did not confirm")[:600],
+                **({"hub_fault": True} if answered_hub_fault(merged) else {})}
     return {**fields, "status": "merged", "merge_commit": merged.get("merge_commit")}
 
 
@@ -794,6 +817,35 @@ def finish_entry(path: pathlib.Path, entry: dict[str, Any], outcome: dict[str, A
     drop_body(entry, path.parent.parent)  # after the write, as in `cancel`
 
 
+def requeue(path: pathlib.Path, entry: dict[str, Any], outcome: dict[str, Any]) -> bool:
+    """Put a running entry back as pending after a hub fault, or False once its retries are spent (sd:3239).
+
+    It keeps its place and its body copy, and `hub_fault` says what failed
+    where; a later outcome writes its own fields beside it. Its `expected_head` moves to the
+    worktree's HEAD only when that is prepare's catch-up: a merge whose first
+    parent is the queued head.
+    """
+    retries = int(entry.get("hub_retries") or 0)
+    if not outcome.pop("hub_fault", False) or retries >= HUB_RETRIES:
+        return False
+    worktree, expected = pathlib.Path(entry["worktree"]), entry["expected_head"]
+    head = lane_git(worktree, "rev-parse", "HEAD")
+    if (head and head != expected and lane_git(worktree, "rev-parse", "HEAD^1") == expected
+            and lane_git(worktree, "rev-parse", "--verify", "--quiet", "HEAD^2")):
+        expected = head
+    fault: dict[str, Any] = {key: outcome[key] for key in ("step", "reason", "prepare_log", "merge_log") if key in outcome}
+
+    def put_back(entries: list[dict[str, Any]]) -> None:
+        for row in entries:
+            if row.get("item") == entry["item"] and row.get("status") == "running":
+                for key in ("started_at", "runner_pid"):
+                    row.pop(key, None)
+                row.update(status="pending", expected_head=expected, hub_retries=retries + 1,
+                           hub_fault={**fault, "at": stamp_now()})
+    update(path, put_back)
+    return True
+
+
 def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_ship,
              gate: Gate = default_gate, note: Note | None = None) -> dict[str, Any]:
     """Drain this repository's queue in order under its lane lock; never wait for the lock.
@@ -804,7 +856,8 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
     call, so a suite can replace it. Off the lane host it refuses before any of
     that (sd:3003). It reads the host again before each claim, under the
     runner lock: after a move it finishes the running entry, claims no next
-    one, and says why in `stopped`.
+    one, and says why in `stopped`. After a hub fault it puts the entry back
+    and stops the same way (`requeue`, sd:3239).
     """
     refuse_elsewhere(root)
     path = queue_path(root, environ)
@@ -843,6 +896,13 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
                 outcome = process(entry, path.parent.parent / "logs", ship)
             except Exception as error:  # a broken entry is marked; the next one still runs
                 outcome = {"status": "failed", "reason": f"{type(error).__name__}: {error}"[:600]}
+            if requeue(path, entry, outcome):
+                ran.append({"item": entry["item"], **outcome, "status": "pending"})
+                answer["stopped"] = (f"sd:{entry['item']} met a hub fault in {outcome.get('step')}; "
+                                     "it is pending again, and the next run retries it")
+                if ahead is not None:
+                    ahead.join()
+                return answer
             outcome.update(settle(entry, outcome, environ, note or default_note, own_lock, root))
             finish_entry(path, entry, outcome)
             ran.append({"item": entry["item"], **outcome})

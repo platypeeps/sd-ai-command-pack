@@ -295,6 +295,78 @@ class Runner(Lane):
         self.assertEqual((entry["status"], entry["step"]), ("failed", "prepare"))
         self.assertIn("did not complete", entry["reason"])
 
+    #: `sd-ship`'s answer when the hub dropped its session or refused its build (sd:3239).
+    HUB_FAULT = {"ok": False, "phase": "prepare", "error": "the sd hub at hub.example.test:8769 is unreachable: "
+                 "[Errno 32] Broken pipe", "workflow": {"blocker": {"code": "hub_unavailable", "retryable": True}}}
+
+    def test_a_hub_fault_puts_the_entry_back_and_the_next_run_ships_it(self) -> None:
+        """sd:3239. A hub upgrade broke prepare's session; the entry failed as a policy block and was lost."""
+        tree = self.worktree("topic")
+        sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.worktree("second"), 2, "two", self.body, self.environ, manual=True, claim="deliver")
+        self.answers[(1, "prepare")] = self.HUB_FAULT
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        # The run stops: the hub is mid-upgrade, and the next entry would meet it too.
+        self.assertEqual([(c[2], c[4]) for c in self.calls], [("prepare", "1")])
+        self.assertIn("sd:1", answer["stopped"])
+        one, two = self.entries()
+        self.assertEqual((one["status"], one["hub_retries"], one["hub_fault"]["step"], two["status"]),
+                         ("pending", 1, "prepare", "pending"))
+        self.assertIn("Broken pipe", one["hub_fault"]["reason"])
+        self.assertNotIn("step", one)
+        self.assertNotIn("runner_pid", one)
+        self.assertTrue(pathlib.Path(one["body_file"]).is_file())
+        del self.answers[(1, "prepare")]
+        self.calls.clear()
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        # No --retry-review: a review that cleared before the fault is the receipt prepare reuses at this head.
+        self.assertEqual([(c[2], c[4], "--retry-review" in c) for c in self.calls],
+                         [("prepare", "1", False), ("merge", "1", False), ("prepare", "2", False), ("merge", "2", False)])
+        self.assertEqual([entry["status"] for entry in self.entries()], ["merged", "merged"])
+
+    def test_a_hub_fault_in_the_merge_is_retried_too(self) -> None:
+        sd_lane.enqueue_entry(self.repo, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        self.answers[(1, "merge")] = {**self.HUB_FAULT, "phase": "merge"}
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], entry["hub_fault"]["step"], entry["hub_retries"]), ("pending", "merge", 1))
+        del self.answers[(1, "merge")]
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual((self.entries()[0]["status"], [c[2] for c in self.calls]),
+                         ("merged", ["prepare", "merge", "prepare", "merge"]))
+
+    def test_the_retry_starts_from_prepares_catch_up_merge_and_not_from_a_builder_commit(self) -> None:
+        """The catch-up moved HEAD past the queued head; a commit of the builder's still skips the entry."""
+        for builder in (False, True):
+            with self.subTest(builder=builder):
+                tree = self.worktree(f"topic-{builder}")
+                sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+                git(self.repo, "commit", "-q", "--allow-empty", "-m", "base moved")
+
+                def catch_up_then_fault(argv: list[str], log: pathlib.Path, tree: pathlib.Path = tree) -> dict:
+                    git(tree, "merge", "-q", "--no-ff", "-m", "Merge origin/main", "main")
+                    self.ship(argv, log)
+                    return self.HUB_FAULT
+                sd_lane.run_lane(self.repo, self.environ, catch_up_then_fault)
+                caught_up = git(tree, "rev-parse", "HEAD")
+                self.assertEqual(self.entries()[-1]["expected_head"], caught_up)
+                if builder:
+                    git(tree, "commit", "-q", "--allow-empty", "-m", "the builder's")
+                sd_lane.run_lane(self.repo, self.environ, self.ship)
+                self.assertEqual(self.entries()[-1]["status"], "skipped" if builder else "merged")
+
+    def test_a_hub_that_keeps_failing_fails_the_entry_after_its_retries(self) -> None:
+        sd_lane.enqueue_entry(self.repo, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        self.answers[(1, "prepare")] = self.HUB_FAULT
+        for _ in range(sd_lane.HUB_RETRIES):
+            sd_lane.run_lane(self.repo, self.environ, self.ship)
+            self.assertEqual(self.entries()[0]["status"], "pending")
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], entry["hub_retries"], len(self.calls)),
+                         ("failed", sd_lane.HUB_RETRIES, sd_lane.HUB_RETRIES + 1))
+        self.assertIn("Broken pipe", entry["reason"])
+
     def test_the_whole_prepare_output_is_kept(self) -> None:
         sd_lane.enqueue_entry(self.repo, 1, "one", self.body, self.environ, claim="deliver")
         sd_lane.run_lane(self.repo, self.environ, self.ship)
