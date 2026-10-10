@@ -79,7 +79,7 @@ Grep the whole repository again before each deletion.
 | 4 | Offload receipts, offload environment | `bin/sd_gate_receipts.py`: `sd-gate-offload:v1:` rows, `offload_view`, `offload_differences`, `offload_miss`, `offload_environment`, `offload_run`, `offload_pins`, `satellite_identity`; `tests/test_sd_gate_offload_rows.py` | none |
 | 5 | Pack digest | `bin/sd_lane.py`: `publish_pack` and its two calls; `bin/sd_gate_receipts.py`: `PACK_PREFIX` | none |
 | 6 | The opt-in column | `bin/sd_lib.py`: `repo_satellite_gate`, `SATELLITE_GATE_MODES` | `sd_db/repos.py`: `set_satellite_gate`, `repo_satellite_gate`; `sd_db/writes.py`; `sd-db.sh repo satellite-gate`; a migration that drops the column |
-| 7 | Prose | `WORKFLOW.md` satellite steps; `docs/coding-to-release.md`; `docs/work/2026-10-05-satellite-gate-offload/` to `archive/` | `local-sd-db/README.md` "Satellite gate offload" |
+| 7 | Prose | `WORKFLOW.md` satellite steps; `docs/coding-to-release.md`; the offload item to `docs/work/archive/2026-10/2026-10-05-satellite-gate-offload/` | `local-sd-db/README.md` "Satellite gate offload" |
 
 What stays: the hub and its served database, the lock-free `prepare`, same-machine gate receipts and reuse (sd:2586),
 `sd-ship hold`, and the staleness alarm (sd:2918).

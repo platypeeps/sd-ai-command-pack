@@ -3,6 +3,7 @@ title: Offload gates to an sd satellite; the hub's lane merges on a satellite re
 created: 2026-10-05
 branch: sd2704-satellite-gate-design
 item: sd:2704
+status: done
 ---
 # PRD — satellite gate offload
 

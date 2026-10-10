@@ -45,7 +45,7 @@ records LAN timings. `9bdd1767` changes the plan (operator decisions), so it
 is not progress. Most `implement.md` edits ride along with code.
 
 The larger cost is staleness. sd:2704's
-[implement.md](../2026-10-05-satellite-gate-offload/implement.md) has nine
+[implement.md](../archive/2026-10/2026-10-05-satellite-gate-offload/implement.md) has nine
 steps and nine unticked boxes on 2026-10-07. Eight steps merged in five pull
 requests: pack #1374, #1377 and #1380, system #172 and #177. Step 1 is a
 measurement, recorded in note #9971. The item's notes hold that progress, in
