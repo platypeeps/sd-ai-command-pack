@@ -948,7 +948,11 @@ class WorkItem:
 
 
 def external_id(root: pathlib.Path | str, item_dir: pathlib.Path) -> str:
-    """One item's row key. A writer needs it and no read connection to get it."""
+    """One item's row key. A writer needs it and no read connection to get it.
+
+    Always `prd.md`, even for a folder holding `design.md` alone: the key is the
+    path `sd_db` registers, not the file `item_document` reads (sd:3255).
+    """
     return (f"{stored_repo(main_worktree_root(pathlib.Path(root).resolve()))}::"
             f"{WORK_DIR}/{item_dir.name}/prd.md")
 
@@ -1640,9 +1644,23 @@ def _is_archived(item_dir: pathlib.Path) -> bool:
     return ARCHIVE_DIR in item_dir.resolve().parts
 
 
-def _read_prd(item_dir: pathlib.Path) -> tuple[dict[str, str], list[str]]:
-    """The prd's frontmatter fields, and what went wrong reading them."""
+def item_document(item_dir: pathlib.Path) -> pathlib.Path:
+    """The file that carries an item's frontmatter: `prd.md`, else `design.md` (sd:3255).
+
+    sd:3000 lets a folder hold `design.md` alone; an older folder keeps
+    `prd.md`, which stays first. With neither, `prd.md` is named, so a
+    missing file reads as it always did. The row key is not this file:
+    `external_id` stays `docs/work/<item>/prd.md`, the one path `sd_db`
+    registers and looks up.
+    """
     prd = item_dir / "prd.md"
+    design = item_dir / "design.md"
+    return design if not prd.is_file() and design.is_file() else prd
+
+
+def _read_prd(item_dir: pathlib.Path) -> tuple[dict[str, str], list[str]]:
+    """The item document's frontmatter fields, and what went wrong reading them."""
+    prd = item_document(item_dir)
     try:
         parsed = parse_frontmatter(prd.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError):
@@ -1766,7 +1784,7 @@ def _status_report(
     statuses: "Statuses",
 ) -> StatusReport:
     archived = _is_archived(item_dir)
-    prd = item_dir / "prd.md"
+    prd = item_document(item_dir)
     if archived:
         if statuses.rows.opened:
             report = _from_row(item_dir, prd, fields, problems, statuses)
@@ -2067,14 +2085,15 @@ ROW_ID_DIGITS = 64
 
 
 def named_item(item_dir: pathlib.Path) -> tuple[int | None, str]:
-    """`(id, "")` for the row `<item_dir>/prd.md` names as `item: sd:<id>`.
+    """`(id, "")` for the row the item document names as `item: sd:<id>`.
 
+    The document is `item_document`'s: `prd.md`, else `design.md` (sd:3255).
     `(None, "")` when the frontmatter carries no key, or the file cannot be
     read as one; `(None, problem)` when the key is there and is not `sd:`
     followed by digits, with the problem naming the key and its value.
     `sd-docs-lint` fails the same shape where the file is, by `ITEM_KEY_RE`.
     """
-    prd = item_dir / "prd.md"
+    prd = item_document(item_dir)
     try:
         fields = parse_frontmatter(prd.read_text(encoding="utf-8"))
     except OSError:

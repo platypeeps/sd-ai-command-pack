@@ -763,6 +763,15 @@ class TheRowIsFoundFromItsKey(RowCase):
         found = sd_handoff_rows.item_for(self.connection, sd_db, self.root, item_dir)
         self.assertEqual(found["id"], number)
 
+    def test_a_design_only_folder_names_its_row_from_design_md(self):
+        """sd:3255. sd:3000 lets a folder hold `design.md` alone; its key names the row."""
+        number = self.row("task")
+        item_dir = self.prd(f"sd:{number}", "a-designed-item")
+        (item_dir / "prd.md").rename(item_dir / "design.md")
+        found = sd_handoff_rows.item_for(self.connection, sd_db, self.root, item_dir)
+        self.assertIsNotNone(found, "design.md's key read no row")
+        self.assertEqual(found["id"], number)
+
 
 if __name__ == "__main__":
     unittest.main()
