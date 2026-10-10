@@ -669,7 +669,8 @@ class Receipts(ReceiptFixture):
         head = self.counted()
         self.gate(head)
         revision, row = self.stored(head)
-        row["binding"] = {**row["binding"], "offload_tools": row["binding"].pop("bound_tools"), "environment_mode": "whole"}
+        tools = row["binding"].pop("bound_tools")
+        row["binding"] = {**row["binding"], "offload_tools": tools, "environment_mode": "whole"}
         with contextlib.closing(sd_gate_receipts._connect(self.database, write=True)) as connection:
             from sd_db import ship
 
