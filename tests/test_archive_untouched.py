@@ -35,6 +35,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from typing import Any
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -332,6 +333,8 @@ def load_sd_review() -> Any:
 
 
 PLANNING_PRD = "---\nstatus: planning\nbranch: topic\n---\n\n- [ ] one\n"
+#: What the retire leaves in an active item: the branch line, and no status.
+ACTIVE_PRD = "---\nbranch: topic\n---\n\n- [ ] one\n"
 
 
 class TheArchiveIsAScopeBoundary(unittest.TestCase):
@@ -363,18 +366,38 @@ class TheArchiveIsAScopeBoundary(unittest.TestCase):
             ["config", "user.name", "Fixture"],
         ):
             subprocess.run(["git", *args], cwd=str(self.repo), check=True, capture_output=True)
-        self.live = self.write_item("docs/work/2026-01-01-live")
-        self.buried = self.write_item("docs/work/archive/2026-01/2026-01-02-buried")
+        self.live = self.write_item("docs/work/2026-01-01-live", ACTIVE_PRD)
+        self.buried = self.write_item("docs/work/archive/2026-01/2026-01-02-buried", PLANNING_PRD)
+        # The rows own the statuses, in the fixture's own database: the live
+        # item is `planning` and the archived one is `done`, whatever its
+        # frontmatter line says.
+        home = self.tmp / "home"
+        home.mkdir()
+        patched = unittest.mock.patch.dict(os.environ, {"HOME": str(home)})
+        patched.start()
+        self.addCleanup(patched.stop)
+        import sd_db
+
+        sd_db.initialise(home=home)
+        connection = sd_db.connect(home=home)
+        self.addCleanup(connection.close)
+        sd_db.upsert_repo(connection, str(self.repo), managed=1)
+        for name, state in (("2026-01-01-live", "planning"), ("2026-01-02-buried", "done")):
+            sd_db.upsert_item(
+                connection, source="docs/work",
+                external_id=f"{self.repo}::docs/work/{name}/prd.md",
+                kind="work", title=name, status=state, who="test", repo=str(self.repo),
+            )
         subprocess.run(["git", "add", "-A"], cwd=str(self.repo), check=True, capture_output=True)
         subprocess.run(
             ["git", "commit", "--quiet", "-m", "seed"],
             cwd=str(self.repo), check=True, capture_output=True,
         )
 
-    def write_item(self, relative: str) -> pathlib.Path:
+    def write_item(self, relative: str, text: str) -> pathlib.Path:
         directory = self.repo / relative
         directory.mkdir(parents=True)
-        (directory / "prd.md").write_text(PLANNING_PRD, encoding="utf-8")
+        (directory / "prd.md").write_text(text, encoding="utf-8")
         return directory
 
     def env(self) -> dict[str, str]:

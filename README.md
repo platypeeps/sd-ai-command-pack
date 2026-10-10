@@ -185,15 +185,13 @@ These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOM
 `sd.gate_cache_gb` bounds the local gate's warm Rust build folders (unset: 40 GB); past it the gate removes the least recently used free folder.
 `sd.bulk_storage_root` names the folder for large uncommitted data, as `<root>/<repository>/` (unset: none); build output stays on the system disk. It grants nothing.
 `sd.privacy_patterns` names the privacy-pattern file `sd-docs-lint --pr-body` checks a pull request body against, one extended regular expression per line (unset: `privacy-patterns` in `$SYSTEM_TOOLS_CONFIG`, else `~/.config/system`); with no file the check is skipped with a note. It grants nothing.
-`sd-ship lane enqueue|list|cancel|move|hold|release|run|watch` keeps a serial prepare-and-merge queue per repository in a file under `sd.lane_root` (unset: `$XDG_STATE_HOME/sd/lanes`), so a queued chain outlives the session that filled it. Enqueue copies the body file into the lane's `bodies/` folder, so a reboot that clears `/tmp` loses no queued body; the copy goes when its entry ends. After a merge the runner deletes the remote branch, notes the item with the command that removes the worktree, and fast-forwards the main checkout; it never removes a worktree, since removal can race a live builder.
+`sd-ship lane enqueue|list|retry|cancel|move|hold|release|run|watch` keeps a serial prepare-and-merge queue per repository in a file under `sd.lane_root` (unset: `$XDG_STATE_HOME/sd/lanes`), so a queued chain outlives the session that filled it. Enqueue copies the body file into the lane's `bodies/` folder, so a reboot that clears `/tmp` loses no queued body; the copy goes when its entry merges or is cancelled. A failed, skipped or prepared entry keeps it until the item's next entry ends, and `lane retry <item> [--manual] [--expected-head <sha>]` queues it again at its head with that copy; `--expected-head` refuses, under the queue's lock, a last entry at another head. After a merge the runner deletes the remote branch, notes the item with the command that removes the worktree, and fast-forwards the main checkout; it never removes a worktree, since removal can race a live builder.
 `sd gate run -- make check` queues any command the same way; `sd gate status` shows the queue.
 Wrap a plain `make check` in any repository that way, and drop a per-repository `lockf` from lane scripts: the pool orders gates across every repository.
 A waiting gate names who holds each slot and since when.
 `sd.review_slots` is load control too: how many reviews may run their reviewers at once on the machine (unset: 2).
 `sd gate post --head SHA` runs the merge gate at SHA and posts `sd/local-gate`, for a merge path that is not `sd-ship merge`.
 `sd gate check` runs the same check at `HEAD` and records a pass that `sd-ship prepare` and the merge gate reuse at that head; it posts nothing.
-`sd gate tools install` installs the gate's pinned tool copies (`bin/sd_gate_tools.py`), and `sd gate tools status` lists them.
-A gate in a repository with `repo.satellite_gate = accept` runs those copies first on `PATH`, and refuses while one is missing.
 
 `configured` allows private code and scoped review context to the operator's eligible configured providers, including future entries.
 A local `reviewers` list restricts recipients; an explicit empty value denies review.
@@ -272,7 +270,7 @@ and files a new row. `sd task show` prints the reference as `ref:`, and
 `sd today --json` and every `--json` row carry it as `ref`. Only a task or a
 followup takes `--ref`, and not with `--recur`.
 
-`sd store items --open` lists the backlog; `sd store item 42 --json` includes
+`sd store items --open` lists the backlog, and `--here` narrows it to this registered checkout; `sd store item 42 --json` includes
 history and a revision that edits can require with `--if-revision`.
 `sd task show 42` is an alias that prints the same thing.
 `sd task cancel 42 --reason TEXT` closes a task or followup nobody will do,

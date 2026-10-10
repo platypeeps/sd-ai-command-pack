@@ -153,7 +153,7 @@ def base_ref(branch: str | None) -> str | None:
 def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SECONDS, base: str | None = None,
                       database: pathlib.Path | None = None, run: Run | None = None,
                       environ: Mapping[str, str] | None = None, reuse: bool = True,
-                      record: bool = True, slot_timeout: int = 0, offload: str | None = None) -> dict[str, Any]:
+                      record: bool = True, slot_timeout: int = 0) -> dict[str, Any]:
     """`sd-check --json` in a clean detached worktree of `head`; the worktree is removed after.
 
     Returns `{"head", "status", "exit_code", "summary", "report", "stderr"}`,
@@ -168,7 +168,6 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
     passing run leaves one when its binding held from before the run to after;
     otherwise the result's `receipt_skipped` names what moved (sd:2612).
     `reuse=False` never reads one and `record=False` never writes one (the merge gate).
-    `offload` and a satellite's offload receipt (sd:2704): `sd_gate_receipts.from_receipts`.
     """
     with tempfile.TemporaryDirectory(prefix=sd_gate_cache.worktree_prefix(root)) as parent:  # sd:2739
         tree = pathlib.Path(parent) / "tree"
@@ -176,28 +175,24 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
         try:
             if not os.path.lexists(tree / LOCAL_BLOCK):  # the digested block only, an empty one for no file; a tracked copy, even a link, is the tree's
                 (tree / LOCAL_BLOCK).write_text(sd_lib.local_policy_text(sd_lib.read_local_block(local) if (local := untracked_local_block(root)) else {}), encoding="utf-8")
-            caller = gate_environment(root, None if environ is None else dict(environ))
-            env, mode = sd_gate_receipts.offload_run(database, root, caller, record=record, offload=offload)  # sd:2782
-            sd_gate_receipts.cargo_subcommands(caller, tree, root, mode)  # sd:2921
+            env = gate_environment(root, None if environ is None else dict(environ))
             content, fork = sd_gate_receipts.tree_key(tree, base)
             own = sd_gate_receipts.gates_itself(root, tree, BIN)
             gated = sd_gate_receipts.Worktree(root, tree, head, base, env, content, fork, own,
-                                              gate_inputs(root, head, content, own), mode)
-            identity = (sd_gate_receipts.gate_binding(tree, head, gated.inputs, base, env, fork, mode)
-                        if database is not None and offload != "require" else None)
-            before = sd_gate_receipts.start_view(gated, identity)  # sd:2704
-            answer, miss = sd_gate_receipts.from_receipts(database, gated, identity, reuse=reuse, record=record, offload=offload)
+                                              gate_inputs(root, head, content, own))
+            identity = sd_gate_receipts.gate_binding(tree, head, gated.inputs, base, env, fork) if database is not None else None
+            answer, miss = sd_gate_receipts.from_receipts(database, gated, identity, reuse=reuse)
             if answer is not None:
                 return {"head": gate_git(tree, "rev-parse", "HEAD"), **answer}
             argv = [sys.executable, str((tree / "bin" if own else BIN) / "sd-check"), "--json", "--timeout", str(timeout),
                     *(["--base", base] if base else []), *(["--slot-timeout", str(slot_timeout)] * (slot_timeout > 0))]
             with sd_gate_cache.cargo_environment(root, tree, env) as child:
-                code, output, errors = (run or run_child)(argv, {**sd_gate_receipts.subcommand_path(child, tree), "TMPDIR": sd_gate_cache.check_temporary(parent)},
+                code, output, errors = (run or run_child)(argv, {**child, "TMPDIR": sd_gate_cache.check_temporary(parent)},
                                                           tree, timeout + slot_timeout + REPORT_GRACE_SECONDS)
             checked = gate_git(tree, "rev-parse", "HEAD")
             reading = check_reading(code, output, errors)
             if record and database and identity and reading["status"] == "success" and checked == head:
-                sd_gate_receipts.record_gate_pass(database, gated, identity, reading, before)
+                sd_gate_receipts.record_gate_pass(database, gated, identity, reading)
         finally:
             # The administrative entry goes with the directory; the temporary
             # directory's own cleanup removes whatever the removal left.

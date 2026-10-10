@@ -41,9 +41,9 @@ NOT_INSTALLED = (
     "tag, then run this again."
 )
 
-#: The two columns a repository's source authority is held in, and the word
-#: each carries while its sitting is incomplete.
-AUTHORITY = ("status_source", "pieces_source")
+#: The column a repository's source authority is held in, and the word it
+#: carries while its sitting is incomplete.
+AUTHORITY = ("pieces_source",)
 RETIRING = "retiring"
 
 
@@ -103,8 +103,8 @@ def unproven_repositories(connection, restore_row) -> list[tuple[str, str]]:
     """
     unproven = [
         (row["path"], column)
-        for row in connection.execute("SELECT path, status_source, pieces_source FROM repo")
-        for column in AUTHORITY if row[column] == RETIRING
+        for row in connection.execute("SELECT * FROM repo")
+        for column in AUTHORITY if column in row.keys() and row[column] == RETIRING
     ]
     del restore_row
     return unproven

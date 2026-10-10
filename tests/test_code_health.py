@@ -640,7 +640,6 @@ COMPLEX = frozenset({
     "bin/sd-review::review",  # 97
     "bin/sd-review::run_provider",  # 40
     "bin/sd-ship::Ship.prepare",  # 53
-    "bin/sd-status::_work_rows",  # 31
     "bin/sd::store_add",  # 28
     "bin/sd::store_set",  # 25
     "bin/sd::validate_kind",  # 28
@@ -653,7 +652,6 @@ COMPLEX = frozenset({
     "bin/sd_registry.py::url_response",  # 26
     "bin/sd_research_pins.py::report",  # 25
     "bin/sd_ship_remote.py::GitHub.ready",  # 29
-    "bin/sd_work.py::run",  # 29
     "bin/sd_writing.py::register",  # 22
     "bin/sd_writing.py::run",  # 37
 })
@@ -1525,7 +1523,6 @@ UNSHIELDED = {
     "test_sd_controls.py": 2,
     "test_sd_docs_lint.py": 2,
     "test_sd_fleet.py": 2,
-    "test_sd_gate_offload_rows.py": 1,
     "test_sd_gate_queue.py": 5,
     "test_sd_gate_slots.py": 4,
     "test_sd_handoff.py": 2,
@@ -1571,7 +1568,6 @@ UNSHIELDED = {
     "test_sd_skill_adopt.py": 1,
     "test_sd_skill_promotion.py": 1,
     "test_sd_skill_use.py": 2,
-    "test_sd_status.py": 1,
     "test_sd_store.py": 2,
     "test_sd_suggest.py": 2,
     "test_sd_work.py": 13,

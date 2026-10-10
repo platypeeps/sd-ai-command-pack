@@ -283,7 +283,7 @@ class WorkItemCoverageTests(unittest.TestCase):
             result = run("review", cwd=repo)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("2026-01-01-probe", result.stdout)
-        self.assertIn("status 'draft' is not one of", result.stdout)
+        self.assertIn("the row is the status; prd.md carries no status: line", result.stdout)
 
     def test_the_paths_are_reported_repo_relative(self) -> None:
         """The lint resolves its root through git, which returns the real path.

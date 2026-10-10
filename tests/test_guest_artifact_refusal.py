@@ -33,6 +33,8 @@ if str(REPO_ROOT / "bin") not in sys.path:
 
 import sd_lib  # noqa: E402
 
+from tests import row_seed  # noqa: E402
+
 VIEWER = ({"login": "sven"}, "")
 
 #: A `gh api` that answers from a fixture: the transport is real, the network
@@ -128,13 +130,15 @@ class Fixture(unittest.TestCase):
         (item / "prd.md").write_text(
             "---\n"
             "title: A thing\n"
-            "status: planning\n"
             "created: 2026-01-01\n"
-            "branch: topic\n"
             "---\n"
             "\n## Requirements\n\n- [ ] one\n",
             encoding="utf-8",
         )
+        # The status and branch are the row's; `run_review` reads this home.
+        home = self.tmp / "home"
+        home.mkdir(exist_ok=True)
+        row_seed.seed_row(home, root, item, "planning", branch="topic")
         return item
 
 
@@ -563,7 +567,7 @@ class ShipMergeFixture(Fixture):
         # policy is the operator's standing setting, and a remote that gained
         # a collaborator is a reason to stop this merge, not to rewrite it.
         upsert_repo(self.connection, str(self.root), remote="https://github.com/sven/thing.git",
-                    status_source="row", runner_merge="auto")
+                    runner_merge="auto")
         self.item = create_item(
             self.connection, kind="work", title="a thing", status="in_progress", repo=str(self.root), branch="topic"
         )
@@ -589,7 +593,7 @@ class ShipMergeFixture(Fixture):
         from sd_db import upsert_repo
 
         upsert_repo(self.connection, str(self.root), remote="https://github.com/sven/thing.git",
-                    status_source="row", runner_merge=value)
+                    runner_merge=value)
 
     def remote(self, people: str, repo: str = OWN_JSON) -> None:
         stub = self.bindir / "gh"
@@ -729,7 +733,7 @@ class TheDemotionNote(ShipMergeFixture):
 
         self.git(self.root, "remote", "set-url", "origin", origin)
         upsert_repo(self.connection, str(self.root), remote=origin,
-                    status_source="row", runner_merge="auto")
+                    runner_merge="auto")
         self.remote(people, repo_json)
 
     def test_a_second_remote_whose_name_extends_the_first_still_gets_its_own_note(self) -> None:

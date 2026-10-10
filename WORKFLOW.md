@@ -106,17 +106,10 @@ These run only when asked by name.
 - A work item is a row: `sd task add`. Its status, notes and progress live on the row.
   Write `docs/work/<date>-<slug>/design.md` only when the shape needs agreement before the work starts.
   The design names its row with `item: sd:<n>`; there is no `prd.md` or `implement.md` to write.
-  An older item keeps its `prd.md`. The file/row status rules stand until sd:3015.
-  Where status lives is what `docs/work/.status-source` says. A checkout whose
-  marker says `row` reads it from the item's row and nowhere in the file: an
-  active `prd.md` there carries no `status:` line, and `sd-docs-lint` fails
-  one that does. A checkout with no marker reads the prd's `status:` line,
-  because its lines were never retired -- `file` is the unmarked default, and
-  deliberately so (`source:bin/sd_lib.py::status_marker` answers `file` for an
-  absent marker: the path every reader took before rows existed, not a new
-  one that happens to agree with it). Under `row`, a checkout or CI runner
-  with no database asks git whether the item is delivered, by the merge
-  trailers, and nothing else.
+  An older item keeps its `prd.md`; an active one carries no `status:` line,
+  and `sd-docs-lint` fails one that does. Every checkout reads status from the
+  item's row. A checkout or CI runner with no database asks git whether the
+  item is delivered, by the merge trailers, and nothing else.
   `ready_to_send` marks a finished artifact waiting on you.
 - `sd-spec`. Run it when a change alters behaviour that `docs/spec/` documents.
 - A review pass beyond the table below. Ask for it by name; the item records
@@ -553,7 +546,7 @@ The rules for them:
 - **Each lane runs on its lane host (sd:3003).** `repo.lane_host` names the
   machine that runs a repository's lane; NULL means the hub. Off that host,
   `sd-ship merge`, `reconcile`, `review`, `adjudicate --accept-dispositions`
-  and `lane enqueue`, `move`, `hold`, `release` and `run` refuse with
+  and `lane enqueue`, `retry`, `move`, `hold`, `release` and `run` refuse with
   `lane_elsewhere` before they read a row (sd:2795); the text names the host,
   the dashboard's Move lane control, and the verb. A host that cannot be read
   refuses with `lane_unknown` and never counts as the hub. `prepare` runs

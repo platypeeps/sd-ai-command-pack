@@ -897,14 +897,6 @@ def demotion_note_key(marker: str) -> str:
 # --------------------------------------------------------------------------
 
 
-#: The tracked marker the retire commit writes beside the lines it removes:
-#: `docs/work/.status-source`, one word. It travels in git, so a checkout with
-#: no database still knows which question to ask. **No marker is `file`**, and
-#: `file` is the path every reader took before rows existed -- the same path,
-#: not a new one that happens to agree with it.
-STATUS_MARKER = ".status-source"
-FROM_FILE, FROM_ROW = "file", "row"
-
 #: How `sd_db` keys an item row. Both halves are read out of
 #: `sd_db/sources/docs_work.py` rather than guessed: `source` is the string
 #: below and `external_id` is `<registered checkout>::docs/work/<item>/prd.md`.
@@ -953,28 +945,6 @@ class WorkItem:
     #: statement that nothing happened. Read by the aging basis,
     #: `last_active` below, and by nothing that decides a status.
     activity: str = ""
-
-
-def status_marker(root: pathlib.Path, work_dir: str = WORK_DIR) -> tuple[str, str]:
-    """Where this checkout's item statuses come from: `(word, problem)`.
-
-    No marker at all is `file`. A marker that is present and says something
-    this cannot read comes back as no word and a sentence, and deliberately
-    *not* as `file`: the marker exists only on a checkout whose `status:`
-    lines have been removed, so falling back to the line there is answering
-    from a line that is not in the file. Every item is then `unknown` with
-    the marker named, which is the loud form of the same finding.
-    """
-    path = pathlib.Path(root) / work_dir / STATUS_MARKER
-    try:
-        said = path.read_text(encoding="utf-8").strip()
-    except FileNotFoundError:
-        return FROM_FILE, ""
-    except (OSError, UnicodeDecodeError) as error:
-        return "", f"{path} cannot be read: {error}"
-    if said in (FROM_FILE, FROM_ROW):
-        return said, ""
-    return "", f"{path} says {said!r}, which is neither {FROM_FILE!r} nor {FROM_ROW!r}"
 
 
 def external_id(root: pathlib.Path | str, item_dir: pathlib.Path) -> str:
@@ -1101,37 +1071,6 @@ def repo_ci(connection: Any, root: pathlib.Path | str) -> str:
     except Exception:  # every fault is "not said"; see the docstring
         return "github"
     return value if value in CI_MODES else "github"
-
-
-#: The values `repo.satellite_gate` takes (sd:2704), default first: `accept`
-#: lets the hub merge on a satellite's offload receipt, and runs every gate in
-#: the repository under `sd_gate_receipts.offload_environment` (sd:2782).
-SATELLITE_GATE_MODES = ("off", "accept")
-
-
-def repo_satellite_gate(connection: Any, root: pathlib.Path | str) -> str:
-    """`repo.satellite_gate` for the repository `root` is a checkout of, else `off`.
-
-    Resolved as `repo_ci` resolves, and fail-closed the same way: an older
-    library or schema without the column, no row, or a read fault answers
-    `off`, and `off` grants nothing, so the hub runs its own gate.
-    """
-    if import_sd_db().module is None:
-        return "off"
-    try:
-        from sd_db import repos  # noqa: PLC0415
-
-        origin = git_output(["config", "--get", "remote.origin.url"], pathlib.Path(root))
-        path = repos.registered_for(connection, str(pathlib.Path(root).resolve()), origin)
-        reader = getattr(repos, "repo_satellite_gate", None)
-        if reader is not None:
-            value = reader(connection, path)
-        else:
-            row = repo_row(connection, path)
-            value = row["satellite_gate"] if row is not None and "satellite_gate" in row.keys() else "off"
-    except Exception:  # every fault is "not said"; see the docstring
-        return "off"
-    return value if value in SATELLITE_GATE_MODES else "off"
 
 
 def hosts_lane(connection: Any, database: Any, repository: str) -> bool:
@@ -1495,7 +1434,7 @@ class Rows:
         # whether it found a database to read. A library that says there is no
         # database is the designed database-free case. A library that is not
         # here has said nothing, and the answer that follows came from a
-        # different source than the marker named.
+        # different source than the row.
         self.installed = False
         self.problem = ""
         self._connection: Any = None
@@ -1617,8 +1556,8 @@ class Rows:
 
         The column is what `sd work register` writes and what
         `sd-status` and the dashboard print. The frontmatter `branch:` line is
-        a second copy nothing reconciles (sd:1382), so a checkout whose marker
-        names the row reads the branch from the row as it reads the status.
+        a second copy nothing reconciles (sd:1382), so the branch is read from
+        the row as the status is.
         """
         if not self.opened:
             return None
@@ -1660,11 +1599,11 @@ class Rows:
 
 @dataclass
 class Statuses:
-    """One checkout's answer to "where does a status come from", resolved once.
+    """One checkout's status reader, resolved once.
 
-    The marker is a property of the checkout and not of the item, so reading
-    it per item puts the same question sixty-four times; the database is
-    opened once too, and closed by whoever opened it.
+    The database is opened once for an enumeration and closed by whoever
+    opened it. Every status is the item's row; a machine with no database
+    asks git instead (`_from_row`).
 
     `history=False` asks `delivered` nothing: no fetch, no `git log`. An open
     item git would have answered reads `unknown`, and a `done` row is not
@@ -1672,23 +1611,16 @@ class Statuses:
     """
 
     root: pathlib.Path
-    source: str
-    problem: str = ""
-    rows: Rows | None = None
+    rows: Rows
     history: bool = True
 
     @classmethod
-    def of(
-        cls, root: pathlib.Path | str, work_dir: str = WORK_DIR, *, history: bool = True
-    ) -> "Statuses":
+    def of(cls, root: pathlib.Path | str, *, history: bool = True) -> "Statuses":
         root = pathlib.Path(root)
-        source, problem = status_marker(root, work_dir)
-        rows = Rows(root) if source == FROM_ROW else None
-        return cls(root, source, problem, rows, history)
+        return cls(root, Rows(root), history)
 
     def close(self) -> None:
-        if self.rows is not None:
-            self.rows.close()
+        self.rows.close()
 
 
 def _root_of(item_dir: pathlib.Path) -> pathlib.Path:
@@ -1696,7 +1628,7 @@ def _root_of(item_dir: pathlib.Path) -> pathlib.Path:
 
     `<root>/docs/work/<item>`, or `<root>/docs/work/archive/<month>/<item>`
     two levels deeper. Derived rather than asked, so reading one directory
-    stays as cheap as it was before there was a marker to find.
+    stays cheap.
     """
     root = item_dir.resolve()
     for _ in range(5 if root.parent.parent.name == ARCHIVE_DIR else 3):
@@ -1728,7 +1660,7 @@ def _from_git(
     problems: list[str],
     history: bool = True,
 ) -> StatusReport:
-    """What a checkout with no database derives once the marker is present.
+    """What a checkout with no database derives for an item.
 
     `yes` is `done`. `unknown` is emphatically not `no`: a shallow clone and
     an unreachable remote cannot see the trailer, and reading either as "not
@@ -1776,21 +1708,20 @@ def _from_row(
     the item, so every database-free checkout goes on picking it. `delivered`
     is the one question asked about that, here as everywhere else.
     """
-    said, trouble = statuses.rows.status(item_dir) if statuses.rows else ("", "")
+    said, trouble = statuses.rows.status(item_dir)
     if trouble:
         problems.append(f"{prd}: {trouble}")
         return StatusReport("unknown", False, tuple(problems))
     if not said:
         # Git answers, as it does for any checkout with no database -- but the
-        # marker said the row was the authority, so a fall-through has to be
-        # audible. Only the not-installed case is named: a library that opened
-        # and found no database has answered the question, and saying so on
-        # every item of a database-free checkout would be noise about the
-        # designed path.
-        if statuses.rows is not None and not statuses.rows.installed:
+        # row is the authority, so a fall-through has to be audible. Only the
+        # not-installed case is named: a library that opened and found no
+        # database has answered the question, and saying so on every item of
+        # a database-free checkout would be noise about the designed path.
+        if not statuses.rows.installed:
             problems.append(
                 f"{prd}: {statuses.rows.problem}, so this status came from git "
-                f"and not from the row this checkout's marker names"
+                f"and not from the row"
             )
         return _from_git(statuses.root, item_dir, prd, fields, problems, statuses.history)
     line = fields.get("status", "").strip()
@@ -1799,7 +1730,7 @@ def _from_row(
             f"{prd}: its `status:` line says {line!r} where the row says {said!r}; "
             f"the line is stale"
         )
-    recorded = statuses.rows is not None and statuses.rows.completed(item_dir)
+    recorded = statuses.rows.completed(item_dir)
     # Both spellings, because both are written. `sd-ship` writes
     # `Delivers: sd:<id>` and `sd work deliver` accepts nothing else, so the
     # id is what a checkout holding the row must ask for; asking by the folder
@@ -1811,7 +1742,7 @@ def _from_row(
     # resolve, which is why `_from_git` asks by it.
     wanted = tuple(dict.fromkeys(
         name for name in
-        ((statuses.rows.identity(item_dir) if statuses.rows else ""), item_dir.name)
+        (statuses.rows.identity(item_dir), item_dir.name)
         if name
     ))
     if (
@@ -1837,33 +1768,18 @@ def _status_report(
     archived = _is_archived(item_dir)
     prd = item_dir / "prd.md"
     if archived:
-        if statuses.source == FROM_ROW and statuses.rows is not None and statuses.rows.opened:
+        if statuses.rows.opened:
             report = _from_row(item_dir, prd, fields, problems, statuses)
             return StatusReport(report.status, True, report.inconsistencies)
         return StatusReport("done", True, tuple(problems))
-
-    if not statuses.source:
-        problems.append(f"{prd}: {statuses.problem}")
-        return StatusReport("unknown", False, tuple(problems))
-    if statuses.source == FROM_ROW:
-        return _from_row(item_dir, prd, fields, problems, statuses)
-
-    declared = fields.get("status", "").strip()
-    if declared not in ITEM_STATUSES:
-        problems.append(
-            f"{prd}: status {declared!r} is not one of {', '.join(ITEM_STATUSES)}"
-        )
-        return StatusReport("unknown", False, tuple(problems))
-    if declared == "in_progress" and not fields.get("branch", "").strip():
-        problems.append(f"{prd}: an in_progress item records the branch it lives on")
-    return StatusReport(declared, False, tuple(problems))
+    return _from_row(item_dir, prd, fields, problems, statuses)
 
 
 def _recorded(statuses: "Statuses", item_dir: pathlib.Path) -> str:
     """What the database last recorded against this item, `""` when none.
 
-    A `file` checkout holds no `Rows` and answers `""`, which is the right
-    answer rather than a missing one: there is no database to have recorded
+    A checkout with no database answers `""`, which is the right answer
+    rather than a missing one: there is no database to have recorded
     anything, and the aging basis falls back to git and to the item's own date
     exactly as it does for a row the database has lost.
 
@@ -1871,13 +1787,11 @@ def _recorded(statuses: "Statuses", item_dir: pathlib.Path) -> str:
     `tests/test_code_health.py` counts two functions of one name as a place its
     dead-code check cannot speak for, and that ceiling only falls.
     """
-    return statuses.rows.activity(item_dir) if statuses.rows is not None else ""
+    return statuses.rows.activity(item_dir)
 
 
 def _row_branch(statuses: "Statuses", item_dir: pathlib.Path) -> str | None:
-    """The row's branch when the row is this checkout's authority, else `None`."""
-    if statuses.source != FROM_ROW or statuses.rows is None:
-        return None
+    """The row's branch, `""` for none, `None` when no row answers."""
     return statuses.rows.branch(item_dir)
 
 
@@ -1914,25 +1828,19 @@ def _reported(
 def status_report(
     item_dir: pathlib.Path, *, statuses: "Statuses | None" = None
 ) -> StatusReport:
-    """Derive a work item's status from its artifacts, or from its row.
+    """Derive a work item's status from its row.
 
     An item under `archive/` is `done` by virtue of where it lives -- the move
-    is the record. Anything else answers wherever `docs/work/.status-source`
-    says: with no marker, from the `status:` line in `prd.md` frontmatter, and
-    with the marker saying `row`, from the item's row in the one database. A
-    status that is missing, unknown, or contradicted by the rest of the
-    frontmatter is reported as an inconsistency rather than raised: a lint rule
-    is the place to fail, and this function is also called by tools that only
-    want to show you the tree.
+    is the record -- unless the database holds its row. A checkout with no
+    database asks git whether the item was delivered. A status that is
+    missing, unknown, or contradicted by the rest of the frontmatter is
+    reported as an inconsistency rather than raised: a lint rule is the place
+    to fail, and this function is also called by tools that only want to show
+    you the tree.
     """
     item_dir = pathlib.Path(item_dir)
     fields, problems = _read_prd(item_dir)
     return _reported(item_dir, fields, problems, statuses)
-
-
-def derive_status(item_dir: pathlib.Path) -> str:
-    """The derived status alone; `unknown` when the artifacts do not say."""
-    return status_report(item_dir).status
 
 
 def work_item(item_dir: pathlib.Path, *, statuses: "Statuses | None" = None) -> WorkItem:
@@ -1973,12 +1881,11 @@ def work_item_dirs(root: pathlib.Path, work_dir: str = WORK_DIR) -> list[pathlib
 def work_items(root: pathlib.Path, work_dir: str = WORK_DIR) -> list[WorkItem]:
     """Every work item, enumerated from the tree rather than from an index.
 
-    The one place the marker is read and the one place the database is
-    opened, so every reader that picks an item -- `sd-review`, `sd-plan`,
-    `sd-status` -- comes through here and none of them restates where a
-    status comes from.
+    The one place the database is opened for an enumeration, so every reader
+    that picks an item -- `sd-review`, `sd-plan`, `sd-status` -- comes through
+    here and none of them restates where a status comes from.
     """
-    statuses = Statuses.of(root, work_dir)
+    statuses = Statuses.of(root)
     try:
         return [
             work_item(path, statuses=statuses)
@@ -2033,8 +1940,8 @@ def _item_directory(path: str, work_dir: str) -> str:
 
     `<work_dir>/<name>/<file>` and `<work_dir>/archive/<month>/<name>/<file>`,
     the same two shapes `work_item_dirs` enumerates. A path directly inside
-    `<work_dir>` -- `.status-source` is the one this repository has -- names no
-    item and must not be read as one, which is what the length test below is.
+    `<work_dir>` -- a stray file, say -- names no item and must not be read as
+    one, which is what the length test below is.
     """
     parts = path.split("/")
     head = work_dir.split("/")
@@ -3419,10 +3326,13 @@ class GroupTimeout(Exception):
 
 
 class _Terminated(BaseException):
-    """SIGTERM, raised while `run_group` owns a group that must end first."""
+    """SIGTERM, raised while `term_ends_group` holds it for a group that must end first."""
 
 
 def _raise_terminated(number: int, frame: object) -> None:
+    import signal  # noqa: PLC0415 - only the group helpers need it
+
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a second SIGTERM must not cut the group's end short
     raise _Terminated
 
 
@@ -3451,24 +3361,16 @@ def _end_group(process: subprocess.Popen) -> None:
                 pass
 
 
-def run_group(argv: list[str], *, cwd: pathlib.Path, env: dict[str, str], timeout: float,
-              input_text: str | None = None) -> subprocess.CompletedProcess:
-    """Run `argv` as the leader of a process group, and end the whole group.
+@contextlib.contextmanager
+def term_ends_group() -> Iterator[None]:
+    """For the block, SIGTERM raises `_Terminated`, so the block ends the group it leads; then SIGTERM ends this process.
 
-    sd:1482. `subprocess.run(timeout=)` kills the one process it started. A
-    child with children of its own -- `sd-check` running `make check` -- left
-    them running with nothing to time them out. Here the group is ended when
-    the call ends: at the deadline, on an interruption, and after a normal exit.
-    The leader gets SIGTERM and a moment to end its own groups before SIGKILL.
-
-    A group of its own no longer receives what is sent to the caller's group,
-    which is how `sd-ship` ends a review. So for the length of the call SIGTERM
-    ends the group first and then the caller, as it would have without one.
-    Only the default disposition is replaced: a caller that handles or ignores
-    SIGTERM keeps that, and a thread cannot install a handler.
-
-    Raises `GroupTimeout` at the deadline, and what `Popen` raises when
-    `argv[0]` cannot start.
+    A group of its own no longer receives what is sent to the caller's group:
+    the lane runner's timeout and an operator's `kill -- -<pgid>` reached
+    `sd-ship prepare` and not its review, which held a gate slot with ppid 1
+    (sd:3203). The block's handler for `_Terminated`, or a `finally`, ends the
+    group. Only the default disposition is replaced: a caller that handles or
+    ignores SIGTERM keeps that, and a thread cannot install a handler.
     """
     import signal  # noqa: PLC0415 - only the group helpers need it
     import threading  # noqa: PLC0415
@@ -3478,6 +3380,31 @@ def run_group(argv: list[str], *, cwd: pathlib.Path, env: dict[str, str], timeou
     if owns_term:
         signal.signal(signal.SIGTERM, _raise_terminated)
     try:
+        yield
+    except _Terminated:
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        os.kill(os.getpid(), signal.SIGTERM)
+        raise
+    finally:
+        if owns_term:
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+
+
+def run_group(argv: list[str], *, cwd: pathlib.Path, env: dict[str, str], timeout: float,
+              input_text: str | None = None) -> subprocess.CompletedProcess:
+    """Run `argv` as the leader of a process group, and end the whole group.
+
+    sd:1482. `subprocess.run(timeout=)` kills the one process it started. A
+    child with children of its own -- `sd-check` running `make check` -- left
+    them running with nothing to time them out. Here the group is ended when
+    the call ends: at the deadline, on an interruption, and after a normal exit.
+    The leader gets SIGTERM and a moment to end its own groups before SIGKILL.
+    SIGTERM to this process ends the group first, then this process (`term_ends_group`).
+
+    Raises `GroupTimeout` at the deadline, and what `Popen` raises when
+    `argv[0]` cannot start.
+    """
+    with term_ends_group():
         process = subprocess.Popen(
             list(argv), cwd=str(cwd), env=dict(env), text=True, start_new_session=True,
             stdin=subprocess.DEVNULL if input_text is None else subprocess.PIPE,
@@ -3488,13 +3415,6 @@ def run_group(argv: list[str], *, cwd: pathlib.Path, env: dict[str, str], timeou
             raise GroupTimeout(f"{argv[0]}: timed out after {timeout}s") from None
         finally:
             _end_group(process)
-    except _Terminated:
-        signal.signal(signal.SIGTERM, signal.SIG_DFL)
-        os.kill(os.getpid(), signal.SIGTERM)
-        raise
-    finally:
-        if owns_term:
-            signal.signal(signal.SIGTERM, signal.SIG_DFL)
     return subprocess.CompletedProcess(list(argv), process.returncode, output or "", errors or "")
 
 

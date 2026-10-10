@@ -999,6 +999,19 @@ def _refile(workflow: Any, connection: Any, args: argparse.Namespace,
     return workflow.edit_item(connection, item, changes, who=who)
 
 
+def _items(sd_db: Any, workflow: Any, args: argparse.Namespace, connection: Any) -> list[dict[str, Any]]:
+    """`sd store items`, filtered as its flags ask.
+
+    sd:3197. `--here` names the checkout as `task add --here` does, refusals included.
+    """
+    here = (_task_repo(argparse.Namespace(kind=None, no_repo=False, here=True), connection, workflow)
+            if args.here else None)
+    return [row for row in (dict(found) for found in sd_db.reads.backlog_items(connection, repo=here))
+            if (not args.open or row["status"] != "done")
+            and (not args.kind or row["kind"] == args.kind)
+            and (not args.status or row["status"] == args.status)]
+
+
 def run(args: argparse.Namespace) -> int:
     sd_db, workflow = _library()
     write = args.work_action not in {"today", "items", "item"}
@@ -1016,11 +1029,7 @@ def run(args: argparse.Namespace) -> int:
         if action == "today":
             result = [dict(row) for row in sd_db.reads.today_items(connection)]
         elif action == "items":
-            result = [dict(row) for row in sd_db.reads.backlog_items(connection)]
-            result = [row for row in result
-                      if (not args.open or row["status"] != "done")
-                      and (not args.kind or row["kind"] == args.kind)
-                      and (not args.status or row["status"] == args.status)]
+            result = _items(sd_db, workflow, args, connection)
         elif action == "item":
             result = workflow.item_state(connection, args.item)
         elif action == "add":
@@ -1327,6 +1336,8 @@ def register(groups: Any, store: Any) -> None:
 
     items = store.add_parser("items", help="workspace items from the shared database")
     items.add_argument("--open", action="store_true", help="exclude done items")
+    items.add_argument("--here", action="store_true",
+                       help="only this checkout's items; refuse unless it is registered in the sd database")
     items.add_argument("--kind", help="filter by item kind")
     items.add_argument("--status", help="filter by workflow status")
     _output(items, "items")

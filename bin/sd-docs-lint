@@ -4,9 +4,10 @@
 Five tree rules and one body rule. Numbers are stable: rules 5, 6 and 8 retired.
 
 1. Shape         -- a work item is a `<YYYY-MM-DD>-<slug>` directory holding a
-                    `design.md` (sd:3000). A legacy `prd.md` has a title, a date
-                    agreeing with the directory, and a known `status:` only where
-                    `.status-source` is not `row`.
+                    `design.md` (sd:3000). A legacy `prd.md` has a title and a date
+                    agreeing with the directory; an active one carries no
+                    `status:` line, because the row is the status, and an
+                    archived one keeps a known `status:`.
 2. Ready         -- an item that claims to be workable can be worked: it states
                     acceptance criteria, carries no open BLOCKING line, and,
                     when `in_progress`, records the branch it lives on.
@@ -97,11 +98,8 @@ def item_directories(work_root: pathlib.Path) -> list[pathlib.Path]:
     return sorted(found)
 
 
-def check_shape(
-    work_root: pathlib.Path, report: Report, source: str = sd_lib.FROM_FILE
-) -> None:
-    """Rule 1. `source` is where an *active* item's status comes from."""
-    archived_status_is_authoritative = source == sd_lib.FROM_FILE
+def check_shape(work_root: pathlib.Path, report: Report) -> None:
+    """Rule 1."""
     archive = work_root / "archive"
     if archive.is_dir():
         for month in sorted(archive.iterdir()):
@@ -133,8 +131,7 @@ def check_shape(
             # so only an `item:` key, when there is one, has a shape to check.
             check_item_key(design, parse_frontmatter(design.read_text(encoding="utf-8")) or {}, report)
             continue
-        status_is_authoritative = archived_status_is_authoritative or is_archived(item, work_root)
-        check_legacy_prd(prd, match.group("date"), status_is_authoritative, report)
+        check_legacy_prd(prd, match.group("date"), is_archived(item, work_root), report)
 
 
 def check_legacy_prd(prd: pathlib.Path, date: str, status_is_authoritative: bool, report: Report) -> None:
@@ -146,11 +143,10 @@ def check_legacy_prd(prd: pathlib.Path, date: str, status_is_authoritative: bool
     if not fields.get("title"):
         report.fail(str(prd), "frontmatter needs a non-empty title")
     check_item_key(prd, fields, report)
-    # The sign inverts outside the archive and holds inside it. Once the
-    # marker says `row`, an active item's status lives in the database
-    # and a `status:` line left in the file is a second answer that will
-    # drift. The archive is the opposite: its files are historical records.
-    # They keep their lines, and a naive inversion fails on all of them.
+    # An active item's status lives in the database, and a `status:` line
+    # left in the file is a second answer that will drift. The archive is the
+    # opposite: its files are historical records. They keep their lines, and
+    # a check that refused a line would fail on all of them.
     status = fields.get("status", "")
     if status_is_authoritative:
         if status not in ITEM_STATUSES:
@@ -184,18 +180,11 @@ def check_ready(
 ) -> int:
     """Rule 2, returning how many items its three checks actually ran on.
 
-    The status is read wherever `docs/work/.status-source` says, because the
-    early return below is a switch: once the retire commit removes the
-    `status:` lines, a rule 2 still reading them finds no workable item
-    anywhere and its three checks -- acceptance criteria, no open BLOCKING
-    line, an `in_progress` item naming its branch -- stop running for every
-    active item in every registered repository, silently and all at once.
-
-    With no marker this stays the line, and stays it exactly: `status_report`
-    also answers `done` for anything under `archive/` by virtue of where it
-    lives, and there is one archived item here whose line still says
-    `in_progress`. Reading that as `done` would quietly stop checking it,
-    which is the same switch in miniature.
+    The status is the row's. A rule 2 reading the file's `status:` line finds
+    no workable item anywhere, because the lines are gone, and its three
+    checks -- acceptance criteria, no open BLOCKING line, an `in_progress`
+    item naming its branch -- would stop running for every active item,
+    silently and all at once.
 
     The count comes back because the item total this rule shares with rule 1 is
     not this rule's coverage and never was. Measured on this repository:
@@ -214,9 +203,7 @@ def check_ready(
         fields = parse_frontmatter(text)
         if fields is None:
             continue
-        status = fields.get("status", "")
-        if statuses.source != sd_lib.FROM_FILE:
-            status = sd_lib.status_report(item, statuses=statuses).status
+        status = sd_lib.status_report(item, statuses=statuses).status
         if status not in WORKABLE_STATUSES:
             continue
         workable += 1
@@ -241,21 +228,16 @@ def status_source_note(statuses: sd_lib.Statuses) -> str:
     and prints the same `clean`. CI is such a checkout. The reduced coverage
     is the designed database-free case; the silence about it was not.
     """
-    if not statuses.source:
-        return f"nowhere; {statuses.problem}, so every item is unknown"
-    if statuses.source == sd_lib.FROM_FILE:
-        return "the status: line in prd.md"
-    rows = statuses.rows
-    if rows is not None and rows.opened:
+    if statuses.rows.opened:
         return "the row"
     if not statuses.history:
         return (
-            "git, not the row this checkout's marker names, and --no-history "
+            "git, not the row, and --no-history "
             "reads no history; every open item reads as unknown, so rule 2 "
             "does not check it"
         )
     return (
-        "git, not the row this checkout's marker names; an open item with no "
+        "git, not the row; an open item with no "
         "branch: line reads as planning here, so rule 2 does not check it, and "
         "a shallow clone reads every open item as unknown"
     )
@@ -678,9 +660,9 @@ def keeps_work_local(repo: pathlib.Path, report: Report) -> bool:
 def check_work_items(repo: pathlib.Path, work_dir: str, report: Report, history: bool) -> None:
     """Rules 1 and 2 over every item, with the status each one reads, said once."""
     work_root = repo / work_dir
-    statuses = sd_lib.Statuses.of(repo, work_dir, history=history)
+    statuses = sd_lib.Statuses.of(repo, history=history)
     try:
-        check_shape(work_root, report, statuses.source)
+        check_shape(work_root, report)
         workable = check_ready(work_root, report, statuses)
         check_branch_lines(work_root, report, statuses)
         # Read before `close()`, which resets `opened`.
@@ -704,7 +686,7 @@ def check_branch_lines(
 ) -> None:
     """Rule 2's advisory: an active item's `branch:` line against its row.
 
-    Where the marker names the row, the row's `branch` column is the copy
+    The row's `branch` column is the copy
     `sd work register` records and `sd-status` prints; the
     frontmatter line is a second copy nothing reconciled (sd:1476). Many
     items still say `branch: main`, so a disagreement is a note, never a
@@ -712,7 +694,7 @@ def check_branch_lines(
     archived item's line is history, as its `status:` line is for rule 1.
     """
     rows = statuses.rows
-    if statuses.source != sd_lib.FROM_ROW or rows is None or not rows.opened:
+    if not rows.opened:
         report.note("rule 2 branch line: not compared; no row to read here")
         return
     compared = disagreeing = 0

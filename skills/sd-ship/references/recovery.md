@@ -158,6 +158,10 @@ Failed attempts, findings, and the initial receipt remain unchanged.
 Repeated incomplete runs exhaust the automatic allowance and grant no publication clearance.
 `sd-ship lane run` takes the retry once by itself after a `review_incomplete` refusal of its prepare (sd:3037).
 
+A dropped hub session or a hub build or schema refusal answers `hub_unavailable`, a retryable failure (sd:3239).
+Rerun the same command once the hub answers; a review that cleared before the fault is reused at its head.
+`sd-ship lane run` puts such an entry back in its queue, stops, and retries it on its next run.
+
 The repository gate runs after a review that does not block.
 A blocking review runs no gate; its refusal says so, and its `check.status` is `not_run`.
 After its dispositions are recorded, the next prepare runs the gate before clearance (`adjudication.md`, step 4).

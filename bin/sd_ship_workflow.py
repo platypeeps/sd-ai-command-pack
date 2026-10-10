@@ -12,10 +12,26 @@ def blocked(code: str, boundary: str, next_action: str, *, state: str = "policy_
             "next_action": next_action}
 
 
+#: `sd_db` faults of the hub's transport or build, by class name (sd:3239): a dropped session, a write
+#: the hub says did not commit, and the refusals a hub upgrade leaves until the satellite's self-install
+#: or the hub's restart. `UnknownOutcome` is not one: its write may have committed, so nothing reruns it.
+HUB_FAULTS = frozenset({"HubUnreachable", "TransactionLost", "BuildMismatch", "HubRestartNeeded", "SchemaTooNew"})
+#: The blocker code of a hub fault; the lane puts such an entry back for its next run.
+HUB_UNAVAILABLE = "hub_unavailable"
+
+
+def is_hub_fault(error: Exception) -> bool:
+    """Whether `error` is one of `HUB_FAULTS`, read without importing `sd_db`."""
+    return any(kind.__module__.startswith("sd_db.") and kind.__name__ in HUB_FAULTS for kind in type(error).__mro__)
+
+
 def failure(phase: str, error: Exception) -> dict:
     detail = getattr(error, "workflow", None)
     if detail is None:
         detail = blocked("prerequisite_failed", "policy", "Inspect the error and resolve the failed prerequisite.")
+        if is_hub_fault(error):
+            detail = blocked(HUB_UNAVAILABLE, "runtime", "Retry this command when the sd hub answers again.",
+                             state="retryable_failure")
         if isinstance(error, (OSError, subprocess.SubprocessError)):
             detail = blocked("execution_failed", "runtime", "Restore the local runtime, then retry this command.",
                              state="retryable_failure")

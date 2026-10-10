@@ -320,75 +320,129 @@ class MachineConfigTests(Fixture):
                 os.environ["XDG_CONFIG_HOME"] = previous
 
 
-class DeriveStatusTests(Fixture):
-    def test_each_declared_status(self) -> None:
-        root = self.tmp / "tree"
-        for status in sd_lib.ITEM_STATUSES:
+class RowFixture(Fixture):
+    """A checkout, and an empty home holding the one database when asked for.
+
+    Every status is the row's, so a test that reads one writes the row. `HOME`
+    points at the scratch home for the whole test, so the operator's database
+    is never opened.
+    """
+
+    database = True
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.home = self.tmp / "home"
+        self.home.mkdir()
+        patched = unittest.mock.patch.dict(os.environ, {"HOME": str(self.home)})
+        patched.start()
+        self.addCleanup(patched.stop)
+        self.root = self.make_repo("tree")
+        self.connection = None
+        if self.database:
+            sd_db.initialise(home=self.home)
+            self.connection = sd_db.connect(sd_db.default_path(self.home), write=True)
+            self.addCleanup(self.connection.close)
+            sd_db.writes.upsert_repo(self.connection, str(self.root))
+
+    def seed(self, name: str, status: str, text: str | None = None, *, month: str | None = None,
+             branch: str | None = None) -> pathlib.Path:
+        """A folder with its `prd.md` and the row that owns its status."""
+        where = f"docs/work/archive/{month}/{name}" if month else f"docs/work/{name}"
+        item = self.write_item(self.root, where, prd(title=name, status=status)
+                               if text is None else text)
+        sd_db.writes.create_item(
+            self.connection, kind="work", title=name, status=status, branch=branch,
+            repo=str(self.root), source=sd_lib.ITEM_ROW_SOURCE,
+            external_id=sd_lib.external_id(self.root, item),
+        )
+        return item
+
+
+def line_free(title: str = "An item", **extra: str) -> str:
+    """A `prd.md` as the retire left it: no `status:` line."""
+    return prd(title=title, **extra).replace("status: planning\n", "")
+
+
+class DeriveStatusTests(RowFixture):
+    def test_each_row_status(self) -> None:
+        for status in ("planning", "ready", "in_progress", "blocked"):
             with self.subTest(status):
-                extra = {"branch": "task/x"} if status == "in_progress" else {}
-                item = self.write_item(
-                    root,
-                    f"docs/work/2026-08-29-{status}",
-                    prd(status=status, **extra),
-                )
+                item = self.seed(f"2026-08-29-{status}", status, line_free())
                 report = sd_lib.status_report(item)
-                self.assertEqual(sd_lib.derive_status(item), status)
+                self.assertEqual(report.status, status)
                 self.assertEqual(report.inconsistencies, ())
                 self.assertFalse(report.archived)
 
-    def test_archive_location_beats_the_frontmatter(self) -> None:
-        root = self.tmp / "tree"
+    def test_a_done_row_nothing_delivered_is_reported_unmarked(self) -> None:
+        item = self.seed("2026-08-29-done", "done", line_free())
+        report = sd_lib.status_report(item)
+        self.assertEqual(report.status, "done")
+        self.assertIn("unmarked", " ".join(report.inconsistencies))
+
+    def test_a_status_line_that_disagrees_with_the_row_is_stale(self) -> None:
+        item = self.seed("2026-08-29-stale", "ready", prd(status="planning"))
+        report = sd_lib.status_report(item)
+        self.assertEqual(report.status, "ready")
+        self.assertIn("the line is stale", " ".join(report.inconsistencies))
+
+    def test_the_row_decides_not_the_line(self) -> None:
+        item = self.seed("2026-08-29-line", "planning", prd(status="done"))
+        self.assertEqual(sd_lib.status_report(item).status, "planning")
+
+    def test_an_item_with_no_row_is_unknown(self) -> None:
+        item = self.write_item(self.root, "docs/work/2026-08-29-orphan", line_free())
+        report = sd_lib.status_report(item)
+        self.assertEqual(report.status, "unknown")
+        self.assertIn("holds no docs/work row", " ".join(report.inconsistencies))
+
+    def test_a_prd_that_cannot_be_read_is_reported_beside_the_row(self) -> None:
+        cases = [("no frontmatter", "# PRD\n"), ("no prd at all", None)]
+        for index, (label, text) in enumerate(cases):
+            with self.subTest(label):
+                item = self.seed(f"2026-08-29-bad{index}", "planning", text)
+                if text is None:
+                    (item / "prd.md").unlink(missing_ok=True)
+                report = sd_lib.status_report(item)
+                self.assertEqual(report.status, "planning")
+                self.assertTrue(report.inconsistencies)
+
+
+class DatabaseFreeStatusTests(RowFixture):
+    """A checkout or runner with no database asks git, and the archive is `done`."""
+
+    database = False
+
+    def test_archive_location_is_done(self) -> None:
         item = self.write_item(
-            root,
-            "docs/work/archive/2026-06/2026-06-01-old",
-            prd(status="planning"),
-        )
+            self.root, "docs/work/archive/2026-06/2026-06-01-old", prd(status="planning"))
         report = sd_lib.status_report(item)
         self.assertEqual(report.status, "done")
         self.assertTrue(report.archived)
 
-    def test_in_progress_without_a_branch_is_reported_not_raised(self) -> None:
-        root = self.tmp / "tree"
+    def test_an_open_item_with_no_delivery_evidence_reads_as_planning(self) -> None:
+        item = self.write_item(self.root, "docs/work/2026-08-29-open", line_free())
+        self.assertEqual(sd_lib.status_report(item).status, "planning")
+
+    def test_an_open_item_recording_a_branch_reads_as_in_progress(self) -> None:
         item = self.write_item(
-            root, "docs/work/2026-08-29-loose", prd(status="in_progress")
-        )
-        report = sd_lib.status_report(item)
-        self.assertEqual(report.status, "in_progress")
-        self.assertEqual(len(report.inconsistencies), 1)
-        self.assertIn("branch", report.inconsistencies[0])
+            self.root, "docs/work/2026-08-29-open", line_free(branch="task/open"))
+        self.assertEqual(sd_lib.status_report(item).status, "in_progress")
 
-    def test_unknown_and_missing_frontmatter(self) -> None:
-        root = self.tmp / "tree"
-        cases = [
-            ("unknown status", prd(status="blocked")),
-            ("no frontmatter", "# PRD\n"),
-            ("no prd at all", None),
-        ]
-        for index, (label, text) in enumerate(cases):
-            with self.subTest(label):
-                item = self.write_item(root, f"docs/work/2026-08-29-bad{index}", text)
-                report = sd_lib.status_report(item)
-                self.assertEqual(report.status, "unknown")
-                self.assertTrue(report.inconsistencies)
+    def test_a_status_line_does_not_decide(self) -> None:
+        item = self.write_item(self.root, "docs/work/2026-08-29-line", prd(status="done"))
+        self.assertEqual(sd_lib.status_report(item).status, "planning")
 
 
-class WorkItemsTests(Fixture):
+class WorkItemsTests(RowFixture):
     def test_enumerates_active_and_archived_from_the_filesystem(self) -> None:
-        root = self.tmp / "tree"
-        self.write_item(
-            root,
-            "docs/work/2026-08-29-alpha",
-            prd(title="Alpha", status="in_progress", branch="task/alpha"),
-        )
-        self.write_item(root, "docs/work/2026-08-28-beta", prd(title="Beta", status="ready"))
-        self.write_item(
-            root,
-            "docs/work/archive/2026-06/2026-06-01-gamma",
-            prd(title="Gamma", status="ready"),
-        )
-        (root / "docs/work/README.md").write_text("index\n", encoding="utf-8")
+        self.seed("2026-08-29-alpha", "in_progress", line_free(title="Alpha", branch="task/alpha"),
+                  branch="task/alpha")
+        self.seed("2026-08-28-beta", "ready", line_free(title="Beta"))
+        self.seed("2026-06-01-gamma", "done", prd(title="Gamma", status="ready"), month="2026-06")
+        (self.root / "docs/work/README.md").write_text("index\n", encoding="utf-8")
 
-        items = sd_lib.work_items(root)
+        items = sd_lib.work_items(self.root)
         self.assertEqual([item.slug for item in items], ["beta", "alpha", "gamma"])
         by_slug = {item.slug: item for item in items}
         self.assertEqual(by_slug["alpha"].status, "in_progress")
@@ -396,6 +450,7 @@ class WorkItemsTests(Fixture):
         self.assertEqual(by_slug["alpha"].title, "Alpha")
         self.assertEqual(by_slug["alpha"].created, "2026-08-29")
         self.assertFalse(by_slug["alpha"].archived)
+        self.assertEqual(by_slug["beta"].status, "ready")
         self.assertEqual(by_slug["gamma"].status, "done")
         self.assertTrue(by_slug["gamma"].archived)
 
@@ -747,12 +802,15 @@ class RowActivity(unittest.TestCase):
             self.addCleanup(rows.close)
             self.assertEqual(rows.activity(absent), "")
 
-    def test_a_file_checkout_has_no_rows_and_answers_empty(self) -> None:
-        """`Statuses` without a marker holds no `Rows` at all."""
-        statuses = sd_lib.Statuses.of(self.root)
-        self.addCleanup(statuses.close)
-        self.assertEqual(statuses.source, sd_lib.FROM_FILE)
-        self.assertEqual(sd_lib._recorded(statuses, self.item_dir), "")
+    def test_a_checkout_with_no_database_answers_empty(self) -> None:
+        """`Statuses` over an empty home holds `Rows` that opened nothing."""
+        with tempfile.TemporaryDirectory() as empty, unittest.mock.patch.dict(
+            os.environ, {"HOME": empty}
+        ):
+            statuses = sd_lib.Statuses.of(self.root)
+            self.addCleanup(statuses.close)
+            self.assertFalse(statuses.rows.opened)
+            self.assertEqual(sd_lib._recorded(statuses, self.item_dir), "")
 
 
 class DisplayFieldsTests(unittest.TestCase):

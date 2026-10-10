@@ -76,8 +76,9 @@ Check each class your change touches before you commit.
 - Put logs and other large uncommitted data under `<root>/<repository>/` when
   `sd config get sd.bulk_storage_root` names a root. Keep build output in your worktree.
 - Before a long build, read the free space with `df -h "$HOME"`. Below 20 GiB available, stop and report.
-- Run a long gate or test in the foreground, or with Bash `run_in_background`, which wakes you when it exits.
-  Never use `Monitor` or a wrapped `sleep` to wait: `Monitor` stops at 30 minutes, and builders sat idle unreported.
+- Run tests in the foreground only, in runs of 10 minutes or less: pick the focused modules your change touches.
+  The lane runs the full `make check`. Never use Bash `run_in_background`, `Monitor` or a wrapped `sleep` to wait:
+  a background exit did not wake idle builders, and they sat about 4 hours unreported.
 
 ## Report
 

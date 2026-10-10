@@ -14,6 +14,7 @@ import pathlib
 import re
 import shlex
 import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -32,6 +33,8 @@ from sd_db import ship as receipts
 from sd_db.repos import set_runner_merge
 from sd_db.testing.github import GitHubDouble
 from sd_db.testing.remote import FixtureRemote, RemoteRefusal, _git
+
+from tests.clean_env import clean_environment
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 #: The bound on one real `sd-ship` command (sd:1539): a hang guard, not a
@@ -416,7 +419,7 @@ class ShipCase(unittest.TestCase):
         initialise(self.database)
         self.connection = connect(self.database)
         self.addCleanup(self.connection.close)
-        upsert_repo(self.connection, str(self.operator), remote=self.remote_url, status_source="row", runner_merge="auto",
+        upsert_repo(self.connection, str(self.operator), remote=self.remote_url, runner_merge="auto",
                     managed=1)
         self.item = create_item(self.connection, kind="work", title="fixture work", status="in_progress", repo=str(self.operator), branch="topic")
         self.double = ShipDouble(self.remote)
@@ -2463,7 +2466,9 @@ roles:
         def provision(ctx, out, ref=None):
             installs.append(ref)
             return True, f"sd_db installed at {ref}"
+        # The schema guard (sd:3249) has its own tests in test_sd_install_reprovision.
         with patch.dict(os.environ, {sd_install.SYSTEM_CHECKOUT_ENV: str(self.root)}), \
+                patch.object(sd_install, "schema_refusal", return_value=""), \
                 patch.object(sd_install, "installed_library_commit", return_value=None), \
                 patch.object(sd_install, "provision_library", provision):
             merged = self.merge()
@@ -3027,7 +3032,7 @@ roles:
         only after the previous one was fixed, came before the first working call.
         """
         other = self.directory / "other"
-        upsert_repo(self.connection, str(other), remote="https://github.com/example-org/other.git", status_source="row")
+        upsert_repo(self.connection, str(other), remote="https://github.com/example-org/other.git")
         self.item = create_item(self.connection, kind="task", title="elsewhere", status="in_progress", repo=str(other))
         allocate = "sd-ship review --no-item --create-record --assert-new-work"
         for command, extra in (("prepare", ()), ("merge", ("--manual", "--expected-head", "a" * 40))):
@@ -3053,7 +3058,7 @@ roles:
         """Two repositories in one database: a carrier pays only its own
         repository's debts, and only for an item whose row names it (sd:1600)."""
         other = self.directory / "other"
-        upsert_repo(self.connection, str(other), remote="https://github.com/example-org/other.git", status_source="row")
+        upsert_repo(self.connection, str(other), remote="https://github.com/example-org/other.git")
         here = create_item(self.connection, kind="task", title="owed here", status="done", repo=str(self.operator))
         there = create_item(self.connection, kind="task", title="owed there", status="done", repo=str(other))
         moved = create_item(self.connection, kind="task", title="row elsewhere", status="done", repo=str(other))
@@ -5445,6 +5450,118 @@ class ReviewWatchdogTests(unittest.TestCase):
         for requested in (1, 2):
             self.assertEqual(ship.timing_plan(subprocess.CompletedProcess(
                 [], 0, json.dumps(dict(report, requested_reviews=requested)), "")), timing)
+
+
+#: A prepare: `review_process` runs `argv[2:]` as `sd-ship prepare` runs `sd-review`.
+STOPPED_PREPARE = """
+import importlib.machinery, importlib.util, pathlib, sys
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]).parent))
+loader = importlib.machinery.SourceFileLoader("sd_ship_stopped", sys.argv[1])
+spec = importlib.util.spec_from_loader(loader.name, loader)
+ship = importlib.util.module_from_spec(spec)
+loader.exec_module(ship)
+ship.review_process(pathlib.Path.cwd(), sys.argv[2:], timeout=600)
+"""
+
+#: A review: say its pid, then run `sd-check` as `sd-review`'s runner does, as a group leader through `run_group`.
+STOPPED_REVIEW = """
+import os, pathlib, sys
+sys.path.insert(0, sys.argv[1])
+import sd_lib
+pathlib.Path("review.pid").write_text(str(os.getpid()))
+sd_lib.run_group([sys.executable, sys.argv[2], "--json"], cwd=pathlib.Path.cwd(), env=dict(os.environ), timeout=600)
+"""
+
+
+class StoppedPrepareTests(unittest.TestCase):
+    """SIGTERM to a prepare's process group ends its review and frees the review's gate slot (sd:3203).
+
+    The review leads a session of its own, so the watchdog can end everything
+    it started; that session no longer receives what the lane runner's
+    `JOB_TIMEOUT` or an operator sends to the prepare's group. A prepare that
+    died of it left the review and its gate running with ppid 1, holding a
+    slot for half an hour. Real processes and a real slot lock, because the
+    claim is about which processes a signal reaches and when the kernel
+    frees the lock.
+    """
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = pathlib.Path(temp.name).resolve()
+        subprocess.run(["git", "init", "-q", "-b", "main"], cwd=self.root, check=True, env=clean_environment())
+        (self.root / ship.sd_lib.LOCAL_FILE_NAME).write_text(
+            f"{ship.sd_lib.LOCAL_BLOCK_START}\ncheck: sh -c 'echo $$ > check.pid; exec sleep 600'\n"
+            f"{ship.sd_lib.LOCAL_BLOCK_END}\n", encoding="utf-8")
+        # One slot in a folder of this test's own; the load rule is off, as the gate slot tests have it.
+        self.slots = dict(SD_GATE_SLOTS="1", SD_GATE_SLOTS_DIR=str(self.root / "slots"), SD_GATE_SLOT_POLL="0.1",
+                          SD_GATE_LOAD_MAX="0", SD_GATE_SETTLE_SECONDS="0")
+
+    def holders(self) -> list[dict]:
+        status = subprocess.run([sys.executable, str(ROOT / "bin/sd"), "gate", "status", "--json"], cwd=self.root,
+                                env=clean_environment(**self.slots), capture_output=True, text=True, timeout=60, check=True)
+        return json.loads(status.stdout)["holders"]
+
+    def pid(self, name: str) -> int | None:
+        path = self.root / name
+        return int(path.read_text()) if path.is_file() and path.read_text().strip() else None
+
+    @staticmethod
+    def running(pid: int) -> bool:
+        """Alive and not a zombie waiting for its parent to reap it."""
+        state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+        return bool(state) and not state.startswith("Z")
+
+    def stop_leftovers(self, pids: list[int]) -> None:
+        """Each of these leads a group of its own; a failed run must not leave them for the next test."""
+        for pid in pids:
+            for stop in (os.killpg, os.kill):
+                try:
+                    stop(pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+
+    def wait_for(self, predicate, seconds: float) -> bool:
+        deadline = time.monotonic() + seconds
+        while not predicate():
+            if time.monotonic() > deadline:
+                return False
+            time.sleep(.1)
+        return True
+
+    def test_term_to_the_prepare_group_ends_the_review_and_frees_its_gate_slot(self):
+        prepare = subprocess.Popen([sys.executable, "-c", STOPPED_PREPARE, str(ROOT / "bin/sd-ship"), sys.executable,
+                                    "-c", STOPPED_REVIEW, str(ROOT / "bin"), str(ROOT / "bin/sd-check")],
+                                   cwd=self.root, env=clean_environment(**self.slots), start_new_session=True,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: self.stop_leftovers([prepare.pid] + [pid for pid in (
+            self.pid("review.pid"), *[row["pid"] for row in self.holders()], self.pid("check.pid")) if pid]))
+        self.assertTrue(self.wait_for(lambda: self.pid("check.pid") and self.holders(), 120),
+                        "the review's gate never took a slot")
+        review, holder = self.pid("review.pid"), self.holders()[0]["pid"]
+
+        os.killpg(prepare.pid, signal.SIGTERM)
+        self.assertEqual(prepare.wait(timeout=60), -signal.SIGTERM, "the prepare dies of SIGTERM, as it would have")
+
+        self.assertTrue(self.wait_for(lambda: not self.running(review), 10), f"review pid {review} outlived its prepare")
+        self.assertTrue(self.wait_for(lambda: not self.holders(), 10), f"gate holder pid {holder} kept its slot")
+        self.assertFalse(self.running(self.pid("check.pid")), "the gate's check outlived its prepare")
+
+    def test_a_second_term_does_not_cut_the_reviews_end_short(self):
+        """A review that ignores SIGTERM gets SIGKILL after the grace, even when a second SIGTERM lands in it."""
+        review = ("import os, pathlib, signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                  "pathlib.Path('review.pid').write_text(str(os.getpid())); time.sleep(600)")
+        prepare = subprocess.Popen([sys.executable, "-c", STOPPED_PREPARE, str(ROOT / "bin/sd-ship"), sys.executable,
+                                    "-c", review], cwd=self.root, env=clean_environment(), start_new_session=True,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: self.stop_leftovers([prepare.pid] + [pid for pid in [self.pid("review.pid")] if pid]))
+        self.assertTrue(self.wait_for(lambda: self.pid("review.pid"), 60), "the review never started")
+        os.killpg(prepare.pid, signal.SIGTERM)
+        time.sleep(1)  # inside the review's grace, `REVIEW_CLEANUP_SECONDS`
+        os.kill(prepare.pid, signal.SIGTERM)
+        self.assertEqual(prepare.wait(timeout=60), -signal.SIGTERM)
+        self.assertTrue(self.wait_for(lambda: not self.running(self.pid("review.pid")), 10),
+                        "a review that ignores SIGTERM outlived its prepare")
 
 
 class CaptureDepthTests(unittest.TestCase):

@@ -30,6 +30,7 @@ import importlib.util
 import io
 import os
 import pathlib
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -280,18 +281,18 @@ class AgainstADatabase(unittest.TestCase):
         del row
 
     def test_resume_refuses_while_a_repository_is_still_retiring(self) -> None:
-        self.sd_db.upsert_repo(self.connection, "/repos/one", status_source="retiring")
+        self.sd_db.upsert_repo(self.connection, "/repos/one", pieces_source="retiring")
         self.open_restore()
         with self.assertRaises(sd_restore.RestoreRefusal) as raised:
             sd_restore.resume(argparse.Namespace())
         message = str(raised.exception)
-        self.assertIn("/repos/one (status_source)", message)
+        self.assertIn("/repos/one (pieces_source)", message)
         self.assertIn("sd restore reimport", message)
         self.assertEqual(len(self.sd_db.unresolved_state(self.connection, "restore")), 1)
 
     def test_old_verified_row_does_not_clear_a_still_retiring_authority(self) -> None:
-        self.sd_db.upsert_repo(self.connection, "/repos/one", status_source="retiring")
-        self.sd_db.record_state(self.connection, "verified", key="/repos/one:status_source", body="old hash")
+        self.sd_db.upsert_repo(self.connection, "/repos/one", pieces_source="retiring")
+        self.sd_db.record_state(self.connection, "verified", key="/repos/one:pieces_source", body="old hash")
         self.open_restore()
         with self.assertRaisesRegex(sd_restore.RestoreRefusal, "still retiring"):
             sd_restore.resume(argparse.Namespace())
@@ -310,21 +311,21 @@ class AgainstADatabase(unittest.TestCase):
         self.assertIn("not a registered repository", str(raised.exception))
 
     def test_reimport_refuses_a_repository_that_is_not_awaiting_one(self) -> None:
-        self.sd_db.upsert_repo(self.connection, "/repos/one", status_source="row")
+        self.sd_db.upsert_repo(self.connection, "/repos/one")
         self.open_restore()
         with self.assertRaises(sd_restore.RestoreRefusal) as raised:
             sd_restore.reimport(argparse.Namespace(repository="/repos/one"))
         self.assertIn("not awaiting a reimport", str(raised.exception))
 
     def test_reimport_refuses_unavailable_sources_without_a_traceback(self) -> None:
-        self.sd_db.upsert_repo(self.connection, "/repos/one", status_source="retiring")
+        self.sd_db.upsert_repo(self.connection, "/repos/one", pieces_source="retiring")
         self.open_restore()
         with self.assertRaisesRegex(sd_restore.RestoreRefusal, "repository is unavailable"):
             sd_restore.reimport(argparse.Namespace(repository="/repos/one"))
 
     def test_unqualified_reimport_previews_and_only_a_fingerprint_requests_apply(self) -> None:
         self.open_restore()
-        result = {"authorities": {"status_source": 1}, "fingerprint": "fixture-fingerprint",
+        result = {"authorities": {"pieces_source": 1}, "fingerprint": "fixture-fingerprint",
                   "dry_run": True, "warning": "Preview only."}
         for arguments, preview in (({}, True), ({"if_fingerprint": "fixture-fingerprint"}, False),
                                    ({"if_fingerprint": "fixture-fingerprint", "dry_run": True}, True)):
@@ -333,6 +334,22 @@ class AgainstADatabase(unittest.TestCase):
                 self.assertEqual(status, 0)
                 self.assertEqual(recover.call_args.kwargs["dry_run"], preview)
                 self.assertEqual(recover.call_args.kwargs["expected_fingerprint"], arguments.get("if_fingerprint"))
+
+
+class AgainstARepoTableWithoutStatusSource(unittest.TestCase):
+    """System sd:3231 dropped the column; the read works on a table without it."""
+
+    def test_the_unproven_read_names_no_column_the_table_lacks(self) -> None:
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        self.addCleanup(connection.close)
+        connection.execute("CREATE TABLE repo (path TEXT PRIMARY KEY, pieces_source TEXT NOT NULL)")
+        connection.executemany(
+            "INSERT INTO repo (path, pieces_source) VALUES (?, ?)",
+            [("/repos/one", "retiring"), ("/repos/two", "row")],
+        )
+
+        self.assertEqual(sd_restore.unproven_repositories(connection, None), [("/repos/one", "pieces_source")])
 
 
 if __name__ == "__main__":

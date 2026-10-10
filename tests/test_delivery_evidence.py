@@ -404,7 +404,7 @@ class TaskDeliveryCLITests(unittest.TestCase):
                         ("config", "user.email", "fixture@example.invalid")):
             subprocess.run(["git", "-C", str(root), *command], check=True, timeout=30)
         with sd_db.connect(sd_db.default_path(case.home), write=True) as connection:
-            sd_db.repos.upsert_repo(connection, sd_lib.stored_repo(root), status_source="row", managed=1)
+            sd_db.repos.upsert_repo(connection, sd_lib.stored_repo(root), managed=1)
         return root
 
     def commit(self, root: pathlib.Path, message: str, content: str) -> str:
@@ -536,8 +536,7 @@ class TaskDeliveryCLITests(unittest.TestCase):
             subprocess.run(["git", "-C", str(root), *command], check=True, timeout=30)
         if register:
             with sd_db.connect(sd_db.default_path(case.home), write=True) as connection:
-                sd_db.repos.upsert_repo(connection, sd_lib.stored_repo(root),
-                                        status_source="row", managed=1)
+                sd_db.repos.upsert_repo(connection, sd_lib.stored_repo(root), managed=1)
         return root
 
     def test_a_fix_shipped_in_another_repository_closes_the_task_where_it_was_filed(

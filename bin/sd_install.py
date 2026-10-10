@@ -2039,7 +2039,8 @@ def reprovision_after_merge(root: Path, commit: str, environ: dict[str, str], pa
     this file's main checkout, the one the dashboard runs under. A failed
     install is reported, not raised: the merge it follows has happened. An
     installed copy that is not an ancestor of `commit` is kept, and the
-    report says why: reconciles need not run in merge order.
+    report says why: reconciles need not run in merge order. A `commit` whose
+    schema differs from the database's installs nothing (`schema_refusal`).
     """
     lib = sibling("sd_lib")
     system = system_checkout(environ)
@@ -2050,8 +2051,62 @@ def reprovision_after_merge(root: Path, commit: str, environ: dict[str, str], pa
         return None
     pack = pack or lib.main_worktree_root(Path(__file__).resolve().parent.parent)
     ctx = Context(checkout=pack, home=Path(os.path.expanduser("~")), environ=dict(environ))
+    refusal = schema_refusal(root, commit, ctx.home)
+    if refusal:
+        return {"ref": commit, "installed": False, "report": refusal}
     installed, report = provision_guarded(ctx, None, ref=commit, merged=True)
     return {"ref": commit, "installed": installed, "report": report}
+
+
+#: What the operator runs after a merge that changes the schema (`local-repo-sync/README.md`).
+MIGRATE_STEPS = ("run `repo-sync.sh refresh`; stop the dashboard, the runner and `sd-serve`; "
+                 "run `sd-db.sh backup`, then `sd-db.sh migrate`; start them again")
+
+
+def schema_refusal(root: Path, commit: str, home: Path) -> str:
+    """Why `commit` must not be installed over the database as it stands, or "" (sd:3249).
+
+    Installing a library built for another schema than the database's made
+    every database command refuse until somebody migrated by hand. A version
+    that cannot be read on either side is unknown, not a match.
+    """
+    source = sibling("sd_lib").git_output(["show", f"{commit}:{LIBRARY_RELATIVE}/sd_db/schema.py"], root)
+    built = sibling("sd_library_guard").schema_version(source or "")
+    if built is None:
+        return f"kept installed sd_db: cannot read SCHEMA_VERSION at {commit}"
+    found, why = database_schema(home)
+    if found is None:
+        return f"kept installed sd_db: cannot read the database's schema version ({why})"
+    if built > found:
+        return (f"kept installed sd_db: {commit} builds schema {built} and the database is at "
+                f"schema {found}; to finish: {MIGRATE_STEPS}")
+    if built < found:
+        return f"kept installed sd_db: {commit} builds schema {built}, older than the database's schema {found}"
+    return ""
+
+
+def database_schema(home: Path) -> tuple[int | None, str]:
+    """The database's schema version through the installed `sd_db`, or None and why.
+
+    Opened read-only. A copy older than the database refuses the open with
+    `SchemaTooNew`, which carries the version it found.
+    """
+    imported = sibling("sd_lib").import_sd_db()
+    if imported.module is None:
+        return None, imported.problem
+    sd_db = imported.module
+    try:
+        connection = sd_db.connect(sd_db.default_path(home), write=False)
+    except sd_db.SchemaTooNew as newer:
+        return newer.found, ""
+    except Exception as problem:
+        return None, str(problem)
+    try:
+        return sd_db.schema_version(connection), ""
+    except Exception as problem:
+        return None, str(problem)
+    finally:
+        connection.close()
 
 
 def open_library(ctx: Context):

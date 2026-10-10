@@ -83,7 +83,6 @@ import sd_codex  # noqa: E402
 import sd_controls  # noqa: E402
 import sd_fleet  # noqa: E402
 import sd_gate_slots  # noqa: E402
-import sd_gate_tools  # noqa: E402
 import sd_handoff_rows  # noqa: E402
 import sd_lib  # noqa: E402
 import sd_notes  # noqa: E402
@@ -2984,8 +2983,6 @@ def cmd_gate(args: argparse.Namespace) -> int:
         return gate_post(args)
     if args.command_name == "check":
         return gate_check(args)
-    if args.command_name == "tools":
-        return sd_gate_tools.tools_verb(args, os.environ)
     environ = dict(os.environ)
     try:
         slots, _ = sd_gate_slots.configured(environ, sd_lib.core_setting("gate_slots", environ))
@@ -3324,7 +3321,6 @@ def build_parser() -> argparse.ArgumentParser:
     checker.add_argument("--base", metavar="BRANCH", default="main",
                          help="the branch the pull request targets, as prepare's gate compares (default: main)")
     checker.add_argument("--database", type=pathlib.Path, help="the workflow database (default: this machine's)")
-    sd_gate_tools.add_tools_verb(gating)
     gate.set_defaults(handler=cmd_gate)
 
     sd_work.register(groups, kept)

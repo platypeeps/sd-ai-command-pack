@@ -48,7 +48,6 @@ lint = load_lint()
 
 GOOD_PRD = """---
 title: A workable item
-status: ready
 created: 2026-08-29
 ---
 
@@ -58,6 +57,9 @@ created: 2026-08-29
 
 - [x] the thing works
 """
+
+#: An archived item keeps the `status:` line it died with; an active one has none.
+ARCHIVED_PRD = GOOD_PRD.replace("title: A workable item\n", "title: A workable item\nstatus: done\n")
 
 GOOD_DECISION = """---
 title: Use JSON for pack-owned config
@@ -88,9 +90,32 @@ class LintFixture(unittest.TestCase):
         self.write_spec("backend", ["quality.md"])
         # No test reads the operator's privacy-pattern file: the default is
         # a directory that does not exist, and the privacy tests write their own.
-        env = mock.patch.dict(os.environ, {"SYSTEM_TOOLS_CONFIG": str(self.repo / "no-config")})
+        # Every run opens the one database through `$HOME`. An empty home holds
+        # none, so the read answers "no database" and asks git, which has no
+        # remote here to fetch from -- the operator's rows are never consulted
+        # and nothing leaves the machine.
+        home = self.repo / "home"
+        home.mkdir()
+        env = mock.patch.dict(
+            os.environ,
+            {"SYSTEM_TOOLS_CONFIG": str(self.repo / "no-config"), "HOME": str(home)},
+        )
         env.start()
         self.addCleanup(env.stop)
+        # What a row would say, by item directory name. An item not named here
+        # reads whatever the database-free path answers.
+        self.row_status: dict[str, str] = {}
+        real = lint.sd_lib.status_report
+
+        def status_report(item, *, statuses=None):
+            said = self.row_status.get(pathlib.Path(item).name)
+            if said is None:
+                return real(item, statuses=statuses)
+            return lint.sd_lib.StatusReport(said, False)
+
+        patched = mock.patch.object(lint.sd_lib, "status_report", status_report)
+        patched.start()
+        self.addCleanup(patched.stop)
 
     def write_item(self, name: str, prd: str, *, month: str | None = None) -> pathlib.Path:
         parent = self.work / "archive" / month if month else self.work
@@ -141,7 +166,7 @@ class Rule1ShapeTests(LintFixture):
     def test_green(self) -> None:
         self.write_item(
             "2026-07-04-an-archived-item",
-            GOOD_PRD.replace("created: 2026-08-29", "created: 2026-07-04"),
+            ARCHIVED_PRD.replace("created: 2026-08-29", "created: 2026-07-04"),
             month="2026-07",
         )
         self.assert_clean()
@@ -168,7 +193,9 @@ class Rule1ShapeTests(LintFixture):
     def test_red_unknown_status(self) -> None:
         self.write_item(
             "2026-08-30-odd",
-            GOOD_PRD.replace("status: ready", "status: pondering"),
+            ARCHIVED_PRD.replace("status: done", "status: pondering").replace(
+                "created: 2026-08-29", "created: 2026-08-30"),
+            month="2026-08",
         )
         self.assert_fails("'pondering' is not one of")
 
@@ -208,84 +235,62 @@ class Rule1ShapeTests(LintFixture):
                 )
 
 
-class Rule1StatusSourceTests(LintFixture):
-    """The sign of rule 1's status check inverts on `docs/work/.status-source`.
+class Rule1StatusLineTests(LintFixture):
+    """Rule 1's status check: the row is the status, so an active `prd.md`
+    carries no `status:` line and an archived one keeps the line it had.
 
-    #767 inverted it and tested nothing: a `row` root with a `status:` line
-    left in an active `prd.md` failed the lint, and no test said so, which is
-    how sd:382 found the contract prose and the code disagreeing with nothing
-    to arbitrate. Each case here is one cell of the sign table -- marker or
-    none, active or archived, line or no line.
+    Each case here is one cell of the table -- active or archived, line or no
+    line -- and the one red cell for each.
     """
 
-    RETIRED_PRD = GOOD_PRD.replace("status: ready\n", "")
-
-    def setUp(self) -> None:
-        super().setUp()
-        # A `row` marker opens the one database through `$HOME`. An empty home
-        # holds none, so the read answers "no database" and asks git, which
-        # has no remote here to fetch from -- the operator's rows are never
-        # consulted and nothing leaves the machine.
-        home = self.repo / "home"
-        home.mkdir()
-        patched = mock.patch.dict(os.environ, {"HOME": str(home)})
-        patched.start()
-        self.addCleanup(patched.stop)
-
-    def mark(self, word: str) -> None:
-        (self.work / lint.sd_lib.STATUS_MARKER).write_text(word + "\n", encoding="utf-8")
-
-    def test_green_row_root_with_a_retired_active_prd(self) -> None:
-        self.mark("row")
-        self.write_item("2026-08-29-a-workable-item", self.RETIRED_PRD)
+    def test_green_an_active_prd_without_a_status_line(self) -> None:
         self.assert_clean()
 
-    def test_red_row_root_with_a_status_line_in_an_active_prd(self) -> None:
-        self.mark("row")
+    def test_red_a_status_line_in_an_active_prd(self) -> None:
+        self.write_item("2026-08-29-a-workable-item", ARCHIVED_PRD)
         failures = self.assert_fails("the row is the status; prd.md carries no status: line")
         self.assertEqual(len(failures), 1, failures)
         self.assertIn("2026-08-29-a-workable-item/prd.md", failures[0])
 
-    def test_green_row_root_with_a_status_line_only_under_the_archive(self) -> None:
-        self.mark("row")
-        self.write_item("2026-08-29-a-workable-item", self.RETIRED_PRD)
+    def test_green_a_status_line_only_under_the_archive(self) -> None:
         self.write_item(
             "2026-07-04-an-archived-item",
-            GOOD_PRD.replace("created: 2026-08-29", "created: 2026-07-04"),
+            ARCHIVED_PRD.replace("created: 2026-08-29", "created: 2026-07-04"),
             month="2026-07",
         )
         self.assert_clean()
 
-    def test_green_unmarked_root_with_a_status_line(self) -> None:
-        self.assertFalse((self.work / lint.sd_lib.STATUS_MARKER).exists())
-        self.assert_clean()
-
-    def test_green_file_root_with_a_status_line(self) -> None:
-        self.mark("file")
-        self.assert_clean()
+    def test_a_marker_file_is_not_read(self) -> None:
+        """The old `.status-source` word decides nothing now, whatever it says."""
+        for word in ("file", "row", "column"):
+            with self.subTest(word=word):
+                (self.work / ".status-source").write_text(word + "\n", encoding="utf-8")
+                self.assert_clean()
 
 
 class Rule2ReadyTests(LintFixture):
     def test_green_in_progress_with_a_branch(self) -> None:
         self.write_item(
             "2026-08-30-running",
-            GOOD_PRD.replace("status: ready", "status: in_progress\nbranch: task/08-30-running")
-            .replace("created: 2026-08-29", "created: 2026-08-30"),
+            GOOD_PRD.replace("created: 2026-08-29", "created: 2026-08-30\nbranch: task/08-30-running"),
         )
+        self.row_status["2026-08-30-running"] = "in_progress"
         self.assert_clean()
 
     def test_green_planning_item_needs_no_acceptance_criteria(self) -> None:
         self.write_item(
             "2026-08-30-idea",
-            "---\ntitle: An idea\nstatus: planning\ncreated: 2026-08-30\n---\n\n# PRD\n",
+            "---\ntitle: An idea\ncreated: 2026-08-30\n---\n\n# PRD\n",
         )
+        self.row_status["2026-08-30-idea"] = "planning"
         self.assert_clean()
 
     def test_red_missing_acceptance_criteria(self) -> None:
         self.write_item(
             "2026-08-30-vague",
-            "---\ntitle: Vague\nstatus: ready\ncreated: 2026-08-30\n---\n\n# PRD\n",
+            "---\ntitle: Vague\ncreated: 2026-08-30\n---\n\n# PRD\n",
         )
+        self.row_status["2026-08-30-vague"] = "ready"
         self.assert_fails("states acceptance criteria")
 
     def test_red_open_blocking_line(self) -> None:
@@ -294,6 +299,7 @@ class Rule2ReadyTests(LintFixture):
             GOOD_PRD.replace("created: 2026-08-29", "created: 2026-08-30")
             + "\nBLOCKING: the API is not designed yet.\n",
         )
+        self.row_status["2026-08-30-blocked"] = "ready"
         self.assert_fails("no open BLOCKING line")
 
     def test_red_open_blocking_line_as_a_list_item(self) -> None:
@@ -302,6 +308,7 @@ class Rule2ReadyTests(LintFixture):
             GOOD_PRD.replace("created: 2026-08-29", "created: 2026-08-30")
             + "\n- BLOCKING: the API is not designed yet.\n",
         )
+        self.row_status["2026-08-30-blocked-bullet"] = "ready"
         self.assert_fails("no open BLOCKING line")
 
     def test_green_prose_that_quotes_the_marker(self) -> None:
@@ -315,15 +322,15 @@ class Rule2ReadyTests(LintFixture):
             GOOD_PRD.replace("created: 2026-08-29", "created: 2026-08-30")
             + "\nRule 2 checks that no open `BLOCKING:` line remains.\n",
         )
+        self.row_status["2026-08-30-discusses"] = "ready"
         self.assert_clean()
 
     def test_red_in_progress_without_a_branch(self) -> None:
         self.write_item(
             "2026-08-30-adrift",
-            GOOD_PRD.replace("status: ready", "status: in_progress").replace(
-                "created: 2026-08-29", "created: 2026-08-30"
-            ),
+            GOOD_PRD.replace("created: 2026-08-29", "created: 2026-08-30"),
         )
+        self.row_status["2026-08-30-adrift"] = "in_progress"
         self.assert_fails("records the branch it lives on")
 
     def test_red_the_note_says_how_many_items_rule_2_actually_checked(self) -> None:
@@ -340,8 +347,10 @@ class Rule2ReadyTests(LintFixture):
         """
         self.write_item(
             "2026-08-30-idea",
-            "---\ntitle: An idea\nstatus: planning\ncreated: 2026-08-30\n---\n\n# PRD\n",
+            "---\ntitle: An idea\ncreated: 2026-08-30\n---\n\n# PRD\n",
         )
+        self.row_status["2026-08-29-a-workable-item"] = "ready"
+        self.row_status["2026-08-30-idea"] = "planning"
         report = self.run_lint()
         self.assertEqual(report.failures, [])
         self.assertIn(
@@ -351,29 +360,18 @@ class Rule2ReadyTests(LintFixture):
 
 
 class Rule2StatusSourceTests(LintFixture):
-    """The run says where rule 2 read its statuses, because the two sources
-    check different item sets and print the same `clean`."""
+    """The run says where rule 2 read its statuses, because a checkout with
+    no database checks fewer items and prints the same `clean`."""
 
     def source_note(self) -> str:
         report = self.run_lint()
         return next(note for note in report.notes if note.startswith("rule 2 status source:"))
 
-    def test_no_marker_reads_the_line(self) -> None:
-        self.assertIn("the status: line in prd.md", self.source_note())
-
-    def test_an_unreadable_marker_is_not_reported_as_the_line(self) -> None:
-        (self.work / ".status-source").write_text("column\n", encoding="utf-8")
+    def test_no_database_says_git_and_names_the_gap(self) -> None:
+        # The empty HOME of the fixture is a machine with the library and no
+        # database: the CI lint job, and any checkout that never ran
+        # `sd-db.sh init`.
         note = self.source_note()
-        self.assertIn("nowhere", note)
-        self.assertIn("'column'", note)
-        self.assertNotIn("status: line", note)
-
-    def test_a_row_marker_with_no_database_says_git_and_names_the_gap(self) -> None:
-        (self.work / ".status-source").write_text("row\n", encoding="utf-8")
-        # An empty HOME is a machine with the library and no database: the
-        # CI lint job, and any checkout that never ran `sd-db.sh init`.
-        with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {"HOME": home}):
-            note = self.source_note()
         self.assertIn("git, not the row", note)
         self.assertIn("rule 2 does not check it", note)
 
@@ -747,7 +745,7 @@ class Rule7WorkReferenceTests(LintFixture):
 
     def test_the_archive_is_read_past(self) -> None:
         """Its items are records, and its own links point inside itself."""
-        self.write_item("2026-08-29-an-archived-item", GOOD_PRD, month="2026-08")
+        self.write_item("2026-08-29-an-archived-item", ARCHIVED_PRD, month="2026-08")
         archived = self.work / "archive" / "2026-08" / "2026-08-29-an-archived-item"
         (archived / "design.md").write_text(
             "# design\n\nSee `docs/work/2026-01-01-long-gone/prd.md`.\n", encoding="utf-8"
@@ -773,7 +771,7 @@ class Rule7WorkReferenceTests(LintFixture):
         Here: one archived document and one `CHANGELOG.md` unread, one
         metavariable reference passed over, one real reference read.
         """
-        self.write_item("2026-08-29-an-archived-item", GOOD_PRD, month="2026-08")
+        self.write_item("2026-08-29-an-archived-item", ARCHIVED_PRD, month="2026-08")
         self.name_it("docs/work/2026-01-01-long-gone/prd.md", page="CHANGELOG.md")
         self.name_it(
             "docs/work/<YYYY-MM-DD>-<slug>/prd.md and "

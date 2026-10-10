@@ -266,10 +266,14 @@ def captured_evidence(output: bytes) -> dict:
     return {"captured_report": captured}
 
 
+@sd_lib.term_ends_group()
 def review_process(root: pathlib.Path, argv: list[str], *, timeout: float) -> subprocess.CompletedProcess:
-    """Bound the owned process group, including pipes left by an exited leader."""
-    process = subprocess.Popen(argv, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+    """Bound the owned process group, including pipes left by an exited leader.
+
+    SIGTERM to this process ends the group as an interruption does, then this process (sd:3203).
+    """
     output, errors = b"", b""
+    process = subprocess.Popen(argv, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
     try:
         try:
             output, errors = process.communicate(timeout=timeout)
