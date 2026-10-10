@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import pathlib
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -25,6 +27,8 @@ BIN = pathlib.Path(__file__).resolve().parent.parent / "bin"
 sys.path.insert(0, str(BIN))
 
 import sd_install  # noqa: E402
+
+SCHEMA = "local-sd-db/sd_db/schema.py"
 
 
 def git(root: pathlib.Path, *args: str) -> str:
@@ -41,6 +45,14 @@ class ReprovisionAfterMerge(unittest.TestCase):
         git(self.system, "config", "user.email", "test@example.test")
         git(self.system, "config", "user.name", "Test")
         self.commit("README.md")
+        self.commit(SCHEMA, "SCHEMA_VERSION = 3\n")
+        # The database the schema check reads lives under the test's own home, at schema 3.
+        self.home = self.system.parent / "home"
+        self.database = sd_install.sibling("sd_lib").import_sd_db().module.default_path(self.home)
+        self.database_at(3)
+        home = mock.patch.dict(os.environ, {"HOME": str(self.home)})
+        home.start()
+        self.addCleanup(home.stop)
         # The provisioning lock lives under the state home: the test's own.
         self.environ = {sd_install.SYSTEM_CHECKOUT_ENV: str(self.system),
                         "XDG_STATE_HOME": str(self.system.parent / "state")}
@@ -55,13 +67,21 @@ class ReprovisionAfterMerge(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def commit(self, name: str) -> str:
+    def commit(self, name: str, text: str | None = None) -> str:
         path = self.system / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f"{name}\n", encoding="utf-8")
+        path.write_text(text if text is not None else f"{name}\n", encoding="utf-8")
         git(self.system, "add", name)
         git(self.system, "commit", "-q", "-m", f"touch {name}")
         return git(self.system, "rev-parse", "HEAD")
+
+    def database_at(self, version: int) -> None:
+        self.database.parent.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(self.database)
+        try:
+            connection.execute(f"PRAGMA user_version = {int(version)}")
+        finally:
+            connection.close()
 
     def test_a_merge_touching_the_library_installs_the_merge_commit(self) -> None:
         merged = self.commit("local-sd-db/sd_db/writing.py")
@@ -85,6 +105,56 @@ class ReprovisionAfterMerge(unittest.TestCase):
         git(self.system, "worktree", "add", "-q", "-b", "topic", str(worktree))
         merged = self.commit("local-sd-db/pyproject.toml")
         sd_install.reprovision_after_merge(worktree, merged, self.environ, pack=self.pack)
+        self.assertEqual(self.calls, [merged])
+
+
+class SchemaChangeWaitsForMigrate(ReprovisionAfterMerge):
+    """A merge that changes `SCHEMA_VERSION` installs nothing until the database is migrated (sd:3249).
+
+    Installing it left the database one version behind the library, and every
+    database command refused until somebody stopped the services and migrated
+    by hand. A schema that cannot be read on either side is unknown, not a match.
+    """
+
+    def test_a_merge_that_bumps_the_schema_installs_nothing_and_names_the_migrate_steps(self) -> None:
+        merged = self.commit(SCHEMA, "SCHEMA_VERSION = 4\n")
+        result = sd_install.reprovision_after_merge(self.system, merged, self.environ, pack=self.pack)
+        self.assertEqual((self.calls, result["installed"]), ([], False))
+        self.assertIn(f"{merged} builds schema 4 and the database is at schema 3", result["report"])
+        for step in ("repo-sync.sh refresh", "sd-serve", "sd-db.sh backup", "sd-db.sh migrate"):
+            self.assertIn(step, result["report"])
+
+    def test_a_library_merge_that_keeps_the_schema_still_installs(self) -> None:
+        merged = self.commit(SCHEMA, "SCHEMA_VERSION = 3\nTABLES = ()\n")
+        result = sd_install.reprovision_after_merge(self.system, merged, self.environ, pack=self.pack)
+        self.assertEqual((self.calls, result["installed"]), ([merged], True))
+
+    def test_a_merge_older_than_the_database_installs_nothing(self) -> None:
+        self.database_at(4)
+        merged = self.commit("local-sd-db/sd_db/writing.py")
+        result = sd_install.reprovision_after_merge(self.system, merged, self.environ, pack=self.pack)
+        self.assertEqual((self.calls, result["installed"]), ([], False))
+        self.assertIn(f"{merged} builds schema 3, older than the database's schema 4", result["report"])
+
+    def test_an_unreadable_schema_at_the_merge_installs_nothing(self) -> None:
+        merged = self.commit(SCHEMA, "SCHEMA_VERSION = next\n")
+        result = sd_install.reprovision_after_merge(self.system, merged, self.environ, pack=self.pack)
+        self.assertEqual((self.calls, result["installed"]), ([], False))
+        self.assertIn(f"cannot read SCHEMA_VERSION at {merged}", result["report"])
+
+    def test_an_unreadable_database_installs_nothing(self) -> None:
+        self.database.unlink()
+        merged = self.commit("local-sd-db/sd_db/writing.py")
+        result = sd_install.reprovision_after_merge(self.system, merged, self.environ, pack=self.pack)
+        self.assertEqual((self.calls, result["installed"]), ([], False))
+        self.assertIn("cannot read the database's schema version", result["report"])
+
+    def test_a_database_newer_than_the_installed_library_is_still_read(self) -> None:
+        """The installed copy refuses the open with `SchemaTooNew`, which names the version it found."""
+        newer = sd_install.sibling("sd_lib").import_sd_db().module.SCHEMA_VERSION + 1
+        self.database_at(newer)
+        merged = self.commit(SCHEMA, f"SCHEMA_VERSION = {newer}\n")
+        sd_install.reprovision_after_merge(self.system, merged, self.environ, pack=self.pack)
         self.assertEqual(self.calls, [merged])
 
 
