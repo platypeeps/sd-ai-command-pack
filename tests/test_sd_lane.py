@@ -495,6 +495,26 @@ class Runner(Lane):
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual(([call[4] for call in self.calls], self.entries()[0]["status"]), (["1"], "prepared"))
 
+    def test_a_run_past_its_budget_starts_no_new_entry_and_leaves_the_rest_pending(self) -> None:
+        """sd:3287: the job limit TERMed a runner mid `make check`; an entry started in budget still finishes."""
+        for item in (1, 2, 3):
+            sd_lane.enqueue_entry(self.worktree(f"b{item}"), item, str(item), self.body, self.environ, claim="deliver")
+        now = [0.0]
+
+        def slow(argv: list[str], log: pathlib.Path) -> dict:
+            now[0] += 40 * 60  # one entry on a busy lane
+            return self.ship(argv, log)
+
+        with mock.patch.object(sd_lane, "clock", lambda: now[0]):
+            answer = sd_lane.run_lane(self.repo, self.environ, slow)
+            self.assertEqual([call[4] for call in self.calls], ["1", "2"])
+            self.assertEqual([row["status"] for row in self.entries()], ["prepared", "prepared", "pending"])
+            self.assertIn("budget", answer["stopped"])
+            spent = sd_lane.run_lane(self.repo, self.environ, slow, deadline=now[0])
+        self.assertEqual((spent["ran"], len(self.calls)), ([], 2), "a hosted run's later lane started an entry")
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual([row["status"] for row in self.entries()], ["prepared"] * 3)
+
     def left_running(self, pid: int | None, step: str = "prepare") -> None:
         """Item 1 claimed by the runner `pid` and never finished, as a killed runner leaves it (sd:2821)."""
         if not self.entries():

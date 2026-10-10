@@ -168,6 +168,10 @@ ROOT_VARIABLE = "SD_LANE_ROOT"
 PREPARE_SECONDS = 3 * 3600 + sd_lib.GATE_SLOT_SECONDS
 MERGE_SECONDS = 3 * 3600 + sd_lib.GATE_SLOT_SECONDS
 MERGE_WAIT_SECONDS = 2100
+#: After this long a run starts no new entry (sd:3287). The lane-run cron job's
+#: JOB_TIMEOUT is 120 minutes, and one entry takes 30 to 45, so an entry started
+#: just inside the budget still finishes before the job limit TERMs the runner.
+RUN_BUDGET_SECONDS = 55 * 60
 #: The lines a gate writes when it ends: the pack's test runner, `make`'s own
 #: failure, and the system repository's check script.
 GATE_END = re.compile(r"run-tests: end head=|check\.sh: every suite passed|make: \*\*\*")
@@ -1395,8 +1399,13 @@ def settle_checkout(root: pathlib.Path, queue: Queue) -> dict[str, Any]:
     return {**({"import": imported} if imported else {}), **({"reclaimed": reclaimed} if reclaimed else {})}
 
 
+def clock() -> float:
+    """The run budget's clock; a suite replaces it."""
+    return time.monotonic()
+
+
 def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_ship,
-             gate: Gate = default_gate, note: Note | None = None) -> dict[str, Any]:
+             gate: Gate = default_gate, note: Note | None = None, deadline: float | None = None) -> dict[str, Any]:
     """Drain this repository's queue in order under its runner lock; never wait for the lock.
 
     It first imports the file queue and reclaims dead holders here
@@ -1411,7 +1420,9 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
     the run (`Stop`), and the next run settles the entry. With its lock held
     it tries the lane root once: `other_lanes_idle` holds that root while
     the serving tree or the tools checkout moves, and then the runner runs
-    nothing (sd:3273).
+    nothing (sd:3273). Once `clock` passes `deadline`, by default
+    `RUN_BUDGET_SECONDS` from now, it claims no next entry and says so in
+    `stopped`; an entry it started still finishes (sd:3287).
     """
     refuse_elsewhere(root, environ)
     queue = queue_for(root, environ)
@@ -1427,7 +1438,11 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
         ran: list[dict[str, Any]] = []
         answer: dict[str, Any] = {"ran": ran, **settle_checkout(root, queue)}
         ahead: threading.Thread | None = None
+        deadline = clock() + RUN_BUDGET_SECONDS if deadline is None else deadline
         while True:
+            if clock() >= deadline:
+                answer["stopped"] = "the run spent its budget; the next run takes the pending entries"
+                break
             token = secrets.token_hex(16)
             try:
                 entry = claim_entry(queue, token)
@@ -1483,8 +1498,10 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
     read skips that lane with the reason. A held runner lock skips it too
     (`run_lane` answers `busy`), and a refusal in one lane leaves the next to run.
     Every other checkout here, hosted or not, has its file queue imported and
-    its dead holders reclaimed under its runner lock (sd:3282).
+    its dead holders reclaimed under its runner lock (sd:3282). The lanes share
+    one run budget, `RUN_BUDGET_SECONDS` from the start (sd:3287).
     """
+    deadline = clock() + RUN_BUDGET_SECONDS
     imported = sd_lib.import_sd_db()
     if imported.module is None:
         raise LaneError(f"lane run --hosted reads the repo table: {imported.problem}")
@@ -1526,7 +1543,7 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
             lanes.append({"path": path, "settled": settled})
     for path, checkout in hosted:
         try:
-            lanes.append({"path": path, **run_lane(checkout, environ, ship, gate, note)})
+            lanes.append({"path": path, **run_lane(checkout, environ, ship, gate, note, deadline)})
         except (LaneError, sd_lib.ConfigError, OSError) as error:
             lanes.append({"path": path, **refusal(error)})
     return {"lanes": lanes}

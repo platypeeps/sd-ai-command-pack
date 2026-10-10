@@ -561,7 +561,9 @@ The rules for them:
   an old host's pending entries can be cancelled after a move. Every machine
   runs the same scheduled `sd-ship lane run --hosted`: each lane it hosts, in
   path order, skipping one whose runner is busy. The runner reads the host
-  again before each claim, so a move stops it at the next item. A satellite
+  again before each claim, so a move stops it at the next item. After 55
+  minutes a run claims no next entry and finishes the one it started, so the
+  job's 120-minute limit never stops a merge; the next run goes on (sd:3287). A satellite
   that hosts a lane gates and merges there; no item passes between machines.
 - **Large uncommitted data goes under the bulk root (sd:1792).** When
   `sd.bulk_storage_root` names a folder, put run outputs, logs, captures,
