@@ -123,6 +123,21 @@ class QueueOutlivesTheProcess(Lane):
         again = self.sd_ship(self.repo, "retry", "7")
         self.assertEqual((again.returncode, json.loads(again.stdout)["ok"]), (3, False))
 
+    def test_retry_expected_head_refuses_another_head_and_names_both(self) -> None:
+        """sd:3268. The Queue page sends the head it showed; another blocked head is refused with `stale_head`."""
+        sd_lane.enqueue_entry(self.repo, 7, "Topic", self.body, self.environ, claim="deliver")
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        head = self.entries()[0]["expected_head"]
+        done = self.sd_ship(self.repo, "retry", "7", "--expected-head", "0" * 40)
+        answer = json.loads(done.stdout)
+        self.assertEqual((done.returncode, answer["ok"], answer["code"]), (3, False, sd_lane.STALE_HEAD), done.stdout)
+        self.assertIn(head, answer["error"])
+        self.assertIn("0" * 40, answer["error"])
+        self.assertEqual([row["status"] for row in self.entries()], ["prepared"])
+        done = self.sd_ship(self.repo, "retry", "7", "--manual", "--expected-head", head)
+        self.assertEqual(done.returncode, 0, done.stderr + done.stdout)
+        self.assertEqual(json.loads(done.stdout)["expected_head"], head)
+
     def test_an_entry_without_a_delivery_claim_is_refused_with_exit_3(self) -> None:
         done = self.sd_ship(self.repo, "enqueue", "--item", "7", "--title", "Topic", "--body-file", str(self.body))
         self.assertEqual(done.returncode, 3, done.stderr + done.stdout)
@@ -285,6 +300,30 @@ class Runner(Lane):
         with self.assertRaisesRegex(sd_lane.LaneError, "--body-file"):
             sd_lane.retry(self.repo, 3, self.environ)
         self.assertEqual([row["status"] for row in self.entries()], ["merged", "cancelled", "failed"])
+
+    def test_retry_expected_head_is_checked_under_the_queue_lock(self) -> None:
+        """sd:3268. An entry that ends at another head between retry's read and its write is refused, not retried."""
+        tree = self.worktree("topic")
+        sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        shown = self.entries()[0]["expected_head"]
+        git(tree, "commit", "-q", "--allow-empty", "-m", "fix")
+        moved = git(tree, "rev-parse", "HEAD")
+        caught_up = sd_lane.caught_up
+
+        def another_run_ends_first(worktree: pathlib.Path, expected: str) -> str:
+            sd_lane.update(sd_lane.queue_path(self.repo, self.environ),
+                           lambda entries: entries.append({**entries[0], "expected_head": moved}))
+            return caught_up(worktree, expected)
+        with mock.patch.object(sd_lane, "caught_up", another_run_ends_first):
+            with self.assertRaises(sd_lane.LaneError) as refused:
+                sd_lane.retry(self.repo, 1, self.environ, manual=True, expected_head=shown)
+        self.assertEqual(refused.exception.code, sd_lane.STALE_HEAD)
+        self.assertIn(moved, str(refused.exception))
+        self.assertEqual([(row["status"], row["expected_head"]) for row in self.entries()],
+                         [("failed", shown), ("failed", moved)])
+        self.assertEqual(sd_lane.retry(self.repo, 1, self.environ, expected_head=moved)["expected_head"], moved)
 
     def test_a_queue_write_that_fails_keeps_the_entry_and_its_body(self) -> None:
         """sd:3170 review: the copy goes only once the queue records the end; a failed write leaves both."""
