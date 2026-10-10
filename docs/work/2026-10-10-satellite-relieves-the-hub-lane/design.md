@@ -96,12 +96,15 @@ Another machine can read neither.
    2. Push the branch if the remote is behind; refuse a remote that is ahead or diverged.
    3. Write the `lane-carry` row: item, branch, head, title, body text, claim, authority, acceptance text, position, `from` host.
    4. Mark the local entry `moved`, a terminal status beside `cancelled`.
+   5. Delete each row this host wrote whose state reads `taken`, with its revision. Only the sender deletes a row.
+   Recovery, before step 1: a pending local entry whose lane is hosted elsewhere and whose row exists, in any state, goes straight to step 4. The sender writes a row only when none exists for that item and head.
    A running entry finishes first; the runner already stops at the next item.
 3. **New host takes in.** Before it claims, `lane run --hosted` reads `lane-carry` rows for each repository it hosts, by position:
    1. Fetch the branch; refuse a fetched head other than the row's.
    2. Make a worktree at `~/worktrees/<repo>-lane-<item>`, or reuse one at that head.
-   3. Write the body to the lane root and `enqueue` with the row's fields.
-   4. Delete the row with its revision.
+   3. Write the body to the lane root and `enqueue` with the row's fields, marked `carried_from` the row.
+   4. Set the row's state from `carried` to `taken`, with its revision. The row stays as the sender's acknowledgement.
+   Take-in reads only `carried` rows. Recovery, before step 1: a local entry in any status, pending or finished, carried from that row means step 3 ran; it goes straight to step 4.
 4. **Run.** The new host gates and merges as any host does.
 5. **Move back.** The same steps in the other direction.
 
@@ -115,11 +118,14 @@ the new host's `prepare --catch-up` gates again. Same-machine receipt reuse then
 | enqueue | branch pushed | push refused or fails | enqueue refuses; nothing queued | new: a push double that fails leaves the queue unchanged |
 | enqueue | queue entry written | killed after push, before the queue write | nothing to undo: a pushed branch alone is harmless | covered by the test above |
 | 2.1 hand-over | none | worktree head moved | entry `failed` with `head_moved`; no row written | new: hand-over with a moved worktree writes no row |
-| 2.3 hand-over | `lane-carry` row written | killed before the local mark | next pass finds the row at the same head and only marks the entry `moved` | new: kill between row and mark; rerun gives one row, one `moved` entry |
-| 2.3 hand-over | row write | database unreachable or refuses | unknown result: the entry stays pending and the pass stops; next pass retries | new: failing write leaves the entry pending, not `moved` |
+| 2.3 hand-over | `lane-carry` row written | killed before the local mark | next pass finds the row, `carried` or `taken`, at the same head and only marks the entry `moved` | new: kill between row and mark; rerun gives one row, one `moved` entry |
+| 2.3 hand-over | row written; destination takes, runs and finishes it | sender stopped between row and mark | the row stays `taken` until the sender deletes it, so the sender's next pass finds it and marks `moved`; it never writes a second row | new: kill the sender after the row; destination takes in and finishes the entry; rerun the sender; one gate, one `moved` entry |
+| 2.3 hand-over | row write | database unreachable or refuses | unknown result: the entry stays pending and the pass stops; next pass finds the row if the write landed, else writes it | new: a write that lands but reports failure; rerun gives one row |
+| 2.5 hand-over | `taken` row deleted | killed mid-delete, or revision conflict | the next pass deletes the rest; a row already gone is done | new: concurrent delete double |
 | 3.1 take-in | none | fetched head differs from the row | row kept, refused with `carry_head_moved`; a note on the item; the operator re-enqueues by hand | new: take-in with a moved remote leaves the row and notes it |
-| 3.3 take-in | local entry pending | killed before the row delete | next pass finds a pending entry for that item and head; it deletes the row only | new: kill between enqueue and delete; rerun gives one entry |
-| 3.4 take-in | row deleted | revision conflict | reread; a row already gone is done | new: concurrent delete double |
+| 3.3 take-in | local entry written | killed before the row reads `taken` | next pass finds a local entry carried from that row, in any status, and only sets `taken` | new: kill between enqueue and mark; let the entry finish; rerun gives one entry and no second gate |
+| 3.4 take-in | row `taken` | revision conflict | reread; a row already `taken` is done | new: concurrent mark double |
+| sender gone | `taken` rows left | the old host never runs again | the rows are inert: take-in reads only `carried` rows; `status` lists `taken` rows older than a day | new: status lists an old `taken` row |
 | move back mid-hand-over | rows exist for the old host | the old host now hosts again | take-in on the old host reads its own rows like any host | new: move, hand over, move back; entries return once each |
 | run | merge on the new host | old host still merging its running entry | branch protection's up-to-date rule stops the stale merge (sd:3003) | existing sd:3003 tests |
 | older state | queue files without `branch` | entry from before this change | hand-over reads the branch from the worktree; with no worktree, entry `failed` with `no_branch` | new: hand-over of an old-format entry |
