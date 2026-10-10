@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import hashlib
 import importlib
@@ -333,8 +334,46 @@ class SharedBindingTests(unittest.TestCase):
             self.assertTrue(self.operation.binding_moved())
         self.assertEqual(calls, [])
 
-    def test_missing_manifest_members_never_fall_back_to_partial_binding(self):
+    def retired(self, kind: str):
+        """sd:3272. The item was reviewed while `sd_retired.py` was a `kind` member; the file is now gone."""
+        name, target = "sd_retired.py", bindings.BIN / "sd_retired.py"
+        original, present = pathlib.Path.read_bytes, [True]
+
+        def read(path):
+            if path != target:
+                return original(path)
+            if present[0]:
+                return b"RETIRED = True\n"
+            raise FileNotFoundError(2, "No such file or directory")
+
+        stack = contextlib.ExitStack()
+        stack.enter_context(patch.object(bindings, kind, getattr(bindings, kind) + (name,)))
+        stack.enter_context(patch.object(pathlib.Path, "read_bytes", read))
+        self.operation.state.update(binding=ship.binding(self.root), binding_manifest=ship.binding_manifest(self.root))
+        present[0] = False
+        return stack
+
+    def test_a_check_member_retired_after_review_keeps_the_review(self):
+        """sd:3272: sd:3216 retired `sd_gate_tools.py`, and prepare refused a receipt
+        bound with it as a prerequisite failure. Check code binds no receipt."""
+        with self.retired("CHECK_FILES"):
+            self.assertEqual(bindings.binding_manifest(self.root)["check"]["sd_retired.py"], bindings.ABSENT)
+            self.assertEqual(self.operation.review_inputs(self.head), self.report)
+        # The version that dropped it from the tuple reads the same receipt.
+        self.assertEqual(self.operation.review_inputs(self.head), self.report)
+
+    def test_a_verdict_member_retired_after_review_reads_as_moved(self):
+        with self.retired("VERDICT_FILES"):
+            with self.assertRaises(ship.Refusal) as caught:
+                self.operation.review_inputs(self.head)
+        self.assertEqual(str(caught.exception), "review tools or repository policy changed after review: sd_retired.py (verdict)")
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "review_binding_moved")
+
+    def test_missing_manifest_members_read_absent_never_a_partial_binding(self):
+        """A missing member is recorded `absent`, never dropped, so it can match no stored hash (sd:3272)."""
         original = pathlib.Path.read_bytes
+        full = ship.binding(self.root)
+        adjudicator = bindings.adjudicator_binding(self.operation.store.__file__)
         for name in bindings.REVIEW_TOOL_FILES:
             target = bindings.BIN / name
 
@@ -344,10 +383,27 @@ class SharedBindingTests(unittest.TestCase):
                 return original(path)
 
             with self.subTest(name=name), patch.object(pathlib.Path, "read_bytes", missing):
-                with self.assertRaisesRegex(ship.Refusal, "required review binding file"):
-                    ship.binding(self.root)
-                with self.assertRaisesRegex(ship.Refusal, "required review binding file"):
-                    bindings.adjudicator_binding(self.operation.store.__file__)
+                manifest = ship.binding_manifest(self.root)
+                kind = next(kind for kind in ("verdict", "gate", "check") if name in manifest[kind])
+                self.assertEqual(manifest[kind][name], bindings.ABSENT)
+                if kind == "verdict":
+                    self.assertNotEqual(ship.binding(self.root), full)
+                    self.assertNotEqual(bindings.adjudicator_binding(self.operation.store.__file__), adjudicator)
+
+    def test_an_unreadable_manifest_member_still_refuses(self):
+        """A failed read is no answer: only a missing file reads `absent`."""
+        original = pathlib.Path.read_bytes
+        for name in bindings.REVIEW_TOOL_FILES:
+            target = bindings.BIN / name
+
+            def unreadable(path, target=target):
+                if path == target:
+                    raise PermissionError(13, "Permission denied")
+                return original(path)
+
+            with self.subTest(name=name), patch.object(pathlib.Path, "read_bytes", unreadable):
+                with self.assertRaisesRegex(ship.Refusal, "required review binding file cannot be read: .*Permission denied"):
+                    ship.binding_manifest(self.root)
 
 
 class HistoryChainTests(unittest.TestCase):
