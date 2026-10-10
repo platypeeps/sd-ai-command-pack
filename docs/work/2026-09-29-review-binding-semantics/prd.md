@@ -118,8 +118,10 @@ import-walk test in `tests/test_sd_workflow_state.py` walks `sd-ship` only.
 8. `adjudicator_binding` uses the same `verdict` normalized hashes in place
    of the raw 25-file hash. It keeps the library file, the adjudicator
    policy files and the skill references raw.
-9. A missing bound file still refuses with
-   "required review binding file cannot be read"; no class is optional.
+9. A missing bound file reads `absent` (sd:3272): it is recorded, never
+   dropped, and matches no hash, so the binding moves; no class is optional.
+   Any other failed read refuses with
+   "required review binding file cannot be read".
 
 ## Acceptance criteria
 
