@@ -10,6 +10,7 @@ import datetime
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1839,6 +1840,30 @@ class TheCheckoutLibraryAnswersFirst(unittest.TestCase):
     def test_a_lib_that_will_not_import_falls_back_to_the_venv_copy(self) -> None:
         self.copy(self.root / "lib", "lib", body="raise ImportError('broken on purpose')\n")
         self.assertEqual(self.answer(), "venv")
+
+
+class TheCopyHashesLikeItsSource(unittest.TestCase):
+    """sd:3278 failure table, step 1 follow: the build digest names bytes, not folders.
+
+    A satellite's self-install exports system's `local-sd-db` while the hub
+    runs the pack's `lib/`. `tree_digest` hashes relative paths and bytes, so
+    the same package under either folder digests the same and no build refuses.
+    """
+
+    def test_lib_sd_db_digests_the_same_under_the_system_folder_name(self) -> None:
+        from tests.clean_env import clean_environment
+        with tempfile.TemporaryDirectory() as tmp:
+            copy = pathlib.Path(tmp) / "local-sd-db" / "sd_db"
+            shutil.copytree(REPO_ROOT / "lib" / "sd_db", copy,
+                            ignore=shutil.ignore_patterns("__pycache__"))
+            code = ("import sys; sys.path.insert(0, sys.argv[1]); from sd_db.remote import tree_digest; "
+                    "print(tree_digest(sys.argv[2]), tree_digest(sys.argv[3]))")
+            done = subprocess.run([sys.executable, "-S", "-c", code, str(REPO_ROOT / "lib"),
+                                   str(REPO_ROOT / "lib" / "sd_db"), str(copy)],
+                                  capture_output=True, text=True, check=False, env=clean_environment())
+        self.assertEqual(done.returncode, 0, done.stderr)
+        ours, theirs = done.stdout.split()
+        self.assertEqual(ours, theirs)
 
 
 if __name__ == "__main__":
