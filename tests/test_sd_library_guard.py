@@ -30,10 +30,10 @@ class LibraryDowngradeGuard(unittest.TestCase):
             calls.append((args, cwd))
             return candidate
 
-        refusal = guard.downgrade_refusal(self.root / ".venv", self.root / "system", "abc123", read_git)
+        refusal = guard.downgrade_refusal(self.root / ".venv", self.root / "pack", "abc123", read_git)
         for args, cwd in calls:
-            self.assertEqual(args, ["show", "abc123:local-sd-db/sd_db/schema.py"])
-            self.assertEqual(cwd, self.root / "system")
+            self.assertEqual(args, ["show", "abc123:lib/sd_db/schema.py"])
+            self.assertEqual(cwd, self.root / "pack")
         return refusal
 
     def test_single_literal_versions_allow_equal_or_newer_but_refuse_downgrade(self):

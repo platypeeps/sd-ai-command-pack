@@ -216,7 +216,7 @@ See [the workflow policy](WORKFLOW.md#standing-authorization) for resolution and
 
 ## Daily workflow
 
-The dashboard and CLI use the same `sd_db` operations from `system/local-sd-db`.
+The dashboard and CLI use the same `sd_db` operations from this pack's `lib/`.
 Capture a task without a checkout or planning document:
 
 ```bash
