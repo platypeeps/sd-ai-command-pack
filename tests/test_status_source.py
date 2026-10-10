@@ -1067,6 +1067,63 @@ class ATaskKeyedFolder(Fixture):
         self.assertIn(f"holds no docs/work row for {self.identity()}", trouble)
 
 
+class ADesignOnlyFolder(Fixture):
+    """sd:3255. sd:3000 lets a folder hold `design.md` alone.
+
+    The readers took the frontmatter and the `item:` key from `prd.md` only,
+    so such a folder read `status-unreadable` with no title, though its key
+    named a live row. `design.md` answers when `prd.md` is absent; an older
+    folder holding both keeps reading `prd.md`. The row key stays
+    `docs/work/<item>/prd.md`: `sd_db` registers no other.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.item / "prd.md").unlink()
+
+    def row(self, status: str) -> int:
+        self._connection = self.database()
+        return sd_db.writes.create_item(
+            self._connection, kind="task", title="A thing, as a row", status=status,
+            repo=str(self.root),
+        )
+
+    def design(self, value: str) -> None:
+        text = ("---\ntitle: A thing, designed\ncreated: 2026-09-05\n"
+                f"item: {value}\n---\n\n# Design\n")
+        (self.item / "design.md").write_text(text, encoding="utf-8")
+
+    def test_a_design_only_folder_reads_its_named_row_and_title(self) -> None:
+        number = self.row("planning")
+        self.design(f"sd:{number}")
+        item = self.only()
+        self.assertEqual(item.status, "planning")
+        self.assertEqual(item.title, "A thing, designed")
+        self.assertEqual(item.created, "2026-09-05")
+        self.assertEqual(item.inconsistencies, ())
+        self.assertEqual(sd_lib.named_item(self.item), (number, ""))
+
+    def test_prd_md_stays_first_when_both_are_there(self) -> None:
+        number = self.row("in_progress")
+        self.design("sd:424242")
+        self.write(prd(None).replace("created: 2026-09-05\n", f"created: 2026-09-05\nitem: sd:{number}\n"))
+        item = self.only()
+        self.assertEqual(item.status, "in_progress")
+        self.assertEqual(item.title, "A thing")
+        self.assertEqual(sd_lib.named_item(self.item), (number, ""))
+
+    def test_a_folder_with_neither_names_prd_md_as_missing(self) -> None:
+        self.database()
+        item = self.only()
+        self.assertEqual(item.status, "unknown")
+        self.assertTrue(any("prd.md is missing" in problem for problem in item.inconsistencies),
+                        item.inconsistencies)
+
+    def test_the_row_key_stays_prd_md(self) -> None:
+        self.design("sd:1")
+        self.assertEqual(sd_lib.external_id(self.root, self.item), self.identity())
+
+
 class TheUnmarkedCheckAsksTheIdEveryWriterWrites(Fixture):
     """sd:1113. The `unmarked` clause asked git for a string nobody writes.
 
