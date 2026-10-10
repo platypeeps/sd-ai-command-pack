@@ -640,7 +640,6 @@ COMPLEX = frozenset({
     "bin/sd-review::review",  # 97
     "bin/sd-review::run_provider",  # 40
     "bin/sd-ship::Ship.prepare",  # 53
-    "bin/sd-status::_work_rows",  # 31
     "bin/sd::store_add",  # 28
     "bin/sd::store_set",  # 25
     "bin/sd::validate_kind",  # 28
@@ -1570,7 +1569,6 @@ UNSHIELDED = {
     "test_sd_skill_adopt.py": 1,
     "test_sd_skill_promotion.py": 1,
     "test_sd_skill_use.py": 2,
-    "test_sd_status.py": 1,
     "test_sd_store.py": 2,
     "test_sd_suggest.py": 2,
     "test_sd_work.py": 13,

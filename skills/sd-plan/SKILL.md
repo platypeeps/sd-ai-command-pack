@@ -48,17 +48,11 @@ write a design just to record routine progress or work already merged.
    `sd-rules --for <work>/<item>/design.md` (or `--for docs/decisions/<record>.md`
    under `--decision`) from the repository root, and cite the rule ids it
    prints rather than restating the rules. Create `<work>/README.md` from
-   the template if the directory is new. The file/row status rules stand
-   until sd:3015; for an item with a `prd.md`, adapt the
-   templates to the selected work root's `.status-source` marker, including
-   when `--work-dir` changes that root. When it says `row`, keep progress in
-   the database and add no `status:` field. With `file` or no marker, add
-   `status: planning` for the legacy reader. Report an
-   unrecognized marker instead of falling back. Do not recreate retired
-   frontmatter from a template.
-4. **Register the row**, when the item is under `docs/work` and that root's
-   `.status-source` says `row`. Run `sd work register docs/work/<item>/prd.md`
-   as soon as the file exists. Under a `--work-dir` root the step does not
+   the template if the directory is new. For an item with a `prd.md`, keep
+   progress in the database and add no `status:` field. Do not recreate
+   retired frontmatter from a template.
+4. **Register the row**, when the item is under `docs/work`. Run
+   `sd work register docs/work/<item>/prd.md` as soon as the file exists. Under a `--work-dir` root the step does not
    apply and the command will refuse: a row's identity is
    `<checkout>::docs/work/<item>/prd.md`, where `<checkout>` is the
    registered key -- `~/repos/<name>` for a checkout under `$HOME` -- and
@@ -71,10 +65,7 @@ write a design just to record routine progress or work already merged.
    idempotent: a second call prints `already registered` and changes nothing,
    so re-running it on an item that already has a row is safe. The row takes
    its name and its date from the file's `title:` and `created:`, which must
-   both be present. With `file` or no marker, skip this step — the `status:`
-   field is the record there, and a row beside it would be a second answer to
-   one question. `sd work register` refuses such a repository by name, so the
-   step cannot create that state by mistake.
+   both be present.
 5. **Review the plan.** Run `sd-review --scope planning`, which resolves one
    active `planning`/`in_progress` item's `design.md` (and an older item's
    `prd.md`/`implement.md`) and routes them to the reviewer the registry gives. Which one: the item

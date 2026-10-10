@@ -44,6 +44,7 @@ def load_module() -> Any:
 
 
 sd_review = load_module()
+from tests import row_seed  # noqa: E402
 
 
 class FakeRunner:
@@ -513,6 +514,22 @@ class ReaderTests(ReviewFixture):
 
 
 class SubjectTests(ReviewFixture):
+    def setUp(self) -> None:
+        super().setUp()
+        self.row_home = self.tmp / "row-home"
+        self.row_home.mkdir()
+        patched = unittest.mock.patch.dict(os.environ, {"HOME": str(self.row_home)})
+        patched.start()
+        self.addCleanup(patched.stop)
+
+    def item(self, root: pathlib.Path, name: str, status: str, branch: str) -> pathlib.Path:
+        """A work item whose status and branch are the row's, as `sd work register` leaves them."""
+        folder = root / "docs" / "work" / name
+        folder.mkdir(parents=True)
+        (folder / "prd.md").write_text("---\ntitle: probe\n---\n\n- [ ] one\n", encoding="utf-8")
+        row_seed.seed_row(self.row_home, root, folder, status, branch=branch)
+        return folder
+
     def test_worktree_scope_sees_modified_and_untracked_files(self) -> None:
         root = self.make_repo()
         (root / "README.md").write_text("seed\nchanged\n", encoding="utf-8")
@@ -546,11 +563,7 @@ class SubjectTests(ReviewFixture):
 
     def test_planning_scope_reads_the_active_work_item(self) -> None:
         root = self.make_repo()
-        item = root / "docs" / "work" / "2026-01-01-thing"
-        item.mkdir(parents=True)
-        (item / "prd.md").write_text(
-            "---\nstatus: in_progress\nbranch: topic\n---\n\n- [ ] one\n", encoding="utf-8"
-        )
+        item = self.item(root, "2026-01-01-thing", "in_progress", "topic")
         (item / "design.md").write_text("design\n", encoding="utf-8")
         subject = sd_review.resolve_subject(root, "planning")
         self.assertEqual(
@@ -577,17 +590,9 @@ class SubjectTests(ReviewFixture):
 
     def plan_fixture(self, first: str = "topic-one", second: str = "topic-two") -> pathlib.Path:
         root = self.make_repo()
-        for name, branch in (("2026-01-01-first", first), ("2026-01-02-second", second)):
-            item = root / "docs" / "work" / name
-            item.mkdir(parents=True)
-            (item / "prd.md").write_text(
-                f"---\nstatus: planning\nbranch: {branch}\n---\n\n- [ ] one\n", encoding="utf-8"
-            )
-        shipped = root / "docs" / "work" / "2026-01-03-shipped"
-        shipped.mkdir(parents=True)
-        (shipped / "prd.md").write_text(
-            "---\nstatus: ready\nbranch: topic-one\n---\n\n- [ ] one\n", encoding="utf-8"
-        )
+        self.item(root, "2026-01-01-first", "planning", first)
+        self.item(root, "2026-01-02-second", "planning", second)
+        self.item(root, "2026-01-03-shipped", "ready", "topic-one")
         return root
 
     def checkout(self, root: pathlib.Path, branch: str) -> None:
@@ -634,11 +639,7 @@ class SubjectTests(ReviewFixture):
         answer a question that was never asked.
         """
         root = self.make_repo()
-        item = root / "docs" / "work" / "2026-01-01-only"
-        item.mkdir(parents=True)
-        (item / "prd.md").write_text(
-            "---\nstatus: planning\nbranch: topic\n---\n\n- [ ] one\n", encoding="utf-8"
-        )
+        self.item(root, "2026-01-01-only", "planning", "topic")
         self.checkout(root, "somewhere-else")
         self.assertEqual(
             sd_review.resolve_subject(root, "planning").paths,
@@ -663,11 +664,7 @@ class SubjectTests(ReviewFixture):
 
     def test_item_that_names_no_active_item_is_a_usage_error_naming_the_active_ones(self) -> None:
         root = self.make_repo()
-        item = root / "docs" / "work" / "2026-01-01-thing"
-        item.mkdir(parents=True)
-        (item / "prd.md").write_text(
-            "---\nstatus: planning\nbranch: topic\n---\n\n- [ ] one\n", encoding="utf-8"
-        )
+        self.item(root, "2026-01-01-thing", "planning", "topic")
         with self.assertRaises(sd_review.UsageError) as caught:
             sd_review.resolve_subject(root, "planning", "2026-01-01-other")
         self.assertIn("2026-01-01-thing", str(caught.exception))
