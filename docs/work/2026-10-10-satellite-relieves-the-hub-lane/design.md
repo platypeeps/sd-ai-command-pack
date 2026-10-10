@@ -47,6 +47,7 @@ Operator, 2026-10-10. D0 to D2 stand from the first round; the shared queue repl
 - D1. The trigger is manual: that same control.
 - D2. No merge while the hub is down; the database lives there.
 - Shared queue: the queue lives in the hub database; nothing is copied between hosts.
+- D3. The operator can release a stuck running entry at once, without waiting for its lease (below, "Operator release").
 
 ## The entry
 
@@ -96,6 +97,13 @@ that at claim. A dead holder's entry:
 - at `step: prepare` goes back to pending at its place, with `reclaims` plus one. Prepare saves under revision
   checks and runs again safely. At the third reclaim the entry fails instead, so a crash loop stops.
 - at `step: merge` fails with today's reclaim text: a merge may have landed, so read its logs and pull request.
+
+**Operator release.** The lease is the backstop, not the only way out. `lane cancel` on a running entry, no new verb or flag,
+applies the reclaim rule above at once: at `step: prepare` the entry goes back to pending at its place; at `step: merge` it fails
+with the reclaim text. It refuses when the holder is on this machine and its pid is alive. A holder on another machine counts as
+stuck on the operator's word: the dashboard Queue row shows the holder host, step and claim age, and a Release control that
+confirms first. The released claim's token is void, so a holder that comes back has every queue write refused.
+A merge the old holder already started can still land; branch protection's up-to-date rule stops a second one (sd:3003).
 
 `expected_head` moves to prepare's catch-up merge on put-back, as `caught_up` does today, read from the worktree on its
 host or from `origin/<branch>` elsewhere.
@@ -182,6 +190,7 @@ Today a satellite already refuses `lane enqueue` with `lane_unknown` while the h
 | claim | none | lane moved after the runner's last read | host read in the claim's transaction; no claim | new: move between read and claim claims nothing |
 | claim | entry `running` | old and new host claim at once | one transaction wins; the other sees a running entry and stops | new: two hosts, one claim |
 | prepare | entry at `step: prepare` | runner or host dies | same host: pid gone, back to pending; other host: after `lease_until`; third reclaim fails it | new: kill mid-prepare, rerun gives pending; three kills give failed |
+| release | running entry reclaimed by the operator | the holder is alive on another machine and writes again | its token is void, so each queue write is refused and it stops; a merge it already started meets branch protection | new: release a running entry, then a write under the old token is refused; release with a live local pid refuses |
 | prepare | entry at `step: prepare` | lease passes while the holder sleeps, lane not moved | only the lane host claims, it is the holder's host, and its pid is alive: no reclaim | new: expired lease, live pid, same host: entry stays running |
 | before merge | entry back to pending | lane moved during prepare | put back at its place with `moved_off`; new host claims it first | new: move mid-prepare; one entry, old host stops |
 | before merge | none | hub fault for 10 minutes | runner stops; reclaim later sees `step: prepare` and puts it back | new: step write fails; rerun gives pending |
@@ -217,6 +226,7 @@ Today a satellite already refuses `lane enqueue` with `lane_unknown` while the h
   write lock for its round trips. The writes are a few small rows per entry.
 - A host that dies mid-merge and never returns holds its entry until the lease passes, up to `MERGE_SECONDS`
   plus 30 minutes. A dead holder mid-prepare on another host waits up to 2 × `PREPARE_SECONDS`.
+  Operator release (D3) ends either wait at once.
 - Reclaim to pending changes today's rule for a dead runner mid-prepare, which marks the entry failed. The cap of
   three reclaims bounds a crash loop.
 - A database restored from a backup (sd:3256) brings back the queue as of the backup.
@@ -238,6 +248,7 @@ Each slice leaves the hub and every satellite working.
    `move`, `hold`, `release`, `retry` and `cancel` work from any host, so `HOST_VERBS` retires; only `run` stays
    host-bound. Starts once every machine runs slice 1. Opus.
 3. **System: the dashboard and the docs.** The Queue page lists every managed repository's lane, not only those with
-   a lane folder, and shows a running entry's host and `step`, which replaces its prepare-log probe.
+   a lane folder, and shows a running entry's host, `step` and claim age, which replaces its prepare-log probe.
+   A running row carries a Release control that confirms, then runs `lane cancel` on that entry (D3).
    Move lane and the `local-sd-db/README.md` "Lane host" section say pending entries follow.
    Invoke `hallmark` first.
