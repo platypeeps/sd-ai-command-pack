@@ -157,6 +157,16 @@ class SchemaChangeWaitsForMigrate(ReprovisionAfterMerge):
         sd_install.reprovision_after_merge(self.system, merged, self.environ, pack=self.pack)
         self.assertEqual(self.calls, [merged])
 
+    def test_a_pack_without_sd_db_reports_why_it_cannot_read_the_schema(self) -> None:
+        missing = mock.Mock(module=None, problem="sd_db is not installed")
+        with mock.patch.object(sd_install, "sibling", return_value=mock.Mock(import_sd_db=lambda: missing)):
+            self.assertEqual(sd_install.database_schema(self.home), (None, "sd_db is not installed"))
+
+    def test_a_schema_read_that_fails_after_the_open_reports_why(self) -> None:
+        sd_db = sd_install.sibling("sd_lib").import_sd_db().module
+        with mock.patch.object(sd_db, "schema_version", side_effect=sqlite3.DatabaseError("disk I/O error")):
+            self.assertEqual(sd_install.database_schema(self.home), (None, "disk I/O error"))
+
 
 class NoAncestryDowngrade(ReprovisionAfterMerge):
     """A late reconcile must not replace a newer installed `sd_db` (sd:2108 review).
