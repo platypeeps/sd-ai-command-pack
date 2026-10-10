@@ -38,6 +38,8 @@ import sd_db.workflow  # noqa: E402
 import sd_db.writes  # noqa: E402
 import sd_lib  # noqa: E402
 
+from tests import row_seed  # noqa: E402
+
 ITEM = "2026-09-24-a-thing"
 KEY = "~/repos/proj"
 
@@ -70,7 +72,7 @@ class TheLookupUnderASecondHome(unittest.TestCase):
         with mock.patch.dict(os.environ, {"HOME": str(first)}):
             with sd_db.connect(sd_db.default_path(first), write=True) as connection:
                 stored = sd_db.repos.add(connection, checkout, home=first)
-                connection.execute("UPDATE repo SET status_source = 'row' WHERE path = ?", (stored,))
+                row_seed.own_by_row(connection, stored)
                 sd_db.workflow.register_work_item(
                     connection, repo=str(checkout), path=f"docs/work/{ITEM}/prd.md",
                     title="A thing", created_at="2026-09-24", who="fixture")

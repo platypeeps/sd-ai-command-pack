@@ -567,7 +567,7 @@ class ShipMergeFixture(Fixture):
         # policy is the operator's standing setting, and a remote that gained
         # a collaborator is a reason to stop this merge, not to rewrite it.
         upsert_repo(self.connection, str(self.root), remote="https://github.com/sven/thing.git",
-                    status_source="row", runner_merge="auto")
+                    runner_merge="auto")
         self.item = create_item(
             self.connection, kind="work", title="a thing", status="in_progress", repo=str(self.root), branch="topic"
         )
@@ -593,7 +593,7 @@ class ShipMergeFixture(Fixture):
         from sd_db import upsert_repo
 
         upsert_repo(self.connection, str(self.root), remote="https://github.com/sven/thing.git",
-                    status_source="row", runner_merge=value)
+                    runner_merge=value)
 
     def remote(self, people: str, repo: str = OWN_JSON) -> None:
         stub = self.bindir / "gh"
@@ -733,7 +733,7 @@ class TheDemotionNote(ShipMergeFixture):
 
         self.git(self.root, "remote", "set-url", "origin", origin)
         upsert_repo(self.connection, str(self.root), remote=origin,
-                    status_source="row", runner_merge="auto")
+                    runner_merge="auto")
         self.remote(people, repo_json)
 
     def test_a_second_remote_whose_name_extends_the_first_still_gets_its_own_note(self) -> None:

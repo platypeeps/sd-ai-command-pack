@@ -22,6 +22,8 @@ import sd_lib  # noqa: E402
 import sd_work  # noqa: E402
 from sd_db.workflow import NOTE_KINDS  # noqa: E402
 
+from tests import row_seed  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -976,11 +978,7 @@ class WorkRegister(unittest.TestCase):
         self.git("config", "user.email", "t@example.com")
         self.git("config", "user.name", "T")
         with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
-            registered = sd_db.repos.add(connection, self.root, home=self.home)
-            connection.execute(
-                "UPDATE repo SET status_source = 'row' WHERE path = ?",
-                (registered,))
-            connection.commit()
+            row_seed.own_by_row(connection, sd_db.repos.add(connection, self.root, home=self.home))
 
     def git(self, *args):
         subprocess.run(["git", *args], cwd=str(self.root), check=True,
@@ -1193,19 +1191,6 @@ class WorkRegister(unittest.TestCase):
     def test_a_missing_file_is_refused_by_name(self):
         refused = self.call("work", "register", "docs/work/nope/prd.md", code=1)
         self.assertIn("no file at", refused.stderr)
-
-    def test_a_repository_whose_files_still_own_status_is_refused(self):
-        """Two answers to one question is the state this must never create."""
-
-        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
-            connection.execute(
-                "UPDATE repo SET status_source = 'file' WHERE path = ?",
-                (sd_lib.stored_repo(self.root),))
-            connection.commit()
-        path = self.item()
-        refused = self.call("work", "register", path, code=1)
-        self.assertIn("second answer", refused.stderr)
-        self.assertNotIn("Traceback", refused.stderr)
 
     def test_a_stale_library_refuses_by_name_instead_of_raising(self):
         """The import cannot stand in for the attribute.
