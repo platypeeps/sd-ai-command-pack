@@ -95,6 +95,7 @@ Recorded as a routine choice (sd note).
 | `bin/sd-db` (moved, same verbs) | `local-sd-db/sd-db.sh` |
 | `import_sd_db` reads `<checkout>/lib` first | `provision_library` and the `.venv` copy |
 | The system gate installs from `SD_PACK_CHECKOUT` | `pip install ./local-sd-db` |
+| `repo-sync/refresh-intent`, the D2 rollback point, beside `follow-intent` and written the same way | a rerun picking the newest backup at the database's current version |
 
 Deleted at the end: `.sd-system-rev`, `test_system_pin.py`, the `sd_db` part of `provision-gate-env.py`,
 `provision_library`, `library_pin`, `LIBRARY_TAGS`, `provision_guarded`, `provisioning_lock`, `ancestry_refusal`,
@@ -166,21 +167,41 @@ After step 3, a merge installs nothing at all: the hub's pack checkout is pinned
 D2: inside `refresh`'s existing drain, when the database's schema version is below the target library's `SCHEMA_VERSION`.
 The check reads the database and the library, never the checkout movement, and runs at every `refresh`: a rerun after a kill finds the same pending migrations.
 
+**The rollback point.** One refresh record names where a failed migration goes back to:
+the system sha and the pack sha `A` before the move, the schema version `N` before `migrate`, and the path of the backup taken at `N`.
+It is `${XDG_STATE_HOME:-$HOME/.local/state}/repo-sync/refresh-intent`, beside follow's intent marker (sd:3100), written the same way: a temporary file, then a rename.
+It lives outside the database because a restore replaces the database and its state folder.
+Every rerun reuses the record and never replaces it, so recovery lands at `A` and `N` however many runs a refresh takes.
+The backup is a valid rollback point only while no service writes, so `refresh` deletes the record just before it starts services, never later.
+
 1. Stop the dashboard, the runner and `sd-serve` (launchd `bootout`).
-2. `bin/sd-db backup`. A failure refuses with nothing moved.
-   A backup taken before `migrate` is not owned by retention, so it stays until the operator removes it; a rerun reuses the newest such backup at the database's current version.
+2. With a record left: check that its backup exists and reads version `N`, and take no backup.
+   An unreadable record, or a missing or mismatched backup, is an unknown rollback point: refuse, keep the services stopped, move nothing, push no `hub-pin`.
+   With no record: `bin/sd-db backup`, then write the record. A failed backup or record write refuses with nothing moved and starts the services again.
+   The backup is not owned by retention, so it stays until the operator removes it.
 3. Move system, then the pack; run `make setup`. A rerun with both already at target skips this step.
 4. `bin/sd-db migrate`. Each migration is its own transaction, so a failure can leave earlier ones committed.
-   On failure, read the database's schema version. If it is still the old version, move the pack back to the old sha (the follow rollback, sd:3218).
-   If it moved, first restore the step 2 backup with `bin/sd-db restore`, which proves the copy, then move the pack back. Old code never starts on a newer database.
-   If that restore fails, leave the services stopped, push no `hub-pin`, and report both errors: the operator decides.
-5. Start the three services. A library change without a schema change restarts them too:
+   On failure, recover to the record. If the database reads above `N`, restore the record's backup with `bin/sd-db restore`, which proves the copy.
+   Then move the pack, then system, back to the record's shas and run `make setup` at `A` (the follow rollback, sd:3218). Old code never starts on a newer database.
+   If the restore or a move back fails, or the version cannot be read, keep the services stopped and the record, push no `hub-pin`, and report both errors: the operator decides.
+5. When the database's version equals the checked-out library's, delete the record, then start the three services.
+   That is the target after a migrate and `N` after a recovery. A library change without a schema change restarts them too:
    the running `sd-serve` refuses sessions with `HubRestartNeeded` once its files change.
-6. Push `hub-pin` only after step 5. Satellites follow only a migrated hub.
+6. Push `hub-pin` only after step 5, and only with the pack at the target. Satellites follow only a migrated hub; a recovery pushes nothing.
 
 Before step 5 and before step 6, `refresh` reads the schema version again. Below the library's version, it does not start services or push: it runs steps 2 and 4, whatever the checkouts did.
 
+A rerun after a kill or a failed restore works from what it reads: the record, the database's version and the checkouts.
+It finishes the migration forward or lands at the record's pair, and it never backs up a partly migrated database.
+A rerun whose target moved on since the record was written still recovers to `A` and `N`.
+No deployed writer opens the database between `N` and the target: code at `A` refuses it as too new (`SchemaTooNew`), code at the target as too old (`SchemaTooOld`).
+
 ## Failure table
+
+Class for the D2 rows: the rollback point of an interrupted or failed migration.
+Steps that write it: the backup and the record write (step 2), the record delete (step 5).
+Steps that read it: the recovery and its restore (step 4), the version reads before steps 5 and 6, and every rerun after a kill, a failed restore or a moved target.
+Steps that move away from it: the checkout move (step 3) and `migrate` (step 4).
 
 | Step | State moved | Failure | Recovery | Test |
 | --- | --- | --- | --- | --- |
@@ -194,14 +215,22 @@ Before step 5 and before step 6, `refresh` reads the schema version again. Below
 | 2 older state | `repo-sync` knew system by `local-sd-db/sd_db/schema.py` | system read as an unknown checkout | detect by `local-repo-sync/repo-sync.sh` | new `repo-sync` test on a system tree without `local-sd-db/sd_db` |
 | 3 merge | `.venv` has no `sd_db` | a missed caller imports the venv copy | it fails with `ImportError`, not stale code; fix the caller | new: after `make setup`, `.venv/bin/python -I -c 'import sd_db'` fails |
 | 3 older state | a satellite venv copy from self-install | stale copy imported | follow's `make setup` uninstalls it | same test, run against a venv with a planted copy |
-| migrate (D2) | services stopped | backup fails | refuse, start services, nothing moved | new `refresh` test with a failing backup double |
-| migrate (D2) | pack moved, schema unchanged | the first pending migration fails | its transaction rolls back; move the pack back; start services; no `hub-pin` push | new `refresh` test against a real database: a first migration that fails leaves the old version, the old sha and no tag push |
-| migrate (D2) | pack moved, schema partly moved | a later migration fails after an earlier one committed | restore the step 2 backup, then move the pack back; start services; no `hub-pin` push | new `refresh` test against a real database with two real migrations, the second failing: the version reads the old one after recovery, the restore row names the step 2 backup, old code opens it |
-| migrate (D2) | schema partly moved, pack moved | the restore also fails | services stay stopped; no `hub-pin` push; both errors reported; the operator decides | same test with a failing restore: services stay down and the report names both errors |
-| migrate (D2) | migrated, services down | `refresh` killed before start | the next `refresh` reads the version at target, then starts the services and pushes | new test: second run with checkouts at target and a migrated database starts services |
-| migrate (D2) | pack moved, one migration committed, services down | `refresh` killed before the rest | the next `refresh` reads the version below target, takes a backup, migrates the rest, then starts services and pushes; on a failure it follows rows above | new test against a real database: kill after the first of two migrations; rerun with checkouts at target finishes both before any start |
-| migrate (D2) | pack moved, services down | `refresh` killed before `migrate` starts | same: the version reads below target, so the rerun migrates before starting anything | new test: kill between step 3 and step 4; rerun migrates first |
-| migrate (D2) | services down after a failed restore | the operator runs `refresh` again | the version check runs first: below target it backs up and migrates; it never starts services on an unmigrated database | new test: rerun after the failed-restore row starts nothing until the version matches |
+| migrate (D2) | services stopped | backup fails | refuse, start services, nothing moved, no record | new `refresh` test with a failing backup double: no record file afterwards |
+| migrate (D2) | backup at `N` taken, no record | the record write fails | refuse with nothing moved; start services; the backup stays | new test: an unwritable state folder leaves both checkouts at their shas and the services running |
+| migrate (D2) | backup at `N` taken, no record | `refresh` killed before the record is written | nothing moved: the rerun takes a new backup and writes the record; the first backup stays for the operator | new test: kill between backup and record; the rerun's record names the second backup |
+| migrate (D2) | record written, checkouts at `A` | `refresh` killed before or during the move | the rerun reuses the record, takes no backup and moves on | new test: kill after the record write; the rerun leaves the record unchanged and takes no backup |
+| migrate (D2) | record left | record unreadable, or its backup missing or not at `N` | unknown rollback point: refuse, services stay stopped, nothing moves, no `hub-pin` push; the report names the record | new test for each: a corrupt record, a deleted backup, a backup at another version |
+| migrate (D2) | pack moved, schema unchanged | the first pending migration fails | its transaction rolls back; the version reads `N`, so no restore; move the pack, then system, back to the record's shas; `make setup` at `A`; delete the record; start services; no `hub-pin` push | new `refresh` test against a real database: a first migration that fails leaves `N`, both checkouts at the record's shas, no record and no tag push |
+| migrate (D2) | pack moved, schema partly moved | a later migration fails after an earlier one committed | restore the record's backup, then move both checkouts back to the record's shas; delete the record; start services; no `hub-pin` push | new `refresh` test against a real database with two real migrations, the second failing: the version reads `N` after recovery, the restore row names the record's backup, old code opens it |
+| migrate (D2) | schema partly moved, pack moved | the restore fails, a move back fails, or the version cannot be read | services stay stopped; the record stays; no `hub-pin` push; both errors reported; the operator decides | same test with a failing restore, then a failing move back: services stay down, the record is unchanged, the report names both errors |
+| migrate (D2) | `A` at `N`, then pack at `B`, schema at `N+1`, services down | `refresh` killed after `N+1` committed; the rerun's `N+2` fails (review round 6) | the rerun reuses the record, so recovery restores the backup at `N` and moves both checkouts back to `A`, not to `B` | new test against a real database: start at `A` and `N`, kill after `N+1`, rerun with `N+2` failing; after recovery the version reads `N`, the pack reads `A`, no second backup exists, old code opens the database and the services run |
+| migrate (D2) | pack moved, one migration committed, services down | `refresh` killed before the rest | the rerun reads the version below target, reuses the record, migrates the rest, deletes the record, then starts services and pushes | new test against a real database: kill after the first of two migrations; the rerun finishes both before any start and takes no backup |
+| migrate (D2) | pack moved, services down | `refresh` killed before `migrate` starts | same: the version reads below target, so the rerun reuses the record and migrates before starting anything | new test: kill between step 3 and step 4; the rerun migrates first |
+| migrate (D2) | recovery part done: restore landed or not, checkouts moved back or not | `refresh` killed during recovery | the rerun reads the record, the version and the checkouts; it migrates forward from `N` with the checkouts at target, or recovers again; never a new backup; never a start before the version equals the checked-out library's | new test: a kill at each recovery point (before restore, after restore, after the pack moves back, before the record delete); each rerun ends at the target or at `A` and `N` |
+| migrate (D2) | services down after a failed restore | the operator runs `refresh` again | the version check runs first: below target, the rerun reuses the record and migrates; a failure recovers to `A` and `N`; it never backs up a partly migrated database | new test: rerun after the failed-restore row takes no backup and starts nothing until the version matches |
+| migrate (D2) | record deleted, services down | `refresh` killed before start | after a migrate: the rerun reads the target and starts and pushes. After a recovery: the hub is at `A` and `N` with no record, so the rerun is a fresh refresh | new test: second run with checkouts at target and a migrated database starts services; a run at `A` and `N` with no record takes a fresh backup |
+| migrate (D2) | services started, record deleted | the `hub-pin` push fails | the rerun pushes; no record outlives the services' first write, so a later refresh never restores a backup older than those writes | new test: a failed push, then a refresh with a new migration takes a fresh backup and a fresh record |
+| migrate (D2) | record holds `A` and `N` | the target moved from `B` to `C` between runs | the rerun migrates toward `C`; recovery still lands at `A` and `N` | new test: a rerun with a newer target and a failing migration recovers to the record's pair |
 | rollback | revert step 3 | `.venv` copy returns | `make setup` installs from `lib/` again | none new: step 1 tests cover that path |
 | rollback | revert step 2 after a later schema bump | system's frozen copy is older than the database | `SchemaTooNew` refuses; nothing is written | none new: existing `SchemaTooNew` tests; revert in reverse order only |
 
