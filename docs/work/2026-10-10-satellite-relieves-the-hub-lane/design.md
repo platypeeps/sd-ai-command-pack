@@ -1,4 +1,6 @@
 ---
+title: A satellite relieves a busy hub lane
+created: 2026-10-10
 item: sd:3174
 ---
 
@@ -36,7 +38,9 @@ What still exists and helps:
 So the hub cannot merge on a satellite's gate without a new cross-machine trust rule.
 That is the rule the 2026-10-08 ruling retired.
 
-## Three shapes
+## Approach
+
+Three shapes meet the need; D0 picks one.
 
 **Shape A: move the lane, and its queue follows (Recommended).**
 The operator moves a repository's lane to the satellite with the existing control.
@@ -59,6 +63,15 @@ It meets both cases in the plan: an overloaded hub moves a lane;
 a lane held by one long gate moves, and the next entries run on the satellite.
 What A gives up: merges for a moved repository run on the satellite, and the unit is a repository, not one entry.
 One order per repository still holds, because one machine hosts it.
+Shape A is one pack PR, one commit per part: portable entries in `enqueue`, hand-over, take-in,
+and a line on Move lane saying pending entries follow. No system change and no schema change. Run it on Opus.
+
+## Non-goals
+
+- Cross-repository merge order; each repository keeps its own lane.
+- A merge while the hub is down (see "Hub down").
+- An automatic trigger unless D1 picks it.
+- Bringing back gate receipts that cross machines, in shape A or C.
 
 ## Shared part: a portable entry
 
@@ -110,7 +123,7 @@ A merge on the hub needs the branch up to date with the base.
 If any entry merges between the satellite's gate and the hub's merge, the catch-up moves the head, the pass no longer applies,
 and the hub gates again. Under load that is the common case, so shape B saves less than it seems.
 
-## Failure tables
+## Failure table
 
 Shape A:
 
@@ -162,15 +175,17 @@ D2. Hub down.
 - Option: no merge until the hub returns (Recommended; the database lives there).
 - Option: a satellite merge with operator approval; a separate item would design the offline path.
 
-## Acceptance (shape A)
+## Acceptance criteria
+
+For shape A:
 
 1. With two pending entries on the hub, Move lane to the satellite. Within two lane-job runs both are pending on the satellite, in the same order, and `moved` on the hub.
 2. The satellite merges both. Each item gets the landing note from the satellite.
 3. Move the lane back. New entries queue on the hub again.
 4. Every row of the shape A failure table has its test, run fail-first.
 
-## Implementation order (shape A)
+## Risks
 
-One pack PR, one commit per part: portable entries in `enqueue`; hand-over; take-in; dashboard note on Move lane that pending entries follow.
-No system change. No schema change: the rows use the `state` table.
-Run it on Opus: it moves state in steps across two machines.
+- The carry-over is a hand-off between machines, the class sd:3003 removed. It runs once per move, not once per entry; its failure rows each need a test.
+- A carried entry gates once more on the new host. Moving a lane with many pending entries costs that many extra gates.
+- Under shape B, a base that moves between the satellite's gate and the hub's merge voids the pass; under load that is common.

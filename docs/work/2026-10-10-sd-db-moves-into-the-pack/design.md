@@ -1,4 +1,6 @@
 ---
+title: sd_db moves into the pack; the system pin retires
+created: 2026-10-10
 item: sd:2997
 ---
 
@@ -55,7 +57,7 @@ System side (read-only for this item):
 | `tests/ci-native.sh`, `tests/run-macos-only.sh` | `pip install ./local-sd-db` into a throwaway venv |
 | `local-sd-db/tests` | 86 files; the acceptance tests drive a pack checkout (`SD_ACCEPTANCE_PACK`) |
 
-## Decision (proposed)
+## Approach
 
 **Where the code goes.** `local-sd-db/sd_db/` moves to `lib/sd_db/` in the pack.
 `pyproject.toml` and `_build.py` move to `lib/`. The tests move to `tests/sd_db/` and join `make check`.
@@ -79,6 +81,13 @@ The rule becomes: a library change lands in the pack first; its system callers f
 A subtree merge would put an unrelated root and a merge commit into a squash-merged repository.
 Recorded as a routine choice (sd note).
 
+## Non-goals
+
+- Moving the dashboard (`local-project-dashboard`); decision D3 names it as a later item.
+- Changing the schema, a migration or any `sd_db` behavior during the move.
+- Automatic migration on a satellite: satellites never migrate; they follow a migrated hub.
+- Carrying system's commit history into the pack.
+
 ## Mechanisms
 
 | New or changed | Replaces |
@@ -95,10 +104,13 @@ Deleted at the end: `.sd-system-rev`, `test_system_pin.py`, the `sd_db` part of 
 the dashboard's library-staleness refusal (sd:962), and `sd_db.self_install` if decision D4 says so.
 Each deletion greps both repositories first; the step's PR body quotes the grep.
 
-## Steps
+## Slices
 
-Each step is one PR. Every machine keeps working between steps.
+Each step is one PR, in order: step 1 (pack), step 2 (system), step 3 (pack), step 4 (system).
+Every machine keeps working between steps.
 A satellite moves only to a pair the hub published in `hub-pin`, so it never mixes steps.
+Steps 1 and 3 are design and concurrency work; run them on Opus.
+Step 2 is mostly path edits plus the shim and the `repo-sync` detection; Sonnet can run it with the failure table.
 
 **Step 1, pack: copy and load from the tree.**
 1. Copy `local-sd-db` at system commit `S` into `lib/` and `tests/sd_db/`. The commit message names `S`.
@@ -109,7 +121,8 @@ A satellite moves only to a pair the hub published in `hub-pin`, so it never mix
 5. `reprovision_after_merge` triggers on a pack merge that touched `lib/`, not on a system merge.
 6. The gate builds `.venv` from the worktree's own `lib/`. Delete `.sd-system-rev` and `test_system_pin.py`.
 
-From this merge on, the pack owns `sd_db`. System's `local-sd-db` is frozen at `S`.
+Leaves working: every machine runs today's callers. Pack `bin/` reads `lib/` (`S`); system callers read the `.venv` copy, also `S`.
+From this merge on, the pack owns `sd_db`. System's `local-sd-db` is frozen at `S` until step 2 merges; record the freeze in an sd note.
 A library change during the freeze goes to the pack.
 
 **Step 2, system: callers move to the pack.**
@@ -126,6 +139,8 @@ A library change during the freeze goes to the pack.
 8. Delete `local-sd-db/sd_db`, `local-sd-db/tests`, `_build.py` and `pyproject.toml`.
    The README keeps one paragraph: the library lives in the pack; the shim is for old callers.
 
+Leaves working: installed cron jobs and LaunchAgents through the shim; the dashboard and machine-setup through the pack's `lib/`.
+
 **Step 3, pack: one copy.**
 1. `make setup` installs no `sd_db`. It runs `pip uninstall -y sd-db` in `.venv`,
    so a caller that still reads the venv copy fails loudly instead of running stale code.
@@ -133,9 +148,13 @@ A library change during the freeze goes to the pack.
 3. Reword the "install the current system/local-sd-db build" refusals in `bin/` to name `make setup` in the pack.
 4. Apply decision D4 to `sd_db.self_install`.
 
+Leaves working: every caller reads the pack's `lib/`; a missed caller fails with `ImportError` rather than running stale code.
+
 **Step 4, system: retire the shim.**
 After the operator's config folder, LaunchAgents and cron jobs name `bin/sd-db`
 (`machine-setup.sh` doctor lists any left), delete `local-sd-db/` and the root `CLAUDE.md` lines that name it.
+
+Leaves working: callers name `bin/sd-db`; nothing names `local-sd-db`.
 
 ## Schema migration after the move
 
@@ -207,7 +226,7 @@ D5. The `sd-db.sh` entrypoint.
 - Option: move it to the pack as `bin/sd-db`; a system shim keeps old paths until step 4 (Recommended).
 - Option: keep `sd-db.sh` in system as the front door, calling into the pack's `lib/`.
 
-## Acceptance
+## Acceptance criteria
 
 1. The pack has no `.sd-system-rev`; `grep -rn sd-system-rev` over both repositories finds only archives.
 2. `make check` in the pack runs the `sd_db` suite from `tests/sd_db/`.
@@ -216,10 +235,10 @@ D5. The `sd-db.sh` entrypoint.
 5. On the hub and on one satellite after step 3: `sd task show 1`, the dashboard, `sd-serve`, a backup job and `repo-sync follow` all work.
 6. One schema-bumping pack merge after step 3 reaches the hub through `refresh` with the D2 flow, and a satellite follows.
 
-## Implementation order
+## Risks
 
-Four PRs, in order: step 1 (pack), step 2 (system), step 3 (pack), step 4 (system).
-Steps 1 and 3 are design and concurrency work; run them on Opus.
-Step 2 is mostly path edits plus the shim and the `repo-sync` detection; Sonnet can run it with the failure table.
-Step 4 is a deletion after the operator's config moved.
-Freeze system's `local-sd-db` from the step 1 merge to the step 2 merge; record the freeze in an sd note.
+- A system caller that imports `sd_db` some way this design did not list keeps reading the `.venv` copy until step 3 removes it.
+  Step 3's uninstall turns that into a loud failure; the step 2 builder greps for `sd_db` outside `local-sd-db` first.
+- The freeze depends on the lane: a system PR touching `local-sd-db` after step 1 must not merge.
+  Step 2's precondition catches it late, not early; the accepted cost is one port.
+- D2 option 1 stops services on every library change at `refresh`. A refresh with no library change stops nothing.
