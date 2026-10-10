@@ -702,11 +702,15 @@ def clean_up(entry: dict[str, Any], head: str | None, main: pathlib.Path, branch
 
 
 @contextlib.contextmanager
-def other_lanes_idle(lanes: pathlib.Path, own: pathlib.Path) -> Iterator[str | None]:
-    """Hold every other lane's runner lock for one step, trying each once; yields the busy lane, or None."""
+def other_lanes_idle(lanes: pathlib.Path, own: pathlib.Path | None = None) -> Iterator[str | None]:
+    """Hold every other lane's runner lock for one step, trying each once; yields the busy lane, or None.
+
+    `own` is the caller's lock, or None for a caller that is no lane: the
+    installer's move of the serving tree (sd:3273).
+    """
     with contextlib.ExitStack() as held:
         for lock in sorted(lanes.glob("*/lane/queue/runner.lock")):
-            if lock.resolve() == own.resolve():
+            if own is not None and lock.resolve() == own.resolve():
                 continue
             handle = held.enter_context(open(lock, "a", encoding="utf-8"))
             try:

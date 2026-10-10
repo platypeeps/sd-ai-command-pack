@@ -15,6 +15,7 @@ actual global excludes, and the test that noticed that is the reason the
 
 from __future__ import annotations
 
+import fcntl
 import importlib.util
 import io
 import json
@@ -2357,6 +2358,53 @@ class ServeTests(InstallerHarness):
         rc, output = self.serve()
         self.assertEqual(rc, 0, output)
         self.assertEqual(self.git(self.tree, "rev-parse", "HEAD"), self.git(self.work, "rev-parse", "HEAD"))
+
+    def running_lane(self, name: str = "demo"):
+        """Hold `name`'s lane runner lock under a scratch lane root, as a running `lane run` does."""
+        lock = self.home / "lanes" / name / "lane" / "queue" / "runner.lock"
+        lock.parent.mkdir(parents=True)
+        handle = open(lock, "a", encoding="utf-8")
+        self.addCleanup(handle.close)
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return handle
+
+    def test_a_running_lane_defers_the_move_and_the_next_setup_makes_it(self):
+        """sd:3273: a lane mid-prepare runs its tools from the tree, so the tree waits for the next `make setup`."""
+        self.assertEqual(self.serve()[0], 0)
+        self.record.unlink()
+        merged = self.merge("two")
+        held = self.running_lane()
+        ctx = self.context(SD_LANE_ROOT=str(self.home / "lanes"))
+        rc, output = self.serve(ctx)
+        self.assertEqual(rc, 0, output)
+        self.assertIn(f"{self.tree} not moved: the demo lane is running from it", output)
+        self.assertEqual(self.git(self.tree, "rev-parse", "HEAD"), self.merged)
+        self.assertFalse(self.record.exists(), "the tree's setup ran under the lane")
+        held.close()
+        rc, output = self.serve(ctx)
+        self.assertEqual(rc, 0, output)
+        self.assertEqual(self.git(self.tree, "rev-parse", "HEAD"), merged)
+
+    def test_the_drain_that_holds_every_lane_moves_the_tree(self):
+        """repo-sync's refresh and follow hold every runner lock themselves and say so (REPO_SYNC_LANES_HELD)."""
+        self.assertEqual(self.serve()[0], 0)
+        merged = self.merge("two")
+        self.running_lane()
+        rc, output = self.serve(self.context(SD_LANE_ROOT=str(self.home / "lanes"), REPO_SYNC_LANES_HELD="1"))
+        self.assertEqual(rc, 0, output)
+        self.assertEqual(self.git(self.tree, "rev-parse", "HEAD"), merged)
+
+    def test_a_lane_root_that_cannot_be_read_moves_nothing(self):
+        """A failed read of `sd.lane_root` is not an idle machine: the move refuses, the tree stays."""
+        self.assertEqual(self.serve()[0], 0)
+        self.merge("two")
+        config = self.home / ".config" / "sd-ai-command-pack" / "config.json"
+        config.parent.mkdir(parents=True)
+        config.write_text("{not json", encoding="utf-8")
+        rc, output = self.serve()
+        self.assertEqual(rc, 1, output)
+        self.assertIn("cannot tell whether a lane is running", output)
+        self.assertEqual(self.git(self.tree, "rev-parse", "HEAD"), self.merged)
 
     def readme_command(self, step: str, marker: str) -> str:
         bullet = (REPO_ROOT / "README.md").read_text(encoding="utf-8").split(f"- **{step}:**", 1)[1].split("\n- ", 1)[0]
