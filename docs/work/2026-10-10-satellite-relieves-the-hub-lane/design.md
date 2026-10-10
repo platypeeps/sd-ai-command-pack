@@ -56,7 +56,7 @@ Fields another machine needs to run it:
 - `id`: made once at enqueue, `<UTC stamp>-<8 hex>`; the key's last part.
 - `repository` (`owner/name`, lower-cased), `item`, `branch`, `expected_head`, `title`.
 - `body` and `acceptance`: the texts, not file paths. The runner writes each to a private temporary file for
-  `prepare`. This retires `keep_body`, `drop_body` and the `bodies/` folder: rows are history, so `retry` copies the
+  `prepare`. This retires `keep_body` and `drop_body`, and new entries write nothing to `bodies/` (the import empties it of what it read): rows are history, so `retry` copies the
   last entry's texts and no copy rule is needed.
 - `claim` (`deliver` or `associate-only`) and `authority`, unchanged.
 - `position`: the queue order. Enqueue takes the largest position plus one; `move` renumbers the pending entries.
@@ -147,9 +147,17 @@ and any lane verb does it for its repository, whenever a `queue.json` exists.
 
 1. Take the repository's runner lock without waiting, then the old queue flock. A busy runner lock skips the import
    until the next run, so an older runner mid-entry keeps its file.
-2. In one transaction, write one row per file entry, in file order, under a fixed id:
+2. Publish: for each pending or blocked file entry, push its branch at `expected_head`, as the new enqueue does
+   (`git push origin <branch>`, no force). Older `sd-ship` never pushed, so these heads may exist only here.
+   Any push that fails or is refused stops the import for this repository: nothing is written, the file stays,
+   and the pass reports the entry. The next pass tries again.
+3. In one transaction, write one row per file entry, in file order, under a fixed id:
    `import-<16 hex of sha256(host, queue path, item, enqueued_at)>`. An id already present is skipped.
-3. Rename the file to `queue.json.imported-<UTC stamp>`, then remove `bodies/`.
+   Each row records the body file it read.
+4. Rename the file to `queue.json.imported-<UTC stamp>`, then delete only the body files the committed rows name.
+   `bodies/` itself and any other file in it stay: an older `sd-ship` copies a body before it takes the queue flock,
+   so a body there may belong to an enqueue whose queue write has not happened yet. That entry lands in a new
+   `queue.json`, and the next pass imports it with its body.
 
 What the import does with older rows:
 
@@ -204,7 +212,10 @@ Today a satellite already refuses `lane enqueue` with `lane_unknown` while the h
 | worktree | lane worktree made | killed before claim or step | next run reuses it at the head, or removes and remakes a lane worktree it made | new: leftover lane worktree at another head |
 | import | rows | killed mid-transaction | nothing written; next pass imports | new: fault inside the transaction leaves no row |
 | import | rows written | killed before the rename | fixed ids exist and are skipped; the file is renamed | new: rerun gives one row per entry |
-| import | file renamed | killed before `bodies/` goes | next pass sees an `imported` file and removes `bodies/` | new: leftover `bodies/` removed |
+| import | file renamed | killed before the named body files go | next pass reads the committed rows and deletes the body files they name | new: leftover named bodies removed, an unnamed body kept |
+| import | none | an older `sd-ship` copied a body, not yet its queue write | the body is not named by any row, so it stays; its entry lands in a new file and imports with it | new: a body written between import and the old enqueue's queue write survives and imports |
+| import publish | branches pushed | a push fails or is refused | nothing written, file kept, entry reported; next pass retries | new: a failing push leaves the file and writes no row |
+| import publish | some branches pushed | killed before the transaction | pushed branches are harmless; the rerun pushes again (no-op) and imports | new: rerun after a kill between push and write gives one row per entry |
 | import | rows | an older `sd-ship` enqueues during the import | the old queue flock orders it; a later entry lands in a new file, imported next pass | new: append after rename imported once |
 | import | rows | older rows: `running`, no branch, no body, `handed_back`, duplicate item | the rules in "Migration" | new: one fixture per older row |
 | rollback | file renamed | the pack goes back to before slice 1 | the old code finds no queue file and runs nothing; rename the `imported` file back, or roll forward | new: the `imported` file holds the original bytes |
