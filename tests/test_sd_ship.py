@@ -2468,7 +2468,9 @@ roles:
         def provision(ctx, out, ref=None):
             installs.append(ref)
             return True, f"sd_db installed at {ref}"
+        # The schema guard (sd:3249) has its own tests in test_sd_install_reprovision.
         with patch.dict(os.environ, {sd_install.SYSTEM_CHECKOUT_ENV: str(self.root)}), \
+                patch.object(sd_install, "schema_refusal", return_value=""), \
                 patch.object(sd_install, "installed_library_commit", return_value=None), \
                 patch.object(sd_install, "provision_library", provision):
             merged = self.merge()
