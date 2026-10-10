@@ -22,8 +22,6 @@ import sd_lib  # noqa: E402
 import sd_work  # noqa: E402
 from sd_db.workflow import NOTE_KINDS  # noqa: E402
 
-from tests import row_seed  # noqa: E402
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -978,7 +976,7 @@ class WorkRegister(unittest.TestCase):
         self.git("config", "user.email", "t@example.com")
         self.git("config", "user.name", "T")
         with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
-            row_seed.own_by_row(connection, sd_db.repos.add(connection, self.root, home=self.home))
+            sd_db.repos.add(connection, self.root, home=self.home)
 
     def git(self, *args):
         subprocess.run(["git", *args], cwd=str(self.root), check=True,

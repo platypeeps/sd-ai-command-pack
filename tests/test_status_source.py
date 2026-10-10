@@ -46,8 +46,6 @@ if str(REPO_ROOT / "bin") not in sys.path:
 import sd_db  # noqa: E402 - installed into this virtualenv by `make setup`
 import sd_lib  # noqa: E402
 
-from tests import row_seed  # noqa: E402
-
 
 def _load(name: str, module_name: str) -> Any:
     """Import a `bin/` executable, which has no `.py` suffix to import by name."""
@@ -224,7 +222,6 @@ class TheRowDecides(Fixture):
         import sd_handoff_rows
 
         connection = self.seed("in_progress")
-        row_seed.own_by_row(connection, str(self.root))
         row = sd_db.writes.item_by_external(connection, sd_lib.ITEM_ROW_SOURCE, self.identity())
         note = sd_db.add_note(connection, row["id"], "followup", "Keep the original history")
         moved = self.work / "2026-09-08-renamed"
@@ -250,7 +247,6 @@ class TheRowDecides(Fixture):
 
         self.write(prd(None))
         connection = self.seed("in_progress")
-        row_seed.own_by_row(connection, str(self.root))
         row = sd_db.writes.item_by_external(connection, sd_lib.ITEM_ROW_SOURCE, self.identity())
         progress.cancel_work(connection, row["id"], reason="No longer needed", who="user")
         with mock.patch.object(sd_lib, "delivered", side_effect=AssertionError("asked Git")):
