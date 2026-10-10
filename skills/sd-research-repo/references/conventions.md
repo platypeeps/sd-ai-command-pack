@@ -143,7 +143,7 @@ citation goes. This is guidance; no check reads the column (ruling of
 2026-09-30, sd:1838).
 
 `registry.md` also keeps a `## Corrections on record` section: the claims that
-reading the real source overturned, each kept and never deleted (sd:1841).
+reading the real source overturned, each one kept, not removed (sd:1841).
 
 ## Main document — START HERE
 
