@@ -103,12 +103,10 @@ def unproven_repositories(connection, restore_row) -> list[tuple[str, str]]:
     A still-retiring authority needs a successful replay. An old receipt alone
     must not bypass it; reimport switches ownership in the receipt transaction.
     """
-    present = {row[1] for row in connection.execute("PRAGMA table_info(repo)")}
-    columns = [column for column in AUTHORITY if column in present]
     unproven = [
         (row["path"], column)
-        for row in connection.execute(f"SELECT path, {', '.join(columns)} FROM repo")
-        for column in columns if row[column] == RETIRING
+        for row in connection.execute("SELECT * FROM repo")
+        for column in AUTHORITY if column in row.keys() and row[column] == RETIRING
     ]
     del restore_row
     return unproven
