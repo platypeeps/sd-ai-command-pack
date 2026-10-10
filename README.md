@@ -508,7 +508,7 @@ make precheck   # lint + the always-run test modules, about a minute
 This repository has `repo.ci = local`: it carries no GitHub Actions workflow.
 `sd-ship merge` runs `sd-check` (here `make precheck`, then `make check`) in a fresh worktree and
 posts the result as the `sd/local-gate` status on the head commit. The gate
-installs `sd_db` at the `platypeeps/system` ref in `.sd-system-rev`.
+installs `sd_db` from the worktree's own `lib/`.
 `sd-ship prepare` checks the public pull request body against the privacy patterns with `sd-docs-lint --body-only`.
 WORKFLOW.md "No-CI mode" describes the gate.
 

@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
-"""Provision the local gate's own virtualenv at the pinned `sd_db` (sd:1918).
+"""Provision the local gate's own virtualenv with the worktree's `sd_db` (sd:1918, sd:3278).
 
 `sd-ship merge` runs `sd-check` for a `repo.ci = local` repository in a fresh
 detached worktree and exports `SD_LOCAL_GATE=1` (`bin/sd_local_gate.py`). In
 that mode the Makefile never borrows the main checkout's `.venv`: a borrowed
 environment is the operator's state, and its `sd_db` is whatever `make setup`
-last installed from the system checkout's HEAD, not the pin. So
-`make check` calls this first, and it builds `.venv` in the worktree:
+last installed, not the commit under test. So `make check` calls this first,
+and it builds `.venv` in the worktree:
 
 * `requirements-dev.txt` and `requirements-security.txt` under
   `--require-hashes`;
-* `sd_db` from the system checkout at the ref `.sd-system-rev` holds: one
-  line, a full commit or an `sd-db-v*` release tag, or the gate fails;
+* `sd_db` from the worktree's own `lib/`, the commit under test;
 * nothing for opencode, which it cannot install on this platform: the live
   confinement test needs it, a skip fails the suite anyway, and this says so
   first, by name, instead of a whole suite later.
@@ -23,38 +22,21 @@ environment is not a thing it may rebuild.
 
 from __future__ import annotations
 
-import os
 import pathlib
-import re
 import shutil
 import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-PIN_FILE = ROOT / ".sd-system-rev"
+LIBRARY = ROOT / "lib"
 VENV = ROOT / ".venv"
 #: Written into the environment once it is complete; a rerun may rebuild only a tree carrying it.
 MARKER = "sd-gate-environment"
-#: A full commit or an `sd-db-v*` release tag, as tests/test_system_pin.py reads it; both are immutable.
-PIN_FORM = re.compile(r"^(?:[0-9a-f]{40}|sd-db-v\d+(?:\.\d+)*)$")
 REQUIREMENTS = ("requirements-dev.txt", "requirements-security.txt")
 
 
 class GateError(Exception):
     """A sentence for stderr; the gate fails rather than run on a guess."""
-
-
-def pinned_ref(text: str) -> str:
-    """The one system ref `.sd-system-rev` pins `sd_db` to."""
-    lines = text.splitlines()
-    if len(lines) != 1 or not PIN_FORM.match(lines[0]):
-        raise GateError(f"{PIN_FILE.name} must hold one full commit or sd-db-v* tag, found {lines}")
-    return lines[0]
-
-
-def system_checkout(environ: dict[str, str]) -> pathlib.Path:
-    """Where the `sd_db` source lives, as `bin/sd_install.py` resolves it."""
-    return pathlib.Path(os.path.expanduser(environ.get("SD_SYSTEM_CHECKOUT") or "~/repos/system"))
 
 
 def require_opencode() -> str:
@@ -66,12 +48,9 @@ def require_opencode() -> str:
     return found
 
 
-def require_commit(checkout: pathlib.Path, ref: str) -> None:
-    probe = subprocess.run(["git", "-C", str(checkout), "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
-                           capture_output=True, text=True, check=False)
-    if probe.returncode != 0:
-        raise GateError(f"{checkout} has no {ref}; run 'git -C {checkout} fetch --tags origin' "
-                        "(or set SD_SYSTEM_CHECKOUT) and retry")
+def head() -> str:
+    probe = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True, check=False)
+    return probe.stdout.strip() if probe.returncode == 0 else "an unknown commit"
 
 
 def clear_venv() -> None:
@@ -94,24 +73,20 @@ def main(argv: list[str]) -> int:
     python = argv[1] if len(argv) > 1 else sys.executable
     try:
         opencode = require_opencode()
-        try:
-            text = PIN_FILE.read_text(encoding="utf-8")
-        except OSError as error:
-            raise GateError(f"cannot read the sd_db pin {PIN_FILE}: {error}") from error
-        ref = pinned_ref(text)
-        checkout = system_checkout(dict(os.environ))
-        require_commit(checkout, ref)
+        if not (LIBRARY / "pyproject.toml").is_file():
+            raise GateError(f"no sd_db library at {LIBRARY}")
+        ref = head()
         clear_venv()
         run([python, "-m", "venv", str(VENV)])
         interpreter = str(VENV / "bin" / "python")
         requirements = [part for name in REQUIREMENTS for part in ("-r", name)]
         run([interpreter, "-m", "pip", "install", "--quiet", "--require-hashes", *requirements])
-        run([interpreter, "-m", "pip", "install", "--quiet", f"git+file://{checkout}@{ref}#subdirectory=local-sd-db"])
-        (VENV / MARKER).write_text(f"sd_db {ref}\n", encoding="utf-8")
+        run([interpreter, "-m", "pip", "install", "--quiet", str(LIBRARY)])
+        (VENV / MARKER).write_text(f"sd_db lib/ at {ref}\n", encoding="utf-8")
     except GateError as error:
         print(f"error: SD_LOCAL_GATE=1: {error}", file=sys.stderr)
         return 1
-    print(f"gate environment: {VENV.name} (no borrowing), sd_db at {ref}, opencode {opencode}")
+    print(f"gate environment: {VENV.name} (no borrowing), sd_db from lib/ at {ref}, opencode {opencode}")
     return 0
 
 

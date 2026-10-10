@@ -1577,7 +1577,6 @@ UNSHIELDED = {
     "test_status_shared_tree.py": 1,
     "test_status_source.py": 4,
     "test_suite_shape.py": 5,
-    "test_system_pin.py": 2,
     "test_workflow_policy.py": 7,
     "test_writer_skills_consult_the_registry.py": 1,
 }

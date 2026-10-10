@@ -72,11 +72,11 @@ PYTHON ?= $(shell if [ -x "$(BREW_PYTHON)" ]; then printf '%s' "$(BREW_PYTHON)";
 # None of it applies to the local gate (sd:1918). `bin/sd_local_gate.py` runs
 # `sd-check` in a fresh detached worktree with `SD_LOCAL_GATE=1` exported, and
 # there a borrowed environment is exactly what must not pass: it is the
-# operator's, and its `sd_db` is whatever `make setup` last took from the
-# system checkout's HEAD rather than the pinned ref. So gate mode never
-# borrows. VENV is `.venv` in the worktree, whatever the caller exported, and
-# every lane first runs `gate-env`, which builds it at the ref `.sd-system-rev`
-# holds. The variable is not passed on to recipes: the suite runs `make` in its
+# operator's, and its `sd_db` is whatever `make setup` last installed rather
+# than the commit under test. So gate mode never borrows. VENV is `.venv` in
+# the worktree, whatever the caller exported, and every lane first runs
+# `gate-env`, which builds it with `sd_db` from the worktree's own `lib/`
+# (sd:3278). The variable is not passed on to recipes: the suite runs `make` in its
 # own fixtures, and those must see the ordinary rules.
 ifeq ($(SD_LOCAL_GATE),1)
 override VENV := .venv
@@ -465,8 +465,8 @@ fonts:
 # the position; do not move `test` back to the front.
 check: lint audit docs-lint test
 
-# Gate mode only (see SD_LOCAL_GATE above): every lane waits for the pinned
-# in-tree environment, which is built once per make. Outside the gate
+# Gate mode only (see SD_LOCAL_GATE above): every lane waits for the in-tree
+# environment, which is built once per make. Outside the gate
 # GATE_ENV is empty and this line adds nothing.
 lint precheck audit docs-lint test: $(GATE_ENV)
 
