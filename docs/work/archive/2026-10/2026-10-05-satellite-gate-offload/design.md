@@ -238,7 +238,7 @@ docs-only scope then refuses on those tools and the command's own name only.
 `cargo-nextest` is what `cargo nextest` runs, which the check names as `cargo` (sd:2921).
 Two builds of one release differ, and Homebrew upgrades each machine on its own day, so every opted-in
 check runs the pack's pinned copies of `cargo-nextest`, `node`, `npm` and `uv` first on `PATH`, and refuses
-while one is missing (sd:2936, design in `docs/work/2026-10-07-gate-pinned-tools/`). `git` and `make` run
+while one is missing (sd:2936, design in `docs/work/archive/2026-10/2026-10-07-gate-pinned-tools/`). `git` and `make` run
 the Command Line Tools copies through the gate's own links. A tool in macOS's own folders binds the Command
 Line Tools version beside its bytes, and a refusal on any tool names how each machine found it.
 `OFFLOAD_HOME_FILES` is another: `.config/uv/uv.toml` (sd:2879).
