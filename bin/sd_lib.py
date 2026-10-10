@@ -3419,10 +3419,13 @@ class GroupTimeout(Exception):
 
 
 class _Terminated(BaseException):
-    """SIGTERM, raised while `run_group` owns a group that must end first."""
+    """SIGTERM, raised while `term_ends_group` holds it for a group that must end first."""
 
 
 def _raise_terminated(number: int, frame: object) -> None:
+    import signal  # noqa: PLC0415 - only the group helpers need it
+
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a second SIGTERM must not cut the group's end short
     raise _Terminated
 
 
@@ -3451,24 +3454,16 @@ def _end_group(process: subprocess.Popen) -> None:
                 pass
 
 
-def run_group(argv: list[str], *, cwd: pathlib.Path, env: dict[str, str], timeout: float,
-              input_text: str | None = None) -> subprocess.CompletedProcess:
-    """Run `argv` as the leader of a process group, and end the whole group.
+@contextlib.contextmanager
+def term_ends_group() -> Iterator[None]:
+    """For the block, SIGTERM raises `_Terminated`, so the block ends the group it leads; then SIGTERM ends this process.
 
-    sd:1482. `subprocess.run(timeout=)` kills the one process it started. A
-    child with children of its own -- `sd-check` running `make check` -- left
-    them running with nothing to time them out. Here the group is ended when
-    the call ends: at the deadline, on an interruption, and after a normal exit.
-    The leader gets SIGTERM and a moment to end its own groups before SIGKILL.
-
-    A group of its own no longer receives what is sent to the caller's group,
-    which is how `sd-ship` ends a review. So for the length of the call SIGTERM
-    ends the group first and then the caller, as it would have without one.
-    Only the default disposition is replaced: a caller that handles or ignores
-    SIGTERM keeps that, and a thread cannot install a handler.
-
-    Raises `GroupTimeout` at the deadline, and what `Popen` raises when
-    `argv[0]` cannot start.
+    A group of its own no longer receives what is sent to the caller's group:
+    the lane runner's timeout and an operator's `kill -- -<pgid>` reached
+    `sd-ship prepare` and not its review, which held a gate slot with ppid 1
+    (sd:3203). The block's handler for `_Terminated`, or a `finally`, ends the
+    group. Only the default disposition is replaced: a caller that handles or
+    ignores SIGTERM keeps that, and a thread cannot install a handler.
     """
     import signal  # noqa: PLC0415 - only the group helpers need it
     import threading  # noqa: PLC0415
@@ -3478,6 +3473,31 @@ def run_group(argv: list[str], *, cwd: pathlib.Path, env: dict[str, str], timeou
     if owns_term:
         signal.signal(signal.SIGTERM, _raise_terminated)
     try:
+        yield
+    except _Terminated:
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        os.kill(os.getpid(), signal.SIGTERM)
+        raise
+    finally:
+        if owns_term:
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+
+
+def run_group(argv: list[str], *, cwd: pathlib.Path, env: dict[str, str], timeout: float,
+              input_text: str | None = None) -> subprocess.CompletedProcess:
+    """Run `argv` as the leader of a process group, and end the whole group.
+
+    sd:1482. `subprocess.run(timeout=)` kills the one process it started. A
+    child with children of its own -- `sd-check` running `make check` -- left
+    them running with nothing to time them out. Here the group is ended when
+    the call ends: at the deadline, on an interruption, and after a normal exit.
+    The leader gets SIGTERM and a moment to end its own groups before SIGKILL.
+    SIGTERM to this process ends the group first, then this process (`term_ends_group`).
+
+    Raises `GroupTimeout` at the deadline, and what `Popen` raises when
+    `argv[0]` cannot start.
+    """
+    with term_ends_group():
         process = subprocess.Popen(
             list(argv), cwd=str(cwd), env=dict(env), text=True, start_new_session=True,
             stdin=subprocess.DEVNULL if input_text is None else subprocess.PIPE,
@@ -3488,13 +3508,6 @@ def run_group(argv: list[str], *, cwd: pathlib.Path, env: dict[str, str], timeou
             raise GroupTimeout(f"{argv[0]}: timed out after {timeout}s") from None
         finally:
             _end_group(process)
-    except _Terminated:
-        signal.signal(signal.SIGTERM, signal.SIG_DFL)
-        os.kill(os.getpid(), signal.SIGTERM)
-        raise
-    finally:
-        if owns_term:
-            signal.signal(signal.SIGTERM, signal.SIG_DFL)
     return subprocess.CompletedProcess(list(argv), process.returncode, output or "", errors or "")
 
 
