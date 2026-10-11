@@ -587,7 +587,7 @@ The rules for them:
   minutes a run claims no next entry and finishes the one it started, so the
   job's 120-minute limit never stops a merge; the next run goes on (sd:3287). The lane
   host gates and merges on its own machine; an entry's commits reach it
-  through `origin`.
+  through `origin`. [docs/sd-db.md § Lane host](docs/sd-db.md#lane-host) covers the move.
 - **Large uncommitted data goes under the bulk root (sd:1792).** When
   `sd.bulk_storage_root` names a folder, put run outputs, logs, captures,
   agent scratch evidence and large downloaded fixtures under

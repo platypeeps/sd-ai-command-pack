@@ -45,8 +45,8 @@ Usage: sd-db <verb> [arguments]
               Serve the database to sd_db.remote connections (sd_db.serve).
   help        This text.
 
-Each verb is described in lib/sd_db's module help and in system's
-local-sd-db/README.md, which this replaces.
+Each verb is described in lib/sd_db's module help. docs/sd-db.md covers
+serve, hub.json, the refusals, the lane host and judgments.
 """
 
 

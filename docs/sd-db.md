@@ -1,0 +1,312 @@
+# The workflow database: hub, lane host and judgments
+
+`bin/sd-db` runs the workflow database's verbs from this checkout's `lib/`.
+This page covers four of them: the hub and its satellites, the refusals, the lane host, and `judgments`.
+The module docstrings under `lib/sd_db/` hold the detail.
+
+## One hub, many satellites: `serve` and `hub.json`
+
+The hub is the one machine that holds `~/.local/share/sd/sd.db`.
+A satellite holds no database.
+It sends every open of the default database to the hub, one TCP session per connection.
+
+### `serve` on the hub
+
+    bin/sd-db serve              # the tailnet listener, port 8769
+    bin/sd-db serve --loopback   # 127.0.0.1 behind a token: the suite over the wire
+
+- `serve` opens the database on the hub's own disk, never through `hub.json`.
+- It never creates a database. A missing file exits 1 and names the path it looked for.
+- One server per file: it takes `<database>.serve.lock` beside the file.
+  A second server exits non-zero and names the lock.
+- It loads its build at start. After the pack's `lib/` changes, restart it.
+  Until then it refuses each session with `HubRestartNeeded`.
+- The first frame carries the client's protocol, package version, schema and build digest.
+  The hub refuses any difference with `BuildMismatch`, which names the side to upgrade, and opens nothing.
+- A launchd job on the hub runs the tailnet listener; the system repository's `local-machine-setup` installs it.
+
+| | `--loopback` | Tailnet (no flag) |
+| --- | --- | --- |
+| Binds | `127.0.0.1` | this node's Tailscale IPv4 address |
+| Admits | a session that sends the token from `<database>.serve.token` (mode 0600) | an untagged node of this node's owner |
+| Token | fresh at each start, removed at exit | none |
+| Opens | the file the session names, or the served one | the served database only |
+| Used by | `python -m sd_db.testing.wire HOST:PORT TOKEN_FILE` | satellites |
+
+Loopback is not a user boundary: every local account reaches `127.0.0.1`, so the token checks the account.
+
+### Peer identity on the tailnet
+
+The listener takes the peer from the TCP socket, never from a frame.
+`sd_db.tailnet` asks `tailscale whois --json --proto=tcp` for the node and its owner.
+The dashboard's direct listener reads the same rules.
+Before anything opens, the listener refuses:
+
+- a tagged node, an expired node, or a node that does not own the address;
+- a login other than this node's owner;
+- this node's own Tailscale addresses;
+- a session that names a database path.
+
+Each refusal goes to the log before any SQL runs.
+`serve` does not start on a tagged node or while Tailscale is not running.
+
+`whois` names a node's owner, not the local account that dialed.
+So every process on an admitted satellite is trusted, service accounts included.
+The refusal of the hub's own addresses keeps a second account on the hub out.
+
+### `hub.json` on a satellite
+
+`~/.config/sd/hub.json` makes a machine a satellite:
+
+    {"hub": "hub.example.test", "port": 8769}
+
+`python -I -m sd_db.satellite --hub HOST --apply` writes it; the system repository's machine setup runs that stage.
+
+- No file: `connect` opens the local database.
+- The file and no answer from the hub: `HubUnreachable`, which names the hub. Nothing is created.
+- The file beside a local `sd.db`: `HubConflict`. A machine is a hub or a satellite, not both.
+- A file that names no usable hub: `HubConfigError`, never a fall back to a local file.
+- An explicit path equal to the default is the default.
+  `sd-review --database ~/.local/share/sd/sd.db` opens the hub, though no file exists.
+- An explicit path other than the default opens locally, such as a backup target.
+- `init` and `migrate` refuse with `HubOnly`.
+- `token_file` is for a loopback hub only; a satellite's file names none.
+
+### A satellite on another build
+
+The hub refuses a satellite whose `sd_db` build differs, with `BuildMismatch`.
+Nothing installs a build: the pack's `lib/` is the one copy (sd:3280).
+The satellite stage reports the build as `DIFFERS`, with both sides' values.
+It names the `repo-sync.sh follow` verb that moves the pack to the hub's commit.
+
+### A lost `COMMIT`: `request_outcome`
+
+A write transaction over the wire carries a request id R.
+R is a ULID the client makes at `BEGIN IMMEDIATE`.
+The session owns R before any statement runs, and the hub refuses an R it has seen.
+At `COMMIT` the hub inserts the `request_outcome` row on the same connection, then commits.
+The row and the writes land together or not at all.
+A transaction that wrote nothing gets no row.
+
+When the answer to `COMMIT` is lost, the client asks the hub `outcome(R)`:
+
+| Answer | Meaning | The client |
+| --- | --- | --- |
+| `recorded` | the transaction committed | returns, and runs nothing again |
+| `in_flight` | a session still owns R | asks again, with a backoff |
+| `absent` | the transaction did not commit | raises `TransactionLost(R)`; run the verb again, under a new id |
+
+When the outcome is still unknown after 60 seconds (`OUTCOME_BOUND`), the client raises `UnknownOutcome(R)`.
+Do not run the verb again until the hub answers for R.
+
+- A plain `BEGIN` opens a read transaction under `query_only`: no R and no row.
+- A session silent for 4 seconds inside an open transaction is closed, which rolls it back.
+  That is below the 5-second `BUSY_TIMEOUT`, so a hub writer behind an abandoned satellite gets the lock.
+- No `request_outcome` row is ever deleted.
+- A local connection ignores R.
+
+## Refusals
+
+### What a session may not run
+
+SQLite's authorizer on each session's connection refuses these statements:
+
+- `ATTACH`, and every `VACUUM`, which SQLite authorizes as an `ATTACH`;
+- `load_extension`;
+- a `PRAGMA` not in `PRAGMAS` of `sd_db/serve.py`, and one that sets a value not in `PRAGMAS_WITH_ARGUMENT`;
+- `BEGIN`, `COMMIT` and `ROLLBACK` that the hub does not route, whatever the text;
+- a `query_only` setting inside a transaction the hub holds.
+
+The client gets `StatementRefused`, which is also a `sqlite3.DatabaseError`.
+The refused statement does not run, and the session continues.
+
+### Hub-only verbs
+
+A file lock or a directory beside the database exists on the hub only.
+So off the hub, each verb that needs one raises `HubOnly` before it locks or writes.
+The message names the verb and the hub.
+`sd_db.database.refuse_hub_only` is the one guard; its callers are the list:
+
+- the control gate of service controls and restore;
+- `backup`, `restore`, `init` and `migrate`;
+- runner controls and the runner's executions directory;
+- `repo remove` and `item remove`;
+- the retention and executions prunes;
+- the publication journal and the `sd writing` cutover;
+- shadow sync;
+- `repo lane-host`, which holds the hub's ship lock while it moves a lane (sd:3075).
+
+`ledger.reserve` raises `LedgerRefused` with scope `hub`: provider calls are charged on the hub.
+`ledger.release_orphans` sweeps nothing off the hub, because it asks the local kernel about owner pids.
+The `sd-ship` repository lock follows the lane host instead; see the next section.
+
+## Lane host
+
+`repo.lane_host` names the machine that runs a repository's merge lane (sd:3075, sd:3003).
+The value is that machine's `hostname -s`, lower-cased.
+NULL, shown as `hub`, means the hub; every row starts there.
+
+    bin/sd-db repo lane-host PATH build-2   # move the lane; prints before and after
+    bin/sd-db repo lane-host PATH hub       # NULL again; refused while another machine hosts it
+
+The dashboard does the same: Management, the repository's page, `lane_host`, Move lane.
+Both refuse an unregistered path and a name outside `[a-z0-9-]+`.
+A move sets every clone row of the remote, so clones never disagree.
+The queue lives in the hub database, so pending entries follow a move and nothing is copied.
+The dashboard Queue page lists each managed lane with its host; Release there ends a stuck claim.
+
+A move holds the ship lock of the machine that hosts the lane, from before its read to after its commit.
+Every ship takes that lock, so a held lock proves no ship runs.
+A busy lock refuses the move and names its holder.
+A ship that waited through the move reads the new host once it gets the lock, and refuses.
+A move runs only on the hub, and only while the hub hosts the lane.
+A lane on another machine refuses with "run the move on <host> (sd:3003 part 2)".
+
+`sd_db.ship.hosts_lane` answers whether this machine hosts a repository.
+`repository_lock` asks it before the flock and again once it holds it, so a move during a wait refuses.
+On any other machine it raises `LaneElsewhere` (`lane_elsewhere`) and locks nothing.
+A read fault, a database that cannot be opened, or clones that disagree raise `LaneUnknown` (`lane_unknown`).
+Uncertain ownership never grants the hub.
+A missing row reads as the hub.
+The hub's lock file sits beside the database; a satellite host's sits under `$XDG_STATE_HOME/sd/ship-locks/`.
+
+The machine that hosts a repository gates and merges it, and no request crosses a machine.
+Schedule `sd-ship lane run --hosted` on every machine: it runs each lane the machine hosts.
+[WORKFLOW.md § Parallel work](../WORKFLOW.md#parallel-work) covers the lane from the ship side.
+
+## `judgments`: what the judgment models cost, by stage
+
+`bin/sd-db judgments` compares the stages that route a decision through a judgment model.
+The system repository's `local-jev` writes a `judgment` row per call.
+The mechanism each caller used before writes one too, under the same stage key and in the same table.
+A fallback that cannot be counted against a judgment answers nothing.
+
+    bin/sd-db judgments                 # every stage, both arms
+    bin/sd-db judgments --since 2026-09 # a month; bounds are compared as text
+    bin/sd-db judgments --json          # the same read, for a screen
+
+### What a row holds
+
+The table holds identifiers and counts, and nothing that was submitted.
+No prompt, state, path, subject or body reaches it.
+The two columns that could carry content are shaped, not only capped: a length cap lets anything short through.
+`answer` is a number: a probability, a score, or a position into the caller's own criteria.
+`ordering` is positions into the caller's own input.
+`sd_db.judgment` refuses a row rather than truncate either.
+
+The names are shaped too.
+`caller`, `stage`, `primitive`, `question_id` and `pair` are identifiers: letters, digits and `.`, `_`, `:` or `-`.
+They are caller-controlled, and a cap alone would accept a file path or a short subject line.
+`provider` and `model` are exempt on purpose: they carry vendor names such as `anthropic/claude-opus-5`.
+
+`location` is where the call came from; `caller` is who asked.
+It is the git toplevel of the caller's working directory, else that directory.
+`record` stores a path under `$HOME` as `~/` plus the relative path, and any other path absolute.
+A bad `location` does not refuse the row.
+A value over 255 characters, or one with a control character, is stored as NULL and the row is kept.
+
+More columns record the conditions of a call.
+A value that fails its shape is stored as NULL and the row is kept.
+
+| Column | What it holds |
+| --- | --- |
+| `threshold` | the cut-off the caller applied (`--gate`, `--unsure-below`), from 0 to 1 |
+| `run_id` | an identifier that groups the calls of one run, such as one review |
+| `prompt_hash` | 16 lowercase hex digits hashing the question definition, never the state |
+| `load_avg` | the one-minute load average when the call was made |
+| `error_class` | an exception class name such as `ConnectionRefusedError` (sd:2973) |
+| `error_detail` | an errno name or HTTP status such as `ECONNREFUSED` or `503`, never message text |
+
+### Batches and gate events
+
+A batched call asks several questions at once (sd:2966).
+Its row is the call: tokens, latency, cost, `questions=N`, and no answer.
+Given `answers`, one entry per question in order, `record` also writes one child row per question.
+A child's `parent` names the batch row; its `question_id` is `<id>:<position>`.
+A child carries the question's type as `primitive`, and its own answer and confidence.
+It carries no tokens, latency or cost, so nothing is counted twice.
+Every report counts calls from batch rows only; agreement and labels read the children.
+A child whose field fails its shape is kept as `invalid` with that field NULL.
+
+A gate event is not a decision.
+A caller that declines at the gate, then records its own mechanism, writes two rows for one decision.
+So the comparison leaves the gate row out of the calls and the declines, and counts it on its own line.
+
+### Cost
+
+A judgment row is not a `cost` row.
+`cost` is money against a `bill`, and its `provider` is a foreign key into the registry; a judgment model is on neither.
+A row's `usd` is the cost its caller reports.
+Without one, `record` prices the tokens at the `price` (`in` and `out`, dollars per million) in `providers.yaml`.
+An entry that names a `model` prices that model only.
+With no usable price, `usd` stays NULL and the token counts are the record.
+The report names those rows per arm as `unpriced`, with their providers.
+`local-jev` rows name provider `typesafe`; its price is the operator's to enter.
+An entry with `roles: []` is never chosen for a role.
+
+A local model is priced by machine time instead (sd:2967).
+An entry with `price: { hour: N }` prices a `jev`, `kev` or `haiku` row at N dollars per hour.
+The time is `server_ms`, or `duration_ms` when the server reported none.
+The rate is the machine's, so it applies whatever the entry's `model`.
+A baseline row is not priced by time. With no `hour` price, a `local` row stays NULL, never 0.0.
+A rate prices the rows written after it is entered; old rows are never repriced.
+
+The operator measures the rate.
+Take the machine's hourly cost, or measure its power under load and multiply by the electricity price:
+
+    sudo powermetrics --samplers cpu_power,gpu_power -n 1   # watts, while the model answers
+    # hour = watts / 1000 * dollars per kWh; 40 W at $0.15/kWh is 0.006
+
+### Labels: whether a judgment was right
+
+Reported confidence is not accuracy.
+A row can carry a label: `override` is the answer an authoritative later source says it should have been.
+It is a number in the shape of `answer`.
+`override_source` names the rule that produced it, and `override_at` says when.
+A row is right when the label equals the answer, compared exactly as decimals.
+A row with no answer, such as a failed call or a batch row, cannot be labelled; a batch's child rows can.
+The report counts labelled and right rows per arm, and per arm by reported confidence in tenths.
+It prints each rule's known blind spot beside the stage it labelled.
+
+`judgments label` is the one write path; a labeller uses these verbs and never opens the database itself.
+The same label twice changes nothing.
+A different label is refused unless `--replace` says to overwrite it.
+A `kev` or `haiku` comparison row is refused: a pair's label lives on its Jev row.
+A choice is labelled with a whole position from 1.
+
+    bin/sd-db judgments unlabelled --stage JEV_SD_REVIEW --prefix sd-review-tier: --json
+    bin/sd-db judgments label --row 42 --override 3 --source outcome.example
+
+No labeller writes this table yet.
+A label needs independent evidence of the right answer, never one derived from the prediction it scores (sd:2107).
+
+### The comparison arms
+
+`jev` can ask a local Kev and a Haiku model the same request beside each live call, once each arm is on (sd:2366).
+Each answer is its own row, arm `kev` or `haiku`, with the Jev row's pair id.
+It carries the latency the model reported in `server_ms`, and the distribution in `probabilities`.
+The distribution is numbers in option order, never the keys.
+The report above reads only `jev` and `baseline`; this one reads the three model arms:
+
+    bin/sd-db judgments compare [--stage NAME] [--since STAMP] [--until STAMP] [--json]
+
+It reports per stage, and per arm and provider:
+
+- calls, and declines by cause;
+- p50 and p95 latency, by nearest rank, so every printed number is one a call took;
+- tokens and cost;
+- agreement with the Jev row of the same pair;
+- accuracy and Brier score on pairs whose Jev row carries a label.
+
+A noul agrees when both sit on the same side of 0.5; the mean `|Δp|` is printed beside it.
+A score agrees when the rounded scores are equal; its distribution feeds the Brier score only.
+A batch is compared question by question: each child row against the Jev child with the same pair and `question_id`.
+Its calls, latency, tokens and cost come from the batch row alone.
+
+Each arm, Jev included, is also read against the old mechanism (sd:2761).
+That is the baseline row a shadow call writes under the same pair id.
+The line gives agreements over comparable pairs, the percent, and the five most common disagreements.
+Each disagreement reads `old→arm`: 1 or 0 for a noul, a position for a choice, a rounded level for a score.
+A pair whose old answer is not a number is counted and not compared.
+Examples are a `--fallback` marker, or a noul asked under a `--gate` other than 0.5.
+A stage with no such pair says `no paired samples with the old mechanism`.
