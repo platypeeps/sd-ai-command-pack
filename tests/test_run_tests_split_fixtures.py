@@ -294,6 +294,17 @@ class SplitModuleFixtures(unittest.TestCase):
                          {f"tests.{name}.part{part}of2" for name in SPLIT_NAMES for part in (1, 2)})
         self.assertEqual([status for _, _, status in summaries], ["0"] * 6)
 
+    def test_the_sd_db_suite_runs_as_shards_of_its_own(self) -> None:
+        """sd:3323: `tests/sd_db/`, the library's suite, runs in `make test` beside `tests/test_*.py`."""
+        library = self.root / "tests" / "sd_db"
+        library.mkdir()
+        (library / "__init__.py").write_text("")
+        (library / "test_store.py").write_text(PLAIN)
+        result = self.run_harness()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("test runner: workers=2 shards=7", result.stdout)
+        self.assertRegex(result.stdout, r"(?m)^shard tests\.sd_db\.test_store: \d+s exit=0$")
+
     def commit_fixture(self) -> str:
         """Make the fixture root a repository with one tracked `notes.txt`."""
         git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]

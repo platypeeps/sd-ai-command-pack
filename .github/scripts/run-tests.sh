@@ -174,10 +174,13 @@ if command -v xcrun >/dev/null 2>&1 &&
 fi
 
 # Largest test file first (size approximates runtime) to shorten the tail.
+# `tests/sd_db/` is the library's own suite, moved from system with `lib/`
+# (sd:3323); its modules run as shards like the rest.
 modules=()
 while IFS= read -r path; do
-  modules+=("tests.$(basename "$path" .py)")
-done < <(ls -S tests/test_*.py 2>/dev/null)
+  path="${path%.py}"
+  modules+=("${path//\//.}")
+done < <(ls -S tests/test_*.py tests/sd_db/test_*.py 2>/dev/null)
 
 if [ "${#modules[@]}" -eq 0 ]; then
   printf '%s\n' "error: no test modules found under tests/" >&2
