@@ -1730,12 +1730,17 @@ class AnyHost(SharedQueue):
         self.assertNotIn("stopped", answer)
 
     def test_a_leftover_lane_folder_git_no_longer_knows_is_replaced(self) -> None:
-        """Failure table, worktree: the lane folder exists but is no registered worktree; the runner remakes it."""
+        """Failure table, worktree: the lane folder exists but is no registered worktree; the runner remakes it.
+
+        Gate round 1: the stale folder is renamed aside, never deleted, so no new deletion path exists.
+        """
         self.enqueued_elsewhere(1, "topic", "work")
         self.made().mkdir(parents=True)
         (self.made() / "stale.txt").write_text("left by a killed run\n", encoding="utf-8")
         sd_lane.run_lane(self.repo, self.environ, self.ship)
-        self.assertEqual(self.entries()[0]["status"], "merged")
+        [aside] = self.made().parent.glob(f"{self.made().name}.stale-*")
+        self.assertEqual((self.entries()[0]["status"], (aside / "stale.txt").read_text(encoding="utf-8")),
+                         ("merged", "left by a killed run\n"))
 
     def test_a_claim_whose_write_fails_reports_no_reclaim(self) -> None:
         """Failure table, claim: a cross-host reclaim inside a claim the hub never took is not reported."""

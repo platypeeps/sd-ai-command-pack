@@ -162,7 +162,6 @@ import os
 import pathlib
 import re
 import secrets
-import shutil
 import sqlite3
 import subprocess
 import sys
@@ -1657,8 +1656,8 @@ def lane_tree(main: pathlib.Path, lane: pathlib.Path, branch: str, expected: str
         if path.resolve() == lane.resolve():
             drop_lane_worktree(main, path, name or None)
     listed = [(path, name) for path, name in listed if path.resolve() != lane.resolve()]
-    if lane.exists():  # the lane's own folder, which git no longer lists: a killed run's
-        shutil.rmtree(lane)
+    if lane.exists():  # the lane's own folder, which git no longer lists: a killed run's, kept aside, never deleted
+        lane.rename(lane.with_name(f"{lane.name}.stale-{entry_id()}"))
     ref, tip = f"refs/heads/{branch}", fetched_tip(main, branch)
     if not tip:
         return skip(HEAD_GONE, f"origin/{branch} is gone; `sd-ship lane retry` publishes {expected} again from "
