@@ -379,7 +379,8 @@ def review_runtime() -> ReviewRuntime:
                          process=lambda root, argv, **kwargs: review_process(root, argv, **kwargs),
                          current_head=lambda root: current_head(root), clock=moment,
                          timing_plan=timing_plan, bin_dir=BIN, setup_seconds=REVIEW_SETUP_SECONDS,
-                         diagnostic_bytes=REVIEW_DIAGNOSTIC_BYTES, manifest=lambda root: binding_manifest(root))
+                         diagnostic_bytes=REVIEW_DIAGNOSTIC_BYTES, manifest=lambda root: binding_manifest(root),
+                         held=lambda root: sd_lane.lane_dir(root, dict(os.environ)) / "review")
 
 
 def commit_paths(root: pathlib.Path, args) -> None:
