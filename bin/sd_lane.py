@@ -1718,7 +1718,7 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
             if clock() >= deadline:
                 answer["stopped"] = "the run spent its budget; the next run takes the pending entries"
                 break
-            token, reclaimed = secrets.token_hex(16), []
+            token, reclaimed = secrets.token_hex(16), list[dict[str, Any]]()
             try:
                 entry = claim_entry(queue, token, reclaimed)
             except LaneError as error:  # moved, unknown, busy, or a hub that stayed down
