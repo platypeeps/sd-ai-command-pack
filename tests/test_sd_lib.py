@@ -1117,11 +1117,16 @@ class SetupStaysLocalTests(unittest.TestCase):
         recipe = self.make("setup", f"VENV={self.tmp}/chosen")
         self.assertIn(f'-m venv "{self.tmp}/chosen"', recipe)
 
-    def test_the_library_goes_into_the_environment_setup_builds(self) -> None:
-        """`--venv` names the environment setup built; `LIVE_VENV` went with the A/B slots (sd:3009)."""
+    def test_setup_takes_sd_db_out_of_the_environment_it_builds(self) -> None:
+        """sd:3280. No copy goes in; one left by an older setup or self-install comes out.
+
+        A caller that still reads the venv copy then fails with `ImportError`
+        instead of running stale code. `LIVE_VENV` went with the A/B slots (sd:3009).
+        """
 
         recipe = self.make("setup", f"VENV={self.tmp}/chosen", f"LIVE_VENV={self.tmp}/live")
-        self.assertIn(f'--provision-library --venv "{self.tmp}/chosen"\n', recipe)
+        self.assertIn(f'"{self.tmp}/chosen/bin/python" -m pip uninstall --yes --quiet sd-db\n', recipe)
+        self.assertNotIn("--provision-library", recipe)
         self.assertNotIn(f"{self.tmp}/live", recipe)
 
     def test_setup_ends_by_serving_from_the_dedicated_checkout(self) -> None:
@@ -1130,6 +1135,39 @@ class SetupStaysLocalTests(unittest.TestCase):
         recipe = self.make("setup")
         self.assertTrue(recipe.rstrip().endswith('".venv/bin/python" bin/sd_install.py --serve'), recipe)
         self.assertNotIn("--serve", self.make("setup", "SERVE=no"))
+
+
+class SetupUninstallsAPlantedCopyTests(unittest.TestCase):
+    """sd:3280 failure table, step 3 older state: a venv copy from step 1 or a self-install.
+
+    Runs the uninstall line `make -n setup` prints against a real venv
+    holding a real `sd_db` built from `lib/`; afterwards `python -I` cannot
+    import it, and a second run (nothing installed) still exits 0.
+    """
+
+    ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+    def test_the_uninstall_line_removes_a_planted_copy_and_reruns_clean(self) -> None:
+        from tests.clean_env import clean_environment
+        with tempfile.TemporaryDirectory() as tmp:
+            venv = pathlib.Path(tmp) / "venv"
+            subprocess.run([sys.executable, "-m", "venv", str(venv)], check=True, capture_output=True)
+            python = venv / "bin" / "python"
+            subprocess.run([str(python), "-m", "pip", "install", "--quiet", "--no-index", str(self.ROOT / "lib")],
+                           check=True, capture_output=True, text=True, env=clean_environment())
+            probe = [str(python), "-I", "-c", "import sd_db"]
+            self.assertEqual(subprocess.run(probe, capture_output=True, check=False).returncode, 0)
+            recipe = subprocess.run(["make", "-s", "-n", "setup", f"VENV={venv}", "SERVE=no"],
+                                    cwd=self.ROOT, capture_output=True, text=True, check=True,
+                                    env=child_make_env()).stdout
+            line = next(line for line in recipe.splitlines() if "pip uninstall" in line)
+            for _ in range(2):
+                done = subprocess.run(["sh", "-c", line], capture_output=True, text=True, check=False,
+                                      env=clean_environment())
+                self.assertEqual(done.returncode, 0, done.stderr)
+            gone = subprocess.run(probe, capture_output=True, text=True, check=False)
+        self.assertNotEqual(gone.returncode, 0)
+        self.assertIn("No module named 'sd_db'", gone.stderr)
 
 
 class BorrowedEnvironmentTests(unittest.TestCase):
@@ -1449,8 +1487,8 @@ case " $* " in
     chmod +x "$last/bin/python"
     exit 0
     ;;
+  *" -m pip uninstall "*) exit "${STUB_UNINSTALL_EXIT:-0}" ;;
   *" -m pip "*) exit "${STUB_PIP_EXIT:-0}" ;;
-  *"--provision-library"*) exit "${STUB_PROVISION_EXIT:-0}" ;;
 esac
 exit 0
 """
@@ -1530,7 +1568,7 @@ exit 0
         self.assertEqual(self.setup().returncode, 0)
         self.assertTrue(self.record.is_dir(), "the first run should record")
         self.move_a_pin()
-        done = self.setup(STUB_PROVISION_EXIT="1")
+        done = self.setup(STUB_UNINSTALL_EXIT="1")
         self.assertNotEqual(done.returncode, 0, done.stdout)
         self.assertFalse(self.record.exists(),
                          "a record survived a provision that failed")
@@ -1576,7 +1614,7 @@ exit 0
         marker over the dead one and removes it when the run completes.
         """
 
-        failed = self.setup(STUB_PROVISION_EXIT="1")
+        failed = self.setup(STUB_UNINSTALL_EXIT="1")
         self.assertNotEqual(failed.returncode, 0, failed.stdout)
         marker = self.linked / ".venv" / "sd-provisioning"
         self.assertTrue(marker.is_file(), "the marker should outlive the run")

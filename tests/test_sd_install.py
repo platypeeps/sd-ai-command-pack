@@ -2641,16 +2641,14 @@ class ServeTests(InstallerHarness):
         self.git(self.tree, "checkout", "-q", "--detach", "origin/main")
         self.assertEqual(sd_install.verify_source(ctx, receipt)["code"], "source_commit_changed")
 
-    def test_provision_library_installs_into_the_environment_venv_names(self):
-        """`make setup VENV=x` builds x, and `--venv` takes `sd_db` there too, not into `.venv`."""
-        out = io.StringIO()
-        with unittest.mock.patch.object(sd_install, "provision_guarded", return_value=(True, "ok")) as provision:
-            self.assertEqual(sd_install.main(["--provision-library", "--venv", str(self.home / "slot")], out=out), 0)
-        self.assertEqual(provision.call_args.args[0].venv, self.home / "slot")
-        self.assertEqual(sd_install.main(["--user", "--venv", "x", "--home", str(self.home)], out=out), 2)
-        self.assertIn("error: --venv requires --provision-library", out.getvalue())
-        self.assertEqual(sd_install.main(["--provision-library", "--venv"], out=out), 2)
-        self.assertIn("error: --venv needs a directory", out.getvalue())
+    def test_the_provisioning_flags_are_gone(self):
+        """sd:3280. `make setup` installs no `sd_db`, so nothing provisions one and no flag offers to."""
+        for argv, flag in ((["--provision-library"], "--provision-library"), (["--user", "--venv", "x"], "--venv")):
+            with self.subTest(flag=flag):
+                out = io.StringIO()
+                self.assertEqual(sd_install.main([*argv, "--home", str(self.home)], out=out), 2)
+                self.assertIn(f"error: unknown argument {flag}", out.getvalue())
+        self.assertNotIn("--provision-library", sd_install.USAGE)
 
     def test_serve_is_reachable_from_the_command_line_and_the_slot_flags_are_gone(self):
         out = io.StringIO()

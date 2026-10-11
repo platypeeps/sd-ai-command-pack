@@ -21,12 +21,9 @@ Two verbs clear it:
   done. It names what was blocked and what was frozen, resolves the row, and
   dispatch resumes.
 
-`sd_db` is imported inside the handlers, not at module import. The library
-reaches this virtualenv through the pack's installer -- item A's criterion 13,
-whose `sd_db` step landed with PR 5 as `sd-install --provision-library`, which
-`make setup` runs. Before that has run, and on any machine whose `system`
-checkout has moved, `sd` must keep working for every other verb and refuse
-this one with the reason.
+`sd_db` is imported inside the handlers, not at module import. The library is
+the pack checkout's own `lib/` (sd:3280). Where it will not import, `sd` must
+keep working for every other verb and refuse this one with the reason.
 """
 
 from __future__ import annotations

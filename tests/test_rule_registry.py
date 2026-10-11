@@ -1862,13 +1862,13 @@ def enforcement_error(mutation: Mutation, outcome: Outcome) -> str | None:
 #: equality: a row added with no mutation fails, and a mutation outliving the row
 #: that needed it fails too.
 #: Where the four code-health mutations write their violation: the first
-#: `def` line of `bin/sd_library_guard.py`, the smallest module in the corpus
+#: `def` line of `bin/sd_review_request.py`, one of the smallest modules in the corpus
 #: `tests/test_code_health.py` governs, replaced by the violation and then the
 #: same line again. The anchor stays, so the file still parses and
-#: `schema_version` is still measured under its own name; the violation is a
+#: `review_argv` is still measured under its own name; the violation is a
 #: new function ahead of it, which no baseline exempts. A lowered ceiling
 #: would prove only that the test reads its constant.
-CODE_HEALTH_ANCHOR = "def schema_version(source: str) -> int | None:"
+CODE_HEALTH_ANCHOR = "def review_argv(bin_dir: pathlib.Path, database: pathlib.Path, args: Any, base: str | None,"
 
 
 def ahead_of_the_anchor(*definitions: str) -> str:
@@ -1945,10 +1945,10 @@ def a_line_inside(path: str, symbol: str) -> int:
     raise LookupError(f"{path} declares no function {symbol}")
 
 
-#: A `path:line` into the body of `schema_version`, the anchor the code-health
+#: A `path:line` into the body of `review_argv`, the anchor the code-health
 #: mutations already lean on, in the file `tests/test_code_health.py` governs.
-INSIDE_A_SYMBOL = (f"bin/sd_library_guard.py:"
-                   f"{a_line_inside('bin/sd_library_guard.py', 'schema_version')}")
+INSIDE_A_SYMBOL = (f"bin/sd_review_request.py:"
+                   f"{a_line_inside('bin/sd_review_request.py', 'review_argv')}")
 
 MUTATIONS: dict[str, Mutation] = {
     "bin/sd_setup_github.py::setup_github": Mutation(
@@ -2019,7 +2019,7 @@ MUTATIONS: dict[str, Mutation] = {
     ),
     "tests/test_code_health.py::test_no_function_is_branchier_than_the_ceiling":
         Mutation(
-            path="bin/sd_library_guard.py",
+            path="bin/sd_review_request.py",
             old=CODE_HEALTH_ANCHOR,
             new=ahead_of_the_anchor(TOO_BRANCHY),
             test="tests.test_code_health.CodeHealth"
@@ -2027,7 +2027,7 @@ MUTATIONS: dict[str, Mutation] = {
         ),
     "tests/test_code_health.py::test_no_function_is_longer_than_the_ceiling":
         Mutation(
-            path="bin/sd_library_guard.py",
+            path="bin/sd_review_request.py",
             old=CODE_HEALTH_ANCHOR,
             new=ahead_of_the_anchor(TOO_LONG),
             test="tests.test_code_health.CodeHealth"
@@ -2035,7 +2035,7 @@ MUTATIONS: dict[str, Mutation] = {
         ),
     "tests/test_code_health.py::test_no_function_nests_deeper_than_the_ceiling":
         Mutation(
-            path="bin/sd_library_guard.py",
+            path="bin/sd_review_request.py",
             old=CODE_HEALTH_ANCHOR,
             new=ahead_of_the_anchor(TOO_DEEP),
             test="tests.test_code_health.CodeHealth"
@@ -2043,7 +2043,7 @@ MUTATIONS: dict[str, Mutation] = {
         ),
     "tests/test_code_health.py::test_no_two_functions_are_the_same_function":
         Mutation(
-            path="bin/sd_library_guard.py",
+            path="bin/sd_review_request.py",
             old=CODE_HEALTH_ANCHOR,
             new=ahead_of_the_anchor(*TWO_OF_A_KIND),
             test="tests.test_code_health.CodeHealth"

@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Provision the local gate's own virtualenv with the worktree's `sd_db` (sd:1918, sd:3278).
+"""Provision the local gate's own virtualenv (sd:1918, sd:3280).
 
 `sd-ship merge` runs `sd-check` for a `repo.ci = local` repository in a fresh
 detached worktree and exports `SD_LOCAL_GATE=1` (`bin/sd_local_gate.py`). In
 that mode the Makefile never borrows the main checkout's `.venv`: a borrowed
-environment is the operator's state, and its `sd_db` is whatever `make setup`
-last installed, not the commit under test. So `make check` calls this first,
-and it builds `.venv` in the worktree:
+environment is the operator's state, and its requirements are whatever
+`make setup` last installed, not the commit under test's. So `make check`
+calls this first, and it builds `.venv` in the worktree:
 
 * `requirements-dev.txt` and `requirements-security.txt` under
   `--require-hashes`;
-* `sd_db` from the worktree's own `lib/`, the commit under test;
+* no `sd_db`: the suite and `bin/` read the worktree's own `lib/`, so a
+  caller that still reads an installed copy fails here first;
 * nothing for opencode, which it cannot install on this platform: the live
   confinement test needs it, a skip fails the suite anyway, and this says so
   first, by name, instead of a whole suite later.
@@ -28,7 +29,6 @@ import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-LIBRARY = ROOT / "lib"
 VENV = ROOT / ".venv"
 #: Written into the environment once it is complete; a rerun may rebuild only a tree carrying it.
 MARKER = "sd-gate-environment"
@@ -73,20 +73,17 @@ def main(argv: list[str]) -> int:
     python = argv[1] if len(argv) > 1 else sys.executable
     try:
         opencode = require_opencode()
-        if not (LIBRARY / "pyproject.toml").is_file():
-            raise GateError(f"no sd_db library at {LIBRARY}")
         ref = head()
         clear_venv()
         run([python, "-m", "venv", str(VENV)])
         interpreter = str(VENV / "bin" / "python")
         requirements = [part for name in REQUIREMENTS for part in ("-r", name)]
         run([interpreter, "-m", "pip", "install", "--quiet", "--require-hashes", *requirements])
-        run([interpreter, "-m", "pip", "install", "--quiet", str(LIBRARY)])
-        (VENV / MARKER).write_text(f"sd_db lib/ at {ref}\n", encoding="utf-8")
+        (VENV / MARKER).write_text(f"requirements at {ref}\n", encoding="utf-8")
     except GateError as error:
         print(f"error: SD_LOCAL_GATE=1: {error}", file=sys.stderr)
         return 1
-    print(f"gate environment: {VENV.name} (no borrowing), sd_db from lib/ at {ref}, opencode {opencode}")
+    print(f"gate environment: {VENV.name} (no borrowing) at {ref}; sd_db is lib/, not installed; opencode {opencode}")
     return 0
 
 

@@ -1791,10 +1791,12 @@ class IssueSectionTests(StatusFixture):
         The read-only suite runs exactly that copy, and it is how the old
         coupling to the index reader was found. With the fallback gone the
         section answers from `sd_lib` and the shared database, which travel
-        with `bin/`; the copy reports the same gap the full checkout does.
+        with `bin/`, and `lib/` beside it, the one `sd_db` (sd:3280); the copy
+        reports the same gap the full checkout does.
         """
         tools = self.base / "tools"
         shutil.copytree(BIN, tools, ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copytree(BIN.parent / "lib", self.base / "lib", ignore=shutil.ignore_patterns("__pycache__"))
         self.with_github(pulls=[])
         completed = self.run_tool(tools / "sd-status")
         self.assertEqual(completed.returncode, 0, completed.stderr)

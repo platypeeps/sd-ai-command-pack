@@ -72,11 +72,11 @@ PYTHON ?= $(shell if [ -x "$(BREW_PYTHON)" ]; then printf '%s' "$(BREW_PYTHON)";
 # None of it applies to the local gate (sd:1918). `bin/sd_local_gate.py` runs
 # `sd-check` in a fresh detached worktree with `SD_LOCAL_GATE=1` exported, and
 # there a borrowed environment is exactly what must not pass: it is the
-# operator's, and its `sd_db` is whatever `make setup` last installed rather
-# than the commit under test. So gate mode never borrows. VENV is `.venv` in
-# the worktree, whatever the caller exported, and every lane first runs
-# `gate-env`, which builds it with `sd_db` from the worktree's own `lib/`
-# (sd:3278). The variable is not passed on to recipes: the suite runs `make` in its
+# operator's, and its requirements are whatever `make setup` last installed
+# rather than the commit under test's. So gate mode never borrows. VENV is
+# `.venv` in the worktree, whatever the caller exported, and every lane first
+# runs `gate-env`, which builds it; `sd_db` comes from the worktree's own `lib/`
+# on the path, never from the environment (sd:3280). The variable is not passed on to recipes: the suite runs `make` in its
 # own fixtures, and those must see the ordinary rules.
 ifeq ($(SD_LOCAL_GATE),1)
 override VENV := .venv
@@ -134,9 +134,9 @@ SETUP_PYTHON = $(SETUP_VENV)/bin/python
 #
 # It is removed before the first mutation and published after the last, not
 # merely written last. Written last is right for a fresh environment and wrong
-# for a re-provision: the previous run's record sat there while pip and
-# `--provision-library` changed the packages under it, so a failing
-# `--provision-library` aborted `make` and left a record that still matched
+# for a re-provision: the previous run's record sat there while pip
+# changed the packages under it, so a failing step after it
+# aborted `make` and left a record that still matched
 # requirements the environment no longer held. A worktree comparing against it
 # passed the borrow check and ran the wrong versions in silence -- the exact
 # failure the record exists to prevent, reached by the record itself.
@@ -178,11 +178,15 @@ SETUP_PYTHON = $(SETUP_VENV)/bin/python
 # write alone -- measured, not assumed -- which is why the marker survives
 # the step that rebuilds the interpreter around it.
 #
+# No `sd_db` goes into the environment: `bin/` reads this checkout's `lib/`
+# (sd:3280). The uninstall takes out a copy an older `make setup` or a
+# satellite self-install left, so a caller that still reads the environment
+# fails with `ImportError` instead of running stale code.
+#
 # The last step serves the machine (sd:3009). The commands run from a plain
 # clone that nobody works in, at this checkout's HEAD (sd:3111). In the clone,
 # `--serve` renders it; in any other checkout, it clones the tree the first
-# time, fetches this HEAD into it, detaches there and runs this recipe there. `--venv` takes sd_db into the
-# environment this recipe builds, which `VENV=...` may put outside `.venv`.
+# time, fetches this HEAD into it, detaches there and runs this recipe there.
 # `SERVE=no` skips the serving step. README "A dedicated serving tree" has
 # the rest.
 setup:
@@ -199,7 +203,7 @@ setup:
 	  rm -rf "$$venv/sd-requirements" "$$venv/.sd-requirements.new"
 	"$(PYTHON)" -m venv "$(SETUP_VENV)"
 	"$(SETUP_PYTHON)" -m pip install --require-hashes -r requirements-dev.txt -r requirements-security.txt
-	"$(SETUP_PYTHON)" bin/sd_install.py --provision-library --venv "$(SETUP_VENV)"
+	"$(SETUP_PYTHON)" -m pip uninstall --yes --quiet sd-db
 	@mkdir -p "$(SETUP_VENV)/.sd-requirements.new"
 	cp requirements-dev.txt requirements-security.txt "$(SETUP_VENV)/.sd-requirements.new/"
 	@mv "$(SETUP_VENV)/.sd-requirements.new" "$(SETUP_VENV)/sd-requirements"

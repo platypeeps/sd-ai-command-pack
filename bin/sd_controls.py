@@ -97,8 +97,8 @@ def acknowledge_reports(args: argparse.Namespace, connection: Any, reporting: An
     keywords: dict[str, bool] = {}
     if args.resolve_ingest_followups:
         if "resolve_ingest_followups" not in inspect.signature(reporting.acknowledge).parameters:
-            raise WorkRefusal("the installed sd_db takes no --resolve-ingest-followups; "
-                              "run bin/sd_install.py --provision-library")
+            raise WorkRefusal("this sd_db takes no --resolve-ingest-followups; "
+                              "run bin/ and lib/ from one pack checkout")
         keywords["resolve_ingest_followups"] = True
     return reporting.acknowledge(connection, args.item, expected_revision=revision, who=getpass.getuser(),
                                  **keywords)
