@@ -98,7 +98,7 @@ class TheVerbs(CliCase):
 
     def test_status_before_init_says_what_to_run(self):
         completed = self.sd_db("status", expect=1)
-        self.assertIn("sd-db.sh init", completed.stdout)
+        self.assertIn("bin/sd-db init", completed.stdout)
 
     def test_status_names_both_versions(self):
         self.sd_db("init")
@@ -634,7 +634,7 @@ class TheRemoveVerbs(RemoveCase):
         self.assertEqual(lines[left + 1], f"sd-db:   file {self.leftover}")
         self.assertEqual(self.counts()["runner_run"], 2)
         parts = shlex.split(lines[-1])
-        self.assertEqual(parts[:4], ["sd-db.sh", "repo", "remove", self.source])
+        self.assertEqual(parts[:4], ["bin/sd-db", "repo", "remove", self.source])
         self.assertEqual(parts[-2:], ["--if-fingerprint", fingerprint])
         applied = self.sd_db(*parts[1:])
         self.assertIn("record item", applied.stdout)
@@ -644,7 +644,7 @@ class TheRemoveVerbs(RemoveCase):
         self.assertEqual(json.loads(record["fields"])["record"], "repo-remove")
         actor = json.loads(record["fields"])["report"]["actor"]
         self.assertEqual((actor["who"], actor["reason"], actor["program"]),
-                         ("alex", "the probe is finished", "sd-db.sh repo remove"))
+                         ("alex", "the probe is finished", "bin/sd-db repo remove"))
         self.assertEqual(actor["principal"], os.environ.get("USER") or actor["principal"])
         self.assertIn(f"backup: {self.snapshots()[0]}", json.loads(record["body"])["text"].split("\n"))
         for path in self.pairs[0] + self.pairs[1]:
@@ -714,7 +714,7 @@ class TheRemoveVerbs(RemoveCase):
         self.assertIsNotNone(self.fingerprint_of(completed.stdout))
         self.assertIn(f"item {other} was imported from register as O27; the next import can bring it back",
                       completed.stdout)
-        self.assertNotIn("Usage: sd-db.sh", completed.stderr)
+        self.assertNotIn("Usage: sd-db", completed.stderr)
 
     def test_the_backup_verb_passes_on_a_store_that_holds_a_record(self):
         """Step 7: `backup` exits 0 after an apply and reports no `BROKEN:` clause."""

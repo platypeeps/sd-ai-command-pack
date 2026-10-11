@@ -120,7 +120,7 @@ def _open(sd_db):
     """The database, or a refusal naming where it was looked for."""
     path = sd_db.default_path()
     if not path.exists():
-        raise CodexRefusal(f"no database at {path}; run `sd-db.sh init` first")
+        raise CodexRefusal(f"no database at {path}; run `bin/sd-db init` first")
     return sd_db.connect(path)
 
 

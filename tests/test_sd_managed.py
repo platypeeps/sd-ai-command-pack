@@ -70,7 +70,7 @@ class ADirectCall(Fixture):
         said = sd_lib.unmanaged(root)
         self.assertIsNotNone(said, "an unmanaged checkout was let through")
         self.assertIn("repo.managed = no", said)
-        self.assertIn("sd-db.sh repo managed ~/theirs yes", said)
+        self.assertIn("bin/sd-db repo managed ~/theirs yes", said)
 
     def test_a_managed_checkout_proceeds(self) -> None:
         root = self.checkout("mine")
@@ -91,7 +91,7 @@ class ADirectCall(Fixture):
             self.assertIsNone(sd_lib.unmanaged(root))
         self.assertEqual(said.getvalue().count("\n"), 1, said.getvalue())
         self.assertIn("(repo.managed); proceeding", said.getvalue())
-        self.assertIn("sd-db.sh repo managed ", said.getvalue())
+        self.assertIn("bin/sd-db repo managed ", said.getvalue())
 
 
 class TheDirectCommands(Fixture):
@@ -120,7 +120,7 @@ class TheDirectCommands(Fixture):
                                  done.stdout + done.stderr)
                 said = done.stdout + done.stderr
                 self.assertIn("repo.managed = no", said)
-                self.assertIn("sd-db.sh repo managed ~/theirs yes", said)
+                self.assertIn("bin/sd-db repo managed ~/theirs yes", said)
         refused = json.loads(self.run_command("sd-ship", root).stdout)
         self.assertEqual(refused["workflow"]["blocker"]["code"], "unmanaged_repository")
 

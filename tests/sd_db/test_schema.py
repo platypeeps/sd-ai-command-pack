@@ -562,6 +562,8 @@ class TheVersionRefusals(SchemaCase):
         message = str(raised.exception)
         self.assertIn(str(SCHEMA_VERSION + 3), message)
         self.assertIn(str(SCHEMA_VERSION), message)
+        # sd:1664, sd:3370: the pack runs `lib/` from its checkout, so the remedy is a pull.
+        self.assertIn("pull --ff-only", message)
 
     def test_a_newer_database_is_refused_for_reading_too(self):
         """A wrong answer read quietly is worse than a process that stops."""
@@ -573,7 +575,8 @@ class TheVersionRefusals(SchemaCase):
         self._set(0)
         with self.assertRaises(SchemaTooOld) as raised:
             connect(self.path)
-        self.assertIn("sd-db.sh migrate", str(raised.exception))
+        # sd:3370: the pack's entrypoint, not the retired local-sd-db.
+        self.assertIn("`bin/sd-db migrate` from the command pack", str(raised.exception))
         # sd:2974: the hub's tailnet listener runs against the database too.
         self.assertIn("sd-serve", str(raised.exception))
 
@@ -1599,7 +1602,7 @@ class TheConnection(SchemaCase):
     def test_a_missing_database_is_not_created_silently(self):
         with self.assertRaises(FileNotFoundError) as raised:
             connect(self.home / ".local/share/sd/absent.db")
-        self.assertIn("sd-db.sh init", str(raised.exception))
+        self.assertIn("`bin/sd-db init` from the command pack", str(raised.exception))
 
 
 if __name__ == "__main__":

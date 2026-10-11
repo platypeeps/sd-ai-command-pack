@@ -252,7 +252,7 @@ class TheWire(ServedCase):
                 self.served.connect(token=token)
 
     def test_a_session_cannot_create_a_database(self):
-        with self.assertRaisesRegex(remote.RemoteError, "cannot create a database"):
+        with self.assertRaisesRegex(remote.RemoteError, "cannot create a database; run `bin/sd-db init`"):
             self.served.connect(self.root / "new.db", create=True)
         self.assertFalse((self.root / "new.db").exists())
 
@@ -653,6 +653,7 @@ class TheServer(ServedCase):
                               env=stubs.environment(environment(self.root)), timeout=60)
         self.assertEqual(bare.returncode, 1)
         self.assertIn("no database at", bare.stderr)
+        self.assertIn("`bin/sd-db init` from the command pack", bare.stderr)
         self.assertEqual(stubs.calls("tailscale"), [])
         self.assertFalse((self.root / "home" / ".local" / "share" / "sd").exists())
         absent = self.root / "nothing" / "sd.db"

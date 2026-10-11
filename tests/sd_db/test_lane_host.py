@@ -108,7 +108,7 @@ class HostsLane(unittest.TestCase):
                     ship.hosts_lane(connection, self.path, REPOSITORY)
                 self.assertEqual(caught.exception.code, "lane_unknown")
                 self.assertIn("/srv/one build-2, /srv/two hub", str(caught.exception))
-                self.assertIn("sd-db.sh repo lane-host /srv/one <host>", str(caught.exception))
+                self.assertIn("bin/sd-db repo lane-host /srv/one <host>", str(caught.exception))
 
 
 class TheLockOnTheHub(unittest.TestCase):
@@ -132,7 +132,7 @@ class TheLockOnTheHub(unittest.TestCase):
         self.assertEqual(str(error), (
             "The lane for example/one runs on build-2, not on this machine.\n"
             "Run it there, or move the lane: dashboard, Management, /srv/one, Move lane;\n"
-            "or sd-db.sh repo lane-host /srv/one hub-mac."))
+            "or bin/sd-db repo lane-host /srv/one hub-mac."))
         self.assertFalse((self.path.parent / ship.LOCK_DIRECTORY).exists())
 
     def test_a_database_that_cannot_be_opened_refuses_and_locks_nothing(self):
@@ -198,7 +198,7 @@ class TheLockOnASatellite(Satellite):
             with ship.repository_lock(default_path(self.home), REPOSITORY):
                 self.fail("the lock was taken on a machine that does not host the lane")
         self.assertEqual(caught.exception.host, "build-3")
-        self.assertIn("or sd-db.sh repo lane-host /srv/one build-2.", str(caught.exception))
+        self.assertIn("or bin/sd-db repo lane-host /srv/one build-2.", str(caught.exception))
         self.assertFalse(self.state.exists())
 
 

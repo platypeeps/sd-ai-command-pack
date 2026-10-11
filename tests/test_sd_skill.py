@@ -341,7 +341,7 @@ class TheLibraryDoor(unittest.TestCase):
         connection, reason = sd_install.open_library(self.context())
         self.assertIsNone(connection)
         self.assertIn("no database at", reason)
-        self.assertIn("sd-db.sh init", reason)
+        self.assertIn("bin/sd-db init", reason)
 
 
 if __name__ == "__main__":

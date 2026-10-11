@@ -2589,7 +2589,7 @@ def body_text(args, root: pathlib.Path, api: GitHub | None) -> tuple[str, str]:
 def unmanaged_refusal(why: str) -> Refusal:
     """A checkout the sd database marks unmanaged (sd:2566): no prepare, merge or record runs there."""
     return Refusal(why, code="unmanaged_repository", boundary="policy", state="operator_decision",
-                   next_action="Mark the repository managed with sd-db.sh repo managed, or ship it without the pack.")
+                   next_action="Mark the repository managed with bin/sd-db repo managed, or ship it without the pack.")
 
 
 def outside_repository() -> Refusal:
@@ -2639,7 +2639,7 @@ def lock_options(args, store) -> dict:
     wait = getattr(args, "lock_wait", 0.0)
     if not hasattr(store, "held_locks"):
         if wait:
-            raise Refusal("--wait needs an sd_db whose ship lock can wait; install the current system/local-sd-db")
+            raise Refusal("--wait needs an sd_db whose ship lock can wait; update this command pack checkout")
         return {}
     selector = f"--item {args.item}" if args.item is not None else f"--no-item --review-id {args.review_id}"
     return {"holder": {"command": f"sd-ship {args.command} {selector}", "item": args.item, "review": args.review_id},

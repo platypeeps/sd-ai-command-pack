@@ -1163,7 +1163,7 @@ def is_managed(row: Any) -> bool:
 def unmanaged_text(path: str) -> str:
     """How a pack tool refuses a repository outside its reach, naming the flag and its remedy."""
     return (f"{path} is not managed in the sd database (repo.managed = no), so pack tools do not run there; "
-            f"set it with `sd-db.sh repo managed {path} yes` if they should")
+            f"set it with `bin/sd-db repo managed {path} yes` if they should")
 
 
 def managed_rows(rows: Iterable[Any]) -> list[Any]:
@@ -1199,8 +1199,8 @@ def unmanaged(root: pathlib.Path | str, *, warn: bool = True, database: pathlib.
     if row is None:
         if warn:
             print(f"warning: {path} has no row in the sd database, so nothing says whether it is managed "
-                  f"(repo.managed); proceeding. Register it with `sd-db.sh repo add {path}`, then "
-                  f"`sd-db.sh repo managed {path} yes`", file=sys.stderr)
+                  f"(repo.managed); proceeding. Register it with `bin/sd-db repo add {path}`, then "
+                  f"`bin/sd-db repo managed {path} yes`", file=sys.stderr)
         return None
     return None if is_managed(row) else unmanaged_text(row["path"])
 

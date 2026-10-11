@@ -46,7 +46,8 @@ Usage: sd-db <verb> [arguments]
   help        This text.
 
 Each verb is described in lib/sd_db's module help. docs/sd-db.md covers
-serve, hub.json, the refusals, the lane host and judgments.
+serve, hub.json, the refusals, the lane host, judgments, the item kinds and
+renaming a repository.
 """
 
 

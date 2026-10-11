@@ -9,6 +9,7 @@ drives the copied library end to end against a database under a temporary
 
 from __future__ import annotations
 
+import ast
 import shutil
 import subprocess
 import sys
@@ -193,7 +194,7 @@ class TheRealLibrary(unittest.TestCase):
         self.assertEqual(sd_db("init").returncode, 0)
         listed = sd_db("repo", "list")
         self.assertEqual((listed.returncode, listed.stdout),
-                         (1, "sd-db: the `repo` table is empty; run `sd-db.sh repo seed`\n"))
+                         (1, "sd-db: the `repo` table is empty; run `bin/sd-db repo seed`\n"))
         status = sd_db("status")
         self.assertEqual(status.returncode, 0, status.stderr)
         schema = (REPO_ROOT / "lib" / "sd_db" / "schema.py").read_text(encoding="utf-8")
@@ -201,6 +202,27 @@ class TheRealLibrary(unittest.TestCase):
                        if line.startswith("SCHEMA_VERSION ="))
         self.assertIn(version, status.stdout)
         self.assertIn(str(Path(home) / ".local" / "share" / "sd" / "sd.db"), status.stdout)
+
+
+class NoRetiredEntrypoint(unittest.TestCase):
+    """sd:3370: no message names `sd-db.sh`, which sd:3281 retired with `local-sd-db`."""
+
+    def test_no_string_in_bin_or_lib_names_sd_db_sh(self) -> None:
+        sources = [path for path in (REPO_ROOT / "bin").iterdir()
+                   if path.is_file() and (path.suffix == ".py" or path.read_bytes().startswith(b"#!/usr/bin/env python3"))]
+        sources += sorted((REPO_ROOT / "lib" / "sd_db").rglob("*.py"))
+        found = []
+        for path in sources:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            docstrings = {id(node.body[0].value) for node in ast.walk(tree)
+                          if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+                          and node.body and isinstance(node.body[0], ast.Expr)
+                          and isinstance(node.body[0].value, ast.Constant)}
+            found += [f"{path.relative_to(REPO_ROOT)}:{node.lineno}" for node in ast.walk(tree)
+                      if isinstance(node, ast.Constant) and isinstance(node.value, str)
+                      and "sd-db.sh" in node.value and id(node) not in docstrings]
+        self.assertGreater(len(sources), 50)
+        self.assertEqual(found, [])
 
 
 if __name__ == "__main__":  # pragma: no cover

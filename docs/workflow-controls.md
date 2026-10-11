@@ -61,8 +61,8 @@ the registered checkout enclosing cwd (`--no-repo` files it against none), and
 `proposal` is the same collision with only one live half: the
 note exists, the item kind is reserved and nothing creates it, so neither
 `sd task add --kind` nor `sd task edit --kind` offers it. The other three --
-Comment, Question, Decision -- are notes and nothing else. `local-sd-db/README.md` holds the
-full table of both closed lists.
+Comment, Question, Decision -- are notes and nothing else. [docs/sd-db.md](sd-db.md#the-item-kinds-and-the-two-words-called-followup)
+holds the full table of both closed lists.
 
 The `sd` launcher is installed at `~/bin/common/sd` and is also managed by the
 system repository's bin-links installer.

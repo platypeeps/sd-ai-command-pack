@@ -1,7 +1,7 @@
 # The workflow database: hub, lane host and judgments
 
 `bin/sd-db` runs the workflow database's verbs from this checkout's `lib/`.
-This page covers four of them: the hub and its satellites, the refusals, the lane host, and `judgments`.
+This page covers the hub and its satellites, the refusals, the lane host, `judgments`, the item kinds, and renaming a repository by hand.
 The module docstrings under `lib/sd_db/` hold the detail.
 
 ## One hub, many satellites: `serve` and `hub.json`
@@ -310,3 +310,75 @@ Each disagreement reads `old→arm`: 1 or 0 for a noul, a position for a choice,
 A pair whose old answer is not a number is counted and not compared.
 Examples are a `--fallback` marker, or a noul asked under a `--gate` other than 0.5.
 A stage with no such pair says `no paired samples with the old mechanism`.
+
+## The item kinds, and the two words called `followup`
+
+`item.kind` is a closed list, guarded by a CHECK. Eleven values:
+
+| Kind | What it is |
+|---|---|
+| `work` | a change to a repository, planned under `docs/work/` |
+| `task` | a scoped piece of work in a repository |
+| `report` | a run report a scheduled job wrote |
+| `dep` | something a `work` item waits on |
+| `skill-review` | a review of a skill, run by the catalogue |
+| `proposal` | reserved; nothing creates one today |
+| `idea` | **a writing piece on the article ladder, and nothing else** |
+| `work-idea` | an idea about a repository or product, not yet planned work |
+| `personal-idea` | an idea about life, which does not enter the writing pipeline |
+| `personal` | a to-do, an errand, a chore; it belongs to no repository |
+| `followup` | something to come back to, filed as an item of its own |
+
+`idea` looks like the generic word and is not.
+`writing.list_pieces` reads `kind = 'idea'` with a `piece`, and the dashboard renders writing controls on it.
+So a personal or a work idea has its own kind, not a stage on `idea`.
+
+`note.kind` is its own closed list of seven: `followup`, `decision`, `proposal`, `question`, `comment`, `exec` and `status_change`.
+Only `followup` and `proposal` are in both lists.
+
+- A `followup` note hangs off an item and is resolved against it (`sd task note <item> --kind followup`).
+  A `followup` item stands on its own (`sd task add --kind followup`).
+  If it makes no sense with the parent deleted, it is a note.
+- A `proposal` note is live: `sd task note <item> --kind proposal` records one, and `reads.brief_notes` carries it into a brief.
+  A `proposal` item is reserved: `sd task add --kind` offers only `workflow.HAND_KINDS`, which leaves it out.
+  An unqualified "proposal" is the note.
+
+`task`, `personal` and `followup` items (`workflow.TASK_STATUS_KINDS`) share the five `TASK_STATUSES`:
+`planning`, `ready`, `in_progress`, `blocked` and `done`.
+`work` keeps its delivery rules; `idea`, `work-idea`, `personal-idea` and `report` keep their own workflows.
+
+`workflow.edit_item` is the verb a person uses to change a row's kind.
+The target must be in the store's CHECK (`workflow.schema_kinds`) and in `workflow.HAND_KINDS`, the five `sd task add --kind` files.
+A `work`, `report`, `dep`, `skill-review` or `proposal` row keeps its kind, because its producer owns it.
+So does an `idea` with a `piece`, and a row whose `fields` carry `contribution` or `skill_review` (`workflow.PRODUCED_FIELDS`).
+The edit writes a `comment` note, `Changed kind <old> -> <new> by <who>`, in the same transaction.
+`writes.upsert_item` also writes `kind` on every import, with no note: a vault-imported `idea` moved by hand goes back on the next import.
+
+`work-idea`, `personal-idea` and `personal` (`workflow.REPO_LESS_KINDS`) are filed with no repository.
+Read them as a group with `reads.backlog_items(connection, repo=reads.NO_REPO)` or the dashboard's `/tasks?repo=no%20repo`.
+That is filing behaviour, not a constraint: `item.repo` has no per-kind CHECK, and `writes.create_item` takes a `repo` for any kind.
+
+## Renaming a repository
+
+There is no rename verb (sd:3172).
+A rename by hand changes the keyed rows and the runner journal together.
+Otherwise `bin/sd-db backup` stops with "runner row ... differs from the backup journal".
+
+1. Stop the lanes, the dashboard and `sd-serve`, then run `bin/sd-db backup`.
+2. In one transaction, change the old key (`~/repos/old`) to the new one in `repo.path` and every `repo` column:
+   `item`, `cost`, `repo_protection`, `runner_lease`, `runner_run` (its `detached_from` too) and `shadow`.
+   `SELECT m.name, p.name FROM sqlite_master m, pragma_table_info(m.name) p
+   WHERE m.type = 'table' AND p.name LIKE '%repo%'` lists the columns.
+3. Rewrite each file in `runner-journal/` beside `sd.db` whose `record.repo` names the old repository, by its key or its absolute path.
+   Do not edit the text: `runner_journal.read` checks the envelope's sha256.
+   Recompute it as `runner_journal.persist` writes it, with sorted keys and compact separators:
+
+       import hashlib, json, pathlib
+       path = pathlib.Path("~/.local/share/sd/runner-journal/<id>.json").expanduser()
+       record = {**json.loads(path.read_text())["record"], "repo": "~/repos/new"}
+       def compact(value):
+           return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+       envelope = {"record": record, "sha256": hashlib.sha256(compact(record)).hexdigest()}
+       path.write_bytes(compact(envelope) + b"\n")
+
+4. Run `bin/sd-db backup` again; it passes when rows and journal agree.

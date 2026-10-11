@@ -14,7 +14,7 @@ Use STE-Concise; report delivery state, decisive checks, blockers, and retained 
 
 ## Standing permission
 
-Read `repo.runner_merge` on the repository row (`sd-db.sh repo list`, last field) before relying on standing permission.
+Read `repo.runner_merge` on the repository row (`bin/sd-db repo list`, last field) before relying on standing permission.
 `auto` means merge active, in-scope PR work without asking, unless the operator explicitly says wait.
 Merge only through `sd-ship prepare` then `sd-ship merge`; the review lane and required CI are part of those gates.
 `auto` never permits a merge that skips the review lane, such as a raw `gh pr merge` or a web squash.

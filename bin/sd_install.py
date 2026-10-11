@@ -1822,7 +1822,7 @@ def open_library(ctx: Context):
     sd_db = imported.module
     path = sd_db.default_path(ctx.home)
     if not path.exists():
-        return None, f"no database at {path}; run `sd-db.sh init` for trials"
+        return None, f"no database at {path}; run `bin/sd-db init` for trials"
     try:
         return sd_db.connect(path), ""
     except Exception as problem:  # pragma: no cover - a corrupt file

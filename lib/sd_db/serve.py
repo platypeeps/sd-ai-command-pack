@@ -624,7 +624,7 @@ class Session(socketserver.BaseRequestHandler):
                             # creates a database (gap (h)).
                             raise remote.RemoteError(
                                 f"a remote session cannot create a database; run "
-                                f"`local-sd-db/sd-db.sh init` on the hub ({target})"
+                                f"`bin/sd-db init` from the command pack on the hub ({target})"
                             )
                         connection = database.open_local(
                             target, write=bool(frame.get("write", True)),
@@ -861,7 +861,7 @@ def serve(port: int, database_path: Path, stream=sys.stderr, *, loopback: bool =
     if not target.exists():
         # Never create: a server under the wrong home must fail closed rather
         # than serve a second, empty database (gap (h)).
-        log.line(f"no database at {target}; run `local-sd-db/sd-db.sh init`")
+        log.line(f"no database at {target}; run `bin/sd-db init` from the command pack")
         return 1
     node = None
     if not loopback:
@@ -916,7 +916,7 @@ def serve(port: int, database_path: Path, stream=sys.stderr, *, loopback: bool =
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="sd-db.sh serve")
+    parser = argparse.ArgumentParser(prog="bin/sd-db serve")
     parser.add_argument("--loopback", action="store_true",
                         help="bind 127.0.0.1 and admit by the owner-only token; without it, bind "
                              "this node's Tailscale IPv4 address and admit by `tailscale whois`")

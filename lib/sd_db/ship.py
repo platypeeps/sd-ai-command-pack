@@ -264,7 +264,7 @@ class LaneElsewhere(WorkflowError):
         super().__init__(
             f"The lane for {repository} runs on {host or 'the hub'}, not on this machine.\n"
             f"Run it there, or move the lane: dashboard, Management, {name}, Move lane;\n"
-            f"or sd-db.sh repo lane-host {path or '<path>'} {this_host()}.")
+            f"or bin/sd-db repo lane-host {path or '<path>'} {this_host()}.")
 
 
 def this_host() -> str:
@@ -308,7 +308,7 @@ def _lane(connection, database, repository: str) -> tuple[bool, str | None, str 
         raise LaneUnknown(
             f"The clones of {repository} name different lane hosts: {rows}. Nothing was locked.\n"
             f"Move the lane once to set every clone: dashboard, Management, Move lane;\n"
-            f"or sd-db.sh repo lane-host {path} <host>.")
+            f"or bin/sd-db repo lane-host {path} <host>.")
     host = hosts.pop() if hosts else None
     if host is None:
         return served_by(database) is None, None, path

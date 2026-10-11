@@ -109,7 +109,7 @@ class _Runner(unittest.TextTestRunner):
 def main(argv: list[str]) -> int:
 
     if len(argv) < 2 or ":" not in argv[0]:
-        print("usage: sd-db.sh test --remote HOST:PORT TOKEN_FILE [unittest args...]", file=sys.stderr)
+        print("usage: bin/sd-db test --remote HOST:PORT TOKEN_FILE [unittest args...]", file=sys.stderr)
         return 1
     from ..serve import read_token
 

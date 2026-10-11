@@ -3590,8 +3590,9 @@ roles:
         """An sd_db without the holder record still serializes; it cannot wait, so --wait refuses."""
         older = SimpleNamespace(repository_lock=receipts.repository_lock)
         self.assertEqual(ship.lock_options(self.args("prepare"), older), {})
-        with self.assertRaisesRegex(ship.Refusal, "--wait needs an sd_db whose ship lock can wait"):
+        with self.assertRaisesRegex(ship.Refusal, "--wait needs an sd_db whose ship lock can wait") as caught:
             ship.lock_options(self.args("prepare", "--wait", "5"), older)
+        self.assertNotIn("local-sd-db", str(caught.exception))
 
     def test_ending_assignment_keeps_work_and_manual_merge_controls_guarded(self):
         from sd_db.progress import cancel_work, work_controls

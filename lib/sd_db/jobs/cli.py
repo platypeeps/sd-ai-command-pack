@@ -73,7 +73,7 @@ def command_status(_argv: list[str]) -> int:
     home = _home()
     path = default_path(home)
     if not path.exists():
-        print(f"sd-db: no database at {path}; run `sd-db.sh init`")
+        print(f"sd-db: no database at {path}; run `bin/sd-db init`")
         return 1
     # Read-only, so a database awaiting a migration still answers.
     connection = connect(path, write=False)
@@ -324,7 +324,7 @@ def _open_for_write() -> sqlite3.Connection:
     home = _home()
     path = default_path(home)
     if not path.exists():
-        raise SdDbError(f"no database at {path}; run `sd-db.sh init`")
+        raise SdDbError(f"no database at {path}; run `bin/sd-db init`")
     return connect(path)
 
 
@@ -333,7 +333,7 @@ def _open_for_read() -> sqlite3.Connection:
     home = _home()
     path = default_path(home)
     if not path.exists():
-        raise SdDbError(f"no database at {path}; run `sd-db.sh init`")
+        raise SdDbError(f"no database at {path}; run `bin/sd-db init`")
     return connect(path, write=False)
 
 
@@ -429,7 +429,7 @@ def command_repo(argv: list[str]) -> int:
             return 1
         rows = registered(connection)
         if not rows:
-            print("sd-db: the `repo` table is empty; run `sd-db.sh repo seed`")
+            print("sd-db: the `repo` table is empty; run `bin/sd-db repo seed`")
             return 1
         if rest:
             rows = [row for row in rows if row["managed"]]
@@ -437,7 +437,7 @@ def command_repo(argv: list[str]) -> int:
                 # An empty answer is an answer: a caller asking which
                 # repositories are managed gets none, not a failure.
                 print("sd-db: no repository is marked managed; run "
-                      "`sd-db.sh repo managed PATH yes`", file=sys.stderr)
+                      "`bin/sd-db repo managed PATH yes`", file=sys.stderr)
                 return 0
         for row in rows:
             print(f"sd-db: {row['path']}  {row['remote'] or '-'}  "
@@ -667,7 +667,7 @@ def _remove_options(kind: str, argv: list[str]) -> dict:
     command. Nothing falls back to `getpass.getuser()` for `who` (note 1846,
     Q9). `--apply` needs `--if-fingerprint`, as `recovery.reimport` does.
     """
-    verb = f"sd-db.sh {kind} remove"
+    verb = f"bin/sd-db {kind} remove"
     options = {"--with-items": False, "--apply": False}
     target = None
     rest = list(argv)
@@ -713,7 +713,7 @@ def _remove_options(kind: str, argv: list[str]) -> dict:
 
 
 def _apply_command(kind: str, target, options: dict, fingerprint: str) -> str:
-    words = ["sd-db.sh", kind, "remove", str(target)]
+    words = ["bin/sd-db", kind, "remove", str(target)]
     if options["with_items"]:
         words.append("--with-items")
     words += ["--who", options["who"], "--reason", options["reason"], "--apply", "--if-fingerprint", fingerprint]
@@ -782,7 +782,7 @@ def _print_apply(result: dict) -> int:
 def _remove(kind: str, argv: list[str]) -> int:
     """Both verbs: the options, G4, the preview, and with `--apply` the apply under `signal_stop`."""
     options = _remove_options(kind, argv)
-    program = f"sd-db.sh {kind} remove"
+    program = f"bin/sd-db {kind} remove"
     principal = getpass.getuser()
     session = os.environ.get("SD_SESSION")
     removal.check_actor(who=options["who"], reason=options["reason"], session=session, principal=principal,
