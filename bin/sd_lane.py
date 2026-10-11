@@ -249,6 +249,9 @@ RECLAIMS = 3
 LANDING_SECONDS = 1800
 #: The bound on one `git` step of a publish: a fetch or a push crosses the network.
 PUBLISH_SECONDS = 300
+#: The longest chain of catch-up merges an entry's head may carry: one per prepare that pushed a catch-up
+#: and was then reclaimed or put back after a hub fault, so every reclaim and hub retry fits (sd:3283).
+CATCH_UPS = RECLAIMS + HUB_RETRIES + 1
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1262,12 +1265,15 @@ def land(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, str]
         return land_note(fields, body, entry, environ, note, own_lock, main)
     branch, tip = lane_git(worktree, "branch", "--show-current") or "", lane_git(worktree, "rev-parse", "HEAD")
     cleanup, remove = clean_up(entry, head, main, branch, tip)
+    kept, where = entry.get("builder_worktree"), f" on {entry.get('builder_host')}"
+    if entry.get("lane_worktree") and kept:  # the builder's own worktree, on the host that enqueued it (sd:3283)
+        cleanup, remove = f"{cleanup}; the builder worktree {kept} stays{where}", f"git -C {kept} worktree remove {kept}"
     fields = {"cleanup": cleanup, "remove": remove}
     body = f"Landed: merged at {merged[:12]} (head {str(head)[:12]}). {cleanup}."
     if branch and tip:
         body += f" Recover: git branch {branch} {tip}."
     if remove:
-        body += f" Remove: {remove}"  # last and bare, so it copies whole
+        body += f" Remove{where if entry.get('lane_worktree') else ''}: {remove}"  # last and bare, so it copies whole
     return land_note(fields, body, entry, environ, note, own_lock, main)
 
 
@@ -1473,25 +1479,46 @@ def finish_entry(queue: Queue, entry: dict[str, Any], token: str, outcome: dict[
     runner_write(queue, mark_finished)
 
 
+def read_git(tree: pathlib.Path, *args: str, ok: tuple[int, ...] = (0,)) -> subprocess.CompletedProcess[str]:
+    """`git <args>` in `tree` for a runner decision; a failure raises `PUBLISH_UNKNOWN`, never a "no"."""
+    done = publish_git(tree, *args)
+    if done is None or done.returncode not in ok:
+        said = (done.stderr or done.stdout).strip()[-300:] if done is not None else "no answer"
+        raise LaneError(f"git {args[0]} failed in {tree} ({said}); the entry is not skipped.", code=PUBLISH_UNKNOWN)
+    return done
+
+
 def catch_up_of(tree: pathlib.Path, commit: str, expected: str) -> bool:
-    """Whether `commit` is prepare's catch-up of `expected`: a merge whose first parent it is."""
-    return (commit != expected and lane_git(tree, "rev-parse", "--verify", "--quiet", f"{commit}^1") == expected
-            and bool(lane_git(tree, "rev-parse", "--verify", "--quiet", f"{commit}^2")))
+    """Whether `commit` is prepare's catch-up of `expected`: a merge whose first parent it is, or a chain of them.
+
+    Each prepare that pushed a catch-up and was then put back or reclaimed
+    adds one, so the chain is at most `CATCH_UPS` long. A read that fails, or
+    a commit this checkout lacks, raises `PUBLISH_UNKNOWN`.
+    """
+    for _ in range(CATCH_UPS if commit != expected else 0):
+        parents = read_git(tree, "rev-list", "--parents", "-n", "1", commit).stdout.split()[1:]
+        if len(parents) < 2:
+            return False
+        if parents[0] == expected:
+            return True
+        commit = parents[0]
+    return False
 
 
 def caught_up(worktree: pathlib.Path, expected: str) -> str:
     """`expected`, or the worktree's HEAD when that is prepare's catch-up of it.
 
-    A retried entry starts there (sd:3239, sd:3254); any other move of HEAD still skips the entry.
+    A retried entry starts there (sd:3239, sd:3254); any other move of HEAD
+    still skips the entry. A read that fails raises `PUBLISH_UNKNOWN`.
     """
-    head = lane_git(worktree, "rev-parse", "HEAD")
-    return head if head and catch_up_of(worktree, head, expected) else expected
+    head = read_git(worktree, "rev-parse", "HEAD").stdout.strip()
+    return head if catch_up_of(worktree, head, expected) else expected
 
 
 def at_head(tree: pathlib.Path, expected: str) -> bool:
-    """Whether `tree`'s HEAD is `expected` or its catch-up merge, the two heads the runner prepares."""
-    head = lane_git(tree, "rev-parse", "HEAD")
-    return bool(head) and caught_up(tree, expected) == head
+    """Whether `tree`'s HEAD is `expected` or its catch-up merge, the heads the runner prepares."""
+    head = read_git(tree, "rev-parse", "HEAD").stdout.strip()
+    return head == expected or catch_up_of(tree, head, expected)
 
 
 def pushed_catch_up(tree: pathlib.Path, branch: str, expected: str) -> str:
@@ -1504,7 +1531,10 @@ def pushed_catch_up(tree: pathlib.Path, branch: str, expected: str) -> str:
     """
     listed = publish_git(tree, "ls-remote", "origin", f"refs/heads/{branch}") if branch else None
     tip = (listed.stdout.split() or [""])[0] if listed is not None and listed.returncode == 0 else ""
-    return tip if tip and catch_up_of(tree, tip, expected) else expected
+    try:
+        return tip if tip and catch_up_of(tree, tip, expected) else expected
+    except LaneError:  # unknown keeps the published head
+        return expected
 
 
 def back_to_pending(row: dict[str, Any], expected: str, **fields: Any) -> None:
@@ -1522,7 +1552,7 @@ def put_back(queue: Queue, entry: dict[str, Any], token: str, expected: str, **f
 def worktrees(main: pathlib.Path) -> list[tuple[pathlib.Path, str]]:
     """Each worktree of the repository on this disk, with the branch it has checked out, or ''."""
     found: list[tuple[pathlib.Path, str]] = []
-    for line in (lane_git(main, "worktree", "list", "--porcelain") or "").splitlines():
+    for line in read_git(main, "worktree", "list", "--porcelain").stdout.splitlines():
         if line.startswith("worktree "):
             found.append((pathlib.Path(line.removeprefix("worktree ")), ""))
         elif line.startswith("branch refs/heads/") and found:
@@ -1548,7 +1578,7 @@ def checkout_for(root: pathlib.Path, queue: Queue, entry: dict[str, Any]) -> dic
     In order: the entry's own worktree, when it was enqueued here; any
     worktree here with its branch at the head; else a lane worktree at
     `<lane folder>/worktrees/<item>` from the fetched `origin/<branch>`
-    (`lane_tree`). The head is `expected_head` or its catch-up merge. A
+    (`lane_tree`). The head is `expected_head` or its catch-up merges (`catch_up_of`). A
     `gate: satellite` entry of the retired hand-off is skipped (sd:3003).
     """
     expected, branch = str(entry.get("expected_head")), str(entry.get("branch") or "")
@@ -1608,7 +1638,7 @@ def lane_tree(main: pathlib.Path, lane: pathlib.Path, branch: str, expected: str
                                "a checkout that has it")
     if tip != expected and not catch_up_of(main, tip, expected):
         return skip(HEAD_MOVED, f"origin/{branch} is at {tip}, neither the queued head {expected} nor its catch-up")
-    local = lane_git(main, "rev-parse", "--verify", "--quiet", ref)
+    local = read_git(main, "rev-parse", "--verify", "--quiet", ref, ok=(0, 1)).stdout.strip()
     if local and (local != tip or any(name == branch for _, name in listed)):
         return skip(BRANCH_BUSY, f"the local branch {branch} is at {local}, or checked out at another head; "
                                  "remove it, or retry from a worktree at the head")
@@ -1725,21 +1755,26 @@ def run_entry(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token: st
     try:
         found = checkout_for(root, queue, entry)
     except LaneError as error:
-        if error.code != PUBLISH_UNKNOWN:
-            found = {"status": "failed", "step": "worktree", "reason": str(error)[:600]}
-        else:
-            try:
-                put_back(queue, entry, token, entry["expected_head"], checkout_fault={"reason": str(error)[:600],
-                                                                                      "at": stamp_now()})
-            except Stop as stop:
-                return None, str(stop)
-            return {"item": entry["item"], "status": "pending"}, f"sd:{entry['item']}: {error} It is pending again."
+        if error.code == PUBLISH_UNKNOWN:
+            return unknown_checkout(queue, entry, token, error)
+        found = {"status": "failed", "step": "worktree", "reason": str(error)[:600]}
     tree = found.pop("tree", None)
     try:
         return run_checkout(root, queue, entry, token, environ, ship, note, tree, found)
     finally:
         if tree is not None and found.get("made"):
             drop_lane_worktree(sd_lib.main_worktree_root(root), tree, found.get("branch_made"))
+
+
+def unknown_checkout(queue: Queue, entry: dict[str, Any], token: str,
+                     error: LaneError) -> tuple[dict[str, Any] | None, str]:
+    """Put `entry` back at its place after a git read with no answer, and stop the run: unknown is not a skip."""
+    try:
+        put_back(queue, entry, token, entry["expected_head"], checkout_fault={"reason": str(error)[:600],
+                                                                              "at": stamp_now()})
+    except Stop as stop:
+        return None, str(stop)
+    return {"item": entry["item"], "status": "pending"}, f"sd:{entry['item']}: {error} It is pending again."
 
 
 def run_checkout(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token: str, environ: dict[str, str],
@@ -1749,7 +1784,9 @@ def run_checkout(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token:
     outcome = found
     try:
         if tree is not None:
-            local = {**entry, "worktree": str(tree), **({"lane_worktree": True} if found.get("made") else {})}
+            built = {"lane_worktree": True, "builder_worktree": entry.get("worktree"),
+                     "builder_host": entry.get("enqueued_on")}
+            local = {**entry, "worktree": str(tree), **(built if found.get("made") else {})}
             outcome = process(local, queue, ship, functools.partial(advance, queue, local, token))
             if outcome.get("moved"):
                 put_back(queue, entry, token, pushed_catch_up(tree, str(entry.get("branch") or ""),
@@ -1764,6 +1801,10 @@ def run_checkout(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token:
             outcome.update(settle(local, outcome, environ, note, queue.lock_file, root))
     except Stop as error:
         return None, str(error)
+    except LaneError as error:
+        if error.code == PUBLISH_UNKNOWN:  # the head check had no answer; prepare has not started
+            return unknown_checkout(queue, entry, token, error)
+        outcome = {"status": "failed", "reason": f"{type(error).__name__}: {error}"[:600]}
     except Exception as error:  # a broken entry is marked; the next one still runs
         outcome = {"status": "failed", "reason": f"{type(error).__name__}: {error}"[:600]}
     try:

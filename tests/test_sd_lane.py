@@ -1462,6 +1462,59 @@ class AnyHost(SharedQueue):
         self.assertEqual((seen[0], self.entries()[0]["status"]), ((head, "origin/topic"), "merged"))
         self.assertEqual((self.made().exists(), git(self.repo, "branch", "--list", "topic")), (False, ""))
 
+    def catch_ups(self, branch: str, head: str, count: int) -> list[str]:
+        """`count` catch-up merges of a moving main onto `head`, each on the last, pushed to `origin/<branch>`."""
+        scratch, merges = self.tmp / "scratch", []
+        git(self.repo, "worktree", "add", "-q", "--detach", str(scratch), head)
+        for number in range(count):
+            git(self.repo, "commit", "-q", "--allow-empty", "-m", f"base {number}")
+            git(scratch, "merge", "-q", "--no-ff", "-m", "Merge origin/main", "main")
+            merges.append(git(scratch, "rev-parse", "HEAD"))
+        git(scratch, "push", "-q", "origin", f"HEAD:refs/heads/{branch}")
+        git(self.repo, "worktree", "remove", "--force", str(scratch))
+        return merges
+
+    def test_a_chain_of_pushed_catch_ups_after_two_reclaims_still_runs(self) -> None:
+        """Codex review: prepare pushed a catch-up, died, was reclaimed, caught up again; both merges are its own."""
+        [head] = self.enqueued_elsewhere(1, "topic", "work")
+        [_, second] = self.catch_ups("topic", head, 2)
+        seen: list[str] = []
+
+        def ship(argv: list[str], log: pathlib.Path) -> dict:
+            seen.append(git(pathlib.Path(argv[1]), "rev-parse", "HEAD"))
+            return self.ship(argv, log)
+        sd_lane.run_lane(self.repo, self.environ, ship)
+        self.assertEqual((self.entries()[0]["status"], seen[:1]), ("merged", [second]))
+
+    def test_a_failed_read_of_a_catch_ups_parents_leaves_the_entry_pending(self) -> None:
+        """Codex review: origin holds a valid catch-up, and the read of its parents fails; unknown, not head_moved."""
+        [head] = self.enqueued_elsewhere(1, "topic", "work")
+        [merge] = self.catch_ups("topic", head, 1)
+        real_lane, real_publish = sd_lane.lane_git, sd_lane.publish_git
+
+        def parents_read(args: tuple[str, ...]) -> bool:
+            return any(merge in arg for arg in args) and args[0] in ("rev-parse", "rev-list", "cat-file", "log")
+
+        def lane_git(worktree: pathlib.Path, *args: str) -> str | None:
+            return None if parents_read(args) else real_lane(worktree, *args)
+
+        def publish_git(root: pathlib.Path, *args: str) -> subprocess.CompletedProcess | None:
+            return None if parents_read(args) else real_publish(root, *args)
+        with mock.patch.object(sd_lane, "lane_git", lane_git), mock.patch.object(sd_lane, "publish_git", publish_git):
+            answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], "holder" in entry, self.calls), ("pending", False, []))
+        self.assertIn("stopped", answer)
+
+    def test_a_lane_worktree_landing_names_the_builders_worktree_and_host(self) -> None:
+        """Codex review: the builder's worktree stays on the host that enqueued it; the note says where and how."""
+        self.enqueued_elsewhere(1, "topic", "work")
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [(_, body, _)] = self.notes
+        kept = self.tmp / "topic"
+        self.assertIn(f"{kept} stays on build-2", body)
+        self.assertTrue(body.endswith(f"Remove on build-2: git -C {kept} worktree remove {kept}"), body)
+
     def test_a_lane_worktree_is_removed_when_its_entry_fails(self) -> None:
         """Failure table, end: the runner removes the lane worktree and the branch it made, whatever the outcome."""
         self.enqueued_elsewhere(1, "topic", "work")
@@ -1497,6 +1550,19 @@ class AnyHost(SharedQueue):
                 entry = self.entries()[0]
                 self.assertEqual((entry["status"], "holder" in entry, self.calls), ("pending", False, []))
                 self.assertIn("origin", answer["stopped"])
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(self.entries()[0]["status"], "merged")
+
+    def test_a_failing_local_read_leaves_the_entry_pending(self) -> None:
+        """Codex class pass, unknown reads: a failed worktree list or local branch read is not a skip or a failure."""
+        self.enqueued_elsewhere(1, "topic", "work")
+        for verb in ("worktree", "rev-parse"):
+            with self.subTest(verb=verb):
+                with self.failing(verb):
+                    answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+                entry = self.entries()[0]
+                self.assertEqual((entry["status"], "holder" in entry, self.calls), ("pending", False, []))
+                self.assertIn("not skipped", answer["stopped"])
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual(self.entries()[0]["status"], "merged")
 
@@ -1674,7 +1740,8 @@ class Retrying(SharedQueue):
         rows = self.rows()
         with self.assertRaises(sd_lane.LaneError) as refused:
             sd_lane.retry(self.repo, 1, self.environ)
-        self.assertEqual((refused.exception.code, self.rows(), self.remote_tip("main"), self.git_verbs),
+        remote = [verb for verb in self.git_verbs if verb != "rev-parse"]  # the local head read is not a publish step
+        self.assertEqual((refused.exception.code, self.rows(), self.remote_tip("main"), remote),
                          (sd_lane.DEFAULT_BRANCH, rows, before, ["ls-remote"]))
 
     def test_retry_after_the_branch_and_worktree_went_refuses_and_writes_no_row(self) -> None:
