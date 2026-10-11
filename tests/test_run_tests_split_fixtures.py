@@ -143,6 +143,20 @@ class Probe(unittest.TestCase):
         print(f"shard niceness={os.getpriority(os.PRIO_PROCESS, 0)}")
 """
 
+# Prints what a shard's children inherit of the coverage hook: the config the
+# hook reads, and whether the hook's folder is on `PYTHONPATH`.
+ENVIRONMENT_PROBE = """import os
+import unittest
+
+
+class Probe(unittest.TestCase):
+    def test_environment(self):
+        hook = os.path.join(os.getcwd(), "tests", "coverage_sitecustomize")
+        found = (os.environ.get("SD_COVERAGE_PROCESS_START"),
+                 hook in os.environ.get("PYTHONPATH", "").split(os.pathsep))
+        print(f"shard env={found!r}", flush=True)
+"""
+
 #: The header and footer `run-tests.sh` writes on stderr around a run (sd:1407, sd:2080).
 START_LINE = r"run-tests: start head=(\S+) dirty=\S+ content=(\S+) pid=(\d+) at=\S+"
 END_LINE = r"run-tests: end head=(\S+) content=(\S+) pid=(\d+) exit=\d+ at=\S+"
@@ -304,6 +318,19 @@ class SplitModuleFixtures(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("test runner: workers=2 shards=7", result.stdout)
         self.assertRegex(result.stdout, r"(?m)^shard tests\.sd_db\.test_store: \d+s exit=0$")
+
+    def test_sd_db_shards_start_no_subprocess_coverage(self) -> None:
+        """sd:3323: the coverage hook reached the `sd_db` suite's stubs, and a stub's
+        `python3` without coverage wrote its warning into the stderr a test compares."""
+        library = self.root / "tests" / "sd_db"
+        library.mkdir()
+        (library / "__init__.py").write_text("")
+        (library / "test_store.py").write_text(ENVIRONMENT_PROBE)
+        result = self.run_harness(test_sd_ship=ENVIRONMENT_PROBE)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        probes = dict(re.findall(r"(?m)^shard (\S+): start\nshard env=(.*)$", result.stdout))
+        self.assertEqual(probes["tests.sd_db.test_store"], repr((None, False)), result.stdout)
+        self.assertEqual(probes["tests.test_sd_ship.part1of1"], repr((str(self.root / ".coveragerc"), True)))
 
     def commit_fixture(self) -> str:
         """Make the fixture root a repository with one tracked `notes.txt`."""

@@ -117,6 +117,11 @@ run_log="$work_dir/unittest-output.log"
 # `[run] include`. tests/coverage_sitecustomize starts coverage in a child only
 # when that child executes a file the include patterns name; the docstring there
 # has the measurements. The installer gate at 100% is what shows nothing is lost.
+#
+# The `tests/sd_db` shards get neither (sd:3323): that suite runs nothing in
+# `[run] include`, and its stubs run `env python3`, which may lack coverage. The
+# hook then writes its warning into the stub's stderr, which those tests compare.
+unhooked_pythonpath="${PYTHONPATH:-}"
 export SD_COVERAGE_PROCESS_START="$REPO_ROOT/.coveragerc"
 export COVERAGE_FILE="$work_dir/.coverage"
 export PYTHONPATH="$REPO_ROOT/tests/coverage_sitecustomize${PYTHONPATH:+:$PYTHONPATH}"
@@ -626,12 +631,18 @@ set -m
   # last, so with only the end line a `Ran` sat above its own label and read
   # as the shard before it (sd:2080).
   started=$SECONDS
+  case "$3" in
+    tests.sd_db.*)
+      unset SD_COVERAGE_PROCESS_START
+      if [ -n "$4" ]; then export PYTHONPATH="$4"; else unset PYTHONPATH; fi
+      ;;
+  esac
   printf "shard %s: start\n" "$3" > "$2/$3.log" || exit 1
   "$1" -m coverage run --parallel-mode -m unittest $ids >> "$2/$3.log" 2>&1
   status=$?
   printf "\nshard %s: %ss exit=%s\n" "$3" "$((SECONDS - started))" "$status" >> "$2/$3.log" || exit 1
   exit "$status"
-' _ "$PYTHON_BIN" "$work_dir" {} < "$shard_file" 9>&- &
+' _ "$PYTHON_BIN" "$work_dir" {} "$unhooked_pythonpath" < "$shard_file" 9>&- &
 shard_pgid=$!
 if [ "$gate_ppid" != "1" ]; then
   watchdog 9>&- &
