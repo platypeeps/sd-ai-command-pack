@@ -16,15 +16,19 @@ def blocked(code: str, boundary: str, next_action: str, *, state: str = "policy_
 #: the hub says did not commit, and the refusals a hub upgrade leaves until the satellite's self-install
 #: or the hub's restart. `UnknownOutcome` is not one: its write may have committed, so nothing reruns it.
 HUB_FAULTS = frozenset({"HubUnreachable", "TransactionLost", "BuildMismatch", "HubRestartNeeded", "SchemaTooNew"})
+#: The hub faults no retry in the same process can pass (sd:3359): a process keeps the `sd_db` build it
+#: loaded, so only a new one, after `repo-sync.sh follow` or `refresh`, gets past them. `HubRestartNeeded`
+#: is not one: the hub restarts itself.
+BUILD_FAULTS = frozenset({"BuildMismatch", "SchemaTooNew"})
 #: The blocker code of a hub fault; the lane puts such an entry back for its next run.
 HUB_UNAVAILABLE = "hub_unavailable"
 #: The blocker code of a verb off its repository's lane host (sd:3003), also when the ship lock refuses it.
 LANE_ELSEWHERE = "lane_elsewhere"
 
 
-def is_hub_fault(error: Exception) -> bool:
-    """Whether `error` is one of `HUB_FAULTS`, read without importing `sd_db`."""
-    return any(kind.__module__.startswith("sd_db.") and kind.__name__ in HUB_FAULTS for kind in type(error).__mro__)
+def is_hub_fault(error: Exception, faults: frozenset[str] = HUB_FAULTS) -> bool:
+    """Whether `error` is one of `faults`, by default `HUB_FAULTS`, read without importing `sd_db`."""
+    return any(kind.__module__.startswith("sd_db.") and kind.__name__ in faults for kind in type(error).__mro__)
 
 
 def failure(phase: str, error: Exception) -> dict:

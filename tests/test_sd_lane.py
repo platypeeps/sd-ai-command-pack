@@ -1498,6 +1498,50 @@ class ClaimAndLease(SharedQueue):
             sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual((faults, self.entries()[0]["status"]), ([], "merged"))
 
+    def test_a_hub_that_refuses_this_build_stops_the_runner_at_once(self) -> None:
+        """sd:3359. Prepare met a hub fault, and the hub then refused the satellite's build.
+
+        The runner retried the put-back for 10 minutes under its lock. Only `repo-sync.sh follow` clears
+        that refusal, and `follow` waits for every runner lock: each waited on the other. A process keeps
+        the build it loaded, so no retry in it can pass. It stops without a sleep, the entry stays running
+        under a holder that is gone, and the next run reclaims it.
+        """
+        import sd_db.database
+        from sd_db import remote
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        refusing: list[bool] = []
+        connect = sd_db.database.connect
+
+        def hub(*args: Any, **kwargs: Any) -> Any:
+            if refusing:
+                raise remote.BuildMismatch("build", "0000aaaa", "1111bbbb")
+            return connect(*args, **kwargs)
+
+        def prepare_then_upgrade(argv: list[str], log: pathlib.Path) -> dict:
+            self.ship(argv, log)
+            refusing.append(True)
+            return Runner.HUB_FAULT
+
+        class Slept(BaseException):
+            pass
+
+        clock = mock.Mock(wraps=time)
+        clock.sleep.side_effect = Slept
+        with mock.patch.object(sd_lane, "WRITE_RETRY_SECONDS", 600), mock.patch.object(sd_lane, "WRITE_PAUSE", 30), \
+                mock.patch.object(sd_lane, "time", clock), mock.patch("sd_db.database.connect", hub):
+            answer = sd_lane.run_lane(self.repo, self.environ, prepare_then_upgrade)
+        self.assertEqual(clock.sleep.call_count, 0)
+        self.assertIn("BuildMismatch", answer["stopped"])
+        self.assertIn("repo-sync.sh", answer["stopped"])
+        with open(self.store().lock_file, "a", encoding="utf-8") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)  # free for `follow`
+        self.assertEqual((self.entries()[0]["status"], self.entries()[0]["step"]), ("running", "prepare"))
+        self.make_dead()
+        self.calls.clear()
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual((answer["reclaimed"][0]["status"], self.entries()[0]["status"]), ("pending", "merged"))
+        self.assertEqual([c[2] for c in self.calls], ["prepare", "merge"])
+
     def test_a_finish_write_that_fails_after_a_merge_is_failed_by_reclaim(self) -> None:
         """Failure table, finish: the hub fails after a merge; the run stops, and reclaim fails the entry."""
         sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
