@@ -946,7 +946,7 @@ class SharedReview:
         if path is None:
             return None
         argv = result.args if isinstance(result.args, list) else [result.args]
-        record = {"binding": self.held_binding(head, passes),
+        record: dict[str, Any] = {"binding": self.held_binding(head, passes),
                   "superseded": {key: value for key, value in self.superseded.items() if value is not ABSENT},
                   "result": {"args": [str(part) for part in argv], "returncode": result.returncode,
                              "stdout": result.stdout, "stderr": result.stderr}}
@@ -1008,7 +1008,8 @@ class SharedReview:
             return refuse_held(path, "its digest does not match its content")
         passes = self.history.native(self.state)
         expected = self.held_binding(head, passes)
-        held = record.get("binding") if isinstance(record.get("binding"), dict) else {}
+        bound = record.get("binding")
+        held: dict[str, Any] = bound if isinstance(bound, dict) else {}
         moved = sorted(name for name in expected if held.get(name) != expected[name])
         if moved:
             return refuse_held(path, f"bound to another {', '.join(moved)}")
