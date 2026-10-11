@@ -208,7 +208,19 @@ class TheSatelliteCheck(unittest.TestCase):
         lines = self.check(served.port, apply=True)
         differs = [line for line in lines if "DIFFERS" in line]
         self.assertEqual(differs, [f"  DIFFERS sd_db package version: satellite {__version__}, hub 0.0.9 — "
-                                   "upgrade the hub's sd_db, restart its `sd-db.sh serve`, then rerun"])
+                                   "run `repo-sync.sh refresh` on the hub, then rerun"])
+        self.assertFalse(self.registry.exists())
+
+    def test_an_older_satellite_is_told_to_follow_and_installs_nothing(self):
+        """sd:3280: self-install is gone; `--apply` names follow, plans and writes nothing."""
+        served = self.serve_version("999.0")
+        self.name_hub(served)
+        from sd_db import __version__
+
+        lines = self.check(served.port, apply=True)
+        self.assertEqual(lines[-1], f"  DIFFERS sd_db package version: satellite {__version__}, hub 999.0 — "
+                                    "run `repo-sync.sh follow` here, then rerun")
+        self.assertFalse(any("install the hub's sd_db" in line for line in lines), lines)
         self.assertFalse(self.registry.exists())
 
     def serve_version(self, version: str) -> Served:

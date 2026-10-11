@@ -210,12 +210,14 @@ class BuildMismatch(RemoteError):
     package version is compared too, and the protocol version before both.
     `upgrade` names the side whose build is older, `hub` or `satellite`,
     or `both` when the two differ without an order. `hub_build` is the
-    hub's build digest, which `sd_db.self_install` installs to match.
+    hub's build digest. The remedy names `repo-sync.sh refresh` for the hub
+    and `repo-sync.sh follow` for a satellite: each moves the pack checkout,
+    and the pack's `lib/` is the one `sd_db` (sd:3280).
     """
 
-    #: The hub's build digest, whatever field differs (sd:2802): the build a
-    #: satellite installs to match. `None` from a hub older than the field,
-    #: which a rebuilt error leaves at this class default.
+    #: The hub's build digest, whatever field differs (sd:2802). `None` from
+    #: a hub older than the field, which a rebuilt error leaves at this class
+    #: default. Kept on the wire for older satellites.
     hub_build: str | None = None
 
     def __init__(self, field: str, satellite, hub, *, hub_build: str | None = None) -> None:
@@ -225,11 +227,11 @@ class BuildMismatch(RemoteError):
         self.hub_build = hub_build
         self.upgrade = older(satellite, hub)
         if self.upgrade == "hub":
-            remedy = f"upgrade the hub's sd_db to {satellite}"
+            remedy = f"run `repo-sync.sh refresh` on the hub for sd_db {satellite}"
         elif self.upgrade == "satellite":
-            remedy = f"upgrade this satellite's sd_db to {hub}"
+            remedy = f"run `repo-sync.sh follow` on this satellite for sd_db {hub}"
         else:
-            remedy = "install the same sd_db build on the hub and on this satellite"
+            remedy = "run `repo-sync.sh refresh` on the hub, then `repo-sync.sh follow` on this satellite"
         super().__init__(
             f"sd_db build mismatch: {DESCRIBED[field]} {satellite} on this satellite, "
             f"{hub} on the hub; {remedy}. The hub ran no statement"
@@ -252,14 +254,6 @@ def older(satellite, hub) -> str:
 
 
 _digest: str | None = None
-
-#: Sessions this process opened on a hub. A refusal after one may follow
-#: statements the hub ran, so `sd_db.self_install` does not rerun it.
-_sessions = 0
-
-
-def sessions_opened() -> int:
-    return _sessions
 
 
 def _hash_files() -> str:
@@ -633,8 +627,6 @@ class Connection:
                 raise
         self._call("open", path=None if path is None else str(path), write=write,
                    create=create, busy_timeout=busy_timeout, token=token, **handshake())
-        global _sessions
-        _sessions += 1
 
     def _call(self, op: str, **fields) -> dict:
         if self._socket is None:

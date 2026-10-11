@@ -14,13 +14,9 @@ carry the drift words the stage's counter greps for:
 * `MISSING` or `DIFFERS` for `~/.config/sd/hub.json`; `--apply` writes it.
   Without `--apply` the hub is asked nothing until the file names it, so
   a missing file is one line of drift, not three.
-* `DIFFERS` for a build the hub refuses, with both sides' values. With
-  `--apply` it installs the hub's build into the pack's venv, but only from
-  HEAD or `origin/main` of the system checkout and only when that commit's
-  digest is the hub's (`sd_db.self_install`, sd:2802); a dry run prints the plan.
-  The checkout is `SD_DB_SOURCE_CHECKOUT`, which `machine-setup.sh` sets to
-  its own, or the one the venv recorded. A satellite newer than the hub, or
-  a hub too old to send its digest, is not installed over.
+* `DIFFERS` for a build the hub refuses, with both sides' values and the
+  `repo-sync.sh` verb that moves the pack. Nothing is installed: the pack's
+  `lib/` is the one copy, and `follow` moves it to the hub's (sd:3280).
 * `MISSING` or `DIFFERS` for `providers.yaml`; `--apply` installs the
   hub's bytes, which the protocol serves (seam 7).
 
@@ -37,7 +33,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from . import database, hub, registry, remote, self_install
+from . import database, hub, registry, remote
 from .errors import RegistryError
 
 
@@ -76,9 +72,8 @@ def _named(config: Path) -> tuple[str, int] | None:
 
 
 def run(host: str, port: int, *, apply: bool = False, home: Path | str | None = None,
-        out=sys.stdout, source: Path | None = None, venv: Path | None = None) -> int:
-    """The stage. `source` and `venv` stand in for the checkout and the venv
-    `sd_db.self_install` would find; tests pass them."""
+        out=sys.stdout) -> int:
+    """The stage."""
     config = hub.config_path(home)
     local = database.local_path(home)
     if local.exists():
@@ -111,7 +106,6 @@ def run(host: str, port: int, *, apply: bool = False, home: Path | str | None = 
     except remote.BuildMismatch as mismatch:
         _line(out, "DIFFERS", f"{remote.DESCRIBED[mismatch.field]}: satellite {mismatch.satellite}, "
                               f"hub {mismatch.hub} — {_remedy(mismatch)}")
-        _install(out, mismatch, apply=apply, source=source, venv=venv)
         return 0
     except remote.HubUnreachable as error:
         _line(out, "SKIP", f"sd hub {host}:{port} did not answer ({error.reason}); "
@@ -152,40 +146,17 @@ def run(host: str, port: int, *, apply: bool = False, home: Path | str | None = 
 
 def _remedy(mismatch: remote.BuildMismatch) -> str:
     if mismatch.upgrade == "hub":
-        return "upgrade the hub's sd_db, restart its `sd-db.sh serve`, then rerun"
+        return "run `repo-sync.sh refresh` on the hub, then rerun"
     if mismatch.upgrade == "satellite":
-        return "install the hub's sd_db build here (`--apply` does when HEAD or origin/main is it), then rerun"
-    return "install the same sd_db build on both machines, then rerun"
-
-
-def _install(out, mismatch: remote.BuildMismatch, *, apply: bool, source: Path | None,
-             venv: Path | None) -> None:
-    """Install the hub's build when `apply`, else plan it (sd:2802)."""
-    if mismatch.upgrade == "hub":
-        # The remedy names the hub: installing its build here goes backwards.
-        return
-    digest = self_install.hub_digest(mismatch)
-    if digest is None:
-        _line(out, "SKIP", "the hub sent no build digest (a hub older than sd:2802); "
-                           "install its sd_db build here by hand")
-        return
-    if not self_install.enabled(os.environ):
-        _line(out, "SKIP", f"self-install is off ({self_install.OFF}={os.environ.get(self_install.OFF)})")
-        return
-    shown = source or os.environ.get(self_install.SOURCE) or "the source checkout the venv recorded"
-    _plan(out, apply, f"install the hub's sd_db build {digest} from {' or '.join(self_install.COMMITS)} of {shown}, "
-                      f"if its digest is the hub's")
-    if not apply:
-        return
-    outcome = self_install.install_hub_build(digest, venv=venv, source=source)
-    _line(out, "ok" if outcome.installed else "DIFFERS", outcome.text)
+        return "run `repo-sync.sh follow` here, then rerun"
+    return "run `repo-sync.sh refresh` on the hub, then `repo-sync.sh follow` here, then rerun"
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m sd_db.satellite")
     parser.add_argument("--hub", required=True, help="the hub's host name on the tailnet")
     parser.add_argument("--port", type=int, default=hub.DEFAULT_PORT)
-    parser.add_argument("--apply", action="store_true", help="write hub.json and providers.yaml, and install the hub's sd_db build")
+    parser.add_argument("--apply", action="store_true", help="write hub.json and providers.yaml")
     arguments = parser.parse_args(argv)
     return run(arguments.hub, arguments.port, apply=arguments.apply)
 
