@@ -32,6 +32,13 @@ it as a write transaction of that one statement: a lost answer is settled
 the same way. A `recorded` write returns no rows and no `lastrowid`, since
 its answer is gone.
 
+A session that drops while it holds nothing, between two units of work,
+is opened again for the next one (sd:3336): a `BEGIN` or a `SELECT` sent
+outside a transaction, which cannot have written anything, goes once more on
+a new session. Nothing else is sent twice. `sd-ship prepare` holds its session
+across a review and gate of 15 to 40 minutes, and a hub restart in that window
+cost the review it was recording.
+
 The frame is a 4-byte big-endian length and that many bytes of UTF-8 JSON.
 JSON and not pickle: the hub will read frames from another machine, and a
 pickle is code.
@@ -152,6 +159,8 @@ _ROLLBACK = re.compile(r"ROLLBACK(?:\s+TRANSACTION)?")
 #: the hub would run it inside a transaction, where a PRAGMA can do nothing
 #: and a SAVEPOINT opens nothing. A text this misses goes as before, unsettled.
 _WRITE = re.compile(r"\s*(INSERT|UPDATE|DELETE|REPLACE|WITH|CREATE|DROP|ALTER)\b", re.IGNORECASE)
+#: A read a dropped session may send again on a new one (sd:3336).
+_SELECT = re.compile(r"\s*SELECT\b", re.IGNORECASE)
 
 
 def statement(sql: str) -> str | None:
@@ -611,15 +620,24 @@ class Connection:
         self._busy_timeout = busy_timeout
         self._token = token
         self._timeout = timeout
+        # What a reopened session needs to open as this one did (sd:3336).
+        self._write = write
+        self._create = create
+        self._answer_timeout = answer_timeout
         #: The request id of the write transaction open on this session.
         self._rid: str | None = None
         #: The session ended under a request, not by `close`.
         self._lost = False
+        self._open()
+
+    def _open(self) -> None:
+        """Dial the hub and send `open`, for a new connection or a reopened session."""
+        token = self._token
         try:
-            self._socket = socket.create_connection((host, port), timeout=timeout)
+            self._socket = socket.create_connection((self.host, self.port), timeout=self._timeout)
         except OSError as error:
-            raise HubUnreachable(host, port, error.strerror or str(error)) from error
-        self._socket.settimeout(answer_timeout)
+            raise HubUnreachable(self.host, self.port, error.strerror or str(error)) from error
+        self._socket.settimeout(self._answer_timeout)
         # The token proves the client can read the server's owner-only token
         # file, so a loopback session stays inside the owner's account. A
         # callable is read only once the socket is up: the server deletes
@@ -631,13 +649,57 @@ class Connection:
             except BaseException:
                 self._abandon()
                 raise
-        self._call("open", path=None if path is None else str(path), write=write,
-                   create=create, busy_timeout=busy_timeout, token=token, **handshake())
+        self._call("open", path=self._path, write=self._write,
+                   create=self._create, busy_timeout=self._busy_timeout, token=token, **handshake())
         global _sessions
         _sessions += 1
 
+    def _reopen(self, lost: HubUnreachable | None) -> None:
+        """A new session in place of one that dropped while it held nothing (sd:3336).
+
+        The hub rolled back whatever the old session left, so nothing on it
+        carries over except what `open` and `trace` set. A hub that cannot
+        be reached raises its own `HubUnreachable`, chained to the drop.
+        """
+        self._abandon()
+        try:
+            self._open()
+        except HubUnreachable as error:
+            self._lost = True
+            raise error from lost
+        self._lost = False
+        if self._trace is not None:
+            self._call("trace", on=True)
+
+    def _unit(self, sql: str, send):
+        """`send()` once, and once more on a new session if this one dropped (sd:3336).
+
+        Only a statement that starts a unit and cannot have written: a
+        `BEGIN` or a `SELECT`, sent while no transaction and no request id
+        is open. A lost `BEGIN IMMEDIATE` wrote nothing: the hub rolls back
+        a session that closes, and `send` makes a fresh id. Every other
+        statement fails as it did.
+        """
+        starts = statement(sql) in ("write", "read") or _SELECT.match(sql)
+        if self.in_transaction or self._rid is not None or not starts:
+            return send()
+        if self._socket is None and self._lost:
+            self._reopen(None)
+            return send()
+        try:
+            return send()
+        except HubUnreachable as lost:
+            if self._socket is not None:
+                raise
+            self._reopen(lost)
+            return send()
+
     def _call(self, op: str, **fields) -> dict:
         if self._socket is None:
+            if self._lost:
+                # A dropped session is a hub fault (`hub_unavailable` to
+                # sd-ship), not a connection its caller closed.
+                raise HubUnreachable(self.host, self.port, "the session dropped under an earlier request")
             raise sqlite3.ProgrammingError("Cannot operate on a closed database.")
         try:
             send_frame(self._socket, request(op, **fields))
@@ -663,10 +725,13 @@ class Connection:
         if kind == "write":
             # A fresh id per `BEGIN IMMEDIATE`, never reused: the hub refuses
             # an id it has seen.
-            rid = new_request_id()
-            answer = self._call("execute", rid=rid, sql=sql, params=params)
-            self._rid = rid
-            return answer
+            def begin() -> dict:
+                rid = new_request_id()
+                answer = self._call("execute", rid=rid, sql=sql, params=params)
+                self._rid = rid
+                return answer
+
+            return self._unit(sql, begin)
         if kind is None and not self.in_transaction and _WRITE.match(sql):
             rid = new_request_id()
             try:
@@ -678,7 +743,7 @@ class Connection:
             return self._commit("execute", sql=sql, params=params)
         if kind == "rollback":
             return self._rollback("execute", sql=sql, params=params)
-        return self._call("execute", sql=sql, params=params)
+        return self._unit(sql, lambda: self._call("execute", sql=sql, params=params))
 
     def _commit(self, op: str, **fields) -> dict:
         """`COMMIT` with R; a lost answer is settled by asking the hub for R."""
@@ -764,7 +829,7 @@ class Connection:
                 self._socket = None
 
     def cursor(self) -> Cursor:
-        if self._socket is None:
+        if self._socket is None and not self._lost:
             raise sqlite3.ProgrammingError("Cannot operate on a closed database.")
         return Cursor(self)
 
