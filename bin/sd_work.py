@@ -671,7 +671,7 @@ def _repair(item: int, commit: str, block: list[str], trailer: str) -> str:
     if f"Item: sd:{item}" not in block:
         return (f"; it names neither `Delivers: sd:{item}` nor `Item: sd:{item}`, so ship "
                 f"the work with `sd-ship prepare --item {item} --deliver`, name `Closes: sd:{item}` "
-                f"in a later item merge's body, or close it by hand with `--reason TEXT` and no "
+                f"in a later item's `--deliver` merge body, or close it by hand with `--reason TEXT` and no "
                 f"`--delivered-by`")
     return (f"; it carries `Item: sd:{item}`, so `sd work deliver {item} {commit} "
             "--associated --reason TEXT` delivers it")

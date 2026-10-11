@@ -110,6 +110,7 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
 8. **Record verified delivery.**
    An associated merge carries `Item:`; only whole-item delivery adds `Delivers:`.
    A body `Closes: sd:N[, sd:M]` line names co-delivered items; each gets `Delivers:` and closes on the merge (sd:1481).
+   An `--associate-only` claim closes nothing, not even the items its title names (sd:3365).
    Prepare refuses one inside a code fence or HTML comment; indent an example.
    A body `Refs: sd:N` line names a related or partial item; the merge leaves it open.
    Record the row only after the remote confirms the merge.

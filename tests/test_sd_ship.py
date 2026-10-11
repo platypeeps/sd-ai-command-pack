@@ -2845,17 +2845,51 @@ roles:
         self.assertNotEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (closes[2],)).fetchone()[0], "done")
         self.assertIn(f"item {by_hand} is done without delivery evidence for {commit}", failed[f"sd:{by_hand}"])
 
-    def test_an_associate_only_merge_still_closes_its_closes_items(self):
+    def test_an_associate_only_merge_closes_no_item_its_title_names(self):
+        """sd:3365, owner ruling 2026-10-11. A link-only pull request whose title
+        named another item squashed with `Delivers:` for it and closed it. A
+        title names context; only a `--deliver` claim closes what it names."""
+        self.task_item("task")
+        other = self.closes_items()[:1]
+        self.unanswered("--associate-only", "--title", f"Slice of sd:{self.item}, after sd:{other[0]} and sd:99999").prepare()
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        self.assertFalse(result["delivery_pending"], result)
+        self.assertFalse(result.get("closed_items"))
+        block = ship.sd_lib.trailer_block(_git(self.remote.path, "log", "-1", "--format=%B", "main")).splitlines()
+        self.assertIn(f"Item: sd:{self.item}", block)
+        self.assertFalse([line for line in block if line.startswith("Delivers:")], block)
+        for number in (self.item, *other):
+            with self.subTest(item=number):
+                self.assertNotEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (number,)).fetchone()[0], "done")
+
+    def test_an_associate_only_prepare_refuses_a_closes_line(self):
+        """sd:3365. An associate-only claim closes nothing, so a `Closes:` line
+        on one is refused before anything is published, not dropped."""
         self.task_item("task")
         closes = self.closes_items()[:1]
         body = self.directory / "body.md"
         body.write_text(f"An early slice that also finishes another row.\n\nCloses: sd:{closes[0]}\n")
-        self.unanswered("--associate-only", "--body-file", str(body)).prepare()
-        with patch.object(ship.time, "sleep"):
-            result = self.merge()
-        self.assertFalse(result["delivery_pending"], result)
-        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "in_progress")
-        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (closes[0],)).fetchone()[0], "done")
+        with self.assertRaises(ship.Refusal) as caught:
+            self.unanswered("--associate-only", "--body-file", str(body)).prepare()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "closes_need_delivery")
+        self.assertFalse(self.remote.pull_requests)
+
+    def test_an_associate_only_receipt_with_a_closes_line_refuses_the_merge(self):
+        """sd:3365, older state: a receipt prepared associate-only before this
+        rule may store a `Closes:` body. The merge refuses it before it lands,
+        and the item stays open."""
+        self.task_item("task")
+        closes = self.closes_items()[:1]
+        number = self.unanswered("--associate-only").prepare()["pull_request"]["number"]
+        operation = self.operation()
+        operation.state["body"] = operation.state["body"].rstrip() + f"\n\nCloses: sd:{closes[0]}\n"
+        operation.save()
+        with patch.object(ship.time, "sleep"), self.assertRaises(ship.Refusal) as caught:
+            self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "closes_need_delivery")
+        self.assertIsNone(getattr(self.remote.pull(number), "merged_head", None))
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (closes[0],)).fetchone()[0], "planning")
 
     def test_prepare_refuses_a_closes_id_that_is_no_item(self):
         self.task_item("task")
