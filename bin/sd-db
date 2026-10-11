@@ -3,9 +3,13 @@
 
 The pack owns `sd_db` now (sd:3278), so its entrypoint moves here too. This is
 system's `local-sd-db/sd-db.sh` with its folder pointed at `lib/`, for the
-verbs that run the library: the same verbs, arguments and exit codes. `lib/`
-goes first on `sys.path`, so a worktree runs its own library and no installed
-copy or `PYTHONPATH` entry answers in its place.
+verbs that run the library: the same verbs, arguments and exit codes.
+
+Every verb takes its library from `sd_lib.import_sd_db`, which reads `lib/`
+first. `init`, `migrate` and `status` keep `lib/`: they move the database to
+its schema or report both versions. Every other verb takes `lib/` when it
+opens the database, else a provisioned copy that does (sd:3278 review
+round 1). A `PYTHONPATH` entry never answers in their place.
 
 Not carried over. `library`, `release` and `SD_DB_LIBRARY` chose between the
 checkout and an installed copy, and step 3 of the design deletes them: here
@@ -20,8 +24,10 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
-LIB = Path(__file__).resolve().parent.parent / "lib"
+#: The verbs that move the database to `lib/`'s schema, or report both versions.
+SCHEMA_VERBS = ("init", "migrate", "status")
 
 #: The verbs `sd_db.jobs.cli` answers; `sd-db.sh` hands each one straight to it.
 CLI_VERBS = ("init", "migrate", "status", "restore", "repo", "item", "work",
@@ -68,14 +74,15 @@ def report_failure(body: str, title: str) -> None:
         print("sd-db backup: the failure mail did not leave", file=sys.stderr)
 
 
-def backup(argv: list[str]) -> int:
-    from sd_db.jobs.backup import BROKEN_SOURCE  # noqa: PLC0415 - after the path insert
+def backup(argv: list[str], sd_db: Any) -> int:
+    from sd_db.jobs.backup import BROKEN_SOURCE  # noqa: PLC0415 - the chosen copy
 
     # A child, as `sd-db.sh` ran it: the mail carries everything the backup
     # wrote to either stream, its own children's included. `-P` keeps the
-    # working directory off the child's path, so `lib/` is the only `sd_db`.
+    # working directory off the child's path, so the chosen copy is its only `sd_db`.
+    library = Path(sd_db.__file__).resolve().parent.parent
     done = subprocess.run([sys.executable, "-P", "-m", "sd_db.jobs.backup", *argv],
-                          env={**os.environ, "PYTHONPATH": str(LIB)}, check=False,
+                          env={**os.environ, "PYTHONPATH": str(library)}, check=False,
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     output = done.stdout.rstrip("\n")
     if done.returncode == 0:
@@ -100,17 +107,25 @@ def dispatch_verb(argv: list[str]) -> int:
     if sys.version_info < (3, 13):
         print(f"sd-db: {sys.executable} is too old; sd_db needs Python 3.13 or newer", file=sys.stderr)
         return 1
-    sys.path.insert(0, str(LIB))
-    if verb == "backup":
-        return backup(argv[1:])
-    if verb == "serve":
-        from sd_db import serve  # noqa: PLC0415 - after the path insert
+    import sd_lib  # noqa: PLC0415 - bin/ is this script's own path entry
+
+    imported = sd_lib.import_sd_db(match_database=verb not in SCHEMA_VERBS)
+    if imported.module is None:
+        print(f"sd-db: {imported.problem}", file=sys.stderr)
+        return 1
+    return run_sd_db_verb(argv, imported.module)
+
+
+def run_sd_db_verb(argv: list[str], sd_db: Any) -> int:
+    if argv[0] == "backup":
+        return backup(argv[1:], sd_db)
+    if argv[0] == "serve":
+        from sd_db import serve  # noqa: PLC0415 - the chosen copy
 
         return serve.main(argv[1:])
-    from sd_db.jobs import cli  # noqa: PLC0415 - after the path insert
+    from sd_db.jobs import cli  # noqa: PLC0415 - the chosen copy
 
     return cli.main(argv)
-
 
 if __name__ == "__main__":
     raise SystemExit(dispatch_verb(sys.argv[1:]))

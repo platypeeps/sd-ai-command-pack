@@ -20,6 +20,8 @@ from tests.clean_env import clean_environment
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SD_DB = REPO_ROOT / "bin" / "sd-db"
+CLI_VERBS = ("init", "migrate", "status", "restore", "repo", "item", "work",
+             "import", "verify", "usage", "judgments", "credentials")
 
 FAKE_CLI = """\
 import sys
@@ -46,12 +48,15 @@ def main(argv):
 """
 
 
-class TheLauncher(unittest.TestCase):
+class LauncherTree(unittest.TestCase):
+    """A copy of the launcher and `sd_lib` beside a fake `lib/`; no tests of its own."""
+
     def setUp(self) -> None:
         self.root = Path(tempfile.mkdtemp(prefix="sd-db-launcher-"))
         self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
         (self.root / "bin").mkdir()
-        shutil.copy2(SD_DB, self.root / "bin" / "sd-db")
+        for name in ("sd-db", "sd_lib.py", "sd_library_guard.py"):
+            shutil.copy2(REPO_ROOT / "bin" / name, self.root / "bin" / name)
         self.write("lib/sd_db/__init__.py", "")
         self.write("lib/sd_db/jobs/__init__.py", "")
         self.write("lib/sd_db/jobs/cli.py", FAKE_CLI)
@@ -78,14 +83,15 @@ class TheLauncher(unittest.TestCase):
     def mails(self) -> list[str]:
         return self.mail.read_text(encoding="utf-8").splitlines() if self.mail.exists() else []
 
+
+class TheLauncher(LauncherTree):
     def test_a_cli_verb_runs_lib_with_its_arguments_and_exit_code(self) -> None:
         run = self.run_sd_db("repo", "list", "--managed")
         self.assertEqual(run.returncode, 7, run.stderr)
         self.assertEqual(run.stdout, "lib cli ['repo', 'list', '--managed']\n")
 
     def test_every_verb_sd_db_sh_hands_the_cli_reaches_it(self) -> None:
-        for verb in ("init", "migrate", "status", "restore", "repo", "item", "work",
-                     "import", "verify", "usage", "judgments", "credentials"):
+        for verb in CLI_VERBS:
             with self.subTest(verb=verb):
                 run = self.run_sd_db(verb, "x")
                 self.assertEqual((run.returncode, run.stdout), (7, f"lib cli [{verb!r}, 'x']\n"), run.stderr)
@@ -134,6 +140,55 @@ class TheLauncher(unittest.TestCase):
         run = self.run_sd_db("backup", FAKE_BACKUP_EXIT="5", SD_NOTIFY=str(self.root / "absent"))
         self.assertEqual(run.returncode, 1)
         self.assertIn("sd-db backup: the failure mail did not leave", run.stderr)
+
+
+class TheCopyThatMatchesTheDatabase(LauncherTree):
+    """sd:3278 review round 1: `lib/` ahead of the database gives way to a matching provisioned copy."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        schema = ("import os, pathlib\nSCHEMA_VERSION = {built}\n"
+                  "def default_path():\n    return pathlib.Path(os.environ['FAKE_DB'])\n"
+                  "class Connection:\n    def close(self):\n        pass\n"
+                  "def connect(path, write=True):\n    return Connection()\n"
+                  "def schema_version(connection):\n    return 27\n")
+        venv = ".venv/lib/python3.13/site-packages"
+        self.write("lib/sd_db/__init__.py", schema.format(built=28))
+        self.write("lib/sd_db/schema.py", "SCHEMA_VERSION = 28\n")
+        self.write(f"{venv}/sd_db/__init__.py", schema.format(built=27))
+        self.write(f"{venv}/sd_db/schema.py", "SCHEMA_VERSION = 27\n")
+        self.write(f"{venv}/sd_db/jobs/__init__.py", "")
+        self.write(f"{venv}/sd_db/jobs/cli.py", FAKE_CLI.replace("lib cli", "venv cli"))
+        self.write(f"{venv}/sd_db/jobs/backup.py", FAKE_BACKUP.replace("lib backup", "venv backup"))
+        self.write(f"{venv}/sd_db/serve.py", FAKE_SERVE.replace("lib serve", "venv serve"))
+        self.write("sd.db", "")
+
+    def run_sd_db(self, *argv: str, **extra: str) -> subprocess.CompletedProcess[str]:
+        return super().run_sd_db(*argv, **{"FAKE_DB": str(self.root / "sd.db"), **extra})
+
+    def test_a_cli_verb_runs_the_matching_copy(self) -> None:
+        run = self.run_sd_db("repo", "list", "--managed")
+        self.assertEqual((run.returncode, run.stdout), (7, "venv cli ['repo', 'list', '--managed']\n"), run.stderr)
+
+    def test_init_migrate_and_status_run_lib_and_the_rest_the_matching_copy(self) -> None:
+        for verb in CLI_VERBS:
+            with self.subTest(verb=verb):
+                where = "lib" if verb in ("init", "migrate", "status") else "venv"
+                run = self.run_sd_db(verb, "x")
+                self.assertEqual((run.returncode, run.stdout), (7, f"{where} cli [{verb!r}, 'x']\n"), run.stderr)
+
+    def test_serve_runs_the_matching_copy(self) -> None:
+        run = self.run_sd_db("serve", "--port", "0")
+        self.assertEqual((run.returncode, run.stdout), (0, "venv serve ['--port', '0']\n"), run.stderr)
+
+    def test_backup_runs_the_matching_copy(self) -> None:
+        run = self.run_sd_db("backup", FAKE_BACKUP_EXIT="0")
+        self.assertEqual((run.returncode, run.stdout), (0, "venv backup []\nto stderr\n"), run.stderr)
+
+    def test_a_failed_backup_of_the_matching_copy_still_mails(self) -> None:
+        run = self.run_sd_db("backup", FAKE_BACKUP_EXIT="5")
+        self.assertEqual(run.returncode, 1)
+        self.assertIn("venv backup []\nto stderr", run.stderr)
 
 
 class TheRealLibrary(unittest.TestCase):
