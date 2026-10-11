@@ -265,6 +265,155 @@ class WritingContentCheckout(unittest.TestCase):
         self.assertEqual(0, self.run_verb("list")[0])
 
 
+BRIEF = {"piece": "2026/a", "draft": "content/2026/a/index.md", "research": "content/2026/a/research.md",
+         "research_exists": True, "digest": "0123456789ab", "generation": 2,
+         "record": "<!-- adversarial-reviewed: words=150 sentences=0123abcd -->", "words": 150}
+
+
+class WritingReview(unittest.TestCase):
+    """`adversarial` runs the shared gate prompt through codex; `reconcile` restamps a companion (sd:3301).
+
+    The gate binary and codex are stubs on a private PATH; the library is an
+    autospec mock, so a keyword it lacks is its own TypeError.
+    """
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name).resolve()
+        self.repo = self.tmp / "repo"
+        (self.repo / "content").mkdir(parents=True)
+        self.stubs = self.tmp / "stubs"
+        self.stubs.mkdir()
+        self.parser = argparse.ArgumentParser()
+        cli.register(self.parser.add_subparsers(required=True))
+        self.connection = Mock()
+        self.connect = Mock(return_value=self.connection)
+        self.gate = self.stub("adversarial-gate", 'printf "%s\\n" "$@" > "$STUBS/gate.argv"\n'
+                                                  'for n in $(seq 120); do printf "word "; done\necho\n')
+        self.stub("codex", 'printf "%s\\n" "$@" > "$STUBS/codex.argv"\ncat > "$STUBS/codex.stdin"\n'
+                           'while [ $# -gt 0 ]; do\n  if [ "$1" = -o ]; then printf "# Review\\n" > "$2"; fi\n'
+                           '  shift\ndone\n')
+        environment = {"PATH": f"{self.stubs}{os.pathsep}/usr/bin:/bin", "ADVERSARIAL_GATE_BIN": str(self.gate),
+                       "STUBS": str(self.stubs)}
+        for patcher in (
+            patch.object(cli.sd_handoff_rows, "library", return_value=sd_db),
+            patch.object(cli.sd_handoff_rows, "connect", self.connect),
+            patch.object(cli.sd_lib, "repo_root", return_value=self.repo),
+            patch.object(cli.sd_lib, "stored_repo", side_effect=str),
+            patch.object(cli.getpass, "getuser", return_value="operator"),
+            patch.object(writing, "piece_for_key", return_value={"id": 7}),
+            patch.dict(os.environ, environment),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.brief = self.autospec("adversarial_brief", {**BRIEF, "root": str(self.repo)})
+        self.recorded = self.autospec("record_adversarial", {"path": "content/2026/a/adversarial.md", "current": True,
+                                                             "digest": "0123456789ab", "verdict": None,
+                                                             "confidence": {"CERTAIN": 0, "LIKELY": 0, "SPECULATIVE": 0}})
+        self.reconciled = self.autospec("reconcile_companion", {"piece": "2026/a", "artifact": "research",
+                                                                "digest": "0123456789ab", "was": {"state": "stale"}})
+
+    def stub(self, name, body):
+        path = self.stubs / name
+        path.write_text("#!/bin/sh\n" + body)
+        path.chmod(0o755)
+        return path
+
+    def autospec(self, name, result):
+        patcher = patch.object(writing, name, autospec=True, return_value=result)
+        self.addCleanup(patcher.stop)
+        return patcher.start()
+
+    def call(self, *argv):
+        arguments = self.parser.parse_args(["writing", *argv, "--json"])
+        with redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()):
+            code = arguments.handler(arguments)
+        return code, json.loads(output.getvalue())
+
+    def test_adversarial_renders_the_lens_and_runs_codex_read_only_on_the_checkout(self):
+        code, result = self.call("adversarial", "--piece", "2026/a")
+        self.assertEqual((code, result["path"]), (0, "content/2026/a/adversarial.md"))
+        self.assertEqual((self.stubs / "gate.argv").read_text().splitlines(),
+                         ["render", "--lens", "writing-draft", "--set", "DRAFT_PATH=content/2026/a/index.md",
+                          "--set", "RESEARCH_PATH=content/2026/a/research.md"])
+        argv = (self.stubs / "codex.argv").read_text().splitlines()
+        self.assertEqual(argv[:6] + argv[7:], ["exec", "-s", "read-only", "-C", str(self.repo), "-o", "-"])
+        self.assertTrue(argv[6].endswith("report.md"))
+        self.assertTrue((self.stubs / "codex.stdin").read_text().startswith("word word"))
+        self.recorded.assert_called_once_with(self.connection, 7, "# Review\n", digest="0123456789ab",
+                                              record=BRIEF["record"], generation=2)
+        self.connect.assert_called_once_with(sd_db, write=False)
+        self.connection.close.assert_called_once()
+
+    def test_adversarial_passes_a_model(self):
+        self.call("adversarial", "--piece", "2026/a", "--model", "m1")
+        self.assertEqual((self.stubs / "codex.argv").read_text().splitlines()[:3], ["exec", "-m", "m1"])
+
+    def test_an_unsubstituted_placeholder_or_short_prompt_refuses_before_codex(self):
+        for body, message in (("echo '{GUARDRAILS_PATH}'; for n in $(seq 120); do printf 'word '; done\n",
+                               r"still carries \{GUARDRAILS_PATH\}"),
+                              ("echo too short\n", "returned 2 words")):
+            with self.subTest(message=message):
+                self.stub("adversarial-gate", body)
+                with self.assertRaisesRegex(cli.WorkRefusal, message):
+                    self.call("adversarial", "--piece", "2026/a")
+                self.assertFalse((self.stubs / "codex.argv").exists())
+        self.recorded.assert_not_called()
+
+    def test_a_missing_gate_names_both_places_it_looked(self):
+        with patch.dict(os.environ, {"ADVERSARIAL_GATE_BIN": str(self.stubs)}), \
+                patch.object(cli.Path, "home", return_value=self.tmp):
+            with self.assertRaisesRegex(cli.WorkRefusal, "ADVERSARIAL_GATE_BIN.*local-adversarial-gate"):
+                self.call("adversarial", "--piece", "2026/a")
+        self.brief.assert_called_once()
+        self.recorded.assert_not_called()
+
+    def test_a_failed_or_silent_codex_writes_no_report(self):
+        for body, message in (("exit 3\n", "codex exited 3"), ("cat >/dev/null\n", "no final message")):
+            with self.subTest(message=message):
+                self.stub("codex", body)
+                with self.assertRaisesRegex(cli.WorkRefusal, message):
+                    self.call("adversarial", "--piece", "2026/a")
+        self.recorded.assert_not_called()
+
+    def test_a_codex_past_its_timeout_is_stopped(self):
+        self.stub("codex", "cat >/dev/null\nsleep 30\n")
+        with self.assertRaisesRegex(cli.WorkRefusal, "--timeout 1"):
+            self.call("adversarial", "--piece", "2026/a", "--timeout", "1")
+        self.recorded.assert_not_called()
+
+    def test_reconcile_reads_its_note_from_a_file(self):
+        note = self.tmp / "note.md"
+        note.write_text("Added `sd writing` claims; each sourced in research.md.\n")
+        code, result = self.call("reconcile", "--piece", "2026/a", "--artifact", "research", "--note-file", str(note))
+        self.assertEqual((code, result["artifact"]), (0, "research"))
+        self.reconciled.assert_called_once_with(self.connection, 7, "research",
+                                                note="Added `sd writing` claims; each sourced in research.md.")
+        self.connect.assert_called_once_with(sd_db, write=False)
+
+    def test_reconcile_takes_an_inline_note_and_one_note_only(self):
+        self.call("reconcile", "--piece", "2026/a", "--artifact", "adversarial", "--note", "A1 rebutted.")
+        self.reconciled.assert_called_once_with(self.connection, 7, "adversarial", note="A1 rebutted.")
+        for argv in (["--note", "a", "--note-file", "b"], [], ["--artifact", "fact-check", "--note", "a"]):
+            with self.subTest(argv=argv), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                self.parser.parse_args(["writing", "reconcile", "--piece", "2026/a",
+                                        *(["--artifact", "research"] if "--artifact" not in argv else []), *argv])
+
+    def test_an_older_library_refuses_by_name(self):
+        with patch.object(writing, "adversarial_brief", None), patch.object(writing, "reconcile_companion", None):
+            for argv in (["adversarial", "--piece", "2026/a"],
+                         ["reconcile", "--piece", "2026/a", "--artifact", "research", "--note", "n"]):
+                with self.subTest(verb=argv[0]):
+                    with self.assertRaisesRegex(cli.WorkRefusal, "install the current library build"):
+                        self.call(*argv)
+        self.connect.assert_not_called()
+
+    def test_review_verbs_run_from_a_linked_worktree(self):
+        self.assertNotIn("adversarial", cli.REGISTERED_ONLY)
+        self.assertNotIn("reconcile", cli.REGISTERED_ONLY)
+
+
 class WritingFromWorktree(unittest.TestCase):
     """A linked worktree keys rows to the main checkout and reads its own files (sd:2024)."""
 

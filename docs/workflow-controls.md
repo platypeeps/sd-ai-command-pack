@@ -32,6 +32,8 @@ progress belongs to the database.
 | Promote an idea to a registered writing piece | `sd writing promote ID [--slug SLUG]` — the row keeps its id and becomes piece `YEAR/slug`, scaffolded from the repository's `templates/piece-template.md`; the writing checkout it runs from is the target, and elsewhere the one repository that registers pieces is |
 | Move a writing piece through its stages | Writing screen, or `sd writing stage --piece YEAR/slug --stage STAGE` |
 | Inspect current writing evidence | Item screen, or `sd writing readiness --piece YEAR/slug` |
+| Run the adversarial gate on a draft | `sd writing adversarial --piece YEAR/slug` — renders the shared `writing-draft` lens, runs codex read-only on the checkout, and writes `adversarial.md` stamped with the draft it read; `sd writing gate` records the verdict |
+| Mark a review companion current after a revision | `sd writing reconcile --piece YEAR/slug --artifact adversarial\|research --note-file PATH` — refuses an adversarial reconcile once more than 25 % of the draft is prose the last run did not read |
 | Park or revive a piece | Item screen, or `sd writing park --piece YEAR/slug [--revive]` |
 | Observe jobs and assignments | Operations → Jobs, `sd jobs list`, `sd assignments list` |
 | Inspect launchd services | Operations → Services, or `sd services list` |
@@ -65,8 +67,8 @@ full table of both closed lists.
 The `sd` launcher is installed at `~/bin/common/sd` and is also managed by the
 system repository's bin-links installer.
 
-Run writing commands from the writing checkout. Existing `scripts/pack.py`
-commands delegate to the same operations. JSON item responses carry a revision;
+Run writing commands from the root of a content repository: the checkout that
+holds `content/`, `profile/` and `templates/`. JSON item responses carry a revision;
 `--if-revision` requires the state you inspected. Browser forms always carry it.
 Parked pieces and their followups stay out of Today, Backlog and resumed-session
 followups. The Writing view can show parked pieces explicitly and revive them.
