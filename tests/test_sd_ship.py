@@ -2452,10 +2452,11 @@ roles:
 
     def test_a_merge_touching_the_library_reprovisions_sd_db_at_the_merge_commit(self):
         """sd:2108. The dashboard refuses an installed sd_db older than the
-        system checkout's last library commit, and the restart after a
-        library merge failed until somebody ran `make setup` in the pack."""
+        library's last commit, and the restart after a library merge failed
+        until somebody ran `make setup` in the pack. The library is the pack's
+        `lib/` (sd:3278); this fixture repository stands in for the pack."""
         import sd_install
-        library = self.root / "local-sd-db/sd_db/writing.py"
+        library = self.root / "lib/sd_db/writing.py"
         library.parent.mkdir(parents=True)
         library.write_text("STAGES = ()\n")
         _git(self.root, "add", "-A")
@@ -2467,7 +2468,9 @@ roles:
             installs.append(ref)
             return True, f"sd_db installed at {ref}"
         # The schema guard (sd:3249) has its own tests in test_sd_install_reprovision.
-        with patch.dict(os.environ, {sd_install.SYSTEM_CHECKOUT_ENV: str(self.root)}), \
+        reprovision = sd_install.reprovision_after_merge
+        with patch.object(sd_install, "reprovision_after_merge",
+                          lambda root, commit, environ: reprovision(root, commit, environ, pack=self.root)), \
                 patch.object(sd_install, "schema_refusal", return_value=""), \
                 patch.object(sd_install, "installed_library_commit", return_value=None), \
                 patch.object(sd_install, "provision_library", provision):

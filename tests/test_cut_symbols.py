@@ -65,8 +65,10 @@ import sd_rules  # noqa: E402
 from tests.governed import GOVERNED  # noqa: E402
 
 #: Excluded from every grep below. This file quotes each symbol it searches
-#: for.
-EXCLUDED = ("tests/test_cut_symbols.py",)
+#: for. `lib/` and `tests/sd_db/` hold `sd_db` as copied from the system
+#: checkout (sd:3278): the symbols here were cut from the pack's commands, and
+#: the library names its own `--push`, `cron-jobs.sh` and protection gaps.
+EXCLUDED = ("tests/test_cut_symbols.py", "lib", "tests/sd_db")
 
 
 def governed_grep(pattern: str) -> list[str]:

@@ -1,7 +1,7 @@
 """Gate mode (sd:1918): under `SD_LOCAL_GATE=1` the Makefile provisions, never borrows.
 
 `bin/sd_local_gate.py` exports the variable; `.github/scripts/provision-gate-env.py`
-builds the pinned in-tree environment. The dry runs here read what `make`
+builds the in-tree environment, with `sd_db` from the worktree's own `lib/` (sd:3278). The dry runs here read what `make`
 would do and build nothing; the script is driven only down its refusals.
 """
 
@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -18,9 +19,6 @@ from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / ".github" / "scripts" / "provision-gate-env.py"
-sys.path.insert(0, str(REPO_ROOT / "tests"))
-
-import test_system_pin  # noqa: E402
 
 spec = importlib.util.spec_from_file_location("provision_gate_env", SCRIPT)
 assert spec and spec.loader
@@ -51,28 +49,41 @@ class TheMakefile(unittest.TestCase):
         self.assertIn('"/elsewhere/.venv/bin/python" -m ruff', dry_run("lint", VENV="/elsewhere/.venv"))
 
 
-class ThePin(unittest.TestCase):
-    def test_the_gate_reads_the_ref_the_pin_file_holds(self) -> None:
-        self.assertEqual(provision.PIN_FILE, test_system_pin.PIN_FILE)
-        self.assertEqual(provision.pinned_ref(provision.PIN_FILE.read_text(encoding="utf-8")),
-                         test_system_pin.pin())
+class TheLibrary(unittest.TestCase):
+    """sd:3278. The gate tests the worktree's own `lib/`; no system checkout, no pin file."""
 
-    def test_an_empty_two_line_or_branch_pin_is_refused(self) -> None:
-        for text in ("", "\n", "sd-db-v0.1.0\nsd-db-v0.2.0\n", "main\n", "2facc3fe\n"):
-            with self.subTest(text=text), self.assertRaises(provision.GateError):
-                provision.pinned_ref(text)
+    def test_the_gate_installs_sd_db_from_the_worktrees_own_lib(self) -> None:
+        seen: list[list[str]] = []
+        with tempfile.TemporaryDirectory() as tmp:
+            venv = pathlib.Path(tmp) / ".venv"
+            venv.mkdir()
+            with mock.patch.object(provision, "VENV", venv), \
+                    mock.patch.object(provision, "require_opencode", return_value="opencode"), \
+                    mock.patch.object(provision, "clear_venv"), \
+                    mock.patch.object(provision, "run", side_effect=seen.append), \
+                    mock.patch("sys.stdout"):
+                self.assertEqual(provision.main(["provision-gate-env.py", sys.executable]), 0)
+            marker = (venv / provision.MARKER).read_text(encoding="utf-8")
+        self.assertEqual(seen[-1][-1], str(REPO_ROOT / "lib"))
+        self.assertEqual([argv for argv in seen if "local-sd-db" in " ".join(argv)], [])
+        self.assertTrue(marker.startswith("sd_db lib/"), marker)
 
-    def test_a_commit_or_release_tag_is_read(self) -> None:
-        for ref in ("a" * 40, "sd-db-v0.1.0"):
-            with self.subTest(ref=ref):
-                self.assertEqual(provision.pinned_ref(ref + "\n"), ref)
+    def test_the_pin_file_is_gone(self) -> None:
+        self.assertFalse((REPO_ROOT / ".sd-system-rev").exists())
 
-    def test_a_missing_pin_file_fails_the_gate_by_name(self) -> None:
-        with mock.patch.object(provision, "PIN_FILE", REPO_ROOT / "no-such-pin"), \
-                mock.patch.object(provision, "require_opencode", return_value="opencode"):
-            with mock.patch("sys.stderr") as err:
-                self.assertEqual(provision.main(["provision-gate-env.py"]), 1)
-        self.assertIn("no-such-pin", "".join(call.args[0] for call in err.write.call_args_list))
+
+class TheOpencodePinIsWrittenOnce(unittest.TestCase):
+    """sd:1557. The opencode version and checksum live in one script."""
+
+    def test_the_opencode_version_and_checksum_are_written_once(self) -> None:
+        definitions = re.compile(r"(?m)^\s*(OPENCODE_VERSION|OPENCODE_SHA256)\s*[:=]")
+        found = sorted(
+            (str(path.relative_to(REPO_ROOT)), name)
+            for path in (REPO_ROOT / ".github").rglob("*")
+            if path.is_file()
+            for name in definitions.findall(path.read_text(encoding="utf-8", errors="replace")))
+        self.assertEqual(found, [(".github/scripts/install-opencode.sh", "OPENCODE_SHA256"),
+                                 (".github/scripts/install-opencode.sh", "OPENCODE_VERSION")])
 
 
 class TheRefusals(unittest.TestCase):
@@ -98,6 +109,7 @@ class TheRefusals(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             venv = pathlib.Path(tmp) / ".venv"
             venv.mkdir()
+            # The marker an older gate wrote, naming a system ref: still a gate environment.
             (venv / provision.MARKER).write_text("sd_db sd-db-v0.1.0\n", encoding="utf-8")
             with mock.patch.object(provision, "VENV", venv):
                 provision.clear_venv()

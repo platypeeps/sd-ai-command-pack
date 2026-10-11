@@ -10,6 +10,7 @@ import datetime
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1795,6 +1796,195 @@ class ProvisionedLibraryTests(unittest.TestCase):
         with unittest.mock.patch.object(
                 sd_lib, "__file__", str(loose / "bin" / "sd_lib.py")):
             self.assertEqual(sd_lib._checkouts_that_may_hold_a_venv(), [loose])
+
+
+class TheCheckoutLibraryAnswersFirst(unittest.TestCase):
+    """sd:3278. `import_sd_db` reads `<checkout>/lib` before any installed copy.
+
+    Each `sd_db` below names where it came from. The checkout's `bin/` and
+    `lib/` then come from one commit, whatever the interpreter has installed.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = pathlib.Path(self._tmp.name).resolve() / "pack"
+        (self.root / "bin").mkdir(parents=True)
+        (self.root / "bin" / "sd_lib.py").write_text(
+            (REPO_ROOT / "bin" / "sd_lib.py").read_text(encoding="utf-8"), encoding="utf-8")
+        self.copy(self.root / "lib", "lib")
+        self.copy(self.root / ".venv/lib/python3.13/site-packages", "venv")
+        self.copy(self.root.parent / "elsewhere", "pythonpath")
+
+    @staticmethod
+    def copy(where: pathlib.Path, name: str, body: str = "") -> None:
+        (where / "sd_db").mkdir(parents=True, exist_ok=True)
+        (where / "sd_db" / "__init__.py").write_text(f"{body}WHERE = {name!r}\n", encoding="utf-8")
+
+    def answer(self, **extra: str) -> str:
+        from tests.clean_env import clean_environment
+        code = ("import sys; sys.path.insert(0, sys.argv[1]); import sd_lib; "
+                "got = sd_lib.import_sd_db(); print(got.module.WHERE if got.module else got.problem)")
+        done = subprocess.run([sys.executable, "-S", "-c", code, str(self.root / "bin")],
+                              capture_output=True, text=True, check=False,
+                              env=clean_environment(**extra))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return done.stdout.strip()
+
+    def test_the_checkout_lib_wins_over_the_venv_copy(self) -> None:
+        self.assertEqual(self.answer(), "lib")
+
+    def test_the_checkout_lib_wins_over_an_importable_pythonpath_copy(self) -> None:
+        self.assertEqual(self.answer(PYTHONPATH=str(self.root.parent / "elsewhere")), "lib")
+
+    def test_a_lib_that_will_not_import_falls_back_to_the_venv_copy(self) -> None:
+        self.copy(self.root / "lib", "lib", body="raise ImportError('broken on purpose')\n")
+        self.assertEqual(self.answer(), "venv")
+
+
+#: A fake `sd_db` that reads its database's version from a file: `FAKE_DB` holds the number,
+#: or `hub:<digest>` for a hub that refuses any build but that one.
+FAKE_LIBRARY = """\
+import os, pathlib
+SCHEMA_VERSION = {built}
+WHERE = {where!r}
+def default_path():
+    return pathlib.Path(os.environ["FAKE_DB"])
+class Connection:
+    def __init__(self, found):
+        self.found = found
+    def close(self):
+        pass
+class remote:
+    @staticmethod
+    def tree_digest(package):
+        return (pathlib.Path(package) / "BUILD").read_text()
+def connect(path, write=True):
+    text = pathlib.Path(path).read_text()
+    if text.startswith("hub:"):
+        error = Exception("the hub runs another build")
+        error.hub_build = text[4:]
+        raise error
+    found = int(text)
+    if found > SCHEMA_VERSION:
+        error = Exception(f"the database is at schema version {{found}} and this library is built for {built}")
+        error.found = found
+        raise error
+    return Connection(found)
+def schema_version(connection):
+    return connection.found
+"""
+
+
+class TheCheckoutLibraryMatchesTheDatabase(unittest.TestCase):
+    """sd:3278 review round 1. `lib/` answers only when it builds the database's schema.
+
+    A worktree whose `lib/` adds a migration, or one left behind a migrated
+    database, would otherwise open the live database with the wrong library:
+    writes refuse with `SchemaTooOld`, or every open with `SchemaTooNew`. The
+    guarded installed copy answers instead when it matches; when neither
+    matches, `lib/` answers and its own open names both versions.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = pathlib.Path(self._tmp.name).resolve() / "pack"
+        (self.root / "bin").mkdir(parents=True)
+        for name in ("sd_lib.py", "sd_library_guard.py"):
+            shutil.copy2(REPO_ROOT / "bin" / name, self.root / "bin" / name)
+        self.database = self.root.parent / "sd.db"
+
+    def library(self, where: str, built: int, *, prefix: str = "") -> None:
+        folder = self.root / ".venv/lib/python3.13/site-packages" if where == "venv" else self.root / where
+        (folder / "sd_db").mkdir(parents=True, exist_ok=True)
+        (folder / "sd_db" / "__init__.py").write_text(
+            prefix + FAKE_LIBRARY.format(built=built, where=where), encoding="utf-8")
+        (folder / "sd_db" / "schema.py").write_text(f"SCHEMA_VERSION = {built}\n", encoding="utf-8")
+        (folder / "sd_db" / "BUILD").write_text(f"build-{where}", encoding="utf-8")
+
+    def answer(self, lib: int, venv: int, database: str | None) -> str:
+        from tests.clean_env import clean_environment
+        self.library("lib", lib)
+        self.library("venv", venv)
+        if database is not None:
+            self.database.write_text(database, encoding="utf-8")
+        code = ("import sys; sys.path.insert(0, sys.argv[1]); import sd_lib; "
+                "first = sd_lib.import_sd_db().module; second = sd_lib.import_sd_db().module; "
+                "print(first.WHERE, second.WHERE)")
+        done = subprocess.run([sys.executable, "-S", "-c", code, str(self.root / "bin")],
+                              capture_output=True, text=True, check=False,
+                              env=clean_environment(FAKE_DB=str(self.database)))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return done.stdout.strip()
+
+    def test_lib_answers_when_it_builds_the_database_s_schema(self) -> None:
+        self.assertEqual(self.answer(lib=27, venv=27, database="27"), "lib lib")
+
+    def test_lib_answers_when_there_is_no_database(self) -> None:
+        self.assertEqual(self.answer(lib=28, venv=27, database=None), "lib lib")
+
+    def test_a_checkout_ahead_of_the_database_runs_the_matching_installed_copy(self) -> None:
+        self.assertEqual(self.answer(lib=28, venv=27, database="27"), "venv venv")
+
+    def test_a_worktree_behind_a_migrated_database_runs_the_matching_installed_copy(self) -> None:
+        self.assertEqual(self.answer(lib=27, venv=28, database="28"), "venv venv")
+
+    def test_with_neither_copy_matching_lib_answers_and_its_open_names_both_versions(self) -> None:
+        self.assertEqual(self.answer(lib=28, venv=26, database="27"), "lib lib")
+
+    def test_an_unreadable_database_version_is_unknown_and_keeps_lib(self) -> None:
+        self.assertEqual(self.answer(lib=28, venv=27, database="not a number"), "lib lib")
+
+    def test_a_satellite_whose_hub_refuses_lib_s_build_runs_the_copy_with_the_hub_s_build(self) -> None:
+        self.assertEqual(self.answer(lib=27, venv=27, database="hub:build-venv"), "venv venv")
+
+    def test_a_satellite_whose_hub_refuses_both_builds_keeps_lib(self) -> None:
+        self.assertEqual(self.answer(lib=27, venv=27, database="hub:build-other"), "lib lib")
+
+    def test_a_matching_copy_that_will_not_import_gives_way_to_the_next(self) -> None:
+        newer = ".venv/lib/python3.14/site-packages"
+        self.library(newer, 27, prefix="import sd_db.schema\nraise RuntimeError('broken on purpose')\n")
+        self.assertEqual(self.answer(lib=28, venv=27, database="27"), "venv venv")
+
+    def test_with_every_matching_copy_broken_lib_comes_back_whole(self) -> None:
+        from tests.clean_env import clean_environment
+        self.library("lib", 28)
+        self.library("venv", 27, prefix="import sd_db.schema\nraise RuntimeError('broken on purpose')\n")
+        self.database.write_text("27", encoding="utf-8")
+        code = ("import sys; sys.path.insert(0, sys.argv[1]); import sd_lib; "
+                "got = sd_lib.import_sd_db().module; import sd_db.schema; "
+                "print(got.WHERE, sys.modules['sd_db'] is got, sd_db.schema.__file__.split('/pack/')[1], "
+                "any('site-packages' in entry for entry in sys.path))")
+        done = subprocess.run([sys.executable, "-S", "-c", code, str(self.root / "bin")],
+                              capture_output=True, text=True, check=False,
+                              env=clean_environment(FAKE_DB=str(self.database)))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.split(), ["lib", "True", "lib/sd_db/schema.py", "False"])
+
+
+class TheCopyHashesLikeItsSource(unittest.TestCase):
+    """sd:3278 failure table, step 1 follow: the build digest names bytes, not folders.
+
+    A satellite's self-install exports system's `local-sd-db` while the hub
+    runs the pack's `lib/`. `tree_digest` hashes relative paths and bytes, so
+    the same package under either folder digests the same and no build refuses.
+    """
+
+    def test_lib_sd_db_digests_the_same_under_the_system_folder_name(self) -> None:
+        from tests.clean_env import clean_environment
+        with tempfile.TemporaryDirectory() as tmp:
+            copy = pathlib.Path(tmp) / "local-sd-db" / "sd_db"
+            shutil.copytree(REPO_ROOT / "lib" / "sd_db", copy,
+                            ignore=shutil.ignore_patterns("__pycache__"))
+            code = ("import sys; sys.path.insert(0, sys.argv[1]); from sd_db.remote import tree_digest; "
+                    "print(tree_digest(sys.argv[2]), tree_digest(sys.argv[3]))")
+            done = subprocess.run([sys.executable, "-S", "-c", code, str(REPO_ROOT / "lib"),
+                                   str(REPO_ROOT / "lib" / "sd_db"), str(copy)],
+                                  capture_output=True, text=True, check=False, env=clean_environment())
+        self.assertEqual(done.returncode, 0, done.stderr)
+        ours, theirs = done.stdout.split()
+        self.assertEqual(ours, theirs)
 
 
 if __name__ == "__main__":

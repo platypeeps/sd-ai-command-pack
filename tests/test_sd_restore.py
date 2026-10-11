@@ -3,9 +3,9 @@
 The library it reads, `sd_db`, reaches this virtualenv through the pack's
 installer. So two things are tested here and they are different things: what
 the verbs do **when the library is absent**, which is every machine before
-`make setup` and any machine whose `system` checkout has moved, and what they
-do against a real database, which is exercised with `sd_db` put on `sys.path`
-from the `system` checkout when that checkout is present beside this one.
+`make setup`, and what they do against a real database, which is exercised
+with `sd_db` put on `sys.path` from the pack's own `lib/` (sd:3278) when no
+copy is installed.
 
 Absence is now simulated rather than found. Before PR 5 the first class held
 by stripping `local-sd-db` from `sys.path`, because nothing else could supply
@@ -15,10 +15,9 @@ under test went untested. `NoLibrary` on `sys.meta_path` refuses the import
 by name, which is the state the refusal exists for and does not depend on
 where the module happens to be installed today.
 
-Where the sibling checkout is absent that second class skips, with the reason
-stated -- the only skip in this file, and one that says what it could not
-reach rather than passing on nothing. On a machine with both checkouts, which
-is every machine this is developed on, it runs.
+Where `lib/` is absent that second class skips, with the reason stated --
+the only skip in this file, and one that says what it could not reach rather
+than passing on nothing. Every checkout carries `lib/`, so it runs.
 """
 
 from __future__ import annotations
@@ -47,16 +46,9 @@ import sd_restore  # noqa: E402
 def _library_source() -> pathlib.Path | None:
     """Where `sd_db`'s source is, asked the way the installer asks.
 
-    This used to be `REPO_ROOT.parent.parent / "system" / "local-sd-db"` -- a
-    guess about directory layout that happened to hold on the machine it was
-    written on and nowhere else. CI checks the sibling out at
-    `sd_install.SYSTEM_CHECKOUT_DEFAULT`, not beside this repository, so the
-    guess resolved to nothing there and the class below skipped, silently
-    asserting nothing about the verbs against real rows.
-
-    `sd_install.library_source` is the one resolution: `SD_SYSTEM_CHECKOUT`
-    if set, `~/repos/system` otherwise. Asking it here means this file and
-    the installer cannot disagree about where the library lives.
+    `sd_install.library_source` is the one resolution: this checkout's `lib/`
+    (sd:3278). Asking it here means this file and the installer cannot
+    disagree about where the library lives.
     """
     spec = importlib.util.spec_from_file_location(
         "sd_install_for_restore_tests", REPO_ROOT / "bin" / "sd_install.py"
@@ -66,11 +58,11 @@ def _library_source() -> pathlib.Path | None:
     # `dataclasses` looks the defining module up in `sys.modules` by name.
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    source = module.library_source(dict(os.environ))
+    source = module.library_source(REPO_ROOT)
     return source if (source / "sd_db" / "__init__.py").exists() else None
 
 
-#: The `system` checkout's library, if this machine has one. Preferred over
+#: This checkout's library source, if it has one. Preferred over
 #: the installed copy only as a fallback: when the installer has provisioned
 #: `sd_db` there is nothing to put on `sys.path`, and putting the source
 #: there anyway would shadow the built copy with the thing B's criterion 1
@@ -218,9 +210,8 @@ class AgainstADatabase(unittest.TestCase):
             pass
         if LIBRARY is None:
             raise unittest.SkipTest(
-                "sd_db is neither installed nor resolvable from a `system` "
-                "checkout; these tests would assert nothing. Run "
-                "`make setup`, or set SD_SYSTEM_CHECKOUT"
+                "sd_db is neither installed nor in this checkout's lib/; "
+                "these tests would assert nothing. Run `make setup`"
             )
         sys.path.insert(0, str(LIBRARY))
         cls.added = True

@@ -54,12 +54,12 @@ class TheHarnessIsImportableHere(unittest.TestCase):
 
         The venv lives inside the pack, so "outside the pack" is the wrong
         test -- a correct install fails it. What must be true is that the
-        import does not reach the `system` checkout's `local-sd-db`, which is
-        exactly what an editable install would do and what a branch switch
-        there would then change under the pack's feet.
+        virtualenv's import does not reach the pack's `lib/` (sd:3278), which
+        is exactly what an editable install would do and what a branch switch
+        there would then change under the system callers' feet.
         """
         resolved = Path(sd_db.__file__).resolve()
-        source = sd_install.library_source(dict(os.environ)).resolve()
+        source = sd_install.library_source(REPO_ROOT).resolve()
         self.assertFalse(
             resolved.is_relative_to(source),
             f"sd_db resolved to {resolved}, inside {source}; it is installed "
@@ -288,14 +288,13 @@ class ProvisioningIsItsOwnRun(unittest.TestCase):
         # A library source the provisioner would accept, so a call would get
         # past the "nothing to install" guard rather than being turned back.
         # A git repository, because the provisioner installs from a ref.
-        system = self.home / "system"
-        source = sd_install.library_source({"SD_SYSTEM_CHECKOUT": str(system)})
+        source = sd_install.library_source(self.checkout)
         source.mkdir(parents=True)
         (source / "pyproject.toml").write_text("[project]\nname = 'sd-db'\n", encoding="utf-8")
         for args in (("init",), ("add", "-A"), ("commit", "-m", "fixture")):
             subprocess.run(
                 ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
-                cwd=system, capture_output=True, text=True, check=False,
+                cwd=self.checkout, capture_output=True, text=True, check=False,
             )
 
     def context(self) -> "sd_install.Context":
@@ -303,7 +302,6 @@ class ProvisioningIsItsOwnRun(unittest.TestCase):
             checkout=self.checkout,
             home=self.home,
             environ={
-                "SD_SYSTEM_CHECKOUT": str(self.home / "system"),
                 "XDG_STATE_HOME": str(self.home / ".local" / "state"),
                 "XDG_CONFIG_HOME": str(self.home / ".config"),
             },
@@ -339,7 +337,7 @@ class TheLibraryDoor(unittest.TestCase):
     """Every way `open_library` and `provision_library` can answer.
 
     Each of these is a machine somebody actually has: no virtualenv yet, no
-    `system` checkout, a `--dry-run`, a `pip` that is not there, a `pip` that
+    `lib/`, a `--dry-run`, a `pip` that is not there, a `pip` that
     fails, a library that will not import, a database that was never created.
     The installer answers all of them with a line and a working install of
     whatever it could still render, so none of them may raise.
@@ -351,14 +349,14 @@ class TheLibraryDoor(unittest.TestCase):
         self.home = Path(scratch.name).resolve()
         self.checkout = self.home / "checkout"
         self.checkout.mkdir()
-        self.system = self.home / "system"
+        # The library is the checkout's own `lib/` (sd:3278).
+        self.system = self.checkout
 
     def context(self, **overrides) -> "sd_install.Context":
         fields = {
             "checkout": self.checkout,
             "home": self.home,
             "environ": {
-                "SD_SYSTEM_CHECKOUT": str(self.system),
                 "XDG_STATE_HOME": str(self.home / ".local" / "state"),
                 "XDG_CONFIG_HOME": str(self.home / ".config"),
             },
@@ -374,18 +372,18 @@ class TheLibraryDoor(unittest.TestCase):
         return path
 
     def library(self, *, committed: bool = True, tag: str = "") -> Path:
-        """A fixture system checkout, as a git repository.
+        """A fixture pack checkout holding `lib/`, as a git repository.
 
         A repository and not a bare directory, because `provision_library`
         installs from an immutable ref now and a directory has none. The
         `committed=False` case is the machine that cloned nothing yet.
         """
-        source = sd_install.library_source({"SD_SYSTEM_CHECKOUT": str(self.system)})
+        source = sd_install.library_source(self.checkout)
         source.mkdir(parents=True, exist_ok=True)
         (source / "pyproject.toml").write_text("[project]\nname = 'sd-db'\n", encoding="utf-8")
         if committed:
             self.git("init")
-            self.git("add", "-A")
+            self.git("add", "lib")
             self.git("commit", "-m", "fixture")
             if tag:
                 self.git("tag", tag)
@@ -421,7 +419,7 @@ class TheLibraryDoor(unittest.TestCase):
     def test_a_tag_for_another_project_in_the_monorepo_is_not_the_library_version(
         self,
     ) -> None:
-        """`system` holds four projects. A `local-ha-mcp` tag is not a version."""
+        """A tag cut for something else in the repository is not a version."""
         self.interpreter("#!/bin/sh\nexit 0\n")
         self.library(tag="ha-mcp-v2")
         head = self.git("rev-parse", "HEAD")
@@ -431,7 +429,7 @@ class TheLibraryDoor(unittest.TestCase):
         self.assertIn(head, report)
 
     def test_an_untagged_checkout_pins_to_its_commit_and_is_not_refused(self) -> None:
-        """`system` carries no tags. Refusing here uninstalls sd_db everywhere."""
+        """The repository carries no `sd-db-v*` tags. Refusing here uninstalls sd_db everywhere."""
         self.interpreter("#!/bin/sh\nexit 0\n")
         self.library()
         head = self.git("rev-parse", "HEAD")
@@ -459,7 +457,7 @@ class TheLibraryDoor(unittest.TestCase):
         self.assertTrue(installed, report)
         self.assertIn("uncommitted work", report)
 
-    def test_a_system_directory_that_is_no_repository_is_refused_with_a_reason(self) -> None:
+    def test_a_checkout_that_is_no_repository_is_refused_with_a_reason(self) -> None:
         self.interpreter("#!/bin/sh\nexit 0\n")
         self.library(committed=False)
         installed, report = sd_install.provision_library(self.context(), io.StringIO())
@@ -482,7 +480,7 @@ class TheLibraryDoor(unittest.TestCase):
         schema = source / "sd_db/schema.py"
         schema.parent.mkdir()
         schema.write_text("SCHEMA_VERSION = 2\n")
-        self.git("add", "-A")
+        self.git("add", "lib")
         self.git("commit", "-m", "schema two")
         installed = self.checkout / ".venv/lib/python3.13/site-packages/sd_db/schema.py"
         installed.parent.mkdir(parents=True)
@@ -523,7 +521,7 @@ class TheLibraryDoor(unittest.TestCase):
         package.mkdir()
         (package / "__init__.py").write_text('MARKER = "old-commit"\n', encoding="utf-8")
         (package / "schema.py").write_text("SCHEMA_VERSION = 3\n", encoding="utf-8")
-        self.git("add", "local-sd-db")
+        self.git("add", "lib")
         self.git("commit", "-m", "old same-version library")
         old_commit = self.git("rev-parse", "HEAD")
         python = self.checkout / sd_install.VENV_RELATIVE
@@ -548,7 +546,7 @@ class TheLibraryDoor(unittest.TestCase):
             self.assertEqual(initial["provenance"]["vcs_info"]["commit_id"], old_commit)
             (package / "__init__.py").write_text('MARKER = "new-commit"\n', encoding="utf-8")
             (package / "schema.py").write_text("SCHEMA_VERSION = 5\n", encoding="utf-8")
-            self.git("add", "local-sd-db")
+            self.git("add", "lib")
             self.git("commit", "-m", "new bytes at the same version")
             new_commit = self.git("rev-parse", "HEAD")
             self.assertNotEqual(old_commit, new_commit)
@@ -654,7 +652,7 @@ class TheProvisioningMode(unittest.TestCase):
         out = io.StringIO()
         code = sd_install.main(
             ["--provision-library", "--home", str(self.home)],
-            environ={"SD_SYSTEM_CHECKOUT": str(self.home / "system")},
+            environ={},
             out=out,
         )
         return code, out.getvalue()

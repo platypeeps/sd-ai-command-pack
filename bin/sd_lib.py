@@ -1328,7 +1328,7 @@ class Imported(NamedTuple):
     provisioned: str
 
 
-def import_sd_db() -> Imported:
+def import_sd_db(*, match_database: bool = True) -> Imported:
     """`sd_db` for an entrypoint running under whatever `python3` is on PATH.
 
     The one place the two tries live. `_provisioned_library_paths` above says
@@ -1347,7 +1347,20 @@ def import_sd_db() -> Imported:
     stay apart for the reason the retry below states: a provisioned copy that
     will not import is not a machine without the library, and one message over
     both sends half its readers to the wrong remedy.
+
+    The checkout's own `lib/` goes first on `sys.path` (sd:3278): the pack
+    owns `sd_db` now, so `bin/` and `lib/` come from one commit and a
+    worktree runs its own library. The two tries stay behind it, so a `lib/`
+    that will not import still falls back to the provisioned copy. A `lib/`
+    built for another schema than the database's gives way to a provisioned
+    copy that matches it (`_matching_library`). `match_database=False` keeps
+    `lib/` for a verb that moves the database to `lib/`'s schema: `bin/sd-db
+    migrate` run from the matching copy would find nothing to apply.
     """
+    tree = str(pathlib.Path(__file__).resolve().parent.parent / "lib")
+    if tree in sys.path:
+        sys.path.remove(tree)
+    sys.path.insert(0, tree)
     try:
         import sd_db  # noqa: PLC0415 - `make setup` provisions it; absent is a state
     except ImportError as error:
@@ -1401,7 +1414,93 @@ def import_sd_db() -> Imported:
                 f"sd_db is provisioned at {offered[0]} but will not import: {retry}"
                 if offered else f"sd_db is not installed here: {error}"
             ), offered[0] if offered else "")
-    return Imported(sd_db, "", "")
+    return Imported(_matching_library(sd_db, tree) if match_database else sd_db, "", "")
+
+
+def _wanted_build(sd_db: Any) -> Callable[[pathlib.Path], bool] | None:
+    """What a provisioned package must be to open the default database `sd_db` cannot, or None.
+
+    None when `sd_db` opens it at its own schema, when there is no database,
+    and when the open fails another way: an unknown answer is not a mismatch,
+    and the caller's own open reports it. Two refusals name what would open
+    it. An older copy's `SchemaTooNew` carries the database's version in
+    `found`; a newer copy reads it and finds it behind. On a satellite the hub
+    compares whole builds, and its `BuildMismatch` carries `hub_build`, the
+    digest a package must have (`sd_db.remote.tree_digest`).
+    """
+    def schema_is(found: int) -> Callable[[pathlib.Path], bool]:
+        guard = sibling("sd_library_guard", "sd_library_guard.py")
+        return lambda package: guard.schema_version((package / "schema.py").read_text(encoding="utf-8")) == found
+
+    try:
+        path = sd_db.default_path()
+        if not path.exists():
+            return None
+        connection = sd_db.connect(path, write=False)
+    except Exception as problem:  # noqa: BLE001 - any other failure leaves the answer unknown
+        hub_build = getattr(problem, "hub_build", None)
+        remote = getattr(sd_db, "remote", None)
+        if isinstance(hub_build, str) and remote is not None:
+            return lambda package: remote.tree_digest(package) == hub_build
+        found = getattr(problem, "found", None)
+        return schema_is(found) if isinstance(found, int) else None
+    try:
+        found = int(sd_db.schema_version(connection))
+    except Exception:  # noqa: BLE001 - as above
+        return None
+    finally:
+        connection.close()
+    return None if found == getattr(sd_db, "SCHEMA_VERSION", None) else schema_is(found)
+
+
+def _sd_db_modules() -> dict[str, Any]:
+    return {name: module for name, module in sys.modules.items() if name == "sd_db" or name.startswith("sd_db.")}
+
+
+def _matching_library(sd_db: Any, tree: str) -> Any:
+    """`lib/`'s `sd_db`, unless it cannot open the database and a provisioned copy can.
+
+    Review round 1 of sd:3278. Reading `lib/` first bypassed the guards that
+    keep the provisioned copy at the database's schema: a worktree whose
+    `lib/` adds a migration refused every write with `SchemaTooOld`, one left
+    behind a migrated database refused every open with `SchemaTooNew`, and on
+    a satellite the hub refused any build but its own. The first provisioned
+    copy `_wanted_build` accepts answers instead; one that will not import
+    is put back and the next is tried. With none, `lib/` stays, and its own
+    open names both sides. A copy from anywhere but `lib/` is a choice
+    already made.
+    """
+    origin = getattr(sd_db, "__file__", None)
+    if not origin or pathlib.Path(origin).resolve().parent.parent != pathlib.Path(tree).resolve():
+        return sd_db
+    # ponytail: one read-only open per call; memoize per database if a caller loops.
+    wanted = _wanted_build(sd_db)
+    if wanted is None:
+        return sd_db
+    loaded = _sd_db_modules()
+    for path in _provisioned_library_paths():
+        try:
+            if not wanted(pathlib.Path(path) / "sd_db"):
+                continue
+        except (OSError, UnicodeError):
+            continue
+        for name in _sd_db_modules():
+            del sys.modules[name]
+        for entry in (tree, path):
+            if entry in sys.path:
+                sys.path.remove(entry)
+        sys.path.insert(0, path)
+        try:
+            import sd_db as provisioned  # noqa: PLC0415 - the copy that opens the database
+        except Exception:  # noqa: BLE001 - any failure puts lib/ back before the next try
+            for name in _sd_db_modules():
+                del sys.modules[name]
+            sys.modules.update(loaded)
+            sys.path.remove(path)
+            sys.path.insert(0, tree)
+            continue
+        return provisioned
+    return sd_db
 
 
 class Rows:
