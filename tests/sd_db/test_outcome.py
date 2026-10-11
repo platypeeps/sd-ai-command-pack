@@ -28,7 +28,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sd_db import create_item, database, initialise, reads, registry, remote, serve, usage
+from sd_db import create_item, database, errors, initialise, reads, registry, remote, serve, usage
 from sd_db.database import transaction
 from sd_db.serve import read_token
 
@@ -280,6 +280,24 @@ class TheLostCommit(OutcomeCase):
         self.assertEqual((answers[0], answers[-1]), (remote.IN_FLIGHT, remote.RECORDED))
         self.assertEqual(count(self.path), 1)
         self.assertTrue(recorded(self.path, client.outcomes[-1][0]))
+
+    def test_a_hub_no_ask_from_this_build_can_pass_ends_the_settle_at_once(self):
+        """sd:3359. A refused build, or a database newer than the hub's: 60 s of asks could not pass.
+
+        The process keeps the build it loaded, so the first such refusal ends the settle,
+        and the outcome stays unknown: the write is not run again.
+        """
+        client = self.connect()
+        lost = remote.HubUnreachable("127.0.0.1", self.hub.port, "[Errno 32] Broken pipe")
+        for refusal in (remote.BuildMismatch("build", "0000aaaa", "1111bbbb"), errors.SchemaTooNew(99, 1)):
+            with self.subTest(refusal=type(refusal).__name__), \
+                    mock.patch.object(client, "outcome", side_effect=refusal):
+                started = time.monotonic()
+                with self.assertRaises(remote.UnknownOutcome) as raised:
+                    client._settle(remote.new_request_id(), lost, "COMMIT")
+                self.assertLess(time.monotonic() - started, remote.OUTCOME_BOUND / 4)
+                self.assertIs(raised.exception.__cause__, refusal)
+                self.assertIn(str(refusal), str(raised.exception))
 
     def test_an_owner_live_at_the_bound_is_an_unknown_outcome(self):
         """(d) at the bound: still `in_flight`, so `UnknownOutcome` names R

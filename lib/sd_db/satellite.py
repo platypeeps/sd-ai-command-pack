@@ -102,7 +102,7 @@ def run(host: str, port: int, *, apply: bool = False, home: Path | str | None = 
         current = hub.read(home) if named == wanted else None
         token = current.token if current is not None and current.token_file is not None else ""
         session = remote.connect(host, port, None, token=token, write=False,
-                                 timeout=hub.CONNECT_TIMEOUT)
+                                 timeout=hub.CONNECT_TIMEOUT, answer_timeout=hub.ANSWER_TIMEOUT)
     except remote.BuildMismatch as mismatch:
         _line(out, "DIFFERS", f"{remote.DESCRIBED[mismatch.field]}: satellite {mismatch.satellite}, "
                               f"hub {mismatch.hub} — {_remedy(mismatch)}")

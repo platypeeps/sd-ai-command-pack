@@ -48,11 +48,12 @@ class Served:
     """One `sd-db.sh serve --loopback` over a fresh database, and its log."""
 
     def __init__(self, root: Path, name: str = "sd.db", *, build: Path = HERE, log: str = "",
-                 program: tuple[str, ...] = (sys.executable, "-m", "sd_db.serve")) -> None:
+                 program: tuple[str, ...] = (sys.executable, "-m", "sd_db.serve"), port: int = 0) -> None:
         """`build` is the folder holding the `sd_db` the server runs; another
         one is another `sd_db` build (step 3). `program` is what runs there,
         `sd-db serve` without the launcher. A database already there is
-        served as it is."""
+        served as it is. `port` 0 takes a free one; a hub restarted in place
+        takes the port it had."""
         self.database = root / name
         self.token_file = root / f"{name}.serve.token"
         if not self.database.exists():
@@ -60,7 +61,7 @@ class Served:
         self.log = root / f"{name}.serve{log}.log"
         self.stream = open(self.log, "w")
         self.process = subprocess.Popen(
-            [*program, "--loopback", "--port", "0", "--database", str(self.database)],
+            [*program, "--loopback", "--port", str(port), "--database", str(self.database)],
             # `python -m` puts the working directory first on `sys.path`, so
             # the build's own folder, or the child imports this one's sd_db.
             stdout=subprocess.DEVNULL, stderr=self.stream, env=environment(root), cwd=build,
@@ -501,6 +502,34 @@ class TheHandshake(ServedCase):
         self.assertIsInstance(raised.exception.__cause__, remote.HubUnreachable)
         with self.assertRaisesRegex(remote.BuildMismatch, f"run `repo-sync.sh follow` on this satellite for sd_db {version}"):
             upgraded.connect()
+        self.assertEqual(self.rows(), 0)
+
+    def test_a_hub_upgraded_in_place_under_a_held_session_names_the_build_at_once(self):
+        """sd:3359. A satellite's prepare held its session while the hub restarted on a newer build, same port.
+
+        Its next write was settled by asking the new hub, which refused each ask for the build: 60 s of
+        asks (`OUTCOME_BOUND`), then an error caused by the dropped session. This process keeps the build
+        it loaded, so no ask can pass: the first refusal ends the settle, and the error names the build.
+        """
+        token = lambda: read_token(self.served.token_file)  # noqa: E731 -- a restarted hub writes a new one
+        wire = self.served.connect(token=token)
+        self.addCleanup(wire.close)
+        self.assertEqual(wire.execute("SELECT 1").fetchone()[0], 1)
+        port = self.served.port
+        self.served.stop()
+        build, version = newer_build(self.root)
+        upgraded = Served(self.root, build=build, log=".upgraded", port=port)
+        self.addCleanup(upgraded.stop)
+        started = time.monotonic()
+        with self.assertRaises(remote.UnknownOutcome) as raised:
+            wire.execute("INSERT INTO probe (name) VALUES ('after')")
+        self.assertLess(time.monotonic() - started, remote.OUTCOME_BOUND / 4)
+        self.assertIsInstance(raised.exception.__cause__, remote.BuildMismatch)
+        self.assertIn(f"run `repo-sync.sh follow` on this satellite for sd_db {version}", str(raised.exception))
+        # A unit that cannot have written opens a new session (sd:3336), and its refusal names the build too.
+        with self.assertRaisesRegex(remote.BuildMismatch, "repo-sync.sh follow"):
+            with transaction(wire):
+                wire.execute("INSERT INTO probe (name) VALUES ('again')")
         self.assertEqual(self.rows(), 0)
 
     def test_the_same_version_with_different_code_is_refused(self):

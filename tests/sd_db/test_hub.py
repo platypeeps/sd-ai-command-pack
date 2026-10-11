@@ -14,6 +14,7 @@ import os
 import socket
 import sqlite3
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -88,6 +89,50 @@ class HubFileNoServer(Satellite):
             initialise(home=self.home)
         self.assertEqual(files_under(self.home), before)
         self.assertFalse((self.home / ".local").exists())
+
+    def test_a_hub_that_takes_the_session_and_never_answers_fails_by_name(self):
+        """sd:3359. A satellite session had a connect bound and no answer bound.
+
+        A hub that took the connection and then sent nothing held the caller for as long
+        as the socket lived, and a lane runner with it. The answer is bounded too.
+        """
+        listener = socket.create_server(("127.0.0.1", 0))
+        self.addCleanup(listener.close)
+        taken: list[socket.socket] = []
+
+        def take() -> None:
+            while True:
+                try:
+                    taken.append(listener.accept()[0])
+                except OSError:
+                    return
+
+        threading.Thread(target=take, daemon=True).start()
+        self.addCleanup(lambda: [each.close() for each in taken])
+        self.name_hub(listener.getsockname()[1])
+        raised: list[BaseException] = []
+
+        def call() -> None:
+            try:
+                connect(home=self.home, write=False).close()
+            except Exception as error:  # noqa: BLE001 -- the test reads what it raised
+                raised.append(error)
+
+        with mock.patch.object(hub, "ANSWER_TIMEOUT", 0.5, create=True):
+            caller = threading.Thread(target=call, daemon=True)
+            caller.start()
+            caller.join(10)
+        self.assertFalse(caller.is_alive(), "the call waited past the answer bound")
+        self.assertIsInstance(raised[0], remote.HubUnreachable)
+        self.assertIn("timed out", str(raised[0]))
+
+    def test_the_answer_bound_waits_past_the_sessions_own_lock_wait(self):
+        """sd:3359. A session that may wait 180 s for the write lock is not cut off before it."""
+        self.name_hub(closed_port())
+        with mock.patch.object(remote, "connect", side_effect=remote.HubUnreachable("127.0.0.1", 1, "stub")) as dialled, \
+                self.assertRaises(remote.HubUnreachable):
+            connect(home=self.home, busy_timeout=180_000)
+        self.assertEqual(dialled.call_args.kwargs["answer_timeout"], hub.ANSWER_TIMEOUT + 180)
 
     def test_an_explicit_other_path_still_opens_locally(self):
         """The Jev meter's file, a backup target: not the record, not the hub's."""
